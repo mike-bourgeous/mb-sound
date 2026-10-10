@@ -147,15 +147,20 @@ module MB
 
         # Installs plans on the graphs feeding +outputs+ (GraphNodes,
         # bundles, or Arrays of them): finds the regions, hooks their root
-        # nodes, and returns the Installation (nil when plans are off or
-        # nothing could be planned).
-        def install(*outputs, engine: self.engine, check: self.check)
+        # nodes, groups regions of the same shape (LaneGroups, with +lanes+;
+        # a Synth passes false and groups its lanes' regions together), and
+        # returns the Installation (nil when plans are off or nothing could
+        # be planned).
+        def install(*outputs, engine: self.engine, check: self.check, lanes: self.lanes)
           return nil unless enabled
 
           inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check)
           inst.build
           inst.precompile
-          inst.regions.empty? ? (inst.uninstall; nil) : inst
+          return (inst.uninstall; nil) if inst.regions.empty?
+
+          inst.lane_groups = LaneGroups.new([inst]) if lanes
+          inst
         end
 
         # Called by nodes (and Tees) after a change: a structural change

@@ -241,7 +241,7 @@ module MB
         @notes.freeze
 
         # Fused plans for each lane's graph (see MB::Sound::Plan)
-        @plans = @lanes.map { |outs| Plan.install(outs) }
+        @plans = @lanes.map { |outs| Plan.install(outs, lanes: false) }
 
         # Channel-wide controllers read by several lanes' regions are
         # sampled once per buffer and handed to every region (see
@@ -251,7 +251,7 @@ module MB
         # Lanes whose regions have the same shape run them together, every
         # lane every buffer (see Plan::LaneGroup; such lanes aren't skipped
         # while idle)
-        @lane_groups = Plan.lanes && @plans.compact.length > 1 ? Plan::LaneGroups.new(@plans) : nil
+        @lane_groups = Plan.lanes && @plans.any? ? Plan::LaneGroups.new(@plans) : nil
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)

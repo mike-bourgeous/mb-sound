@@ -130,8 +130,14 @@ module MB
 
             i = 0
             while i < members.length
+              r = members[i]
+              if !status[i] && !current?(r)
+                # Replaced by a rebuild during this run (another member's
+                # installation rebuilt): its nodes belong to new regions now
+                status[i] = :gone
+                @results[i] = nil
+              end
               unless status[i] # run already (asked for during the run)
-                r = members[i]
                 n = r.prepare(count)
                 unless status[i] # asked for while preparing (inside it)
                   if n.is_a?(Integer)
@@ -238,10 +244,13 @@ module MB
       end
 
       # Finds and keeps the LaneGroups of a set of installations (a Synth's
-      # lanes): regions of different installations with the same program
-      # signature (in the same order within each installation) are grouped.
-      # #check regroups after any installation rebuilt or a region stopped
-      # planning.
+      # lanes, or one installation, e.g. a Session player's): every region
+      # with the same program signature and output type is in one group,
+      # within an installation (e.g. the left and right channels of a
+      # stereo patch, unison copies, or the same filter on several inputs)
+      # and across installations (a Synth's voices and spares, and each
+      # voice's channels).  #check regroups after any installation rebuilt
+      # or a region stopped planning.
       class LaneGroups
         # The current groups.
         attr_reader :groups
@@ -278,18 +287,14 @@ module MB
 
           buckets = Hash.new { |h, k| h[k] = [] }
           @installations.each do |inst|
-            inst.rebuild if inst.stale?
-            seen = Hash.new(0)
+            inst.rebuild(regroup: false) if inst.stale?
             inst.regions.each do |r|
               next if r.disabled
 
               prog = r.program || r.precompile
               next unless prog
 
-              key = [prog.signature, prog.output_type]
-              occurrence = seen[key]
-              seen[key] += 1
-              buckets[[key, occurrence]] << r
+              buckets[[prog.signature, prog.output_type]] << r
             end
           end
 

@@ -28,6 +28,11 @@ module MB
         # SharedInputs can tell when to recompute.
         attr_reader :generation
 
+        # The LaneGroups of this installation's own regions (see
+        # Plan.install), regrouped after each rebuild; nil when a Synth
+        # groups its lanes' regions itself, or with Plan.lanes off.
+        attr_accessor :lane_groups
+
         def initialize(roots, engine:, check:, dry_run: false)
           @roots = roots
           @engine = engine
@@ -94,12 +99,15 @@ module MB
           self
         end
 
-        # Rebuilds after a structural change (see Plan.changed).
-        def rebuild
+        # Rebuilds after a structural change (see Plan.changed), and
+        # regroups the new regions (see #lane_groups) unless +regroup+ is
+        # false.
+        def rebuild(regroup: true)
           # Readers of shared inputs may change in the middle of a block
           @shared&.guard!
           uninstall
           build
+          @lane_groups&.refresh if regroup
         end
 
         # Marks a change that affects which inputs may be shared (a region

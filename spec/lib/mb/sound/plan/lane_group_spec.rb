@@ -156,6 +156,49 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     MB::Sound::Plan.enabled = true
   end
 
+  describe 'regions of one installation' do
+    # A stereo patch whose channels have the same shape (different
+    # constants), and a third channel of another shape
+    def make_bundle(lanes)
+      MB::Sound::Plan.lanes = lanes
+      MB::Sound.seed(0)
+      lfo = 0.3.hz.lfo.sine.at(600..2400)
+      chans = [110, 165].map { |f| f.hz.ramp.pm(src_wave(f) * 0.2).filter(:lowpass, cutoff: lfo, quality: 2).lp4(1500, resonance: 0.3) * 0.4 }
+      chans << 55.hz.sine * 0.3
+      MB::Sound::GraphNode::Channels.new(chans)
+    end
+
+    def src_wave(seed)
+      PlanSpecHelpers::Source.new(seed: seed)
+    end
+
+    def render_bundle(lanes, sizes)
+      b = make_bundle(lanes)
+      inst = MB::Sound::Plan.install(b)
+      out = sizes.map { |n| b.outputs.map { |o| o.sample(n).to_a } }
+      [out, inst]
+    end
+
+    it 'groups the channels of the same shape and gives the same samples' do
+      a, inst = render_bundle(true, sizes)
+      b, _ = render_bundle(false, sizes)
+      expect(a).to eq(b)
+      groups = inst.lane_groups.groups
+      expect(groups.map { |g| g.members.length }).to eq([2])
+      expect(groups[0].lane_runs).to be > 0
+    end
+
+    it 'regroups after a rebuild' do
+      b = make_bundle(true)
+      inst = MB::Sound::Plan.install(b)
+      b.outputs.each { |o| o.sample(64) }
+      inst.stale!
+      3.times { b.outputs.each { |o| o.sample(64) } }
+      expect(inst.lane_groups.groups.map { |g| g.members.length }).to eq([2])
+      expect(inst.lane_groups.groups[0].members.all?(&:installed?)).to eq(true)
+    end
+  end
+
   describe 'lane-major filter kernels' do
     # One graph per lane: +build+ is called with the lane index and a
     # fresh input source; the lanes' regions are grouped by hand.
