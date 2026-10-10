@@ -206,10 +206,12 @@ module MB
         def commit_change(c, land_pos:, land_frame:, commits:, immediate:)
           c.lands = stamp(land_pos, frame: land_frame)
           c.before = undo_snapshot(c.subject)
+          @landing_frame = land_frame # for ramps that start on the landing sample (see Strip)
           # A past time (e.g. a scheduled block that ran late) is passed on,
           # so launch-aligned clips keep their anchor, as before the queue
           c.action.call(c.time || land_pos)
           c.after = undo_snapshot(c.subject)
+          @landing_frame = nil
 
           if immediate
             c.entry = @journal.add(c.entry.with(status: :landed, commits: commits, lands: c.lands))
@@ -218,6 +220,7 @@ module MB
           end
 
         rescue => e
+          @landing_frame = nil
           if immediate
             c.entry = @journal.add(c.entry.with(status: :failed, commits: commits, lands: c.lands, data: c.entry.data.merge(error: e.message)))
             raise
