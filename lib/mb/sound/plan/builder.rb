@@ -235,13 +235,14 @@ module MB
         end
 
         # An oscillator (see Op::Tone): +tone+ (a Tone) with its inputs as
-        # Values or Consts (+reset+ and +target+ boundary inputs or nil).
-        def tone(tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil)
+        # Values or Consts (+reset+ and +target+ boundary inputs or nil;
+        # +scan+ a wavetable tone's scan).
+        def tone(tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil, scan: nil)
           complex = Tone::BUFFER_CLASS[tone.wave_type] == Numo::SComplex
           emit(Op::Tone.new(
             value(complex ? :complex : :real), node, tone,
             frequency: self[frequency], phase_mod: self[phase_mod], width: width && self[width],
-            reset: reset, target: target, gain: gain && self[gain]
+            reset: reset, target: target, gain: gain && self[gain], scan: scan && self[scan]
           ))
         end
 

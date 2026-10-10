@@ -62,4 +62,14 @@ void mb_plan_biquad(float *d, const float *a, const float *cut, const float *q, 
 void mb_plan_biquad_lanes(int lanes, float *const *d, const float *const *a, const float *const *cut, const float *const *q,
 		int type, const VALUE *objs, size_t n);
 
+// The wavetable kernel of OP_TONE (plan_wavetable.c): one segment of a
+// planned wavetable tone (FastWavetable.oscillate's loop through
+// mb_wavetable.h) into +out+; +tinfo+ is Tone#plan_wavetable's [kernel
+// spec, interpolation code, sinc kernel]; +phase_state+, +tstate+, and
+// +noise+ the Tone::State's phase, table, and noise Arrays, updated.
+struct mb_signal;
+void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const struct mb_signal *f, const struct mb_signal *p,
+		const struct mb_signal *w, _Bool warped, const struct mb_signal *scan, double adv, double rndadv, double g, double off,
+		_Bool remove_dc, VALUE phase_state, VALUE tstate, VALUE noise);
+
 #endif

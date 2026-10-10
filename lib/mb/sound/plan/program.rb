@@ -337,7 +337,11 @@ module MB
             kernel = op.kernel
             gain, offset = tone.send(:gain_and_offset)
             fade = tone.instance_variable_get(:@fade_band) || [0.0, 0.0]
-            wave = kernel == :synth ? Op::Tone::BL_WAVES.fetch(tone.wave_type) : Op::Tone::WAVES.fetch(tone.wave_type)
+            wave = case kernel
+                   when :synth then Op::Tone::BL_WAVES.fetch(tone.wave_type)
+                   when :wavetable then 0
+                   else Op::Tone::WAVES.fetch(tone.wave_type)
+                   end
             width_value = op.width.is_a?(Const) ? op.width.value : nil
 
             sc = scalar(
@@ -349,14 +353,15 @@ module MB
               tone.instance_variable_get(:@keep_dc) ? 0 : 1,
               op.width.is_a?(Const) ? 1 : 0,
               op.gain.nil? ? 0 : (op.gain.is_a?(Const) ? 1 : 2),
-              op.fast ? 1 : 0
+              op.fast ? 1 : 0,
+              op.scan.is_a?(Const) ? op.scan.value : 0
             )
 
             @objects << [tone, state, op.frequency.is_a?(Const) ? op.frequency.value : nil, width_value].freeze
             [
               OPCODES[:tone], reg(op.dst), @objects.length - 1, Op::Tone::KERNELS.fetch(kernel), wave,
               value_reg(op.frequency), value_reg(op.phase_mod), value_reg(op.width),
-              value_reg(op.reset), value_reg(op.target), value_reg(op.gain), sc
+              value_reg(op.reset), value_reg(op.target), value_reg(op.gain), value_reg(op.scan), sc
             ]
           end
 

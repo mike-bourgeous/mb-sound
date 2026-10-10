@@ -23,14 +23,17 @@ module MB
         # P1 covers the :naive and :synth kernels (every naive shape, noise,
         # band-limited ramps, squares, triangles, warped shapes, LFO fades)
         # with frequency, phase modulation, width, reset (with targets and
-        # random phases), and gain inputs; tones with sync, ports, timeline
-        # locks, feedback, BLIT, clean resets, or wavetables stay unplanned
+        # random phases), and gain inputs; P3b the :wavetable kernel for
+        # real cycle-mode #wavetable tones and KeyMaps (scan, warps, noise,
+        # key zones picked at resets; FastWavetable.oscillate's loop through
+        # mb_wavetable.h); tones with sync, ports, timeline locks, feedback,
+        # BLIT, clean resets, sample-mode or complex tables stay unplanned
         # (Tone#plan_unsupported_reason).
         #
         # The Ruby mirror is the Tone's own Ruby path (Tone#compute_ruby).
         class Tone < Base
           # Kernel numbers in the C executor.
-          KERNELS = { naive: 0, synth: 1 }.freeze
+          KERNELS = { naive: 0, synth: 1, wavetable: 2 }.freeze
 
           # Wave numbers of FastSound.oscillate (enum wave_types in
           # mb_osc_shapes.h) and of the band-limited shapes (enum bl_wave in
@@ -41,7 +44,7 @@ module MB
           }.freeze
           BL_WAVES = { ramp: 1, square: 2, triangle: 3, sine: 4, parabola: 5 }.freeze
 
-          attr_reader :tone, :frequency, :phase_mod, :width, :reset, :target, :gain, :kernel
+          attr_reader :tone, :frequency, :phase_mod, :width, :reset, :target, :gain, :scan, :kernel
 
           # Waves with fast shapes in Plan.precision :fast (vectorized real
           # sines; see Plan::VecSine).
@@ -57,7 +60,7 @@ module MB
           # True if this op uses fast shapes (see Plan.precision).
           attr_reader :fast
 
-          def initialize(dst, node, tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil)
+          def initialize(dst, node, tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil, scan: nil)
             super(dst, node)
             @tone = tone
             @frequency = frequency
@@ -66,6 +69,7 @@ module MB
             @reset = reset
             @target = target
             @gain = gain
+            @scan = scan
             @kernel = tone.send(:kernel)
             @fast = Plan.precision == :fast && @kernel == :naive && FAST_WAVES.include?(tone.wave_type) &&
               tone.random_advance == 0 && !dst.complex?
@@ -73,10 +77,11 @@ module MB
             raise Unsupported.new(tone, "the #{@kernel} kernel") unless KERNELS.include?(@kernel)
             raise Unsupported.new(tone, 'a complex frequency input') if @frequency.complex?
             raise Unsupported.new(tone, 'a complex gain input') if @gain&.complex? && !dst.complex?
+            raise Unsupported.new(tone, 'a complex wavetable output') if @kernel == :wavetable && dst.complex?
           end
 
           def operands
-            [@frequency, @phase_mod, @width, @reset, @target, @gain].grep(Value)
+            [@frequency, @phase_mod, @width, @reset, @target, @gain, @scan].grep(Value)
           end
 
           def exact?
@@ -98,6 +103,7 @@ module MB
             args << "reset: #{@reset}" if @reset
             args << "to: #{@target}" if @target
             args << "gain: #{@gain}" if @gain
+            args << "scan: #{@scan}" if @scan && !(@scan.is_a?(Const) && @scan.value == 0)
             "#{@kernel == :synth ? 'bl_' : ''}#{@fast ? 'fast_' : ''}#{@tone.send(:wave_name)}(#{args.join(', ')})"
           end
 
@@ -111,7 +117,7 @@ module MB
             @tone.plan_fast_shapes = @fast
             env[@dst] = @tone.compute_ruby(
               count, input(env, @frequency), input(env, @phase_mod), @width && input(env, @width),
-              nil, reset, @target && input(env, @target), nil, nil, nil, nil, nil, @gain && input(env, @gain)
+              nil, reset, @target && input(env, @target), nil, nil, @scan && input(env, @scan), nil, nil, @gain && input(env, @gain)
             )
           ensure
             @tone.plan_fast_shapes = nil

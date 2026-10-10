@@ -99,12 +99,12 @@ enum event_kind { EV_FILL = 0, EV_IMPULSE = 1, EV_GLIDE = 2, EV_BUFFER = 3, EV_R
 #define EV_ENTRY_SIZE 8
 
 // Kernels of OP_TONE (Plan::Op::Tone::KERNELS)
-enum { TONE_NAIVE = 0, TONE_SYNTH = 1 };
+enum { TONE_NAIVE = 0, TONE_SYNTH = 1, TONE_WAVETABLE = 2 };
 
 typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
-static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2;
+static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
 
 // The register file of one call.
 struct regs {
@@ -434,19 +434,22 @@ static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, dou
 
 /*
  * OP_TONE: dst, object, kernel, wave, freq_r, pm_r, width_r, reset_r,
- * target_r, gain_r, sc (registers -1 for scalars or none).  Scalars from
- * sc: freq, pm, width, gain, advance, random advance, gain (#at), offset,
- * fade lo, fade hi, remove DC, has width, gain mode (0 none, 1 scalar, 2
- * register), fast shapes (Plan.precision :fast: vec_sine_segment).  The object is [tone, state, frequency value, width value].
- * See Tone#sample_c and #sample_segments for the steps.
+ * target_r, gain_r, scan_r, sc (registers -1 for scalars or none).  Scalars
+ * from sc: freq, pm, width, gain, advance, random advance, gain (#at),
+ * offset, fade lo, fade hi, remove DC, has width, gain mode (0 none, 1
+ * scalar, 2 register), fast shapes (Plan.precision :fast:
+ * vec_sine_segment), scan.  The object is [tone, state, frequency value,
+ * width value].  The wavetable kernel asks the tone for its table at the
+ * start of the block and after each reset (Tone#plan_wavetable: key zones
+ * are picked there).  See Tone#sample_c and #sample_segments for the steps.
  */
 static void run_tone(const int32_t *op, const struct regs *R, const double *sc, VALUE objects, size_t n)
 {
 	int dst = op[1];
 	VALUE obj = rb_ary_entry(objects, op[2]);
 	int kernel = op[3], wave = op[4];
-	int fr = op[5], pr = op[6], wr = op[7], rr = op[8], tr = op[9], gr = op[10];
-	const double *s = sc + op[11];
+	int fr = op[5], pr = op[6], wr = op[7], rr = op[8], tr = op[9], gr = op[10], scr = op[11];
+	const double *s = sc + op[12];
 
 	VALUE tone = rb_ary_entry(obj, 0);
 	VALUE state = rb_ary_entry(obj, 1);
@@ -456,6 +459,7 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	_Bool dc = s[10] != 0, has_width = s[11] != 0;
 	int gain_mode = (int)s[12];
 	_Bool fast = s[13] != 0;
+	double scan_s = s[14];
 	if (fast && (wave != OSC_SINE || kernel != TONE_NAIVE || rndadv != 0)) rb_raise(rb_eArgError, "Fast plan tones are naive sines without noise only");
 
 	_Bool complex_out = R->c[dst];
@@ -463,7 +467,9 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 
 	VALUE phase_state = rb_ivar_get(state, id_phase);
 	VALUE bl_state = kernel == TONE_SYNTH ? rb_ivar_get(state, id_blep) : Qnil;
-	VALUE noise = kernel == TONE_NAIVE ? rb_ivar_get(state, id_noise) : Qnil;
+	VALUE noise = kernel == TONE_NAIVE || kernel == TONE_WAVETABLE ? rb_ivar_get(state, id_noise) : Qnil;
+	VALUE table_state = kernel == TONE_WAVETABLE ? rb_ivar_get(state, id_table) : Qnil;
+	VALUE tinfo = kernel == TONE_WAVETABLE && n > 0 ? rb_funcall(tone, id_plan_wavetable, 1, tone_input_at(R, fr, freq_s, 0)) : Qnil;
 	Check_Type(phase_state, T_ARRAY);
 
 	const float *reset = rr >= 0 ? R->p[rr] : NULL;
@@ -497,6 +503,14 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 				float *seg = out + start;
 				synth_segment((enum bl_wave)wave, seg, len, &f, &p, &w, adv, g, off, lo, hi, dc, phase_state, bl_state);
 				add_residual(tone, state, seg, len, g);
+			} else if (kernel == TONE_WAVETABLE) {
+				struct mb_signal sw;
+				tone_signal(&w, R, wr, has_width ? width_s : 0.5, start);
+				tone_signal(&sw, R, scr, scan_s, start);
+				float *seg = out + start;
+				mb_plan_wavetable_segment(tinfo, seg, len, &f, &p, &w, has_width || wr >= 0, &sw, adv, rndadv, g, off, dc,
+						phase_state, table_state, noise);
+				add_residual(tone, state, seg, len, g);
 			} else {
 				void *seg = complex_out ? (void *)(out + 2 * start) : (void *)(out + start);
 				if (fast && !complex_out) {
@@ -514,11 +528,16 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 		// The jump before sample +stop+, in the tone's Ruby (target, random
 		// phase, band-limited step)
 		VALUE target = tr >= 0 && R->p[tr] ? tone_input_at(R, tr, 0, stop) : Qnil;
-		rb_funcall(tone, id_plan_reset, 4,
+		rb_funcall(tone, id_plan_reset, 5,
 				tone_input_at(R, fr, freq_s, stop),
 				tone_input_at(R, pr, pm_s, stop),
 				has_width || wr >= 0 ? tone_input_at(R, wr, width_s, stop) : Qnil,
-				target);
+				target,
+				kernel == TONE_WAVETABLE ? tone_input_at(R, scr, scan_s, stop) : Qnil);
+		if (kernel == TONE_WAVETABLE) {
+			// A reset may pick another key zone
+			tinfo = rb_funcall(tone, id_plan_wavetable, 1, Qnil);
+		}
 
 		start = stop;
 		scan = stop + 1;
@@ -558,6 +577,8 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	RB_GC_GUARD(phase_state);
 	RB_GC_GUARD(bl_state);
 	RB_GC_GUARD(noise);
+	RB_GC_GUARD(table_state);
+	RB_GC_GUARD(tinfo);
 }
 
 // OP_SHAPE: the shaper of FastClip.shape (mb_clip_shape.h) with the
@@ -970,7 +991,7 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 			len = 4;
 			break;
 		case OP_TONE:
-			len = 12;
+			len = 13;
 			break;
 		case OP_SHAPE: case OP_NOTE_FREQ:
 			len = 5;
@@ -1283,15 +1304,15 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_TONE: {
 			if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tone object at word %zu", pc);
-			if (op[11] < 0 || (size_t)op[11] + 14 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
-			for (int k = 5; k <= 10; k++) {
+			if (op[12] < 0 || (size_t)op[12] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
+			for (int k = 5; k <= 11; k++) {
 				if (op[k] >= nregs) rb_raise(rb_eArgError, "Bad plan tone input at word %zu", pc);
 			}
-			if ((op[5] >= 0 && !ptrs[op[5]]) || (op[6] >= 0 && !ptrs[op[6]]) || (op[7] >= 0 && !ptrs[op[7]]) || (op[10] >= 0 && !ptrs[op[10]])) {
+			if ((op[5] >= 0 && !ptrs[op[5]]) || (op[6] >= 0 && !ptrs[op[6]]) || (op[7] >= 0 && !ptrs[op[7]]) || (op[10] >= 0 && !ptrs[op[10]]) || (op[11] >= 0 && !ptrs[op[11]])) {
 				rb_raise(rb_eArgError, "A planned tone's input is missing at word %zu", pc);
 			}
-			if (op[3] == TONE_SYNTH && cplx[d]) rb_raise(rb_eArgError, "Band-limited plan tones are real");
-			if (op[3] != TONE_NAIVE && op[3] != TONE_SYNTH) rb_raise(rb_eArgError, "Bad plan tone kernel %d", op[3]);
+			if ((op[3] == TONE_SYNTH || op[3] == TONE_WAVETABLE) && cplx[d]) rb_raise(rb_eArgError, "Band-limited and wavetable plan tones are real");
+			if (op[3] != TONE_NAIVE && op[3] != TONE_SYNTH && op[3] != TONE_WAVETABLE) rb_raise(rb_eArgError, "Bad plan tone kernel %d", op[3]);
 			if (op[10] >= 0 && cplx[op[10]]) rb_raise(rb_eArgError, "A planned tone's gain must be real");
 			if (op[4] < 0 || op[4] > OSC_PARABOLA) rb_raise(rb_eArgError, "Bad plan wave %d", op[4]);
 			run_tone(op, R, sc, objects, n);
@@ -1530,6 +1551,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("env_state_size")), INT2NUM(ST_SIZE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_naive")), INT2NUM(TONE_NAIVE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_synth")), INT2NUM(TONE_SYNTH));
+	rb_hash_aset(h, ID2SYM(rb_intern("tone_wavetable")), INT2NUM(TONE_WAVETABLE));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_sine")), INT2NUM(OSC_SINE));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_complex_sine")), INT2NUM(OSC_COMPLEX_SINE));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_triangle")), INT2NUM(OSC_TRIANGLE));
@@ -1567,6 +1589,8 @@ void Init_fast_plan(void)
 	id_state = rb_intern("@state");
 	id_ring1 = rb_intern("@ring1");
 	id_ring2 = rb_intern("@ring2");
+	id_table = rb_intern("@table");
+	id_plan_wavetable = rb_intern("plan_wavetable");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
 	rb_define_module_function(fast_plan, "run_lanes", ruby_run_lanes, 8);

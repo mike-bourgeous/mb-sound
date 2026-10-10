@@ -1696,12 +1696,13 @@ module MB
         p.tone(
           self,
           frequency: p[@frequency], phase_mod: p[@phase_mod || 0], width: @width && p[@width],
-          reset: reset, target: target, gain: @out_gain && p[@out_gain]
+          reset: reset, target: target, gain: @out_gain && p[@out_gain],
+          scan: wavetable? ? p[@scan || 0] : nil
         )
       end
 
       def plan_inputs
-        [@frequency, @phase_mod, @width, @reset, @reset_to, @out_gain].select { |v| v.respond_to?(:sample) }
+        [@frequency, @phase_mod, @width, @reset, @reset_to, @out_gain, @scan].select { |v| v.respond_to?(:sample) }
       end
 
       def plan_boundary_inputs
@@ -1719,7 +1720,40 @@ module MB
         return "the #{k} kernel" unless Plan::Op::Tone::KERNELS.include?(k)
         return 'a complex gain' if @out_gain.is_a?(Complex)
 
+        if k == :wavetable
+          return 'a complex shape played from a table' unless wavetable?
+          return 'clean (synced table kernel)' if clean_table?
+
+          tables = @table.is_a?(MB::Sound::Wavetable::KeyMap) ? @table.tables : [@table]
+          return 'a sample-mode wavetable' unless tables.all? { |t| t.mode == :cycle }
+          return 'a complex wavetable' if tables.any?(&:complex?)
+        end
+
         nil
+      end
+
+      # For plans (Plan::Op::Tone on the wavetable kernel, in C): picks a
+      # key zone from the frequency +freq+ (Hz) as #sample_c does at the
+      # start of a block (KeyMaps without a reset input, or before the
+      # first pick), unless +freq+ is nil (after a reset, which picked
+      # one), and returns the kernel arguments of the table the tone plays
+      # now: [Wavetable#kernel_spec, interpolation code, sinc kernel],
+      # frozen and kept per table and sample rate.
+      def plan_wavetable(freq)
+        pick_zone(freq) if freq && @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
+        table = current_table
+        cache = (@plan_wavetables ||= {}.compare_by_identity)
+        entry = cache[table]
+        if entry.nil? || entry[3] != @sample_rate
+          entry = [
+            table.kernel_spec(@sample_rate, @interpolation, scan_wrap: @scan_wrap),
+            table.interpolation_code(@interpolation),
+            table.send(:sinc_kernel, @interpolation),
+            @sample_rate,
+          ].freeze
+          cache[table] = entry
+        end
+        entry
       end
 
       def plan_output_type
@@ -1737,11 +1771,14 @@ module MB
 
       # For plans (Plan::Op::Tone in C): the phase jump of a reset on the
       # sample where the frequency is +freq+, the phase modulation
-      # +phase_mod+, the width +width+ (nil without #pwm), and the reset
-      # target input +target+ (cycles, or nil without one); the same Ruby
-      # as an unplanned reset (see #sample_segments).
-      def plan_reset(freq, phase_mod, width, target)
-        reset_jump({ freq: freq, width: width, phase_mod: phase_mod }, reset_target_value(target))
+      # +phase_mod+, the width +width+ (nil without #pwm), the reset target
+      # input +target+ (cycles, or nil without one), and for wavetable tones
+      # the scan +scan+; the same Ruby as an unplanned reset (see
+      # #sample_segments).
+      def plan_reset(freq, phase_mod, width, target, scan = nil)
+        jump_args = { freq: freq, width: width, phase_mod: phase_mod }
+        jump_args[:scan] = scan if table_kernel?
+        reset_jump(jump_args, reset_target_value(target))
       end
 
       # For plans: the executor added the first +n+ samples of the queued
@@ -1756,13 +1793,23 @@ module MB
         @state.reset_ended = true if @reset && Plan.origin(@reset).equal?(source)
       end
 
+      # The State as plain values, plus a KeyMap's picked zone (the table
+      # #sample_c picks at resets and blocks; not part of the State).
       def plan_snapshot
-        @state&.to_h
+        return nil unless @state
+
+        h = @state.to_h
+        h[:zone_table] = @zone_table if @table.is_a?(MB::Sound::Wavetable::KeyMap)
+        h
       end
 
       def plan_restore(snapshot)
         return unless snapshot
 
+        if snapshot.key?(:zone_table)
+          @zone_table = snapshot[:zone_table]
+          snapshot = snapshot.reject { |k, _| k == :zone_table }
+        end
         fresh = State.new(**snapshot)
         fresh.instance_variables.each { |iv| @state.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
       end

@@ -1,1 +1,1 @@
-fast_wavetable.o: $(srcdir)/../include/mb_ext_helpers.h
+fast_wavetable.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_wavetable.h
