@@ -11,13 +11,16 @@ set -eu
 # - LOCAL_CLAUDE (per machine, never shared): credentials, .claude.json,
 #   sessions, daemon sockets and PIDs, history, transcripts, caches.  Mounted
 #   at /claude, which is CLAUDE_CONFIG_DIR in the container.
-# - SHARED_CLAUDE (in the repo, gitignored): memory, skills, and plans,
-#   bind-mounted over those folders inside /claude.  Directories only: Claude
-#   Code replaces files by renaming, which a single-file mount can't take.
+# - SHARED_CLAUDE (in the repo, gitignored): memory, skills, plans, rules,
+#   commands, agents, output-styles, and workflows, bind-mounted over those
+#   folders inside /claude.  Directories only (single files like
+#   settings.json, keybindings.json, and the user CLAUDE.md stay per machine;
+#   put shared personal instructions in rules/ instead).  plugins/ stays per
+#   machine too: it holds install caches and paths.
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_CLAUDE="${LOCAL_CLAUDE:-$HOME/.mb-sound-claude}"
 SHARED_CLAUDE="${SHARED_CLAUDE:-$REPO_DIR/.claude-shared}"
-SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans"
+SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans rules:rules commands:commands agents:agents output-styles:output-styles workflows:workflows"
 
 trap echo EXIT
 
