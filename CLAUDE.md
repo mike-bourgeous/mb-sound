@@ -104,7 +104,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 ### Method Modules (`design/notes/method_modules.md`)
 
-`MB::Sound` extends the top-level API used in `bin/sound.rb`: `IOMethods` (ffmpeg file I/O); `PlaybackMethods` (`play`, `input`, the background `Session`: `bg`/`stop`/`outro`/`panic`/`players`/`resume`, `swap`, `master`, `vis`, `render`, `wait` at the end of scripts, `use_output`); `MultichannelMethods`; `ScheduleMethods` (`at_bar`/`after`/`every` on the Session timeline); `PlotMethods`; `FFTMethods`; `ScriptingMethods`; `GainMethods`, `WindowMethods`; `AnalysisMethods` (including BS.1770 `loudness` → `Loudness::Result`, `node.loudness_meter`, `bin/loudness.rb`, `render(loudness: :spotify)`); `LiveMethods` (`live?`, `live_error`).
+`MB::Sound` extends the top-level API used in `bin/sound.rb`: `IOMethods` (ffmpeg file I/O); `PlaybackMethods` (`play`, `input`, the background `Session`: `bg`/`stop`/`outro`/`panic`/`players`/`resume`, `swap`, `master`, `vis`, `render`, `wait` at the end of scripts, `use_output`; commands return journal entries like `bg :b lands 2:1 (queued)`); `MultichannelMethods`; `ScheduleMethods` (`at_bar`/`after`/`every` on the Session timeline; launch points count from the block's time); `ArrangementMethods` (the Set layer, below); `PlotMethods`; `FFTMethods`; `ScriptingMethods`; `GainMethods`, `WindowMethods`; `AnalysisMethods` (including BS.1770 `loudness` → `Loudness::Result`, `node.loudness_meter`, `bin/loudness.rb`, `render(loudness: :spotify)`); `LiveMethods` (`live?`, `live_error`).
 
 ### C Extensions (`design/notes/c_extensions.md`)
 
@@ -163,6 +163,16 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 ### Multichannel (`design/notes/multichannel.md`)
 
 Nodes have `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable).  DSL calls on bundles run per channel (NumPy-style broadcasting; per-channel args via bundles, `channels(...)`, `spread(a..b)`); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes: `pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.  Sample all outputs of a mixer in turn.  Demo `bin/songs/stereo_song.rb`.
+
+### Arrangement and Session groundwork (`design/notes/arrangement.md`)
+
+Phase 1 of the arrangement plan (`research-arrangement`), built to the interconnect contracts (`research-plan-interconnect`, K1-K3, K7 mute stage).
+- Session groundwork: `Session::Stamp` (session `frame` + Rational `pos`, shown `bar:beat`), `Session::Journal` (K3 entries: seq, kind, subject, issued/commits/lands, status queued/landed/cancelled/failed; the render thread only queues notes), and the change queue: every change (`bg`, `stop`, `resume`, `swap`, `master`, mute/solo, undo restores, scenes) goes through `Session#change`, applied now or at the start of the buffer holding its time on the exact sample, under a render lock; any number of changes can wait per player.  Fades and mute ramps are exact frame-counted `Fades::Ramp`s (same output at any buffer size).  `Session#now` (a scheduled block's time, or a replaying take's) is where launch points count from.
+- Mute/solo (`session/strip.rb`): immediate 5 ms declick or synced at a launch point with `fade:`; muted players sleep (no CPU; clips come back in time on unmute); mute groups (`mutes :breakdown, :drums, :bass`).
+- Undo (`session/undo.rb`): one step per command or scheduled block; `undo` restores snapshots at the next bar (`on: :now`), cancels changes not yet landed; `redo!`, `changes`; bounded at 64 steps and 8 retired graphs (~7.5 MB per 8-voice sq80 synth).
+- Set layer (`MB::Sound::Arrangement`, `Session#arrangement`): `track :bass, q: 1 do |clip| ... end`, `scene :drop, bass: b, drums: beat` (full states; `others: :keep` for partial), `go :drop` (each track at its own `q:`; only differences change), `quant`.
+- Launch points (`lib/mb/sound/launch_point.rb`) on every command that lands a change: `on:` aligns (`:now`/`:beat`/`:bar`/`:clip`, Durations, plain numbers = bars), `in:` is an offset from `Session#now`, `at:` an absolute position (`bar(33)` only; Symbols alias `on:`; numbers, lengths, and passed bars go through `live_error`); `in:`/`at:`, then `on:` or the alignment the command would have anyway (track `q:`, `:bar` while playing).  `q:`/`quant` are `on:` values.  Tracks, groups, and later knobs share one namespace (`Session::Names`; collisions via `live_error`).
+- Takes (`lib/mb/sound/take.rb`): always on in `bin/sound.rb` (Pry hooks); `take.save` writes a replay script (user data dir by default, `repo: true` for `sets/`), exact at any buffer size for the Session's timing (tones within -150 dB at other buffer sizes).  Demo `bin/songs/night_bus_set.rb`.
 
 ### Master effects (`design/notes/master_effects.md`)
 

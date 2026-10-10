@@ -89,14 +89,14 @@ RSpec.describe(MB::Sound::Session) do
     end
 
     it 'supports other launch points' do
-      { now: 0, beat: 24000 - 4000, 16 => 6000 - 4000, 2r => 192000 - 4000 }.each do |at, expected|
+      { now: 0, beat: 24000 - 4000, 1.n16 => 6000 - 4000, 2 => 192000 - 4000 }.each do |on, expected|
         t = MB::Sound::Sequence::Transport.new(bpm: 120)
         s = MB::Sound::Session.new(master_gain: 1, output: output, transport: t, buffer_size: 800, realtime: false, raise_errors: true)
         s.add(0.constant)
         5.times { s.process_buffer }
-        s.add(10.constant, at: at)
+        s.add(10.constant, on: on)
         data = Array.new(250) { s.process_buffer[0].dup }.reduce(:concatenate)
-        expect(nonzero(data).first).to eq(expected), "launch point #{at.inspect}"
+        expect(nonzero(data).first).to eq(expected), "launch point #{on.inspect}"
       end
     end
 
@@ -112,7 +112,7 @@ RSpec.describe(MB::Sound::Session) do
     it 'accepts Durations for launch points and fades' do
       session.add(0.constant)
       run(4000)
-      session.add(1.constant, at: 1.beat, fade: 1.n16)
+      session.add(1.constant, on: 1.beat, fade: 1.n16)
       data = run(24000)
       expect(nonzero(data).first).to eq(24000 - 4000 + 1) # the fade starts from 0
       expect(data[24000 - 4000 + 3000]).to be_within(0.001).of(0.5) # halfway through a sixteenth-note fade
@@ -376,7 +376,7 @@ RSpec.describe(MB::Sound::Session) do
         session.add(0.constant)
         run(800)
         session.add(MB::Sound.grid(4, 'x...x.').loop(align: :launch).trigger + MB::Sound.grid(4, 'x.').loop.trigger, name: :p, at: :clip)
-        expect(session.instance_variable_get(:@players).values.last.start).to eq(1/2r)
+        expect(session.queued(:p).first.lands.pos).to eq(1/2r)
       end
     end
   end

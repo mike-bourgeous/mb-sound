@@ -47,6 +47,7 @@ require_relative 'sound/midi_methods'
 require_relative 'sound/scripting_methods'
 require_relative 'sound/sequence_methods'
 require_relative 'sound/schedule_methods'
+require_relative 'sound/arrangement_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
 require_relative 'sound/envelope_methods'
@@ -74,6 +75,7 @@ module MB
     extend ScriptingMethods
     extend SequenceMethods
     extend ScheduleMethods
+    extend ArrangementMethods
     extend MultichannelMethods
     extend TuningMethods
     extend WarmUpMethods
@@ -178,6 +180,8 @@ require_relative 'sound/notes'
 require_relative 'sound/synth'
 require_relative 'sound/drums'
 require_relative 'sound/session'
+require_relative 'sound/take'
+require_relative 'sound/arrangement'
 
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'

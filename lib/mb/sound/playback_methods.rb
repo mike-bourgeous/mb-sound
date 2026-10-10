@@ -135,11 +135,19 @@ module MB
       # sound filename.  Everything played with #bg is mixed in one shared
       # Session, locked to one timeline, so sequences stay in sync.  If
       # something is already playing, the new sound starts on the next bar;
-      # pass +:at+ to change that (:now, :beat, :bar, :clip, or a note length
-      # grid; see Session#add).
+      # pass +:on+ to align it elsewhere (:now, :beat, :bar, :clip, a number
+      # of bars, or a note length grid like 1.n4), +:in+ to start it that
+      # long from now (bars or a Duration), or +:at+ for a position on the
+      # timeline (e.g. bar(9)); see LaunchPoint.
       #
       # Errors during playback are printed and remove only the sound that
       # failed.
+      #
+      # Returns the change's journal entry (see Session::Journal), which
+      # prints where it lands (e.g. `bg :bass lands 9:1 (queued)`) and gives
+      # the player name as +name+ (#stop and the other commands accept it in
+      # place of the name).  Inside a scheduled block, returns the name.
+      # Every command is one undo step (see #undo).
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3, C2, rest, As1, G1).n16.loop
@@ -149,12 +157,26 @@ module MB
       #     stop       # stops the last one started (player 1)
       #     outro      # fades everything out over four bars
       #     panic      # stops everything right away
-      def bg(name_or_sound, sound = nil, at: nil, fade: nil)
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
-        session_command(name) { |session, time|
-          session.add(sound, at: at, name: name, fade: fade, start_time: at ? nil : time)
+        # A clip given to a track with a patch plays through the patch (see
+        # ArrangementMethods#track)
+        if name && (sound.is_a?(Sequence::Clip) || sound.is_a?(Sequence::Kit))
+          session = Session.current
+          if session.arrangement.tracks[name]
+            return session.arrangement.play(name, sound, at: point, fade: fade) if point.given?
+
+            time = Session.context&.[](:time)
+            time = session.send(:launch_time, nil, []) if time.nil? && !session.arrangement.tracks[name].q
+            return session.arrangement.play(name, sound, start_time: time, fade: fade)
+          end
+        end
+
+        session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
+          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
         }
       end
 
@@ -166,7 +188,8 @@ module MB
       # were stopped.  When nothing is left playing, the timeline pauses where
       # it is (see SequenceMethods#seek and #rewind).
       def stop(*names, fade: nil)
-        session_command(names) { |session, time|
+        names = names.map { |n| player_name(n) }
+        session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip) { |session, time|
           if names.empty?
             [session.remove_last(fade: fade, time: time)].compact
           elsif names == [:all]
@@ -195,7 +218,7 @@ module MB
       # Audio already sent to the sound card may play for a moment longer.
       # Returns the names of the players that were stopped.
       def panic
-        session_command([]) { |session, time|
+        session_command([], label: 'panic') { |session, time|
           session.remove(fade: 0, time: time).tap { session.reset_master(time: time) }
         }
       end
@@ -297,7 +320,7 @@ module MB
       # with no arguments to see what is set.
       #
       # Like #bg, new effects start on the next bar while anything is
-      # playing (+:at+ picks another launch point).  By default the old
+      # playing (+:on+, +:in+, or +:at+ picks another launch point; see #bg).  By default the old
       # effects get no more sound from that point but finish what they were
       # doing, so reverb and delay tails ring out ("spillover").  Pass
       # +:fade+ to crossfade over a number of bars instead, or 0 to cut over.
@@ -311,7 +334,8 @@ module MB
       #     master { |l, r| [l, r.delay(seconds: 0.012)] }   # Haas widening
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
-      def master(effects = :show, at: nil, fade: nil, &block)
+      def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, &block)
+        point = LaunchPoint.of(binding) or return nil
         session = Session.current
         if block.nil? && effects == :show
           return session.master_info
@@ -321,8 +345,8 @@ module MB
           raise ArgumentError, "Pass a block for master effects, or nil to remove them (got #{effects.inspect})"
         end
 
-        session_command(nil) { |s, time|
-          s.master(at: at, fade: fade, start_time: at ? nil : time, &block)
+        session_command(nil, label: block ? 'master' : 'master nil', kind: :master) { |s, time|
+          s.master(at: point, fade: fade, start_time: point.given? ? nil : time, &block)
         }
       end
       alias master_fx master
@@ -349,8 +373,9 @@ module MB
       # Changes the sequence a background player (see #bg) plays, keeping
       # its synth and effects as they are, e.g. to try a new bass line
       # through the same filter and reverb.  Like #bg, the change happens
-      # on the next bar (+:at+ picks another launch point), exactly on the
-      # sample.  Returns the name.
+      # on the next bar (+:on+, +:in+, or +:at+ picks another launch point;
+      # see #bg), exactly on the
+      # sample.  Returns the change's journal entry (see #bg).
       #
       # Pass the new clip to replace the clip that every clip in the graph
       # was made from, or old => new pairs to choose.  Clips made from the
@@ -367,13 +392,15 @@ module MB
       #     beat = grid(16, kick: 'x...x...', snare: '....x...')
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
-      def swap(name, clips = nil, at: nil, **pairs)
+      def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
+        point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
         clips ||= pairs
         raise ArgumentError, 'Pass a new clip or old => new pairs to swap' if clips.is_a?(Hash) && clips.empty?
 
-        session_command(name) { |session, time|
-          session.swap(name, clips, at: at, start_time: at ? nil : time)
+        name = player_name(name)
+        session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
+          session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
           name
         }
       end
@@ -381,9 +408,9 @@ module MB
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,
       # resumes the most recently stopped player.  Like #bg, it starts on the
-      # next bar and fades in over half a bar by default (+:at+ and +:fade+
-      # work the same way).  Returns the name, or nil if there was nothing to
-      # resume.
+      # next bar and fades in over half a bar by default (+:on+, +:in+,
+      # +:at+, and +:fade+ work the same way).  Returns the change's journal entry (see #bg),
+      # or nil if there was nothing to resume.
       #
       # Only players with Symbol names are kept after stopping; see
       # #stopped and #forget.
@@ -392,9 +419,11 @@ module MB
       #     bg :pad, pad_graph
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
-      def resume(name = nil, at: nil, fade: nil)
-        session_command(name) { |session, time|
-          session.resume(name, at: at, fade: fade, start_time: at ? nil : time).tap { |resumed|
+      def resume(name = nil, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        name = player_name(name)
+        session_command(name, label: "resume #{name.inspect}", kind: :resume) { |session, time|
+          session.resume(name, at: point, fade: fade, start_time: point.given? ? nil : time).tap { |resumed|
             if resumed.nil?
               what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
               warn "No background player to resume #{what}"
@@ -633,7 +662,7 @@ module MB
         end_time = bars && bars.to_r * transport.bar_length
         max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
-        sounds.each { |s| session.add(s, at: :now) }
+        sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
         # Frames left to render: up to the end bar at the current tempo (so
@@ -704,10 +733,15 @@ module MB
       end
 
       # Runs a background playback command with the current session (see
-      # Session.current) and the scheduled time, if any.  Inside a scheduled
-      # block (see ScheduleMethods), the command is queued to take effect at
-      # the block's time instead, and +result+ is returned.
-      def session_command(result, &command)
+      # Session.current) and the scheduled time, if any, as one undo step
+      # labeled +label+ (see Session#command).  Inside a scheduled block
+      # (see ScheduleMethods), the command is queued to take effect at the
+      # block's time instead, and +result+ is returned.
+      #
+      # With a +kind+, returns the journal entry of the command's last
+      # change of that kind (as it is now; see Session::Journal), or the
+      # command's value if it made none.
+      def session_command(result, label: nil, kind: nil, &command)
         context = Session.context
         session = Session.current
         time = context&.[](:time)
@@ -716,8 +750,16 @@ module MB
           context[:batch] << -> { command.call(session, time) }
           result
         else
-          command.call(session, time)
+          value, changes = session.command(label) { command.call(session, time) }
+          return value if kind.nil? || value.nil?
+          changes&.reverse&.find { |c| c.kind == kind }&.then { |c| session.journal[c.seq] } || value
         end
+      end
+
+      # A player name given to a command: a Symbol or Integer, or a journal
+      # entry returned by another command.
+      def player_name(name)
+        name.is_a?(Session::Journal::Entry) ? name.subject : name
       end
 
       # Plays the given filename using the default audio output returned by
