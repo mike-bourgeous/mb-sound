@@ -43,19 +43,27 @@ static void pf_ids(void)
 	}
 }
 
-void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *q,
-		const struct mb_plan_param *g, _Bool remember_gain, VALUE obj, size_t n)
+// An SVF's settings and state, read from the Filter::SVF +filter+ (its
+// @state, @type_id, and @sample_rate, read each block: SVF#reset replaces
+// the state Array).
+struct pf_svf_lane {
+	VALUE filter, state;
+	int type;
+	double pi_over_rate, fc_max;
+	double ic1, ic2;
+};
+
+static void pf_svf_read(struct pf_svf_lane *f, VALUE filter)
 {
-	pf_ids();
-	VALUE filter = obj;
-	VALUE state = rb_ivar_get(filter, id_state); // (read each block: SVF#reset replaces it)
-	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 2) {
+	f->filter = filter;
+	f->state = rb_ivar_get(filter, id_state);
+	Check_Type(f->state, T_ARRAY);
+	if (RARRAY_LEN(f->state) != 2) {
 		rb_raise(rb_eArgError, "SVF state must have two elements");
 	}
 
-	int type = NUM2INT(rb_ivar_get(filter, id_type_id));
-	if (type < SVF_LOWPASS || type > SVF_BANDPASS_SKIRT) {
+	f->type = NUM2INT(rb_ivar_get(filter, id_type_id));
+	if (f->type < SVF_LOWPASS || f->type > SVF_BANDPASS_SKIRT) {
 		rb_raise(rb_eArgError, "SVF filter type must be 0..8");
 	}
 	double rate = NUM2DBL(rb_ivar_get(filter, id_sample_rate));
@@ -63,38 +71,131 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
 	}
 
-	double ic1 = mb_finite_entry(state, 0);
-	double ic2 = mb_finite_entry(state, 1);
-	double pi_over_rate = M_PI / rate;
-	double fc_max = rate * PF_MAX_CUTOFF_RATIO;
+	f->ic1 = mb_finite_entry(f->state, 0);
+	f->ic2 = mb_finite_entry(f->state, 1);
+	f->pi_over_rate = M_PI / rate;
+	f->fc_max = rate * PF_MAX_CUTOFF_RATIO;
+}
 
-	struct mb_svf svf;
-	mb_svf_init(&svf);
-	for (size_t i = 0; i < n; i++) {
-		mb_svf_coefficients(&svf, type, mb_plan_param_at(fc, i), mb_plan_param_at(q, i), mb_plan_param_at(g, i), pi_over_rate, fc_max);
-		d[i] = mb_svf_step(&svf, a[i], &ic1, &ic2);
-	}
-
+// Flushes and stores the state, and remembers the last parameters as
+// SVF#remember does (cutoff, quality, and with a gain input the gain).
+static void pf_svf_write(struct pf_svf_lane *f, const struct mb_plan_param *fc, const struct mb_plan_param *q,
+		const struct mb_plan_param *g, _Bool remember_gain, size_t n)
+{
+	double ic1 = f->ic1, ic2 = f->ic2;
 	if (!isfinite(ic1) || fabs(ic1) < PF_FLUSH) {
 		ic1 = 0.0;
 	}
 	if (!isfinite(ic2) || fabs(ic2) < PF_FLUSH) {
 		ic2 = 0.0;
 	}
-	rb_ary_store(state, 0, rb_float_new(ic1));
-	rb_ary_store(state, 1, rb_float_new(ic2));
+	rb_ary_store(f->state, 0, rb_float_new(ic1));
+	rb_ary_store(f->state, 1, rb_float_new(ic2));
 
-	// SVF#remember: the last cutoff, quality, and (with a gain input) gain
 	if (n > 0) {
-		rb_ivar_set(filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
-		rb_ivar_set(filter, id_quality, rb_float_new(mb_plan_param_at(q, n - 1)));
+		rb_ivar_set(f->filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
+		rb_ivar_set(f->filter, id_quality, rb_float_new(mb_plan_param_at(q, n - 1)));
 		if (remember_gain) {
-			rb_ivar_set(filter, id_gain, rb_float_new(mb_plan_param_at(g, n - 1)));
+			rb_ivar_set(f->filter, id_gain, rb_float_new(mb_plan_param_at(g, n - 1)));
+		}
+	}
+}
+
+void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *q,
+		const struct mb_plan_param *g, _Bool remember_gain, VALUE obj, size_t n)
+{
+	pf_ids();
+	struct pf_svf_lane f;
+	pf_svf_read(&f, obj);
+
+	struct mb_svf svf;
+	mb_svf_init(&svf);
+	for (size_t i = 0; i < n; i++) {
+		mb_svf_coefficients(&svf, f.type, mb_plan_param_at(fc, i), mb_plan_param_at(q, i), mb_plan_param_at(g, i), f.pi_over_rate, f.fc_max);
+		d[i] = mb_svf_step(&svf, a[i], &f.ic1, &f.ic2);
+	}
+
+	pf_svf_write(&f, fc, q, g, remember_gain, n);
+
+	RB_GC_GUARD(f.state);
+	RB_GC_GUARD(obj);
+}
+
+// Samples per pass of the lane-major kernels: each pass first works out
+// every lane's coefficients for these samples (lane by lane, as the single
+// filter kernel does, with its caching), then runs the recursions with the
+// lanes interleaved.
+#define PF_CHUNK 64
+
+void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const _Bool *remember_gain, const VALUE *objs, size_t n)
+{
+	pf_ids();
+	size_t L = (size_t)lanes;
+
+	VALUE tmpv;
+	size_t nd = 7 * PF_CHUNK * L + 2 * L;
+	double *mem = ALLOCV_N(double, tmpv, nd);
+	double *X = mem, *A1 = X + PF_CHUNK * L, *A2 = A1 + PF_CHUNK * L, *A3 = A2 + PF_CHUNK * L;
+	double *M0 = A3 + PF_CHUNK * L, *M1 = M0 + PF_CHUNK * L, *M2 = M1 + PF_CHUNK * L;
+	double *IC1 = M2 + PF_CHUNK * L, *IC2 = IC1 + L;
+
+	struct pf_svf_lane f[L];
+	struct mb_svf svf[L];
+	for (size_t l = 0; l < L; l++) {
+		pf_svf_read(&f[l], objs[l]);
+		mb_svf_init(&svf[l]);
+		IC1[l] = f[l].ic1;
+		IC2[l] = f[l].ic2;
+	}
+
+	for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
+		size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
+
+		// Coefficients (and inputs), lane by lane
+		for (size_t l = 0; l < L; l++) {
+			const struct mb_plan_param *p = prm + 3 * l;
+			struct mb_svf *s = &svf[l];
+			for (size_t k = 0; k < m; k++) {
+				size_t i = c0 + k;
+				mb_svf_coefficients(s, f[l].type, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), mb_plan_param_at(&p[2], i),
+						f[l].pi_over_rate, f[l].fc_max);
+				size_t j = k * L + l;
+				A1[j] = s->a1;
+				A2[j] = s->a2;
+				A3[j] = s->a3;
+				M0[j] = s->m0;
+				M1[j] = s->m1;
+				M2[j] = s->m2;
+				X[j] = a[l][i];
+			}
+		}
+
+		// The recursions, every lane's sample k before any lane's k + 1
+		for (size_t k = 0; k < m; k++) {
+			for (size_t l = 0; l < L; l++) {
+				size_t j = k * L + l;
+				X[j] = mb_svf_step_with(A1[j], A2[j], A3[j], M0[j], M1[j], M2[j], X[j], &IC1[l], &IC2[l]);
+			}
+		}
+
+		for (size_t l = 0; l < L; l++) {
+			float *dl = d[l] + c0;
+			for (size_t k = 0; k < m; k++) {
+				dl[k] = X[k * L + l];
+			}
 		}
 	}
 
-	RB_GC_GUARD(state);
-	RB_GC_GUARD(obj);
+	for (size_t l = 0; l < L; l++) {
+		f[l].ic1 = IC1[l];
+		f[l].ic2 = IC2[l];
+		const struct mb_plan_param *p = prm + 3 * l;
+		pf_svf_write(&f[l], &p[0], &p[1], &p[2], remember_gain[l], n);
+		RB_GC_GUARD(f[l].state);
+	}
+
+	ALLOCV_END(tmpv);
 }
 
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,

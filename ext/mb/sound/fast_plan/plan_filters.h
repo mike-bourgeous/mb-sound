@@ -27,6 +27,13 @@ static inline double mb_plan_param_at(const struct mb_plan_param *s, size_t i)
 void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *q,
 		const struct mb_plan_param *g, _Bool remember_gain, VALUE obj, size_t n);
 
+// OP_SVF for several lanes at once (FastPlan.run_lanes): +lanes+ filters,
+// each with its output d[l], input a[l], parameters prm[3 * l ...], gain
+// flag, and Filter::SVF objs[l], giving each exactly what mb_plan_svf gives
+// it, with the lanes' recursions interleaved sample by sample.
+void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const _Bool *remember_gain, const VALUE *objs, size_t n);
+
 // OP_FOUR_POLE: GraphNode::FourPole (Filter::FourPole#dynamic_process:
 // FastFilter.four_pole or .diode_ladder through mb_four_pole.h) on +a+ into
 // +d+; +cfg+ is [k_max, compensation, drive, mix (5), curve, drive mode,

@@ -116,6 +116,11 @@ module MB
         # bit-exact with its node.  Read when a region compiles.
         attr_accessor :precision
 
+        # Whether structurally identical regions (e.g. a Synth's lanes) run
+        # together in LaneGroups (default true; MB_SOUND_PLAN_LANES=0 turns
+        # it off).
+        attr_accessor :lanes
+
         # The fewest graph nodes a region must cover to be planned
         # (single-node regions gain nothing).
         attr_accessor :min_nodes
@@ -214,6 +219,7 @@ module MB
                    else :raise
                    end
       self.min_nodes = 2
+      self.lanes = ENV['MB_SOUND_PLAN_LANES'] != '0'
       self.fold_warnings = ENV['MB_SOUND_PLAN_FOLD_WARN'] != '0'
       self.precision = ENV['MB_SOUND_PLAN_PRECISION'] == 'exact' ? :exact : :fast
     end
@@ -236,5 +242,6 @@ require_relative 'plan/describable'
 require_relative 'plan/region'
 require_relative 'plan/installation'
 require_relative 'plan/shared_inputs'
+require_relative 'plan/lane_group'
 require_relative 'plan/loop'
 require_relative 'plan/loop_pitch'

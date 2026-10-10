@@ -169,6 +169,10 @@ module MB
       # regions (nil with plans off).
       attr_reader :shared_inputs
 
+      # The Plan::LaneGroups running the lanes' identical regions together
+      # (nil with plans or lane groups off; see Plan.lanes).
+      attr_reader :lane_groups
+
       # The Notes instance of each lane (in lane order).
       attr_reader :notes
 
@@ -243,6 +247,11 @@ module MB
         # sampled once per buffer and handed to every region (see
         # Plan::SharedInputs)
         @shared_inputs = @plans.any? ? Plan::SharedInputs.new(@plans) : nil
+
+        # Lanes whose regions have the same shape run them together, every
+        # lane every buffer (see Plan::LaneGroup; such lanes aren't skipped
+        # while idle)
+        @lane_groups = Plan.lanes && @plans.compact.length > 1 ? Plan::LaneGroups.new(@plans) : nil
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)
@@ -466,14 +475,15 @@ module MB
         graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
         sets = graphs.map { |g| g.to_h { |n| [n.__id__, true] } }
 
-        @skippable = graphs.each_with_index.map { |g, idx|
+        @skippable_base = graphs.each_with_index.map { |g, idx|
           @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
         }
+        update_skippable
 
         # What a skipped lane still reads: its own Notes nodes, and its
         # branches of Tees whose other branches are in other lanes
         @boundary = graphs.each_with_index.map { |g, idx|
-          next [] unless @skippable[idx]
+          next [] unless @skippable_base[idx]
 
           # Nodes read by other boundary nodes (e.g. a Glide's time input)
           # are read through them
@@ -488,6 +498,16 @@ module MB
           own + shared
         }
         @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # Lanes with regions in lane groups are computed every buffer (user
+      # decision 2026-10-10: inside cross-voice regions every voice is
+      # computed, so a voice costs the same whatever plays; see
+      # Plan::LaneGroup), the others may be skipped while idle.
+      def update_skippable
+        grouped = @lane_groups ? @lane_groups.grouped_lanes : []
+        @skippable = @skippable_base.each_with_index.map { |s, idx| s && !grouped.include?(idx) }
+        @skippable.each_with_index { |s, idx| @skipping[idx] = false unless s }
       end
 
       # True if lane +idx+ should be skipped from the next buffer (see
@@ -628,6 +648,7 @@ module MB
         data = (@lane_data ||= Array.new(@lanes.length))
         shared = @shared_inputs
         shared&.begin_block(count)
+        update_skippable if @lane_groups&.check
         begin
           idx = 0
           while idx < @lanes.length

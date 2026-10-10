@@ -58,6 +58,9 @@
 
 #include "plan_filters.h"
 
+// The most lanes FastPlan.run_lanes takes at once.
+#define MB_PLAN_MAX_LANES 64
+
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
 
@@ -875,45 +878,44 @@ static float *buffer_for(VALUE v, _Bool is_complex, size_t n, const char *what, 
 	return (float *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
 }
 
-static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VALUE inputs, VALUE params,
-		VALUE scratch, VALUE out, VALUE count_v)
+// A program's words: the register table and the ops after it.
+struct plan_words {
+	const int32_t *w;
+	size_t nwords;
+	long nregs, nslots;
+	size_t first_op;
+};
+
+static void parse_words(VALUE words, struct plan_words *pw)
 {
-	size_t n = NUM2SIZET(count_v);
-
 	if (CLASS_OF(words) != numo_cInt32 || !RTEST(nary_check_contiguous(words))) rb_raise(rb_eArgError, "Plan words must be a contiguous Int32 NArray");
+	pw->w = (const int32_t *)(nary_get_pointer_for_read(words) + nary_get_offset(words));
+	pw->nwords = RNARRAY_SIZE(words);
+	if (pw->nwords < 2) rb_raise(rb_eArgError, "Plan words are too short");
+	pw->nregs = pw->w[0];
+	pw->nslots = pw->w[1];
+	if (pw->nregs < 1 || pw->nslots < 0 || (size_t)(2 + 4 * pw->nregs) > pw->nwords) rb_raise(rb_eArgError, "Bad plan register table");
+	pw->first_op = 2 + 4 * (size_t)pw->nregs;
+}
+
+static const double *scalars_of(VALUE scalars, size_t *nscalars)
+{
 	if (CLASS_OF(scalars) != numo_cDFloat || !RTEST(nary_check_contiguous(scalars))) rb_raise(rb_eArgError, "Plan scalars must be a contiguous DFloat NArray");
-	if (CLASS_OF(scratch) != numo_cSFloat || !RTEST(nary_check_contiguous(scratch))) rb_raise(rb_eArgError, "Plan scratch must be a contiguous SFloat NArray");
-	Check_Type(objects, T_ARRAY);
-	Check_Type(inputs, T_ARRAY);
-	Check_Type(params, T_ARRAY);
+	*nscalars = RNARRAY_SIZE(scalars);
+	return (const double *)(nary_get_pointer_for_read(scalars) + nary_get_offset(scalars));
+}
 
-	const int32_t *w = (const int32_t *)(nary_get_pointer_for_read(words) + nary_get_offset(words));
-	size_t nwords = RNARRAY_SIZE(words);
-	const double *sc = (const double *)(nary_get_pointer_for_read(scalars) + nary_get_offset(scalars));
-	size_t nscalars = RNARRAY_SIZE(scalars);
-
-	if (nwords < 2) rb_raise(rb_eArgError, "Plan words are too short");
-	long nregs = w[0], nslots = w[1];
-	if (nregs < 1 || nslots < 0 || (size_t)(2 + 4 * nregs) > nwords) rb_raise(rb_eArgError, "Bad plan register table");
-
-	size_t stride = 0;
-	float *mem = NULL;
-	if (nslots > 0) {
-		stride = RNARRAY_SIZE(scratch) / nslots;
-		if (stride < 2 * n) rb_raise(rb_eArgError, "Plan scratch is too small for %zu samples", n);
-		mem = (float *)(nary_get_pointer_for_write(scratch) + nary_get_offset(scratch));
-	}
-
-	float *ptrs[nregs];
-	char cplx[nregs];
-	struct regs R = { ptrs, cplx };
-
-	// Bind the registers
-	for (long r = 0; r < nregs; r++) {
-		const int32_t *e = w + 2 + 4 * r;
+// Binds one lane's registers: scratch slots in +mem+ (+stride+ floats
+// each), boundary inputs, params (numbers filled into their slots), and the
+// output buffer.
+static void bind_registers(const struct plan_words *pw, VALUE inputs, VALUE params, float *mem, size_t stride, VALUE out, size_t n,
+		float **ptrs, char *cplx)
+{
+	for (long r = 0; r < pw->nregs; r++) {
+		const int32_t *e = pw->w + 2 + 4 * r;
 		int kind = e[0], idx = e[1], slot = e[3];
 		cplx[r] = e[2] != 0;
-		if (slot >= nslots) rb_raise(rb_eArgError, "Bad plan slot %d", slot);
+		if (slot >= pw->nslots) rb_raise(rb_eArgError, "Bad plan slot %d", slot);
 
 		switch (kind) {
 			case REG_SLOT:
@@ -952,289 +954,351 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				rb_raise(rb_eArgError, "Bad plan register kind %d", kind);
 		}
 	}
+}
 
-	// Run the ops
-	size_t pc = 2 + 4 * nregs;
-	while (pc < nwords) {
-		const int32_t *op = w + pc;
-		size_t len;
-		switch (op[0]) {
-			case OP_FILL:
-				len = 3;
-				break;
-			case OP_MUL: case OP_MULS: case OP_ADD: case OP_ADDS: case OP_DIV: case OP_DIVS: case OP_POW: case OP_POWF: case OP_PART: case OP_COPY:
-				len = 4;
-				break;
-			case OP_TONE:
-				len = 12;
-				break;
-			case OP_SHAPE: case OP_NOTE_FREQ:
-				len = 5;
-				break;
-			case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
-				len = 4;
-				break;
-			case OP_SVF:
-				len = 8;
-				break;
-			case OP_FOUR_POLE: case OP_BIQUAD:
-				len = 7;
-				break;
-			case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
-				len = 4;
-				break;
-			case OP_ENVELOPE:
-				if (pc + 5 > nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
-				len = 5 + 4 * (size_t)op[4] + 7;
-				break;
-			default:
-				rb_raise(rb_eArgError, "Bad plan opcode %d at word %zu", op[0], pc);
-		}
-		if (pc + len > nwords) rb_raise(rb_eArgError, "Truncated plan op at word %zu", pc);
+// The number of words of the op at +pc+ (raises for unknown or truncated
+// ops).
+static size_t op_length(const struct plan_words *pw, size_t pc)
+{
+	const int32_t *op = pw->w + pc;
+	size_t len;
+	switch (op[0]) {
+		case OP_FILL:
+			len = 3;
+			break;
+		case OP_MUL: case OP_MULS: case OP_ADD: case OP_ADDS: case OP_DIV: case OP_DIVS: case OP_POW: case OP_POWF: case OP_PART: case OP_COPY:
+			len = 4;
+			break;
+		case OP_TONE:
+			len = 12;
+			break;
+		case OP_SHAPE: case OP_NOTE_FREQ:
+			len = 5;
+			break;
+		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
+			len = 4;
+			break;
+		case OP_SVF:
+			len = 8;
+			break;
+		case OP_FOUR_POLE: case OP_BIQUAD:
+			len = 7;
+			break;
+		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
+			len = 4;
+			break;
+		case OP_ENVELOPE:
+			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
+			len = 5 + 4 * (size_t)op[4] + 7;
+			break;
+		default:
+			rb_raise(rb_eArgError, "Bad plan opcode %d at word %zu", op[0], pc);
+	}
+	if (pc + len > pw->nwords) rb_raise(rb_eArgError, "Truncated plan op at word %zu", pc);
+	return len;
+}
 
-		// Every register operand must be bound (an ended optional input
-		// is NULL, which only tone resets and targets may read)
-		int d = op[1];
-		if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-		if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
-			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
-		}
-		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
-			rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
-		}
-		if ((op[0] == OP_FILL && (op[2] < 0 || (size_t)op[2] + 2 > nscalars)) ||
-				((op[0] == OP_MULS || op[0] == OP_ADDS || op[0] == OP_DIVS) && (op[3] < 0 || (size_t)op[3] + 2 > nscalars))) {
-			rb_raise(rb_eArgError, "Bad plan scalar at word %zu", pc);
-		}
+// The checks every op gets: every register operand must be bound (an
+// ended optional input is NULL, which only tone resets and targets may
+// read), and scalars in range.
+static void check_op(const int32_t *op, size_t pc, const struct regs *R, long nregs, size_t nscalars)
+{
+	float *const *ptrs = R->p;
+	int d = op[1];
+	if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
+	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
+		if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
+	}
+	if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
+		rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
+	}
+	if ((op[0] == OP_FILL && (op[2] < 0 || (size_t)op[2] + 2 > nscalars)) ||
+			((op[0] == OP_MULS || op[0] == OP_ADDS || op[0] == OP_DIVS) && (op[3] < 0 || (size_t)op[3] + 2 > nscalars))) {
+		rb_raise(rb_eArgError, "Bad plan scalar at word %zu", pc);
+	}
+}
 
-		switch (op[0]) {
-			case OP_FILL:
-				fill(ptrs[d], cplx[d], sc[op[2]], sc[op[2] + 1], n);
-				break;
+// The SVF op's operands for one lane, checked (see OP_SVF).
+static void svf_operands(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects,
+		struct mb_plan_param prm[3], VALUE *obj, _Bool *remember)
+{
+	float *const *ptrs = R->p;
+	const char *cplx = R->c;
+	if (cplx[op[1]] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan SVF filters are real");
+	if (op[6] < 0 || op[6] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan SVF object at word %zu", pc);
+	if (op[7] < 0 || (size_t)op[7] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan SVF scalars at word %zu", pc);
+	for (int k = 0; k < 3; k++) {
+		int r = op[3 + k];
+		if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan SVF parameter register at word %zu", pc);
+		prm[k].p = r >= 0 ? ptrs[r] : NULL;
+		prm[k].scalar = sc[op[7] + k];
+	}
+	*obj = rb_ary_entry(objects, op[6]);
+	*remember = sc[op[7] + 3] != 0;
+}
 
-			case OP_MUL:
-				op_mul(&R, d, op[2], op[3], n);
-				break;
+// Runs the op at +pc+ (+op+) for one lane's registers +R+.
+static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	float *const *ptrs = R->p;
+	const char *cplx = R->c;
+	int d = op[1];
 
-			case OP_MULS:
-				op_muls(&R, d, op[2], sc[op[3]], sc[op[3] + 1], n);
-				break;
+	check_op(op, pc, R, nregs, nscalars);
 
-			case OP_ADD:
-				op_add(&R, d, op[2], op[3], n);
-				break;
+	switch (op[0]) {
+		case OP_FILL:
+			fill(ptrs[d], cplx[d], sc[op[2]], sc[op[2] + 1], n);
+			break;
 
-			case OP_ADDS:
-				op_adds(&R, d, op[2], sc[op[3]], sc[op[3] + 1], n);
-				break;
+		case OP_MUL:
+			op_mul(R, d, op[2], op[3], n);
+			break;
 
-			case OP_DIV: {
-				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan division is real only");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]], *B = ptrs[op[3]];
-				for (size_t i = 0; i < n; i++) D[i] = A[i] / B[i];
-				break;
-			}
+		case OP_MULS:
+			op_muls(R, d, op[2], sc[op[3]], sc[op[3] + 1], n);
+			break;
 
-			case OP_DIVS: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan division is real only");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]];
-				float c = (float)sc[op[3]];
-				for (size_t i = 0; i < n; i++) D[i] = A[i] / c;
-				break;
-			}
+		case OP_ADD:
+			op_add(R, d, op[2], op[3], n);
+			break;
 
-			case OP_POW: {
-				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]], *B = ptrs[op[3]];
-				for (size_t i = 0; i < n; i++) D[i] = pow(A[i], B[i]);
-				break;
-			}
+		case OP_ADDS:
+			op_adds(R, d, op[2], sc[op[3]], sc[op[3] + 1], n);
+			break;
 
-			case OP_POWF: {
-				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
-				mb_vec_pow(ptrs[d], ptrs[op[2]], ptrs[op[3]], n);
-				break;
-			}
-
-			case OP_SVF: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan SVF filters are real");
-				if (op[6] < 0 || op[6] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan SVF object at word %zu", pc);
-				if (op[7] < 0 || (size_t)op[7] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan SVF scalars at word %zu", pc);
-				struct mb_plan_param prm[3];
-				for (int k = 0; k < 3; k++) {
-					int r = op[3 + k];
-					if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan SVF parameter register at word %zu", pc);
-					prm[k].p = r >= 0 ? ptrs[r] : NULL;
-					prm[k].scalar = sc[op[7] + k];
-				}
-				mb_plan_svf(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], &prm[2], sc[op[7] + 3] != 0, rb_ary_entry(objects, op[6]), n);
-				break;
-			}
-
-			case OP_FOUR_POLE: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
-				if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
-				if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
-				struct mb_plan_param prm[2];
-				for (int k = 0; k < 2; k++) {
-					int r = op[3 + k];
-					if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
-					prm[k].p = r >= 0 ? ptrs[r] : NULL;
-					prm[k].scalar = sc[op[6] + 13 + k];
-				}
-				mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
-				break;
-			}
-
-			case OP_CLIP: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan clips are real");
-				if (op[3] < 0 || (size_t)op[3] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan clip scalars at word %zu", pc);
-				float lo = (float)sc[op[3]], hi = (float)sc[op[3] + 1];
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]];
-				for (size_t i = 0; i < n; i++) {
-					float x = A[i];
-					D[i] = x < lo ? lo : (x > hi ? hi : x);
-				}
-				break;
-			}
-
-			case OP_EXP: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan exp is real");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]];
-				for (size_t i = 0; i < n; i++) D[i] = (float)exp((double)A[i]);
-				break;
-			}
-
-			case OP_TIME_SCALE: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan time scales are real");
-				if (op[3] < 0 || (size_t)op[3] + 3 > nscalars) rb_raise(rb_eArgError, "Bad plan time scale scalars at word %zu", pc);
-				const double *k = sc + op[3];
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]];
-				double seconds = k[1], amount = k[2];
-				if (k[0] == 0) {
-					for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * (1.0 - amount * (double)A[i]));
-				} else {
-					for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * pow(2.0, -amount * ((double)A[i] - 60.0) / 12.0));
-				}
-				break;
-			}
-
-			case OP_BIQUAD: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan biquad filters are real");
-				if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan biquad object at word %zu", pc);
-				for (int k = 3; k <= 4; k++) {
-					if (op[k] < 0 || op[k] >= nregs || cplx[op[k]] || !ptrs[op[k]]) rb_raise(rb_eArgError, "Bad plan biquad parameter register at word %zu", pc);
-				}
-				mb_plan_biquad(ptrs[d], ptrs[op[2]], ptrs[op[3]], ptrs[op[4]], op[6], rb_ary_entry(objects, op[5]), n);
-				break;
-			}
-
-			case OP_PART: {
-				if (cplx[d] || !cplx[op[2]]) rb_raise(rb_eArgError, "Plan part needs a complex operand and a real result");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]] + (op[3] ? 1 : 0);
-				for (size_t i = 0; i < n; i++) D[i] = A[2 * i];
-				break;
-			}
-
-			case OP_SHAPE:
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan shapers are real only");
-				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan shaper object at word %zu", pc);
-				if (op[4] < 0 || (size_t)op[4] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan shaper scalars at word %zu", pc);
-				run_shape(op, &R, sc, objects, n);
-				break;
-
-			case OP_NOTE_FREQ: {
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan note frequencies are real only");
-				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tuning object at word %zu", pc);
-				VALUE tuning = rb_ary_entry(objects, op[3]);
-				double tnum = NUM2DBL(rb_funcall(tuning, id_note, 0));
-				double tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]];
-				if (op[4]) {
-					mb_vec_note_freq(D, A, n, tnum, tfrq);
-				} else {
-					for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
-				}
-				break;
-			}
-
-			case OP_COPY:
-				if (cplx[d] != cplx[op[2]]) rb_raise(rb_eArgError, "Plan copy needs registers of one type");
-				memcpy(ptrs[d], ptrs[op[2]], n * (cplx[d] ? 2 : 1) * sizeof(float));
-				break;
-
-			case OP_EVENTS:
-				if (cplx[d]) rb_raise(rb_eArgError, "Plan events are real");
-				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan event list at word %zu", pc);
-				run_events(ptrs[d], rb_ary_entry(objects, op[2]), n);
-				break;
-
-			case OP_KEEP: {
-				if (cplx[op[2]]) rb_raise(rb_eArgError, "Plan keep is real only");
-				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan keep object at word %zu", pc);
-				if (n == 0) break;
-				VALUE ko = rb_ary_entry(objects, op[3]);
-				VALUE target = rb_ary_entry(ko, 0);
-				VALUE name = rb_ary_entry(ko, 1);
-				VALUE last = DBL2NUM(ptrs[op[2]][n - 1]);
-				if (RB_TYPE_P(target, T_HASH)) {
-					rb_hash_aset(target, name, last);
-				} else {
-					rb_ivar_set(target, SYM2ID(name), last);
-				}
-				break;
-			}
-
-			case OP_SMOOTH:
-				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan smoothing is real only");
-				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan smoother object at word %zu", pc);
-				run_smooth(ptrs[d], ptrs[op[2]], rb_ary_entry(objects, op[3]), n);
-				break;
-
-			case OP_MAX: {
-				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan maximum is real only");
-				float *D = ptrs[d];
-				const float *A = ptrs[op[2]], *B = ptrs[op[3]];
-				for (size_t i = 0; i < n; i++) {
-					float a = A[i], b = B[i];
-					D[i] = (a >= b || b != b) ? a : b;
-				}
-				break;
-			}
-
-			case OP_ENVELOPE:
-				if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
-				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan envelope object at word %zu", pc);
-				if (op[3] < 0 || (size_t)op[3] + 10 + 3 * (size_t)op[4] + 7 > nscalars) rb_raise(rb_eArgError, "Bad plan envelope scalars at word %zu", pc);
-				run_envelope(op, &R, sc, objects, n, nregs);
-				break;
-
-			case OP_TONE: {
-				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tone object at word %zu", pc);
-				if (op[11] < 0 || (size_t)op[11] + 14 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
-				for (int k = 5; k <= 10; k++) {
-					if (op[k] >= nregs) rb_raise(rb_eArgError, "Bad plan tone input at word %zu", pc);
-				}
-				if ((op[5] >= 0 && !ptrs[op[5]]) || (op[6] >= 0 && !ptrs[op[6]]) || (op[7] >= 0 && !ptrs[op[7]]) || (op[10] >= 0 && !ptrs[op[10]])) {
-					rb_raise(rb_eArgError, "A planned tone's input is missing at word %zu", pc);
-				}
-				if (op[3] == TONE_SYNTH && cplx[d]) rb_raise(rb_eArgError, "Band-limited plan tones are real");
-				if (op[3] != TONE_NAIVE && op[3] != TONE_SYNTH) rb_raise(rb_eArgError, "Bad plan tone kernel %d", op[3]);
-				if (op[10] >= 0 && cplx[op[10]]) rb_raise(rb_eArgError, "A planned tone's gain must be real");
-				if (op[4] < 0 || op[4] > OSC_PARABOLA) rb_raise(rb_eArgError, "Bad plan wave %d", op[4]);
-				run_tone(op, &R, sc, objects, n);
-				break;
-			}
+		case OP_DIV: {
+			if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan division is real only");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]], *B = ptrs[op[3]];
+			for (size_t i = 0; i < n; i++) D[i] = A[i] / B[i];
+			break;
 		}
 
+		case OP_DIVS: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan division is real only");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]];
+			float c = (float)sc[op[3]];
+			for (size_t i = 0; i < n; i++) D[i] = A[i] / c;
+			break;
+		}
+
+		case OP_POW: {
+			if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]], *B = ptrs[op[3]];
+			for (size_t i = 0; i < n; i++) D[i] = pow(A[i], B[i]);
+			break;
+		}
+
+		case OP_POWF: {
+			if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
+			mb_vec_pow(ptrs[d], ptrs[op[2]], ptrs[op[3]], n);
+			break;
+		}
+
+		case OP_SVF: {
+			struct mb_plan_param prm[3];
+			VALUE obj;
+			_Bool remember;
+			svf_operands(op, pc, R, nregs, sc, nscalars, objects, prm, &obj, &remember);
+			mb_plan_svf(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], &prm[2], remember, obj, n);
+			break;
+		}
+
+		case OP_FOUR_POLE: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
+			if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
+			if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
+			struct mb_plan_param prm[2];
+			for (int k = 0; k < 2; k++) {
+				int r = op[3 + k];
+				if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
+				prm[k].p = r >= 0 ? ptrs[r] : NULL;
+				prm[k].scalar = sc[op[6] + 13 + k];
+			}
+			mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
+			break;
+		}
+
+		case OP_CLIP: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan clips are real");
+			if (op[3] < 0 || (size_t)op[3] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan clip scalars at word %zu", pc);
+			float lo = (float)sc[op[3]], hi = (float)sc[op[3] + 1];
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]];
+			for (size_t i = 0; i < n; i++) {
+				float x = A[i];
+				D[i] = x < lo ? lo : (x > hi ? hi : x);
+			}
+			break;
+		}
+
+		case OP_EXP: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan exp is real");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]];
+			for (size_t i = 0; i < n; i++) D[i] = (float)exp((double)A[i]);
+			break;
+		}
+
+		case OP_TIME_SCALE: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan time scales are real");
+			if (op[3] < 0 || (size_t)op[3] + 3 > nscalars) rb_raise(rb_eArgError, "Bad plan time scale scalars at word %zu", pc);
+			const double *k = sc + op[3];
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]];
+			double seconds = k[1], amount = k[2];
+			if (k[0] == 0) {
+				for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * (1.0 - amount * (double)A[i]));
+			} else {
+				for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * pow(2.0, -amount * ((double)A[i] - 60.0) / 12.0));
+			}
+			break;
+		}
+
+		case OP_BIQUAD: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan biquad filters are real");
+			if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan biquad object at word %zu", pc);
+			for (int k = 3; k <= 4; k++) {
+				if (op[k] < 0 || op[k] >= nregs || cplx[op[k]] || !ptrs[op[k]]) rb_raise(rb_eArgError, "Bad plan biquad parameter register at word %zu", pc);
+			}
+			mb_plan_biquad(ptrs[d], ptrs[op[2]], ptrs[op[3]], ptrs[op[4]], op[6], rb_ary_entry(objects, op[5]), n);
+			break;
+		}
+
+		case OP_PART: {
+			if (cplx[d] || !cplx[op[2]]) rb_raise(rb_eArgError, "Plan part needs a complex operand and a real result");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]] + (op[3] ? 1 : 0);
+			for (size_t i = 0; i < n; i++) D[i] = A[2 * i];
+			break;
+		}
+
+		case OP_SHAPE:
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan shapers are real only");
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan shaper object at word %zu", pc);
+			if (op[4] < 0 || (size_t)op[4] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan shaper scalars at word %zu", pc);
+			run_shape(op, R, sc, objects, n);
+			break;
+
+		case OP_NOTE_FREQ: {
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan note frequencies are real only");
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tuning object at word %zu", pc);
+			VALUE tuning = rb_ary_entry(objects, op[3]);
+			double tnum = NUM2DBL(rb_funcall(tuning, id_note, 0));
+			double tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]];
+			if (op[4]) {
+				mb_vec_note_freq(D, A, n, tnum, tfrq);
+			} else {
+				for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
+			}
+			break;
+		}
+
+		case OP_COPY:
+			if (cplx[d] != cplx[op[2]]) rb_raise(rb_eArgError, "Plan copy needs registers of one type");
+			memcpy(ptrs[d], ptrs[op[2]], n * (cplx[d] ? 2 : 1) * sizeof(float));
+			break;
+
+		case OP_EVENTS:
+			if (cplx[d]) rb_raise(rb_eArgError, "Plan events are real");
+			if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan event list at word %zu", pc);
+			run_events(ptrs[d], rb_ary_entry(objects, op[2]), n);
+			break;
+
+		case OP_KEEP: {
+			if (cplx[op[2]]) rb_raise(rb_eArgError, "Plan keep is real only");
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan keep object at word %zu", pc);
+			if (n == 0) break;
+			VALUE ko = rb_ary_entry(objects, op[3]);
+			VALUE target = rb_ary_entry(ko, 0);
+			VALUE name = rb_ary_entry(ko, 1);
+			VALUE last = DBL2NUM(ptrs[op[2]][n - 1]);
+			if (RB_TYPE_P(target, T_HASH)) {
+				rb_hash_aset(target, name, last);
+			} else {
+				rb_ivar_set(target, SYM2ID(name), last);
+			}
+			break;
+		}
+
+		case OP_SMOOTH:
+			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan smoothing is real only");
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan smoother object at word %zu", pc);
+			run_smooth(ptrs[d], ptrs[op[2]], rb_ary_entry(objects, op[3]), n);
+			break;
+
+		case OP_MAX: {
+			if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan maximum is real only");
+			float *D = ptrs[d];
+			const float *A = ptrs[op[2]], *B = ptrs[op[3]];
+			for (size_t i = 0; i < n; i++) {
+				float a = A[i], b = B[i];
+				D[i] = (a >= b || b != b) ? a : b;
+			}
+			break;
+		}
+
+		case OP_ENVELOPE:
+			if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
+			if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan envelope object at word %zu", pc);
+			if (op[3] < 0 || (size_t)op[3] + 10 + 3 * (size_t)op[4] + 7 > nscalars) rb_raise(rb_eArgError, "Bad plan envelope scalars at word %zu", pc);
+			run_envelope(op, R, sc, objects, n, nregs);
+			break;
+
+		case OP_TONE: {
+			if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tone object at word %zu", pc);
+			if (op[11] < 0 || (size_t)op[11] + 14 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
+			for (int k = 5; k <= 10; k++) {
+				if (op[k] >= nregs) rb_raise(rb_eArgError, "Bad plan tone input at word %zu", pc);
+			}
+			if ((op[5] >= 0 && !ptrs[op[5]]) || (op[6] >= 0 && !ptrs[op[6]]) || (op[7] >= 0 && !ptrs[op[7]]) || (op[10] >= 0 && !ptrs[op[10]])) {
+				rb_raise(rb_eArgError, "A planned tone's input is missing at word %zu", pc);
+			}
+			if (op[3] == TONE_SYNTH && cplx[d]) rb_raise(rb_eArgError, "Band-limited plan tones are real");
+			if (op[3] != TONE_NAIVE && op[3] != TONE_SYNTH) rb_raise(rb_eArgError, "Bad plan tone kernel %d", op[3]);
+			if (op[10] >= 0 && cplx[op[10]]) rb_raise(rb_eArgError, "A planned tone's gain must be real");
+			if (op[4] < 0 || op[4] > OSC_PARABOLA) rb_raise(rb_eArgError, "Bad plan wave %d", op[4]);
+			run_tone(op, R, sc, objects, n);
+			break;
+		}
+	}
+}
+
+static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VALUE inputs, VALUE params,
+		VALUE scratch, VALUE out, VALUE count_v)
+{
+	size_t n = NUM2SIZET(count_v);
+
+	struct plan_words pw;
+	parse_words(words, &pw);
+	size_t nscalars;
+	const double *sc = scalars_of(scalars, &nscalars);
+	if (CLASS_OF(scratch) != numo_cSFloat || !RTEST(nary_check_contiguous(scratch))) rb_raise(rb_eArgError, "Plan scratch must be a contiguous SFloat NArray");
+	Check_Type(objects, T_ARRAY);
+	Check_Type(inputs, T_ARRAY);
+	Check_Type(params, T_ARRAY);
+
+	size_t stride = 0;
+	float *mem = NULL;
+	if (pw.nslots > 0) {
+		stride = RNARRAY_SIZE(scratch) / pw.nslots;
+		if (stride < 2 * n) rb_raise(rb_eArgError, "Plan scratch is too small for %zu samples", n);
+		mem = (float *)(nary_get_pointer_for_write(scratch) + nary_get_offset(scratch));
+	}
+
+	float *ptrs[pw.nregs];
+	char cplx[pw.nregs];
+	struct regs R = { ptrs, cplx };
+	bind_registers(&pw, inputs, params, mem, stride, out, n, ptrs, cplx);
+
+	for (size_t pc = pw.first_op; pc < pw.nwords; ) {
+		size_t len = op_length(&pw, pc);
+		run_op(pw.w + pc, pc, &R, pw.nregs, sc, nscalars, objects, n);
 		pc += len;
 	}
 
@@ -1249,11 +1313,111 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 	return out;
 }
 
+/*
+ * FastPlan.run_lanes(words, scalars, objects, inputs, params, scratch, outs, count)
+ *
+ * Runs one program for several lanes at once (Plan::LaneGroup: the regions
+ * of a Synth's voices, or any regions with the same lowered words): the
+ * words are shared, and scalars, objects, inputs, params, and outs are
+ * Arrays with one entry per lane (each as for FastPlan.run).  scratch holds
+ * nslots * stride floats per lane (stride >= 2 * count).  Ops with
+ * cross-lane kernels (recursions: OP_SVF, ...) run every lane at once, one
+ * sample of all lanes after another (lane-major), so the lanes' independent
+ * recursions fill the pipeline; the other ops run lane after lane.  Every
+ * lane gets exactly the samples and states FastPlan.run would give it.
+ */
+static VALUE ruby_run_lanes(VALUE self, VALUE words, VALUE scalars_list, VALUE objects_list, VALUE inputs_list, VALUE params_list,
+		VALUE scratch, VALUE outs, VALUE count_v)
+{
+	size_t n = NUM2SIZET(count_v);
+
+	struct plan_words pw;
+	parse_words(words, &pw);
+	Check_Type(scalars_list, T_ARRAY);
+	Check_Type(objects_list, T_ARRAY);
+	Check_Type(inputs_list, T_ARRAY);
+	Check_Type(params_list, T_ARRAY);
+	Check_Type(outs, T_ARRAY);
+	long L = RARRAY_LEN(outs);
+	if (L < 1 || L > MB_PLAN_MAX_LANES) rb_raise(rb_eArgError, "Plan lanes must number 1 to %d", MB_PLAN_MAX_LANES);
+	if (RARRAY_LEN(scalars_list) != L || RARRAY_LEN(objects_list) != L || RARRAY_LEN(inputs_list) != L || RARRAY_LEN(params_list) != L) {
+		rb_raise(rb_eArgError, "Plan lane lists must all have %ld entries", L);
+	}
+	if (CLASS_OF(scratch) != numo_cSFloat || !RTEST(nary_check_contiguous(scratch))) rb_raise(rb_eArgError, "Plan scratch must be a contiguous SFloat NArray");
+
+	size_t stride = 0;
+	float *mem = NULL;
+	if (pw.nslots > 0) {
+		stride = RNARRAY_SIZE(scratch) / ((size_t)pw.nslots * (size_t)L);
+		if (stride < 2 * n) rb_raise(rb_eArgError, "Plan scratch is too small for %ld lanes of %zu samples", L, n);
+		mem = (float *)(nary_get_pointer_for_write(scratch) + nary_get_offset(scratch));
+	}
+
+	long nregs = pw.nregs;
+	float *ptrs[L * nregs];
+	char cplx[L * nregs];
+	struct regs R[L];
+	const double *sc[L];
+	size_t nscalars[L];
+	VALUE objects[L];
+
+	for (long l = 0; l < L; l++) {
+		sc[l] = scalars_of(rb_ary_entry(scalars_list, l), &nscalars[l]);
+		objects[l] = rb_ary_entry(objects_list, l);
+		Check_Type(objects[l], T_ARRAY);
+		VALUE inputs = rb_ary_entry(inputs_list, l);
+		VALUE params = rb_ary_entry(params_list, l);
+		Check_Type(inputs, T_ARRAY);
+		Check_Type(params, T_ARRAY);
+		R[l].p = ptrs + l * nregs;
+		R[l].c = cplx + l * nregs;
+		bind_registers(&pw, inputs, params, mem ? mem + (size_t)l * (size_t)pw.nslots * stride : NULL, stride, rb_ary_entry(outs, l), n,
+				ptrs + l * nregs, cplx + l * nregs);
+	}
+
+	for (size_t pc = pw.first_op; pc < pw.nwords; ) {
+		size_t len = op_length(&pw, pc);
+		const int32_t *op = pw.w + pc;
+
+		if (L > 1 && op[0] == OP_SVF) {
+			float *dl[L];
+			const float *al[L];
+			struct mb_plan_param prm[3 * L];
+			VALUE objs[L];
+			_Bool remember[L];
+			for (long l = 0; l < L; l++) {
+				check_op(op, pc, &R[l], nregs, nscalars[l]);
+				svf_operands(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], prm + 3 * l, &objs[l], &remember[l]);
+				dl[l] = R[l].p[op[1]];
+				al[l] = R[l].p[op[2]];
+			}
+			mb_plan_svf_lanes((int)L, dl, al, prm, remember, objs, n);
+		} else {
+			for (long l = 0; l < L; l++) {
+				run_op(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], n);
+			}
+		}
+
+		pc += len;
+	}
+
+	RB_GC_GUARD(words);
+	RB_GC_GUARD(scalars_list);
+	RB_GC_GUARD(objects_list);
+	RB_GC_GUARD(inputs_list);
+	RB_GC_GUARD(params_list);
+	RB_GC_GUARD(scratch);
+	RB_GC_GUARD(outs);
+
+	return outs;
+}
+
 // The executor's enum values, for specs that check the Ruby side's tables.
 static VALUE ruby_enums(VALUE self)
 {
 	VALUE h = rb_hash_new();
 	rb_hash_aset(h, ID2SYM(rb_intern("reg_slot")), INT2NUM(REG_SLOT));
+	rb_hash_aset(h, ID2SYM(rb_intern("max_lanes")), INT2NUM(MB_PLAN_MAX_LANES));
 	rb_hash_aset(h, ID2SYM(rb_intern("reg_input")), INT2NUM(REG_INPUT));
 	rb_hash_aset(h, ID2SYM(rb_intern("reg_param")), INT2NUM(REG_PARAM));
 	rb_hash_aset(h, ID2SYM(rb_intern("reg_out")), INT2NUM(REG_OUT));
@@ -1331,5 +1495,6 @@ void Init_fast_plan(void)
 	id_ring2 = rb_intern("@ring2");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
+	rb_define_module_function(fast_plan, "run_lanes", ruby_run_lanes, 8);
 	rb_define_module_function(fast_plan, "enums", ruby_enums, 0);
 }

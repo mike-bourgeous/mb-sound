@@ -162,14 +162,45 @@ module MB
           compile(start: false)
         end
 
-        # Runs one block (called by the root's Planned hook).
+        # The Plan::LaneGroup running this region's program together with
+        # structurally identical regions (e.g. the same region in every lane
+        # of a Synth), or nil.
+        attr_accessor :lane_group
+
+        # Runs one block (called by the root's Planned hook): through the
+        # region's LaneGroup if it has one, else alone.
         def sample(count)
+          group = @lane_group
+          return group.sample(self, count) if group
+
+          sample_alone(count)
+        end
+
+        # Runs one block of this region by itself (see #sample).
+        def sample_alone(count)
+          n = prepare(count)
+          return @result if n == :done
+
+          finish(n, count)
+        end
+
+        # For internal use by #sample_alone and LaneGroup: everything a
+        # block does before the program runs (rebuilds, compiles, fallbacks,
+        # reading the boundary inputs, and the feeds).  Returns the sample
+        # count to run, or :done with the block's result in #result (an
+        # unfused block, a rebuilt installation's output, or nil once the
+        # region's graph ended).
+        def prepare(count)
           if @installation.stale?
             @installation.rebuild
-            return @root.sample(count)
+            @result = @root.sample(count)
+            return :done
           end
 
-          return run_unfused(count) if @disabled || count <= 0
+          if @disabled || count <= 0
+            @result = run_unfused(count)
+            return :done
+          end
 
           if @recompile
             @recompile = false
@@ -177,8 +208,8 @@ module MB
           end
 
           unless @program || compile
-            return @root.sample(count) if @installation.stale?
-            return run_unfused(count)
+            @result = @installation.stale? ? @root.sample(count) : run_unfused(count)
+            return :done
           end
           start_tones unless @started
 
@@ -192,32 +223,61 @@ module MB
               f = feeders[k]
               if f.plan_finished?(count)
                 (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its MIDI stream is over', until_restart: true) }
-                return run_unfused(count)
+                @result = run_unfused(count)
+                return :done
               end
               k += 1
             end
           end
 
           if @installation.check
-            stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
-            before = stateful.map(&:plan_snapshot)
+            @check_stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
+            @check_before = @check_stateful.map(&:plan_snapshot)
           end
 
           gathered = gather(count)
-          return nil if gathered == :ended
-          return replay_unfused(count) if gathered == :mismatch
+          if gathered == :ended
+            @result = nil
+            return :done
+          end
+          if gathered == :mismatch
+            @result = replay_unfused(count)
+            return :done
+          end
 
-          n = gathered
           k = 0
           while k < feeders.length
             feeders[k].plan_feed(count)
             k += 1
           end
 
-          return check_block(n, count, stateful, before) if @installation.check
+          gathered
+        end
+
+        # The result of a block #prepare finished (see there).
+        attr_reader :result
+
+        # For internal use by #sample_alone and LaneGroup: runs the program
+        # for +n+ samples of a +count+-sample block that #prepare made ready
+        # (or, with +planned+, takes the output a LaneGroup computed into
+        # #out_view), checking it in check mode.  Returns the output.
+        def finish(n, count, planned = nil)
+          if @installation.check
+            stateful = @check_stateful
+            before = @check_before
+            @check_stateful = @check_before = nil
+            return check_block(n, count, stateful, before, planned)
+          end
 
           @planned_blocks += 1
-          execute(n)
+          planned || execute(n)
+        end
+
+        # For internal use by LaneGroup: the arguments FastPlan.run takes
+        # for this region's gathered block (inputs and params as #gather
+        # read them).
+        def run_arguments
+          [@inputs, @params]
         end
 
         # Called by a node inside this region that was read from outside
@@ -404,7 +464,10 @@ module MB
           min
         end
 
-        # Runs the program on gathered inputs for +n+ samples.
+        public
+
+        # Runs the program on gathered inputs for +n+ samples (for internal
+        # use by LaneGroup too).
         def execute(n)
           if @installation.engine == :ruby
             result = @program.run_ruby(n, @inputs, @params)
@@ -425,6 +488,8 @@ module MB
           end
           @out_views[n] ||= @out[0...n]
         end
+
+        private
 
         # Runs the region's nodes themselves for this block, replaying the
         # boundary inputs the region already read.
@@ -468,8 +533,8 @@ module MB
         # Check mode: runs the block planned, then unfused from the same
         # state with the same inputs, and compares the samples and the
         # nodes' states.  Returns the unfused samples.
-        def check_block(n, count, stateful, before)
-          planned = execute(n)
+        def check_block(n, count, stateful, before, planned = nil)
+          planned ||= execute(n)
           planned = planned.dup
           planned_states = stateful.map(&:plan_snapshot)
 

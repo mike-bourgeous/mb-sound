@@ -139,16 +139,25 @@ static inline void mb_svf_coefficients(struct mb_svf *s, int type, double fc, do
 	s->a3 = g * s->a2;
 }
 
-// One sample +x+ through the filter with integrator states *ic1 and *ic2.
-static inline double mb_svf_step(const struct mb_svf *s, double x, double *ic1p, double *ic2p)
+// One sample +x+ through a filter with coefficients a1, a2, a3 and output
+// mix m0, m1, m2 (struct mb_svf's), with integrator states *ic1 and *ic2.
+// Also the lane-major plan kernel's step (fast_plan's mb_plan_svf_lanes,
+// several filters' samples interleaved), so both run the same operations.
+static inline double mb_svf_step_with(double a1, double a2, double a3, double m0, double m1, double m2, double x, double *ic1p, double *ic2p)
 {
 	double ic1 = *ic1p, ic2 = *ic2p;
 	double v3 = x - ic2;
-	double v1 = s->a1 * ic1 + s->a2 * v3;
-	double v2 = ic2 + s->a2 * ic1 + s->a3 * v3;
+	double v1 = a1 * ic1 + a2 * v3;
+	double v2 = ic2 + a2 * ic1 + a3 * v3;
 	*ic1p = 2.0 * v1 - ic1;
 	*ic2p = 2.0 * v2 - ic2;
-	return s->m0 * x + s->m1 * v1 + s->m2 * v2;
+	return m0 * x + m1 * v1 + m2 * v2;
+}
+
+// One sample +x+ through the filter with integrator states *ic1 and *ic2.
+static inline double mb_svf_step(const struct mb_svf *s, double x, double *ic1p, double *ic2p)
+{
+	return mb_svf_step_with(s->a1, s->a2, s->a3, s->m0, s->m1, s->m2, x, ic1p, ic2p);
 }
 
 #endif

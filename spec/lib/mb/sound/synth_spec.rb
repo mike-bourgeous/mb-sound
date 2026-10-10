@@ -626,6 +626,16 @@ RSpec.describe(MB::Sound::Synth) do
   end
 
   describe 'idle lane skipping', :check_shared do
+    # Lanes grouped by the plan layer are computed every buffer (see
+    # Plan::LaneGroup), so these run without lane groups
+    around do |ex|
+      old = MB::Sound::Plan.lanes
+      MB::Sound::Plan.lanes = false
+      ex.run
+    ensure
+      MB::Sound::Plan.lanes = old
+    end
+
     let(:notes) {
       [ev.note_on(48), ev.note_off(48, time: 0.05r), ev.note_on(52, time: 0.2r), ev.note_off(52, time: 0.25r),
        ev.cc_raw(1, 100, time: 0.3r), ev.note_on(55, time: 0.4r), ev.note_off(55, time: 0.45r), ev.note_on(60, time: 0.6r)]

@@ -84,6 +84,14 @@ module MB
           }
         end
 
+        # The lowered words as a String (see #lower): programs with the same
+        # signature have the same ops, registers, and scalar layout, and
+        # differ at most in their scalars and objects (the nodes and states
+        # they run on), so they can run together (Plan::LaneGroup).
+        def signature
+          @signature ||= lower[0].to_binary.freeze
+        end
+
         # The register name of +value+ after lowering (for listings).
         def register_name(value)
           lower
