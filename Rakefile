@@ -1,5 +1,6 @@
 require "bundler/gem_tasks"
 require 'rake/extensiontask'
+require 'shellwords'
 
 task :default => :spec
 
@@ -280,6 +281,57 @@ namespace :memcheck do
   desc 'Record which extensions each memcheck spec calls (spec/valgrind/memcheck_map.json; native rspec, a few minutes)'
   task :map do
     sh({ 'MEMCHECK_MAP' => '1' }, 'bundle', 'exec', 'rspec', *MemcheckSelection.spec_files)
+  end
+end
+
+# The plan layer's full block-size sweep (user decision 2026-10-10: not run
+# before every merge, only for branches that change the plan layer itself).
+# The default suite runs plan comparisons at block sizes 1, 7, 128, 800, and
+# one random size seeded by RSpec's seed; MB_SOUND_PLAN_FULL=1 runs the
+# 21-size sweep (see spec/support/plan_helpers.rb).
+PLAN_FULL_SPECS = %w[
+  spec/lib/mb/sound/plan
+  spec/lib/mb/sound/graph_node/feedback_loop_spec.rb
+  spec/ext/mb/sound/fast_plan_spec.rb
+  spec/ext/mb/sound/fast_loop_spec.rb
+].freeze
+
+# Paths whose changes make the full sweep due (plan:changed).
+PLAN_FULL_PATHS = %w[
+  lib/mb/sound/plan.rb
+  lib/mb/sound/plan
+  ext/mb/sound/fast_plan
+  ext/mb/sound/fast_loop
+  spec/support/plan_helpers.rb
+].freeze
+
+namespace :plan do
+  desc 'Run the plan specs with the full 21-size block sweep (MB_SOUND_PLAN_FULL=1; ~1 min)'
+  task :full do
+    sh({ 'MB_SOUND_PLAN_FULL' => '1' }, 'bundle', 'exec', 'rspec', *PLAN_FULL_SPECS)
+  end
+
+  desc 'Run plan:full if the branch changed the plan layer since the merge-base with BASE (default master-ai) by PLAN_FULL_LINES (default 50) lines or more; PLAN_DRY=1 only reports'
+  task :changed, [:base] do |_, args|
+    base = args[:base] || ENV['BASE'] || 'master-ai'
+    merge_base = `git merge-base HEAD #{base.shellescape}`.strip
+    abort "plan:changed: no merge-base with #{base}" if merge_base.empty?
+
+    # Committed and uncommitted changes (git diff against the merge-base
+    # includes the working tree), plus untracked files
+    stats = `git diff --numstat #{merge_base} -- #{PLAN_FULL_PATHS.shelljoin}`.lines.map(&:split)
+    untracked = `git ls-files --others --exclude-standard -- #{PLAN_FULL_PATHS.shelljoin}`.lines.map(&:chomp)
+    lines = stats.sum { |add, del, _| add.to_i + del.to_i } + untracked.sum { |f| File.foreach(f).count rescue 0 }
+    files = stats.map(&:last) + untracked
+    threshold = Integer(ENV['PLAN_FULL_LINES'] || 50)
+    due = lines >= threshold
+
+    puts "plan:changed: #{files.length} plan-layer files changed since #{merge_base[0, 10]} (#{base}), #{lines} lines; " \
+      "the full sweep is #{due ? 'DUE' : 'not needed'} (threshold #{threshold} lines)"
+    files.first(20).each { |f| puts "  #{f}" }
+    next if ENV['PLAN_DRY'] == '1' || !due
+
+    Rake::Task['plan:full'].invoke
   end
 end
 

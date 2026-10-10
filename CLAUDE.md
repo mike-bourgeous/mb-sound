@@ -27,6 +27,8 @@ bundle exec rake memcheck         # C extension specs under Valgrind (full: ~30-
 bundle exec rake memcheck:changed # only the memcheck specs for extensions changed since master-ai (MEMCHECK_DRY=1, FULL=auto)
 bundle exec rake memcheck:status  # last full memcheck and whether one is due
 bundle exec rake depend:check     # ext depend files against the headers the sources include
+bundle exec rake plan:full        # plan specs over the full 21 block sizes (MB_SOUND_PLAN_FULL=1; ~35 s)
+bundle exec rake plan:changed     # plan:full if the branch changed the plan layer by 50+ lines since master-ai (PLAN_DRY=1)
 ```
 
 Testing: run affected specs while working, and the full suite (about 2 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
@@ -71,7 +73,7 @@ DSL methods live in topic modules `lib/mb/sound/graph_node/*_methods.rb`; node t
 - Covered: constants and arithmetic, shapers, Tones (naive and PolyBLEP kernels with FM/PM/width/gain/resets), Notes event nodes and envelopes (event feeds recorded in Ruby, rendered in C), filters (SVF, biquad, four-pole, diode), SQ80 time scaling, cycle-mode wavetable tones and KeyMaps, SampleHold, TempoNode values.  Boundaries for now: curve shapers, delays, synced tones, ports, timelines, BLIT, clean resets, sample-mode/complex wavetables.
 - Lane groups (`Plan::LaneGroup`): regions with the same lowered words (`Program#signature`) run in one `FastPlan.run_lanes` call, with lane-major SVF/four-pole/diode/biquad recursions; a Synth groups across its lanes (only when each lane is fully planned or never skipped; grouped lanes are computed every buffer, user decision 2026-10-10), `Plan.install` groups an installation's same-shape output regions; members alternate two output buffers (`Region#swap_out!`).  `MB_SOUND_PLAN_LANES=0` off.
 - `0 * x` folds to 0 for constants of the patch (x's ops still run; warned once per kind).  `Plan.changed(node)` after structural edits; `Plan.explain(graph)` lists regions and why nodes stay unfused.  Plans have no steady-input shortcuts (predictable cost).
-- Specs: `spec/lib/mb/sound/plan/` (`plan_compare` runs unplanned, C, and mirror over 21 block sizes), `spec/ext/mb/sound/fast_plan_spec.rb`.
+- Specs: `spec/lib/mb/sound/plan/` (`plan_compare` runs unplanned, C, and mirror over block sizes 1, 7, 128, 800, and one random size from RSpec's seed, repeated to reach every event; `rake plan:full` runs the 21-size sweep, for branches that substantially change `lib/mb/sound/plan*`, `ext/mb/sound/fast_plan`, or `fast_loop`: `rake plan:changed` decides, user decision 2026-10-10), `spec/ext/mb/sound/fast_plan_spec.rb`.
 
 ### Feedback loops (`design/notes/feedback_loops.md`)
 

@@ -3,9 +3,10 @@
 # the unfused graph, bit for bit, over block sizes from 1 to 800, on MIDI
 # files with dense notes and controllers.
 RSpec.describe('Plan: Notes nodes and envelopes') do
-  # A pass over SIZES is about 0.13 s; four cover the files' first notes,
-  # chords, retriggers, and releases.
-  let(:sizes) { PlanSpecHelpers::SIZES * 4 }
+  # A pass over the full block-size sweep (FULL_SIZES, 5166 samples) is about
+  # 0.13 s; four cover the files' first notes, chords, retriggers, and
+  # releases, so the default suite's SIZES repeat over as many samples.
+  let(:sizes) { PlanSpecHelpers.sizes_for(samples: 4 * PlanSpecHelpers::FULL_SIZES.sum) }
 
   let(:dense) { 'spec/test_data/dense_modulated.mid' }
 
