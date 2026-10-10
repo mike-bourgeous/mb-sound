@@ -48,9 +48,10 @@ module MB
           attr_reader :warnings
 
           # +root+ is the graph (a node, bundle, Synth, ...); +inputs+ names
-          # free inputs ({ midi: notes }); +seeds+ prints the random seeds
-          # drawn (seed: N) so the code rebuilds the same noise in any order.
-          def initialize(root, inputs: {}, seeds: true)
+          # free inputs ({ midi: notes }); +seeds: true+ prints the random
+          # seeds drawn (seed: N) so the code rebuilds the same noise in any
+          # order (off by default for reading; documents will include them).
+          def initialize(root, inputs: {}, seeds: false)
             @root = root
             @given_inputs = inputs
             @seeds = seeds
@@ -65,6 +66,7 @@ module MB
                 # Some seeds can't be printed: print none, so every seed is
                 # drawn in the original order
                 @seeds = false
+                @fallback = true
                 reset!
                 text = build
               end
@@ -154,8 +156,10 @@ module MB
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
               next if @names.key?(o)
-              text = expr(o, top: true, indent: indent)
+              # The name first: in `noise = noise()`, the right side must
+              # see the new local (see #call_text)
               name = unique(local_name(o) || base_name(o))
+              text = expr(o, top: true, indent: indent)
               lines << "#{indent}#{name} = #{text}"
               @names[o] = name
             end
@@ -284,7 +288,7 @@ module MB
           def unique(name)
             name = name.to_s.gsub(/[^a-zA-Z0-9_]/, '_').sub(/\A_+/, '').downcase
             name = "n_#{name}" unless name.match?(/\A[a-z_]/)
-            name = "#{name}_" if KEYWORDS.include?(name) || top_level_name?(name)
+            name = "#{name}_" if KEYWORDS.include?(name)
             n = name
             i = 2
             while @used.include?(n)
@@ -295,16 +299,31 @@ module MB
             n
           end
 
-          # True if +name+ would shadow a method printed without a receiver.
-          def top_level_name?(name)
-            Recipe.wrapped[:sound].include?(name.to_sym) || Kernel.respond_to?(name, true)
-          end
+          # Methods whose results are effects (named fx).
+          FX = %i[
+            filter lp4 lowpass4 four_pole diode diode_ladder peq peq_series bandpass_series smooth hilbert_iir clip_rate
+            delay feedback_delay multitap multitap_delay reverb chorus juno_chorus feedback fb oversample resample
+            softclip clip asoftclip aclip quantize aquantize ease aease shape_curve ashape_curve
+          ].freeze
 
+          # A variable name for +o+: the name given with #named, else a role
+          # (voice for synths, osc, lfo, env, notes, fx for effect results,
+          # out for the final output, sig otherwise).
           def base_name(o)
+            named = Recipe.config_of(o).reverse.find { |k| k.name == :named }
+            return named.args[0].to_s if named && named.args[0] && !named.args[0].to_s.empty?
+            return 'out' if o.equal?(@root)
+
             c = Recipe.call_of(o, @scope)
-            name = c && c.name.to_s.match?(IDENT) && ![:new, :[]].include?(c.name) ? c.name.to_s : nil
-            name ||= o.class.name.to_s.rpartition('::').last.gsub(/([a-z])([A-Z])/, '\1_\2').downcase
-            name.empty? ? 'node' : name
+            case o
+            when MB::Sound::Synth then 'voice'
+            when MB::Sound::Tone then o.lfo? ? 'lfo' : 'osc'
+            when MB::Sound::Envelope then 'env'
+            when MB::Sound::Notes then 'notes'
+            when MB::Sound::Sequence::Clip then 'clip'
+            else
+              c && FX.include?(c.name) ? 'fx' : 'sig'
+            end
           end
 
           ### Expressions
@@ -452,7 +471,12 @@ module MB
 
             name = c.name.to_s
             text = recv ? "#{recv}.#{name}" : name
-            text += "(#{args.join(', ')})" if args.any?
+            if args.any?
+              text += "(#{args.join(', ')})"
+            elsif recv.nil? && @used.include?(name)
+              # A local of that name would shadow the bare call
+              text += '()'
+            end
 
             if c.block_kind == :build && c.invocations && !c.invocations.empty?
               text += block_text(c, indent)
@@ -474,14 +498,18 @@ module MB
           def drawn_seed(c)
             return nil unless c.seeds && !c.kwargs.key?(:seed) && c.lane.nil?
 
-            if c.name == :synth || (c.name == :new && c.receiver.is_a?(Class) && c.receiver <= MB::Sound::Synth)
+            synth = c.name == :synth || (c.name == :new && c.receiver.is_a?(Class) && c.receiver <= MB::Sound::Synth)
+            if synth
+              # Lanes draw from the synth's seed; it matters only if they did
               return nil unless c.invocations&.any?(&:seeded)
-              return @seeds ? c.seeds.first : seed_warning(c)
+              return @seeds ? c.seeds.first : nil
             end
-            return (@seeds ? c.seeds.first : seed_warning(c)) if c.seeds.length == 1 && accepts_seed?(c)
+            return (@seeds ? c.seeds.first : nil) if c.seeds.length == 1 && accepts_seed?(c)
 
+            # Can't be given (no seed:, or several seeds)
             @seed_warning = true
-            seed_warning(c)
+            seed_warning(c) if @seeds || @fallback
+            nil
           end
 
           # Warns that +c+'s random seeds aren't printed.  Returns nil.
@@ -494,7 +522,7 @@ module MB
           def accepts_seed?(c)
             m = c.receiver.method(c.name)
             m = m.super_method while m && wrapper?(m.owner)
-            m && m.parameters.any? { |type, n| n == :seed && (type == :key || type == :keyreq) }
+            m && m.parameters.any? { |type, n| (n == :seed && (type == :key || type == :keyreq)) || type == :keyrest }
           rescue NameError
             false
           end

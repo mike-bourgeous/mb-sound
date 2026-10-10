@@ -144,6 +144,18 @@ module MB
           def next_seed
             super.tap { |s| Recipe.drew_seed(s) }
           end
+
+          # Calls inside derive their seeds from the given one (see
+          # Recipe.lane), so they don't print seeds of their own.
+          def with_seed(seed, &block)
+            st = Recipe.state
+            st.seeded += 1
+            begin
+              super
+            ensure
+              st.seeded -= 1
+            end
+          end
         end
 
         LIB_DIR = File.expand_path('../../..', __dir__).freeze

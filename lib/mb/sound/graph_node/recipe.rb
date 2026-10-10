@@ -33,7 +33,8 @@ module MB
         # Invocation the call was made in (nil at the top level); +seq+ the
         # call's order (when it returned); +seeds+ seeds drawn from
         # MB::Sound.next_seed during the call; +lane+ the synth lane
-        # [index, count] the call was made in, if any.
+        # [index, count] the call was made in, :seeded inside another
+        # MB::Sound.with_seed block, or nil (see Recipe.lane).
         Call = Struct.new(:receiver, :name, :args, :kwargs, :block, :block_kind, :invocations, :scope, :seq, :seeds, :lane, :statements)
 
         # One call of a recorded build block: its arguments, result, the
@@ -71,7 +72,7 @@ module MB
         end
 
         # Thread-local recording state.
-        State = Struct.new(:depth, :current, :scopes)
+        State = Struct.new(:depth, :current, :scopes, :seeded)
 
         # Methods that take build blocks (run while the graph is built, their
         # nodes part of the recipe), by name.  Every other recorded method's
@@ -124,7 +125,7 @@ module MB
 
           # The thread's recording state.
           def state
-            Thread.current[:mb_sound_recipe] ||= State.new(0, nil, [])
+            Thread.current[:mb_sound_recipe] ||= State.new(0, nil, [], 0)
           end
 
           # The innermost build block Invocation running on this thread, or
@@ -183,7 +184,7 @@ module MB
             end
 
             kind = block && (BUILD_BLOCKS.include?(name) ? :build : :runtime)
-            call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, nil, MB::Sound::Synth.current_lane)
+            call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, nil, lane(st))
             pass = kind == :build ? wrap_block(block, call) : block
 
             st.depth += 1
@@ -237,11 +238,19 @@ module MB
             end
           end
 
+          # The synth lane [index, count] calls are made in, :seeded inside
+          # another MB::Sound.with_seed block (unison copies, drum voices:
+          # their seeds derive from the parent's), or nil.
+          def lane(st = state)
+            MB::Sound::Synth.current_lane || (st.seeded > 0 ? :seeded : nil)
+          end
+
           # Called by MB::Sound.next_seed: remembers the seed on the call
           # being recorded, and marks the build block invocation that drew it.
           def drew_seed(seed)
             st = state
-            st.current.seeds = (st.current.seeds || []) << seed if st.current
+            # Seeds drawn inside MB::Sound.with_seed derive from its seed
+            st.current.seeds = (st.current.seeds || []) << seed if st.current && st.seeded == 0
             st.scopes.last&.seeded = true
           end
 
@@ -253,7 +262,7 @@ module MB
             inv = st.scopes.last
             return block unless @enabled && inv
 
-            call = Call.new(receiver, name, [], {}, block, :build, nil, inv, next_seq, nil, MB::Sound::Synth.current_lane)
+            call = Call.new(receiver, name, [], {}, block, :build, nil, inv, next_seq, nil, lane(st))
             (inv.statements ||= []) << call
             wrap_block(block, call)
           end
@@ -347,12 +356,13 @@ module MB
         module ToRuby
           # Returns Ruby code that builds this graph again from the DSL calls
           # that built it (see Recipe::RubyWriter).  +inputs+ names free
-          # inputs (e.g. `inputs: { midi: notes }`); +seeds: false+ leaves
-          # out the random seeds drawn.
+          # inputs (e.g. `inputs: { midi: notes }`); +seeds: true+ prints the
+          # random seeds drawn (seed: N), so noise and random phases rebuild
+          # the same whatever the root seed.
           #
           #     220.hz.ramp.filter(:lowpass, cutoff: 800).softclip.to_ruby
           #     # => "220.hz.ramp.filter(:lowpass, cutoff: 800).softclip"
-          def to_ruby(inputs: {}, seeds: true)
+          def to_ruby(inputs: {}, seeds: false)
             RubyWriter.new(self, inputs: inputs, seeds: seeds).to_s
           end
           alias to_rb to_ruby
@@ -374,7 +384,7 @@ module MB
       # Example (bin/sound.rb):
       #     s = 220.hz.ramp.filter(:lowpass, cutoff: 800).softclip
       #     ruby s
-      def ruby(graph, inputs: {}, seeds: true)
+      def ruby(graph, inputs: {}, seeds: false)
         puts GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: seeds).to_s
       end
     end

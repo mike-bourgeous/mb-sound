@@ -145,6 +145,8 @@ module MB
           # power.
           taps = wet_input.multitap(*times, interpolation: interpolation).to_a
           tap_gain = Math.sqrt(1.0 / rates.length)
+          # Both sides' hiss derive from one seed (seed: repeats them)
+          seed = MB::Sound.next_seed if seed.nil? && hiss
           seeds = [seed, seed && seed + 1]
           wets = [0, 1].map { |side|
             w = taps.values_at(*(side...taps.length).step(2)).reduce(:+)
@@ -326,7 +328,8 @@ module MB
         #             poles scale with it); also turns the filters on
         #             without bbd: true; may be a node.
         # +:hiss+ - Hiss level in dBFS (also without bbd: true).
-        # +:seed+ - Hiss seed (default: sub-seeds from MB::Sound.seed).
+        # +:seed+ - Hiss seed (default: a sub-seed of MB::Sound.seed); the right
+        # side's hiss uses seed + 1, so one seed repeats both.
         # +:interpolation+ - Delay reads (:sinc default, :cubic, :linear;
         #                    see MB::Sound::DelayLine).
         #

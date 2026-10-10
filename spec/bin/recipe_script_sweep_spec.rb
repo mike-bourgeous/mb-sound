@@ -80,7 +80,7 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
             graph, inputs = catch(:graph_io_captured) { load path; nil }
             raise 'no graph captured' unless graph
 
-            code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs).to_s
+            code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: true).to_s
             report[:code] = code
             unless code.include?('FIXME')
               ref = RecipeHelpers.render(graph, buffers: 94)

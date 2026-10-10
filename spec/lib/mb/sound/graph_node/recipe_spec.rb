@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     MB::Sound.seed(5)
     given = inputs.call
     graph = build.call(given)
-    code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: given).to_s
+    code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: given, seeds: true).to_s
     expect(code).not_to include('FIXME')
     ref = render(graph, buffers: buffers)
 
@@ -194,7 +194,33 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     it 'gives shared nodes variables' do
       sig = 110.hz.ramp.softclip
       g = sig + sig.delay(100.ms) * 0.5
-      expect(g.to_ruby).to eq("softclip = 110.hz.ramp.softclip\nsoftclip + softclip.delay(100.ms) * 0.5")
+      expect(g.to_ruby).to eq("fx = 110.hz.ramp.softclip\nfx + fx.delay(100.ms) * 0.5")
+    end
+
+    it 'names variables after .named names, else roles, with numeric suffixes' do
+      a = 110.hz.ramp.named('Bass Osc')
+      b = 220.hz.ramp
+      l = 0.5.hz.lfo
+      g = a * l + b * l + a * b + b
+      expect(g.to_ruby).to eq("bass_osc = 110.hz.ramp.named(\"Bass Osc\")\nosc = 220.hz.ramp\nlfo = 0.5.hz.lfo\nbass_osc * lfo + osc * lfo + bass_osc * osc + osc")
+
+      e = MB::Sound.adsr(0.01, 0.1, 0.5, 0.2)
+      s1 = 110.hz.ramp.softclip
+      s2 = 220.hz.ramp.softclip
+      g = (s1 * e + s2 * e) * s1 * s2
+      expect(g.to_ruby.lines.map { |x| x.split(' = ').first }.first(3)).to eq(%w[env fx fx2])
+    end
+
+    it 'adds parentheses to bare calls a variable would shadow' do
+      MB::Sound.seed(3)
+      n = MB::Sound.noise.named('noise')
+      g = n * n + MB::Sound.noise.at(0.5)
+      code = g.to_ruby
+      expect(code).to start_with("noise = noise().named(\"noise\")\n")
+      expect(code).to include('noise().at(0.5)')
+      ref = render(g, buffers: 2)
+      MB::Sound.seed(3)
+      expect(RecipeHelpers.max_diff(ref, render(rebuild(code), buffers: 2))).to eq(0)
     end
 
     it 'prints live values of constants' do
@@ -224,9 +250,8 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       MB::Sound.seed(1)
       n = MB::Sound.noise.at(0.5)
       seed = recipe.call_of(MB::Sound::GraphNode::Recipe.call_of(n).receiver)&.seeds&.first || recipe.call_of(n).seeds&.first
-      expect(n.to_ruby).to match(/\Anoise\(seed: \d+\)\.at\(0\.5\)\z/)
-      expect(n.to_ruby(seeds: false).lines.last).to eq('noise.at(0.5)')
-      expect(n.to_ruby(seeds: false)).to start_with("# WARNING(graph-io): noise draws random seeds that aren't printed")
+      expect(n.to_ruby(seeds: true)).to match(/\Anoise\(seed: \d+\)\.at\(0\.5\)\z/)
+      expect(n.to_ruby).to eq('noise.at(0.5)')
       expect(seed).to be_a(Integer)
     end
 
@@ -281,7 +306,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       load File.expand_path('../../../../../bin/synths/fm_bass.rb', __dir__) unless MB::Sound.respond_to?(:fm_bass)
       code = round_trip(inputs: -> { { midi: MB::Sound::Notes.new(midi_path) } }, buffers: 100) { |i| MB::Sound.fm_bass(i[:midi], oversample: 1) }
       expect(code).to include('  base = v.hz.glide(100.ms)')
-      expect(code).to include('(filter + filter.delay(100.ms)) * 13.db')
+      expect(code).to include('(fx + fx.delay(100.ms)) * 13.db')
     end
 
     it 'rebuilds a Karplus-Strong feedback loop' do
@@ -314,6 +339,20 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       expect(code).to match(/synth\(midi, voices: 2, seed: \d+\)/)
     end
 
+    it 'rebuilds unisons, swarms, chorus hiss, and 808 noise from one printed seed each' do
+      cases = {
+        unison: proc { 220.hz.unison(5, detune: 0.2) { |p, _i| p.ramp.noise(0.1) } },
+        swarm: proc { 220.hz.swarm(4, chord: [0, 4, 7], glide: nil, drift: 0.1) { |p, _i| p.ramp } },
+        chorus: proc { 110.hz.ramp.at(0.5).chorus(:juno1, hiss: -40) },
+        tr808: proc { MB::Sound.tr808(MB::Sound.grid(16, snare: 'x.x.', maracas: 'xxxx', clap: '..x.')) },
+      }
+      cases.each do |name, build|
+        code = round_trip(&build)
+        expect(code).to match(/seed: \d+/), "#{name}: #{code}"
+        expect(code).not_to include('WARNING'), "#{name}: #{code}"
+      end
+    end
+
     it 'rebuilds delay insert pipelines' do
       code = round_trip {
         220.hz.ramp.delay(30.ms, feedback: 0.5) { |d|
@@ -337,7 +376,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         it "rebuilds #{name}" do
           MB::Sound.seed(1)
           graph = factory.call(GraphSweep::Context.new)
-          code = graph.to_ruby
+          code = graph.to_ruby(seeds: true)
           if not_representable.key?(name)
             expect(code).to match(/FIXME|inputs: input/)
             next
