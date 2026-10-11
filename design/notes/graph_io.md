@@ -1,6 +1,6 @@
 # Graph I/O (recipes and Ruby export)
 
-Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10).  The study is branch `research-graph-io` (`research/graph-io/README.md`, `proposal.html`); the maintainer's decisions of 2026-10-10 are summarized at the end.  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10) and phase 2, graph documents (branch `graph-io-2`, 2026-10-11).  The study is branch `research-graph-io` (`research/graph-io/README.md`, `proposal.html`); the maintainer's decisions of 2026-10-10 are summarized at the end.  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
 
 
 ## What it does
@@ -48,6 +48,40 @@ Measured 2026-10-10 (container, alternating on/off runs in one process, `Recipe.
 - Sampling is unchanged (nothing records at sample time): 200 x 512-sample buffers of a 100-node chain built with and without recording, 64.5 vs 63.5 ms (best of 5).  Inner DSL calls made inside the library pay only the recorder's argument splat and a thread-local depth check.
 - Rerun by toggling `MB::Sound::GraphNode::Recipe.enabled` around graph builds in one process (alternating), e.g. `MB::Sound.fm_bass(MB::Sound::Notes.new('spec/test_data/c_major.mid'))` after loading `bin/synths/fm_bass.rb`.
 
+## Graph documents (phase 2, branch `graph-io-2`, 2026-10-11)
+
+Saved graphs are `.mbg.rb` files: the Ruby `to_ruby` prints (with seeds) after a header, read back without running them as Ruby.  `lib/mb/sound/graph_io.rb` (API, limits, presets, console), `graph_io/loader.rb` (Prism walker), `graph_io/registry.rb` (what may be called), `graph_io/document.rb` (Document, Writer), `graph_io/trusted_code.rb` (the opt-in eval).
+
+```ruby
+# mb-sound graph document: a Ruby subset that MB::Sound.preset and
+# MB::Sound::GraphIO.load read without running it (no eval).
+graph 1,
+  name: "tape",
+  kind: :effect,
+  saved: "2026-10-11T03:59:05Z",
+  mb_sound: "0.12.0.usegit (8d22e350)",
+  from: "bin/effects/tape_delay.rb",
+  options: { pitch: false, delay: 0.1, feedback: 0.75, smoothing: 2.0, oversample: 2.0 }
+inputs :input
+param :dry, 1.0, description: "Dry (input) level"
+param :wet, 1.0, description: "Wet (echo) level"
+param :drive, 1.0, description: "Input gain into the tape"
+
+input2 = input[0].resample(mode: :libsamplerate_fastest).named("input")
+...
+[(dry * input2 + wet * (input2 * drive).delay(0.1, feedback: 0.75, smoothing: 2.0) { |fb| ... }, ...].channels
+```
+
+- Header: `graph N, **meta` first (N is `GraphIO::FORMAT`, 1; newer versions refuse to load; meta is informational: name, kind, saved, mb_sound version and commit, from, and `options:`, the script parameters baked into the graph), then `inputs :a, :b` and one `param :name, value, range:, description:, cc:, curve:, unit:` per knob (ControlSpec-shaped).  Headerless text (plain `to_ruby` output) loads too, with inputs from its `# inputs:` comment.
+- Inputs bind by name (`inputs: { midi: notes }`); missing ones raise, extra ones warn.  Params: each use of a param's name is a new `value.constant.named(name)` (as scripts make them: one Constant shared by tape_delay's two channels changed the right channel, since oversample sets the rate of everything upstream and a node shared between an oversampled and a plain branch reads at two rates; between two oversample regions after a resample the output differed by up to 0.92, a library question).  `GraphIO.document_of(graph)[:dry] = 0.5` sets every Constant of a param; overrides on load (`params: { drive: 2 }`) must be numbers; overriding a baked option raises with a "change it in the script" hint.
+- Loader (`GraphIO::Loader`): size, syntax-node count, and nesting depth are checked iteratively before anything runs, and so is forbidden syntax anywhere in the file (if/unless/case/ternaries, loops, def/class/module, backticks, globals, ivars, cvars, interpolation, regexps, `&.`, `&&`/`||`, begin/rescue, splats, multiple and operator assignment, implicit block parameters, `self`, `__FILE__`, BEGIN/END) and forbidden names (`Registry::FORBIDDEN`: eval family, send/public_send/__send__, method/define_method, const_get, ivar access, binding, system/exec/spawn/fork/backticks/popen, require/load, exit/abort/at_exit/trap; `Registry::KERNEL` without a receiver: proc, lambda, loop, sleep, puts, rand, ...).  Then the walker evaluates literals (numbers, Rationals, Complex(), strings without interpolation, symbols, ranges, arrays, hashes), locals (Prism depth picks the scope), constants (`Registry::CONSTANTS`, built from loaded classes: classes whose `.new` is recorded, library Data values, `Wavetable`, `KeyMap`, `Sequence::Duration`, seq markers, Note names, `Float::INFINITY`; never `const_get` with document text), and calls checked against `Registry.allowed?` (the `Recipe.wrapped` names of the receiver's ancestors, numeric unit mixins, `Registry::VALUES`, class methods; bundle iteration with blocks is out) and made with `public_send`.  Errors are `GraphIO::LoadError` with `path`, `line`, and did_you_mean hints; exceptions raised by DSL calls are wrapped with the line.
+- Blocks: build blocks (`Registry::BUILD_BLOCKS` = `Recipe::BUILD_BLOCKS` + `wet`) become procs that walk their bodies per call in a new Scope, answer `arity`/`parameters`/`lambda?` like the literal block, and hand their locals to the recorder (`graph_io_locals`, used by `Recipe.trace_locals` instead of a TracePoint), so a loaded graph re-dumps to the same text (193/193 sweep factories).  Runtime blocks (`proc { |buf| ... }`, lambda values) are checked against the safe subset at load (`Loader#runtime_problem`: arithmetic and `Registry::RUNTIME` math methods, `Math`/`Numo::NMath`, their own parameters and locals; no outer reads, no blocks) and interpreted on each call; they keep their text (`graph_io_source`) for printing.  Outside the subset: `&named_proc(:fold)` from `MB::Sound.named_proc(:fold) { |buf| ... }` (the writer prints registered procs that way), else `trust: :code`, which evals the block's saved source in `TrustedCode` after a warning (off by default).
+- Limits (`GraphIO::LIMITS`, `limits:` per load): 1 MB, 250k syntax nodes, depth 400, 100k DSL calls, 30 s build time, delays (positional, `seconds:`, `max_delay:`, multitap taps; Durations at the slowest tempo) 60 s, `silence`/`until` 600 s, `with_buffer` 2^20 samples, oversample 16, resample 768 kHz, synth voices 64, unison/swarm copies 64, clip repeat-like counts 4096, integers 64 bits (and `n ** k` with k > 64).  Files (`file_input`, `midi_file`) only relative to the document's directory (no absolute paths or `..`), and only for documents loaded from files or with `base_dir:`.  The library's own checks (envelope segments, harmonics) cover the rest; a new DSL method that allocates by an argument needs a line in `Loader#check_limits`.
+- Writer (`GraphIO.dump` / `Writer`): the RubyWriter with `seeds: true`, `knobs:` (Constants named after a param with its value print as the bare name; the writer's `knobs_used` picks which params get `param` lines, the rest go to `options:`) and `knob_nodes:` (a loaded graph's own Constants); FIXMEs raise `GraphIO::DumpError` (problems, code).  A loaded graph's Document supplies name, kind, inputs, params, and options when it is saved again.
+- Presets: `GraphIO.presets_dir` is `$MB_SOUND_PRESETS`, else the project's `presets/` (`GraphIO.project_dir`: the nearest directory up with a Gemfile naming mb-sound, not the mb-sound checkout), else the user data directory (`~/Library/Application Support/mb-sound/presets`, `$XDG_DATA_HOME/mb-sound/presets` or `~/.local/share/mb-sound/presets`); loading searches it and then the user directory.  Console (`GraphIOMethods`, extended into MB::Sound; no collisions with MB::Sound, Object, Kernel, or Pry commands, whose nearest is `save-file`): `save :name, graph` (prints the path, "(replaced)", or "Not saved: ..."), `preset :name, input: mic, mix: 0.6` (keywords split into the document's inputs and params; `trust:`), `presets` (names with inputs and params per directory), `named_proc`.
+- Scripts: `--save NAME` (effect and synth scripts) saves the graph block's result instead of playing, with the script's numeric parameters as params (description, allowed Range, midi_cc number and range) and the others as options (`ScriptRunner#save_graph`, `#graph_params`).
+- Coverage (2026-10-11): graph sweep 193/196 factories dump, load (other root seed), render bit-identically, and re-dump identically (`spec/lib/mb/sound/graph_io_spec.rb`); bin scripts 23/27 through documents with params (`spec/bin/recipe_script_sweep_spec.rb`, `:smoke`); the 3 + 4 left are the phase 1 ones (assets, script-local classes, a proc reading an outer buffer).
+
 ## Decisions (maintainer, 2026-10-10)
 
 1. Basis: recorded outermost DSL calls with introspection as fallback, now; long term "both, split at the library boundary" (declared-parameter library nodes plus recorded project builders), a later project.
@@ -59,7 +93,10 @@ Measured 2026-10-10 (container, alternating on/off runs in one process, `Recipe.
 8. Script params become `params:` in phase 2 (phase 1 prints them as `1.0.constant.named("drive")`).
 10. Lanes that differ: `per_voice(list | range)` (built, see MIDI notes) and `per_channel(list | range)`.
 
-## Not yet (phase 2 and later)
+Phase 2 decisions (maintainer, 2026-10-10/11): files are a Prism-walked Ruby subset against the recorded registry, never eval/instance_eval/Marshal/YAML.load (JSON a machine twin if cheap); saved patches follow library changes (a `rails new`-style project generator later; Gemfile.lock pins the sound per project); new node types should replace proc nodes where possible, runtime blocks load from the safe subset, then named procs, then opt-in `trust: :code`; names `.mbg.rb`, `save`, `preset` (not `load`, Kernel#load), `presets`, `ruby`; presets in a project's `presets/` or the user data dir, path printed; no flow control, optional repeat/spread syntaxes; script params become `params:` with overrides on load; state snapshots deferred (P4; maybe a .zip or MessagePack container instead of sidecars).
 
-- Loading (Prism subset reader, registry of recorded names), `.mbg.rb` files, save/preset/presets, `params:` from script parameters and `p.midi_cc`.
+## Not yet (phase 3 and later)
+
+- JSON machine twin of documents (not built: the data model is the Ruby subset; cheap to add as a Prism-tree-to-JSON pass when a tool needs it).
+- Template variations (`per_voice`/`per_channel` exist; no `repeat`-style syntax for whole sub-graphs yet), knobs for script parameters baked into structure, `p.midi_cc` controls with MIDI open stay `midi.control(spec)` nodes (their cc spec isn't re-centered on a param override).
 - Per-channel collapse (tape_delay's per-channel lambda prints once per channel), structural lane differences unrolled per lane, wavetable/sample assets, clips as event lists, sessions, state.
