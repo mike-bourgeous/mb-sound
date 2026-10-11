@@ -51,10 +51,11 @@ module MB
 
       # Declares a section outside a flow block, so `flow do ... end` can
       # play it with a bare call (see Arrangement#section): `section
-      # :verse, 8.bars, fill: :roll`.
+      # :verse, 8.bars, fill: :roll`.  Also available as #define_section.
       def section(name, length, **options)
         Session.current.arrangement.section(name, length, **options)
       end
+      alias define_section section
 
       # Repeats the section playing now until #onward (from the next
       # boundary that hasn't been decided yet).  Returns where it applies.
@@ -108,6 +109,11 @@ module MB
       # that doesn't move with the tempo).  Returns the marker.
       def marker(name, at:)
         session = Session.current
+        pb = session.arrangement.playback
+        if pb && !pb.ended? && (pb.form.sections.key?(name) || pb.form.labels.key?(name))
+          kind = pb.form.sections.key?(name) ? 'section' : 'label'
+          raise ArgumentError, "#{name.inspect} is a #{kind} of the song form playing (the form moves that marker); give your marker another name"
+        end
         case at
         when LaunchPoint::Bar
           session.markers.set(name, kind: :position, pos: session.transport.bar_position(at.bar) + (at.beat.to_r - 1) / 4)
@@ -127,14 +133,25 @@ module MB
       # Runs the block at marker +name+ (like #at_bar): now if the marker is
       # ahead, else the next time it is set (e.g. when a song form next
       # reaches section or label +name+).  Commands inside land exactly at the
-      # marker.  Returns true if it was scheduled right away.
+      # marker.  Returns true if it was scheduled right away.  Warns (with
+      # suggestions) for a name that is neither a marker yet nor a section
+      # or label of the form playing, which is often a typo.  Also
+      # available as #on_marker.
       def at_marker(name, &block)
         raise ArgumentError, 'Pass a block to run at the marker' unless block
         session = Session.current
+        pb = session.arrangement.playback
+        known = session.markers.to_h.keys
+        known += pb.form.sections.keys + pb.form.labels.keys if pb
+        unless known.include?(name)
+          hint = Form.suggest(name, known.uniq)
+          warn "at_marker: no marker #{name.inspect} yet; the block runs when one is set#{hint}" unless hint.empty?
+        end
         session.markers.on(name) { |_m, pos|
           session.schedule(pos, description: "marker #{name.inspect}", &block)
         }
       end
+      alias on_marker at_marker
 
       # Changes the meter to +beats+ beats of 1/+unit+ notes (`meter 7, 8`
       # for 7/8, `meter 3` for 3/4) from the next bar line (or the launch

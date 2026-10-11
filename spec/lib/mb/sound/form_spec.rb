@@ -609,6 +609,18 @@ RSpec.describe(MB::Sound::Form) do
       expect(ran).to eq([2r, 6r])
     end
 
+    it 'keeps markers apart from form names and warns about at_marker typos' do
+      setup_scenes(:drop)
+      flow do
+        label :top
+        drop 2
+      end
+      expect { within { MB::Sound.marker(:drop, at: MB::Sound.bar(3)) } }.to raise_error(ArgumentError, /:drop is a section of the song form/)
+      expect { within { MB::Sound.marker(:top, at: MB::Sound.bar(3)) } }.to raise_error(ArgumentError, /:top is a label/)
+      expect { within { MB::Sound.at_marker(:drpo) { } } }.to output(/no marker :drpo yet.*Did you mean\?\s+:drop/m).to_stderr
+      expect { within { MB::Sound.on_marker(:later) { } } }.not_to output.to_stderr
+    end
+
     it 'seeks the timeline to a marker that is not a section' do
       setup_scenes(:a)
       within { MB::Sound.marker(:vo, at: MB::Sound.bar(5)) }
@@ -620,8 +632,8 @@ RSpec.describe(MB::Sound::Form) do
 
   describe 'console names' do
     names = %i[
-      flow form play_form section loop! loop_section onward unloop! continue_form goto goto_section
-      skip skip_section finish finish_form practice rehearse marker markers at_marker meter time_signature
+      flow form play_form section define_section loop! loop_section onward unloop! continue_form goto goto_section
+      skip skip_section finish finish_form practice rehearse marker markers at_marker on_marker meter time_signature
     ]
 
     it 'are FormMethods, not Kernel or Object methods, and not Pry commands' do
