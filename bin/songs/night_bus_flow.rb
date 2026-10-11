@@ -4,8 +4,8 @@
 # track at 126 BPM in A minor, about 89 bars, built as one strong loop and
 # arranged mostly by adding and removing parts in 8-bar blocks.  The form is
 # written once as a `flow` block; the performer steers it live with loop!,
-# onward, and finish, and a weighted follow action decides what comes after
-# the first drop.
+# onward, and finish, a weighted `pick` decides whether the first drop comes
+# around once more, and a `goto` keeps the second drop rolling.
 #
 #   intro     8  drums only: tight kick, late-feeling clap, offbeat hats,
 #                a soft/accented shaker; a clap/tom turnaround every 8 bars
@@ -19,38 +19,41 @@
 #   drop      8  dry: kick, punchy saw bass rolling against the kick, the
 #                vocal-ish hook unfiltered, a crash on the downbeat
 #   pickup    8  ride and an octave pluck answer the hook, a static pad;
-#                next: { breakdown: 3, drop: 1 } (a seeded chance branch)
+#                then a seeded `pick`: usually on to the breakdown, one time
+#                in four the drop and pickup once more
 #   breakdown 8  low end cut on the master (highpass "cut"), hats keep going,
 #                the hook alone washing into its dotted-eighth delay
 #   lift      8  a second hook (a fast 4-note pluck arp) fades in, riser
 #   drop2     8  the "anti-drop": bass on the root in the hook's rhythm,
 #                no melody, the arp up high; low end back
-#   pickup2   8  ride, arp, pad turnaround (next: :drop2); the performer
-#                types `finish`
-#   outro     8  the hook through its filter again, simple drums; next: :end
-#                rings everything out
+#   pickup2   8  ride, arp, pad turnaround; `goto :rolling` (a label before
+#                drop2) keeps it going until the performer types `finish`
+#   outro     8  the hook through its filter again, simple drums; the end
+#                of the form rings everything out
 #
 # Usage:
 #     bin/songs/night_bus_flow.rb                 # plays live in the background session
 #     bin/songs/night_bus_flow.rb last_stop.flac  # renders to a file instead (-f to overwrite)
-#     bin/songs/night_bus_flow.rb --seed 2        # another chance branch after the pickup
+#     bin/songs/night_bus_flow.rb --seed 12       # the other branch of the pick (one more drop)
 #     bin/songs/night_bus_flow.rb --help          # all options
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/night_bus_flow.rb'
 #     last_stop                  # tracks and scenes only (go :drop etc. by hand), then
-#     last_stop_form             # play the form and steer it yourself (seed: 2 for another branch)
+#     last_stop_form             # play the form and steer it yourself (seed: 12 for the other branch of the pick)
 #     last_stop(perform: true)   # or the whole performance
 #
 # Try (while it plays):
 #     flow                       # => ▶ groove pass 1/1 (bar 3 of 8), next :build at 17:1 (open)
 #     loop!; onward              # stay in a section, then move on (from the next boundary)
-#     goto :breakdown            # what plays after this section
+#     goto :breakdown            # what plays after this section (or goto :rolling, a label)
 #     practice :drop             # go to the drop and stay there
 #     skip                       # leave at the next bar line
-#     seek :groove               # the groove from the next bar (the timeline keeps running)
+#     seek :groove               # the timeline back to the groove (bar 9), playing on from there
+#     seek :rolling              # or to a label (drop2's bar, even before the form gets there)
 #     finish                     # the outro next
 #     at_marker(:drop2) { mute :pad }   # runs when the form next reaches drop2
+#     markers                    # sections and labels (and your own markers) by bar
 #     scene :hush, others: :cut; go :hush   # cut everything (scenes ring out unless others: :cut)
 #     take.form                  # the form as played, as a flow block to paste
 
@@ -269,12 +272,18 @@ module MB::Sound
       build     8, fill: [:riser, 4]               # the riser scene for the last 4 bars
       gap       1                                  # one bar of 2/4 (the scene sets the meter)
       drop      8
-      pickup    8, next: { breakdown: 3, drop: 1 } # usually the breakdown
+      pickup    8
+      pick do |p|                                # usually straight on...
+        p.option(3) { }
+        p.option(1) { drop; pickup }             # ...sometimes the drop comes around again
+      end
       breakdown 8
       lift      8, fill: [:riser, 4]
+      label     :rolling
       drop2     8
-      pickup2   8, next: :drop2                    # keeps rolling until `finish`
-      outro     8, next: :end                      # rings everything out
+      pickup2   8
+      goto      :rolling                         # keeps rolling until `finish`
+      outro     8                                # the end rings everything out
     end
   end
 
@@ -298,7 +307,7 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: LAST_STOP_BARS,
-      seed: [1, 'Seed for the form\'s chance follow actions', '-s', Integer, 0..1_000_000],
+      seed: [1, 'Seed for the form\'s chance (the pick after the pickup)', '-s', Integer, 0..1_000_000],
     ) { |p| last_stop(perform: true, seed: p.seed) }
   end
 end

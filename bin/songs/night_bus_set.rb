@@ -5,7 +5,7 @@
 # (each line is printed as it lands), using the Set layer: tracks that
 # remember their patches, scenes as whole states launched with `go`, soft
 # mutes and solos, and undo of a mistake.  Phase 2 (song forms with
-# `flow`, follow actions, fills, ring-outs, a meter change) continues in
+# `flow` with labels, goto, and pick, fills, ring-outs, a meter change) continues in
 # night_bus_flow.rb.
 #
 #   1-4    intro      a fifths pad alone (go :intro)
