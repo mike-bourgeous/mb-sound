@@ -42,9 +42,9 @@ module MB
           @p = plot
           @plot_set = true
         elsif graphical
-          @p = MB::M::Plot.new
+          @p = Plot::Plotter.graphical
         else
-          @p = MB::M::Plot.terminal(height_fraction: (MB::U.height - header_lines - 2).to_f / MB::U.height)
+          @p = Plot::Plotter.terminal(height_fraction: (MB::U.height - header_lines - 2).to_f / MB::U.height)
         end
 
         @min = -0.1
@@ -110,37 +110,50 @@ module MB
       # Plots one buffer of +data+ (an Array of Numo::NArrays, one per
       # channel) right away, with level meters, without writing it to the
       # output.  Used by #write and by PlaybackMethods#visualize.
+      #
+      # Plotters with #draw (MB::Sound::Plot::Plotter) get a waveform over
+      # time or a spectrum over log frequency with note names; others get
+      # the MB::M::Plot Hash interface (#plot with channel indexes).
       def plot(data)
         puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K" if !@p.respond_to?(:print) || @p.print
         Meter.linear_meters(data.map { |v| v.abs.max }, 3)
 
         samples = [@window_size, data[0].length].min
-
-        if @spectrum
-          @p.logscale if @p.respond_to?(:logscale)
-          # TODO: Use a window function
-          data = data.map { |c| MB::Sound.real_fft(c[-samples..-1]).abs.map(&:to_db).clip(-80, 80) }
-          samples = data[0].length
-          @p.xrange(1, samples) if @p.respond_to?(:xrange)
-        else
-          @p.logscale(false) if @p.respond_to?(:logscale)
-          @p.xrange(0, samples) if @p.respond_to?(:xrange)
-        end
+        data = data.map { |c| c[-samples..-1] }
 
         max = data.map { |c| c.abs.max * 0.999 }.max
         @max = (max * 2).ceil * 0.5 if max > @max
 
+        return draw(data) if @p.respond_to?(:draw)
+
         if @spectrum
+          @p.logscale if @p.respond_to?(:logscale)
+          # TODO: Use a window function
+          data = data.map { |c| MB::Sound.real_fft(c).abs.map(&:to_db).clip(-80, 80) }
+          @p.xrange(1, data[0].length) if @p.respond_to?(:xrange)
           @p.yrange(-80, 0) if @p.respond_to?(:yrange)
         else
+          @p.logscale(false) if @p.respond_to?(:logscale)
+          @p.xrange(0, samples) if @p.respond_to?(:xrange)
           @p.yrange(-@max, @max) if @p.respond_to?(:yrange)
         end
 
-        d = data.map.with_index.map { |c, idx|
-          [idx, c[-samples..-1]]
-        }.to_h
+        @p.plot(data.each_with_index.to_h { |c, idx| [idx, c] })
+      end
 
-        @p.plot(d)
+      private
+
+      # Draws a Plot chart of +data+ (one buffer per channel).
+      def draw(data)
+        rate = @output.sample_rate
+        chans = data.each_with_index.to_h { |c, i| [i.to_s, c.respond_to?(:real) ? c.real : c] }
+        chart =
+          if @spectrum
+            Plot.spectrum(chans, sample_rate: rate, title: 'spectrum', range: -90..0, floor: -90)
+          else
+            Plot.waveform(chans, sample_rate: rate, title: 'waveform', range: -@max..@max)
+          end
+        @p.draw(chart)
       end
     end
   end

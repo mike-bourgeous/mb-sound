@@ -8,6 +8,7 @@ RSpec.describe('bin/sound.rb', :aggregate_failures) do
     expect(output).to include('Welcome to the'), 'shows the welcome text'
     expect(output).to include('sound.rb MB::Sound'), 'displays the right prompt'
     expect(output).to include('123'), 'shows the frequency being plotted'
-    expect(output).to include('--------------'), 'draws the plot'
+    expect(output).to match(/└[─┬┴]{20,}/), 'draws the plot axes'
+    expect(output).to match(/[\u2801-\u28ff]{3}/), 'draws the sine in Braille'
   end
 end

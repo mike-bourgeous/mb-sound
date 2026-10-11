@@ -61,7 +61,7 @@ RSpec.describe(MB::Sound::IOMethods) do
       begin
         expect(MB::Sound::Meter).to receive(:linear_meters)
         ENV['OUTPUT_TYPE'] = ':null'
-        o = MB::Sound.output(plot: { plot: MB::M::Plot.terminal.tap { |p| p.print = false } })
+        o = MB::Sound.output(plot: { plot: MB::Sound::Plot::Plotter.terminal.tap { |p| p.print = false } })
         expect(o).to be_a(MB::Sound::PlotOutput)
         expect(o.output).to be_a(MB::Sound::NullOutput)
 

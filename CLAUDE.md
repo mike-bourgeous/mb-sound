@@ -45,7 +45,7 @@ Spec conventions (`spec/support/`):
 
 The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`, about 1.5 minutes; plain `rspec` skips them, CI runs them as a separate job) run every script with `--help` (in forks for scripts that also render) and a short render (real processes), with shared-buffer checks raising (see Core Abstraction).  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts, the script runner, or nodes that touch input buffers, and add new scripts to their tables.
 
-System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz` (ALSA headers build RtMidi's ALSA sequencer backend; the shared JACK client loads libjack at run time, so `libjack-jackd2-dev` only builds RtMidi's JACK API, which specs use as an outside JACK client; `jackd2` runs a dummy JACK server for the JACK specs, which skip without it).  In the container, the Dockerfile sets `OUTPUT_TYPE=null` so playback uses `NullOutput`.
+System dependencies (apt): `ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz` (ALSA headers build RtMidi's ALSA sequencer backend; the shared JACK client loads libjack at run time, so `libjack-jackd2-dev` only builds RtMidi's JACK API, which specs use as an outside JACK client; `jackd2` runs a dummy JACK server for the JACK specs, which skip without it).  In the container, the Dockerfile sets `OUTPUT_TYPE=null` so playback uses `NullOutput`.
 
 ## Architecture
 
@@ -114,7 +114,15 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 `MB::Sound` extends the top-level API used in `bin/sound.rb`: `IOMethods` (ffmpeg file I/O); `PlaybackMethods` (`play`, `input`, the background `Session`: `bg`/`stop`/`outro`/`panic`/`players`/`resume`, `swap`, `master`, `vis`, `render`, `wait` at the end of scripts, `use_output`; commands return journal entries like `bg :b lands 2:1 (queued)`); `MultichannelMethods`; `ScheduleMethods` (`at_bar`/`after`/`every` on the Session timeline; launch points count from the block's time); `ArrangementMethods` (the Set layer, below); `PlotMethods`; `FFTMethods`; `ScriptingMethods`; `GainMethods`, `WindowMethods`; `AnalysisMethods` (including BS.1770 `loudness` → `Loudness::Result`, `node.loudness_meter`, `bin/loudness.rb`, `render(loudness: :spotify)`); `LiveMethods` (`live?`, `live_error`).
 
-### C Extensions (`design/notes/c_extensions.md`)
+### Plotting (`design/notes/plotting.md`)
+
+`MB::Sound::Plot` (`lib/mb/sound/plot/`) draws every plot in pure Ruby (no gnuplot; mb-math's `MB::M::Plot` is unused and `spec/support/no_gnuplot.rb` fails specs that start it): Scales (linear, symmetric, dB, log, frequency with note names, time, categorical; nice ticks) -> Coords (cartesian, polar) -> Marks (line with min/max decimation per column, step, points, stems, area, band, rule, heatmap) -> guides (axes, legend, colorbar) -> Chart/Figure -> renderers.
+- Builders: `Plot.chart(title:) { x :time, sample_rate: 48000; line data, label: 'saw' }`, `Plot.figure { chart { ... } }`; presets `Plot.waveform`/`spectrum`/`spectrogram`/`envelope`; console `chart`, `figure`, `spectrogram`; charts `show`, `to_s`, `to_svg`, `to_png`, `save('x.svg' | .png | .txt | .ans | .html)`, and show themselves when Pry prints them.
+- Text looks (`Plot::Text::LOOKS`): `:scope` Braille (default), `:blocks` half blocks, `:mosaic` sextants, `:quad`, `:spark` eighth blocks, `:ascii`; truecolor/256/16/none; deterministic output for specs.  Env: `PLOT_WIDTH`, `PLOT_HEIGHT`, `PLOT_COLOR`, `PLOT_LOOK`, `PLOT_THEME`, `PLOT_IMAGES` (`Plot::Terminal`).
+- SVG (themes `:paper`, `:studio`, `:phosphor`; unique ids per render) and PNG/sixel/kitty/iTerm2 images (pure-Ruby pixels, bitmap DejaVu font from `plot/make_font.rb`, Zlib PNG).
+- `PlotMethods#plotter` is `Plot::Plotter` (MB::M::Plot's Hash interface plus `draw`); `vis` ~140 fps at 120x45 (gnuplot was ~62).  `bin/plot_gallery.rb [--compact]` renders every look and theme side by side.
+
+
 
 Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
 - New C code goes in purpose-specific extensions (user preference), not `fast_sound`.  Shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; shared kernels in `ext/mb/sound/include/mb_*.h`.

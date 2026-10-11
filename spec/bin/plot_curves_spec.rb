@@ -2,8 +2,7 @@ require 'shellwords'
 
 RSpec.describe('bin/plot_curves.rb') do
   # Runs the script in a fork (see ForkScript), or as a real process with
-  # +real+ (the terminal plot: a forked child would share the spec
-  # process's cached gnuplot pipes, if it has any).
+  # +real+ (the terminal plot, so load-order problems still show).
   def run(*args, real: false)
     text, status = run_script('bin/plot_curves.rb', *args, real: real)
     expect(status).to be_success, text

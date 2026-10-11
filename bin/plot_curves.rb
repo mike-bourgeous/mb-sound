@@ -1,5 +1,5 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Plots tweening curves (MB::Sound::Curve) in the terminal or a gnuplot window.
+# Plots tweening curves (MB::Sound::Curve) in the terminal.
 #
 # Usage: $0 [options] [curve ...]
 #
@@ -17,7 +17,8 @@
 #     $0 --all --print                         # every named curve as a table
 #     $0 30 -30 0.25,0.1,0.25,1                # dB curves and a CSS bezier
 #     $0 --from -1 --to 3 --edges mirror sine_in steps
-#     $0 -t elastic                            # in the terminal (default when no display)
+#     $0 -I elastic                            # an inline image (iTerm2, kitty, sixel)
+#     $0 -S curves.svg elastic back            # saved as SVG (or .png, .txt, .ans, .html)
 #
 # In bin/sound.rb:
 #     Curve[:elastic, overshoot: 0.4].(0.5)
@@ -52,7 +53,9 @@ MB::Sound.script(
   all: [false, '-a', 'Plot every named curve'],
   list: [false, '-l', 'List the curve names and exit'],
   print: [false, '-p', 'Print a table of values instead of plotting'],
-  terminal: [false, '-t', 'Plot in the terminal instead of a gnuplot window'],
+  terminal: [false, '-t', 'Plot as terminal text (the default; kept for old command lines)'],
+  image: [false, '-I', 'Show an inline terminal image (iTerm2, kitty, sixel) instead of text'],
+  save: [nil, '-S', String, 'Save the plot to a file (.svg, .png, .txt, .ans, .html) instead of showing it'],
 ) { |args, p|
   if p.list
     MB::Sound::Curve.names.each { |n| c = MB::Sound::Curve[n]; puts format('%-14s %-30s %s', n, c, c.kind) }
@@ -78,13 +81,22 @@ MB::Sound.script(
   end
 
   plots = curves.to_h { |_, c| [c.to_s, c.map_edges(x, p.edges)] }
-  graphical = !p.terminal && ENV['DISPLAY'].to_s != ''
-  MB::Sound.plotter(graphical: graphical, **(graphical ? { width: 960, height: 540 } : {})).plot(plots)
 
-  if graphical
-    begin
-      STDIN.readline
-    rescue EOFError, Interrupt
+  # Up to six curves share one chart with a legend; more get a panel each
+  plot = MB::Sound::Plot
+  chart =
+    if plots.length <= 6
+      plot.chart(legend: true) { |c|
+        c.x plot::Scale::Linear.new(p.from..p.to, label: 'x', nice: false)
+        plots.each { |name, y| c.line y, x: x, label: name }
+      }
+    else
+      plot.figure(*plots.map { |name, y| plot.chart(title: name) { |c| c.line y, x: x } })
     end
+
+  if p.save
+    puts "Wrote #{chart.save(p.save)}"
+  else
+    chart.show(image: p.image || nil)
   end
 }

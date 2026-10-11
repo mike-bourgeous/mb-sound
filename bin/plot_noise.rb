@@ -24,7 +24,7 @@
 #
 # Examples:
 #     $0                                   # every shape, in the terminal
-#     $0 -g                                # every shape in a gnuplot window
+#     $0 -g                                # every shape at once as an inline image
 #     $0 --only gauss,sine,white --print   # statistics only
 #     $0 --only none -e '1.hz.ramp.noise + 1.hz.ramp.noise'   # two uniforms: a triangle
 #     $0 --only none -G -e 'noise.filter(500.hz.lowpass)'     # filtered uniform noise turns Gaussian
@@ -94,7 +94,7 @@ MB::Sound.script(
   samples: [240000, '-n', Integer, 'Samples per shape', 1000..],
   bins: [100, '-b', Integer, 'Histogram bins', 4..10000],
   seed: [nil, '-s', Integer, 'Random seed (MB::Sound.seed; MB::Sound::Noise follows RANDOM_SEED only)'],
-  graphical: [false, '-g', 'Plot in a gnuplot window instead of the terminal'],
+  graphical: [false, '-g', 'Plot every shape at once as an inline terminal image (iTerm2, kitty, sixel; text without one)'],
   print: [false, '-p', 'Print statistics instead of plotting'],
   gaussian: [false, '-G', 'Compare shapes without a known theory (expressions too) with a fitted Gaussian'],
   list: [false, '-l', 'List the shape names and exit'],
@@ -192,11 +192,6 @@ MB::Sound.script(
 
   if p.graphical
     MB::Sound.overlay(panes.to_h, graphical: true)
-    puts 'Press Enter to exit'
-    begin
-      STDIN.readline
-    rescue EOFError, Interrupt
-    end
   else
     panes.each { |title, curves| MB::Sound.overlay({ title => curves }) }
   end

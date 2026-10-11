@@ -95,8 +95,8 @@ module MB
 
       # Samples the output +scale+ times the number of keyframes across the
       # range between #min_time and #max_time, e.g. for plotting.  Returns a
-      # plottable Hash that can be given to MB::M::Plot#plot, or a compatible
-      # method.
+      # plottable Hash for MB::Sound::Plot::Plotter#plot (or any plotter with
+      # the same #plot method).
       def sample(scale = 20)
         times = Numo::SFloat.linspace(@min_time, @max_time, @num_keyframes * scale)
         values = value(times)
@@ -120,7 +120,7 @@ module MB
       end
 
       # Plots the datapoints against time using the given +plotter+
-      # (an instance of MB::M::Plot, or a compatible object).
+      # (an MB::Sound::Plot::Plotter, or an object with the same #plot).
       def plot(plotter)
         plotter.plot(sample)
       end

@@ -13,7 +13,7 @@ require 'mb-sound'
 
 MB::Sound.script(
   args: 0,
-  graphical: [false, 'Plot in a graphical window (and redraw every 2 seconds)'],
+  graphical: [false, 'Plot as an inline terminal image (iTerm2, kitty, sixel) and redraw every 2 seconds'],
   spectrum: [false, 'Plot magnitude and phase spectra instead of time and frequency'],
   samples: [108000, 'Samples to analyze', 1..],
   time_samples: [nil, Integer, 'Samples in the time plot (default: a tenth of --samples)'],
@@ -108,8 +108,8 @@ MB::Sound.script(
       pry_next = false
     end
 
-    # Loop in graphical mode to allow window resizing (TODO: figure out why
-    # gnuplot doesn't resize plots when the window is resized)
+    # Graphical mode redraws every 2 seconds (as an inline image where the
+    # terminal supports one)
     break unless graphical
   end
 }

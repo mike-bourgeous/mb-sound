@@ -85,15 +85,6 @@ MB::Sound.script { |args|
     }
   }
 
-  p = MB::M::Plot.new
-  begin
-    loop do
-      # Loop because gnuplot doesn't resize plots when the window is resized
-      p.plot(plots.reduce(&:merge), columns: plots.first.size)
-      break if ENV['PLOT_TERMINAL'] == 'dumb' # Allow testing
-      sleep 5
-    end
-  ensure
-    p.close
-  end
+  p = MB::Sound::Plot::Plotter.terminal(height_fraction: 1.0)
+  p.plot(plots.reduce(&:merge), columns: plots.first.size)
 }
