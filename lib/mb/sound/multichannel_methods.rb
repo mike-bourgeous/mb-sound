@@ -39,6 +39,22 @@ module MB
       def spread(range)
         GraphNode::ChannelSpread.new(range)
       end
+
+      # Per-channel arguments for a DSL method: a Range spreads evenly across
+      # the channels (like #spread), a list of values gives one value per
+      # channel (like #channels with plain values), and graph nodes make a
+      # bundle (like #channels).  The channel-level sibling of
+      # MidiMethods#per_voice.
+      #
+      # Examples (bin/sound.rb):
+      #     bg 110.hz.ramp.at(0.3).stereo.filter(:lowpass, cutoff: per_channel(500..900))
+      #     bg 220.hz.ramp.at(0.3).delay(per_channel(10.ms, 13.ms))   # mono in, stereo out
+      def per_channel(*items)
+        items = items[0] if items.length == 1 && items[0].is_a?(Array)
+        return spread(items[0]) if items.length == 1 && items[0].is_a?(Range)
+
+        channels(*items)
+      end
     end
   end
 end

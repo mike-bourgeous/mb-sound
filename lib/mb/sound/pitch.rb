@@ -131,7 +131,11 @@ module MB
       #            at that phase, for a hard, repeatable attack; :reset leaves
       #            the block's oscillators as they are.  Call #free in the
       #            block for free-running copies that never reset (random
-      #            start, like the JP-8000's supersaw).
+      #            start, like the JP-8000's supersaw).  Randomness made in
+      #            the block (random phases, noise) derives from the
+      #            unison's seed (copy i runs in MB::Sound.with_seed(seed +
+      #            1 + i), like synth lanes; 2026-10-10), so +seed:+ repeats
+      #            the whole unison.
       # +spread:+ - Stereo spread from 0 (default: a mono node) to 1 (the
       #             outermost copies hard left and right), or a graph node of
       #             0..1; any spread above 0 returns a stereo Channels bundle.

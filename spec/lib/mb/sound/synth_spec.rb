@@ -419,6 +419,51 @@ RSpec.describe(MB::Sound::Synth) do
     end
   end
 
+  describe 'per_voice' do
+    it 'gives each lane its value from a list, repeating a short list' do
+      got = []
+      described_class.new(source, voices: 3, spares: 2) { |v| got << MB::Sound.per_voice(:a, :b); v.gate }
+      expect(got).to eq([:a, :b, :a, :b, :a])
+
+      got = []
+      described_class.new(source, voices: 2, spares: 0) { |v| got << MB::Sound.per_voice([1, 2, 3]); v.gate }
+      expect(got).to eq([1, 2])
+    end
+
+    it 'spreads a Range evenly across the lanes (voices plus spares)' do
+      got = []
+      described_class.new(source, voices: 3, spares: 2) { |v| got << MB::Sound.per_voice(0..1); v.gate }
+      expect(got).to eq([0, 0.25, 0.5, 0.75, 1.0])
+
+      got = []
+      described_class.new(source, voices: 1, spares: 0) { |v| got << MB::Sound.per_voice(2..3); v.gate }
+      expect(got).to eq([2])
+    end
+
+    it 'follows the innermost synth when synths nest' do
+      got = []
+      described_class.new(source, voices: 2, spares: 0) { |v|
+        described_class.new(source, voices: 3, spares: 0) { |w| got << MB::Sound.per_voice(:x, :y, :z); w.gate }
+        got << MB::Sound.per_voice(:p, :q)
+        v.gate
+      }
+      expect(got).to eq([:x, :y, :z, :p, :x, :y, :z, :q])
+    end
+
+    it 'renders lanes with their own values' do
+      events = [ev.note_on(60), ev.note_on(60)]
+      s = described_class.new(source(*events), voices: 2, spares: 0) { |v| v.gate * MB::Sound.per_voice(0.25, 0.5) }
+      lanes = render(s, buffers: 2, individual: true)
+      expect(lanes.map { |l| l[-1] }).to eq([0.25, 0.5])
+    end
+
+    it 'raises outside a voice block' do
+      expect { MB::Sound.per_voice(1, 2) }.to raise_error(ArgumentError, /synth voice blocks/)
+      expect { MB::Sound.per_voice }.to raise_error(ArgumentError, /at least one/)
+      expect(described_class.current_lane).to be_nil
+    end
+  end
+
   describe 'controls' do
     let(:note) { [ev.note_on(69, 1.0)] }
     let(:dc) { ->(v) { v.gate } }

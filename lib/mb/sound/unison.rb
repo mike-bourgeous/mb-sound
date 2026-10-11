@@ -159,7 +159,8 @@ module MB
           raise ArgumentError, 'A unison detune Array takes fixed offsets only; for a changing detune give one node (with a layout:) instead'
         end
 
-        rng = Random.new(seed.nil? ? MB::Sound.next_seed : Integer(seed))
+        seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+        rng = Random.new(seed)
         changing = detune.respond_to?(:sample) && !detune.is_a?(Array)
 
         if changing
@@ -179,7 +180,10 @@ module MB
         copies = pitches.each_with_index.map { |p, i|
           p.unison_phase = phase
           p.unison_copy = Copy.new(i, count, copy_seed)
-          node = block_given? ? yield(p, i) : p.saw
+          # Each copy's own randomness (random phases, noise, drift LFOs)
+          # derives from the unison's seed, like synth lanes (seed + index,
+          # since 2026-10-10), so one seed: rebuilds the whole unison
+          node = MB::Sound.with_seed(seed + 1 + i) { block_given? ? yield(p, i) : p.saw }
           node = node.signal if node.is_a?(Pitch)
           raise ArgumentError, "A unison block must return a graph node (got #{node.inspect})" unless node.respond_to?(:sample)
           raise ArgumentError, "A unison block must return one channel (got #{node.channel_count})" if node.channel_count != 1

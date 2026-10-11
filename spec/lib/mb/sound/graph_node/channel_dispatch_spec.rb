@@ -63,6 +63,14 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
       expect(firsts(result)).to eq([0, 0.5, 1])
     end
 
+    it 'takes per_channel(...) lists, ranges, and nodes like channels and spread' do
+      expect(firsts(1.constant * MB::Sound.per_channel(2, 3))).to eq([2, 3])
+      expect(firsts(1.constant * MB::Sound.per_channel([2, 3]))).to eq([2, 3])
+      expect(firsts(MB::Sound.channels(0.constant, 0.constant, 0.constant) + MB::Sound.per_channel(0..1))).to eq([0, 0.5, 1])
+      expect(MB::Sound.per_channel(1.constant, 2.constant)).to be_a(MB::Sound::GraphNode::Channels)
+      expect(firsts(1.constant * MB::Sound.per_channel(2.constant, 3.constant))).to eq([2, 3])
+    end
+
     it 'requires a multichannel signal for spread' do
       expect { 1.constant + MB::Sound.spread(0..1) }.to raise_error(ArgumentError, /spread.*multichannel/)
     end

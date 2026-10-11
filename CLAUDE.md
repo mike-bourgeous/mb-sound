@@ -66,6 +66,12 @@ DSL methods live in topic modules `lib/mb/sound/graph_node/*_methods.rb`; node t
 - Multiplier, Mixer, and Pan have allocation-free C fast paths (`fast_arithmetic`), bit-identical to the general path.
 - Measure graph cost with `bin/graph_profile.rb [-n 32,128,800] [--profile] [--plan on|off|ruby|both] script.rb` (worst-case synth input: `spec/test_data/dense_modulated.mid`); compare branches in alternating runs against a master-ai worktree.
 
+### Graph I/O: recipes and Ruby export (`design/notes/graph_io.md`)
+
+Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`, `recipe/`), so it prints itself back as Ruby: `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds off by default; also bundles, Synths, Notes, clips), console `ruby node`; variables take block locals, `.named` names, or roles (`voice`, `osc`, `env`, `fx`, `sig`, `out`).  Per-copy randomness derives from one seed per parent (synth lanes, unison copies, chorus hiss, tr808 voices via `MB::Sound.with_seed`), so a single `seed:` rebuilds it.
+- Recording is always on (`MB_SOUND_RECIPES=0` off): generated recorders prepended to the DSL surface (`Recipe::Surface`; a guard spec requires every public DSL method recorded or listed in `Surface::EXEMPT`/`Recipe::EXEMPT` with a reason) record outermost calls only; build blocks (`BUILD_BLOCKS`: synth lanes, feedback, delay inserts, unison) record their invocations and locals; runtime blocks print as Prism source; seeds drawn are kept.  New DSL methods in `*Methods` modules or the surface classes are picked up automatically; a new method that takes a build block goes in `BUILD_BLOCKS`.
+- The writer prints chains, shared variables, units, `per_voice(...)` for lanes that differ in values, and `nil # FIXME(graph-io): ...` for anything unrepresentable; no flow control (phase 2 will load that subset with Prism, no eval).  Round trips: 193/196 graph sweep factories and 22/27 bin synth/effect scripts render bit-identically (`recipe_spec.rb`, `spec/bin/recipe_script_sweep_spec.rb` under `--tag smoke`).
+
 ### Plan layer (`design/notes/plan_layer.md`)
 
 `lib/mb/sound/plan.rb` + `plan/` (executor `ext/mb/sound/fast_plan`) runs connected regions of a graph as one op list per block in C, an as-if transformation: same samples (bit-exact except the default `:fast` sines and 2^x, within -124 dB), the user's graph untouched, node state kept in the nodes so a plan can drop at any block boundary.
@@ -162,7 +168,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 
 ### Multichannel (`design/notes/multichannel.md`)
 
-Nodes have `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable).  DSL calls on bundles run per channel (NumPy-style broadcasting; per-channel args via bundles, `channels(...)`, `spread(a..b)`); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes: `pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.  Sample all outputs of a mixer in turn.  Demo `bin/songs/stereo_song.rb`.
+Nodes have `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable).  DSL calls on bundles run per channel (NumPy-style broadcasting; per-channel args via bundles or `per_channel(list | a..b)` (aliases `channels(...)`, `spread(a..b)`); in synth voice blocks `per_voice(list | a..b)` gives per-lane values); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes: `pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.  Sample all outputs of a mixer in turn.  Demo `bin/songs/stereo_song.rb`.
 
 ### Arrangement and Session groundwork (`design/notes/arrangement.md`)
 

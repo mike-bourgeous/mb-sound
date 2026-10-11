@@ -30,11 +30,10 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
     end
 
     it 'sums its voices like the voices built alone' do
-      MB::Sound.seed(0)
-      kit = MB::Sound.tr808(MB::Sound.grid(4, kick: 'x...', snare: '.x..'), skip_idle: false)
-      MB::Sound.seed(0)
-      kick = MB::Sound::Drums::TR808.kick(MB::Sound.grid(4, 'x...'), skip_idle: false)
-      snare = MB::Sound::Drums::TR808.snare(MB::Sound.grid(4, '.x..'), skip_idle: false)
+      kit = MB::Sound.tr808(MB::Sound.grid(4, kick: 'x...', snare: '.x..'), skip_idle: false, seed: 7)
+      # Voice i (in VOICES order) is built with seed + 1 + i
+      kick = MB::Sound.with_seed(8) { MB::Sound::Drums::TR808.kick(MB::Sound.grid(4, 'x...'), skip_idle: false) }
+      snare = MB::Sound.with_seed(9) { MB::Sound::Drums::TR808.snare(MB::Sound.grid(4, '.x..'), skip_idle: false) }
       a = collect(kit, 1)
       b = collect(kick, 1) + collect(snare, 1)
       expect((a - b).abs.max).to be < 1e-6

@@ -204,7 +204,12 @@ module MB
         # and the shared metal bank work as in the mix; sample every channel
         # each buffer (as a Session does).  The channels add up to the mix
         # exactly (summed in channel order in float32).
-        def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, more_cowbell: nil, skip_idle: true, outputs: :mix, **settings)
+        #
+        # +seed:+ - the kit's random seed (default: a sub-seed of
+        # MB::Sound.seed).  Each voice's noise derives from it (voice i is
+        # built in MB::Sound.with_seed(seed + 1 + i), i in VOICES order;
+        # 2026-10-10), so one seed repeats the whole kit.
+        def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, more_cowbell: nil, skip_idle: true, outputs: :mix, seed: nil, **settings)
           unless OUTPUTS.include?(outputs)
             raise ArgumentError, "Unknown outputs: #{outputs.inspect} (outputs: #{OUTPUTS.map(&:inspect).join(', ')})"
           end
@@ -232,15 +237,16 @@ module MB
             Array(src).map { |s| s.is_a?(MB::Sound::Notes) ? MB::Sound::Notes.new(s.stream, sustain: false) : s }
           }
 
+          seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           voices = {}
-          VOICES.each_key do |v|
+          VOICES.each_key.with_index do |v, idx|
             next unless sources.key?(v)
 
             knobs = settings.fetch(v, {})
             opts = { accent: accent, velocity_curve: velocity_curve, skip_idle: skip_idle }.merge(knobs)
             opts[:metal] = metal_for.(knobs, v) if [:closed_hat, :open_hat, :cymbal].include?(v)
             opts[:choke] = choke_sources.(sources[:closed_hat]) if v == :open_hat && sources[:closed_hat]
-            voices[v] = voice(v, sources[v], **opts)
+            voices[v] = MB::Sound.with_seed(seed + 1 + idx) { voice(v, sources[v], **opts) }
           end
 
           if outputs == :mix
