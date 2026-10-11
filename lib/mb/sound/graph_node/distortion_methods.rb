@@ -108,6 +108,23 @@ module MB
           SampleHold.new(self, trigger, sample_rate: sample_rate)
         end
         alias sah sample_hold
+
+        # Reduces this node's sample rate to +rate+ Hz with a zero-order hold
+        # and no filtering, aliasing on purpose (GraphNode::Decimator): the
+        # lo-fi sampler crunch, and with a resonant filter before it, moving
+        # vocal-like peaks.  +rate+ is a number, a Pitch, or a node of Hz
+        # that may move every sample (e.g. `v.freq * 6` tracks the note, so
+        # every note folds the same way); +jitter+ (0..0.95) loosens the hold
+        # clock at random (+seed+).  Bit crushing is #aquantize.  Aliases
+        # #crush_rate, #srr (sample-rate reduction).
+        #
+        #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900)
+        #     play 220.hz.square.decimate(0.2.hz.lfo.at(500..6000), jitter: 0.2)
+        def decimate(rate, jitter: 0, seed: nil)
+          Decimator.new(self, rate: rate, jitter: jitter, seed: seed, sample_rate: sample_rate)
+        end
+        alias crush_rate decimate
+        alias srr decimate
       end
     end
   end
