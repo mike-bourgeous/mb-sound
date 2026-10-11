@@ -341,7 +341,9 @@ module MB
         return if @options[:output]
 
         @midi = live_notes(source)
-        puts "\e[1mMIDI control enabled\e[0m (#{@midi.stream.source.input.connections.join(', ')})" unless @options[:quiet]
+        src = @midi.stream.source
+        src = src.live_source if src.respond_to?(:live_source)
+        puts "\e[1mMIDI control enabled\e[0m (#{src.input.connections.join(', ')})" unless @options[:quiet]
         @midi
       rescue => e
         puts "\e[38;5;243mMIDI control disabled (#{e.message})\e[0m" unless @options[:quiet]

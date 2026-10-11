@@ -299,6 +299,12 @@ module MB
             @hub.closed?
           end
 
+          # The source of the input being read (e.g. a MIDI::LiveSource),
+          # or nil.
+          def live_source
+            @hub.input&.source
+          end
+
           # Does nothing: the input belongs to the Session's MidiInput.
           def close
             nil

@@ -61,7 +61,10 @@ module MB
         notes = @live_midi[key]
         return notes if notes && notes.stream.source.respond_to?(:hub) && notes.stream.source.hub.equal?(input) && !input.closed?
 
-        @live_midi[key] = MB::Sound::Notes.new(input.stream, sustain: sustain)
+        # One stream per input, shared by its Notes (with and without pedals)
+        @live_midi_taps ||= {}.compare_by_identity
+        stream = @live_midi_taps[input] ||= input.stream
+        @live_midi[key] = MB::Sound::Notes.new(stream, sustain: sustain)
       end
 
       # The MIDI::Stream of live MIDI input from #midi, before the sustain
@@ -77,6 +80,7 @@ module MB
         (@live_midi_streams || {}).each_value { |stream| stream.source.close }
         @live_midi = {}
         @live_midi_streams = {}
+        @live_midi_taps = {}.compare_by_identity
         nil
       end
 
