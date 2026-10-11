@@ -142,11 +142,23 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     it 'ducks by the amount while the sidechain is loud, then releases' do
       kick = Numo::SFloat.zeros(96000)
       kick[0...2400] = 1.0
-      node = 0.5.constant.duck(arr(kick), amount: -12, threshold: -30, attack: 0, release: 0.05, knee: 0)
+      node = 0.5.constant.duck(arr(kick), amount: -12, threshold: -30, attack: 0, release: 0.05, hold: 0, knee: 0)
       out = render(node, 96000)[0]
       expect(db(out[2000] / 0.5)).to be_within(1e-4).of(-12)
       expect(db(out[2400 + 2399] / 0.5)).to be_within(0.01).of(-12 * Math.exp(-1))
       expect(db(out[95999] / 0.5)).to be > -0.001
+    end
+
+    it 'defaults to a deep pump: -18 dB, held 20 ms, released over a 1/16 note' do
+      MB::Sound.bpm(120)
+      kick = Numo::SFloat.zeros(96000)
+      kick[0...2400] = 1.0
+      out = render(0.5.constant.duck(arr(kick), knee: 0), 96000)[0]
+      expect(db(out[2000] / 0.5)).to be_within(1e-3).of(-18)
+      expect(db(out[2400 + 900] / 0.5)).to be_within(1e-3).of(-18) # held for 20 ms
+      t = 2400 + 960 + 6000 # one 1/16 (0.125 s) into the release
+      expect(db(out[t] / 0.5)).to be_within(0.2).of(-18 * Math.exp(-1))
+      expect(db(out[95999] / 0.5)).to be > -0.01
     end
 
     it 'needs a sidechain and a negative amount' do
