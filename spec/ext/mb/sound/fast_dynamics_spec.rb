@@ -84,6 +84,14 @@ RSpec.describe('MB::Sound::FastDynamics', :aggregate_failures) do
       expect(out.map { |o| (o[0] / x[0...450].abs.max).abs.max }.max).to be > 0
     end
 
+    it 'matches the Ruby mirror on monotone cubic and Curve-shaped transfer curves' do
+      cubic = dyn::Transfer.points({ -70 => -90, -45 => -45, -20 => -24, 0 => -12 }, interpolation: :cubic).table
+      shaped = dyn::Transfer.points([[-60, -80, :smooth], [-30, -30], [0, -10]]).table
+      x = bursty(800)
+      compare(1, 800, ins: [x], crv: cubic, blocks: [400, 400])
+      compare(1, 800, ins: [x], crv: shaped, prm: params(mode: 1))
+    end
+
     it 'treats nil inputs and sidechains as silence' do
       compare(2, 64, ins: [nil, bursty(64)], sides: [nil], prm: params(la: 3))
     end
