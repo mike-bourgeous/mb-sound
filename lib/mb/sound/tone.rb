@@ -144,7 +144,11 @@ module MB
       ALWAYS = [0.0, 0.0].freeze
 
       attr_reader :wave_type, :frequency, :amplitude, :range, :wavelength, :phase
-      attr_reader :period, :period_samples
+      # The period of one cycle as a Length::Seconds (and as a
+      # Length::Samples at this tone's rate), or nil for a modulated
+      # frequency.  Lengths work wherever lengths do (`delay(t.period)`).
+      def period = @period&.seconds
+      def period_samples = @period_samples&.samples
       attr_reader :amplitude_set
 
       # The phase modulation source (cycles; a number or node), or nil.
@@ -1042,8 +1046,7 @@ module MB
       # wave (0 to 1; whole cycles wrap): 0 starts oscillators at 0 and
       # rising (or at the top half of the cycle for a square wave), 0.25 at
       # the top of a sine.  +phase+ may also be an MB::Sound::Phase (e.g.
-      # `1.2.radians`, Phase.degrees(90)).  Also available as
-      # #with_phase_cycles.
+      # `1.2.radians`, Phase.degrees(90)).
       #
       # Example: 123.hz.with_phase(0.25)
       def with_phase(phase)
@@ -1055,7 +1058,6 @@ module MB
           @start_cycles = nil
         end
       end
-      alias with_phase_cycles with_phase
 
       # Adds the given other +tone+ as a frequency modulator for this tone,
       # using the given modulation +index+ (good values range from 100 to
@@ -1120,7 +1122,7 @@ module MB
       # A Tone modulator without an amplitude plays at 1 (a full cycle).  An
       # MB::Sound::Phase gives another unit (an +index+ like `2.4.radians`, a
       # node marked `node.radians`) or a fixed phase offset (`0.25.cycles`
-      # makes a sine a cosine).  Also available as #pm_cycles and #pm_cyc.
+      # makes a sine a cosine).
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.pm(330.hz.sine, 0.4).at(-12.db)          # PM depth 0.4 cycles
@@ -1150,8 +1152,6 @@ module MB
         end
       end
 
-      alias pm_cycles pm
-      alias pm_cyc pm
 
       # Operator self-feedback (FM synth style): the sine's phase is
       # modulated by its own output, averaged over the last two samples (as
@@ -1226,8 +1226,7 @@ module MB
       # (bin/aliasing.rb 'p.fm_feedback(0.24)').  Cost: about 28 ns per
       # sample whatever the amount (a plain sine: 21 ns; nodes for the
       # amount and gain add their own cost).  See .dx7_feedback for the DX7's
-      # 0-7 feedback setting in cycles.  Also available as #fmfb, #fm_fb,
-      # and #fm_feedback_cycles.  (#feedback is graph feedback,
+      # 0-7 feedback setting in cycles.  Also available as #fmfb and #fm_fb.  (#feedback is graph feedback,
       # GraphNode::FeedbackMethods.)
       #
       # Examples (bin/sound.rb):
@@ -1260,9 +1259,6 @@ module MB
       end
       alias fm_fb fm_feedback
       alias fmfb fm_feedback
-      alias fm_feedback_cycles fm_feedback
-      alias fm_fb_cycles fm_feedback
-      alias fmfb_cycles fm_feedback
 
       # The feedback amount (cycles; a number or node) given to #fm_feedback,
       # or nil for none.
@@ -1880,7 +1876,7 @@ module MB
       #     500.hz.peak(octaves: 2, gain: -3.db)
       def peak(octaves: 0.5, gain: nil)
         gain ||= @amplitude
-        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
+        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, @frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: gain.to_db)
       end
 
       # Returns a LinearFollower with its max_rise and max_fall set to allow

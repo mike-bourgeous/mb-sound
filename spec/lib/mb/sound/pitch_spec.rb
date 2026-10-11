@@ -56,6 +56,19 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     end
   end
 
+  describe '#period' do
+    it 'is a Length of seconds (and of samples at the pitch rate)' do
+      expect(200.hz.period).to be_a(MB::Sound::Length::Seconds)
+      expect(200.hz.period.to_f).to eq(0.005)
+      expect(200.hz.period_samples).to be_a(MB::Sound::Length::Samples)
+      expect(200.hz.period_samples.to_f).to eq(240)
+      expect(200.hz.at_rate(96000).period_samples.to_f).to eq(480)
+      expect(200.hz.sine.period).to eq(0.005.seconds)
+      expect(200.hz.sine.period_samples).to eq(240.0.samples)
+      expect(MB::Sound::Tone.new(frequency: 3.hz.lfo.at(100..200)).period).to be_nil
+    end
+  end
+
   describe '#to_note' do
     it 'finds the nearest note in the current tuning' do
       expect(440.hz.to_note.name).to eq('A4')
@@ -68,6 +81,8 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     it 'use the current frequency' do
       expect(1000.hz.lowpass.center_frequency).to eq(1000)
       expect(100.hz.highpass(quality: 2).quality).to eq(2)
+      expect(1000.hz.peak(octaves: 1.oct).bandwidth_oct).to eq(1.0)
+      expect(1000.hz.sine.peak(octaves: 6.st).bandwidth_oct).to eq(0.5)
     end
   end
 

@@ -94,7 +94,8 @@ module MB
             marked(condition: Clip.check_condition(n, from))
           end
 
-          # Returns a copy of this step +octaves+ (default 1) higher.
+          # Returns a copy of this step +octaves+ (default 1; a number or an
+          # Interval, `step.up(7.st)`) higher.
           def up(octaves = 1)
             oct(octaves)
           end
@@ -108,7 +109,7 @@ module MB
           # Returns a copy of this step moved by +octaves+ (negative for
           # lower).
           def oct(octaves)
-            semitones = 12 * octaves
+            semitones = Interval.octave_semitones(octaves)
             marked(value: value && Sequence.transpose_value(value, semitones), clip: clip&.transpose(semitones))
           end
 
@@ -362,20 +363,20 @@ module MB
         end
         alias s! slide
 
-        # Returns a Seq +octaves+ (default 1) higher.
+        # Returns a Seq +octaves+ (default 1; a number or an Interval) higher.
         def up(octaves = 1)
-          transpose(12 * octaves)
+          transpose(Interval.octave_semitones(octaves))
         end
 
         # Returns a Seq +octaves+ (default 1) lower.
         def dn(octaves = 1)
-          transpose(-12 * octaves)
+          transpose(-Interval.octave_semitones(octaves))
         end
         alias down dn
 
         # Returns a Seq moved by +octaves+.
         def oct(octaves)
-          transpose(12 * octaves)
+          transpose(Interval.octave_semitones(octaves))
         end
 
         # Returns a Seq played like a TB-303's sequencer: notes sound for

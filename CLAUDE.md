@@ -95,8 +95,8 @@ Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/
 `lib/mb/sound/numeric_sound_mixins.rb` adds `.hz`, `.db`, `.meters`, `.bits` to Numeric.  `440.hz` is a `Pitch` (oscillator methods make a new `Tone` each call; plays as a sine when used as a signal); `Note < Pitch` (C4 = 60) follows the session `Tuning` (`tuning b4: 480`).
 - `Tone` (`lib/mb/sound/tone.rb`) is the one oscillator node; DSL methods configure it before it plays (afterwards `FrozenError`, or a warning in live mode); per-sample state is one `Tone::State`.
 - Phases are in cycles everywhere (0.25 = 90°): `with_phase`, `pm` index, `fm_feedback`, `reset(to:)`, unison `phase:`.  `MB::Sound::Phase`: `0.25.cycles`, `1.5.radians`, `90.degrees` (overrides mb-math's `Numeric#degrees` for reals; write `30.degrees.to_f` for radians), `node.radians`.
-- Lengths: `2.bars`, `3.beats`, `3.n16`, `1.n8.dotted` (`Sequence::Duration`), `4.seconds`, `250.ms`, `5.samples` (`MB::Sound::Length`); every length-taking method accepts them plus plain numbers in its usual unit (seconds for delays/envelopes, bars for fades/schedules, samples for `with_buffer`).
-- `MB::Sound::Interval` (`4.octaves`, `7.semitones`, `50.cents`; plain numbers are semitones for `transpose`) and `MB::Sound::Scale` (`scale(:minor, :a)`; degrees to Notes; `Scale::CHROMATIC` is every transform's default, so `pitch:` is always in scale degrees).
+- Lengths: `2.bars`, `3.beats`, `3.n16`, `1.n8.dotted` (`Sequence::Duration`), `4.seconds`, `250.ms`, `5.samples` (`MB::Sound::Length`); every length-taking method accepts them plus plain numbers in its usual unit (seconds for delays/envelopes, bars for fades/schedules, samples for `with_buffer`); `pitch.period` is a `Length::Seconds`.
+- `MB::Sound::Interval` (`4.octaves`, `7.semitones`, `50.cents`; plain numbers are semitones for `transpose`, octaves for `up`/`dn`/`oct`) and `MB::Sound::Scale` (`scale(:minor, :a)`; degrees to Notes; `Scale::CHROMATIC` is every transform's default, so `pitch:` is always in scale degrees).
 
 ### Oscillators and antialiasing (`design/notes/oscillators.md`)
 

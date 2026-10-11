@@ -287,14 +287,9 @@ module MB
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
-      alias pm_cycles pm
-      alias pm_cyc pm
       def fm_feedback(amount, gain: nil, dc: false) = tone.fm_feedback(amount, gain: gain, dc: dc)
       alias fm_fb fm_feedback
       alias fmfb fm_feedback
-      alias fm_feedback_cycles fm_feedback
-      alias fm_fb_cycles fm_feedback
-      alias fmfb_cycles fm_feedback
       def lfo = tone.lfo
       def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
@@ -412,22 +407,27 @@ module MB
       # (#dn, alias #down), or moved by +octaves+ (#oct), through #transpose
       # (so Notes stay Notes: `A1.up` is A2).  Sequence steps have the same
       # marks (`(!A1).up`; see Sequence::NoteMarks).
+      #
+      # +octaves+ is a number of octaves or an Interval (`A4.up(7.st)`).
       def up(octaves = 1)
-        transpose(12 * octaves)
+        transpose(Interval.octave_semitones(octaves))
       end
 
       def dn(octaves = 1)
-        transpose(-12 * octaves)
+        transpose(-Interval.octave_semitones(octaves))
       end
       alias down dn
 
       def oct(octaves)
-        transpose(12 * octaves)
+        transpose(Interval.octave_semitones(octaves))
       end
 
-      # The period of one cycle in seconds and in samples.
-      def period = 1.0 / frequency
-      def period_samples = period * @sample_rate
+      # The period of one cycle as a Length::Seconds (`220.hz.period` for a
+      # Karplus-Strong delay or an envelope's hold:), and as a
+      # Length::Samples at this pitch's sample rate.  Use #to_f for the
+      # plain number.
+      def period = (1.0 / frequency).seconds
+      def period_samples = (@sample_rate.to_f / frequency).samples
 
       # The wavelength of this pitch in air (see SPEED_OF_SOUND).
       def wavelength
@@ -469,10 +469,11 @@ module MB
       end
 
       # A peaking filter at this frequency with +gain+ (linear, default 1)
-      # and a bandwidth of +octaves+.  `500.hz.at(3.db).peak` uses the
+      # and a bandwidth of +octaves+ (a number or an Interval, `1.oct`).
+      # `500.hz.at(3.db).peak` uses the
       # amplitude as the gain (see Tone#peak).
       def peak(octaves: 0.5, gain: 1.0)
-        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
+        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: gain.to_db)
       end
 
       # A LinearFollower that follows full-scale changes no faster than this

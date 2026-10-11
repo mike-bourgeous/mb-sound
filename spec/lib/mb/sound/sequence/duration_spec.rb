@@ -91,8 +91,9 @@ RSpec.describe(MB::Sound::Sequence::Duration) do
 
     it 'converts to seconds at the current tempo' do
       t = MB::Sound::Sequence::Transport.new(bpm: 120)
-      expect(1.bar.seconds(t)).to eq(2.0)
-      expect(3.n16.seconds(t)).to eq(0.375)
+      expect(1.bar.to_seconds(transport: t)).to eq(2.0)
+      expect(3.n16.to_seconds(transport: t)).to eq(0.375)
+      expect(1.bar).not_to respond_to(:seconds) # removed 2026-10-11 (Numeric#seconds makes a Length)
     end
 
     it 'are accepted wherever durations are' do
