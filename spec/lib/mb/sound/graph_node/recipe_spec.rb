@@ -384,11 +384,21 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         'MixSource (master chain input)' => 'a node class defined in the spec (an input)',
       }.freeze
 
+      # Factories whose graphs print, but with state that isn't graph
+      # structure, and why
+      state_only = {
+        'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
+      }.freeze
+
       GraphSweep.factories.each do |name, factory|
         it "rebuilds #{name}" do
           MB::Sound.seed(1)
           graph = factory.call(GraphSweep::Context.new)
           code = graph.to_ruby(seeds: true)
+          if state_only.key?(name)
+            expect(code).not_to include('FIXME')
+            next
+          end
           if not_representable.key?(name)
             expect(code).to match(/FIXME|inputs: input/)
             next
