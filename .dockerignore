@@ -1,0 +1,25 @@
+# Kept out of the image's `COPY . /app` (dock.sh bind-mounts the real
+# checkout over /app anyway): large or machine-specific build output, and
+# personal state that must never be baked into an image.
+
+# Personal state and credentials
+.claude-shared/
+.claude-user/
+.gh-user/
+.claude/settings.local.json
+
+# Worktrees and build/test output
+.claude/worktrees/
+tmp/
+coverage/
+pkg/
+doc/
+.yardoc/
+.bundle/
+lib/**/*.so
+lib/**/*.bundle
+
+# Renders in the repo root
+/*.flac
+/*.wav
+/*.mp3
