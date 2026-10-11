@@ -170,3 +170,4 @@ require_relative 'sound/io_logger'
 # every DSL method exists
 require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
+require_relative 'sound/graph_io'

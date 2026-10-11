@@ -51,10 +51,28 @@ module MB
           # free inputs ({ midi: notes }); +seeds: true+ prints the random
           # seeds drawn (seed: N) so the code rebuilds the same noise in any
           # order (off by default for reading; documents will include them).
-          def initialize(root, inputs: {}, seeds: false)
+          # +knobs+ ({ 'drive' => 1.0 }) prints Constants named after a
+          # knob with its value as the knob's bare name, as do the nodes of
+          # +knob_nodes+ ({ node => 'drive' }; graph documents' params).
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {})
             @root = root
             @given_inputs = inputs
             @seeds = seeds
+            @knobs = knobs.transform_keys(&:to_s)
+            @knob_nodes = knob_nodes.each_with_object({}.compare_by_identity) { |(k, v), h| h[k] = v.to_s }
+          end
+
+          # Knob names printed (see #initialize).
+          def knobs_used
+            to_s
+            @knobs_used.to_a
+          end
+
+          # The text of a plain value (a literal or unit value), e.g. for a
+          # document header.
+          def literal(v)
+            reset! unless @names
+            leaf(v, '')
           end
 
           # The Ruby text.
@@ -94,6 +112,18 @@ module MB
             @seed_warning = false
             @output_owner = {}.compare_by_identity
             @given_inputs.each_value { |obj| register_outputs(obj) }
+            @knobs_used = Set.new
+            @used.merge(@knobs.keys)
+            @used.merge(@knob_nodes.values)
+          end
+
+          # The knob name +o+ prints as, or nil (see #initialize).
+          def knob_for(o)
+            return @knob_nodes[o] if @knob_nodes.key?(o)
+            return nil if @knobs.empty? || !o.is_a?(Constant)
+            n = o.graph_node_name
+            return nil unless n && @knobs.key?(n) && live_constant(o) == @knobs[n]
+            n
           end
 
           def build
@@ -152,6 +182,7 @@ module MB
             seeded = [] if seeded.length < 2
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
+              next false if knob_for(o)
               info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
@@ -341,6 +372,10 @@ module MB
           # value there.
           def expr_p(o, indent: '', arith: false)
             return [@names[o], ATOM] if @names.key?(o)
+            if (k = knob_for(o))
+              @knobs_used << k
+              return [k, ATOM]
+            end
 
             c = Recipe.call_of(o, @scope)
             return unrecorded(o, indent, arith) unless c
@@ -470,6 +505,8 @@ module MB
             seed = drawn_seed(c)
             kwargs[:seed] = seed if seed
             args += kwargs.map { |k, v| k.is_a?(Symbol) ? "#{key_text(k)} #{value(v, indent)}" : "#{value(k, indent)} => #{value(v, indent)}" }
+            named = c.block && c.block_kind == :runtime && proc_name(c.block)
+            args << "&named_proc(#{named.inspect})" if named
 
             name = c.name.to_s
             text = recv ? "#{recv}.#{name}" : name
@@ -485,10 +522,18 @@ module MB
             elsif c.block_kind == :build && c.block
               # Not called yet (e.g. kept for later): print its source
               text += runtime_block(c, c.block)
-            elsif c.block
+            elsif c.block && !named
               text += runtime_block(c, c.block)
             end
             text
+          end
+
+          # The name of +block+ in MB::Sound.named_proc's registry, or nil.
+          def proc_name(block)
+            procs = defined?(MB::Sound::GraphIO) && MB::Sound::GraphIO.procs
+            return nil unless procs
+            procs.each { |k, v| return k if v.equal?(block) }
+            nil
           end
 
           def key_text(k)
@@ -717,7 +762,7 @@ module MB
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
-            when Proc then Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
+            when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
             when Data
               fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
               "#{class_name(v.class)}.new(#{fields.join(', ')})"
@@ -871,6 +916,7 @@ module MB
           # Local variables from the code around +block+ that its source
           # text +src+ reads (it can't be printed on its own).
           def outer_locals(block, src)
+            return [] if block.respond_to?(:graph_io_source)
             outer = block.binding.local_variables
             return [] if outer.empty?
 
@@ -896,6 +942,9 @@ module MB
           # from its source location; +call_name+ picks among several blocks
           # on one line.  nil if not found (e.g. eval'd code).
           def block_source(block, call_name = nil)
+            # Blocks loaded from graph documents keep their text
+            return block.graph_io_source if block.respond_to?(:graph_io_source)
+
             file, line = block.source_location
             return nil unless file && File.file?(file)
 
