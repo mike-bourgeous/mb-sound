@@ -170,7 +170,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     it 'keeps a mix: setting between dry and wet' do
       rev = 1.constant.reverb(:room, mix: 0.25)
       expect(rev.dry).to eq(0.75)
-      expect(rev.wet).to be_within(1e-9).of(0.25)
+      expect(rev.wet).to be_within(1e-9).of(0.25 * -10.db) # mix scales the preset's wet
     end
   end
 
@@ -350,8 +350,8 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
     end
 
-    it 'plays :room wet at 0 dB and :hall with compact loops (user picks, 2026-10-10)' do
-      expect(described_class::PRESETS[:room][:wet]).to eq(1)
+    it 'plays :room wet at -10 dB and :hall with compact loops (user picks, 2026-10-10/11)' do
+      expect(described_class::PRESETS[:room][:wet]).to eq(-10.db)
       expect(described_class::PRESETS[:hall][:loop_extra]).to eq(0)
       [:space, :stadium, :default, :room].each do |preset|
         expect(described_class::PRESETS[preset][:loop_extra]).to eq(described_class::CLASSIC_LOOP_EXTRA)

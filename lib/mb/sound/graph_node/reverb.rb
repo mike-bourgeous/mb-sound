@@ -140,8 +140,9 @@ module MB
         # the old structure's gain, see Reverb.classic_level; other channel
         # counts follow Reverb.channel_trim).  :stadium, :space, and :default
         # still sound exactly as in 2026-01 (impulse responses null to
-        # -122..-143 dB); since 2026-10-10 (user's picks by ear) :room plays
-        # its wet at 0 dB (was -16 dB; otherwise the same) and :hall has
+        # -122..-143 dB); :room plays its wet at -10 dB (user, 2026-10-11:
+        # 0 dB too wet, the original -16 dB too low; otherwise the same) and,
+        # since 2026-10-10 (user's pick by ear), :hall has
         # compact loops (+loop_extra: 0+, the same decay per second).
         # Presets with +:room_size:+ use the room-size layout; their
         # +:damping:+ values were retuned on 2026-10-10 for
@@ -160,7 +161,7 @@ module MB
             tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
-            wet: 1, # 0 dB since 2026-10-10 (was -16 dB; user's pick by ear)
+            wet: -10.db, # since 2026-10-11 (user: 0 dB too wet, -16 dB too low)
             level: classic_level(8, 4),
             seed: 0,
             extra_time: 1,
