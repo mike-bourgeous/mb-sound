@@ -384,6 +384,31 @@ module MB::Sound
     }
   end
 
+  # A listening check for the pad's lead (maintainer, 2026-10-11: "Hard to
+  # tell when the pad is so quiet; a span with just pad (make it swarmy and
+  # louder) and 4 on the floor would help"): the song's pad clip (A, A, A,
+  # G, a new swell each bar) on a louder swarm of saws and fifths with the
+  # song pad's 0.6 s attack, over a four-on-the-floor kick, from bar 2 so a
+  # lead has room.  +lead+ is the pad track's lead: (nil, 1.attack,
+  # 0.5.attack, ...).
+  #
+  #     render('pad.flac', bars: 9) { last_stop_pad_check(lead: 0.5.attack) }
+  def self.last_stop_pad_check(lead: 0.5.attack)
+    bpm 126
+    quant 1
+    clip = last_stop_clips[:pad]
+    track(:check_pad, lead: lead) { |c|
+      c.synth(voices: 2) { |v|
+        swell = v.amp_env(0.6, 1.0, 0.8, 1.5, curve: :smooth)
+        cloud = v.hz.swarm(7, glide: nil, drift: 12.cents) + v.hz.transpose(7).swarm(5, glide: nil, drift: 12.cents) * 0.6
+        (cloud * swell * 0.5).filter(:lowpass, cutoff: 1800, quality: 0.8)
+      }.softclip(0.5, 0.95) * 0.9
+    }
+    track(:check_kick) { |kit| tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }) * 0.85 }
+    scene :pad_check, check_pad: clip, check_kick: grid(16, kick: 'X...X...X...X...').loop
+    go :pad_check, in: 1
+  end
+
   if main_script?(__FILE__)
     song_script(
       bars: LAST_STOP_BARS,
