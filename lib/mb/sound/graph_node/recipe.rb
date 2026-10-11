@@ -249,8 +249,12 @@ module MB
           # being recorded, and marks the build block invocation that drew it.
           def drew_seed(seed)
             st = state
-            # Seeds drawn inside MB::Sound.with_seed derive from its seed
-            st.current.seeds = (st.current.seeds || []) << seed if st.current && st.seeded == 0
+            # Seeds drawn inside MB::Sound.with_seed derive from its seed, so
+            # a call made outside it (e.g. a top-level unison whose copies
+            # draw) doesn't keep them.  Calls made inside it (lane set) do:
+            # they're never printed (see #drawn_seed), but they keep
+            # seed-drawing nodes in creation order (RubyWriter#seeded_key).
+            st.current.seeds = (st.current.seeds || []) << seed if st.current && (st.seeded == 0 || st.current.lane)
             st.scopes.last&.seeded = true
           end
 

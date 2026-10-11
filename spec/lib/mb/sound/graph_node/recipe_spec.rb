@@ -339,6 +339,18 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       expect(code).to match(/synth\(midi, voices: 2, seed: \d+\)/)
     end
 
+    # Lanes run in MB::Sound.with_seed: noises made in one order and used in
+    # the other must still print in creation order (bin/synths/pluck.rb)
+    it 'keeps seed-drawing nodes in synth lanes in creation order' do
+      code = round_trip(inputs: -> { { midi: MB::Sound::Notes.new(midi_path) } }) { |i|
+        MB::Sound.synth(i[:midi], voices: 2) { |v|
+          n = [MB::Sound.noise, MB::Sound.noise]
+          (n[1].filter(:highpass, cutoff: 3000) * 0.3 + n[0].filter(:lowpass, cutoff: 3000) * 0.1) * v.amp_env
+        }
+      }
+      expect(code).not_to include('noise(seed')
+    end
+
     it 'rebuilds unisons, swarms, chorus hiss, and 808 noise from one printed seed each' do
       cases = {
         unison: proc { 220.hz.unison(5, detune: 0.2) { |p, _i| p.ramp.noise(0.1) } },
