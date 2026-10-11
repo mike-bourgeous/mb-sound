@@ -63,6 +63,11 @@ module MB
           nil
         end
 
+        # Shows the plot when the console (Pry, IRB) or pp prints the chart.
+        def pretty_print(q)
+          q.text("\n" + to_s(height: [default_height, Terminal.height - 4].min))
+        end
+
         private
 
         def default_height
