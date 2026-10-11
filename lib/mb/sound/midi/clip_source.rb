@@ -210,7 +210,14 @@ module MB
           @graph_origin = origin
 
           @origin = clip_origin(@clip, @swap_anchor || timeline_launch || origin, origin)
-          @clip_position = wrap_position(time - @origin)
+          position = time - @origin
+          @clip_position = wrap_position(position)
+          # Keep clip position + origin on the timeline when the position
+          # wrapped (fill lookups and swap times add them; until omnibus5 a
+          # launch a fraction of a sample after its first sample counted a
+          # whole loop late, so fills played a loop early: night_bus_flow's
+          # turn fill a bar early in both drops after the 2/4 gap)
+          @origin -= @clip_position - position if @clip_position != position
           jumped
         end
 

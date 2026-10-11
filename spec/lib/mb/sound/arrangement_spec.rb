@@ -145,6 +145,27 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.resolve(:bar)).to eq(3/4r)
   end
 
+  describe 'fills on launch-aligned loops' do
+    # 126 BPM: bar lines fall between samples (91428.57 frames per bar), so a
+    # launch lands on the sample before its exact time
+    let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 126) }
+
+    it 'plays a fill-marked note in the fill\'s bar after an off-sample launch (was a bar early)' do
+      clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::C3, MB::Sound::C3, MB::Sound::D3.fill(:f)).n4.loop(align: :launch)
+      set.track(:p) { |c| c.gate * c.number }
+      set.scene(:pa, p: clip)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      transport.fills.add(3r, 4r, :f) # bar 4
+      set.go(:pa, in: 1)
+      d = run(800 * 500) # 4.4 bars
+      bar = 48000 * 240 / 126r
+      fill_frames = (0...d.length).select { |i| d[i] == 50 }
+      expect(fill_frames).not_to be_empty
+      expect(fill_frames.first).to be >= (bar * 3.75).floor
+      expect(fill_frames.last).to be < (bar * 4).ceil
+    end
+  end
+
   describe 'lead: and nudge:' do
     # Note edges (gate * note number) of track :p over two scenes
     def edges_with(size: 800, **options)
