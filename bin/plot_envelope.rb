@@ -123,7 +123,9 @@ MB::Sound.script(
   plots.transform_values! { |d| d.length < length ? d.concatenate(Numo::SFloat.zeros(length - d.length)) : d }
   plots.transform_values! { |d| (20 * Numo::NMath.log10(d.clip(10 ** (-p.db / 20), nil))).clip(-p.db, nil) } if p.db
 
-  chart = MB::Sound::Plot.chart(title: envelope.to_s, legend: plots.length > 1) { |c|
+  title = envelope.to_s.sub(/\A\S+ -- /, '') # without the node's id
+  title = title.sub(/ curve \S+/, ' curve presets') if p.compare
+  chart = MB::Sound::Plot.chart(title: title, legend: plots.length > 1) { |c|
     c.x :time, sample_rate: envelope.sample_rate
     c.y p.db ? MB::Sound::Plot::Scale::DB.new(-p.db..0) : MB::Sound::Plot::Scale::Linear.new(label: 'level')
     plots.each { |name, d| c.line d, label: name.to_s }

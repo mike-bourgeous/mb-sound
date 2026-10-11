@@ -334,7 +334,7 @@ module MB
 
           # True if note-name ticks are drawn.
           def notes?
-            !!@notes
+            @notes != false && !@notes.nil?
           end
 
           def secondary_ticks(count = 5)

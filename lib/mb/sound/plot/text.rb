@@ -356,7 +356,19 @@ module MB
             row = @y
             header = @chart.title || !entries.empty? || (frame != :none && @chart.y.title)
             header = false if @h < 4
+
+            # The legend goes on the title row when it fits, else on rows of
+            # its own under the title (as many as leave a usable plot)
+            legend = entries.map { |label, rgb, kind| [glyph(kind), label, rgb] }
+            title_w = @chart.title ? @chart.title.length + 2 : 0
+            if !header || legend.empty? || title_w + legend_width(legend) <= @w
+              legend_rows = nil
+            else
+              max_rows = [@h - 1 - (frame == :none ? 0 : 3) - 3, 0].max
+              legend_rows = wrap_legend(legend, max_rows)
+            end
             row += 1 if header
+            row += legend_rows.length if legend_rows
 
             notes = frame != :none && !coord.x.secondary_ticks.empty?
             bottom = frame == :none ? 0 : (frame == :ticks ? 1 : 2)
@@ -412,7 +424,7 @@ module MB
 
             compose(surface, plot_x, row, plot_w, plot_h)
 
-            draw_header(entries, coord, frame) if header
+            draw_header(legend, legend_rows, coord, frame) if header
             draw_y_axis(yticks, coord, plot_x, row, plot_h, frame, label_w) if left > 0
             draw_x_axis(xticks, coord, plot_x, row + plot_h, plot_w, frame, notes) if bottom > 0
             draw_colorbar(heat, plot_x + plot_w + 1, row, plot_h) if heat && cbar_w > 0
@@ -510,7 +522,7 @@ module MB
             end
           end
 
-          def draw_header(entries, coord, frame)
+          def draw_header(legend, legend_rows, coord, frame)
             x = @x
             title = @chart.title
             if title
@@ -518,27 +530,47 @@ module MB
               x += title.length + 2
             end
 
-            legend = entries.map { |label, rgb, kind| [glyph(kind), label, rgb] }
-            legend_w = legend.sum { |g, l, _| g.length + 1 + l.length + 2 } - 2
+            inline = legend_rows.nil? && !legend.empty?
+            legend_w = inline ? legend_width(legend) : 0
             ytitle = frame != :none ? coord.y.title : nil
-            if ytitle && x + ytitle.length + (legend.empty? ? 0 : legend_w + 2) <= @x + @w
+            if ytitle && x + ytitle.length + (inline ? legend_w + 2 : 0) <= @x + @w
               @cells.text(x, @y, ytitle, fg: @theme.muted)
               x += ytitle.length + 2
             end
 
-            return if legend.empty?
+            if inline
+              draw_legend_row(legend, @x + @w - legend_w, @y)
+            elsif legend_rows
+              legend_rows.each_with_index { |entries, i| draw_legend_row(entries, @x, @y + 1 + i) }
+            end
+          end
 
-            lx = @x + @w - legend_w
-            if lx < x
-              # Drop entries that don't fit
-              legend.pop while !legend.empty? && @x + @w - (legend.sum { |g, l, _| g.length + 1 + l.length + 2 } - 2) < x
-              lx = @x + @w - (legend.sum { |g, l, _| g.length + 1 + l.length + 2 } - 2)
+          def draw_legend_row(entries, x, y)
+            entries.each do |g, l, rgb|
+              @cells.text(x, y, g, fg: rgb)
+              @cells.text(x + g.length + 1, y, l, fg: @theme.ink)
+              x += g.length + 1 + l.length + 2
             end
-            legend.each do |g, l, rgb|
-              @cells.text(lx, @y, g, fg: rgb)
-              @cells.text(lx + g.length + 1, @y, l, fg: @theme.ink)
-              lx += g.length + 1 + l.length + 2
+          end
+
+          def legend_width(legend)
+            legend.sum { |g, l, _| g.length + 1 + l.length + 2 } - 2
+          end
+
+          # Legend entries in rows of the panel's width (at most +max_rows+;
+          # entries past them are left out)
+          def wrap_legend(legend, max_rows)
+            rows = []
+            current = []
+            legend.each do |entry|
+              if !current.empty? && legend_width(current + [entry]) > @w
+                rows << current
+                current = []
+              end
+              current << entry
             end
+            rows << current unless current.empty?
+            rows.first(max_rows)
           end
 
           def glyph(kind)

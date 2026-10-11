@@ -88,10 +88,19 @@ RSpec.describe(MB::Sound::Plot::Text) do
     expect(text).to include('frequency (Hz)', '1k')
   end
 
-  it 'drops legend entries that do not fit' do
-    c = plot.chart(title: 'a long title for a narrow chart') { line [1, 2], label: 'first series'; line [2, 1], label: 'second series' }
-    lines = c.lines(width: 50, height: 8, color: :none)
+  it 'wraps legends that do not fit beside the title onto rows of their own' do
+    c = plot.chart(title: 'a long title for a narrow chart') { line [1, 2], label: 'first series'; line [2, 1], label: 'second series'; line [1, 1], label: 'third' }
+    lines = c.lines(width: 34, height: 12, color: :none)
     expect(lines[0]).to start_with('a long title')
-    expect(lines[0]).not_to include('second series')
+    expect(lines[1]).to start_with('━━ first series  ━━ second series')
+    expect(lines[2]).to start_with('━━ third')
+    expect(lines.length).to eq(12)
+  end
+
+  it 'leaves out legend rows that would crowd out the plot' do
+    c = plot.chart(title: 'title') { 8.times { |i| line [i, i + 1], label: "series #{i}" } }
+    lines = c.lines(width: 20, height: 9, color: :none)
+    expect(lines.count { |l| l.start_with?('━━') }).to eq(2)
+    expect(lines.length).to eq(9)
   end
 end
