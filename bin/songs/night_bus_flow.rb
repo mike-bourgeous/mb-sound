@@ -5,33 +5,44 @@
 # arranged mostly by adding and removing parts in 8-bar blocks.  The form is
 # written once as a `flow` block; the performer steers it live with loop!,
 # onward, and finish, a weighted `pick` decides whether the first drop comes
-# around once more, and a `goto` keeps the second drop rolling.
+# around once more, and a `goto` keeps the second drop rolling.  Knobs
+# (phase 3) move the sound: :cut (the hook's lowpass), :space (its delay
+# send), :air (a master highpass), and :morph (a crossfader between
+# snapshots), turned by scenes, sections, and the performer.
 #
 #   intro     8  drums only: tight kick, late-feeling clap, offbeat hats,
 #                a soft/accented shaker; a clap roll turnaround every 8
 #                bars, toms every 4 in between
-#   groove    8  the hook enters through a low lowpass, offbeat sub on the
-#                root; the performer types `loop!` (it plays twice), then
-#                `onward`
+#   groove    8  the hook enters through a low lowpass (cut: 700), offbeat
+#                sub on the root; the performer types `loop!` (it plays
+#                twice), opens the filter a little on the repeat (`turn
+#                :cut, 1300, over: 4`), then `onward`
 #   build     8  thinned drums, one held E5 for tension, the hook opening out
-#                of its filter; a noise riser (a resonant highpass sweep and
-#                a slight swell) in the last 4 bars (a fill)
+#                of its filter (cut: [3200, from: 500, over: 8]); a noise
+#                riser (a resonant highpass sweep and a slight swell) in the
+#                last 4 bars (a fill)
 #   gap       1  one 2/4 bar: everything rings out (scene drops ring by
 #                default) for a half-bar breath; `meter 2, 4` in its scene
 #   drop      8  dry: kick, punchy saw bass rolling against the kick, the
 #                vocal-ish hook unfiltered, a crash on the downbeat
-#   pickup    8  ride and an octave pluck answer the hook, a static pad;
-#                then a seeded `pick`: usually on to the breakdown, one time
-#                in four the drop and pickup once more
-#   breakdown 8  low end cut on the master (highpass "cut"), hats keep going,
-#                the hook alone washing into its dotted-eighth delay
+#   pickup    8  ride and an octave pluck answer the hook, a static pad
+#                (leading the beat by its attack); the performer snaps the
+#                knobs (`snap :drop`) and throws the hook's delay over the
+#                last 2 bars (`turn :space, 0.55, over: 2`); then a seeded
+#                `pick`: usually on to the breakdown, one time in four the
+#                drop and pickup once more
+#   breakdown 8  low end out on the master (air: [200, over: 1.beat]), hats
+#                keep going, the hook alone washing into its dotted-eighth
+#                delay, its filter opening again from 900 Hz
 #   lift      8  a second hook (a fast 4-note pluck arp) fades in, riser
 #   drop2     8  the "anti-drop": bass on the root in the hook's rhythm,
 #                no melody, the arp up high; low end back
 #   pickup2   8  ride, arp, pad turnaround; `goto :rolling` (a label before
 #                drop2) keeps it going until the performer types `finish`
-#   outro     8  the hook through its filter again, simple drums; the end
-#                of the form rings everything out
+#   outro     8  the hook through its filter again, simple drums, the knobs
+#                morphing from the drop's snapshot back to the intro's
+#                (`xfade :drop, :dark, :morph; turn :morph, 1, over: 8`);
+#                the end of the form rings everything out
 #
 # Usage:
 #     bin/songs/night_bus_flow.rb                 # plays live in the background session
@@ -58,6 +69,14 @@
 #     markers                    # sections and labels (and your own markers) by bar
 #     scene :hush, others: :cut; go :hush   # cut everything (scenes ring out unless others: :cut)
 #     take.form                  # the form as played, as a flow block to paste
+#     knobs                      # => {cut: "2600 Hz (200..6000 exp)", space: ..., ...}
+#     turn :cut, 400, over: 2.bars, curve: :smooth, on: :bar   # sweep the hook down
+#     turn :cut, tween([400, 4000, 900], 2.bars)   # follow a tween until turned again
+#     move :air, 300; undo       # (move is turn) the low end out, then back at the next bar
+#     snap :mine; recall :drop, over: 1   # remember, then morph back to the drop's knobs
+#     turn :morph, 0, over: 4    # after the outro's xfade: back toward the drop
+#     learn :cut                 # the next MIDI controller you move takes the hook filter
+#     track(:drums, nudge: 6.ms) { ... }   # pull the kit late (see last_stop's drum_nudge:)
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -221,14 +240,25 @@ module MB::Sound
   # (each section of the form launches the scene of its name).  With
   # +perform: true+, also plays the form and schedules the performer's
   # commands.  Returns the clips.
-  def self.last_stop(perform: false, seed: 1)
+  #
+  # +pad_lead+ is the pad track's lead: (:attack by default; nil for
+  # none), +drum_nudge+ the drum track's nudge: (e.g. 6.ms to pull the
+  # kit late against the bass; nil for none).
+  def self.last_stop(perform: false, seed: 1, pad_lead: :attack, drum_nudge: nil)
     c = last_stop_clips
     k = last_stop_kits
     bpm 126
-    master { |mix| mix.softclip(0.5, 0.97) }
     quant 1
 
-    track(:drums) { |kit|
+    # Knobs (phase 3): named values the scenes, sections, and performer turn
+    knob :cut, 700, range: 200..6000, curve: :exp, unit: 'Hz' # the hook's lowpass
+    knob :space, 0.15, range: 0..0.6                         # the hook's delay send
+    knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'   # a master highpass (the breakdown's "cut")
+    knob :morph, 0                                           # a crossfader between snapshots
+
+    master { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.8).softclip(0.5, 0.97) }
+
+    track(:drums, nudge: drum_nudge) { |kit|
       tr808(
         kit,
         kick: { tune: 50, decay: 0.5, tone: 0.4 }, clap: { decay: 0.25, tone: 0.6 },
@@ -238,30 +268,31 @@ module MB::Sound
     }
     track(:sub) { |clip| last_stop_sub(clip) }
     track(:bass) { |clip| last_stop_bass(clip) }
-    track(:hook) { |clip| last_stop_hook(clip) }
-    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: 700, delay: 0.15) }
-    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: tween([500, 3200], 8.bars, log: true, loop: false), delay: 0.2) }
-    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: tween([900, 2600], 8.bars, log: true, loop: false), delay: 0.4, feedback: 0.55, level: 0.45) }
+    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: knob(:space)) }
+    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.15) }
+    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.2) }
+    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.4, feedback: 0.55, level: 0.45) }
     track(:answer) { |clip| last_stop_pluck(clip, level: 1.3) }
     track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.68) }
     track(:tension) { |clip| last_stop_tension(clip) }
-    track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
+    # The pad leads the beat by its 0.6 s attack, so each swell peaks on
+    # the bar line (maintainer, 2026-10-11)
+    track(:pad, lead: pad_lead) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
     track(:riser, fade: 1/8r) { |_clip| last_stop_riser } # a tween, not notes: fades instead of ringing
 
     # Scenes: one focus per section (whole states; tracks left out ring out)
     scene :intro, drums: k[:intro]
-    scene :groove, drums: k[:groove], sub: c[:sub], hook_far: c[:hook]
-    scene :build, drums: k[:build], tension: c[:tension], hook_rise: c[:hook]
+    # Knob values in scenes turn as the scene launches: a number, or
+    # [value, over:, curve:, from:] for a sweep
+    scene :groove, drums: k[:groove], sub: c[:sub], hook_far: c[:hook], cut: 700
+    scene :build, drums: k[:build], tension: c[:tension], hook_rise: c[:hook], cut: [3200, from: 500, over: 8, curve: :smooth]
     scene(:gap) { meter 2, 4 }                                     # a half-bar breath
-    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook]) { meter 4, 4 }
+    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook], cut: 2600, space: 0.25, air: 20) { meter 4, 4 }
     scene :pickup, drums: k[:pickup], bass: c[:roll], hook: c[:hook], answer: c[:hook_hi], pad: c[:pad]
-    scene(:breakdown, drums: k[:cut], hook_wash: c[:hook], pad: c[:pad]) {
-      master { |mix| mix.filter(:highpass, cutoff: 200, quality: 0.8).softclip(0.5, 0.97) } # the "cut"
-    }
+    scene :breakdown, drums: k[:cut], hook_wash: c[:hook], pad: c[:pad],
+      cut: [2600, from: 900, over: 8, curve: :smooth], air: [200, over: 1.beat] # the "cut": low end out
     scene :lift, drums: k[:cut], hook_wash: c[:hook], arp: c[:arp], pad: c[:pad]
-    scene(:drop2, drums: k[:drop], bass: c[:root_hook], arp: c[:arp]) {
-      master { |mix| mix.softclip(0.5, 0.97) } # low end back
-    }
+    scene :drop2, drums: k[:drop], bass: c[:root_hook], arp: c[:arp], air: 20 # low end back
     scene :pickup2, drums: k[:pickup], bass: c[:root_hook], arp: c[:arp], pad: c[:pad]
     scene :outro, drums: k[:outro], hook_far: c[:hook]
     scene :riser, riser: c[:bar], others: :keep # a fill: adds the riser
@@ -302,9 +333,23 @@ module MB::Sound
 
     say[1, 'flow do ... end   # the form starts']
     last_stop_form(seed: seed)
+    at_bar(2) { say[2, 'snap :dark   # the intro\'s knobs']; snap :dark }
     at_bar(12) { say[12, 'loop!   # the groove again']; loop! }
+    at_bar(17) { say[17, 'turn :cut, 1300, over: 4, curve: :smooth   # open the far hook on the repeat']; turn :cut, 1300, over: 4, curve: :smooth }
     at_bar(21) { say[21, 'onward']; onward }
-    at_marker(:pickup) { say['pickup', "flow   # => #{Session.current.arrangement.playback}"] }
+    at_marker(:pickup) {
+      say['pickup', "flow   # => #{Session.current.arrangement.playback}"]
+      say['pickup', 'snap :drop   # the drop\'s knobs']
+      snap :drop
+      session = Session.current
+      bar = session.transport.bar_at(session.now).floor + 6
+      at_bar(bar) { say[bar, 'turn :space, 0.55, over: 2, curve: :smooth   # a delay throw']; turn :space, 0.55, over: 2, curve: :smooth }
+    }
+    at_marker(:outro) {
+      say['outro', 'xfade :drop, :dark, :morph; turn :morph, 1, over: 8   # back to the dark']
+      xfade :drop, :dark, :morph
+      turn :morph, 1, over: 8
+    }
     at_marker(:pickup2) {
       session = Session.current
       bar = session.transport.bar_at(session.now).floor + 3

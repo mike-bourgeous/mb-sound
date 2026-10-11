@@ -155,9 +155,10 @@ module MB
           end
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
+          # A crossfader knob in the snapshots stays where it is
+          names -= [source.name] if source.is_a?(GraphNode::Knob)
           names.map { |n|
             k = knob!(n)
-            raise ArgumentError, "Knob #{n.inspect} can't crossfade by itself" if source.is_a?(GraphNode::Knob) && source.equal?(k)
 
             knob_change(k, time, { xfade: [a, b], amount: source.is_a?(Numeric) ? source : GraphNode::Knob.label_of(source), over: over }.compact) { |kn, frame, t|
               va = snapshot_value(a, kn) || kn.value
@@ -199,10 +200,10 @@ module MB
         # A listing of the knobs: name => "800 Hz (100..8000 exp) cc74 -> 3000".
         def knob_info
           knobs.transform_values { |k|
-            parts = [k.value_string, "(#{MB::M.sigfigs(k.range.begin, 4)}..#{MB::M.sigfigs(k.range.end, 4)}#{k.spec.curve == :exp ? ' exp' : ''})"]
+            parts = [k.value_string, "(#{GraphNode::Knob.number(k.range.begin)}..#{GraphNode::Knob.number(k.range.end)}#{k.spec.curve == :exp ? ' exp' : ''})"]
             parts << "cc#{k.cc}" if k.cc
             parts << 'learning' if k.learning?
-            parts << "-> #{MB::M.sigfigs(k.target, 4)}" if k.mode == :ramp
+            parts << "-> #{GraphNode::Knob.number(MB::M.sigfigs(k.target, 4))}" if k.mode == :ramp
             parts << "following #{k.instance_variable_get(:@segment).label}" if k.mode == :follow
             parts.join(' ')
           }
