@@ -552,9 +552,14 @@ module MB
         end
 
         # Returns a clip whose events play only outside fills (outside fill
-        # +name+ if given; see #fill).
+        # +name+ if given; see #fill).  Events that already carry a fill
+        # mark keep it, so a fill layered onto a row (Kit#fill) stays a fill
+        # when the row is marked afterwards (maintainer, 2026-10-11; the
+        # Night Bus clap roll played in every bar because nofill re-marked
+        # it).
         def nofill(name = nil)
-          map_clip { |e| e.with(fill_mark: Clip.check_fill(:nofill, name)) }
+          mark = Clip.check_fill(:nofill, name)
+          map_clip { |e| e.fill_mark ? e : e.with(fill_mark: mark) }
         end
 
         # Validates a fill mark for #fill and #nofill, returning [mode,

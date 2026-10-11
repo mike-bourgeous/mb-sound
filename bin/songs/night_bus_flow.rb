@@ -115,7 +115,9 @@ module MB::Sound
   # downbeats and pickups).
   def self.last_stop_kits
     # (nofill before fill: marking the clap row :nofill after layering
-    # the roll onto it made the roll play in every bar but the turn's)
+    # the roll onto it made the roll play in every bar but the turn's;
+    # since omnibus4 Clip#nofill keeps existing fill marks, so either order
+    # works)
     turn = ->(kit) {
       kit
         .nofill(:clap, :open_hat, name: :turn)

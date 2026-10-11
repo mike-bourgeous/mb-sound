@@ -635,6 +635,21 @@ RSpec.describe(MB::Sound::Form) do
       expect(kit[:kick].looping?).to eq(true)
     end
 
+    it 'keeps a layered fill roll a fill when the row is marked nofill afterwards' do
+      # The Night Bus footgun: the roll's notes became :nofill and played in
+      # every bar but the fill
+      kit = MB::Sound.grid(16, clap: '....X.......X...')
+        .fill(:turn, clap: MB::Sound.grid(16, '....X...x.x.xXXX', value: 39))
+        .nofill(:clap, name: :turn)
+      marks = kit[:clap].events.map { |e| [e.start, e.fill_mark] }
+      expect(marks.count { |_, m| m == [:fill, :turn] }).to eq(7)
+      expect(marks.count { |_, m| m == [:nofill, :turn] }).to eq(2)
+      clip = kit[:clap].loop
+      ons = ->(fills) { clip.edges(0, 1, fills: ->(_pos) { fills }).count { |_, t| t == :on } }
+      expect(ons.([])).to eq(2) # plain bars: the backbeat only
+      expect(ons.([:turn])).to eq(7) # the fill bar: the roll only
+    end
+
     it 'keeps or drops fill-marked notes by the fills playing' do
       clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::D4.fill, MB::Sound::E4.fill(:big), MB::Sound::F4.nofill).n4
       notes = ->(fills) { clip.edges(0, 1, fills: ->(_pos) { fills }).select { |_, t| t == :on }.map { |_, _, e| e.value } }
