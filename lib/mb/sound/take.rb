@@ -25,8 +25,9 @@ module MB
     class Take
       # A console line: its +id+, the Ruby +code+, the Stamp where it was
       # +issued+, and the timeline positions (+lands+) where each change it
-      # made landed, in the order they were made.
-      Line = Struct.new(:id, :code, :issued, :lands, :skipped, keyword_init: true)
+      # made landed, in the order they were made, and the +epoch+ (how many
+      # seeks had landed since the take started; see Session#epoch).
+      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, keyword_init: true)
 
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
@@ -82,6 +83,7 @@ module MB
         @next_id = 0
         @mutex = Mutex.new
         @start = start_state
+        @start_epoch = (@session || Session.default).epoch
       end
 
       # The session whose changes this take records: the one given to
@@ -100,7 +102,7 @@ module MB
       def begin_line(code)
         line = @mutex.synchronize {
           @next_id += 1
-          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code))
+          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch)
         }
         @mutex.synchronize { @lines << line }
         Thread.current[:mb_sound_take_line] = [self, line]
@@ -219,13 +221,14 @@ module MB
           out << "  #{k}: #{ruby_value(v)},\n"
         end
         out << "  ends: #{ruby_value(session.transport.position)},\n"
+        out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
         out << ") do |r|\n"
         lines.each do |l|
           if l.skipped
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
             next
           end
-          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'\n"
+          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}\n"
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
         end
@@ -236,8 +239,8 @@ module MB
       # A Replay of this take (see Replay), as #save would write it.
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
-        Replay.new(**@start.except(:time), ends: session.transport.position) do |r|
-          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code) }
+        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch) do |r|
+          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
         end
       end
 

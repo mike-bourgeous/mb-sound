@@ -354,14 +354,16 @@ RSpec.describe(MB::Sound::Form) do
         c 8
       end
       run(bar + 1600)
-      d = within { MB::Sound.skip }
-      expect(d.section).to eq(:b)
-      expect(d.at.pos).to eq(2)
+      e = within { MB::Sound.skip }
+      expect(e.to_s).to eq('skip :form lands 3:1 (queued)')
+      expect(set.playback.upcoming.section).to eq(:b)
       data = run(bar)
       expect(changes(data)).to eq([[0, 48], [bar - 1600, 50]])
+      expect(session.journal.changes.find { |x| x.kind == :skip }.status).to eq(:landed)
+      expect(session.undo_steps.map(&:label)).not_to include(match(/skip/)) # not an undo step
 
-      d = within { MB::Sound.seek(:a) } # the timeline back to a (bar 1)
-      expect(d.to_s).to eq('next :a at 1:1')
+      e = within { MB::Sound.seek(:a) } # the timeline back to a (bar 1), now
+      expect(e.to_s).to match(/\Aseek :a landed 3:1\.0\d+\z/)
       expect(transport.position).to eq(0)
       data = run_bars(2)
       expect(set.playback.history).to eq([:a, :b, :a])
@@ -435,8 +437,7 @@ RSpec.describe(MB::Sound::Form) do
         c 2
       end
       run(800)
-      d = within { MB::Sound.seek(:mid) } # not reached yet: its place in the form (bar 3)
-      expect(d.to_s).to eq('next :b at 3:1')
+      within { MB::Sound.seek(:mid) } # not reached yet: its place in the form (bar 3)
       expect(transport.position).to eq(2)
       data = run_bars(1)
       expect(changes(data)).to eq([[0, 50]])
@@ -445,12 +446,74 @@ RSpec.describe(MB::Sound::Form) do
       # c's launch at bar 4 is already queued (the scheduler looks ahead):
       # seeking cancels it
       expect(session.queued.map(&:subject)).to include(:c)
-      d = within { MB::Sound.seek(:a) }
-      expect(d.to_s).to eq('next :a at 1:1')
+      within { MB::Sound.seek(:a) }
       expect(transport.position).to eq(0)
       data = run_bars(5)
       expect(changes(data)).to eq([[0, 48], [2 * bar, 50], [3 * bar, 52]])
       expect(set.playback.history).to eq([:a, :b, :a, :b, :c])
+    end
+
+    it 'seeks at launch points through the change queue: exact frames at any buffer size, undoable' do
+      sizes = { 800 => [800], 367 => [367, 368] }
+      results = sizes.transform_values { |list|
+        s2 = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        s2.arrangement.track(:x) { |c| c.notes.number }
+        [:a, :b].each_with_index { |n, i| s2.arrangement.scene(n, x: note(48 + 2 * i)) }
+        out = []
+        frames = 0
+        k = 0
+        step = ->(n) { out << s2.process_buffer(n)[0].dup; frames += n }
+        MB::Sound::Session.with_context(session: s2) {
+          MB::Sound.flow(seed: 1, on: :now) do
+            label :top
+            a 2
+            b 2
+          end
+          step.(list[(k += 1) % list.length]) while frames < 2.5 * bar
+          e = MB::Sound.seek(:top, at: MB::Sound.bar(3, beat: 4)) # inside a buffer at both sizes
+          expect(e.to_s).to eq('seek :top lands 3:4 (queued)')
+          step.(list[(k += 1) % list.length]) while frames < 3 * bar
+          u = MB::Sound.undo(at: MB::Sound.bar(1, beat: 3), on: :now) # back to bar 3 beat 4, in b's pass
+          expect(u.to_s).to start_with('undo seek :top')
+          step.(list[(k += 1) % list.length]) while frames < 5 * bar
+        }
+        h = s2.arrangement.playback.history
+        s2.close
+        [out.reduce(:concatenate), h]
+      }
+
+      data, history = results[800]
+      expect(history).to eq([:a, :b, :a]) # undo resumed b's pass (not a new pass)
+      seek = (2.75 * bar).to_i
+      undo = seek + bar / 2 # bar 1 beat 3 after the seek
+      expect(changes(data)).to eq([[0, 48], [2 * bar, 50], [seek, 48], [undo, 50]])
+      other = results[367][0]
+      n = [other.length, data.length].min
+      expect(changes(other[0...n])).to eq(changes(data[0...n]))
+      expect((other[0...n] - data[0...n]).abs.max).to eq(0)
+      expect(results[367][1]).to eq(history)
+    end
+
+    it 'carries on from weighted gotos with next: (or nil), and reserves the label :next' do
+      setup_scenes(:a, :b)
+      f = described_class.build { label :top; a 1; goto top: 1, nil => 3; b 1 }
+      expect(f.order[2].target).to eq({ top: 1, next: 3 })
+      expect(f.to_ruby).to include('goto top: 1, next: 3')
+      expect { described_class.build { label :next; a 1 } }.to raise_error(ArgumentError, /label :next is reserved/)
+
+      histories = (1..8).map { |seed|
+        session.arrangement.playback&.stop
+        flow(seed: seed) do
+          label :top
+          a 1
+          goto top: 1, next: 1
+          b 1
+        end
+        run_bars(4)
+        set.playback.history.dup
+      }
+      expect(histories.map(&:first)).to all(eq(:a))
+      expect(histories.map { |h| h.index(:b) }.uniq.length).to be > 1 # sometimes on at once, sometimes later
     end
 
     it 'previews decisions that depend on chance as open, and checks what goto Procs return' do

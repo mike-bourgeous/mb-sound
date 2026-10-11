@@ -101,7 +101,7 @@ RSpec.describe(MB::Sound::Take) do
     expect((replay(r, [367, 368])[0...live.length] - live).abs.max).to be < 1e-6
   end
 
-  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, skip, a meter change) bit for bit' do
+  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit' do
     lines = {
       0 => [
         'k = grid(16, kick: "x...x...x...x...").fill(snare: grid(16, "....x.x.xxxxxxxx", value: 38)).loop',
@@ -124,7 +124,9 @@ RSpec.describe(MB::Sound::Take) do
       820 => ['goto :chorus'],
       1000 => ['meter 3, 4'],   # from bar 10
       1100 => ['goto :c'],      # a label: the chorus next
-      1250 => ['skip'],
+      1180 => ['seek :v, on: :bar'], # the timeline back to the verse's last start (bar 3)
+      1290 => ['undo'],         # back to bar 12 (a seek too) at the next bar line
+      1420 => ['skip in: 1.beat, on: :beat'], # (not an undo step)
     }
     run = lambda {
       bnd = MB::Sound::Take.console_binding
@@ -141,8 +143,12 @@ RSpec.describe(MB::Sound::Take) do
     expect(live.abs.max).to be > 0.1
     history = session.arrangement.playback.history
     # loop! (verse x3), goto :chorus, goto :c (the label: chorus again),
-    # the pick's bridge, then verse twice (skip; the weighted goto drew :v)
-    expect(history).to eq([:intro, :verse, :verse, :verse, :chorus, :chorus, :bridge, :verse, :verse])
+    # seek :v (the verse from bar 3), undo (back into the chorus at bar
+    # 12, not a new pass), the pick's bridge, skip
+    expect(history).to eq([:intro, :verse, :verse, :verse, :chorus, :chorus, :verse, :bridge])
+    timeline = session.journal.changes.select { |e| [:seek, :skip, :restore].include?(e.kind) }.map(&:to_s)
+    expect(timeline).to eq(['seek :v landed 12:1', 'restore :timeline landed 4:1', 'skip :form landed 13:1'])
+    expect(t.to_ruby).to include("ends_epoch: 2,\n", ", epoch: 1\n")
     expect(session.transport.meters.length).to eq(2)
 
     r = t.replay

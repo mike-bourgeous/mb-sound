@@ -46,6 +46,10 @@ module MB
       # Names the flow builder uses for its own steps (not section names).
       STEP_NAMES = [:repeat, :fill, :label, :goto, :pick].freeze
 
+      # The goto target that carries on to the next step (`goto top: 3,
+      # next: 1`); not a label name.
+      NEXT = :next
+
       # The section options (see Section).
       SECTION_OPTIONS = [:times, :fill, :scene, :fade].freeze
 
@@ -158,8 +162,9 @@ module MB
       # - Repeat: a group of entries (+steps+) played +count+ times.
       # - Label: a named position (+name+) that gotos jump to; takes no time.
       # - Goto: jumps to a label (+target+: a label, a Hash from labels to
-      #   weights for a random one, or a Proc given a Form::State that
-      #   returns a label or nil to carry on), every time it is reached, or
+      #   weights for a random one, where :next means carry on to the next
+      #   step, or a Proc given a Form::State that returns a label, or nil
+      #   or :next to carry on), every time it is reached, or
       #   +times+ times and then falls through once (its count then starts
       #   over, so a goto inside a bigger loop repeats its own loop on every
       #   pass of the bigger one).
@@ -338,6 +343,7 @@ module MB
           when Label
             raise ArgumentError, "Label names must be Symbols (got #{e.name.inspect})" unless e.name.is_a?(Symbol)
             raise ArgumentError, "label #{e.name.inspect} is also a section name; give the label its own name (e.g. :#{e.name}_top)" if @sections.key?(e.name)
+            raise ArgumentError, 'label :next is reserved (`goto top: 3, next: 1` means carry on to the next step); give the label another name (e.g. :onward)' if e.name == NEXT
           when Goto
             Form.check_goto(e.target, e.times)
           else
@@ -371,6 +377,7 @@ module MB
                     else []
                     end
           targets.each do |t|
+            next if t == NEXT
             unless labels.key?(t)
               hint = @sections.key?(t) ? "\n(:#{t} is a section; put `label :#{t}_top` (any new name) before it and goto that)" : Form.suggest(t, labels.keys)
               raise ArgumentError, "goto #{t.inspect}: no label #{t.inspect} in the form#{hint}"

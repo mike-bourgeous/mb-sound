@@ -214,7 +214,7 @@ module MB
               restores << change(c.kind, c.subject, c.time && c.time > now ? c.time : time, data: c.entry.data, undoes: c.seq, starts: c.starts, &c.action)
             end
 
-            landed.reject { |c| Changes::NO_SNAPSHOT_KINDS.include?(c.kind) }.group_by(&:subject).each do |subject, list|
+            landed.reject { |c| Changes::NO_SNAPSHOT_KINDS.include?(c.kind) }.group_by { |c| snapshot_subject(c) }.each do |subject, list|
               first = list.min_by(&:seq)
               restores << restore_change(subject, first, time)
             end
@@ -248,6 +248,10 @@ module MB
             return change(:restore, :strip, time, data: {}, undoes: original.seq) { |_t| restore_strip(original.before) }
           end
 
+          if subject == :timeline
+            return change(:restore, :timeline, time, data: {}, undoes: original.seq) { |_t| restore_timeline(original.before) }
+          end
+
           state = original.before
           starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
           change(:restore, subject, time, data: {}, undoes: original.seq, starts: starts) { |t|
@@ -259,6 +263,7 @@ module MB
         # Called with @render_lock held.
         def undo_snapshot(subject)
           return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
+          return timeline_snapshot if subject == :timeline
 
           if subject == :master
             chain = @mutex.synchronize { @master_chains&.last }

@@ -11,6 +11,7 @@ require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
 require_relative 'session/markers'
+require_relative 'session/seeks'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
@@ -57,6 +58,7 @@ module MB
       include Master
       include Tails
       include ClipSwaps
+      include Seeks
       include GraphView
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
@@ -467,8 +469,8 @@ module MB
       # Schedules the block to run at +time+ (whole notes on the timeline),
       # and then every +period+ whole notes if given.  Returns an id for
       # #cancel.  See Scheduler for how and when blocks run.
-      def schedule(time, period: nil, description: nil, &block)
-        @scheduler.schedule(time, period: period, description: description, &block)
+      def schedule(time, period: nil, description: nil, epoch: nil, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -599,43 +601,20 @@ module MB
         started = MB::U.clock_now
 
         mix = @render_lock.synchronize {
-          @scheduler.apply_timed_changes
-
-          per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
-          from = @transport.position
-          to = from + count * per_sample
-
-          # If the timeline was seeked, move every running graph's clips there,
-          # and move repeating schedules to their next time
-          seeked = @generation != @transport.generation
-          if seeked
-            @generation = @transport.generation
-            @mutex.synchronize { @players.values }.each do |p|
-              p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
-            end
-            @scheduler.seeked(from)
+          # A seek (or its undo) landing inside the buffer splits it: the
+          # frames before it, then the rest from the new position (see
+          # Seeks), so it lands on the same frame at any buffer size
+          parts = []
+          remaining = count
+          while remaining > 0
+            @scheduler.apply_timed_changes
+            commit_due_seeks unless @changes.empty?
+            per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
+            parts << render_span(n, per_sample)
+            remaining -= n
           end
-
-          @scheduler.dispatch(from, to, playing: !idle?)
-
-          # Changes landing in this buffer, after scheduled blocks (which may
-          # queue some for this buffer)
-          commit_due(from, to, per_sample)
-
-          players = @mutex.synchronize { @players.values }
-
-          mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
-          players.each do |p|
-            render_player(p, mix, from, to, per_sample, count)
-          end
-
-          playing = !players.empty? || queued_start?
-          @transport.advance(to - from) if playing
-          mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
-
-          @frame += count
-          @transport_record = transport_record_for(playing)
-          mix
+          parts.length == 1 ? parts[0] : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
 
         # How busy rendering is (before the output blocks), for deciding
@@ -648,6 +627,48 @@ module MB
         call_taps(mix)
         mix
       end
+
+      # Renders +count+ frames (one span of #process_buffer): scheduled
+      # blocks, changes landing in the span, players, and the master chain.
+      # Advances the timeline and the frame counter.  Returns the mix.
+      # Called with the render lock held.
+      def render_span(count, per_sample)
+        from = @transport.position
+        to = from + count * per_sample
+
+        # If the timeline was seeked, move every running graph's clips there,
+        # and move repeating schedules to their next time
+        seeked = @generation != @transport.generation
+        if seeked
+          @generation = @transport.generation
+          @mutex.synchronize { @players.values }.each do |p|
+            p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
+          end
+          @scheduler.seeked(from)
+        end
+
+        @scheduler.dispatch(from, to, playing: !idle?)
+
+        # Changes landing in this span, after scheduled blocks (which may
+        # queue some for it)
+        commit_due(from, to, per_sample)
+
+        players = @mutex.synchronize { @players.values }
+
+        mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
+        players.each do |p|
+          render_player(p, mix, from, to, per_sample, count)
+        end
+
+        playing = !players.empty? || queued_start?
+        @transport.advance(to - from) if playing
+        mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
+
+        @frame += count
+        @transport_record = transport_record_for(playing)
+        mix
+      end
+      private :render_span
 
       # Stops the background and scheduler threads and closes the output.
       def close

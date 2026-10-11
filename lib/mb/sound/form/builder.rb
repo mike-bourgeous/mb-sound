@@ -18,7 +18,8 @@ module MB
       # - `label :top`: a target for goto (takes no time; also a marker, so
       #   `seek :top` and `at_marker(:top)` work).
       # - `goto :top` (always), `goto :top, times: 2` (twice, then on),
-      #   `goto a: 3, b: 1` (a weighted random label), `goto ->(f) { ... }`
+      #   `goto a: 3, b: 1` (a weighted random label; `goto top: 3, next: 1`
+      #   carries on one time in four), `goto ->(f) { ... }`
       #   (a Proc given a Form::State, returning a label or nil to carry on).
       # - `pick chorus: 3, drop: 1` / `pick :chorus, :drop` (even odds):
       #   plays one, then carries on.  For groups, a block of options:
@@ -104,12 +105,15 @@ module MB
         end
 
         # Jumps to a label: +target+ is a label, or give labels with weights
-        # for a random one (`goto a: 3, b: 1`), or a Proc given a
+        # for a random one (`goto a: 3, b: 1`; `next:` weighs carrying on to
+        # the next step: `goto top: 3, next: 1`), or a Proc given a
         # Form::State that returns a label (or nil to carry on).  With
         # +times:+ it jumps that many times, then falls through once (and
         # its count starts over); without, every time.
         def goto(target = nil, times: nil, **weights)
           ::Kernel.raise ::ArgumentError, 'goto takes a label or weighted labels, not both' if target && !weights.empty?
+          # nil => w is the same as next: w (carry on), like a Proc's nil
+          weights = weights.to_h { |k, w| [k.nil? ? NEXT : k, w] } if weights.key?(nil)
           target ||= weights unless weights.empty?
           ::Kernel.raise ::ArgumentError, 'goto needs a label (goto :top) or weighted labels (goto a: 3, b: 1)' if target.nil?
           Form.check_goto(target, times)

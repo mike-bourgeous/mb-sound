@@ -37,7 +37,7 @@ module MB
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are
         # separate).
-        NO_SNAPSHOT_KINDS = [:scene].freeze
+        NO_SNAPSHOT_KINDS = [:scene, :skip].freeze
 
         # The Journal of changes made to this Session.
         attr_reader :journal
@@ -203,7 +203,9 @@ module MB
         # after scheduled blocks run (they may queue changes for this
         # buffer).
         def commit_due(from, to, per_sample)
-          until @changes.empty? || @changes.first.time >= to
+          # Timeline changes wait for the start of a span (see
+          # #process_buffer and Seeks); later changes wait behind them
+          until @changes.empty? || @changes.first.time >= to || timeline_change?(@changes.first)
             c = @changes.shift
             idx = MB::M.max(((c.time - from) / per_sample).floor, 0)
             commit_change(c, land_pos: MB::M.max(c.time, from), land_frame: @frame + idx, commits: stamp(from, frame: @frame), immediate: false)
@@ -218,12 +220,12 @@ module MB
         def commit_change(c, land_pos:, land_frame:, commits:, immediate:)
           c.lands = stamp(land_pos, frame: land_frame)
           snapshot = !NO_SNAPSHOT_KINDS.include?(c.kind)
-          c.before = undo_snapshot(c.subject) if snapshot
+          c.before = undo_snapshot(snapshot_subject(c)) if snapshot
           @landing_frame = land_frame # for ramps that start on the landing sample (see Strip)
           # A past time (e.g. a scheduled block that ran late) is passed on,
           # so launch-aligned clips keep their anchor, as before the queue
           c.action.call(c.time || land_pos)
-          c.after = undo_snapshot(c.subject) if snapshot
+          c.after = undo_snapshot(snapshot_subject(c)) if snapshot
           @landing_frame = nil
 
           if immediate

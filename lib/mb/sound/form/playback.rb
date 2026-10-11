@@ -18,7 +18,8 @@ module MB
       # commit point's time re-decides (the fill scene it launched is
       # cancelled, since it hasn't landed yet): the boundary a control
       # applies to depends only on its time, so takes replay the same way.
-      # #skip leaves at the next bar line; #seek moves the timeline.
+      # #skip leaves at the next bar line (or a launch point); seeks move
+      # the timeline (see Session#seek and #seek_now).
       #
       # Chance (weighted gotos and picks) uses a random number generator
       # seeded from the form's +seed+ and the number of passes played, so
@@ -175,64 +176,94 @@ module MB
           control(after: :later) { @control = [:index, last_play] }
         end
 
-        # Leaves the current section at the next bar line, for what follows
-        # it in the flow (or +name+, a section or label as in #goto).
-        def skip(name = nil)
+        # Leaves the current section at the launch point +at+ (a
+        # LaunchPoint; the next bar line by default, and never the start of
+        # the pass), for what follows it in the flow (or +name+, a section
+        # or label as in #goto).  Journaled as a :skip change (not undoable).
+        # Returns the Change.
+        def skip(name = nil, at: nil, start_time: nil)
           target = name && control_target(name)
-          @lock.synchronize {
-            raise 'The form has ended' if @ended
-            now = @session.now
-            t = @transport.next_bar_line(now)
-            t = @transport.next_bar_line(now + 1/1024r) if t <= (@pass_start || @start_time)
-            return upcoming if @boundary && t >= @boundary && !name && !@committed
+          @session.with_render_lock {
+            @lock.synchronize {
+              raise 'The form has ended' if @ended
+              now = @session.now
+              point = at || LaunchPoint::NONE
+              t = start_time && !point.given? ? start_time.to_r : @session.send(:launch_time, point, [], default: :bar)
+              t = @transport.next_bar_line(now + 1/1024r) if t <= (@pass_start || @start_time)
+              t = @boundary if @boundary && t >= @boundary && !name && !@committed
 
-            control = @control
-            cut_short(t)
-            @looping = false
-            @control = target || control
-            @next = decide_unlocked(skip: true)
-            @control = nil
-            commit_effects(t)
-            upcoming
+              # Journaled for takes and listings, but not an undo step
+              c = @session.send(:without_command) { @session.change(:skip, name || :form, t, data: { to: name }) { |_t| } }
+              t = c.time if c.time
+              next c if @boundary && t >= @boundary && !name && !@committed
+
+              control = @control
+              cut_short(t)
+              @looping = false
+              @control = target || control
+              @next = decide_unlocked(skip: true)
+              @control = nil
+              commit_effects(t)
+              c
+            }
           }
         end
 
         # Moves the timeline to +name+ (a section or label of the form) and
         # plays the form from there: where it last started or is set to
         # start next, else where it sits in the form played straight
-        # through (gotos not taken, first pick options).  Returns the
-        # Decision (the section that plays there).
-        def seek(name)
+        # through (gotos not taken, first pick options).  The action of a
+        # :seek change (see Session#seek and Session::Seeks), so it runs
+        # with the render lock held, on the frame where the seek lands.
+        # Returns the Decision (the section that plays there).
+        def seek_now(name)
           target = control_target(name)
-          @session.with_render_lock {
-            @lock.synchronize {
-              raise 'The form has ended' if @ended
-              index, pos = @where[name] || [target[0] == :label ? @form.labels[name] : first_play(name), nil]
-              pos ||= score_positions[index]
+          @lock.synchronize {
+            raise 'The form has ended' if @ended
+            index, pos = @where[name] || [target[0] == :label ? @form.labels[name] : first_play(name), nil]
+            pos ||= score_positions[index]
 
-              # A pass whose start the scheduler ran ahead of time never played
-              @history.pop if @pass_start && @pass_start >= @transport.position
+            drop_pending_pass
+            @transport.fills.remove_owner(self, after: pos)
+            @looping = false
+            @transport.seek(pos)
 
-              @gen += 1
-              undo_commit
-              cancel_pass_changes
-              @transport.fills.remove_owner(self, after: pos)
-              @looping = false
-              @control = nil
-              @later = nil
-              @transport.seek(pos)
+            step = @program[index][0] == :label ? walk(index) : Step.new(index: index, section: name, pass: 1, counters: @counters, labels: [].freeze)
+            Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
+              set_label_markers(step.labels, pos)
+              if step.section
+                @counters = step.counters
+                begin_pass(step.index, step.section, 1, pos)
+              else
+                finish_form(pos)
+              end
+            }
+            Decision.new(section: step.section, at: @session.stamp(pos), committed: true)
+          }
+        end
 
-              step = @program[index][0] == :label ? walk(index) : Step.new(index: index, section: name, pass: 1, counters: @counters, labels: [].freeze)
-              Session.with_context(session: @session, time: pos, source: Session.context&.[](:source) || :set) {
-                set_label_markers(step.labels, pos)
-                if step.section
-                  @counters = step.counters
-                  begin_pass(step.index, step.section, 1, pos)
-                else
-                  finish_form(pos)
-                end
-              }
-              Decision.new(section: step.section, at: @session.stamp(pos), committed: true)
+        # What #restore_seek needs to put the form back in the pass playing
+        # now (nil if the form has ended or not started).
+        def seek_snapshot
+          @lock.synchronize {
+            next nil if @ended || @section.nil?
+            # A pass the scheduler started ahead of time isn't playing yet
+            next @prev_snapshot if @pass_start > @transport.position && @prev_snapshot
+            pass_snapshot
+          }
+        end
+
+        # Puts the form back in the pass of +snap+ (see #seek_snapshot),
+        # after the timeline moved back into it (undo of a seek).
+        def restore_seek(snap)
+          @lock.synchronize {
+            return if @ended
+            drop_pending_pass
+            @transport.fills.remove_owner(self, after: snap[:pass_start])
+            @counters = snap[:counters]
+            @looping = snap[:looping]
+            Session.with_context(session: @session, time: snap[:pass_start], source: Session.context&.[](:source) || :set) {
+              begin_pass(snap[:index], snap[:section], snap[:pass], snap[:pass_start], record: false)
             }
           }
         end
@@ -408,8 +439,9 @@ module MB
         # Starts pass +pass+ of section +name+ (instruction +index+) at
         # +time+: launches its scene, sets phrase fills and markers, and
         # schedules its commit point and boundary.  Runs in a scheduled
-        # block at +time+.
-        def begin_pass(index, name, pass, time)
+        # block at +time+.  +record+ false leaves the history alone (a pass
+        # resumed by undo).
+        def begin_pass(index, name, pass, time, record: true)
           @lock.synchronize {
             return if @ended
 
@@ -418,7 +450,7 @@ module MB
             @section = name
             @pass = pass
             @pass_start = time
-            @history << name
+            @history << name if record
             @committed = false
             @commit_record = nil
             @next = nil
@@ -431,7 +463,7 @@ module MB
             # bar), which the section's length in bars counts in
             scene = scene_of(sec)
             first_seq = @session.journal.next_seq
-            @arrangement.go(scene, on: :now, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
+            launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
             @pass_seqs = first_seq...@session.journal.next_seq
 
             @boundary = time + length_from(sec.length, time)
@@ -449,6 +481,28 @@ module MB
             boundary = @boundary
             schedule(boundary, "#{name} ends") { cross(boundary) if gen == @gen }
           }
+        end
+
+        # Drops what the form scheduled and launched ahead for the pass
+        # playing now (for a seek and its undo): the scheduled blocks, the
+        # commit, a scene launch still queued, and a pass whose start the
+        # scheduler ran early (it never played, so it leaves the history).
+        def drop_pending_pass
+          @history.pop if @pass_start && @pass_start >= @transport.position
+          @gen += 1
+          undo_commit
+          cancel_pass_changes
+          skips = @session.queued.select { |e| e.kind == :skip }.map(&:seq)
+          @session.cancel_changes(*skips) unless skips.empty?
+          @control = nil
+          @later = nil
+        end
+
+        # Launches scene +name+ now (the context's time).  The form's own
+        # launches aren't undo steps (undo is for the performer's commands;
+        # a section launch would otherwise be what `undo` takes back).
+        def launch(name, fade: nil)
+          @session.send(:without_command) { @arrangement.go(name, on: :now, fade: fade) }
         end
 
         # Cancels the current pass's scene launch if it hasn't landed yet
@@ -513,7 +567,7 @@ module MB
               record[:set_state] = @arrangement.undo_state
               record[:first_seq] = @session.journal.next_seq
               Session.with_context(session: @session, time: [@fill_start, time].max, source: :set) {
-                @arrangement.go(fname, on: :now)
+                launch(fname)
               }
               record[:last_seq] = @session.journal.next_seq
             end
@@ -555,10 +609,16 @@ module MB
           schedule(t, "#{@section} cut short") { cross(t) if gen == @gen }
         end
 
+        # The current pass for #seek_snapshot.
+        def pass_snapshot
+          { index: @index, section: @section, pass: @pass, pass_start: @pass_start, counters: @counters, looping: @looping }.freeze
+        end
+
         # At a boundary: the next pass, or the end.
         def cross(time)
           nxt = @lock.synchronize {
             commit unless @committed
+            @prev_snapshot = @section && pass_snapshot
             @counters = @next.counters
             @next
           }
@@ -656,7 +716,7 @@ module MB
                         goto_proc(target)
                       end
 
-              if label.nil?
+              if label.nil? || label == Form::NEXT
                 i += 1
               else
                 counters[i] = n + 1 if times
@@ -684,8 +744,8 @@ module MB
         # Calls a goto Proc, checking that it returns a label or nil.
         def goto_proc(target)
           label = target.call(state_unlocked)
-          return label if label.nil? || @form.labels.key?(label)
-          raise ArgumentError, "A goto Proc returned #{label.inspect}; return a label of the form (#{@form.labels.keys.map(&:inspect).join(', ')}) or nil to carry on#{Form.suggest(label, @form.labels.keys)}"
+          return label if label.nil? || label == Form::NEXT || @form.labels.key?(label)
+          raise ArgumentError, "A goto Proc returned #{label.inspect}; return a label of the form (#{@form.labels.keys.map(&:inspect).join(', ')}) or nil (or :next) to carry on#{Form.suggest(label, @form.labels.keys)}"
         end
 
         # The next appearance of section +name+ in the program after the

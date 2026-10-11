@@ -81,11 +81,15 @@ module MB
       end
       alias goto_section goto
 
-      # Leaves the section playing now at the next bar line, for what
-      # follows it in the flow (or +name+, a section or label as in #goto).
-      # Also available as #skip_section.
-      def skip(name = nil)
-        form_playback.skip(name)
+      # Leaves the section playing now at the next bar line (or a launch
+      # point: +on:+, +in:+, +at:+), for what follows it in the flow (or
+      # +name+, a section or label as in #goto).  Returns the :skip journal
+      # entry (skips aren't undo steps).  Also available as #skip_section.
+      def skip(name = nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        pb = form_playback
+        c = pb.skip(name, at: point)
+        Session.current.journal[c.seq] || c.entry
       end
       alias skip_section skip
 

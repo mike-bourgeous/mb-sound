@@ -19,7 +19,10 @@ module MB
       class Scheduler
         # A block scheduled to run at +time+ (whole notes on the timeline),
         # repeating every +period+ whole notes if +period+ is set.
-        Entry = Struct.new(:id, :time, :period, :block, :description, keyword_init: true)
+        # With an +epoch+, it runs only while Session#epoch is that number
+        # (the timeline between two seeks; see Session::Seeks), so a take's
+        # lines run at their time in the right pass over the timeline.
+        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, keyword_init: true)
 
         def initialize(session, realtime:, raise_errors:)
           @session = session
@@ -36,7 +39,7 @@ module MB
         end
 
         # See Session#schedule.
-        def schedule(time, period: nil, description: nil, &block)
+        def schedule(time, period: nil, description: nil, epoch: nil, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
           raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
 
@@ -48,7 +51,8 @@ module MB
               time: time,
               period: period&.to_r,
               block: block,
-              description: description || "bar #{@transport.bar_at(time).floor}"
+              description: description || "bar #{@transport.bar_at(time).floor}",
+              epoch: epoch
             )
             @next_id
           }
@@ -69,7 +73,7 @@ module MB
 
         # Returns true if a scheduled block's time has come.
         def due?
-          @mutex.synchronize { @entries.each_value.any? { |e| e.time <= @transport.position } }
+          @mutex.synchronize { @entries.each_value.any? { |e| e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
         end
 
         # See Session#change_tempo.
@@ -114,7 +118,9 @@ module MB
 
           due = @mutex.synchronize {
             list = []
+            epoch = @session.epoch
             @entries.values.each do |e|
+              next if e.epoch && e.epoch != epoch
               while e.time <= horizon
                 list << [e, e.time]
                 break @entries.delete(e.id) unless e.period
