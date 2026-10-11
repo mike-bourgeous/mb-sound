@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-10",
+  "generated": "2026-10-11",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -108,6 +108,13 @@
       "fast_delay": [
         "FastDelay.feedback",
         "FastDelay.read"
+      ]
+    },
+    "spec/ext/mb/sound/fast_dynamics_spec.rb": {
+      "fast_dynamics": [
+        "FastDynamics.compand",
+        "FastDynamics.crossover",
+        "FastDynamics.limit"
       ]
     },
     "spec/ext/mb/sound/fast_loop_spec.rb": {
@@ -421,6 +428,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -435,6 +444,23 @@
       ],
       "fast_clip": [
         "FastClip.shape_curve"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/dynamics_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_dynamics": [
+        "FastDynamics.compand",
+        "FastDynamics.crossover",
+        "FastDynamics.limit"
+      ],
+      "fast_loudness": [
+        "FastLoudness.true_peak"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
       ]
     },
     "spec/lib/mb/sound/graph_node/feedback_loop_spec.rb": {
@@ -605,6 +631,11 @@
         "FastDelay.feedback",
         "FastDelay.read"
       ],
+      "fast_dynamics": [
+        "FastDynamics.compand",
+        "FastDynamics.crossover",
+        "FastDynamics.limit"
+      ],
       "fast_envelope": [
         "FastEnvelope.process"
       ],
@@ -643,6 +674,7 @@
         "FastSound.dynamic_biquad",
         "FastSound.matrix_mix",
         "FastSound.narray_log",
+        "FastSound.narray_log10",
         "FastSound.narray_log2",
         "FastSound.number_to_freq",
         "FastSound.oscillate",
@@ -1060,8 +1092,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
