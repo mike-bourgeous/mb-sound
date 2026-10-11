@@ -8,12 +8,25 @@ module MB
         # Renders +figure+ as an SVG document String +width+ x +height+
         # pixels in +theme+ (:paper, :studio, :phosphor, or a Theme).
         # Heatmaps are embedded as PNGs of at most +heatmap_pixels+ ([w, h];
-        # viewers scale them smoothly).
-        def self.render(figure, width: 960, height: 540, theme: :paper, heatmap_pixels: [600, 300])
+        # viewers scale them smoothly).  Element ids start with +id_prefix+
+        # (default a new "mbplotN-" for every render), so several SVGs
+        # inlined in one HTML page don't share clip paths, gradients, or
+        # filters.
+        def self.render(figure, width: 960, height: 540, theme: :paper, heatmap_pixels: [600, 300], id_prefix: nil)
           theme = Theme[theme]
-          painter = Painter.new(width, height, theme, heatmap_pixels)
+          id_prefix ||= next_prefix
+          painter = Painter.new(width, height, theme, heatmap_pixels, id_prefix: id_prefix)
           PixelLayout.new(painter, theme).render(figure.figure, width, height)
           painter.document
+        end
+
+        # A new id prefix ("mbplot1-", "mbplot2-", ...).
+        def self.next_prefix
+          @prefix_lock ||= Mutex.new
+          @prefix_lock.synchronize {
+            @prefix_count = (@prefix_count || 0) + 1
+            "mbplot#{@prefix_count}-"
+          }
         end
 
         # Escapes text for XML.
@@ -29,7 +42,8 @@ module MB
 
         # Collects SVG elements (see PixelLayout for the painter protocol).
         class Painter
-          def initialize(width, height, theme, heatmap_pixels = [600, 300])
+          def initialize(width, height, theme, heatmap_pixels = [600, 300], id_prefix: '')
+            @id = id_prefix
             @width = width
             @height = height
             @theme = theme
@@ -47,7 +61,7 @@ module MB
           # bottom.
           def vgradient(x, y, w, h, stops)
             @clip += 1
-            id = "grad#{@clip}"
+            id = "#{@id}grad#{@clip}"
             st = stops.each_with_index.map { |c, i| %(<stop offset="#{SVG.n(100.0 * i / (stops.length - 1))}%" stop-color="#{Color.hex(c)}"/>) }.join
             @defs << %(<linearGradient id="#{id}" x1="0" y1="0" x2="0" y2="1">#{st}</linearGradient>)
             @out << %(<rect x="#{SVG.n(x)}" y="#{SVG.n(y)}" width="#{SVG.n(w)}" height="#{SVG.n(h)}" fill="url(##{id})"/>)
@@ -75,16 +89,16 @@ module MB
 
           def plot(x, y, w, h)
             @clip += 1
-            id = "plot#{@clip}"
+            id = "#{@id}plot#{@clip}"
             @defs << %(<clipPath id="#{id}"><rect x="-2" y="-2" width="#{SVG.n(w + 4)}" height="#{SVG.n(h + 4)}"/></clipPath>)
             @out << %(<g transform="translate(#{SVG.n(x)} #{SVG.n(y)})" clip-path="url(##{id})">)
-            yield Surface.new(w, h, @theme, @out, @heatmap_pixels)
+            yield Surface.new(w, h, @theme, @out, @heatmap_pixels, @id)
             @out << '</g>'
           end
 
           def document
             bg = @theme.background ? %(<rect width="100%" height="100%" fill="#{Color.hex(@theme.background)}"/>) : ''
-            glow = @theme.glow ? '<filter id="glow" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' : ''
+            glow = @theme.glow ? %(<filter id="#{@id}glow" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>) : ''
             font = SVG.escape(@theme.font)
             <<~SVG
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 #{@width} #{@height}" width="#{@width}" height="#{@height}" font-family="#{font}">
@@ -105,7 +119,8 @@ module MB
           end
           attr_writer :label
 
-          def initialize(width, height, theme, out, heatmap_pixels = [600, 300])
+          def initialize(width, height, theme, out, heatmap_pixels = [600, 300], id_prefix = '')
+            @id = id_prefix
             @heatmap_pixels = heatmap_pixels
             @width = width
             @height = height
@@ -119,7 +134,7 @@ module MB
             return if d.empty?
 
             w = grid ? 1 : 1.6
-            filter = @theme.glow && !grid ? ' filter="url(#glow)"' : ''
+            filter = @theme.glow && !grid ? %( filter="url(##{@id}glow)") : ''
             @out << %(<path d="#{d}" fill="none" stroke="#{Color.hex(rgb)}" stroke-width="#{w}" stroke-linejoin="round" stroke-linecap="round"#{%( stroke-dasharray="#{dash.join(' ')}") if dash}#{filter}>#{title}</path>)
           end
 
