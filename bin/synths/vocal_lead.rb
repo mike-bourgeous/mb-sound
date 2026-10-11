@@ -12,9 +12,10 @@
 #    both moving with a tempo-synced LFO.
 # 3. A sample-rate crusher (`decimate`) whose aliasing folds the upper peaks
 #    toward and away from each other, the "yoyo" vowel motion.  Its rate
-#    follows the note with key tracking below 1 (+--crush-track+), so low
-#    notes get relatively more crushing and high notes less, as in the
-#    reference's inverted crush tracking.
+#    follows the note exactly by default (key tracking 1, the maintainer's
+#    pick over 0.5 on 2026-10-11: every note folds alike); below 1
+#    (+--crush-track+) low notes get relatively more crushing and high
+#    notes less, as in the reference's inverted crush tracking.
 # 4. A little delay and reverb (in the song script).
 #
 # Cost (graph_profile, spec/test_data/dense_modulated.mid, one voice):
@@ -25,6 +26,7 @@
 #     bin/synths/vocal_lead.rb                       # live MIDI
 #     bin/synths/vocal_lead.rb song.mid lead.flac    # render a MIDI file
 #     bin/synths/vocal_lead.rb -S pulse -c 3000 -t 0.3 song.mid lead.flac
+#     bin/synths/vocal_lead.rb -w 2 -k 0.9 song.mid lead.flac    # a ramp-like wobble
 #     bin/synths/vocal_lead.rb --help
 #
 # Snippets (bin/sound.rb, after `load 'bin/synths/vocal_lead.rb'`):
@@ -33,7 +35,8 @@
 #     bg :lead, vocal_lead_voice(hook.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a)))
 #     bg :lead, vocal_lead_voice(hook, source: :pulse, vowels: [:i, :a, :u])     # brighter vowels
 #     bg :lead, vocal_lead_voice(hook, crush: 0, formant_mix: 1)                  # no crusher: plain formants
-#     bg :lead, vocal_lead_voice(hook, crush_track: 1)                            # every note folds alike
+#     bg :lead, vocal_lead_voice(hook, crush_track: 0.5)                          # low notes crush more
+#     bg :lead, vocal_lead_voice(hook.transpose(-36), skew: 0.9)                   # bass octave, ramp-like wobble
 #     # The two building blocks alone:
 #     play 110.hz.ramp.formant(:a, :e, :i, :o, :u, morph: 0.25.hz.lfo.at(0..1))
 #     play 110.hz.ramp.lp4(0.5.hz.lfo.at(400..2400), resonance: 0.8).decimate(2900)
@@ -84,17 +87,21 @@ module MB::Sound
   # - +vowels+ and +wobble+: the formant filter's vowels, morphed by a
   #   triangle LFO at +wobble+ (a Duration such as 1.n4 follows the tempo,
   #   or Hz), +voice+ the formant table's voice; +formant_track+ shifts the
-  #   formants by that fraction of the note's distance from C4.
+  #   formants by that fraction of the note's distance from C4.  +skew+
+  #   is the LFO's rising fraction (Notes#lfo; 0.5 a plain triangle, 0.9
+  #   nearly a rising ramp); a skewed LFO starts from its low point, on
+  #   the beat for a tempo rate.
   # - +cutoff+ and +reso+: the parallel lp4's cutoff (wobbling an octave
   #   either side with the same LFO) and resonance.
   # - +formant_mix+: 0 only the lp4, 1 only the formants.
   # - +crush+: the crusher's rate in Hz at C4 (0 for none), +crush_track+
-  #   its key tracking (1 = rate proportional to the note, 0 = fixed; below
-  #   1, low notes crush relatively more), +jitter+ its clock jitter.
+  #   its key tracking (1, the default = rate proportional to the note, 0 =
+  #   fixed; below 1, low notes crush relatively more), +jitter+ its clock
+  #   jitter.
   # - +glide+: legato glide time in seconds.
   def self.vocal_lead_patch(
-    v, source: :kick, scan: 0.0, width: 0.12, vowels: [:a, :o], voice: :tenor, wobble: 1.n4, formant_track: 0.3,
-    cutoff: 1400, reso: 0.75, formant_mix: 0.6, crush: 4200, crush_track: 0.5, jitter: 0.0, glide: 0.04, gain: 1.0
+    v, source: :kick, scan: 0.0, width: 0.12, vowels: [:a, :o], voice: :tenor, wobble: 1.n4, skew: 0.5, formant_track: 0.3,
+    cutoff: 1400, reso: 0.75, formant_mix: 0.6, crush: 4200, crush_track: 1.0, jitter: 0.0, glide: 0.04, gain: 1.0
   )
     pitch = v.hz.glide(glide, legato: true)
     osc = case source.to_sym
@@ -109,7 +116,7 @@ module MB::Sound
           end
 
     # One LFO moves the vowel and the resonant peak together
-    lfo = v.lfo(wobble, shape: :triangle, unipolar: true)
+    lfo = v.lfo(wobble, shape: :triangle, unipolar: true, skew: skew, phase: skew == 0.5 ? nil : 1 - skew / 2.0)
     vox = osc.formant(*vowels, voice: voice, morph: lfo, shift: (v.number - 60) * formant_track)
     peak = osc.lp4(v.cutoff(cutoff, env: false, keytrack: 0.5, gm: false) * (2 ** (lfo * 2 - 1)), resonance: reso)
     mix = vox * formant_mix + peak * (1 - formant_mix)
@@ -127,16 +134,17 @@ module MB::Sound
       vowels: ['a,o', String, '-V', 'Vowels to morph between (a, e, i, o, u, comma separated)'],
       voice: [:tenor, Symbol, 'Formant table voice', MB::Sound::GraphNode::Formant::VOICES.keys],
       wobble: [4.0, Float, '-w', 'Vowel LFO rate in Hz', 0.05..40.0],
+      skew: [0.5, Float, '-k', 'Vowel LFO skew: rising fraction of each cycle (0.5 triangle, 0.9 nearly a ramp)', 0.01..0.99],
       cutoff: [1400.0, Float, 'Resonant filter cutoff at C4 in Hz', 100.0..8000.0],
       reso: [0.75, Float, 'Resonant filter resonance 0..1', 0.0..1.0],
       formant_mix: [0.6, Float, '-x', 'Formant filter share of the mix 0..1', 0.0..1.0],
       crush: [4200.0, Float, '-c', 'Crusher rate at C4 in Hz (0 for none)', 0.0..48000.0],
-      crush_track: [0.5, Float, '-t', 'Crusher key tracking (1 follows the note exactly)', -1.0..2.0],
+      crush_track: [1.0, Float, '-t', 'Crusher key tracking (1 follows the note exactly)', -1.0..2.0],
       jitter: [0.0, Float, '-j', 'Crusher clock jitter 0..0.95', 0.0..0.95],
     ) { |midi, p|
       vowels = p.vowels.split(',').map { |s| s.strip.downcase.to_sym }
       vocal_lead_voice(
-        midi, source: p.source, scan: p.scan, vowels: vowels, voice: p.voice, wobble: p.wobble, cutoff: p.cutoff,
+        midi, source: p.source, scan: p.scan, vowels: vowels, voice: p.voice, wobble: p.wobble, skew: p.skew, cutoff: p.cutoff,
         reso: p.reso, formant_mix: p.formant_mix, crush: p.crush, crush_track: p.crush_track, jitter: p.jitter
       )
     }
