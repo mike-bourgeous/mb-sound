@@ -199,18 +199,6 @@ module MB
         true
       end
 
-      # True if +value+ is an exact number (Integer or Rational), for lengths
-      # computed exactly (e.g. Pitch#period of an Integer frequency).
-      def self.exact?(value)
-        value.is_a?(Integer) || value.is_a?(Rational)
-      end
-
-      # A sample rate as an Integer when it is a whole number (48000.0 ->
-      # 48000), for exact length arithmetic.
-      def self.exact_rate(rate)
-        rate.is_a?(Float) && rate.finite? && rate == rate.round ? rate.round : rate
-      end
-
       # Returns +value+ in seconds: plain numbers are already seconds; lengths
       # convert at +sample_rate+ and +transport+'s tempo.  Raises an error for
       # graph nodes.

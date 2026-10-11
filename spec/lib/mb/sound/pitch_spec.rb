@@ -68,17 +68,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect(MB::Sound::Tone.new(frequency: 3.hz.lfo.at(100..200)).period).to be_nil
     end
 
-    it 'is exact (Rational) for Integer and Rational frequencies' do
-      expect(220.hz.period.value).to eq(1r / 220)
-      expect(220.hz.sine.period.value).to eq(1r / 220)
-      expect(220.hz.period_samples.value).to eq(2400r / 11)
-      expect((3r / 2).hz.period.value).to eq(2r / 3)
-      expect(220.5.hz.period.value).to eq(1.0 / 220.5)
-      expect(MB::Sound::A4.period.value).to be_a(Float)
-      expect(220.hz.sine.frequency).to eq(220.0)
-    end
-
-    it 'gives delays and envelopes the same samples as the Float period' do
+    it 'gives delays and envelopes the same samples as a plain seconds length' do
       take = ->(n) { 3.times.map { n.sample(500)&.dup }.compact.inject(:concatenate) } # the envelope ends
       [
         ->(l) { 100.hz.ramp.delay(l, smoothing: false) },
@@ -94,7 +84,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect(1.constant.delay(MB::Sound::A4.period_samples).to_ruby).to eq('1.constant.delay(A4.period_samples)')
       osc = 110.hz.sine
       expect((osc + 1.constant.delay(osc.period)).to_ruby).to include('osc.period')
-      expect(1.constant.delay(220.hz.period * 2).to_ruby).to eq('1.constant.delay((1r/110).seconds)')
+      expect(1.constant.delay((1r / 110).seconds).to_ruby).to eq('1.constant.delay((1r/110).seconds)') # a typed Rational
     end
   end
 

@@ -147,16 +147,10 @@ module MB
       # The period of one cycle as a Length::Seconds (and as a
       # Length::Samples at this tone's rate), or nil for a modulated
       # frequency.  Lengths work wherever lengths do (`delay(t.period)`).
-      # Exact (Rational) when the frequency was given as an Integer or
-      # Rational (see Pitch#period); graph export prints `osc.period`.
+      # Graph export prints them as the call (`osc.period`; see
+      # Length::Quantity#origin).
       def period = @period && Length::Seconds.new(@period, origin: [self, :period])
-
-      def period_samples
-        return nil unless @period
-
-        rate = Length.exact_rate(@sample_rate)
-        Length::Samples.new(Length.exact?(@period) && Length.exact?(rate) ? @period * rate : @period.to_f * rate, origin: [self, :period_samples])
-      end
+      def period_samples = @period && Length::Samples.new(@period * @sample_rate, origin: [self, :period_samples])
       attr_reader :amplitude_set
 
       # The phase modulation source (cycles; a number or node), or nil.
@@ -2929,9 +2923,8 @@ module MB
         end
 
         if freq.is_a?(Numeric)
-          # The period stays exact for Integer and Rational frequencies
-          @period = Length.exact?(freq) && freq != 0 ? 1r / freq : 1.0 / freq.to_f
           freq = freq.to_f
+          @period = 1.0 / freq
         else
           @period = nil
         end
