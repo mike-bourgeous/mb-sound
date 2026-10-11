@@ -6,16 +6,26 @@
 # (Clip#ghost_chords).
 #
 # The lead plays in the bass octave (A1-E2), a bass-house "talking bass"
-# with a sine sub on its notes, its vowel and filter wobbling with a
-# tempo-synced triangle skewed almost to a ramp (low on each beat, rising
-# over 90% of it, falling just before the next; maintainer's listening
-# note, 2026-10-11: "Bring it down to the bass octave and use a skewed
-# temp synced triangle (almost ramp) for the lfo").  `-O 0 -k 0.5` plays
-# the first version: the hook at A4 with a plain triangle wobble, over an
+# with a sine sub on its notes.  Maintainer's listening notes, 2026-10-11:
+# "Bring it down to the bass octave and use a skewed temp synced triangle
+# (almost ramp) for the lfo", then "Getting closer.  Lfo should be on the
+# order of 1 bar or 4 bars (e.g. rise 3.6, fall 0.4); kick sample benefits
+# from slower notes with pitch bend drops as well so individual kicks are
+# momentarily almost audible (10-20Hz range briefly).  Decimation wet/dry
+# is too strong".  So:
+# - the vowel and filter wobble is a triangle skewed to 0.9 over 4 bars
+#   (rising 3.6 bars, falling 0.4; `-w 1` for 1 bar), from its low point
+#   at bar 1;
+# - the bass hook moves in eighths, and each note before a rest dives two
+#   octaves after its note-off (`drop:`, toward 14 Hz, where each cycle of
+#   the kick wavetable is almost a single kick);
+# - the crusher is mixed 40% wet (`-m`).
+# `--first` plays the first version: the sixteenth hook at A4 with a
+# quarter-note triangle wobble, fully crushed at key tracking 0.5, over an
 # offbeat saw bass that never leaves the root.
 #
-# 1. Bars 1-4: the hook as written, A minor triad tones with B as a
-#    passing note: it implies A minor all the way.
+# 1. Bars 1-4: the hook as written, A minor triad tones (B or D as
+#    passing notes): it implies A minor all the way.
 # 2. Bars 5-12: the same rhythm and contour snapped bar by bar to ghost
 #    chords i-iv-VII-VI (Am, Dm, G, F), twice; nothing but the melody
 #    moves, yet the harmony seems to.
@@ -28,8 +38,10 @@
 #     bin/songs/vocal_lead_song.rb vocal.flac          # renders to a file instead (-f to overwrite)
 #     bin/songs/vocal_lead_song.rb -S pulse vocal.flac # a narrow pulse instead of the kick wavetable
 #     bin/songs/vocal_lead_song.rb -t 0.5 vocal.flac   # low notes crush relatively more
-#     bin/songs/vocal_lead_song.rb -O 0 -k 0.5 vocal.flac  # the first version: lead at A4, plain triangle
+#     bin/songs/vocal_lead_song.rb -w 1 vocal.flac     # a 1-bar wobble
+#     bin/songs/vocal_lead_song.rb -d 0 -m 1 vocal.flac  # no dives, fully crushed
 #     bin/songs/vocal_lead_song.rb -k 0.1 vocal.flac   # skewed the other way: a quick rise, a slow fall
+#     bin/songs/vocal_lead_song.rb --first vocal.flac  # the first version (A4 sixteenths, quarter-note triangle)
 #     bin/songs/vocal_lead_song.rb --help
 #
 # Or in bin/sound.rb:
@@ -37,10 +49,11 @@
 #     vocal_lead_song
 #
 # Snippets (after loading it):
-#     low = VOCAL_HOOK.transpose(-36)       # the hook in the bass octave, as the song plays it
+#     low = VOCAL_BASS_HOOK                 # the bass hook the song plays
 #     swap :lead, low.ghost_chords(1, 6, 3, 7, scale: scale(:minor, :a))     # i-VI-III-VII
 #     swap :lead, low.ghost_chords(1, 4, per: 2.beats, scale: scale(:minor, :a))  # two chords per bar
 #     swap :lead, low.ghost_chords([A1, C2, E2], [F1, A1, C2, E2])          # explicit chords
+#     swap :lead, VOCAL_HOOK.transpose(-36)  # the first version's sixteenths, down in the bass
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -54,21 +67,38 @@ module MB::Sound
   # passing note (the melody reference's recipe).
   VOCAL_HOOK = seq(A4, R, C5, A4, R, E5, R, C5, T, A4, R, B4, C5, R, E5, R).n16.loop
 
+  # The bass hook: two bars of eighths in the bass octave, slower than
+  # VOCAL_HOOK, with rests after three notes for the patch's pitch dives
+  # (`drop:`).
+  VOCAL_BASS_HOOK = seq(
+    A1, A1, R, C2, A1, R, E2, T,
+    A1, R, A1, C2, D2, C2, A1, R,
+  ).n8.loop
+
   # Starts the song on the current session (live, or inside a render
-  # block).  +octave+ moves the hook (-3: A1-E2, the bass octave; 0 the
-  # first version at A4, over a separate root bass), +skew+ is the wobble
-  # LFO's rising fraction (0.5 a plain triangle).  Other options go to the
-  # lead's patch (see .vocal_lead_patch).
-  def self.vocal_lead_song(octave: -3, skew: 0.9, **lead_options)
+  # block).  +first+ plays the first version (VOCAL_HOOK at A4 over a root
+  # bass, a quarter-note triangle wobble, full crush at key tracking 0.5,
+  # no dives); otherwise VOCAL_BASS_HOOK as a talking bass with a wobble
+  # of +wobble+ bars skewed by +skew+ (the rising fraction; 0.5 a plain
+  # triangle), pitch dives of +drop+ octaves, and a +crush_mix+ wet share.
+  # Other options go to the lead's patch (see .vocal_lead_patch).
+  def self.vocal_lead_song(first: false, wobble: 4, skew: 0.9, drop: 2, crush_mix: 0.4, **lead_options)
     bpm 126
 
+    if first
+      hook = VOCAL_HOOK
+      lead_options = { wobble: 1.n4, skew: 0.5, crush_track: 0.5, crush_mix: 1, **lead_options }
+    else
+      hook = VOCAL_BASS_HOOK
+      lead_options = { wobble: wobble.bars, skew: skew, drop: drop, crush_mix: crush_mix, **lead_options }
+    end
+    low = !first
+
     am = scale(:minor, :a)
-    hook = octave == 0 ? VOCAL_HOOK : VOCAL_HOOK.transpose(octave * 12)
     ghost = hook.ghost_chords(1, 4, 7, 6, scale: am)
     harmonic = hook.ghost_chords(1, 4, 7, 6, scale: am, harmonic: true)
-    low = octave <= -2
 
-    lead = vocal_lead_voice(hook, wobble: 1.n4, skew: skew, **lead_options)
+    lead = vocal_lead_voice(hook, **lead_options)
     bass = nil
     if low
       # The talking bass: a sine sub on the same notes (the patch's 90 Hz
@@ -118,8 +148,15 @@ module MB::Sound
       source: [:kick, Symbol, '-S', 'Lead oscillator: kick wavetable, narrow pulse, or saw', [:kick, :pulse, :saw]],
       crush_track: [1.0, Float, '-t', 'Crusher key tracking (1 follows the note exactly)', -1.0..2.0],
       crush: [4200.0, Float, '-c', 'Crusher rate at C4 in Hz (0 for none)', 0.0..48000.0],
-      octave: [-3, Integer, '-O', 'Octaves to move the hook (-3 the bass octave, 0 the first version over a root bass)', -4..1],
-      skew: [0.9, Float, '-k', 'Wobble LFO skew: rising fraction of each beat (0.5 a plain triangle, 0.9 nearly a ramp)', 0.01..0.99],
-    ) { |p| vocal_lead_song(source: p.source, crush_track: p.crush_track, crush: p.crush, octave: p.octave, skew: p.skew) }
+      crush_mix: [0.4, Float, '-m', 'Crusher wet share 0..1', 0.0..1.0],
+      wobble: [4.0, Float, '-w', 'Wobble LFO period in bars', 0.25..16.0],
+      skew: [0.9, Float, '-k', 'Wobble LFO skew: rising fraction of each period (0.5 a plain triangle, 0.9 nearly a ramp)', 0.01..0.99],
+      drop: [2.0, Float, '-d', 'Octaves each note before a rest dives (0 for none)', 0.0..4.0],
+      first: [false, 'Play the first version (A4 sixteenths over a root bass; the other options are ignored but -S and -c)'],
+    ) { |p|
+      opts = p.first ? { source: p.source, crush: p.crush } :
+        { source: p.source, crush_track: p.crush_track, crush: p.crush, crush_mix: p.crush_mix, wobble: p.wobble, skew: p.skew, drop: p.drop }
+      vocal_lead_song(first: p.first, **opts)
+    }
   end
 end
