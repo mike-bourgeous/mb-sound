@@ -54,22 +54,27 @@ RSpec.describe(MB::Sound::Form) do
         fill :big, every: 16
         fill :small, every: 4, length: 1.beat, layer: true
         intro  4.bars
-        verse  8.bars, times: 2, next: { chorus: 3, drop: 1 }
+        label  :top
+        verse  8.bars, times: 2
         chorus 8, fill: :roll
         repeat 2 do
           verse
           chorus times: 2
         end
         drop   16.bars, fill: [:riser, 4.bars], scene: :peak, fade: 1/4r
-        outro  6.beats, next: :end
+        pick   chorus: 3, drop: 1
+        goto   :top, times: 1
+        outro  6.beats
       end
     }
 
     it 'declares sections on their first call and plays them again with bare calls' do
       expect(form.sections.keys).to eq([:intro, :verse, :chorus, :drop, :outro])
-      expect(form.steps.map(&:first)).to eq([:intro, :verse, :chorus, :verse, :chorus, :verse, :chorus, :drop, :outro])
-      expect(form.steps.map(&:last)).to eq([1, 2, 1, 2, 2, 2, 2, 1, 1])
-      expect(form.sections[:verse].next_action).to eq({ chorus: 3, drop: 1 })
+      # Straight through: gotos not taken, the first option of each pick
+      expect(form.steps.map(&:first)).to eq([:intro, :verse, :chorus, :verse, :chorus, :verse, :chorus, :drop, :chorus, :outro])
+      expect(form.steps.map(&:last)).to eq([1, 2, 1, 2, 2, 2, 2, 1, 1, 1])
+      expect(form.labels.keys).to eq([:top])
+      expect(form.order.map(&:class).last(4)).to eq([MB::Sound::Form::Play, MB::Sound::Form::Pick, MB::Sound::Form::Goto, MB::Sound::Form::Play])
       expect(form.sections[:drop].fill.names).to eq([:riser])
       expect(form.sections[:drop].fill.length).to eq(4.bars)
       expect(form.sections[:drop].scene).to eq(:peak)
@@ -79,10 +84,10 @@ RSpec.describe(MB::Sound::Form) do
     it 'prints itself back as Ruby that builds an equal form' do
       code = form.to_ruby
       expect(code).to start_with("flow do\n  fill :big, every: 16\n  fill :small, every: 4, length: 1.beat, layer: true\n  intro 4.bars\n")
-      expect(code).to include('verse 8.bars, times: 2, next: { chorus: 3, drop: 1 }')
+      expect(code).to include("  label :top\n  verse 8.bars, times: 2\n")
       expect(code).to include("  repeat 2 do\n    verse\n    chorus times: 2\n  end")
       expect(code).to include('drop 16.bars, fill: [:riser, 4.bars], scene: :peak, fade: 1/4r')
-      expect(code).to include('outro 6.beats, next: :end')
+      expect(code).to end_with("  pick chorus: 3, drop: 1\n  goto :top, times: 1\n  outro 6.beats\nend")
 
       rebuilt = eval(code.sub(/\Aflow /, 'MB::Sound::Form.build '), binding, __FILE__, __LINE__) # rubocop:disable Security/Eval
       expect(rebuilt).to eq(form)
@@ -102,9 +107,10 @@ RSpec.describe(MB::Sound::Form) do
     it 'raises for a bare unknown name, a second declaration, and bad options' do
       expect { described_class.build { verse } }.to raise_error(NoMethodError, /give its length the first time/)
       expect { described_class.build { verse 8.bars; verse 4.bars } }.to raise_error(ArgumentError, /already declared/)
-      expect { described_class.build { verse 8.bars; verse next: :end } }.to raise_error(ArgumentError, /only takes times:/)
+      expect { described_class.build { verse 8.bars; verse fill: :x } }.to raise_error(ArgumentError, /only takes times:/)
       expect { described_class.build { verse 8.bars, then: :end } }.to raise_error(ArgumentError, /unknown options :then/)
-      expect { described_class.build { verse 8.bars, next: 'chorus' } }.to raise_error(ArgumentError, /next: must be/)
+      expect { described_class.build { verse 8.bars, fil: :x } }.to raise_error(ArgumentError, /unknown options :fil.*Did you mean\?\s+:fill/m)
+      expect { described_class.build { verse 8.bars, next: :chorus } }.to raise_error(ArgumentError, /no longer take next:.*goto :label.*pick/)
       expect { described_class.build { verse 'x' } }.to raise_error(NoMethodError, /must be a length/)
     end
 
@@ -115,13 +121,65 @@ RSpec.describe(MB::Sound::Form) do
     end
 
     it 'plays sections declared outside the flow with bare calls' do
-      set.section(:verse, 8.bars, next: :chorus)
+      set.section(:verse, 8.bars, fill: :roll)
+      set.section(:bridge, 2)
       f = set.build_form do
         verse
         chorus 4
+        pick :bridge, :chorus
       end
-      expect(f.steps.map(&:first)).to eq([:verse, :chorus])
-      expect(f.sections[:verse].next_action).to eq(:chorus)
+      expect(f.steps.map(&:first)).to eq([:verse, :chorus, :bridge])
+      expect(f.sections[:verse].fill.names).to eq([:roll])
+      expect { set.section(:x, 1, next: :y) }.to raise_error(ArgumentError, /no longer take next:/)
+      expect { set.section(:x, 1, fade_in: 1) }.to raise_error(ArgumentError, /unknown options :fade_in.*Did you mean\?\s+:fade/m)
+    end
+
+    it 'builds picks from names, weights, and blocks of options, and prints each back' do
+      f = described_class.build do
+        a 1
+        b 2
+        pick :a, :b
+        pick a: 2, b: 1/2r
+        pick do |p|
+          p.option(3) { }
+          p.option { c 4, times: 2; a }
+          p.option(1/3r) { b times: 3 }
+        end
+        pick d: 1, a: 1 # d is declared later: printed as a block that declares it
+        d 1
+      end
+      code = f.to_ruby
+      expect(code).to include("  pick :a, :b\n  pick a: 2, b: 1/2r\n")
+      expect(code).to include("  pick do |p|\n    p.option(3) { }\n    p.option(1) do\n      c 4, times: 2\n      a\n    end\n    p.option(1/3r) { b times: 3 }\n  end\n")
+      expect(code).to include("    p.option(1) { d 1 }\n    p.option(1) { a }\n  end\n  d\nend")
+      expect(eval(code.sub(/\Aflow /, 'MB::Sound::Form.build '))).to eq(f) # rubocop:disable Security/Eval
+      expect(f.steps.map(&:first)).to eq([:a, :b, :a, :a, :d, :d])
+    end
+
+    it 'builds labels and gotos (a label, weighted labels, a Proc) and checks them' do
+      f = described_class.build do
+        label :top
+        a 1
+        goto :top, times: 2
+        goto top: 3, out: 1
+        label :out
+        goto ->(st) { st.plays(:a) > 1 ? nil : :top }
+        b 1
+      end
+      code = f.to_ruby
+      expect(code).to include("  goto :top, times: 2\n  goto top: 3, out: 1\n  label :out\n  goto ->(f) { nil } # a Proc from #{__FILE__}:")
+      expect(f.labels).to eq({ top: 0, out: 4 })
+
+      expect { described_class.build { a 1; label :x; label :x } }.to raise_error(ArgumentError, /label :x appears more than once/)
+      expect { described_class.build { repeat(2) { label :x; a 1 } } }.to raise_error(ArgumentError, /inside repeat/)
+      expect { described_class.build { a 1; label :a } }.to raise_error(ArgumentError, /also a section name/)
+      expect { described_class.build { label :top; a 1; goto :tpo } }.to raise_error(ArgumentError, /no label :tpo/)
+      expect { described_class.build { label :top; a 1; goto :a } }.to raise_error(ArgumentError, /:a is a section; put `label :a_top`/)
+      expect { described_class.build { a 1; label :top; goto :top } }.to raise_error(ArgumentError, /loop forever/)
+      expect { described_class.build { label :top; a 1; goto :top, times: 0 } }.to raise_error(ArgumentError, /times: must be a positive Integer/)
+      expect { described_class.build { label :top; a 1; goto } }.to raise_error(ArgumentError, /goto needs a label/)
+      expect { described_class.build { a 1; pick chrous: 1 } }.to raise_error(ArgumentError, /No section :chrous.*declare it/m)
+      expect { described_class.build { a 1; lable :x } }.to raise_error(NoMethodError, /Did you mean\?\s+label/)
     end
 
     it 'keeps section names away from console methods' do
@@ -135,17 +193,17 @@ RSpec.describe(MB::Sound::Form) do
     end
 
     it 'sums its length' do
-      expect(form.bars).to eq(4 + 16 + 8 + 2 * (16 + 16) + 16 + 6/4r)
+      expect(form.bars).to eq(4 + 16 + 8 + 2 * (16 + 16) + 16 + 8 + 6/4r)
     end
   end
 
   describe 'playback' do
-    it 'launches each section\'s scene on its exact first sample, then rings out at :end' do
+    it 'launches each section\'s scene on its exact first sample, then rings out at the end' do
       setup_scenes(:intro, :verse, :outro)
       flow do
         intro 2
         verse 1.bar, times: 2
-        outro 1, next: :end
+        outro 1
       end
       data = run_bars(6)
       expect(changes(data)).to eq([[0, 48], [2 * bar, 50], [4 * bar, 52]])
@@ -169,7 +227,7 @@ RSpec.describe(MB::Sound::Form) do
       expect(within { MB::Sound.markers }).to eq({ intro: '1:1 (section)', verse: '3:1 (section)' })
     end
 
-    it 'chooses weighted follow actions repeatably from the seed' do
+    it 'chooses weighted gotos and picks repeatably from the seed' do
       setup_scenes(:a, :b, :c)
       histories = (1..12).map { |seed|
         h = 2.times.map {
@@ -178,9 +236,14 @@ RSpec.describe(MB::Sound::Form) do
           [:a, :b, :c].each_with_index { |n, i| s2.arrangement.scene(n, x: note(48 + i)) }
           MB::Sound::Session.with_context(session: s2) {
             MB::Sound.flow(seed: seed, on: :now) do
-              a 1, next: { b: 1, c: 1 }
-              b 1, next: :a
-              c 1, next: :a
+              label :top
+              a 1
+              b 1
+              c 1
+              pick :b, :c
+              goto top: 1, more: 1
+              label :more
+              a
             end
           }
           8.times { 120.times { s2.process_buffer } }
@@ -193,12 +256,14 @@ RSpec.describe(MB::Sound::Form) do
       expect(histories.flatten.uniq).to contain_exactly(:a, :b, :c)
     end
 
-    it 'gives follow-action Procs the form state' do
+    it 'gives goto Procs the form state' do
       setup_scenes(:drop, :outro)
       seen = []
       flow do
-        drop 1, next: ->(f) { seen << f.to_s; f.plays(:drop) >= 3 ? :outro : :again }
-        outro 1, next: :end
+        label :top
+        drop 1
+        goto ->(f) { seen << f.to_s; f.plays(:drop) >= 3 ? nil : :top }
+        outro 1
       end
       run_bars(5)
       expect(set.playback.history).to eq([:drop, :drop, :drop, :outro])
@@ -209,7 +274,7 @@ RSpec.describe(MB::Sound::Form) do
       setup_scenes(:a, :b)
       flow do
         a 2
-        b 2, next: :end
+        b 2
       end
       run(800)
       within { MB::Sound.loop! }
@@ -226,7 +291,7 @@ RSpec.describe(MB::Sound::Form) do
       flow do
         a 4, fill: :x # (no scene :x; the fill's start is the commit point)
         b 2
-        c 2, next: :end
+        c 2
       end
       run_bars(2)
       d = within { MB::Sound.goto(:c) }
@@ -244,7 +309,7 @@ RSpec.describe(MB::Sound::Form) do
       flow do
         a 4, fill: :roll
         b 2
-        c 2, next: :end
+        c 2
       end
       run_to(3 - 1/4r) # the scheduler ran the commit block (it looks half a bar ahead)
       pb = set.playback
@@ -270,7 +335,7 @@ RSpec.describe(MB::Sound::Form) do
         a 8
         b 8
         c 8
-        d 1, next: :end
+        d 1
       end
       run(800)
       within { MB::Sound.finish }
@@ -295,9 +360,12 @@ RSpec.describe(MB::Sound::Form) do
       data = run(bar)
       expect(changes(data)).to eq([[0, 48], [bar - 1600, 50]])
 
-      within { MB::Sound.seek(:a) } # back to a at the next bar
-      run_bars(2)
+      d = within { MB::Sound.seek(:a) } # the timeline back to a (bar 1)
+      expect(d.to_s).to eq('next :a at 1:1')
+      expect(transport.position).to eq(0)
+      data = run_bars(2)
       expect(set.playback.history).to eq([:a, :b, :a])
+      expect(changes(data)).to eq([[0, 48]])
     end
 
     it 'practices a section (goto and loop!)' do
@@ -305,7 +373,7 @@ RSpec.describe(MB::Sound::Form) do
       flow do
         a 1
         b 1
-        c 1, next: :end
+        c 1
       end
       run(800)
       within { MB::Sound.practice(:c) }
@@ -314,11 +382,106 @@ RSpec.describe(MB::Sound::Form) do
       expect(set.playback.looping?).to eq(true)
     end
 
-    it 'raises for undefined scenes and follow actions naming other sections' do
+    it 'jumps to labels: times: n jumps n times, then falls through and counts again' do
+      setup_scenes(:a, :b, :c, :d)
+      flow do
+        label :top
+        a 1
+        label :inner
+        b 1
+        goto :inner, times: 1
+        c 1
+        goto :top, times: 1
+        d 1
+      end
+      run_bars(3)
+      ran = []
+      within { MB::Sound.at_marker(:inner) { ran << session.now } } # passed; waits for the next time
+      run_bars(6)
+      expect(set.playback.history).to eq([:a, :b, :b, :c, :a, :b, :b, :c, :d])
+      expect(ran).to eq([5r])
+      expect(session.markers[:inner].kind).to eq(:label)
+      expect(session.markers[:inner].pos).to eq(6)
+      expect(session.markers[:top].pos).to eq(4)
+      expect(within { MB::Sound.markers }).to include(top: '5:1 (label)')
+    end
+
+    it 'goes to labels live: goto, skip, and practice take labels as well as sections' do
+      setup_scenes(:a, :b, :c)
+      flow do
+        a 2
+        b 2
+        label :tail
+        c 2
+      end
+      run(800)
+      d = within { MB::Sound.goto(:tail) }
+      expect(d.to_s).to eq('next :c at 3:1 (open)')
+      run_bars(2)
+      within { MB::Sound.skip(:tail) } # c again from the next bar line
+      run_bars(1)
+      within { MB::Sound.practice(:tail) }
+      run_bars(4)
+      expect(set.playback.history).to eq([:a, :c, :c, :c, :c]) # bars 3, 4, 6, 8
+      expect(set.playback.looping?).to eq(true)
+    end
+
+    it 'seeks the timeline to a label or section: where it last played or will, else its place in the form' do
+      setup_scenes(:a, :b, :c)
+      flow do
+        a 2
+        label :mid
+        b 1
+        c 2
+      end
+      run(800)
+      d = within { MB::Sound.seek(:mid) } # not reached yet: its place in the form (bar 3)
+      expect(d.to_s).to eq('next :b at 3:1')
+      expect(transport.position).to eq(2)
+      data = run_bars(1)
+      expect(changes(data)).to eq([[0, 50]])
+      expect(session.markers[:mid].kind).to eq(:label)
+
+      # c's launch at bar 4 is already queued (the scheduler looks ahead):
+      # seeking cancels it
+      expect(session.queued.map(&:subject)).to include(:c)
+      d = within { MB::Sound.seek(:a) }
+      expect(d.to_s).to eq('next :a at 1:1')
+      expect(transport.position).to eq(0)
+      data = run_bars(5)
+      expect(changes(data)).to eq([[0, 48], [2 * bar, 50], [3 * bar, 52]])
+      expect(set.playback.history).to eq([:a, :b, :a, :b, :c])
+    end
+
+    it 'previews decisions that depend on chance as open, and checks what goto Procs return' do
+      setup_scenes(:a, :b, :c)
+      flow do
+        a 1
+        pick do |p|
+          p.option { b 1 }
+          p.option { c 1 }
+        end
+      end
+      run(800)
+      expect(set.playback.upcoming.to_s).to eq('next ? at 2:1 (open)')
+      run_to(1 + 1/8r)
+      expect(set.playback.history.length).to eq(2)
+      expect([:b, :c]).to include(set.playback.history.last)
+
+      flow do
+        label :top
+        a 1
+        goto ->(_f) { :nope }
+      end
+      expect { run_bars(2) }.to raise_error(ArgumentError, /A goto Proc returned :nope; return a label of the form \(:top\) or nil/)
+    end
+
+    it 'raises for undefined scenes and unknown control targets' do
       setup_scenes(:a)
       expect { flow { a 1; b 1 } }.to raise_error(ArgumentError, /launches scene :b, which isn't defined/)
-      expect { flow { a 1, next: :nope } }.to raise_error(ArgumentError, /next: names :nope/)
-      expect { flow { a 1; b 1, scene: false } }.not_to raise_error
+      expect { flow { a 1; b 1, scene: false; label :top } }.not_to raise_error
+      expect { within { MB::Sound.goto(:topp) } }.to raise_error(ArgumentError, /No section or label :topp.*labels: :top.*Did you mean\?\s+:top/m)
+      expect { within { MB::Sound.seek(:bb) } }.to raise_error(ArgumentError, /No section, label, or marker :bb.*Did you mean\?\s+:b/m)
     end
 
     it 'shows where it is' do
@@ -343,7 +506,7 @@ RSpec.describe(MB::Sound::Form) do
       set.scene(:lift, lift: :on, others: :keep)
       flow do
         verse 2, fill: :lift
-        end_scene 1, next: :end
+        end_scene 1
       end
       data = run_bars(3)
       # Bar 1 plays only the 48; bar 2 (the fill) also the 60 (same start: the
@@ -451,7 +614,7 @@ RSpec.describe(MB::Sound::Form) do
       within { MB::Sound.marker(:vo, at: MB::Sound.bar(5)) }
       within { MB::Sound.seek(:vo) }
       expect(transport.position).to eq(4)
-      expect { within { MB::Sound.seek(:nope) } }.to raise_error(ArgumentError, /No section or marker :nope/)
+      expect { within { MB::Sound.seek(:nope) } }.to raise_error(ArgumentError, /No section, label, or marker :nope/)
     end
   end
 
@@ -479,8 +642,10 @@ RSpec.describe(MB::Sound::Form) do
       setup_scenes(:a, :b)
       t = MB::Sound::Take.new(session: session)
       flow do
-        a 1, times: 2, next: :b
-        b 1, next: { a: 1 }
+        label :top
+        a 1, times: 2
+        b 1
+        goto :top
       end
       run_bars(5)
       f = t.form

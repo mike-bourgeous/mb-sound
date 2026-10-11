@@ -160,6 +160,13 @@ module MB
           @render_lock.synchronize { @changes.any? { |c| c.seq == seq } }
         end
 
+        # Runs the block under the render lock (between buffers), e.g. to
+        # move the timeline and launch what plays there as one step (see
+        # Form::Playback#seek).  Returns the block's value.
+        def with_render_lock(&block)
+          @render_lock.synchronize(&block)
+        end
+
         private
 
         # Sets up the change queue and journal.  Called by Session#initialize.

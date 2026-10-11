@@ -130,8 +130,7 @@ module MB
       # The song as played, as a Form (its inspect and #to_ruby print a
       # `flow do ... end` block to paste or edit): the passes of the song
       # form that played (its sections in the order they played, repeats
-      # as times:, the last one ending with next: :end if the form ended),
-      # or, without a form, the scene launches as sections lasting until
+      # as times:), or, without a form, the scene launches as sections lasting until
       # the next launch.
       def form
         pb = session.arrangement.playback
@@ -142,7 +141,7 @@ module MB
       # A linear Form of a form playback's passes.
       def form_from_history(pb)
         runs = pb.history.chunk_while { |a, b| a == b }.map { |r| [r.first, r.length] }
-        linear_form(runs, ended: pb.ended?) { |name| pb.form.sections[name] }
+        linear_form(runs) { |name| pb.form.sections[name] }
       end
 
       # A linear Form of the scene launches (each lasting until the next,
@@ -163,19 +162,17 @@ module MB
           sections[key] ||= Form::Section.new(name: key, length: bars.zero? ? 1 : bars, scene: key == name ? nil : name)
           [key, 1]
         }
-        linear_form(runs, ended: false) { |name| sections[name] }
+        linear_form(runs) { |name| sections[name] }
       end
 
       # Builds a linear Form from [name, passes] runs, taking each section's
-      # length, fill, scene, and fade from the block's Section (follow
-      # actions dropped: the form plays as it was played).
-      def linear_form(runs, ended:)
+      # length, fill, scene, and fade from the block's Section (with
+      # the flow's gotos and picks resolved: the form plays as it was
+      # played).
+      def linear_form(runs)
         sections = {}
-        order = runs.each_with_index.map { |(name, count), i|
-          src = yield(name)
-          sections[name] ||= src.with(times: count, next_action: :next)
-          last = i == runs.length - 1
-          sections[name] = sections[name].with(next_action: :end) if last && ended && i == runs.index { |n, _| n == name }
+        order = runs.map { |name, count|
+          sections[name] ||= yield(name).with(times: count)
           Form::Play.new(name: name, times: count == sections[name].times ? nil : count)
         }
         Form.new(sections: sections, order: order)

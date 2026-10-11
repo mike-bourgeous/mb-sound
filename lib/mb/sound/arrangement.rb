@@ -76,13 +76,14 @@ module MB
       end
 
       # Declares a section outside a form (see Form::Builder for the
-      # options): `section :verse, 8.bars, next: { chorus: 3, drop: 1 }`.
-      # Returns the Form::Section.
-      def section(name, length, times: 1, next: :next, fill: nil, scene: nil, fade: nil)
-        sec = Form::Section.new(
-          name: name, length: length, times: times, next_action: binding.local_variable_get(:next),
-          fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade
-        )
+      # options): `section :verse, 8.bars, fill: :roll`.  Returns the
+      # Form::Section.
+      def section(name, length, times: 1, fill: nil, scene: nil, fade: nil, **others)
+        unless others.empty?
+          raise ArgumentError, "#{name}: sections no longer take next: (what follows belongs to the flow: goto and pick)" if others.key?(:next)
+          raise ArgumentError, "#{name}: unknown options #{others.keys.map(&:inspect).join(', ')} (use #{Form::SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')})#{Form.suggest(others.keys.first, Form::SECTION_OPTIONS)}"
+        end
+        sec = Form::Section.new(name: name, length: length, times: times, fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade)
         @mutex.synchronize { @sections[name] = sec }
       end
 
@@ -98,7 +99,7 @@ module MB
       # Plays +form+ (a Form) from its launch point (+on:+, +in:+, +at:+;
       # the next bar by default, or now if nothing plays), replacing any
       # form already playing (which stops launching sections).  +seed+ seeds
-      # its chance follow actions (MB::Sound.next_seed by default, so takes
+      # its chance (weighted gotos and picks; MB::Sound.next_seed by default, so takes
       # replay the same choices).  Returns the Form::Playback.
       def play_form(form, at: nil, on: nil, in: nil, seed: nil)
         point = LaunchPoint.of(binding) or return nil

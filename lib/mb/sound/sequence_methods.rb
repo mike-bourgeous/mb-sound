@@ -289,18 +289,23 @@ module MB
       # already playing jump there on their next buffer.  Returns the
       # transport.
       #
-      # With a Symbol: a section of the song form playing (see
-      # FormMethods#flow) plays from the next bar line (the timeline keeps
-      # running; returns where it lands), or else the timeline moves to the
-      # marker of that name (see FormMethods#marker).
+      # With a Symbol: a section or label of the song form playing (see
+      # FormMethods#flow): the timeline moves to where it plays and the
+      # form plays on from there (see Form::Playback#seek; returns the
+      # Decision); otherwise the timeline moves to the marker of that name
+      # (see FormMethods#marker and #markers).
       def seek(bar)
         if bar.is_a?(Symbol)
           session = Session.current
           pb = session.arrangement.playback
-          return pb.seek(bar) if pb && !pb.ended? && pb.form.sections.key?(bar)
+          return pb.seek(bar) if pb && !pb.ended? && (pb.form.sections.key?(bar) || pb.form.labels.key?(bar))
 
           pos = session.markers.position(bar)
-          raise ArgumentError, "No section or marker #{bar.inspect} (markers: #{session.markers.to_h.keys.map(&:inspect).join(', ')})" if pos.nil?
+          if pos.nil?
+            names = session.markers.to_h.keys
+            names += pb.form.sections.keys + pb.form.labels.keys if pb
+            raise ArgumentError, "No section, label, or marker #{bar.inspect} (markers: #{session.markers.to_h.keys.map(&:inspect).join(', ')})#{Form.suggest(bar, names.uniq)}"
+          end
           return transport.seek(pos)
         end
 

@@ -101,7 +101,7 @@ RSpec.describe(MB::Sound::Take) do
     expect((replay(r, [367, 368])[0...live.length] - live).abs.max).to be < 1e-6
   end
 
-  it 'replays a song form performance (chance, loop!, a re-decided commit, skip, a meter change) bit for bit' do
+  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, skip, a meter change) bit for bit' do
     lines = {
       0 => [
         'k = grid(16, kick: "x...x...x...x...").fill(snare: grid(16, "....x.x.xxxxxxxx", value: 38)).loop',
@@ -112,8 +112,9 @@ RSpec.describe(MB::Sound::Take) do
         'scene :intro, drums: k',
         'scene :verse, drums: k, bass: a',
         'scene :chorus, drums: k, bass: b',
+        'scene :bridge, drums: k, bass: b.transpose(5)',
         'scene :roll, bass: a.transpose(12), others: :keep',
-        'flow(seed: 9) { fill :small, every: 2; intro 2; verse 2, fill: :roll, next: { chorus: 1, verse: 1 }; chorus 2, next: :verse }',
+        'flow(seed: 9) { fill :small, every: 2; intro 2; label :v; verse 2, fill: :roll; goto c: 1, v: 1; label :c; chorus 2; pick { |p| p.option(1) { }; p.option(1) { bridge 1 } }; goto :v }',
       ],
       290 => ['loop!'],         # verse pass 1, before its commit point (bar 4)
       650 => ['onward'],        # after the second pass's commit point: the next boundary
@@ -122,6 +123,7 @@ RSpec.describe(MB::Sound::Take) do
       # so this re-decides it (replays run the line first)
       820 => ['goto :chorus'],
       1000 => ['meter 3, 4'],   # from bar 10
+      1100 => ['goto :c'],      # a label: the chorus next
       1250 => ['skip'],
     }
     run = lambda {
@@ -138,8 +140,9 @@ RSpec.describe(MB::Sound::Take) do
     live, t = run.call
     expect(live.abs.max).to be > 0.1
     history = session.arrangement.playback.history
-    expect(history.first(5)).to eq([:intro, :verse, :verse, :verse, :chorus])
-    expect(history.length).to be >= 7
+    # loop! (verse x3), goto :chorus, goto :c (the label: chorus again),
+    # the pick's bridge, then verse twice (skip; the weighted goto drew :v)
+    expect(history).to eq([:intro, :verse, :verse, :verse, :chorus, :chorus, :bridge, :verse, :verse])
     expect(session.transport.meters.length).to eq(2)
 
     r = t.replay

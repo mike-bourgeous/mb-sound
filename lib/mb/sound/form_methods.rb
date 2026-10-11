@@ -8,24 +8,26 @@ module MB
     # Example (bin/sound.rb, after defining scenes :intro, :verse, ...):
     #     flow do
     #       intro  4.bars
-    #       verse  8.bars, times: 2, next: { chorus: 3, drop: 1 }
-    #       chorus 8.bars, fill: :roll
-    #       outro  8.bars, next: :end
+    #       label  :top
+    #       verse  8.bars, times: 2
+    #       pick   chorus: 3, drop: 1
+    #       goto   :top, times: 1
+    #       outro  8.bars
     #     end
     #     loop!            # stay in this section...
     #     onward           # ...then move on
-    #     goto :chorus     # what plays after this section
+    #     goto :chorus     # what plays after this section (or goto :top, a label)
     #     skip             # leave at the next bar line
     #     finish           # the outro next
     #     practice :drop   # go to the drop and stay there
-    #     seek :verse      # jump the form to the verse at the next bar
+    #     seek :verse      # move the timeline to the verse and play on from there
     #     marker :vo, at: bar(5, beat: 2); at_marker(:vo) { bg :vox, vox }
     #     meter 7, 8       # 7/8 from the next bar line
     module FormMethods
       # With a block, builds a song form (see Form::Builder) and plays it
       # from its launch point (+on:+, +in:+, +at:+; the next bar while
       # something plays, else now), unless +play: false+.  +seed:+ seeds
-      # chance follow actions.  Returns the Form (its inspect prints the
+      # chance (weighted gotos and picks).  Returns the Form (its inspect prints the
       # block back).  Without a block, returns the form playing
       # (Form::Playback; its inspect says where it is and what comes next).
       # Also available as #form.
@@ -49,7 +51,7 @@ module MB
 
       # Declares a section outside a flow block, so `flow do ... end` can
       # play it with a bare call (see Arrangement#section): `section
-      # :verse, 8.bars, next: { chorus: 3, drop: 1 }`.
+      # :verse, 8.bars, fill: :roll`.
       def section(name, length, **options)
         Session.current.arrangement.section(name, length, **options)
       end
@@ -70,15 +72,17 @@ module MB
       alias unloop! onward
       alias continue_form onward
 
-      # Plays section +name+ next (at the next undecided boundary).  Also
-      # available as #goto_section.
+      # Goes to +name+ next (at the next undecided boundary): a label of the
+      # form (the flow carries on from there), or a section (its next
+      # appearance in the play order).  Also available as #goto_section.
       def goto(name)
         form_playback.goto(name)
       end
       alias goto_section goto
 
-      # Leaves the section playing now at the next bar line, for the next
-      # section of the form (or +name+).  Also available as #skip_section.
+      # Leaves the section playing now at the next bar line, for what
+      # follows it in the flow (or +name+, a section or label as in #goto).
+      # Also available as #skip_section.
       def skip(name = nil)
         form_playback.skip(name)
       end
@@ -91,8 +95,8 @@ module MB
       end
       alias finish_form finish
 
-      # Goes to section +name+ next and repeats it until #onward (#goto and
-      # #loop!).  Also available as #rehearse.
+      # Goes to +name+ (a section or label, as in #goto) next and repeats
+      # it until #onward (#goto and #loop!).  Also available as #rehearse.
       def practice(name)
         form_playback.practice(name)
       end
@@ -114,14 +118,15 @@ module MB
         end
       end
 
-      # Lists the markers: name => where.
+      # Lists the markers (sections, labels, positions, times): name =>
+      # where.
       def markers
         Session.current.markers.info
       end
 
       # Runs the block at marker +name+ (like #at_bar): now if the marker is
       # ahead, else the next time it is set (e.g. when a song form next
-      # reaches section +name+).  Commands inside land exactly at the
+      # reaches section or label +name+).  Commands inside land exactly at the
       # marker.  Returns true if it was scheduled right away.
       def at_marker(name, &block)
         raise ArgumentError, 'Pass a block to run at the marker' unless block

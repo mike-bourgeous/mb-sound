@@ -89,7 +89,7 @@ RSpec.describe('meter map') do
         MB::Sound.flow(seed: 1, on: :now) do
           four 2
           seven 2
-          ending 1, scene: :four, next: :end
+          ending 1, scene: :four
         end
       end
       session.process_buffer while transport.position < 4
