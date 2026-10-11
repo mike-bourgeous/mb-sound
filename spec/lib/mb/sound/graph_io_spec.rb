@@ -114,7 +114,12 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'wavetable sample mode reset' => "a Wavetable that isn't a library table",
       'ArrayInput' => "can't print a Numo::SFloat",
       'MixSource (master chain input)' => 'a class defined outside the library',
-      'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'documents keep only knob values',
+    }.freeze
+
+    # Factories whose documents keep values but not moves: they save with a
+    # comment and load, but render differently
+    values_only = {
+      'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => '# :sweep was about to move (changes queued) when saved',
     }.freeze
 
     GraphSweep.factories.each do |name, factory|
@@ -125,6 +130,12 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
           expect { io.dump(graph) }.to raise_error(io::DumpError, /#{Regexp.escape(not_representable[name])}/)
           next
         end
+        if values_only.key?(name)
+          doc = io.dump(graph, name: 'sweep')
+          expect(doc).to include(values_only[name])
+          expect(render(io.load(doc), buffers: 6, size: 128).map { |c| c.abs.max }.max).to be > 0
+          next
+        end
 
         doc = io.dump(graph, name: 'sweep')
         ref = render(graph, buffers: 6, size: 128)
@@ -133,6 +144,58 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
         expect(RecipeHelpers.max_diff(ref, render(loaded, buffers: 6, size: 128))).to eq(0), doc
         expect(stable(io.dump(loaded, name: 'sweep'))).to eq(stable(doc))
       end
+    end
+  end
+
+  describe 'knobs' do
+    let(:knob) { MB::Sound::GraphNode::Knob.new(:cut, 800, range: 50..4000, curve: :exp, unit: 'Hz', cc: 74) }
+    let(:graph) { 110.hz.ramp.filter(:lowpass, cutoff: knob, quality: 2).lp4(knob) }
+
+    it 'saves knobs as knob lines and loads them back as one knob' do
+      doc = io.dump(graph, name: 'k')
+      expect(doc).to include('knob :cut, 800.0, range: 50.0..4000.0, curve: :exp, unit: "Hz", cc: 74')
+      expect(doc).to include('filter(:lowpass, cutoff: cut, quality: 2).lp4(cut)')
+      loaded = io.load(doc)
+      d = io.document_of(loaded)
+      expect(d.knob?(:cut)).to eq(true)
+      expect(d.knob_nodes[:cut].length).to eq(1)
+      expect(d.knob_nodes[:cut][0]).to be_a(MB::Sound::GraphNode::Knob)
+      expect(d.knob_nodes[:cut][0].spec).to eq(knob.spec)
+      expect(RecipeHelpers.max_diff(render(graph, buffers: 6, size: 128), render(loaded, buffers: 6, size: 128))).to eq(0)
+      expect(stable(io.dump(loaded))).to eq(stable(doc))
+    end
+
+    it 'overrides knob values on load and turns them with Document#set' do
+      doc = io.dump(graph, name: 'k')
+      loaded = io.load(doc, params: { cut: 2000 })
+      k = io.document_of(loaded).knob_nodes[:cut][0]
+      expect(k.value).to eq(2000)
+      io.document_of(loaded)[:cut] = 300
+      loaded.sample(800)
+      loaded.sample(800)
+      expect(k.value).to be_within(1e-3).of(300)
+      expect(io.dump(loaded)).to include('knob :cut, 300')
+    end
+
+    it 'saves a moving knob at its current value with a comment' do
+      knob.ramp_to(3000, frames: 48000, frame: 0)
+      3.times { graph.sample(800) }
+      doc = io.dump(graph, name: 'k')
+      v = knob.value
+      expect(doc).to match(/^# :cut was ramping to 3000 when saved; documents keep knob values, so it holds /)
+      expect(io.document_of(io.load(doc)).knob_nodes[:cut][0].value).to eq(v)
+    end
+
+    it 'checks knob lines' do
+      expect { io.load("knob :cut, 800, range: 0..4000, curve: :exp\n1.constant") }.to raise_error(io::LoadError, /range can't include 0/)
+      expect { io.load("knob :cut, 800, colour: 1\n1.constant") }.to raise_error(io::LoadError, /unknown knob option colour/)
+      expect { io.load("param :cut, 1\nknob :cut, 800\n1.constant") }.to raise_error(io::LoadError, /declared twice/)
+    end
+
+    it 'refuses two knobs with one name' do
+      a = MB::Sound::GraphNode::Knob.new(:x, 0.5)
+      b = MB::Sound::GraphNode::Knob.new(:x, 0.25)
+      expect { io.dump(a + b) }.to raise_error(io::DumpError, /two different knobs are named :x/)
     end
   end
 

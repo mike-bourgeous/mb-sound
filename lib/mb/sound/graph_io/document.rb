@@ -9,12 +9,17 @@ module MB
       # GraphIO.document_of(graph) returns the Document of a loaded graph,
       # and GraphIO.dump reuses it when the graph is saved again.
       class Document
-        # Header calls, in order: graph first, then inputs and params.
-        HEADER = %i[graph inputs param].freeze
+        # Header calls, in order: graph first, then inputs, params, and
+        # knobs.
+        HEADER = %i[graph inputs param knob].freeze
 
         # Options of a param (MIDI::ControlSpec-shaped: range, description,
         # cc number, curve; unit is informational).
         PARAM_KEYS = %i[range description cc curve unit].freeze
+
+        # Options of a knob (GraphNode::Knob::Spec, as the console's `knob`
+        # command takes them, plus a description).
+        KNOB_KEYS = %i[range curve unit cc takeover smooth description].freeze
 
         # Metadata keys GraphIO.dump writes (others are kept as given).
         META_KEYS = %i[name kind saved mb_sound from options].freeze
@@ -61,12 +66,21 @@ module MB
         end
 
         # Sets param +name+ of a loaded graph to +value+ (every Constant
-        # made for it; the change lands at the next buffer).  Returns value.
+        # made for it, landing at the next buffer; a knob turns there,
+        # gliding over its Spec's +smooth+ time).  Returns value.
         def set(name, value)
           name = name.to_sym
           raise ArgumentError, "no param #{name}#{GraphIO.suggest(name, @params.keys)}" unless @params.key?(name)
-          (@knob_nodes[name] || []).each { |c| c.constant = value }
+          (@knob_nodes[name] || []).each { |c|
+            c.is_a?(GraphNode::Knob) ? c.set(value, frame: c.next_frame) : c.constant = value
+          }
           @params[name][:value] = value
+        end
+
+        # True if param +name+ is a knob (a `knob` line, loading as a
+        # GraphNode::Knob).
+        def knob?(name)
+          !!@params.fetch(name.to_sym)[:knob]
         end
         alias []= set
 
@@ -105,13 +119,18 @@ module MB
         # The document text.  Raises GraphIO::DumpError if part of the graph
         # can't be written (the writer's FIXMEs).
         def to_s
-          knobs = @params.transform_keys(&:to_s).transform_values { |s| s[:value] }
+          plain = @params.reject { |_, spec| spec[:knob] }
+          knobs = plain.transform_keys(&:to_s).transform_values { |s| s[:value] }
           knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
+          graph_knobs, knob_problems = self.graph_knobs
+          graph_knobs.each { |name, k| knob_nodes[k] = name.to_s }
           writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes)
           body = writer.to_s
-          moving = moving_knobs
-          unless moving.empty?
-            writer.problems << "knob #{moving.map(&:inspect).join(', ')} has moves (ramps, follows, or queued changes), and documents keep only knob values for now"
+          writer.problems.concat(knob_problems)
+          graph_knobs.each_key do |name|
+            if plain.key?(name) || writer.inputs.key?(name.to_s)
+              writer.problems << "knob #{name.inspect} has the name of a #{plain.key?(name) ? 'param' : 'input'}"
+            end
           end
           unless writer.problems.empty?
             raise DumpError.new(
@@ -123,8 +142,8 @@ module MB
           lines = body.lines(chomp: true)
           lines.shift while lines.first&.start_with?('# inputs:')
           used = writer.knobs_used
-          knob_params = @params.select { |k, _| used.include?(k.to_s) }
-          baked = @params.reject { |k, _| used.include?(k.to_s) }.transform_values { |s| s[:value] }
+          knob_params = plain.select { |k, _| used.include?(k.to_s) }
+          baked = plain.reject { |k, _| used.include?(k.to_s) }.transform_values { |s| s[:value] }
           options = @options.merge(baked)
 
           header = []
@@ -134,20 +153,66 @@ module MB
           input_names = writer.inputs.keys
           header << "inputs #{input_names.map { |n| ":#{n}" }.join(', ')}" unless input_names.empty?
           knob_params.each { |k, spec| header << param_line(writer, k, spec) }
+          graph_knobs.each do |name, k|
+            next unless used.include?(name.to_s)
+            header.concat(knob_lines(writer, k))
+          end
           (header + [''] + lines).join("\n") + "\n"
+        end
+
+        # The GraphNode::Knobs in the graph by name, and problems (two
+        # knobs with one name).
+        def graph_knobs
+          found = {}
+          problems = []
+          roots = @graph.is_a?(Array) ? @graph : [@graph]
+          roots.each do |root|
+            next unless root.respond_to?(:graph)
+
+            root.graph.each do |n|
+              k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
+              next unless k.is_a?(GraphNode::Knob)
+
+              if (other = found[k.name]) && !other.equal?(k)
+                problems << "two different knobs are named #{k.name.inspect}"
+              else
+                found[k.name] = k
+              end
+            end
+          end
+          [found, problems.uniq]
         end
 
         private
 
-        # Names of the graph's knobs that ramp, follow, or have changes
-        # queued; a document can only keep their values.
-        def moving_knobs
-          return [] unless @graph.respond_to?(:graph)
-
-          @graph.graph.filter_map { |n|
-            k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
-            k.spec.name if k.is_a?(GraphNode::Knob) && k.moving?
-          }.uniq
+        # The `knob` header line for +knob+ (as the console's `knob`
+        # command takes it, with the knob's held value), after a comment
+        # if the knob was moving: documents keep a knob's value, not its
+        # moves (takes replay those), so a moving knob saves the value on
+        # the last frame it rendered.
+        def knob_lines(writer, knob)
+          lines = []
+          value = knob.moving? ? knob.value : knob.target
+          if knob.moving?
+            what = case knob.mode
+                   when :ramp then "ramping to #{GraphNode::Knob.number(knob.target)}"
+                   when :follow then "following #{GraphNode::Knob.label_of(knob.following)}"
+                   else 'about to move (changes queued)'
+                   end
+            lines << "# #{knob.name.inspect} was #{what} when saved; documents keep knob values, so it holds #{GraphNode::Knob.number(value)}"
+          end
+          spec = knob.spec
+          parts = [knob.name.inspect, writer.literal(value)]
+          parts << "range: #{writer.literal(spec.range)}" unless spec.range == (0.0..1.0)
+          parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
+          parts << "unit: #{writer.literal(spec.unit)}" if spec.unit
+          cc = knob.cc
+          parts << "cc: #{cc}" if cc
+          parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
+          parts << "smooth: #{writer.literal(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
+          desc = @params.dig(knob.name, :description)
+          parts << "description: #{writer.literal(desc)}" if desc
+          lines << "knob #{parts.join(', ')}"
         end
 
         def guess_kind(inputs)
