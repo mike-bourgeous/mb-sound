@@ -167,6 +167,14 @@ RSpec.describe('bin/synths/pluck.rb') do
       end
     end
 
+    it 'leaves the old velocity response alone with velocity_brightness: false (whatever the curve)' do
+      ev = note_events(69, 0.4)
+      old = render(ev, 0.2, velocity_brightness: false)
+      expect(render(ev, 0.2, velocity_brightness: false, velocity_curve: :linear)).to eq(old)
+      expect(render(ev, 0.2, velocity_brightness: false, velocity_curve: :smoothstep)).to eq(old)
+      expect(render(ev, 0.2)).not_to eq(old)
+    end
+
     it 'makes softer notes darker at every pitch' do
       [45, 69, 81, 93].each do |n|
         cents = [0.2, 0.5, 0.8, 1.0].map { |vel| seed_average { |s| centroid(window(render(note_events(n, vel), 0.1, seed: s), 0, 0.1)) } }

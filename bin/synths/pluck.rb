@@ -158,7 +158,7 @@ module MB::Sound
     # +velocity_brightness+, a fixed number, or (false) the velocity as before
     # 2026-10-11 (noise lowpasses only, not the voice mix)
     bright_by_velocity = velocity_brightness != false
-    brightness_amount = pluck_velocity_brightness(v, velocity_brightness || (0.0..1.0), velocity_curve)
+    brightness_amount = bright_by_velocity ? pluck_velocity_brightness(v, velocity_brightness, velocity_curve) : v.velocity
 
     # The string's pitch (bend included), gliding between legato notes
     freq = glide > 0 ? v.hz.glide(glide, legato: true).freq : v.freq
