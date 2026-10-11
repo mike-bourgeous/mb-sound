@@ -27,14 +27,16 @@
 # --brightness times the pitch on the clean voice); full velocity is the
 # voice as picked by pitch (--velocity-brightness LO..HI sets the range,
 # one number a fixed brightness, off the pre-2026-10-11 velocity response;
-# --velocity-curve the curve, quad_out by default).  CC 1 (the mod wheel) darkens the
+# --velocity-curve the curve, quad_out by default; --tone dark tops out at
+# half brightness, more string and less attack).  CC 1 (the mod wheel) darkens the
 # string (the loop's lowpass, from --damping down to 2x the pitch; the
 # loop's sustain keeps the ring time, so only the tone changes).  With
 # --hammer (one voice), legato notes are hammer-ons (going up) and
 # pull-offs (going down, also when the top note is released while a lower
 # one is held): the pitch jumps and the still ringing string gets a small
 # new pick (--hammer-level, --pull-level): a smooth finger-wide bump
-# (--hammer-width periods; 0 for a noise pick).  Run with --help for all
+# (--hammer-width periods; 0 for a noise pick), with a 4 ms pitch slide
+# (--hammer-glide; 0 jumps).  Run with --help for all
 # options.
 #
 # Examples:
@@ -45,7 +47,10 @@
 #     $0 --clean --pick 4 spec/test_data/c_major.mid         # classic KS everywhere, a longer, scratchier pick
 #     $0 --stretch 2 spec/test_data/c_major.mid               # a softclip in the loop: buzzy, sitar-like
 #     $0 --hammer                                            # live: play legato for hammer-ons and pull-offs
-#     $0 --hammer -W 1                                       # live: softer, rounder hammer-ons (a wider finger)
+#     $0 --hammer -W 0.5                                     # live: narrower finger, a little brighter hammer-ons
+#     $0 --hammer --hammer-glide 0                           # live: hammer-ons jump instantly (a tiny click)
+#     $0 --hammer --hammer-glide 0.02                        # live: slower, slide-like hammer-ons
+#     $0 -T dark spec/test_data/c_major.mid                  # darker: more string, less attack at every velocity
 #     $0 --hammer -W 0                                       # live: noise-pick hammer-ons (before 2026-10-11)
 #     $0 -V 0.5..1 spec/test_data/c_major.mid                # soft notes only half as dark
 #     $0 -V 1 spec/test_data/c_major.mid                     # every note at full brightness (velocity: level only)
@@ -90,8 +95,18 @@ module MB::Sound
   PLUCK_CROSSOVER = 1000.0 unless const_defined?(:PLUCK_CROSSOVER)
 
   # Width of pluck_voice's hammer-on and pull-off bump in periods of the
-  # note (see pluck_voice's +hammer_width+)
-  PLUCK_HAMMER_WIDTH = 0.5 unless const_defined?(:PLUCK_HAMMER_WIDTH)
+  # note (see pluck_voice's +hammer_width+; the user's pick by ear,
+  # 2026-10-11), and the pitch glide in seconds of a hammer-on or pull-off
+  # (+hammer_glide+)
+  PLUCK_HAMMER_WIDTH = 1.0 unless const_defined?(:PLUCK_HAMMER_WIDTH)
+  PLUCK_HAMMER_GLIDE = 0.004 unless const_defined?(:PLUCK_HAMMER_GLIDE)
+
+  # pluck_voice's +tone+ presets: the brightness range across velocity 0..1
+  # (+velocity_brightness+).  :bright (default) reaches the voice by pitch
+  # at full velocity; :dark tops out at half brightness (leaning to the
+  # clean voice, noise lowpasses an octave or more lower: more string, less
+  # attack, for parts where the bright pluck sounds like a struck tube).
+  PLUCK_TONES = { bright: 0.0..1.0, dark: 0.0..0.5 }.freeze unless const_defined?(:PLUCK_TONES)
 
   # A Karplus-Strong voice for Notes +v+ (see the script description).
   #
@@ -127,7 +142,9 @@ module MB::Sound
   # velocity is the voice by pitch exactly (bit for bit the same as
   # +velocity_brightness+ false, where velocity opens the lowpasses
   # linearly and the mix follows the pitch only, as before).  Levels stay
-  # within about 2.5 dB of that older response (ring RMS, 110 Hz).
+  # within about 2.5 dB of that older response (ring RMS, 110 Hz).  +tone+
+  # picks a range from PLUCK_TONES when +velocity_brightness+ is nil
+  # (:bright, default, 0..1; :dark 0..0.5).
   #
   # +sustain+ is the time in seconds for the string to fall 60 dB (at any
   # pitch: the loop gain per period follows the note), +damping+ the loop
@@ -146,23 +163,31 @@ module MB::Sound
   # zero-mean bump +hammer_width+ periods wide (a finger rather than a
   # pick; level matched to the noise pick by pluck_hammer_gain), or with
   # +hammer_width+ 0 the noise pick (no raw part) as before 2026-10-11.
+  # The pitch slides there over +hammer_glide+ seconds (or a Length; 4 ms
+  # by default, 0 to jump: an instant jump of the string's delay clicks).
   def self.pluck_voice(v, sustain: 3.0, damping: 6.0, pick: 1.0, brightness: 12.0, stretch: 0.0, release: 0.08,
                        brightness_hz: 0.0, attack: nil, attack_shape: :linear, glide: 0.0,
                        voice: :auto, crossover: PLUCK_CROSSOVER, click: 1.0, bright_pick: 0.008,
                        hammer: false, hammer_level: 0.25, pull_level: 0.12, hammer_width: PLUCK_HAMMER_WIDTH,
-                       velocity_brightness: 0.0..1.0, velocity_curve: :quad_out)
+                       hammer_glide: PLUCK_HAMMER_GLIDE, tone: :bright, velocity_brightness: nil, velocity_curve: :quad_out)
     raise ArgumentError, "Unknown pluck voice #{voice.inspect} (:auto, :bright, :clean)" unless [:auto, :bright, :clean].include?(voice)
     raise ArgumentError, 'Choose either a glide or hammer-ons' if hammer && glide > 0
 
     # The pluck's brightness (0..1): from the velocity across
     # +velocity_brightness+, a fixed number, or (false) the velocity as before
     # 2026-10-11 (noise lowpasses only, not the voice mix)
+    raise ArgumentError, "Unknown pluck tone #{tone.inspect} (#{PLUCK_TONES.keys.map(&:inspect).join(', ')})" unless PLUCK_TONES.include?(tone)
+    velocity_brightness = PLUCK_TONES[tone] if velocity_brightness.nil?
     bright_by_velocity = velocity_brightness != false
     brightness_amount = bright_by_velocity ? pluck_velocity_brightness(v, velocity_brightness, velocity_curve) : v.velocity
 
     # The string's pitch (bend included), gliding between legato notes
-    freq = glide > 0 ? v.hz.glide(glide, legato: true).freq : v.freq
-    period = glide > 0 ? 1 / freq : v.period
+    # (hammer-ons and pull-offs: a short +hammer_glide+, as the string
+    # settles onto the fret instead of jumping)
+    glide_time = hammer ? hammer_glide : glide
+    glide_time = glide_time.to_f if glide_time.is_a?(MB::Sound::Length)
+    freq = glide_time > 0 ? v.hz.glide(glide_time, legato: true).freq : v.freq
+    period = glide_time > 0 ? 1 / freq : v.period
 
     # How much of the clean voice (0 = bright, 1 = clean): a number, or a
     # node of the note's pitch for :auto
@@ -242,7 +267,7 @@ module MB::Sound
       w = period * hammer_width
       bump = v.env([[1, w * 0.25, 0, :s], [-1, w * 0.5, 0, :s], [0, w * 0.25, 0, :s], [0, 0, 0]], release_at: 3, hold: w,
                    gate: false, gm: false, sensitivity: 0.3..1.0, trigger: pick_trigger)
-      clean += bump * (level * (1 - fresh) * Math.sqrt(PLUCK_HAMMER_WIDTH / hammer_width)) * pluck_hammer_gain(freq)
+      clean += bump * (level * (1 - fresh) * Math.sqrt(0.5 / hammer_width)) * pluck_hammer_gain(freq)
     end
 
     bright_raw = bright_string = nil
@@ -347,9 +372,9 @@ module MB::Sound
     ((1200.0 / freq) ** (3.2 / 20 / Math.log10(2))).aclip(1, 100) * 2.8.db
   end
 
-  # Gain of pluck_voice's hammer-on bump (PLUCK_HAMMER_WIDTH periods wide;
-  # wider bumps are scaled by sqrt(PLUCK_HAMMER_WIDTH / width) for the same
-  # energy) at +freq+ (Hz, a node), so it adds as much ring as the noise
+  # Gain of pluck_voice's hammer-on bump (half a period wide; other widths
+  # are scaled by sqrt(0.5 / width) for the same energy, so the default
+  # width 1 is 0 to +5 dB above the noise pick) at +freq+ (Hz, a node), so it adds as much ring as the noise
   # pick it replaces: -9.1 dB at 988 Hz, 2 dB less per octave below and 11
   # dB more per octave above (the short bump's ring falls off faster on
   # high notes), at most +20 dB.  Fit to the ring the hammer-on adds
@@ -406,7 +431,9 @@ module MB::Sound
       hammer_level: [0.25, Float, 'Hammer-on pick level (legato notes going up) relative to a full pick', 0.0..1.0],
       pull_level: [0.12, Float, 'Pull-off pick level (legato notes going down) relative to a full pick', 0.0..1.0],
       hammer_width: [PLUCK_HAMMER_WIDTH, Float, '-W', 'Width of the hammer-on/pull-off finger bump in periods (wider is smoother; 0: a noise pick as before 2026-10-11)', 0.0..4.0],
-      velocity_brightness: [0.0..1.0, '-V', 'Brightness at velocity 0..1 (LO..HI: soft notes darker and toward the clean voice; one number: fixed; off: velocity opens the noise lowpasses only, as before 2026-10-11)',
+      hammer_glide: [PLUCK_HAMMER_GLIDE, Float, 'Pitch glide of hammer-ons and pull-offs in seconds (0: instant)', 0.0..1.0],
+      tone: [:bright, '-T', "Brightness preset for velocity (#{PLUCK_TONES.map { |k, r| "#{k}: #{r}" }.join(', ')}; --velocity-brightness overrides)", PLUCK_TONES.keys],
+      velocity_brightness: [nil, '-V', 'Brightness at velocity 0..1 (LO..HI: soft notes darker and toward the clean voice; one number: fixed; off: velocity opens the noise lowpasses only, as before 2026-10-11)',
                             ->(str) { str == 'off' ? false : str.include?('..') ? Range.new(*str.split('..', 2).map { |x| Float(x) }) : Float(str) }],
       velocity_curve: [:quad_out, 'Curve from velocity to brightness (an MB::Sound::Curve name, e.g. linear, quad_out, smoothstep)', Symbol],
       release: [0.08, Float, '-r', 'Release time in seconds after note-off (the string is muted)', 0.0..5.0],
@@ -421,7 +448,7 @@ module MB::Sound
           brightness_hz: p.brightness_hz, attack: p.attack, attack_shape: p.attack_shape, glide: p.glide,
           voice: voice, crossover: p.crossover, click: p.click,
           hammer: p.hammer, hammer_level: p.hammer_level, pull_level: p.pull_level, hammer_width: p.hammer_width,
-          velocity_brightness: p.velocity_brightness, velocity_curve: p.velocity_curve)
+          hammer_glide: p.hammer_glide, tone: p.tone, velocity_brightness: p.velocity_brightness, velocity_curve: p.velocity_curve)
       }
     }
   end

@@ -241,9 +241,13 @@ RSpec.describe('bin/synths/pluck.rb') do
       [45, 76].each do |n|
         rings = 5.times.map { |s| hammer_ring(n, seed: s, hammer_width: 0) }
         noise = rings.sum { |r| rms_db(r[960..]) } / rings.length
-        finger_ring = hammer_ring(n)
+        finger_ring = hammer_ring(n, hammer_width: 0.5)
         finger = rms_db(finger_ring[960..])
         expect(finger).to be_within(2.5).of(noise), "note #{n}: finger #{finger.round(1)} dB, noise #{noise.round(1)} dB"
+
+        # The default width (1 period, the user's pick) a little louder
+        wide = rms_db(hammer_ring(n)[960..])
+        expect(wide - noise).to be_between(-1.5, 5.5), "note #{n}: width 1 #{wide.round(1)} dB, noise #{noise.round(1)} dB"
 
         noise_centroid = rings.sum { |r| centroid(r) } / rings.length
         expect(centroid(finger_ring)).to be < noise_centroid * 0.85
@@ -251,9 +255,43 @@ RSpec.describe('bin/synths/pluck.rb') do
     end
 
     it 'is smoother when wider and the same at every seed' do
-      expect(centroid(hammer_ring(45, hammer_width: 1.0))).to be < centroid(hammer_ring(45)) * 0.8
+      expect(centroid(hammer_ring(45))).to be < centroid(hammer_ring(45, hammer_width: 0.5)) * 0.8
       expect(hammer_ring(45, seed: 1)).to be_within(1e-4).of(hammer_ring(45, seed: 2))
     end
+  end
+
+  describe 'hammer-on glide' do
+    let(:events) {
+      [E.note_on(45, 0.9, time: 0r), E.note_on(47, 0.8, time: 1/2r), E.note_off(47, time: 1r), E.note_off(45, time: 3/2r)]
+    }
+
+    it 'slides to the new pitch in a few ms without a click, then holds it' do
+      instant = render(events, 0.65, hammer: true, hammer_glide: 0)
+      glide = render(events, 0.65, hammer: true)
+      expect(render(events, 0.65, hammer: true, hammer_glide: 4.ms)).to eq(glide)
+
+      # The same before the hammer-on, different while it glides
+      expect(window(glide, 0, 0.5)).to eq(window(instant, 0, 0.5))
+      expect((window(glide, 0.5, 0.505) - window(instant, 0.5, 0.505)).abs.max).to be > 1e-3
+
+      # The instant jump's click (a spike in the second difference, about 3x
+      # the ringing string's; measured without the new pick) is about halved
+      click = ->(d) { w = Numo::DFloat.cast(window(d, 0.499, 0.52)); (w[2..] - 2 * w[1...-1] + w[0...-2]).abs.max }
+      silent = { hammer: true, hammer_level: 0, pull_level: 0 }
+      expect(click.(render(events, 0.55, **silent))).to be < click.(render(events, 0.55, **silent, hammer_glide: 0)) * 0.6
+
+      expect(pitch(window(glide, 0.52, 0.62), 80, 160)).to be_within(0.5).of(MB::Sound::B2.frequency)
+    end
+  end
+
+  it 'has a dark tone preset' do
+    ev = note_events(57, 0.8)
+    dark = seed_average { |s| centroid(window(render(ev, 0.1, seed: s, tone: :dark), 0, 0.1)) }
+    bright = seed_average { |s| centroid(window(render(ev, 0.1, seed: s), 0, 0.1)) }
+    expect(dark).to be < bright * 0.9
+    expect(render(ev, 0.1, tone: :dark)).to eq(render(ev, 0.1, velocity_brightness: 0.0..0.5))
+    expect(render(ev, 0.1, tone: :dark, velocity_brightness: 1.0)).to eq(render(ev, 0.1, velocity_brightness: 1.0))
+    expect { render(ev, 0.1, tone: :shiny) }.to raise_error(ArgumentError, /tone/)
   end
 
   it 'renders a MIDI file with --hammer, --bright, and --click' do
