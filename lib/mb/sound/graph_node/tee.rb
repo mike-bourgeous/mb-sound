@@ -34,10 +34,17 @@ module MB
       # The ideal way to create a Tee is with the GraphNode#tee method or
       # GraphNode#get_sampler method.
       #
-      # Note that if a downstream node tries to change the sample rate for one
-      # branch, it will change it for all branches and upstream nodes.  So add
-      # a .resample node to a branch if you want different branches at
-      # different sample rates.
+      # Sample rates: a branch asked for another rate changes the rate of
+      # the source and everything upstream (so every branch follows),
+      # except while an oversample region applies its rate (2026-10-11; see
+      # GraphNode#oversample and Tee.pin_rates): a node read both
+      # inside the region and outside it keeps its rate, and the region's
+      # branch is pinned to the region's rate, reading the source through
+      # its own resampler (Branch#resampled?; libsamplerate's best sinc, or
+      # a zero-order hold for Constants).  So a node shared between an
+      # oversampled region and a plain branch (or two oversample regions)
+      # runs once at its own rate and each consumer reads it at its own
+      # rate; nodes only read inside the region run at the higher rate.
       #
       # Example:
       #     # Runnable in bin/sound.rb
@@ -86,6 +93,68 @@ module MB
           attr_accessor :shared_check
         end
 
+        class << self
+          # The Branch => true set of branches #pin_rates is pinning on
+          # this thread, or nil.
+          def rate_pins
+            Thread.current[:mb_sound_tee_rate_pins]
+          end
+
+          # Runs the block (oversample regions setting the rates of their
+          # inputs +upstreams+ to one rate; see Resample.apply_pending) with
+          # the regions' branches of shared nodes pinned: walking the graph
+          # from +upstreams+ through #sources (stopping at Resample nodes),
+          # a Tee whose every branch is reached is inside the regions and
+          # the walk continues from its source; branches of the other Tees
+          # reached are pinned to the rate asked of them (read through
+          # their own resamplers) instead of passing it upstream, so shared
+          # nodes keep their rate.
+          def pin_rates(upstreams)
+            raise 'Nested Tee.pin_rates' if rate_pins
+
+            seen = {}.compare_by_identity
+            reached = {}.compare_by_identity
+            inside = {}.compare_by_identity
+            stack = Array(upstreams).dup
+            loop do
+              while (node = stack.pop)
+                next if seen[node]
+
+                seen[node] = true
+                if node.is_a?(Branch)
+                  reached[node] = true
+                  next
+                end
+                next if node.is_a?(Resample)
+                next unless node.respond_to?(:sources)
+
+                srcs = node.sources
+                next unless srcs.respond_to?(:each_value)
+
+                srcs.each_value { |v| (v.is_a?(Array) ? v : [v]).each { |n| stack << n if n.respond_to?(:sample) || n.is_a?(Tee) } }
+              end
+
+              progress = false
+              reached.each_key.map(&:tee).uniq.each do |tee|
+                next if inside[tee] || !tee.branches.all? { |b| reached[b] }
+
+                inside[tee] = true
+                progress = true
+                stack << tee.sources[:input]
+              end
+              break unless progress
+            end
+
+            pins = reached.reject { |b, _| inside[b.tee] }.compare_by_identity
+            begin
+              Thread.current[:mb_sound_tee_rate_pins] = pins
+              yield
+            ensure
+              Thread.current[:mb_sound_tee_rate_pins] = nil
+            end
+          end
+        end
+
         self.shared = ENV['MB_SOUND_SHARED_TEE'] != '0'
         self.shared_check = case ENV['MB_SOUND_CHECK_SHARED']
                             when nil, '', '0' then nil
@@ -116,7 +185,7 @@ module MB
           # unfused on the same data.
           attr_accessor :replay
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :original_source
+          def_delegators :@tee, :reset, :original_source
           def_delegators :@reader, :count, :length
 
           attr_reader :sources
@@ -129,6 +198,7 @@ module MB
             @reader = reader
             @trace = caller_locations
             @sources = { tee: @tee }
+            @rate = nil
             @node_type_name = 'Branch'
           end
 
@@ -154,14 +224,74 @@ module MB
 
             raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader
 
+            return resampler.sample(count) if @rate && @rate != @tee.sample_rate
+
             @tee.internal_sample(self, count)
           end
 
-          # Wraps upstream #at_rate to return self instead of upstream.
+          # The rate this branch gives: the source's, unless an oversample
+          # region pinned it (see the Tee class description).
+          def sample_rate
+            @rate || @tee.sample_rate
+          end
+
+          # Sets the rate of this branch's source and everything upstream
+          # (and so of every unpinned branch), as before, except while an
+          # oversample region applies its rate (Tee.pin_rates; see the
+          # Tee class description).
+          def sample_rate=(new_rate)
+            if (pins = Tee.rate_pins) && pins.key?(self)
+              pin_rate(new_rate.to_f == @tee.sample_rate.to_f ? nil : new_rate)
+            else
+              pin_rate(nil)
+              @tee.sample_rate = new_rate
+            end
+          end
+
+          # Sets the rate (see #sample_rate=), returning self.
           def at_rate(new_rate)
-            @tee.at_rate(new_rate)
+            self.sample_rate = new_rate
             self
           end
+
+          # True if this branch reads the Tee's source through its own
+          # resampler (pinned at another rate than the source's; see the
+          # Tee class description).  Resampled branches are plan
+          # boundaries.
+          def resampled?
+            !@rate.nil? && @rate != @tee.sample_rate
+          end
+
+          # For internal use: gives this branch its own
+          # +rate+ (nil to follow the source again).
+          def pin_rate(rate)
+            rate = rate&.to_f
+            return if rate == @rate
+
+            @rate = rate
+            Plan.changed(self)
+          end
+
+          # For internal use by RateReader.
+          def internal_raw_sample(count)
+            @tee.internal_sample(self, count)
+          end
+
+          private
+
+          # The resampler from the source's rate to this branch's (made
+          # again if either rate changed).
+          def resampler
+            from = @tee.sample_rate.to_f
+            unless @resampler && @resampler_from == from && @resampler.sample_rate == @rate
+              mode = @tee.original_source.is_a?(Constant) ? :libsamplerate_zoh : Resample::DEFAULT_MODE
+              @resampler = Resample.new(upstream: RateReader.new(self), sample_rate: @rate, mode: mode)
+              @resampler_from = from
+            end
+            @resampler
+          end
+
+          public
 
           # Describes this branch as a String.
           def to_s
@@ -171,6 +301,26 @@ module MB
           # Pass unknown methods through to the upstream node.
           def method_missing(m, *a, **ka)
             original_source.send(m, *a, **ka)
+          end
+        end
+
+        # The source side of a resampled Branch (see Branch#sample_rate=):
+        # reads the branch's share of the Tee at the source's rate.
+        class RateReader
+          def initialize(branch)
+            @branch = branch
+          end
+
+          def sample(count)
+            @branch.internal_raw_sample(count)
+          end
+
+          def sample_rate
+            @branch.tee.sample_rate
+          end
+
+          def get_sampler
+            self
           end
         end
 

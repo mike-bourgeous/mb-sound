@@ -334,9 +334,10 @@ module MB
         end
 
         # Knobs: each use of a param's name is a new Constant named after
-        # it (a node shared by several channels would branch through a Tee,
-        # which an oversample region in one channel can't share; scripts
-        # make one Constant per use too).  Document#set changes them all.
+        # it, as scripts make them, so loaded documents render like their
+        # scripts (a Constant shared with an oversample region is read
+        # through a resampling Tee branch since omnibus4, correct but not
+        # the same graph).  Document#set changes them all.
         def bind_params
           baked = (@document.meta[:options] || {})
           @overrides.each_key do |k|

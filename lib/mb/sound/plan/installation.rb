@@ -145,7 +145,7 @@ module MB
         # inputs at another count than they are read), so inputs aren't
         # shared with other installations (see SharedInputs).
         def resamples?
-          @seen.nil? || @seen.each_key.any? { |n| n.is_a?(GraphNode::Resample) }
+          @seen.nil? || @seen.each_key.any? { |n| n.is_a?(GraphNode::Resample) || (n.is_a?(GraphNode::Tee::Branch) && n.resampled?) }
         end
 
         # Removes every hook; the graph runs unfused from the next block.
@@ -322,6 +322,12 @@ module MB
           end
 
           @order = post.reverse
+
+          # Oversample regions take their rates now that the graph exists
+          # (consumers first, so nested regions multiply their outer rate;
+          # see GraphNode::Resample#apply_oversample)
+          pending = @order.select { |n| n.is_a?(GraphNode::Resample) && n.oversample_pending }
+          GraphNode::Resample.apply_pending(pending) unless pending.empty?
         end
 
         def sources_of(obj)
@@ -374,6 +380,7 @@ module MB
         # its own plan.
         def fusable_edge?(consumer, handle)
           return false unless consumer.is_a?(Describable)
+          return false if handle.is_a?(GraphNode::Tee::Branch) && handle.resampled?
 
           consumer.plan_inputs.any? { |h| h.equal?(handle) } && consumer.plan_boundary_inputs.none? { |h| h.equal?(handle) }
         end

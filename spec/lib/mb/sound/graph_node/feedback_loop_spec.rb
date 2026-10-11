@@ -476,6 +476,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
     it 'follows a sample rate change (oversampling)' do
       l = MB::Sound.noise(seed: 5).at(0.2).delay(1.ms, feedback: 0.7, smoothing: false) { |fb| fb.filter(:lowpass, cutoff: 2000).softclip }
       o = l.oversample(2)
+      o.apply_oversample
       expect(l.sample_rate).to eq(96000)
       expect(l.program.rings[0].delay.delay_samples).to eq(96)
       out = Array.new(20) { o.sample(256).to_a }.flatten
