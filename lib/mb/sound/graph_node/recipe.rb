@@ -301,6 +301,14 @@ module MB
           # Runs the block, storing +block+'s local variables (as of its
           # last return) in +inv+'s locals.
           def trace_locals(block, inv, &run)
+            if block.respond_to?(:graph_io_locals)
+              # A block loaded from a graph document (GraphIO::Loader) keeps
+              # the document's locals itself
+              result = run.call
+              block.graph_io_locals.each { |k, v| inv.locals[k] = v }
+              return result
+            end
+
             tp = TracePoint.new(:b_return) { |t|
               b = t.binding
               b.local_variables.each { |v| inv.locals[v] = b.local_variable_get(v) }

@@ -159,11 +159,15 @@ module MB
         end
 
         LIB_DIR = File.expand_path('../../..', __dir__).freeze
+        GRAPH_IO_DIR = File.join(LIB_DIR, 'sound', 'graph_io').freeze
 
         class << self
           # True if +location+ is library code (lib/mb/sound).
           def library_caller?(location)
-            location&.path&.start_with?(LIB_DIR) || false
+            path = location&.path
+            return false unless path
+            # The graph document loader makes user calls for the document
+            path.start_with?(LIB_DIR) && !path.start_with?(GRAPH_IO_DIR)
           end
 
           # Prepends the recorders (idempotent; .refresh! adds recorders for
