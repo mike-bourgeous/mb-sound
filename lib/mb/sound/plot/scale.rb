@@ -211,6 +211,11 @@ module MB
             super(lo, hi)
           end
 
+          private def nice_domain(lo, hi)
+            nlo, nhi = super
+            [[nlo, @floor].max, nhi]
+          end
+
           def ticks(count = 5)
             step = Format.nice_step(@hi - @lo, count)
             step = (step / 3.0).ceil * 3 if step >= 3 && step < 10 # 3 or 6 dB grids read well
@@ -315,8 +320,8 @@ module MB
         end
 
         # Logarithmic frequency in Hz (labels 100, 1k, 10k), optionally with
-        # note names of every C (or every +note_step+ semitones) as
-        # secondary ticks.
+        # note names of every C (every other C over more than 9 octaves, or
+        # every +notes+ semitones when it's an Integer) as secondary ticks.
         class Frequency < Log
           NOTE_NAMES = %w[C C# D D# E F F# G G# A A# B].freeze
 

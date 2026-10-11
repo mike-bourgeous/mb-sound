@@ -151,9 +151,10 @@ module MB
 
             sx = x0[seg] + dx[seg] * t
             sy = y0[seg] + dy[seg] * t
-            # The last point of the whole line
-            px = px.concatenate(sx.round).concatenate(Numo::DFloat[x0[-1] + dx[-1]].round)
-            py = py.concatenate(sy.round).concatenate(Numo::DFloat[y0[-1] + dy[-1]].round)
+            # Each segment's end point (the next segment starts there, but
+            # not after a gap or at the end)
+            px = px.concatenate(sx.round).concatenate((x0 + dx).round)
+            py = py.concatenate(sy.round).concatenate((y0 + dy).round)
           end
 
           [Numo::Int32.cast(px), Numo::Int32.cast(py)]

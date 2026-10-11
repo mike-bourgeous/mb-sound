@@ -365,7 +365,7 @@ module MB
             notes = false if bottom == 0
             plot_h = @h - (row - @y) - bottom
 
-            yticks = frame == :none ? spark_ticks(coord.y) : coord.y.ticks(tick_count(plot_h, 2.5, min: 3))
+            yticks = @chart.polar ? [] : frame == :none ? spark_ticks(coord.y) : coord.y.ticks(tick_count(plot_h, 2.5, min: 3))
             ylabels = yticks.map(&:label).compact
             label_w = ylabels.map(&:length).max || 0
             left = frame == :none ? (label_w > 0 ? label_w + 1 : 0) : label_w + 1
@@ -450,8 +450,10 @@ module MB
               ys = (0.5 - Numo::NMath.sin(t) * r * 0.5) * (surface.height - 1)
               surface.polyline(xs, ys, c, dash: [1, 2], prio: 1)
             end
-            surface.polyline(Numo::DFloat[0, surface.width - 1], Numo::DFloat[(surface.height - 1) / 2.0] * 2, c, dash: [1, 2], prio: 1)
-            surface.polyline(Numo::DFloat[(surface.width - 1) / 2.0] * 2, Numo::DFloat[0, surface.height - 1], c, dash: [1, 2], prio: 1)
+            cy = (surface.height - 1) / 2.0
+            surface.polyline(Numo::DFloat[0, surface.width - 1], Numo::DFloat[cy, cy], c, dash: [1, 2], prio: 1)
+            cx = (surface.width - 1) / 2.0
+            surface.polyline(Numo::DFloat[cx, cx], Numo::DFloat[0, surface.height - 1], c, dash: [1, 2], prio: 1)
           end
 
           # Turns the surface's dots into characters in the plot area

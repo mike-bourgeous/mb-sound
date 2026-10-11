@@ -71,7 +71,7 @@ module MB
           values.map { |v|
             s = format("%.#{d}f", v / scale)
             s = s.sub(/\A-(0\.?0*)\z/, '\1') # no negative zero
-            s + SI_PREFIXES[exp]
+            s.match?(/\A0\.?0*\z/) && exp != 0 ? '0' : s + SI_PREFIXES[exp]
           }
         end
 
