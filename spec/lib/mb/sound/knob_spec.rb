@@ -364,6 +364,13 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       session.turn(:morph, 0.5)
       expect(render(session, 800)[-1]).to be_within(0.01).of(800 + 5000)
       expect(@cut.mode).to eq(:follow)
+      expect(morph.value).to eq(0.5)
+
+      # A crossfader knob captured in the snapshots stays where it is
+      session.snap(:with_morph)
+      session.xfade(:with_morph, :bright, :morph)
+      render(session, 800)
+      expect(morph.mode).to eq(:hold)
 
       expect { session.recall(:nope) }.to raise_error(ArgumentError, /No snapshot :nope/)
     end
