@@ -82,19 +82,22 @@ module MB
         # number, limited to the knob's range; gliding over the knob's
         # +smooth:+ time, or +smooth:+ seconds here), over +over:+ (bars, a
         # Duration, or a Length) shaped by +curve:+ (a Curve name or
-        # MB::Sound::Curve) in the knob's scale, or following a graph node
+        # MB::Sound::Curve) in the knob's scale (from where it is, or
+        # +from:+ a value), or following a graph node
         # (+value+ or +follow:+ a node or another knob's name) until it is
         # turned again.  Returns the Change (see Changes#change).
-        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, follow: nil, smooth: nil, start_time: nil)
+        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
           value = follow unless follow.nil?
           raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
           check_turn_value(k, value)
+          raise ArgumentError, "from: needs over: (a ramp)" if from && !over
+          raise ArgumentError, "from: must be a number (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real?)
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          knob_change(k, time, turn_data(value, over, curve)) { |kn, frame, t|
-            apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth)
+          knob_change(k, time, turn_data(value, over, curve).merge(from ? { from: from } : {})) { |kn, frame, t|
+            apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
           }
         end
 
@@ -257,12 +260,12 @@ module MB
         end
 
         # Applies a turn to knob +k+ on frame +frame+ (landing position +t+).
-        def apply_turn(k, value, frame, t, over:, curve:, smooth:)
+        def apply_turn(k, value, frame, t, over:, curve:, smooth:, from: nil)
           value = knob!(value) if value.is_a?(Symbol)
 
           if value.is_a?(Numeric)
             if over
-              k.ramp_to(value, frames: knob_frames(over), frame: frame, curve: curve)
+              k.ramp_to(value, frames: knob_frames(over), frame: frame, curve: curve, from: from)
             else
               k.set(value, frame: frame, smooth: smooth)
             end

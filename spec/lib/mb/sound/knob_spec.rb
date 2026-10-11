@@ -162,6 +162,17 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(d[168000 + 479]).to eq(5000)
     end
 
+    it 'ramps from a given value with from:' do
+      k = session.knob(:cut, 800, range: 100..8000, smooth: 0)
+      session.add(k * 1, name: :x, on: :now)
+      session.turn(:cut, 2000, from: 1000, over: 1.beat)
+      d = render(session, 24800)
+      expect(d[0]).to be_within(0.1).of(1000)
+      expect(d[11999]).to be_within(0.1).of(1500)
+      expect(d[-1]).to eq(2000)
+      expect { session.turn(:cut, 1, from: 2) }.to raise_error(ArgumentError, /needs over/)
+    end
+
     it 'journals turns, which return entries and print where they land' do
       k = session.knob(:cut, 800, range: 100..8000)
       session.add(k * 1, name: :x, on: :now)

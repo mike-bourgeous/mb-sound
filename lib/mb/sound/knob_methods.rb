@@ -44,14 +44,14 @@ module MB
       # Turns knob +name+ (see Session::Knobs#turn): to a number (right
       # away with a short glide, or at a launch point: +on:+, +in:+,
       # +at:+), over +over:+ (bars, a Duration, or a Length) shaped by
-      # +curve:+, or following a node or another knob's name until it is
-      # turned again.  Returns the change's journal entry.  Also available
+      # +curve:+ (from where it is, or +from:+ a value), or following a node
+      # or another knob's name until it is turned again.  Returns the change's journal entry.  Also available
       # as #move.
-      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, follow: nil, smooth: nil)
+      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil)
         point = LaunchPoint.of(binding) or return nil
         name = knob_name(name)
         session_command(name, label: "turn #{name.inspect}", kind: :turn) { |session, time|
-          session.turn(name, value, at: point, over: over, curve: curve, follow: follow, smooth: smooth, start_time: point.given? ? nil : time)
+          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time)
         }
       end
       alias move turn

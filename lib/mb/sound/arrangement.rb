@@ -364,7 +364,7 @@ module MB
       def knob_value(value)
         return [value, {}] unless value.is_a?(Array)
         v, options = value
-        [v, (options || {}).slice(:over, :curve, :smooth)]
+        [v, (options || {}).slice(:over, :curve, :smooth, :from)]
       end
 
       # Checks a scene's (or section's) knob value; false (after
@@ -372,10 +372,10 @@ module MB
       def check_knob_value(owner, name, value)
         v, options = knob_value(value)
         ok = v.is_a?(Numeric) || v.is_a?(Symbol) || v.respond_to?(:sample)
-        extra = value.is_a?(Array) ? ((value[1] || {}).keys - [:over, :curve, :smooth]) : []
+        extra = value.is_a?(Array) ? ((value[1] || {}).keys - [:over, :curve, :smooth, :from]) : []
         ok &&= extra.empty? && (!value.is_a?(Array) || value.length <= 2) && options.is_a?(Hash)
         return true if ok
-        !!MB::Sound.live_error(ArgumentError.new("#{owner.inspect}: knob #{name.inspect} takes a number, a node, a knob name, or [value, over:, curve:] (got #{value.inspect})"))
+        !!MB::Sound.live_error(ArgumentError.new("#{owner.inspect}: knob #{name.inspect} takes a number, a node, a knob name, or [value, over:, curve:, from:] (got #{value.inspect})"))
       end
 
       def check_quant(q)

@@ -132,7 +132,8 @@ module MB
         # A ramp from frame +start+ over +length+ frames to +to+ (the value
         # on frame start + length - 1 and after), shaped by +curve+ (an
         # MB::Sound::Curve or nil for linear).  +from+ is the value on the
-        # frame before +start+, filled in when the ramp begins.
+        # frame before +start+, filled in when the ramp begins (unless
+        # given).
         Ramp = Struct.new(:start, :length, :to, :curve, :from)
 
         # Follows +source+ (a sampler) from frame +start+ on.  +map+ (a
@@ -426,14 +427,15 @@ module MB
 
         # Ramps to +value+ over +frames+ frames starting on frame +frame+,
         # shaped by +curve+ (an MB::Sound::Curve, a curve name like :smooth,
-        # or nil for straight in the knob's scale).  Returns self.
-        def ramp_to(value, frames:, frame:, curve: nil)
+        # or nil for straight in the knob's scale), from where the knob is
+        # (or from +from+: a jump there first).  Returns self.
+        def ramp_to(value, frames:, frame:, curve: nil, from: nil)
           frames = frames.round
           return add_segment(Hold.new(frame, @spec.clamp(value))) if frames <= 1
 
           curve = MB::Sound::Curve[curve] unless curve.nil? || curve.is_a?(MB::Sound::Curve)
           curve = nil if curve.respond_to?(:name) && curve.name == :linear
-          add_segment(Ramp.new(frame, frames, @spec.clamp(value), curve, nil))
+          add_segment(Ramp.new(frame, frames, @spec.clamp(value), curve, from && @spec.clamp(from)))
         end
 
         # Follows +node+ (any GraphNode; its output in the knob's units,
@@ -650,7 +652,7 @@ module MB
             return if seg.nil?
           end
 
-          seg.from = @value if seg.is_a?(Ramp)
+          seg.from ||= @value if seg.is_a?(Ramp)
           @value = seg.value if seg.is_a?(Hold)
           @segment = seg
         end
@@ -659,24 +661,33 @@ module MB
         # start + j is from + (to - from) * curve((j + 1) / length), in the
         # knob's scale, and exactly +to+ from the last frame on.
         def ramp_values(seg, f, n)
-          t = Numo::DFloat.new(n).seq(f - seg.start + 1)
+          j0 = f - seg.start
+          t = Numo::DFloat.new(n).seq(j0 + 1)
           t.inplace / seg.length
-          t = t.clip(0.0, 1.0)
+          ends = j0 + n >= seg.length
+          t.inplace.clip(0.0, 1.0) if ends
           c = seg.curve ? seg.curve.map(t) : t
           if @spec.curve == :exp
             p0 = @spec.position(seg.from)
             p1 = @spec.position(seg.to)
-            v = @spec.value(c * (p1 - p0) + p0)
+            c = c.dup if c.equal?(t) && ends
+            c.inplace * (Math.log(@spec.range.end / @spec.range.begin) * (p1 - p0))
+            c.inplace + Math.log(@spec.range.begin) + p0 * Math.log(@spec.range.end / @spec.range.begin)
+            v = Numo::NMath.exp(c.inplace)
           else
-            v = c * (seg.to - seg.from) + seg.from
+            c = c.dup if c.equal?(t) && ends
+            c.inplace * (seg.to - seg.from)
+            v = c.inplace + seg.from
           end
-          done = t.ge(1.0)
-          v[done] = seg.to if done.any?
+          if ends
+            done = t.ge(1.0)
+            v[done] = seg.to
+          end
           v
         end
 
         # +n+ frames of the followed node (holding its last value once it
-        # ends).
+        # ends), limited to the range or through the Follow's map.
         def follow_values(seg, n)
           buf = seg.source.sample(n)
           if buf.nil? || buf.empty?
@@ -684,12 +695,13 @@ module MB
             return @value
           end
 
-          buf = Numo::DFloat.cast(buf.length > n ? buf[0...n] : buf)
+          buf = buf[0...n] if buf.length > n
           if buf.length < n
             last = buf[-1]
-            buf = buf.concatenate(Numo::DFloat.new(n - buf.length).fill(last))
+            buf = buf.concatenate(buf.class.new(n - buf.length).fill(last))
           end
-          seg.map ? seg.map.call(buf) : buf.clip(@spec.range.begin, @spec.range.end)
+          return seg.map.call(Numo::DFloat.cast(buf)) if seg.map
+          buf.clip(@spec.range.begin, @spec.range.end)
         end
 
         # Reads controller events for frames [+frame+, +frame+ + +count+)
