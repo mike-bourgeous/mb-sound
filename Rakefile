@@ -70,6 +70,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_loudness' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_dynamics' do |ext|
+  ext.name = 'fast_dynamics'
+  ext.ext_dir = 'ext/mb/sound/fast_dynamics'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_unison' do |ext|
   ext.name = 'fast_unison'
   ext.ext_dir = 'ext/mb/sound/fast_unison'

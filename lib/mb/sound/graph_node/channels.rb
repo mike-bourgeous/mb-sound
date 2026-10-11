@@ -31,6 +31,7 @@ module MB
         include Traversable
         include Nameable
         include ChorusMethods
+        include DynamicsMethods
 
         # The channel nodes.
         attr_reader :outputs

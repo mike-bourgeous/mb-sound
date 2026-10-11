@@ -78,7 +78,7 @@ module MB
         # nodes part of the recipe), by name.  Every other recorded method's
         # block is a runtime block.
         BUILD_BLOCKS = Set[
-          :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes,
+          :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
         ].freeze
 
         # Recorded names that only raise the depth (the call itself isn't
