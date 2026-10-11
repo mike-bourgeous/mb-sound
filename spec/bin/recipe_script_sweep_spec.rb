@@ -5,7 +5,10 @@ require 'timeout'
 # graph block runs with recording on (in a fork, stopped before playback),
 # its result prints as Ruby (GraphNode#to_ruby, the block's input named
 # midi or input), and the printed code, evaluated with fresh inputs
-# (c_major.mid, arp_a7.flac), must render the same samples.  Scripts that
+# (c_major.mid, arp_a7.flac), must render the same samples.  The same graph
+# saved as a graph document (GraphIO.dump, with the script's parameters as
+# params, as --save does) and loaded with GraphIO.load (no eval) must render
+# the same samples too, and with a param override, follow it.  Scripts that
 # can't print yet are listed with the reason the printed code gives.
 RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
   root = File.expand_path('../..', __dir__)
@@ -43,7 +46,7 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
     end
 
     def play_or_render(graph)
-      throw :graph_io_captured, [@graph_io_result || graph, @graph_io_input]
+      throw :graph_io_captured, [@graph_io_result || graph, @graph_io_input, graph_params]
     end
 
     def announce(_graph); end
@@ -76,7 +79,7 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
             ARGV.replace([synth ? midi_path : audio_path, '-o', File.join(Dir.tmpdir, "graph_io_#{Process.pid}.flac"), '-f', '-q'])
             $PROGRAM_NAME = path
             MB::Sound.seed(0)
-            graph, inputs = catch(:graph_io_captured) { load path; nil }
+            graph, inputs, (params, options) = catch(:graph_io_captured) { load path; nil }
             raise 'no graph captured' unless graph
 
             code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: true).to_s
@@ -91,6 +94,18 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
               report[:lengths] = [ref.map(&:length), got.map(&:length)]
               report[:diff] = RecipeHelpers.max_diff(ref, got)
               report[:peak] = ref.map { |r| r.length > 0 ? r.abs.max : 0 }.max
+
+              doc = MB::Sound::GraphIO.dump(graph, name: File.basename(path, '.rb'), inputs: inputs, params: params, options: options, from: name)
+              report[:doc] = doc
+              MB::Sound.seed(code.include?('MB::Sound.seed') ? 0 : 78)
+              fresh = inputs.transform_values { |o|
+                o.is_a?(MB::Sound::Notes) ? MB::Sound::Notes.new(midi_path) : MB::Sound.file_input(audio_path).ringdown
+              }
+              loaded = MB::Sound::GraphIO.load(doc, inputs: fresh)
+              got = RecipeHelpers.render(loaded, buffers: 94)
+              report[:doc_lengths] = got.map(&:length)
+              report[:doc_diff] = RecipeHelpers.max_diff(ref, got)
+              report[:knobs] = MB::Sound::GraphIO.document_of(loaded).params.keys
             end
           end
         rescue Exception => e # rubocop:disable Lint/RescueException
@@ -113,6 +128,12 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
         expect(report[:lengths][0]).to eq(report[:lengths][1])
         expect(report[:diff]).to eq(0), report[:code]
         expect(report[:peak]).to be > 0.001
+        expect(report[:doc_lengths]).to eq(report[:lengths][0])
+        expect(report[:doc_diff]).to eq(0), report[:doc]
+        # Knobs print as their names, not as named Constants
+        knobs = report[:knobs].map(&:to_s)
+        expect(report[:doc]).not_to match(/\.constant\.named\("(#{knobs.join('|')})"\)/) unless knobs.empty?
+        expect(knobs).to include('dry', 'wet', 'drive') if name == 'bin/effects/tape_delay.rb'
       end
     end
   end

@@ -148,7 +148,7 @@ module MB
             raise error(body.last, "the document's last line must be a graph (got #{describe(result)})")
           end
 
-          @document.knob_nodes = @knobs
+          @document.knob_nodes = @knob_nodes
           result.instance_variable_set(:@graph_io_document, @document) unless result.frozen?
           result
         end
@@ -333,7 +333,10 @@ module MB
           @inputs = @given_inputs.slice(*declared)
         end
 
-        # Knobs: one named Constant per param, shared by every use.
+        # Knobs: each use of a param's name is a new Constant named after
+        # it (a node shared by several channels would branch through a Tee,
+        # which an oversample region in one channel can't share; scripts
+        # make one Constant per use too).  Document#set changes them all.
         def bind_params
           baked = (@document.meta[:options] || {})
           @overrides.each_key do |k|
@@ -346,6 +349,7 @@ module MB
           end
 
           @knobs = {}
+          @knob_nodes = {}
           @document.params.each do |name, spec|
             value = @overrides.fetch(name, spec[:value])
             raise LoadError.new("#{@label}: param #{name} needs a number (got #{value.inspect})", path: @path) unless value.is_a?(Numeric) && value.real?
@@ -353,8 +357,15 @@ module MB
               warn "#{@label}: param #{name} = #{value} is outside its range #{r}"
             end
             spec[:value] = value
-            @knobs[name] = value.constant.named(name.to_s)
+            @knobs[name] = value
           end
+        end
+
+        # A new Constant for a use of param +name+.
+        def knob(name)
+          c = @knobs[name].constant.named(name.to_s)
+          (@knob_nodes[name] ||= []) << c
+          c
         end
 
         def range_cover?(r, v)
@@ -441,7 +452,7 @@ module MB
           if node.receiver.nil?
             if node.variable_call?
               return @inputs[name] if @inputs&.key?(name)
-              return @knobs[name] if @knobs&.key?(name)
+              return knob(name) if @knobs&.key?(name)
             end
             return complex(node, scope) if name == :Complex
             return named_proc(node, scope) if name == :named_proc

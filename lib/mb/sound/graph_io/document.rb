@@ -21,6 +21,9 @@ module MB
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
 
+        # The Constants made for each param ({ name => [Constant, ...] }).
+        # attr_accessor :knob_nodes (above)
+
         # Inputs named by a `# inputs: a, b` comment (to_ruby's header),
         # for documents without an inputs line.
         attr_reader :comment_inputs
@@ -57,6 +60,21 @@ module MB
           @meta[:kind]
         end
 
+        # Sets param +name+ of a loaded graph to +value+ (every Constant
+        # made for it; the change lands at the next buffer).  Returns value.
+        def set(name, value)
+          name = name.to_sym
+          raise ArgumentError, "no param #{name}#{GraphIO.suggest(name, @params.keys)}" unless @params.key?(name)
+          (@knob_nodes[name] || []).each { |c| c.constant = value }
+          @params[name][:value] = value
+        end
+        alias []= set
+
+        # A param's current value.
+        def [](name)
+          @params.fetch(name.to_sym)[:value]
+        end
+
         # Param defaults (or the values a load used), by name.
         def param_values
           @params.transform_values { |s| s[:value] }
@@ -88,7 +106,7 @@ module MB
         # can't be written (the writer's FIXMEs).
         def to_s
           knobs = @params.transform_keys(&:to_s).transform_values { |s| s[:value] }
-          knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, node), h| h[node] = n.to_s }
+          knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
           writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes)
           body = writer.to_s
           unless writer.problems.empty?

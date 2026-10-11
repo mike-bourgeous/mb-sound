@@ -243,7 +243,10 @@ module MB
                 end
 
         @params.midi_source = method(:midi)
-        graph = to_graph(block.call(input, @params))
+        result = block.call(input, @params)
+        return save_graph(result, input: input) if @options[:save]
+
+        graph = to_graph(result)
         announce(graph)
 
         # Effects process recordings that already have their own levels, so
@@ -277,7 +280,10 @@ module MB
       def run_synth(&block)
         notes = @synth_notes = synth_midi
         @params.midi_source = -> { notes }
-        graph = to_graph(block.arity == 1 ? block.call(notes) : block.call(notes, @params))
+        result = block.arity == 1 ? block.call(notes) : block.call(notes, @params)
+        return save_graph(result, midi: notes) if @options[:save]
+
+        graph = to_graph(result)
         announce(graph)
         play_or_render(graph) do |session|
           stop_after_ringdown(session, ending_nodes(graph))
@@ -426,6 +432,11 @@ module MB
 
           if @kind == :effect || @kind == :synth
             o.on('--acid-xml FILE', "Write the MIDI controls as an ACID controller map ('-' prints it)") { |v| @options[:acid_xml] = v }
+            o.on(
+              '--save NAME',
+              "Save the graph as a preset (a name, or a path ending in #{GraphIO::EXTENSION}) instead of playing; " \
+              'numeric parameters the graph uses as constants become its knobs'
+            ) { |v| @options[:save] = v }
           end
 
           @declared.each do |p|
@@ -505,6 +516,50 @@ module MB
         end
 
         param
+      end
+
+      # Saves the script block's +result+ as a graph document (--save; see
+      # GraphIO.save) with +inputs+ ({ input: ... } or { midi: ... }).
+      # Numeric parameters become params (knobs where the graph uses them
+      # as Constants named after the parameter, e.g. Values#midi_cc
+      # without MIDI or `p.drive.constant.named('drive')`; the rest are
+      # baked in and listed as options), others are listed as options.
+      # Prints and returns the path.
+      def save_graph(result, inputs)
+        params, options = graph_params
+        path = GraphIO.save(@options[:save], result, inputs: inputs, params: params, options: options, from: script_label, kind: @kind)
+        puts "Saved #{File.basename(@script)}'s graph to #{path}"
+        path
+      end
+
+      # [params, options] for #save_graph.
+      def graph_params
+        specs = @params.control_specs.to_h { |sp| [sp.name.to_sym, sp] }
+        params = {}
+        options = {}
+        @declared.each do |p|
+          v = @params[p.name]
+          if v.is_a?(Numeric) && v.real?
+            spec = { value: v }
+            spec[:range] = p.allowed if p.allowed.is_a?(Range)
+            spec[:description] = p.description if p.description
+            if (cc = specs[p.name])
+              spec[:cc] = cc.number
+              spec[:range] = cc.range
+            end
+            params[p.name] = spec
+          else
+            options[p.name] = v
+          end
+        end
+        [params, options]
+      end
+
+      # The script's path relative to the working directory when inside it.
+      def script_label
+        full = File.expand_path(@script)
+        pwd = "#{Dir.pwd}/"
+        full.start_with?(pwd) ? full.delete_prefix(pwd) : File.basename(full)
       end
 
       # Returns +result+ from a script block as a graph node or bundle: an
