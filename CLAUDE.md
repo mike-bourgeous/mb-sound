@@ -171,6 +171,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 - Edges land on exact samples at a shared `Transport`'s tempo; looping clips follow the timeline (`align: :launch` counts from the launch); launches and swaps land on the floor sample of their time.
 - Transforms: `legato`, `reverse`, `permute`, `rotate`, `transpose`; feel and chance: `humanize`, `quantize`, `swing`, `chance`/`maybe`, `every`, `Clip::Variation`s (`vary: true`), `bake(fx)`; generators `euclid`, `melody`.
 - Note marks: accent `!A1`, slide `~A1`, `up`/`dn`/`oct`; `Rest`/`R`, `Tie`/`T`; `Seq#acid` and `acid(...)` for 303 patterns; voice helpers `v.accent`, `v.accent_sweep`, `v.acid_env`; demo `bin/synths/acid.rb`, `bin/songs/acid_song.rb`.  `!` is overridden only on Note and Step (test with `nil?`, never `!x`).
+- `clip.ghost_chords(1, 4, 7, 6, per: 1.bar, scale: scale(:minor, :a), harmonic:, tie: :contour)`: snaps a repeated melody to a silent chord progression (degrees from 1, note Arrays, nil), keeping rhythm and contour; looping clips repeat to fit.
 - `swap :bass, bass2` changes a player's clips on the next bar, keeping graph state; derived clips are rederived.  Demos `bin/songs/sequence_demo.rb`, `swap_song.rb`.
 
 ### Tempo sync (`design/notes/tempo_sync.md`)

@@ -75,8 +75,9 @@ module MB
         # document's directory; see Loader#check_file).
         FILE_METHODS = Set[:file_input, :midi_file].freeze
 
-        # Top-level names besides the recorded MB::Sound methods.
-        TOP_EXTRA = Set[:per_voice, :per_channel].freeze
+        # Top-level names besides the recorded MB::Sound methods (scale:
+        # Scale values for transforms such as Clip#ghost_chords).
+        TOP_EXTRA = Set[:per_voice, :per_channel, :scale].freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.

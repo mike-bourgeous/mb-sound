@@ -762,6 +762,8 @@ module MB
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
+            when MB::Sound::Scale then scale_text(v)
+            when MB::Sound::Sequence::Seq::Step then step_text(v)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
             when Data
               fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
@@ -866,6 +868,21 @@ module MB
 
           # A Note's name (A3, Cs4) when it rebuilds the same note, else
           # its frequency in Hz.
+          # A Scale as the top-level call that makes it: `scale(:minor, A4)`.
+          def scale_text(s)
+            return fixme("a Scale with a period of #{s.period}") unless s.period == 12
+            list = s.name && MB::Sound::Scale::OFFSETS[MB::Sound::Scale::ALIASES.fetch(s.name, s.name)] == s.offsets ? s.name.inspect : leaf(s.offsets, '')
+            root = s.root.is_a?(Integer) ? pitch_text(MB::Sound::Note.new(s.root)) : num(s.root)
+            "scale(#{list}, #{root})"
+          end
+
+          # A rest or tie step (other steps print through their recipes).
+          def step_text(v)
+            return 'Rest' if v.equal?(MB::Sound::Rest)
+            return 'Tie' if v.equal?(MB::Sound::Tie)
+            fixme("can't print a #{v.class}")
+          end
+
           def pitch_text(p)
             if p.instance_of?(MB::Sound::Note)
               name = p.to_s
