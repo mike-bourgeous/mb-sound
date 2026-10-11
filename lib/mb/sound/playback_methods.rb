@@ -187,15 +187,19 @@ module MB
       # bars, or 0 to stop right away.  Returns the names of the players that
       # were stopped.  When nothing is left playing, the timeline pauses where
       # it is (see SequenceMethods#seek and #rewind).
-      def stop(*names, fade: nil)
+      #
+      # +ring: true+ rings the players out instead (as scenes do; see
+      # Session::Tails): their clips stop sending notes and each keeps
+      # playing until its tail is silent, e.g. `stop :bass, ring: true`.
+      def stop(*names, fade: nil, ring: false)
         names = names.map { |n| player_name(n) }
         session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip) { |session, time|
           if names.empty?
-            [session.remove_last(fade: fade, time: time)].compact
+            [session.remove_last(fade: fade, time: time, ring: ring)].compact
           elsif names == [:all]
-            session.remove(fade: fade, time: time)
+            session.remove(fade: fade, time: time, ring: ring)
           else
-            session.remove(*names, fade: fade, time: time).tap { |stopped|
+            session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
               (names - stopped).each do |name|
                 warn "No background player #{name.inspect} is playing"
               end
@@ -659,7 +663,9 @@ module MB
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
         seconds = Length.seconds(seconds, sample_rate: rate, transport: transport) if seconds
-        end_time = bars && bars.to_r * transport.bar_length
+        # The end bar's position through the meter map (read every buffer,
+        # so meter changes made while rendering count)
+        end_time = bars && -> { transport.bar_position(bars.to_r + 1) }
         max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
         sounds.each { |s| session.add(s, on: :now) }
@@ -671,7 +677,7 @@ module MB
         frames_left = -> {
           left = max_frames - frames
           if end_time
-            to_go = end_time - transport.position
+            to_go = end_time.call - transport.position
             left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
           end
           left

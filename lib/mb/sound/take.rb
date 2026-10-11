@@ -25,13 +25,14 @@ module MB
     class Take
       # A console line: its +id+, the Ruby +code+, the Stamp where it was
       # +issued+, and the timeline positions (+lands+) where each change it
-      # made landed, in the order they were made.
-      Line = Struct.new(:id, :code, :issued, :lands, :skipped, keyword_init: true)
+      # made landed, in the order they were made, and the +epoch+ (how many
+      # seeks had landed since the take started; see Session#epoch).
+      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, keyword_init: true)
 
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks help ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers help ls].freeze
 
       class << self
         # The console's take, created when first needed.
@@ -82,6 +83,7 @@ module MB
         @next_id = 0
         @mutex = Mutex.new
         @start = start_state
+        @start_epoch = (@session || Session.default).epoch
       end
 
       # The session whose changes this take records: the one given to
@@ -100,7 +102,7 @@ module MB
       def begin_line(code)
         line = @mutex.synchronize {
           @next_id += 1
-          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code))
+          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch)
         }
         @mutex.synchronize { @lines << line }
         Thread.current[:mb_sound_take_line] = [self, line]
@@ -127,13 +129,57 @@ module MB
         session.journal.changes.select { |e| ids.include?(e.line) }
       end
 
-      # The scene launches in the take, as [Stamp, scene name] pairs.  The
-      # form as played (`take.form` returning a Form whose `to_ruby` prints
-      # a `flow do ... end` block) arrives with song forms.
+      # The song as played, as a Form (its inspect and #to_ruby print a
+      # `flow do ... end` block to paste or edit): the passes of the song
+      # form that played (its sections in the order they played, repeats
+      # as times:), or, without a form, the scene launches as sections lasting until
+      # the next launch.
       def form
-        warn 'take.form: song forms (flow do ... end) arrive in a later phase; here are the scene launches'
-        session.journal.changes.select { |e| e.kind == :scene && e.status == :landed }.map { |e| [e.lands, e.subject] }
+        pb = session.arrangement.playback
+        return form_from_history(pb) if pb && !pb.history.empty?
+        form_from_scenes
       end
+
+      # A linear Form of a form playback's passes.
+      def form_from_history(pb)
+        runs = pb.history.chunk_while { |a, b| a == b }.map { |r| [r.first, r.length] }
+        linear_form(runs) { |name| pb.form.sections[name] }
+      end
+
+      # A linear Form of the scene launches (each lasting until the next,
+      # the last until now), in bars.
+      def form_from_scenes
+        t = session.transport
+        launches = session.journal.changes.select { |e| e.kind == :scene && e.status == :landed }.map { |e| [e.subject, e.lands.pos] }
+        launches = launches.chunk_while { |a, b| a[0] == b[0] }.map(&:first)
+        return Form.new(sections: {}, order: []) if launches.empty?
+
+        ends = launches.drop(1).map(&:last) + [[t.position, launches.last.last].max]
+        lengths = launches.zip(ends).map { |(name, from), to| [name, t.bar_at(to) - t.bar_at(from)] }
+        sections = {}
+        runs = lengths.map { |name, bars|
+          bars = bars.denominator == 1 ? bars.to_i : bars
+          key = sections.find { |_, s| s.name == name && s.length == bars }&.first
+          key ||= sections.key?(name) ? :"#{name}_#{sections.length}" : name
+          sections[key] ||= Form::Section.new(name: key, length: bars.zero? ? 1 : bars, scene: key == name ? nil : name)
+          [key, 1]
+        }
+        linear_form(runs) { |name| sections[name] }
+      end
+
+      # Builds a linear Form from [name, passes] runs, taking each section's
+      # length, fill, scene, and fade from the block's Section (with
+      # the flow's gotos and picks resolved: the form plays as it was
+      # played).
+      def linear_form(runs)
+        sections = {}
+        order = runs.map { |name, count|
+          sections[name] ||= yield(name).with(times: count)
+          Form::Play.new(name: name, times: count == sections[name].times ? nil : count)
+        }
+        Form.new(sections: sections, order: order)
+      end
+      private :form_from_history, :form_from_scenes, :linear_form
 
       def to_s
         n = @mutex.synchronize { @lines.length }
@@ -175,13 +221,14 @@ module MB
           out << "  #{k}: #{ruby_value(v)},\n"
         end
         out << "  ends: #{ruby_value(session.transport.position)},\n"
+        out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
         out << ") do |r|\n"
         lines.each do |l|
           if l.skipped
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
             next
           end
-          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'\n"
+          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}\n"
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
         end
@@ -192,8 +239,8 @@ module MB
       # A Replay of this take (see Replay), as #save would write it.
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
-        Replay.new(**@start.except(:time), ends: session.transport.position) do |r|
-          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code) }
+        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch) do |r|
+          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
         end
       end
 
@@ -238,7 +285,8 @@ module MB
         s = @session || Session.default
         {
           bpm: s.transport.bpm,
-          bar_length: s.transport.bar_length,
+          bar_length: s.transport.bar_length(0),
+          meters: s.transport.meters.drop(1).map { |m| [m.pos, m.bar_length] },
           master_gain: s.master_gain,
           fade_in: s.fade_in,
           fade_out: s.fade_out,

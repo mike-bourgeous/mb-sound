@@ -283,19 +283,36 @@ module MB
         MB::Sound::Session.context&.[](:session)&.transport || Sequence.transport
       end
 
-      # Moves the background playback timeline (see PlaybackMethods#bg) to the
-      # start of +bar+, counting from 1 (fractions are allowed, e.g. 2.5).
-      # Sounds already playing jump there on their next buffer.  Returns the
-      # transport.
-      def seek(bar)
-        raise ArgumentError, "Bar must be a number of at least 1 (got #{bar.inspect})" unless bar.is_a?(Numeric) && bar >= 1
-        transport.seek((bar.to_r - 1) * transport.bar_length)
+      # Moves the background playback timeline (see PlaybackMethods#bg) to
+      # +target+ at a launch point (+on:+, +in:+, +at:+; see LaunchPoint;
+      # now by default), through the Session's change queue, so it lands on
+      # an exact frame, is journaled and undoable (undo goes back to where
+      # the timeline was), and replays exactly from takes (see
+      # Session#seek).  Sounds already playing jump with it.  Returns the
+      # journal entry.
+      #
+      # +target+ is a bar number counting from 1 (fractions are allowed,
+      # e.g. 2.5; through the meter map, see Sequence::Transport#meter), a
+      # section or label of the song form playing (see FormMethods#flow;
+      # the form plays on from there, see Form::Playback#seek_now), or a
+      # marker (see FormMethods#marker and #markers).
+      #
+      #     seek 17                 # bar 17, now
+      #     seek :top, on: :bar     # the form's label :top at the next bar line
+      #     seek :drop, in: 2.beats
+      def seek(target, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        session_command(nil, label: "seek #{target.inspect}", kind: :seek) { |session, time|
+          session.seek(target, at: point, start_time: point.given? ? nil : time)
+        }
       end
 
-      # Moves the background playback timeline back to the start (see #seek).
-      # (Named rewind because bin/sound.rb uses Pry's reset command.)
+      # Moves the background playback timeline back to the start right
+      # away (a reset, not a journaled seek; see #seek).  Returns the
+      # transport.  (Named rewind because bin/sound.rb uses Pry's reset
+      # command.)
       def rewind
-        seek(1)
+        transport.seek(0)
       end
 
       # Sets the tempo in quarter notes per minute, or returns it if

@@ -243,6 +243,16 @@ module MB
           glide_to(number_of(event.note), nil, false)
         end
 
+        # A note starting right at a content jump (e.g. a tween's first
+        # keyframe when its graph launches in a Session): its note-on comes
+        # next and plays as the first note after the jump, so it jumps,
+        # unless +from:+ still gives a start pitch (then it glides from
+        # there, as when the clip plays without a jump).
+        def chase_start(event)
+          return chase(event) unless @from_note || @from_offset
+          @had_note = false
+        end
+
         def other(event)
           case event.type
           when :glide

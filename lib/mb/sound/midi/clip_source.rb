@@ -66,13 +66,46 @@ module MB
         # the old ClipNode's did.
         def swap_clip(clip, time: nil)
           raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Sequence::Clip)
-          @pending_swap = [clip, time&.to_r].freeze
+          if @ring_clip
+            # Ringing out: the clip to play again changes (see #ring_out)
+            @ring_clip = clip
+          else
+            @pending_swap = [clip, time&.to_r].freeze
+          end
           self
         end
 
         # The clip waiting to be swapped in by #swap_clip, or nil.
         def pending_clip
           @pending_swap&.first
+        end
+
+        # Stops sending notes from timeline position +time+ (notes in
+        # progress get note-offs there), remembering the clip to play again
+        # after #end_ring_out.  Used by Session when a player rings out (see
+        # Session::Tails).
+        def ring_out(time)
+          @ring_clip ||= pending_clip || @clip
+          @pending_swap = [Sequence::Clip.silent, time&.to_r].freeze
+          self
+        end
+
+        # The clip silenced by #ring_out, or nil if not ringing out.
+        attr_reader :ring_clip
+
+        # Gives back the clip silenced by #ring_out: swapped in at +time+
+        # (whole notes) if given (a ringing player coming back), else right
+        # away for the next #start_at (a player that went to sleep).
+        def end_ring_out(time: nil)
+          clip = @ring_clip or return self
+          @ring_clip = nil
+          if time
+            swap_clip(clip, time: time)
+          else
+            @pending_swap = nil
+            @clip = clip
+          end
+          self
         end
 
         def looping?
@@ -106,6 +139,14 @@ module MB
         # Source#chase).
         def chase_event
           note_event(@clip.event_at(@clip_position), position)
+        end
+
+        # True if the clip event at the current clip position starts right
+        # there (see Source::Chase#starts).
+        def chase_starts_note?
+          e = @clip.event_at(@clip_position) or return false
+          phase = @clip.looping? && @clip.length > 0 ? @clip_position % @clip.length : @clip_position
+          e.start == phase
         end
 
         # A note-on Event for the clip +event+ at stream +time+, or nil.
@@ -176,7 +217,7 @@ module MB
               @clip_position = swap_time - @origin
               @generation = generation + 1
               note = chase_event
-              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))
+              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split), starts: chase_starts_note?)
               out << Jump.new(split)
               @early = true
               return out.concat(edges(split, to, wnps))
@@ -203,7 +244,8 @@ module MB
           early = @early
           @early = false
 
-          @clip.edges(wn_from, wn_to, early: early).map { |time, type, event, _cycle|
+          fills = @fills_at ||= ->(pos) { transport.fills.names_at(pos + @origin) }
+          @clip.edges(wn_from, wn_to, early: early, fills: fills).map { |time, type, event, _cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
               Event.note_on(event.value, event.velocity, channel: @channel, time: t)

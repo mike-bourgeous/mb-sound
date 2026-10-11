@@ -13,8 +13,21 @@ module MB
       # Clip#legato leaves it alone.  +condition+ is nil (every cycle) or
       # [n, from]: the event plays every +n+th loop cycle starting with
       # cycle +from+ (counting from 1; Elektron's "from:n" trig condition;
-      # see Seq::Step#every and Clip#every).
-      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, keyword_init: true) do
+      # see Seq::Step#every and Clip#every).  +fill_mark+ is nil (plays in and
+      # out of fills) or [mode, name]: mode :fill plays only during fills
+      # (only fill +name+ if given), :nofill only outside them (outside fill
+      # +name+ if given); fills come from a playing song form (see
+      # Seq::Step#fill, Clip#fill, and FillMap).
+      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, :fill_mark, keyword_init: true) do
+        # True if the event plays when the fills named +names+ (an Array,
+        # empty outside fills) are playing (see +fill_mark+).
+        def plays_in_fill?(names)
+          return true if fill_mark.nil?
+          mode, name = fill_mark
+          active = name ? names.include?(name) : !names.empty?
+          mode == :fill ? active : !active
+        end
+
         # The time at which the event ends, in whole notes.
         def end_time
           start + length
@@ -31,6 +44,7 @@ module MB
           s << " v#{MB::M.sigfigs(velocity, 3)}" if velocity != Clip::DEFAULT_VELOCITY
           s << " p#{probability}" if probability
           s << " #{condition[1]}:#{condition[0]}" if condition
+          s << " #{fill_mark[0]}#{fill_mark[1] ? ":#{fill_mark[1]}" : ''}" if fill_mark
           s << ' !' if accented
           s << ' ~' if slid
           s

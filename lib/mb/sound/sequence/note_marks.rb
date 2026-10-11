@@ -56,6 +56,16 @@ module MB
         def every(n, from: 1)
           to_step.every(n, from: from)
         end
+
+        # A step that plays only during fills (see Seq::Step#fill).
+        def fill(name = nil)
+          to_step.fill(name)
+        end
+
+        # A step that plays only outside fills (see Seq::Step#nofill).
+        def nofill(name = nil)
+          to_step.nofill(name)
+        end
       end
     end
   end

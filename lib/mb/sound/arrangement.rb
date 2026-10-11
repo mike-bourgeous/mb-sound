@@ -33,13 +33,20 @@ module MB
       end
 
       # A scene: what each track plays (+values+: a Clip or Kit, :on, :off
-      # or nil, or :keep), its launch quantization +q+, a +fade+ for the
-      # tracks that change, whether tracks it doesn't name stop or keep
-      # playing (+others+: :stop or :keep), and a +block+ run at launch.
+      # or nil, :cut, or :keep), its launch quantization +q+, a +fade+ for
+      # the tracks that change, what happens to tracks it doesn't name
+      # (+others+: :stop (or :ring) rings them out, :cut cuts them, :keep
+      # keeps them playing), and a +block+ run at launch.  Tracks a scene
+      # stops ring out unless +others+ is :cut (tracks given :cut always
+      # cut).
       Scene = Struct.new(:name, :values, :q, :fade, :others, :block, keyword_init: true)
 
       # Values a scene can give a track besides clips.
-      TRACK_STATES = [:on, :off, :keep, true, false, nil].freeze
+      TRACK_STATES = [:on, :off, :cut, :keep, true, false, nil].freeze
+
+      # How a scene stops tracks: :stop (or :ring) rings them out, :cut
+      # stops them with a 5 ms declick (see Scene's +others+).
+      STOP_MODES = [:stop, :ring, :cut].freeze
 
       attr_reader :session
 
@@ -56,8 +63,55 @@ module MB
         @scenes = {}
         @quant = 1
         @current_scene = nil
-        @labels = {}.compare_by_identity
         @mutex = Mutex.new
+        @sections = {}
+        @playback = nil
+      end
+
+      # Sections declared outside a form with #section (a Hash from name to
+      # Form::Section), which bare calls in a `flow` block can play.
+      def sections
+        @mutex.synchronize { @sections.dup }
+      end
+
+      # Declares a section outside a form (see Form::Builder for the
+      # options): `section :verse, 8.bars, fill: :roll`.  Returns the
+      # Form::Section.
+      def section(name, length, times: 1, fill: nil, scene: nil, fade: nil, **others)
+        unless others.empty?
+          raise ArgumentError, "#{name}: sections no longer take next: (what follows belongs to the flow: goto and pick)" if others.key?(:next)
+          raise ArgumentError, "#{name}: unknown options #{others.keys.map(&:inspect).join(', ')} (use #{Form::SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')})#{Form.suggest(others.keys.first, Form::SECTION_OPTIONS)}"
+        end
+        sec = Form::Section.new(name: name, length: length, times: times, fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade)
+        @mutex.synchronize { @sections[name] = sec }
+      end
+
+      # Builds a Form from a block (see Form::Builder), with the sections
+      # declared by #section available to bare calls.
+      def build_form(&block)
+        Form.build(sections: sections, &block)
+      end
+
+      # The form playing (or played last), a Form::Playback, or nil.
+      attr_reader :playback
+
+      # Plays +form+ (a Form) from its launch point (+on:+, +in:+, +at:+;
+      # the next bar by default, or now if nothing plays), replacing any
+      # form already playing (which stops launching sections).  +seed+ seeds
+      # its chance (weighted gotos and picks; MB::Sound.next_seed by default, so takes
+      # replay the same choices).  Returns the Form::Playback.
+      def play_form(form, at: nil, on: nil, in: nil, seed: nil)
+        point = LaunchPoint.of(binding) or return nil
+        raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
+
+        seed ||= MB::Sound.next_seed
+        pb = Form::Playback.new(self, form, seed: seed)
+        time = @session.send(:launch_time, point, [])
+        old = @mutex.synchronize { prev = @playback; @playback = pb; prev }
+        old&.stop
+        pb.start(time)
+        @session.ensure_running
+        pb
       end
 
       # Sets the set-wide launch quantization (see the class comment).
@@ -99,24 +153,24 @@ module MB
         name
       end
 
-      # Gives clips names for #scenes and #tracks listings (e.g.
-      # `label verse_bass: bass_a`).  Returns the names.
-      def label(**clips)
-        @mutex.synchronize { clips.each { |n, c| @labels[c] = n } }
-        clips.keys
-      end
-
-      # A short name for a clip or state, for listings.
-      def label_of(value)
+      # A short name for a clip, kit, or state, for listings: the name
+      # given with Sequence::Named#named (`bass_a.named(:bass_a)`), else
+      # the kind of value (seq, clip, kit).
+      def name_of(value)
         return value.inspect if TRACK_STATES.include?(value)
-        @mutex.synchronize { @labels[value] }&.to_s || value.class.name.split('::').last.downcase
+        return value.name.to_s if value.respond_to?(:named?) && value.named?
+        value.class.name.split('::').last.downcase
       end
 
       # Defines (or redefines) a scene: the state of every track.  Each
       # keyword names a track and gives a Clip or Kit to play, :on to play
       # what it played last (or its graph), :off or nil to stop, or :keep.
       # Tracks not named stop (a scene is a full state), unless +others:
-      # :keep+ (a partial scene, e.g. a fill).  +q:+ is the scene's launch
+      # :keep+ (a partial scene, e.g. a fill).  Stopping tracks ring out:
+      # their clips stop sending notes at the launch point and the track
+      # plays on until it is silent (see Session::Tails), so releases,
+      # delays, and reverbs inside it finish.  +others: :cut+ (or a track's
+      # value :cut) stops with a 5 ms declick instead, and +fade:+ fades.  +q:+ is the scene's launch
       # quantization (tracks' own +q:+ come first), and +fade:+ a fade in
       # bars for the tracks that start or stop.  A block runs at launch for
       # anything else (it gets the launch time, and #bg and the other
@@ -127,7 +181,7 @@ module MB
       #     scene :fill, drums: roll, others: :keep
       def scene(name, q: nil, fade: nil, others: :stop, **values, &block)
         raise ArgumentError, "Scene names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-        raise ArgumentError, "others: must be :stop or :keep (got #{others.inspect})" unless [:stop, :keep].include?(others)
+        raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
 
         values.each_key do |k|
@@ -171,7 +225,8 @@ module MB
           tracks.each_value do |tr|
             value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
-            set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade)
+            stop = sc.others == :cut ? :cut : :ring
+            set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
           end
 
           if sc.block
@@ -211,7 +266,7 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
-          what = tr.patch? ? (tr.clip ? label_of(tr.clip) : 'no clip') : 'graph'
+          what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           "q:#{(tr.q || @quant).inspect} #{what} (#{state})"
         }
       end
@@ -220,7 +275,7 @@ module MB
       # the current scene marked.
       def scene_info
         scenes.transform_values { |sc|
-          parts = sc.values.map { |k, v| "#{k}:#{label_of(v)}" }
+          parts = sc.values.map { |k, v| "#{k}:#{name_of(v)}" }
           parts << 'others:keep' if sc.others == :keep
           parts << "q:#{sc.q.inspect}" if sc.q
           parts << '(block)' if sc.block
@@ -260,14 +315,21 @@ module MB
 
       # Changes track +tr+ to +value+ at +time+.  Returns the last change
       # made (or nil).
-      def set_track(tr, value, time, fade:)
+      #
+      # Stopping tracks ring out (+stop: :ring+; see Session::Tails) unless
+      # given a fade, +stop: :cut+, or the value :cut (a 5 ms declick).
+      def set_track(tr, value, time, fade:, stop: :ring)
         fade = tr.fade if fade.nil?
         playing = @session.playing_after_queue?(tr.name)
 
         case value
-        when :off, false, nil
+        when :off, :cut, false, nil
           return nil unless playing
-          @session.remove(tr.name, fade: fade || @session.declick_bars, time: time)
+          if fade || value == :cut || stop == :cut
+            @session.remove(tr.name, fade: fade || @session.declick_bars, time: time)
+          else
+            @session.remove(tr.name, ring: true, time: time)
+          end
           last_change(tr.name)
 
         when :on, true
@@ -303,12 +365,15 @@ module MB
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays
       # its graph (resuming it if it was stopped).
       def start_track(tr, clip, time, fade)
-        if tr.patch?
+        if tr.patch? && clip && clip.equal?(tr.clip) && @session.ringing?(tr.name)
+          # Still ringing out with this clip: bring the same graph back
+          @session.resume(tr.name, start_time: time, fade: 0)
+        elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
           graph = tr.patch.call(clip)
-          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{label_of(clip)}")
+          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}")
           @mutex.synchronize { tr.clip = clip }
-        elsif @session.stopped.key?(tr.name)
+        elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)
           @session.swap(tr.name, clip, start_time: time) if clip && !clip.equal?(tr.clip)
         else

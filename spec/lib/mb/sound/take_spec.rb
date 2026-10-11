@@ -101,6 +101,65 @@ RSpec.describe(MB::Sound::Take) do
     expect((replay(r, [367, 368])[0...live.length] - live).abs.max).to be < 1e-6
   end
 
+  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit' do
+    lines = {
+      0 => [
+        'k = grid(16, kick: "x...x...x...x...").fill(snare: grid(16, "....x.x.xxxxxxxx", value: 38)).loop',
+        'a = seq(C3, E3, G3, B3).n8.loop',
+        'b = seq(A2, C3, E3, G3).n8.loop',
+        'track(:bass) { |c| c.notes.number * 0.01 }',
+        'track(:drums) { |c| c[:kick].notes.velocity * 0.5 + c[:snare].notes.velocity * 0.25 }',
+        'scene :intro, drums: k',
+        'scene :verse, drums: k, bass: a',
+        'scene :chorus, drums: k, bass: b',
+        'scene :bridge, drums: k, bass: b.transpose(5)',
+        'scene :roll, bass: a.transpose(12), others: :keep',
+        'flow(seed: 9) { fill :small, every: 2; intro 2; label :v; verse 2, fill: :roll; goto c: 1, v: 1; label :c; chorus 2; pick { |p| p.option(1) { }; p.option(1) { bridge 1 } }; goto :v }',
+      ],
+      290 => ['loop!'],         # verse pass 1, before its commit point (bar 4)
+      650 => ['onward'],        # after the second pass's commit point: the next boundary
+      # Inside the scheduler's half-bar lookahead before the third verse
+      # pass's commit point (bar 8): the commit block already ran live,
+      # so this re-decides it (replays run the line first)
+      820 => ['goto :chorus'],
+      1000 => ['meter 3, 4'],   # from bar 10
+      1100 => ['goto :c'],      # a label: the chorus next
+      1180 => ['seek :v, on: :bar'], # the timeline back to the verse's last start (bar 3)
+      1290 => ['undo'],         # back to bar 12 (a seek too) at the next bar line
+      1420 => ['skip in: 1.beat, on: :beat'], # (not an undo step)
+    }
+    run = lambda {
+      bnd = MB::Sound::Take.console_binding
+      MB::Sound.seed(5)
+      t = MB::Sound::Take.new(session: session)
+      out = []
+      1500.times do |i|
+        lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, bnd) } }
+        out << session.process_buffer[0].dup
+      end
+      [out.reduce(:concatenate), t]
+    }
+    live, t = run.call
+    expect(live.abs.max).to be > 0.1
+    history = session.arrangement.playback.history
+    # loop! (verse x3), goto :chorus, goto :c (the label: chorus again),
+    # seek :v (the verse from bar 3), undo (back into the chorus at bar
+    # 12, not a new pass), the pick's bridge, skip
+    expect(history).to eq([:intro, :verse, :verse, :verse, :chorus, :chorus, :verse, :bridge])
+    timeline = session.journal.changes.select { |e| [:seek, :skip, :restore].include?(e.kind) }.map(&:to_s)
+    expect(timeline).to eq(['seek :v landed 12:1', 'restore :timeline landed 4:1', 'skip :form landed 13:1'])
+    expect(t.to_ruby).to include("ends_epoch: 2,\n", ", epoch: 1\n")
+    expect(session.transport.meters.length).to eq(2)
+
+    r = t.replay
+    [[800], [367, 368]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'keeps foreground commands out of replays' do
     t = MB::Sound::Take.new(session: session)
     b = MB::Sound::Take.console_binding

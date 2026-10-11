@@ -23,7 +23,7 @@ module MB
       # between buffer sizes by about 1e-12 (naive shapes like aramp can
       # move an edge by a sample).
       class Replay
-        Line = Struct.new(:issued, :lands, :code, keyword_init: true)
+        Line = Struct.new(:issued, :lands, :code, :epoch, keyword_init: true)
 
         # The last Replay created (for loading a saved take from code).
         class << self
@@ -32,18 +32,20 @@ module MB
 
         attr_reader :lines, :ends
 
-        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, ends: nil)
-          @start = { bpm: bpm, bar_length: bar_length, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
+        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
           @ends = ends&.to_r
+          @ends_epoch = ends_epoch
           @lines = []
           yield self if block_given?
           self.class.last = self
         end
 
         # Adds a console line typed at +issued+ (whole notes) whose changes
-        # landed at +lands+.
-        def line(issued, lands, code)
-          @lines << Line.new(issued: issued.to_r, lands: lands.map(&:to_r), code: code)
+        # landed at +lands+, after +epoch+ seeks had landed (the line runs in
+        # that pass over the timeline; see Session#epoch).
+        def line(issued, lands, code, epoch: 0)
+          @lines << Line.new(issued: issued.to_r, lands: lands.map(&:to_r), code: code, epoch: epoch)
           self
         end
 
@@ -52,6 +54,7 @@ module MB
         def schedule(session)
           t = session.transport
           t.bar_length = @start[:bar_length]
+          (@start[:meters] || []).each { |pos, len| t.meter(len, at: pos) }
           t.bpm = @start[:bpm]
           session.master_gain = @start[:master_gain]
           session.fade_in = @start[:fade_in]
@@ -59,9 +62,10 @@ module MB
           MB::Sound.instance_variable_set(:@root_rng, Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding
+          @base_epoch = session.epoch
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands].min
-            session.schedule(eval_at, description: "take line #{i + 1}") do
+            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i) do
               run_line(session, binding, l, i)
             end
           end
@@ -87,7 +91,7 @@ module MB
 
           frames = 0
           sizes = buffer_sizes.cycle
-          while transport.position < finish
+          until transport.position >= finish && session.epoch >= @base_epoch + @ends_epoch
             n = sizes.next
             session.process_buffer(n)
             frames += n
@@ -120,7 +124,7 @@ module MB
           MB::Sound.live = true
           schedule(session)
           session.add(0.constant, name: :take_clock, on: :now) # keeps the timeline moving between lines
-          sleep 0.1 until session.transport.position >= (@ends || 0)
+          sleep 0.1 until session.transport.position >= (@ends || 0) && session.epoch >= @base_epoch + @ends_epoch
           MB::Sound.outro
           MB::Sound.wait
         ensure

@@ -30,8 +30,15 @@ module MB
 
         # The note to chase where the content last jumped (see
         # Source#chase): the #generation of the jump, the stream +time+ of
-        # the jump, and a note-on +event+ for the note.
-        Chase = Data.define(:generation, :time, :event)
+        # the jump, a note-on +event+ for the note, and whether the note
+        # +starts+ right at the jump (its own note-on follows at the same
+        # time, so it plays as the first note after the jump: a glide with
+        # +from:+ still glides into it).
+        Chase = Data.define(:generation, :time, :event, :starts) do
+          def initialize(generation:, time:, event:, starts: false)
+            super
+          end
+        end
 
         # Stream time (Rational seconds) up to which this source has been
         # read.
@@ -149,7 +156,7 @@ module MB
           @generation = generation + 1
           @jump_pending = true
           note = chase_event
-          @chase = note && Chase.new(generation: @generation, time: position, event: note.at(position))
+          @chase = note && Chase.new(generation: @generation, time: position, event: note.at(position), starts: chase_starts_note?)
         end
 
         # Returns a note-on Event for the note most recently started at the
@@ -157,6 +164,12 @@ module MB
         # know their content.
         def chase_event
           nil
+        end
+
+        # True if the note #chase_event returns starts exactly at the
+        # current content position (see Chase#starts).
+        def chase_starts_note?
+          false
         end
 
         # Whether #read keeps notes balanced (see #read); transforms read

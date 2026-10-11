@@ -55,11 +55,12 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.current_scene).to eq(:two)
   end
 
-  it 'stops tracks the scene leaves out, with a declick, unless others: :keep' do
+  it 'stops tracks the scene leaves out, with a declick for others: :cut, unless others: :keep' do
     set.scene(:keep_a, b: b1, others: :keep)
+    set.scene(:one_cut, a: a1, others: :cut)
     set.go(:two, at: :now)
     run(800)
-    set.go(:one)
+    set.go(:one_cut)
     data = run(96000)
     bar = 96000 - 800
     expect(data[bar - 1]).to eq(50 + 6000)
@@ -128,7 +129,8 @@ RSpec.describe(MB::Sound::Arrangement) do
   end
 
   it 'lists tracks and scenes' do
-    set.label(a1: a1, a2: a2)
+    a1.named(:a1)
+    a2.named('a2')
     set.go(:one, at: :now)
     expect(set.track_info).to eq(a: 'q:1 a1 (playing)', b: 'q:1 no clip (stopped)')
     expect(set.scene_info).to eq(one: '▶ a:a1', two: 'a:a2 b:seq')
