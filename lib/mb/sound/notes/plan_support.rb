@@ -312,7 +312,7 @@ module MB
                 start = off
               end
               @render_offset = off
-              item.is_a?(MIDI::Source::Chase) ? chase(item.event) : handle(item)
+              item.is_a?(MIDI::Source::Chase) ? chase_item(item) : handle(item)
             end
             plan_fill(list, start, count) if start < count
           end
@@ -558,7 +558,7 @@ module MB
                 start = off
               end
               @render_offset = off
-              item.is_a?(MIDI::Source::Chase) ? chase(item.event) : handle(item)
+              item.is_a?(MIDI::Source::Chase) ? chase_item(item) : handle(item)
             end
             plan_fill(list, start, count) if start < count
           end

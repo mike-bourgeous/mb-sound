@@ -141,6 +141,14 @@ module MB
           note_event(@clip.event_at(@clip_position), position)
         end
 
+        # True if the clip event at the current clip position starts right
+        # there (see Source::Chase#starts).
+        def chase_starts_note?
+          e = @clip.event_at(@clip_position) or return false
+          phase = @clip.looping? && @clip.length > 0 ? @clip_position % @clip.length : @clip_position
+          e.start == phase
+        end
+
         # A note-on Event for the clip +event+ at stream +time+, or nil.
         def note_event(event, time)
           event && Event.note_on(event.value, event.velocity, channel: @channel, time: time)
@@ -209,7 +217,7 @@ module MB
               @clip_position = swap_time - @origin
               @generation = generation + 1
               note = chase_event
-              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))
+              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split), starts: chase_starts_note?)
               out << Jump.new(split)
               @early = true
               return out.concat(edges(split, to, wnps))

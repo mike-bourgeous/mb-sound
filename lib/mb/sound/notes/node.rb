@@ -252,6 +252,19 @@ module MB
           false
         end
 
+        # Applies a Source::Chase: #chase for a note sounding at the jump,
+        # #chase_start for one starting right at it (its note-on follows).
+        def chase_item(c)
+          c.starts ? chase_start(c.event) : chase(c.event)
+        end
+
+        # A chased note that starts right at the jump (see #chase_item).
+        # The same as #chase unless a node treats the note-on that follows
+        # as a first note (Glide).
+        def chase_start(event)
+          chase(event)
+        end
+
         # Returns the Source::Chase to apply in the buffer ending at stream
         # time +to+, if the content jumped (see the class description).
         def take_chase(to)
@@ -323,7 +336,7 @@ module MB
               end
 
               @render_offset = off
-              item.is_a?(MIDI::Source::Chase) ? chase(item.event) : handle(item)
+              item.is_a?(MIDI::Source::Chase) ? chase_item(item) : handle(item)
             end
 
             fill(buf, start, buf.length) if start < buf.length

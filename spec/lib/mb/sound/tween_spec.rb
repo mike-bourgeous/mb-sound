@@ -7,6 +7,26 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
   before { MB::Sound.bpm(120) }
 
   describe 'MB::Sound.tween' do
+    it 'tweens from its first keyframe when its graph launches in a Session (not from the end)' do
+      # A Session launch is a content jump onto the first keyframe's note;
+      # the glide used to take it as a chased note and jump to its target
+      # (2026-10-11: night_bus_flow's riser was a constant hiss)
+      session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+      out = []
+      MB::Sound::Session.with_context(session: session) {
+        MB::Sound.bg(:z, 0.constant)
+        30.times { out << session.process_buffer[0].dup } # launch later than the timeline's start
+        MB::Sound.bg(:t, MB::Sound.tween([0.0, 1.0], 1.bar, loop: false), on: :now)
+        150.times { out << session.process_buffer[0].dup }
+      }
+      session.close
+      data = out.reduce(:concatenate)[24000..]
+      expect(data[0]).to be < 0.001
+      expect(data[24000]).to be_within(0.01).of(0.156) # smoothstep at 1/4 of the bar
+      expect(data[48000]).to be_within(0.01).of(0.5)
+      expect(data[96000]).to be_within(1e-6).of(1)
+    end
+
     it 'treats values as keyframes: each value at its step start, tweening to the next' do
       out = take(MB::Sound.tween([0, 1, 0.3], 1.bar, curve: :elastic, loop: false), 8) # a bar is 2 s
       c = MB::Sound::Curve[:elastic]
