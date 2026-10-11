@@ -223,11 +223,16 @@ module MB
           cmap = heat.colormap_for(@theme)
           bw = 12 * @s
           n = [h.round, 1].max
-          steps = [n, 64].min
-          steps.times do |i|
-            y0 = y + h * i / steps
-            y1 = y + h * (i + 1) / steps
-            @p.rect(x, y0, bw, y1 - y0 + 0.5, cmap.at(1 - (i + 0.5) / steps))
+          if @p.respond_to?(:vgradient)
+            stops = Array.new(9) { |i| cmap.at(1 - i / 8.0) }
+            @p.vgradient(x, y, bw, h, stops)
+          else
+            steps = [n, 64].min
+            steps.times do |i|
+              y0 = y + h * i / steps
+              y1 = y + h * (i + 1) / steps
+              @p.rect(x, y0, bw, y1 - y0 + 0.5, cmap.at(1 - (i + 0.5) / steps))
+            end
           end
 
           zs = heat.z_scale

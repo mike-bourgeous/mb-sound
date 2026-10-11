@@ -19,7 +19,7 @@ require 'mb-sound'
 # The sounds every variation draws: a 2-second A minor 7 saw arpeggio with
 # a rising sine sweep under it, one note's spectrum, an ADSR, and one cycle
 # of four basic waveforms.
-def gallery_charts
+def gallery_charts(compact: false)
   plot = MB::Sound::Plot
   rate = 48000
   notes = [45, 48, 52, 55, 57, 55, 52, 48] # A2 C3 E3 G3 A3 G3 E3 C3
@@ -42,6 +42,18 @@ def gallery_charts
   shapes = %i[sine triangle square ramp].to_h { |w|
     [w.to_s, Numo::DFloat.cast(cycle.to_a.map { |v| MB::Sound::Tone.value_at(w, v).real })]
   }
+
+  if compact
+    return {
+      waveform: [plot.waveform(mix, title: 'A minor 7 arpeggio + sweep'), 'MB::Sound::Plot.waveform(sound)'],
+      spectrum: [plot.spectrum(arp[0...8192], title: 'Saw at A2'), 'MB::Sound::Plot.spectrum(sound[0...8192])'],
+      spectrogram: [
+        plot.spectrogram(mix, title: 'Spectrogram', fft: 1024, hop: 512), 'MB::Sound::Plot.spectrogram(sound, fft: 1024, hop: 512)',
+        # Terminal captures with 16 colors instead of 64 (fewer style classes)
+        plot.spectrogram(mix, title: 'Spectrogram', fft: 1024, hop: 512, colormap: MB::Sound::Plot::Colormap.new(:magma, size: 16)),
+      ],
+    }
+  end
 
   {
     waveform: [
@@ -90,7 +102,12 @@ def esc(s)
   MB::Sound::Plot::AnsiHtml.escape(s)
 end
 
-def gallery_page(sections)
+# Style classes shared by every terminal capture (AnsiHtml.convert)
+CLASSES = {}
+
+def gallery_page(sections, compact: false)
+  sounds = compact ? 'a two-second A minor 7 saw arpeggio over a sine sweep from 150 Hz to 6 kHz, one note\'s spectrum on a log frequency axis with note names, and the spectrogram (this is the compact gallery; bin/plot_gallery.rb without --compact adds an ADSR envelope and a multi-series chart with a legend at larger sizes)' : 'a two-second A minor 7 saw arpeggio over a sine sweep from 150 Hz to 6 kHz, one note\'s spectrum on a log frequency axis with note names, its spectrogram, an ADSR envelope, and four waveforms with a legend'
+  body = sections.map { |s| section_html(s) }.join("\n")
   <<~HTML
     <title>mb-sound Plot Gallery</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;600&display=swap">
@@ -127,14 +144,15 @@ def gallery_page(sections)
     .note { color: var(--muted); }
     nav { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.9rem; }
     nav a { color: var(--accent); }
+    #{MB::Sound::Plot::AnsiHtml.stylesheet(CLASSES, scope: '.term')}
     </style>
     <main>
     <header>
       <h1>mb-sound Plot Gallery</h1>
-      <p>Every look of <code>MB::Sound::Plot</code> on the same sounds: a two-second A minor 7 saw arpeggio over a sine sweep from 150 Hz to 6 kHz, one note's spectrum on a log frequency axis with note names, its spectrogram, an ADSR envelope, and four waveforms with a legend.  Terminal captures are the renderer's ANSI output converted to HTML (raw <code>.ans</code> files are next to this page; <code>cat</code> them in a true-color terminal).  Image themes are SVG drawn by the same layout; the last section is the pixel renderer used for PNG files and sixel, kitty, and iTerm2 inline images.</p>
+      <p>Every look of <code>MB::Sound::Plot</code> on the same sounds: #{sounds}.  Terminal captures are the renderer's ANSI output converted to HTML (raw <code>.ans</code> files are next to this page; <code>cat</code> them in a true-color terminal).  Image themes are SVG drawn by the same layout; the last section is the pixel renderer used for PNG files and sixel, kitty, and iTerm2 inline images.</p>
       <nav>#{sections.map { |s| %(<a href="##{s[:id]}">#{esc(s[:name])}</a>) }.join}</nav>
     </header>
-    #{sections.map { |s| section_html(s) }.join("\n")}
+    #{body}
     </main>
   HTML
 end
@@ -143,7 +161,7 @@ def section_html(s)
   figures = s[:items].map { |item|
     body =
       case item[:kind]
-      when :ansi then %(<div class="term"><pre>#{MB::Sound::Plot::AnsiHtml.convert(item[:content], cells: true)}</pre></div>)
+      when :ansi then %(<div class="term"><pre>#{MB::Sound::Plot::AnsiHtml.convert(item[:content], cells: true, classes: CLASSES)}</pre></div>)
       when :svg then %(<div class="img">#{item[:content].sub(/\A<svg /, '<svg role="img" ')}</div>)
       when :png then %(<div class="img"><img alt="#{esc(item[:title])}" src="data:image/png;base64,#{[item[:content]].pack('m0')}"></div>)
       end
@@ -159,32 +177,41 @@ def section_html(s)
 end
 
 MB::Sound.script(
-  output: ['tmp/plot-gallery', '-o', String, 'Output directory'],
+  output: [nil, '-o', String, 'Output directory (default tmp/plot-gallery, or tmp/plot-gallery-compact with --compact)'],
+  compact: [false, '-c', 'A small gallery (three sounds, 60x16 captures, small SVGs, one small PNG)'],
   show: [nil, '-s', String, "Print one look in the terminal instead (#{LOOK_NOTES.keys.join(', ')})"],
   width: [100, '-W', Integer, 'Terminal capture width in columns', 40..400],
   height: [22, '-H', Integer, 'Terminal capture height in lines', 8..200],
   svg_width: [720, Integer, 'SVG and PNG width in pixels', 200..4000],
   svg_height: [380, Integer, 'SVG and PNG height in pixels', 120..4000],
 ) { |_, p|
-  charts = gallery_charts
+  charts = gallery_charts(compact: p.compact)
+  width, height, svg_width, svg_height = p.width, p.height, p.svg_width, p.svg_height
+  if p.compact
+    width = 60 if width == 100
+    height = 16 if height == 22
+    svg_width = 400 if svg_width == 720
+    svg_height = 230 if svg_height == 380
+  end
+  heatmap = p.compact ? [96, 48] : [600, 300]
 
   if p.show
     look = p.show.to_sym
     abort "Unknown look #{p.show} (#{LOOK_NOTES.keys.join(', ')})" unless LOOK_NOTES.key?(look)
 
-    charts.each_value { |chart, _| puts chart.to_s(width: p.width, height: p.height, look: look), '' }
+    charts.each_value { |chart, _| puts chart.to_s(width: width, height: height, look: look), '' }
     next
   end
 
-  dir = p.output
+  dir = p.output || (p.compact ? 'tmp/plot-gallery-compact' : 'tmp/plot-gallery')
   FileUtils.mkdir_p(dir)
   sections = []
   timings = Hash.new(0.0)
 
   LOOK_NOTES.each do |look, note|
-    items = charts.map { |name, (chart, call)|
+    items = charts.map { |name, (chart, call, text_chart)|
       t = MB::U.clock_now
-      text = chart.to_s(width: p.width, height: p.height, look: look, color: look == :ascii ? :none : :truecolor)
+      text = (text_chart || chart).to_s(width: width, height: height, look: look, color: look == :ascii ? :none : :truecolor)
       timings["text #{look}"] += MB::U.clock_now - t
       File.write(File.join(dir, "#{look}_#{name}.ans"), text + "\n")
       { kind: :ansi, title: name.to_s, content: text, call: "#{call}.to_s(look: :#{look})" }
@@ -195,7 +222,7 @@ MB::Sound.script(
   THEME_NOTES.each do |theme, note|
     items = charts.map { |name, (chart, call)|
       t = MB::U.clock_now
-      svg = chart.to_svg(width: p.svg_width, height: p.svg_height, theme: theme)
+      svg = chart.to_svg(width: svg_width, height: svg_height, theme: theme, heatmap_pixels: heatmap)
       timings["svg #{theme}"] += MB::U.clock_now - t
       File.write(File.join(dir, "#{theme}_#{name}.svg"), svg)
       { kind: :svg, title: name.to_s, content: svg, call: "#{call}.save('#{name}.svg', theme: :#{theme})" }
@@ -203,16 +230,17 @@ MB::Sound.script(
     sections << { id: "svg-#{theme}", name: "SVG: #{theme}", note: note, items: items }
   end
 
-  items = charts.map { |name, (chart, call)|
+  png_charts = p.compact ? charts.first(1) : charts
+  items = png_charts.map { |name, (chart, call)|
     t = MB::U.clock_now
-    png = chart.to_png(width: p.svg_width, height: p.svg_height, theme: :studio)
+    png = p.compact ? chart.to_png(width: 360, height: 200, theme: :studio) : chart.to_png(width: svg_width, height: svg_height, theme: :studio)
     timings['png studio'] += MB::U.clock_now - t
     { kind: :png, title: name.to_s, content: png, call: "#{call}.save('#{name}.png')  # or .show(image: true)" }
   }
   sections << { id: 'png', name: 'Pixels: PNG and inline images', note: 'The pure-Ruby pixel renderer (antialiased lines, DejaVu Sans Mono bitmap font) behind PNG files and sixel, kitty, and iTerm2 inline terminal images.', items: items }
 
-  html = gallery_page(sections)
+  html = gallery_page(sections, compact: p.compact)
   File.write(File.join(dir, 'index.html'), html)
   puts "Wrote #{File.join(dir, 'index.html')} (#{(html.bytesize / 1024.0).round} KB)"
-  timings.each { |k, v| puts format('%-16s %7.1f ms for %d charts', k, v * 1000, charts.length) }
+  timings.each { |k, v| puts format('%-16s %7.1f ms for %d charts', k, v * 1000, k.start_with?('png') ? png_charts.length : charts.length) }
 }

@@ -7,9 +7,11 @@ module MB
       module SVG
         # Renders +figure+ as an SVG document String +width+ x +height+
         # pixels in +theme+ (:paper, :studio, :phosphor, or a Theme).
-        def self.render(figure, width: 960, height: 540, theme: :paper)
+        # Heatmaps are embedded as PNGs of at most +heatmap_pixels+ ([w, h];
+        # viewers scale them smoothly).
+        def self.render(figure, width: 960, height: 540, theme: :paper, heatmap_pixels: [600, 300])
           theme = Theme[theme]
-          painter = Painter.new(width, height, theme)
+          painter = Painter.new(width, height, theme, heatmap_pixels)
           PixelLayout.new(painter, theme).render(figure.figure, width, height)
           painter.document
         end
@@ -27,10 +29,11 @@ module MB
 
         # Collects SVG elements (see PixelLayout for the painter protocol).
         class Painter
-          def initialize(width, height, theme)
+          def initialize(width, height, theme, heatmap_pixels = [600, 300])
             @width = width
             @height = height
             @theme = theme
+            @heatmap_pixels = heatmap_pixels
             @out = []
             @defs = []
             @clip = 0
@@ -38,6 +41,16 @@ module MB
 
           def rect(x, y, w, h, color, opacity: 1)
             @out << %(<rect x="#{SVG.n(x)}" y="#{SVG.n(y)}" width="#{SVG.n(w)}" height="#{SVG.n(h)}" fill="#{Color.hex(color)}"#{%( fill-opacity="#{opacity}") if opacity != 1}/>)
+          end
+
+          # A rectangle filled with evenly spaced color +stops+ from top to
+          # bottom.
+          def vgradient(x, y, w, h, stops)
+            @clip += 1
+            id = "grad#{@clip}"
+            st = stops.each_with_index.map { |c, i| %(<stop offset="#{SVG.n(100.0 * i / (stops.length - 1))}%" stop-color="#{Color.hex(c)}"/>) }.join
+            @defs << %(<linearGradient id="#{id}" x1="0" y1="0" x2="0" y2="1">#{st}</linearGradient>)
+            @out << %(<rect x="#{SVG.n(x)}" y="#{SVG.n(y)}" width="#{SVG.n(w)}" height="#{SVG.n(h)}" fill="url(##{id})"/>)
           end
 
           def line(x1, y1, x2, y2, color, width: 1, dash: nil)
@@ -65,7 +78,7 @@ module MB
             id = "plot#{@clip}"
             @defs << %(<clipPath id="#{id}"><rect x="-2" y="-2" width="#{SVG.n(w + 4)}" height="#{SVG.n(h + 4)}"/></clipPath>)
             @out << %(<g transform="translate(#{SVG.n(x)} #{SVG.n(y)})" clip-path="url(##{id})">)
-            yield Surface.new(w, h, @theme, @out)
+            yield Surface.new(w, h, @theme, @out, @heatmap_pixels)
             @out << '</g>'
           end
 
@@ -92,7 +105,8 @@ module MB
           end
           attr_writer :label
 
-          def initialize(width, height, theme, out)
+          def initialize(width, height, theme, out, heatmap_pixels = [600, 300])
+            @heatmap_pixels = heatmap_pixels
             @width = width
             @height = height
             @theme = theme
@@ -135,9 +149,9 @@ module MB
             @out << %(<path d="#{d}" fill="#{Color.hex(rgb)}" fill-opacity="0.75" stroke="#{Color.hex(rgb)}" stroke-width="0.8" stroke-linejoin="round">#{title}</path>)
           end
 
-          # Heatmaps are sampled at up to 600 x 300 and scaled by the viewer
+          # Heatmaps are sampled at up to heatmap_pixels and scaled by the viewer
           def image_grid
-            [[@width.round, 600].min, [@height.round, 300].min]
+            [[@width.round, @heatmap_pixels[0]].min, [@height.round, @heatmap_pixels[1]].min]
           end
 
           def image(ids, colormap)

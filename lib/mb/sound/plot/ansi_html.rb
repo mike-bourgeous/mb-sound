@@ -11,8 +11,10 @@ module MB
         # and +bg+ are the default colors (used for reversed cells).  With
         # +cells+, every non-ASCII character is wrapped in an <i> element
         # (style it as a 1ch-wide inline block) so Braille and block glyphs
-        # from fallback fonts keep the grid aligned.
-        def convert(text, fg: '#d8d8d2', bg: '#141413', cells: false)
+        # from fallback fonts keep the grid aligned.  With a +classes+ Hash,
+        # styles become CSS class names (the Hash collects style => name;
+        # see #stylesheet), which makes colorful captures much smaller.
+        def convert(text, fg: '#d8d8d2', bg: '#141413', cells: false, classes: nil)
           out = +''
           state = { fg: nil, bg: nil, bold: false, reverse: false }
           open = false
@@ -26,6 +28,10 @@ module MB
             style = css(state, fg, bg)
             if style.empty?
               open = false
+            elsif classes
+              name = classes[style] ||= "a#{classes.length.to_s(36)}"
+              out << %(<span class="#{name}">)
+              open = true
             else
               out << %(<span style="#{style}">)
               open = true
@@ -36,6 +42,12 @@ module MB
           end
           out << '</span>' if open
           out
+        end
+
+        # CSS rules for the class names collected by #convert, scoped under
+        # +scope+ (a selector).
+        def stylesheet(classes, scope: '')
+          classes.map { |style, name| "#{scope} .#{name}{#{style}}".strip }.join("\n")
         end
 
         # A minimal HTML page showing +text+ (with ANSI codes) in a dark
