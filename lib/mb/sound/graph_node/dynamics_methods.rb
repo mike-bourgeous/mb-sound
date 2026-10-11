@@ -2,8 +2,8 @@ module MB
   module Sound
     module GraphNode
       # DSL methods for dynamics: compressors, expanders, gates, ducking,
-      # companders, the brickwall limiter, multiband splitting, and an
-      # OTT-style multiband upward/downward compressor.  See
+      # companders, the brickwall limiter, multiband splitting, and a
+      # multiband upward/downward compressor (#squeeze).  See
       # design/notes/dynamics.md and GraphNode::Dynamics.
       #
       # Every method takes a single node or a bundle (stereo channels are
@@ -23,7 +23,7 @@ module MB
       #     mix.limit(ceiling: -1, lookahead: 1.5.ms)        # true-peak brickwall
       #     pad.compand(-60 => -80, -40 => -40, 0 => -12)    # expander + 3.3:1 compressor
       #     mix.bands(120.hz, 2000.hz) { |lo, mid, hi| [lo.compress(ratio: 3), mid, hi.at(-2.db)] }
-      #     mix.ott(depth: 0.5)
+      #     mix.squeeze(:eleven).limit
       module DynamicsMethods
         # Converts a level (dB number, or linear gain above zero) to linear.
         def self.level(value, name)
@@ -57,14 +57,20 @@ module MB
         #
         # Upward compression: +upward_threshold+ (dB) and +upward_ratio+ lift
         # levels below that threshold toward it (2 = half as far below), at
-        # most +max_gain+ dB (default 24).
+        # most +max_gain+ dB (default 24).  When the level rises, the gain
+        # falls over +upward_attack+ (default 1 ms) while it is above 0 dB,
+        # then over +attack+, so hits after quiet stretches don't burst
+        # through boosted.
+        #
+        # +mix+ (0..1, default 1) blends the compressed signal with the
+        # plain one (parallel or "New York" compression), phase-aligned.
         #
         # Examples (bin/sound.rb):
         #     play file_input('drums.flac').compress(threshold: -20, ratio: 4, attack: 10.ms, release: 100.ms, makeup: :auto)
         #     play voice.compress(threshold: -30, ratio: 3, upward_threshold: -50, upward_ratio: 2)
         def compress(threshold: -20, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0,
                      sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
-                     upward_threshold: nil, upward_ratio: 2, max_gain: 24)
+                     upward_threshold: nil, upward_ratio: 2, upward_attack: 0.001, max_gain: 24, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
           slope = DynamicsMethods.ratio_slope(ratio)
           corners = [[t, 1.0, slope]]
@@ -79,7 +85,7 @@ module MB
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, max_gain: upward_threshold ? max_gain.to_f : 0.0,
+            makeup: makeup, max_gain: upward_threshold ? max_gain.to_f : 0.0, boost: upward_attack, mix: mix,
           ))
         end
         alias compressor compress
@@ -92,7 +98,7 @@ module MB
         # Example (bin/sound.rb):
         #     play noisy.expand(threshold: -45, ratio: 3, range: -30)
         def expand(threshold: -40, ratio: 2, knee: 6, range: -40, attack: 0.001, release: 0.1, hold: 0, makeup: 0,
-                   sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0)
+                   sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
           raise ArgumentError, "Expander ratio must be at least 1 (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio >= 1 && ratio.finite?
           r = DynamicsMethods.level_db(range, 'range')
@@ -101,7 +107,7 @@ module MB
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: release, up: attack, hold: hold, hold_up: false,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, min_gain: r, max_gain: 0.0,
+            makeup: makeup, min_gain: r, max_gain: 0.0, mix: mix,
           ))
         end
         alias expander expand
@@ -158,8 +164,10 @@ module MB
         # +over+ (default -100..12) and joined by monotone cubics.
         #
         # Times: +attack+ is how fast the gain falls, +release+ how fast it
-        # rises.  The gain is limited to +min_gain+..+max_gain+ (dB).  The
-        # other options are as for #compress.
+        # rises, +upward_attack+ (default +attack+) how fast it falls while
+        # above 0 dB (a boost).  The gain is limited to
+        # +min_gain+..+max_gain+ (dB).  The other options are as for
+        # #compress.
         #
         # Examples (bin/sound.rb):
         #     play drums.compand(-60 => -70, -30 => -30, 0 => -10, interpolation: :cubic)   # glue with a soft floor
@@ -167,7 +175,7 @@ module MB
         #     play noisy.compand { |db| db < -50 ? db * 2 + 50 : db }                      # 1:2 expander below -50
         def compand(points = nil, interpolation: :linear, over: -100..12, step: 1, attack: 0.005, release: 0.1, hold: 0,
                     makeup: 0, sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
-                    min_gain: -Float::INFINITY, max_gain: Float::INFINITY, **more_points, &block)
+                    min_gain: -Float::INFINITY, max_gain: Float::INFINITY, upward_attack: nil, mix: 1, **more_points, &block)
           bad = more_points.keys.reject { |k| k.is_a?(Numeric) }
           raise ArgumentError, "Unknown compand options: #{bad.map(&:inspect).join(', ')}" unless bad.empty?
 
@@ -186,7 +194,7 @@ module MB
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, min_gain: min_gain, max_gain: max_gain,
+            makeup: makeup, min_gain: min_gain, max_gain: max_gain, boost: upward_attack, mix: mix,
           ))
         end
         alias compander compand
@@ -248,50 +256,72 @@ module MB
         end
         alias multiband bands
 
-        # OTT-style settings for each of the three bands (low, mid, high):
+        # Presets for #squeeze: crossovers (Hz), depth (the parallel mix),
+        # the upward boost's fall time, and per band (low, mid, high) the
         # downward threshold (dB) and ratio, upward threshold (dB) and
-        # ratio, attack and release (seconds, scaled by +time+).  Chosen by
-        # ear and measurement, inspired by (not copied from) Xfer's OTT.
-        OTT_BANDS = [
-          { down: -28, down_ratio: 66, up: -46, up_ratio: 4, attack: 0.012, release: 0.15 }.freeze,
-          { down: -30, down_ratio: 66, up: -48, up_ratio: 4, attack: 0.006, release: 0.1 }.freeze,
-          { down: -32, down_ratio: 66, up: -50, up_ratio: 4, attack: 0.003, release: 0.06 }.freeze,
-        ].freeze
+        # ratio, attack and release (seconds, scaled by +time+).  Values
+        # chosen by ear and measurement (inspired by, not copied from, the
+        # classic three-band upward/downward "OTT" preset).
+        # - :default - gentle glue: 3:1 down, 1.5:1 up, half depth
+        # - :eleven - over the top: 66:1 down, 4:1 up, full depth, loud and
+        #   crunchy (follow it with #limit)
+        SQUEEZE_PRESETS = {
+          default: {
+            split: [120, 2500].freeze, depth: 0.5, upward_attack: 0.002,
+            bands: [
+              { down: -24, down_ratio: 3, up: -42, up_ratio: 1.5, attack: 0.005, release: 0.2 }.freeze,
+              { down: -26, down_ratio: 3, up: -44, up_ratio: 1.5, attack: 0.0025, release: 0.15 }.freeze,
+              { down: -28, down_ratio: 3, up: -46, up_ratio: 1.5, attack: 0.00125, release: 0.1 }.freeze,
+            ].freeze,
+          }.freeze,
+          eleven: {
+            split: [88.3, 2500].freeze, depth: 1.0, upward_attack: 0.0005,
+            bands: [
+              { down: -28, down_ratio: 66, up: -46, up_ratio: 4, attack: 0.003, release: 0.15 }.freeze,
+              { down: -30, down_ratio: 66, up: -48, up_ratio: 4, attack: 0.0015, release: 0.1 }.freeze,
+              { down: -32, down_ratio: 66, up: -50, up_ratio: 4, attack: 0.00075, release: 0.06 }.freeze,
+            ].freeze,
+          }.freeze,
+        }.freeze
 
-        # Aggressive multiband upward + downward compression in the style of
-        # the OTT plugin: three LR4 bands (crossovers +split+, default 88 Hz
-        # and 2.5 kHz), each compressed downward above a threshold (66:1)
-        # and upward below a lower one (4:1, at most +max_gain+ dB of lift),
-        # RMS detection.  +downward+ and +upward+ (0..1) scale the ratios
-        # toward 1:1; +time+ scales attack and release; +depth+ (0..1) mixes
-        # each compressed band with the plain band (so the mix stays phase
-        # aligned); +gain+ is an output gain in dB.  Master-chain friendly.
+        # Multiband upward + downward compression ("squeeze it to eleven"):
+        # three LR4 bands, each compressed downward above a threshold and
+        # upward below a lower one (at most +max_gain+ dB of lift), with
+        # :auto makeup per band.  +preset+ is :default (gentle glue) or
+        # :eleven (the extreme, OTT-style setting; see SQUEEZE_PRESETS).
+        # +downward+ and +upward+ (0..1) scale the ratios toward 1:1; +time+
+        # scales attack and release; +depth+ (0..1, default from the
+        # preset) mixes each compressed band with the plain band
+        # (phase-aligned); +split+ overrides the crossovers; +gain+ is an
+        # output gain in dB.  Every band looks +lookahead+ ahead (default 2
+        # ms, the node's latency) so the fast attacks catch transients.
+        # Master-chain friendly (about 0.7% of realtime per stereo
+        # 800-sample buffer).
         #
         # Examples (bin/sound.rb):
-        #     play drums.ott(depth: 0.4)
-        #     master { |mix| mix.ott(depth: 0.25, time: 0.5) }
-        def ott(depth: 1.0, time: 1.0, upward: 1.0, downward: 1.0, split: [88.3, 2500], gain: 0, max_gain: 24)
-          raise ArgumentError, "OTT depth must be 0..1 (got #{depth.inspect})" unless depth.is_a?(Numeric) && (0..1).cover?(depth)
-          raise ArgumentError, 'OTT splits three bands: give two crossover frequencies' unless split.length == 2
-          raise ArgumentError, "OTT time must be above 0 (got #{time.inspect})" unless time.is_a?(Numeric) && time > 0
-          [upward, downward].each { |v| raise ArgumentError, "OTT upward/downward must be 0..1 (got #{v.inspect})" unless v.is_a?(Numeric) && (0..1).cover?(v) }
+        #     play drums.squeeze                     # gentle
+        #     play drums.squeeze(:eleven).limit       # crunchy, loud
+        #     master { |mix| mix.squeeze(depth: 0.3, time: 0.5) }
+        def squeeze(preset = :default, depth: nil, time: 1.0, upward: 1.0, downward: 1.0, split: nil, gain: 0, max_gain: 24, lookahead: 0.002)
+          settings = SQUEEZE_PRESETS[preset]
+          raise ArgumentError, "Unknown squeeze preset #{preset.inspect} (use #{SQUEEZE_PRESETS.keys.map(&:inspect).join(' or ')})" unless settings
+          depth ||= settings[:depth]
+          split ||= settings[:split]
+          raise ArgumentError, "Squeeze depth must be 0..1 (got #{depth.inspect})" unless depth.is_a?(Numeric) && (0..1).cover?(depth)
+          raise ArgumentError, 'Squeeze splits three bands: give two crossover frequencies' unless split.length == 2
+          raise ArgumentError, "Squeeze time must be above 0 (got #{time.inspect})" unless time.is_a?(Numeric) && time > 0
+          [upward, downward].each { |v| raise ArgumentError, "Squeeze upward/downward must be 0..1 (got #{v.inspect})" unless v.is_a?(Numeric) && (0..1).cover?(v) }
 
           out = bands(*split) { |*bs|
             bs.each_with_index.map { |b, i|
-              s = OTT_BANDS[i]
+              s = settings[:bands][i]
               ratio_down = 1.0 / (1.0 - downward * (1.0 - 1.0 / s[:down_ratio]))
               ratio_up = 1.0 / (1.0 - upward * (1.0 - 1.0 / s[:up_ratio]))
-              comp = b.compress(
+              b.compress(
                 threshold: s[:down], ratio: ratio_down, knee: 6, attack: s[:attack] * time, release: s[:release] * time,
-                upward_threshold: s[:up], upward_ratio: ratio_up, max_gain: max_gain, detector: :rms, rms: 0.005,
+                upward_threshold: s[:up], upward_ratio: ratio_up, upward_attack: settings[:upward_attack] * time,
+                max_gain: max_gain, makeup: :auto, mix: depth, lookahead: lookahead,
               )
-              if depth == 1
-                comp
-              elsif depth == 0
-                b
-              else
-                comp * depth + b * (1.0 - depth)
-              end
             }
           }
           gain == 0 ? out : out * (10.0 ** (gain / 20.0))

@@ -219,7 +219,8 @@ module GraphSweep
         c.sig.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30).noise_gate(threshold: -60).duck(c.trigger, amount: -6)
       }],
       ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60, -70, :smooth], [-20, -20], [0, -8]], link: false) }],
-      ['limit (true peak, unlinked) after ott', ->(c) { c.stereo_sig.ott(depth: 0.5).limit(ceiling: -3, link: false) }],
+      ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3, link: false) }],
+      ['squeeze default, mono', ->(c) { c.sig.squeeze(time: 0.5) }],
       ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],
       ['ping (Resonator)', ->(c) { c.trigger.ping(c.mod(200, 2000), decay: 0.05) }],
 

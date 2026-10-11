@@ -42,6 +42,7 @@ enum dyn_param {
 	DP_HOLD_UP, // 1: hold delays rising gain (compressors), 0: falling (gates)
 	DP_LINK, // 1: one detector for every channel
 	DP_LOOKAHEAD, // whole samples of audio delay
+	DP_MIX, // parallel mix: gain = mix * gain + (1 - mix)
 	DP_COUNT
 };
 
@@ -50,6 +51,7 @@ enum dyn_time {
 	DT_RMS,
 	DT_DOWN,
 	DT_UP,
+	DT_BOOST, // fall time while the gain is above 0 dB (an upward boost)
 	DT_HOLD,
 	DT_COUNT
 };
@@ -172,6 +174,7 @@ static VALUE ruby_compand(VALUE self, VALUE outs, VALUE ins, VALUE sides, VALUE 
 	int hold_up = par[DP_HOLD_UP] != 0;
 	int link = par[DP_LINK] != 0;
 	long la = (long)par[DP_LOOKAHEAD];
+	double mix = par[DP_MIX];
 	if (la < 0) {
 		rb_raise(rb_eArgError, "Lookahead must not be negative");
 	}
@@ -221,8 +224,8 @@ static VALUE ruby_compand(VALUE self, VALUE outs, VALUE ins, VALUE sides, VALUE 
 
 	// Coefficients and gains are recomputed only when their inputs change
 	// (NAN never compares equal, so the first sample computes them).
-	double last_t[DT_COUNT] = { NAN, NAN, NAN, NAN };
-	double coef[DT_COUNT] = { 0, 0, 0, 0 };
+	double last_t[DT_COUNT] = { NAN, NAN, NAN, NAN, NAN };
+	double coef[DT_COUNT] = { 0, 0, 0, 0, 0 };
 	double last_gdb = NAN;
 	double last_glin = 1.0;
 
@@ -274,7 +277,10 @@ static VALUE ruby_compand(VALUE self, VALUE outs, VALUE ins, VALUE sides, VALUE 
 			if (held && ds[2] > 0) {
 				ds[2] -= 1.0;
 			} else {
-				if (g != gs) {
+				if (g < gs && gs > 0) {
+					// A boost (gain above 0 dB) falls at its own speed
+					gs = g + (gs - g) * coef[DT_BOOST];
+				} else if (g != gs) {
 					gs = g + (gs - g) * (g < gs ? coef[DT_DOWN] : coef[DT_UP]);
 				}
 				if (!held) {
@@ -289,7 +295,7 @@ static VALUE ruby_compand(VALUE self, VALUE outs, VALUE ins, VALUE sides, VALUE 
 			double gdb = gs + makeup;
 			if (gdb != last_gdb) {
 				last_gdb = gdb;
-				last_glin = pow(10.0, gdb / 20.0);
+				last_glin = mix * pow(10.0, gdb / 20.0) + (1.0 - mix);
 			}
 			gain[d] = last_glin;
 		}

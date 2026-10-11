@@ -16,11 +16,15 @@ module MB
       # 2. The transfer curve gives the output level; the gain is output
       #    minus input level, clamped to +min_gain+..+max_gain+ (dB).
       # 3. The gain (dB) is smoothed by a one-pole: +down+ time while it
-      #    falls, +up+ while it rises.  +hold+ delays the rising direction
-      #    (+hold_up: true+, compressors and ducks) or the falling one
-      #    (gates), restarting whenever the gain moves the other way.
+      #    falls, +up+ while it rises; while it is above 0 dB (an upward
+      #    boost) it falls over +boost+ instead (default +down+), so a
+      #    transient after a quiet stretch isn't let through boosted.
+      #    +hold+ delays the rising direction (+hold_up: true+, compressors
+      #    and ducks) or the falling one (gates), restarting whenever the
+      #    gain moves the other way.
       # 4. The output is the input (delayed by +lookahead+ samples) times
-      #    the gain plus +makeup+ (dB).
+      #    the gain plus +makeup+ (dB), mixed with the plain input by +mix+
+      #    (parallel compression: gain = mix * gain + 1 - mix).
       #
       # Everything is per sample with state carried across buffers, so the
       # output is the same at any buffer size.  Times (+down+, +up+, +hold+,
@@ -157,7 +161,7 @@ module MB
         attr_reader :sidechain_inputs
 
         # Settings.
-        attr_reader :detector, :link, :lookahead, :makeup, :min_gain, :max_gain, :hold_up
+        attr_reader :detector, :link, :lookahead, :makeup, :min_gain, :max_gain, :hold_up, :mix
 
         # The latest smoothed gain of each detector, in dB (without makeup).
         def gain_db
@@ -176,7 +180,7 @@ module MB
         # the curve's gain at 0 dBFS back).
         def initialize(inputs, transfer:, down:, up:, hold: 0, hold_up: true, detector: :peak, rms: 0.01,
                        link: true, sidechain: nil, lookahead: 0, makeup: 0, min_gain: -Float::INFINITY,
-                       max_gain: Float::INFINITY, description: nil)
+                       max_gain: Float::INFINITY, boost: nil, mix: 1, description: nil)
           inputs = Array(inputs).flat_map { |n| GraphNode.dynamics_channels(n, 'Dynamics inputs') }
           raise ArgumentError, 'A dynamics node needs at least one channel' if inputs.empty?
           raise ArgumentError, "Detector must be one of #{DETECTORS.map(&:inspect).join(', ')} (got #{detector.inspect})" unless DETECTORS.include?(detector)
@@ -205,6 +209,7 @@ module MB
             rms: Length::Source.new(rms),
             down: Length::Source.new(down),
             up: Length::Source.new(up),
+            boost: Length::Source.new(boost.nil? ? down : boost),
             hold: Length::Source.new(hold),
           }
 
@@ -217,6 +222,8 @@ module MB
           @makeup = makeup == :auto ? -0.5 * [@transfer.gain(0), @min_gain].max.clamp(@min_gain, @max_gain) : makeup.to_f
           raise ArgumentError, "Makeup must be dB or :auto (got #{makeup.inspect})" unless @makeup.finite?
 
+          raise ArgumentError, "Mix must be a number from 0 to 1 (got #{mix.inspect})" unless mix.is_a?(Numeric) && (0..1).cover?(mix)
+          @mix = mix.to_f
           @detectors = @link ? 1 : @inputs.length
           @description = description || @transfer.to_s
           @sampled = Array.new(@inputs.length, false)
@@ -267,7 +274,7 @@ module MB
         def params
           Numo::DFloat[
             @detector == :rms ? 1 : 0, @min_gain, @max_gain, @makeup,
-            @hold_up ? 1 : 0, @link ? 1 : 0, @lookahead
+            @hold_up ? 1 : 0, @link ? 1 : 0, @lookahead, @mix
           ]
         end
 
@@ -312,6 +319,7 @@ module MB
           hold_up = params[4] != 0
           link = params[5] != 0
           la = params[6].to_i
+          mix = params[7]
           ndet = link ? 1 : nch
           nside = sides.length
 
@@ -324,22 +332,22 @@ module MB
           pos = state[ndet * 3].to_i
           pos = 0 if la > 0 && (pos < 0 || pos >= la)
 
-          last_t = [nil, nil, nil, nil]
-          coef = [0.0, 0.0, 0.0, 0.0]
+          last_t = [nil, nil, nil, nil, nil]
+          coef = [0.0, 0.0, 0.0, 0.0, 0.0]
           last_gdb = nil
           last_glin = 1.0
           gain = Array.new(ndet, 1.0)
           at = ->(sig, i) { sig.is_a?(Array) ? sig[i] : sig }
 
           n.times do |i|
-            3.times do |t|
+            4.times do |t|
               v = at.(t_in[t], i)
               if v != last_t[t]
                 last_t[t] = v
                 coef[t] = v > 0 ? Math.exp(-1.0 / v) : 0.0
               end
             end
-            hold = at.(t_in[3], i)
+            hold = at.(t_in[4], i)
 
             ndet.times do |d|
               base = d * 3
@@ -366,7 +374,11 @@ module MB
               if held && state[base + 2] > 0
                 state[base + 2] -= 1.0
               else
-                gs = g + (gs - g) * (g < gs ? coef[1] : coef[2]) if g != gs
+                if g < gs && gs > 0
+                  gs = g + (gs - g) * coef[3]
+                elsif g != gs
+                  gs = g + (gs - g) * (g < gs ? coef[1] : coef[2])
+                end
                 state[base + 2] = hold unless held
               end
               gs = g if (gs - g).abs < SNAP
@@ -375,7 +387,7 @@ module MB
               gdb = gs + makeup
               if gdb != last_gdb
                 last_gdb = gdb
-                last_glin = 10.0 ** (gdb / 20.0)
+                last_glin = mix * 10.0 ** (gdb / 20.0) + (1.0 - mix)
               end
               gain[d] = last_glin
             end

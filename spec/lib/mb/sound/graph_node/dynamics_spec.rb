@@ -277,6 +277,40 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
   end
 
+  describe 'in a master chain' do
+    let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
+    let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
+    let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+
+    after { session.close }
+
+    def run(frames)
+      Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+    end
+
+    it 'limits the mix with the latency of the lookahead plus the true-peak delay' do
+      x = Numo::SFloat.zeros(4800)
+      x[1000] = 4.0
+      x[3000] = 0.1
+      session.master { |mix| mix.limit(ceiling: -6, release: 10.ms) }
+      session.add([arr(x), 220.hz.sine.at(3)])
+      l, r = run(9600)
+      expect(l.abs.max).to be <= -6.db + 1e-6
+      expect(r.abs.max).to be <= -6.db + 1e-6
+      expect(l.abs.max_index).to eq(1078)
+    end
+
+    it 'ducks the mix from a sidechain node' do
+      kick = Numo::SFloat.zeros(9600)
+      kick[0...800] = 1
+      session.master { |mix| mix.duck(arr(kick), amount: -20, attack: 0, release: 0.001, knee: 0) }
+      session.add([0.5.constant, 0.5.constant])
+      l, _r = run(9600)
+      expect(db(l[400] / 0.5)).to be_within(1e-4).of(-20)
+      expect(db(l[9000] / 0.5)).to be > -0.001
+    end
+  end
+
   describe '#bands' do
     # The DFT of +x+ at bin +k+.
     def dft(x, k)
@@ -340,10 +374,24 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
   end
 
-  describe '#ott' do
+  describe '#squeeze' do
+    it 'rejects unknown presets and bad knobs' do
+      expect { 1.constant.squeeze(:twelve) }.to raise_error(ArgumentError, /preset/)
+      expect { 1.constant.squeeze(depth: 2) }.to raise_error(ArgumentError, /depth/)
+      expect { 1.constant.squeeze(split: [100]) }.to raise_error(ArgumentError, /two/)
+    end
+
+    it 'lifts quiet sounds more at :eleven' do
+      level = ->(node) { v = render(node, 48000)[0][24000..]; db(Math.sqrt((v**2).mean)) }
+      gentle = level.(1000.hz.sine.at(-60.db).squeeze)
+      eleven = level.(1000.hz.sine.at(-60.db).squeeze(:eleven))
+      expect(gentle).to be > -63 + 6
+      expect(eleven).to be > gentle + 6
+    end
+
     it 'processes a stereo bundle with finite output' do
       st = MB::Sound.stereo(arr(bursty(9600, level: 0.5)), arr(bursty(9600, level: 0.05)))
-      l, r = render(st.ott(depth: 0.7, time: 0.5), 9600)
+      l, r = render(st.squeeze(:eleven, depth: 0.7, time: 0.5), 9600)
       expect(l.length).to eq(9600)
       expect(l.isfinite.all? && r.isfinite.all?).to eq(true)
       expect(l.abs.max).to be > 0

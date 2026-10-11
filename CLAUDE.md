@@ -114,7 +114,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 ### C Extensions (`design/notes/c_extensions.md`)
 
-Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
+Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
 - New C code goes in purpose-specific extensions (user preference), not `fast_sound`.  Shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; shared kernels in `ext/mb/sound/include/mb_*.h`.
 - Every kernel has an exact Ruby mirror that specs compare sample for sample (keep operations identical, including float32 reads of signal inputs).
 - `depend` files list each extension's headers (`rake depend:check`); after changing `depend` or removing a source, `rm -rf tmp/<platform>/<extension>`.
@@ -149,6 +149,13 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 `#reverb` (`GraphNode::Reverb`, `fast_reverb` kernel, mirror `MB_SOUND_REVERB=ruby`) is the one reverb (FdnReverb removed).  `[l, r].reverb(:hall)`: inputs → diffusion → FDN (per sample) → output taps; energy-normalized gains.
 - Classic presets `:room`, `:hall`, `:stadium`, `:space`, `:default` (kept close to 2026-01's sound); room-size presets `:plate`, `:shimmer`, `:grit`, `:lofi`, `:gated`, `:drone`; friendly form `room_size:`, `decay:`, `damping:` (exact design default), `mix:`.
 - `mod:`/`diffusion_mod:` modulation presets; in-loop `lowpass:`, `highpass:`, `drive:`, `crush:`, `shimmer:`, `freeze:`, `stretch:`; after the network `duck:` and `gate:`.  `show_internals: true` builds it as nodes for graphviz.  Not built: an insert block, reverse reverb.
+
+### Dynamics (`design/notes/dynamics.md`)
+
+One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a peak/RMS detector in dB (linked across channels by default; `sidechain:` any node or bundle), a transfer curve (`Dynamics::Transfer`: soft-knee corners, points joined linearly or by monotone cubics, Curve-shaped segments, blocks), a log-domain gain smoother (attack/release/hold, `upward_attack:` for boosts; times take Lengths, Durations, nodes), `lookahead:`, `makeup:` (dB or `:auto`), `mix:` (parallel); same output at any buffer size.
+- Faces: `compress` (+ `upward_threshold:`/`upward_ratio:`), `expand`, `noise_gate`, `duck(kick, amount: -10, release: 1.n16)`, `compand(-60 => -80, -40 => -40, 0 => -12, interpolation: :cubic)` (or `[[in, out, shape], ...]`, or a block).  Levels: dB numbers (0 and below) or linear gains (`-12.db`); `makeup` and compand points are dB.
+- `limit(ceiling: -1, lookahead: 1.5.ms, release:, true_peak: true)`: lookahead brickwall, Annex 2 true peaks; latency lookahead + 6 samples; master-chain ready (`master { |mix| mix.limit }`).
+- `bands(200.hz, 2000) { |lo, mid, hi| [...] }` (LR2/4/8 crossovers summing to an allpass; any node per band; bundles for stereo) and `squeeze` (three-band upward + downward, `:default` gentle, `:eleven` extreme; not called ott: trademark).  ~0.2% of realtime per stereo 800-sample buffer for a compressor, 0.4% limiter, 0.7% squeeze.
 
 ### Drum machines (`design/notes/drums.md`)
 
