@@ -22,14 +22,19 @@
 # Usage: $0 [options] [midi_file [output_file]]
 #
 # Plays live MIDI (or a MIDI file) through 6 voices.  Velocity sets the
-# pluck's level and brightness (a lowpass on the noise; up to --brightness
-# times the pitch on the clean voice).  CC 1 (the mod wheel) darkens the
+# pluck's level and brightness: softer notes move from the bright voice
+# toward the clean one and close both noise lowpasses (in octaves, up to
+# --brightness times the pitch on the clean voice); full velocity is the
+# voice as picked by pitch (--velocity-brightness LO..HI sets the range,
+# one number a fixed brightness, off the pre-2026-10-11 velocity response;
+# --velocity-curve the curve, quad_out by default).  CC 1 (the mod wheel) darkens the
 # string (the loop's lowpass, from --damping down to 2x the pitch; the
 # loop's sustain keeps the ring time, so only the tone changes).  With
 # --hammer (one voice), legato notes are hammer-ons (going up) and
 # pull-offs (going down, also when the top note is released while a lower
 # one is held): the pitch jumps and the still ringing string gets a small
-# new pick (--hammer-level, --pull-level).  Run with --help for all
+# new pick (--hammer-level, --pull-level): a smooth finger-wide bump
+# (--hammer-width periods; 0 for a noise pick).  Run with --help for all
 # options.
 #
 # Examples:
@@ -40,6 +45,12 @@
 #     $0 --clean --pick 4 spec/test_data/c_major.mid         # classic KS everywhere, a longer, scratchier pick
 #     $0 --stretch 2 spec/test_data/c_major.mid               # a softclip in the loop: buzzy, sitar-like
 #     $0 --hammer                                            # live: play legato for hammer-ons and pull-offs
+#     $0 --hammer -W 1                                       # live: softer, rounder hammer-ons (a wider finger)
+#     $0 --hammer -W 0                                       # live: noise-pick hammer-ons (before 2026-10-11)
+#     $0 -V 0.5..1 spec/test_data/c_major.mid                # soft notes only half as dark
+#     $0 -V 1 spec/test_data/c_major.mid                     # every note at full brightness (velocity: level only)
+#     $0 -V off spec/test_data/c_major.mid                   # the pre-2026-10-11 velocity response
+#     $0 --velocity-curve linear spec/test_data/c_major.mid  # darker mid velocities
 #     $0 -v 1 -G 0.1                                         # live: legato notes slide instead
 #
 # Karplus-Strong in the console (bin/sound.rb): one period of noise goes
@@ -106,6 +117,18 @@ module MB::Sound
   # The bright voice's level follows the pitch (PLUCK_BRIGHT_GAIN) so its
   # ring matches the clean voice's and the keyboard stays even.
   #
+  # Velocity (2026-10-11): the velocity through +velocity_curve+ (a Curve
+  # name, :quad_out by default) onto +velocity_brightness+ (a Range of
+  # brightness at velocity 0..1, default 0.0..1.0; a number: fixed) is the
+  # pluck's brightness b.  Of the bright voice's share by pitch, b goes to
+  # the bright burst and 1 - b to the clean one (in power), and both noise
+  # lowpasses sweep in octaves (bright 1500 x 7^b Hz, clean the pitch x
+  # (1 + +brightness+)^b), so soft notes are darker and cleaner and full
+  # velocity is the voice by pitch exactly (bit for bit the same as
+  # +velocity_brightness+ false, where velocity opens the lowpasses
+  # linearly and the mix follows the pitch only, as before).  Levels stay
+  # within about 2.5 dB of that older response (ring RMS, 110 Hz).
+  #
   # +sustain+ is the time in seconds for the string to fall 60 dB (at any
   # pitch: the loop gain per period follows the note), +damping+ the loop
   # lowpass cutoff as a multiple of the pitch (0 for none), +stretch+ a
@@ -119,7 +142,10 @@ module MB::Sound
   # delay follows the glide, so the ringing string bends.  +hammer+ instead
   # makes legato notes hammer-ons and pull-offs: the pitch jumps at once
   # and the string, still ringing, gets a small new pick of +hammer_level+
-  # (going up) or +pull_level+ (going down) times a full one.
+  # (going up) or +pull_level+ (going down) times a full one: a smooth
+  # zero-mean bump +hammer_width+ periods wide (a finger rather than a
+  # pick; level matched to the noise pick by pluck_hammer_gain), or with
+  # +hammer_width+ 0 the noise pick (no raw part) as before 2026-10-11.
   def self.pluck_voice(v, sustain: 3.0, damping: 6.0, pick: 1.0, brightness: 12.0, stretch: 0.0, release: 0.08,
                        brightness_hz: 0.0, attack: nil, attack_shape: :linear, glide: 0.0,
                        voice: :auto, crossover: PLUCK_CROSSOVER, click: 1.0, bright_pick: 0.008,
