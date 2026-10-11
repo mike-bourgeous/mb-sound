@@ -43,6 +43,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/tempo_song.rb' => ['--bars', '0.5'],
     'bin/songs/tween_song.rb' => ['--bars', '0.5', '-c', '4'],
     'bin/songs/unison_song.rb' => ['--bars', '0.5', '-l', 'even'],
+    'bin/songs/vocal_lead_song.rb' => ['--bars', '0.5', '-S', 'pulse', '-t', '1'],
     'bin/songs/wavetable_song.rb' => ['--bars', '0.5'],
     'bin/stereo_graph_example.rb' => ['--bars', '0.5'],
     'bin/synths/fifth_pad.rb' => ['--bars', '0.5'],
@@ -109,6 +110,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/sinewave.rb' => [],
     'bin/synths/sq80_voice.rb' => [],
     'bin/synths/stereo_graph_synth_example.rb' => [],
+    'bin/synths/vocal_lead.rb' => ['-V', 'i,a,u', '-j', '0.2'],
     'bin/synths/wavetable_bass.rb' => [],
     'bin/wavetable_pr_example.rb' => [],
   }.freeze

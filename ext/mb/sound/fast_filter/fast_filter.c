@@ -1,7 +1,7 @@
 /*
  * MB::Sound::FastFilter: analog-style filter kernels (the four-pole, the
- * diode ladder (ruby_diode_ladder below), and the state-variable filter,
- * ruby_svf below).
+ * diode ladder (ruby_diode_ladder below), the state-variable filter,
+ * ruby_svf below, and a bank of SVF bandpasses for formants, ruby_formant).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -259,6 +259,149 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 }
 
 /*
+ * formant: GraphNode::Formant's bank of FORMANT_SECTIONS parallel SVF
+ * bandpasses (mb_svf.h, the same design and step as ruby_svf's :bandpass)
+ * whose settings come from a vowel table morphed per sample.
+ *
+ * +tables+ is a DFloat of 3 * vowels * FORMANT_SECTIONS values: the natural
+ * logs of each vowel's section frequencies (Hz), qualities, and linear
+ * gains (vowel-major within each block).  +morph+ (0..1 across the vowels,
+ * clamped), +shift+ (semitones), and +width+ (bandwidth scale, at least
+ * FORMANT_MIN_WIDTH) are signal inputs.  When any of them changes, each
+ * section's log values interpolate linearly between the two vowels around
+ * the morph position; the shift adds shift * ln(2) / 12 to the frequency,
+ * the width subtracts ln(width) from the quality (bandwidths scale with
+ * it), and with +normalize+ the gain gets -ln(width) / 2 (power follows
+ * bandwidth); the section's coefficients use exp of each.  The output is
+ * the sum of the sections (in section order, in double) as float32.
+ *
+ * +state+ is a DFloat of 2 * FORMANT_SECTIONS integrator states, updated
+ * (flushed like ruby_svf's).  Exact Ruby mirror:
+ * MB::Sound::GraphNode::Formant.process_ruby.
+ */
+#define FORMANT_SECTIONS 5
+#define FORMANT_MIN_WIDTH 0.01
+
+static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE morph, VALUE shift, VALUE width, VALUE state, VALUE rate_v, VALUE normalize)
+{
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D SFloat");
+	}
+	if (CLASS_OF(tables) != numo_cDFloat || RNARRAY_NDIM(tables) != 1 || !RTEST(nary_check_contiguous(tables))) {
+		rb_raise(rb_eArgError, "The formant tables must be a contiguous 1D DFloat");
+	}
+	size_t table_length = RNARRAY_SHAPE(tables)[0];
+	if (table_length == 0 || table_length % (3 * FORMANT_SECTIONS) != 0) {
+		rb_raise(rb_eArgError, "The formant tables must have 3 * %d values per vowel", FORMANT_SECTIONS);
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 || RNARRAY_SHAPE(state)[0] != 2 * FORMANT_SECTIONS ||
+			!RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "The formant state must be a contiguous DFloat of %d values", 2 * FORMANT_SECTIONS);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+	_Bool norm = RTEST(normalize);
+
+	size_t length = RNARRAY_SHAPE(out)[0];
+	struct mb_signal xs, ms, ss, ws;
+	mb_signal_input(&x, length, "The input", &xs);
+	mb_signal_input(&morph, length, "Morph", &ms);
+	mb_signal_input(&shift, length, "Shift", &ss);
+	mb_signal_input(&width, length, "Width", &ws);
+
+	long vowels = (long)(table_length / (3 * FORMANT_SECTIONS));
+	size_t block = (size_t)vowels * FORMANT_SECTIONS;
+	const double *tp = (const double *)(nary_get_pointer_for_read(tables) + nary_get_offset(tables));
+	const double *t_freq = tp;
+	const double *t_q = tp + block;
+	const double *t_gain = tp + 2 * block;
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	float *op = mb_sfloat_ptr(out);
+
+	double pi_over_rate = M_PI / rate;
+	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
+	double semitone_log = log(2.0) / 12.0;
+
+	struct mb_svf svf[FORMANT_SECTIONS];
+	for (int k = 0; k < FORMANT_SECTIONS; k++) {
+		mb_svf_init(&svf[k]);
+	}
+
+	double last_m = NAN, last_s = NAN, last_w = NAN;
+	for (size_t i = 0; i < length; i++) {
+		double m = mb_signal_at(&ms, i);
+		double sh = mb_signal_at(&ss, i);
+		double w = mb_signal_at(&ws, i);
+
+		if (m != last_m || sh != last_s || w != last_w) {
+			last_m = m;
+			last_s = sh;
+			last_w = w;
+
+			long lo = 0, hi = 0;
+			double frac = 0.0;
+			if (vowels > 1) {
+				double mc = m;
+				if (!(mc >= 0.0)) {
+					mc = 0.0;
+				} else if (mc > 1.0) {
+					mc = 1.0;
+				}
+				double pos = mc * (double)(vowels - 1);
+				lo = (long)floor(pos);
+				if (lo > vowels - 2) {
+					lo = vowels - 2;
+				}
+				hi = lo + 1;
+				frac = pos - (double)lo;
+			}
+
+			double shift_log = sh * semitone_log;
+			double wc = w;
+			if (!(wc >= FORMANT_MIN_WIDTH)) {
+				wc = FORMANT_MIN_WIDTH;
+			}
+			double width_log = log(wc);
+			double level_log = norm ? width_log * -0.5 : 0.0;
+
+			for (int k = 0; k < FORMANT_SECTIONS; k++) {
+				size_t a = (size_t)lo * FORMANT_SECTIONS + k;
+				size_t b = (size_t)hi * FORMANT_SECTIONS + k;
+				double lf = t_freq[a] + (t_freq[b] - t_freq[a]) * frac + shift_log;
+				double lq = t_q[a] + (t_q[b] - t_q[a]) * frac - width_log;
+				double lg = t_gain[a] + (t_gain[b] - t_gain[a]) * frac + level_log;
+				mb_svf_coefficients(&svf[k], SVF_BANDPASS, exp(lf), exp(lq), exp(lg), pi_over_rate, fc_max);
+			}
+		}
+
+		double xi = mb_signal_at(&xs, i);
+		double sum = 0.0;
+		for (int k = 0; k < FORMANT_SECTIONS; k++) {
+			sum += mb_svf_step(&svf[k], xi, &st[2 * k], &st[2 * k + 1]);
+		}
+		op[i] = (float)sum;
+	}
+
+	for (int k = 0; k < 2 * FORMANT_SECTIONS; k++) {
+		if (!isfinite(st[k]) || fabs(st[k]) < FP_FLUSH) {
+			st[k] = 0.0;
+		}
+	}
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(morph);
+	RB_GC_GUARD(shift);
+	RB_GC_GUARD(width);
+
+	return out;
+}
+
+/*
  * diode_ladder: a TB-303-style 4-pole diode ladder lowpass (a behavioral
  * model, not a circuit simulation), with lp4's resonance scale, curves,
  * compensation, and drive.
@@ -468,6 +611,7 @@ void Init_fast_filter(void)
 
 	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, -1);
 	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
+	rb_define_module_function(fast_filter, "formant", ruby_formant, 9);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);

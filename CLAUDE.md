@@ -108,6 +108,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 - `sync(ratio:)` / `sync(master)` / `softsync`: causal minBLEP kernel, exact naive waveform through a minimum-phase filter (~2.78 samples delay).  `fm_feedback(amount, gain:)` (aliases `fmfb`, `fm_fb`): DX7-style operator self-feedback in cycles, sines only.  `tone.gain(g)` multiplies inside the Tone.
 - Phase jumps (resets, timeline jumps) are band-limited steps; `clean` (opt-in, ~2x CPU) makes jumps hard-sync events.  `tone.reset(trig, to:)` jumps at nonzero trigger samples; `.free` never resets; `.rnd` random phases.  Randomness from `MB::Sound.seed(n)`/`next_seed` (restored before every spec); noise has its own splitmix64 state per tone.
 - `softclip`, `clip`, `abs`, `quantize` use ADAA plus a half-sample allpass (half a sample of delay); `asoftclip` etc. are exact.  Ports (`tone.wraps`, `.increment`, TempoNode `jumps`): every reader must read each buffer.
+- `sig.decimate(rate, jitter:)` (`crush_rate`, `srr`; `GraphNode::Decimator`, `fast_lofi`): sample-rate reduction aliasing on purpose, the rate a number or a per-sample node (key-track with `v.freq * n`); vocal-lead demo `bin/synths/vocal_lead.rb` / `bin/songs/vocal_lead_song.rb` (formants + resonant filter + key-tracked crusher, ghost chords).
 - Wavetables (`lib/mb/sound/wavetable.rb`, `fast_wavetable`): `Wavetable` cycle tables and samples, mipmapped (`:half_octave` default), `440.hz.wavetable(t, scan:)` with FM/PM/pwm/sync/resets, `KeyMap` zones, `phase_table`, `waveshape`, `Pitch#harmonics` additive.  Demo `bin/songs/wavetable_song.rb`.
 - Unison (`lib/mb/sound/unison.rb`): `pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }`; `pitch.swarm(...)` per-copy glides.  Demos `bin/songs/unison_song.rb`, `swarm_song.rb`.  Still aliasing: FM/PM sidebands (use `oversample`), `gauss`, naive shapes.
 
@@ -125,7 +126,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 
 
-Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
+Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics, fast_lofi (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
 - New C code goes in purpose-specific extensions (user preference), not `fast_sound`.  Shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; shared kernels in `ext/mb/sound/include/mb_*.h`.
 - Every kernel has an exact Ruby mirror that specs compare sample for sample (keep operations identical, including float32 reads of signal inputs).
 - `depend` files list each extension's headers (`rake depend:check`); after changing `depend` or removing a source, `rm -rf tmp/<platform>/<extension>`.
@@ -146,6 +147,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 - Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:, gain:)`, `filter(150.hz.highpass(quality: 4))`, `peq`) build `Filter::SVF` (user decision): cookbook responses, parameters may move every sample without DC bumps.  `structure: :biquad` builds the old Cookbook biquad.
 - `sig.lp4(cutoff, resonance:)` (`four_pole`): CEM3379-style 4-pole, `:db` resonance curve, no self-oscillation unless `self_oscillate: true`, `drive:`/`drive_mode:`, `mode:` taps, `quality:`; `v.reso(...)` in voices.
 - `sig.diode(cutoff, resonance:)`: TB-303-style diode ladder with lp4's knobs, `normalize: true` (default) matches lp4's level and peak frequency.
+- `sig.formant(:a, :o, morph:, voice:, shift:, width:)` (alias `vowel`; `GraphNode::Formant`, kernel `FastFilter.formant`): five parallel SVF bandpasses from the Csound formant tables, morphable and key-trackable, level-normalized.
 
 ### Delays (`design/notes/delays.md`)
 
@@ -178,6 +180,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 - Edges land on exact samples at a shared `Transport`'s tempo; looping clips follow the timeline (`align: :launch` counts from the launch); launches and swaps land on the floor sample of their time.
 - Transforms: `legato`, `reverse`, `permute`, `rotate`, `transpose`; feel and chance: `humanize`, `quantize`, `swing`, `chance`/`maybe`, `every`, `Clip::Variation`s (`vary: true`), `bake(fx)`; generators `euclid`, `melody`.
 - Note marks: accent `!A1`, slide `~A1`, `up`/`dn`/`oct`; `Rest`/`R`, `Tie`/`T`; `Seq#acid` and `acid(...)` for 303 patterns; voice helpers `v.accent`, `v.accent_sweep`, `v.acid_env`; demo `bin/synths/acid.rb`, `bin/songs/acid_song.rb`.  `!` is overridden only on Note and Step (test with `nil?`, never `!x`).
+- `clip.ghost_chords(1, 4, 7, 6, per: 1.bar, scale: scale(:minor, :a), harmonic:, tie: :contour)`: snaps a repeated melody to a silent chord progression (degrees from 1, note Arrays, nil), keeping rhythm and contour; looping clips repeat to fit.
 - `swap :bass, bass2` changes a player's clips on the next bar, keeping graph state; derived clips are rederived.  Demos `bin/songs/sequence_demo.rb`, `swap_song.rb`.
 
 ### Tempo sync (`design/notes/tempo_sync.md`)
