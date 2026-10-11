@@ -96,6 +96,7 @@ module MB
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
+          *DynamicsMethods.public_instance_methods(false),
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.

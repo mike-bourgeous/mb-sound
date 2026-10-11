@@ -30,6 +30,7 @@ require_relative 'sound/fast_reverb'
 require_relative 'sound/fast_unison'
 require_relative 'sound/fast_control'
 require_relative 'sound/fast_loudness'
+require_relative 'sound/fast_dynamics'
 require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
 

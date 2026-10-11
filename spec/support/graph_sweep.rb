@@ -209,6 +209,18 @@ module GraphSweep
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60) }],
+
+      # Dynamics
+      ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {
+        c.stereo_sig.compress(threshold: -20, ratio: 4, detector: :rms, lookahead: 8.samples, hold: 0.002, sidechain: c.sig(55),
+                              upward_threshold: -40, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
+      }],
+      ['compand cubic, expand, noise_gate, duck', ->(c) {
+        c.sig.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30).noise_gate(threshold: -60).duck(c.trigger, amount: -6)
+      }],
+      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60, -70, :smooth], [-20, -20], [0, -8]], link: false) }],
+      ['limit (true peak, unlinked) after ott', ->(c) { c.stereo_sig.ott(depth: 0.5).limit(ceiling: -3, link: false) }],
+      ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],
       ['ping (Resonator)', ->(c) { c.trigger.ping(c.mod(200, 2000), decay: 0.05) }],
 
       # Feedback loops
