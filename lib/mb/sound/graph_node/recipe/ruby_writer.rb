@@ -265,7 +265,9 @@ module MB
             when Array then v.each { |x| objects_in(x, acc) }
             when Hash then v.each { |k, x| objects_in(k, acc); objects_in(x, acc) }
             when Range then objects_in([v.begin, v.end], acc)
-            when MB::Sound::Length::Seconds, MB::Sound::Length::Samples then objects_in(v.value, acc)
+            when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
+              objects_in(v.origin[0], acc) if v.origin
+              objects_in(v.value, acc)
             when MB::Sound::Phase then objects_in(v.cycles, acc) unless v.cycles.is_a?(Numeric)
             when ChannelValues then objects_in(v.values, acc)
             else acc << v if Recipe.graph_object?(v)
@@ -705,8 +707,8 @@ module MB
               "#{b}#{v.exclude_end? ? '...' : '..'}#{e}"
             when Array then "[#{v.map { |x| value(x, indent) }.join(', ')}]"
             when Hash then "{ #{v.map { |k, x| k.is_a?(Symbol) ? "#{key_text(k)} #{value(x, indent)}" : "#{value(k, indent)} => #{value(x, indent)}" }.join(', ')} }"
-            when MB::Sound::Length::Samples then unit_value(v.value, 'samples', indent)
-            when MB::Sound::Length::Seconds then seconds_text(v, indent)
+            when MB::Sound::Length::Samples then v.origin ? origin_text(v, indent) : unit_value(v.value, 'samples', indent)
+            when MB::Sound::Length::Seconds then v.origin ? origin_text(v, indent) : seconds_text(v, indent)
             when MB::Sound::Interval then interval_text(v)
             when MB::Sound::Sequence::Duration then duration_text(v)
             when MB::Sound::Phase then phase_text(v, indent)
@@ -731,12 +733,25 @@ module MB
           def unit_value(x, unit, indent)
             if x.is_a?(Numeric)
               t = num(x)
-              t = "(#{t})" if x.real? && x.negative?
+              t = "(#{t})" if (x.real? && x.negative?) || t.include?('/') # (1r/110).seconds
               "#{t}.#{unit}"
             else
               t, p = expr_p(x, indent: indent)
               p < ATOM ? "(#{t}).#{unit}" : "#{t}.#{unit}"
             end
+          end
+
+          # A length read from an object (Length::Quantity#origin), printed as
+          # the call that made it: `220.hz.period`, `osc.period_samples`.
+          def origin_text(v, indent)
+            obj, name = v.origin
+            if Recipe.graph_object?(obj) || @names.key?(obj)
+              t, p = expr_p(obj, indent: indent)
+              t = "(#{t})" if p < ATOM
+            else
+              t = leaf(obj, indent)
+            end
+            "#{t}.#{name}"
           end
 
           def seconds_text(v, indent)

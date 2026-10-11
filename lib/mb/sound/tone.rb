@@ -147,8 +147,16 @@ module MB
       # The period of one cycle as a Length::Seconds (and as a
       # Length::Samples at this tone's rate), or nil for a modulated
       # frequency.  Lengths work wherever lengths do (`delay(t.period)`).
-      def period = @period&.seconds
-      def period_samples = @period_samples&.samples
+      # Exact (Rational) when the frequency was given as an Integer or
+      # Rational (see Pitch#period); graph export prints `osc.period`.
+      def period = @period && Length::Seconds.new(@period, origin: [self, :period])
+
+      def period_samples
+        return nil unless @period
+
+        rate = Length.exact_rate(@sample_rate)
+        Length::Samples.new(Length.exact?(@period) && Length.exact?(rate) ? @period * rate : @period.to_f * rate, origin: [self, :period_samples])
+      end
       attr_reader :amplitude_set
 
       # The phase modulation source (cycles; a number or node), or nil.
@@ -1034,7 +1042,6 @@ module MB
       # GraphNode::SampleRateHelper), at any time.
       def sample_rate=(sample_rate)
         super
-        @period_samples = @period * @sample_rate if @period
         @advance = nil
         @kernel = nil
         Plan.changed(self, structure: false)
@@ -2922,12 +2929,11 @@ module MB
         end
 
         if freq.is_a?(Numeric)
-          freq = freq.to_f if freq.is_a?(Numeric)
-          @period = 1.0 / freq
-          @period_samples = @period * @sample_rate
+          # The period stays exact for Integer and Rational frequencies
+          @period = Length.exact?(freq) && freq != 0 ? 1r / freq : 1.0 / freq.to_f
+          freq = freq.to_f
         else
           @period = nil
-          @period_samples = nil
         end
 
         @frequency = freq

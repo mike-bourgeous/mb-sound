@@ -24,11 +24,18 @@ module MB
         # The number of seconds or samples (a Numeric), or a graph node.
         attr_reader :value
 
-        def initialize(value)
+        # Where this length was read from, as [object, method name] (e.g.
+        # [220.hz, :period] for `220.hz.period`), so graph export prints
+        # the call instead of the number; nil otherwise.  Arithmetic
+        # results have no origin.  Doesn't affect equality.
+        attr_reader :origin
+
+        def initialize(value, origin: nil)
           unless value.is_a?(Numeric) || value.respond_to?(:sample)
             raise ArgumentError, "A #{self.class.name.split('::').last} length needs a number or a graph node (got #{value.inspect})"
           end
           @value = value
+          @origin = origin
         end
 
         # True if this is a number rather than a graph node.
@@ -190,6 +197,18 @@ module MB
       # True for numbers (Duration and fixed Seconds/Samples).
       def fixed?
         true
+      end
+
+      # True if +value+ is an exact number (Integer or Rational), for lengths
+      # computed exactly (e.g. Pitch#period of an Integer frequency).
+      def self.exact?(value)
+        value.is_a?(Integer) || value.is_a?(Rational)
+      end
+
+      # A sample rate as an Integer when it is a whole number (48000.0 ->
+      # 48000), for exact length arithmetic.
+      def self.exact_rate(rate)
+        rate.is_a?(Float) && rate.finite? && rate == rate.round ? rate.round : rate
       end
 
       # Returns +value+ in seconds: plain numbers are already seconds; lengths

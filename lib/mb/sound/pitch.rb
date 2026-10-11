@@ -46,6 +46,8 @@ module MB
         end
 
         @source = frequency.is_a?(Numeric) ? frequency.to_f : frequency
+        # An Integer or Rational frequency, kept for exact periods (#period)
+        @exact_frequency = frequency if Length.exact?(frequency)
         @sample_rate = sample_rate.to_f
         @signal = nil
       end
@@ -79,7 +81,8 @@ module MB
       # Returns a new full-scale Tone (sine unless +wave_type+ is given) at
       # this pitch.
       def tone(wave_type = :sine)
-        setup_tone(new_tone(oscillator_frequency, wave_type))
+        # An exact frequency gives the Tone an exact period (Tone#period)
+        setup_tone(new_tone(@exact_frequency || oscillator_frequency, wave_type))
       end
       alias hz tone
 
@@ -424,10 +427,20 @@ module MB
 
       # The period of one cycle as a Length::Seconds (`220.hz.period` for a
       # Karplus-Strong delay or an envelope's hold:), and as a
-      # Length::Samples at this pitch's sample rate.  Use #to_f for the
-      # plain number.
-      def period = (1.0 / frequency).seconds
-      def period_samples = (@sample_rate.to_f / frequency).samples
+      # Length::Samples at this pitch's sample rate.  Exact (Rational) for
+      # Integer or Rational frequencies (`220.hz.period.value` is 1/220r);
+      # use #to_f for the plain number.  Graph export prints them as
+      # `220.hz.period` (see Length::Quantity#origin).
+      def period
+        f = @exact_frequency || frequency
+        Length::Seconds.new(Length.exact?(f) && f != 0 ? 1r / f : 1.0 / f, origin: [self, :period])
+      end
+
+      def period_samples
+        f = @exact_frequency || frequency
+        rate = Length.exact_rate(@sample_rate)
+        Length::Samples.new(Length.exact?(f) && f != 0 && Length.exact?(rate) ? rate.to_r / f : rate.to_f / f, origin: [self, :period_samples])
+      end
 
       # The wavelength of this pitch in air (see SPEED_OF_SOUND).
       def wavelength
