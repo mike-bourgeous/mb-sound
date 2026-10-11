@@ -59,6 +59,7 @@ module MemcheckSelection
     'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
     'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
     'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
+    'spec/lib/mb/sound/graph_node/formant_spec.rb',  # FastFilter.formant through Formant
     'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
     'spec/lib/mb/sound/graph_node/decimator_spec.rb', # FastLofi.decimate through Decimator
     'spec/lib/mb/sound/graph_node/dynamics_spec.rb', # FastDynamics.compand/limit/crossover through the nodes

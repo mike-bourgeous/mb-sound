@@ -232,6 +232,26 @@ module MB
         end
         alias diode_ladder diode
 
+        # A formant filter (GraphNode::Formant): five parallel resonant
+        # bandpasses at a sung vowel's formants, so a bright source "says"
+        # the vowel.  +vowels+ are :a, :e, :i, :o, :u (Csound's formant
+        # tables for +voice+ :soprano, :alto, :countertenor, :tenor
+        # (default), or :bass) or custom Arrays of five [Hz, dB, bandwidth]
+        # triples; with several, +morph+ (0..1, a number or node) glides
+        # across the list.  +shift+ moves every formant by semitones (a
+        # number, Interval, or node: key tracking with `v.number - 60`),
+        # +width+ scales the bandwidths (below 1 is more resonant).
+        # Level-normalized by default (see Formant).  Alias #vowel.
+        #
+        #     play 110.hz.ramp.formant(:a)
+        #     play 110.hz.pulse(0.1).formant(:a, :e, :i, :o, :u, morph: 0.25.hz.lfo.at(0..1))
+        #     v.hz.saw.formant(:o, :a, morph: v.mod_wheel, shift: (v.number - 60) * 0.3)
+        def formant(*vowels, voice: Formant::DEFAULT_VOICE, morph: 0, shift: 0, width: 1, normalize: true)
+          vowels = [:a] if vowels.empty?
+          Formant.new(self, vowels: vowels, voice: voice, morph: morph, shift: shift, width: width, normalize: normalize, sample_rate: sample_rate)
+        end
+        alias vowel formant
+
         # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
         # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a
         # linear gain, or an Array with gain and bandwith in octaves (the default

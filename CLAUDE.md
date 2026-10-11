@@ -138,6 +138,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 - Graph cookbook filters (`node.filter(:lowpass, cutoff:, quality:, gain:)`, `filter(150.hz.highpass(quality: 4))`, `peq`) build `Filter::SVF` (user decision): cookbook responses, parameters may move every sample without DC bumps.  `structure: :biquad` builds the old Cookbook biquad.
 - `sig.lp4(cutoff, resonance:)` (`four_pole`): CEM3379-style 4-pole, `:db` resonance curve, no self-oscillation unless `self_oscillate: true`, `drive:`/`drive_mode:`, `mode:` taps, `quality:`; `v.reso(...)` in voices.
 - `sig.diode(cutoff, resonance:)`: TB-303-style diode ladder with lp4's knobs, `normalize: true` (default) matches lp4's level and peak frequency.
+- `sig.formant(:a, :o, morph:, voice:, shift:, width:)` (alias `vowel`; `GraphNode::Formant`, kernel `FastFilter.formant`): five parallel SVF bandpasses from the Csound formant tables, morphable and key-trackable, level-normalized.
 
 ### Delays (`design/notes/delays.md`)
 
