@@ -37,6 +37,12 @@ module MB
       # pedals like a Synth does, unless +sustain: false+ (a separate Notes
       # on the same input; see Notes.new).
       #
+      # The input is read through the session's MIDI input
+      # (Session::MidiInput): the session reads it once per buffer and
+      # every graph playing it gets the events on the same frames, which
+      # recordings (`rec`, `capture`) and the take's MIDI log see too, so a
+      # saved take replays what was played.
+      #
       # Opening live MIDI switches the background session to the :low
       # latency profile unless a profile was chosen (see
       # PlaybackMethods#live_midi_latency).
@@ -50,20 +56,14 @@ module MB
       #     dry = midi(sustain: false); play dry.hz.saw * dry.gate   # ignore the pedals
       def midi(connect = nil, quiet: false, sustain: true)
         @live_midi ||= {}
-        @live_midi_streams ||= {}
+        input = attach_live_midi(Session.current, connect, quiet: quiet)
         key = [connect, !!sustain]
         notes = @live_midi[key]
-        return notes if notes && !notes.stream.source.closed?
+        return notes if notes && notes.stream.source.respond_to?(:hub) && notes.stream.source.hub.equal?(input) && !input.closed?
 
-        stream = @live_midi_streams[connect]
-        if stream.nil? || stream.source.closed?
-          # Switches the output only once the input has opened
-          source = MB::Sound::MIDI::LiveSource.new(connect: connect)
-          live_midi_latency(quiet: quiet)
-          source.output = Session.default.output
-          stream = @live_midi_streams[connect] = MB::Sound::MIDI::Stream.new(source)
-        end
-
+        # One stream per input, shared by its Notes (with and without pedals)
+        @live_midi_taps ||= {}.compare_by_identity
+        stream = @live_midi_taps[input] ||= input.stream
         @live_midi[key] = MB::Sound::Notes.new(stream, sustain: sustain)
       end
 
@@ -80,6 +80,7 @@ module MB
         (@live_midi_streams || {}).each_value { |stream| stream.source.close }
         @live_midi = {}
         @live_midi_streams = {}
+        @live_midi_taps = {}.compare_by_identity
         nil
       end
 
@@ -128,6 +129,31 @@ module MB
       end
 
       private
+
+      # Returns +session+'s MIDI input named +connect+ (see
+      # Session::MidiIn#midi_in), giving it live MIDI input (opened by name
+      # with +connect+, once until #close_midi) unless it has an open input
+      # or replays a take.
+      def attach_live_midi(session, connect = nil, quiet: false)
+        input = session.midi_in(connect)
+        return input if input.replaying? || (input.input && !input.closed?)
+
+        @live_midi_streams ||= {}
+        stream = @live_midi_streams[connect]
+        if stream.nil? || stream.source.closed?
+          # Switches the output only once the input has opened
+          source = MB::Sound::MIDI::LiveSource.new(connect: connect)
+          live_midi_latency(quiet: quiet)
+          source.output = Session.default.output
+          stream = @live_midi_streams[connect] = MB::Sound::MIDI::Stream.new(source)
+          # (the latency switch may have replaced the default session)
+          session = Session.current
+          input = session.midi_in(connect)
+        end
+
+        input.input = stream unless input.input.equal?(stream)
+        input
+      end
 
       # Points the live MIDI sources of #midi at the background session's
       # current output (see PlaybackMethods#use_output).

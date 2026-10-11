@@ -94,7 +94,9 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       expect(MB::Sound.midi).to equal(midi)
       expect(MB::Sound.midi_stream).to equal(midi.stream)
 
-      source = midi.stream.source
+      expect(midi.stream.source).to be_a(MB::Sound::Session::MidiInput::Tap)
+      expect(midi.stream.source.hub).to equal(MB::Sound::Session.default.midi_in)
+      source = midi.stream.source.live_source
       expect(source).to be_a(MB::Sound::MIDI::LiveSource)
       expect(source.timing).to eq(:exact)
       expect(source.output).to equal(MB::Sound::Session.default.output)
@@ -116,9 +118,12 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
 
     it 'follows the output when the session switches outputs' do
       midi = MB::Sound.midi
+      old = midi.stream.source.live_source
       MB::Sound.latency(:safe)
-      expect(midi.stream.source.output).to equal(MB::Sound::Session.default.output)
-      expect(midi.stream.source.output.profile).to eq(:safe)
+      source = MB::Sound.midi_stream.source.live_source
+      expect(source).to equal(old) # the same input, read by the new session
+      expect(source.output).to equal(MB::Sound::Session.default.output)
+      expect(source.output.profile).to eq(:safe)
     end
 
     it 'opens a new input after #close_midi' do
@@ -240,8 +245,8 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       ENV['MIDI_TIMING'] = 'asap'
       keyboard = MB::Sound::FastMIDI::Output.new(:jack, "#{ENV['JACK_CLIENT_NAME']}_keys", nil, 'out')
       midi = MB::Sound.midi("#{ENV['JACK_CLIENT_NAME']}_keys")
-      expect(midi.stream.source.input.api).to eq(:jack)
-      expect(midi.stream.source.input.connections.join).to include("#{ENV['JACK_CLIENT_NAME']}_keys")
+      expect(midi.stream.source.live_source.input.api).to eq(:jack)
+      expect(midi.stream.source.live_source.input.connections.join).to include("#{ENV['JACK_CLIENT_NAME']}_keys")
 
       gate = midi.gate
       number = midi.number

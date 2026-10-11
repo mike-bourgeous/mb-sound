@@ -153,10 +153,11 @@ module MB
 
         # Records from the render thread something that happened by itself
         # (not a change), e.g. a ringing player going to sleep (:rung_out).
-        # It becomes a :landed entry with a new +seq+ and source :session
-        # when the journal is next read.  Only queues a note.
-        def note_entry(kind:, subject:, lands:, data: {})
-          @notes << [:entry, kind, subject, lands, data]
+        # It becomes a :landed entry with a new +seq+ and +source+ (:session
+        # by default; :midi for controller gestures) when the journal is next
+        # read.  Only queues a note.
+        def note_entry(kind:, subject:, lands:, data: {}, source: :session)
+          @notes << [:entry, kind, subject, lands, data, source]
           nil
         end
 
@@ -195,14 +196,14 @@ module MB
         # every read and write.
         def fold
           until @notes.empty?
-            seq, commits, lands, error, data = @notes.pop(true)
+            seq, commits, lands, error, data, source = @notes.pop(true)
 
             if seq == :entry
               kind, subject = commits, lands
               stamp = error
               append(Entry.new(
                 seq: next_seq, kind: kind, subject: subject, issued: stamp, commits: stamp, lands: stamp,
-                status: :landed, source: :session, line: nil, data: data.freeze, undoes: nil
+                status: :landed, source: source || :session, line: nil, data: data.freeze, undoes: nil
               ))
               next
             end

@@ -21,6 +21,8 @@ module MB
     # also take +on:+ (which overrides them), and +in:+ and +at:+ (after
     # which tracks still align to their quantization).
     class Arrangement
+      include Recording
+
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
       # quantization +q+ (nil for the set's), a +fade+ in bars for its
@@ -309,6 +311,7 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
+          state += ', armed' if armed?(tr.name)
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           "q:#{(tr.q || @quant).inspect} #{what}#{lead} (#{state})"
@@ -329,7 +332,7 @@ module MB
 
       # The Set state for undo (see Session#note_undo_extra).
       def undo_state
-        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene } }
+        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, armed: (@armed || {}).dup } }
       end
 
       # Puts the Set state back (called by Session undo and redo).
@@ -337,6 +340,7 @@ module MB
         @mutex.synchronize {
           state[:clips].each { |n, c| @tracks[n].clip = c if @tracks[n] }
           @current_scene = state[:scene]
+          @armed = state[:armed].dup if state[:armed]
         }
       end
 

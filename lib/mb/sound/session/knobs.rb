@@ -28,9 +28,14 @@ module MB
         # frame's values.
         attr_reader :knob_frame
 
-        # The MIDI::Stream knobs listen to for controllers (#learn, cc:),
-        # or nil until set (the console sets live MIDI input).
-        attr_accessor :knob_midi
+        # What knobs listen to for controllers (#learn, cc:): the Session's
+        # default MIDI input (see MidiIn#midi_in; the console attaches live
+        # input to it) unless set to another MIDI::Stream or MidiInput.
+        def knob_midi
+          @knob_midi || midi_in
+        end
+
+        attr_writer :knob_midi
 
         # Defines a knob named +name+ starting at +default+ (see
         # GraphNode::Knob::Spec for the options: range:, curve:, unit:, cc:,
@@ -176,23 +181,24 @@ module MB
 
         # Makes knob +name+ wait for the next MIDI controller moved on
         # #knob_midi (or +stream+) and follow it from then on (see
-        # GraphNode::Knob#listen for pickup and jump takeover).  Returns the
-        # knob.
+        # GraphNode::Knob#listen for pickup and jump takeover).  Learning
+        # starts through the change queue (a :learn change landing now), so
+        # a take replays it on the same frame.  Returns the knob.
         def learn(name, stream: nil)
           k = knob!(name)
-          stream ||= @knob_midi
-          raise ArgumentError, 'No MIDI stream for knobs (set Session#knob_midi)' if stream.nil? && k.listening.nil?
-          k.listen(stream) if stream && (k.listening.nil? || !stream.equal?(@knob_midi))
-          k.learn
+          explicit = !stream.nil?
+          stream ||= knob_midi
+          k.listen(stream) if k.listening.nil? || (explicit && !stream.equal?(k.listening))
+          change(:learn, k.name, now, data: {}) { |_t| k.learn(from_frame: @landing_frame || @frame) }
+          k
         end
 
         # Makes knob +name+ follow MIDI controller +cc+ on #knob_midi (or
         # +stream+).  Returns the knob.
         def bind_cc(name, cc, stream: nil)
           k = knob!(name)
-          stream ||= @knob_midi
-          raise ArgumentError, 'No MIDI stream for knobs (set Session#knob_midi)' if stream.nil? && k.listening.nil?
-          k.listen(stream) if stream && k.listening.nil?
+          stream ||= knob_midi
+          k.listen(stream) if k.listening.nil?
           k.cc = cc
           k
         end
