@@ -51,7 +51,30 @@ module MB
           @swap_anchor = nil
           @pending_swap = nil
           @early = true
+          @ahead = 0r
           @node_type_name = 'MIDI Clip'
+        end
+
+        # How far ahead of the timeline this source plays, in whole notes
+        # (0 by default; negative plays behind it).  Every timeline time
+        # given to it (#start_at, #swap_clip, #ring_out) counts this much
+        # later, so the clip's notes sound this much early, and a change
+        # handed over at time t - ahead happens at clip time t.  Set by
+        # Arrangement tracks with +lead:+ or +nudge:+ (a pad whose slow
+        # attack should peak on the downbeat, drums pushed or pulled a
+        # few ms).
+        attr_reader :ahead
+
+        # Sets #ahead (whole notes; Rational).
+        def ahead=(whole_notes)
+          raise ArgumentError, "ahead must be a number of whole notes (got #{whole_notes.inspect})" unless whole_notes.is_a?(Numeric) && whole_notes.real?
+          @ahead = whole_notes.to_r
+        end
+
+        # See Sequence::TimelineNode#start_at; times count #ahead later.
+        def start_at(time, origin: time, launch: origin, transport: nil)
+          return super if @ahead.zero?
+          super(time.to_r + @ahead, origin: origin.to_r + @ahead, launch: launch.to_r + @ahead, transport: transport)
         end
 
         # Switches to playing +clip+ when the timeline reaches +time+ (whole
@@ -70,7 +93,7 @@ module MB
             # Ringing out: the clip to play again changes (see #ring_out)
             @ring_clip = clip
           else
-            @pending_swap = [clip, time&.to_r].freeze
+            @pending_swap = [clip, time && time.to_r + @ahead].freeze
           end
           self
         end
@@ -86,7 +109,7 @@ module MB
         # Session::Tails).
         def ring_out(time)
           @ring_clip ||= pending_clip || @clip
-          @pending_swap = [Sequence::Clip.silent, time&.to_r].freeze
+          @pending_swap = [Sequence::Clip.silent, time && time.to_r + @ahead].freeze
           self
         end
 

@@ -285,6 +285,12 @@ module MB
         }
       end
 
+      # The Sequence::TimelineNodes in +sound+ (a graph, an Array of them,
+      # or a bundle), as #add finds them.
+      def timeline_nodes_in(sound)
+        to_nodes(sound).flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
+      end
+
       # The timeline nodes of the player named +name+ (playing, stopped, or
       # waiting in the change queue), or an empty Array.
       def timeline_nodes_of(name)

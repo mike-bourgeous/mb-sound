@@ -24,9 +24,13 @@ module MB
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
       # quantization +q+ (nil for the set's), a +fade+ in bars for its
-      # starts and stops (nil for none, with a declick on stops), and the
-      # +clip+ it plays (or will play once queued changes land).
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, keyword_init: true) do
+      # starts and stops (nil for none, with a declick on stops), the
+      # +clip+ it plays (or will play once queued changes land), its +lead+
+      # (how early it plays: bars, a Duration, a Length, or :attack) and
+      # +nudge+ (a timing offset, negative for early: a Length or
+      # Duration), and +ahead+, the two combined in whole notes (see
+      # #track).
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, keyword_init: true) do
         def patch?
           !patch.nil?
         end
@@ -136,20 +140,46 @@ module MB
       # and +fade:+ a fade in bars for its starts and stops.  Returns the
       # name.
       #
+      # +lead:+ plays the track early (maintainer, 2026-10-11: "Slow pads
+      # sometimes need to lead the beat because of their slow attack"):
+      # its clips' notes sound that much before the timeline, and its
+      # launches, swaps, and stops land that much early, so a slow attack
+      # peaks on the downbeat.  Bars (plain numbers), a Duration, a Length,
+      # or :attack (the attack time of the patch's amplitude envelope, the
+      # longest `amp_env` attack in its graph, else the longest envelope
+      # attack; measured each time the patch is built).  +nudge:+ moves its
+      # notes by a fixed time (a Length or Duration; negative pushes them
+      # early for urgency, positive pulls them late to relax, like a
+      # drummer's backbeat: `nudge: 6.ms`).  Both apply to clip-driven
+      # graphs (MIDI::ClipSource#ahead).
+      #
       #     track(:bass, q: 1) { |c| c.tone.ramp.lp4(800) * c.amp_env }
       #     track :pad, pad_graph
-      def track(name, graph = nil, q: nil, fade: nil, &patch)
+      #     track(:pad, lead: :attack) { |c| c.synth { |v| v.hz.saw * v.amp_env(1.5, 1, 0.8, 2) } }
+      #     track(:drums, nudge: 5.ms) { |k| tr808(k) }
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
         check_quant(q) if q
+        check_offset(:lead, lead) unless lead == :attack
+        check_offset(:nudge, nudge)
+        raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
         return nil unless @session.names.claim(name, :track)
 
+        tr = nil
         @mutex.synchronize {
           old = @tracks[name]
-          @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r)
         }
+        set_ahead(tr, graph) if graph || lead != :attack
         name
+      end
+
+      # How far ahead of the timeline track +name+ plays, in whole notes
+      # (see #track's +lead:+ and +nudge:+).
+      def ahead(name)
+        tracks[name]&.ahead || 0r
       end
 
       # A short name for a clip, kit, or state, for listings: the name
@@ -280,7 +310,8 @@ module MB
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
-          "q:#{(tr.q || @quant).inspect} #{what} (#{state})"
+          lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
+          "q:#{(tr.q || @quant).inspect} #{what}#{lead} (#{state})"
         }
       end
 
@@ -360,6 +391,8 @@ module MB
       def set_track(tr, value, time, fade:, stop: :ring)
         fade = tr.fade if fade.nil?
         playing = @session.playing_after_queue?(tr.name)
+        musical = time
+        time = early(tr, time)
 
         case value
         when :off, :cut, false, nil
@@ -373,14 +406,14 @@ module MB
 
         when :on, true
           return nil if playing
-          start_track(tr, tr.clip, time, fade)
+          start_track(tr, tr.clip, musical, fade)
 
         else
           check_clip(tr, value)
           if playing && tr.clip.equal?(value)
             nil
           elsif playing && tr.patch? && (tr.clip.nil? || new_rows?(tr.clip, value))
-            start_track(tr, value, time, fade)
+            start_track(tr, value, musical, fade)
           elsif playing && tr.patch?
             begin
               @session.swap(tr.name, { tr.clip => value }, start_time: time)
@@ -389,27 +422,72 @@ module MB
             rescue ArgumentError
               # The patch doesn't play the clip in a way swap can find;
               # build it again with the new clip
-              start_track(tr, value, time, fade)
+              start_track(tr, value, musical, fade)
             end
           elsif playing
             @session.swap(tr.name, tr.clip && !value.is_a?(Sequence::Clip) ? { tr.clip => value } : value, start_time: time)
             @mutex.synchronize { tr.clip = value }
             last_change(tr.name)
           else
-            start_track(tr, value, time, fade)
+            start_track(tr, value, musical, fade)
           end
         end
+      end
+
+      # +time+ for a change to track +tr+: #ahead earlier (see #track).
+      def early(tr, time)
+        tr.ahead.nil? || tr.ahead.zero? ? time : time - tr.ahead
+      end
+
+      # Computes track +tr+'s #ahead (for :attack, from +graph+'s
+      # envelopes) and gives it to +graph+'s clip sources.
+      def set_ahead(tr, graph)
+        lead = tr.lead == :attack ? attack_lead(graph) : tr.lead
+        ahead = whole_notes(lead) - whole_notes(tr.nudge)
+        @mutex.synchronize { tr.ahead = ahead }
+        @session.timeline_nodes_in(graph).grep(MIDI::ClipSource).each { |s| s.ahead = ahead } if graph
+        ahead
+      end
+
+      # The attack time (a Length) of +graph+'s amplitude envelope: the
+      # longest attack of envelopes made by amp_env, else of any envelope
+      # (0 without envelopes).
+      def attack_lead(graph)
+        envs = @session.send(:to_nodes, graph).flat_map { |n| [n, *n.graph] }.grep(MB::Sound::Envelope).uniq
+        amp = envs.select { |e| e.preset_name == :amp_env }
+        times = (amp.empty? ? envs : amp).filter_map { |e| e.attack_time rescue nil }
+        (times.max || 0).to_f.seconds
+      end
+
+      # A lead or nudge in whole notes at the current tempo.
+      def whole_notes(v)
+        t = @session.transport
+        case v
+        when nil then 0r
+        when Sequence::Duration then v.to_r
+        when Length then Sequence::Duration.rational(Length.seconds(v, transport: t) * t.whole_notes_per_second)
+        else Sequence::Duration.rational(v) * t.bar_length
+        end
+      end
+
+      def check_offset(name, v)
+        ok = v.nil? || v.is_a?(Length) || (v.is_a?(Numeric) && v.real? && v.finite?)
+        raise ArgumentError, "#{name}: takes bars, a Duration, or a Length#{name == :lead ? ', or :attack' : ''} (got #{v.inspect})" unless ok
       end
 
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays
       # its graph (resuming it if it was stopped).
       def start_track(tr, clip, time, fade)
+        musical = time
+        time = early(tr, time)
         if tr.patch? && clip && clip.equal?(tr.clip) && @session.ringing?(tr.name)
           # Still ringing out with this clip: bring the same graph back
           @session.resume(tr.name, start_time: time, fade: 0)
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
           graph = tr.patch.call(clip)
+          set_ahead(tr, graph)
+          time = early(tr, musical) # (an attack lead is measured on the new graph)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}")
           @mutex.synchronize { tr.clip = clip }
         elsif @session.resumable?(tr.name)
