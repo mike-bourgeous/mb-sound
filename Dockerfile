@@ -38,5 +38,13 @@ RUN wget https://bin.ngrok.com/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz && 
 	tar -xvzf ngrok-v3-stable-linux-amd64.tgz -C /usr/local/bin && \
 	rm ngrok-v3-stable-linux-amd64.tgz
 
+# Git identity for commits made in the container (dock.sh passes the host's
+# `git config user.name`/`user.email`; empty means none, as before).  Last so
+# a change of identity doesn't rebuild the layers above.
+ARG GIT_USER_NAME=
+ARG GIT_USER_EMAIL=
+RUN if [ -n "$GIT_USER_NAME" ]; then git config --system user.name "$GIT_USER_NAME"; fi && \
+	if [ -n "$GIT_USER_EMAIL" ]; then git config --system user.email "$GIT_USER_EMAIL"; fi
+
 WORKDIR /app
 CMD /bin/bash

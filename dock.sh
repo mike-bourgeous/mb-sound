@@ -34,7 +34,9 @@ hl()
 
 if [[ "${1-}" = "--build" ]]; then
 	hl "Building"
-	docker build . -f Dockerfile -t $APPNAME
+	docker build . -f Dockerfile -t $APPNAME \
+		--build-arg GIT_USER_NAME="$(git -C "$REPO_DIR" config user.name || true)" \
+		--build-arg GIT_USER_EMAIL="$(git -C "$REPO_DIR" config user.email || true)"
 
 	if docker ps -a 2>&1 | grep -q $APPNAME; then
 		hl "Removing old container"
