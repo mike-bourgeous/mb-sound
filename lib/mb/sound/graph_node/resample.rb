@@ -86,6 +86,103 @@ module MB
         end
         alias at_rate sample_rate=
 
+        # Oversample regions made by GraphNode#oversample whose rates are
+        # still pending (see #oversampling).
+        PENDING = ObjectSpace::WeakMap.new
+
+        # The pending oversampling multiplier (see #oversampling), or nil.
+        attr_reader :oversample_pending
+
+        # The oversampling multiplier this node was made with by
+        # GraphNode#oversample (applied or pending), or nil.
+        attr_reader :oversample_multiplier
+
+        # For GraphNode#oversample: runs the upstream at +multiplier+ times
+        # this node's output rate, from the graph's first #sample (or plan;
+        # see #apply_oversample).  Returns self.
+        def oversampling(multiplier)
+          @oversample_multiplier = multiplier
+          @oversample_pending = multiplier
+          PENDING[self] = true
+          self
+        end
+
+        # Applies a pending #oversampling, with every other pending region
+        # sharing a node with it (see .apply_pending).  Called by #sample
+        # and by the plan layer before it reads the graph.
+        def apply_oversample
+          Resample.apply_pending([self]) if @oversample_pending
+        end
+
+        # Applies the pending oversample regions +regions+ and every other
+        # pending region connected to them through shared nodes (Tees
+        # reached from both), outermost regions first (nested regions
+        # multiply the rate their outer region gives them): regions with
+        # the same target rate together, so a node read only by them (a
+        # Constant shared by two channels' regions) moves to that rate,
+        # and the region's branches of nodes also read elsewhere are pinned
+        # (see Tee.pin_rates).
+        def self.apply_pending(regions)
+          group = regions.select(&:oversample_pending)
+          return if group.empty?
+
+          others = []
+          PENDING.each_key { |r| others << r if r.oversample_pending && group.none? { |g| g.equal?(r) } }
+          walks = {}.compare_by_identity
+          walk = ->(r) { walks[r] ||= region_walk(r.upstream_branch) }
+          unless others.empty?
+            tees = {}.compare_by_identity
+            group.each { |r| walk.(r)[0].each_key { |t| tees[t] = true } }
+            loop do
+              joined = others.select { |o| walk.(o)[0].each_key.any? { |t| tees[t] } }
+              break if joined.empty?
+
+              joined.each { |o| walk.(o)[0].each_key { |t| tees[t] = true } }
+              group.concat(joined)
+              others -= joined
+            end
+          end
+
+          loop do
+            pending = group.select(&:oversample_pending)
+            break if pending.empty?
+
+            outer = pending.reject { |r| pending.any? { |o| !o.equal?(r) && walk.(o)[1][r] } }
+            outer.group_by { |r| r.sample_rate * r.oversample_pending }.each_value do |rs|
+              Tee.pin_rates(rs.map(&:upstream_branch)) { rs.each { |r| r.send(:apply_rate) } }
+            end
+          end
+        end
+
+        # Walks the graph upstream of +start+ through #sources (through
+        # Tees and Resamples), returning [Tees, Resamples] as identity
+        # Hashes.
+        def self.region_walk(start)
+          tees = {}.compare_by_identity
+          resamples = {}.compare_by_identity
+          seen = {}.compare_by_identity
+          stack = [start]
+          while (node = stack.pop)
+            next if seen[node]
+
+            seen[node] = true
+            tees[node] = true if node.is_a?(Tee)
+            resamples[node] = true if node.is_a?(Resample)
+            next unless node.respond_to?(:sources)
+
+            srcs = node.sources
+            next unless srcs.respond_to?(:each_value)
+
+            srcs.each_value { |v| (v.is_a?(Array) ? v : [v]).each { |n| stack << n if n.respond_to?(:sample) || n.is_a?(Tee) } }
+          end
+          [tees, resamples]
+        end
+
+        # For .apply_pending: the Tee branch this node reads.
+        def upstream_branch
+          @upstream
+        end
+
         # Returns the upstream as the only source for this node.
         def sources
           { input: @upstream }
@@ -98,6 +195,8 @@ module MB
         # the returned buffer if you need to keep it outside of a normal node
         # graph or beyond one cycle of a downstream node.
         def sample(count)
+          apply_oversample if @oversample_pending
+
           case @mode
           when :ruby_zoh, :ruby_linear
             sample_ruby(count, @mode)
@@ -124,6 +223,17 @@ module MB
             raise NotImplementedError, "Unsupported sample mode: #{@mode.inspect}"
           end
         end
+
+        # For .apply_pending: sets the upstream to the multiplied rate and
+        # recomputes the conversion ratio.
+        def apply_rate
+          m = @oversample_pending or return
+          @oversample_pending = nil
+          PENDING.delete(self)
+          @upstream.sample_rate = @sample_rate * m
+          self.sample_rate = @sample_rate
+        end
+        private :apply_rate
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)

@@ -209,8 +209,8 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
     it 'follows the running rate inside #oversample' do
       seconds = 100.hz.delay(0.01, smoothing: false)
       samples = 100.hz.delay(5.samples, smoothing: false)
-      seconds.oversample(2)
-      samples.oversample(2)
+      seconds.oversample(2).apply_oversample
+      samples.oversample(2).apply_oversample
       expect(seconds.base_filter.delay_samples).to eq(960)
       expect(samples.base_filter.delay_samples).to eq(5)
     end

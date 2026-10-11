@@ -281,8 +281,21 @@ module MB
               raise error(node, "param #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
               unknown = kwargs.keys - Document::PARAM_KEYS
               raise error(node, "unknown param option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{Document::PARAM_KEYS.join(', ')})") unless unknown.empty?
-              raise error(node, "param #{name} is declared twice") if @document.params.key?(name)
+              raise error(node, "#{name} is declared twice") if @document.params.key?(name)
               @document.params[name] = kwargs.merge(value: value)
+            when :knob
+              name, value = args
+              raise error(node, 'knob needs a name and a value (knob :cut, 800, range: 100..8000, curve: :exp)') unless name.is_a?(Symbol) && args.length == 2
+              raise error(node, "knob #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
+              unknown = kwargs.keys - Document::KNOB_KEYS
+              raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{Document::KNOB_KEYS.join(', ')})") unless unknown.empty?
+              raise error(node, "#{name} is declared twice") if @document.params.key?(name)
+              begin
+                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description))
+              rescue ArgumentError => e
+                raise error(node, "knob #{name}: #{e.message}")
+              end
+              @document.params[name] = kwargs.merge(value: value, knob: true)
             end
             i += 1
           end
@@ -334,9 +347,10 @@ module MB
         end
 
         # Knobs: each use of a param's name is a new Constant named after
-        # it (a node shared by several channels would branch through a Tee,
-        # which an oversample region in one channel can't share; scripts
-        # make one Constant per use too).  Document#set changes them all.
+        # it, as scripts make them, so loaded documents render like their
+        # scripts (a Constant shared with an oversample region is read
+        # through a resampling Tee branch since omnibus4, correct but not
+        # the same graph).  Document#set changes them all.
         def bind_params
           baked = (@document.meta[:options] || {})
           @overrides.each_key do |k|
@@ -358,11 +372,19 @@ module MB
             end
             spec[:value] = value
             @knobs[name] = value
+            if spec[:knob]
+              # One GraphNode::Knob per knob line, read by every use (each
+              # consumer gets its own Knob::Reader)
+              @knob_nodes[name] = [GraphNode::Knob.new(name, value, **spec.slice(*Document::KNOB_KEYS).except(:description))]
+            end
           end
         end
 
-        # A new Constant for a use of param +name+.
+        # The node for a use of param +name+: a new Constant named after it
+        # (see #bind_params), or the knob of a `knob` line.
         def knob(name)
+          return @knob_nodes[name][0] if @document.params[name][:knob]
+
           c = @knobs[name].constant.named(name.to_s)
           (@knob_nodes[name] ||= []) << c
           c

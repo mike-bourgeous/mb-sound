@@ -19,8 +19,10 @@ module MB
       #
       # Examples (bin/sound.rb):
       #     drums.compress(threshold: -18, ratio: 4, attack: 10.ms, release: 120.ms, makeup: :auto)
-      #     bass.duck(kick, amount: -10, release: 1.n8)     # tech house pumping
+      #     bass.duck(kick)                                  # tech house pumping (-18 dB, 1/16 release)
+      #     drums.compress(threshold: -30, ratio: 8, attack: 3.ms, release: 80.ms, makeup: :auto, mix: 0.4)  # parallel ("New York")
       #     mix.limit(ceiling: -1, lookahead: 1.5.ms)        # true-peak brickwall
+      #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1, release: 60.ms) }  # hot mixes: softclip into the limiter
       #     pad.compand(-60 => -80, -40 => -40, 0 => -12)    # expander + 3.3:1 compressor
       #     mix.bands(120.hz, 2000.hz) { |lo, mid, hi| [lo.compress(ratio: 3), mid, hi.at(-2.db)] }
       #     mix.squeeze(:eleven).limit
@@ -123,18 +125,28 @@ module MB
         end
 
         # Sidechain ducking: turns this signal down by up to +amount+ (dB,
-        # e.g. -8, or -8.db) while +sidechain+ (e.g. a kick) is above
+        # e.g. -18, or -18.db) while +sidechain+ (e.g. a kick) is above
         # +threshold+, the reduction growing 1 dB per dB above it (an
         # infinite-ratio compressor with a range) so loud hits duck fully;
-        # recovering over +release+ (try a Duration: 1.n8, 1.n16.dotted)
-        # after +hold+.  The classic tech house pump, also usable in a
-        # master chain (`master { |mix| mix.duck(kick) }`).
+        # recovering over +release+ (a one-pole time constant: seconds, a
+        # Length, or a Duration that follows the tempo) after +hold+.  The
+        # classic tech house pump, also usable in a master chain
+        # (`master { |mix| mix.duck(kick) }`).
+        #
+        # Defaults (2026-10-11, the maintainer's listening pick, "deep pump
+        # -18 dB ... I like the deeper cut", with the faster release they
+        # suggested): -18 dB, 1 ms attack, 20 ms hold, 1/16 release.  Behind
+        # an 808 kick at 124 BPM the gain is -7 dB at the offbeat and -1 dB
+        # by the next kick (a 1/8 release: -11 and -4, never recovering).
+        # Lighter: `amount: -8`; snappier: `release: 1.n32`; longer:
+        # `release: 1.n8`; flat-topped: `hold: 1.n16, release: 1.n32`.
         #
         # Example (bin/sound.rb):
         #     kick = grid('x...x...x...x...').loop.trigger.ping(50, decay: 0.3)
         #     bass = seq(A1, A1, C2, A1).n8.loop.tone.saw.lp4(400)
-        #     bg [kick, bass.duck(kick, amount: -12, release: 1.n8)].sum
-        def duck(sidechain, amount: -8, threshold: -30, knee: 6, attack: 0.002, release: 0.15, hold: 0,
+        #     bg [kick, bass.duck(kick)].sum
+        #     bg [kick, bass.duck(kick, amount: -10, release: 1.n32)].sum   # lighter and snappier
+        def duck(sidechain, amount: -18, threshold: -30, knee: 6, attack: 0.001, release: 1.n16, hold: 0.02,
                  detector: :peak, rms: 0.01, link: true, lookahead: 0)
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
           a = DynamicsMethods.level_db(amount, 'amount')
@@ -207,6 +219,9 @@ module MB
         #
         # Example (bin/sound.rb):
         #     master { |mix| mix.limit(ceiling: -1, release: 80.ms) }
+        #     # Hot mixes: a softclip in front takes the peaks the limiter
+        #     # would pump on (the maintainer's pick on the dynamics bench)
+        #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1, release: 60.ms) }
         def limit(ceiling: -1, lookahead: 0.0015, release: 0.1, true_peak: true, link: true)
           finish_dynamics(Dynamics::Limiter.new(outputs, ceiling: ceiling, lookahead: lookahead, release: release, true_peak: true_peak, link: link))
         end

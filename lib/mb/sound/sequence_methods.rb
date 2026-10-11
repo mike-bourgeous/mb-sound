@@ -148,6 +148,13 @@ module MB
       # tweens back to the first over the last step; repeat a value to hold
       # it.  +overshoot:+ and +cycles:+ go to a named curve.
       #
+      # A looping tween follows the timeline like any looping clip: launched
+      # partway through it (e.g. at bar 2 of a 2-bar tween), it plays the
+      # step the timeline is in, from wherever that step would be (since
+      # 2026-10-11; it used to hold the first keyframe for the launch bar).
+      # +align: :launch+ counts its cycles from the launch instead, so it
+      # starts at its first keyframe wherever it is launched.
+      #
       # Pitches (`300.hz`, Notes) tween in octaves and give Hz, so cutoffs
       # move evenly in pitch and overshoots stay above 0 Hz; plain numbers
       # tween linearly; +log:+ true or false overrides; mixing Pitches and
@@ -158,7 +165,8 @@ module MB
       #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: tween([300.hz, 3000.hz, 800.hz], 1.bar, curve: :elastic), quality: 4) * 0.3
       #     tween([0, 1, 0.3], 1.bar, curve: :bounce, loop: false)    # a bouncing mix knob, then 0.3
       #     tween([0, 12, 12, 7], 2.beats, curve: :steps, cycles: 4)  # stepped automation, holding 12 for a step
-      def tween(values, step = 1.bar, curve: :smoothstep, time: nil, overshoot: nil, cycles: nil, log: nil, loop: true)
+      #     tween([200, 1000], 1.bar, align: :launch)  # from 200 wherever it launches
+      def tween(values, step = 1.bar, curve: :smoothstep, time: nil, overshoot: nil, cycles: nil, log: nil, loop: true, align: :timeline)
         values = Array(values)
         raise ArgumentError, 'A tween needs at least one value' if values.empty?
         Sequence::Clip.tween_values(values, log) # checks the values early
@@ -173,7 +181,7 @@ module MB
           start += len
           e
         }
-        Sequence::Clip.new(events, length: start, loop: loop).tween(time, curve: curve, overshoot: overshoot, cycles: cycles, log: log)
+        Sequence::Clip.new(events, length: start, loop: loop, align: align).tween(time, curve: curve, overshoot: overshoot, cycles: cycles, log: log)
       end
 
       # Loudness falls for #bounce_hits' +:decay+ option, as the velocity

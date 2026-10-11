@@ -30,9 +30,14 @@ module MB
       # +clip+ it plays (or will play once queued changes land), its +lead+
       # (how early it plays: bars, a Duration, a Length, or :attack) and
       # +nudge+ (a timing offset, negative for early: a Length or
-      # Duration), and +ahead+, the two combined in whole notes (see
-      # #track).
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, keyword_init: true) do
+      # Duration), +lead_max+ (the cap of an :attack lead), and +ahead+,
+      # the lead and nudge combined in whole notes, and +capped+ (true if
+      # an :attack lead hit its cap) (see #track).
+      # The longest lead a `lead: :attack` track takes by default (bars;
+      # see #track's +lead_max:+).  Maintainer-approved 2026-10-11.
+      ATTACK_LEAD_MAX = 1
+
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, keyword_init: true) do
         def patch?
           !patch.nil?
         end
@@ -149,7 +154,11 @@ module MB
       # peaks on the downbeat.  Bars (plain numbers), a Duration, a Length,
       # or :attack (the attack time of the patch's amplitude envelope, the
       # longest `amp_env` attack in its graph, else the longest envelope
-      # attack; measured each time the patch is built).  +nudge:+ moves its
+      # attack; measured each time the patch is built), capped at
+      # +lead_max:+ (default ATTACK_LEAD_MAX, 1 bar: a 4 s pad attack
+      # would lead by 2 bars at 120 BPM, starting before the previous
+      # section's last bar; bars, a Duration, or a Length; `tracks` says
+      # "capped").  +nudge:+ moves its
       # notes by a fixed time (a Length or Duration; negative pushes them
       # early for urgency, positive pulls them late to relax, like a
       # drummer's backbeat: `nudge: 6.ms`).  Both apply to clip-driven
@@ -158,21 +167,24 @@ module MB
       #     track(:bass, q: 1) { |c| c.tone.ramp.lp4(800) * c.amp_env }
       #     track :pad, pad_graph
       #     track(:pad, lead: :attack) { |c| c.synth { |v| v.hz.saw * v.amp_env(1.5, 1, 0.8, 2) } }
+      #     track(:swell, lead: :attack, lead_max: 2) { |c| c.synth { |v| v.hz.saw * v.amp_env(4, 1, 0.8, 2) } }
       #     track(:drums, nudge: 5.ms) { |k| tr808(k) }
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, &patch)
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
         check_quant(q) if q
         check_offset(:lead, lead) unless lead == :attack
         check_offset(:nudge, nudge)
+        check_offset(:lead_max, lead_max)
+        raise ArgumentError, "lead_max: caps lead: :attack (got lead: #{lead.inspect})" if lead_max && lead != :attack
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
         return nil unless @session.names.claim(name, :track)
 
         tr = nil
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false)
         }
         set_ahead(tr, graph) if graph || lead != :attack
         name
@@ -314,6 +326,7 @@ module MB
           state += ', armed' if armed?(tr.name)
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
+          lead += ' (attack capped)' if tr.capped
           "q:#{(tr.q || @quant).inspect} #{what}#{lead} (#{state})"
         }
       end
@@ -446,9 +459,17 @@ module MB
       # Computes track +tr+'s #ahead (for :attack, from +graph+'s
       # envelopes) and gives it to +graph+'s clip sources.
       def set_ahead(tr, graph)
-        lead = tr.lead == :attack ? attack_lead(graph) : tr.lead
-        ahead = whole_notes(lead) - whole_notes(tr.nudge)
-        @mutex.synchronize { tr.ahead = ahead }
+        capped = false
+        if tr.lead == :attack
+          lead = whole_notes(attack_lead(graph))
+          cap = whole_notes(tr.lead_max || ATTACK_LEAD_MAX)
+          capped = lead > cap
+          lead = cap if capped
+        else
+          lead = whole_notes(tr.lead)
+        end
+        ahead = lead - whole_notes(tr.nudge)
+        @mutex.synchronize { tr.ahead = ahead; tr.capped = capped }
         @session.timeline_nodes_in(graph).grep(MIDI::ClipSource).each { |s| s.ahead = ahead } if graph
         ahead
       end
@@ -477,6 +498,7 @@ module MB
       def check_offset(name, v)
         ok = v.nil? || v.is_a?(Length) || (v.is_a?(Numeric) && v.real? && v.finite?)
         raise ArgumentError, "#{name}: takes bars, a Duration, or a Length#{name == :lead ? ', or :attack' : ''} (got #{v.inspect})" unless ok
+        raise ArgumentError, "lead_max: must be more than 0 (got #{v.inspect})" if name == :lead_max && v && !(v.is_a?(Numeric) ? v.positive? : v.to_seconds.positive?)
       end
 
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays

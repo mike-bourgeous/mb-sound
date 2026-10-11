@@ -147,8 +147,10 @@ module MB::Sound
     # bounce_hits; the default is :gentle), unless +decay+ overrides it
     hits = ->(length, section_decay = :gentle, **opts) { bounce_hits(length, decay: decay || section_decay, **opts) }
 
-    # Pan paths: each ball rolls across the field over its own time
-    roll = ->(length, from, to) { tween([from, to], length, curve: :sine) }
+    # Pan paths: each ball rolls across the field over its own time, from
+    # its launch like the ball itself (align: :launch; a timeline-aligned
+    # tween would start wherever the timeline is in its loop)
+    roll = ->(length, from, to) { tween([from, to], length, curve: :sine, align: :launch) }
 
     master { |mix|
       mix = mix.reverb(:room, wet: -16.db) if room

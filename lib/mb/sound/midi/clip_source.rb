@@ -172,6 +172,23 @@ module MB
           e.start == phase
         end
 
+        # A Source::Chase for the clip event at the current clip position
+        # (see Source#chase), with the event before it (around the loop) as
+        # +previous+ and the stream seconds since it started at the current
+        # tempo as +elapsed+.
+        def chase_at(time)
+          e = @clip.event_at(@clip_position) or return nil
+          looping = @clip.looping? && @clip.length > 0
+          phase = looping ? @clip_position % @clip.length : @clip_position
+          since = phase - e.start
+          since += @clip.length if since < 0 && looping
+          prev = @clip.event_before(@clip_position)
+          Chase.new(
+            generation: @generation, time: time, event: note_event(e, time), starts: since == 0,
+            previous: note_event(prev, time), elapsed: since / transport.whole_notes_per_second
+          )
+        end
+
         # A note-on Event for the clip +event+ at stream +time+, or nil.
         def note_event(event, time)
           event && Event.note_on(event.value, event.velocity, channel: @channel, time: time)
@@ -239,8 +256,7 @@ module MB
               @origin = clip_origin(clip, swap_time, swap_time)
               @clip_position = swap_time - @origin
               @generation = generation + 1
-              note = chase_event
-              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split), starts: chase_starts_note?)
+              @chase = chase_at(split)
               out << Jump.new(split)
               @early = true
               return out.concat(edges(split, to, wnps))

@@ -680,11 +680,87 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     it 'changes the upstream sample rate without changing the output rate' do
       a = 15.hz.at_rate(48000)
 
-      b = nil
-      expect { b = a.oversample(4) }.to change { a.sample_rate }.to(192000)
+      # The upstream rate changes when the graph first plays (or is
+      # planned), once every consumer exists
+      b = a.oversample(4)
+      expect(a.sample_rate).to eq(48000)
+      expect(b.oversample_pending).to eq(4)
+      expect { b.sample(100) }.to change { a.sample_rate }.to(192000)
 
       expect(b).to be_a(MB::Sound::GraphNode::Resample)
       expect(b.sample_rate).to eq(48000)
+    end
+
+    context 'with nodes shared with other branches' do
+      # Peak difference between two graphs over +n+ 800-sample buffers
+      def diff(a, b, n = 30)
+        n.times.map { (a.sample(800) - b.sample(800)).abs.max }.max
+      end
+
+      it 'keeps a node read outside the region at its rate (built in either order)' do
+        [true, false].each do |region_first|
+          x = 220.hz.ramp
+          if region_first
+            a = (x * 0.5).oversample(2)
+            b = x * 0.5
+          else
+            b = x * 0.5
+            a = (x * 0.5).oversample(2)
+          end
+          mix = a - b
+          out = 20.times.map { mix.sample(800).dup }.reduce(:concatenate)
+          expect(x.sample_rate).to eq(48000)
+          expect(b.sample_rate).to eq(48000)
+          expect(mix.sample_rate).to eq(48000)
+          # The same ramp in both, through the region's two resamplers
+          expect(out.abs.max).to be < 0.02
+        end
+      end
+
+      it 'runs nodes read only inside the region at the higher rate' do
+        x = 220.hz.ramp
+        y = x * 0.5
+        a = (y + y * 0.25).oversample(2) # y has two branches, both inside
+        a.sample(800)
+        expect(x.sample_rate).to eq(96000)
+        expect(y.sample_rate).to eq(96000)
+      end
+
+      it 'moves a node read only by regions of the same rate (per-channel oversample of a bundle)' do
+        q = 110.hz.ramp
+        l, r = MB::Sound.stereo(220.hz.ramp + q, 330.hz.ramp + q).oversample(2).outputs
+        l.sample(800)
+        r.sample(800)
+        expect(q.sample_rate).to eq(96000)
+        expect(q.instance_variable_get(:@internal_tee).branches.none?(&:resampled?)).to eq(true)
+      end
+
+      it 'multiplies the rates of nested regions' do
+        x = 220.hz.ramp
+        inner = (x * 0.5).oversample(3)
+        outer = (inner + 110.hz.ramp).oversample(2)
+        outer.sample(800)
+        expect(x.sample_rate).to eq(288000)
+        expect(inner.sample_rate).to eq(96000)
+      end
+
+      it 'gives two oversample regions a shared Constant at their own rate (tape_delay with one Constant per param)' do
+        build = ->(shared) {
+          c = 0.7.constant
+          [220.hz.ramp, 330.hz.ramp].map { |ch|
+            inp = ch.resample(mode: :libsamplerate_fastest)
+            k = shared ? c : 0.7.constant
+            # The shared Constant first, so the product takes its rate
+            (k * inp + inp.delay(0.01) * 0.5).softclip(0.75, 0.95).oversample(2, mode: :libsamplerate_fastest)
+          }
+        }
+        a = build.(true)
+        b = build.(false)
+        30.times do
+          a.zip(b).each { |x, y| expect((x.sample(800) - y.sample(800)).abs.max).to eq(0) }
+        end
+        expect(a.map(&:sample_rate)).to eq([48000, 48000])
+      end
     end
 
     it 'can change the resampling mode' do

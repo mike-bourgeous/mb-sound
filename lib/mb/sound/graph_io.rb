@@ -122,7 +122,9 @@ module MB
         # nodes): a header (name, kind, saved time, mb-sound version, the
         # script it came from, baked script +options+), `inputs`, and a
         # `param` line for each of +params+ the graph uses as a knob (a
-        # Constant named after the param with its value), then the graph
+        # Constant named after the param with its value), a `knob` line for
+        # each GraphNode::Knob in the graph (its held value; a moving knob
+        # saves its current value after a comment), then the graph
         # as GraphNode#to_ruby prints it, with seeds.  +inputs+ names free
         # inputs ({ midi: notes }).  A loaded graph keeps its Document, so
         # its name, inputs, and params carry over.  Raises DumpError if

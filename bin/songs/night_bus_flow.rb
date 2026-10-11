@@ -114,10 +114,14 @@ module MB::Sound
   # bar of every 8-bar block from the scene's launch (impact on drop
   # downbeats and pickups).
   def self.last_stop_kits
+    # (nofill before fill: marking the clap row :nofill after layering
+    # the roll onto it made the roll play in every bar but the turn's;
+    # since omnibus4 Clip#nofill keeps existing fill marks, so either order
+    # works)
     turn = ->(kit) {
       kit
-        .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39))
         .nofill(:clap, :open_hat, name: :turn)
+        .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39))
         .fill(:toms, low_tom: grid(16, '..........x..x.x', value: 45))
     }
     core = { kick: 'X...x...X...x...', clap: '....X.......X...', hat: '..x...x...x...x.' }

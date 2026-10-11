@@ -53,7 +53,9 @@ MB::Sound.effect_script(
       k == 0 ? base : base + offset * k # (no offset * 0 for the first tap)
     }
 
-    taps = inp.multitap(*delays).to_a.shuffle
+    # Shuffled from MB::Sound's root seed, so renders repeat (RANDOM_SEED
+    # or `seed n` for another order)
+    taps = inp.multitap(*delays).to_a.shuffle(random: Random.new(MB::Sound.next_seed))
     taps = taps.reverse if idx.odd? && p.reverse_odd_taps
 
     filtered_taps = taps.map.with_index { |t, i|

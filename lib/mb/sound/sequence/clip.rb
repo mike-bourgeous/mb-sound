@@ -515,6 +515,28 @@ module MB
           events.reverse_each.find { |e| e.start <= phase } || (@loop ? events.last : nil)
         end
 
+        # Returns the Event before the one #event_at returns for +position+
+        # (whole notes): the previous event of the same cycle, the last one
+        # of the cycle before for a loop's first event, or nil (no event, or
+        # the first event of a non-looping clip).
+        def event_before(position)
+          e = event_at(position) or return nil
+          cycle = @loop ? (position / @length).floor : 0
+          events = @loop ? events_for(cycle) : @events
+          idx = events.index { |x| x.equal?(e) }
+          if idx.nil?
+            # A loop's last event sounding before its first one starts
+            # belongs to the cycle before
+            events = events_for(cycle - 1)
+            idx = events.index { |x| x.equal?(e) }
+            return nil if idx.nil?
+          end
+          return events[idx - 1] if idx > 0
+          return nil unless @loop
+
+          events_for(cycle - 1).last
+        end
+
         # Returns true if the event at +index+ plays in the given loop
         # +cycle+.  Events with a probability are decided by a random number
         # generator seeded from the clip's seed, the cycle, and the index, so
@@ -530,9 +552,14 @@ module MB
         end
 
         # Returns a clip whose events play only outside fills (outside fill
-        # +name+ if given; see #fill).
+        # +name+ if given; see #fill).  Events that already carry a fill
+        # mark keep it, so a fill layered onto a row (Kit#fill) stays a fill
+        # when the row is marked afterwards (maintainer, 2026-10-11; the
+        # Night Bus clap roll played in every bar because nofill re-marked
+        # it).
         def nofill(name = nil)
-          map_clip { |e| e.with(fill_mark: Clip.check_fill(:nofill, name)) }
+          mark = Clip.check_fill(:nofill, name)
+          map_clip { |e| e.fill_mark ? e : e.with(fill_mark: mark) }
         end
 
         # Validates a fill mark for #fill and #nofill, returning [mode,
@@ -657,7 +684,7 @@ module MB
           name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
           g = Notes::Glide.new(
             notes.note_stream, time: glide_clip.send(:tween_time, time, transport), from: values[0],
-            shape: curve, overshoot: overshoot, cycles: cycles, notes: notes
+            shape: curve, overshoot: overshoot, cycles: cycles, resume: true, notes: notes
           ).named(name)
           log ? (2 ** g).named("#{name} (octaves)") : g
         end

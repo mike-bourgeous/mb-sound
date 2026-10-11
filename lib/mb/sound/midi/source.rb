@@ -33,9 +33,13 @@ module MB
         # the jump, a note-on +event+ for the note, and whether the note
         # +starts+ right at the jump (its own note-on follows at the same
         # time, so it plays as the first note after the jump: a glide with
-        # +from:+ still glides into it).
-        Chase = Data.define(:generation, :time, :event, :starts) do
-          def initialize(generation:, time:, event:, starts: false)
+        # +from:+ still glides into it).  Sources that know their content
+        # (ClipSource) also give the +previous+ note (a note-on Event, or
+        # nil for the first note of a non-looping clip) and the stream
+        # seconds +elapsed+ since the chased note started, so a glide can
+        # resume where it would be (tweens; see Notes::Glide).
+        Chase = Data.define(:generation, :time, :event, :starts, :previous, :elapsed) do
+          def initialize(generation:, time:, event:, starts: false, previous: nil, elapsed: nil)
             super
           end
         end
@@ -155,8 +159,15 @@ module MB
         def jumped
           @generation = generation + 1
           @jump_pending = true
+          @chase = chase_at(position)
+        end
+
+        # A Chase for the content at the current position, with stream time
+        # +time+, or nil (see #chase).  Uses #chase_event and
+        # #chase_starts_note? unless overridden.
+        def chase_at(time)
           note = chase_event
-          @chase = note && Chase.new(generation: @generation, time: position, event: note.at(position), starts: chase_starts_note?)
+          note && Chase.new(generation: @generation, time: time, event: note.at(time), starts: chase_starts_note?)
         end
 
         # Returns a note-on Event for the note most recently started at the
