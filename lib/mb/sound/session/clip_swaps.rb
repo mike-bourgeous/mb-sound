@@ -37,7 +37,7 @@ module MB
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
 
-          player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
+          _player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
           count = planned_swaps(name, nodes, clips).length
 
           time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, nodes))

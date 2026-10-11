@@ -124,7 +124,7 @@ module MB
           ret = nil
           endidx = 0
 
-          for i in 0...times
+          times.times do
             idx = endidx
 
             d = sample(count)

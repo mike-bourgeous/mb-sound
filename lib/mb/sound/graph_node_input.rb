@@ -108,7 +108,7 @@ module MB
           info = origin ? " from #{origin}" : ''
 
           spies.each_with_index do |spy_info, idx|
-            s, interval, spy_phase, last_time, was_nil = spy_info
+            s, interval, spy_phase, last_time = spy_info
             next unless spy_phase == phase
 
             begin

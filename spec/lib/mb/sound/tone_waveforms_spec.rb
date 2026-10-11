@@ -9,7 +9,8 @@ RSpec.describe MB::Sound::Tone do
       def wave(type)
         m = method_name
         Struct.new(:type) do
-          define_method(:value_at) { |phi| MB::Sound::Tone.value_at(type, phi) }
+          # value_at is the reference; value_at_ruby is compared with it
+          define_method(:value_at) { |phi| MB::Sound::Tone.value_at(type, phi) } unless m == :value_at
           define_method(m) { |phi| MB::Sound::Tone.public_send(m, type, phi) }
         end.new(type)
       end

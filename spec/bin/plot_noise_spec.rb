@@ -61,6 +61,8 @@ RSpec.describe('bin/plot_noise.rb') do
     text = run('--print', '-n', '50000', '--only', 'none', '-G', '-e', '1.hz.ramp.noise + 1.hz.ramp.noise', '1.hz.sine.noise.at(0.5)')
     _, sigma, min, max, _, kurt, tv = row(text, 'expr 1')
     expect(sigma).to be_within(0.02).of(Math.sqrt(2.0 / 3)) # two uniforms: a triangular distribution
+    expect(min).to be_between(-2, -1.5) # the tails (P(< -1.5) = 1/32) reach toward -2..2
+    expect(max).to be_between(1.5, 2)
     expect(kurt).to be_within(0.1).of(2.4)
     expect(tv).to be_between(0.02, 0.2)
     expect(text).to match(/^expr 2 .* Gaussian/)

@@ -225,7 +225,7 @@ module MB
           begin
             v = MB::M.parse_complex(v)
             conjugate ? v.conj : v
-          rescue => e
+          rescue
             raise MatrixTypeError
           end
         }

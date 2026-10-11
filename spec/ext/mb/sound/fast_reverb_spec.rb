@@ -52,7 +52,6 @@ RSpec.describe(MB::Sound::FastReverb::Network) do
 
   def run(klass, cfg, blocks, par, lines)
     net = klass.new(cfg)
-    rng = Random.new(42)
     blocks.flat_map { |count|
       inputs = Array.new(lines) { |j| j.even? ? Numo::SFloat.new(count).rand(-1, 1) : 0.25 }
       par_now = par.respond_to?(:call) ? par.call(count) : par
