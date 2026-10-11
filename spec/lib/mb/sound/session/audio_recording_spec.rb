@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
   end
 
   # An output that keeps what is written.
-  class KeepOutput
+  class AudioRecordingKeepOutput
     attr_reader :buffers, :closed
 
     def initialize
@@ -46,7 +46,7 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
   it 'records the master bus from the exact start frame to the exact stop frame at any buffer size' do
     [[800], [367, 368], [64], [1001, 13]].each do |sizes|
       s = new_session
-      keep = KeepOutput.new
+      keep = AudioRecordingKeepOutput.new
       s.add(MB::Sound.noise.at(0.5), name: :noise, on: :now)
       s.record_audio('unused.flac', output: keep, start_time: 1/4r) # frame 24000
       s.stop_recording(start_time: 5/8r)                            # frame 60000

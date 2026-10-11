@@ -40,11 +40,11 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
     (1...d.length).select { |i| d[i] != d[i - 1] }
   end
 
-  SIZES = [[800], [367, 368], [64], [1001, 13]].freeze
+  MIDI_INPUT_SIZES = [[800], [367, 368], [64], [1001, 13]].freeze
 
   it 'puts every event on the frame of its time and the position of that frame, at any buffer size' do
     times = [0.01r, 0.5r, 1/3r, 1.2345r]
-    stamps = SIZES.map { |sizes|
+    stamps = MIDI_INPUT_SIZES.map { |sizes|
       s = new_session
       s.add(0.constant, name: :clock, on: :now)
       input = s.midi_in
@@ -63,7 +63,7 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
   end
 
   it 'gives graphs reading its streams the events on the same frames, starting partway through a buffer' do
-    results = SIZES.map { |sizes|
+    results = MIDI_INPUT_SIZES.map { |sizes|
       s = new_session
       s.midi_in.input = keyboard(*notes_at(0.25r, 0.3r, 0.7r))
       s.add(MB::Sound::Notes.new(s.midi_in.stream).gate, name: :keys, on: :now)
@@ -118,7 +118,7 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
   end
 
   it 'moves knobs listening to it on exact frames at any buffer size' do
-    results = SIZES.map { |sizes|
+    results = MIDI_INPUT_SIZES.map { |sizes|
       s = new_session
       k = s.knob(:x, 0.5, smooth: 0, takeover: :jump)
       s.bind_cc(:x, 20)
@@ -139,7 +139,7 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
     rows = s.midi_log.map { |_, epoch, pos, bytes| [epoch, pos, bytes] }
     expect(rows.length).to eq(4)
 
-    SIZES.each do |sizes|
+    MIDI_INPUT_SIZES.each do |sizes|
       r = new_session
       r.replay_midi!
       r.midi_in.replay(rows)

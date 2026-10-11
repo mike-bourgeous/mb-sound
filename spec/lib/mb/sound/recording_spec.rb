@@ -43,14 +43,14 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
-  SIZES = [[800], [367, 368], [64], [1001, 13]].freeze
-  PLAYED = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r], [67, 3.3r, 4.5r], [72, 3.99r, 4.2r]].freeze
+  RECORDING_SIZES = [[800], [367, 368], [64], [1001, 13]].freeze
+  RECORDING_PLAYED = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r], [67, 3.3r, 4.5r], [72, 3.99r, 4.2r]].freeze
 
   describe 'rec (MIDI looper)' do
     it 'records the next bars into an armed track, swapping the loop in on the frame where it closes, at any buffer size' do
-      results = SIZES.map { |sizes|
+      results = RECORDING_SIZES.map { |sizes|
         s = new_session
-        s.midi_in.input = keyboard(*PLAYED)
+        s.midi_in.input = keyboard(*RECORDING_PLAYED)
         setup_lead(s)
         data = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 1'] }, 96000 * 4, sizes)
         [data, s.arrangement.captures, s]
@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
 
     it 'swaps into a track that is already playing, keeping its graph' do
       s = new_session
-      s.midi_in.input = keyboard(*PLAYED)
+      s.midi_in.input = keyboard(*RECORDING_PLAYED)
       setup_lead(s)
       first = MB::Sound.seq(MB::Sound::C3).n1.loop
       MB::Sound::Session.with_context(session: s) { MB::Sound.bg(:lead, first) }
@@ -96,7 +96,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
 
     it 'quantizes and humanizes on request' do
       s = new_session
-      s.midi_in.input = keyboard(*PLAYED)
+      s.midi_in.input = keyboard(*RECORDING_PLAYED)
       setup_lead(s)
       perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 1, quantize: 16'] }, 96000 * 3)
       expect(s.arrangement.captures[:lead_1].events.map(&:start)).to eq([1/16r, 5/16r, 5/8r])
@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
 
     it 'can be undone before it lands, and needs an armed or named track with a patch' do
       s = new_session
-      s.midi_in.input = keyboard(*PLAYED)
+      s.midi_in.input = keyboard(*RECORDING_PLAYED)
       setup_lead(s)
       d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['rec 1, :lead'], 20 => ['undo'] }, 96000 * 3)
       expect(d.abs.max).to eq(0)
@@ -139,7 +139,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
 
     it 'takes a length in bars: the bars before the launch point' do
       s = new_session
-      s.midi_in.input = keyboard(*PLAYED)
+      s.midi_in.input = keyboard(*RECORDING_PLAYED)
       setup_lead(s)
       perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 200 => ['capture :lead, 1'] }, 96000 * 4)
       clip = s.arrangement.captures[:lead_1]

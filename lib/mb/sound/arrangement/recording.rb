@@ -59,7 +59,7 @@ module MB
               # :lead; rec 4` works while the :arm change waits (in a
               # replay, lines run ahead of their landing times)
               @mutex.synchronize { (@armed ||= {})[tr.name] = input }
-              c = @session.change(:arm, tr.name, nil, data: { input: input }.compact) { |_t| }
+              c = @session.change(:arm, tr.name, @session.now, data: { input: input }.compact) { |_t| }
               start_monitor(tr, input) if monitor && tr.patch?
               c
             }
@@ -83,7 +83,7 @@ module MB
               mon = Recording.monitor_name(n)
               @session.remove(mon, fade: @session.declick_bars) if @session.playing_after_queue?(mon)
               @mutex.synchronize { (@armed ||= {}).delete(n) }
-              @session.change(:disarm, n, nil) { |_t| }
+              @session.change(:disarm, n, @session.now) { |_t| }
             }
             @session.note_undo_extra(self, before, undo_state)
           }

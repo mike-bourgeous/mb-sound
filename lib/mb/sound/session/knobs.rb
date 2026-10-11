@@ -189,7 +189,7 @@ module MB
           explicit = !stream.nil?
           stream ||= knob_midi
           k.listen(stream) if k.listening.nil? || (explicit && !stream.equal?(k.listening))
-          change(:learn, k.name, nil, data: {}) { |_t| k.learn(from_frame: @landing_frame || @frame) }
+          change(:learn, k.name, now, data: {}) { |_t| k.learn(from_frame: @landing_frame || @frame) }
           k
         end
 
