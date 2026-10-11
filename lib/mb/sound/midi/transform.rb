@@ -57,8 +57,13 @@ module MB
         # transform (nil if the transform drops it).
         def chase
           c = @parent.chase
-          note = c && map_note(c.event)
-          note && c.with(event: note)
+          return nil unless c
+          return @mapped_chase[1] if @mapped_chase&.first.equal?(c)
+
+          prev = c.previous && map_note(c.previous)
+          note = map_note(c.event)
+          @mapped_chase = [c, note && c.with(event: note, previous: prev)]
+          @mapped_chase[1]
         end
 
         # The parent's Source#first_note, passed through this transform.

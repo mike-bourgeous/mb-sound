@@ -27,6 +27,62 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
       expect(data[96000]).to be_within(1e-6).of(1)
     end
 
+    # Launches a tween in a Session (on: :now) after at least +pre+ frames
+    # (whole buffers), returning the output from frame 0.
+    def launched_tween(tween, pre:, buffer_size:, bars: 4)
+      session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: buffer_size, realtime: false, raise_errors: true)
+      out = []
+      MB::Sound::Session.with_context(session: session) {
+        MB::Sound.bg(:z, 0.constant)
+        out << session.process_buffer[0].dup while out.sum(&:length) < pre
+        MB::Sound.bg(:t, tween, on: :now)
+        out << session.process_buffer[0].dup while out.sum(&:length) < pre + bars * 96000
+      }
+      session.close
+      out.reduce(:concatenate).cast_to(Numo::DFloat)
+    end
+
+    [800, 367, 128].each do |bs|
+      it "follows the timeline when a looping tween launches partway through it (#{bs}-frame buffers)" do
+        # Mid-timeline launches used to hold the first keyframe for the
+        # launch bar (arrange-3, 2026-10-11): the chase at the second
+        # step glided from the first keyframe into it
+        out = launched_tween(MB::Sound.tween([200.0, 1000.0], 1.bar, curve: :linear), pre: 0, buffer_size: bs, bars: 1)
+        expect(out[48000]).to be_within(0.1).of(600)
+
+        # Launched on bar 2 (the loop's second step): 1000 -> 200
+        out = launched_tween(MB::Sound.tween([200.0, 1000.0], 1.bar, curve: :linear), pre: 96001, buffer_size: bs, bars: 3)
+        start = out.to_a.index { |v| v != 0 }
+        expect(start).to be > 96000
+        expect(start).to be <= 96000 + bs
+        # Partway into bar 2 at its own position on the timeline
+        frac = (start - 96000 + 1) / 96000.0
+        expect(out[start]).to be_within(0.1).of(1000 - 800 * frac)
+        expect(out[144000]).to be_within(0.1).of(600) # mid bar 2: halfway down
+        expect(out[192000]).to be_within(0.1).of(200) # bar 3: the first keyframe
+        expect(out[240000]).to be_within(0.1).of(600) # and up again
+      end
+    end
+
+    it 'starts at its first keyframe wherever it launches with align: :launch' do
+      out = launched_tween(MB::Sound.tween([200.0, 1000.0], 1.bar, curve: :linear, align: :launch), pre: 100000, buffer_size: 800, bars: 2)
+      start = out.to_a.index { |v| v != 0 }
+      expect(out[start]).to be_within(0.1).of(200)
+      expect(out[start + 47999]).to be_within(0.1).of(600)
+      expect(out[start + 95999]).to be_within(0.1).of(1000)
+    end
+
+    it 'resumes a step partway when launched mid-step (Elastic curve, uneven steps)' do
+      tw = -> { MB::Sound.tween([0.0, 1.0, 0.5], [1.bar, 2.beats, 2.beats], curve: :elastic) }
+      ref = take(tw.call, 8) # 2 cycles from the timeline start
+      [800, 128].each do |bs|
+        out = launched_tween(tw.call, pre: 120000, buffer_size: bs, bars: 2)
+        start = out.to_a.index { |v| v != 0 }
+        expect(start).to be_within(bs).of(120000)
+        expect((out[start...(start + 96000)] - ref[start...(start + 96000)]).abs.max).to be < 1e-4
+      end
+    end
+
     it 'treats values as keyframes: each value at its step start, tweening to the next' do
       out = take(MB::Sound.tween([0, 1, 0.3], 1.bar, curve: :elastic, loop: false), 8) # a bar is 2 s
       c = MB::Sound::Curve[:elastic]

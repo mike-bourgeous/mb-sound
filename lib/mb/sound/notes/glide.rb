@@ -42,6 +42,14 @@ module MB
       # (e.g. the squiggle's size and wiggles; see Curve); otherwise the
       # curve's defaults apply.
       #
+      # +resume+ (false by default; true for tweens, see
+      # Sequence::Clip#tween) makes the glide pick up where it would be
+      # after a content jump (a Session launch or seek partway through a
+      # clip): a chased note that the source knows the previous note of
+      # (MIDI::Source::Chase#previous, from clips) glides from that note,
+      # already Chase#elapsed into the glide, as if the clip had played up
+      # to the jump.  Otherwise chased notes jump (see above).
+      #
       # +time+ is seconds (a number or length), a graph node of seconds
       # (read on the note-on's sample), or :gm: CC 5 (Notes#portamento_time,
       # 2 ms..5 s) with CC 65 (portamento on/off, off by default as in GM2)
@@ -71,8 +79,10 @@ module MB
           MB::Sound::Curve.back_k(overshoot)
         end
 
-        def initialize(stream, time:, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil, notes: nil, sample_rate: 48000)
+        def initialize(stream, time:, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil, resume: false, notes: nil, sample_rate: 48000)
           super(stream, notes: notes, sample_rate: sample_rate)
+
+          @resume = !!resume
 
           @curve = nil
           if shape.nil?
@@ -251,6 +261,27 @@ module MB
         def chase_start(event)
           return chase(event) unless @from_note || @from_offset
           @had_note = false
+        end
+
+        # Resumes the glide in progress at a content jump (see +resume:+ in
+        # the class description), or chases as usual.
+        def chase_item(c)
+          return super unless @resume && c.previous && enabled?
+
+          start = number_of(c.previous.note)
+          @from_offset = nil
+          if c.starts
+            # The note-on follows at the same time and glides from +start+
+            @from_note = start
+          else
+            @from_note = nil
+            @had_note = true
+            glide_to(number_of(c.event.note), start, true)
+            if @gliding
+              @position = (c.elapsed * @sample_rate).round
+              @gliding = false if @position >= @length
+            end
+          end
         end
 
         def other(event)

@@ -448,4 +448,18 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       expect { c4.n4.rederive(bass) }.to raise_error(ArgumentError, /wasn't made from another clip/)
     end
   end
+
+  describe '#event_before' do
+    it 'gives the event before the one sounding, around the loop' do
+      ev = MB::Sound::Sequence::Event
+      events = [ev.new(start: 1/4r, length: 1/4r, value: 1), ev.new(start: 1/2r, length: 1/4r, value: 2)]
+      loop = MB::Sound::Sequence::Clip.new(events, length: 1r, loop: true)
+      expect(loop.event_before(5/8r).value).to eq(1)
+      expect(loop.event_before(1/4r).value).to eq(2)
+      expect(loop.event_before(1/8r).value).to eq(1) # the last event, sounding before the first starts
+      once = MB::Sound::Sequence::Clip.new(events, length: 1r)
+      expect(once.event_before(1/4r)).to be_nil
+      expect(once.event_before(0r)).to be_nil
+    end
+  end
 end
