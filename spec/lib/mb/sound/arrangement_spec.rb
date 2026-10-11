@@ -185,6 +185,23 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(peak).to be_within(2).of(96000) # peaks on the downbeat
     end
 
+    it 'caps an attack lead at 1 bar unless lead_max: says otherwise' do
+      set.track(:slow, lead: :attack) { |c| c.number * c.amp_env(4, 0.1, 1, 0.1) }
+      set.track(:slower, lead: :attack, lead_max: 2) { |c| c.number * c.amp_env(5, 0.1, 1, 0.1) }
+      set.track(:short, lead: :attack, lead_max: 1.beat) { |c| c.number * c.amp_env(0.25, 0.1, 1, 0.1) }
+      set.scene(:all, slow: a1, slower: a1, short: a1)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      set.go(:all, in: 1)
+      run(800)
+      expect(set.ahead(:slow)).to eq(1r) # 4 s = 2 bars at 120 BPM, capped at 1
+      expect(set.ahead(:slower)).to eq(2r) # 5 s capped at 2 bars
+      expect(set.ahead(:short)).to eq(1/8r) # under its cap
+      expect(set.track_info[:slow]).to include('ahead 2000 ms (attack capped)')
+      expect(set.track_info[:short]).not_to include('capped')
+      expect { set.track(:q, lead: 1, lead_max: 2) { |c| c.number } }.to raise_error(ArgumentError, /caps lead: :attack/)
+      expect { set.track(:q, lead: :attack, lead_max: 0) { |c| c.number } }.to raise_error(ArgumentError, /more than 0/)
+    end
+
     it 'nudges notes late (or early) by a fixed time' do
       expect(edges_with(nudge: 10.ms)).to eq([[0, 0], [96480, 48], [108480, 0], [120480, 48], [132480, 0], [144480, 48]])
       expect { set.track(:q, nudge: 3) { |c| c.number } }.to raise_error(ArgumentError, /Length or Duration/)

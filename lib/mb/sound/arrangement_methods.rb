@@ -25,11 +25,12 @@ module MB
       # its clip, and its launch quantization +q:+.  `bg :name, clip` and
       # scenes play clips on it.  +lead:+ plays it early (bars, a Duration
       # or Length, or :attack for its amp envelope's attack, so slow pads
-      # peak on the beat), +nudge:+ moves its notes by a fixed time (e.g.
+      # peak on the beat; capped at 1 bar unless +lead_max:+ says
+      # otherwise), +nudge:+ moves its notes by a fixed time (e.g.
       # `nudge: 6.ms` pulls a backbeat late).  Also available as
       # #define_track.
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, &patch)
-        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, &patch)
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, &patch)
+        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, &patch)
       end
       alias define_track track
 
