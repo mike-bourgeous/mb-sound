@@ -50,21 +50,39 @@ module MB
       # next: 1`); not a label name.
       NEXT = :next
 
-      # The section options (see Section).
+      # The section options (see Section).  Knob names are options too
+      # (knob values turned as each pass starts).
       SECTION_OPTIONS = [:times, :fill, :scene, :fade].freeze
+
+      # Splits section +options+ into the SECTION_OPTIONS and knob values
+      # (keys that are knobs of the current Session).  Raises for anything
+      # else, with suggestions.
+      def self.section_options(name, options)
+        unknown = options.keys - SECTION_OPTIONS
+        knob_names = Session.current.knobs.keys
+        knobs = options.slice(*(unknown & knob_names))
+        unknown -= knob_names
+        unless unknown.empty?
+          hint = suggest(unknown.first, SECTION_OPTIONS + knob_names)
+          raise ArgumentError, "#{name}: unknown options #{unknown.map(&:inspect).join(', ')} (use #{SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')}, or knob names)#{hint}"
+        end
+        [options.slice(*SECTION_OPTIONS), knobs]
+      end
 
       # A section: its +name+, +length+ (a Duration, or a number of bars),
       # how many passes it plays (+times+), its +fill+ (nil, or a Fill),
       # the scene it launches (+scene+: nil for the scene named like the
-      # section, false for none), and a launch +fade+ in bars (nil for the
-      # scene's own).
-      Section = Data.define(:name, :length, :times, :fill, :scene, :fade) do
-        def initialize(name:, length:, times: 1, fill: nil, scene: nil, fade: nil)
+      # section, false for none), a launch +fade+ in bars (nil for the
+      # scene's own), and +knobs+ to turn as each pass starts (a Hash from
+      # knob name to a value, as in scenes: `drop 8, cut: 8000`).
+      Section = Data.define(:name, :length, :times, :fill, :scene, :fade, :knobs) do
+        def initialize(name:, length:, times: 1, fill: nil, scene: nil, fade: nil, knobs: {})
           raise ArgumentError, "Section names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
           Form.check_length(name, length)
           raise ArgumentError, "#{name}: times: must be a positive Integer (got #{times.inspect})" unless times.is_a?(Integer) && times > 0
           raise ArgumentError, "#{name}: scene: must be a Symbol, false, or nil (got #{scene.inspect})" unless scene.nil? || scene == false || scene.is_a?(Symbol)
-          super
+          raise ArgumentError, "#{name}: knobs must be a Hash (got #{knobs.inspect})" unless knobs.is_a?(Hash)
+          super(name: name, length: length, times: times, fill: fill, scene: scene, fade: fade, knobs: knobs.dup.freeze)
         end
 
         # The keyword options that rebuild this section (for #to_ruby).
@@ -74,7 +92,7 @@ module MB
           opts[:fill] = fill.to_option if fill
           opts[:scene] = scene unless scene.nil?
           opts[:fade] = fade unless fade.nil?
-          opts
+          opts.merge(knobs)
         end
       end
 

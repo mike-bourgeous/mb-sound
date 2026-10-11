@@ -15,6 +15,7 @@ require_relative 'session/seeks'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
+require_relative 'session/knobs'
 
 module MB
   module Sound
@@ -60,6 +61,7 @@ module MB
       include ClipSwaps
       include Seeks
       include GraphView
+      include Knobs
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -250,6 +252,7 @@ module MB
         init_changes
         init_strip
         init_undo
+        init_knobs
         @names = Names.new
         @arrangement = nil
       end
@@ -653,6 +656,9 @@ module MB
         # queue some for it)
         commit_due(from, to, per_sample)
 
+        # Knobs move before anything reads them (see Knobs)
+        advance_knobs(@frame, count) unless @knobs.empty?
+
         players = @mutex.synchronize { @players.values }
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
@@ -667,6 +673,8 @@ module MB
         @frame += count
         @transport_record = transport_record_for(playing)
         mix
+      ensure
+        @knob_frame = nil
       end
       private :render_span
 

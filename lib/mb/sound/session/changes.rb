@@ -37,7 +37,7 @@ module MB
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are
         # separate).
-        NO_SNAPSHOT_KINDS = [:scene, :skip].freeze
+        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap].freeze
 
         # The Journal of changes made to this Session.
         attr_reader :journal
@@ -195,7 +195,7 @@ module MB
         # True if a change that starts a player is queued (with @render_lock
         # or @mutex held, or for an estimate).
         def queued_start?(name = nil)
-          @changes.any? { |c| START_KINDS.include?(c.kind) && (name.nil? || c.subject == name) }
+          @changes.any? { |c| START_KINDS.include?(c.kind) && (name.nil? || c.subject == name) && !knob_change?(c) }
         end
 
         # Applies queued changes whose time is before +to+, each on its

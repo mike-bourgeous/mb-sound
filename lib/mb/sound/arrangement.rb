@@ -78,11 +78,10 @@ module MB
       # options): `section :verse, 8.bars, fill: :roll`.  Returns the
       # Form::Section.
       def section(name, length, times: 1, fill: nil, scene: nil, fade: nil, **others)
-        unless others.empty?
-          raise ArgumentError, "#{name}: sections no longer take next: (what follows belongs to the flow: goto and pick)" if others.key?(:next)
-          raise ArgumentError, "#{name}: unknown options #{others.keys.map(&:inspect).join(', ')} (use #{Form::SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')})#{Form.suggest(others.keys.first, Form::SECTION_OPTIONS)}"
-        end
-        sec = Form::Section.new(name: name, length: length, times: times, fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade)
+        raise ArgumentError, "#{name}: sections no longer take next: (what follows belongs to the flow: goto and pick)" if others.key?(:next)
+        knobs = Session.with_context(session: @session) { Form.section_options(name, others)[1] }
+        knobs.each { |k, v| check_knob_value(name, k, v) or return nil }
+        sec = Form::Section.new(name: name, length: length, times: times, fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade, knobs: knobs)
         @mutex.synchronize { @sections[name] = sec }
       end
 
@@ -158,6 +157,9 @@ module MB
       # the kind of value (seq, clip, kit).
       def name_of(value)
         return value.inspect if TRACK_STATES.include?(value)
+        return MB::M.sigfigs(value, 4).to_s if value.is_a?(Numeric)
+        return value.inspect if value.is_a?(Symbol)
+        return "#{name_of(value[0])}~" if value.is_a?(Array)
         return value.name.to_s if value.respond_to?(:named?) && value.named?
         value.class.name.split('::').last.downcase
       end
@@ -184,10 +186,14 @@ module MB
         raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
 
-        values.each_key do |k|
+        values.each do |k, v|
           kind = @session.names.kind(k)
+          if kind == :knob
+            check_knob_value(name, k, v) or return nil
+            next
+          end
           next if kind.nil? || kind == :track
-          MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track")) or return nil
+          MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track or knob")) or return nil
         end
 
         @mutex.synchronize {
@@ -212,15 +218,22 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        unknown = sc.values.keys - tracks.keys
+        knob_values = sc.values.select { |k, _| @session.names.kind(k) == :knob }
+        unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
-          return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track' : 'are not tracks'}"))
+          return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}"))
         end
 
         _, changes = @session.command("go #{name.inspect}") {
           before = undo_state
           time = resolve(sc.q || @quant, nil, point)
           entry = @session.change(:scene, name, time, data: { scene: name }) { |_t| }
+
+          # Knobs turn at the scene's launch point (a number, a node or
+          # knob name to follow, or [value, over: ..., curve: ...])
+          knob_values.each do |k, v|
+            turn_knob(k, v, time)
+          end
 
           tracks.each_value do |tr|
             value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
@@ -307,6 +320,32 @@ module MB
       end
 
       private
+
+      # Turns knob +name+ to a scene's or section's +value+ at +time+: a
+      # number, a node or knob name to follow, or an Array of a value and
+      # turn options (`[8000, over: 2.bars, curve: :smooth]`).
+      def turn_knob(name, value, time)
+        v, options = knob_value(value)
+        @session.turn(name, v, start_time: time, **options)
+      end
+
+      # Splits a scene's knob value into the value and turn options.
+      def knob_value(value)
+        return [value, {}] unless value.is_a?(Array)
+        v, options = value
+        [v, (options || {}).slice(:over, :curve, :smooth)]
+      end
+
+      # Checks a scene's (or section's) knob value; false (after
+      # live_error) if it can't be used.
+      def check_knob_value(owner, name, value)
+        v, options = knob_value(value)
+        ok = v.is_a?(Numeric) || v.is_a?(Symbol) || v.respond_to?(:sample)
+        extra = value.is_a?(Array) ? ((value[1] || {}).keys - [:over, :curve, :smooth]) : []
+        ok &&= extra.empty? && (!value.is_a?(Array) || value.length <= 2) && options.is_a?(Hash)
+        return true if ok
+        !!MB::Sound.live_error(ArgumentError.new("#{owner.inspect}: knob #{name.inspect} takes a number, a node, a knob name, or [value, over:, curve:] (got #{value.inspect})"))
+      end
 
       def check_quant(q)
         ok = q.is_a?(Length) || Session::LAUNCH_POINTS.include?(q) || (q.is_a?(Numeric) && q >= 0)

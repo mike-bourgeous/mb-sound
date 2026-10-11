@@ -173,7 +173,8 @@ module MB
               times: options.fetch(:times, 1),
               fill: Fill.from(options[:fill], section: name),
               scene: options[:scene],
-              fade: options[:fade]
+              fade: options[:fade],
+              knobs: Form.section_options(name, options)[1]
             )
 
             @sections[name] = section
@@ -204,10 +205,7 @@ module MB
             ::Kernel.raise ::ArgumentError, "#{name}: sections no longer take next: (what follows belongs to the flow): " \
               "write `goto :label` after the section (with `label :label` at the target), or `pick a: 3, b: 1`; the form ends after its last step"
           end
-          unknown = options.keys - SECTION_OPTIONS
-          return if unknown.empty?
-          hint = Form.suggest(unknown.first, SECTION_OPTIONS)
-          ::Kernel.raise ::ArgumentError, "#{name}: unknown options #{unknown.map(&:inspect).join(', ')} (use #{SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')})#{hint}"
+          Form.section_options(name, options)
         end
 
         # Makes a section declared outside the block (Arrangement#section)
@@ -264,7 +262,8 @@ module MB
         def __same__?(name, args, options)
           s = @sections[name]
           args.length == 1 && args.first == s.length && s.times == options.fetch(:times, 1) &&
-            s.fill == Fill.from(options[:fill], section: name) && s.scene == options[:scene] && s.fade == options[:fade]
+            s.fill == Fill.from(options[:fill], section: name) && s.scene == options[:scene] && s.fade == options[:fade] &&
+            s.knobs == Form.section_options(name, options)[1]
         end
 
         def __play__(name, options)
