@@ -14,7 +14,6 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
 
   # Script => the FIXME (or input) the printed code must name
   not_representable = {
-    'bin/effects/grain_repeater.rb' => 'the proc block uses p from the code around it',
     'bin/effects/reverse_delay.rb' => 'the proc block uses a from the code around it',
     'bin/synths/fm_chain.rb' => 'a class defined outside the library',
     'bin/synths/sq80_voice.rb' => "a Wavetable that isn't a library table",
