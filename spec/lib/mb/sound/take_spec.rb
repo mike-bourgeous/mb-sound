@@ -89,6 +89,48 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays knob turns, ramps, snapshots, crossfades, and undo bit for bit' do
+    lines = {
+      0 => [
+        'knob :g, 0.5, range: 0.01..1, curve: :exp',
+        'knob :lvl, 0.2',
+        'a = seq(C3, E3, G3, B3).n8.loop',
+        'track(:bass, q: 1) { |c| c.number * 0.01 * knob(:g) }',
+        'track :pad, knob(:lvl) * 1',
+        'scene :one, pad: :on, bass: a, g: 0.25',
+        'scene :two, pad: :on, bass: a, g: [1, over: 1/2r], lvl: 0.4',
+        'go :one, at: :now',
+        'snap :start',
+      ],
+      97 => ['turn :g, 0.05, over: 1.beat, curve: :smooth'],
+      151 => ['move :lvl, 0.6, in: 1.beat'],
+      240 => ['go :two'],
+      333 => ['snap :wide', 'recall :start, over: 1/2r'],
+      400 => ['undo'],
+      470 => ['knob :morph, 0', 'xfade :start, :wide, :morph', 'turn :morph, 1, over: 1, on: :bar'],
+      620 => ['turn :lvl, 0.9, at: bar(8, beat: 2)'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    720.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.1
+    expect(t.entries.map(&:kind)).to include(:turn, :snap, :restore)
+
+    r = t.replay
+    [[800], [367, 368], [64]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays tones exactly at the same buffer size and within 1e-6 at others' do
     live, t = perform(tones: true)
     r = t.replay

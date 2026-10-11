@@ -464,6 +464,10 @@ module MB
             scene = scene_of(sec)
             first_seq = @session.journal.next_seq
             launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
+            # The section's knob values, after its scene's (they win)
+            sec.knobs.each do |k, v|
+              @session.send(:without_command) { @arrangement.send(:turn_knob, k, v, time) }
+            end
             @pass_seqs = first_seq...@session.journal.next_seq
 
             @boundary = time + length_from(sec.length, time)

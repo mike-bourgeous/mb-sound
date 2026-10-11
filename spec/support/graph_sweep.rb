@@ -187,6 +187,14 @@ module GraphSweep
       ['until and and_then (TimeLimit, NodeSequence, Silence)', ->(c) { c.sig.until(0.002).and_then(c.s.silence(0.001), c.sig(220)) }],
       ['ringdown', ->(c) { c.sig.until(0.003).ringdown }],
       ['sample_hold', ->(c) { c.sig.sample_hold(c.trigger) + c.mod(0, 1).sah(range: -1..1) }],
+      ['knob (held)', ->(c) { c.sig.filter(:lowpass, cutoff: MB::Sound::GraphNode::Knob.new(:held, 800, range: 50..4000, curve: :exp), quality: 2) }],
+      ['knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)', ->(c) {
+        k = MB::Sound::GraphNode::Knob.new(:sweep, 300, range: 50..4000, curve: :exp)
+        k.ramp_to(2000, frames: 900, frame: 20, curve: :smooth)
+        k.set(500, frame: 1500, smooth: 0)
+        k.follow(c.mod(100, 3000), frame: 2400)
+        c.sig.filter(:lowpass, cutoff: k, quality: 2) + k * 0.0001
+      }],
       ['ArrayInput', ->(c) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(3000).rand(-1, 1)], repeat: 2) }],
       ['NullInput', ->(c) { MB::Sound::NullInput.new(sample_rate: 48000, channels: 2) }],
 

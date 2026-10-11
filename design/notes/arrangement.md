@@ -1,6 +1,6 @@
 # Arrangement and the Session groundwork
 
-Phase 1 of the arrangement plan (branch `arrange-1`, 2026-10-10): the shared Session groundwork ("G0") and the Set layer.  Phase 2 (branch `arrange-form`, 2026-10-10/11): ring-outs, song forms (`flow`) with labels, gotos, and picks, performer controls, fills, the marker table, and the meter map (sections below the Set layer).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+Phase 1 of the arrangement plan (branch `arrange-1`, 2026-10-10): the shared Session groundwork ("G0") and the Set layer.  Phase 2 (branch `arrange-form`, 2026-10-10/11): ring-outs, song forms (`flow`) with labels, gotos, and picks, performer controls, fills, the marker table, and the meter map (sections below the Set layer).  Phase 3 (branch `arrange-3`, 2026-10-11): knobs (K6), snapshots, MIDI learn, and tracks that lead the beat or nudge their notes (Knobs, below).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
 
 Sources: the study on branch `research-arrangement` (`research/arrangement/README.md`, prototype in `prototype/`), the interconnect contracts K1-K10 on `research-plan-interconnect` (`research/plan-interconnect/README.md`), and the maintainer's decisions of 2026-10-10 (quoted below).
 
@@ -18,7 +18,7 @@ Built to the interconnect contracts so the terminal UI and glhtui can use it lat
 - **Exact fades** (`session/fades.rb`): fades and mute ramps are `Fades::Ramp`s counted in session frames from their first sample (level `k * slope + from` at frame offset k, so any buffer size gives the same levels), and fade-outs start on the exact sample of their stop time (they used to start at the next buffer start).  Levels are cast to SFloat before multiplying audio (Numo's SFloat * DFloat is ~20x slower).
 - **Commands return journal entries**: `bg`, `swap`, `resume`, `master`, `mute`/`solo`, `go` return the change's entry (`stop`/`panic` still return names; inside scheduled blocks commands return names); `stop`/`swap`/`resume`/`mute` accept an entry in place of a name.  Every console command (and every scheduled block's batch) is one undo step (`Session#command(label) { }`).
 - **Names (K2)**: `Session::Names` (`session/names.rb`): tracks, mute groups, and later knobs share one namespace; `:master` and `:cue` are reserved; a name claimed for two kinds goes through `MB::Sound.live_error` (maintainer decision 6).  `Names.path(:bass, :cut, 3)` is `"bass/cut/3"` (display and files only).
-- Not built yet (later projects): the player strip's gain and route stages (K7; mute/solo is built), the session stream (K4), knobs (K6).  Markers (K8) arrived in phase 2 (below).
+- Not built yet (later projects): the player strip's gain and route stages (K7; mute/solo is built), the session stream (K4).  Markers (K8) arrived in phase 2, knobs (K6) in phase 3 (below).
 
 ## Mute and solo (`session/strip.rb`)
 
@@ -48,7 +48,7 @@ Maintainer: "Yes, with a realtime demo script that shows a set being sculpted". 
 - `go :drop` (alias `launch_scene`, `on:`/`in:`/`at:`, `fade:`): each track changes at its own launch point (the call's `on:`/`in:`/`at:`, then the track's `q:`, the scene's `q:`, the set's `quant`, 1 bar by default).  Only differences change: a patch track already playing swaps clips (keeping graph and effect state), rebuilding when swap can't map the clips or a Kit brings rows the old kit lacks; a track playing the scene's clip is left alone; stops ring out (phase 2) unless the scene says `others: :cut` (5 ms declick) or the scene, call, or track gives a fade.  One undo step; returns the `:scene` journal entry (`scene :drop lands 13:1 (queued)`).
 - Track and scene `q:` and `quant` are alignments (`on:` values): `:now`, `:beat`, `:bar`, `:clip`, a Duration, or a number of **bars** (fades are bars too).
 - Scene keys naming a non-track (e.g. a mute group) go through `live_error`; unknown tracks raise at `go`.
-- Reserved, not built (later phases): `turn`/`move` (knobs, phase 3).  Forms are below.
+- Scene keys naming knobs turn them at the scene's launch point (Knobs, below).  Tracks take `lead:` and `nudge:` (below).  Forms are below.
 
 ## Launch points: `on:`, `in:`, `at:` (`lib/mb/sound/launch_point.rb`)
 
@@ -171,3 +171,45 @@ Maintainer: "As recommended".  `Transport#meters` is a list of `Meter(pos, bar_l
 `bin/songs/night_bus_set.rb`: 48 bars performed command by command (scenes, a riser as a partial scene, a mistake undone on the next bar, mute/solo breaks, a mute-group drop-out, a synced mute fade); `night_bus_set` alone sets up tracks and scenes to play by hand.  Grow it with each phase.  Listening renders: `/app/tmp/listening/arrange-1/`.
 
 Phase 2: `bin/songs/night_bus_flow.rb` ("Night Bus: Last Stop", 126 BPM tech house in A minor, 89 bars + ring-out): the song as a `flow` block (intro, groove looped with `loop!`/`onward`, build with a riser fill, a 2/4 gap bar whose scene sets the meter and rings everything out, drop, pickup and a seeded `pick` (3:1 straight on, or the drop and pickup once more), breakdown with a master highpass "cut", lift, `label :rolling`, drop2 as an anti-drop, pickup2 and `goto :rolling` until `finish`, outro rung out by the end of the form), `fill :turn, every: 8` (a clap roll) and `fill :toms, every: 4` (toms; at bar 8 the turn wins) playing the kits' fill rows (maintainer's listening notes, 2026-10-11: claps as the turn fill, toms an intermediate fill).  `last_stop` sets up tracks and scenes, `last_stop_form` plays the form, `last_stop(perform: true)` the performance.  Section loudness with the default seed (2026-10-11, after the riser fix and the listening notes' mix: bass +2.9 dB, sub +2.1, hook -1.9, hook_wash -1.7, arp -2.4; LUFS, -10 dB master): intro -28.4, groove -24.9, build -24.5, gap -32.8, drop -22.0, pickup -21.7, breakdown -26.4, lift -24.2, drop2 -23.3, pickup2 -23.4, outro -26.9; full -24.2 LUFS, peak -10.2 dBFS; full render ~52 s on the container.  The riser is a resonant highpass sweep (250 Hz to 8 kHz) with a +6 dB swell; until the tween fix (`curves.md`) every tween in a Session sat at its last value, so the riser was a constant hiss and the hook sweeps were static.  Listening renders: `/app/tmp/listening/arrange-form/` (full, ring vs cut at the gap and into the breakdown, the turn fill vs none, the chance branch with seeds 1 and 12).
+
+## Knobs (`lib/mb/sound/graph_node/knob.rb`, `session/knobs.rb`, console `KnobMethods`; phase 3, K6)
+
+Maintainer, 2026-10-10: `turn` for knobs with `move` as an alias; tracks, groups, and knobs share one namespace (collisions through `live_error`).
+
+```ruby
+knob :cut, 800, range: 100..8000, curve: :exp, unit: 'Hz'   # define (again: new options, same value and readers)
+bg :bass, bass.tone.ramp.lp4(knob(:cut))                     # a GraphNode anywhere a node goes
+turn :cut, 3000                          # now, with a 5 ms glide (smooth: 0 for an exact jump)
+turn :cut, 400, over: 2.bars, curve: :smooth, on: :bar      # ramps: bars, Durations, Lengths; any Curve
+turn :cut, 2600, from: 900, over: 8      # jump to 900, then ramp
+turn :cut, tween([400, 8000], 8.bars)    # follow a node (or follow: :other_knob) until turned again
+move :cut, 1200, in: 1.beat              # move is turn
+scene :drop, bass: b, cut: 8000, space: [0.5, over: 2]      # knob values in scenes
+flow do; drop 8, cut: 8000; end          # and in sections (turned as each pass starts)
+snap :dark; recall :dark, over: 4.bars   # snapshots of every knob
+knob :morph, 0; xfade :dark, :bright, :morph; turn :morph, 1, over: 8   # a crossfader (xfade :a, :b, 0.3 for a fixed amount)
+learn :cut                               # the next MIDI controller moved (knob ..., cc: 74 for a number)
+```
+
+- **The node** (`GraphNode::Knob`): a `Knob::Spec` shaped like `MIDI::ControlSpec` (name, default, range, curve `:linear`/`:exp`, unit, cc, takeover `:pickup`/`:jump`, smooth).  Its value is a function of the session frame: segments starting on exact frames (`Hold`; `Ramp` over N frames in the knob's scale, octaves for `:exp`, shaped by a Curve, the value on frame start + j being `from + (to - from) * curve((j + 1) / length)` and exactly `to` on the last frame; `Follow` a node, clamped to the range or mapped).  Ramps start from the value on the frame before they land (or `from:`).  Same values at any buffer size (spec'd at 1, 7, 128, 800, 367/368 standalone; 800, 367, 64, 1001/13 in a Session).
+- **Readers**: `get_sampler` returns a new `Knob::Reader` per consumer (no Tee).  The Session advances every knob once per span, after `commit_due` and before players and master effects (`advance_knobs`, `Session#knob_frame`), and readers return that span's values (a frozen buffer; a cached view for a shorter read).  So knobs drive any number of graphs, including sleeping (muted) players, without falling behind.  Outside a Session readers count their own frames (a new reader starts at the block being read).  Oversampled reads (more frames than the span) aren't supported.
+- **Plans**: readers describe themselves as `p.param` (`plan_param` gives a Float while the knob holds still over the block, else the block's buffer), so planned graphs keep fusing; check mode (`MB_SOUND_PLAN_CHECK`) reads the same cached block twice.
+- **Changes**: `Session#turn` (and `snap`, `recall`, `xfade`, scene and section values) go through the change queue: kind `:turn`, subject the knob name, data `{value:, over:, curve:, from:}` or `{follow:}`; exact landing frames (`@landing_frame`), journaled (`turn :cut lands 2:1 (queued)`), one undo step per command.  Default alignment: none (right away or exactly at `in:`/`at:`, like mutes).  Undo snapshots the knob (`Knobs::KnobSubject`, `KnobState`: the held value, a ramp's target, or the followed node) and restores it with the knob's glide (or following the same node again).  `:snap` is a change without undo snapshots.
+- **Follows**: a followed node's timeline nodes (a tween's clip, tempo LFOs) start at position 0 on the turn's frame, so automation started by a turn plays from its beginning (tweens launched mid-timeline as players hold their first keyframe for the launch bar; see the open question in the arrange-3 report).
+- **Snapshots**: `snap :a` records every knob's held value or ramp target (a follow's current value) when it lands; `recall :a, over:` turns each knob; `xfade :a, :b, x` moves every knob x of the way in its own scale, or with a node or knob name follows it as a crossfader (the crossfader knob itself is left out).  Snapshot names are their own table (not the shared namespace).
+- **MIDI**: `Knob#listen(stream)` reads controller events per span (exact frames from the event times), `#cc=`, `#learn` (the next controller moved); `:pickup` takeover waits until the controller passes the knob's position (or is within half a step), `:jump` moves right away; moves glide over `smooth:`, aren't journaled (live input isn't replayed exactly), and a turn makes a pickup controller catch the knob again.  `Session#knob_midi` is the stream (the console sets live `midi_stream` on `learn` or `cc:`).  `Knob#control_specs` gives a ControlSpec, so `MIDI::ControlMap` and ACID XML list knobs used in graphs.
+- **Names**: `knob`, `knobs`, `turn`/`move`, `snap`, `snaps`, `recall`, `xfade`/`crossfade`, `learn`: no collision with `MB::Sound`, Object/Kernel, GraphNode, or Pry commands (spec).  `knobs` and `snaps` are display commands in takes.
+- **Cost** (2026-10-11, container, median per 800-frame buffer, 64 players each `lp4(knob)`): holding knobs +0.3 us each (1398 vs 1408 us with Constants); ramping 10.5 us each; following `2000 + 1000 * 0.3.hz.lfo` 16.9 us each, mostly the followed graph (followed nodes aren't planned).
+- **graph-io**: knobs print as `GraphNode::Knob.new(...)`; their moves are performance state (takes replay them), not graph structure.  `params:` (K6 for GIO) is GIO phase 2.
+
+## Leading the beat and nudges (`Arrangement#track`, `MIDI::ClipSource#ahead`)
+
+Maintainer, 2026-10-11 ("yes" for phase 3): "Slow pads sometimes need to lead the beat because of their slow attack."
+
+- `track :pad, lead: :attack do |c| ... end` plays the track early: bars, a Duration, a Length, or `:attack` (the longest attack of the patch's `amp_env` envelopes, `Envelope#preset_name`, else of any envelope; measured each time the patch is built).  `nudge: 6.ms` moves its notes by a fixed time (negative early).  `ahead = lead - nudge` in whole notes at the tempo when set (`Arrangement#ahead(name)`; `tracks` shows "ahead 476 ms").
+- `MIDI::ClipSource#ahead`: every timeline time the source is given (`start_at`, `swap_clip`, `ring_out`, `end_ring_out`) counts that much later, so notes sound early, and the track's launches, swaps, and stops land `ahead` earlier (so a lead's first notes play and the old clip's last ones still end on time).  Seeks, wakes, and ring-outs keep the offset.  A launch too close to make its lead lands now (the first notes chase in late).  Mutes aren't shifted.
+- Spec: a 1-beat lead moves edges 24000 frames early at 800 and 367 buffers; a 0.25 s attack peaks within 2 frames of the downbeat; 10 ms nudge = 480 frames.
+
+## Phase 3 demo
+
+`bin/songs/night_bus_flow.rb` with knobs: `:cut` (the hook's lowpass: groove 700, build `[3200, from: 500, over: 8]`, drop 2600, breakdown `[2600, from: 900, over: 8]`, the performer's `turn :cut, 1300, over: 4` on the groove repeat), `:space` (the hook's delay send; a throw to 0.55 over the pickup's last 2 bars), `:air` (a master highpass replacing the breakdown's master chain swap: `[200, over: 1.beat]`, back to 20 at drop2), snapshots `:dark` (bar 2) and `:drop` (each pickup) crossfaded by `:morph` over the outro, the pad `lead: :attack`, and `last_stop(pad_lead:, drum_nudge:)` for comparisons.  Loudness (seed 1): full -24.1 LUFS (phase 2 -24.2), sections within 0.6 dB.  Renders and bench set: `/app/tmp/listening/arrange-3/`.
