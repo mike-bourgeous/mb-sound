@@ -483,13 +483,29 @@ module MB
 
       # The attack time (a Length) of +graph+'s amplitude envelope: the
       # longest attack of envelopes made by amp_env, else of any envelope
-      # (0 without envelopes), times +fraction+.
+      # (0 without envelopes), times +fraction+.  A voice envelope with
+      # GM2 time scaling (Notes::NoteEnvelope#gm, on by default) has a node
+      # for its attack (the time times CC 73's factor), so its time as
+      # given counts (CC 73 at its center).
       def attack_lead(graph, fraction = 1)
         envs = @session.send(:to_nodes, graph).flat_map { |n| [n, *n.graph] }.grep(MB::Sound::Envelope).uniq
         amp = envs.select { |e| e.preset_name == :amp_env }
-        times = (amp.empty? ? envs : amp).filter_map { |e| e.attack_time rescue nil }
+        times = (amp.empty? ? envs : amp).filter_map { |e| envelope_attack(e) }
         t = (times.max || 0).to_f
         (fraction == 1 ? t : t * fraction).seconds
+      end
+
+      # The attack time in seconds of envelope +env+ (see #attack_lead), or
+      # nil if it can't be known before playing (a node).
+      def envelope_attack(env)
+        t = env.attack_time rescue nil
+        return t if t || !env.respond_to?(:base_times)
+
+        base = env.base_times[env.names[0]]
+        return nil unless base.is_a?(Numeric) || (base.is_a?(Length) && !(base.respond_to?(:node) && base.node))
+        Length.seconds(base, sample_rate: env.sample_rate).to_f
+      rescue ArgumentError
+        nil
       end
 
       # Splits a track's +lead:+ into [lead, attack fraction]: :attack is

@@ -211,6 +211,17 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect { set.track(:q, lead: { attack: 0.5 }, lead_max: 2) { |c| c.number } }.not_to raise_error
     end
 
+    it 'measures a synth voice\'s GM2-scaled amp_env by its attack as given' do
+      set.track(:v, lead: :attack) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
+      set.track(:w, lead: { attack: 0.5 }) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
+      set.scene(:all, v: a1, w: a1)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      set.go(:all, in: 1)
+      run(800)
+      expect(set.ahead(:v)).to eq(1/4r) # 0.5 s at 120 BPM (was 0: the attack is a node, time x CC 73)
+      expect(set.ahead(:w)).to eq(1/8r)
+    end
+
     it 'caps an attack lead at 1 bar unless lead_max: says otherwise' do
       set.track(:slow, lead: :attack) { |c| c.number * c.amp_env(4, 0.1, 1, 0.1) }
       set.track(:slower, lead: :attack, lead_max: 2) { |c| c.number * c.amp_env(5, 0.1, 1, 0.1) }
