@@ -37,7 +37,7 @@ module MB
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are
         # separate).
-        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap].freeze
+        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap, :rec, :arm, :disarm, :learn, :record, :stop_record].freeze
 
         # The Journal of changes made to this Session.
         attr_reader :journal

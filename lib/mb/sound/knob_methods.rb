@@ -110,17 +110,18 @@ module MB
         name
       end
 
-      # Points knobs at live MIDI input (unless a stream was set).
+      # Points knobs at the session's MIDI input (see
+      # Session::Knobs#knob_midi), attaching live MIDI input to it.
       def listen_knob_midi(session, k)
-        if session.knob_midi.nil?
+        input = session.knob_midi
+        if input.is_a?(Session::MidiInput)
           begin
-            session.knob_midi = midi_stream
+            attach_live_midi(session, input.name)
           rescue => e
             warn "Knob #{k.name.inspect}: no live MIDI input (#{e.class}: #{e.message})"
-            return
           end
         end
-        k.listen(session.knob_midi) unless k.listening
+        k.listen(input) unless k.listening
       end
 
       # Journal entries for the changes a command returned.
