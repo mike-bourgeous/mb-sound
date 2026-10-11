@@ -6,8 +6,8 @@
 # written once as a `flow` block; the performer steers it live with loop!,
 # onward, and finish, a weighted `pick` decides whether the first drop comes
 # around once more, and a `goto` keeps the second drop rolling.  Knobs
-# (phase 3) move the sound: :cut (the hook's lowpass), :space (its delay
-# send), :air (a master highpass), and :morph (a crossfader between
+# (phase 3) move the sound: :cut (the hook's lowpass), :space and :echo
+# (its delay send and feedback), :air (a master highpass), and :morph (a crossfader between
 # snapshots), turned by scenes, sections, and the performer.
 #
 #   intro     8  drums only: tight kick, late-feeling clap, offbeat hats,
@@ -27,8 +27,9 @@
 #                vocal-ish hook unfiltered, a crash on the downbeat
 #   pickup    8  ride and an octave pluck answer the hook, a static pad
 #                (leading the beat by half its attack); the performer snaps the
-#                knobs (`snap :drop`) and throws the hook's delay over the
-#                last 2 bars (`turn :space, 0.55, over: 2`); then a seeded
+#                knobs (`snap :drop`) and throws the hook's delay on the
+#                last 2 beats (`turn :space, 1` and `turn :echo, 0.6`,
+#                back a beat into the next section); then a seeded
 #                `pick`: usually on to the breakdown, one time in four the
 #                drop and pickup once more
 #   breakdown 8  low end out on the master (air: [200, over: 1.beat]), hats
@@ -175,16 +176,17 @@ module MB::Sound
   # resonant 4-pole lowpass and two moving formant peaks in parallel, then a
   # sample-rate crush (sample-and-hold at a rate that rises with the note,
   # so low notes crush more), a little brightening, and a dotted-eighth
-  # delay.  +cutoff+ may be a node (filter movement).
+  # delay send.  +cutoff+ may be a node (filter movement).
   #
-  # The hook is heard through its delay (always a dotted eighth late): +tap+
-  # is the first tap's level (the hook itself; +delay+ if nil) and +delay+
-  # the level of the repeats after it (the send, which may be a node such as
-  # the :space knob).  Until omnibus5 one level scaled both, so a throw
-  # (`turn :space, 0.55`) raised the hook itself by 6.8 dB along with its
-  # echoes (maintainer's listening note, 2026-10-11: "The apparent dry gain
-  # gets too high during that turn").
-  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 0.8, tap: nil)
+  # The hook plays on the grid at +dry+; +send+ is the level of its
+  # dotted-eighth echoes (relative to the dry hook) and +feedback+ how much
+  # of each echo comes back; both may be nodes (the :space and :echo
+  # knobs).  Until omnibus5 the hook was heard only through its delay (a
+  # dotted eighth late: #delay's dry: defaults to 0) and the send scaled the
+  # hook itself; maintainer, 2026-10-11: "Need dry on the grid" and, for
+  # the throw, "Raising the send level or the feedback gain momentarily is
+  # the way to go".
+  def self.last_stop_hook(clip, cutoff: 2600, dry: 0.25, send: 0.35, feedback: 0.35, level: 0.8)
     hook = synth(clip, voices: 1) { |n|
       pitch = n.hz.glide(0.025, legato: true)
       src = pitch.pwm(0.16) * 0.6
@@ -202,11 +204,7 @@ module MB::Sound
       (crushed * amp * 4).peq(3500.hz => [3.db, 0.8]).filter(:highpass, cutoff: 220, quality: 0.7)
     }
 
-    # wet × (x[n-T] + fb x[n-2T] + fb² x[n-3T] + ...) with the first tap at
-    # its own level: tap x[n-T] + delay fb (x[n-2T] + fb x[n-3T] + ...)
-    first = hook.delay(1.n8.dotted)
-    echoes = first.delay(1.n8.dotted, feedback: feedback, wet: delay * feedback)
-    (first * (tap || delay) + echoes).softclip(0.5, 0.95) * level
+    (hook * dry).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).softclip(0.5, 0.95) * level
   end
 
   # The punchy saw bass: a short pitch bump (tom-like), a steep lowpass
@@ -242,7 +240,7 @@ module MB::Sound
   # A pluck voice for the octave answer and the arp.
   def self.last_stop_pluck(clip, brightness: 9, level: 0.3)
     clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 0.9, brightness: brightness) }
-      .delay(1.n8.dotted, feedback: 0.3, wet: 0.2) * level
+      .delay(1.n8.dotted, feedback: 0.3, wet: 0.35, dry: 1) * (0.2 * level) # on the grid, echoes sent (omnibus5)
   end
 
   # A white-noise riser: a 4-bar resonant highpass sweep (the riser's
@@ -271,7 +269,8 @@ module MB::Sound
 
     # Knobs (phase 3): named values the scenes, sections, and performer turn
     knob :cut, 700, range: 200..6000, curve: :exp, unit: 'Hz' # the hook's lowpass
-    knob :space, 0.15, range: 0..0.6                         # the hook's delay send
+    knob :space, 0.35, range: 0..1                           # the hook's delay send
+    knob :echo, 0.35, range: 0..0.85                         # the hook's delay feedback
     knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'   # a master highpass (the breakdown's "cut")
     knob :morph, 0                                           # a crossfader between snapshots
 
@@ -287,10 +286,10 @@ module MB::Sound
     }
     track(:sub) { |clip| last_stop_sub(clip) }
     track(:bass) { |clip| last_stop_bass(clip) }
-    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: knob(:space), tap: 0.25) } # :space sends the repeats
-    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.15) }
-    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.2) }
-    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.4, feedback: 0.55, level: 0.45) }
+    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), send: knob(:space), feedback: knob(:echo)) }
+    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.15) }
+    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.2) }
+    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.4, send: 0.55, feedback: 0.55, level: 0.45) }
     track(:answer) { |clip| last_stop_pluck(clip, level: 1.3) }
     track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.68) }
     track(:tension) { |clip| last_stop_tension(clip) }
@@ -306,7 +305,7 @@ module MB::Sound
     scene :groove, drums: k[:groove], sub: c[:sub], hook_far: c[:hook], cut: 700
     scene :build, drums: k[:build], tension: c[:tension], hook_rise: c[:hook], cut: [3200, from: 500, over: 8, curve: :smooth]
     scene(:gap) { meter 2, 4 }                                     # a half-bar breath
-    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook], cut: 2600, space: 0.25, air: 20) { meter 4, 4 }
+    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook], cut: 2600, space: 0.35, echo: 0.35, air: 20) { meter 4, 4 }
     scene :pickup, drums: k[:pickup], bass: c[:roll], hook: c[:hook], answer: c[:hook_hi], pad: c[:pad]
     scene :breakdown, drums: k[:cut], hook_wash: c[:hook], pad: c[:pad],
       cut: [2600, from: 900, over: 8, curve: :smooth], air: [200, over: 1.beat] # the "cut": low end out
@@ -361,8 +360,17 @@ module MB::Sound
       say['pickup', 'snap :drop   # the drop\'s knobs']
       snap :drop
       session = Session.current
-      bar = session.transport.bar_at(session.now).floor + 6
-      at_bar(bar) { say[bar, 'turn :space, 0.55, over: 2, curve: :smooth   # a delay throw']; turn :space, 0.55, over: 2, curve: :smooth }
+      bar = session.transport.bar_at(session.now).floor + 7
+      at_bar(bar, beat: 3) {
+        say["#{bar}.3", 'turn :space, 1, over: 1.n16; turn :echo, 0.6, over: 1.n16   # a delay throw']
+        turn :space, 1, over: 1.n16
+        turn :echo, 0.6, over: 1.n16
+      }
+      at_bar(bar + 1, beat: 2) {
+        say["#{bar + 1}.2", 'turn :space, 0.35, over: 1.n8; turn :echo, 0.35, over: 1.beat   # and back']
+        turn :space, 0.35, over: 1.n8
+        turn :echo, 0.35, over: 1.beat
+      }
     }
     at_marker(:outro) {
       say['outro', 'xfade :drop, :dark, :morph; turn :morph, 1, over: 8   # back to the dark']
