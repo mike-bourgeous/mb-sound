@@ -101,6 +101,14 @@ module MB
             @attr[i] = (bold ? BOLD : 0) | (reverse ? REVERSE : 0)
           end
 
+          # Sets the cell at index +i+ (no bounds checks; for canvases).
+          def put(i, ch, fg, bg, attr)
+            @ch[i] = ch
+            @fg[i] = fg
+            @bg[i] = bg
+            @attr[i] = attr
+          end
+
           # Writes +str+ from (+x+, +y+), clipped to the grid (and to +max+
           # columns).
           def text(x, y, str, fg: nil, bold: false, max: nil)
@@ -128,20 +136,33 @@ module MB
             start = y * @width
             return @ch[start, @width].join if mode == :none
 
+            @sgr ||= {}
             out = +''
-            state = nil
-            @width.times do |x|
-              i = start + x
-              style = [@fg[i], @bg[i], @attr[i]]
-              style = nil if style == [nil, nil, 0]
-              if style != state
-                out << "\e[0m" if state
-                out << sgr(style, mode) if style
-                state = style
+            styled = false
+            pf = pb = nil
+            pa = 0
+            fga = @fg
+            bga = @bg
+            aa = @attr
+            cha = @ch
+            i = start
+            stop = start + @width
+            while i < stop
+              f = fga[i]
+              b = bga[i]
+              a = aa[i]
+              unless f.equal?(pf) && b.equal?(pb) && a == pa
+                out << "\e[0m" if styled
+                styled = !(f.nil? && b.nil? && a == 0)
+                out << (@sgr[[f, b, a, mode]] ||= sgr([f, b, a], mode)) if styled
+                pf = f
+                pb = b
+                pa = a
               end
-              out << @ch[i]
+              out << cha[i]
+              i += 1
             end
-            out << "\e[0m" if state
+            out << "\e[0m" if styled
             out
           end
 
@@ -446,6 +467,7 @@ module MB
             end
 
             ph.times do |r|
+              row0 = (py + r) * @cells.width + px
               cr = chars[r]
               fr = fg[r]
               br = bg[r]
@@ -481,7 +503,7 @@ module MB
                 end
                 next if ch == ' ' && b.nil?
 
-                @cells.set(px + c, py + r, ch, fg: f, bg: b, reverse: rr[c] == 1)
+                @cells.put(row0 + c, ch, f, b, rr[c] == 1 ? Cells::REVERSE : 0)
               end
             end
           end
@@ -664,6 +686,7 @@ module MB
             else (0x1FB00 + c - 1 - (c > 21 ? 1 : 0) - (c > 42 ? 1 : 0)).chr(Encoding::UTF_8)
             end
           }.freeze
+          BRAILLE = Array.new(256) { |c| c == 0 ? ' ' : (0x2800 + c).chr(Encoding::UTF_8).freeze }.freeze
           LOWER = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'].freeze
           ASCII = [' ', "'", '-', '|', '.', ':', '|', '|'].freeze
 
@@ -688,7 +711,7 @@ module MB
             case canvas
             when :braille
               code = (Numo::Int32.cast(set) * BRAILLE_WEIGHTS.reshape(1, 1, 8)).sum(axis: 2)
-              chars = code.to_a.map { |r| r.map { |c| c == 0 ? ' ' : (0x2800 + c).chr(Encoding::UTF_8) } }
+              chars = code.to_a.map { |r| r.map { |c| BRAILLE[c] } }
 
             when :half
               top = dots[true, true, 0]
