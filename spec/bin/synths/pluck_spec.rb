@@ -38,6 +38,21 @@ RSpec.describe('bin/synths/pluck.rb') do
     48000 / lag
   end
 
+  # The power-weighted mean frequency of +data+ in Hz, ignoring DC and
+  # below 30 Hz (the string's slowly decaying DC)
+  def centroid(data)
+    x = Numo::DFloat.cast(data)
+    s = Numo::Pocketfft.rfft(x).abs**2
+    s[0...(30 * x.length / 48000.0).ceil] = 0
+    f = Numo::DFloat.new(s.length).seq * (48000.0 / x.length)
+    (s * f).sum / s.sum
+  end
+
+  # Averages over +seeds+ noise seeds of block's value for each render
+  def seed_average(seeds = 4)
+    seeds.times.map { |s| yield s }.sum / seeds
+  end
+
   let(:note) { note_events(45) }
 
   it 'renders a MIDI file with the attack, brightness, and glide options' do
@@ -141,6 +156,95 @@ RSpec.describe('bin/synths/pluck.rb') do
 
     it 'refuses a glide with hammer-ons' do
       expect { render(events, 0.1, hammer: true, glide: 0.1) }.to raise_error(ArgumentError, /glide or hammer/)
+    end
+  end
+
+  describe 'velocity brightness' do
+    it 'is the same as before at full velocity' do
+      [33, 45, 81, 93].each do |n|
+        ev = note_events(n, 1.0)
+        expect(render(ev, 0.3)).to eq(render(ev, 0.3, velocity_brightness: false)), "note #{n}"
+      end
+    end
+
+    it 'makes softer notes darker at every pitch' do
+      [45, 69, 81, 93].each do |n|
+        cents = [0.2, 0.5, 0.8, 1.0].map { |vel| seed_average { |s| centroid(window(render(note_events(n, vel), 0.1, seed: s), 0, 0.1)) } }
+        expect(cents).to eq(cents.sort), "note #{n}: #{cents.map(&:round)}"
+        expect(cents.first).to be < cents.last * 0.9, "note #{n}: #{cents.map(&:round)}"
+      end
+    end
+
+    it 'moves soft low notes toward the clean voice' do
+      soft = render(note_events(45, 0.1), 0.1)
+      expect(soft[0...20].abs.max).to be < render(note_events(45, 0.1), 0.1, velocity_brightness: false)[0...20].abs.max * 0.5
+
+      # Brightness 0 is the clean voice
+      expect(render(note_events(45, 0.5), 0.2, velocity_brightness: 0.0)).to eq(render(note_events(45, 0.5), 0.2, voice: :clean, velocity_brightness: 0.0))
+    end
+
+    it 'keeps the ring level near the velocity-only voice and rising with velocity' do
+      levels = [0.2, 0.5, 0.8, 1.0].map { |vel|
+        [vel, seed_average { |s| rms_db(window(render(note_events(45, vel), 0.3, seed: s), 0.1, 0.3)) },
+         seed_average { |s| rms_db(window(render(note_events(45, vel), 0.3, seed: s, velocity_brightness: false), 0.1, 0.3)) }]
+      }
+      levels.each do |vel, now, before|
+        expect(now).to be_within(2.5).of(before), "velocity #{vel}: #{now.round(1)} dB, velocity only #{before.round(1)} dB"
+      end
+      expect(levels.map { |l| l[1] }).to eq(levels.map { |l| l[1] }.sort)
+    end
+
+    it 'takes a range, a curve, or a fixed brightness' do
+      soft = note_events(45, 0.3)
+      dark = seed_average { |s| centroid(window(render(soft, 0.1, seed: s), 0, 0.1)) }
+      narrow = seed_average { |s| centroid(window(render(soft, 0.1, seed: s, velocity_brightness: 0.6..1.0), 0, 0.1)) }
+      linear = seed_average { |s| centroid(window(render(soft, 0.1, seed: s, velocity_curve: :linear), 0, 0.1)) }
+      fixed = seed_average { |s| centroid(window(render(soft, 0.1, seed: s, velocity_brightness: 1.0), 0, 0.1)) }
+      full = seed_average { |s| centroid(window(render(note_events(45, 1.0), 0.1, seed: s), 0, 0.1)) }
+
+      expect(narrow).to be > dark
+      expect(linear).to be < dark
+      expect(fixed).to be_within(3).percent_of(full)
+      expect(rms_db(render(soft, 0.3, velocity_brightness: 1.0))).to be < rms_db(render(note_events(45, 1.0), 0.3)) - 6
+
+      expect { render(soft, 0.1, velocity_brightness: 0..2) }.to raise_error(ArgumentError, /within 0..1/)
+      expect { render(soft, 0.1, velocity_brightness: :loud) }.to raise_error(ArgumentError, /Range/)
+    end
+
+    it 'is the same for the same seed' do
+      ev = note_events(57, 0.6)
+      expect(render(ev, 0.2, seed: 3)).to eq(render(ev, 0.2, seed: 3))
+      expect(render(ev, 0.2, seed: 3)).not_to eq(render(ev, 0.2, seed: 4))
+    end
+  end
+
+  describe 'hammer-on finger bump' do
+    def hammer_events(n)
+      [E.note_on(n, 0.9, time: 0r), E.note_on(n + 2, 0.8, time: 1/2r), E.note_off(n + 2, time: 1r), E.note_off(n, time: 3/2r)]
+    end
+
+    # The ring a hammer-on adds (the loop is linear: with and without the hammer-on's pick)
+    def hammer_ring(n, seed: 0, **options)
+      ev = hammer_events(n)
+      window(render(ev, 0.65, seed: seed, hammer: true, **options) - render(ev, 0.65, seed: seed, hammer: true, hammer_level: 0, pull_level: 0, **options), 0.5, 0.65)
+    end
+
+    it 'adds about as much ring as the noise pick, darker' do
+      [45, 76].each do |n|
+        rings = 5.times.map { |s| hammer_ring(n, seed: s, hammer_width: 0) }
+        noise = rings.sum { |r| rms_db(r[960..]) } / rings.length
+        finger_ring = hammer_ring(n)
+        finger = rms_db(finger_ring[960..])
+        expect(finger).to be_within(2.5).of(noise), "note #{n}: finger #{finger.round(1)} dB, noise #{noise.round(1)} dB"
+
+        noise_centroid = rings.sum { |r| centroid(r) } / rings.length
+        expect(centroid(finger_ring)).to be < noise_centroid * 0.85
+      end
+    end
+
+    it 'is smoother when wider and the same at every seed' do
+      expect(centroid(hammer_ring(45, hammer_width: 1.0))).to be < centroid(hammer_ring(45)) * 0.8
+      expect(hammer_ring(45, seed: 1)).to be_within(1e-4).of(hammer_ring(45, seed: 2))
     end
   end
 
