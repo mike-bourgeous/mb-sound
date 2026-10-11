@@ -1,8 +1,17 @@
 # SQ Stereo Quadraphonic, a quadraphonic encoding matrix
 # Four input channels, two output channels
 # https://en.wikipedia.org/wiki/Stereo_Quadraphonic
+#
+# The back-channel terms are 1/sqrt(2) (equal power), maintainer decision
+# 2026-10-11.  Sources differ: Wikipedia's basic SQ matrix shows 0.7 (and
+# a "modified", mono-compatible variant with 0.707), while CBS-era patents
+# write 0.707 (US 4,006,313: https://patents.justia.com/patent/4006313;
+# US 3,798,373: https://patents.google.com/patent/US3798373A).  0.7 reads
+# as a rounding of 1/sqrt(2) in published tables.  The sources also differ
+# on which back channel takes which term (a labeling convention); this
+# file keeps its earlier assignment.
 inputs: [ FL, FR, RL, RR ]
 outputs: [ Lt, Rt ]
 matrix:
-  - [ 1.0, 0.0, -0.7i, 0.7 ]
-  - [ 0.0, 1.0, -0.7, 0.7i ]
+  - [ 1.0, 0.0, -0.7071067811865476i, 0.7071067811865476 ]
+  - [ 0.0, 1.0, -0.7071067811865476, 0.7071067811865476i ]
