@@ -28,7 +28,9 @@ module MB
       # quantization +q+ (nil for the set's), a +fade+ in bars for its
       # starts and stops (nil for none, with a declick on stops), the
       # +clip+ it plays (or will play once queued changes land), its +lead+
-      # (how early it plays: bars, a Duration, a Length, or :attack) and
+      # (how early it plays: bars, a Duration, a Length, or :attack, with
+      # +attack+ the fraction of the attack: 1 for `lead: :attack`, 0.5
+      # for `lead: { attack: 0.5 }`) and
       # +nudge+ (a timing offset, negative for early: a Length or
       # Duration), +lead_max+ (the cap of an :attack lead), and +ahead+,
       # the lead and nudge combined in whole notes, and +capped+ (true if
@@ -37,7 +39,7 @@ module MB
       # see #track's +lead_max:+).  Maintainer-approved 2026-10-11.
       ATTACK_LEAD_MAX = 1
 
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, keyword_init: true) do
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :attack, keyword_init: true) do
         def patch?
           !patch.nil?
         end
@@ -154,7 +156,10 @@ module MB
       # peaks on the downbeat.  Bars (plain numbers), a Duration, a Length,
       # or :attack (the attack time of the patch's amplitude envelope, the
       # longest `amp_env` attack in its graph, else the longest envelope
-      # attack; measured each time the patch is built), capped at
+      # attack; measured each time the patch is built), or a fraction of
+      # that attack as `{ attack: 0.5 }` (maintainer, 2026-10-11: "Might be
+      # good to have a fractional lead amount on the attack as well": half
+      # a slow swell before the beat, half after), capped at
       # +lead_max:+ (default ATTACK_LEAD_MAX, 1 bar: a 4 s pad attack
       # would lead by 2 bars at 120 BPM, starting before the previous
       # section's last bar; bars, a Duration, or a Length; `tracks` says
@@ -168,23 +173,25 @@ module MB
       #     track :pad, pad_graph
       #     track(:pad, lead: :attack) { |c| c.synth { |v| v.hz.saw * v.amp_env(1.5, 1, 0.8, 2) } }
       #     track(:swell, lead: :attack, lead_max: 2) { |c| c.synth { |v| v.hz.saw * v.amp_env(4, 1, 0.8, 2) } }
+      #     track(:pad, lead: { attack: 0.5 }) { |c| ... }   # half the attack before the beat
       #     track(:drums, nudge: 5.ms) { |k| tr808(k) }
       def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
         check_quant(q) if q
+        lead, attack = attack_lead_option(lead)
         check_offset(:lead, lead) unless lead == :attack
         check_offset(:nudge, nudge)
         check_offset(:lead_max, lead_max)
-        raise ArgumentError, "lead_max: caps lead: :attack (got lead: #{lead.inspect})" if lead_max && lead != :attack
+        raise ArgumentError, "lead_max: caps an attack lead (lead: :attack or { attack: f }; got lead: #{lead.inspect})" if lead_max && lead != :attack
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
         return nil unless @session.names.claim(name, :track)
 
         tr = nil
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, attack: attack)
         }
         set_ahead(tr, graph) if graph || lead != :attack
         name
@@ -461,7 +468,7 @@ module MB
       def set_ahead(tr, graph)
         capped = false
         if tr.lead == :attack
-          lead = whole_notes(attack_lead(graph))
+          lead = whole_notes(attack_lead(graph, tr.attack || 1))
           cap = whole_notes(tr.lead_max || ATTACK_LEAD_MAX)
           capped = lead > cap
           lead = cap if capped
@@ -476,12 +483,28 @@ module MB
 
       # The attack time (a Length) of +graph+'s amplitude envelope: the
       # longest attack of envelopes made by amp_env, else of any envelope
-      # (0 without envelopes).
-      def attack_lead(graph)
+      # (0 without envelopes), times +fraction+.
+      def attack_lead(graph, fraction = 1)
         envs = @session.send(:to_nodes, graph).flat_map { |n| [n, *n.graph] }.grep(MB::Sound::Envelope).uniq
         amp = envs.select { |e| e.preset_name == :amp_env }
         times = (amp.empty? ? envs : amp).filter_map { |e| e.attack_time rescue nil }
-        (times.max || 0).to_f.seconds
+        t = (times.max || 0).to_f
+        (fraction == 1 ? t : t * fraction).seconds
+      end
+
+      # Splits a track's +lead:+ into [lead, attack fraction]: :attack is
+      # [:attack, 1], `{ attack: f }` [:attack, f] (f a real number above
+      # 0), anything else [lead, nil].
+      def attack_lead_option(lead)
+        return [:attack, 1] if lead == :attack
+        return [lead, nil] unless lead.is_a?(Hash)
+
+        f = lead[:attack]
+        unless lead.keys == [:attack] && f.is_a?(Numeric) && f.real? && f.finite? && f.positive?
+          raise ArgumentError, "lead: takes { attack: fraction } with a fraction above 0 (e.g. { attack: 0.5 }; got #{lead.inspect})"
+        end
+
+        [:attack, f]
       end
 
       # A lead or nudge in whole notes at the current tempo.
