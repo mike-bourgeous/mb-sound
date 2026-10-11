@@ -26,6 +26,12 @@ module MB
           Numo::DFloat.cast(a)
         end
 
+        # True if +surface+ draws smooth vector lines (SVG, images) rather
+        # than text cells.
+        def self.vector?(surface)
+          surface.respond_to?(:vector?) && surface.vector?
+        end
+
         # Shared behavior of every mark.
         class Base
           # The legend label (nil leaves the mark out of the legend).
@@ -112,7 +118,7 @@ module MB
             dx, dy = device(surface, coord, @x, @y)
             if dx.length > surface.width * 2 && !coord.polar? && Geometry.monotonic?(@x)
               regular = @regular && coord.x.linear?
-              dx, dy = Geometry.decimate(dx, dy, surface.width, regular: regular)
+              dx, dy = Geometry.decimate(dx, dy, surface.width, regular: regular, ends: Mark.vector?(surface))
             end
             [dx, dy]
           end
@@ -236,8 +242,8 @@ module MB
             dx, dlo = device(surface, coord, @x, @lo)
             _, dhi = device(surface, coord, @x, @hi)
             if dx.length > surface.width * 2
-              dx2, dlo = Geometry.decimate(dx, dlo, surface.width)
-              _, dhi = Geometry.decimate(dx, dhi, surface.width)
+              dx2, dlo = Geometry.decimate(dx, dlo, surface.width, ends: Mark.vector?(surface))
+              _, dhi = Geometry.decimate(dx, dhi, surface.width, ends: Mark.vector?(surface))
               dx = dx2
             end
             surface.band(dx, dlo, dhi, rgb)

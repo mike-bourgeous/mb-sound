@@ -54,9 +54,10 @@ module MB
             @out << %(<text x="#{SVG.n(x)}" y="#{SVG.n(y)}" font-size="#{size}"#{%( text-anchor="#{a}") if a != 'start'}#{' font-weight="600"' if bold} fill="#{Color.hex(color)}">#{SVG.escape(str)}</text>)
           end
 
-          # An estimate (SVG text isn't measured): 0.6 em per character.
-          def text_width(str, size)
-            str.to_s.length * size * 0.6
+          # An estimate (SVG text isn't measured): 0.6 em per character,
+          # more for bold proportional faces.
+          def text_width(str, size, bold: false)
+            str.to_s.length * size * (bold ? 0.68 : 0.6)
           end
 
           def plot(x, y, w, h)
@@ -85,6 +86,10 @@ module MB
         # The mark surface for one plot area (device units are pixels).
         class Surface
           attr_reader :width, :height
+
+          def vector?
+            true
+          end
           attr_writer :label
 
           def initialize(width, height, theme, out)

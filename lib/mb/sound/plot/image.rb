@@ -270,7 +270,7 @@ module MB
             @c.text(x, y, str, color, bold: bold)
           end
 
-          def text_width(str, _size)
+          def text_width(str, _size, bold: false)
             str.to_s.length * Font::WIDTH
           end
 
@@ -283,6 +283,10 @@ module MB
         # The mark surface for one plot area of a Canvas.
         class Surface
           attr_reader :width, :height
+
+          def vector?
+            true
+          end
 
           def initialize(canvas, x, y, w, h, theme)
             @c = canvas

@@ -80,6 +80,12 @@ module MB
           end
           return if pw < 10 || ph < 10
 
+          # Marks at the domain's ends stay clear of the frame
+          inset = polar ? 0 : 4 * @s
+          frame = [py, ph]
+          py += inset
+          ph -= 2 * inset
+
           draw_header(chart, entries, coord, x, y, w, polar) if header > 0
 
           xticks = coord.x.ticks((pw / (80 * @s)).round.clamp(2, 12))
@@ -99,7 +105,7 @@ module MB
                 next unless u.finite? && u.between?(0, 1)
 
                 xx = px + u * pw
-                @p.line(xx, py, xx, py + ph, @theme.grid, width: 1 * @s)
+                @p.line(xx, frame[0], xx, frame[0] + frame[1], @theme.grid, width: 1 * @s)
               end
             end
           end
@@ -119,7 +125,7 @@ module MB
 
           return if polar
 
-          axes(coord, xticks, yticks, px, py, pw, ph, notes, xtitle)
+          axes(coord, xticks, yticks, px, py, pw, ph, notes, xtitle, frame)
           colorbar(heat, px + pw + 12 * @s, py, ph) if heat
         end
 
@@ -128,7 +134,7 @@ module MB
           tx = x
           if chart.title
             @p.text(tx, base, chart.title, @theme.ink, size: @title_fs, bold: true)
-            tx += @p.text_width(chart.title, @title_fs) + 10 * @s
+            tx += @p.text_width(chart.title, @title_fs, bold: true) + 10 * @s
           end
 
           legend_w = entries.sum { |l, _, _| 22 * @s + @p.text_width(l, @fs) + 14 * @s }
@@ -153,10 +159,12 @@ module MB
           end
         end
 
-        def axes(coord, xticks, yticks, px, py, pw, ph, notes, xtitle)
+        def axes(coord, xticks, yticks, px, py, pw, ph, notes, xtitle, frame)
           m = @theme.muted
-          @p.line(px, py + ph, px + pw, py + ph, m, width: 1 * @s)
-          @p.line(px, py, px, py + ph, m, width: 1 * @s)
+          fy, fh = frame
+          @p.line(px, fy + fh, px + pw, fy + fh, m, width: 1 * @s)
+          @p.line(px, fy, px, fy + fh, m, width: 1 * @s)
+          ph_x = fy + fh # the x axis
 
           used = []
           yticks.each do |t|
@@ -172,14 +180,14 @@ module MB
             @p.text(px - 8 * @s, yy + @fs * 0.35, t.label, m, size: @fs, anchor: :end)
           end
 
-          label_y = py + ph + 6 * @s + @fs
+          label_y = ph_x + 6 * @s + @fs
           last = -Float::INFINITY
           xticks.each do |t|
             u = coord.x.map(t.value)
             next unless u.finite? && u.between?(-1e-9, 1 + 1e-9)
 
             xx = px + u * pw
-            @p.line(xx, py + ph, xx, py + ph + (t.major ? 5 : 3) * @s, m, width: 1 * @s)
+            @p.line(xx, ph_x, xx, ph_x + (t.major ? 5 : 3) * @s, m, width: 1 * @s)
             next unless t.label
 
             tw = @p.text_width(t.label, @fs)
@@ -199,7 +207,7 @@ module MB
               tw = @p.text_width(t.label, @fs)
               next if xx - tw / 2 < last + 4 * @s
 
-              @p.line(xx, py + ph, xx, py + ph + 3 * @s, @theme.series(2), width: 1 * @s)
+              @p.line(xx, ph_x, xx, ph_x + 3 * @s, @theme.series(2), width: 1 * @s)
               @p.text(xx, row, t.label, @theme.series(2), size: @fs, anchor: :middle)
               last = xx + tw / 2
             end

@@ -11,14 +11,17 @@ module MB
         # the minimum and maximum of each column's points, in the order the
         # signal crossed them (so connected lines stay continuous).  With
         # +regular+ (evenly spaced x), groups equal counts of points
-        # (faster).  Returns [xs, ys].
-        def decimate(xs, ys, columns, regular: false)
+        # (faster).  With +ends+, each group's two points sit at its first
+        # and last x (smooth slopes for vector output); otherwise both sit
+        # at its center (whole spans per column for text rasters).
+        # Returns [xs, ys].
+        def decimate(xs, ys, columns, regular: false, ends: false)
           n = xs.length
           return [xs, ys] if n <= columns * 2 || columns < 1
 
-          return decimate_regular(xs, ys, columns) if regular
+          return decimate_regular(xs, ys, columns, ends) if regular
 
-          col = xs.floor
+          col = ends ? xs.floor : xs.round
           change = (col[1..] - col[0...-1]).ne(0).where + 1
           starts = [0] + change.to_a
           ends = change.to_a + [n]
@@ -34,8 +37,11 @@ module MB
             seg = ys[a...b]
             lo = seg.min
             hi = seg.max
-            xm = (xs[a] + xs[b - 1]) * 0.5
-            ox << xm << xm
+            if ends
+              ox << xs[a] << xs[b - 1]
+            else
+              ox << col[a] << col[a]
+            end
             if seg[-1] >= seg[0]
               oy << lo << hi
             else
@@ -46,9 +52,11 @@ module MB
         end
 
         # Evenly spaced decimation (see #decimate).
-        def decimate_regular(xs, ys, columns)
+        def decimate_regular(xs, ys, columns, ends)
           n = xs.length
-          g = (n.to_f / columns).ceil
+          # Text rasters: groups a little under one column apart, so
+          # rounding never skips a column
+          g = ends ? (n.to_f / columns).ceil : [(n.to_f / columns).floor, 1].max
           groups = (n.to_f / g).ceil
           pad = groups * g - n
           if pad > 0
@@ -60,7 +68,6 @@ module MB
           xg = xs.reshape(groups, g)
           ymin = yg.min(axis: 1)
           ymax = yg.max(axis: 1)
-          xc = xg.mean(axis: 1)
           rising = (yg[true, -1] - yg[true, 0]) >= 0
 
           first = ymax.dup
@@ -70,8 +77,14 @@ module MB
 
           out_x = Numo::DFloat.zeros(groups, 2)
           out_y = Numo::DFloat.zeros(groups, 2)
-          out_x[true, 0] = xc
-          out_x[true, 1] = xc
+          if ends
+            out_x[true, 0] = xg[true, 0]
+            out_x[true, 1] = xg[true, -1]
+          else
+            xc = (xg[true, 0] + xg[true, -1]) * 0.5
+            out_x[true, 0] = xc
+            out_x[true, 1] = xc
+          end
           out_y[true, 0] = first
           out_y[true, 1] = second
           [out_x.flatten, out_y.flatten]

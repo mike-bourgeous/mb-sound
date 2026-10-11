@@ -406,7 +406,8 @@ module MB
           # Lines fill to zero (or the bottom) in filling looks
           def draw_line(mark, surface, coord, rgb)
             if @look.fill && mark.dash.nil?
-              base = coord.y.lo <= 0 && coord.y.hi >= 0 ? 0.0 : coord.y.lo
+              lo, hi = [coord.y.lo, coord.y.hi].minmax
+              base = lo < 0 && hi > 0 && !coord.y.is_a?(Scale::DB) ? 0.0 : lo
               Mark::Area.new(mark.y, x: mark.x, base: base).draw(surface, coord, rgb)
             else
               mark.draw(surface, coord, rgb)
@@ -582,12 +583,15 @@ module MB
               end
             end
 
-            last_end = place_labels(cols, label_row, muted)
-
+            # The axis title (with its unit) goes at the right end, ahead of
+            # the tick labels it would cover
             xtitle = coord.x.title
-            if xtitle && last_end + 2 + xtitle.length <= @x + @w
-              @cells.text(@x + @w - xtitle.length, label_row, xtitle, fg: muted)
+            limit = @x + @w
+            if xtitle && xtitle.length <= @w / 3
+              limit = @x + @w - xtitle.length - 1
+              @cells.text(limit + 1, label_row, xtitle, fg: muted)
             end
+            place_labels(cols, label_row, muted, limit: limit)
 
             return unless notes
 
@@ -600,7 +604,7 @@ module MB
 
           # Writes labels centered on their columns without overlaps;
           # returns the end column of the last one.
-          def place_labels(cols, row, fg)
+          def place_labels(cols, row, fg, limit: @x + @w)
             last_end = @x - 1
             cols.each do |t, c|
               next unless t.label
@@ -608,6 +612,7 @@ module MB
               x = c - t.label.length / 2
               x = x.clamp(@x, @x + @w - t.label.length)
               next if x <= last_end + 1 && last_end >= @x
+              next if x + t.label.length > limit
 
               @cells.text(x, row, t.label, fg: fg)
               last_end = x + t.label.length - 1

@@ -8,8 +8,11 @@ module MB
         module_function
 
         # HTML (a <pre> block's contents) for +text+ with ANSI codes.  +fg+
-        # and +bg+ are the default colors (used for reversed cells).
-        def convert(text, fg: '#d8d8d2', bg: '#141413')
+        # and +bg+ are the default colors (used for reversed cells).  With
+        # +cells+, every non-ASCII character is wrapped in an <i> element
+        # (style it as a 1ch-wide inline block) so Braille and block glyphs
+        # from fallback fonts keep the grid aligned.
+        def convert(text, fg: '#d8d8d2', bg: '#141413', cells: false)
           out = +''
           state = { fg: nil, bg: nil, bold: false, reverse: false }
           open = false
@@ -27,7 +30,9 @@ module MB
               out << %(<span style="#{style}">)
               open = true
             end
-            out << escape(chunk)
+            chunk = escape(chunk)
+            chunk = chunk.gsub(/[^\x00-\x7f]/) { |c| "<i>#{c}</i>" } if cells
+            out << chunk
           end
           out << '</span>' if open
           out
