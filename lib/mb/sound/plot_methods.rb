@@ -1,9 +1,9 @@
-require 'tempfile'
-
 module MB
   module Sound
     # Command-line interface methods related to plotting sounds.  MB::Sound
-    # extends itself with this module.
+    # extends itself with this module.  Plots are drawn by MB::Sound::Plot
+    # (pure Ruby: terminal text, SVG, PNG, inline terminal images); no
+    # gnuplot process is involved.
     module PlotMethods
       # Sets up SIGWINCH (window-size change) handler when MB::Sound extends
       # itself with this module.
@@ -38,8 +38,8 @@ module MB
         plotter(graphical: true) if old_pg
       end
 
-      # Closes existing MB::M::Plot plotters without creating new ones.  Useful
-      # for cleaning up between tests.
+      # Closes existing plotters without creating new ones.  Useful for
+      # cleaning up between tests.
       def close_plotter
         @pt ||= nil
         @pg ||= nil
@@ -49,15 +49,55 @@ module MB
         @pg = nil
       end
 
-      # Returns either a terminal-based plotting object if +graphical+ is false,
-      # or a graphical window-based plotting object if +graphical+ is true.
+      # Returns a terminal text plotter (MB::Sound::Plot::Plotter, sized to
+      # 80% of the terminal's height) if +graphical+ is false, or an image
+      # plotter (inline terminal images where supported, else text) if
+      # +graphical+ is true.  +kwargs+ go to the plotter's constructor the
+      # first time (e.g. +width+, +height+, +look+, +theme+).
       #
-      # Overriding this method to return some other compatible object allows
-      # other plotting systems to be used by the CLI DSL.
+      # Overriding this method to return some other object with the same
+      # #plot interface as MB::M::Plot allows other plotting systems to be
+      # used by the CLI DSL (methods that build charts call #draw when the
+      # plotter has it).
       def plotter(graphical: false, **kwargs)
-        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8, **kwargs)
-        @pg ||= MB::M::Plot.new(**kwargs) if graphical
+        @pt ||= Plot::Plotter.terminal(height_fraction: 0.8, **(graphical ? {} : kwargs))
+        @pg ||= Plot::Plotter.graphical(**kwargs) if graphical
         graphical ? @pg : @pt
+      end
+
+      # Builds a chart from a block (see MB::Sound::Plot.chart and
+      # Plot::ChartBuilder): returns a Plot::Chart, which shows itself when
+      # the console prints it, and has #show, #to_s, #to_svg, #save.
+      #
+      #     chart { x :time, sample_rate: 48000; line 110.hz.ramp.sample(4800), label: 'saw' }
+      #     chart(title: 'Saw') { |c| c.line wave }.save('saw.svg')
+      def chart(**kwargs, &block)
+        Plot.chart(**kwargs, &block)
+      end
+
+      # Lays out charts in a grid (see MB::Sound::Plot.figure).
+      #
+      #     figure(columns: 2) { chart { line a }; chart { line b } }
+      def figure(*charts, **kwargs, &block)
+        Plot.figure(*charts, **kwargs, &block)
+      end
+
+      # Plots a spectrogram of a sound file, tone, graph node, or data
+      # (log frequency with note names, levels in dB through a colormap,
+      # with a colorbar).  Tones and graph nodes are sampled for +seconds+.
+      # Other keywords go to MB::Sound::Plot.spectrogram (+fft:+, +hop:+,
+      # +floor:+, +log:+, +colormap:+).  Prints the plot (or returns its
+      # lines if the plotter's #print is off).
+      def spectrogram(sound, seconds: 2, sample_rate: 48000, graphical: false, title: nil, **kwargs)
+        data =
+          case sound
+          when String then read(sound)
+          when Tone, Pitch, GraphNode then sound.sample((seconds * sample_rate).round)
+          else any_sound_to_array(sound)
+          end
+        data = data.map { |c| c.respond_to?(:imag) ? c.real : c } if data.is_a?(Array)
+        title ||= sound.is_a?(String) ? File.basename(sound) : 'spectrogram'
+        plot_chart(Plot.spectrogram(data, sample_rate: sample_rate, title: title, **kwargs), graphical: graphical)
       end
 
       # Plots the spectrum of the given data (split into chunks).  This method
@@ -205,7 +245,9 @@ module MB
             k,
             {
               data: histogram,
-              yrange: [0, histogram.max]
+              x: Numo::DFloat.linspace(-dmax, dmax, bins),
+              yrange: [0, histogram.max],
+              type: 'steps',
             }
           ]
         }.to_h
@@ -238,55 +280,42 @@ module MB
 
       # Plots several curves on the same axes in each pane: +panes+ is a Hash
       # of pane titles to Hashes of curve labels to data (an Array of [x, y]
-      # pairs, or [xs, ys] NArrays), drawn with +styles+ (a gnuplot style for
-      # all curves, or an Array with one per curve position; default
-      # histogram steps for the first curve, lines for the rest).  Ranges:
-      # +xrange+ and +yrange+ (Arrays, or nil for each pane's own data, from
-      # 0 for y).  Prints terminal plots (or returns their lines if the
-      # plotter's print is off, as for #plot).  See #hist.
+      # pairs, or [xs, ys] NArrays), drawn with +styles+ (a style for all
+      # curves, or an Array with one per curve position: 'lines', 'steps',
+      # 'points', 'impulses', 'filledcurves'; default steps for the first
+      # curve, lines for the rest).  Ranges: +xrange+ and +yrange+ (Arrays,
+      # or nil for each pane's own data, from 0 for y).  Prints the plot (or
+      # returns its lines if the plotter's print is off, as for #plot).
+      # See #hist.
       def overlay(panes, graphical: false, styles: nil, xrange: nil, yrange: nil, columns: nil)
-        plt = plotter(graphical: graphical)
-
-        @overlay_files&.each { |f| f.close! rescue nil }
-        @overlay_files = []
-
-        rows = columns ? (panes.size.to_f / columns).ceil : Math.sqrt(panes.size).ceil
-        cols = columns || (panes.size.to_f / rows).ceil
-        plt.command 'unset multiplot'
-        plt.command "set multiplot layout #{rows}, #{cols}"
-
-        panes.each do |title, curves|
+        charts = panes.map { |title, curves|
           ymax = 0
-          xs = []
-          parts = curves.each_with_index.map { |(label, data), i|
-            pairs = overlay_pairs(data)
-            ys = pairs.map { |_, y| y }.select(&:finite?)
-            ymax = [ymax, ys.max || 0].max
-            xs.concat(pairs.map(&:first))
-
-            file = Tempfile.new("overlay_#{i}")
-            @overlay_files << file
-            pairs.each { |x, y| file.puts "#{x} #{y.finite? ? y : 0}" }
-            file.flush
-
+          xs_all = []
+          series = curves.each_with_index.map { |(label, data), i|
+            xs, ys = overlay_arrays(data)
+            finite = ys[ys.isfinite]
+            ymax = [ymax, finite.length > 0 ? finite.max : 0].max
+            xs_all << xs.min << xs.max if xs.length > 0
             style = styles.is_a?(Array) ? styles[i] : styles
-            style ||= i == 0 ? 'steps' : 'lines'
-            "'#{file.path}' using 1:2 with #{style} title #{label.to_s.gsub("'", '').inspect.tr('"', "'")} noenhanced"
+            [label.to_s, xs, ys, (style || (i == 0 ? 'steps' : 'lines')).to_s]
           }
 
-          xr = xrange || [xs.min, xs.max]
+          xr = xrange || [xs_all.min || 0, xs_all.max || 1]
           yr = yrange || [0, ymax > 0 ? ymax * 1.05 : 1]
-          plt.command "set xrange [#{xr[0]}:#{xr[1]}]"
-          plt.command "set yrange [#{yr[0]}:#{yr[1]}]"
-          plt.command 'unset logscale x'
-          plt.command "set title #{title.to_s.inspect} noenhanced"
-          plt.command "plot #{parts.join(', ')}"
-        end
+          Plot.chart(title: title.to_s, x: Plot::Scale::Linear.new(xr, nice: false), y: Plot::Scale::Linear.new(yr), legend: true) { |c|
+            series.each do |label, xs, ys, style|
+              case style
+              when /steps/ then c.step(ys, x: xs, label: label)
+              when 'points', 'dots' then c.points(ys, x: xs, label: label)
+              when 'impulses', 'boxes' then c.stems(ys, x: xs, label: label)
+              when /filled/ then c.area(ys, x: xs, label: label)
+              else c.line(ys, x: xs, label: label)
+              end
+            end
+          }
+        }
 
-        plt.command 'unset title'
-        output = plt.command('unset multiplot')
-        # Colored and printed like MB::M::Plot#plot's terminal plots
-        plt.send(:print_terminal_plot, true, output) if output && plt.instance_variable_get(:@terminal) == 'dumb'
+        plot_chart(Plot.figure(*charts, columns: columns), graphical: graphical)
       end
 
       # Plots estimated densities of +data+ (a Hash of names to NArrays) with
@@ -318,12 +347,30 @@ module MB
         overlay(panes, graphical: graphical, xrange: [range.begin, range.end])
       end
 
-      # [[x, y], ...] for #overlay from pairs or [xs, ys].
-      private def overlay_pairs(data)
+      # [xs, ys] (Numo::DFloats) for #overlay from pairs or [xs, ys];
+      # non-finite y values are drawn as 0.
+      private def overlay_arrays(data)
         if data.is_a?(Array) && data.length == 2 && data.all? { |d| d.is_a?(Numo::NArray) || (d.is_a?(Array) && !d[0].is_a?(Array)) }
-          data[0].to_a.zip(data[1].to_a)
+          xs, ys = data
         else
-          data.to_a
+          pairs = data.to_a
+          xs = pairs.map(&:first)
+          ys = pairs.map(&:last)
+        end
+        xs = Numo::DFloat.cast(xs)
+        ys = Numo::DFloat.cast(ys)
+        ys[~ys.isfinite] = 0
+        [xs, ys]
+      end
+
+      # Shows a Plot chart or figure through the plotter (or returns its
+      # lines when the plotter's print is off).
+      private def plot_chart(chart, graphical: false)
+        p = plotter(graphical: graphical)
+        if p.respond_to?(:draw)
+          p.draw(chart)
+        else
+          chart.show
         end
       end
 

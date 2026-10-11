@@ -45,6 +45,7 @@ require_relative 'support/midi_list_source'
 require_relative 'support/midi_transform_helpers'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
+require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)

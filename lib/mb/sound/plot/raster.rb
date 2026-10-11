@@ -119,7 +119,12 @@ module MB
           dy = ys[1..] - y0
           ok = finite[0...-1] & finite[1..]
           idx = ok.where
-          lone = (finite & ~(finite.concatenate(Numo::Bit[0])[1..]) & ~(Numo::Bit[0].concatenate(finite)[0...-1])).where
+          # Finite points with no finite neighbor are drawn as points
+          f = Numo::Int32.cast(finite)
+          nb = Numo::Int32.zeros(f.length)
+          nb[1..] += f[0...-1]
+          nb[0...-1] += f[1..]
+          lone = (f.eq(1) & nb.eq(0)).where
           px = xs[lone].round
           py = ys[lone].round
 
@@ -140,8 +145,7 @@ module MB
 
             starts = steps.cumsum - steps
             seg = Numo::Int32.zeros(total)
-            marks = starts[1..]
-            seg[marks] = 1 if marks.length > 0
+            seg[starts[1..]] = 1 if starts.length > 1
             seg = seg.cumsum
             t = (Numo::DFloat.new(total).seq - starts[seg]) / steps[seg]
 

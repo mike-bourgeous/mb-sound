@@ -43,7 +43,7 @@ MB::Sound.script(args: 6..) { |(in_file, out_file, *pairs)|
 
   pad = Numo::SFloat.zeros(filter.window_length + filter.filter_length)
 
-  p = MB::M::Plot.terminal(height_fraction: 0.4)
+  p = MB::Sound::Plot::Plotter.terminal(height_fraction: 0.4)
   p.logscale
   p.plot({magnitude: filter.filter_fft.abs.map{|v| MB::M.clamp(v.to_db, -80, 80) }, phase: filter.filter_fft.arg}, columns: 2)
   p.logscale(false)

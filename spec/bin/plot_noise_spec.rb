@@ -77,7 +77,7 @@ RSpec.describe('bin/plot_noise.rb') do
   it 'plots densities with the theory in the terminal' do
     text = run('--only', 'sine,uniform', '-n', '20000', '-b', '40', env: { 'PLOT_WIDTH' => '80', 'PLOT_HEIGHT' => '20' }, real: true)
     expect(text).to include('sine: 1.hz.sine.noise', 'uniform: 1.hz.ramp.noise', 'estimate', 'arcsine')
-    expect(text.lines.count { |l| l.match?(/\+-{20,}\+/) }).to eq(4) # two plots, each with two borders
+    expect(text.lines.count { |l| l.match?(/└[─┬┴]{20,}/) }).to eq(2) # two plots, each with an x axis
   end
 
   it 'rejects unknown shapes' do

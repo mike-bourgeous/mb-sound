@@ -454,8 +454,9 @@ module MB
       # plotter can draw; buffers that arrive while a frame is drawing are
       # skipped.  Also available as #vis.
       #
-      # +:graphical+ plots in a gnuplot window instead of the terminal, and
-      # +:spectrum+ plots the frequency spectrum instead of the waveform.
+      # +:graphical+ plots inline images (iTerm2, kitty, sixel) instead of
+      # text, and +:spectrum+ plots the frequency spectrum (log frequency
+      # with note names) instead of the waveform.
       #
       # The mix is rendered a little ahead of what you hear (by the output's
       # buffering), so the plot may lead the sound slightly.

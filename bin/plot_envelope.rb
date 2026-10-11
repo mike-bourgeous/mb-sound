@@ -65,7 +65,9 @@ MB::Sound.script(
   velocity: [1.0, '-v', Float, 'Note velocity (0..1)', 0.0..1.0],
   compare: [false, 'Plot every curve preset (CURVES) with the same times'],
   db: [nil, Float, 'Plot in decibels over this range (e.g. 80)', 1.0..],
-  terminal: [false, '-t', 'Plot in the terminal instead of a gnuplot window'],
+  terminal: [false, '-t', 'Plot as terminal text (the default; kept for old command lines)'],
+  image: [false, '-I', 'Show an inline terminal image (iTerm2, kitty, sixel) instead of text'],
+  save: [nil, '-S', String, 'Save the plot to a file (.svg, .png, .txt, .ans, .html) instead of showing it'],
   print: [false, 'Print segment boundaries and levels instead of plotting'],
 ) { |args, p|
   times = args.map { |v| Float(v) }
@@ -121,12 +123,15 @@ MB::Sound.script(
   plots.transform_values! { |d| d.length < length ? d.concatenate(Numo::SFloat.zeros(length - d.length)) : d }
   plots.transform_values! { |d| (20 * Numo::NMath.log10(d.clip(10 ** (-p.db / 20), nil))).clip(-p.db, nil) } if p.db
 
-  MB::Sound.plotter(graphical: !p.terminal, width: 960, height: 540).plot(plots)
+  chart = MB::Sound::Plot.chart(title: envelope.to_s, legend: plots.length > 1) { |c|
+    c.x :time, sample_rate: envelope.sample_rate
+    c.y p.db ? MB::Sound::Plot::Scale::DB.new(-p.db..0) : MB::Sound::Plot::Scale::Linear.new(label: 'level')
+    plots.each { |name, d| c.line d, label: name.to_s }
+  }
 
-  unless p.terminal
-    begin
-      STDIN.readline
-    rescue EOFError, Interrupt
-    end
+  if p.save
+    puts "Wrote #{chart.save(p.save)}"
+  else
+    chart.show(image: p.image || nil)
   end
 }

@@ -344,7 +344,7 @@ module MB
             notes = false if bottom == 0
             plot_h = @h - (row - @y) - bottom
 
-            yticks = frame == :none ? spark_ticks(coord.y) : coord.y.ticks(tick_count(plot_h, 3))
+            yticks = frame == :none ? spark_ticks(coord.y) : coord.y.ticks(tick_count(plot_h, 2.5, min: 3))
             ylabels = yticks.map(&:label).compact
             label_w = ylabels.map(&:length).max || 0
             left = frame == :none ? (label_w > 0 ? label_w + 1 : 0) : label_w + 1
@@ -399,8 +399,8 @@ module MB
 
           private
 
-          def tick_count(cells, per)
-            (cells / per.to_f).round.clamp(2, 10)
+          def tick_count(cells, per, min: 2)
+            (cells / per.to_f).round.clamp(min, 10)
           end
 
           # Lines fill to zero (or the bottom) in filling looks

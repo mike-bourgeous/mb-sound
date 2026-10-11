@@ -38,4 +38,19 @@ RSpec.describe('bin/plot_envelope.rb') do
     expect(text).to match(/^480 +0\.01000 +1\.000000  decay$/)
     expect(text).to match(/^1440 +0\.03000 +0\.500000  sustain$/)
   end
+
+  it 'plots every curve preset in one chart with a legend' do
+    text = MB::U.remove_ansi(run('--compare', '0.05', '0.3', '0.4', '0.5'))
+    MB::Sound::Envelope::CURVES.each_key.first(2).each do |name|
+      expect(text).to include("━━ #{name}")
+    end
+    expect(text).to include('time (ms)')
+  end
+
+  it 'saves a plot in dB' do
+    path = tmp_path('env.txt')
+    text = run('--db', '60', '-S', path, '0.01', '0.1', '0.5', '0.2')
+    expect(text).to include("Wrote #{path}")
+    expect(File.read(path)).to include('level (dB)', '-60')
+  end
 end

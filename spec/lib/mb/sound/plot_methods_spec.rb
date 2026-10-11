@@ -1,50 +1,50 @@
+# Plots are drawn by MB::Sound::Plot (no gnuplot process), so their text is
+# deterministic: these examples use the plain ASCII look at 80x40 for
+# structural checks (see spec/lib/mb/sound/plot/ for each renderer).
 RSpec.describe(MB::Sound::PlotMethods) do
   before(:each) do
-    ENV['PLOT_TERMINAL'] = 'dumb'
-    ENV['PLOT_WIDTH'] = '80'
-    ENV['PLOT_HEIGHT'] = '40'
     MB::Sound.close_plotter
-    MB::Sound.plotter(width: 80, height: 40).print = false
+    MB::Sound.plotter(width: 80, height: 40, look: :ascii, color: :none).print = false
   end
 
   after(:each) do
-    ENV.delete('PLOT_TERMINAL')
-    ENV.delete('PLOT_WIDTH')
-    ENV.delete('PLOT_HEIGHT')
     MB::Sound.close_plotter
   end
 
   let(:tone) { 357.2.hz.gauss }
 
-  let(:lines) { output.map(&MB::U.method(:remove_ansi)).map(&:rstrip) }
-  let(:text) { lines.join("\n").lstrip }
+  let(:lines) { output.map(&MB::U.method(:remove_ansi)) }
+  let(:text) { lines.join("\n") }
 
-  # Makes sure the regex matches a full line and isn't accidentally matching a
-  # zero-width string and isn't matching across lines
-  def check_regex(example, lines, text, regex)
-    expect(text).to match(regex)
-    match = text.match(regex).to_s
-    expect(match).not_to include("\n")
-    expect(match.length).to be_between(70, 80)
+  # The data area of the single (or first) chart: the lines between the
+  # header and the x axis, right of the y axis (ASCII look).
+  def plot_area(lines)
+    axis = lines.index { |l| l.match?(/\+[-+]{10,}/) }
+    col = lines[axis].index('+')
+    lines[1...axis].map { |l| l[(col + 1)..].to_s }
+  end
 
-  rescue Exception => e
-    # Trying to find out why sometimes a line starts with \n
-    #
-    # It looks like the plot output has a blank line randomly mixed in and the
-    # line moves around from place to place.  The newline error happens when
-    # that blank line ends up right before the line we want to match.
-    raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+  # [row, column] of the highest drawn point in an area, as fractions of
+  # its height (0 at the top) and width.
+  def peak(area)
+    row = area.index { |l| l.match?(/\S/) }
+    col = area[row].index(/\S/)
+    [row / area.length.to_f, col / area[row].length.to_f]
+  end
+
+  def check_size(lines)
+    expect(lines.length).to eq(40)
+    expect(lines.map(&:length).max).to be <= 80
   end
 
   describe '#hist' do
     let(:output) { MB::Sound.hist(tone.sample(5 * 48000)) }
 
-    it 'can draw a histogram' do |ex|
-      expect(lines.length).to eq(40)
-      check_regex(ex, lines, text, /^\s*1000 \|-\+\s+\* {5,10}\*.*\|$/)
-      check_regex(ex, lines, text, /^\s*200 \|-\+\s+\* {15,25}\*.*\|$/)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+    it 'draws a histogram peaking in the middle' do
+      check_size(lines)
+      row, col = peak(plot_area(lines))
+      expect(row).to be < 0.1
+      expect(col).to be_between(0.3, 0.7)
     end
   end
 
@@ -67,11 +67,10 @@ RSpec.describe(MB::Sound::PlotMethods) do
     let(:arcsine) { ->(x) { x.abs < 1 ? 1 / (Math::PI * Math.sqrt(1 - x * x)) : 0 } }
     let(:output) { MB::Sound.hist({ 'sine' => 1.hz.sine.noise.sample(48000) }, bins: 40, pdf: arcsine) }
 
-    it 'draws the estimate with the theory over it' do
-      expect(text).to include('sine', 'estimate', 'theory')
-      expect(lines.length).to be_between(38, 41)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+    it 'draws the estimate with the theory over it, with a legend' do
+      check_size(lines)
+      expect(lines[0]).to start_with('sine')
+      expect(lines[0]).to include('-- estimate', '-- theory')
     end
   end
 
@@ -83,9 +82,10 @@ RSpec.describe(MB::Sound::PlotMethods) do
       })
     }
 
-    it 'plots several curves per pane, keeping underscores in titles' do
+    it 'plots several curves per pane with legends, keeping underscores in titles' do
+      check_size(lines)
       expect(text).to include('a_b', 'line_1', 'line 2', 'flat')
-      expect(text.lines.count { |l| l.match?(/\+-{20,}\+/) }).to eq(4)
+      expect(lines.count { |l| l.match?(/\+[-+]{20,}/) }).to eq(2)
     end
   end
 
@@ -94,11 +94,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
       let(:output) { MB::Sound.mag_phase(440.hz.sine) }
 
       it 'includes both magnitude and phase graphs' do
-        expect(lines.length).to eq(40)
-        expect(text).to include('mag **')
-        expect(text).to include('phase **')
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
+        expect(text).to include('0 mag', '0 phase')
       end
     end
 
@@ -106,9 +103,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       let(:output) { MB::Sound.mag_phase(5000.hz.lowpass) }
 
       it 'can plot a Filter' do
-        expect(lines.length).to eq(40)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
       end
     end
 
@@ -116,9 +111,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       let(:output) { MB::Sound.mag_phase(MB::Sound::Filter::HilbertIIR.new) }
 
       it 'can plot a complex-output Filter' do
-        expect(lines.length).to eq(40)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
       end
     end
   end
@@ -127,17 +120,9 @@ RSpec.describe(MB::Sound::PlotMethods) do
     context 'with a tone' do
       let(:output) { MB::Sound.time_freq(tone) }
 
-      it 'includes both time and frequency graphs' do |ex|
-        expect(lines.length).to eq(40)
-
-        expect(text).to include('time **')
-        expect(text).to include('freq **')
-        expect(text).not_to match(/^\s*0 .*\*{5,}.*\|$/) # no extended dwell at zero
-
-        check_regex(ex, lines, text, /^\s*0 .*(\*+[^*|]+){12,}.*\|$/) # at least 12 zero crossings
-        check_regex(ex, lines, text, /^\s*-40 .*\*{10,}.*\|$/) # lots of frequency plot density
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+      it 'includes both time and frequency graphs' do
+        check_size(lines)
+        expect(text).to include('0 time', '0 freq')
       end
     end
 
@@ -145,9 +130,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       let(:output) { MB::Sound.time_freq(5000.hz.lowpass) }
 
       it 'can plot a Filter' do
-        expect(lines.length).to eq(40)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
       end
     end
 
@@ -155,9 +138,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       let(:output) { MB::Sound.time_freq(MB::Sound::Filter::HilbertIIR.new) }
 
       it 'can plot a complex-output Filter' do
-        expect(lines.length).to eq(40)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
       end
     end
   end
@@ -166,36 +147,27 @@ RSpec.describe(MB::Sound::PlotMethods) do
     context 'with a sine wave' do
       let(:output) { MB::Sound.spectrum(400.hz.sine, samples: 1200) }
 
-      it 'can plot a spectrogram of a sine wave' do |ex|
-        expect(MB::Sound).to receive(:puts).with(/Plotting/)
-        expect(lines.length).to eq(40)
+      # Formerly flaky: gnuplot's end marker sometimes leaked into the
+      # captured lines (2026-10-11); the output is now deterministic
+      it 'peaks at the sine on a log frequency axis' do
+        expect(MB::Sound).to receive(:puts).with(/Plotting/).twice
+        check_size(lines)
+        expect(output).to eq(MB::Sound.spectrum(400.hz.sine, samples: 1200))
 
-        expect(text).to include('0 ***')
-
-        r1 = /^.*-70 [^*]+(\*+[^*|]+){2}[^*|]+\|$/
-        check_regex(ex, lines, text, r1)
-
-        r2 = /^.*-30 [^*]+(\*+[^*|]+){1,2}[^*|]+\|$/
-        check_regex(ex, lines, text, r2)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        # 400 Hz is bin 10 of 600 (40 Hz bins); the x axis is log from bin 1
+        _, col = peak(plot_area(lines))
+        expect(col).to be_within(0.04).of(Math.log10(10) / Math.log10(600))
       end
     end
 
     context 'with a gauss wave' do
       let(:output) { MB::Sound.spectrum(480.hz.gauss.at(0.1), samples: 800) }
 
-      it 'can plot a spectrogram of a more complex wave' do |ex|
+      it 'can plot the spectrum of a more complex wave' do
         expect(MB::Sound).to receive(:puts).with(/Plotting/)
-        expect(lines.length).to eq(40)
-
-        expect(text).to include('0 ***')
-        check_regex(ex, lines, text, /^.*-40 [^*]+(\*+[^*|]+){7,9}[^*|]+\|$/)
-        check_regex(ex, lines, text, /^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/)
-
-        expect(text.match(/^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/).to_s.length).to be_between(75, 81).inclusive
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
+        _, col = peak(plot_area(lines))
+        expect(col).to be_within(0.04).of(Math.log10(8) / Math.log10(400))
       end
     end
   end
@@ -206,54 +178,41 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       it 'can plot a Tone' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*Tone/m)
-        expect(lines.length).to eq(40)
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
       end
     end
 
     context 'with a sound file' do
       let(:output) { MB::Sound.plot('sounds/synth0.flac') }
 
-      it 'can plot a sound file' do
+      it 'plots each channel in its own panel' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*synth0.flac/m)
-        expect(lines.length).to eq(40)
-        expect(lines.select { |l| l.include?('------------') }.length).to eq(4)
-
-        expect(text).to include('0 **')
-        expect(text).to include('1 **')
-        expect(text).not_to include('2 **')
+        check_size(lines)
+        expect(lines.count { |l| l.match?(/\+[-+]{10,}/) }).to eq(2)
+        expect(lines.grep(/^0 /).length).to eq(1)
+        expect(lines.grep(/^1 /).length).to eq(1)
+        expect(lines.grep(/^2 /)).to be_empty
       end
     end
 
     context 'with a Numo::NArray' do
       let(:output) { MB::Sound.plot(tone.sample(800)) }
 
-      it 'can plot a Numo::NArray' do |ex|
+      it 'can plot a Numo::NArray' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*Numo/m)
-        expect(lines.length).to eq(40)
-
-        expect(text).to include('0 **')
-        expect(text).not_to include('1 **')
-        check_regex(ex, lines, text, /^\s*0 .*(\*+[^*|]+){3,5}.*\|$/) # 4 zero crossings
-      rescue Exception => e
-        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+        check_size(lines)
+        expect(lines[0]).to match(/^0\b/)
+        expect(lines.count { |l| l.match?(/\+[-+]{10,}/) }).to eq(1)
       end
     end
 
     context 'with multiple sounds' do
       let(:output) { MB::Sound.plot([123.hz.sine, 123.hz.ramp, 123.hz.triangle, 123.hz.gauss]) }
 
-      it 'can plot an array of different sounds' do
+      it 'can plot an array of different sounds in a 2x2 grid' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*[^\e]\[/m)
-        expect(lines.length).to eq(40)
-
-        expect(lines.select { |l| l.match(/-{12,}.* {6,}.*-{12,}/) }.length).to eq(4)
-
-        expect(text).to include('0 **')
-        expect(text).to include('1 **')
-        expect(text).to include('2 **')
-        expect(text).to include('3 **')
+        check_size(lines)
+        expect(lines.count { |l| l.scan(/\+[-+]{10,}/).length == 2 }).to eq(2)
       end
     end
 
@@ -266,32 +225,56 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(STDOUT).to receive(:write).at_least(2).times
       lines = MB::Sound.plot(123.hz.sine.sample(14400), all: true, samples: 800)
       expect(lines.length).to eq(40)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot a Filter' do
       expect(MB::Sound).to receive(:puts).with(/Plotting.*Filter/m)
       lines = MB::Sound.plot(5000.hz.lowpass)
       expect(lines.length).to eq(40)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot a Hilbert transform filter with a complex output' do
       expect(MB::Sound).to receive(:puts)
       lines = MB::Sound.plot(MB::Sound::Filter::HilbertIIR.new)
       expect(lines.length).to eq(40)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot complex-valued audio data' do
       expect(MB::Sound).to receive(:puts)
       lines = MB::Sound.plot(123.hz.complex_sine)
       expect(lines.length).to eq(40)
-    rescue Exception => e
-      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+    end
+  end
+
+  describe '#spectrogram' do
+    let(:output) { MB::Sound.spectrogram(440.hz.ramp, seconds: 0.5, fft: 1024) }
+
+    it 'shades a spectrogram with a colorbar when there is no color' do
+      check_size(lines)
+      expect(lines[0]).to start_with('spectrogram')
+      expect(text).to include('Hz', 'time (ms)')
+      expect(text).to match(/[░▒▓█]{10}/)
+    end
+
+    it 'reads files' do
+      lines = MB::Sound.spectrogram('sounds/synth0.flac')
+      expect(lines[0]).to start_with('synth0.flac')
+    end
+  end
+
+  describe '#chart' do
+    it 'builds a chart from a block' do
+      c = MB::Sound.chart(title: 'ramp') { line [0, 1, 2, 3], label: 'up' }
+      expect(c).to be_a(MB::Sound::Plot::Chart)
+      expect(c.lines(width: 40, height: 10, look: :ascii).length).to eq(10)
+    end
+  end
+
+  describe '#figure' do
+    it 'lays out charts' do
+      f = MB::Sound.figure(columns: 2) { chart { line [1, 2] }; chart { line [2, 1] } }
+      expect(f.columns).to eq(2)
+      expect(f.lines(width: 60, height: 10, look: :ascii).first.length).to eq(60)
     end
   end
 

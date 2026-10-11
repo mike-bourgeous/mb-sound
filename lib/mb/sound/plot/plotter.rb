@@ -128,7 +128,7 @@ module MB
 
         # Plots a Hash of titles to data (or Hashes with :data and the
         # options of MB::M::Plot#plot: :xrange, :yrange, :logscale, :type,
-        # :x_label, :y_label) as a grid of charts, +columns+ wide.  Prints
+        # :x_label, :y_label, plus :x for x values) as a grid of charts, +columns+ wide.  Prints
         # text plots and returns nil, or returns the lines with +print:
         # false+ (or #print false).
         def plot(data, rows: nil, columns: nil, print: true)
@@ -187,7 +187,7 @@ module MB
             }
           end
 
-          xs = nil
+          xs = info[:x]
           ys = data
           if data.is_a?(Array) && !data.empty? && data.all?(Array)
             xs = data.map { |v| v[0].is_a?(Complex) ? v[0].abs : v[0] }
