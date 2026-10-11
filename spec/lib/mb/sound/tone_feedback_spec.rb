@@ -47,7 +47,7 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
       },
       'DC kept (dc: true)' => -> { 211.hz.fm(3.hz.lfo.at(40)).fm_feedback(2.2.radians, dc: true) },
       'an LFO-rate feedback sine with DC removal' => -> { 3.hz.fm_feedback(1.5.radians).at(0.2..0.8) },
-      'cycles and a node gain' => -> { 150.hz.fm_feedback_cycles(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
+      'cycles and a node gain' => -> { 150.hz.fm_feedback(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
       'resets keeping the feedback history' => -> {
         t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[7, 300, 301, 900]] = 1 }])
         170.hz.fm_feedback(1.9.radians).reset(t, keep_feedback: true)
@@ -163,15 +163,16 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
     end
   end
 
-  it 'takes the amount in cycles (also as #fm_feedback_cycles), or a radians Phase' do
-    a = 125.hz.fm_feedback_cycles(0.25).sample(2000).dup
+  it 'takes the amount in cycles (0.25 or 0.25.cycles), or a radians Phase' do
+    a = 125.hz.fm_feedback(0.25.cycles).sample(2000).dup
     b = 125.hz.fm_feedback(0.25).sample(2000).dup
     c = 125.hz.fm_feedback((0.5 * Math::PI).radians).sample(2000).dup
     expect(a).to eq(b)
     expect(c).to eq(b)
-    expect(100.hz.fm_fb_cycles(0.1).fm_feedback_amount).to eq(0.1)
-    expect(100.hz.fmfb_cycles(0.1).fm_feedback_amount).to eq(0.1)
-    expect(100.hz.sine.fmfb_cycles(0.1).fm_feedback_amount).to eq(0.1)
+    expect(100.hz.fm_fb(0.1).fm_feedback_amount).to eq(0.1)
+    expect(100.hz.fmfb(0.1).fm_feedback_amount).to eq(0.1)
+    expect(100.hz.sine.fmfb(0.1).fm_feedback_amount).to eq(0.1)
+    expect(100.hz).not_to respond_to(:fm_feedback_cycles) # removed 2026-10-11 (cycles are the default)
     expect(100.hz.fm_feedback(1.5.radians).fm_feedback_amount).to be_within(1e-15).of(1.5 / (2 * Math::PI))
   end
 

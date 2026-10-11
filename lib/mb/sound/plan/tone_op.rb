@@ -92,7 +92,7 @@ module MB
           def tolerance
             return 0.0 unless @fast
 
-            gain, offset = @tone.send(:gain_and_offset)
+            gain, _offset = @tone.send(:gain_and_offset)
             FAST_TOLERANCE * [gain.abs, 1].max * (@gain.is_a?(Const) ? [@gain.value.abs, 1].max : 1)
           end
 

@@ -225,7 +225,6 @@ module MB
 
         # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.
         def to_s
-          names = @multiplicands.keys.map(&method(:make_source_name))
           "#{super} -- #{arithmetic_string}"
         end
 

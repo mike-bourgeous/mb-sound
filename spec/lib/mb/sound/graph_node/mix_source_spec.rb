@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::GraphNode::MixSource) do
   it 'returns copies so graphs can sample a channel twice and modify the result' do
     source.write(data)
     a = source.outputs[0].sample(3)
-    a.inplace * 10
+    a[0] = 10
     expect(source.outputs[0].sample(3)).to eq(data[0])
     expect(data[0]).to eq(Numo::SFloat[1, 2, 3])
   end

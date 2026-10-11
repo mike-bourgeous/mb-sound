@@ -230,7 +230,6 @@ module MB
           # TODO: What needs to be done differently if an odd filter length is
           # given to the constructor?
           @filter_length ||= (@sample_rate.to_f / mindiff / 2).ceil * 2
-          hz_per_bin = @sample_rate.to_f / @filter_length
 
           final_gain_map = {}
 

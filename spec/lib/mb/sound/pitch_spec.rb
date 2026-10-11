@@ -56,6 +56,38 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     end
   end
 
+  describe '#period' do
+    it 'is a Length of seconds (and of samples at the pitch rate)' do
+      expect(200.hz.period).to be_a(MB::Sound::Length::Seconds)
+      expect(200.hz.period.to_f).to eq(0.005)
+      expect(200.hz.period_samples).to be_a(MB::Sound::Length::Samples)
+      expect(200.hz.period_samples.to_f).to eq(240)
+      expect(200.hz.at_rate(96000).period_samples.to_f).to eq(480)
+      expect(200.hz.sine.period).to eq(0.005.seconds)
+      expect(200.hz.sine.period_samples).to eq(240.0.samples)
+      expect(MB::Sound::Tone.new(frequency: 3.hz.lfo.at(100..200)).period).to be_nil
+    end
+
+    it 'gives delays and envelopes the same samples as a plain seconds length' do
+      take = ->(n) { 3.times.map { n.sample(500)&.dup }.compact.inject(:concatenate) } # the envelope ends
+      [
+        ->(l) { 100.hz.ramp.delay(l, smoothing: false) },
+        ->(l) { MB::Sound.adsr(0, 0, 1, 0, hold: l) * 1 },
+        ->(l) { (100.hz.ramp * 0.1).feedback { |fb, i| i + fb.delay(l) * 0.5 } },
+      ].each do |make|
+        expect(take.(make.(220.hz.period))).to eq(take.(make.(220.hz.period.to_f.seconds)))
+      end
+    end
+
+    it 'prints back as the call that made it' do
+      expect(1.constant.delay(220.hz.period).to_ruby).to eq('1.constant.delay(220.hz.period)')
+      expect(1.constant.delay(MB::Sound::A4.period_samples).to_ruby).to eq('1.constant.delay(A4.period_samples)')
+      osc = 110.hz.sine
+      expect((osc + 1.constant.delay(osc.period)).to_ruby).to include('osc.period')
+      expect(1.constant.delay((1r / 110).seconds).to_ruby).to eq('1.constant.delay((1r/110).seconds)') # a typed Rational
+    end
+  end
+
   describe '#to_note' do
     it 'finds the nearest note in the current tuning' do
       expect(440.hz.to_note.name).to eq('A4')
@@ -68,6 +100,8 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     it 'use the current frequency' do
       expect(1000.hz.lowpass.center_frequency).to eq(1000)
       expect(100.hz.highpass(quality: 2).quality).to eq(2)
+      expect(1000.hz.peak(octaves: 1.oct).bandwidth_oct).to eq(1.0)
+      expect(1000.hz.sine.peak(octaves: 6.st).bandwidth_oct).to eq(0.5)
     end
   end
 

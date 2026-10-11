@@ -166,7 +166,7 @@ module MB
         # moves a frame's DC offset by this times (2w - 1) (see
         # Tone#pwm).  Only odd harmonics count.
         def half_means(spectra)
-          rows, cols = spectra.shape
+          rows = spectra.shape[0]
           out = Numo::DFloat.zeros(rows)
           return out if rows == 0
 

@@ -93,7 +93,7 @@ RSpec.describe(MB::Sound::Phase) do
 
   describe 'in oscillator methods' do
     it 'starts tones at a phase in cycles (#with_phase)' do
-      expect(take(440.hz.with_phase(0.25))).to eq(take(440.hz.sine.with_phase_cycles(0.25)))
+      expect(take(440.hz.with_phase(0.25))).to eq(take(440.hz.sine.with_phase(0.25)))
       expect(take(440.hz.with_phase(0.25.cycles))).to eq(take(440.hz.sine.with_phase(0.25)))
       expect(take(440.hz.with_phase((Math::PI / 2).radians))).to eq(take(440.hz.sine.with_phase(0.25)))
       expect(take(440.hz.with_phase(MB::Sound::Phase.degrees(90)))).to eq(take(440.hz.sine.with_phase(0.25)))
@@ -101,11 +101,10 @@ RSpec.describe(MB::Sound::Phase) do
       expect { 440.hz.sine.with_phase(2.hz.lfo) }.to raise_error(ArgumentError, /cycles/)
     end
 
-    it 'takes PM depths in cycles (#pm index, #pm_cycles, node.radians)' do
+    it 'takes PM depths in cycles (#pm index, node.radians)' do
       ref = take(110.hz.sine.pm(330.hz.sine, 0.4))
       expect(take(110.hz.sine.pm(330.hz.sine, 0.4.cycles))).to eq(ref)
-      expect(take(110.hz.sine.pm_cycles(330.hz.sine, 0.4))).to eq(ref)
-      expect(take(110.hz.pm_cyc(330.hz.sine, 0.4))).to eq(ref)
+      expect(take(110.hz.pm(330.hz.sine, 0.4))).to eq(ref)
       expect(take(110.hz.sine.pm(330.hz.sine, (Math::PI * 0.8).radians))).to all_be_within(1e-6).of_array(ref)
 
       # Without an index the modulator's own level is in cycles
@@ -127,7 +126,6 @@ RSpec.describe(MB::Sound::Phase) do
       expect(55.hz.saw.reset(trig, to: Math::PI.radians).reset_to).to eq(0.5)
       expect(110.hz.sine.fm_feedback(0.3.cycles).fm_feedback_amount).to eq(0.3)
       expect(110.hz.sine.fm_feedback(0.3).fm_feedback_amount).to eq(0.3)
-      expect(110.hz.sine.fm_feedback_cycles(0.3).fm_feedback_amount).to eq(0.3)
 
       u1 = take(MB::Sound.with_seed(1) { 110.hz.unison(3, phase: 0.25) { |p| p.sine } })
       u2 = take(MB::Sound.with_seed(1) { 110.hz.unison(3, phase: (Math::PI / 2).radians) { |p| p.sine } })

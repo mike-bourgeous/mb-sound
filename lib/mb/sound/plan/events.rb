@@ -128,7 +128,7 @@ module MB
         def first_value
           return 0.0 if @data.length < 1 + ENTRY_SIZE || @data[0] != MODE_HELD
 
-          kind, from, to, a, b = @data[1, 5]
+          kind, from, _to, a = @data[1, 4]
           return 0.0 unless from == 0
           case kind
           when FILL then Plan.float32(a)

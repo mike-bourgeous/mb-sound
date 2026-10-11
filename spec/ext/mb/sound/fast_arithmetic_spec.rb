@@ -32,8 +32,7 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       if gain == 1
         out.inplace + v
       else
-        tmp.fill(gain).inplace * v
-        out.inplace + tmp
+        out.inplace + (tmp.fill(gain).inplace * v)
       end
     end
     out.not_inplace!

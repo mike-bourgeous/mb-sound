@@ -136,6 +136,7 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
       expect(taps).to be_a(described_class)
       l, r = taps
       expect(l).to be_a(MB::Sound::GraphNode::MultitapDelay::DelayTap)
+      expect(r).to be_a(MB::Sound::GraphNode::MultitapDelay::DelayTap)
 
       input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(10), Numo::SFloat.zeros(10)])
       expect(input.split).to be_a(described_class)

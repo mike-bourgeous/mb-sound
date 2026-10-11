@@ -178,7 +178,7 @@ module GraphSweep
 
       # Arithmetic and routing
       ['arithmetic', ->(c) { (c.sig * c.mod(0, 1) + 0.1.constant - c.sig(55) / 2.constant.+(c.mod(0, 1))) }],
-      ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2).floor + c.sig.round + c.sig.ceil }],
+      ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2 + c.mod(1, 4).log10).floor + c.sig.round + c.sig.ceil }],
       ['complex parts', ->(c) { c.sig.real + 200.hz.complex_sine.imag + 200.hz.complex_sine.arg }],
       ['constant smooth', ->(c) { 0.5.constant(smoothing: 0.01) + c.sig }],
       ['proc', ->(c) { c.sig.proc { |buf| buf * 0.5 } }],
