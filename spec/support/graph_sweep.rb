@@ -187,6 +187,14 @@ module GraphSweep
       ['until and and_then (TimeLimit, NodeSequence, Silence)', ->(c) { c.sig.until(0.002).and_then(c.s.silence(0.001), c.sig(220)) }],
       ['ringdown', ->(c) { c.sig.until(0.003).ringdown }],
       ['sample_hold', ->(c) { c.sig.sample_hold(c.trigger) + c.mod(0, 1).sah(range: -1..1) }],
+      ['knob (held)', ->(c) { c.sig.filter(:lowpass, cutoff: MB::Sound::GraphNode::Knob.new(:held, 800, range: 50..4000, curve: :exp), quality: 2) }],
+      ['knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)', ->(c) {
+        k = MB::Sound::GraphNode::Knob.new(:sweep, 300, range: 50..4000, curve: :exp)
+        k.ramp_to(2000, frames: 900, frame: 20, curve: :smooth)
+        k.set(500, frame: 1500, smooth: 0)
+        k.follow(c.mod(100, 3000), frame: 2400)
+        c.sig.filter(:lowpass, cutoff: k, quality: 2) + k * 0.0001
+      }],
       ['ArrayInput', ->(c) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(3000).rand(-1, 1)], repeat: 2) }],
       ['NullInput', ->(c) { MB::Sound::NullInput.new(sample_rate: 48000, channels: 2) }],
 
@@ -209,6 +217,19 @@ module GraphSweep
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60) }],
+
+      # Dynamics
+      ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {
+        c.stereo_sig.compress(threshold: -20, ratio: 4, detector: :rms, lookahead: 8.samples, hold: 0.002, sidechain: c.sig(55),
+                              upward_threshold: -40, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
+      }],
+      ['compand cubic, expand, noise_gate, duck', ->(c) {
+        c.sig.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30).noise_gate(threshold: -60).duck(c.trigger, amount: -6)
+      }],
+      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60, -70, :smooth], [-20, -20], [0, -8]], link: false) }],
+      ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3, link: false) }],
+      ['squeeze default, mono', ->(c) { c.sig.squeeze(time: 0.5) }],
+      ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],
       ['ping (Resonator)', ->(c) { c.trigger.ping(c.mod(200, 2000), decay: 0.05) }],
 
       # Feedback loops

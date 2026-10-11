@@ -30,6 +30,7 @@ require_relative 'sound/fast_reverb'
 require_relative 'sound/fast_unison'
 require_relative 'sound/fast_control'
 require_relative 'sound/fast_loudness'
+require_relative 'sound/fast_dynamics'
 require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
 
@@ -50,6 +51,8 @@ require_relative 'sound/sequence_methods'
 require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
+require_relative 'sound/knob_methods'
+require_relative 'sound/record_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
 require_relative 'sound/envelope_methods'
@@ -79,6 +82,8 @@ module MB
     extend ScheduleMethods
     extend ArrangementMethods
     extend FormMethods
+    extend KnobMethods
+    extend RecordMethods
     extend MultichannelMethods
     extend TuningMethods
     extend WarmUpMethods
@@ -148,6 +153,7 @@ require_relative 'sound/synth'
 require_relative 'sound/drums'
 require_relative 'sound/session'
 require_relative 'sound/take'
+require_relative 'sound/arrangement/recording'
 require_relative 'sound/arrangement'
 require_relative 'sound/form'
 
@@ -174,3 +180,4 @@ require_relative 'sound/io_logger'
 # every DSL method exists
 require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
+require_relative 'sound/graph_io'

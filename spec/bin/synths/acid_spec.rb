@@ -1,7 +1,7 @@
 require 'shellwords'
 
 RSpec.describe('bin/synths/acid.rb') do
-  before(:all) { load File.expand_path('../../../bin/synths/acid.rb', __dir__) }
+  before(:all) { require File.expand_path('../../../bin/synths/acid.rb', __dir__) } # (night_bus_set.rb requires it too)
 
   # Renders +count+ samples of +node+ in 800-sample buffers
   def render(node, count)

@@ -303,8 +303,14 @@ module MB
         both = positional.keys & options.keys
         raise ArgumentError, "#{both.join(', ')} given twice" unless both.empty?
 
-        new(**settings, **positional, **options)
+        env = new(**settings, **positional, **options)
+        env.instance_variable_set(:@preset_name, name)
+        env
       end
+
+      # The preset this envelope was made from (e.g. :amp_env, so a track
+      # with `lead: :attack` can find a patch's amplitude envelope), or nil.
+      attr_reader :preset_name
 
       # Returns a Hash of curves for each segment (see SEGMENTS) from any
       # curve specification: a preset Symbol (see CURVES), a number or graph

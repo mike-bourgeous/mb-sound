@@ -15,6 +15,9 @@ require_relative 'session/seeks'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
+require_relative 'session/knobs'
+require_relative 'session/midi_in'
+require_relative 'session/audio_recording'
 
 module MB
   module Sound
@@ -60,6 +63,9 @@ module MB
       include ClipSwaps
       include Seeks
       include GraphView
+      include Knobs
+      include MidiIn
+      include AudioRecording
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -250,6 +256,9 @@ module MB
         init_changes
         init_strip
         init_undo
+        init_knobs
+        init_midi_in
+        init_audio_recording
         @names = Names.new
         @arrangement = nil
       end
@@ -280,6 +289,12 @@ module MB
           end
           playing
         }
+      end
+
+      # The Sequence::TimelineNodes in +sound+ (a graph, an Array of them,
+      # or a bundle), as #add finds them.
+      def timeline_nodes_in(sound)
+        to_nodes(sound).flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
       end
 
       # The timeline nodes of the player named +name+ (playing, stopped, or
@@ -537,6 +552,14 @@ module MB
         }
       end
 
+      # Changes the description #players shows for the player named +name+
+      # (e.g. after a recording swapped a new clip into it).
+      def describe_player(name, description)
+        @mutex.synchronize {
+          @players.each_value { |p| p.description = shorten(description) if p.name == name && p.current? }
+        }
+      end
+
       # How busy rendering the last buffer was: its render time (before
       # writing to the output) divided by its length in time, e.g. 0.25 when
       # rendering takes a quarter of real time.  Nil before the first buffer.
@@ -624,6 +647,7 @@ module MB
         mix = mix.map { |c| c * @master_gain } if @master_gain != 1
 
         output.write(mix)
+        record_mix(mix, @frame - count)
         call_taps(mix)
         mix
       end
@@ -649,9 +673,16 @@ module MB
 
         @scheduler.dispatch(from, to, playing: !idle?)
 
+        # MIDI input lands on exact frames before changes (a recording
+        # closing in this span needs its events) and graphs read it
+        pump_midi(@frame, count, from, per_sample)
+
         # Changes landing in this span, after scheduled blocks (which may
         # queue some for it)
         commit_due(from, to, per_sample)
+
+        # Knobs move before anything reads them (see Knobs)
+        advance_knobs(@frame, count) unless @knobs.empty?
 
         players = @mutex.synchronize { @players.values }
 
@@ -667,6 +698,8 @@ module MB
         @frame += count
         @transport_record = transport_record_for(playing)
         mix
+      ensure
+        @knob_frame = nil
       end
       private :render_span
 
@@ -675,6 +708,8 @@ module MB
         return if @closed
         @closed = true
         @thread&.join(5)
+        close_recordings
+        midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
         @scheduler.close
         @output&.close
       end

@@ -16,6 +16,7 @@ require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
+require_relative 'graph_node/dynamics_methods'
 
 module MB
   module Sound
@@ -74,6 +75,7 @@ module MB
       include DebugMethods
       include ChannelMethods
       include ChorusMethods
+      include DynamicsMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -300,6 +302,7 @@ require_relative 'graph_node/sample_rate_helper'
 require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
+require_relative 'graph_node/knob'
 require_relative 'graph_node/silence'
 require_relative 'graph_node/time_limit'
 require_relative 'graph_node/input_channel_split'
@@ -337,6 +340,7 @@ require_relative 'graph_node/channel_mixer/unison'
 require_relative 'graph_node/reverb'
 require_relative 'graph_node/semitone_shift'
 require_relative 'graph_node/resonator'
+require_relative 'graph_node/dynamics'
 
 # Generates per-channel DSL methods, so it must load after every *Methods module
 require_relative 'graph_node/channel_dispatch'

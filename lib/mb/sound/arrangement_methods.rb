@@ -23,9 +23,13 @@ module MB
       # Defines a track (see Arrangement#track): a named player that
       # remembers its patch (a block building a graph from a clip) or graph,
       # its clip, and its launch quantization +q:+.  `bg :name, clip` and
-      # scenes play clips on it.  Also available as #define_track.
-      def track(name, graph = nil, q: nil, fade: nil, &patch)
-        Session.current.arrangement.track(name, graph, q: q, fade: fade, &patch)
+      # scenes play clips on it.  +lead:+ plays it early (bars, a Duration
+      # or Length, or :attack for its amp envelope's attack, so slow pads
+      # peak on the beat), +nudge:+ moves its notes by a fixed time (e.g.
+      # `nudge: 6.ms` pulls a backbeat late).  Also available as
+      # #define_track.
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, &patch)
+        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, &patch)
       end
       alias define_track track
 

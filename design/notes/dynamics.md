@@ -1,0 +1,74 @@
+# Dynamics (compressor, compander, ducking, limiter, multiband)
+
+Branch dynamics-1 (2026-10-11).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+
+Maintainer's asks: a limiter for the master chain (oscillators are full scale, the master bus is -10 dB), lookahead brickwall and true-peak aware, plus a clipper-style option; a classic feed-forward compressor with a sidechain input as a node; tech house ducking ("bass needs to be louder"); multiband OTT-style upward + downward compression on Linkwitz-Riley crossovers; an arbitrary piecewise compander (2026-10-11), with monotone cubic segments.
+
+## Survey (from memory; marked where unverified)
+
+- Giannoulis, Massberg, Reiss, "Digital Dynamic Range Compressor Design: A Tutorial and Analysis" (JAES 60(6), 2012).  The recommended structure: level detection in dB (`x_L = 20 log10 |x|`), a static gain computer with a quadratic soft knee (below `T - W/2` unity, inside the knee `y = x + (1/R - 1)(x - T + W/2)^2 / (2W)`, above `T + W/2` `y = T + (x - T)/R`), then the gain (`y - x_L`) smoothed in the log domain with a branching one-pole (attack coefficient when the gain falls, release when it rises), then makeup.  They compare detector placements (smoothing the level before the gain computer vs the gain after it; the log-domain gain smoother avoids the release-dependent "attack lag" of linear-domain detectors and keeps the knee exact).  Their "smooth decoupled" peak detector adds a release stage inside the attack stage; I recalled but did not reverify its exact equations, so the branching smoother is what's built.  The quadratic knee formula above is verified by its own properties in the specs (continuous value and slope at both knee edges).
+- True-peak limiting: BS.1770-4 Annex 2's 4x polyphase interpolator (12 taps per phase) estimates inter-sample peaks; `fast_loudness` and `Loudness::TruePeak::PHASES` already have it.  Commercial true-peak limiters oversample the gain detection (and sometimes the gain application); the latency of the interpolator (about 6 samples here) adds to the lookahead.
+- Lookahead brickwall (common design, e.g. in open-source limiters such as Signalsmith's write-up; unverified details): required gain per sample `min(1, ceiling / |x|)`, a sliding minimum over the lookahead window, an instant-attack release smoother, then a moving average over the same window, with the audio delayed so the average has reached the peak's required gain when the peak arrives.  Because every value averaged is at most the peak's required gain, the output never exceeds the ceiling (up to float rounding; a final clamp catches that).
+- Linkwitz-Riley crossovers: LR(2n) is a Butterworth-n lowpass squared and highpass squared; since `B_n(s) B_n(-s) = 1 + (-1)^n s^(2n)`, low + high is the allpass `B_n(-s)/B_n(s)` (LR2 needs the high band inverted).  Multi-band trees stay flat when each lower band also passes the higher crossovers' allpasses.  TPT SVFs keep these identities exactly in the digital domain (same bilinear mapping for every branch).
+- OTT (Xfer, free; descended from Ableton's "OTT" multiband preset): three bands (crossovers about 88 Hz and 2.5 kHz, unverified), each with downward compression at a very high ratio (about 66:1, unverified) above a threshold and upward compression (about 4:1, unverified) below a lower one, per-band output gains, `depth` as a parallel mix, `time` scaling attack/release.  Built here from the same pieces, with values chosen by ear and measured, not copied.
+
+## Design
+
+One gain-computer core, several faces (`lib/mb/sound/graph_node/dynamics.rb`, kernel `ext/mb/sound/fast_dynamics`, exact mirror `Dynamics.process_ruby`):
+
+1. **Detector**: `:peak` (|x| per sample) or `:rms` (one-pole mean square over `rms:` time, default 10 ms), in dB with a floor of -200 dB.  Linked (default): one detector for all channels, driven by the loudest channel each sample (max of |x| or of x^2); `link: false` gives each channel its own.  The detector reads the `sidechain:` (any node or bundle; one sidechain channel drives every channel) instead of the input when given.
+2. **Gain computer**: a transfer curve, input level dB → output level dB, as segments `[x0, y0, b, c, d]` (`y = y0 + b dx + c dx^2 + d dx^3`, dx = x - x0) found by binary search; the first and last segments are linear, so the curve continues its end slopes.  Every face builds its segments in Ruby: the compressor's quadratic knee exactly, upward compression and expansion as extra linear segments, the compander's points linearly, as monotone cubics (Fritsch-Carlson / PCHIP slopes, never overshooting), or with a Curve shape per segment (sampled at 32 points and joined by monotone cubics), and a block form sampled every dB.  The gain is `y - x_L`, clamped to `range` (lowest, for gates and expanders) and `max_gain` (highest, for upward compression and the compander).
+3. **Smoothing**: the gain in dB through a branching one-pole: `down` time while the gain falls, `up` time while it rises (compressors and ducks: attack = down, release = up; gates: attack = up, release = down), plus an optional `hold:` that delays the slow direction (restarting whenever the gain is steady or moves the other way).  While the gain is above 0 dB (an upward boost) it falls over its own `boost` time (`upward_attack:`; default 1 ms for `compress`, the attack for `compand`): with one attack for everything, a hit after a quiet stretch came through at up to +24 dB while the attack worked through the whole swing (measured on an 808 bus: peaks +6 dB over the dry peak; first fix targeting 0 dB at the boost speed still let it through, since an exponential approach to 0 never crosses it).  Per-sample recursion with state carried across buffers, so output is identical at any buffer size.  Times take seconds, Lengths, Durations (follow the tempo; `release: 1.n8` for a duck), or nodes; the kernel recomputes a coefficient only when its time changes.
+4. **Lookahead**: the audio is delayed by `lookahead:` (whole samples) while the detector reads it undelayed (compressor: anticipates attacks; the limiter's own algorithm below).
+5. **Makeup**: dB number, or `:auto` (half the curve's gain at 0 dBFS back, a heuristic).
+6. **Mix**: `mix:` blends the processed and plain signal as gains (`gain = mix * gain + 1 - mix`), so parallel ("New York") compression stays phase-aligned even with lookahead.
+
+**Units**: levels (`threshold:`, `ceiling:`, `amount:`, `range:`) accept dB numbers (`-12`) or linear gains (`-12.db`, which is 0.251): numbers above 0 are linear gains, 0 and below are dB (so `0` and `0.db` agree).  `makeup:` and compander points are dB numbers only.  Times as in numbers_lengths_phases.md.
+
+**Limiter** (`limit`, its own kernel in the same extension, mirror `Dynamics::Limiter.process_ruby`): detector level per sample (with `true_peak: true`, the max of the sample and the Annex 2 interpolated values on both sides of it, which delays the detector by 6 samples), required gain `min(1, ceiling/level)`, a sliding minimum over `lookahead + 1` samples, an instant-attack release one-pole, a moving average over `lookahead + 1` samples, then the delayed audio times the gain, clamped to the ceiling.  Linked across channels by default.  Latency: `lookahead` samples, plus 6 with `true_peak`.
+
+**Multiband**: `bands(f1, f2, ..., order: 4) { |low, mid, high| ... }` splits with an LR crossover tree (C kernel, mirror), yields one node (or bundle, for multichannel input) per band, and sums what the block returns (one-channel results are used for every channel; returning fewer nodes than bands drops bands).  Any node works per band.  Without a block it returns the bands as an Array.  Crossover frequencies are fixed numbers for now (nodes later: the SVF rows could take per-sample coefficients).
+
+**Squeeze** (maintainer 2026-10-11: not "ott", which is Xfer's product name; "Squeeze it to eleven"): `squeeze(preset = :default, depth:, time:, upward:, downward:, split:, gain:, max_gain:, lookahead: 2.ms)`, three LR4 bands each through `compress` with downward and upward thresholds, `makeup: :auto`, `mix: depth`, and a 2 ms lookahead shared by every band (so the bands stay aligned and the sum flat).  `SQUEEZE_PRESETS`: `:default` (gentle glue: 120 Hz / 2.5 kHz, 3:1 down at -24/-26/-28 dB, 1.5:1 up below -42/-44/-46 dB, attacks 5/2.5/1.25 ms, releases 200/150/100 ms, depth 0.5) and `:eleven` (88 Hz / 2.5 kHz, 66:1 down at -28/-30/-32, 4:1 up below -46/-48/-50, attacks 3/1.5/0.75 ms, releases 150/100/60 ms, depth 1).  Measured on a 124 BPM 808 bus (dry peak -0.5 dB, RMS -15.7, crest 15.2 dB): default crest 17.7 (peak +1.7, RMS -16.1), `:eleven` crest 19.2 (peak +2.4, RMS -16.9); without the lookahead and with the first attack times (12/6/3 ms) `:eleven`'s crest was 32 dB (peaks +20 dB): fast attacks let through only the first fraction of a millisecond of each hit, but the auto makeup still raises those, so follow `:eleven` with `limit`.  Probes (crest vs attack scale and lookahead): 1 ms lookahead + attack x0.25 gave crest 20.1, 2 ms + x0.1 16.3).
+
+**Channels**: every face takes a single node or a bundle and handles channels itself (excluded from ChannelDispatch, like `reverb`), returning a node for one channel, a bundle otherwise.
+
+**Plan layer**: boundary for now (the nodes are not Describable).  A later `Op::Dynamics` could run the same kernel (the state is already per node in one DFloat).
+
+**CPU budget**: the master chain at 800-sample stereo buffers should stay well under 1% of realtime per compressor or limiter (one log10 and one pow per sample per detector; the limiter's window loops are O(lookahead) per sample, ~72 compares and adds at 1.5 ms), and an OTT under about 3%.  Measurements below.
+
+## Measurements
+
+CPU per 800-sample stereo buffer (2026-10-11, Linux container, no YJIT, best of 3 x 600 buffers, a noise source with a moving level so every gain changes each sample; the source's own 53 us subtracted; realtime is 16 667 us):
+
+| node | us | % of realtime |
+|---|---|---|
+| compress (peak, linked) | 33 | 0.20 |
+| compress (RMS, unlinked, 5 ms lookahead) | 47 | 0.28 |
+| compand (5 points, cubic) | 31 | 0.18 |
+| compand (block, 113 segments) | 32 | 0.19 |
+| duck (sidechain node) | 35 | 0.21 |
+| limit (true peak, 1.5 ms) | 69 | 0.42 |
+| limit (no true peak) | 51 | 0.30 |
+| limit (true peak, 5 ms) | 182 | 1.09 |
+| bands LR4, 3 bands | 44 | 0.26 |
+| bands LR8, 3 bands | 85 | 0.51 |
+| squeeze (:default or :eleven) | 122 | 0.73 |
+
+The limiter's sliding minimum and moving average loop over the window every sample (O(lookahead)); a monotonic deque and a running sum (recomputed periodically against drift) would make long lookaheads cheap if needed.
+
+**Latency**: `compress(lookahead:)` delays by its lookahead; `limit` by `lookahead` samples plus 6 with `true_peak` (72 + 6 = 78 samples, 1.6 ms, at the defaults); `squeeze` by 2 ms.  Nothing compensates other paths: in a master chain the whole mix moves later together, which is harmless; a limiter on one player puts it 1.6 ms behind the others.  Dynamics nodes flush their delay line (silence in, `latency` samples out) when their input ends, so renders keep the last samples; in a master chain the MixSource never ends and the chain's tail tracking renders the delayed end as part of the tail (`render` adds the tail after the last player).  A new chain's spill-over feeds the old one silence, which flushes it the same way.
+
+**Static accuracy**: steady levels follow the curves within 1e-4 dB (float32 output); slow tones through the RMS detector (symmetric attack/release, settled) within 0.1 dB at every point; asymmetric smoothing biases a rippling detector toward the faster direction (measured -0.15 dB at a point with attack 50 ms / release 500 ms), as expected.
+
+**Listening set**: `/app/tmp/listening/dynamics-1/` (`render_bench.rb`, `bench_set.py`, `levels.json`): pumping bass/pad ducked by a kick, a drum bus (plain, compressed, parallel, compand glue), squeeze on the bus and on a mix (LUFS-matched), a hot mix through softclip vs the limiter, and an expander on a noisy pluck.
+
+## Reverb ducking
+
+The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms after a 50 ms peak follower; the maintainer asked for a faster duck release).  Instead of new reverb parameters, a reverb can now be ducked by its input with any times: `wet = sig.reverb(:hall, dry: 0); sig + wet.duck(sig, amount: -12, release: 80.ms)` (sig used twice branches through a Tee).  Not yet a reverb option.
+
+## Later
+
+- Node-valued thresholds/ratios (the curve is fixed per node; times and the sidechain already take nodes); crossover frequencies as nodes.
+- A plan-layer op for the compander (state already in one DFloat).
+- Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).

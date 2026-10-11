@@ -144,4 +144,51 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.resolve(MB::Sound::Sequence::Duration.new(1/4r))).to eq(1/4r)
     expect(set.resolve(:bar)).to eq(3/4r)
   end
+
+  describe 'lead: and nudge:' do
+    # Note edges (gate * note number) of track :p over two scenes
+    def edges_with(size: 800, **options)
+      set.track(:p, **options) { |c| c.gate * c.number }
+      quarter = ->(n) { MB::Sound.seq(n, MB::Sound::Rest).n8.loop }
+      set.scene(:pa, p: quarter.(MB::Sound::C3))
+      set.scene(:pb, p: quarter.(MB::Sound::D3))
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      set.go(:pa, in: 1)
+      d = []
+      d << session.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 1.5
+      set.go(:pb)
+      d << session.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 3
+      changes(d.reduce(:concatenate)).first(6)
+    end
+
+    it 'plays a track early, launching and swapping early, the same at any buffer size' do
+      expected = [[0, 0], [72000, 48], [84000, 0], [96000, 48], [108000, 0], [120000, 48]]
+      expect(edges_with(lead: 1.beat)).to eq(expected)
+      expect(set.ahead(:p)).to eq(1/4r)
+    end
+
+    it 'is the same at other buffer sizes' do
+      expect(edges_with(lead: 1.beat, size: 367)).to eq([[0, 0], [72000, 48], [84000, 0], [96000, 48], [108000, 0], [120000, 48]])
+    end
+
+    it 'leads by the attack of the patch\'s amplitude envelope with lead: :attack' do
+      set.track(:p, lead: :attack) { |c| c.number * c.amp_env(0.25, 0.1, 1, 0.1) }
+      set.scene(:pa, p: a1)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      set.go(:pa, in: 1)
+      d = run(96000 * 2)
+      expect(set.ahead(:p)).to eq(1/8r) # 0.25 s at 120 BPM
+      start = 96000 - 12000
+      expect(d[start - 1]).to eq(0)
+      expect(d[start + 1]).to be > 0
+      peak = d[start...(start + 20000)].max_index + start
+      expect(peak).to be_within(2).of(96000) # peaks on the downbeat
+    end
+
+    it 'nudges notes late (or early) by a fixed time' do
+      expect(edges_with(nudge: 10.ms)).to eq([[0, 0], [96480, 48], [108480, 0], [120480, 48], [132480, 0], [144480, 48]])
+      expect { set.track(:q, nudge: 3) { |c| c.number } }.to raise_error(ArgumentError, /Length or Duration/)
+      expect { set.track(:q, lead: :soon) { |c| c.number } }.to raise_error(ArgumentError, /:attack/)
+    end
+  end
 end

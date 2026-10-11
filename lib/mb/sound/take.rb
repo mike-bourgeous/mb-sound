@@ -15,7 +15,9 @@ module MB
     # take replays, with every change forced to land where it landed live,
     # so replays are exact as long as the code is deterministic: MB::Sound's
     # random seeds are (the take restores the root generator), but `rand`,
-    # `Time.now`, files edited between takes, and live MIDI input are not.
+    # `Time.now`, and files edited between takes are not.  MIDI the
+    # session's inputs read (live playing, controller moves) is saved with
+    # the take and replayed on the same timeline positions (see #midi).
     #
     # Example (bin/sound.rb):
     #     take                 # what has been played so far
@@ -32,7 +34,7 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers help ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps help ls].freeze
 
       class << self
         # The console's take, created when first needed.
@@ -84,6 +86,20 @@ module MB
         @mutex = Mutex.new
         @start = start_state
         @start_epoch = (@session || Session.default).epoch
+        @midi_from = (@session || Session.default).midi_log_length
+      end
+
+      # The MIDI the session's inputs read since the take started (see
+      # Session::MidiIn#midi_log): a Hash from input name (nil for the
+      # default) to [epoch, pos, bytes] rows, epochs counted from the
+      # take's start.  Replays play it on the same frames, so knobs moved
+      # from MIDI, monitored playing, and recorded clips come back exactly.
+      def midi
+        rows = session.midi_log(@midi_from)
+        rows.each_with_object({}) { |(name, epoch, pos, bytes), h|
+          next if epoch < @start_epoch
+          (h[name] ||= []) << [epoch - @start_epoch, pos, bytes]
+        }
       end
 
       # The session whose changes this take records: the one given to
@@ -183,7 +199,8 @@ module MB
 
       def to_s
         n = @mutex.synchronize { @lines.length }
-        "take: #{n} line#{n == 1 ? '' : 's'}, #{entries.length} changes since #{@start[:time]}"
+        m = midi.each_value.sum(&:length)
+        "take: #{n} line#{n == 1 ? '' : 's'}, #{entries.length} changes#{m > 0 ? ", #{m} MIDI events" : ''} since #{@start[:time]}"
       end
 
       def inspect
@@ -223,6 +240,11 @@ module MB
         out << "  ends: #{ruby_value(session.transport.position)},\n"
         out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
         out << ") do |r|\n"
+        midi.each do |name, rows|
+          out << "  r.midi [\n"
+          rows.each { |epoch, pos, bytes| out << "    [#{epoch}, #{ruby_value(pos)}, #{bytes.inspect}],\n" }
+          out << "  ]#{name.nil? ? '' : ", input: #{name.inspect}"}\n"
+        end
         lines.each do |l|
           if l.skipped
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
@@ -240,6 +262,7 @@ module MB
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
         Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch) do |r|
+          midi.each { |name, rows| r.midi(rows, input: name) }
           lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
         end
       end

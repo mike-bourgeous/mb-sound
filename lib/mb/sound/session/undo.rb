@@ -252,6 +252,10 @@ module MB
             return change(:restore, :timeline, time, data: {}, undoes: original.seq) { |_t| restore_timeline(original.before) }
           end
 
+          if subject.is_a?(Knobs::KnobSubject)
+            return change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
+          end
+
           state = original.before
           starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
           change(:restore, subject, time, data: {}, undoes: original.seq, starts: starts) { |t|
@@ -262,6 +266,7 @@ module MB
         # Snapshots a change's subject (see PlayerState and MasterState).
         # Called with @render_lock held.
         def undo_snapshot(subject)
+          return knob_snapshot(subject) if subject.is_a?(Knobs::KnobSubject)
           return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
           return timeline_snapshot if subject == :timeline
 

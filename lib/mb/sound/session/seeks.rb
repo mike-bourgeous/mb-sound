@@ -49,7 +49,9 @@ module MB
 
         # The subject whose state a change snapshots for undo.
         def snapshot_subject(c)
-          c.kind == :seek ? :timeline : c.subject
+          return :timeline if c.kind == :seek
+          return Knobs::KnobSubject.new(c.subject) if knob_change?(c)
+          c.subject
         end
 
         # Raises unless +target+ can be sought now (it is resolved again when
