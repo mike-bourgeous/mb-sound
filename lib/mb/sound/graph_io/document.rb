@@ -109,6 +109,10 @@ module MB
           knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
           writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes)
           body = writer.to_s
+          moving = moving_knobs
+          unless moving.empty?
+            writer.problems << "knob #{moving.map(&:inspect).join(', ')} has moves (ramps, follows, or queued changes), and documents keep only knob values for now"
+          end
           unless writer.problems.empty?
             raise DumpError.new(
               "can't save this graph yet: #{writer.problems.uniq.join('; ')}",
@@ -134,6 +138,17 @@ module MB
         end
 
         private
+
+        # Names of the graph's knobs that ramp, follow, or have changes
+        # queued; a document can only keep their values.
+        def moving_knobs
+          return [] unless @graph.respond_to?(:graph)
+
+          @graph.graph.filter_map { |n|
+            k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
+            k.spec.name if k.is_a?(GraphNode::Knob) && k.moving?
+          }.uniq
+        end
 
         def guess_kind(inputs)
           keys = inputs.keys.map(&:to_sym)

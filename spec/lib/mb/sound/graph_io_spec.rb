@@ -114,6 +114,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'wavetable sample mode reset' => "a Wavetable that isn't a library table",
       'ArrayInput' => "can't print a Numo::SFloat",
       'MixSource (master chain input)' => 'a class defined outside the library',
+      'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'documents keep only knob values',
     }.freeze
 
     GraphSweep.factories.each do |name, factory|

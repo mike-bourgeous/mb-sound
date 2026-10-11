@@ -399,6 +399,12 @@ module MB
           @segment.is_a?(Follow) ? @segment.source : nil
         end
 
+        # True while the knob ramps, follows a node, or has changes queued
+        # (graph-io can't save moves yet, only values).
+        def moving?
+          @lock.synchronize { !@segment.is_a?(Hold) || !@pending.empty? }
+        end
+
         # The knob's state for undo (see Session::Knobs): [:hold, value] (a
         # ramp in progress counts as its target) or [:follow, Follow], with
         # the changes landing up to frame +frame+ (those already added for
