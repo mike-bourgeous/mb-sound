@@ -185,11 +185,11 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(peak).to be_within(2).of(96000) # peaks on the downbeat
     end
 
-    it 'leads by a fraction of the attack with lead: { attack: f }, the same at any buffer size' do
+    it 'leads by a fraction of the attack with lead: 0.5.attack, the same at any buffer size' do
       firsts = [800, 367].map do |size|
         s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: size, realtime: false, raise_errors: true)
         a = s.arrangement
-        a.track(:p, lead: { attack: 0.5 }) { |c| c.number * c.amp_env(0.25, 0.1, 1, 0.1) }
+        a.track(:p, lead: 0.5.attack) { |c| c.number * c.amp_env(0.25, 0.1, 1, 0.1) }
         a.scene(:pa, p: a1)
         s.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
         a.go(:pa, in: 1)
@@ -206,14 +206,17 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(firsts[1][0]).to eq(firsts[0][0])
       expect(firsts[1][1].to_a).to eq(firsts[0][1].to_a)
 
-      expect { set.track(:q, lead: { attack: 0 }) { |c| c.number } }.to raise_error(ArgumentError, /attack: fraction/)
-      expect { set.track(:q, lead: { decay: 0.5 }) { |c| c.number } }.to raise_error(ArgumentError, /attack: fraction/)
-      expect { set.track(:q, lead: { attack: 0.5 }, lead_max: 2) { |c| c.number } }.not_to raise_error
+      expect { set.track(:q, lead: 0.attack) { |c| c.number } }.to raise_error(ArgumentError, /above 0/)
+      expect { set.track(:q, lead: { attack: 0.5 }) { |c| c.number } }.to raise_error(ArgumentError, /0.5.attack/)
+      expect { set.track(:q, lead: 0.5.attack, lead_max: 2) { |c| c.number } }.not_to raise_error
+      expect(set.tracks[:q].lead).to eq(0.5.attack)
+      set.track(:r, lead: :attack) { |c| c.number }
+      expect(set.tracks[:r].lead).to eq(1.attack)
     end
 
     it 'measures a synth voice\'s GM2-scaled amp_env by its attack as given' do
       set.track(:v, lead: :attack) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
-      set.track(:w, lead: { attack: 0.5 }) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
+      set.track(:w, lead: 0.5.attack) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
       set.scene(:all, v: a1, w: a1)
       session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
       set.go(:all, in: 1)

@@ -110,6 +110,15 @@ module MB
       end
       alias second seconds
 
+      # Returns a length of this many attack times (Length::Attack), for a
+      # track's lead: `track(:pad, lead: 0.5.attack) { ... }` plays the pad
+      # half its amplitude envelope's attack early.  Also available as
+      # #attacks.
+      def attack
+        Length::Attack.new(self)
+      end
+      alias attacks attack
+
       # Returns a length of this many milliseconds (as Length::Seconds):
       # `sig.delay(250.ms)`.  Also available as #milliseconds and
       # #millisecond.

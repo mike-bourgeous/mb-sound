@@ -26,7 +26,7 @@
 #   drop      8  dry: kick, punchy saw bass rolling against the kick, the
 #                vocal-ish hook unfiltered, a crash on the downbeat
 #   pickup    8  ride and an octave pluck answer the hook, a static pad
-#                (leading the beat by its attack); the performer snaps the
+#                (leading the beat by half its attack); the performer snaps the
 #                knobs (`snap :drop`) and throws the hook's delay over the
 #                last 2 bars (`turn :space, 0.55, over: 2`); then a seeded
 #                `pick`: usually on to the breakdown, one time in four the
@@ -259,10 +259,11 @@ module MB::Sound
   # +perform: true+, also plays the form and schedules the performer's
   # commands.  Returns the clips.
   #
-  # +pad_lead+ is the pad track's lead: (:attack by default; nil for
-  # none), +drum_nudge+ the drum track's nudge: (e.g. 6.ms to pull the
+  # +pad_lead+ is the pad track's lead: (0.5.attack by default, half its
+  # 0.6 s attack: the maintainer's pick, 2026-10-11; :attack for all of it,
+  # nil for none), +drum_nudge+ the drum track's nudge: (e.g. 6.ms to pull the
   # kit late against the bass; nil for none).
-  def self.last_stop(perform: false, seed: 1, pad_lead: :attack, drum_nudge: nil)
+  def self.last_stop(perform: false, seed: 1, pad_lead: 0.5.attack, drum_nudge: nil)
     c = last_stop_clips
     k = last_stop_kits
     bpm 126
@@ -293,8 +294,8 @@ module MB::Sound
     track(:answer) { |clip| last_stop_pluck(clip, level: 1.3) }
     track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.68) }
     track(:tension) { |clip| last_stop_tension(clip) }
-    # The pad leads the beat by its 0.6 s attack, so each swell peaks on
-    # the bar line (maintainer, 2026-10-11)
+    # The pad leads the beat by half its 0.6 s attack (lead: 0.5.attack),
+    # so each swell is half built at the bar line (maintainer, 2026-10-11)
     track(:pad, lead: pad_lead) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
     track(:riser, fade: 1/8r) { |_clip| last_stop_riser } # a tween, not notes: fades instead of ringing
 
