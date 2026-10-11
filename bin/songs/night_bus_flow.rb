@@ -176,8 +176,16 @@ module MB::Sound
   # sample-rate crush (sample-and-hold at a rate that rises with the note,
   # so low notes crush more), a little brightening, and a dotted-eighth
   # delay.  +cutoff+ may be a node (filter movement).
-  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 0.8)
-    synth(clip, voices: 1) { |n|
+  #
+  # The hook is heard through its delay (always a dotted eighth late): +tap+
+  # is the first tap's level (the hook itself; +delay+ if nil) and +delay+
+  # the level of the repeats after it (the send, which may be a node such as
+  # the :space knob).  Until omnibus5 one level scaled both, so a throw
+  # (`turn :space, 0.55`) raised the hook itself by 6.8 dB along with its
+  # echoes (maintainer's listening note, 2026-10-11: "The apparent dry gain
+  # gets too high during that turn").
+  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 0.8, tap: nil)
+    hook = synth(clip, voices: 1) { |n|
       pitch = n.hz.glide(0.025, legato: true)
       src = pitch.pwm(0.16) * 0.6
 
@@ -192,7 +200,13 @@ module MB::Sound
 
       amp = n.env(0.004, 0.22, 0.45, 0.09, gm: false)
       (crushed * amp * 4).peq(3500.hz => [3.db, 0.8]).filter(:highpass, cutoff: 220, quality: 0.7)
-    }.delay(1.n8.dotted, feedback: feedback, wet: delay).softclip(0.5, 0.95) * level
+    }
+
+    # wet × (x[n-T] + fb x[n-2T] + fb² x[n-3T] + ...) with the first tap at
+    # its own level: tap x[n-T] + delay fb (x[n-2T] + fb x[n-3T] + ...)
+    first = hook.delay(1.n8.dotted)
+    echoes = first.delay(1.n8.dotted, feedback: feedback, wet: delay * feedback)
+    (first * (tap || delay) + echoes).softclip(0.5, 0.95) * level
   end
 
   # The punchy saw bass: a short pitch bump (tom-like), a steep lowpass
@@ -272,7 +286,7 @@ module MB::Sound
     }
     track(:sub) { |clip| last_stop_sub(clip) }
     track(:bass) { |clip| last_stop_bass(clip) }
-    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: knob(:space)) }
+    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: knob(:space), tap: 0.25) } # :space sends the repeats
     track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.15) }
     track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.2) }
     track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.4, feedback: 0.55, level: 0.45) }
