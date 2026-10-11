@@ -63,6 +63,8 @@ Live frames (`PlotOutput#plot`, stereo 800-sample buffers, 120x45 cells, truecol
 | ascii | 205 | 254 |
 | gnuplot dumb (old) | 62 (16 ms) | 70 (14 ms) |
 
+End to end, `vis` on a NullOutput Session (800-sample buffers, 60 per second, 120x45, 3 s): 57-59 fps for scope and blocks, waveform and spectrum, which is every buffer; the same run through gnuplot's dumb terminal drew 42 fps for the waveform (dropping buffers) and 59 for the spectrum.  With smaller buffers (`latency :low`) vis draws as fast as the renderer goes.
+
 A scope frame's 7 ms: about 1.5 ms decimating and rasterizing lines, 1.4 ms canvas conversion (Numo), 0.8 ms cell composition, 1.9 ms ANSI output.  Writing to a real terminal adds the terminal's own time (a 120x45 truecolor frame is 13-29 KB: scope waveform 27 KB, ascii 16 KB).  Static renders for the gallery (5 charts): text 25-115 ms per look, SVG 50-90 ms per theme, PNG ~200 ms per 720x380 image (the pixel renderer is too slow for 60 fps inline-image vis; live vis stays text).
 
 ## Open questions and later work
