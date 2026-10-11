@@ -43,7 +43,7 @@ mb-sound exists because making sound with code is fun: for the maintainer, for t
 
 - Commits are step by step with detailed messages; preserve false starts in history (don't rewrite commit messages); `--no-ff` merges only when the maintainer says merge.  Never push.
 - Merges that change only one `bin/` script (plus its spec) need only that script's specs before and after merging, not the full suite and smoke run.
-- Compiling extensions in the shared main checkout is fine: macOS builds `.bundle` and Linux builds `.so` in separate `tmp/<platform>/` directories.
+- Both machines' containers are x86_64-linux and build into the same `tmp/x86_64-linux/` and `lib/**/*.so` of a checkout (native macOS builds use `tmp/x86_64-darwin*/` and `.bundle`), so in any one checkout run only one `rake compile` at a time across both machines, and no suite or memcheck on one machine while the other compiles there.  Separate worktrees have their own `tmp/` and `lib/` builds, so they don't collide, and could hold machine-specific builds (e.g. `-march=native`) if that's ever wanted (maintainer note, 2026-10-11).
 - Background agents get self-contained prompts (see the `agent-brief` skill), send the main session regular one-line progress updates (relayed to the maintainer as one-liners, so they can see what's running without asking), and run at most about three at once on the 7 GB container (check-mode suites and Valgrind are memory-heavy).
 - After every merge, follow the `post-merge` skill (merge report, post-merge tests, "did you know" note).
 - Keep notes local by default; don't post to GitHub unless asked.

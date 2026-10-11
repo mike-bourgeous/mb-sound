@@ -76,44 +76,40 @@ module MB
           MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
         end
 
-        # Truncates values from the node to the next lower integer.
+        # Rounds values from the node down to the next lower integer (a
+        # MathFunction node).
         def floor
-          self.proc(type_name: 'floor', &:floor)
+          MathFunction.new(self, function: :floor)
         end
 
-        # Raises values from the node to the next higher integer.
+        # Raises values from the node to the next higher integer (a
+        # MathFunction node).
         def ceil
-          self.proc(type_name: 'ceil', &:ceil)
+          MathFunction.new(self, function: :ceil)
         end
 
-        # Rounds values from the node to the nearest integer.
+        # Rounds values from the node to the nearest integer (a MathFunction
+        # node).
         def round
-          self.proc(type_name: 'round', &:round)
+          MathFunction.new(self, function: :round)
         end
 
-        # Appends a node that calculates the natural logarithm of values passing
-        # through.
+        # Appends a node that calculates the natural logarithm of values
+        # passing through (a MathFunction node).
         def log
-          # TODO: arithmetic_string for unary functions
-          self
-            .proc(type_name: 'ln') { |v| MB::FastSound.narray_log(v) }
-            .named("ln(#{make_source_name(self)})")
+          MathFunction.new(self, function: :ln)
         end
 
-        # Appends a node that calculates the base two logarithm of values passing
-        # through.
+        # Appends a node that calculates the base two logarithm of values
+        # passing through (a MathFunction node).
         def log2
-          self
-            .proc(type_name: 'log2') { |v| MB::FastSound.narray_log2(v) }
-            .named("log2(#{make_source_name(self)})")
+          MathFunction.new(self, function: :log2)
         end
 
-        # Appends a node that calculates the base ten logarithm of values passing
-        # through.
+        # Appends a node that calculates the base ten logarithm of values
+        # passing through (a MathFunction node).
         def log10
-          self
-            .proc(type_name: 'log10') { |v| MB::FastSound.narray_log10(v) }
-            .named("log10(#{make_source_name(self)})")
+          MathFunction.new(self, function: :log10)
         end
 
         # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can

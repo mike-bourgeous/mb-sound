@@ -179,7 +179,6 @@ module MB
           apply = fx.respond_to?(:apply) ? fx.method(:apply) : fx
 
           transport = Transport.new(bpm: Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
-          wnps = transport.whole_notes_per_second
 
           unless @loop
             notes, = Clip.bake_notes(self, apply, transport)

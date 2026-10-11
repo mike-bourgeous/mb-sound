@@ -122,7 +122,6 @@ module MB
       # Plots the datapoints against time using the given +plotter+
       # (an instance of MB::M::Plot, or a compatible object).
       def plot(plotter)
-        times, values = sample
         plotter.plot(sample)
       end
 

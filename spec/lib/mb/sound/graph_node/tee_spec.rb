@@ -220,7 +220,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
     let(:source) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4000).seq]) }
 
     it 'raises when a node writes to a shared buffer' do
-      a, b = source.tee
+      a, _b = source.tee
       writer = a.proc { |buf| buf[0] = 5; buf }
       expect { writer.sample(100) }.to raise_error(/frozen/)
     end

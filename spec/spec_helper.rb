@@ -21,6 +21,16 @@ require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
+# mb-util loads the word_wrap gem lazily, and word_wrap 1.0.0 (the latest
+# release) warns about an ambiguous `/` once warnings are on (see
+# config.warnings), so load it now with warnings off.
+begin
+  verbose, $VERBOSE = $VERBOSE, nil
+  require 'word_wrap'
+ensure
+  $VERBOSE = verbose
+end
+
 # True when the specs run under Valgrind (rake memcheck sets
 # MB_SOUND_MEMCHECK=1): specs may use smaller inputs there, and examples
 # tagged memcheck_skip: 'reason' (the reason naming what else runs their C
@@ -35,6 +45,7 @@ require_relative 'support/midi_list_source'
 require_relative 'support/midi_transform_helpers'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
+require_relative 'support/recipe_helpers'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)
 require_relative 'valgrind/memcheck_map_recorder' if ENV['MEMCHECK_MAP'] == '1'

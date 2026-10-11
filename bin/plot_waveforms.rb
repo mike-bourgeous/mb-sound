@@ -42,6 +42,6 @@ MB::Sound.script(
 
   begin
     STDIN.readline
-  rescue EOFError => e
+  rescue EOFError
   end
 }

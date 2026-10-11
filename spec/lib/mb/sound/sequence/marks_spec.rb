@@ -113,6 +113,17 @@ RSpec.describe('Note marks, Rest, Tie, and Seq#acid') do
       expect(MB::Sound.seq(a1, c2).dn.events.map(&:value)).to eq([21, 24])
       expect(MB::Sound.seq(a1).oct(-1).events.map(&:value)).to eq([21])
     end
+
+    it 'take Intervals as well as numbers of octaves' do
+      expect([a1.up(1.oct).number, a1.dn(1.oct).number, a1.oct(-2.oct).number, a1.up(7.st).number, a1.up(1200.cents).number]).to eq([45, 21, 9, 40, 45])
+      expect(440.hz.up(1.oct).frequency).to be_within(1e-9).of(880)
+      expect(440.hz.dn(12.st).frequency).to be_within(1e-9).of(220)
+      expect((!a1).up(1.oct).value).to eq(45)
+      expect((!a1).dn(1.oct).value).to eq(21)
+      expect(MB::Sound.seq(a1, c2).up(1.oct).events.map(&:value)).to eq([45, 48])
+      expect(MB::Sound.seq(a1).dn(1.oct).events.map(&:value)).to eq([21])
+      expect { a1.up('1') }.to raise_error(ArgumentError, /octaves/)
+    end
   end
 
   describe 'Rest and Tie' do

@@ -23,11 +23,11 @@ module MB
           down = line(@midpoint, 1, length - (@zero ? 1 : 0), 0, @midpoint.floor + 1, length - 1)
 
           if up.length == 0
-            window = down
+            down
           elsif down.length == 0
-            window = up
+            up
           else
-            window = up.concatenate(down)
+            up.concatenate(down)
           end
         end
 

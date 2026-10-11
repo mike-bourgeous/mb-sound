@@ -26,6 +26,7 @@
 .claude/todos.json
 .claude/worktrees/
 .claude-user
+.claude-shared
 .gh-user
 
 .DS_Store

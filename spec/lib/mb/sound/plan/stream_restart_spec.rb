@@ -64,6 +64,7 @@ RSpec.describe('MB::Sound::Plan stream restarts') do
     MB::Sound::Plan.check = :raise
     planned, info = render(true, ->(src) { src.restart })
     expect(info[:members_after]).to be > info[:members_before]
+    expect(planned).to eq(render(false, ->(src) { src.restart })[0])
   ensure
     MB::Sound::Plan.check = old
   end

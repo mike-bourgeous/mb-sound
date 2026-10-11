@@ -90,42 +90,6 @@ module MB
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
 
-    # Filters a sound with the given filter parameters (see
-    # MB::Sound::Filter::Cookbook).
-    #
-    # TODO: Maybe remove this, as it is superseded by the GraphNode DSL.
-    #
-    # +:frequency+ - The center or cutoff frequency of the filter.
-    # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
-    # +:sample_rate+ - The sample rate to use for the filter (defaults to
-    #                  sound.sample_rate if sound responds to :sample_rate, or 48000).
-    # +:quality+ - The "quality factor" of the filter.  Higher values are more
-    #              resonant.  Must specify one of quality, slope, or bandwidth.
-    # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.
-    # +:bandwidth+ - The bandwidth of a peaking filter.
-    # +:gain+ - The gain of a shelf or peaking filter.
-    def self.apply_filter(sound, frequency:, filter_type: :lowpass, sample_rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
-      # TODO: Further develop filters and sound sources into a sound
-      # source/sink graph, where a complete graph can be built up with a DSL,
-      # and actual generation only occurs on demand?
-      sample_rate ||= sound.respond_to?(:sample_rate) ? sound.sample_rate : 48000
-      sound = any_sound_to_array(sound)
-      frequency = frequency.frequency if frequency.respond_to?(:frequency) # get 343 from 343.hz
-      filter = MB::Sound::Filter::Cookbook.new(
-        filter_type,
-        sample_rate,
-        frequency,
-        db_gain: gain&.to_db,
-        quality: quality,
-        bandwidth_oct: bandwidth,
-        shelf_slope: slope,
-      )
-      sound.map { |c|
-        filter.reset(c[0])
-        filter.process(c)
-      }
-    end
-
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
@@ -204,3 +168,8 @@ require_relative 'sound/multi_writer'
 require_relative 'sound/process_reader'
 
 require_relative 'sound/io_logger'
+
+# Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
+# every DSL method exists
+require_relative 'sound/graph_node/recipe'
+MB::Sound::GraphNode::Recipe.install!

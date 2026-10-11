@@ -1,7 +1,7 @@
 require 'shellwords'
 
 RSpec.describe('bin/synths/pluck.rb') do
-  before(:all) { load File.expand_path('../../../bin/synths/pluck.rb', __dir__) }
+  before(:all) { require File.expand_path('../../../bin/synths/pluck.rb', __dir__) }
 
   E = MB::Sound::MIDI::Event unless defined?(E)
 

@@ -21,8 +21,10 @@ ENV OUTPUT_TYPE=null
 
 # Claude
 ENV IS_DEMO=1
-ENV CLAUDE_CONFIG_DIR=/app/.claude-user
-RUN mkdir -p /app/.claude-user && curl -fsSL https://claude.ai/install.sh | bash
+# Per-machine config at /claude, with shared folders mounted inside it by
+# dock.sh (see the comment at the top of dock.sh).
+ENV CLAUDE_CONFIG_DIR=/claude
+RUN mkdir -p /claude && curl -fsSL https://claude.ai/install.sh | bash
 
 # GitHub
 ENV GH_CONFIG_DIR=/app/.gh-user
@@ -35,6 +37,14 @@ RUN mkdir -p /app/.gh-user && \
 RUN wget https://bin.ngrok.com/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz && \
 	tar -xvzf ngrok-v3-stable-linux-amd64.tgz -C /usr/local/bin && \
 	rm ngrok-v3-stable-linux-amd64.tgz
+
+# Git identity for commits made in the container (dock.sh passes the host's
+# `git config user.name`/`user.email`; empty means none, as before).  Last so
+# a change of identity doesn't rebuild the layers above.
+ARG GIT_USER_NAME=
+ARG GIT_USER_EMAIL=
+RUN if [ -n "$GIT_USER_NAME" ]; then git config --system user.name "$GIT_USER_NAME"; fi && \
+	if [ -n "$GIT_USER_EMAIL" ]; then git config --system user.email "$GIT_USER_EMAIL"; fi
 
 WORKDIR /app
 CMD /bin/bash

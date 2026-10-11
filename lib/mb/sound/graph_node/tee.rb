@@ -204,9 +204,7 @@ module MB
 
           @branch_index = 0
           @branches = []
-          for i in 0...n
-            add_branch
-          end
+          n.times { add_branch }
 
           @done = false
 

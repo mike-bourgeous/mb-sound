@@ -183,14 +183,15 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
         expect(mk.call(4)).not_to eq(a)
       end
 
-      it 'fixes the layout with seed:, while phases still come from the root generator' do
+      it 'fixes the layout and the copies\' random phases with seed: (copies derive from it since 2026-10-10)' do
         MB::Sound.seed(1)
         a = mixer(110.hz.unison(5, detune: 20.cents, seed: 9))
         MB::Sound.seed(2)
         b = mixer(110.hz.unison(5, detune: 20.cents, seed: 9))
         expect(a.offsets).to eq(b.offsets)
         expect(a.offsets).to eq(described_class.offsets(5, 20.cents, rng: Random.new(9)))
-        expect(a.inputs.map { |i| i.original_source.seed }).not_to eq(b.inputs.map { |i| i.original_source.seed })
+        expect(a.inputs.map { |i| i.original_source.seed }).to eq(b.inputs.map { |i| i.original_source.seed })
+        expect(a.inputs.map { |i| i.original_source.seed }.uniq.length).to eq(5)
       end
     end
 

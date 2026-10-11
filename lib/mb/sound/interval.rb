@@ -41,6 +41,17 @@ module MB
         raise ArgumentError, "Expected an interval or a number of octaves (got #{value.inspect})"
       end
 
+      # Converts an Interval or a plain number of octaves (or a graph node of
+      # octaves) to semitones, for octave marks like Pitch#up and Seq#oct
+      # (`A4.up(1.oct)`, `A4.up(2)`, `A4.up(7.st)`).
+      def self.octave_semitones(value)
+        return value.to_semitones if value.respond_to?(:to_semitones)
+        return value * 12 if value.respond_to?(:sample)
+        return 12 * value if value.is_a?(Numeric)
+
+        raise ArgumentError, "Expected an interval or a number of octaves (got #{value.inspect})"
+      end
+
       # Creates an interval of +semitones+.  The +unit+ (:octaves, :semitones,
       # or :cents) is only used to display the interval (see #to_s).
       def initialize(semitones, unit: :semitones)

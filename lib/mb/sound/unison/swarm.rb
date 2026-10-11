@@ -46,6 +46,9 @@ module MB
         scatter = scatter_range(scatter)
         drift = drift && (drift.respond_to?(:sample) ? drift : Interval.semitones(drift).to_f)
 
+        # One seed for the whole swarm (the chord layout and the unison's
+        # copies derive from it), so seed: rebuilds it
+        unison[:seed] = unison[:seed].nil? ? MB::Sound.next_seed : Integer(unison[:seed])
         detune = chord_offsets(count, chord, detune, layout: unison[:layout] || :random, rng: Random.new(swarm_seed(unison[:seed]))) if chord
 
         pitch.unison(count, detune: detune, **unison) do |p, i|

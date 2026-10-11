@@ -24,9 +24,14 @@ RSpec.describe('Tweening reference outputs') do
   # the followups merge (caa39a5e) deliberately changed key-synced note starts
   # (reset step correction) and the node-detune default, which swarms use
   # (verified: 260b50aa... before caa39a5e, 82da65e6... after, unchanged by tweening).
+  # Re-recorded again 2026-10-11 for graph-io-1: each unison copy's block now
+  # runs in MB::Sound.with_seed(seed + 1 + i) (maintainer decision 2026-10-10:
+  # one seed rebuilds the whole unison/swarm; changed random phases accepted).
+  # Verified: dropping only that with_seed wrap restores 82da65e6... and
+  # 4cac9d2f...; with it, 101635532e470ae6 and 2f97ec1c69d19302.
   it 'keeps swarms unchanged' do
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('82da65e65a627760')
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('4cac9d2fac201fa3')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('101635532e470ae6')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('2f97ec1c69d19302')
   end
 
   it 'keeps smoothing and envelopes unchanged' do

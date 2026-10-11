@@ -172,16 +172,13 @@ module MB
           GraphNode::DelayMethods.delay_filter(self, **options)
         end
 
-        # Returns the length in seconds at the tempo of +transport+ right
-        # now.  The result doesn't follow later tempo changes.
-        def seconds(transport = Sequence.transport)
-          transport.seconds(@whole_notes).to_f
-        end
-
-        # Length protocol: the length in seconds at the tempo of +transport+
-        # right now (see Length).
+        # Length protocol: the length in seconds (a Float) at the tempo of
+        # +transport+ right now (see Length); the result doesn't follow later
+        # tempo changes.  (Duration#seconds(transport), which did the same,
+        # was removed 2026-10-11: `x.seconds` means "a Length of x seconds"
+        # on numbers and nodes.)
         def to_seconds(sample_rate: 48000, transport: Sequence.transport)
-          seconds(transport)
+          transport.seconds(@whole_notes).to_f
         end
 
         # Length protocol: the length in whole notes.
