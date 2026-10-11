@@ -100,6 +100,64 @@ RSpec.describe(MB::Sound::Notes, '#lfo') do
     expect { held.lfo(1, shape: :wobble) }.to raise_error(ArgumentError, /shape/)
     expect { held.lfo(1, sync: :maybe) }.to raise_error(ArgumentError, /sync/)
   end
+
+  describe 'skew:' do
+    # The ideal skewed triangle at phase +u+ (cycles): crossing 0 rising at
+    # 0, peaking at s / 2, lowest at 1 - s / 2.
+    def skewed(u, s)
+      u %= 1
+      if u < s / 2 then 2 * u / s
+      elsif u < 1 - s / 2 then 1 - 2 * (u - s / 2) / (1 - s)
+      else -1 + 2 * (u - (1 - s / 2)) / s
+      end
+    end
+
+    it 'rises for that fraction of each cycle and falls for the rest, with exact corners' do
+      [0.9, 0.1, 0.3].each do |s|
+        out = run(held.lfo(4, skew: s), 0.5)
+        expected = Numo::DFloat.new(out.length).seq.map { |i| skewed(i * 4 / 48000.0, s) }
+        expect((out - expected).abs.max).to be < 1e-5, "skew #{s}"
+      end
+    end
+
+    it 'is the plain triangle at 0.5 and nearly the ramp toward 1' do
+      expect(run(held.lfo(4, skew: 0.5), 0.5).to_a).to eq(run(held.lfo(4), 0.5).to_a)
+      ramp = run(held.lfo(4, shape: :saw), 0.5)
+      near = run(held.lfo(4, skew: 0.999), 0.5)
+      expect(((near - ramp).abs > 0.01).count).to be < 50 # only the ramp's falling edges differ
+    end
+
+    it 'scales to 0..1 when unipolar and starts from its low point with phase: 1 - skew / 2' do
+      out = run(held.lfo(4, skew: 0.8, unipolar: true, phase: 0.6), 0.5)
+      expect(out.min).to be_within(1e-6).of(0)
+      expect(out.max).to be_within(1e-6).of(1)
+      expect(out[0]).to be_within(1e-6).of(0)
+      expect(out[9600]).to be_within(1e-6).of(1) # 0.8 of a 4 Hz cycle
+    end
+
+    it 'restarts at the phase: on each note-on' do
+      events = [ev.note_on(60, 1.0), ev.note_on(64, 1.0).at(Rational(4321, 48000))]
+      out = run(notes_for(*events).lfo(3, skew: 0.9, phase: 0.55, unipolar: true), 0.3)
+      expect(out[4321...(4321 + 4000)].to_a).to eq(out[0...4000].to_a)
+      expect(out[4321]).to be_within(1e-6).of(0)
+    end
+
+    it 'follows the tempo with a Duration rate' do
+      MB::Sound.bpm(120)
+      out = run(held.lfo(1.n4, skew: 0.9, phase: 0.55, unipolar: true), 1)
+      [0, 24000].each { |i| expect(out[i]).to be_within(1e-6).of(0) }
+      expect(out[21600]).to be_within(1e-6).of(1) # 0.9 of a beat
+    ensure
+      MB::Sound.rewind
+    end
+
+    it 'rejects other shapes and skews outside 0..1' do
+      expect { held.lfo(1, shape: :sine, skew: 0.9) }.to raise_error(ArgumentError, /triangle/)
+      expect { held.lfo(1, skew: 1) }.to raise_error(ArgumentError, /between 0 and 1/)
+      expect { held.lfo(1, skew: 0) }.to raise_error(ArgumentError, /between 0 and 1/)
+      expect { held.lfo(1, phase: :x) }.to raise_error(ArgumentError)
+    end
+  end
 end
 
 RSpec.describe(MB::Sound::GraphNode::SampleHold) do
