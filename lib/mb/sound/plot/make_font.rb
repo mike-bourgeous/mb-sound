@@ -8,6 +8,10 @@
 # DejaVu fonts are under the Bitstream Vera license (free to embed and
 # modify, including bitmap derivatives).
 
+# Specs that require every file under lib/ (graph_sweep_spec) must not
+# regenerate the font
+return unless __FILE__ == $PROGRAM_NAME
+
 require 'tmpdir'
 
 FONT = ARGV[0] || '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
