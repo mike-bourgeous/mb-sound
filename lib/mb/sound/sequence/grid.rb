@@ -95,6 +95,7 @@ module MB
       #     play 50.hz.sine * beat[:kick].env(0, 0.2, 0, 0.05) + noise.filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02)
       class Kit
         include Enumerable
+        include Named
 
         # The row clips, keyed by name.
         attr_reader :rows

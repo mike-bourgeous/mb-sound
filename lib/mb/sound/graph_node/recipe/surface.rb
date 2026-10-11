@@ -214,6 +214,7 @@ module MB
               names = Surface.own_surface(c)
               names |= dsl + ELEMENT_ACCESS + [:coerce] if c == Channels
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
+              names |= [:named] if c == MB::Sound::Sequence::Clip # Sequence::Named, shared with Kit
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end

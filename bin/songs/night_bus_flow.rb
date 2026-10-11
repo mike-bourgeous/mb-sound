@@ -86,15 +86,18 @@ module MB::Sound
     })
   end
 
-  # The kits, with fills: a clap roll and toms in the last bar of every 8
-  # (the :turn phrase fill; the plain clap and the open hat step aside),
-  # and a crash on the first bar of every 8-bar block from the scene's
-  # launch (impact on drop downbeats and pickups).
+  # The kits (each named kit_<scene> for listings), with fills: a clap
+  # roll in the last bar of every 8 (the :turn phrase fill; the plain clap
+  # and the open hat step aside), toms in the last bar of every 4 (the
+  # :toms fill; at bar 8 the longer :turn wins), and a crash on the first
+  # bar of every 8-bar block from the scene's launch (impact on drop
+  # downbeats and pickups).
   def self.last_stop_kits
     turn = ->(kit) {
       kit
-        .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39), low_tom: grid(16, '..........x..x.x', value: 45))
+        .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39))
         .nofill(:clap, :open_hat, name: :turn)
+        .fill(:toms, low_tom: grid(16, '..........x..x.x', value: 45))
     }
     core = { kick: 'X...x...X...x...', clap: '....X.......X...', hat: '..x...x...x...x.' }
     {
@@ -105,7 +108,7 @@ module MB::Sound
       pickup: turn.(last_stop_kit(**core, hat: '..X...X...X...X.', shaker: '3735373537353735', ride: '6.4.6.4.6.4.6.4.', crash: true)).loop(align: :launch),
       cut: turn.(last_stop_kit(clap: '....X.......X...', hat: '..x...x...x...x.', shaker: '3735373537353735')).loop(align: :launch),
       outro: turn.(last_stop_kit(kick: 'X...x...X...x...', hat: '..x...x...x...x.')).loop(align: :launch),
-    }
+    }.each { |name, kit| kit.named(:"kit_#{name}") }
   end
 
   # The clips of the song, by name.  The hook is one bar from the i chord
@@ -140,7 +143,7 @@ module MB::Sound
       pad: seq(A2, A2, A2, G2).n1.legato(0.98).loop(align: :launch),
       # A placeholder clip for clipless patches (the riser)
       bar: seq(R).n1.loop,
-    }
+    }.each { |name, clip| clip.named(name) }
   end
 
   # The vocal-ish lead: a narrow pulse (asymmetric harmonics) through a
@@ -239,7 +242,6 @@ module MB::Sound
     track(:tension) { |clip| last_stop_tension(clip) }
     track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
     track(:riser, fade: 1/8r) { |_clip| last_stop_riser } # a tween, not notes: fades instead of ringing
-    Session.current.arrangement.label(**c, **k.transform_keys { |n| :"kit_#{n}" })
 
     # Scenes: one focus per section (whole states; tracks left out ring out)
     scene :intro, drums: k[:intro]
@@ -266,7 +268,8 @@ module MB::Sound
   # The song form (sections launch the scenes of their names).
   def self.last_stop_form(seed: 1)
     flow(seed: seed) do
-      fill :turn, every: 8                         # clap/tom turnaround (drum kits' fill rows)
+      fill :turn, every: 8                         # a clap roll turnaround (drum kits' fill rows)
+      fill :toms, every: 4                         # toms halfway (bar 8 is the turn's)
       intro     8
       groove    8
       build     8, fill: [:riser, 4]               # the riser scene for the last 4 bars

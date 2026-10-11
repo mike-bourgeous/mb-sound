@@ -129,7 +129,8 @@ RSpec.describe(MB::Sound::Arrangement) do
   end
 
   it 'lists tracks and scenes' do
-    set.label(a1: a1, a2: a2)
+    a1.named(:a1)
+    a2.named('a2')
     set.go(:one, at: :now)
     expect(set.track_info).to eq(a: 'q:1 a1 (playing)', b: 'q:1 no clip (stopped)')
     expect(set.scene_info).to eq(one: '▶ a:a1', two: 'a:a2 b:seq')

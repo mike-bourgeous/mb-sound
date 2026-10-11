@@ -60,7 +60,8 @@ module MB::Sound
   # The set's length in bars.
   NIGHT_BUS_BARS = 48
 
-  # The clips of the set, by name (also bound as console variables by
+  # The clips of the set, by name, each named with .named (`scenes` and
+  # `tracks` list them by name; also bound as console variables by
   # .night_bus_set when given a binding).
   def self.night_bus_clips
     {
@@ -75,6 +76,7 @@ module MB::Sound
     }.tap { |c|
       c[:bass_c] = c[:bass_b].permute(seed: 4)
       c[:wrong] = c[:bass_b].transpose(6) # a tritone off: the mistake at bar 11
+      c.each { |name, clip| clip.named(name) }
     }
   end
 
@@ -93,7 +95,6 @@ module MB::Sound
     track(:bass) { |clip| acid_voice(clip, cutoff: 260, reso: 0.72, decay: 0.9) * 0.6 }
     track(:drums, q: 4) { |kit| tr808(kit, kick: { tune: 48, decay: 0.9 }, accent: 6) * 0.9 }
     track(:lead) { |clip| clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 2.5, brightness: 8) }.delay(3.n16, feedback: 0.35, wet: 0.3) * 0.5 }
-    Session.current.arrangement.label(**c) # names for `scenes` and `tracks`
 
     # Scenes: whole states (tracks not named stop), and partial ones
     scene :intro, pad: c[:chords_a]

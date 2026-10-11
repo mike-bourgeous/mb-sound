@@ -63,7 +63,6 @@ module MB
         @scenes = {}
         @quant = 1
         @current_scene = nil
-        @labels = {}.compare_by_identity
         @mutex = Mutex.new
         @sections = {}
         @playback = nil
@@ -154,17 +153,13 @@ module MB
         name
       end
 
-      # Gives clips names for #scenes and #tracks listings (e.g.
-      # `label verse_bass: bass_a`).  Returns the names.
-      def label(**clips)
-        @mutex.synchronize { clips.each { |n, c| @labels[c] = n } }
-        clips.keys
-      end
-
-      # A short name for a clip or state, for listings.
-      def label_of(value)
+      # A short name for a clip, kit, or state, for listings: the name
+      # given with Sequence::Named#named (`bass_a.named(:bass_a)`), else
+      # the kind of value (seq, clip, kit).
+      def name_of(value)
         return value.inspect if TRACK_STATES.include?(value)
-        @mutex.synchronize { @labels[value] }&.to_s || value.class.name.split('::').last.downcase
+        return value.name.to_s if value.respond_to?(:named?) && value.named?
+        value.class.name.split('::').last.downcase
       end
 
       # Defines (or redefines) a scene: the state of every track.  Each
@@ -271,7 +266,7 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
-          what = tr.patch? ? (tr.clip ? label_of(tr.clip) : 'no clip') : 'graph'
+          what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           "q:#{(tr.q || @quant).inspect} #{what} (#{state})"
         }
       end
@@ -280,7 +275,7 @@ module MB
       # the current scene marked.
       def scene_info
         scenes.transform_values { |sc|
-          parts = sc.values.map { |k, v| "#{k}:#{label_of(v)}" }
+          parts = sc.values.map { |k, v| "#{k}:#{name_of(v)}" }
           parts << 'others:keep' if sc.others == :keep
           parts << "q:#{sc.q.inspect}" if sc.q
           parts << '(block)' if sc.block
@@ -376,7 +371,7 @@ module MB
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
           graph = tr.patch.call(clip)
-          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{label_of(clip)}")
+          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}")
           @mutex.synchronize { tr.clip = clip }
         elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)

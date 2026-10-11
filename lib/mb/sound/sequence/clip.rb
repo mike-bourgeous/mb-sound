@@ -19,6 +19,7 @@ module MB
       #     play riff.loop.tone.ramp.at(1) * riff.loop.env(0.005, 0.1, 0.5, 0.1)
       class Clip
         include Enumerable
+        include Named
 
         # Velocity for events that don't specify one (roughly MIDI velocity 96).
         DEFAULT_VELOCITY = 0.75
