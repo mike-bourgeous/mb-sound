@@ -21,8 +21,10 @@ ENV OUTPUT_TYPE=null
 
 # Claude
 ENV IS_DEMO=1
-ENV CLAUDE_CONFIG_DIR=/app/.claude-user
-RUN mkdir -p /app/.claude-user && curl -fsSL https://claude.ai/install.sh | bash
+# Per-machine config at /claude, with shared folders mounted inside it by
+# dock.sh (see the comment at the top of dock.sh).
+ENV CLAUDE_CONFIG_DIR=/claude
+RUN mkdir -p /claude && curl -fsSL https://claude.ai/install.sh | bash
 
 # GitHub
 ENV GH_CONFIG_DIR=/app/.gh-user
