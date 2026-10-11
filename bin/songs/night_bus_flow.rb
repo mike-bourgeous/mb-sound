@@ -8,12 +8,14 @@
 # around once more, and a `goto` keeps the second drop rolling.
 #
 #   intro     8  drums only: tight kick, late-feeling clap, offbeat hats,
-#                a soft/accented shaker; a clap/tom turnaround every 8 bars
+#                a soft/accented shaker; a clap roll turnaround every 8
+#                bars, toms every 4 in between
 #   groove    8  the hook enters through a low lowpass, offbeat sub on the
 #                root; the performer types `loop!` (it plays twice), then
 #                `onward`
 #   build     8  thinned drums, one held E5 for tension, the hook opening out
-#                of its filter; a noise riser in the last 4 bars (a fill)
+#                of its filter; a noise riser (a resonant highpass sweep and
+#                a slight swell) in the last 4 bars (a fill)
 #   gap       1  one 2/4 bar: everything rings out (scene drops ring by
 #                default) for a half-bar breath; `meter 2, 4` in its scene
 #   drop      8  dry: kick, punchy saw bass rolling against the kick, the
@@ -151,7 +153,7 @@ module MB::Sound
   # sample-rate crush (sample-and-hold at a rate that rises with the note,
   # so low notes crush more), a little brightening, and a dotted-eighth
   # delay.  +cutoff+ may be a node (filter movement).
-  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 1.0)
+  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 0.8)
     synth(clip, voices: 1) { |n|
       pitch = n.hz.glide(0.025, legato: true)
       src = pitch.pwm(0.16) * 0.6
@@ -182,14 +184,14 @@ module MB::Sound
       amp = n.env(0.001, decay, 0, 0.05, gm: false) * (n.velocity * 0.4 + 0.6)
       saw = freq.tone.ramp.lp4((2 ** (fenv * 2.5)) * cutoff, resonance: 0.35)
       ((saw + freq.tone * 0.6) * amp).softclip(0.7, 0.97)
-    } * 1.0
+    } * 1.4
   end
 
   # A sine sub with a gate envelope (offbeat sub in the groove).
   def self.last_stop_sub(clip)
     synth(clip, voices: 1) { |n|
       n.freq.tone * n.env(0.004, 0.09, 0.8, 0.05, gm: false)
-    } * 0.25
+    } * 0.32
   end
 
   # The held tension note: a soft triangle with a slow vibrato.
@@ -206,10 +208,13 @@ module MB::Sound
       .delay(1.n8.dotted, feedback: 0.3, wet: 0.2) * level
   end
 
-  # A white-noise riser: a 4-bar highpass sweep and swell.
+  # A white-noise riser: a 4-bar resonant highpass sweep (the riser's
+  # motion) with a slight swell, +6 dB over the 4 bars.  (Tweens in
+  # Sessions used to sit at their last value; 2026-10-11 listening note:
+  # "constant noise".)
   def self.last_stop_riser
-    noise.filter(:highpass, cutoff: tween([300, 9000], 4.bars, log: true, loop: false), quality: 2) *
-      tween([0.02, 0.16], 4.bars, loop: false)
+    noise.filter(:highpass, cutoff: tween([250, 8000], 4.bars, log: true, loop: false), quality: 3) *
+      tween([0.06, 0.12], 4.bars, loop: false)
   end
 
   # Sets up the song on the current session: tempo, master, tracks, scenes
@@ -236,9 +241,9 @@ module MB::Sound
     track(:hook) { |clip| last_stop_hook(clip) }
     track(:hook_far) { |clip| last_stop_hook(clip, cutoff: 700, delay: 0.15) }
     track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: tween([500, 3200], 8.bars, log: true, loop: false), delay: 0.2) }
-    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: tween([900, 2600], 8.bars, log: true, loop: false), delay: 0.4, feedback: 0.55, level: 0.55) }
+    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: tween([900, 2600], 8.bars, log: true, loop: false), delay: 0.4, feedback: 0.55, level: 0.45) }
     track(:answer) { |clip| last_stop_pluck(clip, level: 1.3) }
-    track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.9) }
+    track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.68) }
     track(:tension) { |clip| last_stop_tension(clip) }
     track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
     track(:riser, fade: 1/8r) { |_clip| last_stop_riser } # a tween, not notes: fades instead of ringing
