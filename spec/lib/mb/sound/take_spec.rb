@@ -89,6 +89,54 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays played MIDI, controller moves, learn, monitors, and recorded and captured clips bit for bit' do
+    ev = MB::Sound::MIDI::Event
+    played = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r], [67, 3.3r, 4.5r], [72, 3.99r, 4.2r], [48, 4.25r, 4.5r], [55, 5r, 5.8r]]
+    events = played.flat_map { |n, on, off| [ev.parse([0x90, n, 90], time: on), ev.parse([0x80, n, 64], time: off)] }
+    events += (0..20).map { |i| ev.parse([0xb0, 74, 6 * i], time: 1 + Rational(i, 40)) } # a sweep after learn
+    session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+
+    lines = {
+      0 => [
+        'track(:lead, q: 1) { |c| c.number * c.gate * 0.01 }',
+        'track(:bass, q: 1) { |c| c.number * c.gate * 0.001 }',
+        'knob :cut, 0.5, takeover: :jump, smooth: 0',
+        'bg :k, knob(:cut) * 0.1, on: :now',
+      ],
+      10 => ['arm :lead', 'rec 1'],
+      30 => ['learn :cut'],
+      250 => ['capture :bass, 1, quantize: 16'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    480.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.3
+    expect(session.arrangement.captures.keys).to eq([:lead_1, :bass_1])
+    expect(session.knobs[:cut].cc).to eq(74)
+    expect(session.journal.changes.map(&:kind)).to include(:learn, :rec, :capture, :cc)
+    expect(t.midi[nil].length).to eq(events.length)
+    expect(t.to_s).to include("#{events.length} MIDI events")
+
+    path = tmp_path('midi_take.rb')
+    expect { t.save(path) }.to output(/Saved the take/).to_stdout
+    expect(File.read(path)).to include('r.midi [', '[0, 21/20r, [144, 60, 90]],')
+    load path
+    saved = MB::Sound::Take::Replay.last
+
+    [[t.replay, [800]], [saved, [800]], [saved, [367, 368]], [saved, [64]]].each do |r, sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays knob turns, ramps, snapshots, crossfades, and undo bit for bit' do
     lines = {
       0 => [

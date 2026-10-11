@@ -480,27 +480,35 @@ module MB
         # with +takeover: :pickup+ (the default) only once the controller
         # has passed the knob's position.  Pass nil to stop listening.
         # Returns self.
+        #
+        # A Session's MIDI input (Session::MidiInput) may be given instead
+        # of a stream: the knob then reads each span's events on the frames
+        # where the Session put them (the Session reads its inputs before
+        # advancing knobs), so takes replay controller moves exactly.
         def listen(stream)
           @lock.synchronize {
-            @midi&.close
-            @midi = stream && MIDI::Stream.for(stream).reader
+            @midi.close if @midi.respond_to?(:close)
+            @midi = stream.is_a?(Session::MidiInput) ? stream : (stream && MIDI::Stream.for(stream).reader)
             @picked_up = false
             @cc_position = nil
           }
           self
         end
 
-        # The MIDI::Stream reader this knob listens to, or nil.
+        # The MIDI::Stream reader (or Session::MidiInput) this knob listens
+        # to, or nil.
         def listening
           @midi
         end
 
         # Waits for the next controller moved on the stream given to
         # #listen (which must be set) and controls the knob with it from
-        # then on (see #listen).  Returns self.
-        def learn
+        # then on (see #listen).  +from_frame+ ignores controllers moved
+        # before that session frame (a learn landing partway through a
+        # buffer).  Returns self.
+        def learn(from_frame: nil)
           raise ArgumentError, "Knob #{name.inspect} isn't listening to MIDI (see #listen)" if @midi.nil?
-          @lock.synchronize { @learning = true; @picked_up = false; @cc_position = nil }
+          @lock.synchronize { @learning = true; @learn_from = from_frame; @picked_up = false; @cc_position = nil }
           self
         end
 
@@ -713,24 +721,39 @@ module MB
         # Reads controller events for frames [+frame+, +frame+ + +count+)
         # and queues them as Moves.
         def read_midi(frame, count)
-          from = @midi.cursor
-          events = @midi.next(count.to_r / @sample_rate.to_r)
-          events.each do |e|
+          midi_events(frame, count).each do |off, e|
             next unless e.type == :cc
 
-            if @learning
+            if @learning && (@learn_from.nil? || frame + off >= @learn_from)
               @cc = e.note
               @learning = false
               @picked_up = false
               @cc_position = nil
             end
-            next unless e.note == @cc
+            next unless e.note == @cc && !@learning
 
-            off = ((e.time - from) * @sample_rate.to_r).floor.clamp(0, count - 1)
             mv = Move.new(frame + off, e.value.to_f, e.note)
             idx = @pending.bsearch_index { |s| s.start > mv.start } || @pending.length
             @pending.insert(idx, mv)
           end
+        end
+
+        # [frame offset, MIDI::Event] pairs of the events for frames
+        # [+frame+, +frame+ + +count+): from a Session::MidiInput's span on
+        # its frames, or read from a stream reader.
+        def midi_events(frame, count)
+          if @midi.is_a?(Session::MidiInput)
+            span = @midi.span
+            return [] if span.nil?
+            return span.events.filter_map { |st|
+              [st.frame - frame, st.event] if st.frame >= frame && st.frame < frame + count
+            }
+          end
+
+          from = @midi.cursor
+          @midi.next(count.to_r / @sample_rate.to_r).map { |e|
+            [((e.time - from) * @sample_rate.to_r).floor.clamp(0, count - 1), e]
+          }
         end
 
         # The segment a controller move starts (nil if a :pickup controller
