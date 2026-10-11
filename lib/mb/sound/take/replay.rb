@@ -18,7 +18,9 @@ module MB
       # The session's own timing (launches, swaps, stops, fades, mutes,
       # undo) is exact at any buffer size.  Not reproduced exactly: tempo
       # and master gain changes (they apply at buffer starts and when the
-      # line runs), anything nondeterministic in the code, and live MIDI.
+      # line runs), and anything nondeterministic in the code.  MIDI read
+      # by the session's inputs (Session::MidiInput) replays on the same
+      # timeline positions (see #midi).
       # Oscillators accumulate their phase per buffer, so tones differ
       # between buffer sizes by about 1e-12 (naive shapes like aramp can
       # move an edge by a sample).
@@ -37,6 +39,7 @@ module MB
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @lines = []
+          @midi = {}
           yield self if block_given?
           self.class.last = self
         end
@@ -47,6 +50,19 @@ module MB
         def line(issued, lands, code, epoch: 0)
           @lines << Line.new(issued: issued.to_r, lands: lands.map(&:to_r), code: code, epoch: epoch)
           self
+        end
+
+        # Adds MIDI the session's input named +input+ read during the take:
+        # [epoch, pos, bytes] rows (see Take#midi), played again on the
+        # same timeline positions (see Session::MidiInput#replay).
+        def midi(rows, input: nil)
+          (@midi[input] ||= []).concat(rows.map { |epoch, pos, bytes| [epoch, pos.to_r, bytes] })
+          self
+        end
+
+        # The recorded MIDI (a Hash from input name to rows; see #midi).
+        def midi_events
+          @midi
         end
 
         # Sets up +session+ (fresh, with its timeline at the start) to play
@@ -63,6 +79,10 @@ module MB
 
           binding = Take.console_binding
           @base_epoch = session.epoch
+
+          # MIDI plays from the take, never from live input
+          session.replay_midi!(@base_epoch)
+          @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i) do
@@ -128,6 +148,7 @@ module MB
           MB::Sound.outro
           MB::Sound.wait
         ensure
+          session&.end_replay_midi!
           MB::Sound.live = live unless live.nil?
         end
 
