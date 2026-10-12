@@ -139,6 +139,7 @@ module MB
           ops, @folds = Fold.zero_products(b.ops)
           Fold.report(@folds)
           @program = Program.new(ops: ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
+          @program = ScaleMatch.pad(@program, @pads) if @pads
           @program.lower if @installation.engine == :c
           @inputs = Array.new(@input_ops.length)
           @params = Array.new(@param_ops.length)
@@ -170,6 +171,23 @@ module MB
           @program = nil
           @installation.unsupported!(e.node, e.message)
           nil
+        end
+
+        # Gains `x * 1` to insert so the program has the shape of other
+        # regions it differs from only by gains (a Hash of core op index =>
+        # count, or nil; see ScaleMatch and LaneGroups#refresh).
+        attr_reader :pads
+
+        # Sets #pads and recompiles now (returning the program, or nil).
+        # The region's tones start as usual when it next plays.
+        def pad!(pads)
+          pads = nil if pads&.empty?
+          return @program if pads == @pads && @program
+
+          @pads = pads
+          @program = nil
+          @recompile = false
+          compile(start: false)
         end
 
         # Asks for a recompile before the next block (a node's settings
