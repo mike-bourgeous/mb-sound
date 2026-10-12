@@ -24,6 +24,43 @@ module MB
           Multiplier.new([self, other], sample_rate: self.sample_rate)
         end
 
+        # Scales this node's output, with the meaning Tone#at gives full-scale
+        # signals: a number or a graph node multiplies (`self * amplitude`),
+        # and a Range `a..b` maps -1..1 onto it (`self * (b - a) / 2 +
+        # (a + b) / 2`).  Tones keep their own #at, applied inside the
+        # oscillator.  Bad values (a Range of Durations, which only Tones
+        # take, or anything else) go through MB::Sound.live_error, returning
+        # this node unchanged in live mode.
+        #
+        #     play 220.hz.ramp.lp4(800).at(-20.db)
+        #     220.hz.ramp.filter(:lowpass, cutoff: 3.hz.lfo.lp4(10).at(400..2000))
+        #     adsr(0.01, 0.2, 0.5, 0.3).at(0.5)
+        def at(amplitude)
+          case amplitude
+          when Range
+            lo, hi = amplitude.begin, amplitude.end
+            unless lo.is_a?(Numeric) && hi.is_a?(Numeric) && lo.real? && hi.real?
+              if lo.is_a?(Sequence::Duration) || hi.is_a?(Sequence::Duration)
+                return at_error('Only Tones take a Range of Durations for #at (e.g. 2.bars.lfo.at(3.n16..5.n16))')
+              end
+              return at_error("A Range for #at needs two real numbers (got #{amplitude.inspect})")
+            end
+
+            half = (hi - lo) / 2.0
+            mid = (lo + hi) / 2.0
+            mid == 0 ? self * half : self * half + mid
+
+          when Sequence::Duration
+            at_error("#at takes a number, a graph node, or a Range of numbers, not a Duration (#{amplitude})")
+
+          when Numeric, GraphNode
+            self * amplitude
+
+          else
+            at_error("#at takes a number, a graph node, or a Range of numbers (got #{amplitude.inspect})")
+          end
+        end
+
         # Divides incoming data by +other+, which may be a Numeric or another
         # signal graph.  For signal graphs, each numerator value is divided
         # by the corresponding denominator value at the same index.
@@ -119,6 +156,13 @@ module MB
         end
 
         private
+
+        # Sends an ArgumentError for #at through MB::Sound.live_error and
+        # returns this node unchanged (live mode).
+        def at_error(message)
+          MB::Sound.live_error(ArgumentError.new(message))
+          self
+        end
 
         # Setup/boilerplate buffer management used by #/ and #**.
         def arithmetic_proc(other, name)
