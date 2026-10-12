@@ -126,7 +126,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 
 
-Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics, fast_lofi (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
+Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics, fast_lofi, fast_recipe (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
 - New C code goes in purpose-specific extensions (user preference), not `fast_sound`.  Shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; shared kernels in `ext/mb/sound/include/mb_*.h`.
 - Every kernel has an exact Ruby mirror that specs compare sample for sample (keep operations identical, including float32 reads of signal inputs).
 - `depend` files list each extension's headers (`rake depend:check`); after changing `depend` or removing a source, `rm -rf tmp/<platform>/<extension>`.
