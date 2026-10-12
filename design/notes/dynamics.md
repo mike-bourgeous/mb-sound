@@ -33,7 +33,7 @@ One gain-computer core, several faces (`lib/mb/sound/graph_node/dynamics.rb`, ke
 
 **Channels**: every face takes a single node or a bundle and handles channels itself (excluded from ChannelDispatch, like `reverb`), returning a node for one channel, a bundle otherwise.
 
-**Plan layer**: boundary for now (the nodes are not Describable).  A later `Op::Dynamics` could run the same kernel (the state is already per node in one DFloat).
+**Plan layer** (optimizer-2, 2026-10-12): one-channel companders (compress, expand, noise_gate, duck, compand) are `Plan::Op::Dynamics`, running FastDynamics.compand's kernel (moved to `include/mb_dynamics.h`) on the node's own state; sidechains are boundary inputs, node times fuse; a lookahead node's tail after its input ends runs unfused.  Multichannel nodes (their channels share one kernel call), limiters, and crossover bands stay boundaries with reasons (`Plan.explain`).  See plan_layer.md.
 
 **CPU budget**: the master chain at 800-sample stereo buffers should stay well under 1% of realtime per compressor or limiter (one log10 and one pow per sample per detector; the limiter's window loops are O(lookahead) per sample, ~72 compares and adds at 1.5 ms), and an OTT under about 3%.  Measurements below.
 

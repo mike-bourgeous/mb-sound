@@ -118,10 +118,18 @@ module MB
       # the next bar by default, or now if nothing plays), replacing any
       # form already playing (which stops launching sections).  +seed+ seeds
       # its chance (weighted gotos and picks; MB::Sound.next_seed by default, so takes
-      # replay the same choices).  Returns the Form::Playback.
-      def play_form(form, at: nil, on: nil, in: nil, seed: nil)
+      # replay the same choices).  +warm_up+ builds every track's patch once
+      # first (see #warm_up): :auto (the default) for a realtime session
+      # with YJIT that isn't playing yet, true, or false.  Returns the
+      # Form::Playback.
+      def play_form(form, at: nil, on: nil, in: nil, seed: nil, warm_up: :auto)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
+
+        # Compile the tracks' builds before the first scene change needs them
+        if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle? && defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?)
+          self.warm_up
+        end
 
         seed ||= MB::Sound.next_seed
         pb = Form::Playback.new(self, form, seed: seed)
@@ -383,7 +391,121 @@ module MB
         @session.send(:launch_time, point, nodes, default: q)
       end
 
+      # How much of each track #warm_up plays (bars).
+      WARM_UP_BARS = 1/2r
+
+      # Builds every patch track's graph for each clip the scenes give it
+      # (and the clip it plays now) in a throwaway Session, and plays it
+      # there for WARM_UP_BARS, so YJIT has compiled the code that builds
+      # and renders it before a scene change needs it.  With YJIT, the
+      # first build of a patch costs 5-20x a later one (night_bus_flow's
+      # pluck: ~100 ms, then ~25 ms; ~35 ms every time without YJIT), and
+      # a graph's first buffers compile its nodes' code on the render
+      # thread (15-60 ms at a scene change, dropouts at 128 frames).
+      #
+      # The throwaway Session (a "sandbox") has its own transport (the
+      # session's tempo and meter) and copies of the session's knobs, at
+      # their values, so a patch's knob(:cut) reads the copy; it is made
+      # current while the patch runs.  A patch that reaches nodes made
+      # outside it (a node captured by its block, shared with live graphs
+      # or other tracks) would have them advanced by the sandbox, so each
+      # graph is built twice and played only if the two builds share no
+      # node; otherwise it is only built (+result+ says :built).  The root
+      # random generator is put back as it was (synths draw their seeds
+      # from it), and nothing is added to the session, so renders and takes
+      # play the same.  Only while the session is idle (nothing playing or
+      # queued): a scene built on the scheduler thread meanwhile would draw
+      # its seeds from the warm-up's generator (MB::Sound.with_seed swaps
+      # the root generator for every thread); otherwise
+      # MB::Sound.live_error.
+      #
+      # +tracks+ limits it to some track names.  Pairs of track and clip
+      # already warmed are skipped unless +again+; +play: false+ only
+      # builds.  Returns a Hash of track name => [milliseconds, :played or
+      # :built].  Called by #play_form for a realtime session with YJIT
+      # (see #play_form's +warm_up:+); console: `warm_up(tracks: true)`.
+      def warm_up(*tracks, again: false, play: true)
+        unless @session.idle?
+          return MB::Sound.live_error(RuntimeError.new('warm_up builds the tracks before anything plays (a scene built meanwhile could draw other random seeds)'))
+        end
+
+        chosen = self.tracks.values.select { |tr| tr.patch? && (tracks.empty? || tracks.include?(tr.name)) }
+        values = Hash.new { |h, k| h[k] = [] }
+        scenes.each_value do |sc|
+          sc.values.each { |k, v| values[k] << v if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit) }
+        end
+
+        @warmed ||= Hash.new { |h, k| h[k] = {}.compare_by_identity }
+        result = {}
+        MB::Sound.with_seed(0) do
+          chosen.each do |tr|
+            clips = ([tr.clip].compact + values[tr.name]).uniq(&:object_id)
+            warmed = @mutex.synchronize { @warmed[tr.name] }
+            clips.reject! { |c| warmed[c] && warmed[c].equal?(tr.patch) } unless again
+            next if clips.empty?
+
+            t0 = MB::U.clock_now
+            how = clips.map { |c|
+              done = warm_build(tr, c, play: play)
+              @mutex.synchronize { warmed[c] = tr.patch } if done
+              done
+            }
+            result[tr.name] = [((MB::U.clock_now - t0) * 1000).round(1), how.include?(:built) ? :built : :played]
+          end
+        end
+        result
+      end
+
       private
+
+      # Builds +tr+'s patch with +clip+ in sandbox Sessions and plays it
+      # there if it is self-contained (see #warm_up).  Returns :played,
+      # :built, or nil if the patch raised.
+      def warm_build(tr, clip, play:)
+        boxes = []
+        graphs = (play ? 2 : 1).times.map {
+          box = warm_sandbox
+          boxes << box
+          Session.with_context(session: box) { tr.patch.call(clip) }
+        }
+
+        played = play && (second = warm_nodes(graphs[1])) && warm_nodes(graphs[0]).each_key.none? { |n| second.include?(n) }
+        box = boxes[0]
+        box.add(graphs[0], on: :now)
+        if played
+          bar = (box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate).to_f
+          (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
+        end
+        played ? :played : :built
+      rescue => e
+        warn "warm_up: track #{tr.name.inspect} with #{name_of(clip)} raised #{e.class}: #{e.message}"
+        nil
+      ensure
+        boxes&.each(&:close)
+      end
+
+      # The nodes of +graph+ (a Hash of node => true compared by identity;
+      # numbers in the graph's sources left out), for #warm_build.
+      def warm_nodes(graph)
+        set = {}.compare_by_identity
+        @session.send(:to_nodes, graph).each { |o| [o, *o.graph].each { |n| set[n] = true unless n.is_a?(Numeric) } }
+        set
+      end
+
+      # A throwaway Session for #warm_build: the session's tempo, meter,
+      # channels, rate, and buffer size, and copies of its knobs.
+      def warm_sandbox
+        t = @session.transport
+        transport = Sequence::Transport.new(bpm: t.bpm, bar_length: t.bar_length)
+        channels = @session.instance_variable_get(:@channels)
+        output = NullOutput.new(channels: channels, sample_rate: @session.sample_rate, buffer_size: @session.buffer_size, sleep: false)
+        box = Session.new(output: output, transport: transport, channels: channels, buffer_size: @session.buffer_size, realtime: false, raise_errors: true, master_gain: 1)
+        @session.knobs.each do |name, k|
+          sp = k.spec
+          box.knob(name, k.value, range: sp.range, curve: sp.curve, unit: sp.unit, takeover: sp.takeover, smooth: sp.smooth)
+        end
+        box
+      end
 
       # Turns knob +name+ to a scene's or section's +value+ at +time+: a
       # number, a node or knob name to follow, or an Array of a value and

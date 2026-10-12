@@ -20,8 +20,9 @@ module MB
       # Build blocks (synth lanes, feedback loops, delay inserts, unison
       # layers; BUILD_BLOCKS) run at depth 0 again, as user code, and each
       # call of the block is an Invocation with its arguments, result, and
-      # local variable names (read with a TracePoint targeted at the block
-      # when it returns).  Runtime blocks (procs, spies, schedules) are never
+      # local variable names (read from the Binding of the block's frame,
+      # taken at its first recorded call, once it returns; see
+      # #trace_locals).  Runtime blocks (procs, spies, schedules) are never
       # wrapped; they print as their own source text.
       #
       # Recording is always on (MB_SOUND_RECIPES=0 or Recipe.enabled = false
@@ -41,7 +42,11 @@ module MB
         # block's local variables when it returned, whether anything inside
         # drew a random seed, and calls made for their effect on a block
         # argument (a delay insert pipeline's d.fb { } and d.wet { }).
-        Invocation = Struct.new(:args, :result, :locals, :seeded, :statements, :call)
+        # +frame+ is internal: while the block runs, the block's
+        # RubyVM::InstructionSequence until its frame's Binding is taken
+        # (then the Binding, or false if it can't be found); nil afterwards
+        # (see Recipe.trace_locals).
+        Invocation = Struct.new(:args, :result, :locals, :seeded, :statements, :call, :frame)
 
         # The recipe of one object: the Call that made it (+call+), calls
         # that configured it afterwards (+config+), and Calls that returned
@@ -113,10 +118,24 @@ module MB
         }.freeze
 
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
+        # How build block locals are read (see #trace_locals): :frame (the
+        # block frame's Binding through FastRecipe, the default) or :trace
+        # (a TracePoint, the old way; MB_SOUND_RECIPE_LOCALS=trace).
+        @locals_mode = ENV['MB_SOUND_RECIPE_LOCALS'] == 'trace' ? :trace : :frame
+        @block_iseqs = ObjectSpace::WeakKeyMap.new
         @seq = 0
         @wrapped = Hash.new { |h, k| h[k] = Set.new }
 
         class << self
+          # How build block locals are read: :frame (default) or :trace (see
+          # #trace_locals).
+          attr_reader :locals_mode
+
+          def locals_mode=(mode)
+            raise ArgumentError, "Recipe.locals_mode must be :frame or :trace (got #{mode.inspect})" unless [:frame, :trace].include?(mode)
+            @locals_mode = mode
+          end
+
           # Whether calls are recorded (MB_SOUND_RECIPES=0 turns it off).
           attr_accessor :enabled
 
@@ -174,6 +193,7 @@ module MB
           def call(receiver, name, args, kwargs, block)
             st = state
             return yield(block) if st.depth > 0 || !@enabled
+            take_frame(st.scopes.last)
 
             if SILENT.include?(name)
               st.depth += 1
@@ -230,6 +250,7 @@ module MB
           # (see ELEMENT_ACCESS).
           def note_elements(bundle)
             return unless @enabled && state.depth == 0 && record_of(bundle)
+            take_frame(scope)
 
             outs = bundle.is_a?(Channels) ? bundle.instance_variable_get(:@outputs) : bundle.outputs
             outs.each_with_index do |o, idx|
@@ -266,6 +287,7 @@ module MB
             st = state
             inv = st.scopes.last
             return block unless @enabled && inv
+            take_frame(inv)
 
             call = Call.new(receiver, name, [], {}, block, :build, nil, inv, next_seq, nil, lane(st))
             (inv.statements ||= []) << call
@@ -301,6 +323,23 @@ module MB
 
           # Runs the block, storing +block+'s local variables (as of its
           # last return) in +inv+'s locals.
+          #
+          # By default (locals_mode :frame) the first recorded call made
+          # inside the block takes the Binding of the block's frame
+          # (FastRecipe.frame_binding, see #take_frame), and the locals are
+          # read from it after the block returns (a Binding shares its
+          # frame's environment, so it sees their final values).  The old
+          # way (:trace), a TracePoint(:b_return) targeted at the block,
+          # makes YJIT discard all of its compiled code whenever it is
+          # enabled, so each graph built while something plays made the
+          # render thread recompile everything (50-120 ms buffers after
+          # each scene change; scene-build branch, 2026-10-12).  The two
+          # differ only for locals of blocks and lambdas nested inside a
+          # build block, which the TracePoint also saw (it fired at their
+          # returns too) and the frame doesn't: of the 28 synth and effect
+          # scripts, only wavetable_bass.rb printed differently (a value
+          # passed to a `portamento = ->(pitch) { }` lambda was a `pitch`
+          # variable, now a chain).
           def trace_locals(block, inv, &run)
             if block.respond_to?(:graph_io_locals)
               # A block loaded from a graph document (GraphIO::Loader) keeps
@@ -310,6 +349,23 @@ module MB
               return result
             end
 
+            return trace_locals_tracepoint(block, inv, &run) if @locals_mode == :trace
+
+            iseq = block_iseq(block)
+            return run.call unless iseq
+
+            inv.frame = iseq
+            begin
+              run.call
+            ensure
+              b = inv.frame
+              inv.frame = nil
+              b.local_variables.each { |v| inv.locals[v] = b.local_variable_get(v) } if b.is_a?(Binding)
+            end
+          end
+
+          # The old way of reading build block locals (see #trace_locals).
+          def trace_locals_tracepoint(block, inv, &run)
             tp = TracePoint.new(:b_return) { |t|
               b = t.binding
               b.local_variables.each { |v| inv.locals[v] = b.local_variable_get(v) }
@@ -320,6 +376,26 @@ module MB
               # Not traceable (e.g. a block made from a Method): no names
               run.call
             end
+          end
+
+          # Takes the Binding of the frame of the build block that +inv+
+          # (an Invocation, or nil) is a call of, if not taken yet (see
+          # #trace_locals).  Called by the recorder for calls made at depth
+          # 0, i.e. by the user's code in the block.
+          def take_frame(inv)
+            return unless inv && (iseq = inv.frame).is_a?(RubyVM::InstructionSequence)
+            inv.frame = MB::Sound::FastRecipe.frame_binding(iseq) || false
+          end
+
+          # The RubyVM::InstructionSequence of +block+ if it is a block
+          # written in Ruby (not a Method or Symbol proc), else nil
+          # (cached per block body).
+          def block_iseq(block)
+            iseq = RubyVM::InstructionSequence.of(block) rescue nil
+            return nil unless iseq
+            kind = @block_iseqs[iseq]
+            @block_iseqs[iseq] = kind = (iseq.to_a[9] == :block) if kind.nil?
+            kind ? iseq : nil
           end
 
           # Prepends recorders for +names+ to +target+ (a class or module).

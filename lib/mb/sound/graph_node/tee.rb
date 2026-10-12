@@ -182,8 +182,11 @@ module MB
           # For internal use by the plan layer (MB::Sound::Plan::Region): a
           # buffer the next #sample returns instead of reading the Tee, so
           # a region that already read its boundary inputs can run its nodes
-          # unfused on the same data.
+          # unfused on the same data (ENDED replays an ended read: nil).
           attr_accessor :replay
+
+          # A #replay value standing for a read that returned nil.
+          ENDED = Object.new.freeze
 
           def_delegators :@tee, :reset, :original_source
           def_delegators :@reader, :count, :length
@@ -191,12 +194,18 @@ module MB
           attr_reader :sources
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
+          # Frames kept of where each branch was made (see #initialize).
+          TRACE_DEPTH = 24
+
           def initialize(tee, index, reader)
             @owner = tee
             @tee = tee
             @index = index
             @reader = reader
-            @trace = caller_locations
+            # Where the branch was made, for error messages (the nearest
+            # TRACE_DEPTH frames: a full backtrace from deep inside a synth
+            # lane build cost ~5 us per branch, ~10% of a voice build)
+            @trace = caller_locations(1, TRACE_DEPTH)
             @sources = { tee: @tee }
             @rate = nil
             @node_type_name = 'Branch'
@@ -219,7 +228,7 @@ module MB
           def sample(count)
             if (r = @replay)
               @replay = nil
-              return r
+              return r.equal?(ENDED) ? nil : r
             end
 
             raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader

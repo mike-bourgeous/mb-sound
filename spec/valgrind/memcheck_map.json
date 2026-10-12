@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-11",
+  "generated": "2026-10-12",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -163,6 +163,11 @@
         "FastSynth.oscillate_bl"
       ]
     },
+    "spec/ext/mb/sound/fast_recipe_spec.rb": {
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ]
+    },
     "spec/ext/mb/sound/fast_resample_spec.rb": {
       "fast_resample": [
         "FastResample#initialize",
@@ -239,6 +244,7 @@
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
+        "FastWavetable.shape",
         "FastWavetable.sync"
       ]
     },
@@ -433,8 +439,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -479,6 +483,9 @@
       "fast_loudness": [
         "FastLoudness.true_peak"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_sound": [
         "FastSound.oscillate"
       ]
@@ -508,6 +515,9 @@
       "fast_plan": [
         "FastPlan.run",
         "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
       ],
       "fast_resample": [
         "FastResample#initialize",
@@ -690,6 +700,9 @@
         "FastPlan.run",
         "FastPlan.run_lanes"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_resample": [
         "FastResample#initialize",
         "FastResample#lookup_converter",
@@ -732,6 +745,7 @@
         "FastWavetable.lookup",
         "FastWavetable.oscillate",
         "FastWavetable.play",
+        "FastWavetable.shape",
         "FastWavetable.sync"
       ]
     },
@@ -865,6 +879,9 @@
         "FastPlan.run",
         "FastPlan.run_lanes"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate"
@@ -902,12 +919,30 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.narray_log",
+        "FastSound.narray_log10",
+        "FastSound.narray_log2",
         "FastSound.number_to_freq",
         "FastSound.oscillate",
         "FastSound.smoothstep_buf"
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/dynamics_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_dynamics": [
+        "FastDynamics.compand"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
       ]
     },
     "spec/lib/mb/sound/plan/filter_ops_spec.rb": {
@@ -964,6 +999,9 @@
         "FastPlan.run",
         "FastPlan.run_lanes"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate"
@@ -1004,6 +1042,9 @@
         "FastPlan.run",
         "FastPlan.run_lanes"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_resonator": [
         "FastResonator.ping"
       ],
@@ -1027,6 +1068,9 @@
         "FastLoop.constants",
         "FastLoop.pitch_track",
         "FastLoop.run"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
       ],
       "fast_sound": [
         "FastSound.cookbook",
@@ -1063,6 +1107,9 @@
         "FastPlan.run",
         "FastPlan.run_lanes"
       ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate"
@@ -1086,6 +1133,9 @@
       "fast_plan": [
         "FastPlan.run",
         "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
       ],
       "fast_sound": [
         "FastSound.number_to_freq",
@@ -1129,7 +1179,8 @@
       "fast_wavetable": [
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
-        "FastWavetable.oscillate"
+        "FastWavetable.oscillate",
+        "FastWavetable.shape"
       ]
     },
     "spec/lib/mb/sound/shaper_spec.rb": {
@@ -1180,6 +1231,8 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -1228,13 +1281,15 @@
         "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.play",
+        "FastWavetable.shape",
         "FastWavetable.sync"
       ]
     },
     "spec/lib/mb/sound/wavetable_spec.rb": {
       "fast_wavetable": [
         "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra"
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.shape"
       ]
     }
   }

@@ -1,1 +1,1 @@
-fast_dynamics.o: $(srcdir)/../include/mb_ext_helpers.h
+fast_dynamics.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_dynamics.h

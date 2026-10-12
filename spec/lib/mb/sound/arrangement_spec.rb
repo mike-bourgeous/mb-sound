@@ -26,6 +26,12 @@ RSpec.describe(MB::Sound::Arrangement) do
     data.to_a.each_with_index.select { |v, i| i == 0 || v != data[i - 1] }.map { |v, i| [i, v.round(3)] }
   end
 
+  # The knob +name+ of the current session (a sandbox's copy while a
+  # warm-up builds).
+  def within_knob(name)
+    MB::Sound::Session.current.knob(name)
+  end
+
   def player(name)
     session.instance_variable_get(:@players).values.select { |p| p.name == name && p.current? }.last
   end
@@ -267,6 +273,84 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(edges_with(nudge: 10.ms)).to eq([[0, 0], [96480, 48], [108480, 0], [120480, 48], [132480, 0], [144480, 48]])
       expect { set.track(:q, nudge: 3) { |c| c.number } }.to raise_error(ArgumentError, /Length or Duration/)
       expect { set.track(:q, lead: :soon) { |c| c.number } }.to raise_error(ArgumentError, /:attack/)
+    end
+  end
+
+  describe '#warm_up' do
+    it "builds and plays each patch per scene clip in a sandbox, and keeps the root generator's draws" do
+      built = []
+      set.track(:c) { |c| built << c; MB::Sound.synth(c, voices: 1) { |v| v.hz.saw.rnd * v.amp_env } }
+      set.scene(:three, c: a1)
+      set.scene(:four, c: b1, a: a1)
+
+      MB::Sound.seed(42)
+      expected = MB::Sound.with_seed(42) { MB::Sound.next_seed }
+      result = set.warm_up
+      expect(result.keys).to contain_exactly(:a, :b, :c)
+      expect(result.values.map(&:last)).to all(eq(:played))
+      expect(built).to eq([a1, a1, b1, b1]) # twice each, to look for shared nodes
+      expect(MB::Sound.next_seed).to eq(expected)
+      expect(session.players).to be_empty
+      expect(session.journal.changes).to be_empty
+      expect(transport.position).to eq(0)
+
+      # Already warmed: skipped, unless again
+      expect(set.warm_up).to eq({})
+      expect(set.warm_up(:c, again: true, play: false).keys).to eq([:c])
+      expect(built.length).to eq(6) # a1 and b1 once each
+
+      # A redefined patch is warmed again
+      set.track(:c) { |c| built << c; c.tone.ramp }
+      expect(set.warm_up.keys).to eq([:c])
+    end
+
+    it 'only builds patches that reach nodes made outside them, and reads copies of knobs' do
+      lfo = 2.hz.lfo
+      before_lfo = lfo.sample(10).dup
+      cut = within { session.knob(:cut, 500, range: 100..5000, curve: :exp) }
+      set.track(:shared) { |c| c.tone.ramp * lfo }
+      set.track(:knobbed) { |c| c.tone.ramp.filter(:lowpass, cutoff: within_knob(:cut)) }
+      set.scene(:five, shared: a1, knobbed: b1)
+
+      result = set.warm_up(:shared, :knobbed)
+      expect(result[:shared].last).to eq(:built)
+      expect(result[:knobbed].last).to eq(:played)
+      # Neither the captured node nor the live knob moved
+      lfo2 = 2.hz.lfo
+      lfo2.sample(10)
+      expect(lfo.sample(10)).to eq(lfo2.sample(10))
+      expect(cut.next_frame).to eq(0)
+      expect(before_lfo.length).to eq(10)
+    end
+
+    it 'refuses while something plays' do
+      within { set.go(:one) }
+      run(800)
+      expect { set.warm_up }.to raise_error(RuntimeError, /before anything plays/)
+    end
+
+    it 'renders the same with and without it' do
+      render = ->(warm) {
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        a = s.arrangement
+        MB::Sound.seed(7)
+        a.track(:n) { |c| MB::Sound.synth(c, voices: 2) { |v| (v.hz.ramp.rnd + MB::Sound.noise * 0.1) * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+        a.scene(:x, n: MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop)
+        a.scene(:y, n: MB::Sound.seq(MB::Sound::G3).n8.loop)
+        a.warm_up if warm
+        MB::Sound::Session.with_context(session: s) { a.play_form(MB::Sound::Form.build { x 1; y 1 }, warm_up: false) }
+        data = Array.new(240) { s.process_buffer[0].dup }.reduce(:concatenate)
+        s.close
+        data
+      }
+      plain = render.(false)
+      expect(plain.abs.max).to be > 0.1
+      expect(render.(true)).to eq(plain)
+    end
+
+    it 'runs when a form starts only in an idle realtime session with YJIT' do
+      expect(set).not_to receive(:warm_up)
+      within { set.play_form(MB::Sound::Form.build { one 1 }) }
     end
   end
 end

@@ -18,6 +18,7 @@ require_relative 'session/graph_view'
 require_relative 'session/knobs'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
+require_relative 'session/stems'
 
 module MB
   module Sound
@@ -66,6 +67,7 @@ module MB
       include Knobs
       include MidiIn
       include AudioRecording
+      include Stems
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -167,6 +169,12 @@ module MB
       # thread: the context's session, or the default session.
       def self.current
         context&.[](:session) || default
+      end
+
+      # The session #current would return, without creating the default
+      # session: nil if there is none (or it is closed).
+      def self.existing
+        context&.[](:session) || (@default unless @default&.closed?)
       end
 
       # The performance context of the current thread, set by
@@ -341,6 +349,7 @@ module MB
         fade = bars_or_nil(fade)
 
         nodes = match_rate(to_nodes(sound))
+        adopt_knobs(nodes) # graph documents' knobs join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
@@ -512,6 +521,31 @@ module MB
       # the next buffer even if nothing is playing).
       def schedule_due?
         @scheduler.due?
+      end
+
+      # How far ahead of their time scheduled blocks (song form sections,
+      # at_bar blocks) run in a realtime session, so graphs they build are
+      # ready when their changes land: :auto (the default; half a bar, more
+      # after slow blocks, up to 2 bars) or a number of bars.  See
+      # Scheduler#lookahead.
+      def lookahead
+        @scheduler.lookahead
+      end
+
+      # Sets #lookahead (:auto or a number of bars).
+      def lookahead=(value)
+        @scheduler.lookahead = value
+      end
+
+      # The lookahead used now, in bars (see #lookahead).
+      def lookahead_bars
+        (@scheduler.lookahead_whole_notes / @transport.bar_length).to_r
+      end
+
+      # Scheduled blocks that finished after their time, newest last (see
+      # Scheduler#late).
+      def late_blocks
+        @scheduler.late
       end
 
       # Returns a Hash from player name to a description, noting players
@@ -687,8 +721,12 @@ module MB
         players = @mutex.synchronize { @players.values }
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
-        players.each do |p|
-          render_player(p, mix, from, to, per_sample, count)
+        if @stems
+          render_players_with_stems(players, mix, from, to, per_sample, count, @frame)
+        else
+          players.each do |p|
+            render_player(p, mix, from, to, per_sample, count)
+          end
         end
 
         playing = !players.empty? || queued_start?

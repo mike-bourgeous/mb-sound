@@ -183,7 +183,14 @@ module MB
           inv = GraphNode::Recipe::Invocation.new(args, nil, {}, false, nil, nil)
           # Building draws seeds; the session's later draws stay as they were
           result = MB::Sound.keeping_random_state {
-            GraphNode::Recipe.trace_locals(block, inv) { block.call(*args) }
+            # Loaded blocks keep their locals; others are read with a
+            # TracePoint (the fast frame capture needs the block's own
+            # recording scope, which a probe doesn't push)
+            if block.respond_to?(:graph_io_locals)
+              GraphNode::Recipe.trace_locals(block, inv) { block.call(*args) }
+            else
+              GraphNode::Recipe.trace_locals_tracepoint(block, inv) { block.call(*args) }
+            end
           }
           locals = inv.locals.each_with_object({}.compare_by_identity) { |(k, v), h|
             h[v] = k.to_s if GraphNode::Recipe.graph_object?(v) && !args.any? { |a| a.equal?(v) } && !h.key?(v)

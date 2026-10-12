@@ -55,7 +55,7 @@ module MB
           @handled_spies[handle] ||= []
           @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false]
 
-          # A spied node is never fused into a plan (see Plan.observed?)
+          # A spied node inside a plan gets a tap (see Plan::Op::Tap)
           Plan.changed(self)
 
           self

@@ -224,6 +224,16 @@ module MB
             @frame = snapshot
           end
 
+          # Reads +knob+ from now on instead (a graph document's knob
+          # joining a Session knob of the same name; see
+          # Session::Knobs#adopt_knobs).
+          def rebind(knob)
+            raise ArgumentError, "Readers read Knobs (got #{knob.class})" unless knob.is_a?(Knob)
+            @knob = knob
+            @frame = nil
+            self
+          end
+
           private
 
           # The first frame of the block this read covers: the Session's
@@ -298,6 +308,34 @@ module MB
 
         def name
           @spec.name
+        end
+
+        # Joins +session+ (Session::Knobs#adopt_knobs): a standalone knob,
+        # e.g. one from a graph document loaded outside the Session, counts
+        # the Session's frames from +frame+ on, keeping its value and any
+        # move in progress (shifted to the Session's frame count).  Raises
+        # if the knob already belongs to a Session.
+        def attach(session, frame:, sample_rate: @sample_rate)
+          @lock.synchronize {
+            raise ArgumentError, "Knob #{name.inspect} already belongs to a Session" if @session
+            offset = frame - @next_frame
+            @segment.start += offset
+            @pending.each { |s| s.start += offset }
+            @next_frame = frame
+            @span_frame = nil
+            @span_count = 0
+            @span_out = nil
+            @session = session
+            @sample_rate = sample_rate.to_f
+          }
+          self
+        end
+
+        # Reads +knob+ instead where this knob is read directly (#sample),
+        # after its readers were rebound to it (see Reader#rebind).
+        def redirect(knob)
+          (@self_reader ||= Reader.new(self)).rebind(knob)
+          self
         end
 
         def range

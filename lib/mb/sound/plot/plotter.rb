@@ -128,7 +128,9 @@ module MB
 
         # Plots a Hash of titles to data (or Hashes with :data and the
         # options of MB::M::Plot#plot: :xrange, :yrange, :logscale, :type,
-        # :x_label, :y_label, plus :x for x values) as a grid of charts, +columns+ wide.  Prints
+        # :x_label, :y_label, plus :x for x values and :x_scale for a
+        # Plot::Scale on x, e.g. Scale::Frequency) as a grid of charts,
+        # +columns+ wide.  Prints
         # text plots and returns nil, or returns the lines with +print:
         # false+ (or #print false).
         def plot(data, rows: nil, columns: nil, print: true)
@@ -197,7 +199,9 @@ module MB
           xs = xs && Mark.array(xs)
 
           xscale =
-            if log
+            if info[:x_scale]
+              info[:x_scale]
+            elsif log
               Scale::Log.new(xr && [[xr[0].to_f, 1e-9].max, xr[1]], label: info[:x_label])
             else
               Scale::Linear.new(xr, label: info[:x_label], nice: false)

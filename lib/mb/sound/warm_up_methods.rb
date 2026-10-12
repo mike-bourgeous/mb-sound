@@ -56,10 +56,17 @@ module MB
       # nothing (returns nil) without YJIT; otherwise returns the time taken
       # in seconds.
       #
+      # With +tracks: true+, builds the current session's patch tracks
+      # instead (Arrangement#warm_up, before anything plays; a form started
+      # in a realtime session does this itself) and returns a Hash of track
+      # name => milliseconds.
+      #
       # Example (bin/sound.rb):
       #     warm_up
       #     warm_up(midi: true)
-      def warm_up(calls: 200, buffer: 128, midi: false)
+      #     warm_up(tracks: true)
+      def warm_up(calls: 200, buffer: 128, midi: false, tracks: false)
+        return Session.current.arrangement.warm_up if tracks
         return nil unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
 
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)

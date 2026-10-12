@@ -382,10 +382,19 @@ module MB
       # `preset :dark_hall, input: mic, mix: 0.6`.  +trust: :code+ allows
       # runtime blocks outside the safe subset.
       #
-      # A set document (`save :gig, set`) loads into the current Session:
-      # its tempo, knobs, master chain, tracks, scenes, mute groups, and
-      # flow, returning the Document (`play_form doc.form`, or `go :intro`).
-      def preset(name, trust: nil, **inputs_and_params)
+      # The document's knobs join +session+ right away (the session console
+      # commands use, if one exists; false for none; see
+      # Session::Knobs#adopt_knobs), so `turn :cut` works before the graph
+      # plays; a knob with a MIDI controller (`cc:`) listens to live input.
+      # An override of a knob that joins an existing Session knob turns
+      # the shared knob now (a journaled, undoable turn, as `turn :cut,
+      # 900` would).
+      #
+      # A set document (`save :gig, set`) loads into +session+ (the current
+      # Session by default): its tempo, knobs, master chain, tracks,
+      # scenes, mute groups, and flow, returning the Document (`play_form
+      # doc.form`, or `go :intro`).
+      def preset(name, trust: nil, session: nil, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
           names = GraphIO.presets.values.flatten
@@ -395,13 +404,30 @@ module MB
         doc = GraphIO.parse(path)
         if doc.kind == :set
           raise ArgumentError, "a set takes no inputs (got #{inputs_and_params.keys.join(', ')})" unless inputs_and_params.empty?
-          doc = GraphIO.load(path, trust: trust, session: Session.current)
+          doc = GraphIO.load(path, trust: trust, session: session || Session.current)
           puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
           return doc
         end
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
-        GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+
+        session = Session.existing if session.nil?
+        if session
+          before = session.knobs
+          joined = session.adopt_knobs(graph)
+          attach_knob_midi(session, joined)
+          joined.each do |n, _k|
+            next unless before[n] && params.key?(n)
+            if Session.context&.[](:session).equal?(session)
+              turn(n, params[n])
+            else
+              Session.with_context(session: session) { turn(n, params[n]) }
+            end
+          end
+        end
+
+        graph
       end
 
       # Lists the presets by directory (names with their inputs and params).

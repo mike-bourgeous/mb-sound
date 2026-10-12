@@ -124,6 +124,14 @@ module MB
         k.listen(input) unless k.listening
       end
 
+      # Attaches live MIDI input for the knobs in +knobs+ (a Hash from
+      # name to Knob, as Session::Knobs#adopt_knobs returns) that have a
+      # controller, so graph documents' `knob ..., cc:` lines work as the
+      # console's `knob ..., cc:` does.
+      def attach_knob_midi(session, knobs)
+        knobs.each_value { |k| listen_knob_midi(session, k) if k.cc }
+      end
+
       # Journal entries for the changes a command returned.
       def knob_entries(value)
         return value unless value.is_a?(Array) && value.all?(Session::Changes::Change)
