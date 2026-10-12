@@ -107,12 +107,16 @@ module MB::Sound
   #   2026-10-11: "kick sample benefits from slower notes with pitch bend
   #   drops as well so individual kicks are momentarily almost audible").
   #   0 for none.
+  # - +transpose+: semitones (a number or a node, e.g. an envelope) added
+  #   to the pitch, for bends and dives on held notes (Small Talk's riser
+  #   dive: `v.env(1.bar, ...) * -60`).
   def self.vocal_lead_patch(
     v, source: :kick, scan: 0.0, width: 0.12, vowels: [:a, :o], voice: :tenor, wobble: 1.n4, skew: 0.5, formant_track: 0.3,
     cutoff: 1400, reso: 0.75, formant_mix: 0.6, crush: 4200, crush_track: 1.0, crush_mix: 0.5, jitter: 0.0, glide: 0.04,
-    drop: 0, drop_time: 0.25, gain: 1.0
+    drop: 0, drop_time: 0.25, gain: 1.0, transpose: nil
   )
     pitch = v.hz.glide(glide, legato: true)
+    pitch = pitch.transpose(transpose) if transpose
     if drop > 0
       # 0 while the note is held, falling linearly (in octaves) after it
       fall = v.env(0, 0, 1, drop_time, curve: :linear, sensitivity: 1.0..1.0, gm: false) - 1
