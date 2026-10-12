@@ -296,6 +296,15 @@ module MB
                 raise error(node, "knob #{name}: #{e.message}")
               end
               @document.params[name] = kwargs.merge(value: value, knob: true)
+            when :asset
+              name = args[0]
+              unless args.length == 1 && name.is_a?(String) && kwargs.keys.all? { |k| k == :sha256 }
+                raise error(node, 'asset takes a file name and its sum (asset "assets/pad.flac", sha256: "...")')
+              end
+              sum = kwargs[:sha256]
+              raise error(node, "asset #{name.inspect}: sha256: must be 64 hex digits") unless sum.nil? || (sum.is_a?(String) && sum.match?(/\A[0-9a-f]{64}\z/))
+              raise error(node, "asset #{name.inspect} is listed twice") if @document.assets.key?(name)
+              @document.assets[name] = sum
             end
             i += 1
           end
@@ -406,7 +415,7 @@ module MB
           when Prism::StringNode
             # Registered, so library file readers keep it inside the
             # document's directory (FileGuard)
-            FileGuard.register(node.unescaped.dup.freeze, file_context)
+            FileGuard.register(node.unescaped.dup, file_context)
           when Prism::SymbolNode
             node.unescaped.to_sym
           when Prism::NilNode then nil
@@ -787,7 +796,7 @@ module MB
 
         # Where this document's file names point (see FileGuard).
         def file_context
-          @file_context ||= FileGuard::Context.new(@base_dir, @label, nil)
+          @file_context ||= FileGuard::Context.new(@base_dir, @label, @document)
         end
 
         ### Helpers

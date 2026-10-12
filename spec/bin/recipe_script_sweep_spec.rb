@@ -16,6 +16,15 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
   audio_path = File.join(root, 'spec/test_data/arp_a7.flac')
 
   # Script => the FIXME (or input) the printed code must name
+  # Scripts whose plain to_ruby can't hold their tables but whose bundles
+  # can (graph-io phase 3), with the largest difference allowed relative
+  # to the peak (tables made in memory are saved as FLAC, read back as
+  # float32)
+  bundled = {
+    'bin/synths/sq80_voice.rb' => 1e-5,
+    'bin/synths/wavetable_bass.rb' => 1e-5,
+  }.freeze
+
   not_representable = {
     'bin/effects/reverse_delay.rb' => 'the proc block uses a from the code around it',
     'bin/synths/fm_chain.rb' => 'a class defined outside the library',
@@ -84,6 +93,22 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
 
             code = MB::Sound::GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: true).to_s
             report[:code] = code
+            if bundled.key?(name)
+              # Tables made in the script save as assets of a bundle
+              # (graph-io phase 3)
+              ref = RecipeHelpers.render(graph, buffers: 94)
+              dir = Dir.mktmpdir('graph_io_bundle')
+              saved = MB::Sound::GraphIO.save(File.join(dir, 'script.mbg.rb'), graph, inputs: inputs, params: params, options: options, from: name)
+              report[:bundle] = File.read(saved)
+              MB::Sound.seed(79)
+              fresh = inputs.transform_values { |o|
+                o.is_a?(MB::Sound::Notes) ? MB::Sound::Notes.new(midi_path) : MB::Sound.file_input(audio_path).ringdown
+              }
+              got = RecipeHelpers.render(MB::Sound::GraphIO.load(saved, inputs: fresh), buffers: 94)
+              report[:bundle_diff] = RecipeHelpers.max_diff(ref, got)
+              report[:peak] = ref.map { |r| r.length > 0 ? r.abs.max : 0 }.max
+              FileUtils.rm_rf(dir)
+            end
             unless code.include?('FIXME')
               ref = RecipeHelpers.render(graph, buffers: 94)
               MB::Sound.seed(code.include?('MB::Sound.seed') ? 0 : 77)
@@ -121,6 +146,11 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
       report = Marshal.load(data)
 
       expect(report[:error]).to be_nil, report[:error]
+      if bundled.key?(name)
+        expect(report[:bundle]).to include('asset "assets/')
+        expect(report[:bundle_diff]).to be <= bundled[name] * report[:peak], "diff #{report[:bundle_diff]} (peak #{report[:peak]})\n#{report[:bundle]}"
+        expect(report[:peak]).to be > 0.001
+      end
       if not_representable.key?(name)
         expect(report[:code]).to include(not_representable[name])
       else

@@ -1,3 +1,4 @@
+require 'digest'
 require 'time'
 
 module MB
@@ -9,9 +10,9 @@ module MB
       # GraphIO.document_of(graph) returns the Document of a loaded graph,
       # and GraphIO.dump reuses it when the graph is saved again.
       class Document
-        # Header calls, in order: graph first, then inputs, params, and
-        # knobs.
-        HEADER = %i[graph inputs param knob].freeze
+        # Header calls, in order: graph first, then inputs, params, knobs,
+        # and a bundle's assets.
+        HEADER = %i[graph inputs param knob asset].freeze
 
         # Options of a param (MIDI::ControlSpec-shaped: range, description,
         # cc number, curve; unit is informational).
@@ -25,6 +26,10 @@ module MB
         META_KEYS = %i[name kind saved mb_sound from options].freeze
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
+
+        # A bundle's assets: SHA-256 sums by file name (`asset
+        # "assets/pad.flac", sha256: "..."`), checked when the files are read.
+        attr_reader :assets
 
         # The Constants made for each param ({ name => [Constant, ...] }).
         # attr_accessor :knob_nodes (above)
@@ -42,6 +47,26 @@ module MB
           @knob_nodes = {}
           @input_objects = {}
           @comment_inputs = nil
+          @assets = {}
+          @verified = {}
+        end
+
+        # Checks asset +name+ (read from +real+, its real path) against its
+        # SHA-256 sum, if the header lists it (see FileGuard).  Raises
+        # FileError if the file changed.
+        def verify(name, real)
+          sum = @assets[name]
+          return unless sum
+
+          stat = File.stat(real)
+          key = [real, stat.size, stat.mtime]
+          return if @verified[name] == key
+
+          actual = Digest::SHA256.file(real).hexdigest
+          unless actual == sum
+            raise FileError.new("asset #{name.inspect} doesn't match the document (SHA-256 #{actual[0, 12]}..., expected #{sum[0, 12]}...): the file changed since the bundle was saved")
+          end
+          @verified[name] = key
         end
 
         # Reads `# inputs: midi` from the leading comments (+comments+ are
@@ -102,8 +127,9 @@ module MB
 
       # Writes graph documents (see GraphIO.dump).
       class Writer
-        def initialize(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {})
+        def initialize(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
           @graph = graph
+          @assets = assets
           @doc = GraphIO.document_of(graph)
           @name = name || @doc&.name
           @kind = kind || @doc&.kind || guess_kind(inputs)
@@ -124,7 +150,7 @@ module MB
           knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
           graph_knobs, knob_problems = self.graph_knobs
           graph_knobs.each { |name, k| knob_nodes[k] = name.to_s }
-          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes)
+          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes, assets: @assets)
           body = writer.to_s
           writer.problems.concat(knob_problems)
           graph_knobs.each_key do |name|
@@ -156,6 +182,9 @@ module MB
           graph_knobs.each do |name, k|
             next unless used.include?(name.to_s)
             header.concat(knob_lines(writer, k))
+          end
+          (@assets&.entries || []).each do |e|
+            header << "asset #{e.name.inspect}#{", sha256: #{e.sha256.inspect}" if e.sha256}"
           end
           (header + [''] + lines).join("\n") + "\n"
         end

@@ -56,8 +56,13 @@ module MB
           # +knobs+ ({ 'drive' => 1.0 }) prints Constants named after a
           # knob with its value as the knob's bare name, as do the nodes of
           # +knob_nodes+ ({ node => 'drive' }; graph documents' params).
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {})
+          #
+          # +assets+ (a GraphIO::Assets, for bundles) names files for tables
+          # that aren't library tables and for Strings naming sound or MIDI
+          # files.
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
             @root = root
+            @assets = assets
             @given_inputs = inputs
             @seeds = seeds
             @knobs = knobs.transform_keys(&:to_s)
@@ -766,7 +771,10 @@ module MB
           def leaf(v, indent)
             case v
             when Integer, Float, Rational, Complex then num(v)
-            when nil, true, false, Symbol, String then v.inspect
+            when nil, true, false, Symbol then v.inspect
+            when String
+              # A file name, in a bundle: the asset's name
+              (@assets && @assets.file(v))&.inspect || v.inspect
             when Range
               b = v.begin.nil? ? '' : range_end(v.begin, indent)
               e = v.end.nil? ? '' : range_end(v.end, indent)
@@ -1048,7 +1056,10 @@ module MB
               cached = MB::Sound::Wavetable.instance_variable_get(:@cache)&.[](name.to_sym)
               return "Wavetable[#{name.to_sym.inspect}]" if cached.equal?(t)
             end
-            fixme("a Wavetable#{" (#{name})" if name} that isn't a library table")
+            if @assets && (asset = @assets.wavetable(t))
+              return "Wavetable[#{asset.inspect}]"
+            end
+            fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
           end
 
           # A number, with gains that are exactly k/10 dB printed as k.db.

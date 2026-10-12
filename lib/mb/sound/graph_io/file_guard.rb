@@ -10,35 +10,36 @@ module MB
       # Keeps graph documents' file reads inside the document's directory,
       # whichever library method a file name reaches.
       #
-      # The loader registers every String it makes from document text
-      # (GraphIO::FileGuard.register).  The library's lowest file readers
-      # (Wavetable.from_file, FFMPEGInput (file_input, MB::Sound.read),
-      # and MIDI::MIDIFile) pass their file names through .resolve, which
+      # The loader marks every String it makes from document text with the
+      # document's Context (GraphIO::FileGuard.register; an instance
+      # variable set before the string is frozen, which copies keep; a
+      # WeakMap loses it: it holds its values weakly too, so a context
+      # was collected once its loader was gone).  The library's lowest
+      # file readers (Wavetable.from_file, FFMPEGInput (file_input,
+      # MB::Sound.read), and MIDI::MIDIFile) pass their file names through .resolve, which
       # leaves names from anywhere else alone and turns a document's names
       # into paths inside its directory, or raises FileError.  So
       # `Wavetable['/etc/passwd']`, `440.hz.wavetable('../x.flac')`,
       # `phase_table`, `waveshape`, KeyMap zones, `Notes.new('x.mid')`, and
       # any later method that reads a file named by a document follow the
       # same rule as file_input and midi_file, including reads that happen
-      # after the load (the registry holds the strings weakly).
+      # after the load.
       module FileGuard
         # Where a document's file names point: its directory (nil for text
         # loaded without base_dir:) and a label for messages.
         Context = Struct.new(:base_dir, :label, :assets)
 
-        @strings = ObjectSpace::WeakMap.new
-
         class << self
-          # Notes that +string+ came from a document read in +context+.
-          # Returns the string.
+          # Marks +string+ (not frozen yet) as text of a document read in
+          # +context+, and freezes it.  Returns the string.
           def register(string, context)
-            @strings[string] = context
-            string
+            string.instance_variable_set(:@graph_io_file_context, context)
+            string.freeze
           end
 
           # True if +string+ came from a document.
           def document_string?(string)
-            string.is_a?(String) && @strings.key?(string)
+            string.is_a?(String) && string.instance_variable_defined?(:@graph_io_file_context)
           end
 
           # +path+ unchanged unless it is a String from a document; then the
@@ -48,8 +49,7 @@ module MB
           def resolve(path, what = 'reading a file')
             return path unless document_string?(path)
 
-            ctx = @strings[path]
-            check(path, ctx, what)
+            check(path, path.instance_variable_get(:@graph_io_file_context), what)
           end
 
           # Checks +name+ (a file name from a document read in +ctx+) and
@@ -79,7 +79,13 @@ module MB
         # Wavetable.from_file
         module WavetableFile
           def from_file(path, **kwargs)
-            super(FileGuard.resolve(path, 'Wavetable.from_file'), **kwargs)
+            resolved = FileGuard.resolve(path, 'Wavetable.from_file')
+            super(resolved, **kwargs).tap { |t|
+              # Bundles copy the files of tables read with no options
+              if kwargs.empty? && (resolved.is_a?(String) || resolved.is_a?(Pathname)) && !t.frozen?
+                t.instance_variable_set(:@graph_io_file, File.expand_path(resolved.to_s))
+              end
+            }
           end
         end
 
