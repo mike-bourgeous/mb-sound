@@ -353,8 +353,39 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       session.add(g, name: :x, on: :now)
       expect(render(session, 800)[-1]).to eq(2500)
 
-      expect { within(session) { MB::Sound.preset(path, cut: 900) } }.to output(/joined the session's, which stays at 2500/).to_stderr
+      # An override of a knob that joins turns the shared knob (journaled, undoable)
+      within(session) { MB::Sound.preset(path, cut: 900) }
+      expect(session.journal.changes.last.kind).to eq(:turn)
+      expect(session.journal.changes.last.data).to eq({ value: 900 })
+      expect(render(session, 800)[-1]).to eq(900)
+      within(session) { MB::Sound.undo(on: :now) }
+      expect(render(session, 800)[-1]).to eq(2500)
       expect(io.document_of(within(session) { MB::Sound.preset(path, session: false) }).knob_nodes[:cut][0].session).to eq(nil)
+    end
+  end
+
+  describe 'graph document knobs with a controller' do
+    let(:session) { new_session }
+    after { session.close }
+
+    it 'listen to the session MIDI input when they join through Session#add or bg' do
+      ev = MB::Sound::MIDI::Event
+      doc = "graph 1\nknob :cut, 800.0, range: 100.0..6400.0, curve: :exp, cc: 74, takeover: :jump, smooth: 0\ncut * 1\n"
+      session.knob_midi = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.cc(74, 1.0, time: 0.01r), ev.cc(74, 0.5, time: 0.05r)))
+      g = MB::Sound::GraphIO.load(doc)
+      session.add(g, name: :x, on: :now)
+      expect(session.knobs[:cut].listening).not_to be_nil
+      d = render(session, 4800)
+      expect(d[480]).to be_within(1e-3).of(6400)
+      expect(d[-1]).to be_within(1e-3).of(800) # halfway in octaves from 100 to 6400
+
+      # The console's bg attaches it too (the input has a stream, so no live port opens)
+      s2 = new_session
+      s2.knob_midi = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.cc(74, 1.0, time: 0.01r)))
+      within(s2) { MB::Sound.bg(:y, MB::Sound::GraphIO.load(doc)) }
+      expect(s2.knobs[:cut].listening).not_to be_nil
+      expect(render(s2, 4800)[-1]).to be_within(1e-3).of(6400)
+      s2.close
     end
   end
 

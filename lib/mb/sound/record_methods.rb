@@ -18,7 +18,7 @@ module MB
     #     capture :lead, 2, quantize: 16      # the last 2 bars, on 16ths
     #     captures               # the clips recorded so far, by name
     #     rec_audio 'sets/take3.flac'   # the master bus, from now; alone: a timestamped file
-    #     stop_rec_audio on: :bar       # (or stop_rec)
+    #     stop_rec_audio on: :bar
     module RecordMethods
       # Arms tracks: `rec` and `capture` without names record into them,
       # and each track's patch plays the live MIDI input (a monitor player
@@ -92,8 +92,7 @@ module MB
 
       # Stops recording the master bus (see #rec_audio) at the launch point
       # (now by default).  Returns the journal entry.  Also available as
-      # #stop_recording_audio, #stop_rec, and #stop_recording (MIDI
-      # recordings have lengths, so only audio recordings are stopped).
+      # #stop_recording_audio.
       def stop_rec_audio(at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
@@ -101,8 +100,6 @@ module MB
         session.journal[c.seq]
       end
       alias stop_recording_audio stop_rec_audio
-      alias stop_rec stop_rec_audio
-      alias stop_recording stop_rec_audio
 
       # Captures what was just played into tracks (the armed ones if none
       # are named): from the next launch point of each track the last

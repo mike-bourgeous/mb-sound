@@ -299,9 +299,9 @@ module MB
       # commands use, if one exists; false for none; see
       # Session::Knobs#adopt_knobs), so `turn :cut` works before the graph
       # plays; a knob with a MIDI controller (`cc:`) listens to live input.
-      # An override of a knob that joins an existing Session knob is
-      # ignored with a warning (the Session's knob keeps its value; turn
-      # it).
+      # An override of a knob that joins an existing Session knob turns
+      # the shared knob now (a journaled, undoable turn, as `turn :cut,
+      # 900` would).
       def preset(name, trust: nil, session: nil, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
@@ -318,11 +318,14 @@ module MB
         if session
           before = session.knobs
           joined = session.adopt_knobs(graph)
-          joined.each do |n, k|
-            if before[n] && params.key?(n)
-              warn "preset #{name}: knob #{n.inspect} joined the session's, which stays at #{k.value_string} (turn #{n.inspect}, #{params[n]} to move it)"
+          attach_knob_midi(session, joined)
+          joined.each do |n, _k|
+            next unless before[n] && params.key?(n)
+            if Session.context&.[](:session).equal?(session)
+              turn(n, params[n])
+            else
+              Session.with_context(session: session) { turn(n, params[n]) }
             end
-            listen_knob_midi(session, k) if k.cc && !k.listening && respond_to?(:listen_knob_midi, true)
           end
         end
 

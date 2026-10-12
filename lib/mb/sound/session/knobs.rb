@@ -98,8 +98,10 @@ module MB
         #   one knob that `turn :cut` moves).  A different range or curve
         #   goes through MB::Sound.live_error (live: stays standalone).
         #
-        # Knobs of this or another Session are left alone.  Returns the
-        # Session knobs the graph now reads (a Hash from name to Knob).
+        # Knobs with a MIDI controller (+cc:+) listen to #knob_midi (the
+        # console attaches live input to it; see KnobMethods).  Knobs of
+        # this or another Session are left alone.  Returns the Session knobs
+        # the graph now reads (a Hash from name to Knob).
         def adopt_knobs(sound)
           nodes = to_nodes(sound)
           found = nodes.flat_map { |n| [n, *n.graph] }
@@ -140,6 +142,7 @@ module MB
             end
           end
 
+          joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
           joined
         end
 
