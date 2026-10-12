@@ -404,7 +404,9 @@ module MB
           when Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode
             node.value
           when Prism::StringNode
-            node.unescaped.dup.freeze
+            # Registered, so library file readers keep it inside the
+            # document's directory (FileGuard)
+            FileGuard.register(node.unescaped.dup.freeze, file_context)
           when Prism::SymbolNode
             node.unescaped.to_sym
           when Prism::NilNode then nil
@@ -513,6 +515,8 @@ module MB
 
           begin
             result = receiver.public_send(name, *args, **kwargs, &block)
+          rescue GraphIO::FileError => e
+            raise error(node, e.message)
           rescue GraphIO::LoadError
             raise
           rescue StandardError => e
@@ -771,17 +775,19 @@ module MB
           check_integer(node, result) if result.is_a?(Integer)
         end
 
-        # Files: only relative names inside the document's directory.
+        # Files: only relative names inside the document's directory (see
+        # FileGuard, which also catches file names reaching other readers).
         def check_file(node, name, args)
           file = args[0]
           return unless file.is_a?(String)
-          unless @base_dir
-            raise error(node, "#{name} reads a file, which only documents loaded from a file (or with base_dir:) may do")
-          end
-          if file.start_with?('/', '~') || file.split(%r{[/\\]}).include?('..') || file.match?(/\A[a-zA-Z]:/) || file.include?("\0")
-            raise error(node, "#{name}(#{file.inspect}): files must be named relative to the document, inside its directory")
-          end
-          args[0] = File.join(@base_dir, file)
+          args[0] = FileGuard.check(file, file_context, name.to_s)
+        rescue GraphIO::FileError => e
+          raise error(node, e.message)
+        end
+
+        # Where this document's file names point (see FileGuard).
+        def file_context
+          @file_context ||= FileGuard::Context.new(@base_dir, @label, nil)
         end
 
         ### Helpers

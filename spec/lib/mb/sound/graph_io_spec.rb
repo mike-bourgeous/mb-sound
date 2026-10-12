@@ -417,6 +417,51 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
         File.write(path, "file_input('arp.flac')")
         expect(render(io.load(path), buffers: 4).first.abs.max).to be > 0.01
       end
+
+      # graph-io-3: before FileGuard, Wavetable['/abs/path'], tables named
+      # by path in wavetable/phase_table/waveshape/KeyMap zones, and MIDI
+      # file names given to Notes.new, synth, or tr808 opened any file
+      [
+        'Wavetable["%s"]',
+        '440.hz.wavetable("%s")',
+        '440.hz.wavetable(Wavetable["%s"])',
+        '220.hz.ramp.phase_table("%s")',
+        '220.hz.ramp.waveshape("%s")',
+        '440.hz.wavetable(Wavetable::KeyMap.new({ (C1..C8) => "%s" }))',
+        'Notes.new("%s").tone',
+        'synth("%s") { |v| v.tone }',
+        'tr808("%s")',
+      ].each do |pattern|
+        it "keeps file names in #{pattern % 'x'} relative to the document" do
+          opened = []
+          allow(MB::Sound::FFMPEGInput).to receive(:new).and_wrap_original { |m, f, **kw| opened << f; m.call(f, **kw) }
+          allow(File).to receive(:open).and_wrap_original { |m, f, *a, **kw, &b| opened << f; m.call(f, *a, **kw, &b) }
+
+          expect_load_error(pattern % '/etc/hostname', 1, /only documents loaded from a file/)
+          expect_load_error(pattern % '/etc/hostname', 1, /relative to the document/, base_dir: tmp_path('docs'))
+          expect_load_error(pattern % '../x.mid', 1, /relative to the document/, base_dir: tmp_path('docs'))
+
+          dir = File.dirname(tmp_path('docs/x'))
+          FileUtils.mkdir_p(dir)
+          File.symlink('/etc/hostname', File.join(dir, 'link.flac'))
+          expect_load_error(pattern % 'link.flac', 1, /link to outside the document's directory/, base_dir: dir)
+          expect(opened.map(&:to_s).grep(%r{/etc/|\.\./})).to eq([])
+        end
+      end
+
+      it 'reads tables and MIDI files named relative to the document' do
+        dir = File.dirname(tmp_path('docs/x'))
+        FileUtils.mkdir_p(dir)
+        FileUtils.cp(audio_path, File.join(dir, 'arp.flac'))
+        FileUtils.cp(File.expand_path('../../../test_data/c_major.mid', __dir__), File.join(dir, 'c.mid'))
+        expect(io.load('440.hz.wavetable("arp.flac")', base_dir: dir).table.name).to eq('arp.flac')
+        expect(render(io.load('Notes.new("c.mid").tone.ramp', base_dir: dir), buffers: 4).first.abs.max).to be > 0.1
+      end
+
+      it 'leaves file names from outside the document alone' do
+        expect(io::FileGuard.resolve('/etc/hostname')).to eq('/etc/hostname')
+        expect(io::FileGuard.resolve(audio_path.dup)).to eq(audio_path)
+      end
     end
 
     it 'never uses eval, YAML, Marshal, send, or const_get outside TrustedCode' do
