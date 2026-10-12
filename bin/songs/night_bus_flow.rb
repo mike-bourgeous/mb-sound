@@ -390,7 +390,9 @@ module MB::Sound
   # G, a new swell each bar) on a louder swarm of saws and fifths with the
   # song pad's 0.6 s attack, over a four-on-the-floor kick, from bar 2 so a
   # lead has room.  +lead+ is the pad track's lead: (nil, 1.attack,
-  # 0.5.attack, ...).
+  # 0.5.attack, ...).  Closed hats on every 16th (offbeat eighths accented)
+  # mark the grid for listening on small speakers (maintainer, 2026-10-12:
+  # "add a ride cymbal or closed hat on the grid with the kick").
   #
   #     render('pad.flac', bars: 9) { last_stop_pad_check(lead: 0.5.attack) }
   def self.last_stop_pad_check(lead: 0.5.attack)
@@ -405,7 +407,7 @@ module MB::Sound
       }.softclip(0.5, 0.95) * 0.9
     }
     track(:check_kick) { |kit| tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }) * 0.85 }
-    scene :pad_check, check_pad: clip, check_kick: grid(16, kick: 'X...X...X...X...').loop
+    scene :pad_check, check_pad: clip, check_kick: grid(16, kick: 'X...X...X...X...', hat: 'xxXxxxXxxxXxxxXx').loop
     go :pad_check, in: 1
   end
 
