@@ -521,6 +521,31 @@ module MB
         @scheduler.due?
       end
 
+      # How far ahead of their time scheduled blocks (song form sections,
+      # at_bar blocks) run in a realtime session, so graphs they build are
+      # ready when their changes land: :auto (the default; half a bar, more
+      # after slow blocks, up to 2 bars) or a number of bars.  See
+      # Scheduler#lookahead.
+      def lookahead
+        @scheduler.lookahead
+      end
+
+      # Sets #lookahead (:auto or a number of bars).
+      def lookahead=(value)
+        @scheduler.lookahead = value
+      end
+
+      # The lookahead used now, in bars (see #lookahead).
+      def lookahead_bars
+        (@scheduler.lookahead_whole_notes / @transport.bar_length).to_r
+      end
+
+      # Scheduled blocks that finished after their time, newest last (see
+      # Scheduler#late).
+      def late_blocks
+        @scheduler.late
+      end
+
       # Returns a Hash from player name to a description, noting players
       # that are waiting for their start time, stopping, or fading out.  If a
       # name has both a current player and one being replaced, the current
