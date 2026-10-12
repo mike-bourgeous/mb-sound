@@ -260,6 +260,19 @@ module MB
             end
           end
 
+          # Notes each row clip of recorded Kit +kit+ (its +rows+ Hash) as
+          # kit[:row], so clips taken with kit.rows print that way.
+          def note_rows(kit, rows)
+            return unless @enabled && state.depth == 0 && record_of(kit)
+            take_frame(scope)
+
+            rows.each do |name, clip|
+              next if record_of(clip) || clip.frozen?
+              call = Call.new(kit, :[], [name], {}, nil, nil, nil, scope, next_seq, nil, nil)
+              clip.instance_variable_set(:@graph_recipe, Record.new(clip, call))
+            end
+          end
+
           # The synth lane [index, count] calls are made in, :seeded inside
           # another MB::Sound.with_seed block (unison copies, drum voices:
           # their seeds derive from the parent's), or nil.
@@ -412,7 +425,12 @@ module MB
               um ? [um.owner, um.original_name] : name
             }
             groups.each_value do |(first, *aliases)|
-              if target <= Channels && ([first] + aliases).any? { |n| ELEMENT_ACCESS.include?(n) }
+              if target <= MB::Sound::Sequence::Kit && first == :rows
+                # kit.rows hands out the row clips: they print as kit[:row]
+                mod.define_method(first) do |*args, **kwargs, &block|
+                  super(*args, **kwargs, &block).tap { |rows| Recipe.note_rows(self, rows) }
+                end
+              elsif target <= Channels && ([first] + aliases).any? { |n| ELEMENT_ACCESS.include?(n) }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   Recipe.note_elements(self)
                   super(*args, **kwargs, &block)

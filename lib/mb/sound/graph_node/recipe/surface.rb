@@ -56,8 +56,8 @@ module MB
               names: %i[steps beats],
             },
             'MB::Sound::Sequence::Kit' => {
-              reason: 'readers (rows print through kit[:name])',
-              names: %i[rows each],
+              reason: 'iteration (rows taken with kit.rows or kit[:name] print as kit[:name])',
+              names: %i[each],
             },
           }.freeze
 

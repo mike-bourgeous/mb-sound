@@ -356,7 +356,7 @@ module MB
           ].freeze
 
           # A variable name for +o+: the name given with #named, else a role
-          # (voice for synths, osc, lfo, env, notes, fx for effect results,
+          # (voice for synths, osc, lfo, env, notes, clip, kit, fx for effect results,
           # out for the final output, sig otherwise).
           def base_name(o)
             named = Recipe.config_of(o).reverse.find { |k| k.name == :named }
@@ -370,6 +370,7 @@ module MB
             when MB::Sound::Envelope then 'env'
             when MB::Sound::Notes then 'notes'
             when MB::Sound::Sequence::Clip then 'clip'
+            when MB::Sound::Sequence::Kit then 'kit'
             else
               c && FX.include?(c.name) ? 'fx' : 'sig'
             end

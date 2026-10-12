@@ -31,6 +31,10 @@ module MB::Sound
         -> { tr808(grid(16, kick: 'x...x...', clap: '....x...').fill { grid(16, clap: '......xx') }.nofill(:kick).loop, accent: 6) },
         "fill {\n  grid(16, clap: \"......xx\")\n}.nofill(:kick).loop",
       ],
+      'kit rows taken with kit.rows' => [
+        -> { kit = grid(16, kick: 'x...x...', hat: 'x.x.x.x.'); tr808(Sequence::Kit.new(kit.rows.to_h { |n, c| [n, n == :hat ? c.swing(0.56) : c.every(2)] }).loop) },
+        %{kit = grid(16, kick: "x...x...", hat: "x.x.x.x.")\ntr808(Sequence::Kit.new({ kick: kit[:kick].every(2), hat: kit[:hat].swing(0.56) }).loop},
+      ],
       'Clip.new events' => [
         -> { Sequence::Clip.new([MB::Sound::Sequence::Event.new(start: 0r, length: 1/8r, value: 60, velocity: 0.787), MB::Sound::Sequence::Event.new(start: 1/4r, length: 1/8r, value: 64, velocity: 1.0, accented: true, probability: 0.5)], length: 1/2r).loop.tone },
         "events(\n  [0r, 1r/8, 60, 0.787],\n  [1r/4, 1r/8, 64, 1.0, { probability: 0.5, accented: true }],\n  length: 1r/2\n).loop",
