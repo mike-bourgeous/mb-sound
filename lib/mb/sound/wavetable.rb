@@ -685,6 +685,36 @@ module MB
         KernelRuby.value(kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase.to_f, increment.to_f.abs, scan.to_f, interpolation_code(interpolation))
       end
 
+      # Cycle mode: [value, slope per cycle] at +phase+ (as #value_at), the
+      # slope exact from the table's harmonics: what a band-limited phase
+      # jump of a tone playing the table needs (Tone#table_shape, on every
+      # key-synced reset).  In C (FastWavetable.shape; ~170 us per 128
+      # samples of dense MIDI were these in Ruby, found by sound-design-1);
+      # #shape_at_ruby is the mirror.  Complex tables give Complexes.
+      def shape_at(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil, scan_wrap: false)
+        raise ArgumentError, 'Only cycle-mode tables have a shape' unless @mode == :cycle
+
+        o = (Thread.current[:mb_wavetable_shape] ||= Numo::DFloat.zeros(4))
+        MB::Sound::FastWavetable.shape(
+          o, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase.to_f, increment.to_f, scan.to_f,
+          interpolation_code(interpolation), sinc_kernel(interpolation)
+        )
+        @complex ? [Complex(o[0], o[1]), Complex(o[2], o[3])] : [o[0], o[2]]
+      end
+
+      # The Ruby mirror of #shape_at (Wavetable::KernelRuby).
+      def shape_at_ruby(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil, scan_wrap: false)
+        raise ArgumentError, 'Only cycle-mode tables have a shape' unless @mode == :cycle
+
+        spec = kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap)
+        m = increment.to_f.abs
+        value = KernelRuby.value(spec, phase.to_f, m, scan.to_f, interpolation_code(interpolation))
+        dre = [0.0, 0.0]
+        dim = [0.0, 0.0]
+        KernelRuby.spectral_derivs(spec, phase.to_f, KernelRuby.select(spec, m, scan.to_f), 2, dre, dim)
+        [@complex ? Complex(value) : value.real.to_f, @complex ? Complex(dre[1], dim[1]) : dre[1]]
+      end
+
       # The kernel code of +interpolation+ (nil for #interpolation).
       def interpolation_code(interpolation = nil)
         interpolation ||= @interpolation

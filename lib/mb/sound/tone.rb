@@ -2126,16 +2126,9 @@ module MB
         x = e - e.floor
         u = w == 0.5 ? x : BandLimit.warp(x, w)
         k = w == 0.5 ? 1.0 : (x < w ? 0.5 / w : 0.5 / (1.0 - w))
-        value = table.value_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation, scan_wrap: @scan_wrap)
-
-        # The exact slope from the table's harmonics (see
-        # Wavetable::KernelRuby.spectral_derivs)
-        spec = table.kernel_spec(@sample_rate, @interpolation, scan_wrap: @scan_wrap)
-        dre = [0.0, 0.0]
-        dim = [0.0, 0.0]
-        kr = MB::Sound::Wavetable::KernelRuby
-        kr.spectral_derivs(spec, u, kr.select(spec, m, scan.to_f), 2, dre, dim)
-        slope = table.complex? ? Complex(dre[1], dim[1]) : dre[1]
+        # The value and the exact slope from the table's harmonics, in C
+        # (Wavetable#shape_at; mirror #shape_at_ruby)
+        value, slope = table.shape_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation, scan_wrap: @scan_wrap)
 
         [value, slope * k]
       end

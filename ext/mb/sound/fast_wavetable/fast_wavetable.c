@@ -1156,6 +1156,52 @@ static VALUE ruby_half_means(VALUE self, VALUE out, VALUE spectra)
 	return out;
 }
 
+/*
+ * The value and slope of a cycle-mode table (Tone#table_shape, for the
+ * band-limited steps of phase jumps: key-synced resets):
+ *   shape(out, spec, u, m, scan, interpolation, sinc) -> out
+ *
+ * +out+ is a DFloat of 4 values: [re, im] of the value at +u+ (cycles)
+ * moving +m+ cycles per sample at +scan+ (wt_value), then [re, im] of the
+ * slope per cycle from the table's harmonics (wt_table_slope).  The Ruby
+ * mirror is Wavetable::KernelRuby.value and .spectral_derivs.
+ */
+static VALUE ruby_shape(VALUE self, VALUE out, VALUE spec, VALUE u_v, VALUE m_v, VALUE scan_v, VALUE interp, VALUE sinc)
+{
+	struct wt_table t;
+	wt_read_table(spec, &t);
+	if (t.mode != 0) {
+		rb_raise(rb_eArgError, "FastWavetable.shape needs a cycle-mode table");
+	}
+	struct wt_sinc ks = { 0 };
+	int mode = wt_read_interp(interp, sinc, &t, &ks);
+
+	if (CLASS_OF(out) != numo_cDFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out)) || RNARRAY_SIZE(out) < 4) {
+		rb_raise(rb_eArgError, "Shape output must be a contiguous DFloat of 4 values");
+	}
+	if (OBJ_FROZEN(out)) {
+		rb_raise(rb_eFrozenError, "Shape output is frozen");
+	}
+	double *o = (double *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+
+	double u = NUM2DBL(u_v);
+	double m = fabs(NUM2DBL(m_v));
+	double sc = NUM2DBL(scan_v);
+
+	double re = 0, im = 0;
+	wt_value(&t, u, m, sc, mode, &ks, &re, &im);
+	double sre = 0, sim = 0;
+	wt_table_slope(&t, u, m, sc, mode, &ks, &sre, &sim);
+	o[0] = re;
+	o[1] = im;
+	o[2] = sre;
+	o[3] = sim;
+
+	RB_GC_GUARD(spec);
+	RB_GC_GUARD(sinc);
+	return out;
+}
+
 void Init_fast_wavetable(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1168,4 +1214,5 @@ void Init_fast_wavetable(void)
 	rb_define_module_function(fast_wavetable_module, "sync", ruby_sync, -1);
 	rb_define_module_function(fast_wavetable_module, "harmonic_spectra", ruby_harmonic_spectra, 3);
 	rb_define_module_function(fast_wavetable_module, "half_means", ruby_half_means, 2);
+	rb_define_module_function(fast_wavetable_module, "shape", ruby_shape, 7);
 }
