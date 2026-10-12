@@ -79,6 +79,20 @@ module MB
     # then #sample returns nil once the release ends.  Gated and triggered envelopes never end;
     # #idle? tells when they are silent.
     #
+    # Holding the last level (+hold_last: true+, or #hold_last): when the
+    # last segment lands (or a choke does), the envelope stays at that level
+    # instead of returning to 0, until the next note starts from it.  For
+    # pitch and cutoff envelopes whose release goes somewhere other than 0
+    # (a pitch dive that stays down while the sound rings on).  The held
+    # level is frozen where the segment landed, even if its level is a node
+    # that keeps moving.  #idle? is still true once the envelope has
+    # finished (so voices are reused as before); a one-shot that holds
+    # reaches :ended (#ended?) but #sample keeps returning its last level
+    # instead of nil, so it never ends a graph by itself.  Off by default.
+    #
+    #     dive = v.env([[0, 0], [0, 0.01], [knob(:dive), 0.25]], release_at: 2, hold_last: true)
+    #     v.hz.transpose(dive * 24).saw * v.amp_env(0.005, 2, 0, 1.5)
+    #
     # Multi-segment envelopes: every constructor (adsr, env, amp_env,
     # fm_env, filter_env, and the Notes versions) also takes a segment list
     # of [level, time, curve, shape] (curve and shape optional), named :t1,
@@ -241,6 +255,7 @@ module MB
       FLAG_LIFT = 32
       FLAG_ADD = 64
       FLAG_ZERO = 128
+      FLAG_HOLD_LAST = 256
 
       # Retrigger modes (see #retrigger): :restart attacks from the current
       # level to the new note's velocity peak; :add attacks to the energy
@@ -461,6 +476,9 @@ module MB
       #             stage (see #legato).
       # +:retrigger+ - :restart (default), :add, or :zero (see the class
       #                description and #retrigger).
+      # +:hold_last+ - If true, the envelope holds its last level after the
+      #                last segment (or a choke) lands, instead of returning
+      #                to 0 (see the class description and #hold_last).
       # +:octaves+ - If not nil or 0, the output is 2 ** (level * octaves), a
       #              cutoff multiplier (a number of octaves, anything with
       #              #to_octaves such as an Interval, or a graph node read
@@ -480,7 +498,7 @@ module MB
         curve: :analog, shape: nil, hold: nil,
         gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil,
         sensitivity: 0..1, velocity_range: nil, velocity_scale: :linear, legato: false, octaves: nil,
-        retrigger: :restart, sample_rate: 48000
+        retrigger: :restart, hold_last: false, sample_rate: 48000
       )
         @sample_rate = sample_rate.to_f
         raise ArgumentError, "Sample rate must be positive (got #{sample_rate.inspect})" unless @sample_rate > 0
@@ -531,6 +549,7 @@ module MB
         set_sensitivity(sensitivity, velocity_scale)
 
         @legato = !!legato
+        @hold_last = !!hold_last
         self.retrigger = retrigger
         self.octaves = octaves
 
@@ -735,6 +754,24 @@ module MB
         @legato
       end
 
+      # Makes the envelope hold its last level once its last segment (or a
+      # choke) lands, instead of returning to 0 (or return to 0 again if
+      # +enabled+ is false; see the class description).  Returns self.
+      #
+      # Example:
+      #     v.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2).hold_last
+      def hold_last(enabled = true)
+        @hold_last = !!enabled
+        changed!
+        self
+      end
+
+      # True if the envelope holds its last level after it ends (see
+      # #hold_last).
+      def hold_last?
+        @hold_last
+      end
+
       # Sets the retrigger mode (:restart, :add, or :zero; see the class description)
       # and returns self, or returns the mode without an argument.
       #
@@ -832,9 +869,10 @@ module MB
       end
 
       # True when the envelope is idle at exactly 0 (e.g. for voice
-      # allocation).
+      # allocation), or idle at any level with #hold_last (it has finished
+      # and won't move until the next note).
       def idle?
-        @state[STATE_STAGE] == STAGE_IDLE && @state[STATE_LEVEL] == 0
+        @state[STATE_STAGE] == STAGE_IDLE && (@hold_last || @state[STATE_LEVEL] == 0)
       end
 
       # True when a one-shot has finished (see the class description).
@@ -860,7 +898,8 @@ module MB
       end
 
       # Returns +count+ samples of the envelope (an SFloat reused between
-      # calls), or nil after a one-shot has ended.
+      # calls), or nil after a one-shot has ended (unless it holds its last
+      # level; see #hold_last).
       def sample(count)
         run(count.round, :c)
       end
@@ -911,7 +950,7 @@ module MB
         preset = names.find { |k| preset_shapes.(k) == @shapes } || names.first
         curves = preset || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
         shapes = " shape #{@shapes.values.join('/')}" unless preset_shapes.(preset) == @shapes
-        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{shapes}#{' retrigger add' if @retrigger == :add}"
+        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{shapes}#{' retrigger add' if @retrigger == :add}#{' hold_last' if @hold_last}"
       end
 
       # The config Array for the kernels (see FastEnvelope.process).
@@ -925,6 +964,7 @@ module MB
         flags |= FLAG_LIFT if @lift
         flags |= FLAG_ADD if @retrigger == :add
         flags |= FLAG_ZERO if @retrigger == :zero
+        flags |= FLAG_HOLD_LAST if @hold_last
 
         [
           flags,
@@ -974,6 +1014,7 @@ module MB
         has_lift = flags & FLAG_LIFT != 0
         add = flags & FLAG_ADD != 0
         zero = flags & FLAG_ZERO != 0
+        hold_last = flags & FLAG_HOLD_LAST != 0
 
         seg_times = times.map { |v| signal(v, n, 0.0) }
         seg_curves = curves.map { |v| signal(v, n, 0.0) }
@@ -1243,7 +1284,8 @@ module MB
               break
             end
 
-            y = 0.0
+            # Idle or ended: 0, or the last level with FLAG_HOLD_LAST
+            y = 0.0 unless hold_last
             break
           end
 
@@ -1324,7 +1366,7 @@ module MB
 
       # Runs the C or Ruby kernel for +count+ samples.
       def run(count, kernel)
-        return nil if ended?
+        return nil if ended? && !@hold_last
 
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
 
@@ -1363,9 +1405,11 @@ module MB
       # #quiet?).  Updates the state as the kernel would (the level stays
       # 0, the trigger edge detector resets, and the note position
       # advances), so #run can skip the kernel.  Not with octaves (the
-      # output would be 2 ** (0 * octaves)).
+      # output would be 2 ** (0 * octaves)), nor while #hold_last holds a
+      # level other than 0.
       def quiet_idle?(inputs, config)
         return false unless @state[STATE_STAGE] == STAGE_IDLE && @state[STATE_GATE] == 0
+        return false if @hold_last && @state[STATE_LEVEL] != 0
         return false if config[0] & FLAG_OCTAVES != 0
         return false unless quiet?(:gate, inputs[0]) && quiet?(:trigger, inputs[1])
 
@@ -1575,7 +1619,7 @@ module MB
           mark += '@' if i == @loop_node
           "#{mark}#{num.(@levels[n])}/#{num.(@times[n].length)}"
         }
-        "env(#{segs.join(', ')}) curve #{@curves.values.map(&num).join('/')}#{' retrigger add' if @retrigger == :add}"
+        "env(#{segs.join(', ')}) curve #{@curves.values.map(&num).join('/')}#{' retrigger add' if @retrigger == :add}#{' hold_last' if @hold_last}"
       end
 
       # A time in seconds for defaults (0 for graph nodes).

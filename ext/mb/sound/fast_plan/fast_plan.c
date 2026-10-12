@@ -873,9 +873,15 @@ static void run_envelope(const int32_t *op, const struct regs *R, const double *
 			if (env_at(&a.gate, i) != 0 || env_at(&a.trigger, i) > 0) quiet = 0;
 		}
 		if (quiet) {
-			memset(o, 0, n * sizeof(float));
-			st[ST_LEVEL] = 0;
-			st[ST_PREV_LEVEL] = 0;
+			// ENV_HOLD_LAST holds the last level (the kernel's idle samples)
+			double y = (a.flags & ENV_HOLD_LAST) ? st[ST_LEVEL] : 0;
+			if (y == 0) {
+				memset(o, 0, n * sizeof(float));
+			} else {
+				for (size_t i = 0; i < n; i++) o[i] = y;
+			}
+			st[ST_LEVEL] = y;
+			st[ST_PREV_LEVEL] = y;
 			st[ST_TRIGGER] = 0;
 			st[ST_NOTE_POSITION] += (double)n;
 			RB_GC_GUARD(obj);

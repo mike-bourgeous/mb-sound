@@ -107,6 +107,7 @@ enum env_flags {
 	ENV_LIFT = 32,
 	ENV_ADD = 64,     // retrigger peaks add to the current level (energy sum)
 	ENV_ZERO = 128,   // notes start from 0, not the current level (SQ-80 ENV restart)
+	ENV_HOLD_LAST = 256, // idle and ended envelopes hold their last level instead of 0
 };
 
 // A parameter or input: a constant, or a float or double per sample.
@@ -357,6 +358,7 @@ static inline int mb_env_process(const struct mb_env_args *a, float *o, size_t n
 	int has_lift = !!(flags & ENV_LIFT);
 	int add = !!(flags & ENV_ADD);
 	int zero = !!(flags & ENV_ZERO);
+	int hold_last = !!(flags & ENV_HOLD_LAST);
 
 	int stage = (int)st[ST_STAGE];
 	long seg = (long)st[ST_SEGMENT];
@@ -471,7 +473,7 @@ static inline int mb_env_process(const struct mb_env_args *a, float *o, size_t n
 				} else if (stage == ENV_SUSTAIN) {
 					y = sustain_level;
 					e += 1;
-				} else {
+				} else if (!hold_last) {
 					y = 0;
 				}
 				y_prev = y_last;
@@ -667,8 +669,11 @@ static inline int mb_env_process(const struct mb_env_args *a, float *o, size_t n
 				break;
 			}
 
-			// Idle or ended
-			y = 0;
+			// Idle or ended: 0, or the last level with ENV_HOLD_LAST (where
+			// the last segment or a choke landed, or 0 before any note)
+			if (!hold_last) {
+				y = 0;
+			}
 			break;
 		}
 
