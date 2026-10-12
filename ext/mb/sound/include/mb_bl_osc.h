@@ -312,6 +312,50 @@ static inline int bl_pivot_candidates(enum bl_wave wt, double o, double *u, doub
 	return n;
 }
 
+// One breakpoint candidate at shape phase +ub+ and rotated phase +x+ (see
+// bl_breakpoints), appended to +bp+ at *n unless it has no jump (and not
+// +all+).
+static inline __attribute__((always_inline)) void bl_breakpoint_at(enum bl_wave wt, double w, double k1, double k2,
+		double o, double ub, double x, struct bl_breakpoint *bp, int *n, _Bool all)
+{
+	double ul = ub == 0.0 ? 1.0 : ub; // approaching from below
+	double xl = x == 0.0 ? 1.0 : x;
+
+	double kr = x < 0.5 ? k1 : k2;
+	double kl = xl <= 0.5 ? k1 : k2;
+
+	double vr = bl_shape(wt, ub, 0);
+	double dv = vr - bl_shape(wt, ul, 1);
+	double ds = bl_slope(wt, ub, 0) * kr - bl_slope(wt, ul, 1) * kl;
+
+	if (dv == 0 && ds == 0 && !all) {
+		return;
+	}
+
+	double pos = x < 0.5 ? x * (2.0 * w) : w + (x - 0.5) * (2.0 * (1.0 - w));
+	if (o != 0) {
+		pos += o;
+		if (pos >= 1.0) {
+			pos -= 1.0;
+		}
+	}
+	bp[(*n)++] = (struct bl_breakpoint){ pos, dv, ds, vr, x, ub };
+}
+
+// bl_breakpoints around a pivot other than 0 (out of line: pivot 0 keeps
+// the inline loop it had before pivots).
+static __attribute__((noinline, unused)) int bl_breakpoints_pivot(enum bl_wave wt, double w, struct bl_breakpoint *bp, _Bool all, double o)
+{
+	double cand[BL_MAX_BREAKPOINTS], cx[BL_MAX_BREAKPOINTS];
+	int nc = bl_pivot_candidates(wt, o, cand, cx);
+	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
+	int n = 0;
+	for (int j = 0; j < nc; j++) {
+		bl_breakpoint_at(wt, w, k1, k2, o, cand[j], cx[j], bp, &n, all);
+	}
+	return n;
+}
+
 // Fills +bp+ with the breakpoints of +wt+ warped by width +w+ around pivot
 // +o+ (positions in phase; jumps in value and in slope per cycle of phase),
 // returning how many there are.  Points with no jump are left out unless
@@ -319,38 +363,17 @@ static inline int bl_pivot_candidates(enum bl_wave wt, double o, double *u, doub
 // formula changes).
 static inline int bl_breakpoints(enum bl_wave wt, double w, struct bl_breakpoint *bp, _Bool all, double o)
 {
-	double cand[BL_MAX_BREAKPOINTS], cx[BL_MAX_BREAKPOINTS];
-	int nc = bl_pivot_candidates(wt, o, cand, cx);
-	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
-	int n = 0;
-
-	for (int j = 0; j < nc; j++) {
-		double ub = cand[j];
-		double ul = ub == 0.0 ? 1.0 : ub; // approaching from below
-		double x = cx[j];
-		double xl = x == 0.0 ? 1.0 : x;
-
-		double kr = x < 0.5 ? k1 : k2;
-		double kl = xl <= 0.5 ? k1 : k2;
-
-		double vr = bl_shape(wt, ub, 0);
-		double dv = vr - bl_shape(wt, ul, 1);
-		double ds = bl_slope(wt, ub, 0) * kr - bl_slope(wt, ul, 1) * kl;
-
-		if (dv == 0 && ds == 0 && !all) {
-			continue;
-		}
-
-		double pos = x < 0.5 ? x * (2.0 * w) : w + (x - 0.5) * (2.0 * (1.0 - w));
-		if (o != 0) {
-			pos += o;
-			if (pos >= 1.0) {
-				pos -= 1.0;
-			}
-		}
-		bp[n++] = (struct bl_breakpoint){ pos, dv, ds, vr, x, ub };
+	if (o != 0) {
+		return bl_breakpoints_pivot(wt, w, bp, all, o);
 	}
 
+	double cand[BL_MAX_BREAKPOINTS];
+	int nc = bl_candidates(wt, cand);
+	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
+	int n = 0;
+	for (int j = 0; j < nc; j++) {
+		bl_breakpoint_at(wt, w, k1, k2, 0.0, cand[j], cand[j], bp, &n, all);
+	}
 	return n;
 }
 
@@ -606,9 +629,11 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 			}
 			double new_o = new_w == 0.5 ? 0.0 : op;
 			if (new_w != w || new_o != o) {
+				if (new_o != o) {
+					half_mean = bl_half_mean_pivot(wt, new_o);
+				}
 				w = new_w;
 				o = new_o;
-				half_mean = bl_half_mean_pivot(wt, o);
 				nbp = bl_breakpoints(wt, w, bp, 0, o);
 				k1 = 0.5 / w;
 				k2 = 0.5 / (1.0 - w);
