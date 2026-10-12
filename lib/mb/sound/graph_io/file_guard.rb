@@ -12,7 +12,7 @@ module MB
       #
       # The loader registers every String it makes from document text
       # (GraphIO::FileGuard.register).  The library's lowest file readers
-      # (Wavetable.from_file, MB::Sound.file_input and so MB::Sound.read,
+      # (Wavetable.from_file, FFMPEGInput (file_input, MB::Sound.read),
       # and MIDI::MIDIFile) pass their file names through .resolve, which
       # leaves names from anywhere else alone and turns a document's names
       # into paths inside its directory, or raises FileError.  So
@@ -83,10 +83,10 @@ module MB
           end
         end
 
-        # MB::Sound.file_input (and so MB::Sound.read)
+        # FFMPEGInput (MB::Sound.file_input, MB::Sound.read)
         module SoundFile
-          def file_input(filename, **kwargs)
-            super(FileGuard.resolve(filename, 'file_input'), **kwargs)
+          def initialize(filename, *args, **kwargs, &block)
+            super(FileGuard.resolve(filename, 'reading a sound file'), *args, **kwargs, &block)
           end
         end
 
@@ -98,7 +98,7 @@ module MB
         end
 
         MB::Sound::Wavetable.singleton_class.prepend(WavetableFile)
-        MB::Sound.singleton_class.prepend(SoundFile)
+        MB::Sound::FFMPEGInput.prepend(SoundFile)
         MB::Sound::MIDI::MIDIFile.prepend(MidiFile)
       end
     end
