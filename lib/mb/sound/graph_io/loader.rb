@@ -113,9 +113,11 @@ module MB
         # +params+ overrides its param defaults; +trust+ :code allows
         # runtime blocks outside the safe subset (TrustedCode); +limits+
         # overrides GraphIO::LIMITS.
-        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil)
+        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
           @text = text
           @session = session
+          raise ArgumentError, "seeds: must be :saved or :fresh (got #{seeds.inspect})" unless %i[saved fresh].include?(seeds)
+          @fresh_seeds = seeds == :fresh
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -158,6 +160,11 @@ module MB
         # Set commands of `kind: :set` documents (see #load_set), called
         # with their evaluated arguments on the set's Session.
         SET_COMMANDS = %i[bpm meter master_gain quant master track scene mutes section flow].freeze
+
+        # Commands a scene block may hold (they land at the scene's launch
+        # point, as in an #at_bar block): meter and tempo, knob turns and
+        # snapshots, background players, mutes and solos.
+        SCENE_COMMANDS = %i[meter bpm turn recall xfade bg stop swap mute unmute solo unsolo].freeze
 
         # Loads a set document (kind: :set, see SetWriter) into the
         # Session (the current one unless given): knob lines become the
@@ -462,8 +469,8 @@ module MB
           if b && !b.is_a?(Prism::BlockNode)
             raise error(b, "#{name} takes a literal block here")
           end
-          if b && !%i[master track flow].include?(name)
-            raise error(b, "#{name} takes no block in set documents#{' (scene blocks run code at launch)' if name == :scene}")
+          if b && !%i[master track flow scene].include?(name)
+            raise error(b, "#{name} takes no block in set documents")
           end
 
           begin
@@ -480,6 +487,8 @@ module MB
               MB::Sound.master(&build_proc(b, scope))
             when :track
               MB::Sound.track(*args, **kwargs, &(b && build_proc(b, scope)))
+            when :scene
+              MB::Sound.scene(*args, **kwargs, &(b && scene_proc(b, scope)))
             when :flow
               raise error(node, 'flow takes a block (flow do ... end)') unless b && args.empty? && kwargs.empty?
               raise error(b, 'flow blocks take no parameters') if b.parameters
@@ -497,6 +506,77 @@ module MB
         end
 
         public
+
+        # A scene block: a proc that runs the block's statements when the
+        # scene launches (assignments, and SCENE_COMMANDS with values and
+        # graphs as arguments; no blocks), keeping its text for saving.
+        def scene_proc(b, outer)
+          names, rest = block_params(b)
+          (b.body&.body || []).each do |st|
+            next if st.is_a?(Prism::LocalVariableWriteNode)
+            unless st.is_a?(Prism::CallNode) && st.receiver.nil? && SCENE_COMMANDS.include?(st.name) && st.block.nil?
+              raise error(st, "a scene block holds assignments and the commands #{SCENE_COMMANDS.join(', ')} (without blocks)")
+            end
+          end
+
+          loader = self
+          count = names.length
+          body = b.body
+          source = b.slice
+          pr = proc do |*args|
+            loader.fresh_limits!
+            scope = Scope.new(outer)
+            names.each_with_index { |n, i| scope.vars[n] = args[i] }
+            scope.vars[rest] = args[count..] || [] if rest
+            loader.run_scene(body, scope)
+          end
+          arity = rest ? -(count + 1) : count
+          params = names.map { |n| [:opt, n] }
+          params << [:rest, rest] if rest
+          pr.define_singleton_method(:arity) { arity }
+          pr.define_singleton_method(:parameters) { |**| params }
+          pr.define_singleton_method(:graph_io_source) { source }
+          pr
+        end
+
+        public
+
+        # Runs a scene block's statements (see #scene_proc).
+        def run_scene(body, scope)
+          (body&.body || []).each do |st|
+            if st.is_a?(Prism::LocalVariableWriteNode)
+              eval_node(st, scope)
+              next
+            end
+            args, kwargs = call_args(st, scope)
+            check_limits(st, MB::Sound, st.name, args, kwargs)
+            begin
+              MB::Sound.public_send(st.name, *args, **kwargs)
+            rescue GraphIO::LoadError
+              raise
+            rescue StandardError => e
+              raise error(st, "#{st.name} raised #{e.class}: #{e.message}")
+            end
+          end
+          nil
+        end
+
+        # Why +source+ (a scene block's text, `{ |t| ... }` or `do ... end`)
+        # can't be a scene block of a set document, or nil (see SetWriter).
+        def self.scene_block_problem(source)
+          new("graph 1, kind: :set\nscene(:x) #{source}\n").scene_block_check
+          nil
+        rescue LoadError => e
+          e.message.sub(/\A\(graph document\):\d+: /, '')
+        end
+
+        # Parses a one-scene document made by .scene_block_problem and
+        # checks its block (raises LoadError).
+        def scene_block_check
+          node = parse.statements.body[1]
+          raise LoadError, 'not a scene block' unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+          scene_proc(node.block, Scope.new)
+        end
 
         # Builds a flow's steps from +body+ (the statements of a `flow do`,
         # `repeat n do`, or pick option block) on Form::Builder +builder+:
@@ -699,6 +779,8 @@ module MB
           block = call_block(node, scope)
           check_limits(node, receiver, name, args, kwargs)
           check_file(node, name, args) if Registry::FILE_METHODS.include?(name)
+          # seeds: :fresh draws new random seeds instead of the saved ones
+          kwargs.delete(:seed) if @fresh_seeds
 
           begin
             result = receiver.public_send(name, *args, **kwargs, &block)

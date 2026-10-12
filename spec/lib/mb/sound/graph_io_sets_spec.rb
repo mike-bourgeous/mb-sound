@@ -183,6 +183,25 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(text).to include("track(:bass) { |clip|\n  v = clip.synth(voices: 1) { |n|")
   end
 
+  it 'plays the saved seeds, or fresh ones with seeds: :fresh' do
+    a = session
+    within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
+    text = io.dump(a.arrangement, name: 'demo')
+    expect(text).to match(/tr808\(kit, accent: 6, seed: \d+\)/)
+
+    build = ->(s, **opts) {
+      doc = io.load(text, session: s, **opts)
+      within(s) { s.arrangement.tracks[:drums].patch.call(s.arrangement.scenes[:drop].values[:drums]) }
+    }
+    saved = [build.(session), build.(session)].map { |g| g.to_ruby(seeds: true)[/seed: \d+/] }
+    expect(saved.uniq.length).to eq(1)
+    MB::Sound.seed(10)
+    fresh = [build.(session, seeds: :fresh), build.(session, seeds: :fresh)].map { |g| g.to_ruby(seeds: true)[/seed: \d+/] }
+    expect(fresh.uniq.length).to eq(2)
+    expect(fresh).not_to include(saved[0])
+    expect { io.load(text, session: session, seeds: :new) }.to raise_error(ArgumentError, /seeds: must be :saved or :fresh/)
+  end
+
   it 'keeps the random state while building patches to save them' do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
@@ -221,16 +240,52 @@ RSpec.describe('set documents', :aggregate_failures) do
     end
   end
 
-  it 'leaves scene blocks out with a warning and refuses goto Procs' do
+  it 'saves scene blocks of set commands, and refuses other blocks and goto Procs' do
     a = session
     within(a) {
       MB::Sound.track(:drone) { |c| c.tone.ramp }
-      MB::Sound.scene(:lift, others: :keep) { |_t| MB::Sound.bg(:riser, MB::Sound.noise) }
+      MB::Sound.scene(:gap) { MB::Sound.meter 2, 4 }
+      MB::Sound.scene(:lift, others: :keep) { |_t|
+        MB::Sound.bg :riser, MB::Sound.noise.at(0.12), fade: 0
+      }
     }
+    expect { io.dump(a.arrangement, name: 'x') }.to raise_error(io::DumpError, /scene :gap's block can't be saved: a scene block holds/)
+
+    # As typed in the console or written in MB::Sound
+    file = tmp_path('scene_blocks.rb')
+    File.write(file, <<~RUBY)
+      module MB::Sound
+        scene(:gap) { meter 2, 4 }
+        scene(:lift, others: :keep) { |_t|
+          bg :riser, noise.at(0.12), fade: 0
+        }
+      end
+    RUBY
+    within(a) { load file }
     text = nil
-    expect { text = io.dump(a.arrangement, name: 'x') }.to output(/scene :lift has a block/).to_stderr
-    expect(text).to include("# WARNING(graph-io): scene :lift has a block (code run at launch), which set documents can't hold; it was saved without it")
-    expect(text).to include('scene :lift, others: :keep')
+    expect { text = io.dump(a.arrangement, name: 'x') }.not_to output.to_stderr
+    expect(text).to include("scene(:gap) { meter 2, 4 }\nscene(:lift, others: :keep) { |_t|\n  bg :riser, noise.at(0.12), fade: 0\n}\n")
+
+    b = session
+    io.load(text, session: b)
+    expect(stable(io.dump(b.arrangement, name: 'x'))).to eq(stable(text))
+    within(b) { b.arrangement.go(:gap, on: :now) }
+    3.times { b.process_buffer }
+    expect(b.transport.meters.last.bar_length).to eq(1/2r)
+    within(b) { b.arrangement.go(:lift, on: :now) }
+    3.times { b.process_buffer }
+    expect(b.instance_variable_get(:@players).values.map(&:name)).to include(:riser)
+
+    # A block reading the code around it can't be saved: live_error raises
+    # in scripts, and live, the scene is saved without it
+    riser = MB::Sound.noise
+    within(a) { MB::Sound.scene(:lift, others: :keep) { |_t| MB::Sound.bg :riser, riser } }
+    expect { io.dump(a.arrangement) }.to raise_error(io::DumpError, /scene :lift's block can't be saved: it uses riser from the code around it/)
+    allow(MB::Sound).to receive(:live?).and_return(true)
+    expect { text = io.dump(a.arrangement, name: 'x') }.to output(/scene :lift's block can't be saved/).to_stderr
+    expect(text).to include("# WARNING(graph-io): scene :lift's block was left out (it uses riser from the code around it)")
+    expect(text).to include("scene :lift, others: :keep\n")
+    allow(MB::Sound).to receive(:live?).and_call_original
 
     within(a) {
       MB::Sound.scene(:lift, others: :keep)
@@ -241,7 +296,10 @@ RSpec.describe('set documents', :aggregate_failures) do
 
   it 'loads only set commands and assignments' do
     expect { io.load(%(graph 1, kind: :set\n220.hz.ramp), session: session) }.to raise_error(io::LoadError, /:2: a set document holds set commands/)
-    expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /scene takes no block in set documents \(scene blocks run code at launch\)/)
+    expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block holds assignments and the commands meter, bpm, turn/)
+    expect { io.load(%(graph 1, kind: :set\nscene(:a) { play 220.hz }), session: session) }.to raise_error(io::LoadError, /a scene block holds/)
+    expect { io.load(%(graph 1, kind: :set\nscene(:a) { bg(:x, 1.constant) { 2 } }), session: session) }.to raise_error(io::LoadError, /without blocks/)
+    expect { io.load(%(graph 1, kind: :set\nmutes(:a, :b) { 2 }), session: session) }.to raise_error(io::LoadError, /mutes takes no block/)
     expect { io.load(%(graph 1, kind: :set\nmeter 7.5, 8), session: session) }.to raise_error(io::LoadError, /meter takes beats and a note unit/)
     expect { io.load(%(graph 1, kind: :set\nflow do\n  verse\nend), session: session) }.to raise_error(io::LoadError, /:3: verse: undefined section 'verse'/)
     expect { io.load(%(graph 1, kind: :set\nflow do\n  instance_exec 2\nend), session: session) }.to raise_error(io::LoadError, /never allowed/)

@@ -105,9 +105,15 @@ module MB
         #
         # A set document (kind: :set, see SetWriter) loads into +session+
         # (the current one by default) and returns its Document.
-        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil)
+        #
+        # +seeds: :fresh+ leaves out every `seed:` the document gives, so
+        # noise, random phases, and chance draw new numbers (from the root
+        # random generator) instead of the saved ones; a set's patches then
+        # draw anew each time a scene builds them, like the set they were
+        # saved from.  The default, :saved, plays the same every time.
+        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
           text, path = read_source(source)
-          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session)
+          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session, seeds: seeds)
           graph = loader.load
           loader.document.input_objects = inputs.transform_keys(&:to_sym).slice(*loader.document.inputs)
           graph
@@ -394,7 +400,10 @@ module MB
       # Session by default): its tempo, knobs, master chain, tracks,
       # scenes, mute groups, and flow, returning the Document (`play_form
       # doc.form`, or `go :intro`).
-      def preset(name, trust: nil, session: nil, **inputs_and_params)
+      #
+      # +seeds: :fresh+ draws new random seeds instead of the saved ones
+      # (see GraphIO.load).
+      def preset(name, trust: nil, session: nil, seeds: :saved, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
           names = GraphIO.presets.values.flatten
@@ -404,13 +413,13 @@ module MB
         doc = GraphIO.parse(path)
         if doc.kind == :set
           raise ArgumentError, "a set takes no inputs (got #{inputs_and_params.keys.join(', ')})" unless inputs_and_params.empty?
-          doc = GraphIO.load(path, trust: trust, session: session || Session.current)
+          doc = GraphIO.load(path, trust: trust, session: session || Session.current, seeds: seeds)
           puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
           return doc
         end
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
-        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds)
 
         session = Session.existing if session.nil?
         if session

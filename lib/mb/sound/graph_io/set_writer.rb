@@ -27,9 +27,11 @@ module MB
       # clips and kits scenes play, scenes, mute groups, sections declared
       # outside a flow, and the form playing (else the one built last).  Not
       # saved: what is playing, the journal, undo, markers, snapshots, and
-      # recorded MIDI (takes keep those).  Scene blocks (code run at
-      # launch) are left out with a warning; goto Procs and graphs the
-      # writer can't print raise DumpError.
+      # recorded MIDI (takes keep those).  Scene blocks print as their
+      # source when they hold only Loader::SCENE_COMMANDS (`scene(:gap) {
+      # meter 2, 4 }`); others go through MB::Sound.live_error (DumpError
+      # in scripts; left out with a warning live).  goto Procs and graphs
+      # the writer can't print raise DumpError.
       #
       # Patches rebuilt from a document use the seeds the save printed, so
       # a loaded set plays the same every time, while the set it came from
@@ -262,9 +264,6 @@ module MB
 
         def scenes
           @arrangement.scenes.flat_map { |name, sc|
-            if sc.block
-              @warnings << "scene #{name.inspect} has a block (code run at launch), which set documents can't hold; it was saved without it"
-            end
             parts = [name.inspect]
             sc.values.each do |k, v|
               parts << "#{@lit.key_text(k)} #{scene_value(name, k, v)}"
@@ -272,8 +271,40 @@ module MB
             parts << "q: #{lit(sc.q)}" if sc.q
             parts << "fade: #{lit(sc.fade)}" if sc.fade
             parts << "others: #{lit(sc.others)}" unless sc.others == :stop
-            ["scene #{parts.join(', ')}"]
+            block = sc.block && scene_block(name, sc.block)
+            block ? "scene(#{parts.join(', ')}) #{block}".lines(chomp: true) : ["scene #{parts.join(', ')}"]
           }
+        end
+
+        # A scene block's text, if the set-document loader can run it
+        # (Loader::SCENE_COMMANDS: `{ meter 2, 4 }`, `{ |t| bg :riser, ... }`),
+        # else nil after MB::Sound.live_error (raising DumpError in scripts
+        # and specs; in live mode a warning, and the scene is saved
+        # without its block).
+        def scene_block(name, block)
+          src = GraphNode::Recipe.block_source(block, :scene)
+          problem =
+            if src.nil?
+              "its source wasn't found"
+            elsif !(outer = GraphNode::Recipe.outer_locals(block, src)).empty?
+              "it uses #{outer.join(', ')} from the code around it"
+            else
+              Loader.scene_block_problem(src)
+            end
+          return dedent(src) unless problem
+
+          MB::Sound.live_error(DumpError.new("scene #{name.inspect}'s block can't be saved: #{problem}"))
+          @warnings << "scene #{name.inspect}'s block was left out (#{problem})"
+          nil
+        end
+
+        # +text+ with the lines after the first moved left by the last
+        # line's indentation (a block's source keeps its file's indents).
+        def dedent(text)
+          lines = text.lines(chomp: true)
+          return text if lines.length < 2
+          cut = lines.last[/\A */].length
+          ([lines.first] + lines[1..].map { |l| l.start_with?(' ' * cut) ? l[cut..] : l.lstrip }).join("\n")
         end
 
         def scene_value(scene, key, v)
