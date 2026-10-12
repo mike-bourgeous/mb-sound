@@ -142,6 +142,14 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.scene_info).to eq(one: '▶ a:a1', two: 'a:a2 b:seq')
   end
 
+  it 'lists Symbol values with a space after the colon' do
+    # 2026-10-12: `pad: :on` was listed as "pad::on"
+    set.scene(:three, a: :on, b: :off, q: :beat)
+    set.quant = :beat
+    expect(set.scene_info[:three]).to eq('a: :on b: :off q: :beat')
+    expect(set.track_info[:a]).to start_with('q: :beat ')
+  end
+
   it 'counts plain numbers as bars and accepts Durations for launch points' do
     transport.bar_length = 3/4r
     set.go(:one, at: :now)

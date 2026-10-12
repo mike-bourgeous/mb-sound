@@ -343,6 +343,76 @@ module MB
           end
         end
 
+        # For internal use by Reverb.  One input of a reverb with several
+        # inputs: passes its source through, and once the source ends, plays
+        # silence while any other input of its group still plays (as
+        # Dynamics does), ending (nil) only when every input has ended.  A
+        # short buffer is the source's last, padded with zeros to the
+        # requested length; #end_position tells the Reverb where the source
+        # ended, so its output ends where the last input did.  (Before
+        # 2026-10-12, an input ending early, e.g.
+        # `stereo(saw * one_shot_env, saw).reverb`, cut the network's block
+        # short against the full dry buffers: a ShapeError.)
+        class PaddedInput
+          include GraphNode
+          include SampleRateHelper
+
+          # One PaddedInput per source, sharing their ended flags.
+          def self.group(sources)
+            ended = Array.new(sources.length, false)
+            sources.map.with_index { |s, idx| new(s, ended: ended, index: idx) }
+          end
+
+          # The position (samples from the start) where the source ended,
+          # or nil while it plays.  Positions count every sample returned,
+          # so they stay right when a Tee reads ahead.
+          attr_reader :end_position
+
+          def initialize(source, ended:, index:)
+            @source = source.get_sampler
+            @ended = ended
+            @index = index
+            @position = 0
+            @end_position = nil
+            @sample_rate = @source.sample_rate.to_f
+            @node_type_name = "Reverb input #{index + 1}"
+          end
+
+          def sources
+            { input: @source }
+          end
+
+          # The source's next +count+ samples, or silence after it ends
+          # while another input plays, else nil.
+          def sample(count)
+            unless @ended[@index]
+              buf = @source.sample(count)
+              if buf.nil? || buf.empty?
+                @ended[@index] = true
+                @end_position = @position
+              elsif buf.length >= count
+                @position += buf.length
+                return buf
+              else
+                @ended[@index] = true
+                @end_position = @position + buf.length
+                @position += count
+
+                @pad = buf.class.zeros(count) unless @pad.class == buf.class && @pad.length == count
+                @pad.fill(0)
+                @pad[0...buf.length] = buf
+                return @pad
+              end
+            end
+
+            return nil if @ended.all?
+
+            @position += count
+            @silence = Numo::SFloat.zeros(count).freeze unless @silence&.length == count
+            @silence
+          end
+        end
+
         # A Hash with the parameters of this Reverb.
         attr_reader :parameters
 
@@ -669,7 +739,13 @@ module MB
           # reverb to be used as a stereo-to-surround upmixing reverb.
           #
           # Example: bin/reverb.rb -p hall --input-channels 2 --output-channels 5
-          @upstream_dry_groups = partition_outputs(@upstreams, @output_channels)
+          # With several inputs, an input that ends plays silence until they
+          # all end (see PaddedInput).
+          @padded_inputs = PaddedInput.group(@upstreams) if @upstreams.length > 1
+          @input_position = 0
+          inputs = @padded_inputs || @upstreams
+
+          @upstream_dry_groups = partition_outputs(inputs, @output_channels)
           @upstream_samplers = @upstream_dry_groups.map.with_index { |u, idx|
             u = u.length > 1 ? u.sum : u[0]
             u.get_sampler
@@ -677,7 +753,7 @@ module MB
 
           # Apply predelay to input signal after dry/wet split but before
           # internal splitting/grouping
-          predelayed = @upstreams.map.with_index { |u, idx|
+          predelayed = inputs.map.with_index { |u, idx|
             MB::Sound::Length.seconds(@predelay, sample_rate: @sample_rate) == 0 ? u : u.delay(@predelay).named("Predelay #{idx}")
           }
 
@@ -907,6 +983,26 @@ module MB
         def render_block(count)
           dry = @upstream_samplers.map { |u| u.sample(count) }
           wet = @show_internals ? @last_stage.map { |c| c.sample(count) } : network_wet(count)
+
+          # After every input's source has ended (the ended ones padded with
+          # silence; see PaddedInput), the output ends where the last of
+          # them did
+          bufs = dry + wet
+          unless bufs.any?(&:nil?)
+            n = bufs.map(&:length).min
+            if @padded_inputs && @padded_inputs.all?(&:end_position)
+              n = MB::M.min(n, @padded_inputs.map(&:end_position).max - @input_position)
+              return [dry, [nil]] if n <= 0
+            end
+            @input_position += n
+
+            if bufs.any? { |b| b.length != n }
+              cut = ->(b) { b.length > n ? (b.frozen? ? b[0...n].dup.freeze : b[0...n]) : b }
+              dry = dry.map(&cut)
+              wet = wet.map(&cut)
+            end
+          end
+
           [dry, wet]
         end
 

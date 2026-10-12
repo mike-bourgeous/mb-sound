@@ -114,6 +114,12 @@ Pry.start(
   ]),
   exception_handler: ->(output, exception, _pry) {
     output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
+
+    # color_trace prints #message; since Ruby 3.3 did_you_mean's "Did you
+    # mean?" suggestions are only in #detailed_message (after the message's
+    # lines)
+    hint = exception.detailed_message(highlight: false).lines.drop(exception.message.lines.count).join.strip
+    output.puts("\e[33m#{hint}\e[0m") unless hint.empty?
   },
   load_pry_byebug: false,
   driver: PryByebugWorkaround

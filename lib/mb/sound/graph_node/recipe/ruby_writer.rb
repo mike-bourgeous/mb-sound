@@ -182,7 +182,7 @@ module MB
             seeded = [] if seeded.length < 2
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
-              next false if knob_for(o)
+              next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader)
               info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
@@ -469,6 +469,11 @@ module MB
                 return [t, v.is_a?(Numeric) && v.real? && v.negative? ? UNARY : ATOM]
               end
               return ["#{v.is_a?(Numeric) && v.real? && v.negative? ? "(#{t})" : t}.constant", ATOM]
+            when Knob, Knob::Reader
+              # A Session knob (or a graph document's, without knob_nodes):
+              # each knob(:name) is its own reader, so it prints inline
+              # (2026-10-12: before, as a free input)
+              return [knob_text(o), ATOM]
             when MB::Sound::Notes::NotePitch
               # falls through to an input
             when MB::Sound::Pitch
@@ -480,6 +485,11 @@ module MB
             end
 
             [input_name(o), ATOM]
+          end
+
+          # knob(:name) for a Knob or Knob::Reader.
+          def knob_text(o)
+            "knob(#{(o.is_a?(Knob::Reader) ? o.knob : o).name.to_sym.inspect})"
           end
 
           def channels_printable?(o)

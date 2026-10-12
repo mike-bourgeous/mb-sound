@@ -486,6 +486,66 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     expect(mono_n).to eq(stereo_n)
   end
 
+  describe 'inputs ending at different times' do
+    # 2026-10-12: stereo(saw * one_shot_env, saw).reverb raised a ShapeError
+    # (320 != 800) once the enveloped input ended: the network's block was
+    # cut short against the full dry buffers.  An ended input now plays
+    # silence while the others play (as in Dynamics), and the reverb ends
+    # when they all have (plus extra_time).
+    let(:noise) { ->(n, seed) { Numo::NArray.srand(seed); MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(n).rand(-1, 1)]) } }
+
+    def render(rev, block)
+      outs = rev.respond_to?(:to_a) ? rev.to_a : [rev]
+      chunks = []
+      200.times do
+        b = outs.map { |o| o.sample(block) }
+        break if b.any?(&:nil?)
+        expect(b.map(&:length).uniq.length).to eq(1)
+        chunks << b.map(&:dup)
+      end
+      chunks.transpose.map { |c| c[0].concatenate(*c[1..]) }
+    end
+
+    [nil, 'ruby'].each do |kernel|
+      context "with the #{kernel || 'C'} kernel" do
+        around do |ex|
+          kernel ? ENV['MB_SOUND_REVERB'] = kernel : ENV.delete('MB_SOUND_REVERB')
+          ex.run
+        ensure
+          ENV.delete('MB_SOUND_REVERB')
+        end
+
+        it 'plays on after one input ends, ending with the last plus extra_time' do
+          rev = MB::Sound::GraphNode::Channels.new([noise.(5000, 1), noise.(20000, 2)]).reverb(:plate, extra_time: 0.1)
+          out = render(rev, 800)
+          expect(out.length).to eq(2)
+          expect(out.map(&:length)).to eq([24800, 24800])
+          expect(out[0][6000...20000].abs.max).to be > 0.01
+        end
+
+        it 'ends on the exact sample when the inputs end in the same block' do
+          rev = MB::Sound::GraphNode::Channels.new([noise.(5300, 1), noise.(5000, 2)]).reverb(:hall, extra_time: 0)
+          out = render(rev, 800)
+          expect(out.map(&:length)).to eq([5300, 5300])
+        end
+
+        it 'gives the same output at other buffer sizes' do
+          build = -> { MB::Sound::GraphNode::Channels.new([noise.(5000, 1), noise.(9000, 2)]).reverb(:room, extra_time: 0.05) }
+          a = render(build.(), 800)
+          b = render(build.(), 333)
+          expect(b.map(&:length)).to eq(a.map(&:length))
+          a.zip(b).each { |x, y| expect((x - y).abs.max).to be < 1e-6 }
+        end
+
+        it 'ends a show_internals reverb the same way' do
+          rev = MB::Sound::GraphNode::Channels.new([noise.(5000, 1), noise.(9000, 2)]).reverb(:hall, show_internals: true, extra_time: 0)
+          out = render(rev, 800)
+          expect(out.map(&:length)).to eq([9000, 9000])
+        end
+      end
+    end
+  end
+
   it 'returns nil when its input ends' do
     rev = MB::Sound.silence(0.05).and_then(MB::Sound.silence(0)).reverb(:hall, extra_time: 0)
     expect(Array.new(10) { rev.sample(800) }.last).to be_nil
