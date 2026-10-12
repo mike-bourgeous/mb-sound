@@ -35,8 +35,8 @@
 #                "Delay Lama" chant (a tenor formant on a pair of saws in
 #                the 100 Hz range, sliding "oo-ah" on every note) singing
 #                the same ghost chords; a delay throw on the last 2 beats
-#   lift      8  the chant goes on, the bass comes back filtered and
-#                opening, the riser again
+#   lift      8  the chant and pad go on over a light kick (still no low
+#                end: it all comes back at once in drop2), the riser again
 #   gap       1  one bar of 2/4: everything rings out for a half-bar breath
 #   drop2     8  low end back, the talking bass on i-VI-III-VII, boom
 #   pickup2   8  a seeded pick: usually the ride pickup, one time in three
@@ -48,7 +48,7 @@
 # ghost kick: the same 808 kick, inside each ducked track), the drums get
 # parallel compression, and the master runs a gentle glue compressor into a
 # true-peak limiter at -1 dBTP with the master bus at 0 dB (this is a
-# mastered track: about -14.5 LUFS integrated).
+# mastered track: -14.2 LUFS integrated, -1.0 dBTP, as rendered).
 #
 # Usage:
 #     bin/songs/small_talk.rb                    # plays live in the background session
@@ -79,7 +79,14 @@
 # word); the dives after the rests reach ~12-15 Hz, where each wavetable
 # cycle is nearly a single kick.  On laptop speakers listen for the bass's
 # pitch in the 200-600 Hz formants: it should follow the ghost chords.
-# CPU: see SMALL_TALK_COST below.
+#
+# Cost (whole render through the Session and master chain, YJIT, the Mac's
+# container, 2026-10-12): 512-sample buffers mean 18% of realtime, p99
+# 53%, worst steady-state buffer ~80%; 128-sample buffers mean 37%, p99
+# 87%.  Scene changes build graphs: scheduled blocks up to 0.75 s (the
+# breakdown's chant and pad) against the scheduler's half-bar (0.96 s)
+# lookahead, and render-thread spikes up to ~200 ms where they land
+# (night_bus_flow measures 1.56 s and ~270 ms the same way).
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -307,9 +314,10 @@ module MB::Sound
     c
   end
 
-  # The song form (sections launch the scenes of their names).
-  def self.small_talk_form(seed: 3)
-    flow(seed: seed) do
+  # The song form (sections launch the scenes of their names).  With
+  # +play: false+, builds the Form without playing it.
+  def self.small_talk_form(seed: 3, play: true)
+    flow(seed: seed, play: play) do
       fill :turn, every: 8
       fill :toms, every: 4
       intro     8
