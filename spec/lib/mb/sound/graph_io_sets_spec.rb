@@ -190,7 +190,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(text).to match(/tr808\(kit, accent: 6, seed: \d+\)/)
 
     build = ->(s, **opts) {
-      doc = io.load(text, session: s, **opts)
+      io.load(text, session: s, **opts)
       within(s) { s.arrangement.tracks[:drums].patch.call(s.arrangement.scenes[:drop].values[:drums]) }
     }
     saved = [build.(session), build.(session)].map { |g| g.to_ruby(seeds: true)[/seed: \d+/] }
