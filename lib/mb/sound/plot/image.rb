@@ -131,8 +131,9 @@ module MB
             cov.reshape(@height, @width).clip(0, 1)
           end
 
-          # Draws a polyline.
-          def polyline(xs, ys, color, width: 1.5, opacity: 1.0, dash: nil, glow: false)
+          # Draws a polyline, only inside +clip+ ([x0, y0, x1, y1] in
+          # pixels) if given.
+          def polyline(xs, ys, color, width: 1.5, opacity: 1.0, dash: nil, glow: false, clip: nil)
             if dash
               # Draw the dashes as separate pieces along the line
               sx, sy = samples(xs, ys, 1.0)
@@ -141,13 +142,29 @@ module MB
               xs, ys = sx, sy
             end
             if glow
-              blend(0, 0, blur(line_coverage(xs, ys, width: width * 3)) * 0.5 * opacity, color)
+              blend(0, 0, clip_to(blur(line_coverage(xs, ys, width: width * 3)), clip) * 0.5 * opacity, color)
             end
-            blend(0, 0, line_coverage(xs, ys, width: width) * opacity, color)
+            blend(0, 0, clip_to(line_coverage(xs, ys, width: width), clip) * opacity, color)
           end
 
-          # Filled discs of +radius+.
-          def discs(xs, ys, color, radius: 2.0)
+          # Zeroes coverage +cov+ (rows x cols) outside +rect+ ([x0, y0, x1,
+          # y1], pixels; nil for none), so marks stay in their plot area
+          # like the SVG renderer's clip paths.
+          def clip_to(cov, rect)
+            return cov unless rect
+
+            x0, y0, x1, y1 = rect.map(&:round)
+            x0 = x0.clamp(0, @width)
+            x1 = x1.clamp(0, @width)
+            y0 = y0.clamp(0, @height)
+            y1 = y1.clamp(0, @height)
+            out = Numo::DFloat.zeros(@height, @width)
+            out[y0...y1, x0...x1] = cov[y0...y1, x0...x1] if x1 > x0 && y1 > y0
+            out
+          end
+
+          # Filled discs of +radius+ (only inside +clip+, see #polyline).
+          def discs(xs, ys, color, radius: 2.0, clip: nil)
             cov = Numo::DFloat.zeros(@height * @width)
             r = radius.ceil
             ((-r)..r).each do |dy|
@@ -159,7 +176,7 @@ module MB
                 splat(cov, xs + dx, ys + dy, wgt, bilinear: false)
               end
             end
-            blend(0, 0, cov.reshape(@height, @width).clip(0, 1), color)
+            blend(0, 0, clip_to(cov.reshape(@height, @width).clip(0, 1), clip), color)
           end
 
           # Text with the bitmap font at (+x+, +y+ baseline), +scale+ times
@@ -299,12 +316,12 @@ module MB
 
           def polyline(xs, ys, rgb, dash: nil, grid: false)
             xs, ys = clip(xs, ys)
-            @c.polyline(xs, ys, rgb, width: grid ? 1.0 : 1.6, dash: dash, glow: @theme.glow && !grid)
+            @c.polyline(xs, ys, rgb, width: grid ? 1.0 : 1.6, dash: dash, glow: @theme.glow && !grid, clip: clip_rect)
           end
 
           def points(xs, ys, rgb)
             xs, ys = clip(xs, ys)
-            @c.discs(xs, ys, rgb, radius: xs.length > 2000 ? 0.8 : 2.2)
+            @c.discs(xs, ys, rgb, radius: xs.length > 2000 ? 0.8 : 2.2, clip: clip_rect)
           end
 
           def area(xs, ys, base, rgb)
@@ -331,6 +348,13 @@ module MB
 
           def clip(xs, ys)
             [Numo::DFloat.cast(xs) + @x, Numo::DFloat.cast(ys) + @y]
+          end
+
+          # The plot area plus 2 px (the SVG renderer's clip path), where
+          # lines and points may draw (data beyond the y domain used to draw
+          # over titles, legends, and other panels)
+          def clip_rect
+            [@x - 2, @y - 2, @x + @width + 2, @y + @height + 2]
           end
 
           # Fills under a line (or between it and +hi+) at 1 px resolution
@@ -410,10 +434,32 @@ module MB
         module Font
           # Glyph alpha (Numo::DFloat HEIGHT x WIDTH, 0..1) for +char+
           # (unknown characters as '?').
+          # Stand-ins for common non-ASCII characters the ASCII bitmap font
+          # lacks (one cell each, so text widths don't change); accented
+          # letters fall back to their base letter (see .fallback).
+          FALLBACKS = {
+            '—' => '-', '–' => '-', '‒' => '-', '―' => '-', '−' => '-', '‐' => '-', '‑' => '-',
+            '‘' => "'", '’' => "'", '‚' => "'", '′' => "'", '“' => '"', '”' => '"', '„' => '"', '″' => '"',
+            '…' => '.', '·' => '.', '•' => '*', '×' => 'x', '÷' => '/', '±' => '+', '≈' => '~',
+            '≤' => '<', '≥' => '>', '≠' => '#', '→' => '>', '←' => '<', '°' => 'o', 'µ' => 'u', 'μ' => 'u',
+            "\u00a0" => ' ', "\u2009" => ' ', "\u202f" => ' ', '♯' => '#', '♭' => 'b',
+          }.freeze
+
+          # The ASCII glyph drawn for +char+: itself if the font has it, a
+          # FALLBACKS stand-in, the base letter of an accented letter, else
+          # '?'.
+          def self.fallback(char)
+            return char if GLYPHS.key?(char)
+            return FALLBACKS[char] if FALLBACKS.key?(char)
+
+            base = char.unicode_normalize(:nfd)[0] rescue nil
+            base && GLYPHS.key?(base) ? base : '?'
+          end
+
           def self.alpha(char)
             @alpha ||= {}
             @alpha[char] ||= begin
-              hex = GLYPHS[char] || GLYPHS['?']
+              hex = GLYPHS[fallback(char)]
               Numo::DFloat.cast(hex.each_char.map { |c| c.hex / 15.0 }).reshape(HEIGHT, WIDTH)
             end
           end

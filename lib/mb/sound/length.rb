@@ -341,6 +341,54 @@ module MB
         end
       end
 
+      # A length measured in a patch's attack times: `1.attack` is the
+      # attack of the patch's amplitude envelope, `0.5.attack` half of it
+      # (Numeric#attack).  It has no fixed length of its own: what uses it
+      # knows the patch and resolves it with #of (a track's +lead:+, see
+      # Arrangement#track: `track(:pad, lead: 0.5.attack) { ... }`).  Not a
+      # Length (no #to_seconds), so methods that need a time now reject it.
+      class Attack
+        include Comparable
+
+        # How many attack times (a real number above 0).
+        attr_reader :fraction
+
+        def initialize(fraction)
+          unless fraction.is_a?(Numeric) && fraction.real? && fraction.finite? && fraction.positive?
+            raise ArgumentError, "An attack length needs a number of attacks above 0 (e.g. 0.5.attack; got #{fraction.inspect})"
+          end
+          @fraction = fraction
+        end
+
+        # This many of +attack+ (seconds, a Length, or a Duration) as a
+        # Length::Seconds.
+        def of(attack, transport: Sequence.transport)
+          t = Length.seconds(attack, transport: transport).to_f
+          Seconds.new(@fraction == 1 ? t : t * @fraction)
+        end
+
+        def *(other)
+          raise ArgumentError, "Scale an attack length by a number (got #{other.inspect})" unless other.is_a?(Numeric)
+          Attack.new(@fraction * other)
+        end
+
+        def <=>(other)
+          other.is_a?(Attack) ? @fraction <=> other.fraction : nil
+        end
+
+        def hash = [Attack, @fraction].hash
+        def eql?(other) = other.is_a?(Attack) && @fraction.eql?(other.fraction)
+
+        # Prints as the Ruby that makes it: `0.5.attack`.
+        def to_ruby
+          f = @fraction
+          f = f.to_i if f.is_a?(Float) && f == f.to_i
+          f.is_a?(Rational) ? "(#{f.numerator}/#{f.denominator}r).attack" : "#{f}.attack"
+        end
+        alias to_s to_ruby
+        alias inspect to_ruby
+      end
+
       # Snaps +samples+ to the nearest whole sample if it is within a
       # billionth of it (e.g. 0.1 * 48000), so computed whole-sample lengths
       # stay whole.

@@ -757,12 +757,31 @@ module MB
       #            changing once per cycle (the SQ-80's HUMAN; numeric
       #            rates only).
       # +:seed+ - Seed for the :noise shape, random phases, and :human.
+      # +:skew+ - For the triangle: the fraction of each cycle spent rising
+      #           (0.5, the default, is the plain triangle; toward 1 a
+      #           rising ramp with a quick fall, toward 0 a falling one), a
+      #           number between 0 and 1.  Like every shape it crosses its
+      #           middle rising at phase 0, so it peaks at skew / 2 and falls
+      #           to its low point at 1 - skew / 2 (`phase: 1 - skew / 2`
+      #           starts it from its low point).  Exact edges (a phasor through a clip, not Tone#pwm,
+      #           which warps a triangle's two lobes instead of its slopes).
+      # +:phase+ - Starting phase in cycles (Tone#with_phase; key-synced
+      #            LFOs restart there; tempo LFOs keep that offset from the
+      #            timeline).
       #
       #     v.hz.transpose(v.lfo(5.5, depth: 0.3, delay: 0.4, wheel: 0.5))   # delayed vibrato
       #     cutoff = v.cutoff(400) * (2 ** v.lfo(1.n8, shape: :square, depth: 1))
       #     v.lfo(v.mod_scale(1, v.poly_pressure => 3.oct), shape: :noise)   # pressure speeds it up
-      def lfo(rate = 5.0, shape: :triangle, depth: 1.0, delay: 0, from: 0, sync: nil, wheel: nil, pressure: nil, unipolar: false, human: nil, seed: nil)
+      #     v.lfo(1.n4, skew: 0.9, phase: 0.55, unipolar: true)   # low on each beat, rising, falling just before the next
+      def lfo(rate = 5.0, shape: :triangle, depth: 1.0, delay: 0, from: 0, sync: nil, wheel: nil, pressure: nil, unipolar: false, human: nil, seed: nil, skew: nil, phase: nil)
         wave = LFO_SHAPES.fetch(shape) { raise ArgumentError, "Unknown LFO shape #{shape.inspect} (#{LFO_SHAPES.keys.join(', ')})" }
+        skew = nil if skew == 0.5
+        if skew
+          raise ArgumentError, "skew: shapes the triangle LFO (got shape: #{shape.inspect})" unless wave == :triangle
+          raise ArgumentError, "skew: must be a number between 0 and 1, exclusive (got #{skew.inspect})" unless skew.is_a?(Numeric) && skew.real? && skew > 0 && skew < 1
+        end
+        phase = Phase.cycles(phase) if phase
+        raise ArgumentError, "phase: must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.nil? || phase.is_a?(Numeric)
         tempo = rate.is_a?(MB::Sound::Sequence::Duration)
         sync ||= tempo ? :free : :key
         raise ArgumentError, "LFO sync must be one of #{LFO_SYNC} (got #{sync.inspect})" unless LFO_SYNC.include?(sync)
@@ -775,15 +794,19 @@ module MB
         tone = case wave
                when :sine then tone
                when :noise then tone.asquare
+               when :triangle then skew ? tone.phasor : tone.triangle
                else tone.public_send(wave)
                end
+        tone.with_phase(phase) if phase
         case sync
-        when :key then tone.reset(trigger)
+        when :key then phase ? tone.reset(trigger, to: phase) : tone.reset(trigger)
         when :random then tone.reset(trigger, to: :random).tap { |t| t.seed = seed if seed }
         end
 
         src = if wave == :noise
                 tone.sample_hold(range: unipolar ? 0.0..1.0 : -1.0..1.0, seed: seed)
+              elsif skew
+                lfo_skewed(tone, skew, unipolar)
               else
                 unipolar ? tone.at(0..1) : tone
               end
@@ -987,6 +1010,21 @@ module MB
 
       # +rate+ × (1 + +human+ × a random value held for each cycle of a
       # half-rate square), for #lfo's +:human+.
+      # A skewed triangle from +phasor+ (0...1 cycles): 0.5 at phase 0,
+      # rising with slope 1 / +skew+ to 1 at skew / 2, falling to 0 at
+      # 1 - skew / 2, rising again to 0.5 at 1 (see #lfo's +:skew+); -1..1
+      # unless +unipolar+.  One exact clip: 0.5 + u / s - (u - s / 2)
+      # clipped to 0..(1 - s), times 1 / (s (1 - s)).
+      def lfo_skewed(phasor, skew, unipolar)
+        k = 1.0 / (skew * (1 - skew))
+        fall = (phasor - skew * 0.5).aclip(0, 1 - skew)
+        if unipolar
+          phasor * (1.0 / skew) - fall * k + 0.5
+        else
+          phasor * (2.0 / skew) - fall * (2 * k)
+        end
+      end
+
       def lfo_human(rate, human, seed)
         steps = MB::Sound::Tone.new(frequency: rate.respond_to?(:sample) ? rate * 0.5 : rate * 0.5, sample_rate: @sample_rate).lfo.asquare
         jitter = steps.sample_hold(seed: seed && seed + 1)

@@ -50,6 +50,9 @@ module MB
           polar = chart.polar
 
           header = chart.title || !entries.empty? || (!polar && chart.y.title) ? @title_fs + 10 * @s : 0
+          legend_rows = legend_rows(chart, entries, w)
+          # Wrapped legend rows go under the title (or start on its row)
+          header += (legend_rows.length - (chart.title ? 0 : 1)) * (@fs + 6 * @s) if legend_rows
           notes = !polar && !coord.x.secondary_ticks.empty?
           xtitle = polar ? nil : coord.x.title
           bottom = polar ? 0 : 6 * @s + @fs + 6 * @s
@@ -86,7 +89,7 @@ module MB
           py += inset
           ph -= 2 * inset
 
-          draw_header(chart, entries, coord, x, y, w, polar) if header > 0
+          draw_header(chart, entries, coord, x, y, w, polar, legend_rows) if header > 0
 
           xticks = coord.x.ticks((pw / (80 * @s)).round.clamp(2, 12))
 
@@ -129,7 +132,35 @@ module MB
           colorbar(heat, px + pw + 12 * @s, py, ph) if heat
         end
 
-        def draw_header(chart, entries, coord, x, y, w, polar)
+        # The width of legend entry +label+ (swatch, label, gap).
+        def legend_entry_width(label)
+          22 * @s + @p.text_width(label, @fs) + 14 * @s
+        end
+
+        # nil when the legend fits on the title row, else the entries in
+        # rows that fit +w+ (the text renderer wraps the same way; images
+        # drew the legend over long titles before).
+        def legend_rows(chart, entries, w)
+          return nil if entries.empty?
+
+          title_w = chart.title ? @p.text_width(chart.title, @title_fs, bold: true) + 10 * @s : 0
+          return nil if title_w + entries.sum { |l, _, _| legend_entry_width(l) } <= w
+
+          rows = [[]]
+          used = 0
+          entries.each do |e|
+            ew = legend_entry_width(e[0])
+            if used > 0 && used + ew > w
+              rows << []
+              used = 0
+            end
+            rows.last << e
+            used += ew
+          end
+          rows
+        end
+
+        def draw_header(chart, entries, coord, x, y, w, polar, legend_rows = nil)
           base = y + @title_fs
           tx = x
           if chart.title
@@ -137,13 +168,25 @@ module MB
             tx += @p.text_width(chart.title, @title_fs, bold: true) + 10 * @s
           end
 
-          legend_w = entries.sum { |l, _, _| 22 * @s + @p.text_width(l, @fs) + 14 * @s }
+          legend_w = legend_rows ? 0 : entries.sum { |l, _, _| legend_entry_width(l) }
           yt = polar ? nil : coord.y.title
           if yt && tx + @p.text_width(yt, @fs) + legend_w < x + w
             @p.text(tx, base, yt, @theme.muted, size: @fs)
           end
 
-          lx = x + w - legend_w
+          if legend_rows
+            # Rows under the title (from the title row when there is none)
+            row_base = chart.title ? base + @fs + 6 * @s : base
+            legend_rows.each do |row|
+              draw_legend_row(row, x, row_base)
+              row_base += @fs + 6 * @s
+            end
+          else
+            draw_legend_row(entries, x + w - legend_w, base)
+          end
+        end
+
+        def draw_legend_row(entries, lx, base)
           entries.each do |label, rgb, kind|
             sw = 16 * @s
             case kind

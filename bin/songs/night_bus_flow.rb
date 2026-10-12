@@ -6,8 +6,8 @@
 # written once as a `flow` block; the performer steers it live with loop!,
 # onward, and finish, a weighted `pick` decides whether the first drop comes
 # around once more, and a `goto` keeps the second drop rolling.  Knobs
-# (phase 3) move the sound: :cut (the hook's lowpass), :space (its delay
-# send), :air (a master highpass), and :morph (a crossfader between
+# (phase 3) move the sound: :cut (the hook's lowpass), :space and :echo
+# (its delay send and feedback), :air (a master highpass), and :morph (a crossfader between
 # snapshots), turned by scenes, sections, and the performer.
 #
 #   intro     8  drums only: tight kick, late-feeling clap, offbeat hats,
@@ -26,9 +26,10 @@
 #   drop      8  dry: kick, punchy saw bass rolling against the kick, the
 #                vocal-ish hook unfiltered, a crash on the downbeat
 #   pickup    8  ride and an octave pluck answer the hook, a static pad
-#                (leading the beat by its attack); the performer snaps the
-#                knobs (`snap :drop`) and throws the hook's delay over the
-#                last 2 bars (`turn :space, 0.55, over: 2`); then a seeded
+#                (leading the beat by half its attack); the performer snaps the
+#                knobs (`snap :drop`) and throws the hook's delay on the
+#                last 2 beats (`turn :space, 1` and `turn :echo, 0.6`,
+#                back a beat into the next section); then a seeded
 #                `pick`: usually on to the breakdown, one time in four the
 #                drop and pickup once more
 #   breakdown 8  low end out on the master (air: [200, over: 1.beat]), hats
@@ -175,9 +176,18 @@ module MB::Sound
   # resonant 4-pole lowpass and two moving formant peaks in parallel, then a
   # sample-rate crush (sample-and-hold at a rate that rises with the note,
   # so low notes crush more), a little brightening, and a dotted-eighth
-  # delay.  +cutoff+ may be a node (filter movement).
-  def self.last_stop_hook(clip, cutoff: 2600, delay: 0.25, feedback: 0.35, level: 0.8)
-    synth(clip, voices: 1) { |n|
+  # delay send.  +cutoff+ may be a node (filter movement).
+  #
+  # The hook plays on the grid at +dry+; +send+ is the level of its
+  # dotted-eighth echoes (relative to the dry hook) and +feedback+ how much
+  # of each echo comes back; both may be nodes (the :space and :echo
+  # knobs).  Until omnibus5 the hook was heard only through its delay (a
+  # dotted eighth late: #delay's dry: defaults to 0) and the send scaled the
+  # hook itself; maintainer, 2026-10-11: "Need dry on the grid" and, for
+  # the throw, "Raising the send level or the feedback gain momentarily is
+  # the way to go".
+  def self.last_stop_hook(clip, cutoff: 2600, dry: 0.25, send: 0.35, feedback: 0.35, level: 0.8)
+    hook = synth(clip, voices: 1) { |n|
       pitch = n.hz.glide(0.025, legato: true)
       src = pitch.pwm(0.16) * 0.6
 
@@ -192,7 +202,9 @@ module MB::Sound
 
       amp = n.env(0.004, 0.22, 0.45, 0.09, gm: false)
       (crushed * amp * 4).peq(3500.hz => [3.db, 0.8]).filter(:highpass, cutoff: 220, quality: 0.7)
-    }.delay(1.n8.dotted, feedback: feedback, wet: delay).softclip(0.5, 0.95) * level
+    }
+
+    (hook * dry).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).softclip(0.5, 0.95) * level
   end
 
   # The punchy saw bass: a short pitch bump (tom-like), a steep lowpass
@@ -228,7 +240,7 @@ module MB::Sound
   # A pluck voice for the octave answer and the arp.
   def self.last_stop_pluck(clip, brightness: 9, level: 0.3)
     clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 0.9, brightness: brightness) }
-      .delay(1.n8.dotted, feedback: 0.3, wet: 0.2) * level
+      .delay(1.n8.dotted, feedback: 0.3, wet: 0.35, dry: 1) * (0.2 * level) # on the grid, echoes sent (omnibus5)
   end
 
   # A white-noise riser: a 4-bar resonant highpass sweep (the riser's
@@ -245,10 +257,11 @@ module MB::Sound
   # +perform: true+, also plays the form and schedules the performer's
   # commands.  Returns the clips.
   #
-  # +pad_lead+ is the pad track's lead: (:attack by default; nil for
-  # none), +drum_nudge+ the drum track's nudge: (e.g. 6.ms to pull the
+  # +pad_lead+ is the pad track's lead: (0.5.attack by default, half its
+  # 0.6 s attack: the maintainer's pick, 2026-10-11; :attack for all of it,
+  # nil for none), +drum_nudge+ the drum track's nudge: (e.g. 6.ms to pull the
   # kit late against the bass; nil for none).
-  def self.last_stop(perform: false, seed: 1, pad_lead: :attack, drum_nudge: nil)
+  def self.last_stop(perform: false, seed: 1, pad_lead: 0.5.attack, drum_nudge: nil)
     c = last_stop_clips
     k = last_stop_kits
     bpm 126
@@ -256,7 +269,8 @@ module MB::Sound
 
     # Knobs (phase 3): named values the scenes, sections, and performer turn
     knob :cut, 700, range: 200..6000, curve: :exp, unit: 'Hz' # the hook's lowpass
-    knob :space, 0.15, range: 0..0.6                         # the hook's delay send
+    knob :space, 0.35, range: 0..1                           # the hook's delay send
+    knob :echo, 0.35, range: 0..0.85                         # the hook's delay feedback
     knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'   # a master highpass (the breakdown's "cut")
     knob :morph, 0                                           # a crossfader between snapshots
 
@@ -272,15 +286,15 @@ module MB::Sound
     }
     track(:sub) { |clip| last_stop_sub(clip) }
     track(:bass) { |clip| last_stop_bass(clip) }
-    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: knob(:space)) }
-    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.15) }
-    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.2) }
-    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), delay: 0.4, feedback: 0.55, level: 0.45) }
+    track(:hook) { |clip| last_stop_hook(clip, cutoff: knob(:cut), send: knob(:space), feedback: knob(:echo)) }
+    track(:hook_far) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.15) }
+    track(:hook_rise) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.2) }
+    track(:hook_wash) { |clip| last_stop_hook(clip, cutoff: knob(:cut), dry: 0.4, send: 0.55, feedback: 0.55, level: 0.45) }
     track(:answer) { |clip| last_stop_pluck(clip, level: 1.3) }
     track(:arp) { |clip| last_stop_pluck(clip, brightness: 12, level: 0.68) }
     track(:tension) { |clip| last_stop_tension(clip) }
-    # The pad leads the beat by its 0.6 s attack, so each swell peaks on
-    # the bar line (maintainer, 2026-10-11)
+    # The pad leads the beat by half its 0.6 s attack (lead: 0.5.attack),
+    # so each swell is half built at the bar line (maintainer, 2026-10-11)
     track(:pad, lead: pad_lead) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 900, release: 2)) * 0.25 }
     track(:riser, fade: 1/8r) { |_clip| last_stop_riser } # a tween, not notes: fades instead of ringing
 
@@ -291,7 +305,7 @@ module MB::Sound
     scene :groove, drums: k[:groove], sub: c[:sub], hook_far: c[:hook], cut: 700
     scene :build, drums: k[:build], tension: c[:tension], hook_rise: c[:hook], cut: [3200, from: 500, over: 8, curve: :smooth]
     scene(:gap) { meter 2, 4 }                                     # a half-bar breath
-    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook], cut: 2600, space: 0.25, air: 20) { meter 4, 4 }
+    scene(:drop, drums: k[:drop], bass: c[:roll], hook: c[:hook], cut: 2600, space: 0.35, echo: 0.35, air: 20) { meter 4, 4 }
     scene :pickup, drums: k[:pickup], bass: c[:roll], hook: c[:hook], answer: c[:hook_hi], pad: c[:pad]
     scene :breakdown, drums: k[:cut], hook_wash: c[:hook], pad: c[:pad],
       cut: [2600, from: 900, over: 8, curve: :smooth], air: [200, over: 1.beat] # the "cut": low end out
@@ -346,8 +360,17 @@ module MB::Sound
       say['pickup', 'snap :drop   # the drop\'s knobs']
       snap :drop
       session = Session.current
-      bar = session.transport.bar_at(session.now).floor + 6
-      at_bar(bar) { say[bar, 'turn :space, 0.55, over: 2, curve: :smooth   # a delay throw']; turn :space, 0.55, over: 2, curve: :smooth }
+      bar = session.transport.bar_at(session.now).floor + 7
+      at_bar(bar, beat: 3) {
+        say["#{bar}.3", 'turn :space, 1, over: 1.n16; turn :echo, 0.6, over: 1.n16   # a delay throw']
+        turn :space, 1, over: 1.n16
+        turn :echo, 0.6, over: 1.n16
+      }
+      at_bar(bar + 1, beat: 2) {
+        say["#{bar + 1}.2", 'turn :space, 0.35, over: 1.n8; turn :echo, 0.35, over: 1.beat   # and back']
+        turn :space, 0.35, over: 1.n8
+        turn :echo, 0.35, over: 1.beat
+      }
     }
     at_marker(:outro) {
       say['outro', 'xfade :drop, :dark, :morph; turn :morph, 1, over: 8   # back to the dark']
@@ -359,6 +382,33 @@ module MB::Sound
       bar = session.transport.bar_at(session.now).floor + 3
       at_bar(bar) { say[bar, 'finish   # the outro next']; finish }
     }
+  end
+
+  # A listening check for the pad's lead (maintainer, 2026-10-11: "Hard to
+  # tell when the pad is so quiet; a span with just pad (make it swarmy and
+  # louder) and 4 on the floor would help"): the song's pad clip (A, A, A,
+  # G, a new swell each bar) on a louder swarm of saws and fifths with the
+  # song pad's 0.6 s attack, over a four-on-the-floor kick, from bar 2 so a
+  # lead has room.  +lead+ is the pad track's lead: (nil, 1.attack,
+  # 0.5.attack, ...).  Closed hats on every 16th (offbeat eighths accented)
+  # mark the grid for listening on small speakers (maintainer, 2026-10-12:
+  # "add a ride cymbal or closed hat on the grid with the kick").
+  #
+  #     render('pad.flac', bars: 9) { last_stop_pad_check(lead: 0.5.attack) }
+  def self.last_stop_pad_check(lead: 0.5.attack)
+    bpm 126
+    quant 1
+    clip = last_stop_clips[:pad]
+    track(:check_pad, lead: lead) { |c|
+      c.synth(voices: 2) { |v|
+        swell = v.amp_env(0.6, 1.0, 0.8, 1.5, curve: :smooth)
+        cloud = v.hz.swarm(7, glide: nil, drift: 12.cents) + v.hz.transpose(7).swarm(5, glide: nil, drift: 12.cents) * 0.6
+        (cloud * swell * 0.5).filter(:lowpass, cutoff: 1800, quality: 0.8)
+      }.softclip(0.5, 0.95) * 0.9
+    }
+    track(:check_kick) { |kit| tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }) * 0.85 }
+    scene :pad_check, check_pad: clip, check_kick: grid(16, kick: 'X...X...X...X...', hat: 'xxXxxxXxxxXxxxXx').loop
+    go :pad_check, in: 1
   end
 
   if main_script?(__FILE__)

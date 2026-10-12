@@ -122,4 +122,32 @@ RSpec.describe(MB::Sound::GraphNode::Decimator, :aggregate_failures) do
     expect(220.hz.ramp.decimate(2500).to_s).to eq('Decimator 2500 Hz')
     expect(220.hz.ramp.decimate(1.hz.lfo.at(100..200), jitter: 0.1).to_s).to eq('Decimator node Hz, jitter 0.1')
   end
+
+  describe 'mix:' do
+    it 'blends the crushed signal with the input' do
+      dry = collect(220.hz.ramp, 4800)
+      wet = collect(220.hz.ramp.decimate(3000), 4800)
+      half = collect(220.hz.ramp.decimate(3000, mix: 0.4), 4800)
+      expect((half - (wet * 0.4 + dry * 0.6)).abs.max).to be < 1e-6
+      expect(collect(220.hz.ramp.decimate(3000, mix: 1), 4800)).to eq(wet)
+      expect((collect(220.hz.ramp.decimate(3000, mix: 0), 4800) - dry).abs.max).to be < 1e-7
+    end
+
+    it 'takes a node, the same at any buffer size' do
+      make = -> { 110.hz.ramp.decimate(0.7.hz.lfo.at(500..9000), jitter: 0.4, seed: 7, mix: 0.3.hz.lfo.at(0..1)) }
+      a = collect(make.(), 9600, 800)
+      b = collect(make.(), 9600, [1, 7, 128, 33])
+      expect(b).to eq(a)
+      node = make.()
+      expect(node.mix).to be_a(MB::Sound::GraphNode)
+      expect(node.sources.keys).to include(:mix)
+    end
+
+    it 'prints back as Ruby and rejects bad values' do
+      node = 220.hz.ramp.decimate(2500, mix: 0.4)
+      expect(node.to_ruby).to include('decimate(2500, mix: 0.4)')
+      expect(node.to_s).to include('mix 0.4')
+      expect { 220.hz.ramp.decimate(2500, mix: :x) }.to raise_error(ArgumentError, /mix/)
+    end
+  end
 end

@@ -154,4 +154,31 @@ RSpec.describe(MB::Sound::Length, :aggregate_failures) do
       expect(MB::Sound::HaasPan.new(delay: 1.ms).right_delay_samples).to eq(48)
     end
   end
+
+  describe MB::Sound::Length::Attack do
+    it 'is made by Numeric#attack, compares, scales, and prints as Ruby' do
+      expect(0.5.attack).to be_a(MB::Sound::Length::Attack)
+      expect(0.5.attack.fraction).to eq(0.5)
+      expect(0.5.attack).to eq(0.5.attack)
+      expect(1.attack * 0.25).to eq(0.25.attack)
+      expect(2.attacks).to be > 1.attack
+      expect(0.5.attack.to_ruby).to eq('0.5.attack')
+      expect(1.0.attack.inspect).to eq('1.attack')
+      expect(Rational(1, 3).attack.to_s).to eq('(1/3r).attack')
+      expect(eval(Rational(1, 3).attack.to_ruby)).to eq(Rational(1, 3).attack)
+    end
+
+    it 'resolves against an attack time' do
+      expect(0.5.attack.of(0.6).to_seconds).to be_within(1e-12).of(0.3)
+      expect(1.attack.of(250.ms).to_seconds).to eq(0.25)
+    end
+
+    it 'is not a Length and rejects zero, negative, and non-numbers' do
+      expect(1.attack).not_to be_a(MB::Sound::Length)
+      expect { MB::Sound::Length.seconds(1.attack) }.to raise_error(ArgumentError)
+      expect { 0.attack }.to raise_error(ArgumentError, /above 0/)
+      expect { -1.attack }.to raise_error(ArgumentError, /above 0/)
+      expect { MB::Sound::Length::Attack.new(:x) }.to raise_error(ArgumentError)
+    end
+  end
 end

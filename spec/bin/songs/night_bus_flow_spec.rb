@@ -46,4 +46,19 @@ RSpec.describe('bin/songs/night_bus_flow.rb') do
     expect(rms.(32.5, 34.4)).to be > rms.(24, 32) # the drop
     expect(data[0].abs.max).to be < 0.9
   end
+
+  it 'has a pad check: a swarm pad leading by half its attack over a four-on-the-floor kick' do
+    info = nil
+    path = tmp_path('pad_check.flac')
+    MB::Sound.render(path, bars: 3) do
+      MB::Sound.last_stop_pad_check
+      MB::Sound.at_bar(3) { info = MB::Sound::Session.current.arrangement.track_info[:check_pad] }
+    end
+    expect(info).to include('ahead 300 ms')
+    data = MB::Sound.read(path)
+    bar = (48000 * 240 / 126.0).round
+    expect(data[0][0...(bar * 0.6).round].abs.max).to eq(0)         # nothing until the lead
+    expect(data[0][(bar * 0.85).round...bar].abs.max).to be > 0.01   # the pad swelling before bar 2
+    expect(data[0].abs.max).to be < 0.9
+  end
 end

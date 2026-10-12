@@ -25,7 +25,8 @@ module MB
       # its clip, and its launch quantization +q:+.  `bg :name, clip` and
       # scenes play clips on it.  +lead:+ plays it early (bars, a Duration
       # or Length, or :attack for its amp envelope's attack, so slow pads
-      # peak on the beat; capped at 1 bar unless +lead_max:+ says
+      # peak on the beat, or `0.5.attack` for a fraction of that
+      # attack; capped at 1 bar unless +lead_max:+ says
       # otherwise), +nudge:+ moves its notes by a fixed time (e.g.
       # `nudge: 6.ms` pulls a backbeat late).  Also available as
       # #define_track.

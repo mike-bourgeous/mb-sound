@@ -145,6 +145,27 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.resolve(:bar)).to eq(3/4r)
   end
 
+  describe 'fills on launch-aligned loops' do
+    # 126 BPM: bar lines fall between samples (91428.57 frames per bar), so a
+    # launch lands on the sample before its exact time
+    let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 126) }
+
+    it 'plays a fill-marked note in the fill\'s bar after an off-sample launch (was a bar early)' do
+      clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::C3, MB::Sound::C3, MB::Sound::D3.fill(:f)).n4.loop(align: :launch)
+      set.track(:p) { |c| c.gate * c.number }
+      set.scene(:pa, p: clip)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      transport.fills.add(3r, 4r, :f) # bar 4
+      set.go(:pa, in: 1)
+      d = run(800 * 500) # 4.4 bars
+      bar = 48000 * 240 / 126r
+      fill_frames = (0...d.length).select { |i| d[i] == 50 }
+      expect(fill_frames).not_to be_empty
+      expect(fill_frames.first).to be >= (bar * 3.75).floor
+      expect(fill_frames.last).to be < (bar * 4).ceil
+    end
+  end
+
   describe 'lead: and nudge:' do
     # Note edges (gate * note number) of track :p over two scenes
     def edges_with(size: 800, **options)
@@ -185,6 +206,46 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(peak).to be_within(2).of(96000) # peaks on the downbeat
     end
 
+    it 'leads by a fraction of the attack with lead: 0.5.attack, the same at any buffer size' do
+      firsts = [800, 367].map do |size|
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: size, realtime: false, raise_errors: true)
+        a = s.arrangement
+        a.track(:p, lead: 0.5.attack) { |c| c.number * c.amp_env(0.25, 0.1, 1, 0.1) }
+        a.scene(:pa, p: a1)
+        s.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+        a.go(:pa, in: 1)
+        d = []
+        d << s.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 2
+        d = d.reduce(:concatenate)
+        expect(a.ahead(:p)).to eq(1/16r) # half of 0.25 s at 120 BPM
+        expect(a.track_info[:p]).to include('ahead 125 ms')
+        [(1...d.length).find { |i| d[i] != 0 }, d[0...96000 * 2].dup]
+      ensure
+        s&.close
+      end
+      expect(firsts[0][0]).to be_within(1).of(96000 - 6000)
+      expect(firsts[1][0]).to eq(firsts[0][0])
+      expect(firsts[1][1].to_a).to eq(firsts[0][1].to_a)
+
+      expect { set.track(:q, lead: 0.attack) { |c| c.number } }.to raise_error(ArgumentError, /above 0/)
+      expect { set.track(:q, lead: { attack: 0.5 }) { |c| c.number } }.to raise_error(ArgumentError, /0.5.attack/)
+      expect { set.track(:q, lead: 0.5.attack, lead_max: 2) { |c| c.number } }.not_to raise_error
+      expect(set.tracks[:q].lead).to eq(0.5.attack)
+      set.track(:r, lead: :attack) { |c| c.number }
+      expect(set.tracks[:r].lead).to eq(1.attack)
+    end
+
+    it 'measures a synth voice\'s GM2-scaled amp_env by its attack as given' do
+      set.track(:v, lead: :attack) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
+      set.track(:w, lead: 0.5.attack) { |c| c.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.5, 0.1, 1, 0.1) } }
+      set.scene(:all, v: a1, w: a1)
+      session.add(MB::Sound::GraphNode::Constant.new(0, sample_rate: 48000), name: :clock, on: :now)
+      set.go(:all, in: 1)
+      run(800)
+      expect(set.ahead(:v)).to eq(1/4r) # 0.5 s at 120 BPM (was 0: the attack is a node, time x CC 73)
+      expect(set.ahead(:w)).to eq(1/8r)
+    end
+
     it 'caps an attack lead at 1 bar unless lead_max: says otherwise' do
       set.track(:slow, lead: :attack) { |c| c.number * c.amp_env(4, 0.1, 1, 0.1) }
       set.track(:slower, lead: :attack, lead_max: 2) { |c| c.number * c.amp_env(5, 0.1, 1, 0.1) }
@@ -198,7 +259,7 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(set.ahead(:short)).to eq(1/8r) # under its cap
       expect(set.track_info[:slow]).to include('ahead 2000 ms (attack capped)')
       expect(set.track_info[:short]).not_to include('capped')
-      expect { set.track(:q, lead: 1, lead_max: 2) { |c| c.number } }.to raise_error(ArgumentError, /caps lead: :attack/)
+      expect { set.track(:q, lead: 1, lead_max: 2) { |c| c.number } }.to raise_error(ArgumentError, /caps an attack lead/)
       expect { set.track(:q, lead: :attack, lead_max: 0) { |c| c.number } }.to raise_error(ArgumentError, /more than 0/)
     end
 
