@@ -142,6 +142,10 @@ static void env_read_signal(VALUE v, size_t length, const char *name, double nil
  * With the ENV_ADD flag, a note's peak is env_add_peak of the level when
  * it starts and its velocity's peak (Envelope retrigger: :add).
  *
+ * With the ENV_HOLD_LAST flag (Envelope hold_last: true), the idle and
+ * ended stages keep the last level (where the last segment or a choke
+ * landed) instead of outputting 0, and the next note starts from it.
+ *
  * Triggers fire on rising edges: a sample > 0 after a sample <= 0
  * (negative values are reserved).  A release starts with its time scaled
  * by env_lift_scale of the lift input on that sample.

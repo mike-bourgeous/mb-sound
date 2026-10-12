@@ -28,7 +28,15 @@
  * distortion).  The warp bends the phase at the knee (w) and the wrap, so
  * those become breakpoints too (jumps in slope wherever the shape isn't
  * flat there), and the same corrections band-limit every combination.  At
- * w = 0.5 the warp is the identity, exactly.
+ * w = 0.5 the warp is the identity, exactly.  The warp turns around a
+ * pivot o (osc-env-1, 2026-10-12): the phase is rotated by -o, warped, and
+ * rotated back, so the knees sit at o and o + w, where the shape's phase is
+ * o and o + 0.5; the phase map is still two linear pieces, so the same
+ * breakpoint corrections apply with shifted positions.  A triangle pivots
+ * on its low point (0.75) by default, so its halves are its rising and
+ * falling slopes and the warp is a true skewed triangle (w = the rising
+ * fraction); the other shapes pivot on 0 (a square's first half is the
+ * pulse's high part).  Pivot 0 is the warp as it was before, bit for bit.
  *
  * The Ruby mirror is MB::Sound::BandLimit (lib/mb/sound/band_limit.rb);
  * specs check that both give the same samples.
@@ -83,12 +91,14 @@ static double bl_read_phi(VALUE state)
  * bl_fade; 0 and 0 for always on, infinity for never: a naive waveform).
  * +width+ (Numeric, NArray, or nil for 0.5) warps the phase (see the top of
  * this file), clamped to BL_MIN_WIDTH..(1 - BL_MIN_WIDTH); if +remove_dc+
- * is true, the warped waveform's DC offset is subtracted.  See
- * MB::Sound::BandLimit.
+ * is true, the warped waveform's DC offset is subtracted.  The optional
+ * +pivot+ (cycles; Numeric, NArray, or nil for 0) is the phase the warp
+ * turns around (see the top of this file; Tone passes the shape's
+ * default, BandLimit::PIVOTS).  See MB::Sound::BandLimit.
  */
-static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod,
+static VALUE oscillate_bl(VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod,
 		VALUE advance, VALUE gain, VALUE offset, VALUE state, VALUE bl_state, VALUE fade_lo, VALUE fade_hi,
-		VALUE width, VALUE remove_dc)
+		VALUE width, VALUE remove_dc, VALUE pivot)
 {
 	enum bl_wave wt = bl_find_wave(wave_type);
 
@@ -114,15 +124,19 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *out = mb_sfloat_ptr(buffer);
 
-	struct mb_signal freq, pm, w;
+	struct mb_signal freq, pm, w, o;
 	mb_signal_input(&frequency, length, "Frequency", &freq);
 	mb_signal_input(&phase_mod, length, "Phase modulation", &pm);
 	if (NIL_P(width)) {
 		width = DBL2NUM(0.5);
 	}
 	mb_signal_input(&width, length, "Width", &w);
+	if (NIL_P(pivot)) {
+		pivot = DBL2NUM(0.0);
+	}
+	mb_signal_input(&pivot, length, "Pivot", &o);
 
-	mb_bl_oscillate(wt, out, length, &freq, &pm, &w, adv, g, off, lo, hi, RTEST(remove_dc), &st);
+	mb_bl_oscillate(wt, out, length, &freq, &pm, &w, &o, adv, g, off, lo, hi, RTEST(remove_dc), &st);
 
 	rb_ary_store(state, 0, rb_float_new(st.phi));
 
@@ -140,9 +154,21 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	RB_GC_GUARD(frequency);
 	RB_GC_GUARD(phase_mod);
 	RB_GC_GUARD(width);
+	RB_GC_GUARD(pivot);
 	RB_GC_GUARD(buffer);
 
 	return buffer;
+}
+
+// FastSynth.oscillate_bl(buffer, wave_type, frequency, phase_mod, advance,
+// gain, offset, state, bl_state, fade_lo, fade_hi, width, remove_dc[, pivot])
+static VALUE ruby_oscillate_bl(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 13 && argc != 14) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 13..14)", argc);
+	}
+	return oscillate_bl(argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8], argv[9],
+			argv[10], argv[11], argv[12], argc > 13 ? argv[13] : Qnil);
 }
 
 /*
@@ -592,6 +618,31 @@ static inline void sync_raw(enum bl_wave wt, double w, double p, _Bool left, dou
 	a[2] *= g * g;
 }
 
+// Like sync_raw for a known side (+first+, see bl_pivot_side) and shape
+// phase +u+ (BandLimit.sync_raw_u).
+static inline void sync_raw_u(enum bl_wave wt, double w, _Bool first, double u, _Bool left, double vel, double *a)
+{
+	double k = first ? 0.5 / w : 0.5 / (1.0 - w);
+	double g = vel * k;
+	sync_segment(wt, u, left, u, a);
+	a[1] *= g;
+	a[2] *= g * g;
+}
+
+// sync_raw on the right side of phase +p+ of a warp around pivot +o+
+// (exact on the breakpoints +bp+; BandLimit.sync_raw_at).
+static inline void sync_raw_at(enum bl_wave wt, double w, double o, double p, double vel,
+		const struct bl_breakpoint *bp, int nbp, double *a)
+{
+	if (o == 0) {
+		sync_raw(wt, w, p, 0, vel, a);
+		return;
+	}
+	double u;
+	_Bool first = bl_pivot_side(w, o, p, bp, nbp, &u);
+	sync_raw_u(wt, w, first, u, 0, vel, a);
+}
+
 // Rows per cycle per sample of the sine residual table
 // (BandLimit::SYNC_SINE_ROWS_PER_CYCLE).
 #define SYNC_SINE_ROWS_PER_CYCLE 256
@@ -614,6 +665,19 @@ static inline void sync_sine_segment(double w, double p, _Bool left, double vel,
 	double k = first ? 0.5 / w : 0.5 / (1.0 - w);
 	*u = first ? p * k : 0.5 + (p - w) * k;
 	*g = vel * k;
+}
+
+// sync_sine_segment on the right side of phase +p+ of a warp around pivot
+// +o+ (BandLimit.sync_sine_at).
+static inline void sync_sine_at(double w, double o, double p, double vel, const struct bl_breakpoint *bp, int nbp,
+		double *u, double *g)
+{
+	if (o == 0) {
+		sync_sine_segment(w, p, 0, vel, u, g);
+		return;
+	}
+	_Bool first = bl_pivot_side(w, o, p, bp, nbp, u);
+	*g = vel * (first ? 0.5 / w : 0.5 / (1.0 - w));
 }
 
 // The sine residual table at frequency +g+ (cycles per sample, either sign)
@@ -679,8 +743,9 @@ static inline double sync_sine_value(const struct sync_sine *sn, double u, doubl
 
 // Moves phase *p by +vel+ cycles per sample for +dur+ samples, adding an
 // event for every breakpoint crossed; the segment ends +end_t+ samples
-// before the current sample.  Returns nothing; updates *p.
-static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp, int nbp, double *p, double vel,
+// before the current sample.  +o+ is the warp's pivot.  Returns nothing;
+// updates *p.
+static inline void sync_move(enum bl_wave wt, double w, double o, struct bl_breakpoint *bp, int nbp, double *p, double vel,
 		double dur, double end_t, double *acc, size_t pos, const struct sync_tables *tb, _Bool bl,
 		const struct sync_sine *sn)
 {
@@ -695,11 +760,24 @@ static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp
 			double bpos = bp[j].pos;
 			double t = end_t + (1.0 - f) * dur; // samples before the current sample
 
+			// With a pivot, the sides of the breakpoint from its exact shape
+			// phase
+			_Bool fr = bp[j].x < 0.5;
+			_Bool fl = (bp[j].x == 0.0 ? 1.0 : bp[j].x) <= 0.5;
+			double bul = bp[j].u == 0.0 ? 1.0 : bp[j].u;
+
 			if (sn) {
 				// From one sine segment to the other
 				double ur, gr, ul, gl;
-				sync_sine_segment(w, bpos, 0, vel, &ur, &gr);
-				sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, 1, vel, &ul, &gl);
+				if (o == 0) {
+					sync_sine_segment(w, bpos, 0, vel, &ur, &gr);
+					sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, 1, vel, &ul, &gl);
+				} else {
+					ur = bp[j].u;
+					gr = vel * (fr ? 0.5 / w : 0.5 / (1.0 - w));
+					ul = bul;
+					gl = vel * (fl ? 0.5 / w : 0.5 / (1.0 - w));
+				}
 				if (gl == gr) {
 					continue; // the same exponential (no warp here)
 				}
@@ -715,8 +793,13 @@ static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp
 
 			// Jumps from one side of the breakpoint to the other
 			double r[3], l[3];
-			sync_raw(wt, w, bpos, 0, vel, r);
-			sync_raw(wt, w, bpos == 0.0 ? 1.0 : bpos, 1, vel, l);
+			if (o == 0) {
+				sync_raw(wt, w, bpos, 0, vel, r);
+				sync_raw(wt, w, bpos == 0.0 ? 1.0 : bpos, 1, vel, l);
+			} else {
+				sync_raw_u(wt, w, fr, bp[j].u, 0, vel, r);
+				sync_raw_u(wt, w, fl, bul, 1, vel, l);
+			}
 			if (move > 0) {
 				sync_event(acc, pos, tb, t, r[0] - l[0], r[1] - l[1], r[2] - l[2]);
 			} else {
@@ -749,7 +832,7 @@ static const double *sync_table_arg(VALUE table, size_t len)
  *   oscillate_sync(buffer, wave_type, frequency, advance, gain, offset,
  *                  sync_state, ring, pulses, soft, width, remove_dc,
  *                  r0, r1, r2, oversample, taps, band_limit, m1, m2,
- *                  sine_table, reset_phase)
+ *                  sine_table, reset_phase, pivot)
  * +sync_state+ is [phase at the last sample (cycles), last increment,
  * direction (1 or -1), ring position, primed (0 or 1)]; the first sample of
  * an unprimed oscillator starts at the phase in sync_state[0].  +ring+ is a
@@ -763,14 +846,16 @@ static const double *sync_table_arg(VALUE table, size_t len)
  * BandLimit.sync_sine_table for band-limited sines (nil otherwise).
  * +reset_phase+ (cycles, or nil for 0) is where hard sync events put the
  * phase: Tone resets (reset inputs, key sync, timeline jumps) are hard sync
- * events on their sample (a pulse of 1) to the reset target.  See
- * MB::Sound::BandLimit.sync_ruby.
+ * events on their sample (a pulse of 1) to the reset target.  +pivot+
+ * (optional; cycles, Numeric, NArray, or nil for 0) is the warp's pivot,
+ * as for oscillate_bl.  See MB::Sound::BandLimit.sync_ruby.
  */
 static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 21 && argc != 22) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21..22)", argc);
+	if (argc < 21 || argc > 23) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21..23)", argc);
 	}
+	VALUE pivot = argc > 22 ? argv[22] : Qnil;
 
 	VALUE buffer = argv[0], frequency = argv[2], sync_state = argv[6], ring = argv[7], pulses = argv[8];
 	VALUE width = argv[10], r0_v = argv[12], r1_v = argv[13], r2_v = argv[14], sine_v = argv[20];
@@ -859,10 +944,20 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	}
 	mb_read_signal_input(&width, length, "Width", &w, &wptr, &wstep);
 	w = bl_clamp_width(w);
-	double half_mean = bl_half_mean(wt);
+
+	double op;
+	const float *optr;
+	size_t ostep;
+	if (NIL_P(pivot)) {
+		pivot = DBL2NUM(0.0);
+	}
+	mb_read_signal_input(&pivot, length, "Pivot", &op, &optr, &ostep);
+	op = bl_wrap_pivot(optr ? optr[0] : op);
+	double o = w == 0.5 ? 0.0 : op;
+	double half_mean = bl_half_mean_pivot(wt, o);
 
 	struct bl_breakpoint bp[BL_MAX_BREAKPOINTS];
-	int nbp = bl_breakpoints(wt, w, bp, 1);
+	int nbp = bl_breakpoints(wt, w, bp, 1, o);
 
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -871,11 +966,17 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 		if (pulseptr) {
 			pulse = pulseptr[i * pulsestep];
 		}
-		if (wptr) {
-			double new_w = bl_clamp_width(wptr[i * wstep]);
-			if (new_w != w) {
+		if (wptr || optr) {
+			double new_w = wptr ? bl_clamp_width(wptr[i * wstep]) : w;
+			if (optr) {
+				op = bl_wrap_pivot(optr[i * ostep]);
+			}
+			double new_o = new_w == 0.5 ? 0.0 : op;
+			if (new_w != w || new_o != o) {
 				w = new_w;
-				nbp = bl_breakpoints(wt, w, bp, 1);
+				o = new_o;
+				half_mean = bl_half_mean_pivot(wt, o);
+				nbp = bl_breakpoints(wt, w, bp, 1, o);
 			}
 		}
 
@@ -889,13 +990,13 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 				if (d < 0) d = 0;
 				if (d > 1) d = 1;
 
-				sync_move(wt, w, bp, nbp, &p, vel, 1.0 - d, d, acc, pos, &tb, bl, sn);
+				sync_move(wt, w, o, bp, nbp, &p, vel, 1.0 - d, d, acc, pos, &tb, bl, sn);
 
 				// Jumps from the old direction or phase to the new
 				double a0[3], a1[3], u0 = 0, g0 = 0;
-				sync_raw(wt, w, p, 0, vel, a0);
+				sync_raw_at(wt, w, o, p, vel, bp, nbp, a0);
 				if (sn) {
-					sync_sine_segment(w, p, 0, vel, &u0, &g0);
+					sync_sine_at(w, o, p, vel, bp, nbp, &u0, &g0);
 				}
 				double nvel;
 				if (soft) {
@@ -906,10 +1007,10 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 					nvel = prev_inc;
 					p = reset_phase;
 				}
-				sync_raw(wt, w, p, 0, nvel, a1);
+				sync_raw_at(wt, w, o, p, nvel, bp, nbp, a1);
 				if (sn) {
 					double u1, g1;
-					sync_sine_segment(w, p, 0, nvel, &u1, &g1);
+					sync_sine_at(w, o, p, nvel, bp, nbp, &u1, &g1);
 					sync_sine_switch(acc, pos, sn, d, u0, g0, -1.0);
 					sync_sine_switch(acc, pos, sn, d, u1, g1, 1.0);
 				} else if (bl) {
@@ -917,9 +1018,9 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 				}
 				vel = nvel;
 
-				sync_move(wt, w, bp, nbp, &p, vel, d, 0, acc, pos, &tb, bl, sn);
+				sync_move(wt, w, o, bp, nbp, &p, vel, d, 0, acc, pos, &tb, bl, sn);
 			} else {
-				sync_move(wt, w, bp, nbp, &p, vel, 1.0, 0, acc, pos, &tb, bl, sn);
+				sync_move(wt, w, o, bp, nbp, &p, vel, 1.0, 0, acc, pos, &tb, bl, sn);
 			}
 		}
 
@@ -927,11 +1028,11 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 		double v;
 		if (sn) {
 			double u, gs;
-			sync_sine_segment(w, p, 0, vel, &u, &gs);
+			sync_sine_at(w, o, p, vel, bp, nbp, &u, &gs);
 			v = sync_sine_value(sn, u, gs);
 		} else {
 			double a[3];
-			sync_raw(wt, w, p, 0, vel, a);
+			sync_raw_at(wt, w, o, p, vel, bp, nbp, a);
 			v = a[0] - tb.m1 * a[1] + tb.half_m2 * a[2];
 		}
 		v += acc[pos];
@@ -963,6 +1064,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(frequency);
 	RB_GC_GUARD(pulses);
 	RB_GC_GUARD(width);
+	RB_GC_GUARD(pivot);
 	RB_GC_GUARD(ring);
 	RB_GC_GUARD(r0_v);
 	RB_GC_GUARD(r1_v);
@@ -1148,7 +1250,7 @@ void Init_fast_synth(void)
 	sym_complex_square = rb_intern("complex_square");
 	sym_complex_triangle = rb_intern("complex_triangle");
 
-	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, 13);
+	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, -1);
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
 	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);

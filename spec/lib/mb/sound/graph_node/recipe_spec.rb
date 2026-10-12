@@ -430,6 +430,29 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       end
     end
 
+    it 'rebuilds envelope settings chained after the constructor (and Notes envelopes in synth lanes)' do
+      code = round_trip {
+        gate = 3.hz.lfo.asquare.at(0..1)
+        env = MB::Sound.env(0.01, 0.1, 0.5, 0.1, gate: gate).legato.retrigger(:add).curve(:snappy).shape(release: :s)
+        env2 = MB::Sound.adsr(0.01, 0.1, 0.5, 0.1, gate: gate, velocity: 0.4).sensitivity(-12.db..0.db, scale: :db)
+          .set_time(:attack, 0.02).set_level(:decay, 0.3)
+        dive = MB::Sound.env([[0, 0], [0, 0.01], [-1, 0.05]], release_at: 2, gate: gate, velocity: 0.5).hold_last.no_velocity
+        220.hz.saw * env + 330.hz.saw * env2 + dive * 0.1
+      }
+      expect(code).to include('.legato.retrigger(:add).curve(:snappy).shape(release: :s)')
+      expect(code).to include('.sensitivity(-12.db..1.0, scale: :db).set_time(:attack, 0.02).set_level(:decay, 0.3)')
+      expect(code).to include('.hold_last.no_velocity')
+
+      code = round_trip(inputs: -> { { midi: MB::Sound::Notes.new(midi_path) } }) { |i|
+        MB::Sound.synth(i[:midi], voices: 2) { |v|
+          d = v.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2).hold_last.sensitivity(nil)
+          v.hz.transpose(d * 12).saw * v.amp_env(0.01, 0.2, 0.5, 0.3).gm(false).legato
+        }
+      }
+      expect(code).to include('.hold_last.sensitivity(nil)')
+      expect(code).to include('.gm(false).legato')
+    end
+
     it 'rebuilds delay insert pipelines' do
       code = round_trip {
         220.hz.ramp.delay(30.ms, feedback: 0.5) { |d|

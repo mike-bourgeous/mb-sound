@@ -295,8 +295,8 @@ module MB
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
       def wraps = signal.wraps
       def increment = signal.increment
-      def pwm(width, dc: false) = tone.pwm(width, dc: dc)
-      def skew(width, dc: false) = tone.skew(width, dc: dc)
+      def pwm(width, dc: false, pivot: nil) = tone.pwm(width, dc: dc, pivot: pivot)
+      def skew(width, dc: false, pivot: nil) = tone.skew(width, dc: dc, pivot: pivot)
       def pulse(width = 0.5, dc: false) = tone.pulse(width, dc: dc)
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true, seed: nil) = tone.noise(blend, seed: seed)

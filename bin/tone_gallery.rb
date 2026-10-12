@@ -37,6 +37,7 @@ CASES.merge!(
   pulse_keep_dc: -> { 220.hz.pulse(0.1, dc: true).at(0.5) },
   pwm_sweep: -> { 220.hz.pwm(0.5.hz.lfo.at(0.05..0.95)).square.at(0.5) },
   skew_triangle: -> { 440.hz.triangle.skew(0.1).at(0.5) },
+  skew_triangle_pivot0: -> { 440.hz.triangle.skew(0.1, pivot: 0).at(0.5) }, # the triangle warp before 2026-10-12
   sine_pwm: -> { 220.hz.sine.pwm(0.2).at(0.5) },
   ramp_pwm: -> { 330.hz.ramp.pwm(0.7).at(0.5) },
 )

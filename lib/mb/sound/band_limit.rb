@@ -116,6 +116,17 @@ module MB
       # The narrowest pulse width (and 1 minus the widest).
       MIN_WIDTH = 1e-4
 
+      # The default pivot of each shape's warp (cycles; see .warp and
+      # Tone#pwm): the phase the warp turns around, where the shape's first
+      # half starts.  A triangle pivots on its low point (0.75), so its two
+      # halves are its rising and falling slopes and pwm makes a true skewed
+      # triangle (width = the fraction of each cycle spent rising); the
+      # other shapes pivot on 0 (their first half is the pulse's high part,
+      # the ramp's rise from 0, ...).  Until osc-env-1 (2026-10-12) every
+      # shape pivoted on 0, which split the triangle at its zero crossings
+      # (pass pivot: 0 for that sound).
+      PIVOTS = { triangle: 0.75 }.freeze
+
       # The average of each shape's first half; a warped shape's DC offset is
       # this times (2 * width - 1).
       HALF_MEAN = {
@@ -189,30 +200,135 @@ module MB
         u
       end
 
-      # Maps phase +p+ through the warp with width +w+ (identity at 0.5).
-      def self.warp(p, w)
-        p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))
+      # Maps phase +p+ through the warp with width +w+ (identity at 0.5),
+      # turning around pivot +o+ (cycles, 0...1; see PIVOTS): the phase is
+      # rotated by -o, warped (the shape's first half over +w+ of the
+      # cycle), and rotated back, so the warp's two knees sit at o and at
+      # o + w, where the shape's phase is o and o + 0.5.  See bl_warp_pivot
+      # in mb_bl_osc.h.
+      def self.warp(p, w, o = 0.0)
+        return p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w)) if o == 0
+
+        x = p - o
+        x += 1.0 if x < 0
+        u = x < w ? x * (0.5 / w) : 0.5 + (x - w) * (0.5 / (1.0 - w))
+        u += o
+        u -= 1.0 if u >= 1.0
+        u
       end
 
-      # Breakpoints of +wave_type+ warped by width +w+: [phase, jump in value,
-      # jump in slope per cycle, value after], leaving out points with no
-      # jump.  See bl_breakpoints in fast_synth.c.
-      def self.breakpoints(wave_type, w = 0.5, all = false)
+      # A pivot (cycles) wrapped to 0...1, or 0 if it isn't finite.  See
+      # bl_wrap_pivot in mb_bl_osc.h.
+      def self.wrap_pivot(o)
+        o = o.to_f
+        return 0.0 unless o.finite?
+
+        o -= o.floor
+        o >= 1.0 ? 0.0 : o
+      end
+
+      # The pivot for +wave_type+ warped by width +w+ with pivot setting
+      # +pivot+ (nil for the shape's default in PIVOTS): 0 at width 0.5,
+      # where the warp is the identity (so a plain shape is bit for bit the
+      # same whatever its pivot).
+      def self.pivot_for(wave_type, w, pivot = nil)
+        return 0.0 if w == 0.5
+
+        wrap_pivot(pivot.nil? ? PIVOTS.fetch(wave_type, 0.0) : pivot)
+      end
+
+      # The integral of +wave_type+ from 0 to +u+ (0...1; zero mean, so it is
+      # 0 at both ends), for .half_mean.  See bl_integral in mb_bl_osc.h.
+      def self.integral(wave_type, u)
+        case wave_type
+        when :ramp then u < 0.5 ? u * u : (1.0 - u) * (1.0 - u)
+        when :square then u < 0.5 ? u : 1.0 - u
+        when :triangle
+          if u < 0.25
+            2.0 * u * u
+          elsif u < 0.75
+            2.0 * u - 2.0 * u * u - 0.25
+          else
+            2.0 * u * u - 4.0 * u + 2.0
+          end
+        when :sine then (1.0 - Math.cos(u * (2.0 * Math::PI))) / (2.0 * Math::PI)
+        when :parabola
+          if u < 0.5
+            x = 1.0 - 4.0 * u
+            u + x * x * x / 12.0 - 1.0 / 12.0
+          else
+            x = 4.0 * u - 3.0
+            x * x * x / 12.0 - u + 11.0 / 12.0
+          end
+        else
+          raise ArgumentError, "No band-limited version of #{wave_type.inspect}"
+        end
+      end
+
+      # The average of +wave_type+'s first half from pivot +o+ (o to o + 0.5);
+      # a warped shape's DC offset is this times (2 * width - 1).  HALF_MEAN
+      # at pivot 0; 0 for a triangle on its default pivot.  See
+      # bl_half_mean_pivot in mb_bl_osc.h.
+      def self.half_mean(wave_type, o = 0.0)
+        return HALF_MEAN.fetch(wave_type) if o == 0
+
+        h = o + 0.5
+        h -= 1.0 if h >= 1.0
+        2.0 * (integral(wave_type, h) - integral(wave_type, o))
+      end
+
+      # The shape's own breakpoints and the warp's knees as [u, x] pairs: the
+      # shape's phase u and the rotated phase x (0 at pivot +o+, 0.5 at the
+      # middle knee), exact at the knees (a shape breakpoint within 1e-12 of
+      # a knee is on it).  At pivot 0 these are .candidates with x = u.
+      def self.pivot_candidates(wave_type, o)
+        return candidates(wave_type).map { |u| [u, u] } if o == 0
+
+        own = case wave_type
+              when :ramp then [0.5]
+              when :square then [0.0, 0.5]
+              when :triangle then [0.25, 0.75]
+              else []
+              end
+        pairs = own.map { |u|
+          x = u - o
+          x += 1.0 if x < 0
+          x = 0.5 if (x - 0.5).abs < 1e-12
+          x = 0.0 if x < 1e-12 || x > 1.0 - 1e-12
+          [u, x]
+        }
+        pairs << [o, 0.0] unless pairs.any? { |_, x| x == 0.0 }
+        h = o + 0.5
+        h -= 1.0 if h >= 1.0
+        pairs << [h, 0.5] unless pairs.any? { |_, x| x == 0.5 }
+        pairs
+      end
+
+      # Breakpoints of +wave_type+ warped by width +w+ around pivot +o+ (see
+      # .warp): [phase, jump in value, jump in slope per cycle, value after,
+      # rotated phase x, shape phase u], leaving out points with no jump.
+      # See bl_breakpoints in mb_bl_osc.h.
+      def self.breakpoints(wave_type, w = 0.5, all = false, o = 0.0)
         k1 = 0.5 / w
         k2 = 0.5 / (1.0 - w)
 
-        candidates(wave_type).filter_map do |ub|
+        pivot_candidates(wave_type, o).filter_map do |ub, x|
           ul = ub == 0.0 ? 1.0 : ub
-          kr = ub < 0.5 ? k1 : k2
-          kl = ul <= 0.5 ? k1 : k2
+          xl = x == 0.0 ? 1.0 : x
+          kr = x < 0.5 ? k1 : k2
+          kl = xl <= 0.5 ? k1 : k2
 
           vr = shape(wave_type, ub)
           dv = vr - shape(wave_type, ul, true)
           ds = slope(wave_type, ub) * kr - slope(wave_type, ul, true) * kl
           next if dv == 0 && ds == 0 && !all
 
-          pos = ub < 0.5 ? ub * (2.0 * w) : w + (ub - 0.5) * (2.0 * (1.0 - w))
-          [pos, dv, ds, vr]
+          pos = x < 0.5 ? x * (2.0 * w) : w + (x - 0.5) * (2.0 * (1.0 - w))
+          if o != 0
+            pos += o
+            pos -= 1.0 if pos >= 1.0
+          end
+          [pos, dv, ds, vr, x, ub]
         end
       end
 
@@ -330,16 +446,20 @@ module MB
       # samples as an SFloat.  +freq+, +phase_mod+ (cycles), and +width+ are
       # Numerics or NArrays (+width+ nil for 0.5); +state+ is the phasor's
       # [phi] and +bl_state+ the band-limiting state, both updated like the C
-      # version.
-      def self.oscillate_ruby(count, wave_type, freq, phase_mod, advance, gain, offset, state, bl_state, fade_lo, fade_hi, width = nil, remove_dc = false)
+      # version.  +pivot+ (cycles; Numeric, NArray, or nil for 0) is the
+      # warp's pivot (see .warp; Tone passes the shape's default).
+      def self.oscillate_ruby(count, wave_type, freq, phase_mod, advance, gain, offset, state, bl_state, fade_lo, fade_hi, width = nil, remove_dc = false, pivot = nil)
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pms = phase_mod.is_a?(Numo::NArray) ? real_floats(phase_mod) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
+        pivots = pivot.is_a?(Numo::NArray) ? real_floats(pivot) : nil
         freq = freqs ? freqs[0] : freq.to_f
         pm = pms ? pms[0] : (phase_mod || 0).to_f
         w = clamp_width(widths ? widths[0] : (width || 0.5).to_f)
-        half_mean = HALF_MEAN.fetch(wave_type)
-        points = breakpoints(wave_type, w)
+        op = wrap_pivot(pivots ? pivots[0] : (pivot || 0).to_f)
+        o = w == 0.5 ? 0.0 : op
+        half_mean = half_mean(wave_type, o)
+        points = breakpoints(wave_type, w, false, o)
 
         phi = state[0].to_f
         prev_e, prev_inc, prev_pm, primed = bl_state
@@ -354,12 +474,14 @@ module MB
         count.times do |i|
           freq = freqs[i] if freqs
           pm = pms[i] if pms
-          if widths
-            new_w = clamp_width(widths[i])
-            if new_w != w
-              w = new_w
-              points = breakpoints(wave_type, w)
-            end
+          new_w = widths ? clamp_width(widths[i]) : w
+          op = wrap_pivot(pivots[i]) if pivots
+          new_o = new_w == 0.5 ? 0.0 : op
+          if new_w != w || new_o != o
+            w = new_w
+            o = new_o
+            half_mean = half_mean(wave_type, o)
+            points = breakpoints(wave_type, w, false, o)
           end
 
           inc = freq * advance
@@ -372,7 +494,7 @@ module MB
             e = points[snapped][0]
             v = points[snapped][3]
           else
-            v = shape(wave_type, warp(e, w))
+            v = shape(wave_type, warp(e, w, o))
           end
 
           d_back = prev_inc + (pm - prev_pm)
@@ -743,12 +865,62 @@ module MB
         end
       end
 
-      # [value, slope per cycle] of +wave_type+ warped by +w+ at phase +p+
-      # (for phase jumps of free-running tones; see Tone#queue_jump).
-      def self.sync_shape(wave_type, w, p)
-        k = p < w ? 0.5 / w : 0.5 / (1.0 - w)
-        u = warp(p, w)
+      # [value, slope per cycle] of +wave_type+ warped by +w+ around pivot
+      # +o+ at phase +p+ (for phase jumps of free-running tones; see
+      # Tone#queue_jump).  With a pivot, +points+ (.breakpoints of the same
+      # warp) give phases exactly on a breakpoint their exact shape phase.
+      def self.sync_shape(wave_type, w, p, o = 0.0, points = nil)
+        if o == 0
+          k = p < w ? 0.5 / w : 0.5 / (1.0 - w)
+          u = warp(p, w)
+        else
+          first, u = pivot_side(w, o, p, points || breakpoints(wave_type, w, true, o))
+          k = first ? 0.5 / w : 0.5 / (1.0 - w)
+        end
         [shape(wave_type, u), slope(wave_type, u) * k]
+      end
+
+      # [first, u] for phase +p+ of a warp with width +w+ around pivot +o+
+      # (not 0): whether +p+ is in the first half of the warp (the right side
+      # of a knee on it), and the shape's phase there, exact on the
+      # breakpoints in +points+ (see .breakpoints; rounding the rotation
+      # there could land on the wrong side of a jump).  See bl_pivot_side in
+      # mb_bl_osc.h.
+      def self.pivot_side(w, o, p, points)
+        points.each { |pt| return [pt[4] < 0.5, pt[5]] if pt[0] == p }
+
+        x = p - o
+        x += 1.0 if x < 0
+        first = x < w
+        u = (first ? x * (0.5 / w) : 0.5 + (x - w) * (0.5 / (1.0 - w))) + o
+        u -= 1.0 if u >= 1.0
+        [first, u]
+      end
+
+      # Like .sync_raw for a known side (+first+, see .pivot_side) and shape
+      # phase +u+.  See sync_raw_u in fast_synth.c.
+      def self.sync_raw_u(wave_type, w, first, u, left, vel)
+        k = first ? 0.5 / w : 0.5 / (1.0 - w)
+        g = vel * k
+        f0, f1, f2 = sync_segment(wave_type, u, left, u)
+        [f0, f1 * g, f2 * (g * g)]
+      end
+
+      # .sync_raw on the right side of phase +p+ around pivot +o+ (exact on
+      # +points+).
+      def self.sync_raw_at(wave_type, w, o, p, vel, points)
+        return sync_raw(wave_type, w, p, false, vel) if o == 0
+
+        first, u = pivot_side(w, o, p, points)
+        sync_raw_u(wave_type, w, first, u, false, vel)
+      end
+
+      # .sync_sine_segment on the right side of phase +p+ around pivot +o+.
+      def self.sync_sine_at(w, o, p, vel, points)
+        return sync_sine_segment(w, p, false, vel) if o == 0
+
+        first, u = pivot_side(w, o, p, points)
+        [u, vel * (first ? 0.5 / w : 0.5 / (1.0 - w))]
       end
 
       # [value, first and second derivatives per cycle] at +x+ of the segment
@@ -868,18 +1040,33 @@ module MB
         -(re * Math.sin(psi) + im * Math.cos(psi))
       end
 
-      # See sync_move in fast_synth.c; returns the new phase.
-      def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl, sine = nil)
+      # See sync_move in fast_synth.c; returns the new phase.  +o+ is the
+      # warp's pivot (see .warp).
+      def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl, sine = nil, o = 0.0)
         move = vel * dur
         if bl && move != 0
-          points.each do |bpos, _, _, _|
+          points.each do |bpos, _, _, _, bx, bu|
             f = side_crossing(p, move, bpos)
             next if f.nil?
 
+            if o != 0
+              # The sides of the breakpoint from its exact shape phase
+              fr = bx < 0.5
+              fl = (bx == 0.0 ? 1.0 : bx) <= 0.5
+              bul = bu == 0.0 ? 1.0 : bu
+            end
+
             t = end_t + (1.0 - f) * dur
             if sine
-              ur, gr = sync_sine_segment(w, bpos, false, vel)
-              ul, gl = sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, true, vel)
+              if o == 0
+                ur, gr = sync_sine_segment(w, bpos, false, vel)
+                ul, gl = sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, true, vel)
+              else
+                ur = bu
+                gr = vel * (fr ? 0.5 / w : 0.5 / (1.0 - w))
+                ul = bul
+                gl = vel * (fl ? 0.5 / w : 0.5 / (1.0 - w))
+              end
               next if gl == gr # the same exponential (no warp here)
 
               if move > 0
@@ -892,8 +1079,13 @@ module MB
               next
             end
 
-            r = sync_raw(wave_type, w, bpos, false, vel)
-            l = sync_raw(wave_type, w, bpos == 0.0 ? 1.0 : bpos, true, vel)
+            if o == 0
+              r = sync_raw(wave_type, w, bpos, false, vel)
+              l = sync_raw(wave_type, w, bpos == 0.0 ? 1.0 : bpos, true, vel)
+            else
+              r = sync_raw_u(wave_type, w, fr, bu, false, vel)
+              l = sync_raw_u(wave_type, w, fl, bul, true, vel)
+            end
             if move > 0
               sync_event(acc, pos, tables, t, r[0] - l[0], r[1] - l[1], r[2] - l[2])
             else
@@ -911,16 +1103,21 @@ module MB
       # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
       # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
       # (a DFloat) are updated like the C version.
-      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil, reset_phase = nil)
+      # +pivot+ (cycles; Numeric, NArray, or nil for 0) is the warp's pivot
+      # (see .warp).
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil, reset_phase = nil, pivot = nil)
         reset_phase = reset_phase.nil? ? 0.0 : reset_phase.to_f
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
+        pivots = pivot.is_a?(Numo::NArray) ? real_floats(pivot) : nil
         freq = freqs ? freqs[0] : freq.to_f
         pulse = pulse_list ? pulse_list[0] : 0.0
         w = clamp_width(widths ? widths[0] : (width || 0.5).to_f)
-        half_mean = HALF_MEAN.fetch(wave_type)
-        points = breakpoints(wave_type, w, true)
+        op = wrap_pivot(pivots ? pivots[0] : (pivot || 0).to_f)
+        o = w == 0.5 ? 0.0 : op
+        half_mean = half_mean(wave_type, o)
+        points = breakpoints(wave_type, w, true, o)
         tables = [r0.to_a, r1.to_a, r2.to_a, os, taps]
         m1 = bl ? m1.to_f : 0.0
         half_m2 = bl ? 0.5 * m2 : 0.0
@@ -938,12 +1135,14 @@ module MB
         count.times do |i|
           freq = freqs[i] if freqs
           pulse = pulse_list[i] if pulse_list
-          if widths
-            new_w = clamp_width(widths[i])
-            if new_w != w
-              w = new_w
-              points = breakpoints(wave_type, w, true)
-            end
+          new_w = widths ? clamp_width(widths[i]) : w
+          op = wrap_pivot(pivots[i]) if pivots
+          new_o = new_w == 0.5 ? 0.0 : op
+          if new_w != w || new_o != o
+            w = new_w
+            o = new_o
+            half_mean = half_mean(wave_type, o)
+            points = breakpoints(wave_type, w, true, o)
           end
 
           vel = dir * (primed ? prev_inc : freq * advance)
@@ -954,10 +1153,10 @@ module MB
               d = 0.0 if d < 0
               d = 1.0 if d > 1
 
-              p = sync_move(wave_type, w, points, p, vel, 1.0 - d, d, acc, pos, tables, bl, sine)
+              p = sync_move(wave_type, w, points, p, vel, 1.0 - d, d, acc, pos, tables, bl, sine, o)
 
-              a0 = sync_raw(wave_type, w, p, false, vel)
-              u0, g0 = sync_sine_segment(w, p, false, vel) if sine
+              a0 = sync_raw_at(wave_type, w, o, p, vel, points)
+              u0, g0 = sync_sine_at(w, o, p, vel, points) if sine
               if soft
                 dir = -dir
                 nvel = -vel
@@ -966,9 +1165,9 @@ module MB
                 nvel = prev_inc
                 p = reset_phase
               end
-              a1 = sync_raw(wave_type, w, p, false, nvel)
+              a1 = sync_raw_at(wave_type, w, o, p, nvel, points)
               if sine
-                u1, g1 = sync_sine_segment(w, p, false, nvel)
+                u1, g1 = sync_sine_at(w, o, p, nvel, points)
                 sync_sine_switch(acc, pos, sine, d, u0, g0, -1.0)
                 sync_sine_switch(acc, pos, sine, d, u1, g1, 1.0)
               elsif bl
@@ -976,17 +1175,17 @@ module MB
               end
               vel = nvel
 
-              p = sync_move(wave_type, w, points, p, vel, d, 0.0, acc, pos, tables, bl, sine)
+              p = sync_move(wave_type, w, points, p, vel, d, 0.0, acc, pos, tables, bl, sine, o)
             else
-              p = sync_move(wave_type, w, points, p, vel, 1.0, 0.0, acc, pos, tables, bl, sine)
+              p = sync_move(wave_type, w, points, p, vel, 1.0, 0.0, acc, pos, tables, bl, sine, o)
             end
           end
 
           if sine
-            u, g = sync_sine_segment(w, p, false, vel)
+            u, g = sync_sine_at(w, o, p, vel, points)
             v = sync_sine_value(sine, u, g)
           else
-            a = sync_raw(wave_type, w, p, false, vel)
+            a = sync_raw_at(wave_type, w, o, p, vel, points)
             v = a[0] - m1 * a[1] + half_m2 * a[2]
           end
           v += acc[pos]
