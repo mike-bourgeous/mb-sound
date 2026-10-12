@@ -266,6 +266,17 @@ module MB
 
           gathered = gather(count)
           if gathered.equal?(:ended)
+            tails = @members.select { |m| m.respond_to?(:plan_tail?) && m.plan_tail? }
+            unless tails.empty?
+              # Nodes holding delayed samples (a lookahead compressor) flush
+              # them after their input ends: this block runs unfused on the
+              # inputs already read, and those nodes stay unfused while
+              # they flush
+              tails.each { |m| @installation.exclude(m, 'flushing its delayed tail after its input ended') }
+              @result = replay_unfused(count)
+              return :done
+            end
+
             # Spies see the end as the nodes' own #sample shows it (nil)
             @program.taps.each { |t| t.deliver(nil) } unless @installation.check
             @result = nil
@@ -560,10 +571,11 @@ module MB
               # as the Tee would share it
               buf = read[0]
               buf = buf[0..].freeze if buf && !buf.frozen? && op.handles.length > 1
+              buf = GraphNode::Tee::Branch::ENDED if buf.nil?
               op.handles.each { |h| h.replay = buf }
             else
               op.handles.each_with_index do |h, j|
-                h.replay = read[j] if j < read.length
+                h.replay = read[j].nil? ? GraphNode::Tee::Branch::ENDED : read[j] if j < read.length
               end
             end
           end

@@ -94,6 +94,7 @@ enum {
 	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
 	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
 	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
+	OP_DYNAMICS,  // dst, a, object, sc, nside, side regs..., 5 time regs  dst = GraphNode::Dynamics (one channel) on a (see run_dynamics)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1018,6 +1019,10 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SAMPLE_HOLD:
 			len = 5;
 			break;
+		case OP_DYNAMICS:
+			if (pc + 6 > pw->nwords || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
+			len = 6 + (size_t)op[5] + 5;
+			break;
 		case OP_ENVELOPE:
 			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 			len = 5 + 4 * (size_t)op[4] + 7;
@@ -1037,7 +1042,7 @@ static void check_op(const int32_t *op, size_t pc, const struct regs *R, long nr
 	float *const *ptrs = R->p;
 	int d = op[1];
 	if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
+	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS) {
 		if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 	}
 	if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
@@ -1195,6 +1200,37 @@ static void run_unary(const int32_t *op, size_t pc, const struct regs *R, size_t
 		case UN_CABS: for (size_t i = 0; i < n; i++) D[i] = (float)hypot((double)A[2 * i], (double)A[2 * i + 1]); break;
 		case UN_CARG: for (size_t i = 0; i < n; i++) D[i] = (float)atan2((double)A[2 * i + 1], (double)A[2 * i]); break;
 	}
+}
+
+// A real signal of an op: register +r+ (NULL: an optional input that
+// ended, read as 0), or +scalar+ for r = -1.
+static void op_signal(struct mb_signal *s, const struct regs *R, long nregs, int r, double scalar, size_t pc)
+{
+	s->step = 1;
+	if (r >= 0) {
+		if (r >= nregs || R->c[r]) rb_raise(rb_eArgError, "Bad plan signal register at word %zu", pc);
+		s->ptr = R->p[r];
+		s->scalar = 0.0;
+	} else {
+		s->ptr = NULL;
+		s->scalar = scalar;
+	}
+}
+
+// OP_DYNAMICS: dst, a, object, sc, nside, side registers (nside), then
+// DT_COUNT time registers (-1: the scalar sc[k]); object: the
+// GraphNode::Dynamics (see mb_plan_dynamics).
+static void run_dynamics(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan dynamics are real");
+	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan dynamics object at word %zu", pc);
+	if (op[4] < 0 || (size_t)op[4] + 5 > nscalars) rb_raise(rb_eArgError, "Bad plan dynamics scalars at word %zu", pc);
+	long nside = op[5];
+	struct mb_signal in, side[nside], tim[5];
+	op_signal(&in, R, nregs, op[2], 0.0, pc);
+	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, op[6 + k], 0.0, pc);
+	for (long k = 0; k < 5; k++) op_signal(&tim[k], R, nregs, op[6 + nside + k], sc[op[4] + k], pc);
+	mb_plan_dynamics(R->p[op[1]], &in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
 }
 
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
@@ -1389,6 +1425,11 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_UNARY:
 			run_unary(op, pc, R, n);
+			break;
+
+		case OP_DYNAMICS:
+			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
+			run_dynamics(op, pc, R, nregs, sc, nscalars, objects, n);
 			break;
 
 		case OP_TAP: {
@@ -1655,6 +1696,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("sample_hold")), INT2NUM(OP_SAMPLE_HOLD));
 	rb_hash_aset(h, ID2SYM(rb_intern("unary")), INT2NUM(OP_UNARY));
 	rb_hash_aset(h, ID2SYM(rb_intern("tap")), INT2NUM(OP_TAP));
+	rb_hash_aset(h, ID2SYM(rb_intern("dynamics")), INT2NUM(OP_DYNAMICS));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
