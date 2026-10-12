@@ -27,26 +27,28 @@ module MB
       # With a block, builds a song form (see Form::Builder) and plays it
       # from its launch point (+on:+, +in:+, +at:+; the next bar while
       # something plays, else now), unless +play: false+.  +seed:+ seeds
-      # chance (weighted gotos and picks).  Returns the Form (its inspect prints the
+      # chance (weighted gotos and picks).  +warm_up: false+ skips the
+      # tracks' warm-up before a form starts in an idle realtime session
+      # (see Arrangement#warm_up).  Returns the Form (its inspect prints the
       # block back).  Without a block, returns the form playing
       # (Form::Playback; its inspect says where it is and what comes next).
       # Also available as #form.
-      def flow(play: true, seed: nil, at: nil, on: nil, in: nil, &block)
+      def flow(play: true, seed: nil, warm_up: :auto, at: nil, on: nil, in: nil, &block)
         arrangement = Session.current.arrangement
         return arrangement.playback unless block
 
         point = LaunchPoint.of(binding) or return nil
         f = arrangement.build_form(&block)
-        arrangement.play_form(f, at: point, seed: seed) if play
+        arrangement.play_form(f, at: point, seed: seed, warm_up: warm_up) if play
         f
       end
       alias form flow
 
       # Plays a Form (built with `flow(play: false) { }` or Form.build, or
       # from `take.form`).  See #flow.  Returns the Form::Playback.
-      def play_form(form, seed: nil, at: nil, on: nil, in: nil)
+      def play_form(form, seed: nil, warm_up: :auto, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
-        Session.current.arrangement.play_form(form, at: point, seed: seed)
+        Session.current.arrangement.play_form(form, at: point, seed: seed, warm_up: warm_up)
       end
 
       # Declares a section outside a flow block, so `flow do ... end` can

@@ -24,6 +24,10 @@ module MB
         # lines run at their time in the right pass over the timeline.
         Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, keyword_init: true)
 
+        # Raised (through MB::Sound.live_error) when a scheduled block
+        # finishes after its time (see #lookahead).
+        class LateBlock < RuntimeError; end
+
         # The scheduler thread's Ruby priority: below the render thread, so
         # a long block (building a scene's graphs) gets shorter time slices
         # and the render thread waits less for the GVL between buffers
@@ -73,9 +77,18 @@ module MB
         # graphs for 0.4 s gets ~0.9 s), up to MAX_LOOKAHEAD bars.
         #
         # Changes made by a block land at their exact time as long as the
-        # block finishes before it; a block that finishes late warns (see
-        # #late), its own commands collected for its time are skipped, and
-        # changes it made directly (a scene launch) land late.
+        # block finishes before it.  A block still running at its time
+        # (listed in #late) goes through MB::Sound.live_error:
+        # - live mode (bin/sound.rb): changes it makes directly after its
+        #   time (a form's scene launch) warn and land right away, late; when
+        #   it ends, a LateBlock warning, and the commands it collected for
+        #   its time (bg, stop, ... inside at_bar) are skipped.
+        # - scripts and specs: the first change it makes after its time
+        #   raises Session::LateChange before landing (changes made before
+        #   its time stay), its collected commands are skipped, and a block
+        #   that only finishes late raises LateBlock.  On a realtime
+        #   session's scheduler thread the error is printed (raised with
+        #   +raise_errors+).
         attr_reader :lookahead
 
         # See #lookahead.
@@ -232,14 +245,23 @@ module MB
         def run(entry, time, deadline)
           started = MB::U.clock_now
           batch = []
-          Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
-            entry.block.call
+          # Changes the block makes directly whose time has passed by then
+          # are late (see Changes#check_late)
+          old_deadline = Thread.current[:mb_sound_schedule_deadline]
+          Thread.current[:mb_sound_schedule_deadline] = deadline && [@session, entry.description]
+          begin
+            Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
+              entry.block.call
+            end
+          ensure
+            Thread.current[:mb_sound_schedule_deadline] = old_deadline
+            note_duration(MB::U.clock_now - started)
           end
-          note_duration(MB::U.clock_now - started)
 
           if deadline && (pos = @transport.position) >= deadline
-            note_late(entry, time, pos, MB::U.clock_now - started)
-            warn "Skipped the commands scheduled for #{entry.description}: the block finished after its time" unless batch.empty?
+            message = note_late(entry, time, pos, MB::U.clock_now - started)
+            message += batch.empty? ? '' : '; its commands were skipped'
+            MB::Sound.live_error(LateBlock.new(message))
           else
             # The block's commands are one undo step (see Session#undo)
             Session.with_context(session: @session, time: time, source: :schedule) do
@@ -260,16 +282,15 @@ module MB
           }
         end
 
-        # Notes and warns that the block for +entry+ (at +time+) finished
-        # after its time (the timeline at +pos+), so changes it made
-        # directly landed late.
+        # Notes that the block for +entry+ (at +time+) finished after its
+        # time (the timeline at +pos+).  Returns a message for LateBlock.
         def note_late(entry, time, pos, seconds)
           late = ((pos - time) / @transport.whole_notes_per_second).to_f
           @mutex.synchronize {
             @late << { description: entry.description, time: time, late: late, seconds: seconds }
             @late.shift while @late.length > RECENT_BLOCKS
           }
-          warn format('Scheduled block for %s ran %.0f ms and finished %.0f ms after its time; its changes landed late (lookahead %.2f bars)',
+          format('Scheduled block for %s ran %.0f ms and finished %.0f ms after its time (lookahead %.2f bars)',
             entry.description, seconds * 1000, late * 1000, (lookahead_whole_notes / @transport.bar_length).to_f)
         end
 

@@ -19,6 +19,11 @@ module MB
       # change made from the console while a buffer renders lands exactly at
       # the start of the next one, and the returned journal entry says where.
       module Changes
+        # Raised (through MB::Sound.live_error) by a change made by a
+        # scheduled block that finished after its time, when the change's
+        # time has already passed (see #change and Scheduler#lookahead).
+        class LateChange < RuntimeError; end
+
         # A change waiting in the queue (or applied).  +time+ is the landing
         # position in whole notes (nil for "now").  +action+ is called with
         # the landing time to apply it.  +before+ and +after+ are snapshots
@@ -110,6 +115,7 @@ module MB
           c = nil
           @render_lock.synchronize {
             pos = @transport.position
+            check_late(kind, subject, time, pos) unless perform&.[](:forced)
             seq = @journal.next_seq
             c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts)
 
@@ -244,6 +250,25 @@ module MB
           @journal.note_landed(c.seq, commits: commits, lands: c.lands, error: e.message)
           raise if @raise_errors
           warn "#{c.kind} #{c.subject.inspect} at #{c.lands} failed: #{e.class}: #{e.message}"
+        end
+
+        # A change made by a scheduled block that runs after its time (see
+        # Scheduler#run) whose own time has passed would land late: in live
+        # mode it warns and lands now (late); in scripts and specs it raises
+        # LateChange (MB::Sound.live_error) before landing, so the block
+        # stops there and the scheduler reports it (or raises it with
+        # +raise_errors+).  Changes of blocks that run when their time has
+        # already come (nothing was playing) land now as usual.
+        def check_late(kind, subject, time, pos)
+          late = Thread.current[:mb_sound_schedule_deadline]
+          return unless late && late[0].equal?(self) && time && time < pos
+
+          ms = ((pos - time) / @transport.whole_notes_per_second * 1000).to_f.round
+          MB::Sound.live_error(LateChange.new(
+            "#{kind} #{subject.inspect} for #{Stamp.at(time, @transport)} would land #{ms} ms late: the scheduled block for #{late[1]} " \
+            "was still running at its time (lookahead #{MB::M.sigfigs((@scheduler.lookahead_whole_notes / @transport.bar_length).to_f, 3)} bars; " \
+            'see Session#lookahead)'
+          ))
         end
       end
     end
