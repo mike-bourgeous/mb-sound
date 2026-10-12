@@ -138,6 +138,18 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
 
     after { session.close }
 
+    it 'prints knob readers back as knob(:name) in to_ruby' do
+      # 2026-10-12: they printed as a free input (`lp4(input)`)
+      within(session) do
+        MB::Sound.knob(:cut, 800, range: 100..8000, curve: :exp)
+        MB::Sound.knob(:res, 0.5)
+        g = 220.hz.saw.lp4(MB::Sound.knob(:cut), resonance: MB::Sound.knob(:res)) * MB::Sound.knob(:cut).get_sampler
+        text = g.to_ruby
+        expect(text).not_to include('input')
+        expect(text).to eq('220.hz.saw.lp4(knob(:cut), resonance: knob(:res)) * knob(:cut)')
+      end
+    end
+
     it 'lands turns on their exact frame at any buffer size' do
       results = [800, 367, 64, [1001, 13]].map { |size|
         s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))

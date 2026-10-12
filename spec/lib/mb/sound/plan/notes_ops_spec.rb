@@ -146,6 +146,21 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
       }
     end
 
+    it 'matches hold_last envelopes (held dives, holds while idle, a held one-shot)' do
+      compare { |v|
+        v.env([[0, 0], [0, 0.01], [-1, 0.05]], release_at: 2, hold_last: true) +
+          v.env([[0.5, 0.01], [1, 0.02, 0, :s], [-0.3, 0.04]], release_at: 2, hold_last: true, retrigger: :add) * 0.5
+      }
+      # Idle stretches with a quiet gate (fast_plan's quiet-idle skip writes
+      # the held level)
+      r = plan_compare(sizes: sizes, ruby_tolerance: 1e-6) {
+        gate = 3.hz.lfo.asquare.at(0..1)
+        MB::Sound.env([[0, 0], [0, 0.01], [-1, 0.05]], release_at: 2, gate: gate, hold_last: true) +
+          MB::Sound.env([[1, 0.01], [0.25, 0.02]], hold: 0.05, hold_last: true)
+      }
+      expect([r.unfused_blocks(:c), r.unfused_blocks(:ruby)]).to eq([0, 0])
+    end
+
     it 'builds no GM time node (no 0 * x fold) for zero-length segments, sounding the same' do
       r = compare { |v| v.env(0, 0, 1, 0, gate: false, hold: 0.05) + v.amp_env(0.01, 0, 0.6, 0.1) + v.fm_env(0.seconds, 0.2, 0, 0) }
       expect(r.regions.flat_map { |g| g.folds || [] }).to eq([])

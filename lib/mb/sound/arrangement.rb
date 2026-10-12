@@ -352,7 +352,7 @@ module MB
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped
-          "q:#{(tr.q || @quant).inspect} #{what}#{lead} (#{state})"
+          "#{pair(:q, (tr.q || @quant).inspect)} #{what}#{lead} (#{state})"
         }
       end
 
@@ -360,9 +360,9 @@ module MB
       # the current scene marked.
       def scene_info
         scenes.transform_values { |sc|
-          parts = sc.values.map { |k, v| "#{k}:#{name_of(v)}" }
+          parts = sc.values.map { |k, v| pair(k, name_of(v)) }
           parts << 'others:keep' if sc.others == :keep
-          parts << "q:#{sc.q.inspect}" if sc.q
+          parts << pair(:q, sc.q.inspect) if sc.q
           parts << '(block)' if sc.block
           "#{sc.name == @current_scene ? '▶ ' : ''}#{parts.join(' ')}"
         }
@@ -506,6 +506,12 @@ module MB
           box.knob(name, k.value, range: sp.range, curve: sp.curve, unit: sp.unit, takeover: sp.takeover, smooth: sp.smooth)
         end
         box
+      end
+
+      # "key:text" for the listings, or "key: :sym" when +text+ is a
+      # Symbol's inspect (2026-10-12: `pad: :on` was listed as "pad::on").
+      def pair(key, text)
+        text.start_with?(':') ? "#{key}: #{text}" : "#{key}:#{text}"
       end
 
       # Turns knob +name+ to a scene's or section's +value+ at +time+: a

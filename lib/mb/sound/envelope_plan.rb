@@ -28,9 +28,10 @@ module MB
       def plan_feed(count)
       end
 
-      # True once a one-shot has ended (#sample returns nil from then on).
+      # True once a one-shot has ended (#sample returns nil from then on;
+      # never with #hold_last, whose one-shots keep their last level).
       def plan_finished?(count)
-        ended?
+        ended? && !@hold_last
       end
 
       def plan_inputs

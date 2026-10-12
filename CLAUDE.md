@@ -104,7 +104,7 @@ Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/
 ### Oscillators and antialiasing (`design/notes/oscillators.md`)
 
 Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_synth`); each shape has a naive `a*` twin (`aramp`, `asquare`, ...) for lo-fi and control signals; `.lfo` fades band-limiting in from 15-30 Hz.  Measure with `bin/aliasing.rb 'p.ramp' 'p.aramp'`.
-- `ramp`/`saw`, `square`, `triangle`: PolyBLEP/PolyBLAMP.  `pwm(w)` (alias `skew`) warps any shape.  `complex_*`: closed-form band-limited impulse trains (wavetables with PM/pwm/sync).
+- `ramp`/`saw`, `square`, `triangle`: PolyBLEP/PolyBLAMP.  `pwm(w, pivot:)` (alias `skew`) warps any shape around a per-shape pivot (triangle 0.75: `triangle.skew(w)` is a true skewed triangle rising for `w`; `pivot: 0` the old lobe warp).  `complex_*`: closed-form band-limited impulse trains (wavetables with PM/pwm/sync).
 - `sync(ratio:)` / `sync(master)` / `softsync`: causal minBLEP kernel, exact naive waveform through a minimum-phase filter (~2.78 samples delay).  `fm_feedback(amount, gain:)` (aliases `fmfb`, `fm_fb`): DX7-style operator self-feedback in cycles, sines only.  `tone.gain(g)` multiplies inside the Tone.
 - Phase jumps (resets, timeline jumps) are band-limited steps; `clean` (opt-in, ~2x CPU) makes jumps hard-sync events.  `tone.reset(trig, to:)` jumps at nonzero trigger samples; `.free` never resets; `.rnd` random phases.  Randomness from `MB::Sound.seed(n)`/`next_seed` (restored before every spec); noise has its own splitmix64 state per tone.
 - `softclip`, `clip`, `abs`, `quantize` use ADAA plus a half-sample allpass (half a sample of delay); `asoftclip` etc. are exact.  Ports (`tone.wraps`, `.increment`, TempoNode `jumps`): every reader must read each buffer.
@@ -134,7 +134,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 ### Envelopes (`design/notes/envelopes.md`)
 
 `MB::Sound::Envelope` (`fast_envelope`, mirror `Envelope.process_ruby`) is a state machine over curved segments landing exactly on target at whole samples.  Curves are signed dB (+60 falls like a 60 dB exponential, 0 linear, negative swells; presets `:analog` default, `:linear`, `:snappy`, `:gentle`, `:swell`, `:dx`, `:smooth`, `:pad`); shapes `:exp` or `:s`.  Multi-segment `env([[level, time, curve, shape], ...], release_at:, loop:)`; SQ-80 panel units via `sq80_env`.
-- Times/levels/curves take numbers, Lengths, or nodes; inputs `gate:`, `trigger:`, `velocity:` (+ `sensitivity:`), `choke:`, `lift:`; `retrigger: :add` attacks to the energy sum.  Without a gate, notes release after `hold:`; without gate or trigger it's a one-shot.
+- Times/levels/curves take numbers, Lengths, or nodes; inputs `gate:`, `trigger:`, `velocity:` (+ `sensitivity:`), `choke:`, `lift:`; `retrigger: :add` attacks to the energy sum.  Without a gate, notes release after `hold:`; without gate or trigger it's a one-shot.  `hold_last: true` holds the last level after the envelope ends (pitch dives) instead of 0; `.sensitivity(range | nil)` / `.no_velocity` change or clear velocity scaling in a chain.
 - Constructors: `adsr`, `env`, `amp_env`, `fm_env`, `filter_env`/`filt_env`.  Kernel "runs" specialize only on constants of the patch (user rule).  `GraphNode#db` is gone: write `10 ** (node / 20)`.  Plot with `bin/plot_envelope.rb`.
 
 ### Tweening curves (`design/notes/curves.md`)
@@ -220,6 +220,7 @@ Phases 1-4 of the arrangement plan (`research-arrangement`), built to the interc
 
 Device I/O through bundled miniaudio (`fast_audio`), plus a small JACK backend (one client per process, ports added any time; user requirement).  `OUTPUT_TYPE`/`INPUT_TYPE`: `device` (default), `ffmpeg` (output), `null`.  `DeviceOutput` writes a lock-free ring drained on the device thread (Ruby never on the audio thread); the card's clock paces the Session.
 - Latency profiles `:default` (512/128/50 ms), `:low`, `:video`, `:safe` (`AUDIO_PROFILE`, `-L`, `latency :low`); adaptive queue; live MIDI switches to `:low`.  Graphs stay at 48 kHz and the writer resamples to the card's rate.  Env: `AUDIO_BACKEND`, `OUTPUT_DEVICE`, `AUDIO_SAMPLE_RATE`, `JACK_CLIENT_NAME`, ...
+- Never `jack_port_unregister` on an active JACK client (races libjack's notification thread; segfault 2026-10-12): the shared client keeps closed ports as disconnected spares and unregisters them behind `jack_deactivate` once no port is in use.
 - bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang (busy threads starve the writer otherwise).  Tools: `bin/audio_check.rb`, `bin/audio_load_check.rb`.
 
 ### Scripts (`design/notes/scripts.md`)

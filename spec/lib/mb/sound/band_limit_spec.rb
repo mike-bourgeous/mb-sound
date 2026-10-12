@@ -293,6 +293,146 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
   end
 
+  describe 'warp pivots (pwm pivot:)' do
+    # A sine-shaped signal of +n+ samples around +center+ (an ArrayInput).
+    def wobble(rate, center, depth, period, n: 4800, buffer: 480)
+      data = Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| center + depth * Math.sin(i / period) })
+      MB::Sound::ArrayInput.new(data: [data], sample_rate: rate).with_buffer(buffer)
+    end
+
+    def pivoted(wave, rate: 48000, frequency: 1234.5, width: 0.3, pivot: nil, band_limit: true, sync: nil, soft: false)
+      t = oscillator(wave, rate: rate, frequency: frequency, band_limit: band_limit)
+      t.pwm(width, pivot: pivot)
+      soft ? t.softsync(sync) : t.sync(sync) if sync
+      t
+    end
+
+    MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+      [true, false].each do |bl|
+        it "gives identical C and Ruby samples for a #{bl ? 'band-limited' : 'naive'} #{wave} at fixed, wrapped, and moving pivots" do
+          [0.1, 0.25, 0.5, 0.6, 0.93, 1.25, -0.25].each do |o|
+            c = pivoted(wave, pivot: o, band_limit: bl)
+            r = pivoted(wave, pivot: o, band_limit: bl)
+            [333, 1, 128].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)), "pivot #{o}" }
+          end
+
+          make = -> {
+            pivoted(wave, frequency: 777, width: wobble(48000, 0.5, 0.45, 97.0), pivot: wobble(48000, 0.5, 0.7, 61.0), band_limit: bl)
+          }
+          c = make.call
+          r = make.call
+          5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+        end
+
+        it "gives identical C and Ruby samples for a hard- and soft-synced #{bl ? 'band-limited' : 'naive'} #{wave} with a pivot" do
+          [false, true].each do |soft|
+            [0.37, 0.75].each do |o|
+              make = -> {
+                master = MB::Sound::Pitch.new(110.0, sample_rate: 48000).phasor
+                pivoted(wave, frequency: 271.3, width: 0.4, pivot: o, sync: master.wraps, soft: soft, band_limit: bl)
+              }
+              c = make.call
+              r = make.call
+              [800, 333, 1].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)), "soft #{soft}, pivot #{o}" }
+            end
+
+            make = -> {
+              master = MB::Sound::Pitch.new(110.0, sample_rate: 48000).phasor
+              pivoted(wave, frequency: 271.3, width: wobble(48000, 0.5, 0.4, 53.0), pivot: wobble(48000, 0.3, 0.5, 71.0),
+                sync: master.wraps, soft: soft, band_limit: bl)
+            }
+            c = make.call
+            r = make.call
+            5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)), "soft #{soft}, moving" }
+          end
+        end
+      end
+
+      it "gives identical C and Ruby phase jumps and clean resets for a #{wave} with a pivot" do
+        trig = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2400).tap { |a| a[[17, 400, 401, 1333, 2000]] = 1 }]).with_buffer(240) }
+        [false, true].each do |clean|
+          make = -> {
+            t = pivoted(wave, frequency: 523.1, width: 0.2, pivot: 0.4).reset(trig.call, to: 0.3)
+            clean ? t.clean : t
+          }
+          c = make.call
+          r = make.call
+          10.times { expect(c.sample_c(240)).to eq(r.sample_ruby(240)), "clean #{clean}" }
+        end
+      end
+    end
+
+    it 'makes triangle.skew a true skewed triangle by default: rising for the width, pivoting on the low point' do
+      [0.9, 0.1, 0.3].each do |w|
+        data = 480.hz.atriangle.skew(w, dc: true).sample(480)
+        ideal = Numo::SFloat.cast(Array.new(480) { |i|
+          x = (i / 100.0 - 0.75) % 1.0
+          x < w ? -1 + 2 * x / w : 1 - 2 * (x - w) / (1 - w)
+        })
+        expect(data).to all_be_within(1e-5).of_array(ideal), "width #{w}"
+      end
+      expect(MB::Sound::BandLimit::PIVOTS[:triangle]).to eq(0.75)
+    end
+
+    it 'keeps a skewed triangle centered (no DC to remove)' do
+      [0.05, 0.3, 0.9].each do |w|
+        expect(100.hz.triangle.skew(w, dc: true).sample(48000).mean).to be_within(1e-4).of(0), w.to_s
+      end
+    end
+
+    it 'plays the old triangle warp with pivot: 0 (split at the zero crossings)' do
+      data = 480.hz.atriangle.skew(0.9, pivot: 0, dc: true).sample(100)
+      # A slow positive hump over 0.9 of the cycle, a quick negative dip
+      expect(data[0...90].min).to be >= -1e-6
+      expect(data[45]).to be_within(1e-5).of(1)
+      expect(data[95]).to be_within(1e-5).of(-1)
+    end
+
+    it 'leaves every shape unchanged at width 0.5, whatever the pivot' do
+      [:ramp, :square, :triangle, :sine, :parabola].each do |wave|
+        expect(321.hz.send(wave).pwm(0.5, pivot: 0.3).sample(4800)).to eq(321.hz.send(wave).pwm(0.5).sample(4800)), wave.to_s
+      end
+      expect(321.hz.triangle.pwm(0.5).sample(4800)).to eq(321.hz.triangle.sample(4800))
+    end
+
+    it 'removes the DC offset of every warped shape at any pivot' do
+      MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+        [0.1, 0.6, 0.85].each do |o|
+          expect(100.hz.send(wave).pwm(0.2, pivot: o).sample(48000).mean).to be_within(0.003).of(0), "#{wave} #{o}"
+        end
+      end
+    end
+
+    it 'gives half means that match the waveforms' do
+      MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+        [0.0, 0.1, 0.25, 0.6, 0.75, 0.93].each do |o|
+          n = 20000
+          mean = Array.new(n) { |i| MB::Sound::BandLimit.shape(wave, (o + (i + 0.5) / n * 0.5) % 1.0) }.sum / n
+          expect(MB::Sound::BandLimit.half_mean(wave, o)).to be_within(1e-6).of(mean), "#{wave} #{o}"
+        end
+      end
+    end
+
+    it 'reduces aliasing of skewed triangles' do
+      n = 16384
+      k = 341
+      f = k * 48000.0 / n
+      expect(nonharmonic_db(f.hz.tone.triangle.skew(0.9), k, n: n)).to be < nonharmonic_db(f.hz.tone.atriangle.skew(0.9), k, n: n) - 10
+    end
+
+    it 'accepts a graph node, shows the pivot, and checks its arguments' do
+      tone = 220.hz.triangle.skew(0.8, pivot: 0.3.hz.lfo.at(0..1))
+      expect(tone.sources[:pivot]).to respond_to(:sample)
+      expect(tone.sample(800).abs.max).to be <= 2
+      expect(220.hz.triangle.skew(0.8, pivot: 0.1).to_s).to include('pivot=0.1')
+      expect(220.hz.triangle.skew(0.8).warp_pivot).to eq(0.75)
+      expect(220.hz.ramp.skew(0.8).warp_pivot).to eq(0.0)
+      expect { 220.hz.triangle.skew(0.8, pivot: 'x') }.to raise_error(ArgumentError, /Pivot/)
+      expect { 220.hz.complex_triangle.pwm(0.3, pivot: 0.2).sample(10) }.to raise_error(ArgumentError, /pivot/)
+      expect(220.hz.complex_triangle.pwm(0.3).sample(10)).not_to be_nil
+    end
+  end
+
   describe 'complex BLIT' do
     def blit_osc(wave, rate: 48000, **opts)
       oscillator(wave, rate: rate, **opts)

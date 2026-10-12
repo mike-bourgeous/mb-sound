@@ -14,6 +14,15 @@ Keep the vendored files unmodified so updates stay a plain copy; work around
 problems in `fast_midi.c` or `extconf.rb` instead (e.g. the
 `-Wno-vla-cxx-extension` flag for clang).
 
+`RtMidi.cpp` is compiled inside `rtmidi_build.cpp` (not on its own; see
+`extconf.rb`), which adds `mb_rtmidi_jack_release`: it deactivates a JACK
+client before its port is unregistered, since RtMidi's JACK `closePort`
+unregisters the port of an active client, which races libjack's notification
+thread (a spec process segfaulted in `HandleLatencyCallback`, 2026-10-12;
+JACK2 issue #216).  It reads RtMidi's private `JackMidiData`, so after an
+update check that the struct still has `client` and `port` (the build fails
+if not).
+
 ## Updating RtMidi manually
 
 1. Download the release from <https://github.com/thestk/rtmidi/releases> (or

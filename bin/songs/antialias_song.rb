@@ -24,6 +24,7 @@
 #     bg :pwm, 880.hz.apulse(0.5.hz.lfo.at(0.05..0.95)).at(0.2)       # ...and aliased
 #     bg :cz, 110.hz.sine.pwm(0.3.hz.lfo.at(0.5..0.03)).at(0.3)        # CZ-style phase distortion
 #     bg :tri, 220.hz.triangle.skew(0.3.hz.lfo.at(0.02..0.98)).at(0.3) # a triangle morphing to saws
+#     bg :tri, 220.hz.triangle.skew(0.3.hz.lfo.at(0.02..0.98), pivot: 0).at(0.3) # the lobe-warp version (before 2026-10-12)
 #     bg :soft, 110.hz.triangle.softsync(ratio: 0.1.hz.lfo.at(1.2..3)).at(0.3)
 #     bg :drive, 2000.hz.sine.at(4).softclip * 0.3                    # ADAA soft clip; compare asoftclip
 #     bg :crush, 1500.hz.sine.quantize(0.25) * 0.3                    # antialiased bitcrush; compare aquantize

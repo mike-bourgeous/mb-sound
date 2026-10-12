@@ -200,6 +200,57 @@ RSpec.describe(MB::Sound::Envelope) do
       end
     end
 
+    it 'give exactly the same samples and state with FLAG_HOLD_LAST (random cases, run and general paths)' do
+      rng = Random.new(4242)
+      hold_flag = MB::Sound::Envelope::FLAG_HOLD_LAST
+
+      150.times do |trial|
+        flags = hold_flag
+        flags |= MB::Sound::Envelope::FLAG_GATE if rng.rand < 0.6
+        flags |= MB::Sound::Envelope::FLAG_TRIGGER if rng.rand < 0.5
+        flags |= MB::Sound::Envelope::FLAG_ONE_SHOT if flags & 3 == 0
+        flags |= MB::Sound::Envelope::FLAG_OCTAVES if rng.rand < 0.2
+        flags |= MB::Sound::Envelope::FLAG_ADD if trial % 4 == 1
+        flags |= MB::Sound::Envelope::FLAG_ZERO if trial % 4 == 2
+        config = [flags, 2, 0.2, 1.0, 0, rng.rand(0.0..300.0), MB::Sound::Envelope::CURVE_SCALE, 96.0, 0.01]
+        shapes = [trial & 1, (trial >> 1) & 1, (trial >> 2) & 1]
+        f = ->(v) { Numo::SFloat[v][0] }
+        times = Array.new(3) { rng.rand < 0.1 ? 0.0 : f.(rng.rand(0.0..400.0)) }
+        curves = Array.new(3) { rng.rand < 0.1 ? 0.0 : f.(rng.rand(-90.0..90.0)) }
+        # The last level (held) anywhere, not just 0
+        levels = [1.0, f.(rng.rand(0.0..1.2)), f.(rng.rand(-1.5..1.5))]
+        hold = f.(rng.rand(0.0..300.0))
+
+        states = Array.new(3) {
+          st = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
+          st[MB::Sound::Envelope::STATE_STAGE] = flags & MB::Sound::Envelope::FLAG_ONE_SHOT != 0 ? 5 : 0
+          st[MB::Sound::Envelope::STATE_PEAK] = 1
+          st
+        }
+        5.times do
+          n = rng.rand(1..900)
+          inputs = [
+            flags & 1 != 0 ? gates(rng, n, 0.003) : nil,
+            flags & 2 != 0 ? sparse(rng, n, 0.002) : nil,
+            rng.rand < 0.5 ? piecewise(rng, n, -0.1..1.1, 0.05) : rng.rand,
+            rng.rand < 0.5 ? sparse(rng, n, 0.0005) : nil,
+            nil,
+            rng.rand(-3.0..3.0),
+          ]
+          sig = ->(v) { Numo::SFloat.new(n).fill(v) }
+          # Constants (the C run path), the same values as signals (the
+          # general path), and the Ruby mirror
+          a = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), states[0], times, curves, levels, hold, inputs, config, shapes)
+          b = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), states[1], times.map(&sig), curves.map(&sig), levels.map(&sig), sig.(hold), inputs, config, shapes)
+          r = MB::Sound::Envelope.process_ruby(Numo::SFloat.zeros(n), states[2], times, curves, levels, hold, inputs, config, shapes)
+          expect(a.to_binary).to eq(b.to_binary), "trial #{trial}: run and general paths differ"
+          expect(a.to_a).to eq(r.to_a), "trial #{trial}: C and Ruby differ"
+          expect(states[0].to_a).to eq(states[1].to_a), "trial #{trial}: run and general states differ"
+          expect(states[0].to_a).to eq(states[2].to_a), "trial #{trial}: C and Ruby states differ"
+        end
+      end
+    end
+
     it 'agree for whole envelopes with node parameters and inputs' do
       make = ->(m) {
         n = array_node_class
@@ -239,6 +290,154 @@ RSpec.describe(MB::Sound::Envelope) do
       expect {
         MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /lift/)
+    end
+  end
+
+  describe 'velocity sensitivity helpers' do
+    it 'reads, sets, and clears the range in a chain (#sensitivity, #no_velocity)' do
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 0, trigger: 1, velocity: 0.5, sensitivity: 0.5..1)
+      expect(env.sensitivity).to eq(0.5..1.0)
+      expect(env.sensitivity(0.8..1)).to equal(env)
+      expect(env.sensitivity).to eq(0.8..1.0)
+      expect(env.sample(4)[2]).to be_within(1e-6).of(0.9)
+
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 0, trigger: 1, velocity: 0.5, sensitivity: 0.5..1)
+      expect(env.no_velocity).to equal(env)
+      expect(env.sensitivity).to eq(nil)
+      expect(env.sample(4)[2]).to eq(1)
+
+      [nil, false, 0].each do |off|
+        expect(described_class.new.sensitivity(off).sensitivity).to eq(nil), off.inspect
+      end
+
+      env = described_class.new.sensitivity(-12.db..0.db, scale: :db)
+      expect(env.velocity_scale).to eq(:db)
+      expect(env.velocity_range(0..1, scale: :linear).velocity_scale).to eq(:linear)
+      expect { described_class.new.sensitivity(scale: :db) }.to raise_error(ArgumentError, /range/)
+      expect { described_class.new.sensitivity(0..1, 0..1) }.to raise_error(ArgumentError, /one/)
+    end
+
+    it 'works on Notes envelopes before they play' do
+      make = -> { MB::Sound.seq(MB::Sound::A2.n8, MB::Sound::R.n2).notes.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2, hold_last: true) }
+      run = ->(e) { Numo::SFloat.zeros(0).concatenate(*Array.new(100) { e.sample(480).dup }) }
+      expect(run.(make.()).min).to be > -0.99 # scaled by the note's velocity
+      expect(run.(make.().no_velocity).min).to eq(-1)
+    end
+  end
+
+  describe 'hold_last' do
+    # A pitch dive: down to -1 over 100 samples after the gate falls.
+    def dive(gate, **opts)
+      described_class.new(
+        segments: [[0, 0], [0, 10.samples], [-1, 100.samples]], release_at: 2, curve: 0,
+        gate: array_node_class.new(gate), **opts
+      )
+    end
+
+    it 'is off by default: the envelope returns to 0 once the release lands' do
+      env = dive(pulses(1000, 0...200))
+      out = collect(env, 1000)
+      expect(env.hold_last?).to eq(false)
+      expect(out[299]).to be_within(1e-6).of(-0.99)
+      expect(out[300..].to_a.uniq).to eq([0])
+    end
+
+    it 'holds the level where the last segment landed, from the landing sample on, in C and Ruby' do
+      [:sample, :sample_ruby].each do |method|
+        [1, 7, 128, 800].each do |buffer|
+          env = dive(pulses(1000, 0...200), hold_last: true)
+          out = collect(env, 1000, buffer: buffer, method: method)
+          expect(out[0...200].to_a.uniq).to eq([0])
+          expect(out[250]).to be_within(1e-6).of(-0.5)
+          expect(out[300..].to_a.uniq).to eq([-1]), "#{method} at #{buffer}"
+          expect(env.stage).to eq(:idle)
+          expect(env.idle?).to eq(true)
+          expect(env.level).to eq(-1)
+        end
+      end
+    end
+
+    it 'starts the next note from the held level' do
+      # A zero-length first segment jumps back to 0 on the note start
+      env = dive(pulses(1000, 0...200, 500...600), hold_last: true)
+      out = collect(env, 1000)
+      expect(out[499]).to eq(-1)
+      expect(out[500...600].to_a.uniq).to eq([0])
+      expect(out[700..].to_a.uniq).to eq([-1])
+
+      # A 10-sample attack to 0 starts at -1
+      env = described_class.new(
+        segments: [[0, 10.samples], [0, 10.samples], [-1, 100.samples]], release_at: 2, curve: 0,
+        gate: array_node_class.new(pulses(1000, 0...200, 500...600)), hold_last: true
+      )
+      out = collect(env, 1000)
+      expect(out[499]).to eq(-1)
+      expect(out[500]).to eq(-1)
+      expect(out[505]).to be_within(1e-6).of(-0.5)
+      expect(out[510...600].to_a.uniq).to eq([0])
+      expect(out[700..].to_a.uniq).to eq([-1])
+    end
+
+    it 'holds 0 after a choke' do
+      env = described_class.new(
+        attack: 0, decay: 0, sustain: 1, release: 1, gate: 1, hold_last: true,
+        choke: array_node_class.new(pulses(1000, 200))
+      )
+      out = collect(env, 1000)
+      expect(out[199]).to eq(1)
+      expect(out[400..].to_a.uniq).to eq([0])
+    end
+
+    it 'holds the release level of a moving level node frozen where it landed' do
+      level = array_node_class.new(Numo::SFloat.linspace(-1, -2, 1000))
+      env = described_class.new(segments: [[0, 0], [0, 10.samples], [level, 100.samples]], release_at: 2, curve: 0,
+        gate: array_node_class.new(pulses(1000, 0...200)), hold_last: true)
+      out = collect(env, 1000, buffer: 128)
+      expect(out[300..].to_a.uniq.length).to eq(1)
+      expect(out[300]).to eq(Numo::SFloat.linspace(-1, -2, 1000)[300])
+    end
+
+    it 'keeps a one-shot playing at its last level (ended, but #sample never returns nil)' do
+      env = described_class.new(segments: [[1, 10.samples], [0.25, 10.samples]], hold: 20.samples, curve: 0, hold_last: true)
+      out = collect(env, 1000, buffer: 100)
+      expect(out.length).to eq(1000)
+      expect(out[30..].to_a.uniq).to eq([0.25])
+      expect(env.ended?).to eq(true)
+      expect(env.sample(100).to_a.uniq).to eq([0.25])
+
+      plain = described_class.new(segments: [[1, 10.samples], [0.25, 10.samples]], hold: 20.samples, curve: 0)
+      expect(collect(plain, 1000, buffer: 100).length).to eq(100)
+    end
+
+    it 'skips the kernel when idle at 0 only (the held level is written while idle)' do
+      env = dive(pulses(3000, 0...200), hold_last: true)
+      bufs = Array.new(10) { env.sample(300).dup }
+      expect(bufs[9].to_a.uniq).to eq([-1])
+      env.reset
+      expect(env.sample(300).to_a.uniq).to eq([0])
+    end
+
+    it 'can be set with #hold_last, and goes into the kernel flags' do
+      env = described_class.new
+      expect(env.kernel_config[0] & described_class::FLAG_HOLD_LAST).to eq(0)
+      expect(env.hold_last).to equal(env)
+      expect(env.hold_last?).to eq(true)
+      expect(env.kernel_config[0] & described_class::FLAG_HOLD_LAST).not_to eq(0)
+      expect(env.to_s).to include('hold_last')
+      env.hold_last(false)
+      expect(env.hold_last?).to eq(false)
+    end
+
+    it 'is accepted by every constructor and the Notes versions' do
+      [:adsr, :env, :amp_env, :fm_env, :filter_env].each do |name|
+        expect(MB::Sound.public_send(name, 0.01, 0.1, 0.5, 0.1, hold_last: true).hold_last?).to eq(true), name.to_s
+        expect(MB::Sound.public_send(name, [[1, 0.01], [-0.5, 0.1]], hold_last: true).hold_last?).to eq(true), name.to_s
+      end
+      v = MB::Sound::Notes.new('spec/test_data/dense_modulated.mid')
+      [:env, :amp_env, :fm_env, :filter_env].each do |name|
+        expect(v.public_send(name, 0.01, 0.1, 0.5, 0.1, hold_last: true).hold_last?).to eq(true), name.to_s
+      end
+      expect(MB::Sound.sq80_env(hold_last: true).hold_last?).to eq(true)
     end
   end
 

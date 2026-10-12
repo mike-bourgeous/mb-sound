@@ -28,6 +28,10 @@
 #define MB_JACK_PORT_IS_OUTPUT 0x2
 #define MB_JACK_PORT_IS_PHYSICAL 0x4
 
+// mb_jack_unit.port_kinds bits
+#define MB_JACK_KIND_MIDI 0x1
+#define MB_JACK_KIND_OUTPUT 0x2
+
 #define MB_JACK_AUDIO_TYPE "32 bit float mono audio"
 #define MB_JACK_MIDI_TYPE "8 bit raw midi"
 
@@ -46,6 +50,7 @@ struct mb_jack_unit {
 	void *user;
 
 	void *ports[MB_JACK_MAX_PORTS];
+	uint8_t port_kinds[MB_JACK_MAX_PORTS]; // MB_JACK_KIND_* bits, set by mb_jack_register
 	int port_count;
 	int attached;
 };
@@ -79,7 +84,10 @@ size_t mb_jack_cycles(void);
 const char *mb_jack_register(struct mb_jack_unit *unit, const char **names, int count, int midi, int output);
 
 // Starts and stops calling +unit+'s process function.  mb_jack_detach waits
-// until the process thread is done with the unit, and unregisters its ports.
+// until the process thread is done with the unit, and releases its ports:
+// disconnected and renamed as spares for the next mb_jack_register, and
+// unregistered once no unit holds ports (libjack can't unregister ports of
+// an active client safely; see mb_jack.c).
 void mb_jack_attach(struct mb_jack_unit *unit);
 void mb_jack_detach(struct mb_jack_unit *unit);
 

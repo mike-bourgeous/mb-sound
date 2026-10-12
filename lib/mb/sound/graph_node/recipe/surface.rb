@@ -25,7 +25,7 @@ module MB
                 advance compute_ruby fm_feedback_amount fm_feedback_gain frequency last_freq noise_seed output_gain
                 phase phi period period_samples random_advance reset_input reset_to sample_c sample_ruby state
                 sync_source table timeline to_midi to_note wave_type wavelength amplitude amplitude_set range seed
-                phase_mod scan
+                phase_mod scan pivot warp_pivot
               ],
             },
             'MB::Sound::Pitch' => {
@@ -42,6 +42,19 @@ module MB
                 control_specs control_stream controls envelopes level level_check quiet_check note_stream stream
                 frequency_for to_midi_stream register keys
               ],
+            },
+            'MB::Sound::Envelope' => {
+              reason: 'readers, state, and plumbing (the setters that chain are recorded)',
+              names: %i[
+                at_rate attack attack_time choke decay decay_time gate hold kernel_config level level_of lift loop_node
+                names octaves preset_name release release_node release_time reset retrigger_peak sample_ruby segment_names
+                segments stage sustain sustain_level time trigger velocity velocity_high velocity_low velocity_peak
+                velocity_scale
+              ],
+            },
+            'MB::Sound::Notes::NoteEnvelope' => {
+              reason: 'readers',
+              names: %i[base_times notes],
             },
             'MB::Sound::GraphNode::Channels' => {
               reason: 'readers (channel access is recorded as element access, see ELEMENT_ACCESS)',
@@ -109,6 +122,7 @@ module MB
             [
               MB::Sound::Tone, MB::Sound::Pitch, MB::Sound::Notes::NotePitch, MB::Sound::Notes,
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
+              MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
             ]
           end
         end
