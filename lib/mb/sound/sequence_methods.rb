@@ -26,6 +26,40 @@ module MB
         seq(*items, seed: seed).len(step).acid(**options)
       end
 
+      # Note marks an #events row may give in its trailing Hash.
+      EVENT_MARKS = [:probability, :accented, :slid, :condition, :fill_mark].freeze
+
+      # Returns a Sequence::Clip of explicit events, one Array per event:
+      # [start, length, value, velocity], plus a Hash of note marks
+      # (probability:, accented:, slid:, condition: [n, from], fill_mark:
+      # [:fill or :nofill, name]) when it has any.  Starts and lengths are
+      # whole notes (exact Rationals); values are note numbers (or any
+      # number, or a Pitch).  This is how graph documents and #to_ruby
+      # write clips that have no recipe (a recorded or captured clip,
+      # Clip.new in a script); seq and grid read better for writing by
+      # hand.
+      #
+      #     events([0r, 1r/8, 57, 0.75], [1r/4, 1r/8, 60, 1.0, { accented: true }], length: 1r/2, loop: true)
+      def events(*rows, length: nil, loop: false, seed: 0, align: :timeline)
+        list = rows.map { |row|
+          raise ArgumentError, "Event rows are Arrays [start, length, value, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(4, 5)
+          start, len, value, velocity, marks = row
+          [start, len].each { |t|
+            raise ArgumentError, "Event starts and lengths are whole notes (got #{t.inspect})" unless t.is_a?(Numeric) && t.real? && !t.is_a?(Float)
+          }
+          raise ArgumentError, "Event lengths can't be negative (got #{len})" if len < 0
+          raise ArgumentError, "Event values are numbers or Pitches (got #{value.inspect})" unless (value.is_a?(Numeric) && value.real?) || value.is_a?(Pitch)
+          raise ArgumentError, "Event velocities are numbers from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.real?
+          marks ||= {}
+          raise ArgumentError, "Event marks are a Hash (got #{marks.inspect})" unless marks.is_a?(Hash)
+          unknown = marks.keys - EVENT_MARKS
+          raise ArgumentError, "Unknown event marks #{unknown.map(&:inspect).join(', ')} (#{EVENT_MARKS.join(', ')})" unless unknown.empty?
+          Sequence::Event.new(start: start.to_r, length: len.to_r, value: value, velocity: velocity, **marks)
+        }
+        length = length.whole_notes if length.is_a?(Sequence::Duration)
+        Sequence::Clip.new(list, length: length&.to_r, loop: loop, seed: seed, align: align)
+      end
+
       # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
       # as :minor or :dorian (Scale.names), or an Array of offsets in
       # semitones, with a +root+ (a Note, note number, or name like :a).

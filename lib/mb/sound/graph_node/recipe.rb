@@ -79,6 +79,7 @@ module MB
         # block is a runtime block.
         BUILD_BLOCKS = Set[
           :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
+          :fill, # Kit#fill { grid(...) }
         ].freeze
 
         # Recorded names that only raise the depth (the call itself isn't
@@ -387,6 +388,7 @@ module MB
 
     Notes.include(GraphNode::Recipe::ToRuby)
     Sequence::Clip.include(GraphNode::Recipe::ToRuby)
+    Sequence::Kit.include(GraphNode::Recipe::ToRuby)
 
     # The console's `ruby node`.
     module RecipeMethods
