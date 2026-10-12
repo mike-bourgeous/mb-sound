@@ -228,6 +228,8 @@ module MB
           k = 0
           while k < lanes.length
             r = @members[lanes[k]]
+            taps = r.program.taps
+            taps.each { |t| t.reserve(count) } unless taps.empty?
             low = r.program.lower
             words ||= low[0]
             nslots = low[3]

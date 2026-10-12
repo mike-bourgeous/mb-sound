@@ -93,6 +93,7 @@ enum {
 	OP_TIME_SCALE,// dst, a, sc                  dst = SQ80::TimeScale#time of a: sc [kind (0 velocity, 1 key), seconds, amount]
 	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
 	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
+	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1002,7 +1003,7 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SHAPE: case OP_NOTE_FREQ:
 			len = 5;
 			break;
-		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
+		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX: case OP_TAP:
 			len = 4;
 			break;
 		case OP_SVF:
@@ -1390,6 +1391,21 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 			run_unary(op, pc, R, n);
 			break;
 
+		case OP_TAP: {
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tap object at word %zu", pc);
+			VALUE holder = rb_ary_entry(objects, op[3]);
+			Check_Type(holder, T_ARRAY);
+			VALUE buf = rb_ary_entry(holder, 0);
+			VALUE want = cplx[op[2]] ? numo_cSComplex : numo_cSFloat;
+			if (CLASS_OF(buf) != want || !RTEST(nary_check_contiguous(buf)) || RNARRAY_SIZE(buf) < n) {
+				rb_raise(rb_eArgError, "Plan tap buffer must be a contiguous %s of at least %zu samples", cplx[op[2]] ? "SComplex" : "SFloat", n);
+			}
+			float *T = (float *)(nary_get_pointer_for_write(buf) + nary_get_offset(buf));
+			memcpy(T, ptrs[op[2]], n * (cplx[op[2]] ? 2 : 1) * sizeof(float));
+			RB_GC_GUARD(buf);
+			break;
+		}
+
 		case OP_ENVELOPE:
 			if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
 			if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan envelope object at word %zu", pc);
@@ -1638,6 +1654,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("time_scale")), INT2NUM(OP_TIME_SCALE));
 	rb_hash_aset(h, ID2SYM(rb_intern("sample_hold")), INT2NUM(OP_SAMPLE_HOLD));
 	rb_hash_aset(h, ID2SYM(rb_intern("unary")), INT2NUM(OP_UNARY));
+	rb_hash_aset(h, ID2SYM(rb_intern("tap")), INT2NUM(OP_TAP));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

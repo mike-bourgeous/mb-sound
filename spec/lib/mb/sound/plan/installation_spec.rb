@@ -86,14 +86,62 @@ RSpec.describe(MB::Sound::Plan::Installation) do
   end
 
   describe 'introspection' do
-    it 'never fuses a spied node, and the spy sees every buffer' do
-      seen = []
-      plan_compare(sizes: [64, 1, 300]) { |c|
-        inner = 220.hz.sine * src.new(seed: 1)
-        inner.spy { |v| seen << v.length } if c.engine == :c
+    it 'fuses a spied node with a tap (Op::Tap), and the spy sees every buffer' do
+      seen = {}
+      pre = {}
+      inners = {}
+      r = plan_compare(sizes: [64, 1, 300]) { |c|
+        inner = 220.hz.ramp * src.new(seed: 1) # (exact; fast sines differ within -124 dB)
+        inners[c.engine] = inner
+        seen[c.engine] = []
+        pre[c.engine] = []
+        inner.spy { |v| seen[c.engine] << v.dup }
+        inner.spy(phase: :pre) { |n| pre[c.engine] << n }
         inner * 2 + 440.hz.sine
       }
-      expect(seen).to eq([64, 1, 300])
+      expect(plan_op_names(r)).to include(:Tap)
+      [:c, :ruby].each do |e|
+        expect(r.installations[e].regions.flat_map(&:members)).to include(inners[e])
+        expect(pre[e]).to eq([64, 1, 300])
+        expect(seen[e].map(&:length)).to eq([64, 1, 300])
+        expect(seen[e].map(&:to_binary)).to eq(seen[:unfused].map(&:to_binary))
+      end
+    end
+
+    it 'calls a tapped node\'s spies once per block in check mode (from the unfused reference)' do
+      seen = []
+      inner = 220.hz.ramp * src.new(seed: 1)
+      inner.spy { |v| seen << v.length }
+      g = inner * 2 + 440.hz.ramp
+      inst = MB::Sound::Plan.install(g, check: :raise)
+      [10, 20, 30].each { |n| g.sample(n) }
+      expect(seen).to eq([10, 20, 30])
+      expect(inst.regions.flat_map(&:members)).to include(inner)
+    end
+
+    it 'taps a spied node of every lane of a lane group, and a complex one' do
+      seen = Hash.new { |h, k| h[k] = [] }
+      build = ->(key) {
+        MB::Sound::GraphNode::Channels.new([0, 1].map { |i|
+          x = 220.hz.complex_sine * (1 + i)
+          x.spy { |v| seen[[key, i]] << v.dup }
+          x.real * 2
+        })
+      }
+      g = build.(:planned)
+      u = build.(:unplanned)
+      inst = MB::Sound::Plan.install(g.outputs)
+      expect(inst.lane_groups.groups.length).to eq(1)
+      3.times do
+        bufs = g.outputs.map { |o| o.sample(100) }
+        ref = u.outputs.map { |o| o.sample(100) }
+        bufs.each_with_index { |b, i| expect(b.to_binary).to eq(ref[i].to_binary) }
+      end
+      [0, 1].each do |i|
+        expect(seen[[:planned, i]].length).to eq(3)
+        expect(seen[[:planned, i]].map(&:to_binary)).to eq(seen[[:unplanned, i]].map(&:to_binary))
+      end
+      expect(inst.lane_groups.groups[0].lane_runs).to eq(6)
     end
 
     it 'unfuses a node marked with Plan.observe (after a rebuild)' do

@@ -266,6 +266,8 @@ module MB
 
           gathered = gather(count)
           if gathered.equal?(:ended)
+            # Spies see the end as the nodes' own #sample shows it (nil)
+            @program.taps.each { |t| t.deliver(nil) } unless @installation.check
             @result = nil
             return :done
           end
@@ -299,7 +301,16 @@ module MB
           end
 
           @planned_blocks += 1
-          planned || execute(n)
+          out = planned || execute(n)
+          taps = @program.taps
+          unless taps.empty?
+            k = 0
+            while k < taps.length
+              taps[k].deliver(n)
+              k += 1
+            end
+          end
+          out
         end
 
         # For internal use by LaneGroup: the boundary input buffers and
@@ -360,6 +371,7 @@ module MB
             unless v
               v = b.describe(node)
               @described[node] = v
+              b.tap_value(v, node) if Plan.tapped?(node)
             end
             return v
           end
@@ -495,6 +507,13 @@ module MB
         # Runs the program on gathered inputs for +n+ samples (for internal
         # use by LaneGroup too).
         def execute(n)
+          taps = @program.taps
+          k = 0
+          while k < taps.length
+            taps[k].reserve(n)
+            k += 1
+          end
+
           if @installation.engine == :ruby
             result = @program.run_ruby(n, @inputs, @params)
             out = out_view(n)

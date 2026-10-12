@@ -279,7 +279,7 @@ module MB
         def candidate_reason(node)
           return @excluded[node] if @excluded.key?(node)
           return "not a planned node type (#{Plan.class_label(node)})" unless node.is_a?(Describable)
-          return 'observed (a spy or Plan.observe)' if Plan.observed?(node)
+          return 'observed (Plan.observe)' if Plan.observed?(node)
 
           owner = node.instance_variable_get(:@plan_region) || node.instance_variable_get(:@plan_member)
           return 'planned by another installation' if owner && !owner.installation.equal?(self)

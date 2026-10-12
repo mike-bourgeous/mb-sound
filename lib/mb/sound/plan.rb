@@ -26,10 +26,10 @@ module MB
     # (Plan.install); nothing else changes.  Plans compile when their region
     # first plays, and rebuild after a structural change to a node they
     # cover (Plan.changed: Multiplier#add, Mixer#[]=, a new Tee branch, a
-    # spy, ...).  Graph introspection disables fusion for what it inspects:
-    # a spied node (GraphNode#spy) or one marked with Plan.observe (e.g. a
-    # per-node visualizer or profiler) becomes a region boundary, computed
-    # by its own #sample.
+    # spy, ...).  A spied node (GraphNode#spy) stays fused: the region taps
+    # its value (Op::Tap) and calls its spies after each block.  A node
+    # marked with Plan.observe (e.g. a per-node profiler wrapping #sample)
+    # becomes a region boundary, computed by its own #sample.
     #
     # Settings (environment variables, read at load; also writable):
     # - MB_SOUND_PLAN=0 turns plans off (Plan.enabled = false); =ruby runs
@@ -187,10 +187,15 @@ module MB
           node
         end
 
-        # True if +node+ is observed (Plan.observe or a spy).
+        # True if +node+ is observed (Plan.observe): never fused.  Spied
+        # nodes are fused with a tap (see Plan.tapped? and Op::Tap).
         def observed?(node)
-          return true if node.instance_variable_get(:@plan_observed)
+          !!node.instance_variable_get(:@plan_observed)
+        end
 
+        # True if +node+ has spies (GraphNode#spy): inside a region it gets
+        # an Op::Tap, so the spies see every buffer while it stays fused.
+        def tapped?(node)
           spies = node.instance_variable_get(:@handled_spies)
           !!spies && !spies.empty?
         end
@@ -243,6 +248,7 @@ require_relative 'plan/builder'
 require_relative 'plan/fold'
 require_relative 'plan/filter_ops'
 require_relative 'plan/hold_ops'
+require_relative 'plan/tap_op'
 require_relative 'plan/program'
 require_relative 'plan/describable'
 require_relative 'plan/region'
