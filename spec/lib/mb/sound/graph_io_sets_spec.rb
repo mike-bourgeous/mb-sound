@@ -175,6 +175,14 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(x, y)).to eq(0)
   end
 
+  it 'builds patches to save them without a TracePoint (YJIT would drop its code)' do
+    a = session
+    within(a) { MB::Sound::GraphIOSetSpec.build }
+    expect(TracePoint).not_to receive(:new)
+    text = io.dump(a.arrangement, name: 'demo')
+    expect(text).to include("track(:bass) { |clip|\n  v = clip.synth(voices: 1) { |n|")
+  end
+
   it 'keeps the random state while building patches to save them' do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }

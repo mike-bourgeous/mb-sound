@@ -128,39 +128,24 @@ module MB
           block = @session.master_block
           return [] unless block
 
-          names = block.parameters.map { |_, n| n }.compact
           source = GraphNode::MixSource.new(channels: @session.channels, sample_rate: 48000)
           chans = source.outputs
-          if block.arity == 0 || block.arity == 1
-            name = names[0] || :mix
-            input = GraphNode::Channels.new(chans)
-            inputs = { name => input }
-            result, locals = probe(block, [input])
-          else
-            inputs = names.each_with_index.to_h { |n, i| [n, chans[i]] }
-            result, locals = probe(block, chans)
-          end
-          return [] unless result
-
-          block_lines('master', nil, names.empty? ? [:mix] : names, result, inputs, locals)
+          args = block.arity == 0 || block.arity == 1 ? [GraphNode::Channels.new(chans)] : chans
+          block_statement(:master, [], {}, block, args, 'master')
         end
 
         def tracks
           @arrangement.tracks.flat_map { |name, tr|
-            opts = []
-            opts << "q: #{lit(tr.q)}" if tr.q
-            opts << "fade: #{lit(tr.fade)}" if tr.fade
-            opts << "lead: #{lit(tr.lead)}" if tr.lead
-            opts << "lead_max: #{lit(tr.lead_max)}" if tr.lead_max
-            opts << "nudge: #{lit(tr.nudge)}" if tr.nudge
+            opts = {}
+            opts[:q] = tr.q if tr.q
+            opts[:fade] = tr.fade if tr.fade
+            opts[:lead] = tr.lead if tr.lead
+            opts[:lead_max] = tr.lead_max if tr.lead_max
+            opts[:nudge] = tr.nudge if tr.nudge
             if tr.patch
-              clip = probe_clip(name, tr)
-              param = tr.patch.parameters.map { |_, n| n }.compact.first || :clip
-              result, locals = probe(tr.patch, [clip], "track #{name.inspect}")
-              next [] unless result
-              block_lines("track(#{[name.inspect, *opts].join(', ')})", nil, [param], result, { param => clip }, locals)
+              block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
             else
-              graph_statement("track #{[name.inspect].join}", tr.graph, opts)
+              graph_statement("track #{name.inspect}", tr.graph, opts.map { |k, v| "#{k}: #{lit(v)}" })
             end
           }
         end
@@ -176,43 +161,36 @@ module MB
           Sequence::Clip.new([], length: 1, loop: true)
         end
 
-        # Calls +block+ with +args+, recording what it builds and its local
-        # variables.  Returns [result, { object => local name }], or nil if
-        # it raised (a problem).
-        def probe(block, args, what = 'master')
-          inv = GraphNode::Recipe::Invocation.new(args, nil, {}, false, nil, nil)
-          # Building draws seeds; the session's later draws stay as they were
-          result = MB::Sound.keeping_random_state {
-            # Loaded blocks keep their locals; others are read with a
-            # TracePoint (the fast frame capture needs the block's own
-            # recording scope, which a probe doesn't push)
-            if block.respond_to?(:graph_io_locals)
-              GraphNode::Recipe.trace_locals(block, inv) { block.call(*args) }
-            else
-              GraphNode::Recipe.trace_locals_tracepoint(block, inv) { block.call(*args) }
-            end
-          }
-          locals = inv.locals.each_with_object({}.compare_by_identity) { |(k, v), h|
-            h[v] = k.to_s if GraphNode::Recipe.graph_object?(v) && !args.any? { |a| a.equal?(v) } && !h.key?(v)
-          }
-          [result, locals]
+        # `name(args, kwargs) { |params| body }` for a block (a patch or
+        # the master chain), printed by building it once with +block_args+
+        # as a recorded build block: the block runs through
+        # Recipe.wrap_block like a synth's lane block, so its locals are
+        # read by the recorder's frame capture (no TracePoint, which would
+        # make YJIT drop its code while a set plays), and the RubyWriter
+        # prints the call with the block's own parameter names.  The
+        # random state is kept (MB::Sound.keeping_random_state).  Returns
+        # the lines, or none with a problem if the block raised.
+        def block_statement(name, args, kwargs, block, block_args, what)
+          call = GraphNode::Recipe::Call.new(MB::Sound, name, args, kwargs, block, :build, nil, nil, 0, nil, nil)
+          wrapped = GraphNode::Recipe.wrap_block(block, call)
+          MB::Sound.keeping_random_state { wrapped.call(*block_args) }
+
+          # The writer prints objects through their calls: a holder whose
+          # recipe is this call prints as the statement
+          holder = Sequence::Clip.new([])
+          holder.instance_variable_set(:@graph_recipe, GraphNode::Recipe::Record.new(holder, call))
+          writer = writer_for(holder, {})
+          vars, expr = writer.parts
+          collect(writer, what)
+          vars + expr
         rescue StandardError => e
           @problems << "#{what} couldn't be built to save it (#{e.class}: #{e.message})"
-          nil
-        end
-
-        # `head { |params| body }` for a block that built +result+.
-        def block_lines(head, _opts, params, result, inputs, locals)
-          writer = writer_for(result, inputs, locals)
-          text = writer.to_s
-          collect(writer, head)
-          body = text.lines(chomp: true).reject { |l| l.start_with?('# inputs:') }
-          ["#{head} { |#{params.join(', ')}|", *body.map { |l| "  #{l}" }, '}']
+          []
         end
 
         # `head graph, opts` with the graph's variables first.
         def graph_statement(head, graph, opts)
-          writer = writer_for(graph, {}, {})
+          writer = writer_for(graph, {})
           vars, expr = writer.parts
           collect(writer, head)
           expr = expr.dup
@@ -221,10 +199,10 @@ module MB
           vars + expr
         end
 
-        def writer_for(root, inputs, locals)
+        def writer_for(root, inputs)
           named = (@clip_names || {}).each_with_object({}) { |(obj, n), h| h[n] = obj unless inputs.values.any? { |i| i.equal?(obj) } || root.equal?(obj) }
           GraphNode::Recipe::RubyWriter.new(
-            root, inputs: named.merge(inputs.transform_keys(&:to_s)), seeds: true, knob_nodes: @knob_nodes, assets: @assets, locals: locals
+            root, inputs: named.merge(inputs.transform_keys(&:to_s)), seeds: true, knob_nodes: @knob_nodes, assets: @assets
           )
         end
 
@@ -259,7 +237,7 @@ module MB
 
           list.flat_map { |c|
             name = @clip_names[c]
-            writer = writer_for(c, {}, {})
+            writer = writer_for(c, {})
             vars, expr = writer.parts
             collect(writer, "clip #{name}")
             expr = expr.dup

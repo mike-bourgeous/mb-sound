@@ -59,13 +59,10 @@ module MB
           #
           # +assets+ (a GraphIO::Assets, for bundles) names files for tables
           # that aren't library tables and for Strings naming sound or MIDI
-          # files.  +locals+ ({ object => name }) names objects of the top
-          # level like a build block's locals (set documents print patch
-          # blocks this way).
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil, locals: nil)
+          # files.
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
             @root = root
             @assets = assets
-            @top_locals = locals
             @given_inputs = inputs
             @seeds = seeds
             @knobs = knobs.transform_keys(&:to_s)
@@ -125,7 +122,7 @@ module MB
             @warnings = []
             @fixmes = []
             @template = nil
-            @locals = @top_locals
+            @locals = nil
             @scope = nil
             @seed_warning = false
             @output_owner = {}.compare_by_identity
