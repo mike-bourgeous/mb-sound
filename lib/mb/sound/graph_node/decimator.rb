@@ -19,6 +19,13 @@ module MB
       # MB::Sound's generator when jitter is on), for a looser, dirtier
       # clock.
       #
+      # +mix+ is the crushed share of the output (default 1, all crushed; 0
+      # the input unchanged), a number or a node read every sample:
+      # crushed * mix + input * (1 - mix).  TODO: consolidate with the
+      # universal wet/dry mix for nodes and subgraphs once it exists
+      # (maintainer, 2026-10-12: "Yes, with a note to consolidate whenever
+      # we do universal wet/dry mix for nodes and subgraphs").
+      #
       # The kernel is MB::Sound::FastLofi.decimate (exact Ruby mirror
       # .process_ruby); the output is the same at any buffer size.  Ends
       # when the input or the rate node ends.
@@ -51,10 +58,14 @@ module MB
         # The jitter's random seed (nil without jitter).
         attr_reader :seed
 
+        # The crushed share of the output: a Float or a node (a sampler
+        # branch).
+        attr_reader :mix
+
         # Creates a decimator on +input+ holding +rate+ samples per second (a
         # number, a node of Hz, or a Pitch for its frequency); see the class
-        # description for +jitter+ and +seed+.
-        def initialize(input, rate:, jitter: 0, seed: nil, sample_rate: nil)
+        # description for +jitter+, +seed+, and +mix+.
+        def initialize(input, rate:, jitter: 0, seed: nil, mix: 1, sample_rate: nil)
           raise ArgumentError, "Decimator input must be a graph node (got #{input.inspect})" unless input.respond_to?(:sample)
 
           rate = rate.oscillator_frequency if rate.is_a?(MB::Sound::Pitch)
@@ -66,7 +77,12 @@ module MB
             raise ArgumentError, "Decimator jitter must be a number from 0 to #{MAX_JITTER} (got #{jitter.inspect})"
           end
 
+          unless (mix.is_a?(Numeric) && mix.real? && mix.finite?) || mix.respond_to?(:sample)
+            raise ArgumentError, "Decimator mix must be a real number or a node (got #{mix.inspect})"
+          end
+
           @input = input.get_sampler
+          @mix = mix.is_a?(Numeric) ? mix.to_f : mix.get_sampler
           @rate = rate.is_a?(Numeric) ? rate.to_f : rate.get_sampler
           @jitter = jitter.to_f
           @seed = @jitter > 0 ? (seed.nil? ? MB::Sound.next_seed : Integer(seed)) : nil
@@ -95,18 +111,43 @@ module MB
             x = x[0...r.length] if r.length < x.length
           end
 
+          m = @mix
+          if m.respond_to?(:sample)
+            m = m.sample(x.length)
+            return nil if m.nil? || m.empty?
+            if m.length < x.length
+              x = x[0...m.length]
+              r = r[0...m.length] if r.respond_to?(:length)
+            end
+          end
+
           n = x.length
           @buf = Numo::SFloat.zeros(n) if @buf.nil? || @buf.length != n
-          MB::Sound::FastLofi.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter)
+          out = MB::Sound::FastLofi.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter)
+          m == 1.0 ? out : self.class.mix(out, x, m)
+        end
+
+        # Blends crushed +out+ (modified in place) with the +input+ by
+        # +mix+ (a number or an array): out * mix + input * (1 - mix), in
+        # float32 like the rest of the node.
+        def self.mix(out, input, mix)
+          m = mix.is_a?(Numeric) ? mix.to_f : Numo::SFloat.cast(mix)
+          dry = Numo::SFloat.cast(input.is_a?(Numo::SComplex) || input.is_a?(Numo::DComplex) ? input.real : input)
+          out.inplace * m
+          out.inplace + dry * (1.0 - m)
+          out
         end
 
         def sources
-          @rate.is_a?(Numeric) ? { input: @input } : { input: @input, rate: @rate }
+          s = @rate.is_a?(Numeric) ? { input: @input } : { input: @input, rate: @rate }
+          s[:mix] = @mix unless @mix.is_a?(Numeric)
+          s
         end
 
         def to_s
           r = @rate.is_a?(Numeric) ? "#{MB::M.sigfigs(@rate, 4)} Hz" : 'node Hz'
           j = @jitter > 0 ? ", jitter #{MB::M.sigfigs(@jitter, 3)}" : ''
+          j += @mix.is_a?(Numeric) ? (@mix == 1 ? '' : ", mix #{MB::M.sigfigs(@mix, 3)}") : ', mix node'
           "Decimator #{r}#{j}"
         end
 

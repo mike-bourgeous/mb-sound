@@ -97,8 +97,8 @@ module MB::Sound
   # - +crush+: the crusher's rate in Hz at C4 (0 for none), +crush_track+
   #   its key tracking (1, the default = rate proportional to the note, 0 =
   #   fixed; below 1, low notes crush relatively more), +jitter+ its clock
-  #   jitter, +crush_mix+ its wet share (1 all crushed, 0 none; maintainer,
-  #   2026-10-11: "Decimation wet/dry is too strong").
+  #   jitter, +crush_mix+ its wet share (decimate's mix:, 1 all crushed, 0
+  #   none; maintainer, 2026-10-11: "Decimation wet/dry is too strong").
   # - +glide+: legato glide time in seconds.
   # - +drop+: octaves the pitch dives after each note-off, over +drop_time+
   #   seconds (the release stretches to match), so a note before a rest
@@ -136,8 +136,7 @@ module MB::Sound
     mix = vox * formant_mix + peak * (1 - formant_mix)
 
     crushed = if crush.to_f > 0 && crush_mix > 0
-                c = mix.decimate(v.cutoff(crush, env: false, keytrack: crush_track, gm: false), jitter: jitter)
-                crush_mix >= 1 ? c : c * crush_mix + mix * (1 - crush_mix)
+                mix.decimate(v.cutoff(crush, env: false, keytrack: crush_track, gm: false), jitter: jitter, mix: crush_mix)
               else
                 mix
               end

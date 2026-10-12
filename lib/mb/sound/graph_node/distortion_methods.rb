@@ -115,13 +115,17 @@ module MB
         # vocal-like peaks.  +rate+ is a number, a Pitch, or a node of Hz
         # that may move every sample (e.g. `v.freq * 6` tracks the note, so
         # every note folds the same way); +jitter+ (0..0.95) loosens the hold
-        # clock at random (+seed+).  Bit crushing is #aquantize.  Aliases
+        # clock at random (+seed+).  +mix+ is the crushed share (1, the
+        # default, all crushed; a number or a node; to be consolidated with
+        # a universal wet/dry mix for nodes and subgraphs when one exists).
+        # Bit crushing is #aquantize.  Aliases
         # #crush_rate, #srr (sample-rate reduction).
         #
         #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900)
         #     play 220.hz.square.decimate(0.2.hz.lfo.at(500..6000), jitter: 0.2)
-        def decimate(rate, jitter: 0, seed: nil)
-          Decimator.new(self, rate: rate, jitter: jitter, seed: seed, sample_rate: sample_rate)
+        #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900, mix: 0.4)   # 40% crushed
+        def decimate(rate, jitter: 0, seed: nil, mix: 1)
+          Decimator.new(self, rate: rate, jitter: jitter, seed: seed, mix: mix, sample_rate: sample_rate)
         end
         alias crush_rate decimate
         alias srr decimate
