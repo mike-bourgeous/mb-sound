@@ -21,14 +21,16 @@
 #
 #   intro     8  drums only: kick, offbeat hats, a soft/accented shaker,
 #                a clap roll turnaround every 8 bars, toms every 4
-#   groove    8  clap on 2 and 4, open hats, the "bong" bass (a saturated
-#                sub tom on the offbeats, ducked by the kick)
+#   groove    8  clap on 2 and 4, open hats, the "bong" bass (saturated
+#                offbeat eighths of sine and lowpassed saw with a small
+#                pitch bump, ducked by the kick)
 #   tease     8  the talking bass without its sub through a resonant
 #                lowpass (the :cut knob opening 700 Hz -> 3.5 kHz), so it
 #                speaks in the upper mids over the kick; in the last 4
-#                bars a bandpass noise riser, and in the last bar one
-#                held bass note diving five octaves until the wavetable's
-#                cycles are single kicks
+#                bars a bandpass noise riser, and in the last bar the
+#                bass holds one G1 instead of its eighths, diving four
+#                octaves until the wavetable's cycles are single kicks
+#                (same track, key, and level)
 #   drop      8  dry: the sub and the open talking bass together, hats on
 #                every 16th, a crash and a sub "boom" on the downbeat
 #   pickup    8  the same bass through the ghost chords i-iv-VII-VI, a
@@ -41,7 +43,7 @@
 #                ghost chords, its dotted-eighth echoes filling the gaps;
 #                a delay throw on the last 2 beats
 #   lift      8  the chant and pad go on over a light kick (still no low
-#                end: it all comes back at once in drop2), riser and dive
+#                end: it all comes back at once in drop2), riser again
 #   gap       1  one bar of 2/4: everything rings out for a half-bar breath
 #   drop2     8  low end back, the talking bass on i-VI-III-VII, boom
 #   pickup2   8  a seeded pick: the ride pickup (default seed, two times in
@@ -53,13 +55,17 @@
 # The mix: the kick ducks the bass parts -18 dB (Dynamics#duck from a
 # ghost kick: the same 808 kick, inside each ducked track), the drums get
 # parallel compression, and the master runs a gentle glue compressor into a
-# true-peak limiter at -1 dBTP.  The master bus is at 0 dB (master_gain 1)
+# true-peak limiter at -0.5 dBTP (SMALL_TALK_CEILING), driven 6 dB
+# (SMALL_TALK_DRIVE; -D and -C change them).  The master bus is at 0 dB (master_gain 1)
 # instead of the usual -10 dB: this is a mastered, share-ready track, and
 # the limiter is what keeps it from clipping (the maintainer's OK,
-# 2026-10-12).  -D sets the drive into the limiter.  As rendered
-# (round 2): -14.7 LUFS integrated, -1.0 dBTP.  Before the master the
-# kick-plus-clap hits on 2 and 4 peak about +5 dB over full scale, so
-# stems need --stem-gain -6 (the render warns).
+# 2026-10-12).  As rendered (round 3): -13.0 LUFS integrated, -0.5 dBTP,
+# PLR 12.5 dB (the drops: -11.8 LUFS, PLR 11.3, crest factor 12.3 dB;
+# round 2's 4 dB into -1 dBTP: -14.7, PLR 13.7, drops 12.4).  320k mp3s of
+# it decode at -0.2 dBTP; a ceiling above -0.5 can go over 0 dBTP in
+# lossy copies.  Before the master the kick-plus-clap hits on 2 and 4 peak
+# about +5 dB over full scale, so stems need --stem-gain -6 (the render
+# warns).
 #
 # Usage:
 #     bin/songs/small_talk.rb                    # plays live in the background session
@@ -69,6 +75,9 @@
 #     bin/songs/small_talk.rb --round1 out.flac  # the first round's talking bass (crush 0.4, no cut, air, or squeeze)
 #     bin/songs/small_talk.rb -a 0 out.flac      # no waveshaped high end
 #     bin/songs/small_talk.rb -m 0.4 out.flac    # more crusher
+#     bin/songs/small_talk.rb -H 0 out.flac      # a pure sine sub (-H 0.35 for more harmonics)
+#     bin/songs/small_talk.rb --bong-tom out.flac   # round 2's tom-like groove bass
+#     bin/songs/small_talk.rb -D 4 -C -1 out.flac   # round 2's master (-D 7.5 -C -0.3: hotter)
 #     bin/songs/small_talk.rb --help             # all options
 #
 # Or in bin/sound.rb:
@@ -93,16 +102,18 @@
 # back in the last 0.4 of every 4 (so each 4-bar phrase "says" one long
 # word); the dives after the rests reach ~12-15 Hz, where each wavetable
 # cycle is nearly a single kick, and the tease's last bar slows a held
-# note to about 3 Hz the same way.  On laptop speakers listen for the
+# G1 to about 3 Hz the same way.  The sub's small 2nd and 3rd harmonics
+# (-H; 0 for a pure sine) add about 1.7 dB at 90-160 Hz, for speakers
+# without much below 100 Hz.  On laptop speakers listen for the
 # bass's pitch in the 200-600 Hz formants: it should follow the ghost
 # chords.
 #
 # Cost (whole render through the Session and master chain, YJIT, the Mac's
-# container, 2026-10-12, round 2): 512-sample buffers mean 19.5% of
-# realtime, p99 53%; 128-sample buffers mean 42%, p99 87%.  The talking
-# bass stays loaded from the intro on (a silent clip between its
-# sections), since building it takes up to ~0.8 s; the slowest scene
-# change left builds the breakdown's chant and pad in ~0.67 s, inside the
+# container, 2026-10-12, round 3): 512-sample buffers mean 22% of
+# realtime, p99 54% (round 2 at 128-sample buffers: mean 42%, p99 87%).
+# The talking bass stays loaded from the intro on (a silent clip between
+# its sections), since building it takes up to ~0.8 s; the slowest scene
+# change left builds the breakdown's chant and pad in 0.67-0.85 s, inside the
 # scheduler's half-bar (0.96 s) lookahead.  Render-thread spikes of up to
 # ~300 ms where scenes land are library cost (night_bus_flow: ~270 ms).
 
@@ -116,6 +127,14 @@ module MB::Sound
   # out, with the default seed).
   SMALL_TALK_BARS = 92
 
+  # The gain in dB into the master limiter and its true-peak ceiling in
+  # dBTP (round 3; maintainer, 2026-10-12: "I like the drive and the
+  # pumping; it could even tolerate a bit more possibly.  Production dance
+  # tracks will be pretty low crest factor and as close to max true peak as
+  # possible"; round 2 was 4 dB into -1 dBTP).
+  SMALL_TALK_DRIVE = 6.0
+  SMALL_TALK_CEILING = -0.5
+
   # One swing for every part that plays sixteenths.
   SMALL_TALK_SWING = 0.54
 
@@ -125,9 +144,18 @@ module MB::Sound
 
   # The talking bass's hook: two bars of sixteenths in the bass octave
   # (G1-D2), mostly off the kicks, notes before rests diving.
-  SMALL_TALK_HOOK = seq(
+  SMALL_TALK_HOOK_STEPS = [
     R, R, G1, T, T, T, G1, T, R, R, Bb1, T, G1, T, T, R,
     R, R, G1, T, T, T, D2, T, T, R, C2, T, Bb1, T, G1, T,
+  ].freeze
+  SMALL_TALK_HOOK = seq(*SMALL_TALK_HOOK_STEPS).n16.swing(SMALL_TALK_SWING).loop(align: :launch)
+
+  # The tease's 8 bars of the talking bass: the hook three and a half
+  # times, then one G1 held for the whole last bar, which the patch dives
+  # toward zero (see .small_talk_bass's +dive+): the same track, key, and
+  # level, replacing that bar's faster notes (maintainer, 2026-10-12).
+  SMALL_TALK_TEASE = seq(
+    *SMALL_TALK_HOOK_STEPS * 3, *SMALL_TALK_HOOK_STEPS.first(16), G1, *[T] * 15,
   ).n16.swing(SMALL_TALK_SWING).loop(align: :launch)
 
   # The chant's motif: one bar on the G minor triad (repeated and moved by
@@ -183,6 +211,7 @@ module MB::Sound
       # silent progressions (natural minor; the maintainer's pick of
       # 2026-10-11 over harmonic minor)
       talk: SMALL_TALK_HOOK,
+      talk_tease: SMALL_TALK_TEASE,
       talk_ghost: SMALL_TALK_HOOK.ghost_chords(1, 4, 7, 6, scale: gm).loop(align: :launch),
       talk_ghost2: SMALL_TALK_HOOK.ghost_chords(1, 6, 3, 7, scale: gm).loop(align: :launch),
       # The chant on i-iv-VII-VI (breakdown), and answering the bass in
@@ -191,14 +220,12 @@ module MB::Sound
       chant: SMALL_TALK_CHANT.ghost_chords(1, 4, 7, 6, scale: gm).loop(align: :launch),
       answer: seq(R.n1, D3.n4.d, Bb2.n4.d, C3.n8, Bb2.n8, R.n1, F3.n4.d, D3.n4.d, Eb3.n8, D3.n8).loop(align: :launch),
       # The groove's bong bass: offbeats with a swung 16th push
-      bong: seq(R, R, G1, R, R, R, G1, R, R, R, G1, R, R, R, G1, G1).n16.swing(SMALL_TALK_SWING).loop(align: :launch),
+      bong: seq(R, R, G1, T, R, R, G1, T, R, R, G1, T, R, R, G1, G1).n16.swing(SMALL_TALK_SWING).loop(align: :launch),
+      bong_tom: seq(R, R, G1, R, R, R, G1, R, R, R, G1, R, R, R, G1, G1).n16.swing(SMALL_TALK_SWING).loop(align: :launch),
       # The pad: root and fifth (fifth_pad), i-iv-VII-VI
       pad: seq(G2, C3, F2, Eb2).n1.legato(0.98).loop(align: :launch),
       # The impact on the first bar of every 8
       boom: seq(G1, R, R, R, R, R, R, R).n1.loop(align: :launch),
-      # The dive: one note held through the riser's last bar, falling
-      # five octaves (see .small_talk_dive)
-      dive: seq(R, R, R, G2).n1,
       # A placeholder clip for clipless patches (the riser)
       bar: seq(R).n1.loop,
     }.each { |name, clip| clip.named(name) }
@@ -232,9 +259,38 @@ module MB::Sound
   # +sub+ (the :sub knob) the sine sub's level (0 in the tease, so the low
   # end arrives with the drop).  +round1: true+ builds the first round's
   # sound (crush 0.4, no cut, no air, no squeeze) for comparisons.
-  def self.small_talk_bass(clip, cutoff: 16000, sub: 1, crush_mix: 0.15, air: 0.4, skew: 0.9, round1: false)
+  #
+  # Round 3 (maintainer, 2026-10-12):
+  # - Held notes dive: a note still sounding +dive_after+ seconds after
+  #   its note-on (no note of the hook, release included; the tease's
+  #   last bar is) falls +dive+ semitones
+  #   over the next 1.25 s, evenly in semitones (48: G1 49 Hz to 3 Hz,
+  #   where the kick wavetable's cycles are single kicks).  "The 1 bar
+  #   drop bass should be in the same track+key and at the same level so
+  #   it replaces the faster paced notes for that bar."  The time comes
+  #   from a ramp reset on every note-on (no velocity scaling), and the
+  #   patch's 90 Hz highpass keeps DC and subsonics out.
+  # - The sub gets a little 2nd and 3rd harmonic, +sub_harmonics+ (levels
+  #   of sines at 2x and 3x, phase-locked to the sub; [0, 0] for a pure
+  #   sine): "A tiny bit of second and maybe third harmonic on the sub
+  #   might help cut through a bit more on medium sized speakers".  The
+  #   sub's level is scaled down to keep its RMS.
+  def self.small_talk_bass(clip, cutoff: 16000, sub: 1, crush_mix: 0.15, air: 0.4, skew: 0.9, round1: false,
+                           dive: 48, dive_after: 0.75, sub_harmonics: [0.2, 0.1])
     crush_mix = 0.4 if round1 && crush_mix == 0.15
-    talk = vocal_lead_voice(clip, wobble: 4.bars, skew: skew, drop: 2, crush_mix: crush_mix, crush_track: 1.0, gain: 1.15)
+    talk = synth(clip, voices: 1) { |v|
+      fall = nil
+      if dive && dive > 0
+        # Seconds since the last note-on: a naive ramp at 0.2 Hz reset by
+        # every note-on (0 to 1 over 2.5 s; envelopes don't restart on
+        # back-to-back notes in a mono lane, so the hook's legato chains
+        # would have dived), then 0 for the first +dive_after+ seconds
+        # and down over the rest of 2 s
+        held = 0.2.hz.aramp.reset(v.trigger) * 2.5
+        fall = (held - dive_after).aclip(0, 2.0 - dive_after) * (-dive / (2.0 - dive_after))
+      end
+      vocal_lead_patch(v, wobble: 4.bars, skew: skew, drop: 2, crush_mix: crush_mix, crush_track: 1.0, gain: 1.15, transpose: fall)
+    }
     unless round1
       body = talk.peq(320.hz => [-7.db, 0.8])
       talk = if air > 0
@@ -244,37 +300,44 @@ module MB::Sound
                body.squeeze(:default, depth: 0.6, split: [250, 2500])
              end
     end
-    low_sub = synth(clip, voices: 1) { |v| v.hz.glide(0.04, legato: true).sine * v.env(0.004, 0.3, 0.8, 0.08, gm: false).legato }
+    h2, h3 = sub_harmonics
+    low_sub = synth(clip, voices: 1) { |v|
+      pitch = v.hz.glide(0.04, legato: true)
+      tone = pitch.sine
+      tone = (tone + pitch.transpose(12).sine * h2 + pitch.transpose(12 * Math.log2(3)).sine * h3) * (1 / Math.sqrt(1 + h2**2 + h3**2)) if h2 > 0 || h3 > 0
+      tone * v.env(0.004, 0.3, 0.8, 0.08, gm: false).legato
+    }
     echo = talk.delay(1.n8.dotted, feedback: 0.25, wet: 1, dry: 0).filter(:highpass, cutoff: 500, quality: 0.7) * 0.12
     low = ((talk + echo) * (round1 ? 0.6 : 0.7) + low_sub * sub * 0.34).filter(:lowpass, cutoff: cutoff, quality: round1 ? 0.8 : 1.3)
     low.duck(small_talk_ghost_kick).reverb(:hall, mix: 0.07, highpass: 300, output_channels: 2)
   end
 
-  # The riser's companion: one talking-bass note held for the riser's
-  # last bar while its pitch falls five octaves (G2 98 Hz to 3 Hz, evenly
-  # in semitones), so the kick wavetable slows down to single kicks just
-  # before the drop (maintainer, 2026-10-12: "a 1-bar-long pitch drop
-  # toward zero ... on a held note").  The envelope ignores velocity
-  # (sensitivity: 1.0..1.0; velocity would scale the dive), and the
-  # patch's 90 Hz highpass keeps the dive's DC and subsonics out.
-  def self.small_talk_dive(clip)
-    synth(clip, voices: 1) { |v|
-      fall = v.env(1.bar, 0, 1, 0.05, curve: :linear, sensitivity: 1.0..1.0, gm: false)
-      vocal_lead_patch(v, wobble: 1.bars, skew: 0.9, transpose: fall * -60, crush_mix: 0.15, gain: 1.15)
-    }.reverb(:hall, mix: 0.12, highpass: 300, output_channels: 2) * 0.3
-  end
-
-  # The groove's bong: a sub tom on the offbeats (a pitch bump, a short
-  # decay), saturated so its harmonics carry the pitch on small speakers,
-  # ducked by the kick.
-  def self.small_talk_bong(clip)
+  # The groove's bong bass: offbeat notes ducked by the kick, saturated
+  # so their harmonics carry the pitch on small speakers.
+  #
+  # Round 3 (maintainer, 2026-10-12, on its stem: "sounds more like a
+  # muted low tom drum ... It doesn't sound long enough to come across as
+  # notably pitched"): eighth notes instead of sixteenths, a decay to a
+  # sustain instead of to silence, a smaller and shorter pitch bump, and
+  # more of the lowpassed saw under the sine.  +tom: true+ builds the old
+  # tom-like sound (with the old sixteenth clip, c[:bong_tom]).
+  def self.small_talk_bong(clip, tom: false)
     synth(clip, voices: 1) { |n|
-      bump = n.env(0.0005, 0.035, 0, 0.02, curve: :linear, gm: false)
-      freq = n.freq * (bump * 0.7 + 1)
-      fenv = n.env(0.001, 0.07, 0, 0.04, gm: false)
-      amp = n.env(0.001, 0.16, 0, 0.05, gm: false) * (n.velocity * 0.4 + 0.6)
-      saw = freq.tone.ramp.lp4((2 ** (fenv * 2)) * 420, resonance: 0.3)
-      ((saw * 0.7 + freq.tone) * amp * 1.6).softclip(0.4, 0.95)
+      if tom
+        bump = n.env(0.0005, 0.035, 0, 0.02, curve: :linear, gm: false)
+        freq = n.freq * (bump * 0.7 + 1)
+        fenv = n.env(0.001, 0.07, 0, 0.04, gm: false)
+        amp = n.env(0.001, 0.16, 0, 0.05, gm: false) * (n.velocity * 0.4 + 0.6)
+        saw = freq.tone.ramp.lp4((2 ** (fenv * 2)) * 420, resonance: 0.3)
+        ((saw * 0.7 + freq.tone) * amp * 1.6).softclip(0.4, 0.95)
+      else
+        bump = n.env(0.0005, 0.015, 0, 0.01, curve: :linear, gm: false)
+        freq = n.freq * (bump * 0.15 + 1)
+        fenv = n.env(0.001, 0.12, 0.3, 0.05, gm: false)
+        amp = n.env(0.002, 0.18, 0.55, 0.06, gm: false) * (n.velocity * 0.4 + 0.6)
+        saw = freq.tone.ramp.lp4((2 ** (fenv * 1.5)) * 380, resonance: 0.25)
+        ((saw * 1.1 + freq.tone) * amp * 1.3).softclip(0.4, 0.95) * 0.65 # (longer notes; 4.5 dB above the tom version in the groove)
+      end
     }.duck(small_talk_ghost_kick) * 0.55
   end
 
@@ -321,9 +384,12 @@ module MB::Sound
   # commands.  Returns the clips.  +crush_mix+ and +air+ are the talking
   # bass's crusher share and waveshaped high end (+round1: true+ for the
   # first round's bass), +pad_lead+ the pad's lead (0.3 of its attack:
-  # the maintainer's default, 2026-10-12),
-  # +drive+ the gain in dB into the master limiter.
-  def self.small_talk(perform: false, seed: 2, crush_mix: 0.15, air: 0.4, round1: false, skew: 0.9, pad_lead: 0.3.attack, drive: 4.0)
+  # the maintainer's default, 2026-10-12), +sub_harmonics+ the levels of
+  # the sub's 2nd and 3rd harmonics, +bong_tom+ the groove bass's old
+  # tom-like sound, +drive+ the gain in dB into the master limiter and
+  # +ceiling+ its true-peak ceiling in dBTP.
+  def self.small_talk(perform: false, seed: 2, crush_mix: 0.15, air: 0.4, round1: false, skew: 0.9, pad_lead: 0.3.attack,
+                      sub_harmonics: [0.2, 0.1], bong_tom: false, drive: SMALL_TALK_DRIVE, ceiling: SMALL_TALK_CEILING)
     c = small_talk_clips
     k = small_talk_kits
     bpm 125
@@ -340,7 +406,7 @@ module MB::Sound
     master { |mix|
       glued = mix.filter(:highpass, cutoff: knob(:air), quality: 0.8)
         .compress(threshold: -16, ratio: 2, knee: 8, attack: 0.02, release: 0.2)
-      (glued * drive.db).limit(ceiling: -1, release: 0.08)
+      (glued * drive.db).limit(ceiling: ceiling, release: 0.08)
     }
 
     track(:drums) { |kit|
@@ -354,9 +420,8 @@ module MB::Sound
       # room between them comes up
       beat.compress(threshold: -26, ratio: 4, attack: 0.003, release: 0.08, makeup: 8, mix: 0.3)
     }
-    track(:bong) { |clip| small_talk_bong(clip) }
-    track(:talk) { |clip| small_talk_bass(clip, cutoff: knob(:cut), sub: knob(:sub), crush_mix: crush_mix, air: air, skew: skew, round1: round1) }
-    track(:dive) { |clip| small_talk_dive(clip) }
+    track(:bong) { |clip| small_talk_bong(clip, tom: bong_tom) }
+    track(:talk) { |clip| small_talk_bass(clip, cutoff: knob(:cut), sub: knob(:sub), crush_mix: crush_mix, air: air, skew: skew, round1: round1, sub_harmonics: sub_harmonics) }
     track(:chant) { |clip| small_talk_chant(clip, send: knob(:space), feedback: knob(:echo)) }
     track(:answer) { |clip| small_talk_chant(clip, level: 0.55) }
     track(:pad, lead: pad_lead) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 1100, release: 2)) * 0.4 }
@@ -368,8 +433,8 @@ module MB::Sound
     # close to the scheduler's half-bar lookahead (0.96 s), and a scene
     # that swaps clips keeps the graph instead of rebuilding it
     scene :intro, drums: k[:intro], talk: c[:bar], cut: 16000, air: 20, sub: 1
-    scene :groove, drums: k[:groove], bong: c[:bong], talk: c[:bar]
-    scene :tease, drums: k[:tease], talk: c[:talk], cut: [3500, from: 700, over: 8, curve: :smooth], sub: 0
+    scene :groove, drums: k[:groove], bong: bong_tom ? c[:bong_tom] : c[:bong], talk: c[:bar]
+    scene :tease, drums: k[:tease], talk: c[:talk_tease], cut: [3500, from: 700, over: 8, curve: :smooth], sub: 0
     scene :drop, drums: k[:drop], talk: c[:talk], boom: c[:boom], cut: 16000, sub: 1
     scene :pickup, drums: k[:pickup], talk: c[:talk_ghost], boom: c[:boom]
     scene :breakdown, drums: k[:cut], pad: c[:pad], chant: c[:chant], talk: c[:bar], air: [220, over: 1.beat], space: 0.3, echo: 0.3
@@ -380,7 +445,7 @@ module MB::Sound
     scene :callback, drums: k[:pickup], talk: c[:talk_ghost2], answer: c[:answer], boom: c[:boom]
     scene :outro, drums: k[:outro], talk: c[:talk_ghost], cut: [350, over: 8, curve: :smooth]
     scene :tail, drums: k[:tail]
-    scene :riser, riser: c[:bar], dive: c[:dive], others: :keep # a fill: adds the riser and the dive
+    scene :riser, riser: c[:bar], others: :keep # a fill: adds the riser
 
     small_talk_performance(seed: seed) if perform
     c
@@ -441,7 +506,15 @@ module MB::Sound
       air: [0.4, Float, '-a', 'Talking bass waveshaped high end (0 for none)', 0.0..2.0],
       round1: [false, 'The first round\'s talking bass (crush 0.4, no midrange cut, air, or squeeze)'],
       skew: [0.9, Float, '-k', 'Talking bass LFO skew (rising fraction; 0.5 a plain triangle)', 0.01..0.99],
-      drive: [4.0, Float, '-D', 'Gain in dB into the master limiter', -20.0..20.0],
-    ) { |p| small_talk(perform: true, seed: p.seed, crush_mix: p.crush_mix, air: p.air, round1: p.round1, skew: p.skew, drive: p.drive) }
+      sub_harmonics: [0.2, Float, '-H', 'Sub 2nd harmonic level (the 3rd is half of it; 0 for a pure sine)', 0.0..1.0],
+      bong_tom: [false, 'The groove bass\'s old tom-like sound (round 2)'],
+      drive: [SMALL_TALK_DRIVE, Float, '-D', 'Gain in dB into the master limiter', -20.0..20.0],
+      ceiling: [SMALL_TALK_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
+    ) { |p|
+      small_talk(
+        perform: true, seed: p.seed, crush_mix: p.crush_mix, air: p.air, round1: p.round1, skew: p.skew,
+        sub_harmonics: [p.sub_harmonics, p.sub_harmonics / 2], bong_tom: p.bong_tom, drive: p.drive, ceiling: p.ceiling
+      )
+    }
   end
 end

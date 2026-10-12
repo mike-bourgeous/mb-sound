@@ -17,7 +17,7 @@ RSpec.describe('bin/songs/small_talk.rb') do
     expect(form.to_ruby).to include('callback 8', 'pickup2 8', 'gap 1')
   end
 
-  it 'plays the drop: a talking bass ducked by the kick, through a limiter at -1 dBFS' do
+  it 'plays the drop: a talking bass ducked by the kick, limited at the master ceiling' do
     talk = tmp_path('talk.flac')
     MB::Sound.render(talk, bars: 2) do
       MB::Sound.small_talk
@@ -44,7 +44,24 @@ RSpec.describe('bin/songs/small_talk.rb') do
     end
     data = MB::Sound.read(full)
     peak = data.map { |c| c.abs.max }.max
-    expect(peak).to be <= -1.db + 1e-6
-    expect(peak).to be > -3.db
+    expect(peak).to be <= MB::Sound::SMALL_TALK_CEILING.db + 1e-6
+    expect(peak).to be > (MB::Sound::SMALL_TALK_CEILING - 2).db
+  end
+
+  it 'dives only held notes: the tease ends on one bar-long G1, and the hook never dives' do
+    tease = MB::Sound::SMALL_TALK_TEASE
+    expect(tease.length).to eq(8)
+    last = tease.events.max_by(&:start)
+    expect([last.start, last.length, last.value]).to eq([7, 1, MB::Sound::G1.number])
+
+    render = ->(dive) {
+      path = tmp_path("hook_#{dive}.flac")
+      MB::Sound.render(path, bars: 2) do
+        MB::Sound.bpm 125
+        MB::Sound.bg :t, MB::Sound.small_talk_bass(MB::Sound::SMALL_TALK_HOOK, dive: dive), fade: 0
+      end
+      MB::Sound.read(path)[0]
+    }
+    expect(render.(48)).to eq(render.(0))
   end
 end
