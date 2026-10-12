@@ -38,8 +38,9 @@ module MB
       # The other fields:
       # - +jump_residual+: the rest of a band-limited phase jump's step still
       #   to be added to coming samples (a DFloat), or nil.
-      # - +last_freq+, +last_width+: frequency (Hz) and warp width of the
-      #   last sample played, where a jump between buffers is measured.
+      # - +last_freq+, +last_width+, +last_pivot+: frequency (Hz), warp
+      #   width, and warp pivot (from a pivot node; nil for a constant) of
+      #   the last sample played, where a jump between buffers is measured.
       # - +seed+, +draws+: the random phase generator (see Tone#rnd) as its
       #   seed and the number of numbers drawn, so it can be rebuilt
       #   exactly; nil seed for none.
@@ -54,7 +55,7 @@ module MB
       class State
         FIELDS = [
           :phase, :blep, :blit, :sync, :sync_ring, :pulses, :noise,
-          :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended, :table, :feedback,
+          :jump_residual, :last_freq, :last_width, :last_pivot, :seed, :draws, :reset_ended, :table, :feedback,
         ].freeze
 
         attr_accessor(*FIELDS)
@@ -79,6 +80,7 @@ module MB
           @jump_residual = nil
           @last_freq = 0.0
           @last_width = nil
+          @last_pivot = nil
           @seed = nil
           @draws = 0
           @rng = nil
@@ -150,6 +152,7 @@ module MB
             jump_residual: @jump_residual&.to_a,
             last_freq: @last_freq,
             last_width: @last_width,
+            last_pivot: @last_pivot,
             seed: @seed,
             draws: @draws,
             reset_ended: @reset_ended,

@@ -357,7 +357,8 @@ module MB
               op.width.is_a?(Const) ? 1 : 0,
               op.gain.nil? ? 0 : (op.gain.is_a?(Const) ? 1 : 2),
               op.fast ? 1 : 0,
-              op.scan.is_a?(Const) ? op.scan.value : 0
+              op.scan.is_a?(Const) ? op.scan.value : 0,
+              tone.plan_pivot
             )
 
             @objects << [tone, state, op.frequency.is_a?(Const) ? op.frequency.value : nil, width_value].freeze

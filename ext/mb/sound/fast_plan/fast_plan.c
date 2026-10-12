@@ -381,7 +381,7 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 // FastSynth.oscillate_bl through mb_bl_oscillate on one segment, with the
 // state Arrays read and written as ruby_oscillate_bl does.
 static void synth_segment(enum bl_wave wt, float *out, size_t length,
-		const struct mb_signal *f, const struct mb_signal *p, const struct mb_signal *w,
+		const struct mb_signal *f, const struct mb_signal *p, const struct mb_signal *w, const struct mb_signal *o,
 		double adv, double g, double off, double lo, double hi, _Bool dc, VALUE phase_state, VALUE bl_state)
 {
 	Check_Type(bl_state, T_ARRAY);
@@ -396,7 +396,7 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 	st.prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
 	st.primed = NUM2INT(rb_ary_entry(bl_state, 3));
 
-	mb_bl_oscillate(wt, out, length, f, p, w, adv, g, off, lo, hi, dc, &st);
+	mb_bl_oscillate(wt, out, length, f, p, w, o, adv, g, off, lo, hi, dc, &st);
 
 	rb_ary_store(phase_state, 0, rb_float_new(st.phi));
 	if (length > 0) {
@@ -440,7 +440,7 @@ static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, dou
  * from sc: freq, pm, width, gain, advance, random advance, gain (#at),
  * offset, fade lo, fade hi, remove DC, has width, gain mode (0 none, 1
  * scalar, 2 register), fast shapes (Plan.precision :fast:
- * vec_sine_segment), scan.  The object is [tone, state, frequency value,
+ * vec_sine_segment), scan, the warp's pivot (a constant; cycles).  The object is [tone, state, frequency value,
  * width value].  The wavetable kernel asks the tone for its table at the
  * start of the block and after each reset (Tone#plan_wavetable: key zones
  * are picked there).  See Tone#sample_c and #sample_segments for the steps.
@@ -462,6 +462,7 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	int gain_mode = (int)s[12];
 	_Bool fast = s[13] != 0;
 	double scan_s = s[14];
+	double pivot_s = s[15];
 	if (fast && (wave != OSC_SINE || kernel != TONE_NAIVE || rndadv != 0)) rb_raise(rb_eArgError, "Fast plan tones are naive sines without noise only");
 
 	_Bool complex_out = R->c[dst];
@@ -501,9 +502,10 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 			tone_signal(&p, R, pr, pm_s, start);
 
 			if (kernel == TONE_SYNTH) {
+				struct mb_signal o = { .scalar = pivot_s, .ptr = NULL, .step = 0 };
 				tone_signal(&w, R, wr, has_width ? width_s : 0.5, start);
 				float *seg = out + start;
-				synth_segment((enum bl_wave)wave, seg, len, &f, &p, &w, adv, g, off, lo, hi, dc, phase_state, bl_state);
+				synth_segment((enum bl_wave)wave, seg, len, &f, &p, &w, &o, adv, g, off, lo, hi, dc, phase_state, bl_state);
 				add_residual(tone, state, seg, len, g);
 			} else if (kernel == TONE_WAVETABLE) {
 				struct mb_signal sw;

@@ -20,6 +20,8 @@ struct bl_breakpoint {
 	double dv;  // value after minus value before (moving forward)
 	double ds;  // slope after minus slope before, per cycle
 	double vr;  // value just after (at the breakpoint itself)
+	double x;   // the shape phase rotated by the pivot (0 at the pivot, 0.5 at the middle knee)
+	double u;   // the shape phase (exact, for evaluating either side)
 };
 
 enum bl_wave {
@@ -44,6 +46,74 @@ static inline double bl_half_mean(enum bl_wave wt)
 		default: return 0.0;
 	}
 }
+// The default warp pivot of each shape (MB::Sound::BandLimit::PIVOTS): a
+// triangle turns around its low point, so its warp is a true skewed
+// triangle; the rest around 0.
+static inline double bl_default_pivot(enum bl_wave wt)
+{
+	return wt == BL_TRIANGLE ? 0.75 : 0.0;
+}
+
+// A pivot wrapped to 0...1, or 0 if it isn't finite (BandLimit.wrap_pivot).
+static inline double bl_wrap_pivot(double o)
+{
+	if (!isfinite(o)) {
+		return 0.0;
+	}
+	o -= floor(o);
+	return o >= 1.0 ? 0.0 : o;
+}
+
+// The integral of +wt+ from 0 to +u+ (0...1; BandLimit.integral).
+static inline double bl_integral(enum bl_wave wt, double u)
+{
+	switch (wt) {
+		case BL_RAMP:
+			return u < 0.5 ? u * u : (1.0 - u) * (1.0 - u);
+
+		case BL_SQUARE:
+			return u < 0.5 ? u : 1.0 - u;
+
+		case BL_TRIANGLE:
+			if (u < 0.25) {
+				return 2.0 * u * u;
+			} else if (u < 0.75) {
+				return 2.0 * u - 2.0 * u * u - 0.25;
+			}
+			return 2.0 * u * u - 4.0 * u + 2.0;
+
+		case BL_SINE:
+			return (1.0 - cos(u * (2.0 * M_PI))) / (2.0 * M_PI);
+
+		case BL_PARABOLA:
+			if (u < 0.5) {
+				double x = 1.0 - 4.0 * u;
+				return u + x * x * x / 12.0 - 1.0 / 12.0;
+			} else {
+				double x = 4.0 * u - 3.0;
+				return x * x * x / 12.0 - u + 11.0 / 12.0;
+			}
+
+		default:
+			return 0.0;
+	}
+}
+
+// The average of +wt+'s first half from pivot +o+ (o to o + 0.5), so a
+// warped shape's DC offset is this times (2w - 1); bl_half_mean at pivot 0
+// (BandLimit.half_mean).
+static inline double bl_half_mean_pivot(enum bl_wave wt, double o)
+{
+	if (o == 0) {
+		return bl_half_mean(wt);
+	}
+	double h = o + 0.5;
+	if (h >= 1.0) {
+		h -= 1.0;
+	}
+	return 2.0 * (bl_integral(wt, h) - bl_integral(wt, o));
+}
+
 // The naive waveform at phase +u+ (cycles, 0..1); same shapes as
 // osc_sample.  At a breakpoint this is the value after it (approaching from
 // above); with +left+ it is the value before it (approaching from below,
@@ -158,23 +228,110 @@ static inline double bl_warp(double p, double w)
 	return p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w));
 }
 
-// Fills +bp+ with the breakpoints of +wt+ warped by width +w+ (positions in
-// phase; jumps in value and in slope per cycle of phase), returning how
-// many there are.  Points with no jump are left out unless +all+ (the sync
-// kernel's delayed segments can jump where the shape's formula changes).
-static inline int bl_breakpoints(enum bl_wave wt, double w, struct bl_breakpoint *bp, _Bool all)
+// The warp turning around pivot +o+ (not 0): the phase rotated by -o,
+// warped, and rotated back, so the knees sit at o and o + w where the
+// shape's phase is o and o + 0.5 (BandLimit.warp).
+static inline double bl_warp_pivot(double p, double w, double o)
 {
-	double cand[BL_MAX_BREAKPOINTS];
-	int nc = bl_candidates(wt, cand);
+	double x = p - o;
+	if (x < 0) {
+		x += 1.0;
+	}
+	double u = x < w ? x * (0.5 / w) : 0.5 + (x - w) * (0.5 / (1.0 - w));
+	u += o;
+	if (u >= 1.0) {
+		u -= 1.0;
+	}
+	return u;
+}
+
+// The candidate breakpoints of +wt+ warped around pivot +o+ as shape phases
+// +u+ and rotated phases +x+ (0 at the pivot knee, 0.5 at the middle knee,
+// exact; a shape breakpoint within 1e-12 of a knee is on it), returning how
+// many there are (BandLimit.pivot_candidates).  At pivot 0, bl_candidates
+// with x = u.
+static inline int bl_pivot_candidates(enum bl_wave wt, double o, double *u, double *x)
+{
+	if (o == 0) {
+		int n = bl_candidates(wt, u);
+		for (int j = 0; j < n; j++) {
+			x[j] = u[j];
+		}
+		return n;
+	}
+
+	int n = 0;
+	switch (wt) {
+		case BL_RAMP:
+			u[n++] = 0.5;
+			break;
+
+		case BL_SQUARE:
+			u[n++] = 0.0;
+			u[n++] = 0.5;
+			break;
+
+		case BL_TRIANGLE:
+			u[n++] = 0.25;
+			u[n++] = 0.75;
+			break;
+
+		default:
+			break;
+	}
+
+	_Bool has0 = 0, has_half = 0;
+	for (int j = 0; j < n; j++) {
+		double xj = u[j] - o;
+		if (xj < 0) {
+			xj += 1.0;
+		}
+		if (fabs(xj - 0.5) < 1e-12) {
+			xj = 0.5;
+		}
+		if (xj < 1e-12 || xj > 1.0 - 1e-12) {
+			xj = 0.0;
+		}
+		x[j] = xj;
+		has0 |= xj == 0.0;
+		has_half |= xj == 0.5;
+	}
+	if (!has0) {
+		u[n] = o;
+		x[n++] = 0.0;
+	}
+	if (!has_half) {
+		double h = o + 0.5;
+		if (h >= 1.0) {
+			h -= 1.0;
+		}
+		u[n] = h;
+		x[n++] = 0.5;
+	}
+
+	return n;
+}
+
+// Fills +bp+ with the breakpoints of +wt+ warped by width +w+ around pivot
+// +o+ (positions in phase; jumps in value and in slope per cycle of phase),
+// returning how many there are.  Points with no jump are left out unless
+// +all+ (the sync kernel's delayed segments can jump where the shape's
+// formula changes).
+static inline int bl_breakpoints(enum bl_wave wt, double w, struct bl_breakpoint *bp, _Bool all, double o)
+{
+	double cand[BL_MAX_BREAKPOINTS], cx[BL_MAX_BREAKPOINTS];
+	int nc = bl_pivot_candidates(wt, o, cand, cx);
 	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
 	int n = 0;
 
 	for (int j = 0; j < nc; j++) {
 		double ub = cand[j];
 		double ul = ub == 0.0 ? 1.0 : ub; // approaching from below
+		double x = cx[j];
+		double xl = x == 0.0 ? 1.0 : x;
 
-		double kr = ub < 0.5 ? k1 : k2;
-		double kl = ul <= 0.5 ? k1 : k2;
+		double kr = x < 0.5 ? k1 : k2;
+		double kl = xl <= 0.5 ? k1 : k2;
 
 		double vr = bl_shape(wt, ub, 0);
 		double dv = vr - bl_shape(wt, ul, 1);
@@ -184,11 +341,44 @@ static inline int bl_breakpoints(enum bl_wave wt, double w, struct bl_breakpoint
 			continue;
 		}
 
-		double pos = ub < 0.5 ? ub * (2.0 * w) : w + (ub - 0.5) * (2.0 * (1.0 - w));
-		bp[n++] = (struct bl_breakpoint){ pos, dv, ds, vr };
+		double pos = x < 0.5 ? x * (2.0 * w) : w + (x - 0.5) * (2.0 * (1.0 - w));
+		if (o != 0) {
+			pos += o;
+			if (pos >= 1.0) {
+				pos -= 1.0;
+			}
+		}
+		bp[n++] = (struct bl_breakpoint){ pos, dv, ds, vr, x, ub };
 	}
 
 	return n;
+}
+
+// Whether phase +p+ is in the first half of a warp with width +w+ around
+// pivot +o+ (not 0; the right side of a knee on it), returned, and the
+// shape's phase there in *u, exact on the breakpoints +bp+ (rounding the
+// rotation there could land on the wrong side of a jump;
+// BandLimit.pivot_side).
+static inline _Bool bl_pivot_side(double w, double o, double p, const struct bl_breakpoint *bp, int nbp, double *u)
+{
+	for (int j = 0; j < nbp; j++) {
+		if (bp[j].pos == p) {
+			*u = bp[j].u;
+			return bp[j].x < 0.5;
+		}
+	}
+
+	double x = p - o;
+	if (x < 0) {
+		x += 1.0;
+	}
+	_Bool first = x < w;
+	double uu = (first ? x * (0.5 / w) : 0.5 + (x - w) * (0.5 / (1.0 - w))) + o;
+	if (uu >= 1.0) {
+		uu -= 1.0;
+	}
+	*u = uu;
+	return first;
 }
 
 // If moving from phase +e+ by +d+ cycles (|d| < 1, either direction) crosses
@@ -351,12 +541,14 @@ struct mb_bl_state {
 /*
  * The band-limited oscillator loop of FastSynth.oscillate_bl (see
  * ruby_oscillate_bl in fast_synth.c for the parameters), on +length+
- * samples of +out+, with signal inputs +freqsig+, +pmsig+, and +wsig+
- * (width; a scalar of 0.5 for none), updating *st.  Shared with the plan
- * executor (fast_plan.c), so both run the same code.
+ * samples of +out+, with signal inputs +freqsig+, +pmsig+, +wsig+ (width;
+ * a scalar of 0.5 for none), and +osig+ (the warp's pivot in cycles; a
+ * scalar of 0 for none), updating *st.  Shared with the plan executor
+ * (fast_plan.c), so both run the same code.
  */
 static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		const struct mb_signal *freqsig, const struct mb_signal *pmsig, const struct mb_signal *wsig,
+		const struct mb_signal *osig,
 		double adv, double g, double off, double lo, double hi, _Bool dc, struct mb_bl_state *st)
 {
 	double phi = st->phi;
@@ -380,10 +572,17 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 	size_t wstep = wsig->step;
 	w = bl_clamp_width(w);
 
-	double half_mean = bl_half_mean(wt);
+	// The pivot setting, and the pivot in use (0 at width 0.5, where the
+	// warp is the identity)
+	const float *optr = osig->ptr;
+	size_t ostep = osig->step;
+	double op = bl_wrap_pivot(optr ? optr[0] : osig->scalar);
+	double o = w == 0.5 ? 0.0 : op;
+
+	double half_mean = bl_half_mean_pivot(wt, o);
 
 	struct bl_breakpoint bp[BL_MAX_BREAKPOINTS];
-	int nbp = bl_breakpoints(wt, w, bp, 0);
+	int nbp = bl_breakpoints(wt, w, bp, 0, o);
 
 	// Warp factors, recomputed when the width changes (the same values as
 	// bl_warp; at width 0.5 the warp is skipped, which is exact)
@@ -400,11 +599,17 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		if (pmptr) {
 			pm = pmptr[i * pmstep];
 		}
-		if (wptr) {
-			double new_w = bl_clamp_width(wptr[i * wstep]);
-			if (new_w != w) {
+		if (wptr || optr) {
+			double new_w = wptr ? bl_clamp_width(wptr[i * wstep]) : w;
+			if (optr) {
+				op = bl_wrap_pivot(optr[i * ostep]);
+			}
+			double new_o = new_w == 0.5 ? 0.0 : op;
+			if (new_w != w || new_o != o) {
 				w = new_w;
-				nbp = bl_breakpoints(wt, w, bp, 0);
+				o = new_o;
+				half_mean = bl_half_mean_pivot(wt, o);
+				nbp = bl_breakpoints(wt, w, bp, 0, o);
 				k1 = 0.5 / w;
 				k2 = 0.5 / (1.0 - w);
 			}
@@ -425,7 +630,15 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 			e = bp[snapped].pos;
 			v = bp[snapped].vr;
 		} else {
-			v = bl_shape(wt, w == 0.5 ? e : (e < w ? e * k1 : 0.5 + (e - w) * k2), 0);
+			double u;
+			if (w == 0.5) {
+				u = e;
+			} else if (o == 0) {
+				u = e < w ? e * k1 : 0.5 + (e - w) * k2;
+			} else {
+				u = bl_warp_pivot(e, w, o);
+			}
+			v = bl_shape(wt, u, 0);
 		}
 
 		// Edges between the previous sample and this one: usually found

@@ -108,7 +108,7 @@ module ToneReferenceCases
     'apulse' => -> { render(1760.hz.apulse(0.25).at(0.5)) },
     'pulse_dc' => -> { render(220.hz.pulse(0.1, dc: true).at(0.5)) },
     'pwm_node' => -> { render(220.hz.pwm(30.hz.lfo.at(0.05..0.95)).square.at(0.5)) },
-    'skew_triangle' => -> { render(440.hz.triangle.skew(0.1).at(0.5)) },
+    'skew_triangle' => -> { render(440.hz.triangle.skew(0.1, pivot: 0).at(0.5)) }, # pivot: 0 since osc-env-1 (2026-10-12): the triangle warp as recorded
     'sine_pwm' => -> { render(220.hz.sine.pwm(0.2).at(0.5)) },
     'ramp_pwm' => -> { render(330.hz.ramp.pwm(0.7).at(0.5)) },
     'parabola_pwm' => -> { render(330.hz.parabola.pwm(0.3).at(0.5)) },

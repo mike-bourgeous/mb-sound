@@ -104,6 +104,23 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
       }
     end
 
+    it 'matches warp pivots: skewed triangles (default pivot), explicit pivots, and resets' do
+      plan_compare {
+        w = src.new(seed: 3, scale: 0.4, offset: 0.5)
+        trig = src.new(kind: :impulses, at: (0..8000).step(53).to_a)
+        fm(1, 700).tone.triangle.skew(w) + fm(2, 500).tone.atriangle.skew(0.9) +
+          fm(3, 300).tone.sine.pwm(0.2, pivot: 0.3) + fm(4, 400).tone.ramp.pwm(w, pivot: -0.4, dc: true) +
+          fm(5, 900).tone.square.pwm(0.3, pivot: 0.1).reset(trig, to: 0.2) +
+          fm(6, 200).tone.triangle.skew(0.8, pivot: 0)
+      }
+    end
+
+    it 'leaves a tone with a pivot node unplanned' do
+      tone = 300.hz.triangle.skew(0.7, pivot: src.new(seed: 1))
+      expect(tone.plan_unsupported_reason).to match(/pivot/)
+      expect(300.hz.triangle.skew(0.7, pivot: 0.2).plan_unsupported_reason).to be_nil
+    end
+
     it 'matches resets of a warped shape at audio rate' do
       plan_compare {
         trig = src.new(kind: :impulses, at: (0..8000).step(37).to_a)

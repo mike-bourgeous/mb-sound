@@ -25,7 +25,7 @@ module MB
                 advance compute_ruby fm_feedback_amount fm_feedback_gain frequency last_freq noise_seed output_gain
                 phase phi period period_samples random_advance reset_input reset_to sample_c sample_ruby state
                 sync_source table timeline to_midi to_note wave_type wavelength amplitude amplitude_set range seed
-                phase_mod scan
+                phase_mod scan pivot warp_pivot
               ],
             },
             'MB::Sound::Pitch' => {

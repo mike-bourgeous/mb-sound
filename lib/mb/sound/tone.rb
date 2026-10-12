@@ -159,6 +159,17 @@ module MB
       # The phase warp width (see #pwm), or nil.
       attr_reader :width
 
+      # The phase warp's pivot given to #pwm (cycles, a number or node), or
+      # nil for the shape's default (see #warp_pivot).
+      attr_reader :pivot
+
+      # The pivot the warp turns around (see #pwm): the one given to #pwm,
+      # else the shape's default (BandLimit::PIVOTS; 0 for wavetables and
+      # complex shapes).
+      def warp_pivot
+        @pivot.nil? ? BandLimit::PIVOTS.fetch(@wave_type, 0.0) : @pivot
+      end
+
       # The sync pulse source (see #sync), or nil.
       attr_reader :sync_source
 
@@ -446,6 +457,7 @@ module MB
         @band_limit = true
         @lfo = false
         @width = nil
+        @pivot = nil
         @keep_dc = false
         @sync_source = nil
         @soft_sync = false
@@ -740,14 +752,28 @@ module MB
 
       # Warps the phase so the first half of the waveform plays over +width+
       # of each cycle and the second half over the rest: pulse width
-      # modulation for every shape.  A square becomes a pulse (see #pulse), a
-      # triangle a skewed triangle (towards a saw near 0 or 1), a ramp a saw
-      # with a kink, and a sine an asymmetric sine (like Casio's phase
-      # distortion).  +width+ is a number from 0 to 1 (0.5 is no change) or a
-      # graph node, read every sample (clamped to BandLimit::MIN_WIDTH..(1 -
-      # MIN_WIDTH)).  Band-limited shapes stay band-limited (including the
-      # corners the warp adds to sines and parabolas).  Only ramp, square,
-      # triangle, sine, and parabola can be warped.
+      # modulation for every shape.  A square becomes a pulse (see #pulse)
+      # high for +width+ of each cycle, a triangle a skewed triangle rising
+      # for +width+ of each cycle (towards a falling saw near 0 and a rising
+      # one near 1), a ramp a saw with a kink, and a sine an asymmetric sine
+      # (like Casio's phase distortion).  +width+ is a number from 0 to 1
+      # (0.5 is no change) or a graph node, read every sample (clamped to
+      # BandLimit::MIN_WIDTH..(1 - MIN_WIDTH)).  Band-limited shapes stay
+      # band-limited (including the corners the warp adds to sines and
+      # parabolas).  Only ramp, square, triangle, sine, and parabola can be
+      # warped.
+      #
+      # The warp turns around a pivot: the shape's phase where its "first
+      # half" starts (cycles; see BandLimit.warp).  Each shape has its own
+      # (BandLimit::PIVOTS): a triangle pivots on its low point (0.75), so
+      # its halves are its rising and falling slopes, the others on 0.
+      # +pivot:+ (cycles, a number or a graph node read every sample, wrapped
+      # to 0...1) moves it: `triangle.skew(0.9, pivot: 0)` is the triangle
+      # warp from before 2026-10-12 (split at its zero crossings: a slow
+      # positive hump and a quick negative dip), and a moving pivot sweeps
+      # where a sine's or ramp's kink falls.  Not for wavetables or complex
+      # shapes (their warp always pivots on 0), and a pivot node keeps the
+      # tone out of plans.
       #
       # A warped waveform's DC offset (e.g. 2 * width - 1 for a pulse) is
       # removed, like the AC-coupled output of an analog synth, so sweeping
@@ -758,13 +784,18 @@ module MB
       #     play 110.hz.pwm(0.5.hz.lfo.at(0.1..0.9)).square.at(-12.db)   # classic PWM
       #     play 110.hz.triangle.skew(0.1).at(-12.db)                    # nearly a saw
       #     play C2.sine.pwm(adsr(0.01, 0.3, 0.2, 0.3).at(0.5..0.05))   # CZ-style sweep
-      def pwm(width, dc: false, clean: nil)
+      #     play 110.hz.triangle.skew(0.9, pivot: 0).at(-12.db)          # the old triangle warp
+      def pwm(width, dc: false, clean: nil, pivot: nil)
         unless width.nil? || width.is_a?(Numeric) || width.respond_to?(:sample)
           raise ArgumentError, "Width must be nil, a Numeric, or a graph node (got #{width.inspect})"
+        end
+        unless pivot.nil? || (pivot.is_a?(Numeric) && pivot.real?) || pivot.respond_to?(:sample)
+          raise ArgumentError, "Pivot must be nil, a real number of cycles, or a graph node (got #{pivot.inspect})"
         end
 
         configure do
           @width = fixup_source(width)
+          @pivot = pivot.is_a?(Numeric) ? pivot.to_f : fixup_source(pivot)
           @keep_dc = !!dc
           @clean = !!clean unless clean.nil?
         end
@@ -1613,8 +1644,9 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain = get_upstream_inputs(count)
+        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = get_upstream_inputs(count)
         return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
+        return nil if pivot_missing?(pivot)
 
         state = @state
         if @ports
@@ -1629,17 +1661,18 @@ module MB
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan, fb, fb_gain) do |out, f, ph, w, sc, fbs, fgs|
-            kernel_c(out, f, ph, w, nil, sc, fbs, fgs)
+          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan, fb, fb_gain, pivot: pivot) do |out, f, ph, w, sc, fbs, fgs, pv|
+            kernel_c(out, f, ph, w, nil, sc, fbs, fgs, pivot: pv)
           end
         else
-          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain)
+          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain, pivot: pivot)
           add_jump_residual(buf) if state.jump_residual
         end
         apply_output_gain(buf, out_gain) if out_gain
 
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!
       end
@@ -1650,33 +1683,37 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain = get_upstream_inputs(count)
+        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = get_upstream_inputs(count)
         return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
+        return nil if pivot_missing?(pivot)
 
-        compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain)
+        compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot)
       end
 
       # The samples of #sample_ruby from inputs already read (the inputs
       # are as #get_upstream_inputs returns them).  Also the Ruby mirror of
-      # the plan layer's tone op (Plan::Op::Tone).
-      def compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain)
+      # the plan layer's tone op (Plan::Op::Tone).  +pivot+ is the warp's
+      # pivot (nil: #warp_pivot, a constant in plans).
+      def compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain, pivot = nil)
+        pivot = warp_pivot if pivot.nil? && warped?
         pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan, fb, fb_gain) do |out, f, ph, w, sc, fbs, fgs|
-            kernel_ruby(out, f, ph, w, nil, sc, fbs, fgs)
+          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan, fb, fb_gain, pivot: pivot) do |out, f, ph, w, sc, fbs, fgs, pv|
+            kernel_ruby(out, f, ph, w, nil, sc, fbs, fgs, pivot: pv)
           end
         else
-          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain)
+          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain, pivot: pivot)
           add_jump_residual(buf)
         end
         buf.inplace * out_gain if out_gain # Numo: the mirror of FastArithmetic.scale
 
         @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
         @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        @state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!
       end
@@ -1713,6 +1750,7 @@ module MB
         return 'ports (wraps or increment) in use' if @ports
         return 'a timeline (tempo tone)' if @lock
         return 'sync' if @sync_source
+        return 'a pivot node (pwm pivot:)' if warped? && @pivot.respond_to?(:sample)
 
         k = kernel
         return "the #{k} kernel" unless Plan::Op::Tone::KERNELS.include?(k)
@@ -1765,6 +1803,12 @@ module MB
       # For plans: starts the tone as its first #sample would.
       def plan_start
         start unless @started
+      end
+
+      # For plans (Plan::Op::Tone in C): the warp's pivot (cycles; a
+      # constant, since a pivot node keeps the tone out of plans).
+      def plan_pivot
+        warped? ? warp_pivot.to_f : 0.0
       end
 
       # For plans (Plan::Op::Tone in C): the phase jump of a reset on the
@@ -1821,6 +1865,7 @@ module MB
           phase: @phase,
           phase_mod: @phase_mod,
           width: @width,
+          pivot: @pivot.respond_to?(:sample) ? @pivot : nil,
           sync: @sync_source,
           reset: @reset,
           reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
@@ -1906,7 +1951,7 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync_source}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" pivot=#{make_source_name(@pivot)}" if @width && !@pivot.nil?}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync_source}"
       end
 
       def to_s_graphviz
@@ -2024,7 +2069,7 @@ module MB
       # phase modulation +phase_mod+ (cycles): by default those of the last
       # sample played and no phase modulation (a jump between buffers), or
       # those of the reset sample (a reset input; see #sample_segments).
-      def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil)
+      def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil, pivot: nil)
         state = @state
         if kernel == :reset_sync || clean_table?
           # A hard sync event on the jump sample (see #reset_sync?,
@@ -2052,9 +2097,13 @@ module MB
         return unless played && @sync_source.nil? && synth_kernel? && !blit?
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
+        pivot = state.last_pivot if pivot.nil?
+        pivot = warp_pivot if pivot.nil?
+        o = pivot.is_a?(Numeric) ? BandLimit.pivot_for(@wave_type, w, pivot) : 0.0
+        points = o == 0 ? nil : BandLimit.breakpoints(@wave_type, w, true, o)
         pm = phase_mod
-        v0, s0 = jump_from_shape(w, pm == 0 ? before : BandLimit.wrap(before + pm), freq > 0)
-        v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm))
+        v0, s0 = jump_from_shape(w, pm == 0 ? before : BandLimit.wrap(before + pm), freq > 0, o, points)
+        v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm), o, points)
         inc = freq * advance
         bl = band_limit_setting
         k = bl.is_a?(Range) ? BandLimit.fade(inc.abs / advance, bl.begin.to_f, bl.end.to_f) : 1.0
@@ -2074,13 +2123,15 @@ module MB
       # after it (the side it came from; see BandLimit.side_crossing).
       # Corners without a jump in value (triangles) keep the slope after
       # them, which measured slightly closer to the ideal.
-      def jump_from_shape(w, p, forward)
-        points = BandLimit.breakpoints(@wave_type, w)
+      # +o+ is the warp's pivot, with +all+ its .breakpoints(..., true, o)
+      # (nil at pivot 0).
+      def jump_from_shape(w, p, forward, o = 0.0, all = nil)
+        points = BandLimit.breakpoints(@wave_type, w, false, o)
         j = BandLimit.snap(points, p)
-        return BandLimit.sync_shape(@wave_type, w, p) unless j && points[j][1] != 0
+        return BandLimit.sync_shape(@wave_type, w, p, o, all) unless j && points[j][1] != 0
 
         pos, dv, ds, _ = points[j]
-        v, s = BandLimit.sync_shape(@wave_type, w, pos)
+        v, s = BandLimit.sync_shape(@wave_type, w, pos, o, all)
         forward ? [v - dv, s - ds] : [v, s]
       end
 
@@ -2160,6 +2211,11 @@ module MB
         @state.jump_residual = n < residual.length ? residual[n..].dup : nil
       end
 
+      # True if the warp's pivot node (see #pwm) ended.
+      def pivot_missing?(pivot)
+        warped? && @pivot.respond_to?(:sample) && pivot.nil?
+      end
+
       # True if an input needed for the next samples has ended.
       def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil, fb = 0, fb_gain = 1, out_gain = 1)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync_source && pulses.nil?) ||
@@ -2236,7 +2292,7 @@ module MB
       # #kernel_ruby) on a view of the output buffer with the matching
       # slices of the frequency, phase modulation, and width inputs, and
       # returns the samples.  Returns a view of the output buffer.
-      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil, fb = nil, fb_gain = nil)
+      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil, fb = nil, fb_gain = nil, pivot: nil)
         state = @state
         state.frame_segments = [] if @ports
 
@@ -2251,7 +2307,7 @@ module MB
             out = @osc_buf[start...stop].inplace!
             result = yield(
               out, f, slice_input(phase, start, stop), slice_input(width, start, stop), slice_input(scan, start, stop),
-              slice_input(fb, start, stop), slice_input(fb_gain, start, stop)
+              slice_input(fb, start, stop), slice_input(fb_gain, start, stop), slice_input(pivot, start, stop)
             )
             out[true] = result unless result.equal?(out)
             add_jump_residual(out)
@@ -2260,6 +2316,7 @@ module MB
           break if stop == count
 
           jump_args = { freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop) }
+          jump_args[:pivot] = input_at(pivot, stop) if pivot
           jump_args[:scan] = input_at(scan, stop) if table_kernel?
           if locks&.include?(stop)
             target = @start_cycles + jump_phase[stop]
@@ -2318,7 +2375,7 @@ module MB
 
       # Runs the C kernel for the current settings (see #kernel) into +out+
       # (an inplace view of the output buffer), returning the samples.
-      def kernel_c(out, freq, phase, width, pulses, scan = nil, fb = nil, fb_gain = nil)
+      def kernel_c(out, freq, phase, width, pulses, scan = nil, fb = nil, fb_gain = nil, pivot: nil)
         state = @state
         case kernel
         when :feedback
@@ -2362,7 +2419,7 @@ module MB
           buf = MB::Sound::FastSynth.oscillate_sync(
             out, @wave_type, freq, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine, nil, pivot
           ).inplace!
           state.phase[0] = state.sync[0]
           buf
@@ -2372,7 +2429,7 @@ module MB
           buf = MB::Sound::FastSynth.oscillate_sync(
             out, @wave_type, freq, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, false, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target, pivot
           ).inplace!
           sync_next_phase
           buf
@@ -2383,7 +2440,7 @@ module MB
         when :synth
           MB::Sound::FastSynth.oscillate_bl(
             out, @wave_type, freq, phase, @advance, @gain, @offset,
-            state.phase, state.blep, @fade_band[0], @fade_band[1], width, !@keep_dc
+            state.phase, state.blep, @fade_band[0], @fade_band[1], width, !@keep_dc, pivot
           ).inplace!
         when :phasor
           MB::FastSound.phasor(out, freq, @advance, @random_advance, state.phase, nil, state.noise).inplace!
@@ -2396,7 +2453,7 @@ module MB
 
       # Ruby mirror of #kernel_c: computes out.length samples and stores
       # them in +out+ (an inplace view of the output buffer), returning it.
-      def kernel_ruby(out, freq_table, phase_table, width, pulses, scan = nil, fb = nil, fb_gain = nil)
+      def kernel_ruby(out, freq_table, phase_table, width, pulses, scan = nil, fb = nil, fb_gain = nil, pivot: nil)
         count = out.length
         state = @state
 
@@ -2438,7 +2495,7 @@ module MB
           values = BandLimit.sync_ruby(
             count, @wave_type, freq_table, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine, nil, pivot
           )
           state.phase[0] = state.sync[0]
         when :reset_sync
@@ -2447,7 +2504,7 @@ module MB
           values = BandLimit.sync_ruby(
             count, @wave_type, freq_table, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, false, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target, pivot
           )
           sync_next_phase
         when :blit
@@ -2455,7 +2512,7 @@ module MB
         when :synth
           values = BandLimit.oscillate_ruby(
             count, @wave_type, freq_table, phase_table, @advance, @gain, @offset,
-            state.phase, state.blep, *@fade_band, width, !@keep_dc
+            state.phase, state.blep, *@fade_band, width, !@keep_dc, pivot
           )
         when :phasor
           phases, _increments = phases_ruby(freq_table, count)
@@ -2614,8 +2671,10 @@ module MB
           @fade_band = band_limit_fade
           if wavetable?
             check_wavetable
+            check_table_pivot
             :wavetable
           elsif complex_table?
+            check_table_pivot
             :wavetable
           elsif phasor?
             :phasor
@@ -2634,6 +2693,17 @@ module MB
             :naive
           end
         end
+      end
+
+      # Wavetables and complex shapes always warp around 0 (see #pwm): a
+      # pivot given to #pwm is an error (in live mode a warning, and the
+      # pivot is ignored).
+      def check_table_pivot
+        return if @pivot.nil? || !warped?
+
+        MB::Sound.live_error(ArgumentError.new(
+          "pwm's pivot: works on ramp, square, triangle, sine, and parabola tones, not on #{wave_name} (wavetables and complex shapes warp around 0)"
+        ))
       end
 
       # The main output for GraphNode::Ports.
@@ -2768,6 +2838,13 @@ module MB
           min_length = width.length if width && width.length < min_length
         end
 
+        pivot = @width.nil? ? nil : warp_pivot
+        if pivot.respond_to?(:sample)
+          pivot = pivot.sample(count)
+          pivot = nil if pivot&.empty?
+          min_length = pivot.length if pivot && pivot.length < min_length
+        end
+
         pulses = @sync_source
         if pulses.respond_to?(:sample)
           pulses = pulses.sample(count)
@@ -2835,6 +2912,7 @@ module MB
           freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)
           phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
           width = width[0...min_length] if width&.is_a?(Numo::NArray)
+          pivot = pivot[0...min_length] if pivot&.is_a?(Numo::NArray)
           pulses = pulses[0...min_length] if pulses&.is_a?(Numo::NArray)
           resets = resets[0...min_length] if resets&.is_a?(Numo::NArray)
           targets = targets[0...min_length] if targets&.is_a?(Numo::NArray)
@@ -2848,7 +2926,7 @@ module MB
 
         # One Array reused by every call (destructured by the callers), not
         # a new one per buffer
-        ret = (@upstream_inputs ||= Array.new(13))
+        ret = (@upstream_inputs ||= Array.new(14))
         ret[0] = min_length
         ret[1] = freq
         ret[2] = phase
@@ -2862,6 +2940,7 @@ module MB
         ret[10] = fb
         ret[11] = fb_gain
         ret[12] = out_gain
+        ret[13] = pivot
         ret
       end
 
