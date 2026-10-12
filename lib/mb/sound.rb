@@ -34,6 +34,7 @@ require_relative 'sound/fast_dynamics'
 require_relative 'sound/fast_lofi'
 require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
+require_relative 'sound/fast_recipe'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'

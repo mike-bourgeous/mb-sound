@@ -75,6 +75,71 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       expect(invs[0].result).to be_a(MB::Sound::GraphNode::Multiplier)
     end
 
+    context 'when reading build block locals' do
+      around do |ex|
+        old = recipe.locals_mode
+        ex.run
+      ensure
+        recipe.locals_mode = old
+      end
+
+      # A TracePoint makes YJIT discard all of its compiled code, so the
+      # default must never enable one (scene-build: render spikes after
+      # every graph built while playing)
+      it 'reads them from the block frame without a TracePoint by default' do
+        expect(recipe.locals_mode).to eq(:frame)
+        expect(TracePoint).not_to receive(:new)
+        s = MB::Sound.synth(midi_path, voices: 2, spares: 0) { |v| base = v.hz.saw; later = base * v.gate; later }
+        invs = recipe.call_of(s).invocations
+        expect(invs.map { |i| i.locals.keys & [:base, :later] }).to all(eq([:base, :later]))
+        expect(invs.map { |i| i.locals[:later] }).to eq(invs.map(&:result))
+        expect(invs.map(&:frame)).to all(be_nil)
+      end
+
+      # The TracePoint also fired when blocks nested inside the build block
+      # returned, so their locals leaked into the build block's: here the
+      # feedback block's `input` named the oscillator, printing
+      # `input = ...` and `input.feedback { |fb, input| ... }`
+      it "finds the build block's own locals, as the TracePoint did, without nested blocks' locals" do
+        build = -> {
+          MB::Sound.seed(5)
+          MB::Sound.synth(midi_path, voices: 2, spares: 1) { |v, i|
+            osc = v.hz.ramp.filter(:lowpass, cutoff: 500 + 100 * i)
+            env = v.amp_env(0.01, 0.1, 0.5, 0.2)
+            wet = osc.feedback { |fb, input| inner = fb.delay(2.ms) * 0.3; input + inner }
+            wet * env
+          }
+        }
+        recipe.locals_mode = :trace
+        traced = build.call
+        recipe.locals_mode = :frame
+        framed = build.call
+
+        names = ->(s) { recipe.call_of(s).invocations.map { |i| i.locals.keys.sort } }
+        expect(names.(framed)).to eq(names.(traced).map { |n| n - [:fb, :input, :inner] })
+        expect(names.(framed).flatten).to include(:osc, :env, :wet)
+        loop_names = ->(s) {
+          recipe.call_of(s).invocations.map { |i| recipe.call_of(i.locals[:wet], i).invocations.map { |li| li.locals.keys.sort } }
+        }
+        expect(loop_names.(framed)).to eq(loop_names.(traced))
+        expect(loop_names.(framed).flatten).to include(:inner)
+
+        code = framed.to_ruby
+        expect(code).to include('osc = v.hz.ramp', 'wet = osc.feedback { |fb, input|', 'inner = fb.delay(2.ms) * 0.3')
+        expect(code).to eq(traced.to_ruby.gsub('input = v.hz', 'osc = v.hz').gsub('input.feedback', 'osc.feedback'))
+      end
+
+      it 'names nothing for blocks made from methods' do
+        expect(recipe.block_iseq(method(:puts).to_proc)).to be_nil
+        expect(recipe.block_iseq(:abs.to_proc)).to be_nil
+        expect(recipe.block_iseq(proc { 1 })).to be_a(RubyVM::InstructionSequence)
+      end
+
+      it 'rejects unknown modes' do
+        expect { recipe.locals_mode = :other }.to raise_error(ArgumentError, /:frame or :trace/)
+      end
+    end
+
     it 'keeps the arity and parameters of wrapped build blocks' do
       seen = nil
       220.hz.ramp.feedback { |fb| seen = fb; fb.delay(1.ms) * 0.5 }

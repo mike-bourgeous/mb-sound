@@ -250,9 +250,48 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
         transport.advance(1) # simulate the block taking longer than a bar
       end
     end
+    expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/bar 2 ran \d+ ms and finished 9\d\d ms after its time; its changes landed late/)
     expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/Skipped the commands scheduled for bar 2/)
     run(96000)
     expect(session.players.keys).to eq([:a])
+    expect(session.late_blocks.map { |b| b[:description] }).to eq(['bar 2'])
+    expect(session.late_blocks[0][:late]).to be_between(0.9, 1.0) # the block ran half a bar early, then took a bar
+  end
+
+  describe 'lookahead' do
+    let(:scheduler) { MB::Sound::Session::Scheduler.new(session, realtime: true, raise_errors: true) }
+
+    it 'is half a bar when rendering, whatever blocks take' do
+      expect(session.lookahead).to eq(:auto)
+      expect(session.lookahead_bars).to eq(1/2r)
+      session.instance_variable_get(:@scheduler).send(:note_duration, 3.0)
+      expect(session.lookahead_bars).to eq(1/2r)
+      session.lookahead = 2
+      expect(session.lookahead_bars).to eq(1/2r)
+    end
+
+    it 'grows with slow blocks in a realtime session, up to 2 bars' do
+      bar = transport.bar_length # 2 seconds at 120 BPM
+      expect(scheduler.lookahead_whole_notes).to eq(bar / 2)
+      scheduler.send(:note_duration, 0.2) # 2 * 0.2 + 0.1 < 1 s
+      expect(scheduler.lookahead_whole_notes).to eq(bar / 2)
+      scheduler.send(:note_duration, 0.7) # 2 * 0.7 + 0.1 = 1.5 s
+      expect(scheduler.lookahead_whole_notes).to be_within(1e-9).of(bar * 3 / 4)
+      scheduler.send(:note_duration, 5)
+      expect(scheduler.lookahead_whole_notes).to eq(bar * 2)
+      17.times { scheduler.send(:note_duration, 0.01) } # the slow ones age out
+      expect(scheduler.lookahead_whole_notes).to eq(bar / 2)
+    end
+
+    it 'can be a fixed number of bars or a Duration' do
+      scheduler.send(:note_duration, 5)
+      scheduler.lookahead = 1
+      expect(scheduler.lookahead_whole_notes).to eq(transport.bar_length)
+      scheduler.lookahead = 1.beat
+      expect(scheduler.lookahead_whole_notes).to eq(1/4r)
+      expect { scheduler.lookahead = 0 }.to raise_error(ArgumentError, /Lookahead/)
+      expect { scheduler.lookahead = :soon }.to raise_error(ArgumentError, /Lookahead/)
+    end
   end
 
   it 'prints errors from scheduled blocks and keeps playing' do
@@ -294,6 +333,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       sleep 0.02 until MB::Sound.players.include?(:b) || MB::U.clock_now > deadline
       expect(MB::Sound.players.keys).to include(:b)
       expect(thread.name).to eq('MB::Sound::Session scheduler')
+      expect(thread.priority).to eq(MB::Sound::Session::Scheduler::THREAD_PRIORITY)
     end
   end
 end
