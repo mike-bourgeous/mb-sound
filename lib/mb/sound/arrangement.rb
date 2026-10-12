@@ -113,15 +113,23 @@ module MB
       # its chance (weighted gotos and picks; MB::Sound.next_seed by default, so takes
       # replay the same choices).  +warm_up+ builds every track's patch once
       # first (see #warm_up): :auto (the default) for a realtime session
-      # with YJIT that isn't playing yet, true, or false.  Returns the
-      # Form::Playback.
+      # with YJIT that isn't playing yet, true, or false (`flow(warm_up:
+      # false) { }` in the console); when it runs it prints one line
+      # ("Warmed up 12 tracks in 2.0 s").  Returns the Form::Playback.
       def play_form(form, at: nil, on: nil, in: nil, seed: nil, warm_up: :auto)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
 
         # Compile the tracks' builds before the first scene change needs them
+        raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
         if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle? && defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?)
-          self.warm_up
+          t0 = MB::U.clock_now
+          result = self.warm_up
+          if result && !result.empty?
+            built = result.count { |_, (_, how)| how == :built }
+            puts format("\e[2mWarmed up %d track%s in %.1f s (%sskip with warm_up: false)\e[0m",
+              result.length, result.length == 1 ? '' : 's', MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '')
+          end
         end
 
         seed ||= MB::Sound.next_seed

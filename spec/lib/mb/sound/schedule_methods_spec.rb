@@ -242,20 +242,77 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
     expect(session.tuning.frequency_of(69)).to eq(432)
   end
 
-  it 'skips the commands of a block that finishes after its time' do
-    within do
-      MB::Sound.bg(:a, 1.constant)
-      MB::Sound.at_bar(2) do
-        MB::Sound.bg(:b, 2.constant)
-        transport.advance(1) # simulate the block taking longer than a bar
+  describe 'blocks that finish after their time' do
+    after { MB::Sound.live = false }
+
+    # A block at bar 2 (run half a bar early) that takes longer than a bar,
+    # collecting one command and then (if +direct+) making a change itself
+    def late_block(direct: false)
+      within do
+        MB::Sound.bg(:a, 1.constant)
+        MB::Sound.at_bar(2) do
+          MB::Sound.bg(:b, 2.constant)
+          transport.advance(1) # simulate the block taking longer than a bar
+          session.add(3.constant, name: :c, start_time: MB::Sound::Session.context[:time]) if direct
+        end
       end
     end
-    expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/bar 2 ran \d+ ms and finished 9\d\d ms after its time; its changes landed late/)
-    expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/Skipped the commands scheduled for bar 2/)
-    run(96000)
-    expect(session.players.keys).to eq([:a])
-    expect(session.late_blocks.map { |b| b[:description] }).to eq(['bar 2'])
-    expect(session.late_blocks[0][:late]).to be_between(0.9, 1.0) # the block ran half a bar early, then took a bar
+
+    it 'raise LateBlock in scripts and specs, skipping the commands collected for their time' do
+      late_block
+      expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(
+        /bar 2 raised MB::Sound::Session::Scheduler::LateBlock: Scheduled block for bar 2 ran \d+ ms and finished 9\d\d ms after its time \(lookahead 0.50 bars\); its commands were skipped/
+      )
+      run(96000)
+      expect(session.players.keys).to eq([:a])
+      expect(session.late_blocks.map { |b| b[:description] }).to eq(['bar 2'])
+      expect(session.late_blocks[0][:late]).to be_between(0.9, 1.0) # the block ran half a bar early, then took a bar
+    end
+
+    it 'warn in live mode, still skipping the collected commands' do
+      MB::Sound.live = true
+      late_block
+      expect(MB::Sound).to receive(:warn).with(/LateBlock: Scheduled block for bar 2 .* its commands were skipped/)
+      run(96000)
+      expect(session.players.keys).to eq([:a])
+    end
+
+    context 'with changes made directly after their time' do
+      it 'raise LateChange in scripts and specs before the change lands' do
+        strict = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true)
+        MB::Sound::Session.with_context(session: strict) do
+          MB::Sound.bg(:a, 1.constant)
+          MB::Sound.at_bar(2) do
+            transport.advance(1)
+            strict.add(3.constant, name: :c, start_time: MB::Sound::Session.context[:time])
+          end
+        end
+        expect { Array.new(120) { strict.process_buffer } }.to raise_error(MB::Sound::Session::LateChange, /bg :c for 2:1 would land 9\d\d ms late: the scheduled block for bar 2 was still running/)
+        expect(strict.players.keys).to eq([:a])
+        expect(strict.journal.changes.map(&:subject)).to eq([:a])
+      ensure
+        strict&.close
+      end
+
+      it 'land late with a warning in live mode' do
+        MB::Sound.live = true
+        late_block(direct: true)
+        warnings = []
+        allow(MB::Sound).to receive(:warn) { |m| warnings << m }
+        data = run(96000 * 2)
+        expect(warnings.grep(/LateChange: bg :c for 2:1 would land 9\d\d ms late/).length).to eq(1)
+        expect(warnings.grep(/LateBlock/).length).to eq(1)
+        expect(session.players.keys).to contain_exactly(:a, :c)
+        expect(data.to_a.uniq).to include(4) # 1 + 3 once :c landed
+      end
+
+      it 'land now as usual for a block whose time had already come' do
+        within do
+          MB::Sound.at_bar(1) { session.add(3.constant, name: :c, start_time: 0) }
+        end
+        expect(run(800).to_a.uniq).to eq([3])
+      end
+    end
   end
 
   describe 'lookahead' do

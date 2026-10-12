@@ -360,5 +360,27 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(set).not_to receive(:warm_up)
       within { set.play_form(MB::Sound::Form.build { one 1 }) }
     end
+
+    it 'runs when a form starts with warm_up: true, printing one line' do
+      expect { within { set.play_form(MB::Sound::Form.build { one 1; two 1 }, warm_up: true) } }.to output(
+        /Warmed up 2 tracks in \d+\.\d s \(skip with warm_up: false\)/
+      ).to_stdout
+    end
+
+    it 'says how many tracks were only built' do
+      lfo = 2.hz.lfo
+      set.track(:shared) { |c| c.tone.ramp * lfo }
+      set.scene(:three, shared: a1)
+      expect { within { set.play_form(MB::Sound::Form.build { three 1 }, warm_up: true) } }.to output(
+        /Warmed up 3 tracks in \d+\.\d s \(1 only built, reaching nodes made outside their patch; skip with warm_up: false\)/
+      ).to_stdout
+    end
+
+    it 'is skipped with warm_up: false from the console flow' do
+      allow(session).to receive(:realtime?).and_return(true)
+      expect(set).not_to receive(:warm_up)
+      within { MB::Sound.flow(warm_up: false) { one 1 } }
+      expect { within { MB::Sound.flow(warm_up: :maybe) { one 1 } } }.to raise_error(ArgumentError, /warm_up: must be/)
+    end
   end
 end
