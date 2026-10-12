@@ -175,6 +175,29 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'monitors and the strip' do
+    it "mutes and solos a track's monitor with the track" do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 3.5r])
+      setup_lead(s)
+      d = perform(s, {
+        0 => ['arm :lead', 'bg :other, 0.constant, on: :now'],
+        40 => ['mute :lead'],      # frame 32000
+        60 => ['unmute :lead'],    # 48000
+        80 => ['solo :other'],     # 64000
+        100 => ['solo :lead'],     # 80000
+        120 => ['unsolo', 'mute :"lead/live"'], # 96000: the monitor's own flag still works
+      }, 104000)
+      expect(d[31999]).to eq(60)
+      expect(d[32000 + 240]).to eq(0) # after the 5 ms declick
+      expect(d[48000 + 240]).to eq(60)
+      expect(d[64000 + 240]).to eq(0)
+      expect(d[80000 + 240]).to eq(60)
+      expect(d[96000 + 240]).to eq(0)
+      expect(s.muted?(:lead)).to eq(false)
+    end
+  end
+
   describe 'console names' do
     names = %i[rec record rec_audio record_audio stop_rec_audio stop_recording_audio stop_rec stop_recording arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
 

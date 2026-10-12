@@ -5,7 +5,8 @@ module MB
       # player's strip (contract K7: fade, then gain, then mute/solo).
       #
       # Mutes and solos belong to player names, so a graph replacing a muted
-      # one starts muted.  They apply right away with a short declick ramp
+      # one starts muted.  An armed track's monitor player follows its
+      # track's mute and solo.  They apply right away with a short declick ramp
       # (DECLICK_SECONDS), or at a launch point (+:at+) and over a +:fade+
       # in bars, through the change queue like every other change.
       #
@@ -148,9 +149,14 @@ module MB
         end
 
         # True if a player named +name+ should be heard.  Called with
-        # @render_lock held.
+        # @render_lock held.  An armed track's monitor (:"lead/live"; see
+        # Arrangement::Recording) follows its track's flags as well as its
+        # own: `mute :lead` silences the keyboard through :lead's patch
+        # too, and `solo :lead` keeps it (omnibus6, agreed 2026-10-12).
         def audible_unlocked?(name)
-          !@muted.include?(name) && (@soloed.empty? || @soloed.include?(name))
+          track = Arrangement::Recording.monitored_track(name)
+          return false if @muted.include?(name) || (track && @muted.include?(track))
+          @soloed.empty? || @soloed.include?(name) || (!track.nil? && @soloed.include?(track))
         end
 
         # Ramps every player whose mute/solo level should change, starting
