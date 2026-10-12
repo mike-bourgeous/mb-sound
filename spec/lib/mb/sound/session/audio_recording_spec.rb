@@ -69,10 +69,10 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
     s = new_session
     s.add(0.5.constant, name: :dc, on: :now)
     MB::Sound::Session.with_context(session: s) do
-      expect { MB::Sound.rec(path) }.to output(/Recording the master bus to .*take\.flac/).to_stdout
+      expect { MB::Sound.rec_audio(path) }.to output(/Recording the master bus to .*take\.flac/).to_stdout
     end
     render(s, 4800, [800])
-    MB::Sound::Session.with_context(session: s) { MB::Sound.stop_rec }
+    MB::Sound::Session.with_context(session: s) { MB::Sound.stop_rec_audio }
     render(s, 1600, [800])
     s.recordings.first.wait
 
@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
     expect(data[0].min).to be_within(1e-4).of(0.25)
 
     MB::Sound::Session.with_context(session: s) do
-      expect { MB::Sound.rec(path) }.to raise_error(ArgumentError, /exists/)
+      expect { MB::Sound.rec_audio(path) }.to raise_error(ArgumentError, /exists/)
     end
   end
 

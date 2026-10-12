@@ -73,6 +73,54 @@ module MB
             n = @owner.channel_count
             n == 1 ? @owner.to_s : "#{@owner} output #{@index + 1} of #{n}"
           end
+
+          # Plan layer (see MB::Sound::Plan): a one-channel compander
+          # (compress, expand, noise_gate, duck, compand) is a plan op
+          # (Plan::Op::Dynamics); the owner says why others aren't (see
+          # Dynamics#plan_unsupported_output).
+          include Plan::Describable
+
+          def plan_describe(p)
+            @owner.plan_describe_output(p, self)
+          end
+
+          def plan_unsupported_reason
+            @owner.plan_unsupported_output(self)
+          end
+
+          # Sidechains are always boundary inputs (another player's kick:
+          # they may end, or come short, independently).
+          def plan_boundary_inputs
+            @owner.sidechain_inputs || []
+          end
+
+          def plan_snapshot
+            @owner.plan_snapshot
+          end
+
+          def plan_restore(snapshot)
+            @owner.plan_restore(snapshot)
+          end
+
+          # Short sidechain and time inputs are padded by the node (see
+          # Dynamics#fit), so a block with one runs unfused (Region#gather).
+          def plan_pads_inputs?
+            true
+          end
+
+          # A sidechain or time input that ended reads as 0 from then on:
+          # this block runs unfused, and the node stays unfused afterwards.
+          def plan_input_ended(_source)
+            region = @plan_region || @plan_member
+            region&.installation&.exclude(self, 'a sidechain or time input ended')
+            :replay
+          end
+
+          # True while the node holds delayed samples to flush after its
+          # input ends (lookahead; see Plan::Region#prepare).
+          def plan_tail?
+            @owner.latency > 0
+          end
         end
 
         # Shared buffer handling for multichannel dynamics nodes: samples
@@ -268,6 +316,57 @@ module MB
 
         def to_s_graphviz
           "#{graph_node_name || self.class.name.rpartition('::').last}\n#{@description}"
+        end
+
+        # Plan layer: the reason output +output+ can't be a plan op, or nil
+        # (see Output#plan_unsupported_reason).
+        def plan_unsupported_output(output)
+          return "a #{channel_count}-channel #{self.class.name.rpartition('::').last} (its channels run together in one kernel)" if channel_count != 1
+          return 'flushing its delayed tail after its input ended' if @flushing || @ended
+
+          nil
+        end
+
+        # Plan layer: one Plan::Op::Dynamics for +output+ (one channel): its
+        # input, the detector signals (the input, or the sidechain channels
+        # as optional boundary inputs), and the five times in samples.
+        def plan_describe_output(p, output)
+          x = p[output.sources[:input]]
+          sides = @sidechain_inputs ? @sidechain_inputs.map { |s| p.boundary(s, optional: true) } : [x]
+          times = @times.values.map { |src|
+            if src.node?
+              v = p.optional(src.node)
+              src.unit == :seconds ? v * @sample_rate : v
+            else
+              src.constant_samples(@sample_rate)
+            end
+          }
+          plan_params
+          plan_curve
+          p.dynamics(self, x, sides, times)
+        end
+
+        # The transfer curve's segments as the kernel reads them (for the
+        # plan executor, which reads @plan_curve).
+        def plan_curve
+          @plan_curve ||= @transfer.table
+        end
+
+        # #params, kept (the kernel and the plan executor read @params).
+        def plan_params
+          @params ||= params
+        end
+
+        # The detector state, lookahead delay, and flush position (check
+        # mode).
+        def plan_snapshot
+          [@state.to_a, @delay&.to_a, @flushing, @flushed, @ended]
+        end
+
+        def plan_restore(snapshot)
+          state, delay, @flushing, @flushed, @ended = snapshot
+          @state[true] = state
+          @delay[true] = delay if delay
         end
 
         # Settings as the kernel reads them.

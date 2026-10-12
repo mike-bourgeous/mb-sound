@@ -257,6 +257,22 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       end
     end
 
+    it 'fuses as a param into a planned compressor (a knob release time, in check mode)' do
+      old = MB::Sound::Plan.check
+      MB::Sound::Plan.check = :raise
+      begin
+        k = session.knob(:rel, 0.05, range: 0.001..0.5)
+        g = (110.hz.ramp * 0.9).compress(threshold: -20, release: k) * 0.5
+        expect(MB::Sound::Plan.explain(g)).to match(/1 planned region.*param 0: GraphNode::Knob::Reader.*dynamics\(/m)
+        session.add(g, name: :x, on: :now)
+        session.turn(:rel, 0.2, over: 1.beat)
+        d = render(session, 48000, [800, 367])
+        expect(d.abs.max).to be > 0.05
+      ensure
+        MB::Sound::Plan.check = old
+      end
+    end
+
     it 'shares the namespace with tracks and mute groups' do
       session.arrangement.track(:bass) { |c| c.number }
       expect { session.knob(:bass, 1) }.to raise_error(ArgumentError, /already a track/)
@@ -276,6 +292,116 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(k.range).to eq(100.0..9000.0)
       expect(session.knob(:cut)).to equal(k)
       expect { session.knob(:nope) }.to raise_error(ArgumentError, /No knob :nope/)
+    end
+  end
+
+  describe 'graph documents in a Session' do
+    let(:session) { new_session }
+    let(:io) { MB::Sound::GraphIO }
+    let(:doc) {
+      <<~RUBY
+        graph 1, name: "dc"
+        knob :cut, 800.0, range: 100.0..8000.0, curve: :exp, smooth: 0
+        cut * 1
+      RUBY
+    }
+
+    after { session.close }
+
+    it 'registers a loaded document\'s knob when the graph plays, keeping its value' do
+      g = io.load(doc, params: { cut: 1200 })
+      k = io.document_of(g).knob_nodes[:cut][0]
+      expect(k.session).to eq(nil)
+      g.sample(800) # read standalone first: the knob's frames restart at the session's
+      render(session, 1600)
+      session.add(g, name: :x, on: :now)
+      expect(session.knobs[:cut]).to equal(k)
+      expect(session.names.kind(:cut)).to eq(:knob)
+      expect(render(session, 800)[-1]).to eq(1200)
+      session.turn(:cut, 3000)
+      expect(render(session, 800)[0]).to eq(3000)
+    end
+
+    it 'shares one knob between two loads of a document (the session\'s value wins)' do
+      a = io.load(doc)
+      b = io.load(doc, params: { cut: 2000 })
+      session.add(a, name: :a, on: :now)
+      session.add(b * 2, name: :b, on: :now)
+      expect(render(session, 800)[-1]).to eq(800 + 1600)
+      session.turn(:cut, 400)
+      expect(render(session, 800)[-1]).to eq(400 + 800)
+      expect(io.document_of(b).knob_nodes[:cut][0]).to equal(session.knobs[:cut])
+      io.document_of(b)[:cut] = 1000 # Document#set turns the shared knob
+      expect(render(session, 1600)[-1]).to eq(1000 + 2000)
+    end
+
+    it 'joins a knob the console defined' do
+      session.knob(:cut, 500, range: 100..8000, curve: :exp, smooth: 0)
+      session.add(io.load(doc), name: :x, on: :now)
+      expect(render(session, 800)[-1]).to eq(500)
+    end
+
+    it 'sends name collisions through live_error' do
+      session.knob(:cut, 0.5)
+      expect { session.add(io.load(doc), name: :x, on: :now) }.to raise_error(ArgumentError, /doesn't match the session's/)
+
+      s2 = new_session
+      s2.names.claim(:cut, :track)
+      expect { s2.add(io.load(doc), name: :x, on: :now) }.to raise_error(ArgumentError, /already a track/)
+      s2.close
+    end
+
+    it 'keeps the knob standalone in live mode when the name is taken' do
+      session.names.claim(:cut, :group)
+      g = io.load(doc)
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      expect { session.add(g, name: :x, on: :now) }.to output(/already a group/).to_stderr
+      expect(session.knobs).to be_empty
+      expect(render(session, 800)[-1]).to eq(800)
+    end
+
+    it 'registers knobs right away in the console preset command' do
+      path = tmp_path('dc.mbg.rb')
+      File.write(path, doc)
+      g = within(session) { MB::Sound.preset(path) }
+      expect(session.knobs[:cut]).to equal(io.document_of(g).knob_nodes[:cut][0])
+      within(session) { MB::Sound.turn(:cut, 2500) }
+      session.add(g, name: :x, on: :now)
+      expect(render(session, 800)[-1]).to eq(2500)
+
+      # An override of a knob that joins turns the shared knob (journaled, undoable)
+      within(session) { MB::Sound.preset(path, cut: 900) }
+      expect(session.journal.changes.last.kind).to eq(:turn)
+      expect(session.journal.changes.last.data).to eq({ value: 900 })
+      expect(render(session, 800)[-1]).to eq(900)
+      within(session) { MB::Sound.undo(on: :now) }
+      expect(render(session, 800)[-1]).to eq(2500)
+      expect(io.document_of(within(session) { MB::Sound.preset(path, session: false) }).knob_nodes[:cut][0].session).to eq(nil)
+    end
+  end
+
+  describe 'graph document knobs with a controller' do
+    let(:session) { new_session }
+    after { session.close }
+
+    it 'listen to the session MIDI input when they join through Session#add or bg' do
+      ev = MB::Sound::MIDI::Event
+      doc = "graph 1\nknob :cut, 800.0, range: 100.0..6400.0, curve: :exp, cc: 74, takeover: :jump, smooth: 0\ncut * 1\n"
+      session.knob_midi = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.cc(74, 1.0, time: 0.01r), ev.cc(74, 0.5, time: 0.05r)))
+      g = MB::Sound::GraphIO.load(doc)
+      session.add(g, name: :x, on: :now)
+      expect(session.knobs[:cut].listening).not_to be_nil
+      d = render(session, 4800)
+      expect(d[480]).to be_within(1e-3).of(6400)
+      expect(d[-1]).to be_within(1e-3).of(800) # halfway in octaves from 100 to 6400
+
+      # The console's bg attaches it too (the input has a stream, so no live port opens)
+      s2 = new_session
+      s2.knob_midi = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.cc(74, 1.0, time: 0.01r)))
+      within(s2) { MB::Sound.bg(:y, MB::Sound::GraphIO.load(doc)) }
+      expect(s2.knobs[:cut].listening).not_to be_nil
+      expect(render(s2, 4800)[-1]).to be_within(1e-3).of(6400)
+      s2.close
     end
   end
 

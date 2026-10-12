@@ -92,7 +92,13 @@ enum {
 	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
 	OP_TIME_SCALE,// dst, a, sc                  dst = SQ80::TimeScale#time of a: sc [kind (0 velocity, 1 key), seconds, amount]
 	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
+	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
+	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
+	OP_DYNAMICS,  // dst, a, object, sc, nside, side regs..., 5 time regs  dst = GraphNode::Dynamics (one channel) on a (see run_dynamics)
 };
+
+// Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
+enum unary_fn { UN_FLOOR = 0, UN_CEIL, UN_ROUND, UN_LN, UN_LOG2, UN_LOG10, UN_ABS, UN_SIGN_ARG, UN_CABS, UN_CARG, UN_COUNT };
 
 // Event list modes and entry kinds (Plan::EventList)
 enum { EVENTS_HELD = 0, EVENTS_IMPULSES = 1 };
@@ -1006,7 +1012,7 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SHAPE: case OP_NOTE_FREQ:
 			len = 5;
 			break;
-		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
+		case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX: case OP_TAP:
 			len = 4;
 			break;
 		case OP_SVF:
@@ -1015,11 +1021,15 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_FOUR_POLE: case OP_BIQUAD:
 			len = 7;
 			break;
-		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
+		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE: case OP_UNARY:
 			len = 4;
 			break;
 		case OP_SAMPLE_HOLD:
 			len = 5;
+			break;
+		case OP_DYNAMICS:
+			if (pc + 6 > pw->nwords || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
+			len = 6 + (size_t)op[5] + 5;
 			break;
 		case OP_ENVELOPE:
 			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
@@ -1040,7 +1050,7 @@ static void check_op(const int32_t *op, size_t pc, const struct regs *R, long nr
 	float *const *ptrs = R->p;
 	int d = op[1];
 	if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
+	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS) {
 		if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 	}
 	if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
@@ -1165,6 +1175,70 @@ static void run_sample_hold(const int32_t *op, size_t pc, const struct regs *R, 
 	rb_ivar_set(node, id_prev, DBL2NUM(T[n - 1]));
 	rb_ivar_set(node, id_held, DBL2NUM(held));
 	RB_GC_GUARD(node);
+}
+
+// OP_UNARY: a function of each sample as Numo (float32 buffers: C's double
+// floor/ceil/round and fabs, complex hypot and atan2 in double, rounded to
+// float) and FastSound (logf, log2f, log10f) compute it.
+static void run_unary(const int32_t *op, size_t pc, const struct regs *R, size_t n)
+{
+	float *D = R->p[op[1]];
+	const float *A = R->p[op[2]];
+	int fn = op[3];
+	if (fn < 0 || fn >= UN_COUNT) rb_raise(rb_eArgError, "Bad plan unary function %d at word %zu", fn, pc);
+	if (R->c[op[1]] || R->c[op[2]] != (fn == UN_CABS || fn == UN_CARG)) rb_raise(rb_eArgError, "Bad plan unary operand types at word %zu", pc);
+
+	switch (fn) {
+		case UN_FLOOR: for (size_t i = 0; i < n; i++) D[i] = (float)floor((double)A[i]); break;
+		case UN_CEIL: for (size_t i = 0; i < n; i++) D[i] = (float)ceil((double)A[i]); break;
+		case UN_ROUND: for (size_t i = 0; i < n; i++) D[i] = (float)round((double)A[i]); break;
+		case UN_LN: for (size_t i = 0; i < n; i++) D[i] = logf(A[i]); break;
+		case UN_LOG2: for (size_t i = 0; i < n; i++) D[i] = log2f(A[i]); break;
+		case UN_LOG10: for (size_t i = 0; i < n; i++) D[i] = log10f(A[i]); break;
+		case UN_ABS: for (size_t i = 0; i < n; i++) D[i] = (float)fabs((double)A[i]); break;
+		case UN_SIGN_ARG: {
+			// Numo: the sign bits cast to float, times Math::PI cast to float
+			float pi = (float)M_PI;
+			for (size_t i = 0; i < n; i++) {
+				float bit = signbit(A[i]) ? 1.0f : 0.0f;
+				D[i] = bit * pi;
+			}
+			break;
+		}
+		case UN_CABS: for (size_t i = 0; i < n; i++) D[i] = (float)hypot((double)A[2 * i], (double)A[2 * i + 1]); break;
+		case UN_CARG: for (size_t i = 0; i < n; i++) D[i] = (float)atan2((double)A[2 * i + 1], (double)A[2 * i]); break;
+	}
+}
+
+// A real signal of an op: register +r+ (NULL: an optional input that
+// ended, read as 0), or +scalar+ for r = -1.
+static void op_signal(struct mb_signal *s, const struct regs *R, long nregs, int r, double scalar, size_t pc)
+{
+	s->step = 1;
+	if (r >= 0) {
+		if (r >= nregs || R->c[r]) rb_raise(rb_eArgError, "Bad plan signal register at word %zu", pc);
+		s->ptr = R->p[r];
+		s->scalar = 0.0;
+	} else {
+		s->ptr = NULL;
+		s->scalar = scalar;
+	}
+}
+
+// OP_DYNAMICS: dst, a, object, sc, nside, side registers (nside), then
+// DT_COUNT time registers (-1: the scalar sc[k]); object: the
+// GraphNode::Dynamics (see mb_plan_dynamics).
+static void run_dynamics(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan dynamics are real");
+	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan dynamics object at word %zu", pc);
+	if (op[4] < 0 || (size_t)op[4] + 5 > nscalars) rb_raise(rb_eArgError, "Bad plan dynamics scalars at word %zu", pc);
+	long nside = op[5];
+	struct mb_signal in, side[nside], tim[5];
+	op_signal(&in, R, nregs, op[2], 0.0, pc);
+	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, op[6 + k], 0.0, pc);
+	for (long k = 0; k < 5; k++) op_signal(&tim[k], R, nregs, op[6 + nside + k], sc[op[4] + k], pc);
+	mb_plan_dynamics(R->p[op[1]], &in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
 }
 
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
@@ -1356,6 +1430,30 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		case OP_SAMPLE_HOLD:
 			run_sample_hold(op, pc, R, nregs, objects, n);
 			break;
+
+		case OP_UNARY:
+			run_unary(op, pc, R, n);
+			break;
+
+		case OP_DYNAMICS:
+			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
+			run_dynamics(op, pc, R, nregs, sc, nscalars, objects, n);
+			break;
+
+		case OP_TAP: {
+			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tap object at word %zu", pc);
+			VALUE holder = rb_ary_entry(objects, op[3]);
+			Check_Type(holder, T_ARRAY);
+			VALUE buf = rb_ary_entry(holder, 0);
+			VALUE want = cplx[op[2]] ? numo_cSComplex : numo_cSFloat;
+			if (CLASS_OF(buf) != want || !RTEST(nary_check_contiguous(buf)) || RNARRAY_SIZE(buf) < n) {
+				rb_raise(rb_eArgError, "Plan tap buffer must be a contiguous %s of at least %zu samples", cplx[op[2]] ? "SComplex" : "SFloat", n);
+			}
+			float *T = (float *)(nary_get_pointer_for_write(buf) + nary_get_offset(buf));
+			memcpy(T, ptrs[op[2]], n * (cplx[op[2]] ? 2 : 1) * sizeof(float));
+			RB_GC_GUARD(buf);
+			break;
+		}
 
 		case OP_ENVELOPE:
 			if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
@@ -1604,6 +1702,9 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("exp")), INT2NUM(OP_EXP));
 	rb_hash_aset(h, ID2SYM(rb_intern("time_scale")), INT2NUM(OP_TIME_SCALE));
 	rb_hash_aset(h, ID2SYM(rb_intern("sample_hold")), INT2NUM(OP_SAMPLE_HOLD));
+	rb_hash_aset(h, ID2SYM(rb_intern("unary")), INT2NUM(OP_UNARY));
+	rb_hash_aset(h, ID2SYM(rb_intern("tap")), INT2NUM(OP_TAP));
+	rb_hash_aset(h, ID2SYM(rb_intern("dynamics")), INT2NUM(OP_DYNAMICS));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

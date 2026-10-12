@@ -175,6 +175,13 @@ module MB
           end
         end
 
+        # Graph documents' knobs join the session (Session#add does this
+        # too); those with a controller get live MIDI input
+        if sound.is_a?(GraphNode) || sound.is_a?(GraphNode::MultiOutput) || (sound.is_a?(Array) && sound.all? { |s| s.is_a?(GraphNode) || s.is_a?(GraphNode::MultiOutput) })
+          s = Session.current
+          attach_knob_midi(s, s.adopt_knobs(sound))
+        end
+
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
         }
@@ -630,6 +637,19 @@ module MB
       # (except for clipping in integer formats, which the second pass
       # can't undo: leave headroom, as the default -10 dB master gain does).
       #
+      # With +:stems+ (a directory), each player (track) is also written to
+      # its own file there, "<name>.<ext>" (+:stem_format+, else the
+      # extension of +filename+, e.g. 'mp3'): its part of the mix as it
+      # enters the master chain, times the master gain, from the first frame
+      # and padded to the length of the render, so stems line up sample for
+      # sample.  Without master effects they sum to the mix; with them, to
+      # the mix before the chain (see Session::Stems).  +:stem_gain+ scales
+      # every stem (headroom: before a master limiter a part may peak above
+      # full scale, which integer formats clip; the render warns).
+      # +:loudness+ normalizes only the mix file.
+      #
+      #     render('song.flac', bars: 32, stems: 'song_stems') { my_song }
+      #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
@@ -653,13 +673,17 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+        if stems
+          stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
+          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)
+        end
 
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
@@ -706,6 +730,7 @@ module MB
         frames.to_f / rate
 
       ensure
+        session&.stems&.close(session.frame)
         session&.close
       end
 

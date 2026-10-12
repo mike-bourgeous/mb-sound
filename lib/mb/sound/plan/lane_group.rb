@@ -228,6 +228,8 @@ module MB
           k = 0
           while k < lanes.length
             r = @members[lanes[k]]
+            taps = r.program.taps
+            taps.each { |t| t.reserve(count) } unless taps.empty?
             low = r.program.lower
             words ||= low[0]
             nslots = low[3]
@@ -305,6 +307,7 @@ module MB
           @groups = []
 
           buckets = Hash.new { |h, k| h[k] = [] }
+          listed = [] # [installation, region, program]
           @installations.each do |inst|
             inst.rebuild(regroup: false) if inst.stale?
             # Regions of an installation with resamplers may run at different
@@ -320,6 +323,7 @@ module MB
               prog = r.program || r.precompile
               next unless prog
 
+              listed << [inst, r, prog]
               shape = [prog.signature, prog.output_type]
               key = shape
               if seen
@@ -336,11 +340,77 @@ module MB
             @groups << LaneGroup.new(regions)
           end
 
+          # Regions left alone may differ from others only by gains (x vs
+          # x * c): their cores (ScaleMatch) share a bucket, and they are
+          # padded to one shape (only these are looked at, so a Synth's
+          # identical lanes cost nothing more)
+          alone = buckets.each_value.select { |regions| regions.length == 1 }.map(&:first).to_h { |r| [r, true] }.compare_by_identity
+          unless alone.length < 2
+            loose = Hash.new { |h, k| h[k] = [] }
+            cores = {}.compare_by_identity
+            seen = {}.compare_by_identity
+            listed.each do |inst, r, prog|
+              next unless alone.key?(r)
+
+              key, sites = ScaleMatch.core(prog)
+              cores[r] = [key, sites]
+              shape = [key, prog.output_type]
+              if inst.resamples?
+                counts = (seen[inst] ||= Hash.new(0))
+                k = shape + [counts[shape]]
+                counts[shape] += 1
+                shape = k
+              end
+              loose[shape] << r
+            end
+
+            loose.each_value do |regions|
+              next if regions.length < 2
+
+              pad_to_shape(regions, cores)
+              regions.group_by { |r| r.program&.signature }.each do |sig, same|
+                next if sig.nil? || same.length < 2
+
+                @groups << LaneGroup.new(same)
+              end
+            end
+          end
+
           @generations = @installations.map(&:generation)
           self
         end
 
         private
+
+        # Pads the programs of +regions+ (whose cores match; see
+        # ScaleMatch) with `x * 1` where others have gains, so they lower to
+        # the same words.  Each region's own sites count its earlier pads
+        # too, so padding again is stable; if the padded signatures still
+        # differ, the pads are removed again.
+        def pad_to_shape(regions, cores)
+          sigs = regions.map { |r| r.program.signature }
+          return if sigs.uniq.length == 1
+
+          own = regions.to_h { |r| [r, own_sites(r, cores[r][1])] }.compare_by_identity
+          target = Hash.new(0)
+          own.each_value { |s| s.each { |k, n| target[k] = n if n > target[k] } }
+          regions.each do |r|
+            pads = target.to_h { |k, n| [k, n - own[r][k]] }.reject { |_, n| n <= 0 }
+            r.pad!(pads)
+          end
+
+          return if regions.map { |r| r.program&.signature }.compact.uniq.length == 1
+
+          regions.each { |r| r.pad!(nil) }
+        end
+
+        # The gain sites of region +r+'s program without its own pads (the
+        # program's sites count them).
+        def own_sites(r, sites)
+          s = Hash.new(0)
+          sites.each { |k, n| s[k] = n - (r.pads&.[](k) || 0) }
+          s
+        end
 
         def generations_changed?
           return true if @generations.nil?

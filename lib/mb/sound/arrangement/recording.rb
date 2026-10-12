@@ -40,6 +40,14 @@ module MB
           :"#{name}/live"
         end
 
+        # The track whose monitor player is +name+ (see .monitor_name), or
+        # nil if +name+ isn't a monitor's name.
+        def self.monitored_track(name)
+          return nil unless name.is_a?(Symbol)
+          s = name.name
+          s.end_with?('/live') && s.length > 5 ? s[0...-5].to_sym : nil
+        end
+
         # Arms tracks: #record and #capture without names record into
         # them, and (+monitor: true+, the default) each track's patch also
         # plays the live input (MidiInput#stream through a LiveClip) as the
