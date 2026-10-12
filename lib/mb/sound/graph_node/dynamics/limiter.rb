@@ -65,6 +65,11 @@ module MB
             @lookahead + (@true_peak ? TRUE_PEAK_DELAY : 0)
           end
 
+          # Plan layer: limiters stay unfused (see Output#plan_unsupported_reason).
+          def plan_unsupported_output(_output)
+            'a lookahead limiter (its sliding-window kernel is not a plan op yet)'
+          end
+
           # The sidechain (none for limiters).
           def sidechain_inputs
             nil

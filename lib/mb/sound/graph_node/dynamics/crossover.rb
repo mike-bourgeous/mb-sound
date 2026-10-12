@@ -67,6 +67,13 @@ module MB
               { input: @owner.input }
             end
 
+            # Plan layer: a boundary (see #plan_unsupported_reason).
+            include Plan::Describable
+
+            def plan_unsupported_reason
+              'a crossover band (one filter bank computes every band together)'
+            end
+
             def to_s
               lo, hi = @owner.band_edges(@index)
               "Band #{@index + 1} (#{lo ? "#{MB::M.sigfigs(lo, 3)} Hz" : '0'}..#{hi ? "#{MB::M.sigfigs(hi, 3)} Hz" : 'Nyquist'})"

@@ -422,6 +422,55 @@ module MB
             env[@dst] = Numo::SFloat.cast(@part == :real ? env.fetch(@a).real : env.fetch(@a).imag)
           end
         end
+
+        # A function of each sample (GraphNode::UnaryFunction: MathFunction
+        # and ComplexNode's :abs and :arg), giving a real Value, as Numo and
+        # FastSound compute it on float32 buffers.  The mirror runs the
+        # node's own Ruby (UnaryFunction#apply).
+        class Unary < Base
+          # The functions with the C executor's numbers (fast_plan.c's
+          # enum unary_fn) and whether each takes a complex operand.
+          FUNCTIONS = {
+            floor: [0, false],    # (float)floor(x)
+            ceil: [1, false],     # (float)ceil(x)
+            round: [2, false],    # (float)round(x) (halves away from zero)
+            ln: [3, false],       # logf(x)
+            log2: [4, false],     # log2f(x)
+            log10: [5, false],    # log10f(x)
+            abs: [6, false],      # (float)fabs(x)
+            sign_arg: [7, false], # pi for a set sign bit, else 0 (ComplexNode :arg of a real signal)
+            cabs: [8, true],      # (float)hypot(re, im)
+            carg: [9, true],      # (float)atan2(im, re)
+          }.freeze
+
+          attr_reader :a, :function
+
+          def initialize(dst, node, a, function)
+            super(dst, node)
+            id, complex = FUNCTIONS[function]
+            raise ArgumentError, "Unknown unary function #{function.inspect}" unless id
+            raise Unsupported.new(node, "#{function} of a #{a.complex? ? 'complex' : 'real'} signal") unless a.complex? == complex
+            raise ArgumentError, 'A unary op takes a Value' unless a.is_a?(Value)
+
+            @a = a
+            @function = function
+          end
+
+          def operands = [@a]
+          def expression = "#{@function}(#{@a})"
+          def opcode = :unary
+
+          # The executor's function number.
+          def function_id
+            FUNCTIONS.fetch(@function)[0]
+          end
+
+          def run_ruby(env, count)
+            a = env.fetch(@a)
+            a = a[0...count] if a.length > count
+            env[@dst] = Numo::SFloat.cast(@node.apply(a))
+          end
+        end
       end
     end
   end

@@ -122,7 +122,9 @@ RSpec.describe(MemcheckSelection) do
     it 'selects a changed memcheck spec by itself' do
       sel = select('spec/lib/mb/sound/curve_spec.rb')
       expect(sel.extensions).to be_empty
-      expect(sel.specs).to eq(['spec/lib/mb/sound/curve_spec.rb', *MemcheckSelection::ALWAYS].sort)
+      # (memcheck specs added since the map was recorded run in every
+      # selective run until the map is refreshed)
+      expect(sel.specs).to eq(['spec/lib/mb/sound/curve_spec.rb', *MemcheckSelection::ALWAYS, *sel.unmapped_specs].uniq.sort)
     end
 
     it 'selects nothing for unrelated files' do

@@ -182,8 +182,11 @@ module MB
           # For internal use by the plan layer (MB::Sound::Plan::Region): a
           # buffer the next #sample returns instead of reading the Tee, so
           # a region that already read its boundary inputs can run its nodes
-          # unfused on the same data.
+          # unfused on the same data (ENDED replays an ended read: nil).
           attr_accessor :replay
+
+          # A #replay value standing for a read that returned nil.
+          ENDED = Object.new.freeze
 
           def_delegators :@tee, :reset, :original_source
           def_delegators :@reader, :count, :length
@@ -219,7 +222,7 @@ module MB
           def sample(count)
             if (r = @replay)
               @replay = nil
-              return r
+              return r.equal?(ENDED) ? nil : r
             end
 
             raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader

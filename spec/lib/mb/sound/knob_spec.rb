@@ -257,6 +257,22 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       end
     end
 
+    it 'fuses as a param into a planned compressor (a knob release time, in check mode)' do
+      old = MB::Sound::Plan.check
+      MB::Sound::Plan.check = :raise
+      begin
+        k = session.knob(:rel, 0.05, range: 0.001..0.5)
+        g = (110.hz.ramp * 0.9).compress(threshold: -20, release: k) * 0.5
+        expect(MB::Sound::Plan.explain(g)).to match(/1 planned region.*param 0: GraphNode::Knob::Reader.*dynamics\(/m)
+        session.add(g, name: :x, on: :now)
+        session.turn(:rel, 0.2, over: 1.beat)
+        d = render(session, 48000, [800, 367])
+        expect(d.abs.max).to be > 0.05
+      ensure
+        MB::Sound::Plan.check = old
+      end
+    end
+
     it 'shares the namespace with tracks and mute groups' do
       session.arrangement.track(:bass) { |c| c.number }
       expect { session.knob(:bass, 1) }.to raise_error(ArgumentError, /already a track/)

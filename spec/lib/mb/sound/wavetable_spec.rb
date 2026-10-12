@@ -585,4 +585,29 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(w[:basic].to_s).to eq('basic (cycle, 4 frames, 19 levels)')
     end
   end
+
+  describe '#shape_at' do
+    it 'gives exactly the Ruby mirror (#shape_at_ruby) for real, complex, and scanned tables with every interpolation' do
+      r = Random.new(4)
+      tables = [
+        w.from_harmonics(w::Library.saw),
+        w.from_harmonics([1, 0.5], complex: true, size: 64),
+        w.from_harmonics([[1], [0, 1], [0, 0, 1]], size: 32),
+      ]
+      tables.each do |t|
+        w::INTERPOLATIONS.each_key do |interp|
+          [false, true].each do |wrap|
+            40.times do
+              u = r.rand
+              m = [0.0, r.rand * 0.5, r.rand * 0.01].sample(random: r)
+              sc = r.rand * 1.2
+              a = t.shape_at(u, scan: sc, increment: m, interpolation: interp, scan_wrap: wrap)
+              b = t.shape_at_ruby(u, scan: sc, increment: m, interpolation: interp, scan_wrap: wrap)
+              expect(a).to eq(b), "#{interp} u=#{u} m=#{m} scan=#{sc} wrap=#{wrap}"
+            end
+          end
+        end
+      end
+    end
+  end
 end

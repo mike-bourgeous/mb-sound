@@ -2,3 +2,4 @@ fast_plan.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_osc_s
 plan_filters.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_svf.h $(srcdir)/../include/mb_four_pole.h $(srcdir)/plan_filters.h
 plan_biquad.o: $(srcdir)/../include/mb_biquad.h $(srcdir)/plan_filters.h
 plan_wavetable.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_wavetable.h $(srcdir)/plan_filters.h
+plan_dynamics.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_dynamics.h $(srcdir)/plan_filters.h
