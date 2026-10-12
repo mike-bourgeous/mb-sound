@@ -102,9 +102,12 @@ module MB
         #
         #     GraphIO.load('presets/dark_hall.mbg.rb', inputs: { input: mic }, params: { mix: 0.6 })
         #     GraphIO.load(220.hz.ramp.softclip.to_ruby)
-        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil)
+        #
+        # A set document (kind: :set, see SetWriter) loads into +session+
+        # (the current one by default) and returns its Document.
+        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil)
           text, path = read_source(source)
-          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir)
+          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session)
           graph = loader.load
           loader.document.input_objects = inputs.transform_keys(&:to_sym).slice(*loader.document.inputs)
           graph
@@ -134,6 +137,15 @@ module MB
         # files the graph reads (bundles; see .save); without it they raise
         # DumpError (tables) or keep their paths (file names).
         def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+          if graph.is_a?(Arrangement)
+            unless inputs.empty? && params.empty? && options.empty? && kind.nil?
+              raise ArgumentError, 'set documents take no inputs, params, options, or kind'
+            end
+            w = SetWriter.new(graph, name: name, meta: meta, assets: assets, from: from)
+            text = w.to_s
+            w.warnings.uniq.each { |m| warn "#{name || 'set'}: #{m}" } unless assets&.entries&.any?(&:sha256)
+            return text
+          end
           Writer.new(graph, name: name, kind: kind, inputs: inputs, params: params, options: options, from: from, meta: meta, assets: assets).to_s
         end
 
@@ -369,6 +381,10 @@ module MB
       # document's inputs and param overrides given as keywords, e.g.
       # `preset :dark_hall, input: mic, mix: 0.6`.  +trust: :code+ allows
       # runtime blocks outside the safe subset.
+      #
+      # A set document (`save :gig, set`) loads into the current Session:
+      # its tempo, knobs, master chain, tracks, scenes, mute groups, and
+      # flow, returning the Document (`play_form doc.form`, or `go :intro`).
       def preset(name, trust: nil, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
@@ -377,6 +393,12 @@ module MB
         end
 
         doc = GraphIO.parse(path)
+        if doc.kind == :set
+          raise ArgumentError, "a set takes no inputs (got #{inputs_and_params.keys.join(', ')})" unless inputs_and_params.empty?
+          doc = GraphIO.load(path, trust: trust, session: Session.current)
+          puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
+          return doc
+        end
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
         GraphIO.load(path, inputs: inputs, params: params, trust: trust)
@@ -399,6 +421,14 @@ module MB
         end
         all.values.flatten.uniq
       end
+
+      # The set of the current Session (its Arrangement: tracks, scenes,
+      # knobs, flow), for `save :gig, set`.  Also available as
+      # #current_set.
+      def set
+        Session.current.arrangement
+      end
+      alias current_set set
 
       # Registers a runtime block under +name+ for graph documents
       # (`sig.proc(&named_proc(:fold))` saves and loads as that name), or
@@ -425,3 +455,4 @@ require_relative 'graph_io/loader'
 require_relative 'graph_io/trusted_code'
 require_relative 'graph_io/file_guard'
 require_relative 'graph_io/assets'
+require_relative 'graph_io/set_writer'

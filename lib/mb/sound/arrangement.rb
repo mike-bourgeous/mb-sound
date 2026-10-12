@@ -99,9 +99,16 @@ module MB
       end
 
       # Builds a Form from a block (see Form::Builder), with the sections
-      # declared by #section available to bare calls.
+      # declared by #section available to bare calls.  The form is kept as
+      # #last_form (whether or not it plays).
       def build_form(&block)
-        Form.build(sections: sections, &block)
+        Form.build(sections: sections, &block).tap { |f| @mutex.synchronize { @last_form = f } }
+      end
+
+      # The form built last (by `flow`, played or not), or nil.  Set
+      # documents save the playing form, else this one.
+      def last_form
+        @mutex.synchronize { @last_form }
       end
 
       # The form playing (or played last), a Form::Playback, or nil.

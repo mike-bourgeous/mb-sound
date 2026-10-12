@@ -59,10 +59,13 @@ module MB
           #
           # +assets+ (a GraphIO::Assets, for bundles) names files for tables
           # that aren't library tables and for Strings naming sound or MIDI
-          # files.
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
+          # files.  +locals+ ({ object => name }) names objects of the top
+          # level like a build block's locals (set documents print patch
+          # blocks this way).
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil, locals: nil)
             @root = root
             @assets = assets
+            @top_locals = locals
             @given_inputs = inputs
             @seeds = seeds
             @knobs = knobs.transform_keys(&:to_s)
@@ -80,6 +83,14 @@ module MB
           def literal(v)
             reset! unless @names
             leaf(v, '')
+          end
+
+          # The text split into [variable lines, the final expression's
+          # lines] (without the header comments), for writers that put the
+          # expression into a statement of their own (set documents).
+          def parts
+            to_s
+            @parts
           end
 
           # The Ruby text.
@@ -114,7 +125,7 @@ module MB
             @warnings = []
             @fixmes = []
             @template = nil
-            @locals = nil
+            @locals = @top_locals
             @scope = nil
             @seed_warning = false
             @output_owner = {}.compare_by_identity
@@ -137,6 +148,7 @@ module MB
             roots = @root.is_a?(Array) ? @root : [@root]
             lines = emit_scope(nil, roots, [], '')
             final = Recipe.graph_object?(@root) ? expr(@root, top: true) : value(@root)
+            @parts = [finish_lines(lines.join("\n").split("\n")), finish_lines(final.split("\n"))]
             lines << final
             body = finish_lines(lines.join("\n").split("\n"))
 
@@ -556,9 +568,14 @@ module MB
             nil
           end
 
+          public
+
+          # The text of Hash key +k+ (`name:` or `"odd name":`).
           def key_text(k)
             k.is_a?(Symbol) && k.to_s.match?(/\A[a-z_][a-zA-Z0-9_]*[?!]?\z/) ? "#{k}:" : "#{k.to_s.inspect}:"
           end
+
+          private
 
           # The seed drawn by +c+ if it should be printed (see the class
           # description), else nil.
@@ -793,6 +810,7 @@ module MB
             when MB::Sound::Wavetable then wavetable_text(v)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
+            when MB::Sound::Length::Attack then v.to_ruby
             when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
             when Data

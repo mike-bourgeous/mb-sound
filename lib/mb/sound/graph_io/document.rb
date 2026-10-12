@@ -31,6 +31,10 @@ module MB
         # "assets/pad.flac", sha256: "..."`), checked when the files are read.
         attr_reader :assets
 
+        # Set documents: the Session the set was loaded into, and the flow
+        # (a Form, not playing: `play_form doc.form`), or nil.
+        attr_accessor :session, :form
+
         # The Constants made for each param ({ name => [Constant, ...] }).
         # attr_accessor :knob_nodes (above)
 
@@ -120,6 +124,10 @@ module MB
         end
 
         def inspect
+          if kind == :set && @session
+            a = @session.arrangement
+            return "#<GraphIO::Document #{name.inspect} set: tracks #{a.tracks.keys.join(', ')}; scenes #{a.scenes.keys.join(', ')}#{'; a flow (play_form doc.form)' if @form}>"
+          end
           "#<GraphIO::Document #{name.inspect} inputs: #{@inputs.inspect} params: #{param_values.inspect}>"
         end
         alias to_s inspect

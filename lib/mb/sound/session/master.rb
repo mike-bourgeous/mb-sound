@@ -78,6 +78,7 @@ module MB
 
           chain = build_master(block, description: description)
           chain.mode, chain.fade = master_mode(fade)
+          @master_block = block
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           change(:master, :master, time, data: { description: chain.description, fade: fade }) { |t|
@@ -103,6 +104,13 @@ module MB
             next "#{chain.description} (starting)" if chain.start <= @transport.position
             "#{chain.description} (starts at bar #{bar_of(chain.start)})"
           }
+        end
+
+        # The block given to the latest #master call (whether its chain
+        # started or still waits), or nil for bypass (graph documents save it; see
+        # GraphIO::SetWriter).
+        def master_block
+          @master_block
         end
 
         # Rebuilds the latest master chain from its block, cutting over at
