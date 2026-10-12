@@ -302,9 +302,12 @@ module MB
         open_song_graphviz(&block) if @options[:graphviz]
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite) { arrange_song(&block) }
+          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite, stems: @options[:stems]) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
+          puts "Stems in #{@options[:stems]}" if @options[:stems]
         else
+          raise ArgumentError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems]
+
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           arrange_song(&block)
           stop_after_bars(@options[:bars]) if @options[:bars]
@@ -430,6 +433,7 @@ module MB
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
+            o.on('--stems DIR', 'With a render: also write each track to DIR/<track>.<ext> (its part of the mix before the master chain)') { |v| @options[:stems] = v }
           end
 
           if @kind == :effect || @kind == :synth

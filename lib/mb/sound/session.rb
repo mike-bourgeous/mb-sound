@@ -18,6 +18,7 @@ require_relative 'session/graph_view'
 require_relative 'session/knobs'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
+require_relative 'session/stems'
 
 module MB
   module Sound
@@ -66,6 +67,7 @@ module MB
       include Knobs
       include MidiIn
       include AudioRecording
+      include Stems
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -687,8 +689,12 @@ module MB
         players = @mutex.synchronize { @players.values }
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
-        players.each do |p|
-          render_player(p, mix, from, to, per_sample, count)
+        if @stems
+          render_players_with_stems(players, mix, from, to, per_sample, count, @frame)
+        else
+          players.each do |p|
+            render_player(p, mix, from, to, per_sample, count)
+          end
         end
 
         playing = !players.empty? || queued_start?
