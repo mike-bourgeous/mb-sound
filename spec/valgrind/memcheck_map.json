@@ -215,6 +215,28 @@
         "FastWavetable.sync"
       ]
     },
+    "spec/ext/mb/sound/jack_port_teardown_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_connections",
+        "FastAudio.jack_disconnect",
+        "FastAudio.jack_info",
+        "FastAudio.jack_ports",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#port_name",
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIOutput#close",
+        "FastAudio::JackMIDIOutput#initialize",
+        "FastAudio::JackMIDIOutput#port_name",
+        "FastAudio::JackMIDIOutput#write"
+      ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output.new"
+      ]
+    },
     "spec/lib/mb/fast_sound_spec.rb": {
       "fast_sound": [
         "FastSound.smootherstep_buf",
