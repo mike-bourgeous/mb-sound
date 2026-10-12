@@ -116,6 +116,11 @@ RSpec.describe(MB::Sound::RecordMethods) do
         expect { MB::Sound.rec(1, :pad) }.to raise_error(ArgumentError, /patch/)
         expect { MB::Sound.rec(1, :nope) }.to raise_error(ArgumentError, /No track :nope/)
         expect { MB::Sound.rec(:lead) }.to raise_error(ArgumentError, /length in bars/)
+        # Audio has its own command (omnibus6): rec alone or with a path is an error
+        expect { MB::Sound.rec }.to raise_error(ArgumentError, /records MIDI.*use rec_audio$/)
+        expect { MB::Sound.rec('x.flac') }.to raise_error(ArgumentError, /use rec_audio "x.flac"/)
+        expect { MB::Sound.rec_audio(4) }.to raise_error(ArgumentError, /MIDI recording is rec 4/)
+        expect(MB::Sound.respond_to?(:stop_rec)).to eq(false) # audio commands all say audio
       end
     end
   end
@@ -171,8 +176,31 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'monitors and the strip' do
+    it "mutes and solos a track's monitor with the track" do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 3.5r])
+      setup_lead(s)
+      d = perform(s, {
+        0 => ['arm :lead', 'bg :other, 0.constant, on: :now'],
+        40 => ['mute :lead'],      # frame 32000
+        60 => ['unmute :lead'],    # 48000
+        80 => ['solo :other'],     # 64000
+        100 => ['solo :lead'],     # 80000
+        120 => ['unsolo', 'mute :"lead/live"'], # 96000: the monitor's own flag still works
+      }, 104000)
+      expect(d[31999]).to eq(60)
+      expect(d[32000 + 240]).to eq(0) # after the 5 ms declick
+      expect(d[48000 + 240]).to eq(60)
+      expect(d[64000 + 240]).to eq(0)
+      expect(d[80000 + 240]).to eq(60)
+      expect(d[96000 + 240]).to eq(0)
+      expect(s.muted?(:lead)).to eq(false)
+    end
+  end
+
   describe 'console names' do
-    names = %i[rec record stop_rec stop_recording arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
+    names = %i[rec record rec_audio record_audio stop_rec_audio stop_recording_audio arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
 
     it 'are RecordMethods, not Kernel or Object methods, GraphNode methods, or Pry commands' do
       require 'pry'

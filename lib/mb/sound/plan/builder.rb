@@ -234,6 +234,12 @@ module MB
           emit(Op::Part.new(value(:real), node, a, which))
         end
 
+        # +function+ (a key of Op::Unary::FUNCTIONS) of each sample of +a+,
+        # computed by the node being described (its #apply is the mirror).
+        def unary(function, a)
+          emit(Op::Unary.new(value(:real), node, self[a], function))
+        end
+
         # An oscillator (see Op::Tone): +tone+ (a Tone) with its inputs as
         # Values or Consts (+reset+ and +target+ boundary inputs or nil;
         # +scan+ a wavetable tone's scan).

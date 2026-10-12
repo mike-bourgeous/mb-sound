@@ -3,11 +3,14 @@ require 'forwardable'
 module MB
   module Sound
     module GraphNode
-      # Coerces a signal to its real, imaginary, magnitude, or phase component.
-      class ComplexNode
+      # Coerces a signal to its real, imaginary, magnitude, or phase
+      # component (GraphNode#real, #imag, #arg; the :abs mode is the complex
+      # magnitude, not GraphNode#abs, the antialiased shaper).  A thin
+      # subclass of UnaryFunction; the plan layer fuses every mode
+      # (Plan::Op::Part for :real and :imag, Plan::Op::Unary for :abs and
+      # :arg).
+      class ComplexNode < UnaryFunction
         extend Forwardable
-
-        include GraphNode
 
         VALID_MODES = [:real, :imag, :abs, :arg]
 
@@ -18,7 +21,15 @@ module MB
           arg: 'Argument',
         }
 
-        attr_reader :mode, :mode_name
+        # The modes as UnaryFunction functions (display names).
+        FUNCTIONS = {
+          real: 'real',
+          imag: 'imag',
+          abs: 'abs',
+          arg: 'arg',
+        }.freeze
+
+        attr_reader :mode_name
 
         def_delegators :@input, :sample_rate, :sample_rate=
 
@@ -29,30 +40,35 @@ module MB
           raise ArgumentError, "Invalid Complex conversion mode: #{mode.inspect}" unless VALID_MODES.include?(mode)
           raise ArgumentError, "Input must respond to #sample" unless input.respond_to?(:sample)
 
-          @input = input.get_sampler
-          @mode = mode
+          super(input, function: mode)
           @mode_name = MODE_NAMES[mode]
         end
 
-        # Returns a source list containing the original input given to the
-        # constructor.
-        def sources
-          { input: @input }
+        # The conversion mode (the UnaryFunction function).
+        def mode
+          @function
         end
 
         # Plan layer (see MB::Sound::Plan): the real or imaginary part (a
-        # real input passes through; its imaginary part is zero).
-        include Plan::Describable
-
+        # real input passes through; its imaginary part is zero), the
+        # magnitude, or the phase.
         def plan_describe(p)
           x = p[@input]
-          return x.real if @mode == :real
-
-          x.complex? ? x.imag : p.fill(0)
+          case @function
+          when :real then x.real
+          when :imag then x.complex? ? x.imag : p.fill(0)
+          else super
+          end
         end
 
-        def plan_unsupported_reason
-          @mode == :real || @mode == :imag ? nil : "the #{@mode} mode"
+        # See UnaryFunction#plan_function: Numo's complex magnitude
+        # (float(hypot)) and phase (float(atan2)), and for real signals the
+        # absolute value and the sign's phase (0 or pi).
+        def plan_function(complex)
+          case @function
+          when :abs then complex ? :cabs : :abs
+          when :arg then complex ? :carg : :sign_arg
+          end
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.
@@ -61,13 +77,12 @@ module MB
           self
         end
 
-        # Converts the next +count+ samples from the original input according
-        # to the mode given to the constructor.
-        def sample(count)
-          data = @input.sample(count)
-
+        # Converts +data+ (a buffer of the input) according to the mode given
+        # to the constructor.
+        def apply(data)
+          count = data.length
           if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
-            case @mode
+            case @function
             when :real
               part(data, false) || data.real
 
@@ -81,10 +96,10 @@ module MB
               data.arg
 
             else
-              raise "BUG: Unsupported mode #{@mode}"
+              raise "BUG: Unsupported mode #{@function}"
             end
           elsif data.is_a?(Numo::NArray)
-            case @mode
+            case @function
             when :real
               data
 
@@ -102,28 +117,17 @@ module MB
               (data.class.cast(data.signbit).inplace * Math::PI).not_inplace!
 
             else
-              raise "BUG: Unsupported mode #{@mode}"
+              raise "BUG: Unsupported mode #{@function}"
             end
-
-          elsif data.nil?
-            nil
 
           else
             raise "Unsupported datatype: #{data.class}"
           end
         end
 
-        # Single-line description.
-        def to_s
-          "#{super} -- #{@mode_name}"
-        end
-
-        # Multiline description for GraphViz.
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{@mode_name}
-          EOF
+        # The mode's name for #to_s and graphviz (e.g. "Real").
+        def function_description
+          @mode_name
         end
 
         private

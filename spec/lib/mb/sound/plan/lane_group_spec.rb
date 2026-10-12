@@ -249,6 +249,52 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     end
   end
 
+  describe 'x and x * c as one shape (ScaleMatch)' do
+    # stereo_drone's shape: a shared node read plainly on the left and
+    # inverted on the right
+    def drone(lanes)
+      MB::Sound::Plan.lanes = lanes
+      MB::Sound.seed(3)
+      n = (1.hz.noise.at(0.1) * 0.5).filter(:lowpass, cutoff: 800, quality: 2)
+      m = 2.hz.lfo.at(0.2..0.4)
+      b = MB::Sound::GraphNode::Channels.new([
+        (220.hz.ramp * m + n).softclip(0.6),
+        (330.hz.ramp * (m * 0.5) + n * -1 * 0.5).softclip(0.6),
+      ])
+      [b, MB::Sound::Plan.install(b)]
+    end
+
+    it 'pads the plain channel with x * 1 so both channels run together, bit for bit' do
+      a, inst = drone(true)
+      b, _ = drone(false)
+      sizes.each { |n| expect(a.outputs.map { |o| o.sample(n).to_binary }).to eq(b.outputs.map { |o| o.sample(n).to_binary }) }
+      groups = inst.lane_groups.groups
+      expect(groups.map { |g| g.members.length }).to eq([2])
+      expect(groups[0].lane_runs).to eq(2 * sizes.length)
+      padded = groups[0].members.find(&:pads)
+      expect(padded.pads.values.sum).to eq(3) # m * 1, and n * 1 * 1
+      expect(groups[0].members.map { |r| r.program.signature }.uniq.length).to eq(1)
+    end
+
+    it 'keeps the pads stable across a regroup' do
+      a, inst = drone(true)
+      a.outputs.each { |o| o.sample(64) }
+      inst.stale!
+      3.times { a.outputs.each { |o| o.sample(64) } }
+      expect(inst.lane_groups.groups.map { |g| g.members.length }).to eq([2])
+      g = inst.lane_groups.groups[0]
+      expect(g.members.map { |r| r.program.signature }.uniq.length).to eq(1)
+      expect(g.members.map { |r| r.pads&.values&.sum.to_i }.sort).to eq([0, 3])
+    end
+
+    it "doesn't pad gains on complex values (x * 1 isn't exact for complex infinities)" do
+      prog = ->(g) { MB::Sound::Plan::ScaleMatch.core(MB::Sound::Plan::Installation.new([g], engine: :c, check: nil).build.regions[0].compile(start: false)) }
+      c = 220.hz.complex_sine
+      _, sites = prog.((c * 2).real + 1.hz.ramp)
+      expect(sites).to be_empty
+    end
+  end
+
   describe 'with resamplers' do
     it 'groups regions of one shape in an installation with resamplers only across installations' do
       # Regions inside and outside a resampler may run at different counts

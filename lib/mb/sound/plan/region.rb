@@ -139,6 +139,7 @@ module MB
           ops, @folds = Fold.zero_products(b.ops)
           Fold.report(@folds)
           @program = Program.new(ops: ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
+          @program = ScaleMatch.pad(@program, @pads) if @pads
           @program.lower if @installation.engine == :c
           @inputs = Array.new(@input_ops.length)
           @params = Array.new(@param_ops.length)
@@ -170,6 +171,23 @@ module MB
           @program = nil
           @installation.unsupported!(e.node, e.message)
           nil
+        end
+
+        # Gains `x * 1` to insert so the program has the shape of other
+        # regions it differs from only by gains (a Hash of core op index =>
+        # count, or nil; see ScaleMatch and LaneGroups#refresh).
+        attr_reader :pads
+
+        # Sets #pads and recompiles now (returning the program, or nil).
+        # The region's tones start as usual when it next plays.
+        def pad!(pads)
+          pads = nil if pads&.empty?
+          return @program if pads == @pads && @program
+
+          @pads = pads
+          @program = nil
+          @recompile = false
+          compile(start: false)
         end
 
         # Asks for a recompile before the next block (a node's settings
@@ -266,6 +284,19 @@ module MB
 
           gathered = gather(count)
           if gathered.equal?(:ended)
+            tails = @members.select { |m| m.respond_to?(:plan_tail?) && m.plan_tail? }
+            unless tails.empty?
+              # Nodes holding delayed samples (a lookahead compressor) flush
+              # them after their input ends: this block runs unfused on the
+              # inputs already read, and those nodes stay unfused while
+              # they flush
+              tails.each { |m| @installation.exclude(m, 'flushing its delayed tail after its input ended') }
+              @result = replay_unfused(count)
+              return :done
+            end
+
+            # Spies see the end as the nodes' own #sample shows it (nil)
+            @program.taps.each { |t| t.deliver(nil) } unless @installation.check
             @result = nil
             return :done
           end
@@ -299,7 +330,16 @@ module MB
           end
 
           @planned_blocks += 1
-          planned || execute(n)
+          out = planned || execute(n)
+          taps = @program.taps
+          unless taps.empty?
+            k = 0
+            while k < taps.length
+              taps[k].deliver(n)
+              k += 1
+            end
+          end
+          out
         end
 
         # For internal use by LaneGroup: the boundary input buffers and
@@ -360,6 +400,7 @@ module MB
             unless v
               v = b.describe(node)
               @described[node] = v
+              b.tap_value(v, node) if Plan.tapped?(node)
             end
             return v
           end
@@ -495,6 +536,13 @@ module MB
         # Runs the program on gathered inputs for +n+ samples (for internal
         # use by LaneGroup too).
         def execute(n)
+          taps = @program.taps
+          k = 0
+          while k < taps.length
+            taps[k].reserve(n)
+            k += 1
+          end
+
           if @installation.engine == :ruby
             result = @program.run_ruby(n, @inputs, @params)
             out = out_view(n)
@@ -541,10 +589,11 @@ module MB
               # as the Tee would share it
               buf = read[0]
               buf = buf[0..].freeze if buf && !buf.frozen? && op.handles.length > 1
+              buf = GraphNode::Tee::Branch::ENDED if buf.nil?
               op.handles.each { |h| h.replay = buf }
             else
               op.handles.each_with_index do |h, j|
-                h.replay = read[j] if j < read.length
+                h.replay = read[j].nil? ? GraphNode::Tee::Branch::ENDED : read[j] if j < read.length
               end
             end
           end
