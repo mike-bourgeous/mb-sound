@@ -56,7 +56,10 @@
 # true-peak limiter at -1 dBTP.  The master bus is at 0 dB (master_gain 1)
 # instead of the usual -10 dB: this is a mastered, share-ready track, and
 # the limiter is what keeps it from clipping (the maintainer's OK,
-# 2026-10-12).  -D sets the drive into the limiter.  As rendered: LOUDNESS.
+# 2026-10-12).  -D sets the drive into the limiter.  As rendered
+# (round 2): -14.7 LUFS integrated, -1.0 dBTP.  Before the master the
+# kick-plus-clap hits on 2 and 4 peak about +5 dB over full scale, so
+# stems need --stem-gain -6 (the render warns).
 #
 # Usage:
 #     bin/songs/small_talk.rb                    # plays live in the background session
@@ -94,7 +97,14 @@
 # bass's pitch in the 200-600 Hz formants: it should follow the ghost
 # chords.
 #
-# Cost: COST.
+# Cost (whole render through the Session and master chain, YJIT, the Mac's
+# container, 2026-10-12, round 2): 512-sample buffers mean 19.5% of
+# realtime, p99 53%; 128-sample buffers mean 42%, p99 87%.  The talking
+# bass stays loaded from the intro on (a silent clip between its
+# sections), since building it takes up to ~0.8 s; the slowest scene
+# change left builds the breakdown's chant and pad in ~0.67 s, inside the
+# scheduler's half-bar (0.96 s) lookahead.  Render-thread spikes of up to
+# ~300 ms where scenes land are library cost (night_bus_flow: ~270 ms).
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -353,14 +363,18 @@ module MB::Sound
     track(:boom) { |clip| small_talk_boom(clip) }
     track(:riser, fade: 1/8r) { |_clip| small_talk_riser } # a tween, not notes: fades instead of ringing
 
-    scene :intro, drums: k[:intro], cut: 16000, air: 20, sub: 1
-    scene :groove, drums: k[:groove], bong: c[:bong]
+    # The talking bass stays loaded (on a silent clip) from the start:
+    # building it takes up to ~0.8 s (squeeze, formants, reverb, plan),
+    # close to the scheduler's half-bar lookahead (0.96 s), and a scene
+    # that swaps clips keeps the graph instead of rebuilding it
+    scene :intro, drums: k[:intro], talk: c[:bar], cut: 16000, air: 20, sub: 1
+    scene :groove, drums: k[:groove], bong: c[:bong], talk: c[:bar]
     scene :tease, drums: k[:tease], talk: c[:talk], cut: [3500, from: 700, over: 8, curve: :smooth], sub: 0
     scene :drop, drums: k[:drop], talk: c[:talk], boom: c[:boom], cut: 16000, sub: 1
     scene :pickup, drums: k[:pickup], talk: c[:talk_ghost], boom: c[:boom]
-    scene :breakdown, drums: k[:cut], pad: c[:pad], chant: c[:chant], air: [220, over: 1.beat], space: 0.3, echo: 0.3
-    scene :lift, drums: k[:lift], pad: c[:pad], chant: c[:chant]
-    scene(:gap) { meter 2, 4 }
+    scene :breakdown, drums: k[:cut], pad: c[:pad], chant: c[:chant], talk: c[:bar], air: [220, over: 1.beat], space: 0.3, echo: 0.3
+    scene :lift, drums: k[:lift], pad: c[:pad], chant: c[:chant], talk: c[:bar]
+    scene(:gap, talk: c[:bar]) { meter 2, 4 }
     scene(:drop2, drums: k[:drop], talk: c[:talk_ghost2], boom: c[:boom], cut: 16000, air: 20) { meter 4, 4 }
     scene :pickup2, drums: k[:pickup], talk: c[:talk_ghost2], boom: c[:boom]
     scene :callback, drums: k[:pickup], talk: c[:talk_ghost2], answer: c[:answer], boom: c[:boom]
