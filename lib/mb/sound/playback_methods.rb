@@ -636,8 +636,10 @@ module MB
       # enters the master chain, times the master gain, from the first frame
       # and padded to the length of the render, so stems line up sample for
       # sample.  Without master effects they sum to the mix; with them, to
-      # the mix before the chain (see Session::Stems).  +:loudness+
-      # normalizes only the mix file.
+      # the mix before the chain (see Session::Stems).  +:stem_gain+ scales
+      # every stem (headroom: before a master limiter a part may peak above
+      # full scale, which integer formats clip; the render warns).
+      # +:loudness+ normalizes only the mix file.
       #
       #     render('song.flac', bars: 32, stems: 'song_stems') { my_song }
       #
@@ -664,7 +666,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
@@ -673,7 +675,7 @@ module MB
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
-          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite)
+          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)
         end
 
         rate = output.sample_rate

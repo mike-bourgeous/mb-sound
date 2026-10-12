@@ -67,4 +67,19 @@ RSpec.describe(MB::Sound::Session::Stems) do
     MB::Sound.render(tmp_path('mix2.flac'), bars: 1, stems: dir, stem_format: 'mp3') { MB::Sound.bg :tone, 220.hz.sine * 0.1, fade: 0 }
     expect(Dir[File.join(dir, '*')].map { |f| File.basename(f) }.sort).to eq(['tone.mp3', 'tone.wav'])
   end
+
+  it 'warns about stems over full scale, and scales stems by stem_gain:' do
+    dir = tmp_path('stems')
+    loud = -> { MB::Sound.bg :hot, 110.hz.sine * 1.5, fade: 0; MB::Sound.master { |m| m.limit } }
+    expect {
+      MB::Sound.render(tmp_path('mix.flac'), bars: 1, stems: dir, gain: 1) { loud.() }
+    }.to output(/Stems over full scale.*hot \+3\.5 dB.*stem_gain: -4\.db/).to_stderr
+
+    MB::Sound.rewind
+    expect {
+      MB::Sound.render(tmp_path('mix.flac'), bars: 1, stems: dir, gain: 1, overwrite: true, stem_gain: -6.db) { loud.() }
+    }.not_to output.to_stderr
+    peak = read(File.join(dir, 'hot.flac')).map { |c| c.abs.max }.max
+    expect(peak).to be_within(0.01).of(1.5 * -6.db)
+  end
 end

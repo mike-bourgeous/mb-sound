@@ -29,15 +29,22 @@ module MB
           # The stem files written so far: name => path.
           attr_reader :paths
 
+          # The highest sample magnitude written to each stem: name => peak.
+          attr_reader :peaks
+
           # Writes stems into +dir+ (created if needed) as
-          # "<name>.<format>" files at +sample_rate+ with +channels+.
+          # "<name>.<format>" files at +sample_rate+ with +channels+, scaled
+          # by +gain+ (headroom for stems whose part peaks above full scale
+          # before a master limiter, which integer formats would clip).
           # +overwrite+ as for MB::Sound.file_output.
-          def initialize(dir, format: 'flac', channels: 2, sample_rate: 48000, overwrite: false)
+          def initialize(dir, format: 'flac', channels: 2, sample_rate: 48000, overwrite: false, gain: 1.0)
             @dir = dir
             @format = format.to_s.delete_prefix('.')
             @channels = channels
             @sample_rate = sample_rate
             @overwrite = overwrite
+            @gain = gain.to_f
+            @peaks = {}
             @outputs = {}
             @cursors = {}
             @paths = {}
@@ -49,15 +56,28 @@ module MB
           def add(name, data, frame)
             out = output_for(name)
             pad(name, frame)
+            data = data.map { |d| d * @gain } if @gain != 1
+            peak = data.map { |d| d.abs.max }.max.to_f
+            @peaks[name] = peak if peak > @peaks.fetch(name, 0.0)
             out.write(data)
             @cursors[name] += data[0].length
           end
 
           # Pads every stem with silence to +frames+ and closes the files.
+          # Warns about stems that went over full scale (clipped in integer
+          # formats such as FLAC and WAV).
           def close(frames)
             @outputs.each_key { |name| pad(name, frames) }
             @outputs.each_value(&:close)
             @outputs.clear
+
+            over = @peaks.select { |_, p| p > 1.0 }
+            unless over.empty?
+              worst = over.values.max
+              list = over.map { |n, p| "#{n} #{format('%+.1f', 20 * Math.log10(p))} dB" }.join(', ')
+              warn "Stems over full scale (clipped in integer formats): #{list}; " \
+                "render with stem_gain: #{-(20 * Math.log10(worst)).ceil}.db (--stem-gain #{-(20 * Math.log10(worst)).ceil}) for headroom"
+            end
           end
 
           private

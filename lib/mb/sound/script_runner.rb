@@ -302,7 +302,7 @@ module MB
         open_song_graphviz(&block) if @options[:graphviz]
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite, stems: @options[:stems]) { arrange_song(&block) }
+          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
           puts "Stems in #{@options[:stems]}" if @options[:stems]
         else
@@ -434,6 +434,7 @@ module MB
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
             o.on('--stems DIR', 'With a render: also write each track to DIR/<track>.<ext> (its part of the mix before the master chain)') { |v| @options[:stems] = v }
+            o.on('--stem-gain DB', Float, 'Gain in dB for --stems (headroom for parts peaking over full scale before a master limiter)') { |v| @options[:stem_gain] = v }
           end
 
           if @kind == :effect || @kind == :synth
