@@ -116,6 +116,10 @@ RSpec.describe(MB::Sound::RecordMethods) do
         expect { MB::Sound.rec(1, :pad) }.to raise_error(ArgumentError, /patch/)
         expect { MB::Sound.rec(1, :nope) }.to raise_error(ArgumentError, /No track :nope/)
         expect { MB::Sound.rec(:lead) }.to raise_error(ArgumentError, /length in bars/)
+        # Audio has its own command (omnibus6): rec alone or with a path is an error
+        expect { MB::Sound.rec }.to raise_error(ArgumentError, /records MIDI.*use rec_audio$/)
+        expect { MB::Sound.rec('x.flac') }.to raise_error(ArgumentError, /use rec_audio "x.flac"/)
+        expect { MB::Sound.rec_audio(4) }.to raise_error(ArgumentError, /MIDI recording is rec 4/)
       end
     end
   end
@@ -172,7 +176,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
   end
 
   describe 'console names' do
-    names = %i[rec record stop_rec stop_recording arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
+    names = %i[rec record rec_audio record_audio stop_rec_audio stop_recording_audio stop_rec stop_recording arm arm_track disarm disarm_track armed armed_tracks capture capture_midi captures recorded_clips recordings]
 
     it 'are RecordMethods, not Kernel or Object methods, GraphNode methods, or Pry commands' do
       require 'pry'

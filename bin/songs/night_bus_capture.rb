@@ -35,7 +35,7 @@
 #     captures                   # => {keys_1: Clip(...), keys_2: ...}
 #     scene :more, drums: last_stop_kits[:drop], keys: captures[:keys_1]; go :more
 #     learn :cut                 # the next knob you turn takes the hook's filter
-#     rec 'sets/jam.flac'; stop_rec on: :bar   # the master bus to a file
+#     rec_audio 'sets/jam.flac'; stop_rec_audio on: :bar   # the master bus to a file
 #     undo                       # a capture or rec is one undo step
 #     take.save                  # the replay script includes your MIDI
 

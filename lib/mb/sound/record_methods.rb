@@ -5,8 +5,10 @@ module MB
     # Console methods for recording a performance (see
     # design/notes/arrangement.md, Recording): MIDI into tracks (a looper,
     # `rec 4`, and Capture MIDI, `capture :lead`) and the master bus to an
-    # audio file (`rec 'sets/take3.flac'`).  MB::Sound extends itself with
-    # this module.
+    # audio file (`rec_audio 'sets/take3.flac'`).  MIDI and audio have
+    # their own commands (maintainer, 2026-10-12: "Audio and midi recording
+    # should be separate commands"), so `rec` alone never means audio.
+    # MB::Sound extends itself with this module.
     #
     # Example (bin/sound.rb):
     #     track(:lead, q: 1) { |c| c.synth(voices: 4) { |v| v.hz.saw.lp4(1800) * v.amp_env } }
@@ -15,8 +17,8 @@ module MB
     #     capture :lead          # or: what you just played, from the next bar
     #     capture :lead, 2, quantize: 16      # the last 2 bars, on 16ths
     #     captures               # the clips recorded so far, by name
-    #     rec 'sets/take3.flac'  # the master bus, from now; `rec` alone: a timestamped file
-    #     stop_rec on: :bar
+    #     rec_audio 'sets/take3.flac'   # the master bus, from now; alone: a timestamped file
+    #     stop_rec_audio on: :bar       # (or stop_rec)
     module RecordMethods
       # Arms tracks: `rec` and `capture` without names record into them,
       # and each track's patch plays the live MIDI input (a monitor player
@@ -45,23 +47,21 @@ module MB
       end
       alias armed_tracks armed
 
-      # Records.  With a length (bars, or a Duration such as 4.bars), MIDI:
-      # a loop of that length from the next launch point of each armed
-      # track (or the tracks named after the length, or before it: `rec
-      # :lead, 4`), which swaps into the track when it closes (see
-      # Arrangement#record for +quantize:+, +humanize:+, +channel:+,
-      # +sustain:+).  With a path (or nothing), audio: the master bus, from
-      # the launch point (now by default) until #stop_rec, to that file or a
-      # timestamped one in the take directory (Take#home, `sets/` with
-      # +repo: true+, else the user data directory, as Take#save chooses).
-      # Returns the journal entry.  Also available as #record.
-      def rec(*args, at: nil, on: nil, in: nil, repo: false, overwrite: false, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+      # Records MIDI: a loop of +length+ (bars, or a Duration such as
+      # 4.bars) from the next launch point of each armed track (or the
+      # tracks named after the length, or before it: `rec :lead, 4`), which
+      # swaps into the track when it closes (see Arrangement#record for
+      # +quantize:+, +humanize:+, +channel:+, +sustain:+).  Audio is
+      # #rec_audio.  Returns the journal entry.  Also available as #record.
+      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
 
-        if args.empty? || args.first.is_a?(String)
-          raise ArgumentError, "Audio recordings take one path (got #{args.inspect})" if args.length > 1
-          return record_audio_file(session, args.first, point, repo: repo, overwrite: overwrite)
+        if args.empty? || args.any?(String)
+          return MB::Sound.live_error(ArgumentError.new(
+            "rec records MIDI and takes a length in bars (rec 4, rec 4.bars, rec :lead, 4); " \
+            "for the master bus to an audio file use rec_audio#{args.empty? ? '' : " #{args.grep(String).first.inspect}"}"
+          ))
         end
 
         length = args.find { |a| a.is_a?(Numeric) || a.is_a?(Sequence::Duration) }
@@ -75,16 +75,34 @@ module MB
       end
       alias record rec
 
-      # Stops recording the master bus (see #rec) at the launch point (now
-      # by default).  Returns the journal entry.  Also available as
-      # #stop_recording.
-      def stop_rec(at: nil, on: nil, in: nil)
+      # Records the master bus (after master gain) to an audio file, from
+      # the launch point (now by default) until #stop_rec_audio: to +path+,
+      # or without one a timestamped file in the take directory (Take#home,
+      # `sets/` with +repo: true+, else the user data directory, as
+      # Take#save chooses).  An existing file needs +overwrite: true+.
+      # Returns the journal entry.  Also available as #record_audio.
+      def rec_audio(path = nil, at: nil, on: nil, in: nil, repo: false, overwrite: false)
+        point = LaunchPoint.of(binding) or return nil
+        unless path.nil? || path.is_a?(String)
+          return MB::Sound.live_error(ArgumentError.new("rec_audio takes a file path (got #{path.inspect}); MIDI recording is rec #{path.inspect}"))
+        end
+        record_audio_file(Session.current, path, point, repo: repo, overwrite: overwrite)
+      end
+      alias record_audio rec_audio
+
+      # Stops recording the master bus (see #rec_audio) at the launch point
+      # (now by default).  Returns the journal entry.  Also available as
+      # #stop_recording_audio, #stop_rec, and #stop_recording (MIDI
+      # recordings have lengths, so only audio recordings are stopped).
+      def stop_rec_audio(at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
         c = session.stop_recording(at: point, start_time: point.given? ? nil : schedule_time(session))
         session.journal[c.seq]
       end
-      alias stop_recording stop_rec
+      alias stop_recording_audio stop_rec_audio
+      alias stop_rec stop_rec_audio
+      alias stop_recording stop_rec_audio
 
       # Captures what was just played into tracks (the armed ones if none
       # are named): from the next launch point of each track the last
@@ -114,7 +132,7 @@ module MB
       end
       alias recorded_clips captures
 
-      # The audio recordings of the master bus (see #rec), as text.
+      # The audio recordings of the master bus (see #rec_audio), as text.
       def recordings
         Session.current.recordings.map(&:to_s)
       end
