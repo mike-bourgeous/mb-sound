@@ -108,7 +108,11 @@ module MB
 
       # Plots time-domain and frequency-domain magnitudes of the given data.
       # Supports plotting filter responses.
-      def time_freq(data, graphical: false, time_samples: 800, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true, columns: nil)
+      #
+      # Frequencies are in Hz (log with note names with +logarithmic+, the
+      # default; DC left out) at the filter's sample rate, else
+      # +sample_rate+.
+      def time_freq(data, graphical: false, time_samples: 800, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true, columns: nil, sample_rate: 48000)
         data = any_sound_to_hash(data)
 
         time = data.map { |label, c|
@@ -130,22 +134,21 @@ module MB
         freq = data.map { |label, c|
           case c
           when Filter
+            f, scale = spectrum_x(freq_samples, filter_rate(c, sample_rate), log: logarithmic)
             c = c.frequency_response(freq_samples)
 
           else
-            c = real_fft(c[0...([c.length, freq_samples * 2].min)])
+            n = [c.length, freq_samples * 2].min
+            c = real_fft(c[0...n])
             c /= c.abs.max
+            f, scale = spectrum_x(c.length, sample_rate, n: n, log: logarithmic)
           end
 
           c = c.abs.map { |v| (v != 0 && v.finite?) ? v.to_db : -100 }
 
           [
             "#{label} freq",
-            {
-              data: c,
-              logscale: logarithmic,
-              x_label: 'f',
-            }
+            freq_panel(c, f, scale),
           ]
         }
 
@@ -166,37 +169,37 @@ module MB
 
       # Plots frequency-domain magnitude and phase of the given data.  Supports
       # plotting filter responses.
-      def mag_phase(data, graphical: false, freq_samples: 2000, freq_yrange: nil, logarithmic: true)
+      #
+      # Frequencies are in Hz (log with note names with +logarithmic+, the
+      # default; DC left out) at the filter's sample rate, else
+      # +sample_rate+.
+      def mag_phase(data, graphical: false, freq_samples: 2000, freq_yrange: nil, logarithmic: true, sample_rate: 48000)
         data = any_sound_to_hash(data)
 
+        axes = {}
         freq = data.map { |k, c|
-          [
-            k,
-            c.is_a?(Filter) ? c.frequency_response(freq_samples) : real_fft(c[0...[c.length, freq_samples * 2].min])
-          ]
+          if c.is_a?(Filter)
+            axes[k] = spectrum_x(freq_samples, filter_rate(c, sample_rate), log: logarithmic)
+            [k, c.frequency_response(freq_samples)]
+          else
+            n = [c.length, freq_samples * 2].min
+            r = real_fft(c[0...n])
+            axes[k] = spectrum_x(r.length, sample_rate, n: n, log: logarithmic)
+            [k, r]
+          end
         }.to_h
 
         mag = freq.map { |label, c|
           [
             "#{label} mag",
-            {
-              data: c.abs.map { |v| v != 0 ? v.to_db : -100 },
-              logscale: logarithmic,
-              x_label: 'f',
-              yrange: freq_yrange || [-30, 30],
-            }
+            freq_panel(c.abs.map { |v| v != 0 ? v.to_db : -100 }, *axes[label]).merge(yrange: freq_yrange || [-30, 30]),
           ]
         }
 
         phase = freq.map { |label, c|
           [
             "#{label} phase",
-            {
-              data: c.arg,
-              yrange: [-Math::PI, Math::PI],
-              logscale: logarithmic,
-              x_label: 'f',
-            }
+            freq_panel(c.arg, *axes[label]).merge(yrange: [-Math::PI, Math::PI]),
           ]
         }
 
@@ -378,8 +381,13 @@ module MB
       # +offset+, and plotting the following +samples+ samples.  If +all+ is true
       # then the entirety of the file, tone, or data will be plotted in slices of
       # +samples+ samples.
-      def plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false, spectrum: false)
+      #
+      # With +spectrum+, plots each slice's spectrum in dB over frequency in
+      # Hz (log, with note names, like Plot.spectrum; DC left out) at
+      # +sample_rate+ (the tone's or node's rate, else 48 kHz).
+      def plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false, spectrum: false, sample_rate: nil)
         # FIXME: This function is hard to read
+        sample_rate ||= file_tone_data.respond_to?(:sample_rate) && !file_tone_data.is_a?(Filter) ? file_tone_data.sample_rate : 48000
         STDOUT.write("\e[H\e[2J") if all == true
 
         if all == true || all == false
@@ -457,7 +465,7 @@ module MB
               p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
             end
 
-            result = plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
+            result = plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum, sample_rate: sample_rate)
 
             now = MB::U.clock_now
             elapsed = [now - t, 0.1].min
@@ -485,11 +493,15 @@ module MB
             c || []
           }
 
+          p.logscale(false) if p.respond_to?(:logscale)
+          axes = nil
           if spectrum
-            p.logscale if p.respond_to?(:logscale)
-            data = data.map { |c| MB::Sound.real_fft(c).abs.map(&:to_db).clip(-80, 80) }
-          else
-            p.logscale(false) if p.respond_to?(:logscale)
+            # Hz on a log axis with note names (DC left out), like Plot.spectrum
+            axes = data.map { |c| spectrum_x(c.length / 2 + 1, sample_rate, n: c.length) }
+            data = data.map.with_index { |c, idx|
+              d = MB::Sound.real_fft(c).abs.map(&:to_db).clip(-80, 80)
+              axes[idx][1] ? d[1..] : d
+            }
           end
 
           ymin = data.map(&:min).min
@@ -501,7 +513,9 @@ module MB
             data.map.with_index { |c, idx|
               yrange = [0, c.shape[0]] if c.is_a?(Numo::NArray) && c.ndim == 2
               yrange = [0, 1] if yrange == [0, 0]
-              [idx.to_s, {data: c, yrange: yrange}]
+              info = { data: c, yrange: yrange }
+              info.merge!(x: axes[idx][0][1..], x_scale: axes[idx][1]) if axes && axes[idx][1]
+              [idx.to_s, info]
             }.to_h,
             print: false
           )
@@ -585,6 +599,35 @@ module MB
       end
 
       private
+
+      # The frequencies in Hz of +count+ spectrum points from 0 Hz (an FFT
+      # of +n+ samples, spaced +rate+ / +n+; without +n+, a filter
+      # response's points from 0 to Nyquist) and the x Scale to plot them
+      # on: log with note names like Plot.spectrum's (from the first
+      # nonzero frequency), or linear Hz with +log: false+.  The Scale is
+      # nil for fewer than two points.
+      def spectrum_x(count, rate, n: nil, log: true)
+        rate = rate.to_f
+        step = n ? rate / n : (count > 1 ? rate / 2 / (count - 1) : 0)
+        f = Numo::DFloat.new(count).seq * step
+        return [f, nil] if count < 2 || f[-1] <= 0
+
+        scale = log ? Plot::Scale::Frequency.new([f[1], f[-1]], notes: true) : Plot::Scale::Linear.new([0.0, f[-1]], label: 'frequency', unit: 'Hz', nice: false)
+        [f, scale]
+      end
+
+      # The sample rate of filter +f+, else +default+.
+      def filter_rate(f, default)
+        f.respond_to?(:sample_rate) && f.sample_rate ? f.sample_rate : default
+      end
+
+      # A Plotter panel of +data+ over frequencies +f+ on +scale+ (see
+      # #spectrum_x; the 0 Hz point is left out of log scales).
+      def freq_panel(data, f, scale)
+        return { data: data, x_label: 'f' } unless scale
+        skip = scale.is_a?(Plot::Scale::Log) ? 1 : 0
+        { data: data[skip..], x: f[skip...data.length], x_scale: scale }
+      end
 
       # Used by #table to generate table entries for the given +data+.
       def evaluate(data, range:, steps:, try_convert: true)

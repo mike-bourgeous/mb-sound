@@ -169,6 +169,12 @@ module MB
         context&.[](:session) || default
       end
 
+      # The session #current would return, without creating the default
+      # session: nil if there is none (or it is closed).
+      def self.existing
+        context&.[](:session) || (@default unless @default&.closed?)
+      end
+
       # The performance context of the current thread, set by
       # #with_perform while a take replays (see Take): a Hash with the
       # +:session+, the +:forced+ landing times of the line's changes, the
@@ -341,6 +347,7 @@ module MB
         fade = bars_or_nil(fade)
 
         nodes = match_rate(to_nodes(sound))
+        adopt_knobs(nodes) # graph documents' knobs join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq

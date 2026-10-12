@@ -175,6 +175,13 @@ module MB
           end
         end
 
+        # Graph documents' knobs join the session (Session#add does this
+        # too); those with a controller get live MIDI input
+        if sound.is_a?(GraphNode) || sound.is_a?(GraphNode::MultiOutput) || (sound.is_a?(Array) && sound.all? { |s| s.is_a?(GraphNode) || s.is_a?(GraphNode::MultiOutput) })
+          s = Session.current
+          attach_knob_midi(s, s.adopt_knobs(sound))
+        end
+
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
         }

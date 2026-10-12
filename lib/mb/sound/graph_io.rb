@@ -294,7 +294,15 @@ module MB
       # document's inputs and param overrides given as keywords, e.g.
       # `preset :dark_hall, input: mic, mix: 0.6`.  +trust: :code+ allows
       # runtime blocks outside the safe subset.
-      def preset(name, trust: nil, **inputs_and_params)
+      #
+      # The document's knobs join +session+ right away (the session console
+      # commands use, if one exists; false for none; see
+      # Session::Knobs#adopt_knobs), so `turn :cut` works before the graph
+      # plays; a knob with a MIDI controller (`cc:`) listens to live input.
+      # An override of a knob that joins an existing Session knob turns
+      # the shared knob now (a journaled, undoable turn, as `turn :cut,
+      # 900` would).
+      def preset(name, trust: nil, session: nil, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
           names = GraphIO.presets.values.flatten
@@ -304,7 +312,24 @@ module MB
         doc = GraphIO.parse(path)
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
-        GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+
+        session = Session.existing if session.nil?
+        if session
+          before = session.knobs
+          joined = session.adopt_knobs(graph)
+          attach_knob_midi(session, joined)
+          joined.each do |n, _k|
+            next unless before[n] && params.key?(n)
+            if Session.context&.[](:session).equal?(session)
+              turn(n, params[n])
+            else
+              Session.with_context(session: session) { turn(n, params[n]) }
+            end
+          end
+        end
+
+        graph
       end
 
       # Lists the presets by directory (names with their inputs and params).
