@@ -102,8 +102,9 @@ RSpec.describe(MB::Sound::PlotMethods) do
     context 'with a filter' do
       let(:output) { MB::Sound.mag_phase(5000.hz.lowpass) }
 
-      it 'can plot a Filter' do
+      it 'can plot a Filter on a frequency axis in Hz with note names' do
         check_size(lines)
+        expect(text).to include('frequency (Hz)', '1k', 'C5')
       end
     end
 
@@ -123,6 +124,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       it 'includes both time and frequency graphs' do
         check_size(lines)
         expect(text).to include('0 time', '0 freq')
+        expect(text).to include('frequency (Hz)', '1k', 'C5') # frequencies in Hz (omnibus6), not bins
       end
     end
 
@@ -157,6 +159,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
         # 400 Hz is bin 10 of 600 (40 Hz bins); the x axis is log from bin 1
         _, col = peak(plot_area(lines))
         expect(col).to be_within(0.04).of(Math.log10(10) / Math.log10(600))
+        expect(text).to include('frequency (Hz)', '200', '500', 'C5')
       end
     end
 
