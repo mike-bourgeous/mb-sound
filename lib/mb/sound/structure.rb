@@ -32,7 +32,7 @@ module MB
       # (seconds): a Hann window's spectral flux rises as the leading half
       # of the window takes in a transient.  Measured on generated drum
       # renders (see #analyze's +:offset+).
-      ONSET_LATENCY = 0.0
+      ONSET_LATENCY = 0.005
 
       # Analyzes +data+ (an Array of channels, one Numo array, or a sound
       # filename read at +sample_rate+) and returns a Structure::Result.
@@ -95,7 +95,7 @@ module MB
         if beats == :grid
           range = refine ? refine.to_f : 0
           range = 0.01 if estimate && range < 0.01 # an estimate gets the spike's +-1 % search
-          beat_frames, tempo = timed.(:beats) { Beats.grid(onset, frames.phase_onset(phase_weights), bpm, fps, range: range) }
+          beat_frames, tempo = timed.(:beats) { Beats.grid(onset, frames.phase_onset(phase_weights), bpm, fps, range: range, fit: range > 0) }
         else
           beat_frames = timed.(:beats) { Beats.dp(onset, bpm, fps, tightness: tightness) }
           period = Beats.fit_period(beat_frames)

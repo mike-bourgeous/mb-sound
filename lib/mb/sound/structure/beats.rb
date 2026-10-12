@@ -19,7 +19,7 @@ module MB
         # .active).
         #
         # Returns [beat frames (Floats), bpm].
-        def grid(onset, phase_onset, bpm, fps, range: 0.01, step: 0.0002)
+        def grid(onset, phase_onset, bpm, fps, range: 0.01, step: 0.0002, fit: true)
           p0 = 60 * fps / bpm
           period = if range > 0
             (-range).step(range, step).map { |d| p0 * (1 + d) }.max_by { |p| fold(onset, p).max }
@@ -37,8 +37,55 @@ module MB
           phase -= period if phase > 0.75 * period # a beat just before frame 0 (detection runs a little early)
 
           count = ((onset.size - 1 - phase) / period).floor + 1
-          frames = Array.new(count) { |i| phase + i * period }
-          [active(onset, frames, period), 60 * fps / period]
+          frames = active(onset, Array.new(count) { |i| phase + i * period }, period)
+          period, frames = straighten(frames, phase_onset, period) if fit && frames.length >= 8
+          [frames, 60 * fps / period]
+        end
+
+        # Fits a straight line (period and phase) through the onset peaks
+        # near each of the grid's beat +frames+ (see .refine) and returns
+        # [period, new beat frames].  The line starts from the Theil-Sen
+        # estimate (median pairwise slope; a stray peak such as the first
+        # frame's can't pull it), then least squares through the peaks
+        # within one frame of it.  The fold's period steps are 0.02 %, and
+        # on a few bars the sharpest fold can be a few steps off (0.06 %,
+        # 9 ms over 16 s, on a generated 8-bar groove); the line isn't
+        # limited by steps.
+        def straighten(frames, env, period)
+          peaks = refine(frames.map(&:round), env.to_a)
+          n = peaks.length
+          slopes = []
+          stride = [n / 64, 1].max # at most about 4000 pairs
+          (0...n).step(stride) { |i| ((i + 1)...n).step(stride) { |j| slopes << (peaks[j] - peaks[i]) / (j - i) } }
+          slope = median(slopes)
+          t0 = median(peaks.each_with_index.map { |q, i| q - slope * i })
+
+          idx = (0...n).select { |i| (peaks[i] - (t0 + i * slope)).abs <= 1.0 }
+          line = idx.length >= n / 2 && fit_line(idx, idx.map { |i| peaks[i] })
+          p, t0 = line || [slope, t0]
+          return [period, frames] if (p / period - 1).abs > 0.01
+
+          [p, Array.new(n) { |i| t0 + i * p }]
+        end
+
+        def median(values)
+          v = values.sort
+          v.length.odd? ? v[v.length / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2.0
+        end
+
+        # Least squares line through points (+xs+, +ys+): [slope, intercept],
+        # or nil for fewer than two distinct x values.
+        def fit_line(xs, ys)
+          n = xs.length.to_f
+          return nil if n < 2
+          sx = xs.sum.to_f
+          sy = ys.sum.to_f
+          sxx = xs.sum { |x| x * x }.to_f
+          sxy = xs.zip(ys).sum { |x, y| x * y }
+          den = n * sxx - sx * sx
+          return nil if den == 0
+          slope = (n * sxy - sx * sy) / den
+          [slope, (sy - slope * sx) / n]
         end
 
         # Folds +env+ (Numo array) at +period+ frames into a PHASE_BINS

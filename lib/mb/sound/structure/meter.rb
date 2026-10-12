@@ -8,12 +8,16 @@ module MB
 
         # Downbeat likelihood for each beat (beat i spans its time to the
         # next beat's; the last spans one median interval), in standard
-        # deviations: the change in timbre (MFCC 1..13) and harmony (chroma
-        # cosine distance) from the previous beat, energy rises, and half the
-        # low band's onset at the beat (kicks, bass notes).
+        # deviations: the change in timbre (MFCC 1..13) from the previous
+        # beat, the change in harmony (chroma cosine distance) between the
+        # +harmony_beats+ beats before and from the beat (half a bar in 4/4,
+        # so drum noise averages out and a kick on 3 doesn't look like a
+        # chord change), the same for the bass chroma (55 to 300 Hz, the
+        # roots; times BASS_WEIGHT), energy rises, and half the low band's
+        # onset at the beat (kicks, bass notes).
         #
         # +frames+ is a Frames, +beat_frames+ the beats' frame positions.
-        def observations(frames, beat_frames)
+        def observations(frames, beat_frames, harmony_beats: 2)
           n = beat_frames.length
           return Numo::DFloat.zeros(n) if n < 2
 
@@ -28,22 +32,46 @@ module MB
           mean_rows = ->(m) { Numo::DFloat.cast(spans.map { |r| m[r, true].mean(axis: 0).to_a }) }
           mf = mean_rows.(frames.mfcc)[true, 1..13]
           ch = mean_rows.(frames.chroma)
+          bch = mean_rows.(frames.bass_chroma)
           energy = spans.map { |r| frames.energy[r].mean }
           low = frames.band_flux[0]
           low_onset = Numo::DFloat.cast(spans.map { |r| low[r.begin...[r.begin + 3, r.end].min].max })
 
           dt = Numo::DFloat.zeros(n)
           dc = Numo::DFloat.zeros(n)
+          db = Numo::DFloat.zeros(n)
           de = Numo::DFloat.zeros(n)
+          hb = harmony_beats
+          edge = []
           (1...n).each do |i|
             dt[i] = Math.sqrt(((mf[i, true] - mf[i - 1, true])**2).sum)
-            a = ch[i, true]
-            b = ch[i - 1, true]
-            dc[i] = 1 - (a * b).sum / (Math.sqrt((a * a).sum * (b * b).sum) + 1e-12)
             de[i] = [energy[i] - energy[i - 1], 0].max
-          end
+            next edge << i if i < hb || i + hb > n
 
-          zscore(dt) + zscore(dc) + zscore(de) + 0.5 * zscore(low_onset)
+            dc[i] = window_change(ch, i, hb)
+            db[i] = window_change(bch, i, hb)
+          end
+          # Nothing came before the first beat, and the harmony windows don't
+          # fit at the ends: neutral values there, not "no change"
+          inner = (0...n).to_a - edge - [0]
+          [dc, db].each { |x| x[edge + [0]] = inner.empty? ? 0 : x[inner].mean }
+          [dt, de].each { |x| x[0] = x[1..].mean }
+
+          zscore(dt) + zscore(dc) + BASS_WEIGHT * zscore(db) + zscore(de) + 0.5 * zscore(low_onset)
+        end
+
+        # Weight of the bass chroma change in .observations.  1 found the
+        # 2/4 bar in generated grooves with a bass line where 0 did not, and
+        # kept the research spike's songs as they were; 2 added false 2-beat
+        # bars in the night bus and drums_808.
+        BASS_WEIGHT = 1.0
+
+        # Cosine distance between the mean rows of +m+ over the +hb+ rows
+        # before row +i+ and the +hb+ rows from it.
+        def window_change(m, i, hb)
+          a = m[i...(i + hb), true].mean(axis: 0)
+          b = m[(i - hb)...i, true].mean(axis: 0)
+          1 - (a * b).sum / (Math.sqrt((a * a).sum * (b * b).sum) + 1e-12)
         end
 
         def zscore(x)
