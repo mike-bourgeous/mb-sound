@@ -46,6 +46,11 @@ module MB
           apply(data)
         end
 
+        # The input's sample rate (subclasses may keep their own).
+        def sample_rate
+          @input.sample_rate
+        end
+
         # The display name of the function.
         def function_name
           self.class::FUNCTIONS[@function]
