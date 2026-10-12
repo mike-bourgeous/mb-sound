@@ -50,6 +50,12 @@ $CXXFLAGS = "#{$CXXFLAGS} -std=c++11 -O2 -Wall -Wextra"
 vla_flag = '-Wno-vla-cxx-extension'
 $CXXFLAGS << " #{vla_flag}" if try_compile('int main(void) { return 0; }', "-Werror #{vla_flag}")
 
+# RtMidi.cpp is compiled inside rtmidi_build.cpp (with a JACK teardown
+# helper that needs RtMidi's private data; the vendored file stays
+# unmodified), so it isn't listed as a source of its own.
+$srcs = %w[fast_midi.c rtmidi_c.cpp rtmidi_build.cpp]
+$objs = $srcs.map { |f| f.sub(/\.(c|cpp)\z/, '.o') }
+
 with_cflags("#{$CFLAGS} -O2 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=gnu11") do
   create_makefile('mb/sound/fast_midi')
 end

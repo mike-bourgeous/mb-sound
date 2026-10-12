@@ -32,6 +32,7 @@ static struct {
 	jack_client_t *(*client_open)(const char *name, int options, int *status, ...);
 	int (*client_close)(jack_client_t *client);
 	int (*activate)(jack_client_t *client);
+	int (*deactivate)(jack_client_t *client);
 	int (*set_process_callback)(jack_client_t *client, int (*callback)(jack_nframes_t, void *), void *arg);
 	void (*on_shutdown)(jack_client_t *client, void (*callback)(void *), void *arg);
 	jack_nframes_t (*get_sample_rate)(jack_client_t *client);
@@ -39,6 +40,9 @@ static struct {
 	char *(*get_client_name)(jack_client_t *client);
 	jack_port_t *(*port_register)(jack_client_t *client, const char *name, const char *type, unsigned long flags, unsigned long buffer_size);
 	int (*port_unregister)(jack_client_t *client, jack_port_t *port);
+	int (*port_disconnect)(jack_client_t *client, jack_port_t *port);
+	int (*port_rename)(jack_client_t *client, jack_port_t *port, const char *name); // optional
+	int (*port_set_name)(jack_port_t *port, const char *name); // optional, older
 	void *(*port_get_buffer)(jack_port_t *port, jack_nframes_t nframes);
 	const char *(*port_name)(const jack_port_t *port);
 	const char **(*port_get_connections)(const jack_port_t *port);
@@ -70,6 +74,19 @@ static _Atomic(struct unit_list *) active;
 static _Atomic size_t cycles_started;
 static _Atomic size_t cycles_done;
 static pthread_mutex_t change_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// Released ports, kept registered for reuse (see mb_jack.h: libjack can't
+// unregister a port of an active client safely).  Guarded by change_lock.
+struct spare {
+	jack_port_t *port;
+	int midi;
+	int output;
+};
+static struct spare *spares;
+static int spare_count;
+static int spare_capacity;
+static unsigned long spare_serial; // numbers the spare names
+static int held_ports; // ports registered for units (not spares)
 
 static void jack_silent(const char *msg)
 {
@@ -111,6 +128,7 @@ int mb_jack_load(void)
 	LOAD(client_open, "jack_client_open");
 	LOAD(client_close, "jack_client_close");
 	LOAD(activate, "jack_activate");
+	LOAD(deactivate, "jack_deactivate");
 	LOAD(set_process_callback, "jack_set_process_callback");
 	LOAD(on_shutdown, "jack_on_shutdown");
 	LOAD(get_sample_rate, "jack_get_sample_rate");
@@ -118,6 +136,11 @@ int mb_jack_load(void)
 	LOAD(get_client_name, "jack_get_client_name");
 	LOAD(port_register, "jack_port_register");
 	LOAD(port_unregister, "jack_port_unregister");
+	LOAD(port_disconnect, "jack_port_disconnect");
+	*(void **)&jack.port_rename = dlsym(jack.lib, "jack_port_rename");
+	if (jack.port_rename == NULL) {
+		*(void **)&jack.port_set_name = dlsym(jack.lib, "jack_port_set_name");
+	}
 	LOAD(port_get_buffer, "jack_port_get_buffer");
 	LOAD(port_name, "jack_port_name");
 	LOAD(port_get_connections, "jack_port_get_connections");
@@ -137,6 +160,93 @@ int mb_jack_load(void)
 
 	loaded = 1;
 	return 0;
+}
+
+/*
+ * Ports are added at any time, but libjack (jackd2 1.9.22) can't remove a
+ * port of an active client safely: jack_port_unregister erases the port
+ * from the client's port list on the caller's thread while the client's
+ * notification thread may be walking that list in HandleLatencyCallback
+ * (sent after any graph change anywhere on the server), which then reads
+ * the freed list node and crashes (a spec process segfaulted in that
+ * thread, 2026-10-12; JACK2 issue #216, where JACK's maintainer says to
+ * deactivate a client before unregistering ports).  So a released port is
+ * disconnected, renamed to a spare name, and kept for the next port of its
+ * kind; spares are unregistered only while the client is deactivated: here
+ * once no unit holds a port (deactivating then interrupts nothing), and by
+ * jack_client_close, which deactivates first.
+ */
+
+// Forgets the spare list (the client that owned the ports is gone).
+static void forget_spares(void)
+{
+	free(spares);
+	spares = NULL;
+	spare_count = 0;
+	spare_capacity = 0;
+	held_ports = 0;
+}
+
+// Renames +port+ (without its client prefix); returns 0 on success.
+static int rename_port(jack_port_t *port, const char *name)
+{
+	if (jack.port_rename != NULL) {
+		return jack.port_rename(client, port, name);
+	}
+	if (jack.port_set_name != NULL) {
+		return jack.port_set_name(port, name);
+	}
+	return -1;
+}
+
+// Disconnects +port+ and keeps it as a spare (unregistering it only if the
+// spare list can't grow, which never happens in practice).
+static void release_port(jack_port_t *port, int midi, int output)
+{
+	jack.port_disconnect(client, port);
+
+	if (spare_count == spare_capacity) {
+		int capacity = spare_capacity ? spare_capacity * 2 : 16;
+		struct spare *grown = realloc(spares, sizeof(*spares) * capacity);
+		if (grown == NULL) {
+			jack.port_unregister(client, port);
+			return;
+		}
+		spares = grown;
+		spare_capacity = capacity;
+	}
+
+	char name[64];
+	snprintf(name, sizeof(name), "spare_%s_%s_%lu", midi ? "midi" : "audio", output ? "out" : "in", ++spare_serial);
+	rename_port(port, name);
+	spares[spare_count++] = (struct spare){ .port = port, .midi = midi, .output = output };
+}
+
+// Unregisters every spare behind a deactivation, if nothing uses the client
+// (no unit holds a port or is attached).  Call with change_lock held.
+static void free_spares_while_idle(void)
+{
+	struct unit_list *list = atomic_load(&active);
+	if (spare_count == 0 || held_ports > 0 || (list != NULL && list->count > 0)) {
+		return;
+	}
+
+	// jack_deactivate returns after any notification the client was handling
+	// (the server waits for its reply before taking the request), and an
+	// inactive client skips latency notifications, so nothing walks the
+	// port list while the ports go.
+	if (jack.deactivate(client) != 0) {
+		return;
+	}
+	for (int i = 0; i < spare_count; i++) {
+		jack.port_unregister(client, spares[i].port);
+	}
+	spare_count = 0;
+	if (jack.activate(client) != 0) {
+		// Reported like a lost server; the next mb_jack_open after
+		// mb_jack_close opens a new client
+		atomic_store(&client_lost, 1);
+	}
 }
 
 static void quiet(int on)
@@ -216,6 +326,7 @@ const char *mb_jack_open(const char *name)
 		// Opened before a fork; the child has no JACK connection
 		client = NULL;
 		atomic_store(&active, NULL);
+		forget_spares();
 	}
 	if (client != NULL) {
 		return atomic_load(&client_lost) ? "The JACK server closed the connection" : NULL;
@@ -290,13 +401,15 @@ void mb_jack_close(void)
 {
 	if (client == NULL || client_pid != getpid()) {
 		client = NULL;
+		forget_spares();
 		return;
 	}
 
 	pthread_mutex_lock(&change_lock);
 	jack_client_t *c = client;
 	client = NULL;
-	jack.client_close(c); // stops the process thread
+	jack.client_close(c); // deactivates first, then stops the process thread and frees every port
+	forget_spares();
 	struct unit_list *list = atomic_exchange(&active, NULL);
 	notify_shutdown(list);
 	if (list != NULL) {
@@ -329,6 +442,34 @@ size_t mb_jack_cycles(void)
 	return atomic_load(&cycles_done);
 }
 
+// Takes a spare port of the given kind for +name+: one already named +name+,
+// else any renamed to +name+.  Returns NULL if there is none.
+static jack_port_t *take_spare(const char *name, int midi, int output)
+{
+	int found = -1;
+	for (int i = 0; i < spare_count && found < 0; i++) {
+		if (spares[i].midi == midi && spares[i].output == output) {
+			const char *full = jack.port_name(spares[i].port);
+			const char *short_name = full ? strchr(full, ':') : NULL;
+			if (short_name != NULL && strcmp(short_name + 1, name) == 0) {
+				found = i;
+			}
+		}
+	}
+	for (int i = 0; i < spare_count && found < 0; i++) {
+		if (spares[i].midi == midi && spares[i].output == output && rename_port(spares[i].port, name) == 0) {
+			found = i;
+		}
+	}
+	if (found < 0) {
+		return NULL;
+	}
+
+	jack_port_t *port = spares[found].port;
+	spares[found] = spares[--spare_count];
+	return port;
+}
+
 const char *mb_jack_register(struct mb_jack_unit *unit, const char **names, int count, int midi, int output)
 {
 	if (!mb_jack_is_open()) {
@@ -341,17 +482,24 @@ const char *mb_jack_register(struct mb_jack_unit *unit, const char **names, int 
 	pthread_mutex_lock(&change_lock);
 	int first = unit->port_count;
 	for (int i = 0; i < count; i++) {
-		jack_port_t *port = jack.port_register(client, names[i], midi ? MB_JACK_MIDI_TYPE : MB_JACK_AUDIO_TYPE,
-				output ? MB_JACK_PORT_IS_OUTPUT : MB_JACK_PORT_IS_INPUT, 0);
+		jack_port_t *port = take_spare(names[i], midi, output);
+		if (port == NULL) {
+			port = jack.port_register(client, names[i], midi ? MB_JACK_MIDI_TYPE : MB_JACK_AUDIO_TYPE,
+					output ? MB_JACK_PORT_IS_OUTPUT : MB_JACK_PORT_IS_INPUT, 0);
+		}
 		if (port == NULL) {
 			for (int k = first; k < unit->port_count; k++) {
-				jack.port_unregister(client, unit->ports[k]);
+				release_port(unit->ports[k], midi, output);
 			}
+			held_ports -= unit->port_count - first;
 			unit->port_count = first;
+			free_spares_while_idle();
 			pthread_mutex_unlock(&change_lock);
 			return "Could not register a JACK port (is the name taken?)";
 		}
+		unit->port_kinds[unit->port_count] = (midi ? MB_JACK_KIND_MIDI : 0) | (output ? MB_JACK_KIND_OUTPUT : 0);
 		unit->ports[unit->port_count++] = port;
+		held_ports++;
 	}
 	pthread_mutex_unlock(&change_lock);
 
@@ -377,7 +525,13 @@ void mb_jack_detach(struct mb_jack_unit *unit)
 		}
 		if (!atomic_load(&client_lost)) {
 			for (int i = 0; i < unit->port_count; i++) {
-				jack.port_unregister(client, unit->ports[i]);
+				int kind = unit->port_kinds[i];
+				release_port(unit->ports[i], !!(kind & MB_JACK_KIND_MIDI), !!(kind & MB_JACK_KIND_OUTPUT));
+			}
+			held_ports -= unit->port_count;
+			if (held_ports <= 0) {
+				held_ports = 0;
+				free_spares_while_idle();
 			}
 		}
 	}

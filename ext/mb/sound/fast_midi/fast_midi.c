@@ -20,6 +20,7 @@
 #include <ruby.h>
 
 #include "rtmidi_c.h"
+#include "rtmidi_build.h"
 
 
 // The longest message (e.g. SysEx) read at once
@@ -166,6 +167,7 @@ static void input_release(struct midi_input *in)
 {
 	// A forked child has no RtMidi thread to stop; leave the copy alone.
 	if (in->device != NULL && in->pid == getpid()) {
+		mb_rtmidi_jack_release(in->device, 1);
 		rtmidi_close_port(in->device);
 		rtmidi_in_free(in->device);
 	}
@@ -333,6 +335,7 @@ static void output_free(void *ptr)
 {
 	RtMidiOutPtr device = ptr;
 	if (device != NULL) {
+		mb_rtmidi_jack_release(device, 0);
 		rtmidi_close_port(device);
 		rtmidi_out_free(device);
 	}

@@ -1,3 +1,6 @@
-fast_midi.o: fast_midi.c rtmidi_c.h
+fast_midi.o: fast_midi.c rtmidi_c.h rtmidi_build.h
 rtmidi_c.o: rtmidi_c.cpp rtmidi_c.h RtMidi.h
+# RtMidi.cpp is built inside rtmidi_build.cpp (see extconf.rb); this line
+# only keeps depend:check's one-entry-per-source rule
 RtMidi.o: RtMidi.cpp RtMidi.h
+rtmidi_build.o: rtmidi_build.cpp rtmidi_build.h RtMidi.cpp RtMidi.h rtmidi_c.h

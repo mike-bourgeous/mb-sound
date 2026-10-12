@@ -106,7 +106,9 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
 
     a.close
     expect(a.closed?).to eq(true)
-    expect(fa.jack_ports("^#{client}:", nil, 0)).to eq(["#{client}:out_3"])
+    # a's ports stay as disconnected spares while b uses the client (see
+    # mb_jack.c)
+    expect(fa.jack_ports("^#{client}:", nil, 0).reject { |n| n.include?(':spare_audio_out_') }).to eq(["#{client}:out_3"])
     expect { a.write([Numo::SFloat.zeros(10)] * 2) }.to raise_error(IOError)
 
     b.write([Numo::SFloat.ones(256)])
@@ -240,7 +242,8 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
       inp.close
       expect(inp.closed?).to eq(true)
       expect(inp.port_name).to be_nil
-      expect(fa.jack_ports("^#{client}:", true, 0)).to eq([])
+      expect(fa.jack_ports("^#{client}:", true, 0)).to all(match(/:spare_midi_in_\d+\z/))
+      expect(fa.jack_ports("^#{client}:", true, 0).flat_map { |n| fa.jack_connections(n) }).to eq([])
       expect { inp.read(false) }.to raise_error(IOError)
     end
 
