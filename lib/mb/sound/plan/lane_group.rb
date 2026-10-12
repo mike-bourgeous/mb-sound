@@ -307,7 +307,7 @@ module MB
           @groups = []
 
           buckets = Hash.new { |h, k| h[k] = [] }
-          cores = {}.compare_by_identity
+          listed = [] # [installation, region, program]
           @installations.each do |inst|
             inst.rebuild(regroup: false) if inst.stale?
             # Regions of an installation with resamplers may run at different
@@ -323,11 +323,8 @@ module MB
               prog = r.program || r.precompile
               next unless prog
 
-              # Programs differing only by gains (x vs x * c) share a
-              # bucket and are padded to one shape below (ScaleMatch)
-              key, sites = ScaleMatch.core(prog)
-              cores[r] = [key, sites]
-              shape = [key, prog.output_type]
+              listed << [inst, r, prog]
+              shape = [prog.signature, prog.output_type]
               key = shape
               if seen
                 key = shape + [seen[shape]]
@@ -340,11 +337,42 @@ module MB
           buckets.each_value do |regions|
             next if regions.length < 2
 
-            pad_to_shape(regions, cores)
-            regions.group_by { |r| r.program&.signature }.each do |sig, same|
-              next if sig.nil? || same.length < 2
+            @groups << LaneGroup.new(regions)
+          end
 
-              @groups << LaneGroup.new(same)
+          # Regions left alone may differ from others only by gains (x vs
+          # x * c): their cores (ScaleMatch) share a bucket, and they are
+          # padded to one shape (only these are looked at, so a Synth's
+          # identical lanes cost nothing more)
+          alone = buckets.each_value.select { |regions| regions.length == 1 }.map(&:first).to_h { |r| [r, true] }.compare_by_identity
+          unless alone.length < 2
+            loose = Hash.new { |h, k| h[k] = [] }
+            cores = {}.compare_by_identity
+            seen = {}.compare_by_identity
+            listed.each do |inst, r, prog|
+              next unless alone.key?(r)
+
+              key, sites = ScaleMatch.core(prog)
+              cores[r] = [key, sites]
+              shape = [key, prog.output_type]
+              if inst.resamples?
+                counts = (seen[inst] ||= Hash.new(0))
+                k = shape + [counts[shape]]
+                counts[shape] += 1
+                shape = k
+              end
+              loose[shape] << r
+            end
+
+            loose.each_value do |regions|
+              next if regions.length < 2
+
+              pad_to_shape(regions, cores)
+              regions.group_by { |r| r.program&.signature }.each do |sig, same|
+                next if sig.nil? || same.length < 2
+
+                @groups << LaneGroup.new(same)
+              end
             end
           end
 
