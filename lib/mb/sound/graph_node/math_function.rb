@@ -6,12 +6,12 @@ module MB
       # +:log10+).  Made by GraphNode#floor, #ceil, #round, #log, #log2, and
       # #log10 (ArithmeticMethods); a node type of its own (instead of a
       # ProcNode block), so graphs using these print back as Ruby and show
-      # their function in graphviz.
+      # their function in graphviz.  A thin subclass of UnaryFunction; the
+      # plan layer fuses it (Plan::Op::Unary) on real signals.
       #
       # Example (a stepped ramp: 4 steps per second, 0, 1/3, 2/3, 1):
       #     (1.hz.aramp.at(0..4) * 0.9999).floor / 3
-      class MathFunction
-        include GraphNode
+      class MathFunction < UnaryFunction
         include SampleRateHelper
 
         # Display names of the functions.
@@ -24,31 +24,17 @@ module MB
           log10: 'log10',
         }.freeze
 
-        # The function (a key of FUNCTIONS).
-        attr_reader :function
-
         # Creates a node applying +function+ (a key of FUNCTIONS) to each
         # sample of +input+.
         def initialize(input, function:, sample_rate: nil)
-          raise ArgumentError, "Unknown math function #{function.inspect} (#{FUNCTIONS.keys.join(', ')})" unless FUNCTIONS.include?(function)
-          raise ArgumentError, 'Input must respond to #sample' unless input.respond_to?(:sample)
-
-          @input = input.get_sampler
-          @function = function
+          super(input, function: function)
           @sample_rate = (sample_rate || @input.sample_rate).to_f
           @node_type_name = "MathFunction (#{FUNCTIONS[function]})"
         end
 
-        def sources
-          { input: @input }
-        end
-
-        # The function applied to the next +count+ samples of the input (a
-        # new buffer; the input's buffer is never modified).
-        def sample(count)
-          data = @input.sample(count)
-          return nil if data.nil?
-
+        # The function applied to +data+ (a new buffer; the input's buffer
+        # is never modified).
+        def apply(data)
           case @function
           when :floor then data.floor
           when :ceil then data.ceil
@@ -59,20 +45,11 @@ module MB
           end
         end
 
-        # The function and input, e.g. "floor(ramp)".
-        def arithmetic_string(_separator = ' ')
-          "#{FUNCTIONS[@function]}(#{make_source_name(climb_tee_tree(@input))})"
-        end
-
-        def to_s
-          "#{super} -- #{arithmetic_string}"
-        end
-
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{arithmetic_string}
-          EOF
+        # Every function is a plan op on real signals (C's floor, ceil,
+        # round in double as Numo computes them, and logf, log2f, log10f as
+        # FastSound's).
+        def plan_function(complex)
+          complex ? nil : @function
         end
       end
     end

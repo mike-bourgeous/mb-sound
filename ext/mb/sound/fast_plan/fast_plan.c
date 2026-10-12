@@ -92,7 +92,11 @@ enum {
 	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
 	OP_TIME_SCALE,// dst, a, sc                  dst = SQ80::TimeScale#time of a: sc [kind (0 velocity, 1 key), seconds, amount]
 	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
+	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
 };
+
+// Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
+enum unary_fn { UN_FLOOR = 0, UN_CEIL, UN_ROUND, UN_LN, UN_LOG2, UN_LOG10, UN_ABS, UN_SIGN_ARG, UN_CABS, UN_CARG, UN_COUNT };
 
 // Event list modes and entry kinds (Plan::EventList)
 enum { EVENTS_HELD = 0, EVENTS_IMPULSES = 1 };
@@ -1007,7 +1011,7 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_FOUR_POLE: case OP_BIQUAD:
 			len = 7;
 			break;
-		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
+		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE: case OP_UNARY:
 			len = 4;
 			break;
 		case OP_SAMPLE_HOLD:
@@ -1157,6 +1161,39 @@ static void run_sample_hold(const int32_t *op, size_t pc, const struct regs *R, 
 	rb_ivar_set(node, id_prev, DBL2NUM(T[n - 1]));
 	rb_ivar_set(node, id_held, DBL2NUM(held));
 	RB_GC_GUARD(node);
+}
+
+// OP_UNARY: a function of each sample as Numo (float32 buffers: C's double
+// floor/ceil/round and fabs, complex hypot and atan2 in double, rounded to
+// float) and FastSound (logf, log2f, log10f) compute it.
+static void run_unary(const int32_t *op, size_t pc, const struct regs *R, size_t n)
+{
+	float *D = R->p[op[1]];
+	const float *A = R->p[op[2]];
+	int fn = op[3];
+	if (fn < 0 || fn >= UN_COUNT) rb_raise(rb_eArgError, "Bad plan unary function %d at word %zu", fn, pc);
+	if (R->c[op[1]] || R->c[op[2]] != (fn == UN_CABS || fn == UN_CARG)) rb_raise(rb_eArgError, "Bad plan unary operand types at word %zu", pc);
+
+	switch (fn) {
+		case UN_FLOOR: for (size_t i = 0; i < n; i++) D[i] = (float)floor((double)A[i]); break;
+		case UN_CEIL: for (size_t i = 0; i < n; i++) D[i] = (float)ceil((double)A[i]); break;
+		case UN_ROUND: for (size_t i = 0; i < n; i++) D[i] = (float)round((double)A[i]); break;
+		case UN_LN: for (size_t i = 0; i < n; i++) D[i] = logf(A[i]); break;
+		case UN_LOG2: for (size_t i = 0; i < n; i++) D[i] = log2f(A[i]); break;
+		case UN_LOG10: for (size_t i = 0; i < n; i++) D[i] = log10f(A[i]); break;
+		case UN_ABS: for (size_t i = 0; i < n; i++) D[i] = (float)fabs((double)A[i]); break;
+		case UN_SIGN_ARG: {
+			// Numo: the sign bits cast to float, times Math::PI cast to float
+			float pi = (float)M_PI;
+			for (size_t i = 0; i < n; i++) {
+				float bit = signbit(A[i]) ? 1.0f : 0.0f;
+				D[i] = bit * pi;
+			}
+			break;
+		}
+		case UN_CABS: for (size_t i = 0; i < n; i++) D[i] = (float)hypot((double)A[2 * i], (double)A[2 * i + 1]); break;
+		case UN_CARG: for (size_t i = 0; i < n; i++) D[i] = (float)atan2((double)A[2 * i + 1], (double)A[2 * i]); break;
+	}
 }
 
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
@@ -1347,6 +1384,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_SAMPLE_HOLD:
 			run_sample_hold(op, pc, R, nregs, objects, n);
+			break;
+
+		case OP_UNARY:
+			run_unary(op, pc, R, n);
 			break;
 
 		case OP_ENVELOPE:
@@ -1596,6 +1637,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("exp")), INT2NUM(OP_EXP));
 	rb_hash_aset(h, ID2SYM(rb_intern("time_scale")), INT2NUM(OP_TIME_SCALE));
 	rb_hash_aset(h, ID2SYM(rb_intern("sample_hold")), INT2NUM(OP_SAMPLE_HOLD));
+	rb_hash_aset(h, ID2SYM(rb_intern("unary")), INT2NUM(OP_UNARY));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

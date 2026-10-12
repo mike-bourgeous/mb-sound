@@ -129,6 +129,50 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
     it 'matches parts of a real input' do
       plan_compare { (src.new(seed: 1) * 2).real + (src.new(seed: 2) * 3).imag }
     end
+
+    it 'matches magnitudes and phases of complex and real inputs (Op::Unary)' do
+      r = plan_compare {
+        c = src.new(seed: 1, complex: true) * 2
+        x = src.new(seed: 2, scale: 3) * 1
+        abs = MB::Sound::GraphNode::ComplexNode.new(c, mode: :abs) + MB::Sound::GraphNode::ComplexNode.new(x, mode: :abs)
+        abs + c.arg + x.arg
+      }
+      fns = r.program.ops.grep(MB::Sound::Plan::Op::Unary).map(&:function)
+      expect(fns).to contain_exactly(:cabs, :abs, :carg, :sign_arg)
+    end
+  end
+
+  describe 'MathFunction (UnaryFunction)' do
+    it 'matches rounding of every kind, halves and signed zeros included' do
+      r = plan_compare {
+        x = src.new(seed: 1, scale: 6, kind: :steps) * 0.5 + src.new(seed: 2, scale: 2) * 1
+        x.floor + x.ceil * 2 + x.round * 3
+      }
+      expect(r.program.ops.grep(MB::Sound::Plan::Op::Unary).map(&:function)).to contain_exactly(:floor, :ceil, :round)
+    end
+
+    it 'matches logarithms' do
+      r = plan_compare {
+        x = src.new(seed: 3, scale: 2, offset: 2.5) * 1
+        x.log + x.log2 * 0.5 + x.log10 * 0.25
+      }
+      expect(r.program.ops.grep(MB::Sound::Plan::Op::Unary).map(&:function)).to contain_exactly(:ln, :log2, :log10)
+    end
+
+    # Each logarithm alone: NaNs from different functions carry different
+    # signs (glibc's log10f gives +NaN for some negative inputs, logf -NaN),
+    # and a sum of two NaNs keeps the first operand's, so sums of NaNs from
+    # several functions depend on the summing order (Mixer's, as before)
+    [:log, :log2, :log10].each do |fn|
+      it "matches #{fn} of zero and negative inputs (-Infinity and NaN, bit for bit)" do
+        plan_compare { (src.new(seed: 3, scale: 4, offset: 1) * 1).send(fn) * 0.5 }
+      end
+    end
+
+    it 'stays unfused on a complex input' do
+      r = plan_compare(fallbacks: true) { (src.new(seed: 1, complex: true) * 2).floor.real * 3 }
+      expect(r.program.ops.grep(MB::Sound::Plan::Op::Unary)).to eq([])
+    end
   end
 
   describe 'GraphNode arithmetic procs' do
