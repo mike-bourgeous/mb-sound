@@ -60,7 +60,25 @@ RSpec.describe(MB::Sound::Jack, :aggregate_failures) do
 
       later.close
       midi_out.close
-      expect(client_ports).to eq(%w[in_1 in_2 midi_in out_1 out_2])
+
+      # Closed ports stay registered as disconnected spares while other
+      # ports are in use (libjack can't unregister ports of an active client
+      # safely; see mb_jack.c), and the next ports of their kind reuse them
+      used, spare = client_ports.partition { |n| !n.start_with?('spare_') }
+      expect(used).to eq(%w[in_1 in_2 midi_in out_1 out_2])
+      expect(spare.map { |n| n[/\Aspare_(\w+?_\w+?)_\d+\z/, 1] }.sort).to eq(%w[audio_out audio_out midi_out])
+      spare.each { |n| expect(MB::Sound::Jack.connections("#{client}:#{n}")).to eq([]) }
+
+      again = open(MB::Sound::DeviceOutput.new(channels: 2))
+      expect(again.jack_ports).to eq(["#{client}:out_3", "#{client}:out_4"])
+      expect(client_ports.grep(/spare_audio/)).to eq([])
+      expect(client_ports.grep(/spare_midi_out/).length).to eq(1)
+
+      # Once no port is in use, spares are unregistered (behind a
+      # deactivation that interrupts nothing)
+      [out, midi, inp, again].each(&:close)
+      expect(client_ports).to eq([])
+      expect(MB::Sound::Jack.open?).to eq(true)
     end
 
     it 'connects new audio ports to the physical ports once' do

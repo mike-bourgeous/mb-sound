@@ -28,8 +28,8 @@ module ParallelSpecs
     Dir.chdir(ROOT) { patterns.flat_map { |p| File.directory?(p) ? Dir["#{p}/**/*_spec.rb"] : Dir[p] }.uniq.sort }
   end
 
-  def known_times
-    File.exist?(TIMES_PATH) ? JSON.parse(File.read(TIMES_PATH)) : {}
+  def known_times(path = TIMES_PATH)
+    File.exist?(path) ? JSON.parse(File.read(path)) : {}
   rescue JSON::ParserError
     {}
   end
@@ -67,19 +67,30 @@ module ParallelSpecs
     statuses = pids.map { |pid| Process.wait2(pid).last }
     wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
-    report(groups.length, statuses, wall)
+    report(groups.map(&:first), statuses, wall)
   end
 
-  def report(count, statuses, wall)
+  # Prints the summary of a run of +groups+ (lists of files), whose
+  # processes ended with +statuses+ (Process::Status), and writes the
+  # measured file times.  A process without a readable JSON report crashed
+  # (e.g. a segfault in a C library): it's listed with its signal, files, and
+  # log, and the other processes' times are still written.  Returns true if
+  # every process passed.
+  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH)
     examples = []
-    count.times do |i|
-      json = File.join(OUT_DIR, "#{i}.json")
-      examples.concat(JSON.parse(File.read(json))['examples']) if File.exist?(json)
+    crashed = []
+    groups.each_index do |i|
+      json = File.join(out_dir, "#{i}.json")
+      begin
+        examples.concat(JSON.parse(File.read(json)).fetch('examples'))
+      rescue Errno::ENOENT, JSON::ParserError, KeyError, TypeError
+        crashed << i
+      end
     end
 
     file_times = Hash.new(0.0)
     examples.each { |e| file_times[e['file_path'].delete_prefix('./')] += e['run_time'] }
-    File.write(TIMES_PATH, JSON.pretty_generate(known_times.merge(file_times.transform_values { |t| t.round(3) })) + "\n")
+    File.write(times_path, JSON.pretty_generate(known_times(times_path).merge(file_times.transform_values { |t| t.round(3) })) + "\n")
 
     failed = examples.select { |e| e['status'] == 'failed' }
     pending = examples.count { |e| e['status'] == 'pending' }
@@ -95,8 +106,34 @@ module ParallelSpecs
     end
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
-    bad = statuses.each_with_index.reject { |s, _| s.success? }
-    bad.each { |s, i| puts "spec:parallel: process #{i} exited with #{s.exitstatus} (see #{OUT_DIR.delete_prefix("#{ROOT}/")}/#{i}.log)" }
-    bad.empty?
+    crashed.each { |i| report_crash(i, groups[i], statuses[i], out_dir) }
+    bad = statuses.each_with_index.reject { |s, i| s.success? || crashed.include?(i) }
+    bad.each { |s, i| puts "spec:parallel: process #{i} exited with #{s.exitstatus} (see #{display_path(File.join(out_dir, "#{i}.log"))})" }
+    bad.empty? && crashed.empty?
+  end
+
+  # Lists a process that ended without its JSON report.
+  def report_crash(index, files, status, out_dir)
+    log = File.join(out_dir, "#{index}.log")
+    how =
+      if status.nil?
+        'never reported'
+      elsif status.signaled?
+        name = Signal.signame(status.termsig) rescue nil
+        "was killed by #{name ? "SIG#{name}" : 'signal'} (#{status.termsig})"
+      else
+        "exited with #{status.exitstatus}"
+      end
+    bug = File.foreach(log).find { |l| l.include?('[BUG]') } rescue nil
+    progress = File.foreach(log).sum { |l| l[/\A[.*FE]+/].to_s.length } rescue 0
+
+    puts "spec:parallel: process #{index} CRASHED: it #{how} without its JSON report after #{progress} examples (log #{display_path(log)})"
+    puts "  #{bug.strip[0, 200]}" if bug
+    puts "  Its #{files.length} files:"
+    files.each { |f| puts "    #{f}" }
+  end
+
+  def display_path(path)
+    path.delete_prefix("#{ROOT}/")
   end
 end
