@@ -76,6 +76,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_dynamics' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_recipe' do |ext|
+  ext.name = 'fast_recipe'
+  ext.ext_dir = 'ext/mb/sound/fast_recipe'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_lofi' do |ext|
   ext.name = 'fast_lofi'
   ext.ext_dir = 'ext/mb/sound/fast_lofi'

@@ -42,7 +42,7 @@ module MB
 
           raise 'No sample rate given to ProcNode' unless @sample_rate
 
-          @callers = caller_locations(5)
+          @callers = caller_locations(5, 24) # where it was made, for messages (a full backtrace costs ~5 us deep in a build)
           @cb = block
         end
 
