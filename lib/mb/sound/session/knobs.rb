@@ -82,6 +82,67 @@ module MB
           @knob_lock.synchronize { @knobs.dup }
         end
 
+        # Brings the standalone knobs in +sound+ (a graph, bundle, or Array
+        # of graphs; e.g. a graph document's `knob` lines, which load as
+        # GraphNode::Knobs belonging to no Session) into this Session, so
+        # #turn, scenes, snapshots, and #learn work on them (omnibus6,
+        # maintainer: "join knobs and live_error").  #add calls this for
+        # every graph it plays; the console's `preset` when it loads.
+        #
+        # - A new name: the knob itself joins (claiming the name in #names;
+        #   a track or group of that name goes through MB::Sound.live_error,
+        #   and live the knob stays standalone), keeping its value.
+        # - The name of a Session knob with the same range and curve: the
+        #   graph reads the Session's knob instead (it keeps its value, so a
+        #   document loaded twice, or two documents with a :cut knob, share
+        #   one knob that `turn :cut` moves).  A different range or curve
+        #   goes through MB::Sound.live_error (live: stays standalone).
+        #
+        # Knobs of this or another Session are left alone.  Returns the
+        # Session knobs the graph now reads (a Hash from name to Knob).
+        def adopt_knobs(sound)
+          nodes = to_nodes(sound)
+          found = nodes.flat_map { |n| [n, *n.graph] }
+          readers = found.grep(GraphNode::Knob::Reader)
+          own = {}.compare_by_identity
+          (readers.map(&:knob) + found.grep(GraphNode::Knob)).each { |k| own[k] = true }
+
+          joined = {}
+          own.each_key do |k|
+            if k.session
+              joined[k.name] = k if k.session.equal?(self)
+              next
+            end
+
+            existing = @knob_lock.synchronize { @knobs[k.name] }
+            if existing
+              if existing.range != k.range || existing.spec.curve != k.spec.curve
+                MB::Sound.live_error(ArgumentError.new(
+                  "The graph's knob #{k.name.inspect} (#{k.range} #{k.spec.curve}) doesn't match the session's (#{existing.range} #{existing.spec.curve}); rename one of them"
+                ))
+                next
+              end
+
+              readers.each { |r| r.rebind(existing) if r.knob.equal?(k) }
+              k.redirect(existing)
+              ([sound] + found).each { |n|
+                doc = GraphIO.document_of(n)
+                doc.knob_nodes[k.name] = [existing] if doc && doc.knob_nodes[k.name]&.any? { |x| x.equal?(k) }
+              }
+              joined[k.name] = existing
+            else
+              next unless @names.claim(k.name, :knob)
+              @render_lock.synchronize {
+                k.attach(self, frame: @frame, sample_rate: output_open? ? sample_rate : k.sample_rate)
+                @knob_lock.synchronize { @knobs[k.name] = k }
+              }
+              joined[k.name] = k
+            end
+          end
+
+          joined
+        end
+
         # Moves knob +name+ at the launch point (+on:+, +in:+, +at:+; see
         # LaunchPoint; right away by default, like mutes): to +value+ (a
         # number, limited to the knob's range; gliding over the knob's
