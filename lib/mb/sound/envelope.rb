@@ -813,7 +813,7 @@ module MB
         raise ArgumentError, "Velocity scale must be :linear or :db (got #{scale.inspect})" unless [:linear, :db].include?(scale)
 
         case range
-        when nil, 0
+        when nil, false, 0
           low = high = 1.0
 
         when Range
@@ -836,10 +836,35 @@ module MB
         self
       end
 
-      # The velocity range given to #set_sensitivity (nil if velocity is
-      # ignored).
-      def sensitivity
-        @velocity_low == @velocity_high && @velocity_low == 1.0 ? nil : @velocity_low..@velocity_high
+      # Without arguments, the velocity range (see #set_sensitivity; nil if
+      # velocity is ignored).  With a +range+, sets it and returns self, so it
+      # chains (also on Notes envelopes before they play): a Range of peak
+      # levels for velocity 0..1, or nil, false, or 0 to ignore velocity
+      # (every note peaks at full level; see #no_velocity).  +:scale+ is
+      # :linear or :db (default: unchanged).
+      #
+      # Example:
+      #     v.env(0.01, 0.3, 0.5, 0.2).sensitivity(0.8..1)
+      #     v.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2).sensitivity(nil)   # a pitch dive of exactly -1
+      def sensitivity(*range, scale: nil)
+        if range.empty?
+          raise ArgumentError, 'Give a velocity range to set the scale' if scale
+          return @velocity_low == @velocity_high && @velocity_low == 1.0 ? nil : @velocity_low..@velocity_high
+        end
+        raise ArgumentError, "Give one velocity range (got #{range.length} arguments)" if range.length > 1
+
+        set_sensitivity(range[0] == false ? nil : range[0], scale || @velocity_scale)
+      end
+      alias velocity_range sensitivity
+
+      # Ignores velocity: every note peaks at the full level (the same as
+      # #sensitivity(nil)).  Returns self.  For pitch envelopes whose levels
+      # are intervals, not loudness.
+      #
+      # Example:
+      #     v.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2).no_velocity
+      def no_velocity
+        set_sensitivity(nil, @velocity_scale)
       end
 
       # Sets the octaves of a cutoff multiplier envelope (see #initialize).

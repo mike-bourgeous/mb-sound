@@ -134,7 +134,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 ### Envelopes (`design/notes/envelopes.md`)
 
 `MB::Sound::Envelope` (`fast_envelope`, mirror `Envelope.process_ruby`) is a state machine over curved segments landing exactly on target at whole samples.  Curves are signed dB (+60 falls like a 60 dB exponential, 0 linear, negative swells; presets `:analog` default, `:linear`, `:snappy`, `:gentle`, `:swell`, `:dx`, `:smooth`, `:pad`); shapes `:exp` or `:s`.  Multi-segment `env([[level, time, curve, shape], ...], release_at:, loop:)`; SQ-80 panel units via `sq80_env`.
-- Times/levels/curves take numbers, Lengths, or nodes; inputs `gate:`, `trigger:`, `velocity:` (+ `sensitivity:`), `choke:`, `lift:`; `retrigger: :add` attacks to the energy sum.  Without a gate, notes release after `hold:`; without gate or trigger it's a one-shot.  `hold_last: true` holds the last level after the envelope ends (pitch dives) instead of 0.
+- Times/levels/curves take numbers, Lengths, or nodes; inputs `gate:`, `trigger:`, `velocity:` (+ `sensitivity:`), `choke:`, `lift:`; `retrigger: :add` attacks to the energy sum.  Without a gate, notes release after `hold:`; without gate or trigger it's a one-shot.  `hold_last: true` holds the last level after the envelope ends (pitch dives) instead of 0; `.sensitivity(range | nil)` / `.no_velocity` change or clear velocity scaling in a chain.
 - Constructors: `adsr`, `env`, `amp_env`, `fm_env`, `filter_env`/`filt_env`.  Kernel "runs" specialize only on constants of the patch (user rule).  `GraphNode#db` is gone: write `10 ** (node / 20)`.  Plot with `bin/plot_envelope.rb`.
 
 ### Tweening curves (`design/notes/curves.md`)

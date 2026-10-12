@@ -43,6 +43,19 @@ module MB
                 frequency_for to_midi_stream register keys
               ],
             },
+            'MB::Sound::Envelope' => {
+              reason: 'readers, state, and plumbing (the setters that chain are recorded)',
+              names: %i[
+                at_rate attack attack_time choke decay decay_time gate hold kernel_config level level_of lift loop_node
+                names octaves preset_name release release_node release_time reset retrigger_peak sample_ruby segment_names
+                segments stage sustain sustain_level time trigger velocity velocity_high velocity_low velocity_peak
+                velocity_scale
+              ],
+            },
+            'MB::Sound::Notes::NoteEnvelope' => {
+              reason: 'readers',
+              names: %i[base_times notes],
+            },
             'MB::Sound::GraphNode::Channels' => {
               reason: 'readers (channel access is recorded as element access, see ELEMENT_ACCESS)',
               names: %i[channel_index length size names to_h],
@@ -109,6 +122,7 @@ module MB
             [
               MB::Sound::Tone, MB::Sound::Pitch, MB::Sound::Notes::NotePitch, MB::Sound::Notes,
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
+              MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
             ]
           end
         end

@@ -293,6 +293,38 @@ RSpec.describe(MB::Sound::Envelope) do
     end
   end
 
+  describe 'velocity sensitivity helpers' do
+    it 'reads, sets, and clears the range in a chain (#sensitivity, #no_velocity)' do
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 0, trigger: 1, velocity: 0.5, sensitivity: 0.5..1)
+      expect(env.sensitivity).to eq(0.5..1.0)
+      expect(env.sensitivity(0.8..1)).to equal(env)
+      expect(env.sensitivity).to eq(0.8..1.0)
+      expect(env.sample(4)[2]).to be_within(1e-6).of(0.9)
+
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 0, trigger: 1, velocity: 0.5, sensitivity: 0.5..1)
+      expect(env.no_velocity).to equal(env)
+      expect(env.sensitivity).to eq(nil)
+      expect(env.sample(4)[2]).to eq(1)
+
+      [nil, false, 0].each do |off|
+        expect(described_class.new.sensitivity(off).sensitivity).to eq(nil), off.inspect
+      end
+
+      env = described_class.new.sensitivity(-12.db..0.db, scale: :db)
+      expect(env.velocity_scale).to eq(:db)
+      expect(env.velocity_range(0..1, scale: :linear).velocity_scale).to eq(:linear)
+      expect { described_class.new.sensitivity(scale: :db) }.to raise_error(ArgumentError, /range/)
+      expect { described_class.new.sensitivity(0..1, 0..1) }.to raise_error(ArgumentError, /one/)
+    end
+
+    it 'works on Notes envelopes before they play' do
+      make = -> { MB::Sound.seq(MB::Sound::A2.n8, MB::Sound::R.n2).notes.env([[0, 0], [0, 0.01], [-1, 0.25]], release_at: 2, hold_last: true) }
+      run = ->(e) { Numo::SFloat.zeros(0).concatenate(*Array.new(100) { e.sample(480).dup }) }
+      expect(run.(make.()).min).to be > -0.99 # scaled by the note's velocity
+      expect(run.(make.().no_velocity).min).to eq(-1)
+    end
+  end
+
   describe 'hold_last' do
     # A pitch dive: down to -1 over 100 samples after the gate falls.
     def dive(gate, **opts)
