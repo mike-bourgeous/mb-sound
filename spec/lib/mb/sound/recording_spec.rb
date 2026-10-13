@@ -236,6 +236,37 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'arm and disarm in scheduled blocks' do
+    it "land at the block's time, not when the scheduler runs it (half a bar early)" do
+      s = new_session
+      ev = MB::Sound::MIDI::Event
+      events = (0...16).flat_map { |i| [ev.parse([0x90, 60, 100], time: i * 0.5r + 0.01r), ev.parse([0x80, 60, 64], time: i * 0.5r + 0.49r)] }
+      s.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+      setup_lead(s)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.bg(:clock, 0.constant, on: :now)
+        MB::Sound.at_bar(2) { MB::Sound.arm(:lead) }
+        MB::Sound.at_bar(3) { MB::Sound.disarm(:lead) }
+      end
+      d = perform(s, {}, 96000 * 4)
+      nz = (d.ne 0).where
+      expect(nz[0]).to eq(96000 + 480)     # the first note in bar 2
+      expect(nz[-1]).to eq(191519)         # bar 2's last note (3.51..3.99 s) whole; none from bar 3
+      kinds = s.journal.changes.select { |e| e.subject.to_s.start_with?('lead') }.map { |e| [e.kind, e.subject, e.lands.to_s] }
+      expect(kinds).to eq([[:arm, :lead, '2:1'], [:bg, :'lead/live', '2:1'], [:stop, :'lead/live', '3:1'], [:disarm, :lead, '3:1']])
+    end
+
+    it "says how to stop an armed track's monitor when stopping a track that isn't playing" do
+      s = new_session
+      s.midi_in.input = keyboard
+      setup_lead(s)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.arm(:lead)
+        expect { MB::Sound.stop(:lead) }.to output(/No background player :lead is playing \(armed: its live monitor :"lead\/live" is; disarm :lead stops it\)/).to_stderr
+      end
+    end
+  end
+
   describe 'monitors and the strip' do
     it "mutes and solos a track's monitor with the track" do
       s = new_session

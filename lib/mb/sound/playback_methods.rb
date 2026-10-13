@@ -213,7 +213,9 @@ module MB
           else
             session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
               (names - stopped).each do |name|
-                warn "No background player #{name.inspect} is playing"
+                mon = name.is_a?(Symbol) && Arrangement::Recording.monitor_name(name)
+                hint = mon && session.playing_after_queue?(mon) ? " (armed: its live monitor #{mon.inspect} is; disarm #{name.inspect} stops it)" : ''
+                warn "No background player #{name.inspect} is playing#{hint}"
               end
             }
           end
