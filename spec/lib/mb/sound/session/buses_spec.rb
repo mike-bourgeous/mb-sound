@@ -296,6 +296,21 @@ RSpec.describe(MB::Sound::Session::Buses) do
       end
     end
 
+    it 'keeps ducking while the pad is soloed (a source a reader reads renders while muted)' do
+      kick_graph = -> { MB::Sound.grid(4, 'x...').loop.trigger.ping(50, decay: 0.3) }
+      ref = new_session
+      ref.add(0.5.constant.duck(kick_graph.()), name: :ref)
+      expected = run(48000, s: ref)
+      ref.close
+
+      session.add(kick_graph.(), name: :k)
+      session.add(0.5.constant.duck(:k), name: :pad)
+      session.solo(:pad)
+      data = run(48000)
+      expect(session.instance_variable_get(:@players).values.find { |p| p.name == :k }.asleep).to eq(false)
+      expect((data[480..] - expected[480..]).abs.max).to be < 1e-6 # (after the 5 ms solo declick)
+    end
+
     it 'refuses a reader that reads what it feeds' do
       session.bus(:b) { |sig| sig }
       expect { session.add(session.bus_tap(:b), name: :x, to: :b) }.to raise_error(ArgumentError, /loop/)

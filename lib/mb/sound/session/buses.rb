@@ -295,6 +295,8 @@ module MB
           @send_knobs = []
           @bus_cycle_warned = false
           @routed_span = false
+          @bus_tapped = ::Set.new
+          @bus_sources = ::Set.new
         end
 
         # True if anything needs the routed render (buses, or graphs that
@@ -450,6 +452,12 @@ module MB
           bufs
         end
 
+        # True if a reader reads player or bus +name+ (or a node inside
+        # it) this span: it keeps rendering while muted.
+        def bus_source?(name)
+          @bus_sources.include?(name)
+        end
+
         # True if some reader reads +key+ (a name, or [name, only]).
         def bus_tapped?(key)
           @bus_tapped.include?(key)
@@ -558,6 +566,7 @@ module MB
           @bus_span_buses = buses.to_h { |b| [b.name, b] }
           buses.each { |b| b.input = nil }
           @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
+          @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
           @send_knobs.each { |k| k.read(frame, count) } unless @send_knobs.empty?
 
           ranks = bus_ranks
@@ -589,7 +598,11 @@ module MB
         # Adds a player's buffer (+data+, after its fades and mute: +ramp+)
         # to its destinations: its main out (+mix+ or a bus), its sends, a
         # reader's signal, and +stem+.  Called by #render_player.
-        def deliver_player(p, data, ramp, mix, stem, offset, frames)
+        #
+        # A reader's signal hears the player before its mute and solo
+        # (+fade+: the fade ramp alone), so soloing a bass keeps it ducking
+        # by a muted kick.
+        def deliver_player(p, data, ramp, mix, stem, offset, frames, fade: ramp)
           route = route_of(p.name)
           dest = (route&.to && bus_input(route.to)) || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
@@ -605,12 +618,12 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
-            d = d[0...len]
-            d = d * ramp[0...len] if ramp
+            raw = d[0...len]
+            d = ramp ? raw * ramp[0...len] : raw
             r = offset...(offset + len)
             m[r].inplace + d
             stem[c][r].inplace + d if stem
-            tap[c][r].inplace + d if tap
+            tap[c][r].inplace + (fade.equal?(ramp) ? d : (fade ? raw * fade[0...len] : raw)) if tap
             sends.each do |input, v|
               input[c][r].inplace + (v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r])
             end
@@ -626,7 +639,9 @@ module MB
           s = 0
           e = count
 
-          muted = b.strip_level <= 0 && b.strip_ramp.nil?
+          # A bus a sidechain reads keeps processing while muted
+          read = bus_tapped?(b.name)
+          muted = b.strip_level <= 0 && b.strip_ramp.nil? && !read
           if b.asleep || muted
             wake = bus_wake_index(b, input, frame, count)
             if wake.nil? || muted
@@ -645,7 +660,7 @@ module MB
           end
 
           # A mute ramp ending in this span: the bus stops on its last frame
-          if b.strip_ramp && b.strip_ramp.to <= 0
+          if b.strip_ramp && b.strip_ramp.to <= 0 && !read
             silent_from = b.strip_ramp.start + b.strip_ramp.length - frame
             e = MB::M.clamp(silent_from, s, count)
           end
@@ -683,9 +698,9 @@ module MB
             ramp = ramp_levels(b, :strip_level, :strip_ramp, frame + p0, p1 - p0)
             r = p0...p1
             out.each_with_index do |o, c|
+              tap[c][r].inplace + o if tap # (readers hear it before its mute)
               o.inplace * ramp if ramp
               dest[c][r].inplace + o
-              tap[c][r].inplace + o if tap
               stem[c][r].inplace + o if stem
             end
             p0 = p1

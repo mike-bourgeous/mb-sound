@@ -1117,9 +1117,18 @@ module MB
         # A muted player has nothing to ring out
         return retire(p, keep: p.keep) if ringing && p.ring.stop_frame && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
 
+        # A player that a sidechain reads keeps rendering while muted (see
+        # Buses#bus_source?), waking here if it slept before
+        sidechained = @routed_span && bus_source?(p.name)
+        if sidechained && p.asleep
+          wake_pos = from + offset * per_sample
+          p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
+          p.asleep = false
+        end
+
         # Sleeping (muted) players aren't rendered until their unmute ramp
         # starts; then their clips catch up with the timeline
-        if p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?)
+        if !sidechained && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
           wake = p.strip_ramp && p.strip_ramp.to > 0 ? MB::M.max(p.strip_ramp.start - base, offset) : nil
           if wake.nil? || wake >= offset + frames
             p.asleep = true
@@ -1139,7 +1148,7 @@ module MB
         # A mute ramp ending in this buffer: the graph stops on the ramp's
         # last frame (not the end of the buffer), so free-running
         # oscillators sleep at the same point whatever the buffer size
-        if p.strip_ramp && p.strip_ramp.to <= 0
+        if p.strip_ramp && p.strip_ramp.to <= 0 && !sidechained
           silent_from = p.strip_ramp.start + p.strip_ramp.length
           if silent_from <= base + offset
             p.strip_level = 0.0
@@ -1178,12 +1187,12 @@ module MB
           end
         end
 
-        ramp = fade_ramp(p, base + offset, frames)
+        fade = fade_ramp(p, base + offset, frames)
         strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
-        ramp = ramp ? (strip ? ramp * strip : ramp) : strip
+        ramp = fade ? (strip ? fade * strip : fade) : strip
 
         if routed
-          deliver_player(p, data, ramp, mix, stem, offset, frames)
+          deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
         else
           mix.each_with_index do |m, c|
             d = data[c % data.length]
@@ -1227,7 +1236,7 @@ module MB
         elsif faded
           note_rung_out(p, frame, output.sample_rate) if p.ring&.active
           retire(p, keep: true)
-        elsif p.strip_level <= 0 && p.strip_ramp.nil?
+        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && bus_source?(p.name))
           p.asleep = true
         end
       end
