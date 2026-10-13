@@ -312,6 +312,20 @@ module MB
             Plan.changed(self)
           end
 
+          # Moves this branch forward to the furthest-ahead other branch of
+          # its Tee, discarding the frames it skips (exactly: its next read
+          # gives the frames the leader reads next), for a branch whose
+          # graph hasn't played yet and should start in step with the
+          # others (see Session::Strip#catch_up_waiting).  A branch that
+          # overflowed gets a new reader there.  Returns the number of
+          # frames skipped (nil if it had overflowed; 0 if it was already
+          # level with or ahead of every other branch).
+          def catch_up
+            raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader
+
+            @tee.catch_up(self)
+          end
+
           # For internal use by RateReader.
           def internal_raw_sample(count)
             @tee.internal_sample(self, count)
@@ -482,6 +496,56 @@ module MB
           raise_overflow(branch)
         end
 
+        # For internal use by Branch#catch_up: moves +branch+ to the
+        # furthest-ahead other branch.  In lockstep a branch lags at most
+        # the current shared buffer (the leader's next read would have left
+        # lockstep otherwise); while buffered, the leader is the
+        # non-overflowed reader with the least left to read (all readers
+        # share one write position).
+        def catch_up(branch)
+          return 0 if @branches.length <= 1
+
+          if @buffered
+            lead = nil
+            @branches.each do |b|
+              next if b.equal?(branch) || b.reader.overflowed?
+
+              len = b.reader.length
+              lead = len if lead.nil? || len < lead
+            end
+            return 0 if lead.nil?
+
+            r = branch.reader
+            if r.overflowed?
+              r.close
+              branch.reader = @cbuf.reader(lead)
+              skipped = nil
+            else
+              skipped = r.length - lead
+              return 0 if skipped <= 0
+
+              r.discard(skipped)
+            end
+            resume_lockstep
+            return skipped
+          end
+
+          skipped = 0
+          if branch.reader.overflowed?
+            # Every other reader is empty in lockstep
+            branch.reader.close
+            branch.reader = @cbuf.reader
+            skipped = nil
+          end
+
+          if branch.frame < @frame
+            skipped &&= @frame_data&.length || 0
+            branch.frame = @frame
+          end
+
+          skipped
+        end
+
         private
 
         # Samples the source for the next shared buffer, checking the last one
@@ -579,12 +643,17 @@ module MB
 
           data = r.empty? ? nil : r.read(MB::M.min(r.length, count))
 
-          if @buffered && Tee.shared && @branches.all? { |b| b.reader.overflowed? || b.reader.empty? }
-            @buffered = false
-            @branches.each { |b| b.frame = @frame }
-          end
-
+          resume_lockstep
           data
+        end
+
+        # Goes back to sharing buffers once every branch has read everything
+        # buffered (or has overflowed).
+        def resume_lockstep
+          return unless @buffered && Tee.shared && @branches.all? { |b| b.reader.overflowed? || b.reader.empty? }
+
+          @buffered = false
+          @branches.each { |b| b.frame = @frame }
         end
 
         def raise_overflow(branch)
