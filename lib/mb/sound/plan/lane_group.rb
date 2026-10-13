@@ -86,6 +86,7 @@ module MB
             run(count)
           end
 
+          sample_gone(region, idx, count) if @status[idx] == :gone
           @delivered[idx] = true
           @results[idx]
         end
@@ -112,9 +113,24 @@ module MB
           when nil
             @status[idx] = :done
             @results[idx] = region.sample_alone(count)
+          when :gone
+            sample_gone(region, idx, count)
           end
           @delivered[idx] = true
           @results[idx]
+        end
+
+        # The block of member +idx+ (+region+), replaced during this run (see
+        # #run): rebuilds its installation if that hasn't happened yet, then
+        # reads its root, whose hooks now lead to the new regions (or to its
+        # own #sample).  Returning nil here would end the member's graph
+        # (a stereo Synth lane whose envelope stream ended stopped for good,
+        # its envelope never going idle; fixes-6).
+        def sample_gone(region, idx, count)
+          @status[idx] = :done
+          inst = region.installation
+          inst.rebuild if inst.stale?
+          @results[idx] = region.installed? ? region.sample_alone(count) : region.root.sample(count)
         end
 
         # Runs every member for a +count+-sample block.
@@ -142,7 +158,10 @@ module MB
               r = members[i]
               if !status[i] && !current?(r)
                 # Replaced by a rebuild during this run (another member's
-                # installation rebuilt): its nodes belong to new regions now
+                # installation rebuilt or went stale, e.g. a feeder's
+                # stream ended): its nodes belong to new regions now, and
+                # its block comes from them when it's asked for (see
+                # #sample_gone)
                 status[i] = :gone
                 @results[i] = nil
               end
