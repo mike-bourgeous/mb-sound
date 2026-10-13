@@ -18,8 +18,9 @@
 #             in a long soft room (--space)
 #   rin       a small high bowl: faster beating, a shorter room
 #   gong      a tam-tam: dense low partials gliding down after the stroke
-#             and a high shimmer swelling in over seconds, ringing at high
-#             partials (ring:) (D2 plays 55 Hz; other notes transpose it)
+#             and a high shimmer swelling in over seconds, ringing at 16
+#             high partials spread in stereo (ring:, partials:, spread:)
+#             (D2 plays 55 Hz; other notes transpose it)
 #   koto      a plucked FM tone (1:1 body, faint 7:1 tine; more a koto or
 #             a hammered string than an e-piano) through worn tape
 #             (--wear) and a room
@@ -116,12 +117,19 @@ module MB::Sound
   # flat-centered gong), and a high shimmer swelling in over a couple of
   # seconds (energy cascading up), then fading; in a big room.  The
   # shimmer is a wandering band of noise, +ring+ (0..1, power share) of
-  # it ringing through resonators at seven high partials of the gong
-  # (44-90 times its pitch, gliding with it; +ring_decay+ seconds): more
-  # tone and resonance in the shimmer (patches-2, 2026-10-13: "a little
-  # more tonality and resonance in the shimmer would be good"; ring: 0 is
-  # the earlier noise-only shimmer).
-  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, ring: 0.6, ring_decay: 0.8, space: 0.5)
+  # it ringing through resonators at +partials+ high partials of the gong
+  # (AMBIENT_GONG_SHIMMER: 30-125 times its pitch, gliding with it, each a
+  # little apart in how far it glides; +ring_decay+ seconds at 60 times
+  # the pitch, shorter above, longer below), every other partial panned
+  # to the other side by +spread+ (0 mono, 1 hard left and right), so the
+  # shimmer sparkles across the stereo field.
+  #
+  # patches-2 (2026-10-13: "a little more tonality and resonance in the
+  # shimmer would be good") added seven partials 44-90 times the pitch, in
+  # mono (`partials: 7, spread: 0` is close to it; ring: 0 is the earlier
+  # noise-only shimmer); patches-3 (2026-10-13: "Having more shimmer
+  # partials to spread around would be even better") has 16, wider.
+  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, ring: 0.6, ring_decay: 0.8, partials: 16, spread: 0.7, space: 0.5)
     gong = synth(midi, voices: 1) { |n|
       hit = n.trigger
       fall = adsr(0, 4, 0, 0, trigger: hit, curve: :linear)
@@ -132,16 +140,45 @@ module MB::Sound
       }.reduce(:+)
       swell = n.env(2.2, 7, 0, 3, curve: :swell, gm: false)
       band = noise.filter(:bandpass, cutoff: ambient_walk(0.7, 2400, 5200), quality: 1.5)
-      if ring > 0
-        # (the resonators' sum is about 245 times the band's RMS at 0.8 s; RMS grows about as decay ** 0.6)
-        tones = [44.1, 50.3, 57.8, 63.9, 71.6, 80.2, 89.7].map { |r| band.ping(f * r * (1 + fall * glide), decay: ring_decay) }.reduce(:+)
-        band = band * Math.sqrt(1 - ring) + tones * (Math.sqrt(ring) / 245 * (0.8 / ring_decay)**0.6)
-      end
       air = band * swell * shimmer
+      if ring > 0
+        sides = ambient_gong_shimmer(partials).each_with_index.group_by { |_r, i| i % 2 }.values.map { |rs|
+          rs.map { |(r, g), _i|
+            band.ping(f * r * (1 + fall * glide * g), decay: ring_decay * (60.0 / r)**0.5)
+          }.reduce(:+)
+        }
+        # (each side's resonator sum is about 51 sqrt(partials) times the band's RMS at 0.8 s, RMS growing about
+        # as decay ** 0.6; AMBIENT_GONG_RING keeps patches-2's tonal level, about 0.8 sqrt(ring) times the band,
+        # in each channel at any spread)
+        k = Math.sqrt(ring) / (AMBIENT_GONG_RING * Math.sqrt(partials)) * (0.8 / ring_decay)**0.6
+        l, r = sides.length == 2 ? sides : [sides[0], sides[0] * 0]
+        a = (1 + spread) / 2.0
+        b = (1 - spread) / 2.0
+        noise_part = (band * Math.sqrt(1 - ring) * swell * shimmer).pan(0.2)
+        air = noise_part + stereo(l * a + r * b, l * b + r * a) * (swell * shimmer * (k / Math.sqrt(a * a + b * b)))
+      else
+        air = air.pan(0.2)
+      end
       low = low.filter(:highpass, cutoff: 38, quality: 0.6) * 0.12
-      stereo(low, low) + air.pan(0.2)
+      stereo(low, low) + air
     }
     ambient_room(gong, space: space, decay: 10, room_size: 1.0)
+  end
+
+  # Calibration of ambient_gong_voice's shimmer resonators (see there).
+  AMBIENT_GONG_RING = 63.0
+
+  # The shimmer partials of ambient_gong_voice: +count+ [ratio, glide]
+  # pairs, ratios spread geometrically over 30..125 times the gong's pitch
+  # with a fixed irregular nudge (so they never line up as harmonics), and
+  # each partial's share (0.6..1.4) of the gong's downward glide.
+  def self.ambient_gong_shimmer(count)
+    return [] if count < 1
+    (0...count).map { |i|
+      t = count == 1 ? 0.5 : i / (count - 1.0)
+      nudge = ((i * 0.618034) % 1 - 0.5) * 0.06
+      [30.0 * (125 / 30.0)**t * (1 + nudge), 0.6 + 0.8 * ((i * 0.381966) % 1)]
+    }
   end
 
   # A plucked FM tone for a kankyō motif (written as a soft e-piano; it
