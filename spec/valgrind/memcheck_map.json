@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-12",
+  "generated": "2026-10-13",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -494,6 +494,8 @@
     },
     "spec/lib/mb/sound/graph_node/dynamics_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -1142,6 +1144,8 @@
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1199,8 +1203,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1253,8 +1255,6 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
