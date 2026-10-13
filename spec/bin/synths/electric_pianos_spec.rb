@@ -40,6 +40,32 @@ RSpec.describe('bin/synths/electric_pianos.rb') do
     expect(harmonics(barky)[0]).to be > harmonics(plain)[0] + 6
   end
 
+  it 'keeps a hard tine chord out of heavy clipping, with drive: for patches-2\'s hot amp' do
+    chord = -> { patch_notes(*[MB::Sound::F3, MB::Sound::A3, MB::Sound::C4, MB::Sound::E4].map { |n| [n.number, 0, 0.5, 1.0] }) }
+    clean = render_patch(MB::Sound.tine_piano_voice(chord.(), tremolo: 0, drive: 0.01, level: 32.5), 0.5)[0]
+    soft = render_patch(MB::Sound.tine_piano_voice(chord.(), tremolo: 0), 0.5)[0]
+    hot = render_patch(MB::Sound.tine_piano_voice(chord.(), tremolo: 0, drive: 1, level: 0.325), 0.5)[0]
+    residue = ->(x) { rms_db(x - clean) - rms_db(clean) }
+    expect(residue.(soft)).to be < -20
+    expect(residue.(hot)).to be > -10
+    expect(peak_db(soft)).to be_between(-3, 3)
+  end
+
+  it 'scales the pickup drive with pickup:, pickup_velocity:, and (below C4) pickup_key:' do
+    f2 = MB::Sound::F2
+    # Power above the fundamental (the pickup's harmonics), in dB of the total
+    upper = ->(x, f) { 10 * Math.log10(band_share(seconds(x, 0.01, 0.21), f * 1.5, 24000)) }
+    reed = ->(n, vel = 0.6, **o) { render_patch(MB::Sound.reed_piano_voice(patch_notes([n.number, 0, 0.5, vel]), tremolo: 0, **o), 0.3)[0] }
+    expect(upper.(reed.(f2), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 0), f2.frequency) + 0.5
+    expect(upper.(reed.(f2, pickup: 2), f2.frequency)).to be > upper.(reed.(f2), f2.frequency) + 1
+    c5 = MB::Sound::C5
+    expect((reed.(c5) - reed.(c5, pickup_key: 0)).abs.max).to be < 1e-6 # (no key scaling above C4)
+    # pickup_velocity: 0 drives soft notes as hard as hard ones
+    expect(upper.(reed.(f2, 0.3, pickup_velocity: 0), f2.frequency)).to be > upper.(reed.(f2, 0.3), f2.frequency) + 1
+    tine = ->(**o) { render_patch(MB::Sound.tine_piano_voice(patch_notes([a3, 0, 0.5, 1.0]), tremolo: 0, **o), 0.3)[0] }
+    expect((tine.(pickup: 0) - tine.()).abs.max).to be > 0.01
+  end
+
   it 'renders each patch from a MIDI file with -p (in a fork)' do
     %w[tine reed].each do |patch|
       out = tmp_path("#{patch}.flac")
