@@ -17,6 +17,7 @@ require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
 require_relative 'graph_node/dynamics_methods'
+require_relative 'graph_node/sampling_methods'
 
 module MB
   module Sound
@@ -76,6 +77,7 @@ module MB
       include ChannelMethods
       include ChorusMethods
       include DynamicsMethods
+      include SamplingMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -310,6 +312,7 @@ require_relative 'graph_node/silence'
 require_relative 'graph_node/time_limit'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/mix_source'
+require_relative 'graph_node/bus_tap'
 require_relative 'graph_node/channels'
 require_relative 'graph_node/loudness_meter'
 require_relative 'graph_node/io_sample_mixin'
@@ -330,6 +333,7 @@ require_relative 'graph_node/resample'
 require_relative 'graph_node/quantize'
 require_relative 'graph_node/sample_hold'
 require_relative 'graph_node/decimator'
+require_relative 'graph_node/sampler_voice'
 require_relative 'graph_node/shaper'
 require_relative 'graph_node/curve_shaper'
 require_relative 'graph_node/four_pole'

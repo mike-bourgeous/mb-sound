@@ -138,6 +138,7 @@ module MB
           stmts = tree.statements.body
           @document = Document.new(path: @path)
           @document.read_comments(@comments)
+          fresh_limits! # (header values may call value methods: `param :x, 1.constant` failed with a NoMethodError)
           index = read_header(stmts)
           body = stmts[index..] || []
           return load_set(body) if set?
@@ -432,9 +433,19 @@ module MB
 
           @knobs = {}
           @knob_nodes = {}
+          @bound = {}
           @document.params.each do |name, spec|
             value = @overrides.fetch(name, spec[:value])
-            raise LoadError.new("#{@label}: param #{name} needs a number (got #{value.inspect})", path: @path) unless value.is_a?(Numeric) && value.real?
+            if (node = bound_param(name, value))
+              # Bound to a node or a Session knob by the caller: every use
+              # reads it (consumers branch it with get_sampler), and the
+              # document's own default stays the param's value
+              @bound[name] = node
+              spec[:bound] = value.is_a?(Symbol) ? value : node
+              @knobs[name] = spec[:value]
+              next
+            end
+            raise LoadError.new("#{@label}: param #{name} needs a number, a graph node, or a knob name (got #{value.inspect})", path: @path) unless value.is_a?(Numeric) && value.real?
             if (r = spec[:range]) && r.is_a?(Range) && @overrides.key?(name) && !range_cover?(r, value)
               warn "#{@label}: param #{name} = #{value} is outside its range #{r}"
             end
@@ -446,6 +457,25 @@ module MB
               opts = spec.slice(*Document::KNOB_KEYS).except(:description)
               @knob_nodes[name] = [set? ? session_knob(name, value, opts) : GraphNode::Knob.new(name, value, **opts)]
             end
+          end
+        end
+
+        # The node param +name+ is bound to when the caller's +value+ (never
+        # document text: params in the document are numbers) is a graph node
+        # or a Symbol naming a knob of the Session (the loader's, else the
+        # current context's or default one, never created here), else nil.
+        def bound_param(name, value)
+          case value
+          when Symbol
+            session = @session || Session.existing
+            knob = session&.knobs&.[](value)
+            unless knob
+              names = session ? session.knobs.keys : []
+              raise LoadError.new("#{@label}: param #{name} names knob #{value.inspect}, but #{session ? 'the session has no such knob' : 'there is no session'}#{GraphIO.suggest(value, names)} (knobs: #{names.empty? ? 'none' : names.join(', ')})", path: @path)
+            end
+            knob
+          when GraphNode, GraphNode::Channels
+            value
           end
         end
 
@@ -654,6 +684,7 @@ module MB
         # The node for a use of param +name+: a new Constant named after it
         # (see #bind_params), or the knob of a `knob` line.
         def knob(name)
+          return @bound[name] if @bound&.key?(name)
           return @knob_nodes[name][0] if @document.params[name][:knob]
 
           c = @knobs[name].constant.named(name.to_s)
@@ -751,6 +782,7 @@ module MB
             end
             return complex(node, scope) if name == :Complex
             return named_proc(node, scope) if name == :named_proc
+            return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
             if Document::HEADER.include?(name)
               raise error(node, "#{name} belongs in the header, before the graph")
@@ -1002,6 +1034,21 @@ module MB
         end
 
         # &named_proc(:name): a block from GraphIO.procs.
+        # bus(:drums) or bus(:drums, only: :kick): a node reading a bus or
+        # track of the Session that plays the graph (GraphNode::BusTap).
+        # Documents only read buses; defining one (a block, to:) is the
+        # console's or a set's.
+        def bus_reader(node, scope)
+          raise error(node, 'documents read buses (bus(:name)); define them in the console or a set') if node.block
+          args, kwargs = call_args(node, scope)
+          only = kwargs.delete(:only)
+          unless args.length == 1 && args[0].is_a?(Symbol) && kwargs.empty? && (only.nil? || only.is_a?(Symbol))
+            raise error(node, 'bus takes a bus or track name and only: a node name (bus(:drums, only: :kick))')
+          end
+          check_limits(node, MB::Sound, :bus, args, {})
+          GraphNode::BusTap.new(args[0], only: only, channels: Session.existing&.channels || 2).node
+        end
+
         def named_proc(node, scope)
           args, = call_args(node, scope)
           name = args[0]
@@ -1093,7 +1140,8 @@ module MB
         def check_file(node, name, args)
           file = args[0]
           return unless file.is_a?(String)
-          args[0] = FileGuard.check(file, file_context, name.to_s)
+          resolved = FileGuard.check(file, file_context, name.to_s)
+          args[0] = resolved unless Registry::KEEP_NAME.include?(name)
         rescue GraphIO::FileError => e
           raise error(node, e.message)
         end

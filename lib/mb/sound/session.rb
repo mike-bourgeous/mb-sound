@@ -20,6 +20,7 @@ require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/monitor_trim'
+require_relative 'session/buses'
 
 module MB
   module Sound
@@ -70,6 +71,7 @@ module MB
       include AudioRecording
       include Stems
       include MonitorTrim
+      include Buses # last: it extends Strip, Undo, and Seeks through super
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -289,6 +291,7 @@ module MB
         init_midi_in
         init_audio_recording
         init_monitor(monitor.nil? ? realtime : monitor)
+        init_buses
         @names = Names.new
         @arrangement = nil
       end
@@ -363,7 +366,10 @@ module MB
       # The graph is built and prepared right away; the change goes through
       # the change queue (see Changes), so it lands exactly at its time even
       # if other changes for the same name are waiting.
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil)
+      #
+      # +:to+ and +:send+ set the name's routing (see Buses#route): the bus
+      # its main out feeds, and its sends (bus name => level).
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -386,6 +392,12 @@ module MB
             @order << name
             name
           }
+
+          # Routing, readers of buses and players, and spies for readers of
+          # named nodes in this graph (see Buses)
+          route(name, to: to, send: send) unless to == :keep && send.nil?
+          bind_bus_taps(nodes, name) or return nil
+          attach_bus_spies(name, nodes) if @bus_only.key?(name)
 
           change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
@@ -791,7 +803,12 @@ module MB
         players = @mutex.synchronize { @players.values }
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
-        if @stems
+        playing = !players.empty? || queued_start?
+        routed = @routed_span = routed?
+        if routed
+          # Buses, sends, and readers: dependency order (see Buses)
+          render_routed(players, mix, from, to, per_sample, count, @frame, playing)
+        elsif @stems
           render_players_with_stems(players, mix, from, to, per_sample, count, @frame)
         else
           players.each do |p|
@@ -799,10 +816,10 @@ module MB
           end
         end
 
-        playing = !players.empty? || queued_start?
         @transport.advance(to - from) if playing
         # Pre-chain master gain (the default; see #master_gain_post?)
         mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
+        begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
 
         @frame += count
@@ -1065,7 +1082,10 @@ module MB
       # Strip).  Ramps start on the exact sample of their time.  A player
       # that is silent because of a mute or solo sleeps (isn't rendered)
       # until it is unmuted.
-      def render_player(p, mix, from, to, per_sample, count)
+      #
+      # +stem+ (stems with routing; see Buses#render_routed) gets the
+      # player's main out wherever it goes.
+      def render_player(p, mix, from, to, per_sample, count, stem: nil)
         return if p.start >= to
 
         rate = output.sample_rate.to_f
@@ -1110,9 +1130,18 @@ module MB
         # A muted player has nothing to ring out
         return retire(p, keep: p.keep) if ringing && p.ring.stop_frame && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
 
+        # A player that a sidechain reads keeps rendering while muted (see
+        # Buses#bus_source?), waking here if it slept before
+        sidechained = @routed_span && bus_source?(p.name)
+        if sidechained && p.asleep
+          wake_pos = from + offset * per_sample
+          p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
+          p.asleep = false
+        end
+
         # Sleeping (muted) players aren't rendered until their unmute ramp
         # starts; then their clips catch up with the timeline
-        if p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?)
+        if !sidechained && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
           wake = p.strip_ramp && p.strip_ramp.to > 0 ? MB::M.max(p.strip_ramp.start - base, offset) : nil
           if wake.nil? || wake >= offset + frames
             p.asleep = true
@@ -1132,7 +1161,7 @@ module MB
         # A mute ramp ending in this buffer: the graph stops on the ramp's
         # last frame (not the end of the buffer), so free-running
         # oscillators sleep at the same point whatever the buffer size
-        if p.strip_ramp && p.strip_ramp.to <= 0
+        if p.strip_ramp && p.strip_ramp.to <= 0 && !sidechained
           silent_from = p.strip_ramp.start + p.strip_ramp.length
           if silent_from <= base + offset
             p.strip_level = 0.0
@@ -1144,6 +1173,8 @@ module MB
           frames = MB::M.min(frames, silent_from - (base + offset))
         end
 
+        routed = @routed_span
+        begin_bus_read(offset, p.name) if routed
         # Knob readers and MIDI input taps in the graph read from this
         # player's first frame (see GraphNode::Knob#clock_frame and
         # #player_frame)
@@ -1179,18 +1210,22 @@ module MB
           end
         end
 
-        ramp = fade_ramp(p, base + offset, frames)
+        fade = fade_ramp(p, base + offset, frames)
         strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
-        ramp = ramp ? (strip ? ramp * strip : ramp) : strip
+        ramp = fade ? (strip ? fade * strip : fade) : strip
 
-        mix.each_with_index do |m, c|
-          d = data[c % data.length]
-          next if d.nil? || d.empty?
-          d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-          len = MB::M.min(d.length, frames)
-          d = d[0...len]
-          d = d * ramp[0...len] if ramp
-          m[offset...(offset + len)] = m[offset...(offset + len)] + d
+        if routed
+          deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
+        else
+          mix.each_with_index do |m, c|
+            d = data[c % data.length]
+            next if d.nil? || d.empty?
+            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            len = MB::M.min(d.length, frames)
+            d = d[0...len]
+            d = d * ramp[0...len] if ramp
+            m[offset...(offset + len)] = m[offset...(offset + len)] + d
+          end
         end
 
         if rung_out
@@ -1237,7 +1272,7 @@ module MB
         elsif faded
           note_rung_out(p, frame, output.sample_rate) if p.ring&.active
           retire(p, keep: true)
-        elsif p.strip_level <= 0 && p.strip_ramp.nil?
+        elsif p.strip_level <= 0 && p.strip_ramp.nil? && !(@routed_span && bus_source?(p.name))
           p.asleep = true
         end
       end

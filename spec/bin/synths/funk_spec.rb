@@ -25,6 +25,45 @@ RSpec.describe('bin/synths/funk.rb') do
     expect((half - boxed).abs.max).to be > 0.01
   end
 
+  # Renders +graph+ (a block, built inside the render) for +bars+ at 96 BPM
+  # in a Session, so tempo-synced LFOs follow the timeline; the left channel.
+  def render_bars(bars)
+    path = tmp_path('bars.flac')
+    MB::Sound.render(path, bars: bars, overwrite: true, gain: 0.db) do
+      MB::Sound.bpm 96
+      MB::Sound.bg :x, MB::Sound.with_seed(3) { yield }, fade: 0
+    end
+    MB::Sound.read(path)[0]
+  end
+
+  # The share of +x+'s power from +lo+ to +hi+ Hz in each +step+ seconds.
+  def band_steps(x, step, lo, hi)
+    n = (step * 48000).round
+    (x.length / n).times.map { |i| band_share(x[(i * n)...((i + 1) * n)].dup, lo, hi) }
+  end
+
+  it 'sweeps the mouth with wobble: (by default only the beatbox), so the backbeats say different vowels' do
+    kit = -> { MB::Sound.grid(16, snare: '....X.......X...').loop }
+    beat = 60.0 / 96
+    snares = ->(x) { [1, 3].map { |b| band_share(seconds(x, b * beat, b * beat + 0.1).dup, 200, 1500) } }
+    [false, true].each do |box|
+      still = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0) })
+      swept = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0.8) })
+      default = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box) })
+      expect(default).to eq(box ? swept : still), "beatbox: #{box}: the default wobbles only the beatbox"
+      ratio = ->((a, b)) { (10 * Math.log10(a / b)).abs }
+      expect(ratio.(swept)).to be > ratio.(still) + 1, "beatbox: #{box}: #{still} -> #{swept}"
+    end
+  end
+
+  it 'moves the talkbox\'s mouth with the groove on a held note with groove:' do
+    held = -> { MB::Sound.seq(MB::Sound::A4.n1).loop }
+    still = band_steps(render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, groove: 0) }, 60.0 / 96 / 8, 900, 2500)[8..]
+    moving = band_steps(render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) }, 60.0 / 96 / 8, 900, 2500)[8..]
+    spread = ->(v) { db = v.map { 10 * Math.log10(_1) }; db.max - db.min }
+    expect(spread.(moving)).to be > spread.(still) + 2
+  end
+
   it 'plays the bass louder and a little brighter with velocity' do
     d2 = MB::Sound::D2.number
     soft = render_patch(MB::Sound.funk_bass_voice(patch_notes([d2, 0, 0.5, 0.3])), 0.5)[0]

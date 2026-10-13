@@ -34,7 +34,7 @@ module MB
         # previous note one more step (MB::Sound::Tie).  Marks return new
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
-        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, keyword_init: true) do
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, keyword_init: true) do
           include NoteMethods
 
           # True for a rest (no note, clip, or tie).
@@ -107,6 +107,18 @@ module MB
           # fill plays.
           def nofill(name = nil)
             marked(fill_mark: Clip.check_fill(:nofill, name))
+          end
+
+          # With +semitones+ (an Interval or a number), a copy of this step
+          # with a pitch mark: the note's per-note pitch (MIDI::Event#pitch),
+          # which samplers play as their slice or sample that much higher
+          # while the note (the key, the slice) stays the same; a chop clip
+          # (Sample::Slices#chop) marks every hit, and Clip#transpose moves
+          # marked notes' marks instead of their keys.  Without an argument,
+          # the mark (semitones, or nil).
+          def pitch(semitones = nil)
+            return self[:pitch] if semitones.nil?
+            marked(pitch: Interval.semitones(semitones).to_f)
           end
 
           # Returns a copy of this step +octaves+ (default 1; a number or an
@@ -185,7 +197,7 @@ module MB
           Event.new(
             start: start, length: total - last + last * legato, value: step.value, velocity: step.velocity,
             probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil,
-            condition: step.condition, fill_mark: step.fill_mark
+            condition: step.condition, fill_mark: step.fill_mark, pitch: step[:pitch]
           )
         end
 
@@ -296,7 +308,12 @@ module MB
         # Returns a Seq with every note's value shifted by +semitones+.
         def transpose(semitones)
           map_steps { |s|
-            s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(semitones))
+            if s[:pitch]
+              # A pitch-marked step (a sampler chop hit) keeps its key
+              s.to_h.merge(pitch: s[:pitch] + Interval.semitones(semitones).to_f)
+            else
+              s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(semitones))
+            end
           }
         end
 

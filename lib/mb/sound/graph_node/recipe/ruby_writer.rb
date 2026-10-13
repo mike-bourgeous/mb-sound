@@ -201,7 +201,7 @@ module MB
             seeded = [] if seeded.length < 2
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
-              next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader)
+              next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader) || o.is_a?(BusTap::Channel)
               info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
@@ -500,11 +500,16 @@ module MB
               # each knob(:name) is its own reader, so it prints inline
               # (2026-10-12: before, as a free input)
               return [knob_text(o), ATOM]
+            when BusTap::Channel
+              # A reader of a Session bus or track: bus(:name) (see #bus_text)
+              return [bus_text(o), ATOM]
             when MB::Sound::Notes::NotePitch
               # falls through to an input
             when MB::Sound::Pitch
               return [pitch_text(o), ATOM]
             when Channels
+              tap = o.to_a.first.is_a?(BusTap::Channel) && o.to_a.first.original_source
+              return [bus_text(tap), ATOM] if tap && o.to_a == tap.outputs
               if channels_printable?(o)
                 return ["channels(#{o.to_a.map { |x| expr(x, indent: indent) }.join(', ')})", ATOM]
               end
@@ -517,13 +522,22 @@ module MB
             [input_name(o), ATOM]
           end
 
+          # bus(:name), bus(:name, only: :node), or one channel of a bus,
+          # bus(:name)[1], for a BusTap or one of its channels.
+          def bus_text(o)
+            tap = o.is_a?(BusTap) ? o : o.original_source
+            text = "bus(#{tap.source_name.inspect}#{tap.only ? ", only: #{tap.only.inspect}" : ''})"
+            return text if o.is_a?(BusTap) || tap.outputs.length == 1
+            "#{text}[#{tap.outputs.index(o)}]"
+          end
+
           # knob(:name) for a Knob or Knob::Reader.
           def knob_text(o)
             "knob(#{(o.is_a?(Knob::Reader) ? o.knob : o).name.to_sym.inspect})"
           end
 
           def channels_printable?(o)
-            o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) }
+            o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) || x.is_a?(BusTap::Channel) }
           end
 
           # Names a free input.
@@ -849,6 +863,9 @@ module MB
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
+            when MB::Sound::Sample then sample_text(v, indent)
+            when MB::Sound::Sample::Slices then slices_text(v, indent)
+            when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
@@ -981,7 +998,7 @@ module MB
 
             note = MB::Sound::Note.new(v.value)
             base = pitch_text(note)
-            return nil unless base.match?(/\A[A-G]/)
+            return nil unless base.match?(/\A([A-G]|Note\.new\()/)
 
             # Applied innermost first, as `~!A1.chance(p)` evaluates
             suffix = []
@@ -1000,6 +1017,10 @@ module MB
                 mode, name = v.fill_mark
                 suffix << ".#{mode}#{"(#{name.inspect})" if name}"
                 rebuilt = rebuilt.public_send(mode, name)
+              end
+              if v.pitch
+                suffix << ".pitch(#{num(v.pitch)})"
+                rebuilt = rebuilt.pitch(v.pitch)
               end
               rebuilt = MB::Sound::Sequence::Seq.step(rebuilt)
               prefix = ''
@@ -1099,9 +1120,13 @@ module MB
           def pitch_text(p)
             if p.instance_of?(MB::Sound::Note)
               name = p.to_s
-              if name.match?(/\A[A-G][sb]?-?\d+\z/)
+              if name.match?(/\A[A-G][sb]?\d+\z/)
                 n = MB::Sound::Note.new(name) rescue nil
                 return name if n && n.frequency == p.frequency
+              elsif name.match?(/\A[A-G][sb]?-\d+\z/) && p.number == p.number.round
+                # Octave -1 has no constant (Fs-1 would be Fs minus 1)
+                n = MB::Sound::Note.new(p.number.round)
+                return "Note.new(#{p.number.round})" if n.frequency == p.frequency
               end
             end
             unless p.constant?
@@ -1130,6 +1155,88 @@ module MB
               return "Wavetable[#{asset.inspect}]"
             end
             fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          # A Sample: the calls that cut or edited it (Sample#lineage) on its
+          # origin, which prints as an asset in bundles (or its file).
+          def sample_text(s, indent)
+            # Edits (new audio: bits, lofi, stretch, mono) save as assets in
+            # bundles, so loading neither redoes them nor rounds differently
+            if @assets && s.lineage && MB::Sound::Sample::EDITS.include?(s.lineage[1]) && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
+            if s.lineage
+              parent, name, args, kwargs = s.lineage
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            if @assets && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
+            return "Sample[#{s.file.inspect}]" if s.file
+
+            fixme("a Sample made from audio in memory (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          def slices_text(s, indent)
+            return fixme('Slices without a recipe') unless s.lineage
+            parent, name, args, kwargs = s.lineage
+            "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+          end
+
+          # An Instrument: from slices (keymap) or an SFZ file; others print
+          # as a FIXME for now.
+          def instrument_text(i, indent)
+            if i.lineage
+              parent, name, args, kwargs = i.lineage
+              if parent == :sfz
+                extra = kwargs.map { |k, v| ", #{key_text(k)} #{value(v, indent)}" }.join
+                return "sfz(#{leaf(args[0], indent)}#{extra})"
+              end
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            instrument_block_text(i, indent)
+          end
+
+          # An Instrument built region by region, as its constructor with a
+          # block of `i.region` calls (only settings that differ from
+          # Instrument#region's defaults).
+          def instrument_block_text(inst, indent)
+            kw = {}
+            kw[:split] = inst.split if inst.split
+            kw[:mips] = inst.mips unless inst.mips == :default
+            kw[:envelope] = inst.envelope if inst.envelope
+            kw[:name] = inst.name if inst.name
+            args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            inner = "#{indent}  "
+            lines = inst.regions.map { |r|
+              opts = {}
+              opts[:keys] = r.keys[0]..r.keys[1] unless r.keys == [0, 127]
+              opts[:vel] = r.vel[0]..r.vel[1] unless r.vel == [0, 127]
+              opts[:seq] = r.seq if r.seq
+              opts[:rand] = r.rand[0]...r.rand[1] if r.rand
+              opts[:root] = r.root if r.root
+              opts[:keytrack] = r.keytrack unless r.keytrack == 1
+              opts[:veltrack] = r.veltrack unless r.veltrack == 0
+              opts[:tune] = r.tune unless r.tune == 0
+              opts[:gain] = r.gain unless r.gain == 1
+              opts[:offset] = r.offset unless r.offset == 0
+              list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
+              "#{inner}i.region(#{list.join(', ')})"
+            }
+            head = args.empty? ? 'Sampler::Instrument.new' : "Sampler::Instrument.new(#{args.join(', ')})"
+            "#{head} { |i|\n#{lines.join("\n")}\n#{indent}}"
+          end
+
+          # (Samples, Slices, and Instruments print as postfix chains, so
+          # they need no parentheses as receivers)
+          def lineage_receiver(parent, indent)
+            leaf(parent, indent)
+          end
+
+          def lineage_call(name, args, kwargs, indent)
+            list = args.map { |a| value(a, indent) } + kwargs.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            return "[#{list.join(', ')}]" if name == :[]
+            list.empty? ? ".#{name}" : ".#{name}(#{list.join(', ')})"
           end
 
           # A number: Decibels as k.db, and Float gains that are exactly k/10

@@ -12,16 +12,17 @@
 # In D minor / F major, 96 bars (about 2:20 plus the ring-out).  Written
 # with the public mb-sound API only.
 #
-# The break is the point.  There is no sampler in mb-sound yet, so the
-# song first presses its own "record": a two-bar funk break played on
+# The break is the point.  The song first presses its own "record"
+# (bounced into a Sample; when Nev wrote it there was no sampler yet, and
+# the slices were sample-mode Wavetables in a KeyMap): a two-bar funk break played on
 # the TR-808 kit (tuned up to sound more like a kit than a drum machine)
 # at 138.75 BPM in a small room, softclipped like tape (.jungle_record).
 # Then it does what we did on the S950: cuts the record into slices,
-# truncates them to 12 bits, puts each slice on its own key zone
-# (Wavetable::KeyMap of sample-mode tables, 11 semitones per zone;
-# .jungle_sampler) and
-# plays the slices from note patterns, three semitones up so 138.75 BPM
-# lands on 165 (2^(3/12) * 138.75 = 165.0: pitch it up until it fits).  The
+# truncates them to 12 bits, puts each slice on its own key
+# (.memory_card_break, a Sample::Slices, and its keymap; a keyboard plays
+# them through jungle.rb's .jungle_sampler zones) and plays the slices
+# from chop patterns whose hits carry pitch marks three semitones up, so
+# 138.75 BPM lands on 165 (2^(3/12) * 138.75 = 165.0: pitch it up until it fits).  The
 # whole record is a slice too (:full), so rolling sections loop it in
 # time.  One voice: every new slice truncates the last, like a mono
 # sampler.  Ghost notes, pitched snare rolls, and a reversed snare are
@@ -72,18 +73,22 @@ module MB::Sound
   # played three semitones up land exactly on the song's grid.
   MEMORY_CARD_RECORD_BPM = MEMORY_CARD_BPM / 2 ** (3 / 12.0)
 
-  # A chop pattern in 16ths: slice names (see .jungle_slices), [name,
-  # semitones] for pitched slices, and Tie/Rest (T/R) steps; e.g.
-  # chop(:k, T, :h, :g, [:s, 2]).
+  # The record's slices (Sample::Slices; .jungle_slices_of at the
+  # record's tempo), pressed once.
+  def self.memory_card_break
+    @memory_card_break ||= jungle_slices_of(bpm: MEMORY_CARD_RECORD_BPM)
+  end
+
+  # A chop pattern in 16ths (Sample::Slices#chop on .memory_card_break):
+  # slice names (see .jungle_slices; :rev is the snare run backwards),
+  # [name, semitones] for pitched slices, and Tie/Rest (T/R) steps, three
+  # semitones up so the record lands on the song's grid; e.g.
+  # chop(:k, T, :h, :g, [:s, 2]).  Every hit carries a pitch mark, so
+  # `chop(...).transpose(2)` pitches the hits, not the slices.
   def self.chop(*steps)
-    keys = jungle_slice_keys
-    seq(*steps.map { |s|
-      case s
-      when Symbol then keys.fetch(s)
-      when Array then keys.fetch(s[0]).transpose(s[1])
-      else s
-      end
-    }).n16
+    brk = memory_card_break
+    rev = brk[:s2].rev
+    brk.chop(*steps.map { |s| s == :rev ? rev : s }).transpose(3)
   end
 
   # The chop patterns (looping clips, named).
@@ -183,7 +188,7 @@ module MB::Sound
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
   def self.memory_card(drive: 5.0, ceiling: -1.0)
-    map = jungle_sampler(bpm: MEMORY_CARD_RECORD_BPM) # (renders the record at its own tempo first)
+    map = memory_card_break.instrument # (the record bounces at its own tempo)
     chops = memory_card_chops
     c = memory_card_clips
     k = memory_card_kits

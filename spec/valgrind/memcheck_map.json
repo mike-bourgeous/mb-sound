@@ -189,6 +189,11 @@
         "FastReverb::Network#process"
       ]
     },
+    "spec/ext/mb/sound/fast_sampler_spec.rb": {
+      "fast_sampler": [
+        "FastSampler.play"
+      ]
+    },
     "spec/ext/mb/sound/fast_synth_feedback_spec.rb": {
       "fast_synth": [
         "FastSynth.feedback_sine"
@@ -512,8 +517,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -792,6 +795,9 @@
       "fast_reverb": [
         "FastReverb::Network#initialize",
         "FastReverb::Network#process"
+      ],
+      "fast_sampler": [
+        "FastSampler.play"
       ],
       "fast_sound": [
         "FastSound.biquad_narray",
@@ -1268,6 +1274,36 @@
         "FastWavetable.shape"
       ]
     },
+    "spec/lib/mb/sound/sampler_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sampler": [
+        "FastSampler.play"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
     "spec/lib/mb/sound/shaper_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.copy"
@@ -1316,8 +1352,6 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },

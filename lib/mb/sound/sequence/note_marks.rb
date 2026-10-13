@@ -57,6 +57,12 @@ module MB
           to_step.every(n, from: from)
         end
 
+        # A Seq::Step of this note with a pitch mark of +semitones+ (see
+        # Seq::Step#pitch): samplers play its slice that much higher.
+        def pitch(semitones)
+          to_step.pitch(semitones)
+        end
+
         # A step that plays only during fills (see Seq::Step#fill).
         def fill(name = nil)
           to_step.fill(name)
