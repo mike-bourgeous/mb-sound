@@ -19,6 +19,7 @@
 
 #include "numo/narray.h"
 #include "mb_ext_helpers.h"
+#include "mb_phase.h"
 
 #define WT_MAX_LEVELS 64
 #define WT_DERIV_ORDERS 2 // value and slope (phase warp corners)
@@ -833,6 +834,10 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 	double pending_re = 0, pending_im = 0, pending_d = 0;
 
 	_Bool constant = !freqptr && rndadv == 0;
+	_Bool running = !constant && rndadv == 0; // a frequency signal (see mb_phase.h)
+	if (running) {
+		phi = mb_wrap_phase(phi);
+	}
 	double steps = 0;
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
@@ -846,7 +851,7 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 			steps = inc * i;
 		}
 
-		double e = wt_wrap(phi + steps, 1.0);
+		double e = running ? phi : wt_wrap(phi + steps, 1.0);
 		if (pm != 0) {
 			e = wt_wrap(e + pm, 1.0);
 		}
@@ -915,8 +920,8 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 
 		if (rndadv != 0) {
 			phi = wt_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
-		} else if (!constant) {
-			steps += inc;
+		} else if (running) {
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 

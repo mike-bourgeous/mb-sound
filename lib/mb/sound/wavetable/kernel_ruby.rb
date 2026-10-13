@@ -44,6 +44,8 @@ module MB
           pending_d = 0.0
           rndadv = rndadv.to_f
           constant = f_a.nil? && rndadv == 0
+          running = !constant && rndadv == 0 # a frequency signal (mb_phase.h)
+          phi = Tone.wrap_phase(phi) if running
           steps = 0.0
           values = Array.new(count)
 
@@ -62,7 +64,7 @@ module MB
             end
             steps = inc * i if constant
 
-            e = wrap(phi + steps)
+            e = running ? phi : wrap(phi + steps)
             e = wrap(e + pm) if pm != 0
 
             if w != 0.5
@@ -108,8 +110,8 @@ module MB
             primed = true
             if rndadv != 0
               phi = wrap(phi + inc) # noise: a running wrapped phase (block-size independent)
-            elsif !constant
-              steps += inc
+            elsif running
+              phi = Tone.wrap_phase(phi + inc)
             end
           end
 
@@ -277,6 +279,7 @@ module MB
           len = le - ls
 
           constant = f_a.nil?
+          phi = Tone.wrap_phase(phi) unless constant # a running phase and position (mb_phase.h)
           steps = 0.0
           psteps = 0.0
           values = Array.new(count)
@@ -290,14 +293,14 @@ module MB
               psteps = sp * i
             end
 
-            p = pos + psteps
+            p = constant ? pos + psteps : pos
             p = ls + fwrap(p - ls, len) if looped && p >= le
 
             values[i] = gain(value(spec, p, sp.abs, 0.0, interp), g, off)
 
             unless constant
-              steps += inc
-              psteps += sp
+              phi = Tone.wrap_phase(phi + inc)
+              pos = p + sp
             end
           end
 

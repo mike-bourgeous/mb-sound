@@ -14,6 +14,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_osc_shapes.h"
+#include "mb_phase.h"
 #include "mb_biquad.h"
 
 static ID sym_array_lookup;
@@ -650,6 +651,10 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 	}
 
 	_Bool constant = !freqptr && rndadv == 0;
+	_Bool running = !constant && rndadv == 0; // a frequency signal (see mb_phase.h)
+	if (running) {
+		phi = mb_wrap_phase(phi);
+	}
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -661,7 +666,7 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 			steps = inc * i;
 		}
 
-		out[i] = wrap(phi + steps, 1.0);
+		out[i] = running ? phi : wrap(phi + steps, 1.0);
 		if (incptr) {
 			incptr[i] = inc;
 		}
@@ -671,8 +676,8 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 			// where blocks start (steps of up to +-freq/2 cycles summed per
 			// block rounded differently by block size)
 			phi = wrap(phi + inc, 1.0);
-		} else if (!constant) {
-			steps += inc;
+		} else if (running) {
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
@@ -792,6 +797,10 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr, &pmstep);
 
 	_Bool constant = !freqptr && rndadv == 0;
+	_Bool running = !constant && rndadv == 0; // a frequency signal (see mb_phase.h)
+	if (running) {
+		phi = mb_wrap_phase(phi);
+	}
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -806,7 +815,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 			steps = inc * i;
 		}
 
-		double complex v = shape_sample(wt, wrap(phi + steps, 1.0), inc, pm) * g + off;
+		double complex v = shape_sample(wt, running ? phi : wrap(phi + steps, 1.0), inc, pm) * g + off;
 
 		if (complex_buffer) {
 			((complex float *)out)[i] = v;
@@ -819,8 +828,8 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 			// where blocks start (steps of up to +-freq/2 cycles summed per
 			// block rounded differently by block size)
 			phi = wrap(phi + inc, 1.0);
-		} else if (!constant) {
-			steps += inc;
+		} else if (running) {
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 

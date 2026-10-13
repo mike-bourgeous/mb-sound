@@ -10,6 +10,7 @@
 
 #include <math.h>
 #include "mb_ext_helpers.h"
+#include "mb_phase.h"
 
 #define BL_MAX_BREAKPOINTS 4
 #define BL_EPS 1e-9
@@ -612,6 +613,9 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
 
 	_Bool constant = !freqptr;
+	if (!constant) {
+		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
+	}
 	double steps = 0;
 	double e = 0, inc = 0;
 	double pending = 0, pending_d = 0;
@@ -645,7 +649,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 			steps = inc * i;
 		}
 
-		e = mb_wrap(phi + steps, 1.0);
+		e = constant ? mb_wrap(phi + steps, 1.0) : phi;
 		if (pm != 0) {
 			e = mb_wrap(e + pm, 1.0);
 		}
@@ -710,7 +714,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		primed = 1;
 
 		if (!constant) {
-			steps += inc;
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 

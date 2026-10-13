@@ -15,9 +15,9 @@ RSpec.describe('Tone null-test reference') do
   INTENDED = {
     # Bug fix 2026-10-06: wraps landing exactly on a sample (a whole number
     # of cycles) were lost to rounding; now a pulse of 1 on that sample
-    'tone_ports' => 'wraps: adds the pulse lost at sample 960 (1500 Hz + 200 Hz FM, whole cycles)',
+    'tone_ports' => 'wraps: adds the pulse lost at sample 960 (1500 Hz + 200 Hz FM, whole cycles); 2026-10-13: running phase (last bits)',
     'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles); 2026-10-07: no backward-edge spikes',
-    'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles)',
+    'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles); 2026-10-13: running phase, the phasor reads 0 (not 1.0) at that wrap',
     'phasor_wraps_only' => 'new at_2000 output (2000 Hz, every wrap on a sample; had no pulses); main unchanged',
     # Fix 2026-10-07: synced ramps, triangles, and parabolas are exactly the
     # minimum-phase filtered naive waveform (segments delayed with the
@@ -59,7 +59,7 @@ RSpec.describe('Tone null-test reference') do
     'pulse' => 'first sample as if the tone had always run',
     'pm_index' => 'first sample as if the tone had always run; 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     'square_110' => 'first sample as if the tone had always run',
-    'rate_96000_fm' => 'first sample as if the tone had always run',
+    'rate_96000_fm' => 'first sample as if the tone had always run; 2026-10-13: running phase (last bits)',
     'notes' => 'first sample as if the tone had always run',
     'ramp_pwm' => 'first sample as if the tone had always run',
     'reset_lfo' => 'first sample as if the tone had always run',
@@ -89,6 +89,20 @@ RSpec.describe('Tone null-test reference') do
     # sample difference 1.3e-6)
     'pm' => 'PM in cycles (last bits)',
     'pm_chain' => 'PM in cycles (last bits)',
+    # 2026-10-13 (fixes-6): tones with a frequency signal keep a running
+    # phase wrapped every sample (mb_phase.h), so they give the same samples
+    # at any block size; FM renders differ in the last bits (residuals
+    # -256 to -323 dB), and phasors whose wraps land exactly on a sample
+    # read 0 there instead of a float32 1.0 (tempo phasors every 1500
+    # samples at 32 Hz)
+    'fm_stack' => 'running phase (last bits)',
+    'fm_through_zero' => 'running phase (last bits)',
+    'freq_node' => 'running phase (last bits)',
+    'tuning_480' => 'running phase (last bits)',
+    'tempo_lfo' => 'running phase (last bits)',
+    'tempo_late_start' => 'running phase (last bits)',
+    'tempo_phasor' => 'running phase: 0 (not 1.0) at wraps exactly on samples',
+    'tempo_pitch_freewheel' => 'running phase: the phasor part reads 0 (not 1.0) at wraps exactly on samples',
   }.freeze
 
   it 'has a reference for every case' do

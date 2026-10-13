@@ -116,6 +116,18 @@ module MB
         (z >> 11) * (2.0**-53)
       end
 
+      # Ruby mirror of mb_wrap_phase() in mb_phase.h: +x+ (cycles) wrapped
+      # to 0...1, never 1.0 (so wrapping a wrapped phase gives it back), 0
+      # for non-finite phases.
+      # Tones with a frequency signal keep a running phase wrapped by this
+      # every sample, so they give the same samples at any block size.
+      def self.wrap_phase(x)
+        return 0.0 unless x.finite?
+
+        r = x - x.floor
+        r < 1.0 ? r : 0.0
+      end
+
       # Waveform shapes (see #sine, #ramp, ...).  A #phasor tone has the
       # wave type :phasor instead.
       WAVE_TYPES = [
@@ -2590,8 +2602,9 @@ module MB
       # an NArray of +count+ values) in Ruby, returning [phases, increments]
       # as DFloat NArrays (increments is a Float if every sample advances by
       # the same amount).  The same math as MB::FastSound.phasor: phase[i] =
-      # phi + sum(increments[0...i]) (i * increment when constant), wrapped
-      # once to 0...1; with noise, a running phase wrapped every sample.
+      # phi + i * increment wrapped once to 0...1 for a constant frequency;
+      # for a frequency signal or noise, a running phase wrapped every
+      # sample (Tone.wrap_phase; noise wraps as before).
       def phases_ruby(freq, count)
         freq = Numo::DFloat.cast(freq) if freq.is_a?(Numo::NArray)
 
@@ -2618,15 +2631,20 @@ module MB
         end
 
         if increments.is_a?(Numo::NArray)
-          # Running sum: phase i has advanced by increments 0...i
-          sums = increments.cumsum
-          steps = Numo::DFloat.zeros(count)
-          steps[1..] = sums[0...-1] if count > 1
-          total = sums[-1]
-        else
-          steps = Numo::DFloat.new(count).seq * increments
-          total = increments * count
+          # A frequency signal: a running phase wrapped every sample (as
+          # the C kernels; see mb_phase.h), the same at any block size
+          phases = Numo::DFloat.zeros(count)
+          phi = Tone.wrap_phase(@state.phi)
+          count.times do |i|
+            phases[i] = phi
+            phi = Tone.wrap_phase(phi + increments[i])
+          end
+          @state.phi = phi
+          return [phases, increments]
         end
+
+        steps = Numo::DFloat.new(count).seq * increments
+        total = increments * count
 
         phi = @state.phi
         phases = steps + phi
