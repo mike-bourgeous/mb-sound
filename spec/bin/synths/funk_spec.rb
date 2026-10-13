@@ -42,13 +42,15 @@ RSpec.describe('bin/synths/funk.rb') do
     (x.length / n).times.map { |i| band_share(x[(i * n)...((i + 1) * n)].dup, lo, hi) }
   end
 
-  it 'sweeps the mouth with wobble:, so the backbeats say different vowels' do
+  it 'sweeps the mouth with wobble: (by default only the beatbox), so the backbeats say different vowels' do
     kit = -> { MB::Sound.grid(16, snare: '....X.......X...').loop }
     beat = 60.0 / 96
     snares = ->(x) { [1, 3].map { |b| band_share(seconds(x, b * beat, b * beat + 0.1).dup, 200, 1500) } }
     [false, true].each do |box|
       still = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0) })
-      swept = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box) })
+      swept = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0.8) })
+      default = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box) })
+      expect(default).to eq(box ? swept : still), "beatbox: #{box}: the default wobbles only the beatbox"
       ratio = ->((a, b)) { (10 * Math.log10(a / b)).abs }
       expect(ratio.(swept)).to be > ratio.(still) + 1, "beatbox: #{box}: #{still} -> #{swept}"
     end

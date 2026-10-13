@@ -12,9 +12,9 @@
 #
 # Patches (-p):
 #   beat      mouth drums: a short, dry tr808 kit (kick, snare, hats; GM note
-#             map) half through a formant "mouth" whose vowel sweeps over
-#             each bar (wobble:; beatbox: true says each drum through its
-#             own narrow vowel)
+#             map) half through a formant "mouth" (beatbox: true says each
+#             drum through its own narrow vowel, sweeping over each bar;
+#             wobble: sets the sweep, also for the plain kit)
 #   perc      shaker, rim, and congas (GM note map), highpassed
 #   bass      a round funk bass: a sine body plus a lowpassed saw opening
 #             with velocity; ghost notes are just thumps
@@ -63,7 +63,9 @@ module MB::Sound
   # tenor "ka" (a to e), the hats a soprano "ts" (i); +beatbox+ is the
   # share of those (power), the rest the plain kit.
   #
-  # +wobble+ (0..1; 0 for none) sweeps the mouth's vowels and slides its
+  # +wobble+ (0..1; 0 for none; by default FUNK_BEAT_WOBBLE with
+  # +beatbox+, else 0: the maintainer kept the plain kit still, 2026-10-13)
+  # sweeps the mouth's vowels and slides its
   # formants (5 semitones either way at 1; 3 for the beatbox) on a
   # tempo-synced triangle LFO every +wobble_rate+ (a Duration; a bar by
   # default), like a beatboxer's mouth opening and closing over the
@@ -75,13 +77,14 @@ module MB::Sound
   # every hit on a beat would say the same thing).  patches-3 (2026-10-13;
   # maintainer on the beatbox render: "Give it some more filter lfo and
   # it's golden"); before, the vowels held still (wobble: 0).
-  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: 0.8, wobble_rate: 1.bar)
+  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar)
     voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
       closed_hat: { decay: 0.035, tone: 0.5 },
       open_hat: { decay: 0.22 },
     }
+    wobble ||= beatbox ? FUNK_BEAT_WOBBLE : 0
     unless beatbox
       kit = tr808(source, only: voices.keys, velocity_curve: :midi, **voices)
       vowel = if wobble == 0
@@ -116,6 +119,9 @@ module MB::Sound
     mix += outs.names.map { |n| outs[n] }.reduce(:+) * (Math.sqrt(1 - amount) * dry) if amount < 1
     mix.softclip(0.7, 0.95) * level
   end
+
+  # .funk_beat's vowel LFO depth with +beatbox+ (the plain kit's is 0).
+  FUNK_BEAT_WOBBLE = 0.8
 
   # The beatbox drums' phases in .funk_beat's vowel LFO (cycles): the
   # snare at 0 says "e" on 2 and "a" on 4, the kick a quarter cycle on

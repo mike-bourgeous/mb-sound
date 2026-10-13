@@ -14,8 +14,8 @@
 #   reese  six detuned saws (unison), a 4-pole lowpass breathing on a 2-bar
 #          LFO around --cutoff, softclipped, highpassed at 150 Hz off the sub
 #   sub    one sine through a 110 Hz lowpass, gliding between legato notes
-#          (harmonics: true adds a quiet 2nd and 3rd for small speakers;
-#          [0.4, 0.2] is Small Talk's louder pair)
+#          with a quiet 2nd and 3rd for small speakers (harmonics: false
+#          for the bare sine; [0.4, 0.2] is Small Talk's louder pair)
 #   neuro  the "switch-up" bass: saws plus a square an octave up into a
 #          diode ladder jumping on 16ths, talking formants morphing on 8ths,
 #          a key-tracked crusher (--grit wet), squeezed (sync:, fold:, and
@@ -86,12 +86,13 @@ module MB::Sound
   DNB_SUB_HARMONICS = [0.2, 0.1].freeze
 
   # The sub: one sine, mono, lowpassed at +cutoff+ Hz, gliding between
-  # legato notes.  +harmonics+ (true for DNB_SUB_HARMONICS, or [2nd, 3rd]
-  # levels, e.g. [0.4, 0.2] like Small Talk's sub; default none) adds sines
+  # legato notes.  +harmonics+ (true, the default, for DNB_SUB_HARMONICS;
+  # false for none, the sub before 2026-10-13; or [2nd, 3rd] levels, e.g.
+  # [0.4, 0.2] like Small Talk's sub) adds sines
   # at 2x and 3x after the lowpass, phase-locked to the sub, scaled to keep
   # its RMS, so the sub carries on speakers that can't play its
   # fundamental.
-  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: false)
+  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: true)
     harmonics = DNB_SUB_HARMONICS if harmonics == true
     h2, h3 = harmonics || [0, 0]
     unless h2 > 0 || h3 > 0

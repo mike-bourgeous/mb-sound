@@ -20,14 +20,14 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(band_share(seconds(bright, 0.2, 0.9), 2000, 20000)).to be > band_share(seconds(dark, 0.2, 0.9), 2000, 20000) * 10
   end
 
-  it 'plays a clean sub: the note\'s sine, nothing above the lowpass' do
-    sub = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1])), 1)[0]
+  it 'plays a clean sub with harmonics: false: the note\'s sine, nothing above the lowpass' do
+    sub = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: false), 1)[0]
     expect(peak_hz(seconds(sub, 0.2, 0.9), 20, 400)).to be_within(1.5).of(MB::Sound::F1.frequency)
     expect(band_share(seconds(sub, 0.2, 0.9), 300, 24000)).to be < 5e-3
   end
 
   it 'adds the 2nd and 3rd harmonics to the sub with harmonics:, keeping its RMS' do
-    plain = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1])), 1)[0]
+    plain = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: false), 1)[0]
     rich = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: [0.4, 0.2]), 1)[0]
     f = MB::Sound::F1.frequency
     expect(band_share(seconds(rich, 0.2, 0.9), f * 1.5, f * 2.5)).to be_within(0.03).of(0.4**2 / 1.2)
@@ -35,8 +35,9 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(rms_db(seconds(rich, 0.2, 0.9))).to be_within(0.5).of(rms_db(seconds(plain, 0.2, 0.9)))
   end
 
-  it 'adds quieter dnb harmonics to the sub with harmonics: true' do
-    rich = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: true), 1)[0]
+  it 'adds quieter dnb harmonics to the sub by default (harmonics: true)' do
+    rich = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1])), 1)[0]
+    expect((rich - render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: true), 1)[0]).abs.max).to eq(0)
     f = MB::Sound::F1.frequency
     h2, h3 = MB::Sound::DNB_SUB_HARMONICS
     power = 1 + h2**2 + h3**2
