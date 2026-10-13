@@ -150,6 +150,9 @@ module MB
 
         # Removes every hook; the graph runs unfused from the next block.
         def uninstall
+          # Blocks lane groups computed for these regions and not yet read
+          # go to the regions' roots (see LaneGroup#hand_off)
+          @regions.each { |r| r.lane_group&.hand_off(r) }
           @regions.each(&:uninstall)
           # Counts carry over to the regions on the same roots after a
           # rebuild (see #build)
