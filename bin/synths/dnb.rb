@@ -303,12 +303,13 @@ module MB::Sound
 
   # The club master for a mix (a node or bundle): a highpass at +air+
   # (Hz; a number or a node), glue compression, +drive+ dB into a
-  # softclipper, and a true-peak limiter at +ceiling+ dBTP (clip, then
-  # limit).
+  # softclipper (a number or a node, such as a preset param), and a
+  # true-peak limiter at +ceiling+ dBTP (clip, then limit).
   def self.dnb_master(mix, drive: 11.0, ceiling: -0.5, air: 20)
     glued = mix.filter(:highpass, cutoff: air, quality: 0.7)
       .compress(threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12)
-    (glued * drive.db).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
+    gain = drive.is_a?(Numeric) ? drive.db : 10 ** (drive / 20)
+    (glued * gain).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
   end
 
   # The script's patches by name (see the header), with the script's

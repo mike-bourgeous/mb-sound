@@ -57,10 +57,15 @@ module MB
       knob :space, 0.4, range: 0..1                                # the pluck's delay send
       knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'       # the master highpass
 
-      role :drums, :dnb_drums, about: 'two-step 808 kit at DnB tunings, parallel compression'
-      role :bass, :dnb_reese, params: { cutoff: :cut }, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
-      role :sub, :dnb_sub, level: -6.db, duck: -12.db, about: 'a clean mono sine an octave down'
-      role :neuro, :dnb_neuro, params: { grit: :grit }, level: -1.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
+      # (levels and master drive rebalanced in patches-5, 2026-10-13, so the
+      # master's limiter only catches peaks: the maintainer heard the mix
+      # shift when the neuro stopped; before: drums 0, bass 0, sub -6, neuro
+      # -1.5 dB, drive 11 dB, -7.5 LUFS, the clipper and limiter holding
+      # drop2 7.1 dB down (median of 100 ms peaks) and the outro 3.9)
+      role :drums, :dnb_drums, level: -1.db, about: 'two-step 808 kit at DnB tunings, parallel compression'
+      role :bass, :dnb_reese, params: { cutoff: :cut }, level: -2.db, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
+      role :sub, :dnb_sub, level: -9.db, duck: -12.db, about: 'a clean mono sine an octave down'
+      role :neuro, :dnb_neuro, params: { grit: :grit }, level: -5.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
       role :pad, :dnb_pad, level: -4.5.db, about: 'minor 9th pads'
       role :pluck, :dnb_pluck, params: { echo: :space }, level: -7.db, about: 'liquid pluck with a dotted-eighth delay'
       role :impact, :dnb_boom, about: 'a falling sine hit on the downbeat'
@@ -76,17 +81,17 @@ module MB
       scene :riser, riser: :bar, others: :keep
       pulse :drop
 
-      loudness(-8..-6)
+      loudness(-10..-8)
       true_peak(-0.5.db)
       mono_below 120 # club systems: a mono low end (and the sub is mono already)
-      master :dnb_master, air: :air
+      master :dnb_master, air: :air, drive: 8
       master_gain 0.db
 
       tip 'Sections come in 8s; phrases in 16 and 32.  DJs want a 32-bar intro of drums and light elements, and the drop on a 32-bar line.'
       tip 'The two-step: kick on 1 and on the "and" of 3, snares on 2 and 4, ghost snares between; a snare-roll fill at the end of every 16 tells the crowd something is coming.'
       tip 'Keep the sub a separate clean mono sine below about 100-120 Hz and highpass the Reese above it, so phase wobble never cancels the low end; duck both under the kick.'
       tip 'Tension: a filter build (turn :cut), a riser, and a one-bar pull-up of near silence before the drop; the second drop is a variation (a switch-up bass), not a copy.'
-      tip 'Club masters are loud (drops around -6 LUFS short-term, crest factor 6-8 dB): glue, softclip, then a true-peak limiter (clip, then limit).'
+      tip 'Club masters are loud (drops around -6 LUFS short-term, crest factor 6-8 dB): glue, softclip, then a true-peak limiter (clip, then limit).  Balance the parts first: if the limiter holds the whole drop down, the mix shifts when a part stops (turn the drive up only once the balance holds).'
     end
   end
 end
