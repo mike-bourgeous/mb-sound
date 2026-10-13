@@ -5,7 +5,7 @@ module MB
       # GraphNode.
       module DelayMethods
         # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of
-        # +time+ (also accepted as +:seconds+): a number of seconds, any
+        # +time+: a number of seconds, any
         # length (`5.samples`, `250.ms`, `0.01.seconds`), a musical length
         # that follows the tempo (`3.n16`, `1.n8.dotted`), or a graph node
         # giving the time every sample (seconds, or samples with
@@ -17,10 +17,14 @@ module MB
         # to Sequence::TempoNode::SLOWEST_BPM; +:max_delay+ (any length)
         # sizes the initial buffer otherwise (buffers grow as needed).
         #
-        # See MB::Sound::Filter::Delay#initialize for a description of the
-        # +:smoothing+ parameter.  By default, delay time changes (including
-        # tempo changes) glide like a tape delay; pass `smoothing: false` to
-        # jump instead.
+        # +:smooth+ glides delay time changes (including tempo changes) like
+        # a tape delay: true (the default), a rate in seconds per second, or
+        # a Filter (see the +:smoothing+ parameter of
+        # MB::Sound::Filter::Delay#initialize); pass `smooth: false` to jump
+        # instead.  (+:smoothing+ is accepted too.)
+        #
+        # +:seconds+ (the old spelling of +time+) is deprecated: it warns
+        # once per call site (graph documents still load it silently).
         #
         # The +:feedback+ gain and the +:wet+ and +:dry+ levels may be numbers
         # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
@@ -79,29 +83,35 @@ module MB
         # With d.fb the echoes come from a second delay line outside the
         # loop (the loop's own delay reads early by the insert's latency),
         # so pipeline delays cost about one more delay.
-        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
+        def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
+          time = DelayMethods.seconds_keyword(time, seconds)
+          smoothing = DelayMethods.smooth_keyword(smooth, smoothing, true)
+
           if insert
             raise ArgumentError, "ring_out: false isn't supported with an insert block (the feedback loop rings out)" unless ring_out
 
             return feedback_delay(
-              time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, feedback: feedback,
+              time, smooth: smoothing, max_delay: max_delay, feedback: feedback,
               dry: dry, wet: wet, interpolation: interpolation, &insert
             )
           end
 
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
-            time, seconds: seconds, smoothing: smoothing, max_delay: max_delay,
+            time, smooth: smoothing, max_delay: max_delay,
             feedback: feedback, dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           ))
         end
 
         # #delay with a feedback insert block (see #delay).
-        def feedback_delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+        def feedback_delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+          time = DelayMethods.seconds_keyword(time, seconds)
+          smoothing = DelayMethods.smooth_keyword(smooth, smoothing, true)
+
           if feedback.nil? || feedback == false
             raise ArgumentError, 'A delay with a feedback insert block needs a feedback: gain (a number or a node)'
           end
 
-          delay_opts = { seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation }
+          delay_opts = { smooth: smoothing, max_delay: max_delay, interpolation: interpolation }
           pipeline = nil
 
           # (echo loops: no sustain shelf, whose pitch would be 1 / time)
@@ -223,11 +233,58 @@ module MB
           end
         end
 
+        # The library's own directory, skipped when looking for call sites.
+        LIB_DIR = File.expand_path('../../..', __dir__) + File::SEPARATOR
+        private_constant :LIB_DIR
+
+        @warned_sites = {}
+        @warned_lock = Mutex.new
+
+        # The delay time from #delay's +time+ and its deprecated +:seconds+
+        # keyword (maintainer decision 2026-10-13; research-api-surface
+        # R2): +seconds+ warns once per call site (the first caller outside
+        # this library), except inside .quiet_seconds (graph documents keep
+        # loading `seconds:` silently).
+        def self.seconds_keyword(time, seconds)
+          return time if seconds.nil?
+          raise ArgumentError, 'Pass a delay time or seconds:, not more than one' if time
+          return seconds if Thread.current[:mb_sound_quiet_seconds]
+
+          site = caller_locations(1).find { |l|
+            path = l.absolute_path || l.path
+            !path.start_with?(LIB_DIR) && !path.start_with?('<internal:')
+          }
+          where = site ? "#{site.path}:#{site.lineno}" : '(unknown)'
+          first = @warned_lock.synchronize { @warned_sites[where] ? false : (@warned_sites[where] = true) }
+          warn "#{where}: warning: delay(seconds: t) is deprecated; write delay(t) (seconds, or any length like 250.ms)" if first
+
+          seconds
+        end
+
+        # Runs the block without .seconds_keyword's deprecation warning
+        # (for graph document loading).
+        def self.quiet_seconds
+          old = Thread.current[:mb_sound_quiet_seconds]
+          Thread.current[:mb_sound_quiet_seconds] = true
+          yield
+        ensure
+          Thread.current[:mb_sound_quiet_seconds] = old
+        end
+
+        # The delay smoothing from +:smooth+ and its older spelling
+        # +:smoothing+ (research-api-surface R3), or +default+.
+        def self.smooth_keyword(smooth, smoothing, default)
+          raise ArgumentError, 'Pass smooth: or smoothing: (the same option), not both' unless smooth.nil? || smoothing.nil?
+          return smooth unless smooth.nil?
+          return smoothing unless smoothing.nil?
+          default
+        end
+
         # Builds the MB::Sound::Filter::Delay for #delay and
         # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
-          raise ArgumentError, 'Pass a delay time or seconds:, not more than one' if time && seconds
-          time ||= seconds || 0
+        def self.delay_filter(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
+          time = seconds_keyword(time, seconds) || 0
+          smoothing = smooth_keyword(smooth, smoothing, true)
 
           MB::Sound::Filter::Delay.new(
             delay: time, smoothing: smoothing,
@@ -243,8 +300,9 @@ module MB
         # lengths (`96.samples`, `250.ms`), musical lengths that follow the
         # tempo (`1.n8.dotted`), or graph nodes.
         #
-        # Delay changes jump unless +:smoothing+ is given (true, a rate in
-        # seconds per second, or a Filter, as for #delay), which glides each
+        # Delay changes jump unless +:smooth+ is given (true, a rate in
+        # seconds per second, or a Filter, as for #delay; +:smoothing+ is
+        # accepted too), which glides each
         # tap's delay like a tape delay.  +:initial_buffer+ (any length) sizes
         # the starting buffer (it grows as needed).
         #
@@ -252,7 +310,8 @@ module MB
         #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, name: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
+        def multitap(*delays, name: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smooth: nil, smoothing: nil)
+          smoothing = DelayMethods.smooth_keyword(smooth, smoothing, false)
           MB::Sound::GraphNode::MultitapDelay.new(
             self,
             *delays,

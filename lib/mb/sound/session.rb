@@ -465,12 +465,19 @@ module MB
       end
 
       # Discards the named stopped graphs (all of them if no names are
-      # given), so they can no longer be resumed.  Returns the names that
-      # were discarded.
-      def forget(*names)
-        @mutex.synchronize {
-          names = @stopped.keys if names.empty?
-          names.select { |n| @stopped.delete(n) }
+      # given), so they can no longer be resumed: a :forget change (see
+      # Changes) for each, landing now or at +time+ (whole notes; a
+      # scheduled block's time), and undoable.  Returns the names
+      # discarded (or to be discarded).
+      def forget(*names, time: nil)
+        time = nil if time && time.to_r <= @transport.position
+        @render_lock.synchronize {
+          names = @mutex.synchronize { @stopped.keys } if names.empty?
+          names.select { |n|
+            next false unless time || @mutex.synchronize { @stopped.key?(n) }
+            change(:forget, n, time) { |_t| @mutex.synchronize { @stopped.delete(n) } }
+            true
+          }
         }
       end
 
@@ -496,10 +503,13 @@ module MB
       end
 
       # Schedules the block to run at +time+ (whole notes on the timeline),
-      # and then every +period+ whole notes if given.  Returns an id for
-      # #cancel.  See Scheduler for how and when blocks run.
-      def schedule(time, period: nil, description: nil, epoch: nil, &block)
-        @scheduler.schedule(time, period: period, description: description, epoch: epoch, &block)
+      # and then every +period+ whole notes if given.  Returns a
+      # Scheduler::Handle (prints when it runs; #cancel).  +owner+ is who
+      # scheduled it (:user, :form, :take, :script; see Scheduler::Entry)
+      # and +label+ the command to show.  See Scheduler for how and when
+      # blocks run.
+      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -511,15 +521,30 @@ module MB
         start_thread
       end
 
-      # Removes scheduled blocks (all of them if no ids are given).  Returns
-      # the ids that were removed.
+      # Removes scheduled blocks (Scheduler::Handles or ids; every block
+      # scheduled with ScheduleMethods if none are given).  Returns the
+      # Handles that were cancelled.
       def cancel(*ids)
         @scheduler.cancel(*ids)
       end
 
-      # Returns a Hash from schedule id to a description of when it runs.
+      # The Scheduler::Handles of blocks that haven't run yet (and repeating
+      # blocks), soonest first.
       def scheduled
         @scheduler.scheduled
+      end
+
+      # The scheduler's panic button (see Scheduler#reset): stops the song
+      # form playing (if any), cancels every scheduled block except a take's
+      # replayed lines, and restarts the scheduler thread if it died or a
+      # block is stuck (waiting up to +wait+ seconds for it first).  Returns
+      # a Hash with :cancelled (Handles), :form (true if a form was
+      # stopped), and :restarted (nil, or what was wrong).
+      def reset_scheduler(wait: Scheduler::RESET_WAIT)
+        pb = @arrangement&.playback
+        form = !!(pb && !pb.ended?)
+        pb.stop if form
+        @scheduler.reset(wait: wait).merge(form: form)
       end
 
       # Returns true if a scheduled block's time has come (so it will run on

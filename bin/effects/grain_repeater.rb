@@ -61,6 +61,6 @@ MB::Sound.effect_script(
 
     # FIXME: if max_delay isn't set, then the first time the delay equals one second the buffer is lost
     # e.g. bin/effects/grain_repeater.rb --delay=0.5 -c 3 --count=3 sounds/drums.flac result.flac
-    inp.delay(seconds: delay_osc, smoothing: false, max_delay: period) * fade_osc
+    inp.delay(delay_osc, smooth: false, max_delay: period) * fade_osc
   }.channels
 }

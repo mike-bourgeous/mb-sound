@@ -65,7 +65,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     it 'gives a hint instead of restarting a session with players or master effects' do
       MB::Sound.bg(220.hz.sine)
       expect { expect(MB::Sound.live_midi_latency).to eq(nil) }.to output(/`latency :low`/).to_stderr
-      MB::Sound.panic
+      expect { MB::Sound.panic }.to output(/\Apanic: stopped 1 player/).to_stderr
       MB::Sound::Session.default.close
 
       MB::Sound.master { |mix| mix.softclip }

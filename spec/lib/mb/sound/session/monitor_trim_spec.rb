@@ -75,7 +75,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     MB::Sound::Session.monitor_gain = 3.db
     out = out_class.new(channels: 2, sleep: false)
     s = new_session(output: out, monitor: true)
-    s.master { |l, r| [l.limit(ceiling: -6, true_peak: false), r.limit(ceiling: -6, true_peak: false)] }
+    s.master { |l, r| [l.limit(ceiling: -6.db, true_peak: false), r.limit(ceiling: -6.db, true_peak: false)] }
     s.add(100.hz.square, name: :loud, on: :now)
     mix = Array.new(60) { s.process_buffer(800)[0].dup }.reduce(:concatenate)
     tail = 24000...mix.length

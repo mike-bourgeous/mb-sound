@@ -38,11 +38,6 @@ module MB
           @buf.fill(0)
         end
 
-        # The length in seconds at the current sample rate.
-        def seconds
-          MB::Sound::Length.seconds(@length, sample_rate: @sample_rate)
-        end
-
         # Changes the sample rate, keeping the remaining length in seconds (a
         # length in samples keeps its sample count).
         def sample_rate=(rate)

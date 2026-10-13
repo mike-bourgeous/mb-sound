@@ -16,7 +16,7 @@ module MB
     # The IFFT methods undo this normalization to restore the original signal.
     #
     # Parameters to all methods may be a Numo::NArray, a Tone, an Array
-    # thereof, or a numeric Array.  See IOMethods#any_sound_to_array.
+    # thereof, or a numeric Array.  See Internal.any_sound_to_array.
     module FFTMethods
       module PocketfftMethods
         # Returns the normalized complex FFT of the given data (e.g.
@@ -25,7 +25,7 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def fft(data)
-          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = Internal.convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
           data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
@@ -57,7 +57,7 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def ifft(data)
-          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = Internal.convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
           data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
@@ -88,7 +88,7 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def real_fft(data)
-          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = Internal.convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
           data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
@@ -120,14 +120,14 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def real_ifft(data, odd_length: false)
-          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = Internal.convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
           data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
           when Numo::NArray
             if odd_length
               # TODO: support more dimensions?
-              data = generate_negative_freqs(data, odd_length: true)
+              data = Internal.generate_negative_freqs(data, odd_length: true)
               return ifft(data).real
             end
 
@@ -172,17 +172,6 @@ module MB
         }) : dft
       end
 
-      # Generates negative frequencies from the given FFT data with only
-      # positive frequencies.  This is not required if you use the #real_fft
-      # and #real_ifft methods.
-      def generate_negative_freqs(data, odd_length: false)
-        raise NotImplementedError, 'Only one dimension supported at this time' if data.ndim != 1
-
-        # TODO: Use inplace! where possible if it speeds things up
-        neg = data[1..(odd_length ? -1 : -2)].reverse
-        data.concatenate(neg.conj)
-      end
-
       # Converts the given +data+ to a complex analytic signal with real and
       # imaginary components (the real component should match the original if the
       # original signal was real).
@@ -191,9 +180,9 @@ module MB
       # near the endpoints may not match what would be produced for the same region
       # when in the middle of the data window.
       #
-      # See #positive_freqs and #generate_negative_freqs
+      # See #positive_freqs and Internal.generate_negative_freqs
       def analytic_signal(data)
-        data = convert_sound_to_narray(data)
+        data = Internal.convert_sound_to_narray(data)
         if data.is_a?(Array)
           return data.map { |v| analytic_signal(v) }
         end

@@ -240,8 +240,8 @@ module MB
           @detector = detector
           @link = !!link
           @hold_up = !!hold_up
-          @min_gain = min_gain.to_f
-          @max_gain = max_gain.to_f
+          @min_gain = DynamicsMethods.db_param(min_gain).to_f
+          @max_gain = DynamicsMethods.db_param(max_gain).to_f
           raise ArgumentError, 'min_gain must not be above max_gain' if @min_gain > @max_gain
 
           if sidechain
@@ -267,7 +267,7 @@ module MB
           @lookahead = Length.snap(la).round
           raise ArgumentError, "Lookahead must not be negative (got #{lookahead.inspect})" if @lookahead < 0
 
-          @makeup = makeup == :auto ? -0.5 * [@transfer.gain(0), @min_gain].max.clamp(@min_gain, @max_gain) : makeup.to_f
+          @makeup = makeup == :auto ? -0.5 * [@transfer.gain(0), @min_gain].max.clamp(@min_gain, @max_gain) : DynamicsMethods.db_param(makeup).to_f
           raise ArgumentError, "Makeup must be dB or :auto (got #{makeup.inspect})" unless @makeup.finite?
 
           raise ArgumentError, "Mix must be a number from 0 to 1 (got #{mix.inspect})" unless mix.is_a?(Numeric) && (0..1).cover?(mix)

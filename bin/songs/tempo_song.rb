@@ -27,7 +27,7 @@
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.at(800..8000)) }   # a master sweep that freezes while stopped
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.freewheel.at(800..8000)) }   # keeps moving while stopped
 #     notes = seq(A2, E3, C3).n4.loop        # a comb resonator tuned to each note (Clip#period)
-#     bg :string, (noise.at(1) * notes.env(0, 0.004, 0, 0.001)).delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
+#     bg :string, (noise.at(1) * notes.env(0, 0.004, 0, 0.001)).delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smooth: false) * 0.3
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -61,7 +61,7 @@ module MB::Sound
 
     # An echo whose delay alternates between 5/16 and 3/16 every bar
     echo = (arp.transpose(12).tone.at(1) * arp.env(0.001, 0.06, 0, 0.05, curve: :linear))
-      .delay(2.bars.lfo.square.at(3.n16..5.n16), dry: 0.6, wet: -3.db, smoothing: false) * 0.08
+      .delay(2.bars.lfo.square.at(3.n16..5.n16), dry: 0.6, wet: -3.db, smooth: false) * 0.08
 
     bass_synth = (bass.tone.ramp.at(1).filter(:lowpass, cutoff: 150 + 1200 * bass.env(0.001, 0.1, 0.1, 0.05), quality: 4) *
       bass.env(0.003, 0.15, 0.6, 0.08)) * 0.18

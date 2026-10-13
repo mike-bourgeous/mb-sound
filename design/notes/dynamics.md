@@ -23,7 +23,9 @@ One gain-computer core, several faces (`lib/mb/sound/graph_node/dynamics.rb`, ke
 5. **Makeup**: dB number, or `:auto` (half the curve's gain at 0 dBFS back, a heuristic).
 6. **Mix**: `mix:` blends the processed and plain signal as gains (`gain = mix * gain + 1 - mix`), so parallel ("New York") compression stays phase-aligned even with lookahead.
 
-**Units**: levels (`threshold:`, `ceiling:`, `amount:`, `range:`) accept dB numbers (`-12`) or linear gains (`-12.db`, which is 0.251): numbers above 0 are linear gains, 0 and below are dB (so `0` and `0.db` agree).  `makeup:` and compander points are dB numbers only.  Times as in numbers_lengths_phases.md.
+**Units**: levels (`threshold:`, `upward_threshold:`, `ceiling:`, `amount:`, `range:`) are written `-12.db`: Numeric#db returns a `MB::Sound::Decibels` (`lib/mb/sound/decibels.rb`), a linear gain (0.251) that remembers its dB value, so dynamics read it as exactly -12 dB.  Bare numbers keep their old meaning for now: above 0 linear gains, 0 and below dB, with a warning once per call site (`threshold: -20 is read as -20 dB for now; write -20.db`), and linear levels above 1 (louder than full scale, e.g. `threshold: 6` = +15.6 dB) warn too (`DynamicsMethods.check_level`; graph documents load quietly, `quiet_levels`).  `makeup:`, `min_gain:`/`max_gain:`, squeeze `gain:`, and compander points are dB numbers and read Decibels as their dB values (`makeup: 3.db` is +3 dB; before 2026-10-13 it was misread as a gain of 1.41 dB).  Defaults are Decibels (`threshold: -20.db`), the same numbers as before.  Times as in numbers_lengths_phases.md.
+
+Decision (maintainer, 2026-10-13, "Decibels: option b, with full migration after the genre experiment"): bare negative levels will become linear gains treated by absolute value, like gains everywhere else (`live_error` for a negative linear level, a warning above 1), after the genre experiment, with every bare-number call site in bin/lib/spec moved to `.db` and graph documents loading the old meaning by format version.  Until then (branch api-1) only the tag, the exact dB reading, and the warnings exist.
 
 **Limiter** (`limit`, its own kernel in the same extension, mirror `Dynamics::Limiter.process_ruby`): detector level per sample (with `true_peak: true`, the max of the sample and the Annex 2 interpolated values on both sides of it, which delays the detector by 6 samples), required gain `min(1, ceiling/level)`, a sliding minimum over `lookahead + 1` samples, an instant-attack release one-pole, a moving average over `lookahead + 1` samples, then the delayed audio times the gain, clamped to the ceiling.  Linked across channels by default.  Latency: `lookahead` samples, plus 6 with `true_peak`.
 
@@ -67,10 +69,10 @@ The limiter's sliding minimum and moving average loop over the window every samp
 
 ## Reverb ducking
 
-The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms after a 50 ms peak follower; the maintainer asked for a faster duck release).  Instead of new reverb parameters, a reverb can now be ducked by its input with any times: `wet = sig.reverb(:hall, dry: 0); sig + wet.duck(sig, amount: -12, release: 80.ms)` (sig used twice branches through a Tee).  Not yet a reverb option.
+The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms after a 50 ms peak follower; the maintainer asked for a faster duck release).  Instead of new reverb parameters, a reverb can now be ducked by its input with any times: `wet = sig.reverb(:hall, dry: 0); sig + wet.duck(sig, amount: -12.db, release: 80.ms)` (sig used twice branches through a Tee).  Not yet a reverb option.
 
 ## Later
 
 - Node-valued thresholds/ratios (the curve is fixed per node; times and the sidechain already take nodes); crossover frequencies as nodes.
 - A plan-layer op for the compander (state already in one DFloat).
-- Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).
+- Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30.db, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).

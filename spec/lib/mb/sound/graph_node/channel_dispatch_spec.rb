@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
     end
 
     it 'accepts per-channel keyword arguments and Durations' do
-      result = 1.constant.delay(seconds: MB::Sound.channels(0.001, 0.002), smoothing: false)
+      result = 1.constant.delay(MB::Sound.channels(0.001, 0.002), smoothing: false)
       expect(result.outputs.map { |o| o.base_filter.delay_samples }).to eq([48, 96])
 
       tempo = 1.constant.delay(MB::Sound.channels(1.n16, 1.n8))

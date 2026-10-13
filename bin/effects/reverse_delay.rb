@@ -62,7 +62,7 @@ MB::Sound.effect_script(
     # The delay LFO controls the position in the delay buffer
     delay_lfo = lfo_freq.tone.ramp.lfo.at(0..2).with_phase(idx.to_f / channels).named('Delay LFO') * delay_time
 
-    delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
+    delayed = inp.delay(delay_lfo, smooth: false) * amp_lfo
 
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size

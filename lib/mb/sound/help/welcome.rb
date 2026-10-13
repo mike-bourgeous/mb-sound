@@ -29,7 +29,7 @@ module MB
       # is a real one (not OUTPUT_TYPE=null or ffmpeg).  Enter keeps the
       # default right away.  MB_SOUND_LEVEL_CHECK=0 skips it.  Returns the
       # chosen level, or nil if it didn't run or was cancelled.
-      def self.first_level_check(input: $stdin, out: $stdout, output_type: MB::Sound.detect_output, player: nil)
+      def self.first_level_check(input: $stdin, out: $stdout, output_type: MB::Sound::Internal.detect_output, player: nil)
         return nil if Level.saved? || ENV['MB_SOUND_LEVEL_CHECK'] == '0'
         return nil unless input.respond_to?(:tty?) && input.tty?
         return nil unless output_type == :device

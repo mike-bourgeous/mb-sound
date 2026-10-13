@@ -22,7 +22,144 @@ module MB
         # With an +epoch+, it runs only while Session#epoch is that number
         # (the timeline between two seeks; see Session::Seeks), so a take's
         # lines run at their time in the right pass over the timeline.
-        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, keyword_init: true)
+        #
+        # +owner+ says who scheduled it: :user (ScheduleMethods, at_marker),
+        # :form (a song form's own blocks), :take (a take's replayed lines),
+        # or :script (a script's end of --bars).  #cancel with no ids
+        # cancels :user blocks; #reset everything but :take lines.
+        # +label+ is the command for display (e.g. "at_bar 9"), +status+
+        # :pending (waiting for its time), :due (handed to the runner),
+        # :running, :ran, or :cancelled.
+        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :owner, :label, :status, keyword_init: true)
+
+        # A printable handle for a scheduled block, returned by
+        # ScheduleMethods#at_bar, #after, #every (and Session#schedule):
+        # prints the command and when it runs (e.g. `at_bar 9 runs 9:1`),
+        # and #cancel cancels it.
+        class Handle
+          def initialize(scheduler, entry)
+            @scheduler = scheduler
+            @entry = entry
+          end
+
+          # The schedule id (Session#cancel accepts it too).
+          def id
+            @entry.id
+          end
+
+          # When the block runs, as a description (e.g. "bar 9").
+          def description
+            @entry.description
+          end
+
+          # Who scheduled it: :user, :form, :take, or :script (see Entry).
+          def owner
+            @entry.owner
+          end
+
+          # The command that scheduled it (e.g. "at_bar 9"), or the
+          # description.
+          def label
+            @entry.label || @entry.description
+          end
+
+          # :pending, :due (about to run, ahead of its time), :running,
+          # :ran, or :cancelled.
+          def status
+            @entry.status
+          end
+
+          def pending?
+            [:pending, :due].include?(status)
+          end
+
+          def cancelled?
+            status == :cancelled
+          end
+
+          def ran?
+            status == :ran
+          end
+
+          # True for blocks that repeat (ScheduleMethods#every).
+          def repeating?
+            !@entry.period.nil?
+          end
+
+          # The timeline position (whole notes) the block runs at next (for
+          # a repeating block, the next occurrence not yet handed to the
+          # runner), or the last one once it ran or was cancelled.
+          def time
+            @entry.time
+          end
+
+          # The time as a Session::Stamp (prints as bar:beat).
+          def stamp
+            @scheduler.stamp(@entry.time)
+          end
+
+          # Cancels the block (if it hasn't run yet).  Returns self, which
+          # then prints as cancelled.
+          def cancel
+            @scheduler.cancel(self)
+            self
+          end
+
+          # E.g. "at_bar 9 runs 9:1", "every 4 bars runs next 4:1",
+          # "after 2 ran 3:1", "at_bar 9 cancelled".
+          def to_s
+            case status
+            when :pending, :due then "#{label} runs #{repeating? ? 'next ' : ''}#{stamp}"
+            when :running then "#{label} running (for #{stamp})"
+            when :ran then "#{label} ran #{stamp}"
+            when :cancelled then "#{label} cancelled"
+            else "#{label} #{status}"
+            end
+          end
+
+          def inspect
+            "#<Schedule #{id}: #{self}>"
+          end
+
+          def pretty_print(q)
+            q.text(inspect)
+          end
+
+          def ==(other)
+            other.is_a?(Handle) && other.entry.equal?(@entry)
+          end
+          alias eql? ==
+
+          def hash
+            @entry.object_id.hash
+          end
+
+          protected
+
+          attr_reader :entry
+        end
+
+        # Raised into a stuck scheduler thread by #reset.
+        class Reset < Exception; end # rubocop:disable Lint/InheritException
+
+        # A one-line summary of a #reset report (see
+        # Session#reset_scheduler), or nil if it did nothing.
+        def self.reset_message(report)
+          parts = []
+          parts << 'stopped the song form' if report[:form]
+          c = report[:cancelled].reject { |h| h.owner == :form } # "stopped the song form" covers those
+          unless c.empty?
+            labels = c.map(&:label).uniq
+            labels = labels.first(5) + ["#{labels.length - 5} more"] if labels.length > 6
+            parts << "cancelled #{c.length} scheduled block#{'s' unless c.length == 1} (#{labels.join(', ')})"
+          end
+          parts << report[:restarted] if report[:restarted]
+          parts.empty? ? nil : parts.join('; ')
+        end
+
+        # How long (seconds) #reset waits for a running block to finish
+        # before it stops the scheduler thread and starts a fresh one.
+        RESET_WAIT = 1.0
 
         # Raised (through MB::Sound.live_error) when a scheduled block
         # finishes after its time (see #lookahead).
@@ -65,6 +202,7 @@ module MB
           @lookahead = :auto
           @recent = []
           @late = []
+          @running = nil
         end
 
         # How far ahead of their time blocks run: :auto (the default) or a
@@ -127,13 +265,13 @@ module MB
           @mutex.synchronize { @recent.dup }
         end
 
-        # See Session#schedule.
-        def schedule(time, period: nil, description: nil, epoch: nil, &block)
+        # See Session#schedule.  Returns a Handle.
+        def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
           raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
 
           time = time.to_r
-          @mutex.synchronize {
+          entry = @mutex.synchronize {
             @next_id += 1
             @entries[@next_id] = Entry.new(
               id: @next_id,
@@ -141,28 +279,94 @@ module MB
               period: period&.to_r,
               block: block,
               description: description || "bar #{@transport.bar_at(time).floor}",
-              epoch: epoch
+              epoch: epoch,
+              owner: owner,
+              label: label,
+              status: :pending
             )
-            @next_id
           }
+          Handle.new(self, entry)
         end
 
-        # See Session#cancel.
+        # See Session#cancel.  +ids+ are Handles or ids; with none, cancels
+        # every :user block.  Returns the Handles cancelled.
         def cancel(*ids)
-          @mutex.synchronize {
-            ids = @entries.keys if ids.empty?
-            ids.select { |id| @entries.delete(id) }
+          entries = @mutex.synchronize {
+            list =
+              if ids.empty?
+                @entries.values.select { |e| e.owner == :user }
+              else
+                ids.filter_map { |i| @entries[i.is_a?(Handle) ? i.id : i] }
+              end
+            list.each { |e| cancel_entry(e) }
           }
+          entries.map { |e| Handle.new(self, e) }
         end
 
-        # See Session#scheduled.
+        # See Session#scheduled: Handles for the blocks that haven't run
+        # yet (and repeating ones), soonest first.
         def scheduled
-          @mutex.synchronize { @entries.transform_values(&:description) }
+          @mutex.synchronize { @entries.values.sort_by { |e| [e.time, e.id] } }.map { |e| Handle.new(self, e) }
+        end
+
+        # A Stamp for timeline position +time+ (for Handle#to_s).
+        def stamp(time)
+          Stamp.at(time, @transport)
         end
 
         # Returns true if a scheduled block's time has come.
         def due?
-          @mutex.synchronize { @entries.each_value.any? { |e| e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
+          @mutex.synchronize { @entries.each_value.any? { |e| e.status == :pending && e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
+        end
+
+        # The scheduler's panic button (see PlaybackMethods#panic and
+        # ScheduleMethods#reset_scheduler): cancels every block except a
+        # take's replayed lines (+keep+ owners), including blocks handed to
+        # the runner ahead of their time, and on a realtime session, if the
+        # scheduler thread died or a block has been running for longer than
+        # +wait+ seconds more, stops that thread (Thread#raise, then
+        # Thread#kill) and starts a fresh one for the blocks still queued.
+        # Called from the scheduler thread itself (a scheduled block or a
+        # take line), it only cancels.
+        #
+        # Returns a Hash: :cancelled (the Handles cancelled), :restarted (nil,
+        # or what was wrong with the thread).
+        def reset(wait: RESET_WAIT, keep: [:take])
+          cancelled = @mutex.synchronize {
+            @entries.values.reject { |e| keep.include?(e.owner) }.each { |e| cancel_entry(e) }
+          }.map { |e| Handle.new(self, e) }
+          report = { cancelled: cancelled, restarted: nil }
+
+          thread = @thread
+          return report if !@realtime || thread.nil? || thread.equal?(Thread.current)
+
+          unless thread.alive?
+            @thread = nil
+            start_thread if @queue && !@queue.empty?
+            report[:restarted] = 'the scheduler thread had stopped; started a new one'
+            return report
+          end
+
+          running = @mutex.synchronize { @running }
+          return report if running.nil?
+
+          deadline = MB::U.clock_now + wait
+          sleep 0.01 while @mutex.synchronize { @running.equal?(running) } && MB::U.clock_now < deadline
+          return report unless @mutex.synchronize { @running.equal?(running) }
+
+          entry, started = running
+          seconds = MB::U.clock_now - started
+          thread.raise(Reset, 'scheduler reset')
+          thread.kill unless thread.join(0.2)
+          thread.join(0.2)
+          @mutex.synchronize {
+            @running = nil
+            entry.status = :cancelled
+          }
+          @thread = nil
+          start_thread
+          report[:restarted] = format('the block for %s had run %.1f s; stopped it and started a new scheduler thread', entry.description, seconds)
+          report
         end
 
         # See Session#change_tempo.
@@ -210,9 +414,10 @@ module MB
             epoch = @session.epoch
             @entries.values.each do |e|
               next if e.epoch && e.epoch != epoch
+              next unless e.status == :pending
               while e.time <= horizon
                 list << [e, e.time]
-                break @entries.delete(e.id) unless e.period
+                break e.status = :due unless e.period
                 e.time += e.period
               end
             end
@@ -240,9 +445,22 @@ module MB
 
         private
 
+        # Marks +entry+ cancelled and drops it (with @mutex held).
+        def cancel_entry(entry)
+          entry.status = :cancelled
+          @entries.delete(entry.id)
+        end
+
         # Runs a scheduled block, collecting its commands and then applying
-        # them if the block finished before +deadline+.
+        # them if the block finished before +deadline+.  Skips blocks
+        # cancelled after they were handed over (see #dispatch).
         def run(entry, time, deadline)
+          return if @mutex.synchronize {
+            next true if entry.status == :cancelled
+            entry.status = :running unless entry.period
+            false
+          }
+
           started = MB::U.clock_now
           batch = []
           # Changes the block makes directly whose time has passed by then
@@ -272,6 +490,13 @@ module MB
         rescue => e
           raise if @raise_errors
           warn "Scheduled block for #{entry.description} raised #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+        ensure
+          @mutex.synchronize {
+            if !entry.period && entry.status == :running
+              entry.status = :ran
+              @entries.delete(entry.id)
+            end
+          }
         end
 
         # Remembers how long a block ran, for the adaptive lookahead.
@@ -301,8 +526,16 @@ module MB
           @queue ||= Queue.new
           @thread = Thread.new do
             while (item = @queue.pop)
-              run(*item)
+              running = [item[0], MB::U.clock_now]
+              @mutex.synchronize { @running = running }
+              begin
+                run(*item)
+              ensure
+                @mutex.synchronize { @running = nil if @running.equal?(running) }
+              end
             end
+          rescue Reset
+            # #reset stopped a stuck block; a fresh thread takes the queue
           end
           @thread.name = 'MB::Sound::Session scheduler'
           @thread.priority = THREAD_PRIORITY
