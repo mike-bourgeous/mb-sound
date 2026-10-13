@@ -179,6 +179,13 @@ RSpec.describe 'Buffer size invariance' do
       'phasor' => -> { fm.().phasor },
       'PolyBLEP saw' => -> { fm.().saw },
       'PolyBLEP square, pwm' => -> { fm.().square.pwm(0.3) },
+      # A width or pivot signal moves the edges every sample: the first
+      # sample of a buffer is corrected for the previous sample's warp, as
+      # within a buffer (fixes-7; up to full scale at one-sample buffers)
+      'PolyBLEP square, pwm signal' => -> { fm.().square.pwm(3.hz.lfo.at(0.2..0.8)) },
+      'PolyBLEP saw, pwm signal' => -> { fm.().saw.pwm(0.5.hz.lfo.at(0.1..0.9)) },
+      'PolyBLEP triangle, skew signal' => -> { fm.().triangle.skew(2.hz.lfo.at(0.2..0.8)) },
+      'PolyBLEP square, pivot signal' => -> { fm.().square.pwm(0.3, pivot: 1.5.hz.lfo.at(0..0.5)) },
       'BLIT complex ramp' => -> { fm.().complex_ramp },
       'feedback sine' => -> { fm.().sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { fm.().wavetable(cycle.()) },
@@ -204,6 +211,7 @@ RSpec.describe 'Buffer size invariance' do
     {
       'naive sine' => ->(f) { f.tone.sine },
       'PolyBLEP saw' => ->(f) { f.tone.saw },
+      'PolyBLEP square with a width signal' => ->(f) { f.tone.square.pwm(MB::Sound.noise.at(0.1..0.9)) },
       'BLIT complex ramp' => ->(f) { f.tone.complex_ramp },
       'cycle wavetable' => ->(f) { f.tone.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
     }.each do |name, make|

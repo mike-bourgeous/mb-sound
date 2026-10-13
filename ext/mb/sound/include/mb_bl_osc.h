@@ -556,11 +556,30 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
 
 // The state of a band-limited oscillator between buffers (see
 // mb_bl_oscillate): the phase (cycles) and the bl_state Array's values.
+// +prev_w+ and +prev_o+ are the (clamped) width and the pivot in use at the
+// previous sample, NAN if unknown (a four-element bl_state from before they
+// were kept): the edges between the previous sample and a buffer's first
+// one are those of the previous sample's warp, as within a buffer, so a
+// width signal gives the same samples at any buffer size.
 struct mb_bl_state {
 	double phi;
 	double prev_e, prev_inc, prev_pm;
 	int primed; // 1 primed, 0 a tone's first sample, 2 just after a jump
+	double prev_w, prev_o;
 };
+
+// Reads +prev_w+ and +prev_o+ from a bl_state Array (NAN for a
+// four-element one; see struct mb_bl_state).
+static inline void mb_bl_read_prev_warp(VALUE bl_state, struct mb_bl_state *st)
+{
+	if (RARRAY_LEN(bl_state) >= 6) {
+		st->prev_w = NUM2DBL(rb_ary_entry(bl_state, 4));
+		st->prev_o = NUM2DBL(rb_ary_entry(bl_state, 5));
+	} else {
+		st->prev_w = NAN;
+		st->prev_o = NAN;
+	}
+}
 
 /*
  * The band-limited oscillator loop of FastSynth.oscillate_bl (see
@@ -678,8 +697,17 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		if (i > 0 && d_back == pending_d) {
 			v += pending;
 		} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
+			// The edges of the previous sample's warp, as the pending
+			// correction would have used (within a buffer d_back equals
+			// pending_d unless it isn't finite)
 			double after;
-			bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			if (i == 0 && st->prev_w == st->prev_w && (st->prev_w != w || st->prev_o != o)) {
+				struct bl_breakpoint pbp[BL_MAX_BREAKPOINTS];
+				int npbp = bl_breakpoints(wt, st->prev_w, pbp, 0, st->prev_o);
+				bl_step(pbp, npbp, prev_e, d_back, adv, lo, hi, &after);
+			} else {
+				bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			}
 			v += after;
 		} else if (fresh && i == 0) {
 			// A tone's first sample, corrected as if it had always run at
@@ -728,6 +756,8 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		st->prev_inc = prev_inc;
 		st->prev_pm = prev_pm;
 		st->primed = 1;
+		st->prev_w = w;
+		st->prev_o = o;
 	}
 }
 

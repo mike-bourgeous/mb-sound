@@ -15,7 +15,8 @@ module MB
       #   FastSynth.oscillate_bl/blit).
       # - +blep+: [previous effective phase, previous increment, previous
       #   phase modulation, primed: 1, or 0 before the first sample, 2 after
-      #   a phase jump] (FastSynth.oscillate_bl).
+      #   a phase jump, previous width, previous pivot in use]
+      #   (FastSynth.oscillate_bl).
       # - +blit+: [integrator re, im, gain re, im, previous phase, previous
       #   increment, primed 0/1] (FastSynth.blit).
       # - +sync+: [phase, previous increment, direction +1/-1, ring
@@ -71,7 +72,7 @@ module MB
           raise ArgumentError, "Unknown state fields #{extra.inspect}" unless extra.empty?
 
           @phase = [phase.to_f]
-          @blep = [0.0, 0.0, 0.0, 0]
+          @blep = [0.0, 0.0, 0.0, 0, 0.5, 0.0]
           @blit = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
           @sync = [@phase[0], 0.0, 1.0, 0, 0]
           @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)

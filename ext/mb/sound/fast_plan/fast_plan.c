@@ -399,8 +399,8 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 		double adv, double g, double off, double lo, double hi, _Bool dc, VALUE phase_state, VALUE bl_state)
 {
 	Check_Type(bl_state, T_ARRAY);
-	if (RARRAY_LEN(bl_state) != 4) {
-		rb_raise(rb_eArgError, "Band-limiting state must have four elements");
+	if (RARRAY_LEN(bl_state) != 4 && RARRAY_LEN(bl_state) != 6) {
+		rb_raise(rb_eArgError, "Band-limiting state must have four or six elements");
 	}
 
 	struct mb_bl_state st;
@@ -409,6 +409,7 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 	st.prev_inc = NUM2DBL(rb_ary_entry(bl_state, 1));
 	st.prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
 	st.primed = NUM2INT(rb_ary_entry(bl_state, 3));
+	mb_bl_read_prev_warp(bl_state, &st);
 
 	mb_bl_oscillate(wt, out, length, f, p, w, o, adv, g, off, lo, hi, dc, &st);
 
@@ -418,6 +419,8 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 		rb_ary_store(bl_state, 1, rb_float_new(st.prev_inc));
 		rb_ary_store(bl_state, 2, rb_float_new(st.prev_pm));
 		rb_ary_store(bl_state, 3, INT2NUM(1));
+		rb_ary_store(bl_state, 4, rb_float_new(st.prev_w));
+		rb_ary_store(bl_state, 5, rb_float_new(st.prev_o));
 	}
 }
 

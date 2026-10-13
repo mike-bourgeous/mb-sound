@@ -86,8 +86,10 @@ static double bl_read_phi(VALUE state)
  * +phase_mod+ is in cycles.  +state+ is the phasor's [phi]; +bl_state+ is
  * [last effective phase, last increment, last phase_mod, primed (1; 0 for a tone's first sample, which
  * is corrected as if the tone had always run; 2 after a phase jump, which
- * skips the correction)], carried between buffers so the first sample of a
- * buffer is corrected for an edge just before it.
+ * skips the correction), and optionally the last width and the last pivot
+ * in use (written back always; see struct mb_bl_state)], carried between
+ * buffers so the first sample of a buffer is corrected for an edge just
+ * before it, as it would be within a buffer.
  * +fade_lo+ and +fade_hi+ (Hz) fade the corrections in with frequency (see
  * bl_fade; 0 and 0 for always on, infinity for never: a naive waveform).
  * +width+ (Numeric, NArray, or nil for 0.5) warps the phase (see the top of
@@ -112,13 +114,14 @@ static VALUE oscillate_bl(VALUE buffer, VALUE wave_type, VALUE frequency, VALUE 
 	double hi = NUM2DBL(fade_hi);
 
 	Check_Type(bl_state, T_ARRAY);
-	if (RARRAY_LEN(bl_state) != 4) {
-		rb_raise(rb_eArgError, "Band-limiting state must have four elements");
+	if (RARRAY_LEN(bl_state) != 4 && RARRAY_LEN(bl_state) != 6) {
+		rb_raise(rb_eArgError, "Band-limiting state must have four or six elements");
 	}
 	st.prev_e = NUM2DBL(rb_ary_entry(bl_state, 0));
 	st.prev_inc = NUM2DBL(rb_ary_entry(bl_state, 1));
 	st.prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
 	st.primed = NUM2INT(rb_ary_entry(bl_state, 3));
+	mb_bl_read_prev_warp(bl_state, &st);
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -146,6 +149,8 @@ static VALUE oscillate_bl(VALUE buffer, VALUE wave_type, VALUE frequency, VALUE 
 		rb_ary_store(bl_state, 1, rb_float_new(st.prev_inc));
 		rb_ary_store(bl_state, 2, rb_float_new(st.prev_pm));
 		rb_ary_store(bl_state, 3, INT2NUM(1));
+		rb_ary_store(bl_state, 4, rb_float_new(st.prev_w));
+		rb_ary_store(bl_state, 5, rb_float_new(st.prev_o));
 	}
 
 	if (!was_inplace) {
