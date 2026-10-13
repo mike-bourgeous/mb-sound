@@ -177,6 +177,57 @@ module MB
           end
         end
 
+        # Reads sleeping player +p+'s branches of nodes that other players
+        # also play (see #asleep_reads) for +frames+ frames, so their Tees
+        # keep it in step: before, the Tee left it a whole CircularBuffer
+        # behind after a second asleep, and unmuting raised
+        # BranchBufferOverflow.  The player's own nodes still sleep.
+        def read_while_asleep(p, frames)
+          return if frames <= 0
+
+          asleep_reads(p).each { |b| b.sample(frames) }
+        end
+
+        # What sleeping player +p+ still reads (like a skipped Synth lane;
+        # see Synth#boundary): its branches of Tees with a branch in another
+        # player's graph (sleeping or not), less those that another of
+        # these reads through.  Branches nothing in the Session plays (an
+        # unused `lfo * 2`, or a graph not started yet) don't count: reading
+        # for them would run the node while the player sleeps, so a muted
+        # player's sound would depend on unused nodes.  Cached until a Tee
+        # gains or loses a branch or the players change.
+        def asleep_reads(p)
+          players = @span_players || @mutex.synchronize { @players.values }
+          # One list of the players' serials per span, the same object while
+          # the players stay the same
+          serials = (@span_serials ||= begin
+            list = players.map(&:serial)
+            list == @asleep_serials ? @asleep_serials : (@asleep_serials = list)
+          end)
+          changes = GraphNode::Tee.branch_changes
+          cache = p.asleep_reads
+          return cache[2] if cache && cache[0] == changes && cache[1].equal?(serials)
+
+          own = p.input.graph(include_tees: true)
+          set = own.to_h { |n| [n.__id__, true] }
+          others = {}
+          players.each do |o|
+            next if o.equal?(p)
+
+            o.input.graph(include_tees: true).each { |n| others[n.__id__] = true }
+          end
+
+          shared = own.select { |n|
+            n.is_a?(GraphNode::Tee::Branch) && n.owner_tee.branches.any? { |b| !set[b.__id__] && others[b.__id__] }
+          }
+          upstream = {}
+          shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
+          shared.reject! { |n| upstream[n.__id__] }
+
+          p.asleep_reads = [changes, serials, shared]
+          shared
+        end
+
         # The mute/solo level a new player named +name+ starts at.
         def initial_strip_level(name)
           audible_unlocked?(name) ? 1.0 : 0.0

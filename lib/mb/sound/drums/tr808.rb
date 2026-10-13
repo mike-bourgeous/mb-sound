@@ -154,10 +154,11 @@ module MB
           end
           extra[:metal] = metal if metal && [:closed_hat, :open_hat, :cymbal].include?(key)
 
-          graph = Build.public_send(key, trigger, **k, **extra)
+          graph = nil
+          built = GraphNode::Tee.collect_branches { graph = Build.public_send(key, trigger, **k, **extra) }
           Voice.new(
             graph, name: key, machine: :tr808, inputs: inputs, notes: notes,
-            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle
+            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle, built: built
           )
         end
 
