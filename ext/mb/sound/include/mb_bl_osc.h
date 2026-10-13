@@ -563,6 +563,7 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
 // width signal gives the same samples at any buffer size.
 struct mb_bl_state {
 	double phi;
+	struct mb_grid_phase grid; // a constant frequency's phase grid (see mb_phase.h)
 	double prev_e, prev_inc, prev_pm;
 	int primed; // 1 primed, 0 a tone's first sample, 2 just after a jump
 	double prev_w, prev_o;
@@ -635,7 +636,10 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
 	}
-	double steps = 0;
+	struct mb_grid_phase grid = st->grid;
+	if (constant) {
+		mb_grid_phase_start(&grid, phi, freq * adv);
+	}
 	double e = 0, inc = 0;
 	double pending = 0, pending_d = 0;
 	for (size_t i = 0; i < length; i++) {
@@ -664,11 +668,8 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		}
 
 		inc = freq * adv;
-		if (constant) {
-			steps = inc * i;
-		}
 
-		e = constant ? mb_wrap(phi + steps, 1.0) : phi;
+		e = mb_wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0);
 		if (pm != 0) {
 			e = mb_wrap(e + pm, 1.0);
 		}
@@ -741,15 +742,19 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		prev_pm = pm;
 		primed = 1;
 
-		if (!constant) {
+		if (constant) {
+			mb_grid_phase_next(&grid);
+		} else {
 			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		st->phi = mb_grid_phase_now(&grid);
+		st->grid = grid;
+	} else {
+		st->phi = mb_wrap(phi, 1.0);
 	}
-	st->phi = mb_wrap(phi + steps, 1.0);
 
 	if (length > 0) {
 		st->prev_e = prev_e;

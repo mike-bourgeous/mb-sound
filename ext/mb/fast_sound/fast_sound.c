@@ -604,13 +604,14 @@ static void write_noise_state(VALUE noise, uint64_t rng)
 	}
 }
 
-// Reads and checks the [phi] state array of a phasor.
+// Reads and checks the [phi] (or [phi, grid base, k, inc]; see mb_phase.h)
+// state array of a phasor.
 static double read_phasor_state(VALUE state)
 {
 	Check_Type(state, T_ARRAY);
 
-	if (RARRAY_LEN(state) != 1) {
-		rb_raise(rb_eArgError, "State array must have exactly one numeric element");
+	if (RARRAY_LEN(state) != 1 && RARRAY_LEN(state) != 4) {
+		rb_raise(rb_eArgError, "State array must have one numeric element (four with a constant frequency's phase grid)");
 	}
 
 	return NUM2DBL(rb_ary_entry(state, 0));
@@ -655,18 +656,21 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 	if (running) {
 		phi = mb_wrap_phase(phi);
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(state, &grid);
+		mb_grid_phase_start(&grid, phi, phasor_increment(freq, adv, 0, &rng));
+	}
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
 			freq = freqptr[i * freqstep];
 		}
 
 		double inc = phasor_increment(freq, adv, rndadv, &rng);
-		if (constant) {
-			steps = inc * i;
-		}
 
-		out[i] = running ? phi : wrap(phi + steps, 1.0);
+		out[i] = running ? phi : wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0);
 		if (incptr) {
 			incptr[i] = inc;
 		}
@@ -678,13 +682,17 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 			phi = wrap(phi + inc, 1.0);
 		} else if (running) {
 			phi = mb_wrap_phase(phi + inc);
+		} else {
+			mb_grid_phase_next(&grid);
 		}
 	}
 
 	if (constant) {
-		steps = phasor_increment(freq, adv, 0, &rng) * length;
+		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(state, &grid);
+	} else {
+		rb_ary_store(state, 0, rb_float_new(wrap(phi, 1.0)));
 	}
-	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
 	write_noise_state(noise, rng);
 
 	if (!was_inplace) {
@@ -801,7 +809,13 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 	if (running) {
 		phi = mb_wrap_phase(phi);
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(state, &grid);
+		mb_grid_phase_start(&grid, phi, phasor_increment(freq, adv, 0, &rng));
+	}
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
 			freq = freqptr[i * freqstep];
@@ -811,11 +825,8 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 		}
 
 		double inc = phasor_increment(freq, adv, rndadv, &rng);
-		if (constant) {
-			steps = inc * i;
-		}
 
-		double complex v = shape_sample(wt, running ? phi : wrap(phi + steps, 1.0), inc, pm) * g + off;
+		double complex v = shape_sample(wt, running ? phi : wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0), inc, pm) * g + off;
 
 		if (complex_buffer) {
 			((complex float *)out)[i] = v;
@@ -830,13 +841,17 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 			phi = wrap(phi + inc, 1.0);
 		} else if (running) {
 			phi = mb_wrap_phase(phi + inc);
+		} else {
+			mb_grid_phase_next(&grid);
 		}
 	}
 
 	if (constant) {
-		steps = phasor_increment(freq, adv, 0, &rng) * length;
+		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(state, &grid);
+	} else {
+		rb_ary_store(state, 0, rb_float_new(wrap(phi, 1.0)));
 	}
-	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
 	write_noise_state(noise, rng);
 
 	if (!was_inplace) {

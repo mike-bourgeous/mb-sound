@@ -16,7 +16,7 @@ RSpec.describe('Tone null-test reference') do
     # Bug fix 2026-10-06: wraps landing exactly on a sample (a whole number
     # of cycles) were lost to rounding; now a pulse of 1 on that sample
     'tone_ports' => 'wraps: adds the pulse lost at sample 960 (1500 Hz + 200 Hz FM, whole cycles); 2026-10-13: running phase (last bits)',
-    'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles); 2026-10-07: no backward-edge spikes',
+    'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles); 2026-10-07: no backward-edge spikes; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles); 2026-10-13: running phase, the phasor reads 0 (not 1.0) at that wrap',
     'phasor_wraps_only' => 'new at_2000 output (2000 Hz, every wrap on a sample; had no pulses); main unchanged',
     # Fix 2026-10-07: synced ramps, triangles, and parabolas are exactly the
@@ -45,7 +45,7 @@ RSpec.describe('Tone null-test reference') do
     'reset_to_node' => 'phase jumps: ideal step area; 2026-10-10: reset targets in cycles (a radians node scaled; last bits, -130 dB)',
     'rnd_reset' => 'phase jumps: ideal step area',
     'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
-    'tempo_lfo_changes' => 'phase jumps: ideal step area',
+    'tempo_lfo_changes' => 'phase jumps: ideal step area; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'tone_ports_reset' => 'phase jumps: ideal step area',
     # 2026-10-08: complex shapes with phase modulation, warps, or sync play
     # from complex wavetables (Tone#complex_table?) instead of the naive
@@ -61,14 +61,14 @@ RSpec.describe('Tone null-test reference') do
     'square_110' => 'first sample as if the tone had always run',
     'rate_96000_fm' => 'first sample as if the tone had always run; 2026-10-13: running phase (last bits)',
     'notes' => 'first sample as if the tone had always run',
-    'ramp_pwm' => 'first sample as if the tone had always run',
+    'ramp_pwm' => 'first sample as if the tone had always run; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'reset_lfo' => 'first sample as if the tone had always run',
     'drumramp' => 'first sample as if the tone had always run',
     'sine_pwm' => 'first sample as if the tone had always run',
     'sync_tone_master' => 'first sample as if the tone had always run',
     'pwm_node' => 'first sample as if the tone had always run',
     'lfo_square_20' => 'first sample as if the tone had always run',
-    'square_3520' => 'first sample as if the tone had always run',
+    'square_3520' => 'first sample as if the tone had always run; 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'skew_triangle' => 'first sample as if the tone had always run',
     'negative_amp' => 'first sample as if the tone had always run',
     'parabola_pwm' => 'first sample as if the tone had always run',
@@ -78,9 +78,9 @@ RSpec.describe('Tone null-test reference') do
     # 2026-10-13: naive jumps landing exactly on a sample (3520 Hz is 11/150
     # cycles per sample) snap onto the jump (the value after it), so they
     # land on the same sample at any block size; 1-2 samples each
-    'aramp_3520' => 'naive edges on samples snap to the jump (sample 1125)',
+    'aramp_3520' => 'naive edges on samples snap to the jump (sample 1125); 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'asquare_3520' => 'naive edges on samples snap to the jump (samples 1050, 1125)',
-    'gauss_3520' => 'naive edges on samples snap to the jump (sample 1125)',
+    'gauss_3520' => 'naive edges on samples snap to the jump (sample 1125); 2026-10-13 (fixes-7): constant-frequency phase grid (last bits)',
     'noise_root_seed' => 'noise: block-size independent phase (last bits)',
     'noise_seeded_blend' => 'noise: block-size independent phase (last bits)',
     # 2026-10-10: phase modulation is in cycles (kernels add it to the phase
@@ -103,6 +103,19 @@ RSpec.describe('Tone null-test reference') do
     'tempo_late_start' => 'running phase (last bits)',
     'tempo_phasor' => 'running phase: 0 (not 1.0) at wraps exactly on samples',
     'tempo_pitch_freewheel' => 'running phase: the phasor part reads 0 (not 1.0) at wraps exactly on samples',
+    # 2026-10-13 (fixes-7): tones with a constant frequency count their
+    # phases from an 800-sample grid of their own time (mb_phase.h), so
+    # they give the same samples at any block size; these cases, rendered
+    # in irregular blocks, differ in the last bits (residuals -237 to
+    # -329 dB)
+    'atriangle_3520' => 'constant-frequency phase grid (last bits)',
+    'complex_ramp_330' => 'constant-frequency phase grid (last bits)',
+    'lfo_ramp_100' => 'constant-frequency phase grid (last bits)',
+    'parabola_3520' => 'constant-frequency phase grid (last bits)',
+    'ramp_3520' => 'constant-frequency phase grid (last bits)',
+    'rate_44100' => 'constant-frequency phase grid (last bits)',
+    'sine_3520' => 'constant-frequency phase grid (last bits)',
+    'triangle_3520' => 'constant-frequency phase grid (last bits)',
   }.freeze
 
   it 'has a reference for every case' do

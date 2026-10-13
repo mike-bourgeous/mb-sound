@@ -46,7 +46,7 @@ module MB
           constant = f_a.nil? && rndadv == 0
           running = !constant && rndadv == 0 # a frequency signal (mb_phase.h)
           phi = Tone.wrap_phase(phi) if running
-          steps = 0.0
+          grid = constant ? Tone.grid_phase_start(state, phi, f_s * adv) : nil # (mb_phase.h)
           values = Array.new(count)
 
           count.times do |i|
@@ -62,9 +62,8 @@ module MB
             else
               inc = fr * adv
             end
-            steps = inc * i if constant
 
-            e = running ? phi : wrap(phi + steps)
+            e = running ? phi : wrap(constant ? grid[0] + grid[2] * grid[1] : phi)
             e = wrap(e + pm) if pm != 0
 
             if w != 0.5
@@ -112,11 +111,16 @@ module MB
               phi = wrap(phi + inc) # noise: a running wrapped phase (block-size independent)
             elsif running
               phi = Tone.wrap_phase(phi + inc)
+            else
+              Tone.grid_phase_next(grid)
             end
           end
 
-          steps = f_s * adv * count if constant
-          state[0] = wrap(phi + steps)
+          if constant
+            Tone.grid_phase_store(state, grid)
+          else
+            state[0] = wrap(phi)
+          end
           if count > 0
             tstate[1] = prev_pm
             tstate[2] = 1
@@ -280,37 +284,52 @@ module MB
 
           constant = f_a.nil?
           phi = Tone.wrap_phase(phi) unless constant # a running phase and position (mb_phase.h)
-          steps = 0.0
-          psteps = 0.0
+          loop_pos = ->(x) { looped && x >= le ? ls + fwrap(x - ls, len) : x }
           values = Array.new(count)
+
+          # A constant frequency counts the phase and the position from
+          # their grids (mb_phase.h; the position's in tstate[5..7])
+          if constant
+            grid = Tone.grid_phase_start(state, phi, f_s * adv)
+            sp0 = f_s * speed
+            b, k, i = tstate[5], tstate[6], tstate[7]
+            pgrid = if b.is_a?(Float) && k.is_a?(Float) && i.is_a?(Float) && i == sp0 && k >= 0 && k < Tone::PHASE_GRID && loop_pos.(b + sp0 * k) == pos
+                      [b, k, i]
+                    else
+                      [pos, 0.0, sp0]
+                    end
+          end
 
           count.times do |i|
             fr = f_a ? f_a[i] : f_s
             inc = fr * adv
             sp = fr * speed
-            if constant
-              steps = inc * i
-              psteps = sp * i
-            end
 
-            p = constant ? pos + psteps : pos
-            p = ls + fwrap(p - ls, len) if looped && p >= le
+            p = loop_pos.(constant ? pgrid[0] + pgrid[2] * pgrid[1] : pos)
 
             values[i] = gain(value(spec, p, sp.abs, 0.0, interp), g, off)
 
-            unless constant
+            if constant
+              Tone.grid_phase_next(grid)
+              pgrid[1] += 1.0
+              if pgrid[1] >= Tone::PHASE_GRID
+                pgrid[0] = loop_pos.(pgrid[0] + pgrid[2] * Tone::PHASE_GRID)
+                pgrid[1] = 0.0
+              end
+            else
               phi = Tone.wrap_phase(phi + inc)
               pos = p + sp
             end
           end
 
           if constant
-            steps = f_s * adv * count
-            psteps = f_s * speed * count
+            Tone.grid_phase_store(state, grid)
+            p = loop_pos.(pgrid[0] + pgrid[2] * pgrid[1])
+            tstate[5], tstate[6], tstate[7] = pgrid
+          else
+            state[0] = wrap(phi)
+            p = loop_pos.(pos)
           end
-          state[0] = wrap(phi + steps)
-          p = pos + psteps
-          p = ls + fwrap(p - ls, len) if looped && p >= le
           tstate[0] = p
           tstate[2] = 1 if count > 0
 

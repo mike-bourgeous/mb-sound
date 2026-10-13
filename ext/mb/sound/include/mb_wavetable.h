@@ -789,6 +789,7 @@ static inline void wt_corner_step(const struct wt_table *t, double e, double d, 
 // noise generator.
 struct mb_wt_osc_state {
 	double phi;
+	struct mb_grid_phase grid; // a constant frequency's phase grid (see mb_phase.h)
 	double prev_pm;
 	_Bool primed;
 	double prev_e;
@@ -838,7 +839,10 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 	if (running) {
 		phi = mb_wrap_phase(phi);
 	}
-	double steps = 0;
+	struct mb_grid_phase grid = s->grid;
+	if (constant) {
+		mb_grid_phase_start(&grid, phi, wt_increment(freq, adv, 0, &rng));
+	}
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = freqptr[i * freqptr_step];
@@ -847,11 +851,8 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 		if (scptr) sc = scptr[i * scptr_step];
 
 		double inc = wt_increment(freq, adv, rndadv, &rng);
-		if (constant) {
-			steps = inc * i;
-		}
 
-		double e = running ? phi : wt_wrap(phi + steps, 1.0);
+		double e = running ? phi : wt_wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0);
 		if (pm != 0) {
 			e = wt_wrap(e + pm, 1.0);
 		}
@@ -922,13 +923,17 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 			phi = wt_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
 		} else if (running) {
 			phi = mb_wrap_phase(phi + inc);
+		} else {
+			mb_grid_phase_next(&grid);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		s->phi = mb_grid_phase_now(&grid);
+		s->grid = grid;
+	} else {
+		s->phi = wt_wrap(phi, 1.0);
 	}
-	s->phi = wt_wrap(phi + steps, 1.0);
 	s->rng = rng;
 	if (length > 0) {
 		s->prev_pm = prev_pm;

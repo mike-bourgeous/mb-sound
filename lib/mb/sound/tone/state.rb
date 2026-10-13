@@ -71,7 +71,7 @@ module MB
           extra = fields.keys - FIELDS
           raise ArgumentError, "Unknown state fields #{extra.inspect}" unless extra.empty?
 
-          @phase = [phase.to_f]
+          @phase = phase.is_a?(Array) ? phase.dup : [phase.to_f] # (an Array: with a constant frequency's grid; see #to_h)
           @blep = [0.0, 0.0, 0.0, 0, 0.5, 0.0]
           @blit = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
           @sync = [@phase[0], 0.0, 1.0, 0, 0]
@@ -143,7 +143,7 @@ module MB
         # saving a graph; State.new(**state.to_h) restores it.
         def to_h
           {
-            phase: @phase[0],
+            phase: @phase.length > 1 ? @phase.dup : @phase[0], # (with a constant frequency's grid; see mb_phase.h)
             blep: @blep.dup,
             blit: @blit.dup,
             sync: @sync.dup,

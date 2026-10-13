@@ -241,6 +241,59 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  # A tone with a constant frequency computes its phases from the last
+  # point of an 800-sample grid of its own time (mb_phase.h; fixes-7), so it
+  # gives the same samples at any block size (before, from each block's
+  # start: a 3.3 Hz phasor's wraps a sample apart at 367/368, a persona
+  # take's 31.1-second loop strikes -130 dB)
+  describe 'tones with a constant frequency' do
+    cycle = -> { MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25, 0.125], size: 256) }
+    sound = -> { Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) } }
+    tones = {
+      'naive sine' => -> { 220.3.hz.sine },
+      'naive ramp' => -> { 220.3.hz.aramp },
+      'phasor' => -> { 3.3.hz.phasor },
+      'LFO' => -> { 0.31.hz.lfo },
+      'PolyBLEP saw' => -> { 220.3.hz.saw },
+      'PolyBLEP square, pwm signal' => -> { 220.3.hz.square.pwm(3.hz.lfo.at(0.2..0.8)) },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.2) },
+      'cycle wavetable' => -> { 220.3.hz.wavetable(cycle.()) },
+      'sample wavetable (looped)' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_samples(sound.(), mode: :sample, root: 200, loop: 1000...4000)) },
+      'wraps port' => -> { (1.0 / 0.311).hz.lfo.with_phase(0.93).wraps.ping(400, decay: 0.2) },
+    }
+
+    [false, true].each do |planned|
+      tones.each do |name, make|
+        it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
+          build = -> {
+            g = make.() * 0.5
+            MB::Sound::Plan.install(g) if planned
+            g
+          }
+          expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
+        end
+      end
+    end
+
+    {
+      'naive sine' => -> { 220.3.hz.sine },
+      'PolyBLEP square' => -> { 220.3.hz.square.pwm(0.3) },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'cycle wavetable' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
+      'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.3) },
+    }.each do |name, make|
+      it "gives the Ruby mirror's samples and state for a #{name} across grid points" do
+        tones = [:sample_c, :sample_ruby].map { |m| [m, make.()] }
+        [367, 1, 1031, 800, 433].each do |n|
+          a, b = tones.map { |m, t| t.public_send(m, n).dup }
+          expect(b.to_a).to eq(a.to_a)
+          expect(tones[1][1].state.phase).to eq(tones[0][1].state.phase)
+        end
+      end
+    end
+  end
+
   describe 'Synth idle lane skipping' do
     clip = -> { MB::Sound.seq(MB::Sound::C4.n16, MB::Sound::Rest.n4, MB::Sound::E4.n16, MB::Sound::Rest.n2, MB::Sound::G4.n8.d, MB::Sound::Rest.n4).loop }
     patches = {

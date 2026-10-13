@@ -299,7 +299,13 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 	if (running) {
 		phi = mb_wrap_phase(phi);
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(phase_state, &grid);
+		mb_grid_phase_start(&grid, phi, phasor_increment(freq, adv, 0, &rng));
+	}
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
 			freq = freqptr[i * freqstep];
@@ -309,11 +315,8 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 		}
 
 		double inc = phasor_increment(freq, adv, rndadv, &rng);
-		if (constant) {
-			steps = inc * i;
-		}
 
-		double complex v = shape_sample(wt, running ? phi : mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
+		double complex v = shape_sample(wt, running ? phi : mb_wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0), inc, pm) * g + off;
 		if (complex_out) {
 			((complex float *)out)[i] = v;
 		} else {
@@ -324,13 +327,17 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			phi = mb_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
 		} else if (running) {
 			phi = mb_wrap_phase(phi + inc);
+		} else {
+			mb_grid_phase_next(&grid);
 		}
 	}
 
 	if (constant) {
-		steps = phasor_increment(freq, adv, 0, &rng) * length;
+		rb_ary_store(phase_state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(phase_state, &grid);
+	} else {
+		rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi, 1.0)));
 	}
-	rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 	if (!NIL_P(noise)) {
 		rb_ary_store(noise, 0, ULL2NUM(rng));
 	}
@@ -358,7 +365,13 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(phase_state, &grid);
+		mb_grid_phase_start(&grid, phi, freq * adv);
+	}
 	for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
 		size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
 		for (size_t k = 0; k < m; k++) {
@@ -370,26 +383,26 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 				pm = pmptr[i * pmstep];
 			}
 
-			double inc = freq * adv;
+			double ph;
 			if (constant) {
-				steps = inc * i;
+				ph = mb_wrap(grid.base + grid.inc * grid.k, 1.0);
+				mb_grid_phase_next(&grid);
+			} else {
+				ph = phi;
+				phi = mb_wrap_phase(phi + freq * adv);
 			}
-
-			double ph = constant ? mb_wrap(phi + steps, 1.0) : phi;
 			double r = ph + pm;
 			x[k] = mb_vec_reduce(r);
-
-			if (!constant) {
-				phi = mb_wrap_phase(phi + inc);
-			}
 		}
 		mb_vec_sine_shape(out + start, x, m, gf, of);
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		rb_ary_store(phase_state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(phase_state, &grid);
+	} else {
+		rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi, 1.0)));
 	}
-	rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 }
 
 // FastSynth.oscillate_bl through mb_bl_oscillate on one segment, with the
@@ -410,10 +423,14 @@ static void synth_segment(enum bl_wave wt, float *out, size_t length,
 	st.prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
 	st.primed = NUM2INT(rb_ary_entry(bl_state, 3));
 	mb_bl_read_prev_warp(bl_state, &st);
+	mb_grid_phase_read(phase_state, &st.grid);
 
 	mb_bl_oscillate(wt, out, length, f, p, w, o, adv, g, off, lo, hi, dc, &st);
 
 	rb_ary_store(phase_state, 0, rb_float_new(st.phi));
+	if (!isnan(st.grid.inc)) {
+		mb_grid_phase_write(phase_state, &st.grid);
+	}
 	if (length > 0) {
 		rb_ary_store(bl_state, 0, rb_float_new(st.prev_e));
 		rb_ary_store(bl_state, 1, rb_float_new(st.prev_inc));
