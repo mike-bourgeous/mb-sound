@@ -77,6 +77,10 @@ const char *mb_jack_client_name(void);
 uint32_t mb_jack_sample_rate(void);
 uint32_t mb_jack_buffer_size(void);
 size_t mb_jack_cycles(void);
+// Cycles the server skipped or repeated for this client (asynchronous
+// servers, when the client was late; see mb_jack.c), since it opened.
+size_t mb_jack_cycles_skipped(void);
+size_t mb_jack_cycles_repeated(void);
 
 // Registers +count+ ports named +names+ on the shared client for +unit+
 // (audio or MIDI, +output+ or input).  Returns NULL or an error message;

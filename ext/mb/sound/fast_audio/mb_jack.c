@@ -73,6 +73,17 @@ static _Atomic int client_lost; // the server shut down or dropped us
 static _Atomic(struct unit_list *) active;
 static _Atomic size_t cycles_started;
 static _Atomic size_t cycles_done;
+
+// Cycles the server ran this client late, in asynchronous mode (jackd's
+// default without --sync): a client still busy when a cycle starts misses
+// it (skipped: the frame time jumps by more than a period, and what other
+// clients' outputs held in it is gone), or gets two callbacks for one cycle
+// (repeated: the frame time didn't move; see midi_in_process).  Counted
+// for MB::Sound::Jack.info; the process thread owns prev_frame.
+static _Atomic size_t cycles_skipped;
+static _Atomic size_t cycles_repeated;
+static uint32_t prev_frame;
+static int have_prev_frame;
 static pthread_mutex_t change_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Released ports, kept registered for reuse (see mb_jack.h: libjack can't
@@ -281,6 +292,19 @@ static int process(jack_nframes_t nframes, void *arg)
 	(void)arg;
 
 	atomic_fetch_add(&cycles_started, 1);
+
+	uint32_t frame = jack.last_frame_time(client);
+	if (have_prev_frame && nframes > 0) {
+		uint32_t delta = frame - prev_frame;
+		if (delta == 0) {
+			atomic_fetch_add_explicit(&cycles_repeated, 1, memory_order_relaxed);
+		} else if (delta > nframes) {
+			atomic_fetch_add_explicit(&cycles_skipped, delta / nframes - 1, memory_order_relaxed);
+		}
+	}
+	prev_frame = frame;
+	have_prev_frame = 1;
+
 	struct unit_list *list = atomic_load(&active);
 	if (list != NULL) {
 		for (int i = 0; i < list->count; i++) {
@@ -342,6 +366,9 @@ const char *mb_jack_open(const char *name)
 
 	atomic_store(&client_lost, 0);
 	atomic_store(&active, NULL);
+	atomic_store(&cycles_skipped, 0);
+	atomic_store(&cycles_repeated, 0);
+	have_prev_frame = 0; // no process thread yet
 	if (jack.set_process_callback(c, process, NULL) != 0) {
 		jack.client_close(c);
 		return "Could not set the JACK process callback";
@@ -440,6 +467,16 @@ uint32_t mb_jack_buffer_size(void)
 size_t mb_jack_cycles(void)
 {
 	return atomic_load(&cycles_done);
+}
+
+size_t mb_jack_cycles_skipped(void)
+{
+	return atomic_load(&cycles_skipped);
+}
+
+size_t mb_jack_cycles_repeated(void)
+{
+	return atomic_load(&cycles_repeated);
 }
 
 // Takes a spare port of the given kind for +name+: one already named +name+,

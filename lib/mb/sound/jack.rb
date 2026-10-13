@@ -32,8 +32,12 @@ module MB
           FastAudio.jack_info&.dig(:client_name)
         end
 
-        # The shared client's :client_name, :sample_rate, :buffer_size, and
-        # :cycles, or nil if it isn't open.
+        # The shared client's :client_name, :sample_rate, :buffer_size,
+        # :cycles, :skipped_cycles, and :repeated_cycles, or nil if it isn't
+        # open.  An asynchronous server (jackd without --sync) skips cycles
+        # for a client that is late, losing what other clients sent it then,
+        # or calls it twice for one cycle (MIDI::Input drops the repeated
+        # messages).
         def info
           FastAudio.jack_info
         end

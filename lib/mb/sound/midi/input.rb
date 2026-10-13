@@ -31,6 +31,9 @@ module MB
       #     input.read_raw  # => [[0.0, "\x90<d"], [0.012, "\x80<\x00"]] (RtMidi deltas)
       class Input
         class << self
+          # True once an input has warned about a repeated JACK cycle.
+          attr_accessor :repeats_reported
+
           # The MIDI APIs available: RtMidi's (:core, :alsa) plus :jack (the
           # shared JACK client, loaded at run time) except on macOS, where
           # CoreMIDI covers everything.
@@ -222,7 +225,11 @@ module MB
         # previous message received (across reads; 0 for the first message
         # since opening).  Never waits.
         def read_raw
-          @api == :jack ? @input.read(false) : @input.read
+          return @input.read unless @api == :jack
+
+          events = @input.read(false)
+          warn_repeats if @input.repeated != 0
+          events
         end
 
         # True if #read_raw gives JACK frame times, false for RtMidi deltas.
@@ -269,6 +276,21 @@ module MB
           "#<#{self.class.name} #{@api} #{connections.first}#{' closed' if closed?}>"
         end
         alias inspect to_s
+
+        private
+
+        # Says once per process that JACK ran a cycle twice for an input
+        # (the input received its messages once; see Jack.info).
+        def warn_repeats
+          return if Input.repeats_reported
+
+          Input.repeats_reported = true
+          skipped = Jack.info&.dig(:skipped_cycles)
+          warn "JACK ran a cycle twice for MIDI input #{port}: the server is asynchronous and this " \
+            "client was late, so its #{@input.repeated} repeated messages were dropped.  The " \
+            "#{skipped || 'unknown number of'} cycles it skipped lost whatever arrived in them.  " \
+            '`jackd --sync` or a lighter load avoids this (MB::Sound::Jack.info counts them).'
+        end
       end
     end
   end
