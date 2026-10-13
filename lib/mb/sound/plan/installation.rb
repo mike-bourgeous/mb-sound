@@ -33,11 +33,14 @@ module MB
         # groups its lanes' regions itself, or with Plan.lanes off.
         attr_accessor :lane_groups
 
-        def initialize(roots, engine:, check:, dry_run: false)
+        # +unread+ (optional): a predicate telling Tee branches that nothing
+        # reads (see #live_branches).
+        def initialize(roots, engine:, check:, dry_run: false, unread: nil)
           @roots = roots
           @engine = engine
           @check = check
           @dry_run = dry_run
+          @unread = unread
           @regions = []
           @excluded = {}
           @unsupported = {}.compare_by_identity
@@ -67,6 +70,20 @@ module MB
         # while uninstalled).
         def dropped_blocks
           [0, 1].map { |k| @retired.each_value.sum { |c| c[k] } }
+        end
+
+        # The branches of +tee+ that count as its readers: every branch,
+        # less those the installation's +unread+ predicate leaves out (a
+        # Synth's branches made while building its lanes and read by no lane,
+        # e.g. a `band * 0.5` left unused in the voice block; see
+        # Synth#unread_branch?).  Regions, fusing, direct sources, and
+        # SharedInputs treat those as absent, so an unused node changes
+        # nothing (a fused node's Tee isn't sampled, so they stay empty; a
+        # read from one goes through Region#foreign_read).
+        def live_branches(tee)
+          return tee.branches unless @unread
+
+          tee.branches.reject { |b| @unread.call(b) }
         end
 
         # True after a structural change; the next block rebuilds.
@@ -352,7 +369,7 @@ module MB
 
           internal = node.instance_variable_get(:@internal_tee)
           tees = @tees_of[node].dup
-          if internal && !tees.any? { |t| t.equal?(internal) } && !internal.branches.empty?
+          if internal && !tees.any? { |t| t.equal?(internal) } && !live_branches(internal).empty?
             complete = false # branches nobody here reads
           end
 
@@ -364,7 +381,7 @@ module MB
           queue = tees
           until queue.empty?
             tee = queue.shift
-            tee.branches.each do |b|
+            live_branches(tee).each do |b|
               readers = @seen.key?(b) ? @readers[b] : []
               more = @tees_of[b]
               complete = false if readers.empty? && more.empty?

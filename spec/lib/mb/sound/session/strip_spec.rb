@@ -65,6 +65,77 @@ RSpec.describe(MB::Sound::Session::Strip) do
     expect(data[idx + 24000]).to eq(MB::Sound::D3.number)
   end
 
+  describe 'nodes shared between players' do
+    # The unused node changes the plan regions; exact plans keep that from
+    # changing the LFO's samples (the default :fast sines differ by 3e-8)
+    around do |ex|
+      old = MB::Sound::Plan.precision
+      MB::Sound::Plan.precision = :exact
+      ex.run
+    ensure
+      MB::Sound::Plan.precision = old
+    end
+
+    def new_session
+      MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false),
+        transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+    end
+
+    # Renders +frames+ frames of session +s+ in buffers of +sizes+.
+    def run_in(s, frames, sizes)
+      out = []
+      sizes = sizes.cycle
+      while frames > 0
+        n = [sizes.next, frames].min
+        out << s.process_buffer(n)[0].dup
+        frames -= n
+      end
+      out.reduce(:concatenate)
+    end
+
+    # Plays +graphs+ (name => node) in a new Session, mutes :b after 800
+    # frames for +muted+ frames, then unmutes it, in buffers of +sizes+;
+    # returns the mix after the unmute.
+    def mute_and_back(graphs, sizes, muted: 72000)
+      s = new_session
+      graphs.each { |name, g| s.add(g, name: name) }
+      run_in(s, 800, sizes)
+      s.mute(:b)
+      run_in(s, muted, sizes)
+      expect(s.instance_variable_get(:@players).values.find { |p| p.name == :b }.asleep).to eq(true)
+      s.unmute(:b)
+      run_in(s, 24000, sizes)
+    ensure
+      s&.close
+    end
+
+    # fixes-9: the sleeping player's branch of the shared LFO went unread,
+    # so after more than a second (the Tee's CircularBuffer) unmuting raised
+    # BranchBufferOverflow.  It now reads that branch while asleep.
+    it 'keeps a muted player in step with a node another player plays, at any buffer size' do
+      lfo = 3.hz.lfo
+      data = mute_and_back({ a: lfo * 0.5, b: lfo * 0.25 }, [128, 801, 7])
+
+      # After the 5 ms unmute ramp, both players play the LFO in phase
+      ref = new_session
+      ref.add(3.hz.lfo * 0.75)
+      expected = run_in(ref, 800 + 72000 + 24000, [800])[-24000..]
+      ref.close
+      expect(data.abs.max).to be > 0.5
+      expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
+    end
+
+    it "pauses a muted player's node that only unused nodes share" do
+      outs = [false, true].map { |extra|
+        lfo = 3.hz.lfo
+        _unused = lfo * 2 if extra
+        mute_and_back({ b: lfo * 0.25 }, [800])
+      }
+      expect(outs[0].abs.max).to be > 0.2
+      expect(outs[1]).to eq(outs[0])
+    end
+  end
+
   it 'mutes at a launch point over a fade in bars (synced fade)' do
     session.add(1.constant, name: :x)
     run(800)

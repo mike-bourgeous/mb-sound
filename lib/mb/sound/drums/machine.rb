@@ -260,21 +260,26 @@ module MB
             inputs << [Drums.mix(triggers.(chokers.map { |c| own_notes(c) }, false)), choke_tap]
           end
 
-          hit = Hit.new(trigger, knobs: k, name: spec.name, machine: @name)
-          b = spec.block
-          graph = b.arity == 0 ? hit.instance_exec(&b) : b.call(hit)
-          graph = Drums.mix(graph.flatten) if graph.is_a?(Array)
-          unless graph.respond_to?(:sample)
-            raise ArgumentError, "The #{spec.name} block returned #{graph.inspect}, not a graph node"
-          end
-          level = k[:level]
-          graph = graph * level unless level.is_a?(Numeric) && level == 1
-          graph = graph * ChokeGate.new(tap, choke_tap) if choke_tap
-          graph = graph.named("#{@name} #{spec.name}")
+          # Branches made while building (unread ones don't keep a sleeping
+          # voice reading; see Voice#boundary)
+          graph = nil
+          built = GraphNode::Tee.collect_branches {
+            hit = Hit.new(trigger, knobs: k, name: spec.name, machine: @name)
+            b = spec.block
+            graph = b.arity == 0 ? hit.instance_exec(&b) : b.call(hit)
+            graph = Drums.mix(graph.flatten) if graph.is_a?(Array)
+            unless graph.respond_to?(:sample)
+              raise ArgumentError, "The #{spec.name} block returned #{graph.inspect}, not a graph node"
+            end
+            level = k[:level]
+            graph = graph * level unless level.is_a?(Numeric) && level == 1
+            graph = graph * ChokeGate.new(tap, choke_tap) if choke_tap
+            graph = graph.named("#{@name} #{spec.name}")
+          }
 
           Voice.new(
             graph, name: spec.name, machine: @name, inputs: inputs, notes: notes,
-            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle
+            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle, built: built
           )
         end
 

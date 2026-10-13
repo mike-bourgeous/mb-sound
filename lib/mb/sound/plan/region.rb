@@ -383,7 +383,8 @@ module MB
 
         # The node a region may read directly for boundary input +op+:
         # its handles are every branch of one Tee on that node (so nothing
-        # else reads the Tee), else nil.
+        # else reads the Tee; unread branches don't count, see
+        # Installation#live_branches), else nil.
         def direct_source(op)
           tees = op.handles.map { |h| h.is_a?(GraphNode::Tee::Branch) ? h.owner_tee : nil }.uniq
           return nil unless tees.length == 1 && tees[0]
@@ -391,7 +392,8 @@ module MB
           tee = tees[0]
           src = tee.sources[:input]
           return nil if src.is_a?(GraphNode::Tee::Branch) || !src.equal?(op.source)
-          return nil unless tee.branches.length == op.handles.length && tee.branches.all? { |b| op.handles.any? { |h| h.equal?(b) } }
+          live = @installation.live_branches(tee)
+          return nil unless live.length == op.handles.length && live.all? { |b| op.handles.any? { |h| h.equal?(b) } }
 
           src
         end

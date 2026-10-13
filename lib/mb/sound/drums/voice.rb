@@ -93,8 +93,11 @@ module MB
         # Creates a voice playing +graph+.  +inputs+ is a list of [source,
         # tap] pairs: each buffer, the voice reads each source (a trigger
         # node; nil reads as zeros) and gives it to its Tap, which the graph
-        # reads.  The first input wakes a skipped voice.
-        def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, skip_idle: true, sample_rate: 48000)
+        # reads.  The first input wakes a skipped voice.  +built+ (from
+        # GraphNode::Tee.collect_branches around the graph's build) tells
+        # branches made while building the graph and left unread from
+        # readers elsewhere (see #boundary).
+        def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, skip_idle: true, sample_rate: 48000, built: nil)
           @graph = graph.get_sampler
           @name = name
           @machine = machine
@@ -114,6 +117,7 @@ module MB
           @node_type_name = "#{machine} #{name}"
           @skip_idle = !!skip_idle
           @skippable = nil
+          @built = built
         end
 
         def sample(count)
@@ -217,7 +221,7 @@ module MB
               hit = first_hit(bufs[0], o)
               stop = hit || count
               if stop > o
-                @boundary.each { |n| n.sample(stop - o) }
+                boundary.each { |n| n.sample(stop - o) }
                 if o == 0 && hit.nil?
                   whole = zeros(count)
                 else
@@ -326,28 +330,52 @@ module MB
           nodes = @graph.graph(include_tees: true)
           # Clip sources are read through Notes nodes, which stay in step
           @skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
-          @boundary = []
           @busy = []
           return unless @skippable
 
           @busy = nodes.select { |n| n.is_a?(GraphNode::SamplerVoice) || n.is_a?(Repeats) }
 
-          set = nodes.to_h { |n| [n.__id__, true] }
-          set[@graph.__id__] = true
-          shared = nodes.select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && n.owner_tee.branches.any? { |b| !set[b.__id__] }
+          @set = nodes.to_h { |n| [n.__id__, true] }
+          @set[@graph.__id__] = true
+          @tee_branches = nodes.select { |n| n.is_a?(GraphNode::Tee::Branch) }
+          @notes_nodes = nodes.select { |n| n.is_a?(MB::Sound::Notes::Node) }
+          @boundary_cache = nil
+        end
+
+        # What the voice reads while skipped (see #setup_skipping): its
+        # branches of Tees read elsewhere (another voice, e.g. a kit's metal
+        # bank, or any graph outside the voice, whose branch may be made
+        # later) and its Notes nodes (e.g. a knob following a clip's notes),
+        # leaving out nodes that others of these read.  Branches made while
+        # building the voice's graph and read by nothing in it (e.g. an
+        # unused `band * 0.5`; see GraphNode::Tee.collect_branches) don't
+        # count: reading for them would run the voice's nodes while it
+        # sleeps.  Decided when skipping, and cached until any Tee's
+        # branches change.
+        def boundary
+          return [] unless @skippable
+
+          changes = GraphNode::Tee.branch_changes
+          return @boundary_cache[1] if @boundary_cache && @boundary_cache[0] == changes
+
+          set = @set
+          built = @built
+          shared = @tee_branches.select { |n|
+            n.owner_tee.branches.any? { |b| !set[b.__id__] && !(built && built[b]) }
           }
           upstream = {}
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           shared.reject! { |n| upstream[n.__id__] }
 
-          # Notes nodes (e.g. a knob following a clip's notes) keep their
-          # readers in step, unless a shared branch above reads them
-          notes_nodes = nodes.select { |n| n.is_a?(MB::Sound::Notes::Node) && !upstream[n.__id__] }
+          # Notes nodes keep their readers in step, unless a shared branch
+          # above reads them
+          notes_nodes = @notes_nodes.reject { |n| upstream[n.__id__] }
           notes_nodes.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           notes_nodes.reject! { |n| upstream[n.__id__] }
 
-          @boundary = shared + notes_nodes
+          list = shared + notes_nodes
+          @boundary_cache = [changes, list]
+          list
         end
       end
     end

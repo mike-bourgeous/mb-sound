@@ -276,4 +276,50 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       expect(v.notes.length).to eq(1)
     end
   end
+
+  describe 'idle skipping with shared nodes' do
+    # Hits at 0 and 1.5 s: the voice sleeps for over a second in between
+    let(:sparse) { MB::Sound.grid(4, 'x..x') }
+
+    # fixes-9: what a sleeping voice reads was decided at its first buffer,
+    # so a reader of its metal bank made later wasn't kept in step and the
+    # voice's branch overflowed (BranchBufferOverflow) when it woke
+    it 'keeps a branch read outside the voice in step, even one made after the voice started' do
+      m = described_class.metal
+      v = described_class.closed_hat(sparse, metal: m)
+      v.sample(800)
+      outside = m * 1
+      sleeping = []
+      out = 150.times.map { b = v.sample(800).dup; sleeping << v.sleeping?; outside.sample(800); b }
+      expect(sleeping[60]).to eq(true)
+      data = Numo::SFloat.hstack(out)
+      expect(peak(data, 0, 0.1)).to be > 0.01
+      expect(peak(data, 1.5, 1.6)).to be > 0.5 * peak(data, 0, 0.1)
+    end
+
+    # fixes-9: like Synth lanes (fixes-8), a branch made while building the
+    # voice and read by nothing (an unused `band * 0.5`) made the voice
+    # read its branch while asleep, running its noise and filter on
+    it "isn't changed by unread nodes made while building the voice" do
+      outs = [false, true].map { |extra|
+        MB::Sound.seed(3)
+        tap = MB::Sound::Drums::Voice::Tap.new('trigger')
+        graph = nil
+        built = MB::Sound::GraphNode::Tee.collect_branches {
+          band = MB::Sound.noise.filter(:bandpass, cutoff: 3000, quality: 1.5)
+          _unread = band * 0.5 if extra # never read
+          graph = band * MB::Sound::Drums.decay_env(tap, 0.05)
+        }
+        v = MB::Sound::Drums::Voice.new(
+          graph, name: :noise, machine: :test, inputs: [[MB::Sound::Notes.new(sparse).trigger, tap]], built: built
+        )
+        sleeping = []
+        out = 150.times.map { b = v.sample(800).dup; sleeping << v.sleeping?; b }
+        expect(sleeping[60]).to eq(true)
+        Numo::SFloat.hstack(out)
+      }
+      expect(peak(outs[0], 1.5, 1.6)).to be > 0.1
+      expect(outs[1]).to eq(outs[0])
+    end
+  end
 end

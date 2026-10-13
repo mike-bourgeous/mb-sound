@@ -150,11 +150,12 @@ module MB
         # nodes, groups regions of the same shape (LaneGroups, with +lanes+;
         # a Synth passes false and groups its lanes' regions together), and
         # returns the Installation (nil when plans are off or nothing could
-        # be planned).
-        def install(*outputs, engine: self.engine, check: self.check, lanes: self.lanes)
+        # be planned).  +unread+ is a predicate for Tee branches that nothing
+        # reads (see Installation#live_branches).
+        def install(*outputs, engine: self.engine, check: self.check, lanes: self.lanes, unread: nil)
           return nil unless enabled
 
-          inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check)
+          inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check, unread: unread)
           inst.build
           inst.precompile
           return (inst.uninstall; nil) if inst.regions.empty?

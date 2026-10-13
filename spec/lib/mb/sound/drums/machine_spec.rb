@@ -213,6 +213,44 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       expect(hits(kit[:snare], 0.5)).to eq([0, 7200])
     end
 
+    describe 'idle skipping with shared and unread nodes (as tr808 since fixes-9)' do
+      let(:sparse) { MB::Sound.grid(4, hat: 'x..x') }
+
+      def run_voice(v)
+        sleeping = []
+        out = 150.times.map { b = v.sample(800).dup; sleeping << v.sleeping?; yield if block_given?; b }
+        expect(sleeping[60]).to eq(true)
+        Numo::SFloat.hstack(out)
+      end
+
+      it "isn't changed by unread nodes made in a voice block" do
+        outs = [false, true].map { |extra|
+          MB::Sound.seed(3)
+          m = MB::Sound.kit {
+            voice(:closed_hat) { |h|
+              band = MB::Sound.noise.filter(:bandpass, cutoff: 3000, quality: 1.5)
+              _unread = band * 0.5 if extra # never read
+              band * h.env(0.05)
+            }
+          }
+          run_voice(m.kit(sparse, seed: 1)[:closed_hat])
+        }
+        expect(outs[0][72000...76800].abs.max).to be > 0.1
+        expect(outs[1]).to eq(outs[0])
+      end
+
+      it 'keeps a branch read outside the voice in step, even one made after the kit started' do
+        bank = MB::Sound::Drums::TR808.metal
+        m = MB::Sound.kit { voice(:closed_hat) { |h| bank.filter(:highpass, cutoff: 6000) * h.env(0.05) * 4 } }
+        v = m.kit(sparse, seed: 1)[:closed_hat]
+        v.sample(800)
+        outside = bank * 1
+        data = run_voice(v) { outside.sample(800) }
+        expect(data[0...4800].abs.max).to be > 0.01
+        expect(data[72000...76800].abs.max).to be > 0.5 * data[0...4800].abs.max
+      end
+    end
+
     it 'borrows voices from the TR-808 and TR-909' do
       m = MB::Sound.kit {
         tr909 :kick, :closed_hat, :open_hat, kick: { decay: 0.3 }

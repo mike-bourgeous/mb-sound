@@ -88,7 +88,15 @@ RSpec.describe(MB::Sound::DeviceInput, :aggregate_failures) do
 
     data = Array.new(10) { i.read(480) }.map(&:first).reduce(:concatenate)
     expect(data.length).to eq(4800)
-    expect(i.stats[:frames_captured]).to be_within(600).of(4410)
+
+    # The device frames the reads used: 4410 at 44.1 kHz for 4800 at 48
+    # kHz, plus the resampler's lookahead (21 frames) and up to one period
+    # (128) the device may capture between the two counts #stats reads.
+    # frames_captured alone also counts what arrived while a reader slowed
+    # by load caught up (fixes-9: 5760 under spec:parallel; up to 14720
+    # with a busy Ruby thread holding the GVL, with frames skipped).
+    stats = i.stats
+    expect(stats[:frames_captured] - stats[:queued] - stats[:skipped]).to be_within(200).of(4410)
   end
 
   it 'records at the sound card rate with resample: false' do
