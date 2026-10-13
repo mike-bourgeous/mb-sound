@@ -4,11 +4,12 @@
 # resolve through MB::Sound.const_missing, as they do in the console.  Only
 # the names, a blurb, and the examples are hand-written: each name's line
 # comes from its doc comment.  The guard spec (spec/lib/mb/sound/help_spec.rb)
-# checks every name, plays every example, and checks its level: peaks under
-# Help::Level::EXAMPLE_PEAK_DB at the output and loudness within
+# checks every name, plays every example, and checks its level: peaks at
+# most Help::Level::EXAMPLE_PEAK_OVER_TONE_DB over the tone, loudness within
 # Help::Level::EXAMPLE_LOUDNESS_WINDOW of the level check tone (a triangle
 # peaking at -30 dBFS, about -35 LUFS).  Tones at about -20 dB before the
-# master bus land there; `try` then plays them at the listening level.
+# master bus land there; the monitor trim (help.level) brings them to the
+# listening level.
 # Player names start with `try` so an example never replaces your players.
 module MB
   module Sound
@@ -19,7 +20,7 @@ module MB
         (Ctrl-C to stop).  Commands return journal entries that say where
         they land.  Sounds end through envelopes, clips, `until`, or `stop`.
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :play, :wait, :master_gain, :warm_up
+      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
       note :method_modules
       see :sets, :now, :files
@@ -257,7 +258,7 @@ module MB
         sleep); master effects run on the whole mix and swap at launch
         points.
       TEXT
-      commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain
+      commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
       see :dynamics
       example 'a quick master chain' do

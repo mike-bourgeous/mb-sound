@@ -34,6 +34,7 @@ module MB
           keeping_random_state: 'library code that must not move the random state',
           live_midi_latency: 'the latency live MIDI input adds (read by MIDI sources)',
           forget: 'Session bookkeeping for stopped players',
+          drawn_seed: 'a mark graph documents write around seeds (seed: drawn_seed(N)), read by their loader',
         }.freeze
 
         module_function

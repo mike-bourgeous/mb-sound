@@ -19,8 +19,8 @@ module MB
     # Console help for bin/sound.rb (design/notes/help.md): the one-screen
     # sheet (`help`), topics and method pages generated from doc comments
     # (`help :knobs`, `help :turn`, `help /reson/`, `help node`), runnable
-    # examples at a calibrated listening level (`help(:knobs).try`,
-    # `help.level`), `now`, and lessons.  Loaded by bin/sound.rb, not by
+    # examples (`help(:knobs).try`), the listening level check
+    # (`help.level`, a monitor trim), `now`, and lessons.  Loaded by bin/sound.rb, not by
     # `require 'mb/sound'`.
     #
     # The hand-written part is Ruby in content/ (topics, the sheet,

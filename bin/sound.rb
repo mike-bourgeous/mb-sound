@@ -41,6 +41,8 @@ clear if ARGV.include?('--clear')
 # Console help (lib/mb/sound/help.rb): help, now, lesson; Pry's own help
 # moves to pry-help.  The welcome screen is a few lines and one random tip.
 require 'mb/sound/help'
+MB::Sound::Help::Level.apply # the saved listening level becomes the monitor trim
+MB::Sound::Help.first_level_check # first launch only, in a terminal, with a sound card
 puts MB::Sound::Help.welcome, ''
 
 # The take: an always-on log of every line typed and exactly where each change

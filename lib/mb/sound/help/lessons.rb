@@ -143,12 +143,11 @@ module MB
 
         def hint = step&.hint || 'Type the code above (or `lesson.run` to have it typed for you).'
 
-        # Runs the step's code as if typed (at the listening level, see
-        # Help::Level), then checks it.
+        # Runs the step's code as if typed, then checks it.
         def run
           return self if done? || step.code.nil?
           puts step.source.lines.map { |l| code(l.chomp) }.join("\n")
-          Try::Context.new(Level.try_gain).instance_exec(&step.code)
+          MB::Sound.instance_exec(&step.code)
           msg = after_line
           puts msg.lines.first if msg
           self

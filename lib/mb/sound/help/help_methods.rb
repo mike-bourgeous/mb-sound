@@ -14,7 +14,7 @@ module MB
     #     help /reson/        # search names and doc comments
     #     help node           # explain a graph
     #     help.tip            # a random example to try
-    #     help.level          # the listening level for examples
+    #     help.level          # the listening level (sets the monitor trim)
     #     now                 # what's playing, and commands that apply
     #     lesson :set         # a lesson (lesson alone lists them)
     module HelpMethods

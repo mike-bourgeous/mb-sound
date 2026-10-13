@@ -20,19 +20,36 @@ RSpec.describe MB::Sound::Help do
     end
   end
 
+  # Help state goes to a temp dir; the monitor trim (process-wide, set by
+  # the level) is restored after each example
   around do |ex|
     old = ENV['MB_SOUND_HELP_DIR']
+    old_trim = MB::Sound::Session.monitor_gain
     ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
     ex.run
   ensure
     ENV['MB_SOUND_HELP_DIR'] = old
+    MB::Sound::Session.monitor_gain = old_trim
   end
 
-  def new_session(master_gain: MB::Sound::Session::DEFAULT_MASTER_GAIN)
+  # A NullOutput that keeps a copy of everything written to it.
+  let(:recording_output) {
+    Class.new(MB::Sound::NullOutput) {
+      def written = @written ||= []
+      def write(data)
+        written << data.map(&:dup)
+        super
+      end
+    }.new(channels: 2, sleep: false)
+  }
+
+  def written(output) = output.written.transpose.map { |c| Numo::SFloat.zeros(0).concatenate(*c) }
+
+  def new_session(master_gain: MB::Sound::Session::DEFAULT_MASTER_GAIN, output: nil, monitor: nil)
     MB::Sound::Session.new(
-      master_gain: master_gain, output: MB::Sound::NullOutput.new(channels: 2, sleep: false),
+      master_gain: master_gain, output: output || MB::Sound::NullOutput.new(channels: 2, sleep: false),
       transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 2, buffer_size: 800,
-      realtime: false, raise_errors: true
+      realtime: false, raise_errors: true, monitor: monitor
     )
   end
 
@@ -82,11 +99,13 @@ RSpec.describe MB::Sound::Help do
           it "#{topic.name}: example #{i + 1} (#{ex.title}) plays near the reference level" do
             session = new_session
             out = MB::Sound::Session.with_context(session: session) do
-              MB::Sound::Help::Try.run(ex, out: StringIO.new, gain: 1)
+              MB::Sound::Help::Try.run(ex, out: StringIO.new)
               play_bars(session, ex.bars + 1)
             end
             ref = self.class.reference
-            expect(peak_db(out)).to be < MB::Sound::Help::Level::EXAMPLE_PEAK_DB
+            # Peaks scale with the chosen level, as the tone does: at most
+            # EXAMPLE_PEAK_OVER_TONE_DB over it at any level
+            expect(peak_db(out) - ref[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
             expect(loudness(out)).to be_within(MB::Sound::Help::Level::EXAMPLE_LOUDNESS_WINDOW).of(ref[:loudness])
           ensure
             session&.close
@@ -95,7 +114,7 @@ RSpec.describe MB::Sound::Help do
           it "#{topic.name}: example #{i + 1} (#{ex.title}) runs" do
             session = new_session
             MB::Sound::Session.with_context(session: session) do
-              expect { MB::Sound::Help::Try.run(ex, out: StringIO.new, gain: 1) }.not_to raise_error
+              expect { MB::Sound::Help::Try.run(ex, out: StringIO.new) }.not_to raise_error
             end
           ensure
             session&.close
@@ -158,13 +177,13 @@ RSpec.describe MB::Sound::Help do
           lesson.steps.each do |step|
             expect(runner.step).to equal(step)
             expect(step.passed?).to eq(false), "step #{step.title.inspect} passes before its code runs" if step.check
-            MB::Sound::Help::Try::Context.new(1).instance_exec(&step.code) if step.code
+            MB::Sound.instance_exec(&step.code) if step.code
             expect(step.passed?).to eq(true), "step #{step.title.inspect}: #{step.check_text} failed"
             expect(runner.after_line).to include('✓')
             play_bars(session, 1)
           end
           expect(runner.done?).to eq(true)
-          expect(peak_db(play_bars(session, 2))).to be < MB::Sound::Help::Level::EXAMPLE_PEAK_DB
+          expect(peak_db(play_bars(session, 2)) - self.class.reference[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
         end
       ensure
         session&.close
@@ -227,7 +246,7 @@ RSpec.describe MB::Sound::Help do
       expect(db).to eq(-30 + 9 - 1 - 3)
       expect(MB::Sound::Help::Level.saved).to eq(-25)
       expect(player.log).to eq([[:start, -30], [:level, -27], [:level, -24], [:level, -21], [:level, -22], [:level, -25], [:stop]])
-      expect(text).to include('examples play at -25 dBFS')
+      expect(text).to include('level -25 dBFS: monitor trim +5 dB')
     end
 
     it 'cancels with q (or Escape, Ctrl-C, end of input), keeping the saved level' do
@@ -247,56 +266,84 @@ RSpec.describe MB::Sound::Help do
     end
 
     it 'sets the level directly' do
-      expect(MB::U.remove_ansi(MB::Sound.help.level(-18).to_s)).to include('-18.0 dBFS')
+      expect(MB::U.remove_ansi(MB::Sound.help.level(-18).to_s)).to include('-18.0 dBFS').and include('monitor trim +12.0 dB')
       expect(MB::Sound::Help::Level.db).to eq(-18)
       expect(MB::Sound::Help::Level.save(5)).to eq(MB::Sound::Help::Level::RANGE.end)
     end
 
-    it 'gives try examples the level over the reference, compensating the master gain' do
-      default = MB::Sound::Session::DEFAULT_MASTER_GAIN
-      expect(MB::Sound::Help::Level.try_gain(master_gain: default, db: -30)).to be_within(1e-12).of(1)
-      expect(20 * Math.log10(MB::Sound::Help::Level.try_gain(master_gain: default, db: -18))).to be_within(1e-9).of(12)
-      expect(20 * Math.log10(MB::Sound::Help::Level.try_gain(master_gain: 1, db: -18))).to be_within(1e-9).of(2)
+    it 'turns the saved level into the monitor trim' do
+      expect(MB::Sound::Help::Level.trim_for(-30)).to be_within(1e-12).of(1)
+      MB::Sound::Help::Level.save(-18)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(12)
+      MB::Sound::Session.monitor_gain = 1
+      expect(MB::Sound::Help::Level.apply.to_db).to be_within(1e-9).of(12)
+      expect(MB::Sound::Help::Level.save(-3)).to eq(-3)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(27)
     end
 
-    it 'plays the level check tone at the asked peak through a Session' do
-      session = new_session
+    it 'plays the level check tone at the asked peak through a monitored Session, and restores the trim' do
+      MB::Sound::Session.monitor_gain = 2.db
+      out = recording_output
+      session = new_session(output: out, monitor: true)
       p = MB::Sound::Help::Level::SessionPlayer.new(session)
       p.start(-30)
-      expect(peak_db(play_bars(session, 1))).to be_within(0.3).of(-30)
+      play_bars(session, 1)
+      expect(peak_db(written(out))).to be_within(0.3).of(-30)
       p.level = -18
-      play_bars(session, 0.1)
-      expect(peak_db(play_bars(session, 1))).to be_within(0.3).of(-18)
+      out.written.clear
+      expect(peak_db(play_bars(session, 1))).to be_within(0.3).of(-30) # the mix before the trim
+      expect(peak_db(written(out))).to be_within(0.3).of(-18)
       p.stop
       play_bars(session, 0.1)
       expect(session.players).not_to have_key(MB::Sound::Help::Level::PLAYER)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(2)
     ensure
       session&.close
     end
 
-    it 'plays try examples at the listening level' do
-      ex = MB::Sound::Help::TOPICS[:play].examples.first
-      peaks = [-30, -18].map do |db|
-        MB::Sound::Help::Level.save(db)
-        session = new_session
-        MB::Sound::Session.with_context(session: session) do
-          MB::Sound::Help::Try.run(ex, out: StringIO.new, calibrate: false)
-          peak_db(play_bars(session, 1))
-        end
-      ensure
-        session&.close
-      end
-      expect(peaks[1] - peaks[0]).to be_within(0.01).of(12)
+    it 'saves and applies the level on Enter, and restores the old trim on cancel' do
+      MB::Sound::Session.monitor_gain = 1
+      session = new_session(monitor: true)
+      player = MB::Sound::Help::Level::SessionPlayer.new(session)
+      MB::Sound::Help::Level::Calibration.new(input: StringIO.new("++q"), out: StringIO.new, player: player).run
+      expect(MB::Sound::Session.monitor_gain).to eq(1)
+      MB::Sound::Help::Level::Calibration.new(input: StringIO.new("++\r"), out: StringIO.new, player: player).run
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(6)
+    ensure
+      session&.close
     end
 
-    it 'scales track patches and scheduled players too' do
-      ctx = MB::Sound::Help::Try::Context.new(0.5)
-      g = 100.hz.sine
-      expect(MB::Sound::Help::Try::Context.scale(g, 0.5)).not_to equal(g)
-      expect(MB::Sound::Help::Try::Context.scale(g, 1)).to equal(g)
-      clip = MB::Sound.seq(MB::Sound::A1).loop
-      expect(MB::Sound::Help::Try::Context.scale(clip, 0.5)).to equal(clip)
-      expect(ctx.instance_exec { bpm }).to eq(MB::Sound.bpm)
+    describe 'first launch' do
+      let(:tty) { StringIO.new("\r").tap { |io| def io.tty? = true } }
+
+      it 'runs before the prompt in a terminal with a sound card; Enter keeps the default' do
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: player)).to eq(-30)
+        expect(MB::Sound::Help::Level.saved).to eq(-30)
+        expect(MB::U.remove_ansi(out.string)).to include('First launch')
+        expect(player.log.first).to eq([:start, -30])
+      end
+
+      it 'skips without a terminal, without a sound card, when asked to, or once there is a level' do
+        expect(MB::Sound::Help.first_level_check(input: StringIO.new("\r"), out: StringIO.new, output_type: :device, player: player)).to be_nil
+        expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :null, player: player)).to be_nil
+        begin
+          ENV['MB_SOUND_LEVEL_CHECK'] = '0'
+          expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :device, player: player)).to be_nil
+        ensure
+          ENV.delete('MB_SOUND_LEVEL_CHECK')
+        end
+        MB::Sound::Help::Level.save(-24)
+        expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :device, player: player)).to be_nil
+        expect(player.log).to eq([])
+      end
+
+      it 'skips with a note if the output fails' do
+        bad = Object.new.tap { |o| def o.start(_) = raise(IOError, 'no device'); def o.stop = nil }
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: bad)).to be_nil
+        expect(out.string).to include('Level check skipped')
+      end
     end
   end
 
@@ -391,10 +438,12 @@ RSpec.describe MB::Sound::Help do
       expect(t.lines.length).to be <= 14
     end
 
-    it 'mentions the level check until there is one' do
-      expect(MB::U.remove_ansi(MB::Sound::Help.welcome)).to include('help.level')
+    it 'mentions the level check until there is one, then the monitor trim' do
+      expect(MB::U.remove_ansi(MB::Sound::Help.welcome)).to include('help.level sets a comfortable')
       MB::Sound::Help::Level.save(-24)
-      expect(MB::U.remove_ansi(MB::Sound::Help.welcome)).not_to include('help.level')
+      t = MB::U.remove_ansi(MB::Sound::Help.welcome)
+      expect(t).not_to include('sets a comfortable')
+      expect(t).to include('monitor trim +6 dB')
     end
   end
 

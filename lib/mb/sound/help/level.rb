@@ -5,36 +5,42 @@ require 'io/console'
 module MB
   module Sound
     module Help
-      # The listening level for help's "try it" examples, set once per user
-      # by a level check (`help.level`): a soft tone plays at REFERENCE_DB
-      # (dBFS peak at the output), up/down move it in dB steps until it is
-      # comfortable, Enter keeps it.  Every example then plays at the chosen
-      # level relative to the reference, since the guard spec keeps every
-      # example's loudness near the reference tone's (maintainer, 2026-10-13:
-      # "consumer expects near 0 for audibility probably.  Maybe start with
-      # a level test at -30 and a 'press up or down until level is good'").
+      # The listening level, set once per user by a level check
+      # (`help.level`; bin/sound.rb runs it before the first prompt): a soft
+      # tone plays at REFERENCE_DB (dBFS peak at the output), up/down move
+      # it in dB steps until it is comfortable, Enter keeps it (maintainer,
+      # 2026-10-13: "consumer expects near 0 for audibility probably.  Maybe
+      # start with a level test at -30 and a 'press up or down until level
+      # is good'").
       #
-      # The level is saved in the user data directory (Help.data_dir,
-      # level.json), next to lesson progress.
+      # The level becomes the monitor trim (Session::MonitorTrim, the
+      # console's #monitor_gain): the chosen level over the reference, for
+      # live playback only (examples, lessons, and everything typed), after
+      # the master chain; renders, recordings, and takes never hear it.
+      # Examples are written to play near the reference tone's loudness, so
+      # they play near the chosen level.  Saved in the user data directory
+      # (Help.data_dir, level.json) next to lesson progress.
       #
       # Example (bin/sound.rb):
       #     help.level          # the level check (keys: up/down 3 dB, left/right 1 dB, Enter, q)
-      #     help.level -18      # or set it directly (dBFS at the output)
-      #     help.level.db       # the level try examples play at
+      #     help.level -18      # or set it directly (dBFS peak of the tone at the output)
+      #     monitor_gain.to_db  # the trim it set (+12 here)
       module Level
-        # The level check tone's peak at the output (dBFS) before any change,
-        # and the level examples are written for.
+        # The level check tone's peak at the output (dBFS) with no trim, and
+        # the level examples are written for.
         REFERENCE_DB = -30.0
 
-        # The range the level check allows.  The top, -12 dBFS peak for a
-        # soft tone, is about as loud as consumer music (around -14 LUFS);
-        # the guard spec keeps example peaks under EXAMPLE_PEAK_DB, so
-        # examples stay below full scale at the top.
-        RANGE = -60.0..-12.0
+        # The range the level check allows: up to -3 dBFS peak for the tone
+        # (about -9 dBFS RMS; maintainer, 2026-10-13: "Ok to peak to -3 if
+        # the user chooses it").
+        RANGE = -60.0..-3.0
 
-        # Example peaks allowed at the output at the reference level (the
-        # top of RANGE adds 18 dB).
-        EXAMPLE_PEAK_DB = -20.0
+        # How far an example may peak over the level check tone (the guard
+        # spec checks it at the reference).  At a chosen level L, examples
+        # peak at most at L + 9 dB, so they stay under full scale up to a
+        # tone level of -9 dBFS; above that, transient peaks can reach the
+        # monitor trim's clip (which warns; see Session::MonitorTrim).
+        EXAMPLE_PEAK_OVER_TONE_DB = 9.0
 
         # Example loudness allowed around the reference tone's (LU).
         EXAMPLE_LOUDNESS_WINDOW = 7.0
@@ -61,25 +67,28 @@ module MB
 
         def saved? = !saved.nil?
 
-        # The level examples play at: the saved one, else the reference.
+        # The listening level: the saved one, else the reference.
         def db = saved || REFERENCE_DB
 
-        # Saves +db+ (clamped to RANGE); returns the saved value.
+        # The monitor trim (linear) for a listening level of +db+.
+        def trim_for(db) = 10 ** ((db - REFERENCE_DB) / 20.0)
+
+        # Saves +db+ (clamped to RANGE) and sets the monitor trim from it;
+        # returns the saved value.
         def save(db)
           raise ArgumentError, "The level must be a number of dB (got #{db.inspect})" unless db.is_a?(Numeric)
           db = db.to_f.clamp(RANGE.begin, RANGE.end)
           FileUtils.mkdir_p(File.dirname(path))
           File.write(path, JSON.pretty_generate('db' => db, 'reference_db' => REFERENCE_DB, 'saved' => Time.now.utc.to_s))
+          apply
           db
         end
 
-        # The linear gain for a try example's players: the saved level over
-        # the reference, compensating a master gain moved from the default
-        # (examples are measured at the default -10 dB).
-        def try_gain(master_gain: Session.current.master_gain, db: self.db)
-          master_db = 20 * Math.log10([master_gain.to_f, 1e-6].max)
-          default_db = 20 * Math.log10(Session::DEFAULT_MASTER_GAIN)
-          10 ** ((db - REFERENCE_DB - (master_db - default_db)) / 20.0)
+        # Sets the monitor trim from the saved level (bin/sound.rb at
+        # startup); leaves it alone if there is none.  Returns the trim.
+        def apply
+          Session.monitor_gain = trim_for(saved) if saved?
+          Session.monitor_gain
         end
 
         # The level check tone at full scale (peak 1): a soft A3 triangle
@@ -88,31 +97,31 @@ module MB
           220.hz.triangle * (0.75.constant + 1.hz.lfo * 0.25)
         end
 
-        # Plays the level check tone through a Session (realtime or not),
-        # its gain set so the output peaks at the given dBFS.
+        # Plays the level check tone through a Session at the reference peak
+        # (before the trim) and moves the monitor trim, so the output peaks
+        # at the asked dBFS in a Session that applies the trim (a realtime
+        # one, or +monitor: true+).  #stop restores the trim it found.
         class SessionPlayer
           def initialize(session = Session.current)
             @session = session
-            @gain = nil
           end
 
           def start(db)
-            @gain = GraphNode::Constant.new(gain_for(db), sample_rate: 48000)
-            @session.add(Level.signal * @gain, name: PLAYER, on: :now, fade: 0)
+            @old_trim = Session.monitor_gain
+            gain = 10 ** (REFERENCE_DB / 20.0) / [@session.master_gain, 1e-6].max
+            @session.add(Level.signal * gain, name: PLAYER, on: :now, fade: 0)
+            self.level = db
           end
 
           def level=(db)
-            @gain.constant = gain_for(db) if @gain
+            Session.monitor_gain = Level.trim_for(db)
           end
 
           def stop
             @session.remove(PLAYER, fade: 0)
-            @gain = nil
+            Session.monitor_gain = @old_trim if @old_trim
+            @old_trim = nil
           end
-
-          private
-
-          def gain_for(db) = 10 ** (db / 20.0) / [@session.master_gain, 1e-6].max
         end
 
         # The level check's key loop, with injectable +input+ (anything
@@ -143,6 +152,7 @@ module MB
           # Runs the key loop; saves and returns the chosen level, or
           # returns nil if cancelled (the saved level stays).
           def run
+            @stopped = false
             @out.puts intro
             @player.start(@db)
             show
@@ -153,16 +163,18 @@ module MB
               show
             end
             @out.print "\r\e[K"
+            @player.stop
+            @stopped = true
             if result == :done
               Level.save(@db)
-              @out.puts "#{c(:ok, '✓')} examples play at #{fmt(@db)} dBFS (#{fmt(@db - REFERENCE_DB, sign: true)} dB from the reference); #{code('help.level')} to change it"
+              @out.puts "#{c(:ok, '✓')} level #{fmt(@db)} dBFS: monitor trim #{fmt(@db - REFERENCE_DB, sign: true)} dB for live playback (renders unchanged); #{code('help.level')} to change it"
               @db
             else
               @out.puts c(:dim, "level unchanged (#{fmt(Level.db)} dBFS)")
               nil
             end
           ensure
-            @player.stop
+            @player.stop unless @stopped
           end
 
           # Applies one key: returns :done, :cancel, or nil (level moved or
@@ -192,7 +204,7 @@ module MB
           def intro
             [
               "#{c(:title, 'level check')} #{c(:dim, "a soft tone at #{fmt(@db)} dBFS")}",
-              wrap('Turn it up or down until it is comfortable, about as loud as you would like to hear examples.  Your system volume stays where it is.', indent: 2),
+              wrap('Turn it up or down until it is comfortable, about as loud as you would like to hear mb-sound; Enter keeps it.  This sets a monitor trim for live playback only (renders and recordings are unchanged); your system volume stays where it is.', indent: 2),
             ].join("\n")
           end
 

@@ -4,8 +4,8 @@
 # before its code and pass after), so a lesson that drifts from the API
 # fails a spec instead of confusing a reader.  Names start with l_ so a
 # lesson never stops your own players.  Levels follow the topics' (tones at
-# about -20 dB before the master bus); `lesson.run` plays at the listening
-# level (help.level).
+# about -20 dB before the master bus), which the monitor trim (help.level)
+# brings to the listening level.
 #
 # The full vimtutor-style tutorial these grow into is designed in
 # design/notes/help_tutorial.md.

@@ -33,9 +33,10 @@ module MB
           Tip.new(topic, random.rand(topic.examples.length))
         end
 
-        # The listening level for examples (see Help::Level): with a number,
-        # sets it (dBFS at the output); without, runs the level check when
-        # the console is interactive (keys move the level), else shows it.
+        # The listening level (see Help::Level), which sets the monitor
+        # trim for live playback: with a number, sets it (dBFS peak of the
+        # level check tone); without, runs the level check when the console
+        # is interactive (keys move the level), else shows it.
         def level(db = nil, input: $stdin, out: $stdout)
           if db
             Level.save(db)
@@ -76,12 +77,12 @@ module MB
         def db = Level.db
 
         def to_s
+          trim = format('%+.1f dB', 20 * Math.log10([Session.monitor_gain, 1e-9].max))
           if Level.saved?
-            "#{c(:title, 'level')} examples play at #{c(:key, "#{Level.db.round(1)} dBFS")} peak, " \
-              "#{format('%+.1f', Level.db - Level::REFERENCE_DB)} dB from the reference\n" \
-              "#{c(:dim, '  help.level checks it again; help.level -20 sets it')}"
+            "#{c(:title, 'level')} #{c(:key, "#{Level.db.round(1)} dBFS")} (the level check tone's peak): monitor trim #{trim} for live playback\n" \
+              "#{c(:dim, '  renders and recordings are unchanged; help.level checks it again, help.level -20 sets it')}"
           else
-            "#{c(:title, 'level')} no level check yet: examples play at the #{Level::REFERENCE_DB.round} dBFS reference\n" \
+            "#{c(:title, 'level')} no level check yet (monitor trim #{trim}; the tone's reference is #{Level::REFERENCE_DB.round} dBFS)\n" \
               "#{c(:dim, '  help.level runs the check (keys move the level); help.level -20 sets it')}"
           end
         end
@@ -122,9 +123,9 @@ module MB
 
         def examples = @topic.examples
 
-        # Runs example +n+ (1-based) through the background Session at the
-        # listening level (see Help::Try): shows the code, runs it as if
-        # typed, and stops the players it started after the example's bars.
+        # Runs example +n+ (1-based) through the background Session (see
+        # Help::Try): shows the code, runs it as if typed, and stops the
+        # players it started after the example's bars.
         def try(n = 1, **opts)
           raise ArgumentError, "#{@topic.name} has no examples" if @topic.examples.empty?
           ex = (n.between?(1, @topic.examples.length) && @topic.examples[n - 1]) or
