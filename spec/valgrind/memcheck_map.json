@@ -567,6 +567,7 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.matrix_mix",
         "FastSound.oscillate"
       ]
     },
@@ -1100,6 +1101,7 @@
     },
     "spec/lib/mb/sound/plan/lane_group_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.min_max",
