@@ -154,22 +154,25 @@ module MB
             end
           end
 
-          # Runs the block, returning the Branch => true set (by identity)
-          # of the branches made on this thread while it ran (nested calls
-          # add theirs to the outer set too).  Graphs that skip work while
+          # Runs the block, returning an ObjectSpace::WeakMap (Branch =>
+          # true, by identity) of the branches made on this thread while it
+          # ran (nested calls add theirs to the outer map too).  Weak, so
+          # branches nothing reads are still collected (a Notes node's
+          # stream reader held here would hold its stream back from
+          # ending).  Graphs that skip work while
           # idle (Synth lanes, drum voices) use it to tell a branch made
           # while building them but left unread (e.g. `band * 0.5` made in a
           # voice block and never used) from a reader elsewhere, which they
           # must keep in step with while skipped.
           def collect_branches
             outer = Thread.current[:mb_sound_tee_new_branches]
-            made = {}.compare_by_identity
+            made = ObjectSpace::WeakMap.new
             Thread.current[:mb_sound_tee_new_branches] = made
             yield
             made
           ensure
             Thread.current[:mb_sound_tee_new_branches] = outer
-            outer&.merge!(made) if made
+            made&.each { |b, v| outer[b] = v } if outer
           end
         end
 
@@ -416,7 +419,9 @@ module MB
           @branch_changes += 1
 
           @branches << branch
-          Thread.current[:mb_sound_tee_new_branches]&.store(branch, true)
+          if (made = Thread.current[:mb_sound_tee_new_branches])
+            made[branch] = true
+          end
           Plan.changed(self)
           Plan.changed(@source)
 
