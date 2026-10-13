@@ -669,7 +669,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 
 		inc = freq * adv;
 
-		e = mb_wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0);
+		e = constant ? mb_wrap(grid.base + grid.inc * grid.k, 1.0) : phi;
 		if (pm != 0) {
 			e = mb_wrap(e + pm, 1.0);
 		}

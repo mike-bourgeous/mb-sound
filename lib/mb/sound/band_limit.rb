@@ -498,7 +498,7 @@ module MB
 
           inc = freq * advance
 
-          e = wrap(freqs ? phi : grid[0] + grid[2] * grid[1])
+          e = freqs ? phi : wrap(grid[0] + grid[2] * grid[1])
           e = wrap(e + pm) if pm != 0
           snapped = snap(points, e)
           if snapped
