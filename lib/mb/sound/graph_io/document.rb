@@ -94,6 +94,13 @@ module MB
           @meta[:kind]
         end
 
+        # What the graph is and where it came from (the header's
+        # `description:`, e.g. from a script's synth_script description),
+        # or nil.
+        def description
+          @meta[:description]
+        end
+
         # Sets param +name+ of a loaded graph to +value+ (every Constant
         # made for it, landing at the next buffer; a knob turns there,
         # gliding over its Spec's +smooth+ time).  Returns value.
@@ -147,7 +154,7 @@ module MB
           @options = options
           @options = @doc.meta[:options] || {} if @doc && options.empty?
           @from = from || @doc&.meta&.[](:from)
-          @meta = meta
+          @meta = (@doc ? @doc.meta.slice(:description) : {}).merge(meta) # (a loaded document keeps its description)
         end
 
         # The document text.  Raises GraphIO::DumpError if part of the graph

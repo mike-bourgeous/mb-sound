@@ -66,7 +66,7 @@ module MB::Sound
   def self.acid_patch(
     n, wave: :saw, cutoff: 300, reso: 0.6, env_mod: 3.0, decay: Notes::ACID_ENV_DECAY, accent: 0.8,
     filter: :diode, drive: 1.5, glide: 0.06, sweep: true, env_curve: Notes::ACID_ENV_CURVE,
-    accent_decay: Notes::ACID_ENV_ACCENT_DECAY
+    accent_decay: Notes::ACID_ENV_ACCENT_DECAY, gain: ACID_GAIN
   )
     pitch = n.hz.glide(glide, legato: true)
     osc = wave.to_sym == :square ? pitch.square : pitch.saw
@@ -91,9 +91,10 @@ module MB::Sound
     veg = n.env(0.002, 3.5, 0.0, 0.008, sensitivity: 1.0..1.0, curve: [0, 30, 0], gm: false).legato
     amp = veg * (acc * (accent * 0.45) + sw * (accent * 0.14) + 0.55)
 
-    # Makeup gain into a soft clipper: about -27 dB RMS on c_major.mid, near
+    # Makeup gain (+gain+; more pushes the clipper into distortion) into a
+    # soft clipper: about -27 dB RMS on c_major.mid at the default, near
     # the other synth scripts' -24 (the half-step gates leave gaps)
-    (filtered * amp * ACID_GAIN).filter(:highpass, cutoff: 35, quality: 0.7).softclip(0.6, 0.95)
+    (filtered * amp * gain).filter(:highpass, cutoff: 35, quality: 0.7).softclip(0.6, 0.95)
   end
 
   if main_script?(__FILE__)

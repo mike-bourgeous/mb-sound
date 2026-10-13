@@ -89,7 +89,11 @@ module MB::Sound
     } * 0.3
 
     master_gain(-4.db)
-    master { |mix| mix.softclip(0.7, 0.98) }
+    # A true-peak limiter, not a softclip (maintainer 2026-10-13, after the
+    # master gain moved before the chain: "The soft clip distortion was not
+    # an essential part of this so it's better with the higher peaks. This
+    # song would do better with a limiter rather than a softclip")
+    master { |mix| mix.limit(ceiling: -1.db, true_peak: true) }
 
     bg :strings, (tape * 0.9).pan(-0.15)
     at_bar(5) { bg :pad, flanged.pan(0.25), fade: 0 }
