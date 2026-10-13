@@ -81,6 +81,42 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
     expect(100.hz.gain(0.5).sources.keys).not_to include(:gain)
   end
 
+  describe '#at with a node' do
+    it 'sets the output gain, the same samples as tone * node, and returns the tone' do
+      t = 220.hz.ramp.at(0.3)
+      expect(t.at(env)).to equal(t)
+      expect(t.output_gain).to be_a(MB::Sound::GraphNode)
+      expect(collect(220.hz.ramp.at(0.3).at(env))).to eq(collect(220.hz.ramp.at(0.3) * env))
+      expect(collect(220.hz.at(env))).to eq(collect(220.hz.sine * env))
+    end
+
+    it 'multiplies after the tone when it already has a gain, so the rounding stays that of tone * gain * node' do
+      a = 220.hz.ramp.gain(0.5).at(env)
+      expect(a).to be_a(MB::Sound::GraphNode::Multiplier)
+      expect(collect(a)).to eq(collect(220.hz.ramp.gain(0.5) * env))
+      b = 220.hz.ramp.at(env).at(env)
+      expect(b).to be_a(MB::Sound::GraphNode::Multiplier)
+      expect(collect(b)).to eq(collect(220.hz.ramp * env * env))
+    end
+
+    it 'multiplies after phasors and playing tones instead of failing' do
+      expect(100.hz.phasor.at(env)).to be_a(MB::Sound::GraphNode::Multiplier)
+      t = 220.hz.ramp
+      t.sample(10)
+      expect(t.at(env)).to be_a(MB::Sound::GraphNode::Multiplier)
+      expect(t.output_gain).to be_nil
+    end
+
+    it 'prints back as .at(node) and round trips through a graph document' do
+      MB::Sound.seed(1)
+      g = 220.hz.ramp.at(0.3).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
+      expect(g.to_ruby).to include("220.hz.ramp.at(0.3).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
+      loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'at'))
+      expect(loaded).to be_a(MB::Sound::Tone)
+      expect(collect(loaded)).to eq(collect(220.hz.ramp.at(0.3) * env))
+    end
+  end
+
   it 'raises for phasors and bad values' do
     expect { 100.hz.phasor.gain(0.5) }.to raise_error(ArgumentError, /phasor/)
     expect { 100.hz.gain('x') }.to raise_error(ArgumentError)
