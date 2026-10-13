@@ -137,7 +137,8 @@ module MB
             Drums.mix(list.map { |s|
               n = Drums.notes_for(s)
               notes << n if n
-              n ? n.trigger : s
+              # Flam-marked notes play as flams (Seq::Step#flam)
+              n ? Drums.hits(n, Drums.flams?(s) ? Machine::DEFAULT_FLAM : nil) : s
             })
           }
 
@@ -254,7 +255,7 @@ module MB
             # What a clip swapped in later must look like for this kit to
             # play it as if built for it (see Kit#plays_clip?)
             clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
-            Kit.new(voices, machine: :tr808, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil)
+            Kit.new(voices, machine: :tr808, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: Drums.flams?(source))
           else
             GraphNode::Channels.new(voices.values, names: voices.keys).named('tr808 outputs')
           end

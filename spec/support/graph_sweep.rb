@@ -295,10 +295,10 @@ module GraphSweep
       ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
       ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.ramp * v.env).pan(0.3) } }],
       ['drums (Kit, Voice)', ->(c) { c.s.tr808(c.s.grid(16, bd: 'x.x.', snare: '.x..', hat: 'xxxx')) }],
-      # Kit builder (Drums::Machine, Hit layers, Repeats bursts and flams,
+      # Kit builder (Drums::Machine, Hit layers, Repeats bursts, Flams,
       # ChokeGate) and the TR-909 (sampled hats through SamplerVoice)
       ['drums 909 (Repeats, ChokeGate)', ->(c) {
-        c.s.tr909(c.s.grid(32, bd: 'x.x.', clap: '.x..', hat: 'x.x.', oh: 'xx..', ride: '..x.'), flams: c.s.grid(32, snare: '..x.'), flam: 0.001, shuffle: 2)
+        c.s.tr909(c.s.grid(32, bd: 'x.x.', clap: '.x..', hat: 'x.x.', oh: 'xx..', ride: '..x.', snare: '..f.'), flam: 0.001, shuffle: 2)
       }],
       ['drums kit builder', ->(c) {
         c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx')) {

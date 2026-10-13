@@ -34,7 +34,7 @@ module MB
         # previous note one more step (MB::Sound::Tie).  Marks return new
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
-        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, keyword_init: true) do
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, :flam, keyword_init: true) do
           include NoteMethods
 
           # True for a rest (no note, clip, or tie).
@@ -121,6 +121,17 @@ module MB
             marked(pitch: Interval.semitones(semitones).to_f)
           end
 
+          # Returns a copy of this step with a flam mark: drum kits (tr808,
+          # tr909, kit) play it as a grace stroke (Drums::Flams::GRACE of
+          # its velocity) and then the hit +spacing+ later (seconds or a
+          # Length; true, the default, for the kit's flam: spacing, 18 ms
+          # unless set).  Other voices ignore it.  `snare.flam`,
+          # `D1.flam(25.ms)`, or 'f' / 'F' in a grid.  Read the mark with
+          # `step[:flam]`.
+          def flam(spacing = true)
+            marked(flam: Clip.check_flam(spacing))
+          end
+
           # Returns a copy of this step +octaves+ (default 1; a number or an
           # Interval, `step.up(7.st)`) higher.
           def up(octaves = 1)
@@ -197,7 +208,7 @@ module MB
           Event.new(
             start: start, length: total - last + last * legato, value: step.value, velocity: step.velocity,
             probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil,
-            condition: step.condition, fill_mark: step.fill_mark, pitch: step[:pitch]
+            condition: step.condition, fill_mark: step.fill_mark, pitch: step[:pitch], flam: step[:flam]
           )
         end
 
@@ -352,7 +363,7 @@ module MB
           steps = @steps.dup
           notes.each_with_index do |slot, idx|
             src = @steps[notes[order[idx]]]
-            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition, fill_mark: src.fill_mark))
+            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition, fill_mark: src.fill_mark, flam: src[:flam]))
           end
 
           Seq.new(steps, seed: @seed, loop: @loop, align: @align)

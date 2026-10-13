@@ -18,7 +18,8 @@
 # Snippets to try in bin/sound.rb (X is an accent, 6 dB louder by default):
 #     bg :house, tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', hat: 'xxXxxxXxxxXxxxXx', oh: '..x...x...x...x.').loop, shuffle: 2)
 #     bg :techno, tr909(grid(16, kick: 'X...X...X...X...', rim: '..x..x....x..x..', ride: 'x.x.x.x.x.x.x.x.').loop, kick: { decay: 1.2, punch: 0.9, drive: 0.8 })
-#     bg :roll, tr909(grid(16, snare: '3.4.5.6.7.8.9xXX').loop, flams: grid(16, snare: '......x.......x.').loop, flam: 14.ms)
+#     bg :roll, tr909(grid(16, snare: '3.4.5.6f7.8.9fXF').loop, flam: 14.ms)          # f / F: flams (F accented)
+#     bg :flams, tr909(seq(D1, D1.flam, D1, D1.flam(30.ms), !D1.flam).n8.loop)            # flam marks on any clip
 #     bg :rumble, tr909(grid(16, kick: 'X..xX..xX..xX..x').loop, kick: { tune: seq(A1, A1, C2, G1).n1.loop.freq, decay: 1.2 })   # a tuned kick
 #     bg :hats, tr909(grid(16, hat: 'x' * 16).loop, hat: { decay: 2.bars.lfo.at(0.05..0.3) })                                  # moving hat decay
 #     o = tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', oh: '..x...x...x...x.').loop, outputs: :separate)
@@ -60,10 +61,9 @@ module MB::Sound
     }
     ride = -> { tr909(grid(16, ride: 'x.x.x.X.x.x.x.X.').loop, shuffle: shuffle, ride: { level: 0.3 }) }
 
-    # The build: a snare roll rising to accents, flams on the off-beats
+    # The build: a snare roll rising to accents, with flams (f, F)
     roll = tr909(
-      grid(16, snare: '3...4...5.5.6.6.|7.7.8888999XXXXX'),
-      flams: grid(16, snare: '..3...4...5.6.6.|.....7..........'),
+      grid(16, snare: '3.f.4.f.5.5f6.6f|7.7f8888999XFXFX'),
       flam: flam,
       snare: { snappy: 0.75, tone: 0.65 },
     )

@@ -1022,6 +1022,10 @@ module MB
                 suffix << ".pitch(#{num(v.pitch)})"
                 rebuilt = rebuilt.pitch(v.pitch)
               end
+              if v[:flam]
+                suffix << (v[:flam] == true ? '.flam' : ".flam(#{num(v[:flam])})")
+                rebuilt = rebuilt.flam(v[:flam])
+              end
               rebuilt = MB::Sound::Sequence::Seq.step(rebuilt)
               prefix = ''
               if v.accented

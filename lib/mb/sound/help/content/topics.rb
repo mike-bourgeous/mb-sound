@@ -144,7 +144,8 @@ module MB
       about <<~TEXT
         Drum machines driven by a grid (Sequence::Kit) or MIDI (GM notes):
         `tr808`, `tr909` (analog kick, snare, toms, clap; 6-bit sampled hats
-        and cymbals; `shuffle:` 0..6, `flams:`), and kits of your own:
+        and cymbals; `shuffle:` 0..6, flams as note marks: 'f' in a grid or
+        `D1.flam`), and kits of your own:
         `kit { voice :kick, tune: 50 do |h| h.body(h.tune, sweep: 3) +
         h.click end; choke :open_hat, by: :closed_hat }` with layers
         (body, noise, click, metal, sample, fm, bursts, env, sweep) and

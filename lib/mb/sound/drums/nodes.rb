@@ -187,3 +187,93 @@ module MB
     end
   end
 end
+
+module MB
+  module Sound
+    module Drums
+      # Plays flam-marked hits as flams: at each hit of +trigger+ where
+      # +mark+ (Notes#flam_mark) isn't 0, a grace stroke (GRACE of the
+      # hit's velocity) on the hit's sample, then the hit +mark+ seconds
+      # later (+spacing+ seconds for a mark of Notes::FlamMark::DEFAULT,
+      # i.e. `C1.flam` without a time); other hits pass through.  Delays
+      # are whole samples; the same output at any buffer size.  Ends when
+      # its trigger ends.
+      class Flams
+        include GraphNode
+        include GraphNode::SampleRateHelper
+
+        # The grace stroke's share of the hit's velocity.
+        GRACE = 0.6
+
+        # The spacing (seconds) for marks without their own.
+        attr_reader :spacing
+
+        def initialize(trigger, mark, spacing:, sample_rate: 48000)
+          @trigger = trigger.get_sampler
+          @mark = mark.get_sampler
+          @spacing = MB::Sound::Length.seconds(spacing).to_f
+          raise ArgumentError, "A flam spacing is over 0 seconds (got #{spacing.inspect})" unless @spacing > 0
+          @sample_rate = sample_rate.to_f
+          @node_type_name = 'Flams'
+          @pending = [] # [samples from now, velocity]
+          @bufs = nil
+        end
+
+        def sample(count)
+          t = @trigger.sample(count)
+          return nil if t.nil? || t.empty?
+          m = @mark.sample(count)
+          n = t.length
+          n = MB::M.min(n, m.length) if m && !m.empty?
+
+          # Two output buffers in turn: a Voice hands this buffer to its
+          # graph through a Tap whose Tee branches share it until the next
+          # buffer is read
+          @bufs = [Numo::SFloat.zeros(n), Numo::SFloat.zeros(n)] if @bufs.nil? || @bufs[0].length != n
+          @bufs.reverse!
+          @buf = @bufs[0]
+          @buf[0...n] = n == t.length ? t : t[0...n]
+
+          hits = t[0...n].ne(0)
+          if m && !m.empty? && hits.count_true > 0
+            hits.where.each do |i|
+              f = m[i]
+              next if f == 0
+              v = @buf[i]
+              @buf[i] = v * GRACE
+              d = ((f < 0 ? @spacing : f) * @sample_rate).round
+              @pending << [i + MB::M.max(d, 1), v]
+            end
+          end
+
+          unless @pending.empty?
+            later = []
+            @pending.each do |pos, v|
+              if pos < n
+                @buf[pos] = @buf[pos] + v
+              else
+                later << [pos - n, v]
+              end
+            end
+            @pending = later
+          end
+
+          @buf
+        end
+
+        # True when no second stroke is waiting.
+        def idle?
+          @pending.empty?
+        end
+
+        def sources
+          { trigger: @trigger, mark: @mark }
+        end
+
+        def to_s
+          "Flams (#{MB::M.sigfigs(@spacing * 1000, 3)} ms)"
+        end
+      end
+    end
+  end
+end

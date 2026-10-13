@@ -191,7 +191,7 @@ module MB
 
         # A note-on Event for the clip +event+ at stream +time+, or nil.
         def note_event(event, time)
-          event && Event.note_on(event.value, event.velocity, channel: @channel, time: time, pitch: event.pitch)
+          event && Event.note_on(event.value, event.velocity, channel: @channel, time: time, pitch: event.pitch, flam: event.flam)
         end
 
         # Seeks to +time+ seconds into the clip at the current tempo.
@@ -294,7 +294,7 @@ module MB
           @clip.edges(wn_from, wn_to, early: early, fills: fills).map { |time, type, event, _cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
-              Event.note_on(event.value, event.velocity, channel: @channel, time: t, pitch: event.pitch)
+              Event.note_on(event.value, event.velocity, channel: @channel, time: t, pitch: event.pitch, flam: event.flam)
             else
               Event.note_off(event.value, channel: @channel, time: t)
             end

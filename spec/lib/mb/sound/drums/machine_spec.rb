@@ -153,15 +153,26 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
         expect { trigger_kit.kit(MB::Sound.midi_file('spec/test_data/c2_sustain.mid'), shuffle: 2) }.to raise_error(ArgumentError, /grids and clips/)
       end
 
-      it 'plays flams as a grace stroke and the hit flam: later' do
-        kit = trigger_kit.kit(MB::Sound.grid(16, kick: 'x...'), flams: MB::Sound.grid(16, kick: '..X.'), flam: 10.ms)
+      it 'plays flam marks as a grace stroke and the hit flam: later' do
+        kit = trigger_kit.kit(MB::Sound.grid(16, kick: 'x.F.'), flam: 10.ms)
         x = collect(kit, 0.6)
         expect(x.ne(0).where.to_a).to eq([0, 2 * step, 2 * step + 480])
-        grace = MB::Sound::Drums::Machine::FLAM_GRACE**(MB::Sound::Drums::DEFAULT_ACCENT / -(20 * Math.log10(0.75)))
+        grace = MB::Sound::Drums::Flams::GRACE**(MB::Sound::Drums::DEFAULT_ACCENT / -(20 * Math.log10(0.75)))
         expect(x[2 * step] / x[2 * step + 480]).to be_within(1e-5).of(grace)
-        only = trigger_kit.kit(MB::Sound.grid(16, kick: 'x...'), flams: MB::Sound.grid(16, snare: 'x...'), kick: { flam: 0.001 })
-        expect(only.names).to eq([:kick, :snare])
-        expect(hits(only[:snare], 0.1)).to eq([0, (MB::Sound::Drums::Machine::DEFAULT_FLAM * 48000).round])
+
+        # The kit's default, a voice's own flam:, and a mark's own time
+        clip = MB::Sound.seq(MB::Sound::C2.flam, MB::Sound::D2.flam, MB::Sound::C2.flam(5.ms), MB::Sound::D2).n16
+        k = trigger_kit.kit(clip, snare: { flam: 0.001 })
+        expect(hits(k[:kick], 0.4)).to eq([0, (MB::Sound::Drums::Machine::DEFAULT_FLAM * 48000).round, 2 * step, 2 * step + 240])
+        expect(hits(k[:snare], 0.4)).to eq([step, step + 48, 3 * step])
+        expect { trigger_kit.kit(clip, flams: clip) }.to raise_error(ArgumentError, /flams/)
+      end
+
+      it 'plays flams the same at any buffer size, wrapped only for sources with marks' do
+        g = MB::Sound.grid(16, kick: 'xfxF', snare: 'f..x').loop
+        ref = collect(trigger_kit.kit(g, flam: 0.13), 1, 800)
+        [1, 5, 367].each { |bs| expect(collect(trigger_kit.kit(g, flam: 0.13), 1, bs)).to eq(ref) }
+        expect(trigger_kit.kit(MB::Sound.grid(16, kick: 'x...'))[:kick].sources[:trigger]).not_to be_a(MB::Sound::Drums::Flams)
       end
     end
 

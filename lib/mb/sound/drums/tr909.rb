@@ -22,8 +22,9 @@ module MB
       # - every voice: level, accent (dB), velocity_curve, flam (see
       #   Machine#kit)
       #
-      # The kit takes +shuffle:+ (0..6, the 909's shuffle steps), +flams:+
-      # and +flam:+ (see Machine#kit).  The closed hat chokes the open hat.
+      # The kit takes +shuffle:+ (0..6, the 909's shuffle steps) and
+      # +flam:+, the spacing of flam-marked notes (`D1.flam`, 'f' in a grid;
+      # see Machine#kit).  The closed hat chokes the open hat.
       #
       #     tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', hat: 'x.xxx.xxx.xxx.xx', oh: '..X...X...X...X.').loop, shuffle: 2)
       module TR909

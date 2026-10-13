@@ -168,6 +168,43 @@ module MB
         end
       end
 
+      # The latest note-on's flam mark (MIDI::Event#flam), held until the
+      # next note-on: 0 for none, seconds, or DEFAULT (-1) for a mark of
+      # true (the kit's spacing); see Notes#flam_mark.
+      class FlamMark < NoteNode
+        # The value of a flam mark of true.
+        DEFAULT = -1.0
+
+        def initialize(stream, notes: nil, sample_rate: 48000)
+          super
+          @flam = FlamMark.encode(stream.first_note&.flam)
+          @node_type_name = 'Notes FlamMark'
+        end
+
+        # The node value for an event's flam mark.
+        def self.encode(flam)
+          flam == true ? DEFAULT : flam.to_f
+        end
+
+        def value
+          @flam
+        end
+
+        private
+
+        def level
+          @flam
+        end
+
+        def note_on(event)
+          @flam = FlamMark.encode(event.flam)
+        end
+
+        def chase(event)
+          @flam = FlamMark.encode(event.flam)
+        end
+      end
+
       # 1 while the latest note's velocity is at least +threshold+, else 0
       # (see Notes#accent).
       class Accent < Velocity

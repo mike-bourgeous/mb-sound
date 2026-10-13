@@ -58,8 +58,8 @@ module MB
           # Unattached MIDI transform chains: echo(...).strum(...)
           'MB::Sound::MIDI::Transform::Spec' => MB::Sound::MIDI::Stream::TRANSFORMS.to_a,
           # Note marks (`!A1`, `~C2`, `G2.chance(0.5)`), on Notes and steps
-          'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill pitch],
-          'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct pitch],
+          'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill pitch flam],
+          'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct pitch flam],
           # Sample views and edits (how Samples print: Sample#lineage)
           'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with],
           'MB::Sound::Sample::Slices' => %i[[] name keymap],

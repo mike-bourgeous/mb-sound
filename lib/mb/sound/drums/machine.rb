@@ -38,10 +38,7 @@ module MB
         # Kit output modes (see #kit).
         OUTPUTS = [:mix, :separate, :individual].freeze
 
-        # How loud the first stroke of a flam is, relative to the second.
-        FLAM_GRACE = 0.6
-
-        # The default flam spacing (seconds).
+        # The default flam spacing (seconds; see #kit).
         DEFAULT_FLAM = 0.018
 
         # The machine's name (e.g. :tr909, or :kit).
@@ -180,9 +177,10 @@ module MB
         # - +shuffle:+ swing for grid and clip sources: 0..6 like a TR-909
         #   (each step delays every second 16th by 1/48 of a beat; 4 is
         #   about a triplet feel) or a Float swing amount (see Clip#swing);
-        # - +flams:+ a second source (grid, clip, ...) whose hits play as
-        #   flams: a grace stroke (FLAM_GRACE of the velocity) then the hit
-        #   +flam:+ later (seconds or a Length; DEFAULT_FLAM, 18 ms);
+        # - +flam:+ the spacing of flam-marked notes without their own
+        #   (`snare.flam`, 'f' in a grid; see Seq::Step#flam): a grace
+        #   stroke (Flams::GRACE of the velocity), then the hit this much
+        #   later (seconds or a Length; DEFAULT_FLAM, 18 ms);
         # - +outputs:+ :mix (a Kit) or :separate (alias :individual: a
         #   Channels bundle of the voices, named, in definition order,
         #   adding up to the mix exactly);
@@ -190,7 +188,7 @@ module MB
         #   in MB::Sound.with_seed(seed + 1 + i));
         # - +skip_idle:+ as for Voice.
         def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, skip_idle: true, outputs: :mix, seed: nil,
-                shuffle: nil, flam: DEFAULT_FLAM, flams: nil, **settings)
+                shuffle: nil, flam: DEFAULT_FLAM, **settings)
           unless OUTPUTS.include?(outputs)
             raise ArgumentError, "Unknown outputs: #{outputs.inspect} (outputs: #{OUTPUTS.map(&:inspect).join(', ')})"
           end
@@ -201,33 +199,31 @@ module MB
           }
 
           source = Machine.shuffled(source, shuffle) if shuffle
-          flams = Machine.shuffled(flams, shuffle) if flams && shuffle
           sources = voice_sources(source, only: only, map: map)
-          flam_sources = flams ? voice_sources(flams, only: only, map: map) : {}
-          if sources.empty? && flam_sources.empty?
+          if sources.empty?
             raise ArgumentError, "Nothing in #{source} plays a #{@name} voice (voices: #{names.join(', ')})"
           end
 
-          all_sources = [source, flams].compact
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+          flams = Drums.flams?(source)
           voices = {}
           @voices.each_value.with_index do |spec, idx|
-            next unless sources.key?(spec.name) || flam_sources.key?(spec.name)
+            next unless sources.key?(spec.name)
 
             knobs = settings.fetch(spec.name, {})
-            chokers = (@chokes[spec.name] || []).flat_map { |c| [sources[c], flam_sources[c]].compact.flatten }
+            chokers = (@chokes[spec.name] || []).flat_map { |c| Array(sources[c]) }
             voices[spec.name] = MB::Sound.with_seed(seed + 1 + idx) {
               build_voice(
-                spec, sources[spec.name], flam_sources[spec.name], chokers,
-                accent: accent, velocity_curve: velocity_curve || Drums.velocity_curve(all_sources), flam: flam,
+                spec, sources[spec.name], chokers,
+                accent: accent, velocity_curve: velocity_curve || Drums.velocity_curve(source), flam: flam, flams: flams,
                 skip_idle: skip_idle, **knobs
               )
             }
           end
 
           if outputs == :mix
-            clip_notes = source.is_a?(Sequence::Clip) && !source.performed? && flams.nil? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
-            Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil)
+            clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
+            Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: flams)
           else
             GraphNode::Channels.new(voices.values, names: voices.keys).named("#{@name} outputs")
           end
@@ -235,9 +231,10 @@ module MB
         alias call kit
 
         # Builds one Drums::Voice for +spec+ played by +source+ (one or an
-        # Array of sources; nil if only flams play it), with +flams+ (the
-        # flam source or nil) and +chokers+ (sources whose hits choke it).
-        def build_voice(spec, source, flams, chokers, accent:, velocity_curve:, flam:, skip_idle: true, **knobs)
+        # Array of sources) with +chokers+ (sources whose hits choke it).
+        # +flams+ is true if the source may carry flam marks (see
+        # Drums.flams?), +flam+ their default spacing.
+        def build_voice(spec, source, chokers, accent:, velocity_curve:, flam:, flams: false, skip_idle: true, **knobs)
           own = knobs.slice(*COMMON_KNOBS)
           k = Drums.knobs(spec.name, spec.defaults, knobs.except(*COMMON_KNOBS))
           accent = own.fetch(:accent, accent)
@@ -245,28 +242,22 @@ module MB
           flam = own.fetch(:flam, flam)
 
           notes = []
-          triggers = ->(src) {
+          triggers = ->(src, with_flams) {
             (src.is_a?(Array) ? src : [src]).map { |s|
               n = Drums.notes_for(s)
               notes << n if n
-              n ? n.trigger : s
+              n ? Drums.hits(n, with_flams ? flam : nil) : s
             }
           }
 
-          parts = source ? triggers.(source) : []
-          if flams
-            spacing = MB::Sound::Length.seconds(flam)
-            parts += triggers.(flams).map { |t| Repeats.new(t, [[0, FLAM_GRACE], [spacing, 1.0]]) }
-          end
-
           tap = Voice::Tap.new('trigger')
-          inputs = [[Drums.mix(parts), tap]]
+          inputs = [[Drums.mix(triggers.(source, flams)), tap]]
           trigger = Drums.accented(tap, accent, curve: velocity_curve)
 
           choke_tap = nil
           unless chokers.empty?
             choke_tap = Voice::Tap.new('choke')
-            inputs << [Drums.mix(triggers.(chokers.map { |c| own_notes(c) })), choke_tap]
+            inputs << [Drums.mix(triggers.(chokers.map { |c| own_notes(c) }, false)), choke_tap]
           end
 
           hit = Hit.new(trigger, knobs: k, name: spec.name, machine: @name)

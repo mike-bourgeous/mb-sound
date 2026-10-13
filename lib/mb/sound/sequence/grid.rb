@@ -37,6 +37,8 @@ module MB
           'X' => { velocity: Clip::ACCENT_VELOCITY, accented: true },
           '-' => :tie,
           '?' => { probability: 0.5 },
+          'f' => { flam: true },
+          'F' => { velocity: Clip::ACCENT_VELOCITY, accented: true, flam: true },
           '.' => :rest,
           '|' => :ignore,
           ' ' => :ignore,

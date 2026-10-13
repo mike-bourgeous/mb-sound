@@ -35,8 +35,9 @@ module MB
       # like #tr808: analog kick, snare, toms, rimshot, and clap, and 6-bit
       # sampled hats, crash, and ride (see Drums::TR909 for voices and
       # knobs, Drums::Machine#kit for options).  +shuffle:+ (0..6) swings
-      # grids and clips like the 909's shuffle; +flams:+ is a second grid
-      # whose hits play as flams (+flam:+ apart, 18 ms by default).
+      # grids and clips like the 909's shuffle; flam-marked notes ('f' or
+      # 'F' in a grid, `D1.flam` in a seq) play as flams, +flam:+ apart (18
+      # ms by default; tr808 kits play them too).
       #
       # Voices: kick, snare, rimshot, clap, low/mid/high_tom, closed_hat
       # (hat), open_hat, crash, ride.
@@ -44,7 +45,7 @@ module MB
       # Examples (bin/sound.rb):
       #     bg :house, tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', hat: '..x...x...x...x.', oh: '..x...x...x...X.').loop, shuffle: 2)
       #     bg :techno, tr909(grid(16, kick: 'X...X...X...X...', hat: 'xxXxxxXxxxXxxxXx', ride: 'x.x.x.x.x.x.x.x.').loop, kick: { decay: 0.9, attack: 0.8 })
-      #     bg :roll, tr909(grid(16, snare: 'x.x.x.x.xxxxXXXX').loop, flams: grid(16, snare: '...x.......x....').loop, flam: 12.ms)
+      #     bg :roll, tr909(grid(16, snare: 'x.x.x.xfxxxxXXFX').loop, flam: 12.ms)
       def tr909(source, **settings)
         Drums::TR909.kit(source, **settings)
       end
@@ -54,7 +55,7 @@ module MB
       # from the Drums::Hit +h+: body, noise, click, metal, sample, fm, env,
       # sweep, bursts), `choke :open_hat, by: :closed_hat` for chokes.  With
       # a +source+, returns the kit playing it (see Drums::Machine#kit for
-      # the options: knobs per voice, accent:, shuffle:, flams:, outputs:,
+      # the options: knobs per voice, accent:, shuffle:, flam:, outputs:,
       # ...); without, the machine, to play later with `machine.kit(source)`
       # (or `machine.(source)`).  A block without parameters runs on the
       # builder (`voice ...`); with one, call it on that (`k.voice ...`).

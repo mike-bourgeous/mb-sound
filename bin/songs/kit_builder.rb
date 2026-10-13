@@ -90,12 +90,11 @@ module MB::Sound
       junk.kit(
         junk.grid(16,
           kick:  'X..x..x...x..x..',
-          can:   '....X.......X..x',
+          can:   '....X.......X..f|....X..f....X..f',
           hat:   'x.xXx.x.x.xXx.x.',
           oh:    '......x.......x.',
           log:   '..x..x.x..x..x.x',
         ).loop,
-        flams: junk.grid(16, can: '...............x|.......x.......x').loop,
         flam: 22.ms,
         shuffle: shuffle,
         log: { tune: melody.freq },
