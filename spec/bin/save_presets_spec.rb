@@ -7,7 +7,7 @@ require File.expand_path('../../bin/save_presets.rb', __dir__)
 
 RSpec.describe('bin/save_presets.rb') do
   before(:all) do
-    %w[kez_volta skylark_junction kaede_rowntree tiko_marvell].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
+    %w[dnb jungle ambient funk electric_pianos].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
   end
 
   after { MB::Sound.rewind }
@@ -32,6 +32,8 @@ RSpec.describe('bin/save_presets.rb') do
       doc = io.parse(file)
       expect(doc.inputs).to eq([:midi])
       expect(doc.kind).to eq(:synth)
+      expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch))
+      expect(doc.description).to include("from #{script}", 'persona panel experiment')
 
       # Drum kits play GM drum notes (kick, hat, snare, shaker, ride, conga)
       midi = -> {
@@ -60,6 +62,7 @@ RSpec.describe('bin/save_presets.rb') do
       doc = io.parse(file)
       expect(doc.inputs).to eq([:input])
       expect(doc.params.keys).to eq(params.keys)
+      expect(doc.description).to start_with("Effect :#{name} from bin/synths/").and include('first made by')
 
       source = -> { 110.hz.saw.at(0.3) * MB::Sound.adsr(0.01, 0.2, 0, 0.1) }
       direct = MB::Sound.with_seed(0) { builder.call(source.(), params.transform_values { |p| p[:value].constant }) }
@@ -69,13 +72,13 @@ RSpec.describe('bin/save_presets.rb') do
   end
 
   it 'loads presets by name with `preset`, taking params' do
-    g = MB::Sound.preset(:kez_reese, midi: MB::Sound::Notes.new(midi_file), cutoff: 600)
+    g = MB::Sound.preset(:dnb_reese, midi: MB::Sound::Notes.new(midi_file), cutoff: 600)
     expect(io.document_of(g)[:cutoff]).to eq(600)
     expect(render_buffers(g, 10).flatten.compact.map { |b| b.abs.max }.max).to be > 0
   end
 
   it 'finds the presets up to date (a real run of the script)' do
-    text = `bin/save_presets.rb --check kaede_tape 2>&1`
+    text = `bin/save_presets.rb --check ambient_tape 2>&1`
     expect($?).to be_success, text
     expect(text).to include('1 preset up to date')
   end

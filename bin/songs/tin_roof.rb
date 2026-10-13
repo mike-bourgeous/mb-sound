@@ -6,8 +6,8 @@
 # reviewed the API and each wrote a 2-3 minute demo with it; research branch
 # research-persona-zen, research/persona-panel/zen/, with Kaede's review,
 # friction log, and a performed take).  The song moved here from that
-# branch; its instruments (bowls, rin, gong, e-piano, harp, drone, rain
-# stick, tape, rooms) live in bin/synths/kaede_rowntree.rb (playable from
+# branch; its instruments (bowls, rin, gong, koto, harp, drone, rain
+# stick, tape, rooms) live in bin/synths/ambient.rb (playable from
 # MIDI, and saved as presets); the weather (rain, river) stays here.
 #
 # About two and a half minutes at 60 BPM (one bar is four seconds), in D,
@@ -24,7 +24,7 @@
 #               #wraps pulses, not bars), every partial a beating doublet
 #   bloom    8  a tam-tam stroke (dense inharmonic partials gliding down,
 #               high shimmer swelling in over seconds), a sparse kankyō
-#               e-piano motif (humanized, some notes by chance), a swung
+#               motif on the FM koto (humanized, some notes by chance), a swung
 #               Karplus-Strong "harp" figure on the 16ths
 #   hush     4  nearly nothing: thin rain and a small rin on its own
 #               31.1-second loop
@@ -61,7 +61,7 @@
 #
 require 'bundler/setup'
 require 'mb-sound'
-require_relative '../synths/kaede_rowntree'
+require_relative '../synths/ambient'
 
 module MB::Sound
   # Bars in the render: the form (38 bars) plus the ring-out.
@@ -75,11 +75,11 @@ module MB::Sound
   # brighter, longer "tin" pings).  +level+ may be a node (the :drizzle
   # knob): it scales the bed and the drops' density feel by level.
   def self.tin_roof_rain_side(level)
-    bed = noise.filter(:bandpass, cutoff: kaede_walk(0.31, 600, 1700), quality: 0.9) * 0.35 +
+    bed = noise.filter(:bandpass, cutoff: ambient_walk(0.31, 600, 1700), quality: 0.9) * 0.35 +
       noise.filter(:highpass, cutoff: 6500, quality: 0.5) * 0.04
-    drops = kaede_dust(90)
+    drops = ambient_dust(90)
     pitch = noise.sample_hold(drops) * 900 + 2600
-    tin = kaede_dust(7)
+    tin = ambient_dust(7)
     tin_pitch = noise.sample_hold(tin) * 1200 + 5200
     patter = drops.ping(pitch, decay: 0.02) * 0.5 + tin.ping(tin_pitch, decay: 0.09) * 0.25
     (bed + patter * (level * 0.8 + 0.2)) * level
@@ -93,8 +93,8 @@ module MB::Sound
   # resonances) that rise in pitch as they ring.
   def self.tin_roof_river
     side = -> {
-      flow = noise.filter(:lowpass, cutoff: kaede_walk(0.13, 220, 520), quality: 0.6).filter(:highpass, cutoff: 70, quality: 0.6) * 0.5
-      bub = kaede_dust(14)
+      flow = noise.filter(:lowpass, cutoff: ambient_walk(0.13, 220, 520), quality: 0.6).filter(:highpass, cutoff: 70, quality: 0.6) * 0.5
+      bub = ambient_dust(14)
       base = noise.sample_hold(bub) * 220 + 520
       fall = adsr(0, 0.06, 0, 0, trigger: bub, curve: :linear) # 1 at the strike, 0 after 60 ms
       bubbles = bub.ping(base * (1.7 - fall * 0.7), decay: 0.07) * 0.18
@@ -111,7 +111,7 @@ module MB::Sound
     w * (noise.sample_hold(w) * 0.2 + 0.8)
   end
 
-  # Two bowls (.kaede_bowl) on incommensurable loops, in a long soft room,
+  # Two bowls (.ambient_bowl) on incommensurable loops, in a long soft room,
   # panned apart.  +space+ (a node) is the room's level; +hand+ (a node,
   # 0..1) scales the strikes, so a hand that stops striking lets the bowls
   # ring out while their loops keep turning (a scene that dropped the track
@@ -119,16 +119,16 @@ module MB::Sound
   # the bowls stay in every scene after the drift and the :ring knob plays
   # them).
   def self.tin_roof_bowls(space, hand)
-    low = kaede_bowl(tin_roof_strikes(19.7, phase: 0.92) * hand, D3.frequency, decay: 26).pan(-0.35)
-    mid = kaede_bowl(tin_roof_strikes(23.3, phase: 0.55) * hand, A3.frequency, flat: 12, decay: 20, beat: 1.1).pan(0.4) # the pebble: 12 cents flat
+    low = ambient_bowl(tin_roof_strikes(19.7, phase: 0.92) * hand, D3.frequency, decay: 26).pan(-0.35)
+    mid = ambient_bowl(tin_roof_strikes(23.3, phase: 0.55) * hand, A3.frequency, flat: 12, decay: 20, beat: 1.1).pan(0.4) # the pebble: 12 cents flat
     dry = (low + mid) * 0.12
-    kaede_room(dry, space: space, decay: 9)
+    ambient_room(dry, space: space, decay: 9)
   end
 
   # A small rin (high bowl) on its own 31.1-second loop.
   def self.tin_roof_rin(space)
-    rin = kaede_bowl(tin_roof_strikes(31.1, phase: 0.93), G4.frequency, decay: 24, beat: 1.6).pan(0.15) * 0.08
-    kaede_room(rin, space: space, decay: 7)
+    rin = ambient_bowl(tin_roof_strikes(31.1, phase: 0.93), G4.frequency, decay: 24, beat: 1.6).pan(0.15) * 0.08
+    ambient_room(rin, space: space, decay: 7)
   end
 
   # The clips.  At 60 BPM a bar is 4 seconds: an eighth is half a second.
@@ -171,13 +171,13 @@ module MB::Sound
     s = ->(n, &blk) { MB::Sound.with_seed(seed * 1000 + n, &blk) }
     track(:rain, fade: 1) { |_| s.(1) { tin_roof_rain(knob(:drizzle)) } }
     track(:river, fade: 2) { |_| s.(2) { tin_roof_river } }
-    track(:drone, fade: 2) { |_| s.(3) { kaede_drone(D2.frequency) } }
+    track(:drone, fade: 2) { |_| s.(3) { ambient_drone(D2.frequency) } }
     track(:bowls, fade: 1) { |_| s.(4) { tin_roof_bowls(knob(:space), knob(:ring)) } }
     track(:rin, fade: 1) { |_| s.(5) { tin_roof_rin(knob(:space)) } }
-    track(:gong) { |clip| s.(6) { kaede_gong_voice(clip, space: knob(:space)) } }
-    track(:motif) { |clip| s.(7) { kaede_epiano_voice(clip, wear: knob(:wear), space: knob(:space)) } }
-    track(:harp) { |clip| s.(8) { kaede_harp_voice(clip, wear: knob(:wear), space: knob(:space)) } }
-    track(:stick) { |clip| s.(9) { kaede_rainstick_voice(clip) } }
+    track(:gong) { |clip| s.(6) { ambient_gong_voice(clip, space: knob(:space)) } }
+    track(:motif) { |clip| s.(7) { ambient_koto_voice(clip, wear: knob(:wear), space: knob(:space)) } }
+    track(:harp) { |clip| s.(8) { ambient_harp_voice(clip, wear: knob(:wear), space: knob(:space)) } }
+    track(:stick) { |clip| s.(9) { ambient_rainstick_voice(clip) } }
 
     on = seq(R).n1.loop.named(:weather) # a silent clip for the texture tracks (they ignore it)
 

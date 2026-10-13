@@ -6,7 +6,7 @@
 # wrote a 2-3 minute demo with it; research branch research-persona-edm,
 # research/persona-panel/edm/, with Kez's review, friction log, and a
 # performed take).  The song moved here from that branch; its patches live
-# in bin/synths/kez_volta.rb (playable from MIDI, and saved as presets).
+# in bin/synths/dnb.rb (playable from MIDI, and saved as presets).
 #
 # A drum & bass roller at 174 BPM in F minor,
 # 112 bars (about 2:37).  Everything is synthesized with the public
@@ -66,7 +66,7 @@
 
 require 'bundler/setup'
 require 'mb-sound'
-require_relative '../synths/kez_volta'
+require_relative '../synths/dnb'
 
 module MB::Sound
   # Length of the form in bars (plus a ring-out).
@@ -77,7 +77,7 @@ module MB::Sound
   TV_CEILING = -0.5
 
   # The kick, shared by the drums and the ghost kicks that duck the bass.
-  TV_KICK = kez_kick_settings.freeze
+  TV_KICK = dnb_kick_settings.freeze
 
   # The two-step (one bar of 16ths): kick on 1 and the "and" of 3.
   TV_TWO_STEP = 'X.........X.....'
@@ -149,7 +149,7 @@ module MB::Sound
   # A ghost kick for sidechains: the drums' kick on the two-step, never
   # heard (every ducked part plays over a two-step kit).
   def self.tv_ghost_kick
-    kez_ghost_kick(grid(16, kick: TV_TWO_STEP).loop(align: :launch), kick: TV_KICK)
+    dnb_ghost_kick(grid(16, kick: TV_TWO_STEP).loop(align: :launch), kick: TV_KICK)
   end
 
   # A noise riser: a resonant bandpass sweeping up over +bars+ with a
@@ -173,15 +173,15 @@ module MB::Sound
 
     # A club master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1
-    master { |mix| kez_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
+    master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
 
-    track(:drums) { |kit| kez_drums(kit, kick: TV_KICK) }
-    track(:reese) { |clip| (kez_reese_voice(clip, cutoff: knob(:cut)) * 1.0).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:sub) { |clip| (kez_sub_voice(clip) * 0.5).duck(tv_ghost_kick, amount: -12.db, release: 1.n16) }
-    track(:neuro) { |clip| (kez_neuro_voice(clip, grit: knob(:grit)) * 0.85).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:pad) { |clip| kez_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
-    track(:pluck) { |clip| kez_pluck_voice(clip, send: knob(:space)) * 0.45 }
-    track(:boom) { |clip| kez_boom_voice(clip) }
+    track(:drums) { |kit| dnb_drums(kit, kick: TV_KICK) }
+    track(:reese) { |clip| (dnb_reese_voice(clip, cutoff: knob(:cut)) * 1.0).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
+    track(:sub) { |clip| (dnb_sub_voice(clip) * 0.5).duck(tv_ghost_kick, amount: -12.db, release: 1.n16) }
+    track(:neuro) { |clip| (dnb_neuro_voice(clip, grit: knob(:grit)) * 0.85).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
+    track(:pad) { |clip| dnb_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
+    track(:pluck) { |clip| dnb_pluck_voice(clip, send: knob(:space)) * 0.45 }
+    track(:boom) { |clip| dnb_boom_voice(clip) }
     track(:riser, fade: 1/8r) { |_clip| tv_riser(8) }
 
     scene :intro, drums: k[:intro], pad: c[:pad], reese: c[:bar], neuro: c[:bar], cut: 250, air: 20

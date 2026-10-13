@@ -206,7 +206,7 @@ module MB
       def initialize(
         source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
         priority: :last, glide_mode: :last, retrigger: :reuse, controls: [], bend_range: nil, sustain: true,
-        seed: nil, tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
+        seed: nil, tail: TAIL_SECONDS, skip_idle: true, exact_lanes: false, sample_rate: 48000, &block
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
 
@@ -238,16 +238,22 @@ module MB
         )
 
         @notes = []
+        @exact_lanes = !!exact_lanes
         @quiet = Array.new(@allocator.lanes.length, true)
+        @quiet_pos = Array.new(@allocator.lanes.length)
         @peaks = Array.new(@allocator.lanes.length, 0.0)
+        @cell_lo = Array.new(@allocator.lanes.length) { [] }
+        @cell_hi = Array.new(@allocator.lanes.length) { [] }
+        @cell_fresh = Array.new(@allocator.lanes.length, true)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
           v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
-          v.quiet_check = -> { @quiet[idx] }
+          v.quiet_check = -> { @quiet[idx] && (!@exact_lanes || cell_quiet?(idx)) }
           v.level_check = -> { @peaks[idx] }
           graph = Synth.with_lane(idx, @allocator.lanes.length) {
             MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           }
-          lane.idle_check = -> { v.idle? }
+          lane.idle_check = -> { @exact_lanes ? @quiet[idx] : v.idle? }
+          lane.idle_position = -> { @exact_lanes ? @quiet_pos[idx] : nil }
           lane.level_check = -> { v.level }
           lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
           v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
@@ -362,6 +368,37 @@ module MB
         @skip_idle
       end
 
+      # Aligns the grid where lanes are measured for the allocator (see
+      # #sample_lanes; SKIP_GRID samples) with the frames of a Session whose
+      # frame +frame+ is the synth's first sample, so its points fall on
+      # Session frames that are multiples of SKIP_GRID and 800-sample
+      # Session buffers never need splitting.  Idle skipping keeps its grid
+      # of the synth's own time (moving it would move where free-running
+      # oscillators pause).  Called by Session when a player starts; does
+      # nothing once the synth has been sampled.  Returns self.
+      def align_grid(frame)
+        @grid_offset = Integer(frame) % SKIP_GRID unless @grid_started
+        self
+      end
+
+      # True if lanes become free for new notes by their quiet state over
+      # whole cells of the measuring grid, with buffers crossing a grid
+      # point read in pieces split there, so allocation is the same at any
+      # buffer size (see #sample_lanes).  False (the default) measures each
+      # lane per buffer, as before fixes-7: no extra CPU, but a released
+      # lane may be freed at a different note at different buffer sizes.
+      # Session#exact_lanes, render(exact_lanes: true), and take replays
+      # turn it on for the Synths they play.
+      def exact_lanes?
+        @exact_lanes
+      end
+
+      # Turns exact lane allocation on or off (see #exact_lanes?); only
+      # before the synth's first sample (ignored after).
+      def exact_lanes=(exact)
+        @exact_lanes = !!exact unless @grid_started
+      end
+
       # The indices of lanes that may be skipped while idle: with
       # +:skip_idle+ on (the default), lanes whose graphs have no delays,
       # reverbs, FIR filters, or tempo-following nodes (see
@@ -375,14 +412,15 @@ module MB
         @skipping.each_index.select { |idx| @skipping[idx] }
       end
 
-      # The indices of the lanes whose last rendered buffer was quiet (every
-      # channel within -90 dB, QUIET) with no note held and every envelope idle
-      # (or that haven't rendered since).  A lane counts as busy for the
+      # The indices of the lanes whose last grid cell (SKIP_GRID samples of
+      # the synth's own time) was quiet (every channel within -90 dB, QUIET)
+      # with no note held and every envelope idle at its end (or that
+      # haven't rendered a cell yet).  A lane counts as busy for the
       # allocator (and its Notes gate and trigger keep going after a MIDI
       # file ends) until it is quiet, so voices without envelopes, such as
-      # resonant filter pings, ring out.  Measured once per buffer, after
-      # the lane renders, so allocation stays the same for the same events
-      # and buffer sizes.
+      # resonant filter pings, ring out.  Measured over whole cells, with
+      # blocks split at the grid points (see #sample_lanes), so allocation
+      # is the same for the same events at any buffer size.
       def quiet_lanes
         @quiet.each_index.select { |idx| @quiet[idx] }
       end
@@ -498,6 +536,7 @@ module MB
         @skip_generation = Array.new(@lanes.length)
         @cell_loud = Array.new(@lanes.length, false)
         @skip_position = 0
+        @grid_offset = 0 # where the measuring grid starts (see #align_grid)
         @zeros = nil
 
         graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
@@ -519,8 +558,9 @@ module MB
         end
         update_skippable
 
-        # What a skipped lane still reads: its own Notes nodes, and its
-        # branches of Tees whose other branches are in other lanes
+        # What a skipped lane still reads: its own Notes nodes, its
+        # branches of Tees whose other branches are in other lanes, and its
+        # knob readers
         @boundary = graphs.each_with_index.map { |g, idx|
           next [] unless @skippable_base[idx]
 
@@ -534,7 +574,11 @@ module MB
           shared = g.select { |n|
             n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.owner_tee.branches.any? { |b| !sets[idx][b.__id__] }
           }
-          own + shared
+
+          # Knob readers keep their place in the Session's buffer (see
+          # GraphNode::Knob::Reader), so they read past skipped stretches
+          knobs = g.select { |n| n.is_a?(GraphNode::Knob::Reader) && !upstream[n.__id__] }
+          own + shared + knobs
         }
         @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
       end
@@ -569,18 +613,57 @@ module MB
       # offset (e.g. a waveshaper's output for silence, which would keep a
       # lane busy forever); silent uses the absolute peak, since skipping
       # replaces the lane's output with zeros.
+      #
+      # With #exact_lanes?, measured over each grid cell (SKIP_GRID; channel
+      # ranges gathered here, recorded at the grid point by #record_cells),
+      # so the result is the same at any buffer size; else per buffer.
       def measure_lane(idx, bufs)
-        lo = hi = swing = nil
+        return measure_lane_buffer(idx, bufs) unless @exact_lanes
+
+        lo = @cell_lo[idx]
+        hi = @cell_hi[idx]
+        fresh = @cell_fresh[idx]
+        c = 0
+        while c < bufs.length
+          mn, mx = range_of(bufs[c])
+          if fresh || lo[c].nil?
+            lo[c] = mn
+            hi[c] = mx
+          else
+            lo[c] = mn if mn < lo[c]
+            hi[c] = mx if mx > hi[c]
+          end
+          c += 1
+        end
+        @cell_fresh[idx] = false
+      end
+
+      # True if lane +idx+'s output since the last grid point (with
+      # #exact_lanes?) is quiet (see #measure_lane), so a lane's Notes don't
+      # count it quiet by a record made before it played.
+      def cell_quiet?(idx)
+        return true if @cell_fresh[idx]
+
+        lo = @cell_lo[idx]
+        hi = @cell_hi[idx]
+        c = 0
+        while c < lo.length
+          return false if (hi[c] - lo[c]) * 0.5 > QUIET
+          c += 1
+        end
+        true
+      end
+
+      # #measure_lane per buffer (without #exact_lanes?).
+      def measure_lane_buffer(idx, bufs)
+        swing = nil
         bufs.each do |b|
           mn, mx = range_of(b)
-          lo = mn if lo.nil? || mn < lo
-          hi = mx if hi.nil? || mx > hi
           sw = (mx - mn) * 0.5
           swing = sw if swing.nil? || sw > swing
         end
-        idle = @notes[idx].voice_idle?
         @peaks[idx] = swing
-        @quiet[idx] = idle && swing <= QUIET
+        @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
       end
 
       # Marks lane +idx+ as ended (silent from now on).
@@ -639,8 +722,9 @@ module MB
           end
           next if shared&.shared_node?(n)
 
-          # Notes nodes advance without a buffer (also inside fused plans)
-          if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?
+          # Notes nodes and knob readers advance without a buffer (also
+          # inside fused plans)
+          if (n.is_a?(Notes::Node) || n.is_a?(GraphNode::Knob::Reader) ? n.advance(count) : n.sample(count)).nil?
             lane_ended(idx)
             return :ended
           end
@@ -698,7 +782,78 @@ module MB
       # #sample_individual's work, in Arrays reused by every call (the
       # result, and each lane's Array of channel buffers), for #mix_mono and
       # #mix_channels.
+      #
+      # A block crossing a point of the synth's measuring grid (SKIP_GRID
+      # samples from its first sample, or aligned with a Session's frames;
+      # see #align_grid) is read in pieces split there, so every lane is on
+      # the grid point when the allocator reads the events after it: lanes
+      # become free for new notes by what they measured over whole grid
+      # cells, at the same points at any buffer size (see #record_cells;
+      # fixes-7, 2026-10-13: measured per buffer, a released lane was freed
+      # at a different note at 367/368 than at 800, and the note went to
+      # another lane).
       def sample_lanes(count)
+        @grid_started = true
+        return sample_lanes_piece(count) unless @exact_lanes
+
+        g = SKIP_GRID - (@skip_position + @grid_offset) % SKIP_GRID
+        return sample_lanes_piece(count) if g >= count
+
+        joined = (@joined_data ||= Array.new(@lanes.length))
+        o = 0
+        while o < count
+          n = MB::M.min(SKIP_GRID - (@skip_position + @grid_offset) % SKIP_GRID, count - o)
+          data = sample_lanes_piece(n)
+          if o == 0
+            return nil if data.nil?
+            data.each_with_index { |d, idx| joined[idx] = d.nil? ? nil : join_piece(idx, d, 0, n, count) }
+          else
+            joined.each_index do |idx|
+              # (lanes that ended in an earlier piece are cut short)
+              next if joined[idx].nil? || entry_length(joined[idx]) < count
+
+              d = data&.[](idx)
+              joined[idx] = d.nil? ? join_end(joined[idx], o) : join_piece(idx, d, o, n, count)
+            end
+            break if data.nil?
+          end
+          o += n
+        end
+        joined
+      end
+
+      # Puts lane +idx+'s piece +d+ (a buffer, or an Array of channel
+      # buffers, for +n+ samples) at offset +o+ of the lane's joined
+      # buffers of +count+ samples (reused), returning the lane's entry (cut
+      # short after a short piece: the lane ended).
+      def join_piece(idx, d, o, n, count)
+        bufs = d.is_a?(Array) ? d : [d]
+        store = ((@joined_bufs ||= [])[idx] ||= [])
+        short = false
+        out = bufs.each_with_index.map { |b, c|
+          t = store[c]
+          t = store[c] = b.class.zeros(count) if t.nil? || t.length != count || t.class != b.class
+          t[o...(o + b.length)] = b
+          short ||= b.length < n
+          t
+        }
+        entry = d.is_a?(Array) ? out : out[0]
+        short ? join_end(entry, o + bufs.map(&:length).max) : entry
+      end
+
+      # The length of a lane's entry (a buffer or channel buffers).
+      def entry_length(entry)
+        entry.is_a?(Array) ? entry.map(&:length).max : entry.length
+      end
+
+      # A lane's joined entry +entry+ cut to its first +n+ samples (a lane
+      # that ended after the first piece).
+      def join_end(entry, n)
+        entry.is_a?(Array) ? entry.map { |b| b[0...n] } : entry[0...n]
+      end
+
+      # One piece of #sample_lanes (not crossing a grid point).
+      def sample_lanes_piece(count)
         any = false
         data = (@lane_data ||= Array.new(@lanes.length))
         shared = @shared_inputs
@@ -715,8 +870,35 @@ module MB
           shared&.end_block
         end
         @skip_position += count
+        record_cells if @exact_lanes && (@skip_position + @grid_offset) % SKIP_GRID == 0
 
         any ? data : nil
+      end
+
+      # At a grid point: records each lane's level and quiet state over the
+      # grid cell just ended (see #measure_lane), and where its stream was
+      # (the allocator asks about lanes only for notes it sent before it),
+      # for the allocator's idle checks and #quiet_lanes.
+      def record_cells
+        @lanes.each_index do |idx|
+          next if @done[idx]
+
+          swing = 0.0
+          unless @cell_fresh[idx]
+            lo = @cell_lo[idx]
+            hi = @cell_hi[idx]
+            c = 0
+            while c < lo.length
+              sw = (hi[c] - lo[c]) * 0.5
+              swing = sw if sw > swing
+              c += 1
+            end
+          end
+          @cell_fresh[idx] = true
+          @peaks[idx] = swing
+          @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
+          @quiet_pos[idx] = @allocator.lanes[idx].source.position
+        end
       end
 
       # One lane's entry of #sample_lanes.

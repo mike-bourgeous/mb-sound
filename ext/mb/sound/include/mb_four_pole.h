@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "mb_ext_helpers.h"
+#include "mb_svf.h"
 
 // Cutoff limits: at least 1 Hz, at most this fraction of the sample rate.
 #define FP_MIN_CUTOFF 1.0
@@ -276,14 +277,24 @@ struct mb_fp_args {
 	int normalize;      // diode ladder only
 };
 
-// Flushes states that are not finite or below FP_FLUSH to zero (at the end
-// of each buffer).
+// Flushes states that are not finite or below FP_FLUSH to zero (on the
+// flush grid; see MB_FLUSH_GRID in mb_svf.h).
 static inline void mb_fp_flush(double *st4)
 {
 	for (int j = 0; j < 4; j++) {
 		if (!isfinite(st4[j]) || fabs(st4[j]) < FP_FLUSH) {
 			st4[j] = 0.0;
 		}
+	}
+}
+
+// Counts one sample on the flush grid (*fk, samples since the last grid
+// point), flushing +st4+ at the grid point.
+static inline void mb_fp_flush_tick(long *fk, double *st4)
+{
+	if (++*fk >= MB_FLUSH_GRID) {
+		*fk = 0;
+		mb_fp_flush(st4);
 	}
 }
 
@@ -417,9 +428,9 @@ static inline double mb_fp_step(const struct mb_fp_args *args, const struct mb_f
 
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
 // the four-pole cascade (fast_filter.c's four_pole), updating the states
-// +st4+ (not flushed).
+// +st4+ and the flush grid count *fk (flushing on the grid).
 static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
-		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4)
+		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4, long *fk)
 {
 	double rate = args->rate, drive = args->drive;
 	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
@@ -438,6 +449,7 @@ static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *
 	for (size_t i = 0; i < length; i++) {
 		mb_fp_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
 		out[i] = (float)mb_fp_step(args, &cc.c, inv_drive, driven, in[i], st);
+		mb_fp_flush_tick(fk, st);
 	}
 
 	st4[0] = st[0];
@@ -582,9 +594,9 @@ static inline double mb_dl_step(const struct mb_fp_args *args, const struct mb_d
 
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
 // the diode ladder (fast_filter.c's diode_ladder), updating the states +st4+
-// (not flushed).
+// and the flush grid count *fk (flushing on the grid).
 static inline void mb_diode_ladder_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
-		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4)
+		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4, long *fk)
 {
 	double rate = args->rate;
 	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
@@ -601,6 +613,7 @@ static inline void mb_diode_ladder_run(const struct mb_fp_args *args, const floa
 	for (size_t i = 0; i < length; i++) {
 		mb_dl_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
 		out[i] = (float)mb_dl_step(args, &cc.c, driven, in[i], st);
+		mb_fp_flush_tick(fk, st);
 	}
 
 	st4[0] = st[0];

@@ -622,6 +622,29 @@ RSpec.describe(MB::Sound::Synth) do
       expect(again.reduce(:concatenate)).to eq(data)
     end
 
+    it 'with exact_lanes, ends at the grid point after the last loud grid cell' do
+      # Lanes measured over whole SKIP_GRID cells (Synth#exact_lanes?): the
+      # same end at any buffer size
+      grid = described_class::SKIP_GRID
+      quiet = described_class.const_get(:QUIET)
+      lengths = [480, 367, 1031].map { |size|
+        events = [ev.note_on(48), ev.note_off(48, time: 1/100r)]
+        s = described_class.new(source(*events, last: nil), voices: 2, tail: 0, exact_lanes: true) { |v|
+          v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
+        }
+        expect(s.exact_lanes?).to eq(true)
+        out = []
+        while (b = s.sample(size)) && out.length < 2000
+          out << b.dup
+        end
+        data = out.reduce(:concatenate)
+        loud = (0...(data.length / grid)).select { |i| c = data[(i * grid)...((i + 1) * grid)]; (c.max - c.min) * 0.5 > quiet }.last
+        expect(out.length).to eq(((loud + 2) * grid / size.to_f).ceil)
+        data
+      }
+      lengths.each { |d| expect(d[0...lengths.map(&:length).min]).to eq(lengths[0][0...lengths.map(&:length).min]) }
+    end
+
     it 'lets an envelope into a resonant filter ring out after a finite source' do
       events = [ev.note_on(48), ev.note_off(48, time: 1/20r)]
       s = described_class.new(source(*events, last: nil), voices: 1, mono: false, spares: 0, tail: 0) { |v|

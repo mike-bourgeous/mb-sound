@@ -39,7 +39,10 @@ module MB
       # between buffers (a reset or sync) gives 1.  A wrap exactly on a
       # sample (within EPS, like the kernels' edges; e.g. every wrap of
       # 2000 Hz at 48 kHz) gives a pulse of 1 on that sample.  There is no
-      # C version: the C sync kernel only reads the pulses.
+      # C version: the C sync kernel only reads the pulses.  +phi+ may be a
+      # tone's phase state Array (a copy from the block's start), whose
+      # grid gives a constant frequency's phases as the kernels compute
+      # them (see mb_phase.h).
       def self.sync_pulses(phi, freq, advance, count, prev)
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
@@ -49,12 +52,17 @@ module MB
         if increments.is_a?(Numo::NArray)
           # A frequency signal: the kernels' running phase (mb_phase.h)
           phases = Numo::DFloat.zeros(count)
-          ph = Tone.wrap_phase(phi)
+          ph = Tone.wrap_phase(phi.is_a?(Array) ? phi[0].to_f : phi)
           count.times do |i|
             phases[i] = ph
             ph = Tone.wrap_phase(ph + increments[i])
           end
           incs = increments
+        elsif phi.is_a?(Array)
+          # A constant frequency: the kernels' phases from the grid in the
+          # phase state +phi+ (mb_phase.h; without changing it)
+          phases, _ = Tone.grid_phases(Tone.grid_phase_start(phi, phi[0].to_f, increments.to_f), count)
+          incs = Numo::DFloat.new(count).fill(increments)
         else
           steps = Numo::DFloat.new(count).seq * increments
           incs = Numo::DFloat.new(count).fill(increments)
@@ -466,12 +474,12 @@ module MB
 
         phi = state[0].to_f
         phi = Tone.wrap_phase(phi) if freqs # a running phase (mb_phase.h)
-        prev_e, prev_inc, prev_pm, primed = bl_state
+        prev_e, prev_inc, prev_pm, primed, prev_w, prev_o = bl_state
         fresh = primed == 0
         primed = primed == 1
 
         out = Numo::SFloat.zeros(count)
-        steps = 0.0
+        grid = freqs ? nil : Tone.grid_phase_start(state, phi, freq * advance) # (mb_phase.h)
         e = inc = 0.0
         pending = 0.0
         pending_d = 0.0
@@ -489,9 +497,8 @@ module MB
           end
 
           inc = freq * advance
-          steps = inc * i unless freqs
 
-          e = freqs ? phi : wrap(phi + steps)
+          e = freqs ? phi : wrap(grid[0] + grid[2] * grid[1])
           e = wrap(e + pm) if pm != 0
           snapped = snap(points, e)
           if snapped
@@ -505,7 +512,10 @@ module MB
           if i > 0 && d_back == pending_d
             v += pending
           elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
-            v += step(points, prev_e, d_back, advance, fade_lo, fade_hi)[1]
+            # The edges of the previous sample's warp, as the pending
+            # correction would have used (mb_bl_oscillate)
+            prev_points = i == 0 && prev_w && (prev_w != w || prev_o != o) ? breakpoints(wave_type, prev_w, false, prev_o) : points
+            v += step(prev_points, prev_e, d_back, advance, fade_lo, fade_hi)[1]
           elsif fresh && i == 0
             v += step(points, wrap(e - inc), inc, advance, fade_lo, fade_hi)[1]
           end
@@ -529,12 +539,19 @@ module MB
           prev_pm = pm
           primed = true
 
-          phi = Tone.wrap_phase(phi + inc) if freqs
+          if freqs
+            phi = Tone.wrap_phase(phi + inc)
+          else
+            Tone.grid_phase_next(grid)
+          end
         end
 
-        steps = freq * advance * count unless freqs
-        state[0] = wrap(phi + steps)
-        bl_state.replace([prev_e, prev_inc, prev_pm, 1]) if count > 0
+        if freqs
+          state[0] = wrap(phi)
+        else
+          Tone.grid_phase_store(state, grid)
+        end
+        bl_state.replace([prev_e, prev_inc, prev_pm, 1, w, o]) if count > 0
 
         out
       end
@@ -667,14 +684,13 @@ module MB
         primed = primed != 0
 
         out = Numo::SComplex.zeros(count)
-        steps = 0.0
+        grid = freqs ? nil : Tone.grid_phase_start(state, phi, freq * advance) # (mb_phase.h)
         p = inc = 0.0
         count.times do |i|
           freq = freqs[i] if freqs
           inc = freq * advance
-          steps = inc * i unless freqs
 
-          p = freqs ? phi : wrap(phi + steps)
+          p = freqs ? phi : wrap(grid[0] + grid[2] * grid[1])
           theta = p * (2.0 * Math::PI)
 
           continued = primed && (i > 0 || (wrap(prev_p + prev_inc - p + 0.5) - 0.5).abs < 1e-6)
@@ -705,11 +721,18 @@ module MB
           prev_inc = inc
           primed = true
 
-          phi = Tone.wrap_phase(phi + inc) if freqs
+          if freqs
+            phi = Tone.wrap_phase(phi + inc)
+          else
+            Tone.grid_phase_next(grid)
+          end
         end
 
-        steps = freq * advance * count unless freqs
-        state[0] = wrap(phi + steps)
+        if freqs
+          state[0] = wrap(phi)
+        else
+          Tone.grid_phase_store(state, grid)
+        end
         blit_state.replace([yre, yim, gre, gim, prev_p, prev_inc, 1]) if count > 0
 
         out

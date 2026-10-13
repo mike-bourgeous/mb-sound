@@ -194,6 +194,14 @@ RSpec.describe 'Buffer size invariance' do
       'phasor' => -> { fm.().phasor },
       'PolyBLEP saw' => -> { fm.().saw },
       'PolyBLEP square, pwm' => -> { fm.().square.pwm(0.3) },
+      # A width or pivot signal moves the edges every sample: the first
+      # sample of a buffer is corrected for the previous sample's warp, as
+      # within a buffer (fixes-7; up to full scale at one-sample buffers)
+      'PolyBLEP square, pwm signal' => -> { fm.().square.pwm(3.hz.lfo.at(0.2..0.8)) },
+      'PolyBLEP saw, pwm signal' => -> { fm.().saw.pwm(0.5.hz.lfo.at(0.1..0.9)) },
+      'PolyBLEP triangle, skew signal' => -> { fm.().triangle.skew(2.hz.lfo.at(0.2..0.8)) },
+      'PolyBLEP square, pivot signal' => -> { fm.().square.pwm(0.3, pivot: 1.5.hz.lfo.at(0..0.5)) },
+      'cycle wavetable, pwm signal' => -> { fm.().wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
       'BLIT complex ramp' => -> { fm.().complex_ramp },
       'feedback sine' => -> { fm.().sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { fm.().wavetable(cycle.()) },
@@ -219,6 +227,7 @@ RSpec.describe 'Buffer size invariance' do
     {
       'naive sine' => ->(f) { f.tone.sine },
       'PolyBLEP saw' => ->(f) { f.tone.saw },
+      'PolyBLEP square with a width signal' => ->(f) { f.tone.square.pwm(MB::Sound.noise.at(0.1..0.9)) },
       'BLIT complex ramp' => ->(f) { f.tone.complex_ramp },
       'cycle wavetable' => ->(f) { f.tone.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
     }.each do |name, make|
@@ -243,6 +252,96 @@ RSpec.describe 'Buffer size invariance' do
             g
           }
           expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
+        end
+      end
+    end
+  end
+
+  # A tone with a constant frequency computes its phases from the last
+  # point of an 800-sample grid of its own time (mb_phase.h; fixes-7), so it
+  # gives the same samples at any block size (before, from each block's
+  # start: a 3.3 Hz phasor's wraps a sample apart at 367/368, a persona
+  # take's 31.1-second loop strikes -130 dB)
+  describe 'tones with a constant frequency' do
+    cycle = -> { MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25, 0.125], size: 256) }
+    sound = -> { Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) } }
+    tones = {
+      'naive sine' => -> { 220.3.hz.sine },
+      'naive ramp' => -> { 220.3.hz.aramp },
+      'phasor' => -> { 3.3.hz.phasor },
+      'LFO' => -> { 0.31.hz.lfo },
+      'PolyBLEP saw' => -> { 220.3.hz.saw },
+      'PolyBLEP square, pwm signal' => -> { 220.3.hz.square.pwm(3.hz.lfo.at(0.2..0.8)) },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.2) },
+      'cycle wavetable' => -> { 220.3.hz.wavetable(cycle.()) },
+      'cycle wavetable, pwm signal' => -> { 220.3.hz.wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
+      'sample wavetable (looped)' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_samples(sound.(), mode: :sample, root: 200, loop: 1000...4000)) },
+      'wraps port' => -> { (1.0 / 0.311).hz.lfo.with_phase(0.93).wraps.ping(400, decay: 0.2) },
+    }
+
+    [false, true].each do |planned|
+      tones.each do |name, make|
+        it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
+          build = -> {
+            g = make.() * 0.5
+            MB::Sound::Plan.install(g) if planned
+            g
+          }
+          expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
+        end
+      end
+    end
+
+    {
+      'naive sine' => -> { 220.3.hz.sine },
+      'PolyBLEP square' => -> { 220.3.hz.square.pwm(0.3) },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'cycle wavetable' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
+      'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.3) },
+      'cycle wavetable, width signal' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], size: 64)).pwm(MB::Sound.noise.at(0.1..0.9)) },
+      'sample wavetable (looped)' => -> {
+        s = Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) }
+        220.3.hz.wavetable(MB::Sound::Wavetable.from_samples(s, mode: :sample, root: 200, loop: 1000...4000))
+      },
+    }.each do |name, make|
+      it "gives the Ruby mirror's samples and state for a #{name} across grid points" do
+        tones = [:sample_c, :sample_ruby].map { |m|
+          MB::Sound.seed(5)
+          [m, make.()]
+        }
+        [367, 1, 1031, 800, 433].each do |n|
+          a, b = tones.map { |m, t| t.public_send(m, n).dup }
+          expect(b.to_a).to eq(a.to_a)
+          expect(tones[1][1].state.phase).to eq(tones[0][1].state.phase)
+          expect(tones[1][1].state.table).to eq(tones[0][1].state.table)
+        end
+      end
+    end
+  end
+
+  # Filters flush states below 1e-30 on an 800-sample grid of their own
+  # time (MB_FLUSH_GRID; fixes-7: after each buffer before, so tails below
+  # 1e-30 differed by buffer size)
+  describe 'filter state flushing' do
+    tiny = -> { MB::Sound::GraphNode::Constant.new(1e-31, sample_rate: 48000) }
+    {
+      'SVF' => -> { tiny.().filter(:lowpass, cutoff: 500, quality: 0.7) },
+      'four-pole' => -> { tiny.().lp4(500, resonance: 0.3) },
+      'diode ladder' => -> { tiny.().diode(500, resonance: 0.3) },
+      'formant' => -> { tiny.().formant(:a, :o, morph: 0.5) },
+      # (sustain: false: the sustain shelf's pitch tracking still differs in
+      # the last bit by buffer size, fixes-7 found)
+      'SVF in a feedback loop' => -> { tiny.().feedback(sustain: false) { |fb, input| input + fb.delay(30.samples).filter(:lowpass, cutoff: 3000, quality: 0.7) * 0.5 } },
+    }.each do |name, make|
+      [false, true].each do |planned|
+        it "gives the same tiny tails at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
+          build = -> {
+            g = make.() * 1e30
+            MB::Sound::Plan.install(g) if planned
+            g
+          }
+          expect_invariant(build, seconds: 0.1, sizes: [[367, 368], [1], [1031]])
         end
       end
     end
@@ -286,6 +385,69 @@ RSpec.describe 'Buffer size invariance' do
       expect_invariant(-> { clip.call.synth(voices: 2) { |v, _i| patches['noise'].(v) } }, seconds: 0.4, sizes: [[1]])
     ensure
       MB::Sound.bpm(old)
+    end
+
+    # With exact_lanes (Synth#exact_lanes?; renders and takes can ask for
+    # it), lanes become free for new notes by their quiet state over whole
+    # grid cells (fixes-7): measured per buffer, a released lane was free at
+    # 367/368 but not at 800 when a note came, so the note went to another
+    # lane, whose free-running sine had another phase (a persona take's
+    # keys, +1.2 dB)
+    [:string, :reuse].each do |retrigger|
+      it "allocates the same lanes at any buffer size (retrigger: #{retrigger})" do
+        notes = MB::Sound.seq(
+          MB::Sound::C4.n32, MB::Sound::E4.n32, MB::Sound::Rest.n64, MB::Sound::C4.n32, MB::Sound::G4.n64,
+          MB::Sound::Rest.n32.t, MB::Sound::E4.n32, MB::Sound::C4.n64.d, MB::Sound::Rest.n16
+        ).humanize(1.n128).loop
+        make = -> {
+          MB::Sound.seed(3)
+          notes.synth(voices: 3, retrigger: retrigger, exact_lanes: true) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+        }
+        expect_invariant(make, seconds: 3, sizes: [[367, 368], [1], [1031], [64]])
+      end
+    end
+
+    it 'aligns the grid of a Synth launched off it with the Session frames (no split 800-sample buffers)' do
+      # A synth launched at frame 13714: its grid (where lanes are measured
+      # for the allocator) falls on Session frames that are multiples of
+      # 800, so 800-sample buffers are read whole (fixes-7); other sizes
+      # split and give the same samples
+      results = [[800], [367, 368], [1031]].map { |sizes|
+        out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+        s = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        s.exact_lanes = true
+        MB::Sound.seed(3)
+        syn = clip.call.synth(voices: 2, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+        pieces = 0
+        syn.define_singleton_method(:sample_lanes_piece) { |n| pieces += 1; super(n) }
+        s.add(syn, name: :x, start_time: 1/7r)
+        data = []
+        i = 0
+        while s.frame < 96_000
+          data << s.process_buffer(sizes[i % sizes.length])[0].dup
+          i += 1
+        end
+        s.close
+        expect(syn.exact_lanes?).to eq(true)
+        expect(pieces).to eq(i - 17) if sizes == [800] # one piece per buffer once it started (frame 13714, in buffer 17)
+        data.reduce(:concatenate)
+      }
+      n = results.map(&:length).min
+      results.each { |r| expect(r[0...n]).to eq(results[0][0...n]) }
+      expect(results[0].abs.max).to be > 0.1
+    ensure
+      MB::Sound.rewind
+    end
+
+    it 'reads whole buffers without exact_lanes (the default) at any buffer size' do
+      syn = clip.call.synth(voices: 2) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+      expect(syn.exact_lanes?).to eq(false)
+      pieces = 0
+      syn.define_singleton_method(:sample_lanes_piece) { |n| pieces += 1; super(n) }
+      100.times { syn.sample(367) }
+      expect(pieces).to eq(100)
+    ensure
+      MB::Sound.rewind
     end
 
     it 'skips lanes in the invariance cases (so the cases test something)' do

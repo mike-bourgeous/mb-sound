@@ -43,9 +43,20 @@ module MB::Sound
   # The song's length in bars.
   ACID_SONG_BARS = 16
 
+  # The acid's filter drive, makeup gain into its clipper (12 dB over
+  # acid.rb's), and level (see .acid_song); -D 1.5 -G 3 -l 0.9 is the song
+  # before 2026-10-13.
+  ACID_SONG_DRIVE = 4.0
+  ACID_SONG_GAIN = 12.0
+  ACID_SONG_LEVEL = 0.75
+
   # Starts the song on the current session (live, or inside a render
-  # block); +filter+ is :diode or :lp4.
-  def self.acid_song(filter: :diode)
+  # block); +filter+ is :diode or :lp4.  +drive+ is the filter's drive and
+  # +gain+ the makeup gain into the voice's soft clipper (acid_patch;
+  # 1.5 and 3.0 there), pushed here so the acid distorts (maintainer
+  # 2026-10-13: "Acid should be pushed into its distortion a fair amount
+  # anyway; try cranking the acid up"); +level+ is its level in the mix.
+  def self.acid_song(filter: :diode, drive: ACID_SONG_DRIVE, gain: ACID_SONG_GAIN, level: ACID_SONG_LEVEL)
     bpm 128
 
     main = acid(A1, !A1, ~A2, A1, R, C2, !A1, T, ~D2, E2, A1.up, R, !G1, ~A1, A2, R).loop
@@ -59,7 +70,7 @@ module MB::Sound
     # The cutoff knob rises from 180 to 900 Hz and back over 8 bars
     knob = 8.bars.lfo.triangle.at(180..900)
     # MEG decay 1.3 s on the exponential curve (0.5 s linear before 2026-10-10)
-    acid = acid_voice(main, cutoff: knob, reso: 0.7, decay: 1.3, filter: filter)
+    acid = acid_voice(main, cutoff: knob, reso: 0.7, decay: 1.3, filter: filter, drive: drive, gain: gain)
 
     kick = (45.constant + 120 * beat[:kick].env(0, 0.03, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.25, 0, 0.05) * 0.8
     hats = noise.at(1).filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02, sensitivity: 0.3..1, curve: :linear) * 0.2
@@ -67,7 +78,7 @@ module MB::Sound
 
     master { |mix| mix.softclip(0.6, 0.98) }
 
-    bg :acid, acid * 0.9, fade: 0
+    bg :acid, acid * level, fade: 0
     bg :drums, kick + hats + clap, fade: 0
 
     at_bar(5) { swap :acid, poly }
@@ -81,6 +92,9 @@ module MB::Sound
     song_script(
       bars: ACID_SONG_BARS,
       filter: [:diode, Symbol, '-F', 'The acid filter', [:diode, :lp4]],
-    ) { |p| acid_song(filter: p.filter) }
+      drive: [ACID_SONG_DRIVE, Float, '-D', 'Acid filter drive (acid.rb: 1.5)', 0.1..10.0],
+      gain: [ACID_SONG_GAIN, Float, '-G', 'Acid makeup gain into its soft clipper (acid.rb: 3)', 0.1..30.0],
+      level: [ACID_SONG_LEVEL, Float, '-l', 'Acid level in the mix', 0.0..2.0],
+    ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level) }
   end
 end

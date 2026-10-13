@@ -128,6 +128,73 @@ module MB
         r < 1.0 ? r : 0.0
       end
 
+      # The grid of constant-frequency phases (MB_PHASE_GRID in mb_phase.h):
+      # a tone with a constant frequency computes each sample's phase from
+      # the phase at the last point of a grid of this many samples of its
+      # own time, so it gives the same samples at any block size.
+      PHASE_GRID = 800
+
+      # x - floor(x) as the C kernels' mb_wrap(x, 1.0) (NaN for non-finite x).
+      def self.wrap_cycles(x)
+        x.finite? ? x - x.floor : Float::NAN
+      end
+
+      # Ruby mirror of mb_grid_phase_read and mb_grid_phase_start: the grid
+      # [base, k, inc] in entries 1..3 of phase state Array +state+ if it
+      # leads to phase +phi+ with increment +inc+, else a new grid at +phi+.
+      def self.grid_phase_start(state, phi, inc)
+        b, k, i = state[1], state[2], state[3]
+        if b.is_a?(Float) && k.is_a?(Float) && i.is_a?(Float) && i == inc && k >= 0 && k < PHASE_GRID && wrap_cycles(b + inc * k) == phi
+          [b, k, i]
+        else
+          [phi, 0.0, inc]
+        end
+      end
+
+      # Ruby mirror of a kernel's constant-frequency phases: +count+
+      # phases (wrapped, a DFloat) from +grid+ ([base, k, inc]; see
+      # .grid_phase_start), returning [phases, the grid after them].
+      # +wrap+ (a Proc) wraps values instead (sample positions in a loop).
+      def self.grid_phases(grid, count, wrap = nil)
+        base, k, inc = grid
+        phases = Numo::DFloat.zeros(count)
+        o = 0
+        while o < count
+          n = MB::M.min((PHASE_GRID - k).to_i, count - o)
+          seg = Numo::DFloat.new(n).seq(k) * inc + base
+          phases[o...(o + n)] = wrap ? seg.map { |v| wrap.call(v) } : seg - seg.floor
+          k += n
+          if k >= PHASE_GRID
+            base = wrap ? wrap.call(base + inc * PHASE_GRID) : wrap_cycles(base + inc * PHASE_GRID)
+            k = 0.0
+          end
+          o += n
+        end
+        [phases, [base, k.to_f, inc]]
+      end
+
+      # Ruby mirror of mb_grid_phase_next: moves +grid+ ([base, k, inc],
+      # changed in place) to the next sample.
+      def self.grid_phase_next(grid)
+        grid[1] += 1.0
+        if grid[1] >= PHASE_GRID
+          grid[0] = wrap_cycles(grid[0] + grid[2] * PHASE_GRID)
+          grid[1] = 0.0
+        end
+        grid
+      end
+
+      # Stores +grid+ ([base, k, inc]) and the phase it leads to into phase
+      # state Array +state+ (mb_grid_phase_now, mb_grid_phase_write).
+      def self.grid_phase_store(state, grid)
+        base, k, inc = grid
+        state[0] = wrap_cycles(base + inc * k)
+        state[1] = base
+        state[2] = k
+        state[3] = inc
+        state
+      end
+
       # Waveform shapes (see #sine, #ramp, ...).  A #phasor tone has the
       # wave type :phasor instead.
       WAVE_TYPES = [
@@ -1712,7 +1779,7 @@ module MB
 
         state = @state
         if @ports
-          state.frame_phase = state.phase[0]
+          state.frame_phase = state.phase.dup # (with its grid; see BandLimit.sync_pulses)
           state.frame_freq = freq
           state.frame_segments = nil
         end
@@ -2369,7 +2436,7 @@ module MB
         (splits + [count]).each do |stop|
           if stop > start
             f = slice_input(freq, start, stop)
-            state.frame_segments&.push([state.phase[0], f, stop - start])
+            state.frame_segments&.push([state.phase.dup, f, stop - start])
 
             out = @osc_buf[start...stop].inplace!
             result = yield(
@@ -2643,13 +2710,9 @@ module MB
           return [phases, increments]
         end
 
-        steps = Numo::DFloat.new(count).seq * increments
-        total = increments * count
-
-        phi = @state.phi
-        phases = steps + phi
-        phases -= phases.floor # like Ruby's %, not Numo's (which keeps the sign)
-        @state.phi = phi + total
+        # A constant frequency: phases from its grid (mb_phase.h)
+        phases, grid = Tone.grid_phases(Tone.grid_phase_start(@state.phase, @state.phi, increments.to_f), count)
+        Tone.grid_phase_store(@state.phase, grid)
 
         [phases, increments]
       end

@@ -7,7 +7,7 @@
 # it; research branch research-persona-jungle, research/persona-panel/jungle/,
 # with Nev's review, friction log, and a performed take).  The song moved
 # here from that branch; its patches, the sampler included, live in
-# bin/synths/skylark_junction.rb (playable from MIDI, and saved as presets).
+# bin/synths/jungle.rb (playable from MIDI, and saved as presets).
 #
 # In D minor / F major, 96 bars (about 2:20 plus the ring-out).  Written
 # with the public mb-sound API only.
@@ -15,11 +15,11 @@
 # The break is the point.  There is no sampler in mb-sound yet, so the
 # song first presses its own "record": a two-bar funk break played on
 # the TR-808 kit (tuned up to sound more like a kit than a drum machine)
-# at 138.75 BPM in a small room, softclipped like tape (.nev_record).
+# at 138.75 BPM in a small room, softclipped like tape (.jungle_record).
 # Then it does what we did on the S950: cuts the record into slices,
 # truncates them to 12 bits, puts each slice on its own key zone
 # (Wavetable::KeyMap of sample-mode tables, 11 semitones per zone;
-# .nev_sampler) and
+# .jungle_sampler) and
 # plays the slices from note patterns, three semitones up so 138.75 BPM
 # lands on 165 (2^(3/12) * 138.75 = 165.0: pitch it up until it fits).  The
 # whole record is a slice too (:full), so rolling sections loop it in
@@ -62,7 +62,7 @@
 #
 require 'bundler/setup'
 require 'mb-sound'
-require_relative '../synths/skylark_junction'
+require_relative '../synths/jungle'
 
 module MB::Sound
   MEMORY_CARD_BPM = 165
@@ -72,11 +72,11 @@ module MB::Sound
   # played three semitones up land exactly on the song's grid.
   MEMORY_CARD_RECORD_BPM = MEMORY_CARD_BPM / 2 ** (3 / 12.0)
 
-  # A chop pattern in 16ths: slice names (see .nev_slices), [name,
+  # A chop pattern in 16ths: slice names (see .jungle_slices), [name,
   # semitones] for pitched slices, and Tie/Rest (T/R) steps; e.g.
   # chop(:k, T, :h, :g, [:s, 2]).
   def self.chop(*steps)
-    keys = nev_slice_keys
+    keys = jungle_slice_keys
     seq(*steps.map { |s|
       case s
       when Symbol then keys.fetch(s)
@@ -183,7 +183,7 @@ module MB::Sound
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
   def self.memory_card(drive: 5.0, ceiling: -1.0)
-    map = nev_sampler(bpm: MEMORY_CARD_RECORD_BPM) # (renders the record at its own tempo first)
+    map = jungle_sampler(bpm: MEMORY_CARD_RECORD_BPM) # (renders the record at its own tempo first)
     chops = memory_card_chops
     c = memory_card_clips
     k = memory_card_kits
@@ -199,13 +199,13 @@ module MB::Sound
       (glued * drive.db).limit(ceiling: ceiling.db, release: 0.1)
     }
 
-    track(:breaks) { |clip| nev_breaks_voice(clip, map: map, cutoff: knob(:brk)) }
-    track(:perc) { |kit| nev_perc(kit) }
-    track(:sub) { |clip| nev_sub_voice(clip) }
-    track(:reese) { |clip| nev_reese_voice(clip) }
-    track(:keys) { |clip| nev_rhodes_voice(clip) }
-    track(:pad) { |clip| nev_pad_voice(clip) }
-    track(:lead) { |clip| nev_flute_voice(clip, send: knob(:space)) }
+    track(:breaks) { |clip| jungle_breaks_voice(clip, map: map, cutoff: knob(:brk)) }
+    track(:perc) { |kit| jungle_perc(kit) }
+    track(:sub) { |clip| jungle_sub_voice(clip) }
+    track(:reese) { |clip| jungle_reese_voice(clip) }
+    track(:keys) { |clip| jungle_keys_voice(clip) }
+    track(:pad) { |clip| jungle_pad_voice(clip) }
+    track(:lead) { |clip| jungle_flute_voice(clip, send: knob(:space)) }
     track(:riser, fade: 1/8r) { |_clip| memory_card_riser }
 
     # The breaks stay loaded on a silent chop from the start (scenes swap

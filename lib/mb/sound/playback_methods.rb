@@ -748,6 +748,10 @@ module MB
       # full scale, which integer formats clip; the render warns).
       # +:loudness+ normalizes only the mix file.
       #
+      # +:exact_lanes+ (true) makes the render the same at any buffer size
+      # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
+      # CPU at buffer sizes other than 800).
+      #
       #     render('song.flac', bars: 32, stems: 'song_stems') { my_song }
       #
       # Example (bin/sound.rb):
@@ -773,7 +777,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, max_seconds: nil, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, max_seconds: nil, exact_lanes: false, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -781,6 +785,7 @@ module MB
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+        session.exact_lanes = exact_lanes
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)

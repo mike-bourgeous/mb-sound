@@ -243,6 +243,16 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect(again).to include('options: { voices: 4 }')
     end
 
+    it 'reads a description from the header and keeps it on a re-save' do
+      described = doc.sub('graph 1, name: "tremolo",', 'graph 1, name: "tremolo", description: "A \\"wobbly\\" tremolo",')
+      expect(io.parse(described).description).to eq('A "wobbly" tremolo')
+      g = io.load(described, inputs: { input: 1.constant })
+      expect(io.document_of(g).description).to eq('A "wobbly" tremolo')
+      expect(io.dump(g)).to include('description: "A \\"wobbly\\" tremolo"')
+      expect(io.dump(g, meta: { description: 'Calmer' })).to include('description: "Calmer"')
+      expect(io.parse(doc).description).to be_nil
+    end
+
     it 'raises for unknown params, baked options, and non-numbers' do
       expect { io.load(doc, inputs: { input: 1.constant }, params: { dpeth: 1 }) }.to raise_error(io::LoadError, /no param dpeth \(did you mean depth/)
       expect { io.load(doc, inputs: { input: 1.constant }, params: { voices: 2 }) }.to raise_error(io::LoadError, /voices was baked into this patch/)
