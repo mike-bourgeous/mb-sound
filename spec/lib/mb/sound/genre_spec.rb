@@ -159,6 +159,8 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
   end
 
   describe 'playing' do
+    include PatchHelpers # (band_share, seconds)
+
     it 'sets up tracks, knobs, and scenes, and plays the form from presets and tr808' do
       path = tmp_path('genre.flac')
       t = genre[:funk].short(20)
@@ -190,6 +192,40 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(node.to_ruby).to include('duck(').and include('kick: { tune: 54')
       expect { t.patch(:nope, clip) }.to raise_error(ArgumentError, /No role :nope/)
       expect { MB::Sound::Genre.build_patch(:no_such_patch_x, clip) }.to raise_error(ArgumentError, /No preset or method/)
+    end
+
+    it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked under the pulse kick' do
+      t = genre[:techno]
+      expect(t.roles[:bass].patch).to eq(:roller)
+      expect(t.roles[:bass].duck).to eq(-9.db)
+      expect(t.pulse).to eq(:peak)
+      MB::Sound.knob(:cut, 400, range: 150..6000, curve: :exp)
+
+      # The roller alone: stereo, its tick above 1 kHz, its low end mono
+      path = tmp_path('roller.flac')
+      MB::Sound.render(path, bars: 1, tail: false) do
+        MB::Sound.bpm 132
+        MB::Sound.bg :bass, MB::Sound::Genre::Patches.roller(t.clips[:bass]), fade: 0
+      end
+      l, r = MB::Sound.read(path)
+      expect(l).not_to eq(r) # (the room)
+      expect(band_share(l.dup, 1000, 8000)).to be > 0.002 # (a short tick: 0.34% of the power)
+      side = l - r
+      expect(band_share(side.dup, 0, 120) * (side**2).sum).to be < (l**2).sum * 1e-4
+
+      # Ducked: the bass is quieter right after each kick than with no duck
+      plain = t.with(roles: t.roles.merge(bass: t.roles[:bass].with(duck: nil)))
+      level = ->(tt) {
+        p2 = tmp_path("roller_#{tt.equal?(t) ? 'duck' : 'plain'}.flac")
+        MB::Sound.render(p2, bars: 1, tail: false) do
+          MB::Sound.bpm 132
+          MB::Sound.bg :bass, tt.patch(:bass, tt.clips[:bass]), fade: 0
+        end
+        x = MB::Sound.read(p2)[0]
+        beat = 60.0 / 132
+        (0...4).sum { |b| (seconds(x, b * beat + beat / 4, b * beat + beat / 2)**2).sum }
+      }
+      expect(10 * Math.log10(level.(t) / level.(plain))).to be < -3
     end
   end
 end

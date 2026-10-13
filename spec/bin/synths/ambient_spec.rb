@@ -55,6 +55,24 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(high).to be_within(4).of(125)
   end
 
+  it 'moves the gong\'s shimmer up or down with tune: (semitones; a number or a node), the low partials staying' do
+    gong = ->(**o) { render_patch(MB::Sound.with_seed(5) { MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0, ring: 1, **o) }, 4)[0] }
+    # The shimmer's power-weighted mean frequency above 800 Hz
+    centroid = ->(x) {
+      s = Numo::Pocketfft.rfft(Numo::DFloat.cast(seconds(x, 2.5, 3.5))).abs**2
+      s = s[800..]
+      (s * (Numo::DFloat.new(s.length).seq + 800)).sum / s.sum
+    }
+    base = gong.()
+    low = gong.(tune: -12)
+    high = gong.(tune: 5)
+    expect(gong.(tune: 0)).to eq(base)
+    expect(centroid.(low)).to be < centroid.(base) * 0.75
+    expect(centroid.(high)).to be > centroid.(base) * 1.15
+    expect(peak_hz(seconds(low, 3, 4), 40, 70)).to be_within(1.5).of(55)
+    expect((gong.(tune: -12.constant) - low).abs.max).to be < 1e-4 # (a node, e.g. a knob)
+  end
+
   it 'wears the koto and harp with the tape' do
     notes = -> { patch_notes([MB::Sound::A4.number, 0, 0.5], [MB::Sound::D5.number, 0.5, 1]) }
     new = render_patch(MB::Sound.ambient_koto_voice(notes.(), wear: 0, space: 0), 2)[0]

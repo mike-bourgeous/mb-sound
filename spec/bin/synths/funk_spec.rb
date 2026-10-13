@@ -64,6 +64,41 @@ RSpec.describe('bin/synths/funk.rb') do
     expect(spread.(moving)).to be > spread.(still) + 2
   end
 
+  it 'drifts the talkbox\'s vowels over two bars with vowel_rate:, the eighth-note mouth staying' do
+    held = -> { MB::Sound.seq(MB::Sound::A4.n1).loop }
+    bar = 60.0 / 96 * 4
+    # Each bar's note says different vowels as the 2-bar drift moves (lowest at bar 1, highest at bar 2);
+    # without it every bar is the same
+    # (third-octave band levels from 250 Hz to 4 kHz, phase-insensitive: the buzz runs free across notes)
+    bands = ->(x) { (0...12).map { |k| lo = 250 * 2**(k / 3.0); 10 * Math.log10(band_share(x.dup, lo, lo * 2**(1 / 3.0))) } }
+    change = ->(x) { bands.(seconds(x, 0, bar / 2)).zip(bands.(seconds(x, bar, bar * 1.5))).map { |p, q| (p - q).abs }.max }
+    slow = change.(render_bars(2) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) })
+    still = change.(render_bars(2) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, vowel_rate: nil) })
+    expect(slow).to be > still + 3
+    # ... and the mouth still opens and closes on the eighths
+    x = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) }
+    steps = band_steps(seconds(x, bar / 2, bar), bar / 8, 900, 2500).map { 10 * Math.log10(_1) }
+    expect(steps.max - steps.min).to be > 1
+  end
+
+  it 'says the talkbox\'s vowels across the whole list (u to e), opening with each note' do
+    held = -> { MB::Sound.seq(MB::Sound::A4.n1).loop }
+    x = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, groove: 0) }
+    e = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, groove: 0, vowels: [:e]) }
+    # (before 2026-10-13 the morph stayed on "e"; now the sustain sits between "o" and "a")
+    expect(rms_db(seconds(x, 0.5, 2) - seconds(e, 0.5, 2))).to be > rms_db(seconds(e, 0.5, 2)) - 10
+  end
+
+  it 'opens the beatbox snare\'s formant (less resonance) with snare_width:' do
+    kit = -> { MB::Sound.grid(16, snare: '....X.......X...').loop }
+    narrow = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, snare_width: 0.4) }
+    default = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true) }
+    wide = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, snare_width: MB::Sound::FUNK_BEATBOX_SNARE_WIDTH) }
+    expect(default).to eq(wide)
+    expect(MB::Sound::FUNK_BEATBOX_SNARE_WIDTH).to be > 0.4
+    expect((default - narrow).abs.max).to be > 0.01
+  end
+
   it 'plays the bass louder and a little brighter with velocity' do
     d2 = MB::Sound::D2.number
     soft = render_patch(MB::Sound.funk_bass_voice(patch_notes([d2, 0, 0.5, 0.3])), 0.5)[0]
