@@ -16,7 +16,7 @@ Branch `genre-1` (2026-10-13).  Maintainer, after the persona panel: "The person
 | `form` | `Form` (a `flow` block) | intro 32, build 8, drop 32 (at bar 41: the classic "drop at 33" plus a build), breakdown 16, pullup 1, drop2 32, outro 32 |
 | `kits` | `{name => Sequence::Kit}` (grids, fills) | `:intro`, `:build`, `:drop` (two-step, ghosts, a `:roll` fill), ... |
 | `clips` | `{name => Sequence::Clip}` | `:riff`, `:chords`, `:hook`, `:hit` |
-| `roles` | `{name => Genre::Role}` | `drums: Role(:dnb_drums)`, `bass: Role(:dnb_reese, level: -1.db, duck: -8.db, filter: :cut)` |
+| `roles` | `{name => Genre::Role}` | `drums: Role(:dnb_drums)`, `bass: Role(:dnb_reese, params: { cutoff: :cut }, duck: -8.db)` |
 | `scenes` | `{name => {track => kit/clip name, knob => value}}` | `drop: { drums: :drop, bass: :riff, sub: :riff, cut: 2400 }` |
 | `knobs` | `{name => [default, options]}` | `cut: [2400, { range: 150..8000, curve: :exp }]` |
 | `pulse` | kit name whose kick row keys ducks | `:drop` |
