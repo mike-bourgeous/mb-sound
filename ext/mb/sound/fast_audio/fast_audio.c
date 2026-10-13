@@ -265,8 +265,10 @@ static VALUE ruby_jack_open(VALUE self, VALUE name)
 /*
  * call-seq: MB::Sound::FastAudio.jack_info -> Hash or nil
  *
- * The shared JACK client's :client_name, :sample_rate, :buffer_size, and
- * :cycles (process cycles run), or nil if it isn't open.
+ * The shared JACK client's :client_name, :sample_rate, :buffer_size,
+ * :cycles (process cycles run), :skipped_cycles and :repeated_cycles (server
+ * cycles this client missed or was called twice for, when an asynchronous
+ * server found it late), or nil if it isn't open.
  */
 static VALUE ruby_jack_info(VALUE self)
 {
@@ -279,6 +281,8 @@ static VALUE ruby_jack_info(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("sample_rate")), UINT2NUM(mb_jack_sample_rate()));
 	rb_hash_aset(h, ID2SYM(rb_intern("buffer_size")), UINT2NUM(mb_jack_buffer_size()));
 	rb_hash_aset(h, ID2SYM(rb_intern("cycles")), SIZET2NUM(mb_jack_cycles()));
+	rb_hash_aset(h, ID2SYM(rb_intern("skipped_cycles")), SIZET2NUM(mb_jack_cycles_skipped()));
+	rb_hash_aset(h, ID2SYM(rb_intern("repeated_cycles")), SIZET2NUM(mb_jack_cycles_repeated()));
 	return h;
 }
 
@@ -2262,6 +2266,18 @@ struct jack_midi {
 	_Atomic size_t read_pos;
 	_Atomic size_t messages; // messages that went through
 	_Atomic size_t dropped; // messages that didn't fit (queue or port buffer)
+	_Atomic size_t repeated; // messages of a repeated cycle, not queued again
+
+	// The last input cycle that had messages (JACK's thread only; see
+	// midi_in_process)
+	uint32_t last_frame;
+	uint64_t last_print;
+	int have_last;
+
+	// #stall (specs): sleep stall_us in every stall_every-th callback
+	_Atomic unsigned stall_us;
+	_Atomic unsigned stall_every;
+	unsigned stall_count; // JACK's thread only
 
 	_Atomic int open;
 	_Atomic int stopped;
@@ -2290,10 +2306,53 @@ static void ring_get(struct jack_midi *m, size_t pos, uint8_t *dst, size_t n)
 	memcpy(dst + first, m->data, n - first);
 }
 
+// FNV-1a over an input buffer's events (times, sizes, and bytes)
+static uint64_t midi_fingerprint(void *buffer, uint32_t count)
+{
+	uint64_t h = 0xcbf29ce484222325ULL;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t time;
+		const uint8_t *bytes;
+		size_t size;
+		if (mb_jack_midi_get(buffer, i, &time, &bytes, &size) != 0) {
+			continue;
+		}
+		uint8_t head[8] = {
+			time & 0xff, (time >> 8) & 0xff, (time >> 16) & 0xff, time >> 24,
+			size & 0xff, (size >> 8) & 0xff, (size >> 16) & 0xff, (size >> 24) & 0xff,
+		};
+		for (size_t k = 0; k < sizeof(head); k++) {
+			h = (h ^ head[k]) * 0x100000001b3ULL;
+		}
+		for (size_t k = 0; k < size; k++) {
+			h = (h ^ bytes[k]) * 0x100000001b3ULL;
+		}
+	}
+	return h;
+}
+
 // JACK's thread: input port events into the ring
+//
+// An asynchronous JACK server (jackd without --sync) starts each cycle on
+// time even when a client hasn't finished the last one, so a late client
+// can be called twice in one server cycle.  Its port buffers (and the
+// frame time) then belong to the server's current cycle both times, so the
+// second call would queue the same messages again (a note-on twice, at the
+// same frame).  A cycle with the frame time and the messages of the last
+// one is that repeat and is skipped (counted in #stats).  Frame times
+// always move between real cycles, so nothing else changes.  (A late
+// client also misses cycles; their messages are gone, overwritten by the
+// sending client's next cycle, and nothing here can bring them back.)
 static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 {
 	struct jack_midi *m = unit->user;
+
+	unsigned stall_us = atomic_load_explicit(&m->stall_us, memory_order_relaxed);
+	if (stall_us != 0 && ++m->stall_count % atomic_load_explicit(&m->stall_every, memory_order_relaxed) == 0) {
+		struct timespec ts = { stall_us / 1000000, (stall_us % 1000000) * 1000L };
+		nanosleep(&ts, NULL);
+	}
+
 	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
 	uint32_t count = mb_jack_midi_count(buffer);
 	if (count == 0) {
@@ -2301,6 +2360,15 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 	}
 
 	uint32_t base = mb_jack_last_frame_time();
+	uint64_t print = midi_fingerprint(buffer, count);
+	if (m->have_last && base == m->last_frame && print == m->last_print) {
+		atomic_fetch_add_explicit(&m->repeated, count, memory_order_relaxed);
+		return;
+	}
+	m->last_frame = base;
+	m->last_print = print;
+	m->have_last = 1;
+
 	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
 	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
 
@@ -2683,15 +2751,50 @@ static VALUE jack_midi_port_name(VALUE self)
 	return atomic_load(&m->open) && m->unit.port_count ? rb_utf8_str_new_cstr(mb_jack_port_name(m->unit.ports[0])) : Qnil;
 }
 
-/* { messages:, dropped:, queued: } (queued in bytes) */
+/*
+ * { messages:, dropped:, repeated:, queued: } (queued in bytes; repeated:
+ * messages of a cycle the server ran twice, received once)
+ */
 static VALUE jack_midi_stats(VALUE self)
 {
 	struct jack_midi *m = get_jack_midi(self);
 	VALUE h = rb_hash_new();
 	rb_hash_aset(h, ID2SYM(rb_intern("messages")), SIZET2NUM(atomic_load(&m->messages)));
 	rb_hash_aset(h, ID2SYM(rb_intern("dropped")), SIZET2NUM(atomic_load(&m->dropped)));
+	rb_hash_aset(h, ID2SYM(rb_intern("repeated")), SIZET2NUM(atomic_load(&m->repeated)));
 	rb_hash_aset(h, ID2SYM(rb_intern("queued")), SIZET2NUM(midi_queued(m)));
 	return h;
+}
+
+/*
+ * The messages of repeated cycles received once (stats[:repeated], without
+ * allocating a Hash; MIDI::Input checks it on every read).
+ */
+static VALUE jack_midi_repeated(VALUE self)
+{
+	return SIZET2NUM(atomic_load(&get_jack_midi(self)->repeated));
+}
+
+/*
+ * call-seq:
+ *   input.stall(microseconds, every) -> nil
+ *
+ * For specs: makes every +every+-th JACK callback of this input sleep for
+ * +microseconds+ before reading its port, like a client thread the system
+ * didn't schedule in time (0 microseconds stops).  An asynchronous server
+ * then skips and repeats cycles for the client (see midi_in_process).
+ */
+static VALUE jack_midi_stall(VALUE self, VALUE microseconds, VALUE every)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	unsigned us = NUM2UINT(microseconds);
+	unsigned n = NUM2UINT(every);
+	if (us > 1000000 || n == 0) {
+		rb_raise(rb_eArgError, "Stalls are up to a second, every 1 or more callbacks");
+	}
+	atomic_store(&m->stall_every, n);
+	atomic_store(&m->stall_us, us);
+	return Qnil;
 }
 
 static void init_jack_midi(VALUE fast_audio)
@@ -2704,6 +2807,8 @@ static void init_jack_midi(VALUE fast_audio)
 	rb_define_method(input, "closed?", jack_midi_closed, 0);
 	rb_define_method(input, "port_name", jack_midi_port_name, 0);
 	rb_define_method(input, "stats", jack_midi_stats, 0);
+	rb_define_method(input, "repeated", jack_midi_repeated, 0);
+	rb_define_method(input, "stall", jack_midi_stall, 2);
 
 	VALUE output = rb_define_class_under(fast_audio, "JackMIDIOutput", rb_cObject);
 	rb_define_alloc_func(output, jack_midi_alloc);
