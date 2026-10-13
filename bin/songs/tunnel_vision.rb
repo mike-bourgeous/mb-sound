@@ -53,6 +53,7 @@
 #     bin/songs/tunnel_vision.rb tv.flac         # renders (-f to overwrite)
 #     bin/songs/tunnel_vision.rb --stems stems/ tv.flac
 #     bin/songs/tunnel_vision.rb -D 8 -C -1 tv.flac   # gentler master
+#     bin/songs/tunnel_vision.rb --no-buses tv.flac   # Kez's original ambience (no buses)
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/tunnel_vision.rb'
@@ -63,6 +64,9 @@
 #     go :drop; turn :cut, 600, over: 2; turn :cut, 5000, over: 1.n4   # Reese filter ride
 #     turn :grit, 0.6, over: 4      # more crusher on the neuro bass
 #     move :air, 180; undo          # low end out, then back next bar
+#     feed :pad, :hall, 1, over: 2  # drown the pad in the hall (buses)
+#     solo :hall                    # just the reverb return (and what feeds it)
+#     mute :echo; unmute :echo, on: :bar
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -160,7 +164,15 @@ module MB::Sound
   end
 
   # Sets up the song on the current session.  Returns the clips.
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING)
+  #
+  # +buses+ (default; buses-1, 2026-10-13) plays the ambience through
+  # shared buses: the pad and pluck dry, sending to a :hall reverb bus
+  # (ducked by the kick) and the pluck to an :echo bus (dotted eighths,
+  # the :space knob as its send), and the basses duck by the drums'
+  # own kick (`duck(:drums, only: :kick)`) instead of a ghost kick.
+  # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
+  # kick for the ducks).
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -176,11 +188,22 @@ module MB::Sound
     master { |mix| kez_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
 
     track(:drums) { |kit| kez_drums(kit, kick: TV_KICK) }
-    track(:reese) { |clip| (kez_reese_voice(clip, cutoff: knob(:cut)) * 1.0).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:sub) { |clip| (kez_sub_voice(clip) * 0.5).duck(tv_ghost_kick, amount: -12.db, release: 1.n16) }
-    track(:neuro) { |clip| (kez_neuro_voice(clip, grit: knob(:grit)) * 0.85).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:pad) { |clip| kez_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
-    track(:pluck) { |clip| kez_pluck_voice(clip, send: knob(:space)) * 0.45 }
+    if buses
+      # The sidechain: the drums' kick voice itself, read on the exact
+      # sample (no ghost kick to keep in step with the kit)
+      bus(:hall) { |sig| sig.reverb(:hall, mix: 1).duck(:drums, only: :kick, amount: -6.db, release: 1.n8) }
+      bus(:echo) { |sig| sig.delay(1.n8.dotted, feedback: 0.4) }
+      duck = ->(node, amount) { node.duck(:drums, only: :kick, amount: amount, release: 1.n16) }
+      track(:pad, send: { hall: 0.35 }) { |clip| kez_pad_voice(clip, hall: nil) * 0.6 }
+      track(:pluck, send: { echo: :space, hall: 0.25 }) { |clip| kez_pluck_voice(clip, send: nil, plate: nil) * 0.45 }
+    else
+      duck = ->(node, amount) { node.duck(tv_ghost_kick, amount: amount, release: 1.n16) }
+      track(:pad) { |clip| kez_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
+      track(:pluck) { |clip| kez_pluck_voice(clip, send: knob(:space)) * 0.45 }
+    end
+    track(:reese) { |clip| duck.(kez_reese_voice(clip, cutoff: knob(:cut)) * 1.0, -8.db) }
+    track(:sub) { |clip| duck.(kez_sub_voice(clip) * 0.5, -12.db) }
+    track(:neuro) { |clip| duck.(kez_neuro_voice(clip, grit: knob(:grit)) * 0.85, -8.db) }
     track(:boom) { |clip| kez_boom_voice(clip) }
     track(:riser, fade: 1/8r) { |_clip| tv_riser(8) }
 
@@ -218,8 +241,9 @@ module MB::Sound
       bars: TV_BARS,
       drive: [TV_DRIVE, Float, '-D', 'Gain in dB into the master clipper and limiter', -20.0..24.0],
       ceiling: [TV_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
+      buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling)
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses)
       tunnel_vision_form
     }
   end

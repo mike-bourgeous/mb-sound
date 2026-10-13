@@ -5,20 +5,21 @@ Branch buses-1 (2026-10-13).  The maintainer queued "Buses, sends, bus sidechain
 ## API
 
 ```ruby
-bus :verb { |sig| sig.reverb(:hall, mix: 1) }       # a named bus: its own effect chain, into the master
-bus :slap, to: :verb { |sig| sig.delay(1.n8) }       # into another bus (no cycles)
-bus :drums { |sig| sig.compress(threshold: -18.db) } # a group bus
-track :keys, send: { verb: -12.db } do |c| ... end   # sends (post-fader), per player name
-track :kick, to: :drums do |c| ... end               # the track's main out goes into a bus
-bg :pad, graph, send: { verb: -6.db, slap: :space }  # bg too; a knob name follows the knob
-feed :keys, :verb, -6.db, over: 2, on: :bar          # change a send (journaled, undoable)
-feed :keys, :verb, 0                                 # off
-bass.duck(:drums)                                    # sidechain from a bus or a track
-bass.duck(:drums, only: :kick)                       # one named output inside a track's graph
-pad.compress(sidechain: bus(:drums))                 # bus(:name) reads a bus or track anywhere
-mute :verb; solo :verb                               # buses are strip names
-buses                                                # listing
-render 'x.flac', stems: 'stems/' { ... }             # one stem per bus too
+bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }        # a named bus: its own effect chain, into the master
+bus(:slap, to: :verb) { |sig| sig.delay(1.n8) }       # into another bus (no loops)
+bus(:drums) { |sig| sig.compress(threshold: -18.db) } # a group bus
+track(:keys, send: { verb: -12.db }) { |c| ... }      # sends (post-fader), per player name
+track(:kick, to: :drums) { |k| tr808(k) }             # the track's main out goes into a bus
+bg :pad, graph, send: { verb: -6.db, slap: :space }   # bg too; a knob name follows the knob
+feed :keys, :verb, -6.db, over: 2, on: :bar           # change a send (journaled, undoable)
+feed :keys, :verb, 0                                  # off
+bass.duck(:drums)                                     # sidechain from a bus or a track
+bass.duck(:drums, only: :kick)                        # one named node inside a track's graph
+pad.compress(sidechain: bus(:drums))                  # bus(:name) reads a bus or track anywhere
+master { |mix| mix.duck(:kick_bus) }                  # master chains read them too
+mute :verb; solo :verb                                # buses are strip names
+buses; routes                                         # listings
+render('x.flac', stems: 'stems/') { ... }             # one stem per bus too
 ```
 
 ## Decisions (agent's, open to the maintainer's review)

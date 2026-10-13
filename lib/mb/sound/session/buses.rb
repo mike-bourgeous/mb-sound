@@ -699,10 +699,12 @@ module MB
         # change's landing frame; nil to keep sleeping.
         def bus_wake_index(b, input, frame, count)
           candidates = []
-          if b.strip_ramp && b.strip_ramp.to > 0
-            candidates << MB::M.max(b.strip_ramp.start - frame, 0)
-          elsif b.strip_level <= 0
-            return nil
+          if b.strip_level <= 0
+            # Muted: only the unmute ramp's start wakes it (input before it
+            # is dropped, whatever the buffer size)
+            return nil unless b.strip_ramp && b.strip_ramp.to > 0
+            w = MB::M.max(b.strip_ramp.start - frame, 0)
+            return w < count ? w : nil
           end
           candidates << MB::M.max(b.wake_at - frame, 0) if b.wake_at
           if input
