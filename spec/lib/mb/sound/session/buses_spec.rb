@@ -330,7 +330,9 @@ RSpec.describe(MB::Sound::Session::Buses) do
     it "gives each track its own share of the buses it feeds, so stems sum to the mix (bus stems on request)" do
       Dir.mktmpdir do |dir|
         MB::Sound.render(File.join(dir, 'mix.flac'), channels: 1, gain: 1, seconds: 2, stems: dir, bus_stems: true) do
-          MB::Sound.bus(:half) { |sig| sig.delay(0.01) * 0.5 }
+          # (a knob in the block: the stem copies are built on the render thread)
+          MB::Sound.knob(:stem_level, 0.5)
+          MB::Sound.bus(:half) { |sig| sig.delay(0.01) * MB::Sound.knob(:stem_level) }
           MB::Sound.bus(:grp, to: :half) { |sig| sig * 0.5 }
           MB::Sound.bg(:x, 0.25.constant.until(1), send: { half: 1 })
           MB::Sound.bg(:y, 0.125.constant.until(1), to: :grp)

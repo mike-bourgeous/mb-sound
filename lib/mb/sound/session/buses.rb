@@ -783,7 +783,8 @@ module MB
             strip_level: b.strip_level, strip_ramp: b.strip_ramp, asleep: false, quiet_from: @frame,
             wake_at: nil, playing: b.playing, frames: nil
           )
-          c = build_master(block, description: chain&.description, label: bus.to_s)
+          # (built on the render thread: commands in the block use this Session)
+          c = Session.with_context(session: self) { build_master(block, description: chain&.description, label: bus.to_s) }
           prepare_bus_chain(bus, c)
           start_master_chain(c, @transport.position)
           sh.chains << c
@@ -884,7 +885,7 @@ module MB
           # Stem copies of the bus switch chains with it
           @stem_shadows.each_value do |list|
             sh = list[name] or next
-            c = build_master(block, description: chain.description, label: name.to_s)
+            c = Session.with_context(session: self) { build_master(block, description: chain.description, label: name.to_s) }
             prepare_bus_chain(name, c)
             c.mode, c.fade = chain.mode, chain.fade
             c.start = time
