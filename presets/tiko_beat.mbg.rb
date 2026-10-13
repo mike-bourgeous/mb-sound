@@ -1,0 +1,13 @@
+# mb-sound graph document: a Ruby subset that MB::Sound.preset and
+# MB::Sound::GraphIO.load read without running it (no eval).
+graph 2,
+  name: "tiko_beat",
+  kind: :synth,
+  saved: "2026-10-13T10:01:30Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
+  from: "bin/synths/tiko_marvell.rb",
+  options: { patch: :beat, dub: 0.0, keep: 0.82 }
+inputs :midi
+
+sig = tr808(midi, only: [:kick, :snare, :closed_hat, :open_hat], velocity_curve: :midi, kick: { tune: 56, decay: 0.32, tone: 0.25 }, snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 }, closed_hat: { decay: 0.035, tone: 0.5 }, open_hat: { decay: 0.22 }, seed: drawn_seed(900450186894289455))
+(sig * 0.55 + sig.formant(:o, :u, morph: 0.4, width: 1.6) * 0.7).softclip(0.7, 0.95) * 2.0

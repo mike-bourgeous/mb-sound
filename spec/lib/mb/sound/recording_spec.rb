@@ -102,6 +102,15 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(s.arrangement.captures[:lead_1].events.map(&:start)).to eq([1/16r, 5/16r, 5/8r])
     end
 
+    it 'keeps the loop when its track was stopped before it closed (e.g. a render ending mid-take)' do
+      s = new_session
+      s.midi_in.input = keyboard(*RECORDING_PLAYED)
+      setup_lead(s)
+      d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 1'], 60 => ['stop :lead'] }, 96000 * 3)
+      expect(s.arrangement.captures[:lead_1].events.length).to eq(3)
+      expect(d.abs.max).to eq(0) # nothing to swap it into
+    end
+
     it 'can be undone before it lands, and needs an armed or named track with a patch' do
       s = new_session
       s.midi_in.input = keyboard(*RECORDING_PLAYED)
@@ -252,6 +261,17 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(d[120000]).to eq(0)
       expect(s.arrangement.armed).to be_empty
       expect(MB::Sound::Session.with_context(session: s) { MB::Sound.tracks[:lead] }).not_to include('armed')
+    end
+
+    it 'plays live input through MB::Sound.synth patches (the voices in bin/synths/ take any MIDI source)' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 0.75r])
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:lead, q: 1) { |c| MB::Sound.synth(c, voices: 1) { |v| v.number * v.gate } }
+      end
+      d = perform(s, { 0 => ['arm :lead'] }, 48000)
+      expect(d[24000 - 1]).to eq(0)
+      expect(d[24000]).to eq(60)
     end
   end
 

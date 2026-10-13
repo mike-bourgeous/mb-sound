@@ -36,6 +36,13 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect(render(h)).to eq(render(220.hz.ramp.filter(:lowpass, cutoff: 800).delay(1.n16.dotted).softclip))
     end
 
+    it 'keeps tempo-synced pitches and LFOs tempo-synced' do
+      make = -> { 220.hz.saw.lp4(1.bar.hz.transpose(-12).lfo.at(260..700)) + 3.n16.lfo.at(0.1) }
+      code = make.().to_ruby
+      expect(code).to include('1.bar.hz.transpose(-12)', '3.n16.hz.lfo') # (not 0.5.hz: the frequency at 120 BPM)
+      expect(render(io.load(code), buffers: 300)).to eq(render(make.(), buffers: 300))
+    end
+
     it 'binds inputs by name, from the header or to_ruby\'s inputs comment' do
       notes = MB::Sound::Notes.new(midi_path)
       synth = MB::Sound.synth(notes, voices: 2) { |v| v.hz.saw * v.amp_env }
@@ -503,7 +510,8 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
 
       names = nil
       expect { names = MB::Sound.presets }.to output(/quarter  \(inputs: input; params: mix 0\.25\)/).to_stdout
-      expect(names).to eq([:quarter])
+      expect(names).to include(:quarter)
+      expect(names - [:quarter]).to eq(io.presets[io.library_presets_dir]) # and mb-sound's own
 
       g = MB::Sound.preset(:quarter, input: 2.constant, mix: 0.5)
       expect(g.sample(4).to_a).to eq([1.0] * 4)

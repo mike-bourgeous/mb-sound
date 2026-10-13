@@ -47,7 +47,8 @@ module MB
         VALUES = {
           'MB::Sound::Pitch' => %i[period period_samples],
           'MB::Sound::Tone' => %i[period period_samples],
-          'MB::Sound::Sequence::Duration' => %i[dotted dd double_dotted triplet d t] + ARITHMETIC.to_a,
+          # (hz, lfo: tempo-synced pitches and LFOs, `1.bar.hz`)
+          'MB::Sound::Sequence::Duration' => %i[dotted dd double_dotted triplet d t hz lfo] + ARITHMETIC.to_a,
           'MB::Sound::Length::Quantity' => ARITHMETIC.to_a,
           'MB::Sound::Interval' => ARITHMETIC.to_a,
           'MB::Sound::Phase' => ARITHMETIC.to_a,
