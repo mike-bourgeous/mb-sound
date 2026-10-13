@@ -153,7 +153,7 @@ module MB
           end
 
           def operands = [@a]
-          def expression = "#{@scale.kind}_time(#{@a}, #{@scale.seconds} s, amount #{@scale.amount})"
+          def expression = "#{@scale.kind}_time(#{@a}, #{@scale.time_seconds} s, amount #{@scale.amount})"
           def opcode = :time_scale
 
           def run_ruby(env, count)

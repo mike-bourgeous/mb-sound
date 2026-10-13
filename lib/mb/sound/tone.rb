@@ -156,8 +156,9 @@ module MB
       # The phase modulation source (cycles; a number or node), or nil.
       attr_reader :phase_mod
 
-      # The phase warp width (see #pwm), or nil.
-      attr_reader :width
+      # The phase warp width (see #pwm), or nil.  Not +width+, which is the
+      # stereo-width DSL method.
+      def pwm_width = @width
 
       # The phase warp's pivot given to #pwm (cycles, a number or node), or
       # nil for the shape's default (see #warp_pivot).
@@ -174,7 +175,7 @@ module MB
       attr_reader :sync_source
 
       # Whether #softsync was used (sync reverses the phase).
-      attr_reader :soft_sync
+      def soft_sync? = @soft_sync
 
       # The seed of this tone's random phase generator (see #random_phase),
       # or nil if none has been set or drawn.

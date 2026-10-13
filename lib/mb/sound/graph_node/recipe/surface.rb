@@ -226,7 +226,7 @@ module MB
             record(GraphNode, dsl - @wrapped[GraphNode].to_a, key: GraphNode)
 
             # Classes that define DSL methods themselves (Pitch#tone,
-            # FourPole#filter, ...) need their own recorders
+            # Tone#wavetable, ...) need their own recorders
             ObjectSpace.each_object(Class) do |c|
               next unless c.name&.start_with?('MB::Sound') && c.include?(GraphNode)
               own = c.public_instance_methods(false) & dsl

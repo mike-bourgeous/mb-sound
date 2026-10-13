@@ -391,7 +391,7 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       b = 110.hz.ramp.diode_ladder(800, resonance: 0.7, drive: 2)
       c = 110.hz.ramp.lp4(800, resonance: 0.7, mode: :diode, drive: 2)
       d = 110.hz.ramp.filter(:diode, cutoff: 800, resonance: 0.7)
-      [a, b, c, d].each { |n| expect(n.filter).to be_diode }
+      [a, b, c, d].each { |n| expect(n.kernel_filter).to be_diode }
       out = [a, b, c].map { |n| n.sample(1000) }
       expect(out[0]).to eq(out[1])
       expect(out[0]).to eq(out[2])
@@ -405,7 +405,7 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4)) # lp4's knob
       q = 110.hz.ramp.diode(800, quality: 4, normalize: false)
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true))
-      expect(q.filter).not_to be_normalize
+      expect(q.kernel_filter).not_to be_normalize
     end
   end
 end

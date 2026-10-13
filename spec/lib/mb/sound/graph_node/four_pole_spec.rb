@@ -36,16 +36,16 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     it 'takes a Pitch as the cutoff frequency' do
       node = 110.hz.ramp.lp4(800.hz, resonance: 0.3)
       expect(node.cutoff).to eq(800.0)
-      expect(node.filter.cutoff).to eq(800.0)
+      expect(node.kernel_filter.cutoff).to eq(800.0)
     end
 
     it 'has aliases four_pole and lowpass4' do
       expect(saw.four_pole(500)).to be_a(MB::Sound::GraphNode::FourPole)
-      expect(saw.lowpass4(500).filter.mode).to eq(:lp4)
+      expect(saw.lowpass4(500).kernel_filter.mode).to eq(:lp4)
     end
 
     it 'passes the options to the filter' do
-      f = saw.lp4(500, resonance: 1, self_oscillate: true, mode: :hp2, compensation: 0.1).filter
+      f = saw.lp4(500, resonance: 1, self_oscillate: true, mode: :hp2, compensation: 0.1).kernel_filter
       expect(f).to be_self_oscillate
       expect(f.drive).to eq(1.0)
       expect(f.mode).to eq(:hp2)
@@ -72,23 +72,23 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
       cutoff = MB::Sound::ArrayInput.new(data: [Numo::SFloat[300, 400, 500]])
       node = 1.constant.lp4(cutoff)
       node.sample(5)
-      expect(node.filter.cutoff).to eq(500)
+      expect(node.kernel_filter.cutoff).to eq(500)
       node.sample(5)
-      expect(node.filter.cutoff).to eq(500)
+      expect(node.kernel_filter.cutoff).to eq(500)
     end
 
     it 'works per channel on bundles' do
       out = MB::Sound.stereo(110.hz.ramp, 165.hz.ramp).lp4(MB::Sound.channels(500, 900), resonance: 0.5)
       expect(out).to be_a(MB::Sound::GraphNode::Channels)
-      expect(out.map { |c| c.filter.cutoff }).to eq([500.0, 900.0])
+      expect(out.map { |c| c.kernel_filter.cutoff }).to eq([500.0, 900.0])
     end
 
     it 'follows sample rate changes' do
       node = saw.lp4(1000)
       node.sample_rate = 96000
       expect(node.sample_rate).to eq(96000)
-      expect(node.filter.sample_rate).to eq(96000)
-      expect(node.at_rate(44100).filter.sample_rate).to eq(44100)
+      expect(node.kernel_filter.sample_rate).to eq(96000)
+      expect(node.at_rate(44100).kernel_filter.sample_rate).to eq(44100)
     end
 
     it 'resets the filter state' do
@@ -110,8 +110,8 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
   describe 'GraphNode#filter' do
     it 'makes a four-pole filter for :lp4 and the other modes' do
       expect(saw.filter(:lp4, cutoff: 500, resonance: 0.5)).to be_a(MB::Sound::GraphNode::FourPole)
-      expect(saw.filter(:four_pole, cutoff: 500).filter.mode).to eq(:lp4)
-      expect(saw.filter(:hp4, cutoff: 500).filter.mode).to eq(:hp4)
+      expect(saw.filter(:four_pole, cutoff: 500).kernel_filter.mode).to eq(:lp4)
+      expect(saw.filter(:hp4, cutoff: 500).kernel_filter.mode).to eq(:hp4)
     end
 
     it 'knows every four-pole mode' do
@@ -121,14 +121,14 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     it 'maps quality for four-pole filters to the same gain at the cutoff' do
       node = saw.filter(:lp4, cutoff: 500, quality: 4)
       expect(node.resonance).to be_within(1e-12).of(Math.log(16) / Math.log(196))
-      f = node.filter
+      f = node.kernel_filter
       f.resonance = node.resonance
       at_cutoff = f.response(2 * Math::PI * 500 / 48000).abs / f.response(0).abs
       expect(at_cutoff).to be_within(1e-6).of(4)
 
       lin = saw.lp4(500, quality: 4, resonance_curve: :linear)
-      lin.filter.resonance = lin.resonance
-      expect(lin.filter.loop_gain).to be_within(1e-9).of(f.loop_gain)
+      lin.kernel_filter.resonance = lin.resonance
+      expect(lin.kernel_filter.loop_gain).to be_within(1e-9).of(f.loop_gain)
 
       expect(saw.lp4(500, quality: 0.1).resonance).to eq(0)
       expect(saw.lp4(500, quality: 100).resonance).to eq(1)

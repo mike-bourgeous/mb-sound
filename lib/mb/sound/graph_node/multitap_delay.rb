@@ -63,11 +63,6 @@ module MB
             @smoother_started = false
           end
 
-          # The delay time as given.
-          def delay
-            @time.length
-          end
-
           # The longest delay in samples at +sample_rate+, if known.
           def max_delay_samples(sample_rate)
             @time.max_samples(sample_rate)

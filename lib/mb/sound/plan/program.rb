@@ -331,7 +331,7 @@ module MB
               [OPCODES[:exp], reg(op.dst), reg(op.a), 0]
             when Op::TimeScale
               sc = op.scale
-              [OPCODES[:time_scale], reg(op.dst), reg(op.a), scalar(sc.kind == :velocity ? 0 : 1, sc.seconds, sc.amount)]
+              [OPCODES[:time_scale], reg(op.dst), reg(op.a), scalar(sc.kind == :velocity ? 0 : 1, sc.time_seconds, sc.amount)]
             when Op::FilterBiquad
               @objects << op.filter
               [OPCODES[:biquad], reg(op.dst), reg(op.a), reg(op.cutoff), reg(op.quality), @objects.length - 1, op.type_id]

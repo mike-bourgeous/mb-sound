@@ -223,7 +223,7 @@ module MB
           set = nodes.to_h { |n| [n.__id__, true] }
           set[@graph.__id__] = true
           shared = nodes.select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && n.tee.branches.any? { |b| !set[b.__id__] }
+            n.is_a?(GraphNode::Tee::Branch) && n.owner_tee.branches.any? { |b| !set[b.__id__] }
           }
           upstream = {}
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }

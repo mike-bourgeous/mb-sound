@@ -14,8 +14,9 @@ module MB
         include GraphNode
         include SampleRateHelper
 
-        # The MB::Sound::Filter::FourPole holding the state and options.
-        attr_reader :filter
+        # The MB::Sound::Filter::FourPole holding the state and options (not
+        # +filter+, which is the DSL method that adds another filter).
+        def kernel_filter = @filter
 
         # The cutoff and resonance: numbers or graph nodes.
         attr_reader :cutoff, :resonance

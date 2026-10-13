@@ -374,8 +374,8 @@ module MB
         # its handles are every branch of one Tee on that node (so nothing
         # else reads the Tee), else nil.
         def direct_source(op)
-          tees = op.handles.map(&:tee).uniq
-          return nil unless tees.length == 1
+          tees = op.handles.map { |h| h.is_a?(GraphNode::Tee::Branch) ? h.owner_tee : nil }.uniq
+          return nil unless tees.length == 1 && tees[0]
 
           tee = tees[0]
           src = tee.sources[:input]

@@ -135,7 +135,7 @@ module MB
               end
 
               progress = false
-              reached.each_key.map(&:tee).uniq.each do |tee|
+              reached.each_key.map(&:owner_tee).uniq.each do |tee|
                 next if inside[tee] || !tee.branches.all? { |b| reached[b] }
 
                 inside[tee] = true
@@ -145,7 +145,7 @@ module MB
               break unless progress
             end
 
-            pins = reached.reject { |b, _| inside[b.tee] }.compare_by_identity
+            pins = reached.reject { |b, _| inside[b.owner_tee] }.compare_by_identity
             begin
               Thread.current[:mb_sound_tee_rate_pins] = pins
               yield
@@ -170,7 +170,11 @@ module MB
           include NodeOutput
 
           # Values for internal use by Tee.
-          attr_reader :index, :reader, :tee
+          attr_reader :index, :reader
+
+          # The Tee this branch belongs to (not +tee+, which is the DSL method
+          # that splits this branch again).
+          def owner_tee = @tee
 
           # For internal use by Tee: the branch's CircularBuffer reader (an
           # IdleReader until the Tee leaves lockstep for the first time).
@@ -325,7 +329,7 @@ module MB
           end
 
           def sample_rate
-            @branch.tee.sample_rate
+            @branch.owner_tee.sample_rate
           end
 
           def get_sampler

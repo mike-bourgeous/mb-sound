@@ -49,9 +49,6 @@ module MB
         # The input node (a sampler branch).
         attr_reader :input
 
-        # The frequency in Hz: a Numeric or a node (a sampler branch).
-        attr_reader :freq
-
         # The decay as given (a Length::Source holds it).
         attr_reader :decay
 
