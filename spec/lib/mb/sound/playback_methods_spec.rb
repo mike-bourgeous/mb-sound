@@ -468,6 +468,64 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(out).to be_closed
     end
 
+    describe 'time limits' do
+      # Instead of 10 minutes of rendering
+      before { stub_const('MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS', 0.5) }
+
+      let(:out) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
+
+      it 'stops endless sounds without bars: or seconds: at MAX_RENDER_SECONDS with a warning' do
+        expect {
+          expect(MB::Sound.render(out, 0.1.constant)).to eq(0.5)
+        }.to output(/after 0.5 seconds; pass bars: or seconds:/).to_stderr
+        expect(out.frames_written).to eq(24000)
+      end
+
+      it 'always reaches the end bar and its tail with bars:, past MAX_RENDER_SECONDS' do
+        stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 0.25)
+        song = proc do
+          MB::Sound.bg(:pad, 0.1.constant)
+          MB::Sound.master { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
+          # Two passes over bar 1 before bar 2: 3 bars of time for bars: 2
+          MB::Sound.at_bar(2) { MB::Sound.seek 1 }
+        end
+
+        expect {
+          expect(MB::Sound.render(out, bars: 2, bpm: 240, &song)).to eq(3)
+        }.not_to output.to_stderr
+        expect(out.frames_written).to eq(3 * 48000)
+
+        out2 = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        expect {
+          expect(MB::Sound.render(out2, bars: 2, bpm: 240, tail: true, &song)).to eq(3.25)
+        }.not_to output.to_stderr
+        expect(out2.frames_written).to eq(3.25 * 48000)
+      end
+
+      it 'stops a bars: render that never reaches its end bar at max_seconds:, tail included, without a warning' do
+        song = proc do
+          MB::Sound.bg(:pad, 0.1.constant)
+          MB::Sound.master { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
+          # A seek back to bar 1 every half bar: bar 3 never comes
+          MB::Sound.every(1/2r) { MB::Sound.seek 1 }
+        end
+
+        expect {
+          expect(MB::Sound.render(out, bars: 2, bpm: 120, max_seconds: 0.75, tail: true, &song)).to eq(0.75)
+        }.not_to output.to_stderr
+        expect(out.frames_written).to eq(36000)
+      end
+
+      it 'caps seconds: and endless renders at max_seconds:' do
+        expect(MB::Sound.render(out, 0.1.constant, seconds: 1, max_seconds: 0.25)).to eq(0.25)
+        out2 = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        expect {
+          expect(MB::Sound.render(out2, 0.1.constant, max_seconds: 0.75)).to eq(0.75)
+        }.not_to output.to_stderr
+        expect { MB::Sound.render(out2, 0.1.constant, max_seconds: 0) }.to raise_error(ArgumentError, /max_seconds/)
+      end
+    end
+
     describe 'with loudness:' do
       it 'normalizes the file to a number of LUFS or a named target' do
         expect(MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 2, loudness: -16)).to eq(2)

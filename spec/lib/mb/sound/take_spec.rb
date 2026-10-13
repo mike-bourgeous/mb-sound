@@ -250,6 +250,116 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  # Plays +lines+ (a Hash from buffer index to console lines) live for
+  # +buffers+ buffers of +size+ frames.  Returns the mix (left channel)
+  # and the take.
+  def perform_lines(lines, buffers:, size: 800, seed: 5)
+    bnd = MB::Sound::Take.console_binding
+    MB::Sound.seed(seed)
+    t = MB::Sound::Take.new(session: session)
+    out = []
+    buffers.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, bnd) } }
+      out << session.process_buffer(size)[0].dup
+    end
+    [out.reduce(:concatenate), t]
+  end
+
+  [
+    ['a tempo set by the first line', 'cut: 3500', nil],
+    ['a scene knob ramp', 'cut: [3500, from: 350, over: 1]', nil],
+    ['section knob values', 'cut: 16000', 'b 2, cut: [3500, over: 1.beat]'],
+    ['a track with lead: launched by the first section', 'cut: 3500', nil, 'lead: 1.beat'],
+    ['a track with lead: 0.3.attack', 'cut: 3500', nil, 'lead: 0.3.attack'],
+  ].each do |label, b_knob, b_section, lead|
+    it "replays #{label} bit for bit at the same buffer size and within 1e-4 at others" do
+      lines = {
+        0 => [
+          'bpm 165',
+          'knob :cut, 16000, range: 200..16000, curve: :exp',
+          "track(:t#{lead ? ", #{lead}" : ''}) { |c| c.synth(voices: 10) { |v| v.hz.unison(3, detune: 0.12) { |p, _i| p.saw } * v.env(0.6, 0.5, 0.8, 1.2, gm: false) * 0.25 }.filter(:lowpass, cutoff: knob(:cut), quality: 0.9) * 0.3 }",
+          # (align: :launch: a lead launched now counts the clip from
+          # before the first sample)
+          'scene :a, t: seq(A2.n2.d, E3.n4).loop(align: :launch), cut: 16000',
+          "scene :b, t: seq(A2, C3).n8.loop, #{b_knob}",
+          "flow { a 1; #{b_section || 'b 2'} }",
+        ],
+      }
+      live, t = perform_lines(lines, buffers: 200)
+      expect(live.abs.max).to be > 0.02
+
+      # Through the saved script (a lead's launch saves [landing, time])
+      path = tmp_path('take.rb')
+      expect { t.save(path) }.to output(/Saved/).to_stdout
+      expect(File.read(path)).to match(/r\.line 0r, \[.*\[0r, -\d+\/\d+r\]/) if lead
+      load path
+      r = MB::Sound::Take::Replay.last
+      [[800], [367, 368]].each do |sizes|
+        MB::Sound.seed(5)
+        data = replay(r, sizes)
+        expect(data.length).to be >= live.length
+        diff = (data[0...live.length] - live).abs.max
+        # (Tones accumulate their phase per buffer; see Take::Replay)
+        expect(diff).to be <= (sizes == [800] ? 0 : 1e-4), "max difference #{diff} at buffer sizes #{sizes}"
+      end
+    end
+  end
+
+  it 'replays a take that ends (players ring out) to where its timeline stops, at any buffer size' do
+    # Live in 1000-frame buffers: the timeline stops at the end of the
+    # buffer in which the last player ends (bar 2 + 1000 frames), which a
+    # replay in other buffer sizes may never reach
+    _live, t = perform_lines({ 0 => ['bg :x, 0.1.constant.until(1.bar)'] }, buffers: 120, size: 1000)
+    expect(t.replay.ends).to eq(97000r / 96000)
+    expect(t.to_ruby).to include("seconds: 2.5,\n")
+
+    [[800], [367, 368], [1000]].each do |sizes|
+      frames = 0
+      expect {
+        frames = t.replay.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| }
+      }.not_to output.to_stderr
+      expect(frames).to be_between(96000, 98000)
+    end
+  end
+
+  it 'warns when a replay goes quiet with take lines left to run' do
+    r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 6r) { |rp|
+      rp.line(0r, [0r], 'bg :x, 0.1.constant.until(1.bar)')
+      rp.line(5r, [5r], 'bg :y, 0.1.constant')
+    }
+    frames = 0
+    expect {
+      frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
+    }.to output(/went quiet at 2:1.*1 take line left to run.*ends at 7:1/).to_stderr
+    expect(frames).to be_between(96000, 97600)
+  end
+
+  it 'stops a replay that never reaches its end after its length plus EXTRA_SECONDS, or MAX_SECONDS' do
+    stub_const('MB::Sound::Take::Replay::EXTRA_SECONDS', 0.5)
+    stub_const('MB::Sound::Take::Replay::MAX_SECONDS', 0.25)
+    make = ->(seconds) {
+      MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 1000r, seconds: seconds) { |rp|
+        # A seek back to the start every half bar: the timeline never gets
+        # past bar 1
+        rp.line(0r, [0r], 'bg :x, 0.1.constant; every(1/2r) { seek 1 }')
+      }
+    }
+
+    count = 0
+    expect {
+      expect(make.(1).render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0) { |_| count += 1 }).to eq(72000)
+    }.to output(/Stopped replaying the take after 1.5 seconds without reaching its end.*pass max_seconds:/).to_stderr
+    expect(count).to eq(90)
+
+    expect {
+      expect(make.(nil).render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)).to eq(12000)
+    }.to output(/after 0.25 seconds/).to_stderr
+
+    expect {
+      expect(make.(nil).render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0, max_seconds: 0.5)).to eq(24000)
+    }.to output(/after 0.5 seconds/).to_stderr
+  end
+
   it 'keeps foreground commands out of replays' do
     t = MB::Sound::Take.new(session: session)
     b = MB::Sound::Take.console_binding
