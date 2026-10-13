@@ -36,7 +36,7 @@ RSpec.describe('bin/songs/memory_card.rb') do
   end
 
   it 'chops by slice name, with pitched slices' do
-    keys = MB::Sound.nev_slice_keys
+    keys = MB::Sound.jungle_slice_keys
     clip = MB::Sound.chop(:k, MB::Sound::T, [:s, 2], MB::Sound::R)
     expect(clip.events.map(&:value)).to eq([keys[:k].number, keys[:s].number + 2])
   end

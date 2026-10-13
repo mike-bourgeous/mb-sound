@@ -40,11 +40,13 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 
 	struct mb_wt_osc_state st;
 	st.phi = wt_read_state(phase_state, 1, "Phase state");
+	mb_grid_phase_read(phase_state, &st.grid);
 	wt_read_state(tstate, 5, "Wavetable state");
 	st.primed = NUM2INT(rb_ary_entry(tstate, 2)) != 0;
 	st.prev_pm = NUM2DBL(rb_ary_entry(tstate, 1));
 	st.prev_e = NUM2DBL(rb_ary_entry(tstate, 3));
 	st.prev_inc = NUM2DBL(rb_ary_entry(tstate, 4));
+	mb_wt_read_corner_state(tstate, &st);
 	st.rng = 0;
 	if (rndadv != 0) {
 		Check_Type(noise, T_ARRAY);
@@ -60,11 +62,15 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 		rb_ary_store(noise, 0, ULL2NUM(st.rng));
 	}
 	rb_ary_store(phase_state, 0, rb_float_new(st.phi));
+	if (!isnan(st.grid.inc)) {
+		mb_grid_phase_write(phase_state, &st.grid);
+	}
 	if (length > 0) {
 		rb_ary_store(tstate, 1, rb_float_new(st.prev_pm));
 		rb_ary_store(tstate, 2, INT2NUM(1));
 		rb_ary_store(tstate, 3, rb_float_new(st.prev_e));
 		rb_ary_store(tstate, 4, rb_float_new(st.prev_inc));
+		mb_wt_write_corner_state(tstate, &st);
 	}
 
 	RB_GC_GUARD(tinfo);

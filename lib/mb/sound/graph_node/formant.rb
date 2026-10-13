@@ -151,7 +151,7 @@ module MB
             @table.flat_map { |f| f.map { |hz, _, bw| Math.log(hz.to_f / bw) } } +
             @table.flat_map { |f| f.map { |_, db, _| db * DB_LOG } }
           ).freeze
-          @state = Numo::DFloat.zeros(2 * SECTIONS)
+          @state = Numo::DFloat.zeros(2 * SECTIONS + 1) # (and the flush grid count; see Filter::SVF::FLUSH_GRID)
           @out = nil
           @node_type_name = 'Formant'
         end
@@ -214,7 +214,8 @@ module MB
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           raise ArgumentError, "The formant tables must have 3 * #{SECTIONS} values per vowel" unless tables.length > 0 && tables.length % (3 * SECTIONS) == 0
-          raise ArgumentError, "The formant state must have #{2 * SECTIONS} values" unless state.length == 2 * SECTIONS
+          counted = state.length == 2 * SECTIONS + 1
+          raise ArgumentError, "The formant state must have #{2 * SECTIONS} values (#{2 * SECTIONS + 1} with the flush grid count)" unless counted || state.length == 2 * SECTIONS
 
           n = out.length
           xs = signal_values(x, n)
@@ -225,6 +226,9 @@ module MB
           block = vowels * SECTIONS
           t = tables.to_a
           st = state.to_a
+          fk = counted ? st.pop : 0
+          fk = fk >= 0 && fk < Filter::SVF::FLUSH_GRID ? fk.to_i : 0
+          flush = ->(v) { (!v.finite? || v.abs < Filter::SVF::FLUSH) ? 0.0 : v }
           semitone_log = Math.log(2.0) / 12.0
           type_id = Filter::SVF::FILTER_TYPE_IDS[:bandpass]
 
@@ -297,11 +301,16 @@ module MB
               sum += m0 * xi + m1 * v1 + m2 * v2
             end
             out[i] = sum
+
+            if counted && (fk += 1) >= Filter::SVF::FLUSH_GRID
+              fk = 0
+              st.map!(&flush)
+            end
           end
 
-          st.each_with_index do |v, k|
-            state[k] = (!v.finite? || v.abs < Filter::SVF::FLUSH) ? 0.0 : v
-          end
+          st.map!(&flush) unless counted
+          st.each_with_index { |v, k| state[k] = v }
+          state[2 * SECTIONS] = fk.to_f if counted
           out
         end
 

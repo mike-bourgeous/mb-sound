@@ -134,6 +134,7 @@ module MB
           output = MB::Sound.file_output(output, channels: channels, overwrite: true) if output.is_a?(String)
           transport = Sequence::Transport.new(bpm: @start[:bpm], bar_length: @start[:bar_length])
           session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_sizes.first, realtime: false, raise_errors: false)
+          session.exact_lanes = true # the same lanes at any buffer size (Synth#exact_lanes?)
           session.add_tap(&tap) if tap
           live = MB::Sound.live?
           MB::Sound.live = true
@@ -185,6 +186,8 @@ module MB
           MB::Sound.rewind
           live = MB::Sound.live?
           MB::Sound.live = true
+          exact = session.exact_lanes
+          session.exact_lanes = true # as #render (Synth#exact_lanes?)
           schedule(session)
           session.add(0.constant, name: :take_clock, on: :now) # keeps the timeline moving between lines
           max_seconds ||= default_max_seconds
@@ -200,6 +203,7 @@ module MB
           MB::Sound.wait
         ensure
           session&.end_replay_midi!
+          session.exact_lanes = exact if session && !exact.nil?
           MB::Sound.live = live unless live.nil?
         end
 

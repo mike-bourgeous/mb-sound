@@ -122,8 +122,8 @@ static const int op_words[OP_COUNT] = {
 // support - LOOP_SINC_BLEND).
 #define LOOP_SINC_BLEND 4.0
 
-// Lowest SVF state kept (smaller values flush to zero after each sample,
-// as FastFilter.svf does after each call)
+// Lowest SVF state kept (smaller values flush to zero on the flush grid,
+// MB_FLUSH_GRID in mb_svf.h, as FastFilter.svf does)
 #define LOOP_SVF_FLUSH 1e-30
 
 // Highest SVF cutoff as a fraction of the sample rate (FastFilter's
@@ -154,6 +154,7 @@ struct svf_state {
 	struct mb_svf c;
 	int type;
 	double ic1, ic2, pi_over_rate, fc_max;
+	long fk; // samples since the last flush grid point (MB_FLUSH_GRID in mb_svf.h)
 	VALUE state;
 };
 
@@ -610,9 +611,10 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				mb_svf_init(&s->c);
 				s->state = rb_ary_entry(objects, o[3]);
 				Check_Type(s->state, T_ARRAY);
-				if (RARRAY_LEN(s->state) != 2) rb_raise(rb_eArgError, "SVF state must have two elements");
+				if (RARRAY_LEN(s->state) != 2 && RARRAY_LEN(s->state) != 3) rb_raise(rb_eArgError, "SVF state must have two elements (three with the flush grid count)");
 				s->ic1 = mb_finite_entry(s->state, 0);
 				s->ic2 = mb_finite_entry(s->state, 1);
+				s->fk = mb_flush_count_read(s->state, 2);
 				break;
 			}
 			case OP_DREAD:
@@ -778,11 +780,16 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			double g = p->kreg[2] >= 0 ? R[p->kreg[2]] : p->kd[2];
 			mb_svf_coefficients(&s->c, s->type, fc, q, g, s->pi_over_rate, s->fc_max);
 			double y = mb_svf_step(&s->c, R[p->a], &s->ic1, &s->ic2);
-			if (!isfinite(s->ic1) || fabs(s->ic1) < LOOP_SVF_FLUSH) {
-				s->ic1 = 0.0;
-			}
-			if (!isfinite(s->ic2) || fabs(s->ic2) < LOOP_SVF_FLUSH) {
-				s->ic2 = 0.0;
+			if (++s->fk >= MB_FLUSH_GRID) {
+				// The flush grid, as Filter::SVF outside loops (fixes-7: every
+				// sample before)
+				s->fk = 0;
+				if (!isfinite(s->ic1) || fabs(s->ic1) < LOOP_SVF_FLUSH) {
+					s->ic1 = 0.0;
+				}
+				if (!isfinite(s->ic2) || fabs(s->ic2) < LOOP_SVF_FLUSH) {
+					s->ic2 = 0.0;
+				}
 			}
 			R[p->dst] = (float)y;
 			NEXT;
@@ -850,6 +857,7 @@ sample_done:
 	for (size_t k = 0; k < nsvf; k++) {
 		rb_ary_store(svfs[k].state, 0, rb_float_new(svfs[k].ic1));
 		rb_ary_store(svfs[k].state, 1, rb_float_new(svfs[k].ic2));
+		rb_ary_store(svfs[k].state, 2, rb_float_new((double)svfs[k].fk));
 	}
 	for (int k = 0; k < nrings; k++) {
 		struct ring_state *g = &rings[k];

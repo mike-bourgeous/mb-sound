@@ -122,6 +122,12 @@ module MB
           @span_id
         end
 
+        # The first frame the Session is rendering for the player being
+        # rendered (see Session#player_frame), or nil.
+        def player_frame
+          @session.player_frame
+        end
+
         # True if graphs should read the input themselves: a realtime
         # Session whose render thread isn't running (e.g. `play` in the
         # foreground before anything plays in the background).
@@ -268,9 +274,12 @@ module MB
 
         # A MIDI::Source of a MidiInput's events for one graph (see
         # MidiInput#stream): each read gives the events of the span the
-        # Session read last, on the same frames (a read covers the end of
-        # the span: a graph that started partway through it starts there,
-        # and events before that are left out).  Events of spans the graph
+        # Session read last, on the same frames (the first read in a span
+        # starts at the player's first frame, Session#player_frame, or else
+        # is taken to cover the end of the span: a graph that started
+        # partway through it starts there, and events before that are left
+        # out; a graph may read the span in pieces, e.g. a Synth split at
+        # its grid points).  Events of spans the graph
         # didn't read (asleep, not started yet) are dropped.  Outside a
         # running realtime Session it reads the input itself (see
         # MidiInput#detached?).
@@ -323,7 +332,8 @@ module MB
             if span && span.id != @last_id
               @last_id = span.id
               rate = @hub.sample_rate
-              base = span.frame + span.count - ((to - from) * rate).round
+              pf = @hub.player_frame
+              base = pf && pf >= span.frame && pf < span.frame + span.count ? pf : span.frame + span.count - ((to - from) * rate).round
               @pending = span.events.filter_map { |s|
                 s.event.at(from + Rational(s.frame - base, rate)) if s.frame >= base
               }

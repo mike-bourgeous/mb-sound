@@ -29,9 +29,14 @@ module MB
       # latency profile the script plays with by default (see
       # DeviceOutput::PROFILES; e.g. :low for light patches);
       # -L/--latency-profile and AUDIO_PROFILE override it.
-      def effect_script(input_channels: nil, live_channels: nil, profile: nil, **params, &block)
+      #
+      # +description+ (also for #synth_script) is the text --save writes
+      # into the graph document's header (`description: "..."`): a String,
+      # or a Proc called with the parameters (e.g. to describe the patch
+      # picked with -p), returning a String or nil.
+      def effect_script(input_channels: nil, live_channels: nil, profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile).run_effect(&block)
+        runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile, description: description).run_effect(&block)
       end
 
       # Runs a synthesizer script: the block gets the script's MIDI (a
@@ -50,9 +55,9 @@ module MB
       #       midi.synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(p.cutoff)) * v.amp_env }
       #     }
       #     MB::Sound.synth_script { |midi| midi.hz.square * midi.amp_env }   # mono
-      def synth_script(profile: nil, **params, &block)
+      def synth_script(profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Provide a block that turns the MIDI input into a node graph' unless block
-        runner(:synth, params, profile: profile).run_synth(&block)
+        runner(:synth, params, profile: profile, description: description).run_synth(&block)
       end
 
       # Runs a song script: the block arranges the song on the current

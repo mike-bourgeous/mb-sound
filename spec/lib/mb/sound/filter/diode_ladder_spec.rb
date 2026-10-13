@@ -110,10 +110,13 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect { fp.diode_process_ruby(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 0.0, 1, 0, 0, 2) }.to raise_error(ArgumentError, /Normalize/)
     end
 
-    it 'flushes tiny states to zero' do
-      st = [1e-35, -1e-35, 0.0, 1e-31]
+    it 'flushes tiny states to zero on the 800-sample flush grid' do
+      st = [1e-35, -1e-35, 0.0, 1e-31, 799.0]
       ff.diode_ladder(Numo::SFloat.zeros(1), 1000, 0, st, 48000, 3.9, 0.375, 0.0)
-      expect(st).to eq([0.0] * 4)
+      expect(st).to eq([0.0] * 5)
+      st2 = [1e-35, -1e-35, 0.0, 1e-31, 799.0]
+      fp.diode_process_ruby(Numo::SFloat.zeros(1), 1000, 0, st2, 48000, 3.9, 0.375, 0.0)
+      expect(st2).to eq(st)
     end
 
     it 'gives identical samples through #dynamic_process_ruby' do

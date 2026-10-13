@@ -68,12 +68,13 @@ static enum bl_wave bl_find_wave(VALUE wave_type)
 	rb_raise(rb_eArgError, "No band-limited version of %"PRIsVALUE, wave_type);
 }
 
-// Reads and checks the [phi] state array of a phasor (cycles).
+// Reads and checks the [phi] (or [phi, grid base, k, inc]; see mb_phase.h)
+// state array of a phasor (cycles).
 static double bl_read_phi(VALUE state)
 {
 	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 1) {
-		rb_raise(rb_eArgError, "State array must have exactly one numeric element");
+	if (RARRAY_LEN(state) != 1 && RARRAY_LEN(state) != 4) {
+		rb_raise(rb_eArgError, "State array must have one numeric element (four with a constant frequency's phase grid)");
 	}
 	return NUM2DBL(rb_ary_entry(state, 0));
 }
@@ -86,8 +87,10 @@ static double bl_read_phi(VALUE state)
  * +phase_mod+ is in cycles.  +state+ is the phasor's [phi]; +bl_state+ is
  * [last effective phase, last increment, last phase_mod, primed (1; 0 for a tone's first sample, which
  * is corrected as if the tone had always run; 2 after a phase jump, which
- * skips the correction)], carried between buffers so the first sample of a
- * buffer is corrected for an edge just before it.
+ * skips the correction), and optionally the last width and the last pivot
+ * in use (written back always; see struct mb_bl_state)], carried between
+ * buffers so the first sample of a buffer is corrected for an edge just
+ * before it, as it would be within a buffer.
  * +fade_lo+ and +fade_hi+ (Hz) fade the corrections in with frequency (see
  * bl_fade; 0 and 0 for always on, infinity for never: a naive waveform).
  * +width+ (Numeric, NArray, or nil for 0.5) warps the phase (see the top of
@@ -112,13 +115,15 @@ static VALUE oscillate_bl(VALUE buffer, VALUE wave_type, VALUE frequency, VALUE 
 	double hi = NUM2DBL(fade_hi);
 
 	Check_Type(bl_state, T_ARRAY);
-	if (RARRAY_LEN(bl_state) != 4) {
-		rb_raise(rb_eArgError, "Band-limiting state must have four elements");
+	if (RARRAY_LEN(bl_state) != 4 && RARRAY_LEN(bl_state) != 6) {
+		rb_raise(rb_eArgError, "Band-limiting state must have four or six elements");
 	}
 	st.prev_e = NUM2DBL(rb_ary_entry(bl_state, 0));
 	st.prev_inc = NUM2DBL(rb_ary_entry(bl_state, 1));
 	st.prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
 	st.primed = NUM2INT(rb_ary_entry(bl_state, 3));
+	mb_bl_read_prev_warp(bl_state, &st);
+	mb_grid_phase_read(state, &st.grid);
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -140,12 +145,17 @@ static VALUE oscillate_bl(VALUE buffer, VALUE wave_type, VALUE frequency, VALUE 
 	mb_bl_oscillate(wt, out, length, &freq, &pm, &w, &o, adv, g, off, lo, hi, RTEST(remove_dc), &st);
 
 	rb_ary_store(state, 0, rb_float_new(st.phi));
+	if (!isnan(st.grid.inc)) {
+		mb_grid_phase_write(state, &st.grid);
+	}
 
 	if (length > 0) {
 		rb_ary_store(bl_state, 0, rb_float_new(st.prev_e));
 		rb_ary_store(bl_state, 1, rb_float_new(st.prev_inc));
 		rb_ary_store(bl_state, 2, rb_float_new(st.prev_pm));
 		rb_ary_store(bl_state, 3, INT2NUM(1));
+		rb_ary_store(bl_state, 4, rb_float_new(st.prev_w));
+		rb_ary_store(bl_state, 5, rb_float_new(st.prev_o));
 	}
 
 	if (!was_inplace) {
@@ -402,7 +412,14 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(state, &grid);
+		mb_grid_phase_start(&grid, phi, freq * adv);
+	}
+	double gbase = grid.base, gk = grid.k; // (locals: blit_derivative is a call)
 	double p = 0, inc = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -410,11 +427,8 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 		}
 
 		inc = freq * adv;
-		if (constant) {
-			steps = inc * i;
-		}
 
-		p = constant ? mb_wrap(phi + steps, 1.0) : phi;
+		p = constant ? mb_wrap(gbase + grid.inc * gk, 1.0) : phi;
 		double theta = p * (2.0 * M_PI);
 
 		_Bool continued = primed && (i > 0 || fabs(mb_wrap(prev_p + prev_inc - p + 0.5, 1.0) - 0.5) < 1e-6);
@@ -446,15 +460,26 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 		prev_inc = inc;
 		primed = 1;
 
-		if (!constant) {
+		if (constant) {
+			// mb_grid_phase_next on the locals
+			gk += 1.0;
+			if (gk >= MB_PHASE_GRID) {
+				gbase = mb_wrap(gbase + grid.inc * MB_PHASE_GRID, 1.0);
+				gk = 0;
+			}
+		} else {
 			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		grid.base = gbase;
+		grid.k = gk;
+		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(state, &grid);
+	} else {
+		rb_ary_store(state, 0, rb_float_new(mb_wrap(phi, 1.0)));
 	}
-	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 
 	if (length > 0) {
 		rb_ary_store(blit_state, 0, rb_float_new(yre));
@@ -1165,7 +1190,13 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
 	}
-	double steps = 0;
+
+	// A constant frequency counts from its grid (see mb_phase.h)
+	struct mb_grid_phase grid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(state, &grid);
+		mb_grid_phase_start(&grid, phi, freq * adv);
+	}
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
 			freq = freqptr[i * freqstep];
@@ -1181,11 +1212,8 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 		}
 
 		double inc = freq * adv;
-		if (constant) {
-			steps = inc * i;
-		}
 
-		double ph = constant ? mb_wrap(phi + steps, 1.0) : phi;
+		double ph = constant ? mb_wrap(grid.base + grid.inc * grid.k, 1.0) : phi;
 		double radians = ph * (2.0 * M_PI);
 		double avg = y1 + y2;
 		avg = avg * 0.5;
@@ -1215,16 +1243,19 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 		v = v * g;
 		out[i] = v + off;
 
-		if (!constant) {
+		if (constant) {
+			mb_grid_phase_next(&grid);
+		} else {
 			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv;
-		steps = steps * length;
+		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(state, &grid);
+	} else {
+		rb_ary_store(state, 0, rb_float_new(mb_wrap(phi, 1.0)));
 	}
-	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 	rb_ary_store(fb_state, 0, rb_float_new(y1));
 	rb_ary_store(fb_state, 1, rb_float_new(y2));
 	rb_ary_store(fb_state, 2, rb_float_new(dc));
