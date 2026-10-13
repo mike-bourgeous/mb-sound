@@ -1077,6 +1077,7 @@ module MB
           p.start = start
           p.started = true
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
+          align_grids(p, base + offset)
         end
 
         ringing = p.ring&.active && !p.fade_out
@@ -1199,6 +1200,16 @@ module MB
         retire(p)
         raise if @raise_errors
         warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+      end
+
+      # Aligns the grids of the Synths in player +p+'s graph with the
+      # Session's frames (see Synth#align_grid), +frame+ being the player's
+      # first frame.
+      def align_grids(p, frame)
+        nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
+        nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.each do |n|
+          n.align_grid(frame) if n.is_a?(Synth)
+        end
       end
 
       # Retires a player after a buffer if it ended, was cut off by its

@@ -364,6 +364,36 @@ RSpec.describe 'Buffer size invariance' do
       end
     end
 
+    it 'aligns the grid of a Synth launched off it with the Session frames (no split 800-sample buffers)' do
+      # A synth launched at frame 13714: its grid (where lanes are measured
+      # for the allocator) falls on Session frames that are multiples of
+      # 800, so 800-sample buffers are read whole (fixes-7); other sizes
+      # split and give the same samples
+      results = [[800], [367, 368], [1031]].map { |sizes|
+        out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+        s = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        MB::Sound.seed(3)
+        syn = clip.call.synth(voices: 2, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+        pieces = 0
+        syn.define_singleton_method(:sample_lanes_piece) { |n| pieces += 1; super(n) }
+        s.add(syn, name: :x, start_time: 1/7r)
+        data = []
+        i = 0
+        while s.frame < 96_000
+          data << s.process_buffer(sizes[i % sizes.length])[0].dup
+          i += 1
+        end
+        s.close
+        expect(pieces).to eq(i - 17) if sizes == [800] # one piece per buffer once it started (frame 13714, in buffer 17)
+        data.reduce(:concatenate)
+      }
+      n = results.map(&:length).min
+      results.each { |r| expect(r[0...n]).to eq(results[0][0...n]) }
+      expect(results[0].abs.max).to be > 0.1
+    ensure
+      MB::Sound.rewind
+    end
+
     it 'skips lanes in the invariance cases (so the cases test something)' do
       old = MB::Sound::Plan.lanes
       MB::Sound::Plan.lanes = false

@@ -241,7 +241,9 @@ module MB
         @quiet = Array.new(@allocator.lanes.length, true)
         @quiet_pos = Array.new(@allocator.lanes.length)
         @peaks = Array.new(@allocator.lanes.length, 0.0)
-        @cell_ranges = Array.new(@allocator.lanes.length) { [] }
+        @cell_lo = Array.new(@allocator.lanes.length) { [] }
+        @cell_hi = Array.new(@allocator.lanes.length) { [] }
+        @cell_fresh = Array.new(@allocator.lanes.length, true)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
           v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
           v.quiet_check = -> { @quiet[idx] }
@@ -363,6 +365,18 @@ module MB
       # see #skippable_lanes).
       def skip_idle?
         @skip_idle
+      end
+
+      # Aligns the synth's grid (SKIP_GRID: where idle lanes may fall asleep
+      # and lanes are measured for the allocator) with the frames of a
+      # Session whose frame +frame+ is the synth's first sample, so grid
+      # points fall on Session frames that are multiples of SKIP_GRID and
+      # 800-sample Session buffers never need splitting.  Called by Session
+      # when a player starts; does nothing once the synth has been sampled.
+      # Returns self.
+      def align_grid(frame)
+        @skip_position = Integer(frame) % SKIP_GRID unless @grid_started
+        self
       end
 
       # The indices of lanes that may be skipped while idle: with
@@ -583,17 +597,22 @@ module MB
       # here, recorded at the grid point by #record_cells), so the result
       # is the same at any buffer size.
       def measure_lane(idx, bufs)
-        ranges = @cell_ranges[idx]
-        bufs.each_with_index do |b, c|
-          mn, mx = range_of(b)
-          r = ranges[c]
-          if r.nil?
-            ranges[c] = [mn, mx]
+        lo = @cell_lo[idx]
+        hi = @cell_hi[idx]
+        fresh = @cell_fresh[idx]
+        c = 0
+        while c < bufs.length
+          mn, mx = range_of(bufs[c])
+          if fresh || lo[c].nil?
+            lo[c] = mn
+            hi[c] = mx
           else
-            r[0] = mn if mn < r[0]
-            r[1] = mx if mx > r[1]
+            lo[c] = mn if mn < lo[c]
+            hi[c] = mx if mx > hi[c]
           end
+          c += 1
         end
+        @cell_fresh[idx] = false
       end
 
       # Marks lane +idx+ as ended (silent from now on).
@@ -721,6 +740,7 @@ module MB
       # measured per buffer, a released lane was freed at a different note
       # at 367/368 than at 800, and the note went to another lane).
       def sample_lanes(count)
+        @grid_started = true
         g = SKIP_GRID - @skip_position % SKIP_GRID
         return sample_lanes_piece(count) if g >= count
 
@@ -808,10 +828,18 @@ module MB
         @lanes.each_index do |idx|
           next if @done[idx]
 
-          ranges = @cell_ranges[idx]
           swing = 0.0
-          ranges.each { |lo, hi| sw = (hi - lo) * 0.5; swing = sw if sw > swing }
-          ranges.clear
+          unless @cell_fresh[idx]
+            lo = @cell_lo[idx]
+            hi = @cell_hi[idx]
+            c = 0
+            while c < lo.length
+              sw = (hi[c] - lo[c]) * 0.5
+              swing = sw if sw > swing
+              c += 1
+            end
+          end
+          @cell_fresh[idx] = true
           @peaks[idx] = swing
           @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
           @quiet_pos[idx] = @allocator.lanes[idx].source.position
