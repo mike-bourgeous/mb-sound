@@ -55,7 +55,8 @@ module MB
       # +in:+, +at:+), or over +over:+ (bars, a Duration, or a Length;
       # linear in gain, shaped by +curve:+, from where it is or +from:+).
       # Returns the journal entry; undoable.  Also available as
-      # #send_level (`send` is every Ruby object's method-call method).
+      # #send_level and #fx_send (`send` is every Ruby object's method-call
+      # method).
       #
       #     feed :keys, :verb, -6.db, over: 2, on: :bar
       def feed(name, bus, level, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil)
@@ -66,6 +67,7 @@ module MB
         }
       end
       alias send_level feed
+      alias fx_send feed
 
       # The routing of every player name: name => { to:, send: { bus =>
       # level } }.

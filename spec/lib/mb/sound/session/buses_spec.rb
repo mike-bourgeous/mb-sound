@@ -327,18 +327,25 @@ RSpec.describe(MB::Sound::Session::Buses) do
   end
 
   describe 'stems' do
-    it 'writes a stem per bus and the dry part of each track' do
+    it "gives each track its own share of the buses it feeds, so stems sum to the mix (bus stems on request)" do
       Dir.mktmpdir do |dir|
-        MB::Sound.render(File.join(dir, 'mix.flac'), channels: 1, gain: 1, seconds: 0.5, stems: dir) do
-          MB::Sound.bus(:half) { |sig| sig * 0.5 }
-          MB::Sound.bg(:x, 0.5.constant, send: { half: 1 })
+        MB::Sound.render(File.join(dir, 'mix.flac'), channels: 1, gain: 1, seconds: 2, stems: dir, bus_stems: true) do
+          MB::Sound.bus(:half) { |sig| sig.delay(0.01) * 0.5 }
+          MB::Sound.bus(:grp, to: :half) { |sig| sig * 0.5 }
+          MB::Sound.bg(:x, 0.25.constant.until(1), send: { half: 1 })
+          MB::Sound.bg(:y, 0.125.constant.until(1), to: :grp)
         end
-        x = MB::Sound.read(File.join(dir, 'x.flac'))[0]
-        half = MB::Sound.read(File.join(dir, 'half.flac'))[0]
-        mix = MB::Sound.read(File.join(dir, 'mix.flac'))[0]
-        expect(x[1000]).to be_within(1e-4).of(0.5)
-        expect(half[1000]).to be_within(1e-4).of(0.25)
-        expect(mix[1000]).to be_within(1e-4).of(0.75)
+        read = ->(n) { MB::Sound.read(File.join(dir, "#{n}.flac"))[0] }
+        x, y, mix, half, grp = %w[x y mix half grp].map { |n| read.(n) }
+        expect(x[2000]).to be_within(1e-4).of(0.25 + 0.125)         # dry plus its echo
+        expect(y[2000]).to be_within(1e-4).of(0.03125)              # through grp, then half (grp feeds only half)
+        expect(y[200]).to be_within(1e-6).of(0)                     # (before half's 10 ms delay)
+        expect(mix[2000]).to be_within(1e-4).of(x[2000] + y[2000])
+        expect((x + y - mix).abs.max).to be < 1e-4
+        # Ringing out after the tracks end (the delay tail is in the stems)
+        expect(x[48000 + 200]).to be_within(1e-4).of(0.125)
+        expect(half[2000]).to be_within(1e-4).of(0.125 + 0.03125)
+        expect(grp[2000]).to be_within(1e-4).of(0.0625)
       end
     end
   end

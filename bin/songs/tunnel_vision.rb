@@ -80,6 +80,12 @@ module MB::Sound
   TV_DRIVE = 11.0
   TV_CEILING = -0.5
 
+  # The :hall bus's return gain in dB (buses): its reverb is wet only and
+  # energy-normalized (about 20 dB under its input), so the return needs
+  # this to sit around -30 dBFS RMS in the breakdown (maintainer, round 2
+  # of buses-1: "way more hall (-30dBFS or more?)").
+  TV_HALL = 24.0
+
   # The kick, shared by the drums and the ghost kicks that duck the bass.
   TV_KICK = dnb_kick_settings.freeze
 
@@ -172,7 +178,7 @@ module MB::Sound
   # own kick (`duck(:drums, only: :kick)`) instead of a ghost kick.
   # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
   # kick for the ducks).
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true)
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -191,7 +197,7 @@ module MB::Sound
     if buses
       # The sidechain: the drums' kick voice itself, read on the exact
       # sample (no ghost kick to keep in step with the kit)
-      bus(:hall) { |sig| sig.reverb(:hall, mix: 1).duck(:drums, only: :kick, amount: -6.db, release: 1.n8) }
+      bus(:hall) { |sig| (sig.reverb(:hall, mix: 1) * hall.db).duck(:drums, only: :kick, amount: -6.db, release: 1.n8) }
       bus(:echo) { |sig| sig.delay(1.n8.dotted, feedback: 0.4) }
       duck = ->(node, amount) { node.duck(:drums, only: :kick, amount: amount, release: 1.n16) }
       # (dry levels as the original's reverb mixes left them: 0.65 and 0.75)
@@ -242,9 +248,10 @@ module MB::Sound
       bars: TV_BARS,
       drive: [TV_DRIVE, Float, '-D', 'Gain in dB into the master clipper and limiter', -20.0..24.0],
       ceiling: [TV_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
+      hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses)
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall)
       tunnel_vision_form
     }
   end

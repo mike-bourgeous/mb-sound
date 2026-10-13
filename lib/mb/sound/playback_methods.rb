@@ -749,7 +749,11 @@ module MB
       # the mix before the chain (see Session::Stems).  +:stem_gain+ scales
       # every stem (headroom: before a master limiter a part may peak above
       # full scale, which integer formats clip; the render warns).
-      # +:loudness+ normalizes only the mix file.
+      # A track that sends or plays into buses (see BusMethods) carries its
+      # own share of each bus in its stem (its own copy of every bus it
+      # reaches, fed only by it), so stems still sum to the mix before the
+      # master chain; +:bus_stems+ (true) also writes each bus's output as
+      # "<bus>.<ext>".  +:loudness+ normalizes only the mix file.
       #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
@@ -780,7 +784,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, max_seconds: nil, exact_lanes: false, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -791,7 +795,7 @@ module MB
         session.exact_lanes = exact_lanes
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
-          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)
+          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
         end
 
         rate = output.sample_rate

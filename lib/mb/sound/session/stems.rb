@@ -18,6 +18,11 @@ module MB
       # filters act on the sum, so a stem through the master alone wouldn't
       # sound like its part of the mix.
       #
+      # With buses (see Buses), a player's stem is the player as heard: its
+      # main out if it goes to the master, plus its share of every bus it
+      # feeds, from its own copy of each bus, so stems still sum to the mix
+      # before the master chain (Writer +buses+ adds each bus's output).
+      #
       # Players with the same name (a track's replacements, ringing tails,
       # rebuilt graphs) share one stem; unnamed players (numbered by #bg)
       # get "player_<number>".  Turned on by PlaybackMethods#render's +stems:+
@@ -37,7 +42,13 @@ module MB
           # by +gain+ (headroom for stems whose part peaks above full scale
           # before a master limiter, which integer formats would clip).
           # +overwrite+ as for MB::Sound.file_output.
-          def initialize(dir, format: 'flac', channels: 2, sample_rate: 48000, overwrite: false, gain: 1.0)
+          # True to write a stem per bus too (its return; see Buses).
+          attr_reader :buses
+
+          # +buses+ also writes each bus's output as its own stem (the
+          # tracks' stems already hold their share of every bus).
+          def initialize(dir, format: 'flac', channels: 2, sample_rate: 48000, overwrite: false, gain: 1.0, buses: false)
+            @buses = buses
             @dir = dir
             @format = format.to_s.delete_prefix('.')
             @channels = channels

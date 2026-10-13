@@ -297,6 +297,7 @@ module MB
           @routed_span = false
           @bus_tapped = ::Set.new
           @bus_sources = ::Set.new
+          @stem_shadows = {}
         end
 
         # True if anything needs the routed render (buses, or graphs that
@@ -565,6 +566,16 @@ module MB
           @bus_span_count = count
           @bus_span_buses = buses.to_h { |b| [b.name, b] }
           buses.each { |b| b.input = nil }
+          # Stems: each track's own copy of every bus it reaches (see
+          # #stem_shadow), following its bus's mute
+          @stem_shadows.each_value do |list|
+            list.each do |bus, sh|
+              b = @bus_span_buses[bus]
+              sh.input = nil
+              sh.strip_level = b ? b.strip_level : 0.0
+              sh.strip_ramp = b&.strip_ramp
+            end
+          end
           @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
           @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
           @send_knobs.each { |k| k.read(frame, count) } unless @send_knobs.empty?
@@ -589,6 +600,16 @@ module MB
               end
             else
               render_bus(x, mix, from, to, per_sample, count, frame, playing, parts)
+              # Each track's share of this bus, into the track's stem (or its
+              # copy of the next bus)
+              if parts
+                @stem_shadows.each do |track, list|
+                  sh = list[x.name] or next
+                  stem = (parts[track] ||= Array.new(@channels) { Numo::SFloat.zeros(count) })
+                  dest = sh.to ? stem_shadow_input(track, sh.to) : stem
+                  render_bus(sh, nil, from, to, per_sample, count, frame, playing, nil, into: dest)
+                end
+              end
             end
           end
 
@@ -602,16 +623,26 @@ module MB
         # A reader's signal hears the player before its mute and solo
         # (+fade+: the fade ramp alone), so soloing a bass keeps it ducking
         # by a muted kick.
+        #
+        # With stems, +stem+ gets the player's main out if it goes to the
+        # master; what it sends or plays into buses goes through its own
+        # copies of those buses into its stem (see #stem_shadow), so each
+        # stem is the track as heard before the master chain.
         def deliver_player(p, data, ramp, mix, stem, offset, frames, fade: ramp)
           route = route_of(p.name)
-          dest = (route&.to && bus_input(route.to)) || mix
+          main_bus = route&.to && bus_input(route.to)
+          dest = main_bus || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
+          track = stem && stem_name(p)
           sends = route ? route.sends.filter_map { |bus, k|
             input = bus_input(bus) or next
             v = k.read(@frame, @bus_span_count)
             next if v.is_a?(Numeric) && v == 0
-            [input, v]
+            [input, v, track && stem_shadow_input(track, bus)]
           } : []
+          if stem && main_bus
+            stem = stem_shadow_input(track, route.to)
+          end
 
           dest.each_with_index do |m, c|
             d = data[c % data.length]
@@ -624,8 +655,10 @@ module MB
             m[r].inplace + d
             stem[c][r].inplace + d if stem
             tap[c][r].inplace + (fade.equal?(ramp) ? d : (fade ? raw * fade[0...len] : raw)) if tap
-            sends.each do |input, v|
-              input[c][r].inplace + (v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r])
+            sends.each do |input, v, shadow|
+              x = v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r]
+              input[c][r].inplace + x
+              shadow[c][r].inplace + x if shadow
             end
           end
         end
@@ -633,14 +666,18 @@ module MB
         # Renders bus +b+ for the span: wakes it on its first loud input (or
         # a chain change, or an unmute), runs its chains, and adds its output
         # to its destination, its reader signal, and +parts+ (stems).
-        def render_bus(b, mix, from, to, per_sample, count, frame, playing, parts)
+        #
+        # +into+ renders a track's stem copy of the bus (see #stem_shadow)
+        # into that Array instead (the track's stem, or its copy of the next
+        # bus), with no reader signal or bus stem.
+        def render_bus(b, mix, from, to, per_sample, count, frame, playing, parts, into: nil)
           rate = output.sample_rate.to_f
           input = b.input
           s = 0
           e = count
 
           # A bus a sidechain reads keeps processing while muted
-          read = bus_tapped?(b.name)
+          read = into.nil? && bus_tapped?(b.name)
           muted = b.strip_level <= 0 && b.strip_ramp.nil? && !read
           if b.asleep || muted
             wake = bus_wake_index(b, input, frame, count)
@@ -675,9 +712,9 @@ module MB
           end
 
           quiet = (Master::TAIL_QUIET_SECONDS * rate).round
-          dest = b.to ? (bus_input(b.to) || mix) : mix
-          tap = bus_tapped?(b.name) ? bus_signal_buffer(b.name) : nil
-          stem = parts ? Array.new(@channels) { Numo::SFloat.zeros(count) } : nil
+          dest = into || (b.to ? (bus_input(b.to) || mix) : mix)
+          tap = read ? bus_signal_buffer(b.name) : nil
+          stem = parts && @stems.buses ? Array.new(@channels) { Numo::SFloat.zeros(count) } : nil
 
           p0 = s
           while p0 < e
@@ -712,10 +749,47 @@ module MB
             b.asleep = true
           end
 
-          if parts
+          if stem
             key = b.name.to_s.gsub(%r{[/\\\0]}, '_')
             parts[key] = parts[key] ? parts[key].each_with_index.map { |a, c| a + stem[c] } : stem
           end
+        end
+
+        # The input of track stem +track+'s copy of bus +bus+ this span
+        # (see #stem_shadow), zeroed on first use.
+        def stem_shadow_input(track, bus)
+          sh = stem_shadow(track, bus) or return nil
+          sh.input ||= Array.new(@channels) { Numo::SFloat.zeros(@bus_span_count) }
+        end
+
+        # A stem's own copy of bus +bus+ (and, through +to+, of the buses it
+        # feeds): a Bus with a chain built from the bus's block, fed only
+        # that track's sends, so its stem holds the track as heard in the
+        # mix, bus effects included (maintainer, 2026-10-13: "Use final
+        # versions of stems through all non-mastering processing").  Made
+        # when the track first sends to the bus during a stems render.
+        def stem_shadow(track, bus)
+          list = (@stem_shadows[track] ||= {})
+          return list[bus] if list.key?(bus)
+
+          b = @bus_span_buses[bus] or return nil
+          # The newest chain (a swap still waiting for a later span: the one
+          # playing now)
+          chain = b.chains.last
+          chain = b.chains.reverse.find(&:started) if chain && !chain.started && chain.start > @transport.position
+          block = chain&.block
+          sh = Bus.new(
+            name: bus, to: b.to, chains: [], block: block, input: nil,
+            strip_level: b.strip_level, strip_ramp: b.strip_ramp, asleep: false, quiet_from: @frame,
+            wake_at: nil, playing: b.playing, frames: nil
+          )
+          c = build_master(block, description: chain&.description, label: bus.to_s)
+          prepare_bus_chain(bus, c)
+          start_master_chain(c, @transport.position)
+          sh.chains << c
+          list[bus] = sh
+          stem_shadow(track, b.to) if b.to
+          sh
         end
 
         # Where a sleeping bus wakes in this span: its first input frame at
@@ -806,6 +880,18 @@ module MB
               b.wake_at = @landing_frame || @frame
             end
           }
+
+          # Stem copies of the bus switch chains with it
+          @stem_shadows.each_value do |list|
+            sh = list[name] or next
+            c = build_master(block, description: chain.description, label: name.to_s)
+            prepare_bus_chain(name, c)
+            c.mode, c.fade = chain.mode, chain.fade
+            c.start = time
+            sh.chains.reject! { |x| !x.started }
+            sh.chains << c
+            sh.wake_at = @landing_frame || @frame if sh.asleep
+          end
         end
 
         # --- Overrides (Strip, Undo, Seeks) ---
