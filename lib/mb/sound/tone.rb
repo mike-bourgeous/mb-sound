@@ -990,18 +990,28 @@ module MB
       #     sig.delay(2.bars.lfo.square.at(3.n16..5.n16))   # alternates each bar
       #
       # A graph node becomes the tone's output gain (#gain: it multiplies
-      # inside the oscillator, the same samples as `tone * node`, and fuses
-      # into the tone's plan op) and returns this tone.  When that can't be
-      # done exactly, it multiplies after the tone as GraphNode#at does for
-      # every node (`tone * node`, a new node): when the tone already has a
-      # gain (multiplying the two inside would round differently), is a
-      # phasor, or is already playing (so `.at(node)` never fails).
+      # inside the oscillator, after the scale and offset, the same samples
+      # as `tone * node`, and fuses into the tone's plan op) and returns
+      # this tone.  A numeric gain already set merges with it into one gain
+      # input (`node * gain`; maintainer 2026-10-13: within float32
+      # rounding of `tone.gain(g) * node`).  A gain that is already a node
+      # goes through MB::Sound.live_error (raises in scripts; live, warns),
+      # then the node multiplies after the tone as GraphNode#at does for
+      # every node (`tone * node`, a new node), as it also does for phasors
+      # and tones already playing, so `.at(node)` never fails live.
       #
       #     play 220.hz.saw.at(adsr(0.01, 0.3, 0.5, 0.4, hold: 1))
       def at(amplitude)
         if amplitude.is_a?(GraphNode)
-          return super if @out_gain || @started || phasor? || @in_or_at
-          return gain(amplitude)
+          return super if @started || phasor? || @in_or_at
+          return gain(amplitude) if @out_gain.nil?
+          return gain(amplitude * @out_gain) if @out_gain.is_a?(Numeric)
+
+          MB::Sound.live_error(ArgumentError.new(
+            "#{self.class.name} #{wave_name} already has a gain node (#{@out_gain.class.name}); " \
+            'multiply after it instead (tone * node), or give #gain one node'
+          ))
+          return super
         end
 
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0

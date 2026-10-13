@@ -90,13 +90,45 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
       expect(collect(220.hz.at(env))).to eq(collect(220.hz.sine * env))
     end
 
-    it 'multiplies after the tone when it already has a gain, so the rounding stays that of tone * gain * node' do
+    # Relative difference from the reference, at most about one float32 ulp
+    def ulps(a, b)
+      (a - b).abs.max / b.abs.max
+    end
+
+    it 'merges with a numeric gain into one gain input, within float32 rounding of tone.gain(g) * node' do
       a = 220.hz.ramp.gain(0.5).at(env)
-      expect(a).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(collect(a)).to eq(collect(220.hz.ramp.gain(0.5) * env))
-      b = 220.hz.ramp.at(env).at(env)
+      expect(a).to be_a(MB::Sound::Tone)
+      expect(a.output_gain).to be_a(MB::Sound::GraphNode)
+      x = collect(a)
+      y = collect(220.hz.ramp.gain(0.5) * env)
+      expect(x.length).to eq(y.length)
+      expect(ulps(x, y)).to be < 2.4e-7
+    end
+
+    it 'keeps a biased range: (wave * amp + offset) * gain * node' do
+      a = 110.hz.ramp.at(0.2..0.9).gain(0.37).at(env)
+      expect(a).to be_a(MB::Sound::Tone)
+      x = collect(a)
+      y = collect(110.hz.ramp.at(0.2..0.9) * 0.37 * env)
+      expect(ulps(x, y)).to be < 2.4e-7
+      # The offset is scaled too: the output at a sustain of 0.5 averages
+      # 0.55 * 0.37 * 0.5, not 0.37 * 0.5 * ramp + 0.55
+      expect(x[3000...3870].mean).to be_within(0.01).of(0.55 * 0.37 * 0.5)
+    end
+
+    it 'merges an LFO with a numeric gain on a feedback sine' do
+      a = 220.hz.fm_feedback(1.5).gain(0.81).at(3.hz.lfo.at(0.2..1.3))
+      expect(a).to be_a(MB::Sound::Tone)
+      expect(ulps(collect(a), collect(220.hz.fm_feedback(1.5).gain(0.81) * 3.hz.lfo.at(0.2..1.3)))).to be < 2.4e-7
+    end
+
+    it 'raises (live_error) when the gain is already a node, and multiplies after the tone live' do
+      expect { 220.hz.ramp.gain(env).at(env) }.to raise_error(ArgumentError, /already has a gain node/)
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      b = nil
+      expect { b = 220.hz.ramp.gain(env).at(env) }.to output(/already has a gain node/).to_stderr
       expect(b).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(collect(b)).to eq(collect(220.hz.ramp * env * env))
+      expect(collect(b)).to eq(collect(220.hz.ramp.gain(env) * env))
     end
 
     it 'multiplies after phasors and playing tones instead of failing' do
@@ -114,6 +146,12 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
       loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'at'))
       expect(loaded).to be_a(MB::Sound::Tone)
       expect(collect(loaded)).to eq(collect(220.hz.ramp.at(0.3) * env))
+
+      merged = 110.hz.ramp.at(0.2..0.9).gain(0.37).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
+      text = merged.to_ruby
+      expect(text).to include("110.hz.ramp.at(0.2..0.9).gain(0.37).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
+      loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(merged, name: 'at'))
+      expect(collect(loaded)).to eq(collect(110.hz.ramp.at(0.2..0.9).gain(0.37).at(env)))
     end
   end
 

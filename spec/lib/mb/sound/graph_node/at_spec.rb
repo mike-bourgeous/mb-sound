@@ -61,9 +61,9 @@ RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
     expect(a.sample(5).to_a).to eq((ref * Numo::SFloat.cast(values)).to_a)
   end
 
-  it 'multiplies after a Tone that already has a gain' do
+  it 'merges with a Tone\'s numeric gain into one gain input' do
     a = 220.hz.ramp.gain(0.5).at(input(values))
-    expect(a).to be_a(MB::Sound::GraphNode::Multiplier)
+    expect(a).to be_a(MB::Sound::Tone)
     ref = (220.hz.ramp * 0.5).sample(5).dup
     expect(a.sample(5).to_a).to eq((ref * Numo::SFloat.cast(values)).to_a)
   end

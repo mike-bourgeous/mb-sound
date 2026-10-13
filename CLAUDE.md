@@ -61,7 +61,7 @@ play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
 ```
 
 DSL methods live in topic modules `lib/mb/sound/graph_node/*_methods.rb`; node types in `lib/mb/sound/graph_node/`, MIDI nodes in `lib/mb/sound/notes/`; traversal via `Traversable`.
-- `node.at(x)` scales any node like Tone#at: numbers and nodes multiply, `a..b` maps -1..1 onto the range (Tones keep their own #at, applied inside the oscillator; a node becomes the tone's #gain unless it already has one or is playing).
+- `node.at(x)` scales any node like Tone#at: numbers and nodes multiply, `a..b` maps -1..1 onto the range (Tones keep their own #at, applied inside the oscillator; a node becomes the tone's #gain, merged with a numeric gain; a node gain already set is a live_error plus a Multiplier).
 - Every consumer must call `get_sampler` on nodes it stores in its constructor, so a node used in several places branches through a `Tee` instead of advancing twice.
 - Tee branches reading in lockstep share one frozen buffer; otherwise the Tee copies through a CircularBuffer (made lazily).  A node processing its input in place copies it first only if `buf.frozen?` (user rule; `GraphNode::FrozenCopy`).  `MB_SOUND_CHECK_SHARED=1` / the `:check_shared` tag verify shared buffers aren't modified; `MB_SOUND_SHARED_TEE=0` turns sharing off.
 - `oversample(m)` raises upstream rates when the graph first plays or is planned; nodes also read outside the region keep their rate and the region's Tee branch resamples them (`Branch#resampled?`, `Tee.pin_rates`), so shared nodes are never read at two rates.

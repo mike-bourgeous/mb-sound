@@ -58,6 +58,8 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     it 'matches #at with a node, which becomes the gain inside the tone op' do
       r = plan_compare { fm(1).tone.ramp.at(0.5).at(src.new(seed: 5)) * 1 }
       expect(r.program.to_s).to match(/gain: v\d+/)
+      r = plan_compare { fm(2).tone.ramp.at(0.2..0.9).gain(0.37).at(src.new(seed: 6)) * 1 }
+      expect(r.program.to_s).to match(/gain: v\d+/)
     end
 
     it 'matches noise (random advance with its own generator state)' do
