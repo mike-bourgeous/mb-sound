@@ -183,7 +183,7 @@ module MB
           unless @loop
             notes, = Clip.bake_notes(self, apply, transport)
             events = notes.map { |start, length, value, velocity| Event.new(start: start, length: length, value: value, velocity: velocity) }
-            return Clip.new(events, length: [@length, *events.map(&:end_time)].max, seed: @seed)
+            return Clip.new(events, length: [@length, *events.map(&:end_time)].max, seed: @seed, performed: @performed)
           end
 
           # Find how many cycles the transform's tail spans, then play enough
@@ -199,7 +199,7 @@ module MB
           events = notes.select { |start, *| start >= from && start < to }.map { |start, length, value, velocity|
             Event.new(start: start - from, length: length, value: value, velocity: velocity)
           }
-          Clip.new(events, length: @length * cycles, loop: true, seed: @seed, align: @align)
+          Clip.new(events, length: @length * cycles, loop: true, seed: @seed, align: @align, performed: @performed)
         end
 
         # A non-looping clip of +total+ copies of this loop's cycles
@@ -213,7 +213,7 @@ module MB
               e.with(start: MB::M.max(e.start + j * @length, 0r), probability: nil, condition: nil)
             }
           }
-          Clip.new(events, length: @length * total, seed: @seed)
+          Clip.new(events, length: @length * total, seed: @seed, performed: @performed)
         end
         protected :unrolled
 

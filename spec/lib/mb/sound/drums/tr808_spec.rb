@@ -174,6 +174,35 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       expect(MB::Sound.tr808(MB::Sound.seq(36, 38)).voices.values.map { |v| v.knobs[:velocity_curve] }).to eq([:grid, :grid])
     end
 
+    it 'plays a performed clip (recorded from live MIDI) like live MIDI: :midi, every voice of the map' do
+      ev = ->(note) { MB::Sound::Sequence::Event.new(start: 0r, length: 1 / 8r, value: note, velocity: 0.5) }
+      played = MB::Sound::Sequence::Clip.new([ev.(36)], length: 1, loop: true, performed: true)
+      expect(MB::Sound::Drums.velocity_curve(played)).to eq(:midi)
+      expect(MB::Sound::Drums.velocity_curve(played.transpose(2).quantize(16))).to eq(:midi)
+      kit = MB::Sound.tr808(played)
+      expect(kit.names).to eq(described_class::VOICES.keys)
+      expect(kit.voices.values.map { |v| v.knobs[:velocity_curve] }.uniq).to eq([:midi])
+      # (an empty one too: a recording's placeholder)
+      expect(MB::Sound.tr808(MB::Sound::Sequence::Clip.new([], length: 1, loop: true, performed: true)).names.length).to eq(described_class::VOICES.length)
+      expect { MB::Sound.tr808(MB::Sound::Sequence::Clip.new([], length: 1, loop: true)) }.to raise_error(ArgumentError, /plays a TR-808 voice/)
+    end
+
+    it 'says which clips a kit can take in a swap (Kit#plays_clip?)' do
+      ev = ->(note) { MB::Sound::Sequence::Event.new(start: 0r, length: 1 / 8r, value: note, velocity: 0.5) }
+      kicks = MB::Sound::Sequence::Clip.new([ev.(36)], length: 1, loop: true)
+      hats = MB::Sound::Sequence::Clip.new([ev.(42)], length: 1, loop: true)
+      played = MB::Sound::Sequence::Clip.new([ev.(42)], length: 1, loop: true, performed: true)
+      kit = MB::Sound.tr808(kicks)
+      expect(kit.plays_clip?(kicks.transpose(0))).to eq(true)
+      expect(kit.plays_clip?(hats)).to eq(false)   # no hat voice
+      expect(kit.plays_clip?(MB::Sound::Sequence::Clip.new([ev.(36)], length: 1, performed: true))).to eq(false) # another curve
+      live = MB::Sound.tr808(played)
+      expect(live.plays_clip?(played.transpose(1))).to eq(true)
+      expect(live.plays_clip?(kicks)).to eq(false)
+      expect(MB::Sound.tr808(kicks, velocity_curve: :midi).plays_clip?(played)).to eq(false) # (no hat)
+      expect(MB::Sound.tr808(played, velocity_curve: :grid).plays_clip?(hats)).to eq(true) # a given curve stays
+    end
+
     it 'plays MIDI velocity 64 6 dB quieter than 127 with :midi (14.3 dB with :grid)' do
       notes = ->(curve) {
         clip = MB::Sound::Sequence::Clip.new([127, 64].each_with_index.map { |v, i| MB::Sound::Sequence::Event.new(start: i / 2r, length: 1 / 8r, value: 75, velocity: v / 127.0) })

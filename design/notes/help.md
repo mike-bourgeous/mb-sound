@@ -14,7 +14,7 @@ Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the resear
 
 ## Layout
 
-`lib/mb/sound/help.rb` loads `lib/mb/sound/help/`; it is not part of `require 'mb/sound'`.  bin/sound.rb requires it, prints `Help.welcome`, and calls `Help.install_pry!` (renames Pry's help, wraps Pry's printer so pages print as text, adds the lesson `after_eval` hook).  `MB::Sound` extends `HelpMethods` (`help`, `now`, `lesson`).
+`lib/mb/sound/help.rb` loads `lib/mb/sound/help/`; it is not part of `require 'mb/sound'`, but `MB::Sound::HelpAutoload` loads it on the first `help`, `now`, or `lesson` in any script (fixes-5, 2026-10-13: a plain script got a NameError).  bin/sound.rb requires it, prints `Help.welcome`, and calls `Help.install_pry!` (renames Pry's help, wraps Pry's printer so pages print as text, adds the lesson `after_eval` hook).  `MB::Sound` extends `HelpMethods` (`help`, `now`, `lesson`).
 
 | file | what |
 |---|---|
@@ -59,7 +59,7 @@ Example levels (the guard spec), relative to the tone so they scale with the cho
 
 ## Lessons
 
-A lesson (`Help.lesson :name, title, minutes:`) is steps with `say` (prose), `type { code }` (shown, never run by the hook), `check('description') { |memo| ... }`, an optional `start { ... }` whose result goes to the check (for "something new since the step began": the capture step compares `captures.length`), and `hint`.  `needs :midi` marks lessons that need a keyboard (the spec plays a stand-in).  The Pry `after_eval` hook runs the current step's check after every console line; passing prints a check mark and the next step.  `lesson.run` types the step for you, `next`, `back`, `hint`, `quit`; progress is saved in `Help.data_dir/progress.json` (`lesson :set` resumes, `restart: true` from the top).
+A lesson (`Help.lesson :name, title, minutes:`) is steps with `say` (prose), `type { code }` (shown, never run by the hook), `check('description') { |memo| ... }`, an optional `start { ... }` whose result goes to the check (for "something new since the step began": the capture step looks for a `:capture` change queued since, since `captures.length` also grew when an earlier `rec` closed), and `hint`.  `needs :midi` marks lessons that need a keyboard (the spec plays a stand-in); `needs :idle_set` (`:set`, `:flow`) makes `lesson` refuse (`live_error`) to start over a playing form or a scene whose tracks play (`Lesson#busy`), and every lesson name (tracks, scenes, sections, knobs) starts with `l_` (fixes-5: `lesson :flow` had redefined a playing song's `:intro`/`:outro`).  Files a lesson's code makes without a path (`rec_audio`) go to `Help.data_dir/lessons/<name>` (`LessonRunner#files_dir`), never the take directory.  `lesson` lists the lessons once the active one is done.  The Pry `after_eval` hook runs the current step's check after every console line; passing prints a check mark and the next step.  `lesson.run` types the step for you, `next`, `back`, `hint`, `quit`; progress is saved in `Help.data_dir/progress.json` (`lesson :set` resumes, `restart: true` from the top).
 
 Lessons in phase 1: `:set` (6 steps), `:knobs` (5), `:flow` (4), `:record` (5: arm, `rec 2`, `capture :l_keys, 1`, `rec_audio`, wrap up).  Their names start with `l_`.
 

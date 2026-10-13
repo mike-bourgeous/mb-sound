@@ -51,9 +51,10 @@ module MB
       # 4.bars) from the next launch point of each armed track (or the
       # tracks named after the length, or before it: `rec :lead, 4`), which
       # swaps into the track when it closes (see Arrangement#record for
-      # +quantize:+, +humanize:+, +channel:+, +sustain:+).  Audio is
-      # #rec_audio.  Returns the journal entry.  Also available as #record.
-      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+      # +quantize:+, +humanize:+, +channel:+, +sustain:+; the loop follows
+      # the timeline's phase, or with +align: :launch+ starts from what was
+      # played first).  Audio is #rec_audio.  Returns the journal entry.  Also available as #record.
+      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
 
@@ -70,8 +71,8 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("rec takes a length in bars (rec 4, rec 4.bars, rec :lead, 4) or an audio path (got #{args.inspect})"))
         end
 
-        attach_session_midi(session, input)
-        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+        attach_recording_midi(session, input, names)
+        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
       end
       alias record rec
 
@@ -79,7 +80,8 @@ module MB
       # the launch point (now by default) until #stop_rec_audio: to +path+,
       # or without one a timestamped file in the take directory (Take#home,
       # `sets/` with +repo: true+, else the user data directory, as
-      # Take#save chooses).  An existing file needs +overwrite: true+.
+      # Take#save chooses; during a lesson, the lesson's folder in the help
+      # directory, see Help::LessonRunner#files_dir).  An existing file needs +overwrite: true+.
       # Returns the journal entry.  Also available as #record_audio.
       def rec_audio(path = nil, at: nil, on: nil, in: nil, repo: false, overwrite: false)
         point = LaunchPoint.of(binding) or return nil
@@ -106,7 +108,7 @@ module MB
       # +length+ bars (or a Duration; by default the last phrase, see
       # Arrangement#capture) loop on it.  Options as in #rec.  Returns the
       # :capture journal entry.  Also available as #capture_midi.
-      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
         point = LaunchPoint.of(binding) or return nil
         number = names.find { |a| a.is_a?(Numeric) || a.is_a?(Sequence::Duration) }
         if number
@@ -116,8 +118,8 @@ module MB
         end
 
         session = Session.current
-        attach_session_midi(session, input)
-        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+        attach_recording_midi(session, input, names)
+        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
       end
       alias capture_midi capture
 
@@ -144,6 +146,19 @@ module MB
         warn "No live MIDI input (#{e.class}: #{e.message})"
       end
 
+      # Attaches the MIDI inputs #rec and #capture read: +input+ if given,
+      # else each track's armed input (the tracks +names+, or the armed
+      # ones), so recording a track armed on a named input doesn't also
+      # open the default input.
+      def attach_recording_midi(session, input, names)
+        return attach_session_midi(session, input) if input
+
+        armed = session.arrangement.armed
+        names = armed.keys if names.empty?
+        inputs = names.map { |n| armed[n] }.uniq
+        (inputs.empty? ? [nil] : inputs).each { |i| attach_session_midi(session, i) }
+      end
+
       # The scheduled block's time inside one (see Session::Changes#now).
       def schedule_time(session)
         context = Session.context
@@ -151,7 +166,10 @@ module MB
       end
 
       def record_audio_file(session, path, point, repo:, overwrite:)
-        path ||= File.join(Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir), "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
+        # (Help loads with bin/sound.rb)
+        dir = Help::LessonRunner.active&.files_dir if !repo && defined?(Help::LessonRunner)
+        dir ||= Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir)
+        path ||= File.join(dir, "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
         path = File.expand_path(path)
         replay = Session.perform&.[](:source) == :replay
         unless replay

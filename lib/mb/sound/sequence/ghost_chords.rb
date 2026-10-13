@@ -88,7 +88,7 @@ module MB
             target == n ? e : e.with(value: Sequence.transpose_value(e.value, target - n))
           end
 
-          Clip.new(moved, length: clip.length, loop: @loop, seed: @seed, align: @align, variations: clip.equal?(self) ? @variations : [])
+          Clip.new(moved, length: clip.length, loop: @loop, seed: @seed, align: @align, variations: clip.equal?(self) ? @variations : [], performed: @performed)
         end
 
         # The most copies #ghost_chords makes of a looping clip.

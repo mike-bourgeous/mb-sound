@@ -125,6 +125,85 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'drum kits' do
+    # Hits on a stand-in drum pad: [note, seconds, velocity].
+    def pads(*hits)
+      events = hits.flat_map { |n, on, vel| [ev.parse([0x99, n, vel], time: on.to_r), ev.parse([0x89, n, 0], time: on.to_r + 0.1r)] }
+      MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    end
+
+    def peak_db(data)
+      20 * Math.log10(data.abs.max)
+    end
+
+    it 'monitors and records a tr808 track, the loop playing at the level it was played' do
+      s = new_session
+      s.midi_in.input = pads([36, 2r, 100], [38, 3r, 60])
+      MB::Sound::Session.with_context(session: s) { MB::Sound.track(:beat, q: 1) { |c| MB::Sound.tr808(c) } }
+      d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :beat', 'rec 2'] }, 96000 * 6)
+
+      clip = s.arrangement.captures[:beat_1]
+      expect(clip.performed?).to eq(true)
+      # (recorded from bar 2: timeline phases, so it plays in phase from bar 4)
+      expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1r, 36], [3/2r, 38]])
+
+      # Bar 2 (frame 96000) on the monitor, the same hits from bar 4 on the
+      # loop (and bar 6): the same curve, the same level
+      live_kick, loop_kick = [96000, 288000].map { |f| d[f...(f + 48000)] }
+      live_snare, loop_snare = [144000, 336000].map { |f| d[f...(f + 48000)] }
+      expect(peak_db(live_kick)).to be > -20
+      expect(peak_db(loop_kick)).to be_within(0.01).of(peak_db(live_kick))
+      rms_db = ->(x) { 10 * Math.log10((x.cast_to(Numo::DFloat) ** 2).mean) }
+      expect(rms_db.(loop_snare)).to be_within(0.5).of(rms_db.(live_snare)) # (the snare's noise differs)
+      expect(peak_db(d[480000...(480000 + 48000)])).to be_within(0.01).of(peak_db(live_kick))
+      expect(d[240000...288000].abs.max).to be < 1e-3 # late in bar 3: nothing played, the loop not yet in
+    end
+
+    it 'captures into a tr808 track playing a step clip, building the kit again for the recorded voices' do
+      s = new_session
+      s.midi_in.input = pads([42, 2r, 100], [42, 2.5r, 100])
+      kicks = MB::Sound.seq(36).n4.loop
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:beat, q: 1) { |c| MB::Sound.tr808(c) }
+        MB::Sound.scene(:a, beat: kicks)
+        MB::Sound.go(:a)
+      end
+      perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 125 => ['capture :beat, 1'] }, 96000 * 4)
+      graph = s.instance_variable_get(:@players).values.find { |p| p.name == :beat && p.current? }.input
+      kit = MB::Sound::GraphNode.graph(graph).grep(MB::Sound::Drums::Kit).first
+      expect(kit.names).to include(:closed_hat)
+      expect(kit.plays_clip?(s.arrangement.captures[:beat_1])).to eq(true)
+    end
+
+    it 'gives a short error for a patch that cannot play live input' do
+      s = new_session
+      s.midi_in.input = pads
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:odd, q: 1) { |c| c.ghost_chords(1) }
+        expect { MB::Sound.arm(:odd) }.to output(/can't monitor live MIDI \(NoMethodError: ghost_chords isn't available on live MIDI input.{0,200}\); recording still works\n\z/).to_stderr
+      end
+    end
+  end
+
+  describe 'align: :launch' do
+    it 'records a loop that starts from what was played first, where it closes' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 2.1r, 2.3r], [64, 4.1r, 4.3r]) # bars 2 and 3
+      setup_lead(s)
+      d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 2, align: :launch'] }, 96000 * 6)
+      clip = s.arrangement.captures[:lead_1]
+      expect(clip.align).to eq(:launch)
+      expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1/20r, 60], [21/20r, 64]])
+      expect(d[288000 + 4800]).to eq(60) # bar 4: the first bar played (in timeline phase it would be 64)
+      expect(d[384000 + 4800]).to eq(64)
+      expect(d[480000 + 4800]).to eq(60)
+
+      MB::Sound::Session.with_context(session: s) do
+        expect { MB::Sound.rec(1, :lead, align: :bar) }.to raise_error(ArgumentError, /align: is :timeline .* or :launch/)
+      end
+    end
+  end
+
   describe 'capture' do
     it 'captures the last phrase into the track at its next launch point, playing on in phase' do
       s = new_session
@@ -173,6 +252,71 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(d[120000]).to eq(0)
       expect(s.arrangement.armed).to be_empty
       expect(MB::Sound::Session.with_context(session: s) { MB::Sound.tracks[:lead] }).not_to include('armed')
+    end
+  end
+
+  describe 'MIDI inputs' do
+    it "rec and capture open the armed tracks' inputs, not the default one" do
+      s = new_session
+      s.midi_in(:pads).input = keyboard(*RECORDING_PLAYED)
+      setup_lead(s)
+      opened = []
+      allow(MB::Sound).to receive(:attach_live_midi) { |_session, connect = nil, **| opened << connect }
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.arm(:lead, input: :pads, monitor: false)
+        MB::Sound.rec(1)
+        MB::Sound.rec(1, :lead)
+        MB::Sound.rec(1, input: :keys)
+      end
+      expect(opened).to eq([:pads, :pads, :pads, :keys])
+    end
+  end
+
+  describe 'arm and disarm in scheduled blocks' do
+    it "land at the block's time, not when the scheduler runs it (half a bar early)" do
+      s = new_session
+      ev = MB::Sound::MIDI::Event
+      events = (0...16).flat_map { |i| [ev.parse([0x90, 60, 100], time: i * 0.5r + 0.01r), ev.parse([0x80, 60, 64], time: i * 0.5r + 0.49r)] }
+      s.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+      setup_lead(s)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.bg(:clock, 0.constant, on: :now)
+        MB::Sound.at_bar(2) { MB::Sound.arm(:lead) }
+        MB::Sound.at_bar(3) { MB::Sound.disarm(:lead) }
+      end
+      d = perform(s, {}, 96000 * 4)
+      nz = (d.ne 0).where
+      expect(nz[0]).to eq(96000 + 480)     # the first note in bar 2
+      expect(nz[-1]).to eq(191519)         # bar 2's last note (3.51..3.99 s) whole; none from bar 3
+      kinds = s.journal.changes.select { |e| e.subject.to_s.start_with?('lead') }.map { |e| [e.kind, e.subject, e.lands.to_s] }
+      expect(kinds).to eq([[:arm, :lead, '2:1'], [:bg, :'lead/live', '2:1'], [:stop, :'lead/live', '3:1'], [:disarm, :lead, '3:1']])
+    end
+
+    it "stops only an armed track's clips, saying its live monitor still plays; players marks monitors" do
+      s = new_session
+      s.midi_in.input = keyboard
+      s.midi_in(:keys).input = keyboard
+      setup_lead(s)
+      hint = /\Astop :lead: its live monitor :"lead\/live" is still playing \(disarm :lead or stop :"lead\/live"\)\n\z/
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.arm(:lead, input: :keys)
+        expect(MB::Sound.players[:'lead/live']).to start_with('lead: live monitor (armed; MIDI input :keys)')
+        MB::Sound.disarm(:lead)
+        MB::Sound.arm(:lead)
+        expect(MB::Sound.players[:'lead/live']).to start_with('lead: live monitor (armed; live MIDI)')
+
+        # Not playing: just the hint
+        expect { MB::Sound.stop(:lead) }.to output(hint).to_stderr
+
+        # Playing a clip: the clip stops, the monitor plays on
+        MB::Sound.bg(:lead, MB::Sound.seq(MB::Sound::C3).n1.loop, on: :now)
+        expect { MB::Sound.stop(:lead, fade: 0) }.to output(hint).to_stderr
+        s.process_buffer(800)
+        expect(MB::Sound.players.keys).to eq([:'lead/live'])
+
+        # Naming the monitor too: no hint
+        expect { MB::Sound.stop(:lead, :'lead/live', fade: 0) }.to output("No background player :lead is playing\n").to_stderr
+      end
     end
   end
 

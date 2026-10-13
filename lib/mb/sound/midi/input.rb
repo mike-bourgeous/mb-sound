@@ -1,3 +1,5 @@
+require 'tempfile'
+
 module MB
   module Sound
     module MIDI
@@ -59,7 +61,7 @@ module MB
               FastAudio.jack_ports(nil, true, flags)
             else
               client = DeviceOutput.client_name
-              kind == :input ? FastMIDI.input_ports(api, client) : FastMIDI.output_ports(api, client)
+              rtmidi_quietly { kind == :input ? FastMIDI.input_ports(api, client) : FastMIDI.output_ports(api, client) }
             end
           end
 
@@ -92,6 +94,44 @@ module MB
             end
 
             [lists.keys.first, nil, nil, lists]
+          end
+
+          # Runs the block (RtMidi calls) with the process's stderr (file
+          # descriptor 2) captured, since RtMidi and ALSA print their errors
+          # there: a FastMIDI::Error raised by the block is raised again
+          # with that text in its message (one line, instead of a wall of
+          # ALSA and RtMidi messages for every attempt when there is no MIDI
+          # device; the looper persona, 2026-10-13), and on success the text
+          # is printed after all.  Other threads' output to stderr in the
+          # meantime is held until the block returns.
+          def rtmidi_quietly
+            $stderr.flush
+            STDERR.flush
+            saved = STDERR.dup
+            Tempfile.create('mb_sound_rtmidi') do |f|
+              error = nil
+              begin
+                STDERR.reopen(f)
+                result = yield
+              rescue FastMIDI::Error => e
+                error = e
+              ensure
+                STDERR.flush
+                STDERR.reopen(saved)
+                saved.close
+              end
+
+              f.rewind
+              text = f.read
+              if error
+                detail = text.lines.map(&:strip).reject(&:empty?).uniq.join('; ')
+                message = error.message.sub(" (see RtMidi's message above)", '')
+                raise FastMIDI::Error, detail.empty? ? message : "#{message}: #{detail}"
+              end
+
+              STDERR.write(text) unless text.empty?
+              result
+            end
           end
 
           # Formats the port lists from .find_port for error messages.
@@ -167,7 +207,7 @@ module MB
             FastAudio.jack_connect(@connected_to, @input.port_name) if @connected_to
           else
             @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
-            @input = FastMIDI::Input.new(@api, client, index, @port_name, queue_size)
+            @input = self.class.rtmidi_quietly { FastMIDI::Input.new(@api, client, index, @port_name, queue_size) }
           end
 
           DeviceOutput.track(self, true)

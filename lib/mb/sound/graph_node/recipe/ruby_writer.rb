@@ -1065,6 +1065,7 @@ module MB
             kwargs[:loop] = true if clip.looping?
             kwargs[:seed] = clip.seed unless clip.seed == 0
             kwargs[:align] = clip.align unless clip.align == :timeline
+            kwargs[:performed] = true if clip.performed?
             text = events_text(rows, kwargs, indent)
             text += ".named(#{clip.name.inspect})" if clip.named?
             text

@@ -178,7 +178,8 @@ module MB
         #   voices by GM_MAP (36 kick, 38 snare, 42 closed hat, ...; +:map+
         #   adds or replaces voice => notes entries), every voice of the
         #   map unless +:only+ lists some (for a clip, only the voices its
-        #   notes play).
+        #   notes play; every voice for a performed clip, see
+        #   Sequence::Clip#performed?).
         #
         # Voice knobs are Hashes by voice name (aliases work), e.g. `kick: {
         # tune: 48, decay: 1.2 }`; +:accent+ (dB, see Drums.accented) applies
@@ -250,7 +251,10 @@ module MB
           end
 
           if outputs == :mix
-            Kit.new(voices, machine: :tr808)
+            # What a clip swapped in later must look like for this kit to
+            # play it as if built for it (see Kit#plays_clip?)
+            clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
+            Kit.new(voices, machine: :tr808, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil)
           else
             GraphNode::Channels.new(voices.values, names: voices.keys).named('tr808 outputs')
           end
@@ -268,6 +272,12 @@ module MB
             level: knobs.fetch(:level, VOICES[:cowbell][:level]) * 10 ** (db / 20.0),
             decay: knobs.fetch(:decay, VOICES[:cowbell][:decay]) * 2 ** (db / MORE_COWBELL_DOUBLING),
           )
+        end
+
+        # The notes that play voice +v+ in a kit with +map+ (see .kit).
+        def gm_notes(v, map)
+          map.each { |k, notes| return Array(notes) if voice_name(k) == v }
+          GM_MAP.fetch(v)
         end
 
         # Sources by voice name for .kit (see there).
@@ -291,8 +301,10 @@ module MB
             [voice_name(v) || raise(ArgumentError, "Unknown TR-808 voice #{v.inspect} in map:"), Array(notes)]
           })
           voices = only || gm.keys
-          if source.is_a?(Sequence::Clip)
-            # A clip's notes are known: only the voices it plays
+          if source.is_a?(Sequence::Clip) && !source.performed?
+            # A clip's notes are known: only the voices it plays (a
+            # performed clip may be a recording's placeholder, or be
+            # swapped for the next take: every voice of the map)
             values = source.events.map(&:value)
             voices = voices.select { |v| gm.fetch(v).any? { |n| values.include?(n) } }
           end
