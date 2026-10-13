@@ -5,9 +5,9 @@
 # (so its numeric options become the document's params), and each effect
 # preset an effect method from one of those scripts saved with GraphIO.save.
 # The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
-# ambient.rb, neo_soul.rb, named for their genres) are the first; each
-# document's description says where it came from (the scripts'
-# <script>_description).
+# ambient.rb, neo_soul.rb, named for their genres) were the first, then
+# bin/synths/electric_pianos.rb; each document's description says where it
+# came from (the scripts' <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
 # again after a library change shows what changed in `git diff presets/`.
 #
@@ -55,6 +55,8 @@ module MB::Sound
     neo_soul_clav: ['bin/synths/neo_soul.rb', :clav],
     neo_soul_talkbox: ['bin/synths/neo_soul.rb', :talkbox],
     neo_soul_choir: ['bin/synths/neo_soul.rb', :choir],
+    tine_piano: ['bin/synths/electric_pianos.rb', :tine],
+    reed_piano: ['bin/synths/electric_pianos.rb', :reed],
   }.freeze
 
   # Effect presets: { name => [script, params, builder] }; the builder gets

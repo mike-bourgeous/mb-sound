@@ -7,7 +7,7 @@ require File.expand_path('../../bin/save_presets.rb', __dir__)
 
 RSpec.describe('bin/save_presets.rb') do
   before(:all) do
-    %w[dnb jungle ambient neo_soul].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
+    %w[dnb jungle ambient neo_soul electric_pianos].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
   end
 
   after { MB::Sound.rewind }
@@ -33,7 +33,7 @@ RSpec.describe('bin/save_presets.rb') do
       expect(doc.inputs).to eq([:midi])
       expect(doc.kind).to eq(:synth)
       expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch))
-      expect(doc.description).to include("from #{script}", 'first made by', 'persona panel experiment of 2026-10-13')
+      expect(doc.description).to include("from #{script}", 'persona panel experiment')
 
       # Drum kits play GM drum notes (kick, hat, snare, shaker, ride, conga)
       midi = -> {
