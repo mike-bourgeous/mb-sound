@@ -283,6 +283,7 @@ module MB
         raise "Expected #{@channels} channels, got #{data.length}" unless data.length == @channels
         frames = @playback.write(data)
         adapt if @adaptive
+        warn_repeats if !Jack.audio_repeats_reported && @playback.repeated != 0
         frames
       end
 
@@ -434,6 +435,11 @@ module MB
 
       def ms(frames)
         (frames * 1000.0 / @device_rate).round
+      end
+
+      def warn_repeats
+        n = @playback.repeated
+        Jack.warn_audio_repeats("audio output #{jack_ports&.join(', ')}", "played #{n} repeated cycle#{'s' unless n == 1} once")
       end
     end
   end

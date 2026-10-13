@@ -37,9 +37,29 @@ module MB
         # open.  An asynchronous server (jackd without --sync) skips cycles
         # for a client that is late, losing what other clients sent it then,
         # or calls it twice for one cycle (MIDI::Input drops the repeated
-        # messages).
+        # messages, DeviceInput the repeated audio, and DeviceOutput plays
+        # the repeated cycle's period once).
         def info
           FastAudio.jack_info
+        end
+
+        # True once an audio output or input has warned about a repeated
+        # JACK cycle (see #warn_audio_repeats).
+        attr_accessor :audio_repeats_reported
+
+        # Says once per process that JACK ran a cycle twice for an audio
+        # output or input (+what+, e.g. 'audio output rspec:out_1'), which
+        # +handled+ the repeat (e.g. 'played 3 repeated cycles once').
+        # Called by DeviceOutput#write and DeviceInput#read.
+        def warn_audio_repeats(what, handled)
+          return if audio_repeats_reported
+
+          self.audio_repeats_reported = true
+          skipped = info&.dig(:skipped_cycles)
+          warn "JACK ran a cycle twice for #{what}: the server is asynchronous and this client " \
+            "was late, so it #{handled}.  The #{skipped || 'unknown number of'} cycles it skipped " \
+            'are gaps in the audio.  `jackd --sync` or a lighter load avoids this ' \
+            '(MB::Sound::Jack.info counts them).'
         end
 
         # Closes the shared client (its outputs and inputs stop).

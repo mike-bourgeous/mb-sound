@@ -117,7 +117,9 @@ module MB
       # Returns +frames+ frames of recorded audio, one Numo::SFloat per
       # channel, waiting (without the GVL) until enough has arrived.
       def read(frames)
-        @capture.read(frames)
+        data = @capture.read(frames)
+        warn_repeats if !Jack.audio_repeats_reported && @capture.repeated != 0
+        data
       end
 
       # Graphs may read any number of frames at a time.
@@ -173,6 +175,13 @@ module MB
         "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"
       end
       alias to_s inspect
+
+      private
+
+      def warn_repeats
+        n = @capture.repeated
+        Jack.warn_audio_repeats("audio input #{jack_ports&.join(', ')}", "recorded #{n} repeated cycle#{'s' unless n == 1} once")
+      end
     end
   end
 end
