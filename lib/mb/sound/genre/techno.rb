@@ -30,7 +30,7 @@ module MB
 
       knob :cut, 400, range: 150..6000, curve: :exp, unit: 'Hz'
 
-      role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the techno kit'
+      role :drums, :tr909, level: -4.db, about: 'the tr909, the techno kit'
       role :bass, :dnb_sub, level: -3.db, about: 'a rolling offbeat sub'
       role :stab, :dnb_reese, params: { cutoff: :cut }, level: -6.db, about: 'a detuned stab opening over the phrase'
 

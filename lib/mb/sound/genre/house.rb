@@ -34,7 +34,7 @@ module MB
 
       knob :cut, 8000, range: 200..12000, curve: :exp, unit: 'Hz'
 
-      role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the house kit'
+      role :drums, :tr909, level: -4.db, about: 'the tr909, the house kit'
       role :bass, :funk_bass, about: 'an offbeat bass bouncing between octaves'
       role :keys, :tine_piano, filter: :cut, level: -4.db, about: 'electric piano stabs'
       role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser'
