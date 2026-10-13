@@ -75,7 +75,7 @@
 #     bin/songs/small_talk.rb --round1 out.flac  # the first round's talking bass (crush 0.4, no cut, air, or squeeze)
 #     bin/songs/small_talk.rb -a 0 out.flac      # no waveshaped high end
 #     bin/songs/small_talk.rb -m 0.4 out.flac    # more crusher
-#     bin/songs/small_talk.rb -H 0 out.flac      # a pure sine sub (-H 0.35 for more harmonics)
+#     bin/songs/small_talk.rb -H 0 out.flac      # a pure sine sub (-H 0.2 for round 3's lighter harmonics)
 #     bin/songs/small_talk.rb --bong-tom out.flac   # round 2's tom-like groove bass
 #     bin/songs/small_talk.rb -D 4 -C -1 out.flac   # round 2's master (-D 7.5 -C -0.3: hotter)
 #     bin/songs/small_talk.rb --help             # all options
@@ -102,9 +102,12 @@
 # back in the last 0.4 of every 4 (so each 4-bar phrase "says" one long
 # word); the dives after the rests reach ~12-15 Hz, where each wavetable
 # cycle is nearly a single kick, and the tease's last bar slows a held
-# G1 to about 3 Hz the same way.  The sub's small 2nd and 3rd harmonics
-# (-H; 0 for a pure sine) add about 1.7 dB at 90-160 Hz, for speakers
-# without much below 100 Hz.  On laptop speakers listen for the
+# G1 to about 3 Hz the same way.  The sub's 2nd and 3rd harmonics (-H
+# 0.4, the 3rd half of it; 0 for a pure sine; 0.4 since 2026-10-13, the
+# maintainer's "0.35 ... I might push the harmonics a little higher
+# still", round 3 had 0.2) add about 2.4 dB at 90-160 Hz in the drop
+# (0.2: 1.7 dB), for speakers without much below 100 Hz; the sub's RMS
+# stays the same.  On laptop speakers listen for the
 # bass's pitch in the 200-600 Hz formants: it should follow the ghost
 # chords.
 #
@@ -276,7 +279,7 @@ module MB::Sound
   #   might help cut through a bit more on medium sized speakers".  The
   #   sub's level is scaled down to keep its RMS.
   def self.small_talk_bass(clip, cutoff: 16000, sub: 1, crush_mix: 0.15, air: 0.4, skew: 0.9, round1: false,
-                           dive: 48, dive_after: 0.75, sub_harmonics: [0.2, 0.1])
+                           dive: 48, dive_after: 0.75, sub_harmonics: [0.4, 0.2])
     crush_mix = 0.4 if round1 && crush_mix == 0.15
     talk = synth(clip, voices: 1) { |v|
       fall = nil
@@ -389,7 +392,7 @@ module MB::Sound
   # tom-like sound, +drive+ the gain in dB into the master limiter and
   # +ceiling+ its true-peak ceiling in dBTP.
   def self.small_talk(perform: false, seed: 2, crush_mix: 0.15, air: 0.4, round1: false, skew: 0.9, pad_lead: 0.3.attack,
-                      sub_harmonics: [0.2, 0.1], bong_tom: false, drive: SMALL_TALK_DRIVE, ceiling: SMALL_TALK_CEILING)
+                      sub_harmonics: [0.4, 0.2], bong_tom: false, drive: SMALL_TALK_DRIVE, ceiling: SMALL_TALK_CEILING)
     c = small_talk_clips
     k = small_talk_kits
     bpm 125
@@ -506,7 +509,7 @@ module MB::Sound
       air: [0.4, Float, '-a', 'Talking bass waveshaped high end (0 for none)', 0.0..2.0],
       round1: [false, 'The first round\'s talking bass (crush 0.4, no midrange cut, air, or squeeze)'],
       skew: [0.9, Float, '-k', 'Talking bass LFO skew (rising fraction; 0.5 a plain triangle)', 0.01..0.99],
-      sub_harmonics: [0.2, Float, '-H', 'Sub 2nd harmonic level (the 3rd is half of it; 0 for a pure sine)', 0.0..1.0],
+      sub_harmonics: [0.4, Float, '-H', 'Sub 2nd harmonic level (the 3rd is half of it; 0 for a pure sine)', 0.0..1.0],
       bong_tom: [false, 'The groove bass\'s old tom-like sound (round 2)'],
       drive: [SMALL_TALK_DRIVE, Float, '-D', 'Gain in dB into the master limiter', -20.0..20.0],
       ceiling: [SMALL_TALK_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
