@@ -263,6 +263,44 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
     end
   end
 
+  describe '#play_flams_early' do
+    # 120 BPM: an 8th is 1/4 s
+    let(:clip) { MB::Sound.seq(MB::Sound::C2, MB::Sound::D2.flam, MB::Sound::C2.flam(0.0101), MB::Sound::D2).n8.loop }
+
+    def flam_events(src, to, chunk)
+      (0...(to * chunk).ceil).flat_map { |i| src.read(Rational(i, chunk), Rational(i + 1, chunk)) }.map { |e| [e.time, e.type, e.note] }
+    end
+
+    it 'plays flam-marked note-ons early by their spacing in whole samples, at any read size' do
+      src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport).play_flams_early(0.016)
+      expect(src.flam_lead).to eq(0.016)
+      events = flam_events(src, 1, 1)
+      expect(events.select { |e| e[1] == :note_on }).to eq([
+        [0r, :note_on, 36], [1/4r - 768/48000r, :note_on, 38], [1/2r - 485/48000r, :note_on, 36], [3/4r, :note_on, 38],
+      ])
+      [7, 100, 1001].each do |chunk|
+        s2 = MB::Sound::MIDI::ClipSource.new(clip, transport: transport).play_flams_early(0.016)
+        expect(flam_events(s2, 1, chunk)).to eq(events)
+      end
+
+      plain = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
+      expect(flam_events(plain, 1, 1).select { |e| e[1] == :note_on }.map(&:first)).to eq([0r, 1/4r, 1/2r, 3/4r])
+    end
+
+    it 'plays a flam within its spacing of the start on its step, and drops read-ahead flams at a swap' do
+      src = MB::Sound::MIDI::ClipSource.new(MB::Sound.seq(MB::Sound::D2.flam, MB::Sound::C2).n8.loop, transport: transport).play_flams_early(0.016)
+      ons = flam_events(src, 1, 1).select { |e| e[1] == :note_on }.map(&:first)
+      expect(ons).to eq([0r, 1/4r, 1/2r - 768/48000r, 3/4r, 1 - 768/48000r]) # (the next cycle read ahead)
+
+      # Swapped (at 1/4 whole note = 0.5 s) for a clip without flams: the
+      # flam read ahead for 0.5 s isn't played
+      src = MB::Sound::MIDI::ClipSource.new(MB::Sound.seq(MB::Sound::D2.flam, MB::Sound::C2).n8.loop, transport: transport).play_flams_early(0.016)
+      src.swap_clip(MB::Sound::E2.n8.loop, time: 1/4r)
+      events = src.read(0, 1/2r - 1/100r) + src.read(1/2r - 1/100r, 1)
+      expect(events.select { |e| e.type == :note_on }.map { |e| [e.time, e.note] }).to eq([[0r, 38], [1/4r, 36], [1/2r, 40], [3/4r, 40]])
+    end
+  end
+
   describe '#chase and #first_note' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound.seq(MB::Sound::E4).vel(0.5), MB::Sound::G4).n4.loop }
 

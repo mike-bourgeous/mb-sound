@@ -71,6 +71,30 @@ module MB
           @ahead = whole_notes.to_r
         end
 
+        # The default flam spacing (seconds) when flam-marked note-ons play
+        # early (see #play_flams_early), or nil (the default: they play on
+        # their step).
+        attr_reader :flam_lead
+
+        # Plays flam-marked note-ons (Seq::Step#flam) early by their flam
+        # spacing (+spacing+ seconds for marks without their own time),
+        # rounded to whole samples at +sample_rate+, so a drum kit's grace
+        # stroke (Drums::Flams plays it on the note-on and the main hit the
+        # spacing later) comes before the step and the main hit lands on it
+        # (drums-3, 2026-10-13: the maintainer heard the delayed main hits
+        # as out of time).  The clip is read ahead by the longest spacing to
+        # find them.  A flam within that spacing of a launch, a jump, or a
+        # swap (where reading ahead couldn't see it) plays on its step with
+        # the main hit late, as from live MIDI.  Set by drum kits for the
+        # clips they play; nil turns it off.
+        def play_flams_early(spacing, sample_rate: 48000)
+          @flam_lead = spacing && MB::Sound::Length.seconds(spacing).to_f
+          raise ArgumentError, "A flam spacing is over 0 seconds (got #{spacing.inspect})" if @flam_lead && !(@flam_lead > 0)
+          @flam_rate = sample_rate.to_r
+          reset_flams
+          self
+        end
+
         # See Sequence::TimelineNode#start_at; times count #ahead later.
         def start_at(time, origin: time, launch: origin, transport: nil)
           return super if @ahead.zero?
@@ -127,6 +151,7 @@ module MB
           else
             @pending_swap = nil
             @clip = clip
+            reset_flams
           end
           self
         end
@@ -254,9 +279,9 @@ module MB
             stop = start + (to - from) * wnps
 
             if time < stop
-              @pending_swap = nil
               split = time > start ? from + (time - start) / wnps : from
               out = split > from ? edges(from, split, wnps) : []
+              @pending_swap = nil
               @clip = clip
               swap_time = MB::M.max(time, start)
               @swap_anchor = clip.launch_aligned? ? swap_time : nil
@@ -266,6 +291,7 @@ module MB
               @chase = chase_at(split)
               out << Jump.new(split)
               @early = true
+              reset_flams(split)
               return out.concat(edges(split, to, wnps))
             end
           end
@@ -279,6 +305,47 @@ module MB
         def jumped
           super
           @early = true
+          reset_flams
+        end
+
+        # Forgets flams read ahead (at a jump or swap): early note-ons for
+        # steps at or after stream time +from+ (all if nil) are dropped, and reading
+        # ahead starts again from the next read's position.
+        def reset_flams(from = nil)
+          @flam_start = nil
+          @flam_to = nil
+          @flam_queue = from ? (@flam_queue || []).select { |_e, step| step < from } : []
+        end
+
+        # The longest flam spacing of the clip (seconds): #flam_lead or a
+        # longer mark's own time.
+        def flam_window
+          return @flam_window[1] if @flam_window && @flam_window[0].equal?(@clip)
+          own = @clip.events.filter_map { |e| e.flam.is_a?(Numeric) && e.flam > 0 ? e.flam.to_f : nil }
+          (@flam_window = [@clip, [@flam_lead, *own].max])[1]
+        end
+
+        # The flam-marked note-ons of clip positions [@flam_to, +look_to+),
+        # queued at their early times, and the queued ones before stream
+        # time +to+ (no earlier than +from+), removed from the queue.
+        def early_flams(from, to, wn_from, wnps, look_to, fills)
+          if @flam_to < look_to
+            @clip.edges(@flam_to, look_to, early: false, fills: fills).each do |time, type, event, _cycle|
+              next unless type == :on && event.flam
+
+              seconds = event.flam.is_a?(Numeric) && event.flam > 0 ? event.flam.to_f : @flam_lead
+              lead = MB::M.max((seconds * @flam_rate).round, 1) / @flam_rate
+              step = from + (time - wn_from) / wnps
+              e = Event.note_on(event.value, event.velocity, channel: @channel, time: MB::M.max(step - lead, from), pitch: event.pitch, flam: event.flam)
+              @flam_queue << [e, step]
+            end
+            @flam_queue = @flam_queue.each_with_index.sort_by { |(e, _step), i| [e.time, i] }.map(&:first)
+            @flam_to = look_to
+          end
+
+          due = @flam_queue.take_while { |e, _step| e.time < to }
+          @flam_queue = @flam_queue.drop(due.length)
+          due.map(&:first)
         end
 
         # Converts the clip's edges for stream times [from, to) to Events and
@@ -291,14 +358,33 @@ module MB
           @early = false
 
           fills = @fills_at ||= ->(pos) { transport.fills.names_at(pos + @origin) }
-          @clip.edges(wn_from, wn_to, early: early, fills: fills).map { |time, type, event, _cycle|
+
+          # Flams at or after @flam_start play early (see #play_flams_early)
+          if @flam_lead && @flam_start.nil?
+            @flam_start = wn_from + flam_window * wnps
+            @flam_to = @flam_start
+          end
+          start = @flam_lead && @flam_start
+
+          out = @clip.edges(wn_from, wn_to, early: early, fills: fills).filter_map { |time, type, event, _cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
+              next if start && event.flam && time >= start
               Event.note_on(event.value, event.velocity, channel: @channel, time: t, pitch: event.pitch, flam: event.flam)
             else
               Event.note_off(event.value, channel: @channel, time: t)
             end
           }
+          return out unless start
+
+          # Not past a pending swap (its clip may have no flams there)
+          look_to = wn_to + flam_window * wnps
+          if (swap = @pending_swap)
+            look_to = MB::M.min(look_to, swap[1] ? swap[1] - @origin : wn_to)
+          end
+          due = early_flams(from, to, wn_from, wnps, look_to, fills)
+          return out if due.empty?
+          (out + due).each_with_index.sort_by { |e, i| [e.time, i] }.map(&:first)
         end
       end
     end
