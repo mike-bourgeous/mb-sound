@@ -442,7 +442,7 @@ module MB
           joined = session.adopt_knobs(graph)
           attach_knob_midi(session, joined)
           joined.each do |n, _k|
-            next unless before[n] && params.key?(n)
+            next unless before[n] && params[n].is_a?(Numeric) # (knob names and nodes bind; see Loader#bound_param)
             if Session.context&.[](:session).equal?(session)
               turn(n, params[n])
             else

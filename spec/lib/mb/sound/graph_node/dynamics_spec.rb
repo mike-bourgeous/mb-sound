@@ -464,6 +464,23 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
   end
 
+  describe '#mono_below' do
+    it 'makes the lows mono and leaves the highs' do
+      low = MB::Sound.stereo(40.hz.sine, 40.hz.sine.with_phase(0.5)) # all side
+      l, r = render(low.mono_below(120), 48000)
+      expect(db(((l - r) / 2)[24000..].abs.max)).to be < -30
+      high = MB::Sound.stereo(2000.hz.sine, 2000.hz.sine.with_phase(0.5))
+      l, r = render(high.mono_below(120), 48000)
+      expect(db(((l - r) / 2)[24000..].abs.max)).to be_within(0.1).of(0)
+    end
+
+    it 'returns one-channel nodes unchanged and prints itself' do
+      s = 100.hz.sine
+      expect(s.mono_below(120)).to equal(s)
+      expect(MB::Sound.stereo(100.hz.sine, 101.hz.sine).mono_below(120).to_ruby).to end_with('.mono_below(120)')
+    end
+  end
+
   describe '#squeeze' do
     it 'rejects unknown presets and bad knobs' do
       expect { 1.constant.squeeze(:twelve) }.to raise_error(ArgumentError, /preset/)

@@ -107,6 +107,9 @@ module MB
         def set(name, value)
           name = name.to_sym
           raise ArgumentError, "no param #{name}#{GraphIO.suggest(name, @params.keys)}" unless @params.key?(name)
+          if (b = @params[name][:bound])
+            raise ArgumentError, "param #{name} was bound to #{b.is_a?(Symbol) ? "knob #{b.inspect} (turn #{b.inspect} instead)" : 'a node when loaded'}"
+          end
           (@knob_nodes[name] || []).each { |c|
             c.is_a?(GraphNode::Knob) ? c.set(value, frame: c.next_frame) : c.constant = value
           }
