@@ -31,8 +31,13 @@ module MB
       knob :cut, 400, range: 150..6000, curve: :exp, unit: 'Hz'
 
       role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the techno kit'
-      role :bass, :dnb_sub, level: -3.db, about: 'a rolling offbeat sub'
+      # (the roller: a short sub with a noise tick in a small room, ducked
+      # under the kick, so it rolls between the kicks instead of booming
+      # under them; patches-4, 2026-10-13: "clashes with 808 kick")
+      role :bass, :roller, level: -3.db, duck: -9.db, about: 'a rolling offbeat sub with a noise tick, ducked under the kick'
       role :stab, :dnb_reese, params: { cutoff: :cut }, level: -6.db, about: 'a detuned stab opening over the phrase'
+
+      pulse :peak
 
       scene :intro, drums: :intro, cut: 400
       scene :build, drums: :intro, bass: :bass, stab: :stab, cut: [1500, { from: 400, over: 16 }]
