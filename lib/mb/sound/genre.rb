@@ -1,3 +1,5 @@
+require 'monitor'
+
 module MB
   module Sound
     # Genre templates: what a genre is (tempo, meter, phrase lengths, a song
@@ -94,7 +96,7 @@ module MB
 
       @definitions = {}
       @built = {}
-      @lock = Mutex.new
+      @lock = Monitor.new # reentrant: a template built on first use may start `like` another
 
       class << self
         # Registers a template +name+ built from the +block+ (see Builder) on
@@ -333,13 +335,14 @@ module MB
           }
           scenes.each { |n, v| l << "  scene #{n.inspect}#{", #{Genre.kwargs(v)}" unless v.empty?}" }
           l << "  pulse #{pulse.inspect}" if pulse
-          l << "  loudness #{Genre.ruby(mix.loudness)}" if mix.loudness
-          l << "  true_peak #{Genre.ruby(mix.true_peak)}" if mix.true_peak
-          l << "  mono_below #{Genre.ruby(mix.mono_below)}" if mix.mono_below
+          call = ->(m, v) { text = Genre.ruby(v); text.start_with?('-') ? "  #{m}(#{text})" : "  #{m} #{text}" } # (-1 alone warns)
+          l << call.(:loudness, mix.loudness) if mix.loudness
+          l << call.(:true_peak, mix.true_peak) if mix.true_peak
+          l << call.(:mono_below, mix.mono_below) if mix.mono_below
           mix.master.each { |n, a, o|
             l << "  master #{[n.inspect, *a.map { |v| Genre.ruby(v) }, (Genre.kwargs(o) unless o.empty?)].compact.join(', ')}"
           }
-          l << "  master_gain #{Genre.ruby(mix.gain)}" if mix.gain
+          l << call.(:master_gain, mix.gain) if mix.gain
           tips.each { |t| l << "  tip #{t.inspect}" }
           l << 'end'
           l.join("\n")
@@ -547,8 +550,10 @@ module MB
         end
 
         # Removes parts by name: `without roles: [:pluck], scenes: [:pullup]`.
+        # Removed roles leave the scenes too.
         def without(roles: [], kits: [], clips: [], scenes: [], knobs: [])
           roles.each { |n| @roles.delete(n) }
+          @scenes = @scenes.transform_values { |v| v.except(*roles).freeze } unless roles.empty?
           kits.each { |n| @kits.delete(n) }
           clips.each { |n| @clips.delete(n) }
           scenes.each { |n| @scenes.delete(n) }
