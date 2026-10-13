@@ -81,14 +81,20 @@ module MB
           @sample_rate = (sample_rate || input.sample_rate).to_f
           @state = Numo::DFloat.zeros(2)
           @input_ended = false
+          @rung_out = false
           @buf = nil
           @node_type_name = 'Resonator'
         end
 
         # Returns +count+ samples of the ringing, or nil once the input has
         # ended and the ringing has died away (or the frequency or decay
-        # node ended).
+        # node ended).  After the input ends, the last buffer stops on the
+        # exact sample where the ringing falls below QUIET, so the end is
+        # the same at any buffer size (2026-10-13; it used to end at the
+        # first buffer start below QUIET).
         def sample(count)
+          return nil if @rung_out
+
           x = @input_ended ? nil : @input.sample(count)
           if x.nil? || x.empty?
             @input_ended = true
@@ -109,8 +115,43 @@ module MB
           end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastResonator.ping(@buf, x, f, d, @state, @sample_rate, @cos_phase, @sin_phase)
+          return ping(@buf, x, f, d) unless @input_ended
+
+          # The ringing only decays now: find where it falls below QUIET
+          saved = @state.dup
+          out = ping(@buf, x, f, d)
+          return out if ringing_level >= QUIET
+
+          lo = 0 # still at least QUIET after lo samples
+          hi = count # below QUIET after hi samples
+          scratch = Numo::SFloat.zeros(count)
+          while hi - lo > 1
+            mid = (lo + hi) / 2
+            @state[0..] = saved
+            ping(scratch[0...mid], x, slice(f, mid), slice(d, mid))
+            if ringing_level < QUIET
+              hi = mid
+            else
+              lo = mid
+            end
+          end
+
+          @state[0..] = saved
+          @rung_out = true
+          ping(@buf[0...hi], x, slice(f, hi), slice(d, hi))
         end
+
+        # Runs the kernel into +out+ (see #sample).
+        def ping(out, x, f, d)
+          MB::Sound::FastResonator.ping(out, x, f, d, @state, @sample_rate, @cos_phase, @sin_phase)
+        end
+        private :ping
+
+        # The first +n+ samples of a kernel input (a number or NArray).
+        def slice(v, n)
+          v.is_a?(Numo::NArray) && v.length != n ? v[0...n] : v
+        end
+        private :slice
 
         # The magnitude of the ringing state (the amplitude of the ring).
         def ringing_level
@@ -120,6 +161,7 @@ module MB
         # Silences the ringing.
         def reset
           @state.fill(0)
+          @rung_out = false
           self
         end
 

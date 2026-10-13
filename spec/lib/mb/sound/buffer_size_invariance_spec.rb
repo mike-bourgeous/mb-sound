@@ -75,6 +75,35 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  describe 'resonators' do
+    it 'ring out to the same sample at any buffer size once their input ends' do
+      # A sum ends with its first input to end: the shorter ring cuts the
+      # longer one off on the exact sample where it falls below -120 dB
+      make = -> {
+        hit = MB::Sound.seq(MB::Sound::D2).n4.notes.trigger
+        hit.ping(330, decay: 0.3) + hit.ping(110, decay: 2)
+      }
+      lengths = [[800], [367, 368], [64], [1031]].map { |s|
+        MB::Sound.rewind
+        node = make.call
+        n = 0
+        i = 0
+        loop do
+          b = node.sample(s[i % s.length])
+          break if b.nil?
+          n += b.length
+          i += 1
+        end
+        n
+      }
+      expect(lengths.uniq.length).to eq(1)
+      expect(lengths[0] % 800).not_to eq(0)
+      expect_invariant(make, seconds: 0.8)
+    ensure
+      MB::Sound.rewind
+    end
+  end
+
   describe 'tr808' do
     grid = ->(row) { MB::Sound.grid(16, row => 'x.......x....x..').loop }
 
