@@ -70,7 +70,13 @@ module MB
 
         # Processes +count+ samples from the source through the filter and
         # returns the result.
+        #
+        # Filters with a #ring_out method (Filter::Delay) ring out after the
+        # source ends (returns nil, or a short buffer): the wrapper stops
+        # sampling the source and returns the filter's tail until it ends.
         def sample(count)
+          return @base_filter.ring_out(count) if @ringing
+
           buf = @source.sample(count)
 
           # FIXME: FFMPEGInput -> SampleWrapper crackles and doesn't filter,
@@ -78,8 +84,14 @@ module MB
           # FIXME: maybe related to resampling issues from ffmpeginput??
 
           # TODO: Maybe this nil/empty/short handling could be consolidated?
-          # TODO: Drain ring-out from filters and delays after a source returns nil
-          return nil if buf.nil? || buf.empty?
+          if buf.nil? || buf.empty?
+            return nil unless rings_out?
+
+            @ringing = true
+            return @base_filter.ring_out(count)
+          end
+
+          short = buf.length < count && rings_out?
 
           if @in_place
             buf = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(buf) if buf.frozen? # a shared buffer (see Tee)
@@ -87,6 +99,17 @@ module MB
           end
           buf = SampleWrapper.call_filter(@base_filter, buf, @inputs, scratch: (@sampled_inputs ||= {}))
           buf&.not_inplace!
+          return buf unless short && buf
+
+          # The source's last (short) buffer: the tail starts right after it
+          @ringing = true
+          tail = @base_filter.ring_out(count - buf.length)
+          tail ? buf.concatenate(tail) : buf
+        end
+
+        # True if the filter rings out after the source ends (see #sample).
+        def rings_out?
+          @inputs.empty? && @base_filter.respond_to?(:ring_out) && @base_filter.rings_out?
         end
 
         # Feedback loops (GraphNode::FeedbackLoop, Plan::Loop): a delay

@@ -118,6 +118,7 @@ end
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/delay_line'
+require_relative 'sound/ring_out'
 require_relative 'sound/wavetable'
 require_relative 'sound/plan'
 require_relative 'sound/graph_node'

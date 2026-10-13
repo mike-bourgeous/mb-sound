@@ -170,6 +170,11 @@ module MB
           initial = 1.1 * longest if longest && initial < 1.1 * longest
           @line = MB::Sound::DelayLine.new(initial.ceil)
           @audio_buf = nil
+
+          # The longest delay seen so far (sizes the ring-out after the
+          # source ends; see #frame_input), and the samples left to ring
+          @longest = longest.to_f
+          @tail_left = nil
         end
 
         # Sets the name of the overarching multi-tap delay node (kind of a
@@ -210,14 +215,13 @@ module MB
           end
 
           if @audio_buf.nil?
-            # TODO: drain the delay buffer if the audio stops?  Or rely on
-            # .and_then in graph DSL to append silence?
-            @audio_buf = @source.sample(delays.is_a?(Numeric) ? count : delays.length)
+            @audio_buf = frame_input(delays.is_a?(Numeric) ? count : delays.length)
             return nil if @audio_buf.nil?
           end
 
           # Later taps may have longer delays (growing keeps the block)
           longest = delays.is_a?(Numeric) ? delays : delays_max(delays)
+          @longest = longest if longest.finite? && longest > @longest
           @line.prepare(@audio_buf.length, longest.ceil, @audio_buf.class)
           @line.write(@audio_buf) unless @sampled.any?
 
@@ -231,6 +235,32 @@ module MB
         end
 
         private
+
+        # The input for a new graph frame of up to +n+ samples.  After the
+        # source ends (nil or a short buffer), the taps ring out: silence
+        # goes into the line until the longest delay (plus the
+        # interpolation reach) has played every stored sample, ending on that
+        # exact sample; then nil.
+        def frame_input(n)
+          if @tail_left.nil?
+            buf = @source.sample(n)
+            return buf if buf && buf.length == n
+
+            start = buf ? buf.length : 0
+            @tail_left = @longest.ceil + MB::Sound::DelayLine::MARGIN
+          else
+            buf = nil
+            start = 0
+          end
+          return nil if @tail_left <= 0
+
+          length = [n, start + @tail_left].min
+          @tail_left -= length - start
+          type = buf ? buf.class : @line.buffer_class
+          out = type.zeros(length)
+          out[0...start] = buf if start > 0
+          out
+        end
 
         # delays.max.real without allocating for real buffers
         # (FastArithmetic.min_max gives Numo's max).

@@ -88,10 +88,21 @@ module MB
         end
 
         def to_s
-          "#{super} -- #{@length.is_a?(Numeric) ? "#{MB::M.sigfigs(@length, 4)}s" : @length}"
+          "#{super} -- #{length_label}"
+        end
+
+        # For descriptions of what plays (MB::Sound.playback_info, Session
+        # player lists): the node it limits and how, e.g. an lp4 "until 2
+        # bars".
+        def wrapped_description
+          [@source, "until #{length_label}"]
         end
 
         private
+
+        def length_label
+          @length.is_a?(Numeric) ? "#{MB::M.sigfigs(@length, 4)}s" : @length.to_s
+        end
 
         # Samples left at the current tempo (unlimited while paused).
         def musical_samples_left

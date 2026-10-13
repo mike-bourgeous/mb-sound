@@ -52,6 +52,11 @@ module MB
         def sources
           { input: @source }
         end
+
+        # For descriptions of what plays (see TimeLimit#wrapped_description).
+        def wrapped_description
+          [@source, 'ringdown']
+        end
       end
     end
   end

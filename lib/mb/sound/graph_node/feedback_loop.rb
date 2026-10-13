@@ -296,8 +296,21 @@ module MB
         def sample_program(count)
           n = count
 
-          # Boundary inputs (every handle, keeping their Tees in step)
+          return nil if @ring&.done?
+
+          ringing = !@ring.nil?
+
+          # Boundary inputs (every handle, keeping their Tees in step); an
+          # input that has ended reads as silence while the loop rings out
+          ring_start = nil
           @input_ops.each_with_index do |op, i|
+            if @ended_inputs&.[](i)
+              buf = (@ring_zeros ||= {})[count] ||= Numo::SFloat.zeros(count)
+              @inputs[i] = buf
+              @values[op.dst] = buf
+              next
+            end
+
             hs = op.handles
             buf = hs[0].sample(count)
             j = 1
@@ -305,7 +318,15 @@ module MB
               hs[j].sample(count)
               j += 1
             end
-            return nil if buf.nil? || buf.empty?
+            if buf.nil? || buf.length < count
+              (@ended_inputs ||= [])[i] = true
+              @ring ||= MB::Sound::RingOut.new
+              len = buf ? buf.length : 0
+              ring_start = len if ring_start.nil? || len < ring_start
+              padded = (buf ? buf.class : Numo::SFloat).zeros(count)
+              padded[0...len] = buf if len > 0
+              buf = padded
+            end
 
             unless buf.is_a?(Numo::SFloat)
               if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
@@ -361,7 +382,29 @@ module MB
             end
           end
 
-          run(n)
+          out = run(n)
+          return out unless @ring
+
+          ring_out(out, ringing ? 0 : (ring_start || 0))
+        end
+
+        # After an input ends, the loop rings out until its output (what it
+        # feeds back) has stayed below -90 dB for its longest delay plus the
+        # interpolation reach (see MB::Sound::RingOut), ending on that exact
+        # sample.  The quiet run counts from +start+ in the block +out+.
+        def ring_out(out, start)
+          longest = @program.rings.map { |g|
+            d = g.last_delay
+            d = d.max.to_f if d.is_a?(Numo::NArray)
+            d.finite? ? d : 0.0
+          }.max || 0.0
+          window = longest.ceil + MB::Sound::DelayLine::MARGIN
+
+          tail = start > 0 ? out[start..] : out
+          keep = @ring.advance(tail, tail.length, window)
+          return out unless keep
+
+          out[0...(start + keep)]
         end
 
         # Program#pitch_track for a block of +n+ samples; in check mode the C
