@@ -23,6 +23,12 @@ module MB
             @transforms.reduce(@input.stream) { |s, (m, args, kwargs)| s.public_send(m, *args, **kwargs) }
           end
 
+          # A new #stream, so the input plays wherever a MIDI source is
+          # taken (MIDI::Stream.for: MB::Sound.synth, Synth.new, tr808).
+          def to_midi_stream
+            stream
+          end
+
           # A MB::Sound::Notes on a new #stream (see Sequence::Clip#notes).
           def notes(transport: nil)
             MB::Sound::Notes.new(stream, sustain: true)

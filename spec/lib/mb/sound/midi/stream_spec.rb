@@ -164,6 +164,8 @@ RSpec.describe(MB::Sound::MIDI::Stream) do
       s = MB::Sound::MIDI::Stream.for(clip)
       expect(MB::Sound::MIDI::Stream.for(s)).to equal(s)
       expect { MB::Sound::MIDI::Stream.for(42) }.to raise_error(ArgumentError)
+      # (names other objects by class: inspecting a big one built a huge string)
+      expect { MB::Sound::MIDI::Stream.for(Object.new) }.to raise_error(ArgumentError, 'Cannot make a MIDI stream from a Object')
     end
   end
 

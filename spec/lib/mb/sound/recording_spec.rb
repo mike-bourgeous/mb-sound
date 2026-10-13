@@ -174,6 +174,26 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(s.arrangement.armed).to be_empty
       expect(MB::Sound::Session.with_context(session: s) { MB::Sound.tracks[:lead] }).not_to include('armed')
     end
+
+    it 'plays live input through patches that take any MIDI source (MB::Sound.synth, tr808)' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 0.75r])
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:lead, q: 1) { |c| MB::Sound.synth(c, voices: 1) { |v| v.number * v.gate } }
+      end
+      d = perform(s, { 0 => ['arm :lead'] }, 48000)
+      expect(d[24000 - 1]).to eq(0)
+      expect(d[24000]).to eq(60)
+
+      s = new_session
+      s.midi_in.input = keyboard([38, 0.5r, 0.75r]) # a snare
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:drums, q: 1) { |c| MB::Sound.tr808(c) }
+      end
+      d = perform(s, { 0 => ['arm :drums'] }, 48000)
+      expect(d[0...24000].abs.max).to eq(0)
+      expect(d[24000...30000].abs.max).to be > 0.01
+    end
   end
 
   describe 'monitors and the strip' do
