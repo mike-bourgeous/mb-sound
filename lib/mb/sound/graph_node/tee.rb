@@ -154,6 +154,11 @@ module MB
             end
           end
 
+          # A count of branches added to and removed from every Tee, for
+          # callers that cache something derived from Tee#branches (see
+          # Synth#boundary).
+          attr_accessor :branch_changes
+
           # Runs the block, returning an ObjectSpace::WeakMap (Branch =>
           # true, by identity) of the branches made on this thread while it
           # ran (nested calls add theirs to the outer map too).  Weak, so
@@ -176,6 +181,7 @@ module MB
           end
         end
 
+        self.branch_changes = 0
         self.shared = ENV['MB_SOUND_SHARED_TEE'] != '0'
         self.shared_check = case ENV['MB_SOUND_CHECK_SHARED']
                             when nil, '', '0' then nil
@@ -387,7 +393,6 @@ module MB
           @cbuf_size = circular_buffer_size
 
           @branch_index = 0
-          @branch_changes = 0
           @branches = []
           n.times { add_branch }
 
@@ -402,10 +407,6 @@ module MB
           @copying = false
         end
 
-        # A count of branches added and removed, for callers that cache
-        # something derived from #branches.
-        attr_reader :branch_changes
-
         # Adds a new branch to the Tee and returns it.
         #
         # This is part of the code to allow multiple references to a single
@@ -416,7 +417,7 @@ module MB
           branch.frame = @frame || 0
 
           @branch_index += 1
-          @branch_changes += 1
+          Tee.branch_changes += 1
 
           @branches << branch
           if (made = Thread.current[:mb_sound_tee_new_branches])
@@ -431,7 +432,7 @@ module MB
         # For internal use by Branch#destroy.
         def remove_branch(b)
           @branches.delete(b)
-          @branch_changes += 1
+          Tee.branch_changes += 1
           Plan.changed(self)
           Plan.changed(@source)
         end
