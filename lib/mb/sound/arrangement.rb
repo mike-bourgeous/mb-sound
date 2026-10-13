@@ -593,7 +593,7 @@ module MB
             start_track(tr, value, musical, fade)
           elsif playing && tr.patch?
             begin
-              @session.swap(tr.name, { tr.clip => value }, start_time: time)
+              @session.swap(tr.name, { tr.clip => silence_dropped_rows(tr.clip, value) }, start_time: time)
               @mutex.synchronize { tr.clip = value }
               last_change(tr.name)
             rescue ArgumentError
@@ -717,6 +717,19 @@ module MB
         return false unless value.is_a?(Sequence::Kit)
         return true unless old.is_a?(Sequence::Kit)
         !(value.rows.keys - old.rows.keys).empty?
+      end
+
+      # A swap target for Kit +value+ replacing Kit +old+: +value+ with a
+      # silent looping row for each row of +old+ it doesn't have, so those
+      # rows stop on the swap instead of playing on (swaps match kit rows
+      # by name, and a row missing from the new kit was left alone: a dnb
+      # drop's kick and snares kept playing through the hats-only
+      # breakdown; patches-5, 2026-10-13).  Other values pass through.
+      def silence_dropped_rows(old, value)
+        return value unless old.is_a?(Sequence::Kit) && value.is_a?(Sequence::Kit)
+        dropped = old.rows.keys - value.rows.keys
+        return value if dropped.empty?
+        Sequence::Kit.new(value.rows.merge(dropped.to_h { |k| [k, MB::Sound.seq(MB::Sound::R).n1.loop] }))
       end
 
       # False if the graph last built for track +tr+ has a node that can't
