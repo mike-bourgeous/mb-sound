@@ -65,7 +65,7 @@
 #     turn :grit, 0.6, over: 4      # more crusher on the neuro bass
 #     move :air, 180; undo          # low end out, then back next bar
 #     feed :pad, :hall, 1, over: 2  # drown the pad in the hall (buses)
-#     turn :lift, 1, over: 4        # lift the hall's tail in the rests (upward compression)
+#     turn :lift, 0, over: 4        # the hall without its lift (upward compression of the tail in rests; on by default)
 #     solo :hall                    # just the reverb return (and what feeds it)
 #     mute :echo; unmute :echo, on: :bar
 
@@ -87,6 +87,15 @@ module MB::Sound
   # of buses-1: "way more hall (-30dBFS or more?)"; round 3, after hearing
   # +18/+24/+30: "18 sounds right during the notes").
   TV_HALL = 18.0
+
+  # The :lift knob's default (0..1: how much of the hall's return goes
+  # through the upward compressor lifting its tail in the rests) and the
+  # lifted return's trim: patches-5 (2026-10-13; the maintainer picked
+  # lift on, "With the lift I might take the wet mix down 6dB or so"), so
+  # at lift 1 the hall returns at TV_HALL - 6 dB (+12) before its lift,
+  # and turning :lift down brings back the unlifted +18 dB.
+  TV_LIFT = 1.0
+  TV_LIFT_TRIM = -6.db
 
   # The kick, shared by the drums and the ghost kicks that duck the bass.
   TV_KICK = dnb_kick_settings.freeze
@@ -180,7 +189,7 @@ module MB::Sound
   # own kick (`duck(:drums, only: :kick)`) instead of a ghost kick.
   # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
   # kick for the ducks).
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: 0.0)
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -203,14 +212,14 @@ module MB::Sound
       # The sidechain: the drums' kick voice itself, read on the exact
       # sample (no ghost kick to keep in step with the kit)
       # The hall: highpassed (the drums send a little too, kick included),
-      # +hall dB on the wet-only reverb, an optional upward compressor
-      # lifting the tail in rests (the :lift knob blends it in; off by
-      # default), ducked by the kick
+      # +hall dB on the wet-only reverb, an upward compressor lifting the
+      # tail in rests (the :lift knob blends it in, on by default since
+      # patches-5; the lifted return 6 dB down), ducked by the kick
       bus(:hall) { |sig|
         wet = sig.filter(:highpass, cutoff: 250, quality: 0.7).reverb(:hall, mix: 1) * hall.db
         lifted = wet.compress(threshold: 0.db, ratio: 1, upward_threshold: -36.db, upward_ratio: 4, max_gain: 12,
                               attack: 0.01, release: 0.15, upward_attack: 0.02, detector: :rms, rms: 0.05)
-        (wet * (knob(:lift) * -1 + 1) + lifted * knob(:lift)).duck(:drums, only: :kick, amount: -6.db, release: 1.n8)
+        (wet * (knob(:lift) * -1 + 1) + lifted * (knob(:lift) * TV_LIFT_TRIM)).duck(:drums, only: :kick, amount: -6.db, release: 1.n8)
       }
       bus(:echo) { |sig| sig.delay(1.n8.dotted, feedback: 0.4) }
       duck = ->(node, amount) { node.duck(:drums, only: :kick, amount: amount, release: 1.n16) }
@@ -264,7 +273,7 @@ module MB::Sound
       drive: [TV_DRIVE, Float, '-D', 'Gain in dB into the master clipper and limiter', -20.0..24.0],
       ceiling: [TV_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
       hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
-      lift: [0.0, Float, '-U', 'Upward lift of the hall tail in rests, 0..1 (the :lift knob; with buses)', 0.0..1.0],
+      lift: [TV_LIFT, Float, '-U', 'Upward lift of the hall tail in rests, 0..1, the lifted return 6 dB down (the :lift knob; with buses; 0 before patches-5)', 0.0..1.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
     ) { |p|
       tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift)
