@@ -20,6 +20,13 @@ module MB
           mpc60: { rate: 40_000, bits: 12, input_filter: true, filter: 16_000 },
         }.freeze
 
+        # How voices read each preset's output unless told otherwise
+        # (Sample::READ_STYLES): the MPC60, the cleanest converter, reads
+        # clean (band-limited, interpolated); the S950 and SP-1200 read
+        # drop-sample with no levels, aliasing as hits pitch up like the
+        # hardware (maintainer's Bench verdicts, 2026-10-13).
+        PRESET_READS = { s950: :drop, sp1200: :drop, mpc60: :clean }.freeze
+
         module_function
 
         # +data+ rounded to 2^(bits - 1) steps per unit.
@@ -75,14 +82,30 @@ module MB
           x
         end
 
-        # Ways Sample#stretch picks its cycles (+fit+): nil plays cycles of
-        # exactly the asked length from where the clock says, cut anywhere
-        # (the plain cyclic stretch); :auto snaps each cycle to the local
-        # period near the asked length (autocorrelation), starts each cycle
-        # where the sound best matches what would have followed the last
-        # one (the S950-style "cycle fudging"), and cuts at rising zero
-        # crossings.
-        FITS = [nil, :auto].freeze
+        # Ways Sample#stretch picks its cycles (+fit+): :auto (the default
+        # since sampler-3) snaps each cycle to the local period near the
+        # asked length (autocorrelation), starts each cycle where the sound
+        # best matches what would have followed the last one (the
+        # S950-style "cycle fudging"), and cuts at rising zero crossings;
+        # :fixed plays cycles of exactly the asked length from where the
+        # clock says, cut anywhere (the plain cyclic stretch).
+        #
+        # :fixed retunes tones whose period doesn't divide the cycle: each
+        # harmonic h × f0 becomes partials at h × f0 / ratio + m / cycle,
+        # the strongest within 1 / (2 × cycle) of h × f0.  A 55 Hz bass
+        # stretched 2x with 30 ms cycles measured partials at 60.8 Hz (+1.8
+        # semitones) and 27.5 Hz, 88.3 Hz, 149 Hz between them: a
+        # periodicity near 30 Hz, about an octave low (maintainer's Bench
+        # note "the fixed version tunes lower"); :auto measured 55.0 Hz.
+        FITS = [:auto, :fixed].freeze
+
+        # +fit+ as a FITS name (nil and false mean :fixed, the plain
+        # stretch they meant before :auto became the default).
+        def fit_name(fit)
+          fit = (fit.nil? || fit == false) ? :fixed : fit.to_sym
+          raise ArgumentError, "Unknown stretch fit #{fit.inspect} (#{FITS.map(&:inspect).join(', ')})" unless FITS.include?(fit)
+          fit
+        end
 
         # How far :auto looks for a matching period or splice, as a
         # fraction of the cycle (so periods up to half a cycle are found).
@@ -104,14 +127,14 @@ module MB
         # linear fades.  +fit+ (see FITS) :auto plans the cycles from
         # +guide+ (the channels' mix, so every channel cuts in the same
         # places; +data+ by default) with Lofi.fit_plan.
-        def stretch(data, ratio, cycle, crossfade, fit: nil, guide: nil, sample_rate: 48000)
+        def stretch(data, ratio, cycle, crossfade, fit: :auto, guide: nil, sample_rate: 48000)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           raise ArgumentError, 'The stretch cycle must be at least 16 samples' unless cycle >= 16
-          raise ArgumentError, "Unknown stretch fit #{fit.inspect} (#{FITS.map(&:inspect).join(', ')})" unless FITS.include?(fit)
+          fit = fit_name(fit)
 
           x = Numo::DFloat.cast(data)
           out_len = (x.length * ratio).round
-          plan = fit ? fit_plan(guide || x, ratio, cycle, sample_rate: sample_rate) : fixed_plan(x.length, ratio, cycle)
+          plan = fit == :auto ? fit_plan(guide || x, ratio, cycle, sample_rate: sample_rate) : fixed_plan(x.length, ratio, cycle)
           play_plan(x, plan, out_len, crossfade)
         end
 
