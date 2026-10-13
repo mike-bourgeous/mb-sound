@@ -134,6 +134,105 @@ RSpec.describe(MB::Sound::Session::Strip) do
       expect(outs[0].abs.max).to be > 0.2
       expect(outs[1]).to eq(outs[0])
     end
+
+    # The LFO played by :a and :b for +frames+ frames from the start: what
+    # the mix should be once a stopped or replaced :b plays again.
+    def never_stopped(frames)
+      ref = new_session
+      ref.add(3.hz.lfo * 0.75)
+      run_in(ref, frames, [800])
+    ensure
+      ref&.close
+    end
+
+    # fixes-10: a graph kept for resume wasn't read while stopped, so after
+    # more than a second its branch of the shared LFO overflowed and
+    # resuming raised BranchBufferOverflow.  It now reads that branch while
+    # kept, for exactly the frames since its stop.
+    it 'keeps a stopped graph in step with a node a playing graph plays, and resumes it in phase, at any buffer size' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = new_session
+        s.add(lfo * 0.5, name: :a)
+        s.add(lfo * 0.25, name: :b)
+        run_in(s, 800, sizes)
+        s.remove(:b, fade: 0, time: 1/4r) # frame 24000, inside a buffer for 801 and 7
+        run_in(s, 72000, sizes)
+        expect(s.stopped.keys).to eq([:b])
+        expect(s.instance_variable_get(:@kept_graphs).length).to eq(1)
+
+        s.resume(:b, fade: 0) # the next bar: frame 96000
+        data = run_in(s, 48000, sizes)
+        expect(s.instance_variable_get(:@kept_graphs)).to be_empty
+
+        expected = never_stopped(72800 + 48000)[72800..]
+        bar = 96000 - 72800
+        expect(data.abs.max).to be > 0.7
+        expect((data[bar..] - expected[bar..]).abs.max).to be < 1e-6
+        expect((data[0...bar] - expected[0...bar] * (0.5 / 0.75)).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
+    it 'keeps a replaced graph in step for undo' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = new_session
+        s.add(lfo * 0.5, name: :a)
+        s.add(lfo * 0.25, name: :b)
+        run_in(s, 800, sizes)
+        s.command('bg') { s.add(lfo * 0.1, name: :b, fade: 0, on: :now) }
+        run_in(s, 72000, sizes)
+
+        s.undo(on: :now)
+        data = run_in(s, 48000, sizes)
+        expected = never_stopped(72800 + 48000)[72800..]
+        # The undo crossfades over a declick; after it :b is back in phase
+        expect(data.abs.max).to be > 0.7
+        expect((data[24000..] - expected[24000..]).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
+    it 'keeps graphs that only share a node with each other in step while they are all stopped' do
+      lfo = 3.hz.lfo
+      s = new_session
+      s.add(lfo * 0.5, name: :a)
+      s.add(lfo * 0.25, name: :b)
+      run_in(s, 800, [801, 7])
+      s.remove(:b, fade: 0)
+      run_in(s, 72000, [801, 7])
+      s.remove(:a, fade: 0)
+      run_in(s, 72000, [801, 7])
+      s.resume(:a, fade: 0, on: :now)
+      run_in(s, 72000, [801, 7])
+      s.resume(:b, fade: 0, on: :now)
+      data = run_in(s, 24000, [801, 7])
+
+      expected = never_stopped(800 + 72000 * 3 + 24000)[-24000..]
+      expect((data - expected).abs.max).to be < 1e-6
+    ensure
+      s&.close
+    end
+
+    it 'stops keeping a graph in step once it is forgotten' do
+      lfo = 3.hz.lfo
+      s = new_session
+      s.add(lfo * 0.5, name: :a)
+      s.add(lfo * 0.25, name: :b)
+      run_in(s, 800, [800])
+      s.remove(:b, fade: 0)
+      run_in(s, 800, [800])
+      expect(s.instance_variable_get(:@kept_graphs).length).to eq(1)
+
+      s.forget(:b) # not a console command, so no undo step holds it
+      run_in(s, 800, [800])
+      expect(s.instance_variable_get(:@kept_graphs)).to be_empty
+    ensure
+      s&.close
+    end
   end
 
   it 'mutes at a launch point over a fade in bars (synced fade)' do

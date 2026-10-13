@@ -87,14 +87,16 @@ module MB
       #
       # +strip_level+ and +strip_ramp+ are the mute/solo level (see Strip);
       # +asleep+ is true while a muted player isn't being rendered;
-      # +asleep_reads+ caches what it still reads (see Strip#asleep_reads).
+      # +asleep_reads+ caches what it still reads (see Strip#asleep_reads);
+      # +read_to+ is the session frame its graph has been read up to (see
+      # Strip#read_kept_graphs).
       #
       # +ring+ is a Tails::Ring while the player rings out after a stop
       # (see Tails).
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads,
+        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -462,7 +464,9 @@ module MB
       #
       # Looping clips come back in phase with the timeline.  Other nodes
       # keep their state from when they stopped, so e.g. a delay or reverb
-      # may replay the start of an old tail.
+      # may replay the start of an old tail, except nodes the graph shares
+      # with other graphs in the Session, which it kept in step with while
+      # stopped (see Strip#read_kept_graphs).
       def resume(name = nil, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
         point = LaunchPoint.of(binding) or return nil
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
@@ -803,7 +807,7 @@ module MB
 
         players = @mutex.synchronize { @players.values }
         @span_players = players # for Strip#asleep_reads
-        @span_serials = nil
+        @span_graphs = nil
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
         playing = !players.empty? || queued_start?
@@ -818,6 +822,9 @@ module MB
             render_player(p, mix, from, to, per_sample, count)
           end
         end
+
+        # Graphs kept for #resume or #undo keep their shared nodes in step
+        read_kept_graphs(@frame + count)
 
         @transport.advance(to - from) if playing
         # Pre-chain master gain (the default; see #master_gain_post?)
@@ -904,6 +911,7 @@ module MB
               if !p.started && p.start >= time
                 # It would never have played
                 @players.delete(p.serial)
+                note_retired(p)
                 keep_stopped(p)
               else
                 p.stop_at = MB::M.min(p.stop_at || time, time)
@@ -917,6 +925,7 @@ module MB
               p.fading_out = false
             else
               @players.delete(p.serial)
+              note_retired(p)
               keep_stopped(p)
             end
           end
@@ -1003,6 +1012,7 @@ module MB
         @mutex.synchronize {
           end_ring(p)
           @players.delete(p.serial)
+          note_retired(p)
           keep_stopped(p) if keep
           @order.delete(p.name) unless @players.each_value.any? { |o| o.name == p.name }
         }
@@ -1107,6 +1117,7 @@ module MB
           p.started = true
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
           align_grids(p, base + offset)
+          catch_up_kept(p, base + offset) # a graph kept since it stopped
         end
 
         ringing = p.ring&.active && !p.fade_out
@@ -1150,6 +1161,7 @@ module MB
             p.asleep = true
             fade_ramp(p, base + offset, frames) # keeps fades moving while asleep
             read_while_asleep(p, frames)
+            p.read_to = base + offset + frames
             return finish_player(p, false, base + offset + frames)
           end
 
@@ -1175,6 +1187,7 @@ module MB
             p.asleep = true
             fade_ramp(p, base + offset, frames)
             read_while_asleep(p, frames)
+            p.read_to = base + offset + frames
             return finish_player(p, false, base + offset + frames)
           end
           if silent_from < base + offset + frames
@@ -1199,6 +1212,7 @@ module MB
         end
         check_speed(p, MB::U.clock_now - t, frames)
         read_while_asleep(p, asleep_after) # the rest of the buffer after a mute ramp
+        p.read_to = base + offset + frames + asleep_after
 
         if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
           retire(p)
@@ -1249,6 +1263,7 @@ module MB
         finish_player(p, ended, base + offset + frames, to: to)
 
       rescue => e
+        p.read_to = nil # not kept in step (see Strip#read_kept_graphs)
         retire(p)
         raise if @raise_errors
         warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
