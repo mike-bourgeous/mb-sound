@@ -1,8 +1,9 @@
 RSpec.describe('bin/synths/jungle.rb') do
   before(:all) do
     require File.expand_path('../../../bin/synths/jungle.rb', __dir__)
-    @record = MB::Sound.jungle_record
-    @map = MB::Sound.jungle_sampler(@record)
+    @sample = MB::Sound.jungle_record
+    @record = @sample.data
+    @map = MB::Sound.jungle_sampler(@sample)
   end
 
   after { MB::Sound.rewind }
@@ -23,8 +24,10 @@ RSpec.describe('bin/synths/jungle.rb') do
     keys = MB::Sound.jungle_slice_keys
     expect(keys.keys).to eq([:k, :h, :s, :sk, :g, :kk, :s2, :k2, :s3, :full, :rev])
     expect(keys.values.map(&:number)).to eq((0...11).map { |i| 6 + 11 * i })
-    expect(@map.zones.length).to eq(11)
-    expect(@map.zones.map { |lo, hi, _| [lo, hi] }).to eq((0...11).map { |i| [2 + 11 * i, 13 + 11 * i] })
+    expect(@map.regions.length).to eq(11)
+    expect(@map.regions.map(&:keys)).to eq((0...11).map { |i| [2 + 11 * i, 12 + 11 * i] })
+    expect(@map.regions.map(&:root)).to eq((0...11).map { |i| 3.0 + 11 * i })
+    expect(@map.regions.last.sample).to be_reversed
   end
 
   it 'plays a slice from its key: the record at 165 BPM, 12 bits' do
@@ -37,10 +40,18 @@ RSpec.describe('bin/synths/jungle.rb') do
     expect(peak_db(second)).to be > -10
     expect(rms_db(out[(2 * bar + 4800).round..])).to be < -90 # a two-bar slice, over
 
-    # 12-bit slices: every table sample is a multiple of 1/2048
-    data = Numo::DFloat.cast(@map.zones[3][2].frames)
+    # 12-bit slices: every sample is a multiple of 1/2048
+    data = Numo::DFloat.cast(@map.regions[3].sample.data)
     expect(data.length).to be > 1000
     expect(((data * 2048) - (data * 2048).round).abs.max).to be < 1e-3
+  end
+
+  it 'chops its slices directly, slice and pitch apart' do
+    brk = MB::Sound.jungle_slices_of(@sample)
+    expect(brk.names.keys).to eq([:k, :h, :s, :sk, :g, :kk, :s2, :k2, :s3, :full])
+    clip = brk.chop(:k, MB::Sound::Tie, :s, [:s, 2]).transpose(3)
+    out = render_patch(MB::Sound.jungle_breaks_voice(clip, map: brk.instrument, grit: 0), 0.4)[0]
+    expect(peak_db(seconds(out, 0, 0.02))).to be > -10
   end
 
   it 'cuts the last slice with each new one (one voice)' do

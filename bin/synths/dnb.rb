@@ -170,21 +170,25 @@ module MB::Sound
   # Minor 9th pads: three detuned saws per note, slow swell, a lowpass at
   # +cutoff+, highpassed at 200 Hz, a hall (+hall+ wet).  Stereo.
   def self.dnb_pad_voice(midi, cutoff: 2600, hall: 0.35, voices: 10)
-    synth(midi, voices: voices) { |v|
+    pad = synth(midi, voices: voices) { |v|
       saws = v.hz.unison(3, detune: 0.12) { |p, _i| p.saw }
       (saws.lp4(cutoff, resonance: 0.1) * v.env(0.6, 0.5, 0.8, 1.2, gm: false) * 0.25)
-    }.filter(:highpass, cutoff: 200, quality: 0.7).reverb(:hall, mix: hall, output_channels: 2)
+    }.filter(:highpass, cutoff: 200, quality: 0.7)
+    hall ? pad.reverb(:hall, mix: hall, output_channels: 2) : pad # (hall: nil: dry, for a reverb bus)
   end
 
   # The liquid pluck: a soft square through a closing lowpass, a
   # dotted-eighth delay (+send+ wet, a number or a node; +feedback+), a
-  # plate (+plate+ wet).  Stereo.
+  # plate (+plate+ wet).  Stereo.  +send: nil, plate: nil+ is the dry
+  # pluck (mono), for delay and reverb buses.
   def self.dnb_pluck_voice(midi, send: 0.4, feedback: 0.4, plate: 0.25)
-    synth(midi, voices: 2) { |v|
+    pluck = synth(midi, voices: 2) { |v|
       fenv = v.env(0.001, 0.18, 0.0, 0.1, gm: false)
       tone = v.hz.square.lp4(500 * (2 ** (fenv * 3)), resonance: 0.3)
       tone * v.env(0.002, 0.35, 0.0, 0.15, gm: false) * 0.5
-    }.delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).reverb(:plate, mix: plate, output_channels: 2)
+    }
+    pluck = pluck.delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1) if send
+    plate ? pluck.reverb(:plate, mix: plate, output_channels: 2) : pluck
   end
 
   # The impact: a sine falling +drop+ octaves onto the note in 0.25 s,

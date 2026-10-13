@@ -12,8 +12,10 @@
 #
 # Patches (-p):
 #   breaks  the sampler: a two-bar funk break "record" pressed from a
-#           tuned-up tr808 at 138.75 BPM (.jungle_record), cut into 11 slices
-#           at 12 bits on 11-semitone key zones (.jungle_sampler), one voice
+#           tuned-up tr808 bounced at 138.75 BPM (.jungle_record, a Sample),
+#           at 12 bits, cut into sixteenths with 11 named slices on
+#           11-semitone key zones (.jungle_sampler, a Sampler::Instrument;
+#           sampler-1, 2026-10-13: was sample-mode Wavetables), one voice
 #           (each slice cuts the last), a 13 kHz output filter, a touch of
 #           sample-rate grit, a lowpass at --cutoff, tape softclip.  The
 #           in-tempo key of each slice (3 semitones above its root, so the
@@ -52,6 +54,8 @@
 #     amen = seq(k[:k], T, k[:h], k[:g], k[:sk], T, T, T, k[:h], T, k[:kk], T, k[:s2], T, T, T).n16.loop
 #     bg :breaks, jungle_breaks_voice(amen)
 #     swap :breaks, amen.transpose(2)                            # chops pitched up a tone
+#     brk = jungle_slices_of                                     # or chop the slices directly (slice and pitch apart):
+#     bg :breaks, jungle_breaks_voice(brk.chop(:k, T, :h, :g, [:s, 2], T, brk[:s].rev, :kk).loop.transpose(3), map: brk.instrument)
 #     bg :keys, jungle_keys_voice(seq([C3, E3, F3, A3].map(&:n2).reduce(:&), R.n2).loop)
 #     bg :sub, jungle_sub_voice(seq(D2.n2.d, D2.n8, C2.n8, D2.n1).loop)
 
@@ -88,9 +92,10 @@ module MB::Sound
   end
 
   # Presses the record: two bars of a funk break (+rows+ of 16ths; digits
-  # are ghost-note velocities) on a tuned-up TR-808 kit at +bpm+ (its own
-  # Transport, so the session's tempo is untouched), a small room, a
-  # tape-ish softclip.  Returns two bars of mono samples (an SFloat).
+  # are ghost-note velocities) on a tuned-up TR-808 kit bounced at +bpm+
+  # (a private tempo, so the session's is untouched), through a small room
+  # and a tape-ish softclip.  Returns a mono Sample (with its tempo, so
+  # `rec.at(7.n16)` counts the record's sixteenths).
   def self.jungle_record(
     bpm: 165 / 2 ** (3 / 12.0), seed: 165,
     rows: {
@@ -100,58 +105,54 @@ module MB::Sound
       open_hat: '..............x.|......x.........',
     }
   )
-    transport = Sequence::Transport.new(bpm: bpm)
-    drums = tr808(
-      grid(16, **rows).to_clip.stream(transport: transport),
-      kick: { tune: 58, decay: 0.32, tone: 0.65, level: 1.0 },
-      snare: { tune: 205, decay: 0.16, tone: 0.7, snappy: 0.75, level: 1.0 },
-      closed_hat: { decay: 0.045, tone: 0.75, level: 0.3 },
-      open_hat: { decay: 0.25, tone: 0.7, level: 0.3 }, accent: 8, velocity_curve: :grid, seed: seed
-    )
-    record = drums.reverb(:room, mix: 0.18).softclip(0.5, 0.95)
-    length = (48000 * 60.0 / bpm * 8).round
-    bufs = []
-    got = 0
-    while got < length
-      b = record.sample(800)
-      break unless b
-      bufs << b.dup
-      got += b.length
-    end
-    Numo::SFloat.hstack(bufs)[0...length]
-  end
-
-  # Cuts +record+ (made at +bpm+) into the slices of .jungle_slices, +bits+
-  # each, with a 2 ms fade-out at each cut, and maps them onto key zones
-  # (see .jungle_slice_keys).  Returns a Wavetable::KeyMap.
-  def self.jungle_sampler(record = nil, bpm: 165 / 2 ** (3 / 12.0), bits: 12, zone: 11)
-    record ||= jungle_record(bpm: bpm)
-    step = 48000 * 60.0 / bpm / 4
-    scale = 2 ** (bits - 1)
-    zones = jungle_slices.each_with_index.to_h { |(_name, (start, steps, reverse)), i|
-      a = (start * step).round
-      b = [((start + steps) * step).round, record.length].min
-      data = record[a...b].dup
-      data = data.reverse.dup if reverse
-      fade = [96, data.length].min
-      data[-fade..] = data[-fade..] * Numo::SFloat.linspace(1, 0, fade)
-      data = (data * scale).round / scale.to_f # 12 bits, like the S950
-      low = 2 + i * zone
-      [low...(low + zone), Wavetable.from_samples(Numo::SFloat.cast(data), mode: :sample, root: Note.new(low + 1))]
+    bounce(2.bars, bpm: bpm, name: 'jungle_record') {
+      tr808(
+        grid(16, **rows),
+        kick: { tune: 58, decay: 0.32, tone: 0.65, level: 1.0 },
+        snare: { tune: 205, decay: 0.16, tone: 0.7, snappy: 0.75, level: 1.0 },
+        closed_hat: { decay: 0.045, tone: 0.75, level: 0.3 },
+        open_hat: { decay: 0.25, tone: 0.7, level: 0.3 }, accent: 8, velocity_curve: :grid, seed: seed
+      ).reverb(:room, mix: 0.18).softclip(0.5, 0.95)
     }
-    Wavetable::KeyMap.new(zones)
   end
 
-  # The breaks: one sampler voice playing +map+ (a KeyMap; .jungle_sampler by
-  # default; each slice cuts the last), a 13 kHz lowpass like the
-  # sampler's output filter, +grit+ of sample-rate reduction to 30 kHz,
-  # a lowpass at +cutoff+ (a number or a node, e.g. a knob), and a little
-  # tape saturation.  Velocity 0.75 (MIDI 95) plays a slice as cut.
+  # The record at +bits+ (12, like the S950), cut into its 32 sixteenths,
+  # with the names of .jungle_slices for its runs (a Sample::Slices; each
+  # slice fades out over 2 ms).  `jungle_slices_of.chop(:k, T, :s, ...)`
+  # writes chops for it directly, slice and pitch apart.
+  def self.jungle_slices_of(record = nil, bpm: 165 / 2 ** (3 / 12.0), bits: 12)
+    record ||= jungle_record(bpm: bpm)
+    record = record.bits(bits) if bits
+    names = jungle_slices.reject { |_, (_, _, reverse)| reverse }.transform_values { |start, steps| start..(start + steps - 1) }
+    record.slices(at: (0...32).map { |i| i.n16 }).name(**names) # on the record's tempo grid
+  end
+
+  # The breaks sampler (a Sampler::Instrument): the slices of
+  # .jungle_slices_of on key zones +zone+ semitones wide from note 2 up,
+  # each slice's own pitch one semitone above its zone's start and
+  # tracking the keys from there (see .jungle_slice_keys).  +record+ is a
+  # Sample (.jungle_record by default).  (Chop clips from
+  # .jungle_slices_of play on that Slices' own instrument: pass
+  # `map: brk.instrument` to .jungle_breaks_voice.)
+  def self.jungle_sampler(record = nil, bpm: 165 / 2 ** (3 / 12.0), bits: 12, zone: 11)
+    brk = jungle_slices_of(record, bpm: bpm, bits: bits)
+    MB::Sound::Sampler::Instrument.new { |inst|
+      jungle_slices.each_with_index do |(name, (start, steps, reverse)), i|
+        low = 2 + i * zone
+        inst.region(reverse ? brk[start...(start + steps)].rev : brk[name], keys: low...(low + zone), root: low + 1)
+      end
+    }
+  end
+
+  # The breaks: one sampler voice playing +map+ (a Sampler::Instrument;
+  # .jungle_sampler by default; each slice cuts the last, with a 1.3 ms
+  # declick), a 13 kHz lowpass like the sampler's output filter, +grit+ of
+  # sample-rate reduction to 30 kHz, a lowpass at +cutoff+ (a number or a
+  # node, e.g. a knob), and a little tape saturation.  Velocity 0.75 (MIDI
+  # 95) plays a slice as cut.
   def self.jungle_breaks_voice(midi, map: nil, cutoff: 16000, grit: 0.25, level: 1.6)
     map ||= jungle_sampler
-    voice = synth(midi, voices: 1) { |v|
-      v.hz.wavetable(map) * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * (1 / 0.75))
-    }
+    voice = map.sampler(midi) { |v, s| s * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * (1 / 0.75)) }
     voice
       .filter(:lowpass, cutoff: 13000, quality: 0.6)
       .decimate(30000, mix: grit)

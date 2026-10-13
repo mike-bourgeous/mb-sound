@@ -179,6 +179,50 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays buses, sends, feeds, bus readers, bus mutes and solos, and undo bit for bit' do
+    lines = {
+      0 => [
+        'knob :space, 0.3',
+        'bus(:echo) { |sig| sig.delay(0.3, feedback: 0.5) }',
+        'bus(:grp) { |sig| sig * 0.8 }',
+        'a = seq(C3, E3, G3, B3).n8.loop',
+        'track(:keys, q: 1, send: { echo: :space }) { |c| c.number * 0.01 * c.gate }',
+        'track(:kick, to: :grp) { |c| c.gate * 0.5 }',
+        'bg :pad, 0.2.constant.duck(:kick, amount: -12.db), send: { echo: 0.1 }',
+        'scene :one, keys: a, kick: grid(4, "x...").loop',
+        'go :one, at: :now',
+      ],
+      97 => ['feed :keys, :echo, 0.8, over: 1.beat'],
+      151 => ['mute :echo'],
+      200 => ['unmute :echo, on: :bar'],
+      260 => ['solo :keys'],
+      330 => ['solo'],
+      380 => ['feed :pad, :echo, 0.5, on: :bar'],
+      420 => ['undo'],
+      470 => ['bus(:echo, on: :bar) { |sig| sig.delay(0.2, feedback: 0.3) }'],
+      560 => ['stop :keys, :kick'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    720.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.05
+    expect(t.entries.map(&:kind)).to include(:bus, :send, :mute, :solo)
+
+    r = t.replay
+    [[800], [367, 368], [64]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays tones exactly at the same buffer size and within 1e-6 at others' do
     live, t = perform(tones: true)
     r = t.replay

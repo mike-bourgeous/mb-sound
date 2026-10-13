@@ -56,6 +56,7 @@ require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
+require_relative 'sound/bus_methods'
 require_relative 'sound/record_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
@@ -66,6 +67,7 @@ require_relative 'sound/live_methods'
 require_relative 'sound/drum_methods'
 require_relative 'sound/structure_methods'
 require_relative 'sound/genre_methods'
+require_relative 'sound/sampler_methods'
 require_relative 'sound/help_autoload'
 
 module MB
@@ -90,6 +92,7 @@ module MB
     extend ArrangementMethods
     extend FormMethods
     extend KnobMethods
+    extend BusMethods
     extend RecordMethods
     extend MultichannelMethods
     extend TuningMethods
@@ -101,6 +104,7 @@ module MB
     extend DrumMethods
     extend StructureMethods
     extend GenreMethods
+    extend SamplerMethods
     extend HelpAutoload
 
     # Speed of sound for wavelength calculations, in meters per second.
@@ -162,6 +166,7 @@ require_relative 'sound/midi/streams'
 require_relative 'sound/notes'
 require_relative 'sound/synth'
 require_relative 'sound/drums'
+require_relative 'sound/sampler'
 require_relative 'sound/session'
 require_relative 'sound/take'
 require_relative 'sound/arrangement/recording'

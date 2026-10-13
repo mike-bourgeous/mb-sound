@@ -105,6 +105,21 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  describe 'sampler' do
+    let(:rec) { MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(48000).seq.map { |i| Math.sin(i * 0.03) * Math.exp(-(i % 6000) / 2000.0) })] }
+
+    it 'gives the same chop samples at any buffer size (one truncating voice, declick tails, reverse, pitch)' do
+      brk = rec.slices(16)
+      expect_invariant(-> { brk.chop(0, 3, [5, 2], MB::Sound::Tie, brk[7].rev, 1, MB::Sound::Rest, [2, -3]).loop.sampler(brk) }, sizes: [[367, 368], [64], [1031], [1]])
+    end
+
+    it 'gives the same samples for looping polyphonic voices with bends' do
+      s = rec[0...12_000].looped(2000...9000, mode: :ping_pong)
+      clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4.n4).n8.loop
+      expect_invariant(-> { clip.synth(voices: 3) { |v| s.play(v) * v.env(0.001, 0.1, 0.7, 0.05) } })
+    end
+  end
+
   describe 'tr808' do
     grid = ->(row) { MB::Sound.grid(16, row => 'x.......x....x..').loop }
 

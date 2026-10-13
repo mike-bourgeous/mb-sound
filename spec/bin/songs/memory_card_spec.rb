@@ -35,9 +35,12 @@ RSpec.describe('bin/songs/memory_card.rb') do
     expect(peak).to be <= -1.db + 1e-3
   end
 
-  it 'chops by slice name, with pitched slices' do
-    keys = MB::Sound.jungle_slice_keys
-    clip = MB::Sound.chop(:k, MB::Sound::T, [:s, 2], MB::Sound::R)
-    expect(clip.events.map(&:value)).to eq([keys[:k].number, keys[:s].number + 2])
+  it 'chops by slice name, with pitched slices: keys of the break with pitch marks, three semitones up' do
+    brk = MB::Sound.memory_card_break
+    clip = MB::Sound.chop(:k, MB::Sound::T, [:s, 2], MB::Sound::R, :rev)
+    keys = brk.chop(:k, :s, brk[:s2].rev).events.map(&:value)
+    expect(clip.events.map(&:value)).to eq(keys)
+    expect(clip.events.map(&:pitch)).to eq([3.0, 5.0, 3.0])
+    expect(clip.transpose(2).events.map(&:value)).to eq(keys)
   end
 end

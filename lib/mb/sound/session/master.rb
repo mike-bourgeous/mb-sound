@@ -159,7 +159,9 @@ module MB
         end
 
         # Builds a Chain from a master block (a bypass chain for nil).
-        def build_master(block, description: nil)
+        # +label+ names the chain in its default description ("master: ...";
+        # a bus's name for buses, see Buses).
+        def build_master(block, description: nil, label: 'master')
           source = GraphNode::MixSource.new(channels: @channels, sample_rate: output.sample_rate)
 
           chain = Chain.new(
@@ -198,7 +200,8 @@ module MB
           chain.nodes = list
 
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
-          chain.description = description || shorten("master: #{chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq.join(', ')}")
+          bind_bus_taps(chain.nodes, :master) if label == 'master' # readers of buses and players (see Buses)
+          chain.description = description || shorten("#{label}: #{chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq.join(', ')}")
           chain
         end
 
@@ -393,9 +396,10 @@ module MB
         end
 
         # Returns true if a chain can be dropped: it was replaced and has
-        # faded out or gone quiet.
-        def master_chain_done?(c)
-          return false if c.equal?(@master_chains.last) || !c.started
+        # faded out or gone quiet.  +list+ is the chains it belongs to (a
+        # bus's, see Buses).
+        def master_chain_done?(c, list = @master_chains)
+          return false if c.equal?(list.last) || !c.started
 
           faded = c.gain <= 0 && c.gain_step < 0
           silent = !c.feeding && (c.bypass? || c.quiet_frames >= TAIL_QUIET_SECONDS * output.sample_rate)

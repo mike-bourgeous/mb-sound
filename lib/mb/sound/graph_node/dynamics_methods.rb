@@ -125,7 +125,8 @@ module MB
         # keeps the reduction that long before releasing.  +makeup+ is dB or
         # :auto (half the gain change at 0 dBFS back).
         #
-        # +sidechain+ (any node or bundle) drives the detector instead of the
+        # +sidechain+ (any node or bundle, or a bus or track name such as
+        # :drums; see BusMethods#bus) drives the detector instead of the
         # input; +detector+ is :peak (default) or :rms (+rms+ window);
         # +link+ (default true) uses one detector for every channel;
         # +lookahead+ delays the audio so the gain moves before peaks.
@@ -219,9 +220,17 @@ module MB
         #     bass = seq(A1, A1, C2, A1).n8.loop.tone.saw.lp4(400)
         #     bg [kick, bass.duck(kick)].sum
         #     bg [kick, bass.duck(kick, amount: -10.db, release: 1.n32)].sum   # lighter and snappier
+        #
+        # +sidechain+ may also name a bus or track (see BusMethods#bus and
+        # design/notes/buses.md): `duck(:drums)` follows what :drums plays,
+        # and `duck(:drums, only: :kick)` its kick voice (a drum voice, or a
+        # node given `.named(:kick)`, inside :drums' graph), read in the same
+        # buffer on the exact sample.
         def duck(sidechain, amount: -18.db, threshold: -30.db, knee: 6, attack: 0.001, release: 1.n16, hold: 0.02,
-                 detector: :peak, rms: 0.01, link: true, lookahead: 0)
+                 detector: :peak, rms: 0.01, link: true, lookahead: 0, only: nil)
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
+          raise ArgumentError, 'only: picks a node inside a bus or track named by a Symbol (duck(:drums, only: :kick))' if only && !sidechain.is_a?(Symbol)
+          sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
           a = DynamicsMethods.level_db(amount, 'amount')
           raise ArgumentError, 'Duck amount must be at most 0 dB' if a > 0
           t = DynamicsMethods.level_db(threshold, 'threshold')

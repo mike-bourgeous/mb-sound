@@ -121,6 +121,23 @@ module MB
           }
         end
 
+        # Records +frames+ frames of the master bus into +output+ (an object
+        # with #write and #close; see Sampler::AudioCapture) from the launch
+        # point (+at+; right away by default), stopping by itself.  Not
+        # listed in #recordings and not stopped by #stop_recording.
+        # Returns the Change.
+        def capture_audio(frames, output:, at: nil, start_time: nil)
+          point = at || LaunchPoint::NONE
+          time = start_time && !point.given? ? start_time.to_r : launch_time(point, [], default: nil)
+          rec = Recorder.new('(capture)', channels: @channels, sample_rate: output_open? ? sample_rate : 48000, output: output)
+          change(:capture_audio, :audio, time, data: { frames: frames }) { |_t|
+            start = @landing_frame || @frame
+            rec.start(start)
+            rec.stop(start + frames)
+            @recording_lock.synchronize { @captures << rec }
+          }
+        end
+
         # Stops every recording of the master bus at the launch point
         # (right away by default).  Returns the Change.
         def stop_recording(at: nil, start_time: nil)
@@ -143,11 +160,18 @@ module MB
           @recording_lock = Mutex.new
           @recordings = []
           @all_recordings = []
+          @captures = []
         end
 
         # Gives the recorders the buffer of the mix that starts at session
         # frame +frame+ (called by #process_buffer after the output write).
         def record_mix(mix, frame)
+          caps = @recording_lock.synchronize { @captures.dup }
+          unless caps.empty?
+            done = caps.select { |r| r.write(mix, frame) }
+            @recording_lock.synchronize { @captures -= done } unless done.empty?
+          end
+
           list = @recording_lock.synchronize { @recordings.dup }
           return if list.empty?
 
@@ -167,6 +191,8 @@ module MB
         # Finishes every recording (when the Session closes).
         def close_recordings
           list = @recording_lock.synchronize { @recordings.dup.tap { @recordings.clear } }
+          caps = @recording_lock.synchronize { @captures.dup.tap { @captures.clear } }
+          caps.each(&:wait)
           list.each(&:wait)
           @recording_lock.synchronize { @all_recordings.concat(list) }
         end

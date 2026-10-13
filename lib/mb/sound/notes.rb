@@ -358,6 +358,14 @@ module MB
         memo(:velocity) { Velocity.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
+      # The pitch mark (semitones) of the latest note-on, 0 without one (a
+      # Notes::PitchMark; see Seq::Step#pitch): the per-note pitch of
+      # sampler chop hits, which SamplerVoice reads at each note-on.  Other
+      # voices may use it too: `v.hz.transpose(v.pitch_mark).saw`.
+      def pitch_mark
+        memo(:pitch_mark) { PitchMark.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+
       # The release velocity (0..1) of the latest note-off (a Notes::Lift),
       # 64/127 until the first one.
       def lift
