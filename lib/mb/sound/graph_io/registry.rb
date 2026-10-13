@@ -61,7 +61,7 @@ module MB
           'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill pitch],
           'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct pitch],
           # Sample views and edits (how Samples print: Sample#lineage)
-          'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with],
+          'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with read_as],
           'MB::Sound::Sample::Slices' => %i[[] name keymap],
           # Instruments built region by region (in Instrument.new's block)
           'MB::Sound::Sampler::Instrument' => %i[region],

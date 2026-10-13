@@ -118,19 +118,24 @@ module MB
 
         # [specs, regions DFloat] for the kernel for channel +c+ at
         # +sample_rate+ (see FastSampler.play), with level spacing +mips+ and
-        # +interpolation+.
-        def kernel_tables(c, sample_rate, mips: @mips, interpolation: :optimal)
+        # +interpolation+ for every region, or (nil) each sample's own
+        # (Sample#read_as: the lofi presets read drop-sample with no levels),
+        # else #mips and :optimal.
+        def kernel_tables(c, sample_rate, mips: nil, interpolation: nil)
           tables = []
-          index = {}.compare_by_identity
-          spec_of = ->(s) {
-            t = s.audio.table(c % s.channel_count, mips)
-            index[t] ||= (tables << t.kernel_spec(sample_rate, interpolation)).length - 1
+          index = {}
+          spec_of = ->(s, m, interp) {
+            t = s.audio.table(c % s.channel_count, m)
+            index[[t.object_id, interp]] ||= (tables << t.kernel_spec(sample_rate, interp)).length - 1
           }
 
           rows = @regions.map { |r|
             s = r.sample
-            row(s, spec_of.(s), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
-                veltrack: r.veltrack, tune: r.tune, gain: r.gain, offset: r.offset)
+            interp = (interpolation || s.interpolation || :optimal).to_sym
+            code = Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
+            m = mips.nil? ? (s.mips.nil? ? @mips : s.mips) : mips
+            row(s, spec_of.(s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
+                veltrack: r.veltrack, tune: r.tune, gain: r.gain, offset: r.offset, interp: code)
           }
           [tables, Numo::DFloat.cast(rows)]
         end
@@ -146,7 +151,9 @@ module MB
         # region, a number or node read at each note-on), +declick+ (samples
         # a re-struck note fades over; Sampler::DECLICK), +interpolation+
         # (:optimal; :none for the classic aliasing read), +mips+
-        # (#mips by default; false for no band-limited levels), +seed+
+        # (#mips by default; false for no band-limited levels), each nil
+        # for each sample's own read (Sample#read_as; the lofi presets read
+        # drop-sample with no levels, else :optimal and #mips), +seed+
         # (round robins), +freq+ (a node of Hz or a Pitch, instead of the
         # Notes' frequency), +gate+, +shift+ (semitones read at each
         # note-on, instead of the Notes' #pitch_mark).
@@ -154,7 +161,7 @@ module MB
         # With an #envelope (SFZ), the voice is multiplied by
         # `source.env(*envelope)`.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: :optimal, mips: @mips, seed: nil)
+                 interpolation: nil, mips: nil, seed: nil)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
             return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips)
@@ -231,12 +238,12 @@ module MB
           source.is_a?(Sequence::Clip) || source.is_a?(MIDI::Stream) || source.respond_to?(:to_midi_stream) || source.is_a?(String)
         end
 
-        def row(s, table, sample_rate, keys:, vel:, root:, keytrack:, seq: nil, rand: nil, veltrack: 0.0, tune: 0.0, gain: 1.0, offset: 0.0)
+        def row(s, table, sample_rate, keys:, vel:, root:, keytrack:, seq: nil, rand: nil, veltrack: 0.0, tune: 0.0, gain: 1.0, offset: 0.0, interp: -1)
           lp = s.loop_points || [0.0, 0.0]
           [
             table, keys[0], keys[1], vel[0], vel[1], seq ? seq[1] : 1, seq ? seq[0] : 1, rand ? rand[0] : 0.0, rand ? rand[1] : 1.0,
             root, keytrack, s.tune + tune, s.level * gain, s.start, s.stop, lp[0], lp[1], LOOP_MODES.fetch(s.loop_mode),
-            s.reversed? ? 1 : 0, s.fade_in, s.fade_out, veltrack, s.sample_rate / sample_rate.to_f, offset,
+            s.reversed? ? 1 : 0, s.fade_in, s.fade_out, veltrack, s.sample_rate / sample_rate.to_f, offset, interp,
           ]
         end
       end

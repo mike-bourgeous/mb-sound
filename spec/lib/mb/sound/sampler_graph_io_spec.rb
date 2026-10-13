@@ -47,6 +47,24 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
     expect { io.load(path) }.to raise_error(io::LoadError, /sha256|SHA-256|changed/i)
   end
 
+  it 'keeps lofi drop-sample reads and read_as views in bundles' do
+    dirty = rec.lofi(:mpc60).slices(8)
+    clean = rec.lofi(:sp1200).read_as(:clean).slices(8)
+    clip = MB::Sound.seq(MB::Sound::C2, MB::Sound::D2.pitch(7), MB::Sound::E2.pitch(12)).n8.loop
+    g = clip.sampler(dirty) + clip.sampler(clean)
+    dir = File.dirname(tmp_path('x'))
+    MB::Sound.seed(1)
+    path = io.save(File.join(dir, 'lofi'), g, name: 'lofi')
+    text = File.read(path)
+    expect(text).to include('.read_as(:clean).slices(8)')
+    back = io.load(path)
+    ref = render(g)
+    expect(max_diff(ref, render(back))).to be < 1e-6
+    expect(ref.map { |b| b.abs.max }.max).to be > 0.1
+    reads = Dir[File.join(dir, 'lofi.mbg', 'assets', '*.flac')].map { |f| MB::Sound::Sample[f] }.map { |x| [x.interpolation, x.mips] }
+    expect(reads).to contain_exactly([:none, false], [:none, false])
+  end
+
   it 'reads SFZ instruments named by documents, inside the document directory only' do
     dir = File.dirname(tmp_path('x'))
     FileUtils.mkdir_p(File.join(dir, 'kit'))
