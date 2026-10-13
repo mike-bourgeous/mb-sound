@@ -39,6 +39,11 @@ RSpec.describe(MB::Sound::MIDI::Capture) do
     ]
     clip = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2)
     expect(summary(clip).map { |s, l, n, _| [s, l, n] }).to eq([[1/2r, 1/8r, 38], [1r, 1/8r, 36]])
+    # A launch-aligned loop: offsets into the window
+    launch = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, align: :launch)
+    expect(launch.align).to eq(:launch)
+    expect(summary(launch).map { |s, _, n, _| [s, n] }).to eq([[0r, 36], [3/2r, 38]])
+    expect { MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, align: :bar) }.to raise_error(ArgumentError, /alignment/)
     # Not a loop: offsets into the window
     once = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, loop: false)
     expect(summary(once).map { |s, _, n, _| [s, n] }).to eq([[0r, 36], [3/2r, 38]])

@@ -222,10 +222,15 @@ module MB
             session.remove(fade: fade, time: time, ring: ring)
           else
             session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
-              (names - stopped).each do |name|
-                mon = name.is_a?(Symbol) && Arrangement::Recording.monitor_name(name)
-                hint = mon && session.playing_after_queue?(mon) ? " (armed: its live monitor #{mon.inspect} is; disarm #{name.inspect} stops it)" : ''
-                warn "No background player #{name.inspect} is playing#{hint}"
+              names.each do |name|
+                # An armed track's live monitor keeps playing (maintainer,
+                # 2026-10-13: stop stops the clips; "Keep, but add hints")
+                mon = name.is_a?(Symbol) && !names.include?(Arrangement::Recording.monitor_name(name)) && Arrangement::Recording.monitor_name(name)
+                if mon && session.playing_after_queue?(mon)
+                  warn "stop #{name.inspect}: its live monitor #{mon.inspect} is still playing (disarm #{name.inspect} or stop #{mon.inspect})"
+                elsif !stopped.include?(name)
+                  warn "No background player #{name.inspect} is playing"
+                end
               end
             }
           end

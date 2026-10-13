@@ -293,9 +293,12 @@ module MB
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`
-        replays it exactly).  `rec`/`capture` record MIDI into armed tracks,
-        `rec_audio` the master bus to a file; `render` bounces graphs
-        offline.
+        replays it exactly).  `rec`/`capture` record MIDI into armed tracks
+        (loops follow the timeline's phase; `align: :launch` starts from
+        what you played first); an armed track's live monitor is its own
+        player, :"name/live", which `stop :name` leaves playing and
+        `disarm` stops.  `rec_audio` records the master bus to a file;
+        `render` bounces graphs offline.
       TEXT
       commands :take, :arm, :disarm, :armed, :rec, :capture, :captures, :rec_audio, :stop_rec_audio, :recordings, :render, :write
       note :arrangement

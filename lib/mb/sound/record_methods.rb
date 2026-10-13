@@ -51,9 +51,10 @@ module MB
       # 4.bars) from the next launch point of each armed track (or the
       # tracks named after the length, or before it: `rec :lead, 4`), which
       # swaps into the track when it closes (see Arrangement#record for
-      # +quantize:+, +humanize:+, +channel:+, +sustain:+).  Audio is
-      # #rec_audio.  Returns the journal entry.  Also available as #record.
-      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+      # +quantize:+, +humanize:+, +channel:+, +sustain:+; the loop follows
+      # the timeline's phase, or with +align: :launch+ starts from what was
+      # played first).  Audio is #rec_audio.  Returns the journal entry.  Also available as #record.
+      def rec(*args, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
 
@@ -71,7 +72,7 @@ module MB
         end
 
         attach_recording_midi(session, input, names)
-        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+        session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
       end
       alias record rec
 
@@ -107,7 +108,7 @@ module MB
       # +length+ bars (or a Duration; by default the last phrase, see
       # Arrangement#capture) loop on it.  Options as in #rec.  Returns the
       # :capture journal entry.  Also available as #capture_midi.
-      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+      def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
         point = LaunchPoint.of(binding) or return nil
         number = names.find { |a| a.is_a?(Numeric) || a.is_a?(Sequence::Duration) }
         if number
@@ -118,7 +119,7 @@ module MB
 
         session = Session.current
         attach_recording_midi(session, input, names)
-        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+        session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
       end
       alias capture_midi capture
 

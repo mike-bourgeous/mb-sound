@@ -20,7 +20,8 @@ module MB
       # Event starts are exact Rationals: positions of the frames the
       # events landed on, modulo the length for a loop (so a loop recorded
       # from bar 2 of a 2-bar grid starts with the second bar's notes and
-      # plays in phase), less the window's start otherwise.  The clip is
+      # plays in phase; maintainer, 2026-10-13: keep timeline phase), less
+      # the window's start otherwise (and for +align: :launch+ loops).  The clip is
       # Clip#performed? (its velocities are as played).
       module Capture
         # How early (whole notes) a note may start before the window and
@@ -30,12 +31,20 @@ module MB
         # Builds the clip from +events+ (an Array of [pos, MIDI::Event],
         # sorted by pos; pos in whole notes).  +length+ is the clip's
         # length in whole notes.  +channel+ (0-based) keeps one channel's
-        # notes (all channels if nil).
-        def self.clip(events, from:, length:, grace: GRACE, channel: nil, sustain: true, loop: true)
+        # notes (all channels if nil).  +align+ (:timeline or :launch, see
+        # Sequence::Clip#loop) is how a loop lines up: in timeline phase
+        # (starts are positions mod +length+), or from where it launches
+        # (starts are offsets into the window, so it plays what was played
+        # first wherever and whenever it launches).
+        def self.clip(events, from:, length:, grace: GRACE, channel: nil, sustain: true, loop: true, align: :timeline)
           from = from.to_r
           length = length.to_r
           grace = grace.to_r
           raise ArgumentError, "Capture length must be positive (got #{length})" unless length > 0
+          unless Sequence::Clip::ALIGNMENTS.include?(align)
+            raise ArgumentError, "Loop alignment must be one of #{Sequence::Clip::ALIGNMENTS.map(&:inspect).join(', ')} (got #{align.inspect})"
+          end
+          phase = loop && align == :timeline
 
           start = from - grace
           stop = start + length
@@ -89,9 +98,9 @@ module MB
             # if the window didn't start on a multiple of its length (a
             # 2-bar loop recorded from bar 2 played its bars swapped
             # before, 2026-10-13); else offsets into the window
-            Sequence::Event.new(start: (loop ? p : p - from) % length, length: MB::M.max(len, 0r), value: note, velocity: velocity)
+            Sequence::Event.new(start: (phase ? p : p - from) % length, length: MB::M.max(len, 0r), value: note, velocity: velocity)
           }
-          Sequence::Clip.new(seq_events, length: length, loop: loop, performed: true)
+          Sequence::Clip.new(seq_events, length: length, loop: loop, align: loop ? align : :timeline, performed: true)
         end
       end
     end

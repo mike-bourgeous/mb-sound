@@ -185,6 +185,25 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'align: :launch' do
+    it 'records a loop that starts from what was played first, where it closes' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 2.1r, 2.3r], [64, 4.1r, 4.3r]) # bars 2 and 3
+      setup_lead(s)
+      d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 2, align: :launch'] }, 96000 * 6)
+      clip = s.arrangement.captures[:lead_1]
+      expect(clip.align).to eq(:launch)
+      expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1/20r, 60], [21/20r, 64]])
+      expect(d[288000 + 4800]).to eq(60) # bar 4: the first bar played (in timeline phase it would be 64)
+      expect(d[384000 + 4800]).to eq(64)
+      expect(d[480000 + 4800]).to eq(60)
+
+      MB::Sound::Session.with_context(session: s) do
+        expect { MB::Sound.rec(1, :lead, align: :bar) }.to raise_error(ArgumentError, /align: is :timeline .* or :launch/)
+      end
+    end
+  end
+
   describe 'capture' do
     it 'captures the last phrase into the track at its next launch point, playing on in phase' do
       s = new_session
@@ -273,13 +292,30 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(kinds).to eq([[:arm, :lead, '2:1'], [:bg, :'lead/live', '2:1'], [:stop, :'lead/live', '3:1'], [:disarm, :lead, '3:1']])
     end
 
-    it "says how to stop an armed track's monitor when stopping a track that isn't playing" do
+    it "stops only an armed track's clips, saying its live monitor still plays; players marks monitors" do
       s = new_session
       s.midi_in.input = keyboard
+      s.midi_in(:keys).input = keyboard
       setup_lead(s)
+      hint = /\Astop :lead: its live monitor :"lead\/live" is still playing \(disarm :lead or stop :"lead\/live"\)\n\z/
       MB::Sound::Session.with_context(session: s) do
+        MB::Sound.arm(:lead, input: :keys)
+        expect(MB::Sound.players[:'lead/live']).to start_with('lead: live monitor (armed; MIDI input :keys)')
+        MB::Sound.disarm(:lead)
         MB::Sound.arm(:lead)
-        expect { MB::Sound.stop(:lead) }.to output(/No background player :lead is playing \(armed: its live monitor :"lead\/live" is; disarm :lead stops it\)/).to_stderr
+        expect(MB::Sound.players[:'lead/live']).to start_with('lead: live monitor (armed; live MIDI)')
+
+        # Not playing: just the hint
+        expect { MB::Sound.stop(:lead) }.to output(hint).to_stderr
+
+        # Playing a clip: the clip stops, the monitor plays on
+        MB::Sound.bg(:lead, MB::Sound.seq(MB::Sound::C3).n1.loop, on: :now)
+        expect { MB::Sound.stop(:lead, fade: 0) }.to output(hint).to_stderr
+        s.process_buffer(800)
+        expect(MB::Sound.players.keys).to eq([:'lead/live'])
+
+        # Naming the monitor too: no hint
+        expect { MB::Sound.stop(:lead, :'lead/live', fade: 0) }.to output("No background player :lead is playing\n").to_stderr
       end
     end
   end
