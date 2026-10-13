@@ -864,7 +864,7 @@ module MB
       # the wrapper's label after its name (e.g. "lp4/id=12 until 2 bars --
       # lp4(800.0 Hz, r=0.0)").
       def graph_description(node)
-        node = node.tee.original_source while node.is_a?(GraphNode::Tee::Branch) && node.tee.original_source
+        node = node.owner_tee.original_source while node.is_a?(GraphNode::Tee::Branch) && node.owner_tee.original_source
         return node.to_s unless node.respond_to?(:wrapped_description)
 
         inner, label = node.wrapped_description

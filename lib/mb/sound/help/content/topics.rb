@@ -263,7 +263,7 @@ module MB
       see :dynamics
       example 'a quick master chain' do
         bg :try, 110.hz.saw.at(-20.db).until(2.bars)
-        master { |mix| mix.softclip.limit(ceiling: -1) }
+        master { |mix| mix.softclip.limit(ceiling: -1.db) }
         after(3) { master nil }
       end
     end

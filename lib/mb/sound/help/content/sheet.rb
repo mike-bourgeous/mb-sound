@@ -18,7 +18,7 @@ module MB
       line { g.delay(1.n8.dotted, feedback: 0.4) }
       line { stereo(l, r).reverb(:hall, mix: 0.3) }
       line { g.feedback { |fb, x| x + fb.delay(5.ms) * 0.8 } }
-      line { g.compress.limit(ceiling: -1) }
+      line { g.compress.limit(ceiling: -1.db) }
       line { tr808(grid(16, kick: 'x...x...').loop) }
     end
 
