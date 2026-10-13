@@ -248,6 +248,13 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       expect(220.hz.transpose(1.oct).ramp.delay(96.samples).to_ruby).to eq('220.hz.transpose(1.oct).ramp.delay(96.samples)')
     end
 
+    it 'prints notes of octave -1 as Note.new(n), marks included (Fs-1 would be Fs minus 1)' do
+      clip = MB::Sound.seq(MB::Sound::Note.new(6), MB::Sound::Tie, !MB::Sound::Note.new(7), MB::Sound::C0).n16
+      code = clip.to_ruby
+      expect(code).to eq('seq(Note.new(6), Tie, !Note.new(7), C0).n16')
+      expect(rebuild(code).events).to eq(clip.events)
+    end
+
     it 'prints operators with the parentheses they need' do
       a = 220.hz.sine
       b = 330.hz.sine

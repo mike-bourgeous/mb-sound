@@ -263,6 +263,51 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect_load_error("param :x, 1, rnage: 1..2\nx", 1, /unknown param option rnage/)
     end
 
+    context 'when bound by the caller to a node or a Session knob' do
+      let(:session) {
+        out = MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 800)
+        MB::Sound::Session.new(master_gain: 1, output: out, channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+      }
+
+      after { session.close }
+
+      it 'reads a graph node for every use of the param, and Document#set refuses to change it' do
+        depth = 0.constant
+        g = io.load(doc, inputs: { input: 1.constant }, params: { depth: depth })
+        expect(render(g, buffers: 4).flat_map(&:to_a).uniq).to eq([1.0])
+        d = io.document_of(g)
+        expect(d.knob_nodes).not_to have_key(:depth)
+        expect(d.param_values[:depth]).to eq(0.5) # the document's default stays
+        expect { d[:depth] = 1 }.to raise_error(ArgumentError, /bound to a node/)
+      end
+
+      it 'reads a knob of the Session named by a Symbol' do
+        knob = session.knob(:wobble, 0, range: 0..1)
+        g = io.load(doc, inputs: { input: 1.constant }, params: { depth: :wobble }, session: session)
+        expect(render(g, buffers: 4).flat_map(&:to_a).uniq).to eq([1.0])
+        expect(g.to_ruby).to include('knob(:wobble)')
+        expect { io.document_of(g)[:depth] = 1 }.to raise_error(ArgumentError, /bound to knob :wobble \(turn :wobble instead\)/)
+        expect(knob.value).to eq(0)
+
+        expect { io.load(doc, inputs: { input: 1.constant }, params: { depth: :wobbel }, session: session) }
+          .to raise_error(io::LoadError, /param depth names knob :wobbel, but the session has no such knob.*did you mean.*wobble/m)
+      end
+
+      it 'binds a knob line to the Session knob instead of making its own' do
+        k = MB::Sound::GraphNode::Knob.new(:cut, 800, range: 50..4000, curve: :exp)
+        text = io.dump(110.hz.ramp.lp4(k), name: 'k')
+        session.knob(:brightness, 1200, range: 50..4000, curve: :exp)
+        g = io.load(text, params: { cut: :brightness }, session: session)
+        expect(io.document_of(g).knob_nodes).not_to have_key(:cut)
+        expect(g.to_ruby).to include(':brightness')
+      end
+
+      it 'never takes knob names or nodes from document text' do
+        expect_load_error("param :x, :wobble\nx", 1, /needs a number/)
+        expect_load_error("param :x, 1.constant\nx", 1, /needs a number/)
+      end
+    end
+
     it 'turns script parameters into params with --save (a real script process)' do
       path = tmp_path('tape.mbg.rb')
       script = File.expand_path('../../../../bin/effects/tape_delay.rb', __dir__)

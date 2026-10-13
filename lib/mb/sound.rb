@@ -65,6 +65,7 @@ require_relative 'sound/random_methods'
 require_relative 'sound/live_methods'
 require_relative 'sound/drum_methods'
 require_relative 'sound/structure_methods'
+require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
 require_relative 'sound/help_autoload'
 
@@ -100,6 +101,7 @@ module MB
     extend LiveMethods
     extend DrumMethods
     extend StructureMethods
+    extend GenreMethods
     extend SamplerMethods
     extend HelpAutoload
 
@@ -195,3 +197,4 @@ require_relative 'sound/io_logger'
 require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
 require_relative 'sound/graph_io'
+require_relative 'sound/genre'

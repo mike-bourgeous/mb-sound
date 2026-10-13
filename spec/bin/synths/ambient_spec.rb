@@ -44,6 +44,17 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(rms_db(seconds(rung, 2.5, 3.5))).to be_within(3).of(rms_db(seconds(noisy, 2.5, 3.5)))
   end
 
+  it 'spreads the gong\'s shimmer partials across the stereo field with spread:' do
+    wide = render_patch(MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0, ring: 1), 4)
+    mono = render_patch(MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0, ring: 1, spread: 0), 4)
+    side = ->((l, r)) { rms_db(seconds(l - r, 2.5, 3.5)) - rms_db(seconds(l + r, 2.5, 3.5)) }
+    expect(side.(wide)).to be > side.(mono) + 6
+    expect(rms_db(seconds(wide[0], 2.5, 3.5))).to be_within(2).of(rms_db(seconds(mono[0], 2.5, 3.5)))
+    low, high = MB::Sound.ambient_gong_shimmer(16).map(&:first).minmax
+    expect(low).to be_within(2).of(30)
+    expect(high).to be_within(4).of(125)
+  end
+
   it 'wears the koto and harp with the tape' do
     notes = -> { patch_notes([MB::Sound::A4.number, 0, 0.5], [MB::Sound::D5.number, 0.5, 1]) }
     new = render_patch(MB::Sound.ambient_koto_voice(notes.(), wear: 0, space: 0), 2)[0]
