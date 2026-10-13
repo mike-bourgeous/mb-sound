@@ -102,9 +102,18 @@ module MB
         #
         #     GraphIO.load('presets/dark_hall.mbg.rb', inputs: { input: mic }, params: { mix: 0.6 })
         #     GraphIO.load(220.hz.ramp.softclip.to_ruby)
-        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil)
+        #
+        # A set document (kind: :set, see SetWriter) loads into +session+
+        # (the current one by default) and returns its Document.
+        #
+        # +seeds: :fresh+ leaves out every `seed:` the document gives, so
+        # noise, random phases, and chance draw new numbers (from the root
+        # random generator) instead of the saved ones; a set's patches then
+        # draw anew each time a scene builds them, like the set they were
+        # saved from.  The default, :saved, plays the same every time.
+        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
           text, path = read_source(source)
-          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir)
+          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session, seeds: seeds)
           graph = loader.load
           loader.document.input_objects = inputs.transform_keys(&:to_sym).slice(*loader.document.inputs)
           graph
@@ -129,21 +138,81 @@ module MB
         # inputs ({ midi: notes }).  A loaded graph keeps its Document, so
         # its name, inputs, and params carry over.  Raises DumpError if
         # part of the graph can't be written yet.
-        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {})
-          Writer.new(graph, name: name, kind: kind, inputs: inputs, params: params, options: options, from: from, meta: meta).to_s
+        #
+        # +assets+ (an Assets) names files for tables and sound or MIDI
+        # files the graph reads (bundles; see .save); without it they raise
+        # DumpError (tables) or keep their paths (file names).
+        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+          if graph.is_a?(Arrangement)
+            unless inputs.empty? && params.empty? && options.empty? && kind.nil?
+              raise ArgumentError, 'set documents take no inputs, params, options, or kind'
+            end
+            w = SetWriter.new(graph, name: name, meta: meta, assets: assets, from: from)
+            text = w.to_s
+            w.warnings.uniq.each { |m| warn "#{name || 'set'}: #{m}" } unless assets&.entries&.any?(&:sha256)
+            return text
+          end
+          Writer.new(graph, name: name, kind: kind, inputs: inputs, params: params, options: options, from: from, meta: meta, assets: assets).to_s
         end
 
         # Writes +graph+'s document to +target+ (a preset name, saved in
-        # .presets_dir, or a path ending in .mbg.rb).  Returns the path.
-        def save(target, graph, **opts)
+        # .presets_dir, or a path ending in .mbg.rb).  Returns the path of
+        # the document.
+        #
+        # A graph that reads files (wavetables and samples that aren't
+        # library tables, MIDI files, sound files) is saved as a bundle: a
+        # directory `name.mbg/` with `name.mbg.rb` and the files in
+        # `assets/` (see Assets), replacing a plain document of the same
+        # name and the other way around.  +bundle: true+ always makes a
+        # bundle, +false+ never (raising DumpError if the graph reads
+        # files).
+        def save(target, graph, bundle: nil, **opts)
+          require 'fileutils'
           path = target_path(target)
           name = opts.delete(:name) || File.basename(path).delete_suffix(EXTENSION)
-          text = dump(graph, name: name, **opts)
-          dir = File.dirname(path)
-          require 'fileutils'
-          FileUtils.mkdir_p(dir)
-          File.write(path, text)
-          path
+          assets = Assets.new
+          text = dump(graph, name: name, assets: assets, **opts)
+          dir = bundle_dir(path)
+
+          if assets.empty? && bundle != true
+            FileUtils.mkdir_p(File.dirname(path))
+            File.write(path, text)
+            remove_bundle(dir)
+            return path
+          end
+          if bundle == false
+            raise DumpError.new("#{name} reads files (#{assets.entries.map { |e| File.basename(e.name) }.join(', ')}), which only a bundle can hold (save with bundle: true or nil)")
+          end
+
+          # Files first, in a new directory that replaces the old bundle
+          # (whose files may be the sources)
+          stage = "#{dir}.saving-#{Process.pid}"
+          FileUtils.rm_rf(stage)
+          begin
+            assets.write(stage)
+            text = dump(graph, name: name, assets: assets, **opts)
+            File.write(File.join(stage, File.basename(path)), text)
+            remove_bundle(dir)
+            File.rename(stage, dir)
+          ensure
+            FileUtils.rm_rf(stage)
+          end
+          FileUtils.rm_f(path)
+          File.join(dir, File.basename(path))
+        end
+
+        # The bundle directory for document path +path+ (x.mbg.rb -> x.mbg).
+        def bundle_dir(path)
+          path.delete_suffix('.rb')
+        end
+
+        # The document inside bundle directory +dir+: dir/<name>.mbg.rb,
+        # else its only .mbg.rb file, else nil.
+        def bundle_document(dir)
+          own = File.join(dir, "#{File.basename(dir).delete_suffix('.mbg')}#{EXTENSION}")
+          return own if File.file?(own)
+          docs = Dir[File.join(dir, "*#{EXTENSION}")]
+          docs.length == 1 ? docs[0] : nil
         end
 
         # The Document of a graph built by .load, or nil.
@@ -202,13 +271,23 @@ module MB
         # nil.
         def find_preset(name)
           file = "#{name}#{EXTENSION}"
-          preset_dirs.map { |d| File.join(d, file) }.find { |p| File.file?(p) }
+          preset_dirs.each do |d|
+            plain = File.join(d, file)
+            return plain if File.file?(plain)
+            bundle = bundle_dir(plain)
+            return bundle_document(bundle) if File.directory?(bundle) && bundle_document(bundle)
+          end
+          nil
         end
 
-        # Preset names by directory ({ dir => [names] }).
+        # Preset names by directory ({ dir => [names] }), plain documents
+        # and bundles alike.
         def presets
           preset_dirs.to_h { |d|
-            [d, Dir[File.join(d, "*#{EXTENSION}")].sort.map { |p| File.basename(p).delete_suffix(EXTENSION).to_sym }]
+            plain = Dir[File.join(d, "*#{EXTENSION}")].select { |p| File.file?(p) }
+            bundles = Dir[File.join(d, '*.mbg')].select { |p| File.directory?(p) && bundle_document(p) }
+            names = plain.map { |p| File.basename(p).delete_suffix(EXTENSION) } + bundles.map { |p| File.basename(p).delete_suffix('.mbg') }
+            [d, names.uniq.sort.map(&:to_sym)]
           }
         end
 
@@ -242,9 +321,13 @@ module MB
         def read_source(source)
           case source
           when Pathname
-            [File.read(source.to_s), source.to_s]
+            read_source(source.to_s)
           when String
-            if !source.include?("\n") && source.end_with?('.rb') && File.file?(source)
+            if !source.include?("\n") && File.directory?(source)
+              doc = bundle_document(source)
+              raise LoadError.new("no graph document in #{source} (a bundle holds name.mbg.rb)", path: source) unless doc
+              [File.read(doc), doc]
+            elsif !source.include?("\n") && source.end_with?('.rb') && File.file?(source)
               [File.read(source), source]
             elsif !source.include?("\n") && source.end_with?('.rb')
               raise LoadError.new("no graph document at #{source}", path: source)
@@ -254,6 +337,15 @@ module MB
           else
             raise ArgumentError, "GraphIO.load takes a path or document text (got #{source.class})"
           end
+        end
+
+        # Removes bundle directory +dir+ if it is one (a document and
+        # assets/ only); raises for other directories.
+        def remove_bundle(dir)
+          return unless File.directory?(dir)
+          extra = Dir.children(dir) - [Assets::DIR] - Dir.children(dir).grep(/#{Regexp.escape(EXTENSION)}\z/)
+          raise DumpError.new("#{dir} holds other files (#{extra.first(3).join(', ')}); not replacing it") unless extra.empty?
+          FileUtils.rm_rf(dir)
         end
 
         public
@@ -281,7 +373,8 @@ module MB
       #
       #     save :dark_hall, input.reverb(:hall).softclip
       def save(name, graph, **opts)
-        existed = File.file?(GraphIO.target_path(name))
+        target = GraphIO.target_path(name)
+        existed = File.file?(target) || File.directory?(GraphIO.bundle_dir(target))
         path = GraphIO.save(name, graph, **opts)
         puts "Saved #{name} to #{path}#{' (replaced)' if existed}"
         path
@@ -302,7 +395,15 @@ module MB
       # An override of a knob that joins an existing Session knob turns
       # the shared knob now (a journaled, undoable turn, as `turn :cut,
       # 900` would).
-      def preset(name, trust: nil, session: nil, **inputs_and_params)
+      #
+      # A set document (`save :gig, set`) loads into +session+ (the current
+      # Session by default): its tempo, knobs, master chain, tracks,
+      # scenes, mute groups, and flow, returning the Document (`play_form
+      # doc.form`, or `go :intro`).
+      #
+      # +seeds: :fresh+ draws new random seeds instead of the saved ones
+      # (see GraphIO.load).
+      def preset(name, trust: nil, session: nil, seeds: :saved, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
           names = GraphIO.presets.values.flatten
@@ -310,9 +411,15 @@ module MB
         end
 
         doc = GraphIO.parse(path)
+        if doc.kind == :set
+          raise ArgumentError, "a set takes no inputs (got #{inputs_and_params.keys.join(', ')})" unless inputs_and_params.empty?
+          doc = GraphIO.load(path, trust: trust, session: session || Session.current, seeds: seeds)
+          puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
+          return doc
+        end
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
-        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust)
+        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds)
 
         session = Session.existing if session.nil?
         if session
@@ -350,6 +457,14 @@ module MB
         all.values.flatten.uniq
       end
 
+      # The set of the current Session (its Arrangement: tracks, scenes,
+      # knobs, flow), for `save :gig, set`.  Also available as
+      # #current_set.
+      def set
+        Session.current.arrangement
+      end
+      alias current_set set
+
       # Registers a runtime block under +name+ for graph documents
       # (`sig.proc(&named_proc(:fold))` saves and loads as that name), or
       # returns the registered block without one.
@@ -373,3 +488,6 @@ require_relative 'graph_io/registry'
 require_relative 'graph_io/document'
 require_relative 'graph_io/loader'
 require_relative 'graph_io/trusted_code'
+require_relative 'graph_io/file_guard'
+require_relative 'graph_io/assets'
+require_relative 'graph_io/set_writer'

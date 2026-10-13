@@ -27,7 +27,9 @@ module MB
         # later loader can read without eval.
         class RubyWriter
           # Operator precedence for parentheses.
-          PREC = { :+ => 2, :- => 2, :* => 3, :/ => 3, :** => 5 }.freeze
+          # (| and & join and layer clips; Ruby binds & tighter than |, both
+          # looser than + and -)
+          PREC = { :| => 0, :& => 1, :+ => 2, :- => 2, :* => 3, :/ => 3, :** => 5 }.freeze
           ATOM = 10
           UNARY = 4
           BINARY = PREC.keys.freeze
@@ -54,8 +56,13 @@ module MB
           # +knobs+ ({ 'drive' => 1.0 }) prints Constants named after a
           # knob with its value as the knob's bare name, as do the nodes of
           # +knob_nodes+ ({ node => 'drive' }; graph documents' params).
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {})
+          #
+          # +assets+ (a GraphIO::Assets, for bundles) names files for tables
+          # that aren't library tables and for Strings naming sound or MIDI
+          # files.
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
             @root = root
+            @assets = assets
             @given_inputs = inputs
             @seeds = seeds
             @knobs = knobs.transform_keys(&:to_s)
@@ -73,6 +80,14 @@ module MB
           def literal(v)
             reset! unless @names
             leaf(v, '')
+          end
+
+          # The text split into [variable lines, the final expression's
+          # lines] (without the header comments), for writers that put the
+          # expression into a statement of their own (set documents).
+          def parts
+            to_s
+            @parts
           end
 
           # The Ruby text.
@@ -130,6 +145,7 @@ module MB
             roots = @root.is_a?(Array) ? @root : [@root]
             lines = emit_scope(nil, roots, [], '')
             final = Recipe.graph_object?(@root) ? expr(@root, top: true) : value(@root)
+            @parts = [finish_lines(lines.join("\n").split("\n")), finish_lines(final.split("\n"))]
             lines << final
             body = finish_lines(lines.join("\n").split("\n"))
 
@@ -340,7 +356,7 @@ module MB
           ].freeze
 
           # A variable name for +o+: the name given with #named, else a role
-          # (voice for synths, osc, lfo, env, notes, fx for effect results,
+          # (voice for synths, osc, lfo, env, notes, clip, kit, fx for effect results,
           # out for the final output, sig otherwise).
           def base_name(o)
             named = Recipe.config_of(o).reverse.find { |k| k.name == :named }
@@ -354,6 +370,7 @@ module MB
             when MB::Sound::Envelope then 'env'
             when MB::Sound::Notes then 'notes'
             when MB::Sound::Sequence::Clip then 'clip'
+            when MB::Sound::Sequence::Kit then 'kit'
             else
               c && FX.include?(c.name) ? 'fx' : 'sig'
             end
@@ -381,6 +398,11 @@ module MB
             return unrecorded(o, indent, arith) unless c
 
             c = live_call(o, c)
+            if @seeds && o.is_a?(MB::Sound::Sequence::Clip) && unprintable_seeds?(c) && o.variations.empty?
+              # A clip whose recipe drew seeds that can't be given (e.g.
+              # bake through humanize) is saved as the events it made
+              return [clip_events_text(o, indent), ATOM]
+            end
             recv_obj = c.receiver
             if BINARY.include?(c.name) && c.args.length == 1 && c.kwargs.empty? && c.block.nil?
               prec = PREC[c.name]
@@ -422,7 +444,8 @@ module MB
             return class_name(r) if r.is_a?(Module)
 
             t, p = Recipe.graph_object?(r) ? expr_p(r, indent: indent) : [value(r, indent), r.is_a?(Numeric) && r.real? && r.negative? ? UNARY : ATOM]
-            p < ATOM ? "(#{t})" : t
+            # Unary note marks bind after calls: (!A1).n8
+            p < ATOM || t.match?(/\A[!~]/) ? "(#{t})" : t
           end
 
           def class_name(k)
@@ -482,6 +505,10 @@ module MB
               if channels_printable?(o)
                 return ["channels(#{o.to_a.map { |x| expr(x, indent: indent) }.join(', ')})", ATOM]
               end
+            when MB::Sound::Sequence::Clip
+              # A clip without a recipe (captured, recorded, Clip.new):
+              # its events
+              return [clip_events_text(o, indent), ATOM]
             end
 
             [input_name(o), ATOM]
@@ -510,6 +537,9 @@ module MB
 
           # receiver.name(args) { block } for call +c+.
           def call_text(recv, c, indent)
+            if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
+              return events_text(c.args, c.kwargs, indent)
+            end
             args = c.args.map { |a| value(a, indent) }
             kwargs = c.kwargs.dup
             seed = drawn_seed(c)
@@ -546,9 +576,14 @@ module MB
             nil
           end
 
+          public
+
+          # The text of Hash key +k+ (`name:` or `"odd name":`).
           def key_text(k)
             k.is_a?(Symbol) && k.to_s.match?(/\A[a-z_][a-zA-Z0-9_]*[?!]?\z/) ? "#{k}:" : "#{k.to_s.inspect}:"
           end
+
+          private
 
           # The seed drawn by +c+ if it should be printed (see the class
           # description), else nil.
@@ -574,6 +609,12 @@ module MB
             @warnings << "#{c.name} draws random seeds that aren't printed; " \
               'rebuilds match only in the same order after the same MB::Sound.seed'
             nil
+          end
+
+          # True if call +c+ drew random seeds that can't be printed as
+          # seed: (see #drawn_seed).
+          def unprintable_seeds?(c)
+            c.seeds && !c.kwargs.key?(:seed) && c.lane.nil? && !(c.seeds.length == 1 && accepts_seed?(c))
           end
 
           def accepts_seed?(c)
@@ -755,7 +796,10 @@ module MB
           def leaf(v, indent)
             case v
             when Integer, Float, Rational, Complex then num(v)
-            when nil, true, false, Symbol, String then v.inspect
+            when nil, true, false, Symbol then v.inspect
+            when String
+              # A file name, in a bundle: the asset's name
+              (@assets && @assets.file(v))&.inspect || v.inspect
             when Range
               b = v.begin.nil? ? '' : range_end(v.begin, indent)
               e = v.end.nil? ? '' : range_end(v.end, indent)
@@ -774,6 +818,8 @@ module MB
             when MB::Sound::Wavetable then wavetable_text(v)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
+            when MB::Sound::Length::Attack then v.to_ruby
+            when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
             when Data
               fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
@@ -886,11 +932,134 @@ module MB
             "scale(#{list}, #{root})"
           end
 
-          # A rest or tie step (other steps print through their recipes).
+          # A rest or tie step, or a note with marks (`!A1`, `~C2`,
+          # `G2.chance(0.5)`; other steps print through their recipes).
           def step_text(v)
             return 'Rest' if v.equal?(MB::Sound::Rest)
             return 'Tie' if v.equal?(MB::Sound::Tie)
-            fixme("can't print a #{v.class}")
+            marked_step_text(v) || fixme("can't print a #{v.class} (#{v.to_h.compact.inspect})")
+          end
+
+          # The marks of a note step as Ruby (`~!A1.chance(0.5).every(2)`),
+          # checked by building the step again, or nil.
+          def marked_step_text(v)
+            return nil if v.clip || v.length || v.legato || v.tie || v.value.nil?
+            return nil unless v.value.is_a?(Integer) && v.value.between?(0, 127)
+
+            note = MB::Sound::Note.new(v.value)
+            base = pitch_text(note)
+            return nil unless base.match?(/\A[A-G]/)
+
+            # Applied innermost first, as `~!A1.chance(p)` evaluates
+            suffix = []
+            rebuilt = note
+            unrecorded_calls {
+              if v.probability
+                suffix << ".chance(#{num(v.probability)})"
+                rebuilt = rebuilt.chance(v.probability)
+              end
+              if v.condition
+                n, from = v.condition
+                suffix << (from == 1 ? ".every(#{n})" : ".every(#{n}, from: #{from})")
+                rebuilt = rebuilt.every(n, from: from)
+              end
+              if v.fill_mark
+                mode, name = v.fill_mark
+                suffix << ".#{mode}#{"(#{name.inspect})" if name}"
+                rebuilt = rebuilt.public_send(mode, name)
+              end
+              rebuilt = MB::Sound::Sequence::Seq.step(rebuilt)
+              prefix = ''
+              if v.accented
+                rebuilt = rebuilt.accent
+                prefix = '!'
+              end
+              if v.slid == true
+                rebuilt = rebuilt.slide
+                prefix = "~#{prefix}"
+              elsif v.slid
+                suffix << ".slide(#{num(v.slid)})"
+                rebuilt = rebuilt.slide(v.slid)
+              end
+              return nil unless rebuilt == v
+              # Method calls bind before unary marks; .slide(x) must come last
+              if v.slid && v.slid != true && !prefix.empty?
+                return "(#{prefix}#{base}#{suffix[0...-1].join})#{suffix[-1]}"
+              end
+              return "#{prefix}#{base}#{suffix.join}"
+            }
+          end
+
+          # An unattached MIDI transform chain as the calls that make it:
+          # `echo(3.n16, 3, pitch: 7.st).strum(20.ms)`.
+          def transform_spec_text(spec, indent)
+            return fixme('an empty MIDI transform chain') if spec.steps.empty?
+            first = true
+            spec.steps.map { |name, args, kwargs, block|
+              return fixme("a MIDI transform chain with a #{name} block") if block
+              unless !first || MB::Sound.respond_to?(name)
+                return fixme("a MIDI transform chain starting with #{name}")
+              end
+              first = false
+              parts = args.map { |a| value(a, indent) } + kwargs.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
+              "#{name}#{"(#{parts.join(', ')})" unless parts.empty?}"
+            }.join('.')
+          end
+
+          # Runs the block without recording its calls.
+          def unrecorded_calls
+            st = Recipe.state
+            st.depth += 1
+            begin
+              yield
+            ensure
+              st.depth -= 1
+            end
+          end
+
+          # events(...) of a clip without a recipe (see
+          # SequenceMethods#events), or a FIXME for one with per-cycle
+          # variations (code, not data).
+          def clip_events_text(clip, indent)
+            unless clip.variations.empty?
+              return fixme("a clip without a recipe that has per-cycle variations (#{clip.variations.map(&:name).join(', ')})")
+            end
+            rows = clip.events.map { |e|
+              marks = MB::Sound::SequenceMethods::EVENT_MARKS.to_h { |k| [k, e[k]] }.compact
+              [e.start, e.length, e.value, e.velocity, *(marks.empty? ? [] : [marks])]
+            }
+            kwargs = { length: clip.length }
+            kwargs[:loop] = true if clip.looping?
+            kwargs[:seed] = clip.seed unless clip.seed == 0
+            kwargs[:align] = clip.align unless clip.align == :timeline
+            text = events_text(rows, kwargs, indent)
+            text += ".named(#{clip.name.inspect})" if clip.named?
+            text
+          end
+
+          # events(rows..., kwargs) with one event per line.
+          def events_text(rows, kwargs, indent)
+            row_texts = rows.map { |r| event_row_text(r, indent) }
+            kw = kwargs.map { |k, v| "#{key_text(k)} #{k == :length ? event_number(v) : value(v, indent)}" }
+            parts = row_texts + (kw.empty? ? [] : [kw.join(', ')])
+            return "events(#{parts.join(', ')})" if row_texts.length <= 2 && parts.join(', ').length < 80
+
+            inner = indent + '  '
+            "events(\n#{parts.map { |t| "#{inner}#{t}" }.join(",\n")}\n#{indent})"
+          end
+
+          def event_row_text(row, indent)
+            return value(row, indent) unless row.is_a?(Array)
+
+            start, len, val, vel, marks = row
+            items = [event_number(start), event_number(len), val.is_a?(Numeric) ? event_number(val) : value(val, indent), event_number(vel)]
+            items << value(marks, indent) if marks
+            "[#{items.join(', ')}]"
+          end
+
+          # A number exactly, never as dB (velocities, positions).
+          def event_number(n)
+            n.is_a?(Float) && n.finite? ? n.to_s : num(n)
           end
 
           def pitch_text(p)
@@ -913,7 +1082,10 @@ module MB
               cached = MB::Sound::Wavetable.instance_variable_get(:@cache)&.[](name.to_sym)
               return "Wavetable[#{name.to_sym.inspect}]" if cached.equal?(t)
             end
-            fixme("a Wavetable#{" (#{name})" if name} that isn't a library table")
+            if @assets && (asset = @assets.wavetable(t))
+              return "Wavetable[#{asset.inspect}]"
+            end
+            fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
           end
 
           # A number, with gains that are exactly k/10 dB printed as k.db.

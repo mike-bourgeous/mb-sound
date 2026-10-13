@@ -113,8 +113,11 @@ module MB
         # +params+ overrides its param defaults; +trust+ :code allows
         # runtime blocks outside the safe subset (TrustedCode); +limits+
         # overrides GraphIO::LIMITS.
-        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil)
+        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
           @text = text
+          @session = session
+          raise ArgumentError, "seeds: must be :saved or :fresh (got #{seeds.inspect})" unless %i[saved fresh].include?(seeds)
+          @fresh_seeds = seeds == :fresh
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -134,13 +137,13 @@ module MB
           @document.read_comments(@comments)
           index = read_header(stmts)
           body = stmts[index..] || []
+          return load_set(body) if set?
           raise error(tree, 'the document has no graph (only a header)') if body.empty?
 
           bind_inputs
           bind_params
 
-          @calls = 0
-          @started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          fresh_limits!
           scope = Scope.new
           result = nil
           body.each { |s| result = eval_node(s, scope) }
@@ -150,7 +153,48 @@ module MB
 
           @document.knob_nodes = @knob_nodes
           result.instance_variable_set(:@graph_io_document, @document) unless result.frozen?
+          @loaded = true
           result
+        end
+
+        # Set commands of `kind: :set` documents (see #load_set), called
+        # with their evaluated arguments on the set's Session.
+        SET_COMMANDS = %i[bpm meter master_gain quant master track scene mutes section flow].freeze
+
+        # Commands a scene block may hold (they land at the scene's launch
+        # point, as in an #at_bar block): meter and tempo, knob turns and
+        # snapshots, background players, mutes and solos.
+        SCENE_COMMANDS = %i[meter bpm turn recall xfade bg stop swap mute unmute solo unsolo].freeze
+
+        # Loads a set document (kind: :set, see SetWriter) into the
+        # Session (the current one unless given): knob lines become the
+        # session's knobs, and the body is set commands (SET_COMMANDS) and
+        # local variables (clips, graphs).  Returns the Document, whose
+        # #form is the flow (not playing; `play_form doc.form`).
+        def load_set(body)
+          @session ||= Session.current
+          unless @given_inputs.empty? && @document.inputs.empty?
+            raise LoadError.new("#{@label}: set documents have no inputs", path: @path)
+          end
+          @inputs = {}
+          Session.with_context(session: @session) do
+            bind_params
+            fresh_limits!
+            scope = Scope.new
+            body.each do |s|
+              if s.is_a?(Prism::LocalVariableWriteNode)
+                eval_node(s, scope)
+              elsif s.is_a?(Prism::CallNode) && s.receiver.nil? && SET_COMMANDS.include?(s.name)
+                set_command(s, scope)
+              else
+                raise error(s, "a set document holds set commands (#{SET_COMMANDS.join(', ')}) and assignments")
+              end
+            end
+          end
+          @document.knob_nodes = @knob_nodes
+          @document.session = @session
+          @loaded = true
+          @document
         end
 
         # Reads only the header (no graph is built).  Returns a Document.
@@ -177,6 +221,17 @@ module MB
           @comments = result.comments.map { |c| [c.location.start_line, c.location.slice] }
           check_shape(result.value)
           result.value
+        end
+
+        # True once #load returned (set documents' patches build later).
+        def loaded?
+          @loaded
+        end
+
+        # Starts counting calls and build time anew (see LIMITS).
+        def fresh_limits!
+          @calls = 0
+          @started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         end
 
         # Walks a build block's body in +scope+ (called by the procs that
@@ -296,6 +351,15 @@ module MB
                 raise error(node, "knob #{name}: #{e.message}")
               end
               @document.params[name] = kwargs.merge(value: value, knob: true)
+            when :asset
+              name = args[0]
+              unless args.length == 1 && name.is_a?(String) && kwargs.keys.all? { |k| k == :sha256 }
+                raise error(node, 'asset takes a file name and its sum (asset "assets/pad.flac", sha256: "...")')
+              end
+              sum = kwargs[:sha256]
+              raise error(node, "asset #{name.inspect}: sha256: must be 64 hex digits") unless sum.nil? || (sum.is_a?(String) && sum.match?(/\A[0-9a-f]{64}\z/))
+              raise error(node, "asset #{name.inspect} is listed twice") if @document.assets.key?(name)
+              @document.assets[name] = sum
             end
             i += 1
           end
@@ -375,10 +439,213 @@ module MB
             if spec[:knob]
               # One GraphNode::Knob per knob line, read by every use (each
               # consumer gets its own Knob::Reader)
-              @knob_nodes[name] = [GraphNode::Knob.new(name, value, **spec.slice(*Document::KNOB_KEYS).except(:description))]
+              opts = spec.slice(*Document::KNOB_KEYS).except(:description)
+              @knob_nodes[name] = [set? ? session_knob(name, value, opts) : GraphNode::Knob.new(name, value, **opts)]
             end
           end
         end
+
+        # True for a set document (kind: :set).
+        def set?
+          @document.kind == :set
+        end
+
+        # The Session's knob for a set document's `knob` line: made, or
+        # given the document's options and value if the session has it.
+        def session_knob(name, value, opts)
+          existing = @session.knobs[name]
+          k = @session.knob(name, value, **opts)
+          raise LoadError.new("#{@label}: knob #{name} can't be made (its name is taken in the session)", path: @path) unless k
+          k.set(value, frame: k.next_frame) if existing && k.target != value
+          k
+        end
+
+        # Runs set command +node+ (see SET_COMMANDS) on the set's Session.
+        def set_command(node, scope)
+          name = node.name
+          args, kwargs = call_args(node, scope)
+          check_limits(node, MB::Sound, name, args, kwargs)
+          b = node.block
+          if b && !b.is_a?(Prism::BlockNode)
+            raise error(b, "#{name} takes a literal block here")
+          end
+          if b && !%i[master track flow scene].include?(name)
+            raise error(b, "#{name} takes no block in set documents")
+          end
+
+          begin
+            case name
+            when :meter
+              beats, unit = args
+              unit ||= 4
+              unless beats.is_a?(Integer) && unit.is_a?(Integer) && beats > 0 && unit > 0 && kwargs.empty?
+                raise error(node, 'meter takes beats and a note unit (meter 7, 8)')
+              end
+              @session.transport.bar_length = Rational(beats, unit)
+            when :master
+              raise error(node, 'master takes a block (master { |mix| ... })') unless b && args.empty? && kwargs.empty?
+              MB::Sound.master(&build_proc(b, scope))
+            when :track
+              MB::Sound.track(*args, **kwargs, &(b && build_proc(b, scope)))
+            when :scene
+              MB::Sound.scene(*args, **kwargs, &(b && scene_proc(b, scope)))
+            when :flow
+              raise error(node, 'flow takes a block (flow do ... end)') unless b && args.empty? && kwargs.empty?
+              raise error(b, 'flow blocks take no parameters') if b.parameters
+              loader = self
+              body = b.body
+              @document.form = @session.arrangement.build_form { loader.walk_flow(body, self, scope) }
+            else
+              MB::Sound.public_send(name, *args, **kwargs)
+            end
+          rescue GraphIO::LoadError
+            raise
+          rescue StandardError => e
+            raise error(node, "#{name} raised #{e.class}: #{e.message}")
+          end
+        end
+
+        public
+
+        # A scene block: a proc that runs the block's statements when the
+        # scene launches (assignments, and SCENE_COMMANDS with values and
+        # graphs as arguments; no blocks), keeping its text for saving.
+        def scene_proc(b, outer)
+          names, rest = block_params(b)
+          (b.body&.body || []).each do |st|
+            next if st.is_a?(Prism::LocalVariableWriteNode)
+            unless st.is_a?(Prism::CallNode) && st.receiver.nil? && SCENE_COMMANDS.include?(st.name) && st.block.nil?
+              raise error(st, "a scene block holds assignments and the commands #{SCENE_COMMANDS.join(', ')} (without blocks)")
+            end
+          end
+
+          loader = self
+          count = names.length
+          body = b.body
+          source = b.slice
+          pr = proc do |*args|
+            loader.fresh_limits!
+            scope = Scope.new(outer)
+            names.each_with_index { |n, i| scope.vars[n] = args[i] }
+            scope.vars[rest] = args[count..] || [] if rest
+            loader.run_scene(body, scope)
+          end
+          arity = rest ? -(count + 1) : count
+          params = names.map { |n| [:opt, n] }
+          params << [:rest, rest] if rest
+          pr.define_singleton_method(:arity) { arity }
+          pr.define_singleton_method(:parameters) { |**| params }
+          pr.define_singleton_method(:graph_io_source) { source }
+          pr
+        end
+
+        public
+
+        # Runs a scene block's statements (see #scene_proc).
+        def run_scene(body, scope)
+          (body&.body || []).each do |st|
+            if st.is_a?(Prism::LocalVariableWriteNode)
+              eval_node(st, scope)
+              next
+            end
+            args, kwargs = call_args(st, scope)
+            check_limits(st, MB::Sound, st.name, args, kwargs)
+            begin
+              MB::Sound.public_send(st.name, *args, **kwargs)
+            rescue GraphIO::LoadError
+              raise
+            rescue StandardError => e
+              raise error(st, "#{st.name} raised #{e.class}: #{e.message}")
+            end
+          end
+          nil
+        end
+
+        # Why +source+ (a scene block's text, `{ |t| ... }` or `do ... end`)
+        # can't be a scene block of a set document, or nil (see SetWriter).
+        def self.scene_block_problem(source)
+          new("graph 1, kind: :set\nscene(:x) #{source}\n").scene_block_check
+          nil
+        rescue LoadError => e
+          e.message.sub(/\A\(graph document\):\d+: /, '')
+        end
+
+        # Parses a one-scene document made by .scene_block_problem and
+        # checks its block (raises LoadError).
+        def scene_block_check
+          node = parse.statements.body[1]
+          raise LoadError, 'not a scene block' unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+          scene_proc(node.block, Scope.new)
+        end
+
+        # Builds a flow's steps from +body+ (the statements of a `flow do`,
+        # `repeat n do`, or pick option block) on Form::Builder +builder+:
+        # sections and the steps repeat, fill, label, goto, and pick, with
+        # values only (goto Procs are code).
+        def walk_flow(body, builder, scope)
+          (body&.body || []).each do |s|
+            unless s.is_a?(Prism::CallNode) && s.receiver.nil?
+              raise error(s, 'a flow holds sections and steps (verse 8, repeat 2 do ... end, label, goto, pick, fill)')
+            end
+            name = s.name
+            args, kwargs = call_args(s, scope)
+            @calls += 1
+            if (args + kwargs.values).any? { |a| a.is_a?(Proc) }
+              raise error(s, "#{name} takes values in a set document (goto Procs are code)")
+            end
+            b = s.block
+            raise error(b, 'flow blocks are literal blocks') if b && !b.is_a?(Prism::BlockNode)
+            if name.to_s.start_with?('__') || (BasicObject.public_instance_methods.include?(name) && name != :!)
+              raise error(s, "#{name} can't be a section name")
+            end
+
+            begin
+              case name
+              when :repeat
+                raise error(s, 'repeat takes a block of sections') unless b && b.parameters.nil?
+                builder.repeat(*args, **kwargs) { walk_flow(b.body, builder, scope) }
+              when :pick
+                if b
+                  params, = block_params(b)
+                  raise error(b, 'a pick block takes one parameter (pick do |p| p.option(2) { ... } end)') unless params.length == 1
+                  builder.pick(*args, **kwargs) { |opts| walk_options(b.body, params[0], opts, builder, scope) }
+                else
+                  builder.pick(*args, **kwargs)
+                end
+              else
+                raise error(b, "#{name} takes no block") if b
+                FLOW_CALL.bind_call(builder, name, *args, **kwargs)
+              end
+            rescue GraphIO::LoadError
+              raise
+            rescue StandardError, NoMethodError => e
+              raise error(s, "#{name}: #{e.message}")
+            end
+          end
+          nil
+        end
+
+        # A pick block's `p.option(weight) { sections }` lines.
+        def walk_options(body, param, opts, builder, scope)
+          (body&.body || []).each do |s|
+            ok = s.is_a?(Prism::CallNode) && s.name == :option && s.receiver.is_a?(Prism::LocalVariableReadNode) && s.receiver.name == param
+            raise error(s, "a pick block holds #{param}.option(weight) { sections } lines") unless ok
+            args, kwargs = call_args(s, scope)
+            b = s.block
+            raise error(s, 'option takes a literal block') if b && !(b.is_a?(Prism::BlockNode) && b.parameters.nil?)
+            if b
+              opts.option(*args, **kwargs) { walk_flow(b.body, builder, scope) }
+            else
+              opts.option(*args, **kwargs)
+            end
+          end
+        end
+
+        # Calls a flow step or section by name on a Form::Builder (a
+        # BasicObject, which has no public_send of its own).
+        FLOW_CALL = Kernel.instance_method(:public_send)
+
+        private
 
         # The node for a use of param +name+: a new Constant named after it
         # (see #bind_params), or the knob of a `knob` line.
@@ -404,7 +671,9 @@ module MB
           when Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode
             node.value
           when Prism::StringNode
-            node.unescaped.dup.freeze
+            # Registered, so library file readers keep it inside the
+            # document's directory (FileGuard)
+            FileGuard.register(node.unescaped.dup, file_context)
           when Prism::SymbolNode
             node.unescaped.to_sym
           when Prism::NilNode then nil
@@ -510,9 +779,13 @@ module MB
           block = call_block(node, scope)
           check_limits(node, receiver, name, args, kwargs)
           check_file(node, name, args) if Registry::FILE_METHODS.include?(name)
+          # seeds: :fresh draws new random seeds instead of the saved ones
+          kwargs.delete(:seed) if @fresh_seeds
 
           begin
             result = receiver.public_send(name, *args, **kwargs, &block)
+          rescue GraphIO::FileError => e
+            raise error(node, e.message)
           rescue GraphIO::LoadError
             raise
           rescue StandardError => e
@@ -589,6 +862,9 @@ module MB
           last = nil
           pr = proc do |*args|
             args = args[0] if count > 1 && args.length == 1 && args[0].is_a?(Array)
+            # A set's patches build again long after the load: each build
+            # gets the limits afresh
+            loader.fresh_limits! if loader.loaded?
             scope = Scope.new(outer)
             names.each_with_index { |n, i| scope.vars[n] = args[i] }
             scope.vars[rest] = args[count..] || [] if rest
@@ -771,17 +1047,19 @@ module MB
           check_integer(node, result) if result.is_a?(Integer)
         end
 
-        # Files: only relative names inside the document's directory.
+        # Files: only relative names inside the document's directory (see
+        # FileGuard, which also catches file names reaching other readers).
         def check_file(node, name, args)
           file = args[0]
           return unless file.is_a?(String)
-          unless @base_dir
-            raise error(node, "#{name} reads a file, which only documents loaded from a file (or with base_dir:) may do")
-          end
-          if file.start_with?('/', '~') || file.split(%r{[/\\]}).include?('..') || file.match?(/\A[a-zA-Z]:/) || file.include?("\0")
-            raise error(node, "#{name}(#{file.inspect}): files must be named relative to the document, inside its directory")
-          end
-          args[0] = File.join(@base_dir, file)
+          args[0] = FileGuard.check(file, file_context, name.to_s)
+        rescue GraphIO::FileError => e
+          raise error(node, e.message)
+        end
+
+        # Where this document's file names point (see FileGuard).
+        def file_context
+          @file_context ||= FileGuard::Context.new(@base_dir, @label, @document)
         end
 
         ### Helpers

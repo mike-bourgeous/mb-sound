@@ -68,6 +68,10 @@ module MB
               reason: 'readers',
               names: %i[steps beats],
             },
+            'MB::Sound::Sequence::Kit' => {
+              reason: 'iteration (rows taken with kit.rows or kit[:name] print as kit[:name])',
+              names: %i[each],
+            },
           }.freeze
 
           # Top-level MB::Sound modules whose methods build graphs, with the
@@ -123,6 +127,7 @@ module MB
               MB::Sound::Tone, MB::Sound::Pitch, MB::Sound::Notes::NotePitch, MB::Sound::Notes,
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
               MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
+              MB::Sound::Sequence::Kit,
             ]
           end
         end
@@ -232,11 +237,13 @@ module MB
               names = Surface.own_surface(c)
               names |= dsl + ELEMENT_ACCESS + [:coerce] if c == Channels
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
-              names |= [:named] if c == MB::Sound::Sequence::Clip # Sequence::Named, shared with Kit
+              names |= [:named] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end
             record(MB::Sound::Note, MB::Sound::Sequence::NoteMethods.public_instance_methods(false), key: MB::Sound::Note)
+            # (!A1).n8: a marked note's length makes a Seq
+            record(MB::Sound::Sequence::Seq::Step, MB::Sound::Sequence::NoteMethods.public_instance_methods(false), key: MB::Sound::Sequence::Seq::Step)
 
             record(MB::Sound.singleton_class, Surface.top_level, key: :sound)
             record(MB::Sound::Wavetable::KeyMap.singleton_class, [:zones], key: MB::Sound::Wavetable::KeyMap.singleton_class)

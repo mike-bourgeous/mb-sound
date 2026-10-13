@@ -59,6 +59,17 @@ module MB
         ENV['RANDOM_SEED'] ? Integer(ENV['RANDOM_SEED']) : DEFAULT_SEED
       end
 
+      # Runs the block, then puts the root random generator back as it
+      # was, so seeds drawn inside don't change later draws (graph
+      # documents build set patches once to save them; see
+      # GraphIO::SetWriter).  Returns the block's value.
+      def keeping_random_state
+        rng = root_rng.dup
+        yield
+      ensure
+        @root_rng = rng if rng
+      end
+
       # Draws a seed for a sub-generator from the root generator (a
       # non-negative Integer below 2**62), e.g. `Random.new(MB::Sound.next_seed)`.
       def next_seed

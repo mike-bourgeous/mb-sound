@@ -54,6 +54,11 @@ module MB
           # lfo.samples, 0.25.cycles of a node, input.outputs[i]
           'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs],
           'MB::Sound::GraphNode::MultiOutput' => %i[outputs [] left right],
+          # Unattached MIDI transform chains: echo(...).strum(...)
+          'MB::Sound::MIDI::Transform::Spec' => MB::Sound::MIDI::Stream::TRANSFORMS.to_a,
+          # Note marks (`!A1`, `~C2`, `G2.chance(0.5)`), on Notes and steps
+          'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill],
+          'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
