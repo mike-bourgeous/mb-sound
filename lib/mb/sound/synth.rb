@@ -265,8 +265,15 @@ module MB
         }
         @notes.freeze
 
-        # Fused plans for each lane's graph (see MB::Sound::Plan)
-        @plans = @lanes.map { |outs| Plan.install(outs, lanes: false) }
+        # Every node of every lane's graph (see #unread_branch?)
+        @lane_graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
+        @in_lanes = {}
+        @lane_graphs.each { |g| g.each { |n| @in_lanes[n.__id__] = true } }
+
+        # Fused plans for each lane's graph (see MB::Sound::Plan), leaving
+        # out branches nothing reads
+        unread = ->(b) { unread_branch?(b) }
+        @plans = @lanes.map { |outs| Plan.install(outs, lanes: false, unread: unread) }
 
         # Channel-wide controllers read by several lanes' regions are
         # sampled once per buffer and handed to every region (see
@@ -542,7 +549,7 @@ module MB
         @grid_offset = 0 # where the measuring grid starts (see #align_grid)
         @zeros = nil
 
-        graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
+        graphs = @lane_graphs
         sets = graphs.map { |g| g.to_h { |n| [n.__id__, true] } }
 
         @skippable_base = graphs.each_with_index.map { |g, idx|
@@ -564,8 +571,6 @@ module MB
         # What a skipped lane still reads: its own Notes nodes, its
         # branches of Tees that others read (see #boundary), and its knob
         # readers
-        @in_lanes = {}
-        sets.each { |set| @in_lanes.merge!(set) }
         @boundary = graphs.each_with_index.map { |g, idx|
           next [[], [], []] unless @skippable_base[idx]
 
@@ -606,11 +611,23 @@ module MB
 
         set = @lane_sets[idx]
         shared = tee_branches.select { |n|
-          n.owner_tee.branches.any? { |b| !set[b.__id__] && (@in_lanes[b.__id__] || !@built_branches[b]) }
+          n.owner_tee.branches.any? { |b| !set[b.__id__] && !unread_branch?(b) }
         }
         list = own + shared + knobs
         @boundary_cache[idx] = [changes, list]
         list
+      end
+
+      # True if Tee branch +b+ was made while building the lanes and is in
+      # no lane's graph: nothing reads it (e.g. the branch of a `band * 0.5`
+      # left unused in the voice block).  Skipped lanes don't read for it
+      # (see #boundary) and the plans treat it as absent (see
+      # Plan::Installation#live_branches), so an unused node changes
+      # neither skipping nor fusing and lane grouping.  Branches made
+      # outside the synth count as readers (they may belong to a graph that
+      # starts later).
+      def unread_branch?(b)
+        !@in_lanes[b.__id__] && !!@built_branches[b]
       end
 
       # True if every graph node of lane +idx+'s graph (+graphs+, with the

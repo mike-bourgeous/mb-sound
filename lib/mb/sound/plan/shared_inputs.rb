@@ -162,10 +162,12 @@ module MB
 
             tee = tees[0]
             next unless tee.sources[:input].equal?(src)
-            next unless tee.branches.length == list.length && tee.branches.all? { |b| list.any? { |h| h.equal?(b) } }
+            # Unread branches (Installation#live_branches) don't count
+            live = @installations[0].live_branches(tee)
+            next unless live.length == list.length && live.all? { |b| list.any? { |h| h.equal?(b) } }
 
             @sources << src
-            @branches << tee.branches.dup
+            @branches << live.dup
           end
 
           @generations = @installations.map(&:generation)
