@@ -242,7 +242,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.stop(:a)                       # fading out over four bars
         expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
 
-        entries = MB::Sound.panic
+        entries = nil
+        expect { entries = MB::Sound.panic }.to output("panic: stopped 2 players\n").to_stderr
         expect(entries.map { |e| [e.kind, e.name] }).to contain_exactly([:stop, :a], [:stop, :b])
         expect(MB::Sound.players).to be_empty
         expect(MB::Sound::Session.default).to be_idle
@@ -253,7 +254,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.master(at: :now) { |mix| mix.delay(0.5) }
         sleep 0.05 until MB::Sound.master.start_with?('master:')
 
-        MB::Sound.panic
+        expect { MB::Sound.panic }.to output(/\Apanic: stopped 1 player/).to_stderr
         expect(MB::Sound.master).to start_with('master:')
         expect(MB::Sound::Session.default.instance_variable_get(:@master_chains).length).to be <= 2
       end

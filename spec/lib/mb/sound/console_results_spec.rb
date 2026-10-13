@@ -91,7 +91,7 @@ RSpec.describe('console command results') do
       end
       run(800)
 
-      expect(MB::Sound).to receive(:warn).with('panic: cancelled 1 scheduled block (at_bar 3)')
+      expect(MB::Sound).to receive(:warn).with('panic: stopped 1 player; cancelled 1 queued change; cancelled 1 scheduled block (at_bar 3)')
       entries = within { MB::Sound.panic }
       expect(entries.map { |e| [e.kind, e.name, e.status] }).to eq([[:stop, :a, :landed], [:mute, :a, :cancelled]])
 
@@ -99,6 +99,13 @@ RSpec.describe('console command results') do
       expect(ran).to eq(false)
       expect(session.scheduled).to be_empty
       expect(session.queued).to be_empty
+    end
+
+    it 'prints one line even when nothing was scheduled' do
+      within { MB::Sound.bg(:a, 1.constant) }
+      run(800)
+      expect(MB::Sound).to receive(:warn).with('panic: stopped 1 player').once
+      within { MB::Sound.panic }
     end
 
     it 'stops a song form' do
@@ -109,7 +116,7 @@ RSpec.describe('console command results') do
       run(800)
       expect(session.arrangement.playback.ended?).to eq(false)
 
-      expect(MB::Sound).to receive(:warn).with(/\Apanic: stopped the song form/)
+      expect(MB::Sound).to receive(:warn).with(/\Apanic: stopped 0 players; stopped the song form/)
       within { MB::Sound.panic }
       expect(session.arrangement.playback.ended?).to eq(true)
       expect(session.scheduled.reject { |h| h.owner == :take }).to be_empty

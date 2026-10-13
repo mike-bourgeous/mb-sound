@@ -251,16 +251,17 @@ module MB
       # mutes, ...) are cancelled, and the scheduler is reset (see
       # ScheduleMethods#reset_scheduler: the song form stops, every
       # scheduled block is cancelled, and a stuck or dead scheduler thread
-      # is replaced), with a message saying what that did.
+      # is replaced).  It always prints one line saying what it stopped and
+      # cancelled.
       #
       # Returns the journal entries of the stops and of the cancelled
       # changes (one entry, or an Array; see #stop).
       def panic
         cancelled = []
+        message = nil
         stops = session_command([], label: 'panic', kind: :stop, all: true) { |session, time|
           report = session.reset_scheduler
           message = Session::Scheduler.reset_message(report)
-          warn "panic: #{message}" if message
 
           waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
           cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
@@ -269,8 +270,20 @@ module MB
         }
         return stops if Session.context&.[](:batch)
 
-        entries = [*Array(stops).grep(Session::Journal::Entry), *cancelled]
+        stopped = Array(stops).grep(Session::Journal::Entry)
+        warn "panic: #{panic_summary(stopped.length, cancelled.length, message)}"
+
+        entries = [*stopped, *cancelled]
         entries.length == 1 ? entries.first : entries
+      end
+
+      # The one line #panic prints: players stopped, changes cancelled, and
+      # what resetting the scheduler did (+scheduler+, or nil).
+      private def panic_summary(stopped, cancelled, scheduler)
+        parts = ["stopped #{stopped} player#{'s' unless stopped == 1}"]
+        parts << "cancelled #{cancelled} queued change#{'s' unless cancelled == 1}" if cancelled > 0
+        parts << scheduler if scheduler
+        parts.join('; ')
       end
 
       # Plays background sounds (#bg, songs) through +output+ from now on:
