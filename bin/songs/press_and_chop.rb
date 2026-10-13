@@ -27,6 +27,8 @@
 #     bg :b, brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k).loop.transpose(3).sampler(brk).at(-10.db)
 #     swap :b, brk.chop(:k, :k, :s, brk[:s].rev).loop.transpose(5)   # same slices, higher
 #     play press_and_chop_record.rev.node         # the whole record backwards, once
+#     play press_and_chop_record.stretch(2, cycle: 30.ms, fit: :auto).node   # half speed, cycles fitted to the hits
+#     brk = press_and_chop_break(lofi: :sp1200)   # drop-sample reads; .read_as(:clean) on the record for the clean read
 require 'bundler/setup'
 require 'mb-sound'
 

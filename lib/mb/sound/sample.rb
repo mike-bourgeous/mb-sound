@@ -574,12 +574,25 @@ module MB
       # S950-style cyclic timestretch: cycles of +cycle+ (25 ms) taken from
       # the input in step and repeated or skipped, with +crossfade+ (0) of
       # overlap; short cycles buzz at 1 / cycle (metallic), long ones
-      # stutter.
-      def stretch(ratio, cycle: 25.ms, crossfade: 0)
+      # stutter.  +fit+ :auto lets each cycle fit the sound (Lofi::FITS):
+      # its length snapped to the local period near +cycle+ (by
+      # autocorrelation), each splice where the sound matches what would
+      # have followed (the S950's "cycle fudging"), cut at rising zero
+      # crossings, so tones stretch without the buzz and breaks with
+      # smaller seams.  Every channel cuts in the same places.
+      #
+      #     pad.stretch(2, cycle: 30.ms)               # the plain cyclic stretch
+      #     pad.stretch(2, cycle: 30.ms, fit: :auto)   # cycles fitted to the sound
+      def stretch(ratio, cycle: 25.ms, crossfade: 0, fit: nil)
+        fit = fit&.to_sym
+        raise ArgumentError, "Unknown stretch fit #{fit.inspect} (#{Lofi::FITS.map(&:inspect).join(', ')})" unless Lofi::FITS.include?(fit)
         c = position(cycle).round
         x = position(crossfade).round
-        edit(:stretch, [ratio], { cycle: cycle, crossfade: crossfade }.reject { |k, v| k == :cycle ? v == 25.ms : v == 0 }) { |d|
-          Lofi.stretch(d, ratio.to_f, c, x)
+        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v.nil? : v == 0) }
+        guide = nil
+        edit(:stretch, [ratio], kw) { |d|
+          guide ||= fit && mono_mix
+          Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end
 
@@ -678,6 +691,13 @@ module MB
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze
         )
+      end
+
+      # The region's channels mixed (stored order, before #level), as a
+      # DFloat.
+      def mono_mix
+        chans = Array.new(channel_count) { |c| Numo::DFloat.cast(@audio.channels[c][@start...@stop]) }
+        chans.sum / channel_count
       end
 
       # The read settings ({ interpolation:, mips: }) of +style+ (a

@@ -147,6 +147,46 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect(z.length).to eq(7200)
     end
 
+    it 'fits stretch cycles to the sound with fit: :auto' do
+      sine = ->(n, f) { Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| Math.sin(i * 2 * Math::PI * f / 48000) }) }
+      jump = ->(d) { (d[1..] - d[0...-1]).abs.max }
+      x = MB::Sound::Sample[sine.(24000, 110)]
+      fixed = x.stretch(2, cycle: 30.ms)
+      auto = x.stretch(2, cycle: 30.ms, fit: :auto)
+      expect(auto.length).to eq(48000)
+      # 30 ms isn't a whole number of 110 Hz periods: the plain stretch
+      # cuts mid-cycle, the fitted one splices on matching phase
+      expect(jump.(fixed.data)).to be > 0.5
+      expect(jump.(auto.data)).to be < 2 * jump.(x.data)
+
+      # Cycles are whole periods near the asked length, cut at rising zero crossings
+      plan = MB::Sound::Sample::Lofi.fit_plan(x.data, 2.0, 1440)
+      period = 48000 / 110.0
+      plan[0...-2].each do |o, src, len|
+        expect((len / period - (len / period).round).abs).to be < 0.01
+        expect(len).to be_within(period / 2 + 1).of(1440)
+      end
+      expect(plan.map(&:first).each_cons(2).all? { |a, b| b > a }).to eq(true)
+      # The output keeps time: each cycle starts near output time / ratio
+      plan.each { |o, src, _| expect(src).to be_within(0.25 * 1440 + 12).of([o / 2.0, 24000 - 1440].min) }
+
+      # Every channel cuts in the same places
+      st = MB::Sound::Sample[[sine.(24000, 110) + sine.(24000, 2000) * 0.1, sine.(24000, 110) * 0.5]].stretch(1.5, cycle: 20.ms, fit: :auto)
+      expect(st.length).to eq(36000)
+      mono = MB::Sound::Sample[sine.(24000, 110) + sine.(24000, 2000) * 0.1].stretch(1.5, cycle: 20.ms, fit: :auto)
+      expect(st.data(0)).not_to eq(mono.data) # the plan follows the mix, not one channel
+
+      # Noise: no period, splices only where they match; still the asked length
+      rng = Random.new(3)
+      noise = MB::Sound::Sample[Numo::SFloat.cast(Array.new(9600) { rng.rand - 0.5 })]
+      expect(noise.stretch(0.5, cycle: 10.ms, fit: :auto).length).to eq(4800)
+      expect(noise.stretch(3, fit: :auto, crossfade: 1.ms).length).to eq(28800)
+      expect(MB::Sound::Sample[sine.(500, 440)].stretch(2, cycle: 30.ms, fit: :auto).length).to eq(1000) # shorter than a cycle
+
+      expect(auto.lineage[1..3]).to eq([:stretch, [2], { cycle: 30.ms, fit: :auto }])
+      expect { x.stretch(2, fit: :wobble) }.to raise_error(ArgumentError, /Unknown stretch fit/)
+    end
+
     it 'mixes to mono' do
       st = MB::Sound::Sample[[ramp, ramp * 3]]
       expect(st.mono.data).to eq(ramp * 2)
