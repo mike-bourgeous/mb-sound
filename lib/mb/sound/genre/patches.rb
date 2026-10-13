@@ -33,6 +33,29 @@ module MB
           wet = dry.filter(:highpass, cutoff: 250, quality: 0.7).reverb(:room, dry: 0, wet: room, output_channels: 2)
           MB::Sound.stereo(dry, dry) + wet
         end
+
+        # A detuned saw stab (the dnb_reese patch's voice: six detuned saws
+        # through a four-pole lowpass at +cutoff+ Hz, a number or node such
+        # as a knob, wobbled by a 2-bar LFO, highpassed at 150 Hz) with a
+        # +drive+ knob (0..1) into its soft clipper: 1 is the Reese's own
+        # drive (2.2x into softclip(0.35, 0.95)), the default 0.1 a gentle
+        # edge (1.12x into softclip(0.845, 0.95)).  One voice, legato, like
+        # the Reese.  The techno stub's stab (drums-3, 2026-10-13; the
+        # maintainer on the Reese stab: "That's an insane amount of
+        # distortion on the stab note. Could be useful in a different
+        # context but not right here"); `drive: 1` brings the heavy one back.
+        def stab(source, cutoff: 2400, drive: 0.1)
+          gain = 1.0 + 1.2 * drive
+          threshold = 0.9 - 0.55 * drive
+          MB::Sound.synth(source, voices: 1) { |v|
+            pitch = v.hz.glide(0.035, legato: true)
+            saws = pitch.unison(6, detune: 0.32, spread: 0.5) { |p, _i| p.saw }
+            lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8)
+            amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato
+            ((saws.lp4(cutoff * lfo, resonance: 0.25) * gain).softclip(threshold, 0.95) * amp)
+              .filter(:highpass, cutoff: 150, quality: 0.7).filter(:highpass, cutoff: 150, quality: 0.7)
+          }
+        end
       end
     end
   end
