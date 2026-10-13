@@ -62,6 +62,12 @@ module MB
           self
         end
 
+        # True when no hit is waiting to be repeated (see Drums::Voice's
+        # idle skipping).
+        def idle?
+          @history_length == 0 || @history.ne(0).count_true == 0
+        end
+
         def sources
           { input: @input }
         end

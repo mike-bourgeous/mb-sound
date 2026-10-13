@@ -120,8 +120,9 @@ module MB
 
         # The beater's click: the trigger itself (one sample at the
         # velocity) through a lowpass whose cutoff +tone+ (0..1) moves from
-        # 400 Hz to 6.4 kHz, at +level+.
+        # 400 Hz to 6.4 kHz, at +level+ (0 for none: returns 0).
         def click(level = 0.5, tone: 0.5)
+          return 0 if level.is_a?(Numeric) && level == 0
           (@trigger * level).filter(:lowpass, cutoff: Drums.exp2(tone * 4) * 400, quality: 0.7)
         end
 

@@ -190,6 +190,18 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       expect { MB::Sound.kit { voice(:kick, smp) { t } } }.to raise_error(ArgumentError, /not both/)
     end
 
+    it 'keeps voices awake through a sample\'s quiet start and late repeats' do
+      quiet_start = MB::Sound::Sample.new(Numo::SFloat.zeros(9600).concatenate(Numo::SFloat.ones(2400)))
+      kit = MB::Sound.kit(MB::Sound.grid(16, kick: 'X...', snare: 'X...')) {
+        voice :kick, quiet_start
+        voice(:snare) { |h| h.bursts(2, 0.15) }
+      }
+      x = collect(kit[:kick], 0.5)
+      expect(x[0...9000].abs.max).to be < 1e-6
+      expect(x[9700...11900].abs.min).to be > 0.9
+      expect(hits(kit[:snare], 0.5)).to eq([0, 7200])
+    end
+
     it 'borrows voices from the TR-808 and TR-909' do
       m = MB::Sound.kit {
         tr909 :kick, :closed_hat, :open_hat, kick: { decay: 0.3 }

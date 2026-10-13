@@ -128,6 +128,14 @@ module MB
         GraphNode::Mixer.new(nodes, stop_early: false)
       end
 
+      # +node+ times +gain+ (a number or node), or 0 for a gain of 0 (which
+      # .mix leaves out), so a layer turned off costs nothing.
+      def scale(node, gain)
+        return node if gain.is_a?(Numeric) && gain == 1
+        return 0 if gain.is_a?(Numeric) && gain == 0
+        node * gain
+      end
+
       # A frequency in Hz from a number, Pitch/Note, or node.
       def hz(value)
         value.is_a?(MB::Sound::Pitch) ? value.oscillator_frequency : value

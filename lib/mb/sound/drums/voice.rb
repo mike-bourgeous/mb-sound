@@ -12,7 +12,9 @@ module MB
       # never end by themselves); looping clips and live MIDI play forever.
       #
       # Idle skipping (+skip_idle: true+, the default): after SLEEP_TIME of
-      # output within -120 dB, the voice stops sampling its graph (giving
+      # output within -120 dB (and with every sampler voice and Repeats in
+      # its graph idle, so a reversed sample's quiet start or a late burst
+      # still plays), the voice stops sampling its graph (giving
       # zeros) until its next hit, like Synth's idle lanes.  Not exactly
       # the same as rendering every sample (free-running oscillators and
       # noise pause while skipped, which only changes their phase), but the
@@ -287,7 +289,9 @@ module MB
             if start + stop == g
               @silent_cells = @cell_loud ? 0 : @silent_cells + 1
               @cell_loud = false
-              @sleeping = true if @silent_cells >= need
+              # Samplers and repeats with sound to come (a reversed
+              # sample's quiet start, a late burst) keep the voice awake
+              @sleeping = true if @silent_cells >= need && @busy.all?(&:idle?)
             end
             i = stop
           end
@@ -323,7 +327,10 @@ module MB
           # Clip sources are read through Notes nodes, which stay in step
           @skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
           @boundary = []
+          @busy = []
           return unless @skippable
+
+          @busy = nodes.select { |n| n.is_a?(GraphNode::SamplerVoice) || n.is_a?(Repeats) }
 
           set = nodes.to_h { |n| [n.__id__, true] }
           set[@graph.__id__] = true

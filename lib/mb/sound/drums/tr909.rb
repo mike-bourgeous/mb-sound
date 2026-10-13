@@ -121,24 +121,24 @@ module MB
               body = h.body(h.tune, decay: h.decay, sweep: h.punch * 5, sweep_time: 0.018, drop: 0.25, drop_time: 0.15)
               drive = Drums.exp2(h.drive * 2)
               punch = (body * drive).softclip(0.6, 1.0) * (1.25 / (1 + 0.25 * drive))
-              tick = h.noise(decay: 0.006, highpass: 1500, lowpass: 7000) * (h.attack * 0.9)
+              tick = Drums.scale(h.noise(decay: 0.006, highpass: 1500, lowpass: 7000), h.attack * 0.9)
               h.mix(punch, h.click(h.attack * 0.9, tone: 0.75), tick)
             end
 
-            voice :rimshot, tune: 480.0, decay: 0.035, gm: GM_MAP[:rimshot], as: [:rim, :rs, :side_stick], level: 0.5 do |h|
+            voice :rimshot, tune: 480.0, decay: 0.035, gm: GM_MAP[:rimshot], as: [:rim, :rs, :side_stick], level: 0.9 do |h|
               f = h.hz(h.tune)
               pings = h.mix(h.body(f, decay: h.decay) * 0.9, h.body(f * 3.4, decay: h.decay * 0.6) * 0.6, h.body(f * 0.46, decay: h.decay * 1.5) * 0.4)
               pings.filter(:highpass, cutoff: 350, quality: 0.7).softclip(0.7, 1.0)
             end
 
-            voice :snare, tune: 185.0, tone: 0.5, snappy: 0.6, decay: 0.2, gm: GM_MAP[:snare], as: [:sd], level: 0.85 do |h|
+            voice :snare, tune: 185.0, tone: 0.5, snappy: 0.6, decay: 0.2, gm: GM_MAP[:snare], as: [:sd], level: 0.95 do |h|
               f = h.hz(h.tune)
               heads = h.body(f, decay: h.decay, sweep: 0.6, sweep_time: 0.012) * 0.6 + h.body(f * 1.62, decay: h.decay * 0.6, sweep: 0.6, sweep_time: 0.012) * 0.4
               noise = h.noise(decay: h.snappy * 0.2 + 0.08, highpass: 1000, lowpass: Drums.exp2(h.tone * 2) * 3500)
-              h.mix(heads * 0.55, noise * (h.snappy * 1.3))
+              h.mix(heads * 0.55, Drums.scale(noise, h.snappy * 1.3))
             end
 
-            voice :clap, tone: 0.5, decay: 0.28, gm: GM_MAP[:clap], as: [:cp, :hc, :hand_clap], level: 0.6 do |h|
+            voice :clap, tone: 0.5, decay: 0.28, gm: GM_MAP[:clap], as: [:cp, :hc, :hand_clap], level: 0.75 do |h|
               bursts = h.bursts(4, 0.0085, falloff: 0.85)
               burst_env = Drums.decay_env(bursts, 0.009, curve: 30)
               tail_env = Drums.decay_env(Repeats.new(h.t, [[0.0255, 1.0]]), h.decay)

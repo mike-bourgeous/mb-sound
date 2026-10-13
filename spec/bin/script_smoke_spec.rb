@@ -26,7 +26,9 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
+    'bin/songs/drums_909.rb' => ['--bars', '0.5', '-s', '4'],
     'bin/songs/feedback_song.rb' => ['--bars', '0.5', '-e', '0.7'],
+    'bin/songs/kit_builder.rb' => ['--bars', '0.5', '-s', '0'],
     'bin/songs/loop_church.rb' => ['--bars', '0.5', '-S', '0.6'],
     'bin/songs/memory_card.rb' => ['--bars', '0.5', '-C', '-2'],
     'bin/songs/midi_transforms_song.rb' => ['--bars', '0.5', '-s'],
@@ -102,6 +104,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/ambient.rb' => ['-p', 'koto', '-w', '0.5'], # (bowls and the gong ring past the 10 s check)
     'bin/synths/dnb.rb' => ['-p', 'neuro', '-G', '0.5'],
     'bin/synths/drums_808.rb' => ['-c', '6'],
+    'bin/synths/drums_909.rb' => ['-k', '0.8'],
     'bin/synths/electric_pianos.rb' => ['-p', 'reed', '-b', '1.5'],
     'bin/synths/ep2_syn.rb' => [],
     'bin/synths/filter_ping.rb' => [],
