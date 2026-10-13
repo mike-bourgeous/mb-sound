@@ -26,6 +26,12 @@ module MB
       # (ghost 16ths on the closed hat so the 909's shuffle 2 swings them)
       kit :groove, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '5.3.5.335.3.5.32').loop(align: :launch)
         .nofill(:clap, name: :clap_roll).fill(:clap_roll, **roll)
+      # (the drop: closed hats on every 16th but the open hats' offbeats,
+      # so the 909's shuffle swings every second one; drums-3, maintainer:
+      # "Maybe full 16th hats for one of the sections to show off the
+      # swing more?")
+      kit :drop, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '65.565.565.565.5').loop(align: :launch)
+        .nofill(:clap, name: :clap_roll).fill(:clap_roll, **roll)
       kit :breakdown, grid(16, closed_hat: '..3...3...3...3.').loop(align: :launch)
 
       clip :bass, seq(R, A1, A2, R, R, A1, A2, R, R, A1, A2, R, R, G1, G2, R).n16.legato(0.6).loop(align: :launch)
@@ -42,7 +48,7 @@ module MB
       scene :intro, drums: :intro
       scene :groove, drums: :groove, bass: :bass, keys: :chords, cut: [8000, { from: 800, over: 16 }]
       scene :breakdown, drums: :breakdown, keys: :chords, cut: 1500
-      scene :drop, drums: :groove, bass: :bass, keys: :chords, cut: 8000
+      scene :drop, drums: :drop, bass: :bass, keys: :chords, cut: 8000
       scene :outro, drums: :intro, bass: :bass
       scene :riser, riser: :bar, others: :keep
 
