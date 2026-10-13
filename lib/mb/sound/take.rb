@@ -63,7 +63,10 @@ module MB
         def note_change(session, change)
           take, line = Thread.current[:mb_sound_take_line]
           return unless line && take.session_ok?(session)
-          line.lands << (change.lands&.pos || change.time)
+          land = change.lands&.pos
+          # A change for a time already past lands now, but its action
+          # sees its own time (a lead: track starting before the beat)
+          line.lands << (land && change.time && change.time < land ? [land, change.time] : (land || change.time))
         end
       end
 
@@ -207,7 +210,7 @@ module MB
       def inspect
         lines = @mutex.synchronize { @lines.last(12) }
         body = lines.map { |l|
-          lands = l.lands.map { |t| session.stamp(t).to_s }.uniq
+          lands = l.lands.map { |t| session.stamp(Array(t).first).to_s }.uniq
           "  #{l.issued}#{lands.empty? ? '' : " -> #{lands.join(', ')}"}  #{l.code.lines.first.to_s.strip[0, 70]}"
         }
         ["#<#{self}", *body].join("\n") + '>'

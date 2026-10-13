@@ -270,29 +270,37 @@ RSpec.describe(MB::Sound::Take) do
     ['a scene knob ramp', 'cut: [3500, from: 350, over: 1]', nil],
     ['section knob values', 'cut: 16000', 'b 2, cut: [3500, over: 1.beat]'],
     ['a track with lead: launched by the first section', 'cut: 3500', nil, 'lead: 1.beat'],
-    ['a track with lead: :attack', 'cut: 3500', nil, 'lead: :attack'],
+    ['a track with lead: 0.3.attack', 'cut: 3500', nil, 'lead: 0.3.attack'],
   ].each do |label, b_knob, b_section, lead|
-    it "replays #{label} bit for bit at the same and other buffer sizes" do
+    it "replays #{label} bit for bit at the same buffer size and within 1e-4 at others" do
       lines = {
         0 => [
           'bpm 165',
           'knob :cut, 16000, range: 200..16000, curve: :exp',
-          "track(:t#{lead ? ", #{lead}" : ''}) { |c| (c.tone.ramp * c.amp_env(0.05, 0, 1, 0.1)).filter(:lowpass, cutoff: knob(:cut), quality: 0.9) * 0.3 }",
-          'scene :a, t: seq(A2, E3).n8.loop, cut: 16000',
+          "track(:t#{lead ? ", #{lead}" : ''}) { |c| c.synth(voices: 10) { |v| v.hz.unison(3, detune: 0.12) { |p, _i| p.saw } * v.env(0.6, 0.5, 0.8, 1.2, gm: false) * 0.25 }.filter(:lowpass, cutoff: knob(:cut), quality: 0.9) * 0.3 }",
+          # (align: :launch: a lead launched now counts the clip from
+          # before the first sample)
+          'scene :a, t: seq(A2.n2.d, E3.n4).loop(align: :launch), cut: 16000',
           "scene :b, t: seq(A2, C3).n8.loop, #{b_knob}",
           "flow { a 1; #{b_section || 'b 2'} }",
         ],
       }
       live, t = perform_lines(lines, buffers: 200)
-      expect(live.abs.max).to be > 0.1
+      expect(live.abs.max).to be > 0.02
 
-      r = t.replay
+      # Through the saved script (a lead's launch saves [landing, time])
+      path = tmp_path('take.rb')
+      expect { t.save(path) }.to output(/Saved/).to_stdout
+      expect(File.read(path)).to match(/r\.line 0r, \[.*\[0r, -\d+\/\d+r\]/) if lead
+      load path
+      r = MB::Sound::Take::Replay.last
       [[800], [367, 368]].each do |sizes|
         MB::Sound.seed(5)
         data = replay(r, sizes)
         expect(data.length).to be >= live.length
         diff = (data[0...live.length] - live).abs.max
-        expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+        # (Tones accumulate their phase per buffer; see Take::Replay)
+        expect(diff).to be <= (sizes == [800] ? 0 : 1e-4), "max difference #{diff} at buffer sizes #{sizes}"
       end
     end
   end

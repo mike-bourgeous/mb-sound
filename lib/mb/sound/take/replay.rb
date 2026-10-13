@@ -60,10 +60,13 @@ module MB
         end
 
         # Adds a console line typed at +issued+ (whole notes) whose changes
-        # landed at +lands+, after +epoch+ seeks had landed (the line runs in
-        # that pass over the timeline; see Session#epoch).
+        # landed at +lands+ (each a position, or [position, time] for a
+        # change made for a time already past, e.g. a lead: track's
+        # launch), after +epoch+ seeks had landed (the line runs in that
+        # pass over the timeline; see Session#epoch).
         def line(issued, lands, code, epoch: 0)
-          @lines << Line.new(issued: issued.to_r, lands: lands.map(&:to_r), code: code, epoch: epoch)
+          lands = lands.map { |t| t.is_a?(Array) ? t.map(&:to_r) : t.to_r }
+          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch)
           self
         end
 
@@ -99,7 +102,7 @@ module MB
           session.replay_midi!(@base_epoch)
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           @lines.each_with_index do |l, i|
-            eval_at = [l.issued, *l.lands].min
+            eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, exact: true) do
               run_line(session, binding, l, i)
             end
