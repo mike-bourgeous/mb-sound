@@ -1,0 +1,591 @@
+module MB
+  module Sound
+    # A sound to play in a sampler (see design/notes/sampler.md): audio in
+    # memory (one Numo::SFloat per channel at #sample_rate) with a #root
+    # note, an optional loop, and the region of the audio it plays.  Samples
+    # are values: every method returns a new Sample, and the views (#slices,
+    # #at, #rev, #trim, #looped, #fade, #gain, #transpose) share the audio
+    # and its band-limited playback tables, so cutting a break into slices
+    # copies nothing.  Edits that change the sound (#bits, #lofi, #stretch,
+    # #mono) make new audio from the region.
+    #
+    # Positions and lengths: Integers are samples, other numbers seconds,
+    # and Lengths (`250.ms`, `96.samples`) or Durations (`7.n16`, counted at
+    # the sample's #bpm when it has one, e.g. from #bounce, else the session
+    # tempo) work too.
+    #
+    #     kick = Sample['sounds/kick.flac']                   # a file (root C4)
+    #     pno  = Sample['piano_c4.flac', root: C4, loop: 0.5..1.2]
+    #     rec  = bounce(2.bars, bpm: 138.75) { tr808(grid(16, kick: 'X...x...', snare: '....X...')) }
+    #     brk  = rec.slices(16)                                # 16 equal slices (a Sample::Slices)
+    #     rec.at(7.n16)                                        # play from the 8th sixteenth (tracker 9xx)
+    #     rec.rev.bits(12)                                     # backwards, 12 bits
+    #     synth(midi) { |v| pno.play(v) * v.env(0.002, 0.3, 0.8, 0.4) }
+    class Sample
+      # Loop modes: :one_shot plays to the end whatever the gate does (and
+      # keeps a synth voice busy until then), :no_loop plays to the end or
+      # until the voice's envelope releases, :forward loops while it plays,
+      # :ping_pong loops back and forth, :release loops while the note is
+      # held and then plays on to the end.
+      LOOP_MODES = %i[no_loop one_shot forward ping_pong release].freeze
+
+      # The audio data shared by a Sample and its views: the channels and the
+      # playback tables built from them.
+      class Audio
+        attr_reader :channels, :sample_rate
+
+        def initialize(channels, sample_rate)
+          @channels = channels.map { |c| Numo::SFloat.cast(c).freeze }.freeze
+          raise ArgumentError, 'A sample needs at least one channel' if @channels.empty?
+          raise ArgumentError, 'Sample channels must be 1D' unless @channels.all? { |c| c.ndim == 1 }
+          raise ArgumentError, 'Sample channels must be the same length' unless @channels.map(&:length).uniq.length == 1
+          raise ArgumentError, 'A sample needs at least one sample of audio' if @channels[0].length < 1
+
+          @sample_rate = sample_rate.to_f
+          @tables = {}
+          @mutex = Mutex.new
+        end
+
+        def length
+          @channels[0].length
+        end
+
+        # The sample-mode Wavetable (no loop; the sampler loops) for channel
+        # +c+ with level spacing +mips+, built on first use and kept.
+        def table(c, mips = :default)
+          key = [c % @channels.length, mips]
+          @mutex.synchronize {
+            @tables[key] ||= Wavetable.from_samples(
+              @channels[key[0]], mode: :sample, root: 261.6255653005986, mips: mips, sample_rate: @sample_rate,
+              name: 'sample'
+            )
+          }
+        end
+      end
+
+      class << self
+        # A Sample from +source+: a Sample (itself, or with +options+
+        # changed), a String or Pathname (a sound file, see .from_file), a
+        # Numo::NArray (1D: one channel; 2D: a row per channel), an Array of
+        # NArrays (channels) or of numbers, or a sample-mode Wavetable.
+        def [](source, **options)
+          case source
+          when Sample then options.empty? ? source : source.with(**options)
+          when String, Pathname then from_file(source, **options)
+          when Wavetable then from_wavetable(source, **options)
+          else new(source, **options)
+          end
+        end
+
+        # Reads a sound file (any format ffmpeg reads, resampled to 48 kHz).
+        # Files saved by #save keep their settings (tags); +options+
+        # override them.  In graph documents file names are relative to the
+        # document (GraphIO::FileGuard).
+        def from_file(path, **options)
+          path = path.to_s
+          tags = {}
+          channels = MB::Sound.read(path, metadata_out: tags)
+          info = saved_tags(tags)
+          scale = info.delete(:scale)
+          channels = channels.map { |c| c * scale } if scale
+          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(path) : nil, **info.merge(options))
+        end
+
+        # A Sample of a sample-mode Wavetable's sound, root, and loop.
+        def from_wavetable(table, **options)
+          raise ArgumentError, 'Only sample-mode wavetables hold samples' unless table.mode == :sample
+          root = MB::Sound.tuning.number_of(table.root)
+          new(table.frames, root: root, loop: table.loop, sample_rate: table.sample_rate, name: table.name, **options)
+        end
+
+        # The settings read back from tags written by #save.
+        def saved_tags(tags)
+          t = tags.each_with_object({}) { |(k, v), h|
+            k = k.to_s.downcase
+            h[k.delete_prefix(TAG_PREFIX).to_sym] = v if k.start_with?(TAG_PREFIX)
+          }
+          return {} if t.empty?
+
+          out = {}
+          out[:root] = Float(t[:root]) if t[:root]
+          out[:loop] = Range.new(Float(t[:loop_start]), Float(t[:loop_end]), true) if t[:loop_start] && t[:loop_end]
+          out[:loop_mode] = t[:loop_mode].to_sym if t[:loop_mode]
+          out[:start] = Integer(t[:start]) if t[:start]
+          out[:stop] = Integer(t[:stop]) if t[:stop]
+          out[:reverse] = t[:reverse] == 'true' if t[:reverse]
+          out[:fade_in] = Float(t[:fade_in]) if t[:fade_in]
+          out[:fade_out] = Float(t[:fade_out]) if t[:fade_out]
+          out[:tune] = Float(t[:tune]) if t[:tune]
+          out[:level] = Float(t[:level]) if t[:level]
+          out[:bpm] = Float(t[:bpm]) if t[:bpm]
+          out[:scale] = Float(t[:scale]) if t[:scale]
+          out
+        end
+      end
+
+      # The prefix of the tags #save writes.
+      TAG_PREFIX = 'mb_sample_'
+
+      # The audio this sample plays a region of (a Sample::Audio).
+      attr_reader :audio
+
+      # The region of the audio, in source samples (#start inclusive, #stop
+      # exclusive).
+      attr_reader :start, :stop
+
+      # The note number (Float) at which the sample plays at its own speed.
+      attr_reader :root
+
+      # The loop as [start, end] source samples (end exclusive), or nil.
+      attr_reader :loop_points
+
+      # See LOOP_MODES.
+      attr_reader :loop_mode
+
+      # Fade lengths at the region's start and end (source samples), applied
+      # while playing (slices fade out over 2 ms so cuts don't click).
+      attr_reader :fade_in, :fade_out
+
+      # Semitones added to the pitch, and the linear gain.
+      attr_reader :tune, :level
+
+      # The tempo the sample was recorded at (BPM; #bounce sets it), for
+      # Durations; nil if unknown.
+      attr_reader :bpm
+
+      # A name for listings.
+      attr_reader :name
+
+      # How this sample was made from another: [parent, method, args,
+      # kwargs], or nil for a sample made from audio.
+      attr_reader :lineage
+
+      # Creates a Sample from +data+ (see .[]) at +sample_rate+ (48 kHz by
+      # default).  +root+ is a Note, note number, or Pitch (C4 by default);
+      # +loop+ a Range of positions (see the class description) or nil;
+      # +loop_mode+ one of LOOP_MODES (:forward with a loop, else
+      # :one_shot).
+      def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
+                     bpm: nil, name: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil)
+        @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
+        @start = Integer(start || 0)
+        @stop = Integer(stop || @audio.length)
+        unless @start >= 0 && @stop <= @audio.length && @stop > @start
+          raise ArgumentError, "A sample's region must lie inside its audio and not be empty (got #{@start}...#{@stop} of #{@audio.length})"
+        end
+
+        @root = Sample.note_number(root)
+        @bpm = bpm&.to_f
+        @loop_points = loop.nil? ? nil : Sample.loop_points(loop, self)
+        @loop_mode = (loop_mode || (@loop_points ? :forward : :one_shot)).to_sym
+        raise ArgumentError, "Unknown loop mode #{@loop_mode.inspect} (#{LOOP_MODES.join(', ')})" unless LOOP_MODES.include?(@loop_mode)
+        if [:forward, :ping_pong, :release].include?(@loop_mode) && @loop_points.nil?
+          raise ArgumentError, "Loop mode #{@loop_mode.inspect} needs a loop (looped(range, mode: #{@loop_mode.inspect}))"
+        end
+
+        @reversed = !!reverse
+        @fade_in = fade_in.to_f
+        @fade_out = fade_out.to_f
+        @tune = tune.to_f
+        @level = level.to_f
+        @name = name
+        @lineage = lineage
+        @file = file
+        freeze
+      end
+
+      # The channels of +data+ as an Array of 1D arrays.
+      def self.channels_of(data)
+        case data
+        when Numo::NArray
+          case data.ndim
+          when 1 then [data]
+          when 2 then Array.new(data.shape[0]) { |c| data[c, true] }
+          else raise ArgumentError, 'Sample data must be 1D (mono) or 2D (a row per channel)'
+          end
+        when Array
+          if data.all? { |d| d.is_a?(Numo::NArray) }
+            data
+          elsif data.all?(Numeric)
+            [Numo::SFloat.cast(data)]
+          else
+            raise ArgumentError, 'Give sample data as an NArray, an Array of NArrays (channels), or an Array of numbers'
+          end
+        else
+          raise ArgumentError, "Cannot make a sample from #{data.class} (give a file name, NArray, Array, or Wavetable)"
+        end
+      end
+
+      # The note number of +root+ (a Note, Pitch, or number).
+      def self.note_number(root)
+        case root
+        when Note then root.detune == 0 ? root.number.to_f : root.detuned_number.to_f
+        when Pitch then MB::Sound.tuning.number_of(root.frequency).to_f
+        when Numeric then root.to_f
+        else raise ArgumentError, "A sample's root is a Note, Pitch, or note number (got #{root.inspect})"
+        end
+      end
+
+      # Loop points [start, end] (absolute source samples) for +range+
+      # (positions relative to the region of +sample+; Integers samples,
+      # Floats seconds, Lengths) or an Array of absolute points.
+      def self.loop_points(range, sample)
+        return range.map(&:to_f).freeze if range.is_a?(Array) && range.length == 2
+        raise ArgumentError, "A loop is a Range of positions (got #{range.inspect})" unless range.is_a?(Range)
+
+        a = range.begin.nil? ? sample.start.to_f : sample.start + sample.position(range.begin)
+        b = range.end.nil? ? sample.stop.to_f : sample.start + sample.position(range.end) + (range.exclude_end? || range.end.nil? ? 0 : 1)
+        raise ArgumentError, "The loop must be inside the sample and not empty (got #{range.inspect})" unless a >= sample.start && b <= sample.stop && b > a
+        [a.to_f, b.to_f].freeze
+      end
+
+      # +x+ (an Integer of samples, other numbers seconds, a Length, or a
+      # Duration at #bpm) as a number of source samples.
+      def position(x)
+        case x
+        when Integer then x
+        when Numeric then x * sample_rate
+        when Length then Length.samples(x, sample_rate: sample_rate, transport: transport)
+        else raise ArgumentError, "Expected a position (samples as an Integer, seconds, a Length, or a Duration; got #{x.inspect})"
+        end
+      end
+
+      # The Transport Durations are counted at: the sample's #bpm, else the
+      # session's.
+      def transport
+        @bpm ? Sequence::Transport.new(bpm: @bpm) : Sequence.transport
+      end
+
+      def sample_rate
+        @audio.sample_rate
+      end
+
+      # The region's length in samples.
+      def length
+        @stop - @start
+      end
+      alias size length
+
+      # The region's length in seconds.
+      def seconds
+        length / sample_rate
+      end
+      alias duration seconds
+
+      def channel_count
+        @audio.channels.length
+      end
+
+      def mono?
+        channel_count == 1
+      end
+
+      # True if it plays backwards.
+      def reversed?
+        @reversed
+      end
+
+      # True if it has loop points.
+      def looped?
+        !@loop_points.nil?
+      end
+
+      # True if a synth voice stays busy until the sample ends (see
+      # LOOP_MODES).
+      def one_shot?
+        @loop_mode == :one_shot
+      end
+
+      # A copy with +changes+ (any of #initialize's keywords) sharing the
+      # audio.
+      def with(**changes)
+        mode = @loop_mode
+        if changes.key?(:loop) && !changes.key?(:loop_mode)
+          looping = %i[forward ping_pong release]
+          if changes[:loop].nil?
+            mode = :one_shot if looping.include?(mode)
+          elsif !looping.include?(mode)
+            mode = :forward
+          end
+        end
+        kw = {
+          root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
+          reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
+          audio: @audio, lineage: @lineage,
+        }
+        Sample.new(nil, **kw.merge(changes))
+      end
+
+      # The region's audio for channel +c+ in play order (reversed if
+      # #reversed?), scaled by #level, as a new SFloat.
+      def data(c = 0)
+        d = @audio.channels[c % channel_count][@start...@stop]
+        d = d.reverse if @reversed
+        d = d * @level if @level != 1
+        d.dup
+      end
+
+      # The region's audio as an Array of SFloats, one per channel (see
+      # #data).
+      def to_a
+        Array.new(channel_count) { |c| data(c) }
+      end
+
+      # The peak level of the region (all channels, after #level).
+      def peak
+        to_a.map { |d| d.abs.max.to_f }.max
+      end
+
+      # The part of the region from +range+'s begin to its end (positions
+      # relative to the region start; see the class description).  Also
+      # `sample[a...b]` with Integer samples.
+      def trim(range)
+        raise ArgumentError, "Trim takes a Range of positions (got #{range.inspect})" unless range.is_a?(Range)
+        a = range.begin.nil? ? 0 : position(range.begin).round
+        b = range.end.nil? ? length : position(range.end).round + (range.exclude_end? || range.end.nil? ? 0 : 1)
+        a = a.clamp(0, length)
+        b = b.clamp(0, length)
+        raise ArgumentError, "The trimmed sample would be empty (#{range.inspect} of #{length} samples)" unless b > a
+        if @reversed
+          a, b = length - b, length - a
+        end
+        view(:trim, [range], start: @start + a, stop: @start + b, loop: clip_loop(@start + a, @start + b))
+      end
+
+      # Integer ranges trim (see #trim).
+      def [](range)
+        trim(range)
+      end
+
+      # The sample starting +offset+ into its region (a tracker's 9xx sample
+      # offset), e.g. `rec.at(7.n16)`.
+      def at(offset)
+        o = position(offset).round
+        raise ArgumentError, "The offset #{offset.inspect} is past the end of the sample" unless o >= 0 && o < length
+        r = @reversed ? (@start...(@stop - o)) : ((@start + o)...@stop)
+        view(:at, [offset], start: r.begin, stop: r.end, loop: clip_loop(r.begin, r.end))
+      end
+
+      # The sample backwards.  Alias #rev.
+      def reverse
+        view(:reverse, [], reverse: !@reversed)
+      end
+      alias rev reverse
+
+      # The sample looping over +range+ (relative positions; the whole
+      # region if nil) in +mode+ (:forward, :ping_pong, or :release, which
+      # loops while the note is held).
+      def looped(range = nil, mode: :forward)
+        mode = mode.to_sym
+        raise ArgumentError, "Loop modes are :forward, :ping_pong, and :release (got #{mode.inspect})" unless [:forward, :ping_pong, :release].include?(mode)
+        points = Sample.loop_points(range || (0...length), self)
+        args = range ? [range] : []
+        view(:looped, args, { mode: mode }, loop: points, loop_mode: mode)
+      end
+
+      # The sample without a loop, playing to its end whatever the gate
+      # does.
+      def one_shot
+        view(:one_shot, [], loop: nil, loop_mode: :one_shot)
+      end
+
+      # Fades over +in+ at the start and +out+ at the end of the region (in
+      # play order), applied while playing.
+      def fade(in: 0, out: 0)
+        i = binding.local_variable_get(:in)
+        view(:fade, [], { in: i, out: out }.reject { |_, v| v == 0 }, fade_in: position(i).to_f, fade_out: position(out).to_f)
+      end
+
+      # The sample +gain+ times louder (a number or Decibels: `gain(-6.db)`).
+      def gain(gain)
+        view(:gain, [gain], level: @level * gain.to_f)
+      end
+
+      # The sample scaled so its peak is +peak+ (1.0, or e.g. -1.db).
+      def normalize(peak = 1.0)
+        p = self.peak
+        raise ArgumentError, 'Cannot normalize a silent sample' unless p > 0
+        view(:normalize, peak == 1.0 ? [] : [peak], level: @level * peak.to_f / p)
+      end
+
+      # The sample +semitones+ higher (an Interval or a number; added to
+      # #tune).
+      def transpose(semitones)
+        view(:transpose, [semitones], tune: @tune + Interval.semitones(semitones).to_f)
+      end
+
+      # Plays as a voice of a synth: see Sampler::Instrument#play (one
+      # region over every key, tracking the keyboard from #root).
+      #
+      #     synth(midi) { |v| piano.play(v) * v.env(0.002, 0.3, 0.8, 0.4) }
+      def play(source = nil, **options)
+        to_instrument.play(source, **options)
+      end
+
+      # A Sampler::Instrument playing this sample on every key (keytrack 1),
+      # or as given by +region+ options (see Sampler::Instrument#region).
+      def to_instrument(**region)
+        s = self
+        Sampler::Instrument.new { |i| i.region(s, **region) }
+      end
+
+      # A graph node playing the sample once from its start (then ending),
+      # e.g. `play kick.node` or `kick.node.reverb(:room)`.  Alias #to_node.
+      def node(**options)
+        to_instrument(keytrack: 0).node(**options)
+      end
+      alias to_node node
+
+      # Slices of the region (a Sample::Slices): +count+ equal slices, or at
+      # +at+ (an Array of positions from the region start), or at detected
+      # transients with `slices(:onsets)` (see Sample::Onsets; +threshold+
+      # and +min_gap+ tune the detector).  Each slice fades out over +fade+
+      # (2 ms) so cuts don't click.
+      #
+      #     brk = rec.slices(16)
+      #     brk = rec.slices(at: [0, 2.n16, 7.n16, 12.n16])
+      #     brk = rec.slices(:onsets)
+      def slices(count = nil, at: nil, fade: Slices::DEFAULT_FADE, **onsets)
+        Slices.build(self, count, at: at, fade: fade, **onsets)
+      end
+      alias slice slices
+      alias chops slices
+
+      # The transient times (source samples from the region start) found by
+      # Sample::Onsets.
+      def onsets(**options)
+        Onsets.detect(self, **options)
+      end
+
+      # The sample reduced to +bits+ (rounded to 2^(bits-1) steps).
+      def bits(bits)
+        edit(:bits, [bits]) { |d| Lofi.bits(d, bits) }
+      end
+
+      # The sample through a classic sampler's converters (see Sample::Lofi):
+      # a preset (:s950, :sp1200, :mpc60) or +rate+ (Hz), +bits+, and an
+      # output +filter+ (Hz, or nil).
+      def lofi(preset = nil, **options)
+        settings = Lofi.settings(preset, **options)
+        args = preset ? [preset] : []
+        edit(:lofi, args, options) { |d| Lofi.process(d, sample_rate: sample_rate, **settings) }
+      end
+
+      # The sample stretched to +ratio+ times its length at the same pitch,
+      # S950-style cyclic timestretch: cycles of +cycle+ (25 ms) taken from
+      # the input in step and repeated or skipped, with +crossfade+ (0) of
+      # overlap; short cycles buzz at 1 / cycle (metallic), long ones
+      # stutter.
+      def stretch(ratio, cycle: 25.ms, crossfade: 0)
+        c = position(cycle).round
+        x = position(crossfade).round
+        edit(:stretch, [ratio], { cycle: cycle, crossfade: crossfade }.reject { |k, v| k == :cycle ? v == 25.ms : v == 0 }) { |d|
+          Lofi.stretch(d, ratio.to_f, c, x)
+        }
+      end
+
+      # The channels mixed to one.
+      def mono
+        return self if mono?
+        mix = to_a.sum / channel_count
+        edit(:mono, [], {}, channels: [mix])
+      end
+
+      # Saves the whole audio and this sample's settings as tags (see
+      # .from_file) to +path+ (FLAC by default).
+      def save(path, overwrite: false)
+        chans = @audio.channels
+        peak = chans.map { |c| c.abs.max.to_f }.max
+        scale = peak > 1 ? peak : nil
+        chans = chans.map { |c| c / scale } if scale
+        MB::Sound.write(path, chans, sample_rate: sample_rate, overwrite: overwrite, metadata: tags.merge(scale ? { "#{TAG_PREFIX}scale": scale } : {}))
+        path
+      end
+
+      # The tags #save writes.
+      def tags
+        t = {
+          root: @root, start: @start, stop: @stop, loop_mode: @loop_mode, reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out,
+          tune: @tune, level: @level, bpm: @bpm,
+        }
+        t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
+        t.compact.to_h { |k, v| [:"#{TAG_PREFIX}#{k}", v.is_a?(Numeric) || v.is_a?(String) ? v : v.to_s] }
+      end
+
+      # The file this sample was read from without options (graph
+      # documents copy it into bundles), or nil.
+      def file
+        @file
+      end
+
+      # The sample this one was cut or edited from (following #lineage to
+      # the start), or itself.
+      def origin
+        @lineage ? @lineage[0].origin : self
+      end
+
+      def to_s
+        parts = ["#{format('%.3f', seconds)} s"]
+        parts << "#{channel_count} ch" unless mono?
+        parts << "root #{Sample.note_name(@root)}"
+        parts << "loop #{@loop_mode}" if @loop_points
+        parts << 'reversed' if @reversed
+        parts << "#{MB::M.sigfigs(@tune, 3)} st" if @tune != 0
+        "#{@name || 'Sample'} (#{parts.join(', ')})"
+      end
+
+      def inspect
+        "#<#{self.class.name} #{self}>"
+      end
+
+      # A note name for note number +n+ (e.g. C4), or the number.
+      def self.note_name(n)
+        n == n.round ? Note.new(n.round).name : MB::M.sigfigs(n, 5).to_s
+      rescue StandardError
+        n.to_s
+      end
+
+      private
+
+      # A view sharing the audio, remembering +method+ and +args+ for
+      # printing.
+      def view(method, args, kwargs = {}, **changes)
+        with(lineage: [self, method, args, kwargs].freeze, **changes)
+      end
+
+      # A new sample from the region's audio in stored order, edited by the
+      # block (called with each channel's SFloat, returning the new
+      # channel), with the loop and settings kept (loop points scaled with
+      # the length).
+      def edit(method, args, kwargs = {}, channels: nil)
+        src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
+        out = channels || src.map { |d| Numo::SFloat.cast(yield(d)) }
+        len = out[0].length
+        loop = nil
+        if @loop_points
+          k = len.to_f / length
+          a = ((@loop_points[0] - @start) * k).floor
+          b = ((@loop_points[1] - @start) * k).ceil.clamp(a + 1, len)
+          loop = [a.to_f, b.to_f] if a >= 0 && a < len
+        end
+        Sample.new(
+          out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
+          fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name, sample_rate: sample_rate,
+          lineage: [self, method, args, kwargs].freeze
+        )
+      end
+
+      # The loop clipped to a new region (nil if it falls outside).
+      def clip_loop(a, b)
+        return nil unless @loop_points
+        la = MB::M.max(@loop_points[0], a.to_f)
+        lb = MB::M.min(@loop_points[1], b.to_f)
+        lb > la ? [la, lb] : nil
+      end
+    end
+  end
+end
+
+require_relative 'sample/slices'
+require_relative 'sample/onsets'
+require_relative 'sample/lofi'
