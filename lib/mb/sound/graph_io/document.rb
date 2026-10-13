@@ -5,7 +5,7 @@ module MB
   module Sound
     module GraphIO
       # A graph document's header and the objects a load bound: the format
-      # version and metadata (`graph 1, name: ..., saved: ...`), the inputs
+      # version and metadata (`graph 2, name: ..., saved: ...`), the inputs
       # (`inputs :midi`), and the knobs (`param :drive, 1.0, range: ...`).
       # GraphIO.document_of(graph) returns the Document of a loaded graph,
       # and GraphIO.dump reuses it when the graph is saved again.
@@ -158,7 +158,7 @@ module MB
           knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
           graph_knobs, knob_problems = self.graph_knobs
           graph_knobs.each { |name, k| knob_nodes[k] = name.to_s }
-          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: true, knobs: knobs, knob_nodes: knob_nodes, assets: @assets)
+          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: :marked, knobs: knobs, knob_nodes: knob_nodes, assets: @assets)
           body = writer.to_s
           writer.problems.concat(knob_problems)
           graph_knobs.each_key do |name|

@@ -76,6 +76,15 @@ module MB
         root_rng.rand(1 << 62)
       end
 
+      # Returns +seed+: graph documents write seeds drawn when the graph
+      # was built as `seed: drawn_seed(N)` (GraphIO::FORMAT 2), so
+      # GraphIO.load(seeds: :fresh) can redraw them while keeping seeds the
+      # code gave.  Their loader reads the mark itself; this method lets
+      # the same text run as plain Ruby.
+      def drawn_seed(seed)
+        Integer(seed)
+      end
+
       # Runs the block with the root generator restarted from +seed+, then
       # puts the previous root generator back as it was (its draws so far
       # kept), so everything random created in the block (e.g. Tone#rnd)

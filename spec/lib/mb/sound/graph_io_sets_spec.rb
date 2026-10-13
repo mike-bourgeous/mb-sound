@@ -90,7 +90,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     within(s) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
     text = io.dump(s.arrangement, name: 'demo')
     expect(text).to start_with('# mb-sound set document')
-    expect(text).to include('graph 1, name: "demo", kind: :set')
+    expect(text).to include('graph 2, name: "demo", kind: :set')
     expect(text).to include(<<~RUBY)
       knob :cut, 900.0, range: 100.0..8000.0, curve: :exp, unit: "Hz"
 
@@ -112,7 +112,7 @@ RSpec.describe('set documents', :aggregate_failures) do
       track(:lead, lead: 0.5.attack) { |c|
     RUBY
     expect(text).to include("track :drone, 55.hz.triangle.at(-24.db)\n")
-    expect(text).to match(/track\(:drums, q: 4\) \{ \|kit\|\n  tr808\(kit, accent: 6, seed: \d+\) \* 0.8\n\}/)
+    expect(text).to match(/track\(:drums, q: 4\) \{ \|kit\|\n  tr808\(kit, accent: 6, seed: drawn_seed\(\d+\)\) \* 0.8\n\}/)
     expect(text).to include(<<~RUBY)
       scene :fill, drums: beat, others: :keep
       scene :intro, bass: bass_a, drone: :on, cut: 600
@@ -187,7 +187,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
     text = io.dump(a.arrangement, name: 'demo')
-    expect(text).to match(/tr808\(kit, accent: 6, seed: \d+\)/)
+    expect(text).to match(/tr808\(kit, accent: 6, seed: drawn_seed\(\d+\)\)/)
 
     build = ->(s, **opts) {
       io.load(text, session: s, **opts)

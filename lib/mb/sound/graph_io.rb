@@ -9,7 +9,7 @@ module MB
     # header:
     #
     #     # mb-sound graph document: ...
-    #     graph 1, name: "dark_hall", kind: :effect, saved: "2026-10-11T14:02:11Z", mb_sound: "0.12.0"
+    #     graph 2, name: "dark_hall", kind: :effect, saved: "2026-10-11T14:02:11Z", mb_sound: "0.12.0"
     #     inputs :input
     #     param :mix, 0.4, range: 0.0..1.0
     #
@@ -33,8 +33,12 @@ module MB
     # input: mic, mix: 0.6`, `presets`, `ruby node` (to_ruby).
     module GraphIO
       # The document format version written by GraphIO.dump; documents of
-      # newer versions don't load.
-      FORMAT = 1
+      # newer versions don't load.  Format 2 (2026-10-13) marks seeds drawn
+      # when the graph was built as `seed: drawn_seed(N)`; seeds: :fresh
+      # redraws only those, keeping seeds the code gave (in format 1
+      # documents, and in text without a header, every seed counts as
+      # drawn).
+      FORMAT = 2
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'
@@ -106,11 +110,15 @@ module MB
         # A set document (kind: :set, see SetWriter) loads into +session+
         # (the current one by default) and returns its Document.
         #
-        # +seeds: :fresh+ leaves out every `seed:` the document gives, so
-        # noise, random phases, and chance draw new numbers (from the root
-        # random generator) instead of the saved ones; a set's patches then
-        # draw anew each time a scene builds them, like the set they were
-        # saved from.  The default, :saved, plays the same every time.
+        # +seeds: :fresh+ leaves out every seed the save drew
+        # (`seed: drawn_seed(N)`), so noise, random phases, and chance draw
+        # new numbers (from the root random generator) instead of the saved
+        # ones; a set's patches then draw anew each time a scene builds
+        # them, like the set they were saved from.  Seeds the code gave
+        # (e.g. `chance(0.5, seed: 7)`) stay.  Format 1 documents and text
+        # without a header don't mark drawn seeds, so :fresh leaves out
+        # every `seed:` they give.  The default, :saved, plays the same
+        # every time.
         def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
           text, path = read_source(source)
           loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session, seeds: seeds)
@@ -402,7 +410,7 @@ module MB
       # doc.form`, or `go :intro`).
       #
       # +seeds: :fresh+ draws new random seeds instead of the saved ones
-      # (see GraphIO.load).
+      # (see GraphIO.load; seeds the code gave stay).
       def preset(name, trust: nil, session: nil, seeds: :saved, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path

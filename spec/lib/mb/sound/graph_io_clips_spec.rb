@@ -94,6 +94,79 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(render(graph), render(loaded))).to eq(0)
   end
 
+  describe 'seeds: :fresh' do
+    # A clip with a pinned seed, one that draws its seed, and a noise tone
+    # that draws one
+    let(:doc) {
+      MB::Sound.seed(1)
+      g = MB::Sound.instance_exec {
+        (melody(scale(:minor, :a), 8, seed: 3).named(:pinned) | melody(scale(:minor, :a), 8).named(:drawn)).loop.tone + noise
+      }
+      io.dump(g, name: 'seeds')
+    }
+
+    # The seed: values the reloaded graph prints, in order
+    def seeds_of(graph)
+      graph.to_ruby(seeds: true).scan(/seed: (\d+)/).flatten.map(&:to_i)
+    end
+
+    it 'marks drawn seeds and leaves seeds the code gave as they were written' do
+      expect(doc).to start_with("# mb-sound graph document").and include("graph #{io::FORMAT},")
+      expect(io::FORMAT).to eq(2)
+      expect(doc).to include('melody(scale(:minor, A4), 8, seed: 3).named(:pinned)')
+      expect(doc).to match(/melody\(scale\(:minor, A4\), 8, seed: drawn_seed\(\d+\)\)\.named\(:drawn\)/)
+      expect(doc).to match(/noise\(seed: drawn_seed\(\d+\)\)/)
+    end
+
+    it 'redraws only the drawn seeds, keeping a pinned clip seed' do
+      saved = seeds_of(io.load(doc))
+      expect(saved.length).to eq(3)
+      expect(saved).to include(3)
+
+      MB::Sound.seed(10)
+      a = seeds_of(io.load(doc, seeds: :fresh))
+      b = seeds_of(io.load(doc, seeds: :fresh))
+      [a, b].each do |fresh|
+        expect(fresh.length).to eq(3)
+        expect(fresh).to include(3)
+        expect(fresh - [3]).not_to include(*(saved - [3]))
+      end
+      expect(a - [3]).not_to eq(b - [3])
+    end
+
+    it 'keeps every seed with seeds: :saved, also after saving the loaded graph again' do
+      MB::Sound.seed(10)
+      loaded = io.load(doc)
+      expect(io.load(doc).then { |g| seeds_of(g) }).to eq(seeds_of(loaded))
+      expect(RecipeHelpers.max_diff(render(io.load(doc), buffers: 8), render(loaded, buffers: 8))).to eq(0)
+      # Drawn seeds stay marked as drawn through a load and a save
+      expect(io.dump(loaded, name: 'seeds').sub(/saved: "[^"]*"/, '')).to eq(doc.sub(/saved: "[^"]*"/, ''))
+    end
+
+    it 'redraws every seed of documents that don\'t mark them (format 1, or text without a header)' do
+      legacy = doc.gsub(/drawn_seed\((\d+)\)/, '\\1').sub("graph #{io::FORMAT},", 'graph 1,')
+      saved = seeds_of(io.load(legacy))
+      expect(saved).to include(3)
+      fresh = seeds_of(io.load(legacy, seeds: :fresh))
+      expect(fresh.length).to eq(3)
+      expect(fresh & saved).to eq([])
+
+      bare = doc.lines.drop_while { |l| !l.start_with?('graph') }.drop(1).join.gsub(/drawn_seed\((\d+)\)/, '\\1')
+      expect(seeds_of(io.load(bare, seeds: :fresh)) & saved).to eq([])
+    end
+
+    it 'runs as plain Ruby too (drawn_seed returns its seed)' do
+      expect(MB::Sound.drawn_seed(42)).to eq(42)
+    end
+
+    it 'takes drawn_seed only as a seed: value' do
+      expect { io.load("graph 2
+220.hz.ramp.at(drawn_seed(3))") }.to raise_error(io::LoadError, /drawn_seed\(n\) goes only in seed:/)
+      expect { io.load("graph 2
+noise(seed: drawn_seed(1.5))") }.to raise_error(io::LoadError, /drawn_seed takes an Integer/)
+    end
+  end
+
   it "can't save a clip without a recipe that varies per cycle" do
     c = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8
     varied = MB::Sound::Sequence::Clip.new(c.events, length: c.length, loop: true, variations: [MB::Sound::Sequence::Clip::Variation.new(name: 'mine', block: ->(ev, _, _) { ev })])
