@@ -87,11 +87,15 @@ module MB
           entries = nil
           @session.command("disarm #{names.map(&:inspect).join(', ')}") {
             before = undo_state
+            # At Session#now, like the :disarm change: a scheduled block's
+            # time, not when the scheduler runs it (up to Session#lookahead
+            # earlier, which cut the end of the monitored phrase; the looper persona, 2026-10-13)
+            time = @session.now
             entries = names.map { |n|
               mon = Recording.monitor_name(n)
-              @session.remove(mon, fade: @session.declick_bars) if @session.playing_after_queue?(mon)
+              @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
               @mutex.synchronize { (@armed ||= {}).delete(n) }
-              @session.change(:disarm, n, @session.now) { |_t| }
+              @session.change(:disarm, n, time) { |_t| }
             }
             @session.note_undo_extra(self, before, undo_state)
           }
@@ -219,7 +223,9 @@ module MB
         # what +hub+ saw from +from+ for +length+ (both nil for the last
         # phrase, found when it lands).  Returns the :capture Change.
         def capture_into(tr, hub, close:, length:, from:, quantize:, humanize:, channel:, sustain:)
-          placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true).named(:"#{tr.name}_rec")
+          # (performed, like the clip it stands for, so a drum kit built for it
+          # plays any recorded note at live velocities; see TR808.kit)
+          placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true, performed: true).named(:"#{tr.name}_rec")
           set_track(tr, placeholder, close, fade: nil)
 
           data = { length: length || :phrase, from: from && @session.stamp(from) }.compact

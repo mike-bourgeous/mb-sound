@@ -18,7 +18,10 @@ module MB
       # sounds ends the earlier note there.
       #
       # Event starts are exact Rationals: positions of the frames the
-      # events landed on, less the window's start.
+      # events landed on, modulo the length for a loop (so a loop recorded
+      # from bar 2 of a 2-bar grid starts with the second bar's notes and
+      # plays in phase), less the window's start otherwise.  The clip is
+      # Clip#performed? (its velocities are as played).
       module Capture
         # How early (whole notes) a note may start before the window and
         # still count as its downbeat: a 64th note (31 ms at 120 BPM).
@@ -81,9 +84,14 @@ module MB
           held.keys.each { |k| finish.call(k, stop) }
 
           seq_events = notes.sort_by { |p, _, n, _| [p, n] }.map { |p, len, note, velocity|
-            Sequence::Event.new(start: (p - from) % length, length: MB::M.max(len, 0r), value: note, velocity: velocity)
+            # A loop's starts are timeline phases (pos mod length), so it
+            # plays in phase with the timeline from where it closes even
+            # if the window didn't start on a multiple of its length (a
+            # 2-bar loop recorded from bar 2 played its bars swapped
+            # before, 2026-10-13); else offsets into the window
+            Sequence::Event.new(start: (loop ? p : p - from) % length, length: MB::M.max(len, 0r), value: note, velocity: velocity)
           }
-          Sequence::Clip.new(seq_events, length: length, loop: loop)
+          Sequence::Clip.new(seq_events, length: length, loop: loop, performed: true)
         end
       end
     end

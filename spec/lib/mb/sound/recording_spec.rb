@@ -125,6 +125,66 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'drum kits' do
+    # Hits on a stand-in drum pad: [note, seconds, velocity].
+    def pads(*hits)
+      events = hits.flat_map { |n, on, vel| [ev.parse([0x99, n, vel], time: on.to_r), ev.parse([0x89, n, 0], time: on.to_r + 0.1r)] }
+      MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    end
+
+    def peak_db(data)
+      20 * Math.log10(data.abs.max)
+    end
+
+    it 'monitors and records a tr808 track, the loop playing at the level it was played' do
+      s = new_session
+      s.midi_in.input = pads([36, 2r, 100], [38, 3r, 60])
+      MB::Sound::Session.with_context(session: s) { MB::Sound.track(:beat, q: 1) { |c| MB::Sound.tr808(c) } }
+      d = perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :beat', 'rec 2'] }, 96000 * 6)
+
+      clip = s.arrangement.captures[:beat_1]
+      expect(clip.performed?).to eq(true)
+      # (recorded from bar 2: timeline phases, so it plays in phase from bar 4)
+      expect(clip.events.map { |e| [e.start, e.value] }).to eq([[1r, 36], [3/2r, 38]])
+
+      # Bar 2 (frame 96000) on the monitor, the same hits from bar 4 on the
+      # loop (and bar 6): the same curve, the same level
+      live_kick, loop_kick = [96000, 288000].map { |f| d[f...(f + 48000)] }
+      live_snare, loop_snare = [144000, 336000].map { |f| d[f...(f + 48000)] }
+      expect(peak_db(live_kick)).to be > -20
+      expect(peak_db(loop_kick)).to be_within(0.01).of(peak_db(live_kick))
+      rms_db = ->(x) { 10 * Math.log10((x.cast_to(Numo::DFloat) ** 2).mean) }
+      expect(rms_db.(loop_snare)).to be_within(0.5).of(rms_db.(live_snare)) # (the snare's noise differs)
+      expect(peak_db(d[480000...(480000 + 48000)])).to be_within(0.01).of(peak_db(live_kick))
+      expect(d[240000...288000].abs.max).to be < 1e-3 # late in bar 3: nothing played, the loop not yet in
+    end
+
+    it 'captures into a tr808 track playing a step clip, building the kit again for the recorded voices' do
+      s = new_session
+      s.midi_in.input = pads([42, 2r, 100], [42, 2.5r, 100])
+      kicks = MB::Sound.seq(36).n4.loop
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:beat, q: 1) { |c| MB::Sound.tr808(c) }
+        MB::Sound.scene(:a, beat: kicks)
+        MB::Sound.go(:a)
+      end
+      perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 125 => ['capture :beat, 1'] }, 96000 * 4)
+      graph = s.instance_variable_get(:@players).values.find { |p| p.name == :beat && p.current? }.input
+      kit = MB::Sound::GraphNode.graph(graph).grep(MB::Sound::Drums::Kit).first
+      expect(kit.names).to include(:closed_hat)
+      expect(kit.plays_clip?(s.arrangement.captures[:beat_1])).to eq(true)
+    end
+
+    it 'gives a short error for a patch that cannot play live input' do
+      s = new_session
+      s.midi_in.input = pads
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:odd, q: 1) { |c| c.ghost_chords(1) }
+        expect { MB::Sound.arm(:odd) }.to output(/can't monitor live MIDI \(NoMethodError: ghost_chords isn't available on live MIDI input.{0,200}\); recording still works\n\z/).to_stderr
+      end
+    end
+  end
+
   describe 'capture' do
     it 'captures the last phrase into the track at its next launch point, playing on in phase' do
       s = new_session

@@ -27,6 +27,21 @@ RSpec.describe(MB::Sound::MIDI::Capture) do
     expect(clip.length).to eq(1r)
     expect(summary(clip)).to eq([[1/7r, 2/7r, 60, 100 / 127.0], [1/2r, 1/4r, 64, 1.0]])
     expect(clip.events.map(&:start)).to all(be_a(Rational))
+    expect(clip.performed?).to eq(true)
+  end
+
+  it "keeps a loop in phase with the timeline when the window doesn't start on a multiple of its length" do
+    g = MB::Sound::MIDI::Capture::GRACE
+    events = [
+      [1r, on(36)], [1 + 1/8r, off(36)],             # bar 2 (the window's first bar)
+      [2 + 1/2r, on(38)], [2 + 5/8r, off(38)],       # bar 3
+      [3 - g / 2, on(40)], [3 + 1/8r, off(40)],      # the next window's early downbeat: out
+    ]
+    clip = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2)
+    expect(summary(clip).map { |s, l, n, _| [s, l, n] }).to eq([[1/2r, 1/8r, 38], [1r, 1/8r, 36]])
+    # Not a loop: offsets into the window
+    once = MB::Sound::MIDI::Capture.clip(events, from: 1, length: 2, loop: false)
+    expect(summary(once).map { |s, _, n, _| [s, n] }).to eq([[0r, 36], [3/2r, 38]])
   end
 
   it 'wraps a downbeat played a little early to the end of the loop, and leaves the next downbeat out' do

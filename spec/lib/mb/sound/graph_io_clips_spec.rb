@@ -73,7 +73,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
     end
   end
 
-  it 'saves a captured clip as its events, with its name' do
+  it "saves a captured clip as its events, with its name, performed (its velocities as played)" do
     e = ->(pos, type, note, vel) { [pos, MB::Sound::MIDI::Event.new(type: type, channel: 0, note: note, velocity: vel)] }
     clip = MB::Sound::MIDI::Capture.clip([
       e.(0r, :note_on, 60, 100 / 127.0), e.(1/8r, :note_off, 60, 0.0),
@@ -87,11 +87,12 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
         [0r, 1r/8, 60, 0.7874015748031497],
         [1r/4, 1r/8, 67, 0.5],
         [1r/2, 31r/64, 64, 0.5],
-        length: 1r, loop: true
+        length: 1r, loop: true, performed: true
       ).named(:lead_1).tone.ramp
     RUBY
     loaded = io.load(doc)
     expect(RecipeHelpers.max_diff(render(graph), render(loaded))).to eq(0)
+    expect(MB::Sound::GraphNode.graph(loaded).grep(MB::Sound::MIDI::ClipSource).map { |s| s.clip.performed? }).to eq([true])
   end
 
   describe 'seeds: :fresh' do
