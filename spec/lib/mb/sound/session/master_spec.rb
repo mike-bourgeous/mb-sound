@@ -23,6 +23,58 @@ RSpec.describe(MB::Sound::Session::Master) do
     expect(session.master_active?).to eq(false)
   end
 
+  describe 'master gain placement' do
+    let(:gained) { MB::Sound::Session.new(master_gain: 2.db, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+
+    after { gained.close }
+
+    def run_gained(frames)
+      Array.new(frames / 800) { gained.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+    end
+
+    it 'applies the gain before the chain by default, so a clipper keeps its ceiling' do
+      expect(gained.master_gain_post?).to eq(false)
+      gained.add([0.9.constant, -0.9.constant])
+      gained.master { |mix| mix.aclip(-0.95, 0.95) }
+      out = run_gained(800)
+      expect(out[0][0]).to be_within(1e-6).of(0.95)
+      expect(out[1][0]).to be_within(1e-6).of(-0.95)
+    end
+
+    it 'applies the gain after the chain with master_gain_post' do
+      gained.master_gain_post = true
+      gained.add([0.9.constant, -0.9.constant])
+      gained.master { |mix| mix.aclip(-0.95, 0.95) }
+      out = run_gained(800)
+      expect(out[0][0]).to be_within(1e-6).of(0.9 * 2.db)
+      expect(out[1][0]).to be_within(1e-6).of(-0.9 * 2.db)
+    end
+
+    it 'gives the same samples either way without a master chain' do
+      a = MB::Sound::Session.new(master_gain: -7.db, master_gain_post: true, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), buffer_size: 800, realtime: false, raise_errors: true)
+      b = MB::Sound::Session.new(master_gain: -7.db, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), buffer_size: 800, realtime: false, raise_errors: true)
+      [a, b].each { |s| s.add([MB::Sound.with_seed(3) { 220.hz.ramp.rnd }, 330.hz.triangle * 0.7]) }
+      5.times { expect(a.process_buffer.map(&:to_a)).to eq(b.process_buffer.map(&:to_a)) }
+    ensure
+      a&.close
+      b&.close
+    end
+
+    it 'rejects anything but true or false' do
+      expect { gained.master_gain_post = 1 }.to raise_error(ArgumentError)
+    end
+
+    it 'sets the placement with master_gain(post:) and keeps it until changed' do
+      MB::Sound.master_gain(2.db, post: true)
+      expect(MB::Sound::Session.current.master_gain_post?).to eq(true)
+      MB::Sound.master_gain(1.db)
+      expect(MB::Sound::Session.current.master_gain_post?).to eq(true)
+      MB::Sound.master_gain(post: false)
+      expect(MB::Sound::Session.current.master_gain_post?).to eq(false)
+      expect(MB::Sound.master_gain).to be_within(1e-9).of(1.db)
+    end
+  end
+
   describe 'blocks' do
     before { session.add([1.constant, 2.constant]) }
 

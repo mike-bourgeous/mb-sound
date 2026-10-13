@@ -238,6 +238,47 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       sizes.first(20).each { |n| expect(a.sample(n).to_a).to eq(b.sample(n).to_a) }
     end
 
+    # A stereo voice: both channels read one envelope (its own region
+    # through a Tee), and their regions are grouped.  When the MIDI file
+    # ends, the envelope's feeder leaves the plan in the middle of a group
+    # run, replacing the second channel's region; that channel used to get
+    # nil (ending the lane mid-release, so the envelope never went idle and
+    # Synth#ended? stayed false: the patches-1 ring-out bug).
+    it 'keeps a member replaced in the middle of a run going (a stereo lane whose envelope stream ends)' do
+      old = MB::Sound::Plan.enabled
+      run = ->(planned) {
+        MB::Sound::Plan.enabled = planned
+        MB::Sound::Plan.lanes = true
+        MB::Sound.seed(0)
+        notes = MB::Sound::Notes.new('spec/test_data/c_major.mid')
+        g = MB::Sound.synth(notes, voices: 1) { |v|
+          s = v.hz.unison(3, detune: 0.3, spread: 0.5) { |p, _| p.saw }
+          s.lp4(2400 * 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8), resonance: 0.25) * v.env(0.004, 0.25, 0.85, 0.06, gm: false)
+        }
+        syn = g.graph.grep(MB::Sound::Synth).first
+        out = []
+        ended_at = nil
+        sizes = PlanSpecHelpers.sizes_for(samples: 48000 * 8)
+        sizes.each_with_index do |n, i|
+          bufs = g.outputs.map { |o| o.sample(n) }
+          break if bufs.any?(&:nil?)
+
+          out << bufs.map(&:to_a)
+          ended_at ||= i if syn.ended?
+        end
+        [out, ended_at]
+      }
+
+      a, a_end = run.(true)
+      b, b_end = run.(false)
+      expect(b_end).not_to be_nil
+      expect(a_end).to eq(b_end)
+      expect(a.length).to eq(b.length)
+      a.each_with_index { |bl, i| expect(bl).to eq(b[i]), "block #{i} differs" }
+    ensure
+      MB::Sound::Plan.enabled = old
+    end
+
     it 'regroups after a rebuild' do
       b = make_bundle(true)
       inst = MB::Sound::Plan.install(b)

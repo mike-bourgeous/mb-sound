@@ -14,7 +14,7 @@ RSpec.describe 'Buffer size invariance' do
     MB::Sound.seed(1)
     node = make.call
     total = (seconds * 48000).round
-    out = Numo::SFloat.zeros(total)
+    out = nil
     n = 0
     i = 0
     while n < total
@@ -22,6 +22,7 @@ RSpec.describe 'Buffer size invariance' do
       b = node.sample(c)
       break if b.nil?
 
+      out ||= b.class.zeros(total)
       out[n...(n + b.length)] = b
       n += c
       i += 1
@@ -164,6 +165,74 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  # A tone whose frequency is a signal keeps a running phase wrapped every
+  # sample (mb_phase.h; fixes-6), so it gives the same samples at any block
+  # size, in every kernel and in plans (fixes-3 measured -138 to -145 dB
+  # differences when each block summed its increments from its start).
+  describe 'tones with a frequency signal' do
+    fm = -> { 220.hz.fm(5.5.hz.lfo.at(12)) }
+    cycle = -> { MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25, 0.125], size: 256) }
+    sound = -> { Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) } }
+    tones = {
+      'naive sine' => -> { fm.().sine },
+      'naive ramp' => -> { fm.().aramp },
+      'phasor' => -> { fm.().phasor },
+      'PolyBLEP saw' => -> { fm.().saw },
+      'PolyBLEP square, pwm' => -> { fm.().square.pwm(0.3) },
+      'BLIT complex ramp' => -> { fm.().complex_ramp },
+      'feedback sine' => -> { fm.().sine.fm_feedback(0.2) },
+      'cycle wavetable' => -> { fm.().wavetable(cycle.()) },
+      'sample wavetable (looped)' => -> { fm.().wavetable(MB::Sound::Wavetable.from_samples(sound.(), mode: :sample, root: 200, loop: 1000...4000)) },
+      'audio-rate FM' => -> { 220.hz.fm(330.hz.at(500)).saw },
+    }
+
+    it 'wraps phases to 0...1, never 1.0, and non-finite phases to 0 (Tone.wrap_phase, the mirror of mb_wrap_phase)' do
+      w = MB::Sound::Tone
+      expect(w.wrap_phase(0.25)).to eq(0.25)
+      expect(w.wrap_phase(1.0)).to eq(0.0)
+      expect(w.wrap_phase(1.75)).to eq(0.75)
+      expect(w.wrap_phase(-0.25)).to eq(0.75)
+      expect(w.wrap_phase(-1e-20)).to eq(0.0) # x - floor(x) rounds to 1.0
+      expect(w.wrap_phase(7.5)).to eq(0.5)
+      expect(w.wrap_phase(-3.25)).to eq(0.75)
+      expect(w.wrap_phase(Float::NAN)).to eq(0.0)
+      expect(w.wrap_phase(-Float::INFINITY)).to eq(0.0)
+    end
+
+    # Steps of more than a cycle per sample take mb_wrap_phase's floor()
+    # path; within a cycle, its compares
+    {
+      'naive sine' => ->(f) { f.tone.sine },
+      'PolyBLEP saw' => ->(f) { f.tone.saw },
+      'BLIT complex ramp' => ->(f) { f.tone.complex_ramp },
+      'cycle wavetable' => ->(f) { f.tone.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
+    }.each do |name, make|
+      it "gives the Ruby mirror's samples for a #{name} with wild frequencies" do
+        tones = [:sample_c, :sample_ruby].map { |m|
+          MB::Sound.seed(5)
+          [m, make.(MB::Sound.noise.at(150_000) + 300.hz.at(400))]
+        }
+        [128, 37, 800].each do |n|
+          a, b = tones.map { |m, t| t.public_send(m, n).dup }
+          expect(b.to_a).to eq(a.to_a)
+        end
+      end
+    end
+
+    [false, true].each do |planned|
+      tones.each do |name, make|
+        it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
+          build = -> {
+            g = make.() * 0.5
+            MB::Sound::Plan.install(g) if planned
+            g
+          }
+          expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
+        end
+      end
+    end
+  end
+
   describe 'Synth idle lane skipping' do
     clip = -> { MB::Sound.seq(MB::Sound::C4.n16, MB::Sound::Rest.n4, MB::Sound::E4.n16, MB::Sound::Rest.n2, MB::Sound::G4.n8.d, MB::Sound::Rest.n4).loop }
     patches = {
@@ -187,11 +256,9 @@ RSpec.describe 'Buffer size invariance' do
             skipped << s
             s
           }
-          # Tones with a frequency signal accumulate their phase per block,
-          # which can move the last bit of a float sample (about -140 dB;
-          # see design/notes/oscillators.md); everything else is exact
-          tol = name == 'noise' ? 0 : -130.db
-          expect_invariant(make, seconds: 3, tolerance: tol)
+          # (Tones with a frequency signal, v.hz, keep a running phase
+          # wrapped every sample since fixes-6, so these are exact too)
+          expect_invariant(make, seconds: 3)
         ensure
           MB::Sound::Plan.lanes = old
         end

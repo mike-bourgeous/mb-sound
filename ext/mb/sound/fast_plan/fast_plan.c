@@ -49,6 +49,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_osc_shapes.h"
+#include "mb_phase.h"
 #include "mb_bl_osc.h"
 #include "mb_clip_shape.h"
 #include "mb_vec_sine.h"
@@ -294,6 +295,10 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 	size_t pmstep = p->step;
 
 	_Bool constant = !freqptr && rndadv == 0;
+	_Bool running = !constant && rndadv == 0; // a frequency signal (see mb_phase.h)
+	if (running) {
+		phi = mb_wrap_phase(phi);
+	}
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -308,7 +313,7 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			steps = inc * i;
 		}
 
-		double complex v = shape_sample(wt, mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
+		double complex v = shape_sample(wt, running ? phi : mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
 		if (complex_out) {
 			((complex float *)out)[i] = v;
 		} else {
@@ -317,8 +322,8 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 
 		if (rndadv != 0) {
 			phi = mb_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
-		} else if (!constant) {
-			steps += inc;
+		} else if (running) {
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
@@ -350,6 +355,9 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 	float x[MB_VEC_CHUNK];
 
 	_Bool constant = !freqptr;
+	if (!constant) {
+		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
+	}
 	double steps = 0;
 	for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
 		size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
@@ -367,12 +375,12 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 				steps = inc * i;
 			}
 
-			double ph = mb_wrap(phi + steps, 1.0);
+			double ph = constant ? mb_wrap(phi + steps, 1.0) : phi;
 			double r = ph + pm;
 			x[k] = mb_vec_reduce(r);
 
 			if (!constant) {
-				steps += inc;
+				phi = mb_wrap_phase(phi + inc);
 			}
 		}
 		mb_vec_sine_shape(out + start, x, m, gf, of);

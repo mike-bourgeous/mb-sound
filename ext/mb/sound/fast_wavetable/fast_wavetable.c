@@ -314,6 +314,9 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 	double len = t.loop_end - t.loop_start;
 
 	_Bool constant = !freqptr;
+	if (!constant) {
+		phi = mb_wrap_phase(phi); // a running phase and position (see mb_phase.h)
+	}
 	double steps = 0, psteps = 0;
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
@@ -326,7 +329,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 			psteps = sp * i;
 		}
 
-		double p = pos + psteps;
+		double p = constant ? pos + psteps : pos;
 		if (t.has_loop && p >= t.loop_end) {
 			p = ls + wt_wrap(p - ls, len);
 		}
@@ -337,8 +340,8 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 		wt_store(out, t.cs, i, re, im, g, off);
 
 		if (!constant) {
-			steps += inc;
-			psteps += sp;
+			phi = mb_wrap_phase(phi + inc);
+			pos = p + sp;
 		}
 	}
 

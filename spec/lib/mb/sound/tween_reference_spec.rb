@@ -29,9 +29,12 @@ RSpec.describe('Tweening reference outputs') do
   # one seed rebuilds the whole unison/swarm; changed random phases accepted).
   # Verified: dropping only that with_seed wrap restores 82da65e6... and
   # 4cac9d2f...; with it, 101635532e470ae6 and 2f97ec1c69d19302.
+  # Re-recorded 2026-10-13 for fixes-6: tones with a frequency signal keep a
+  # running phase wrapped every sample (mb_phase.h); last bits only (max
+  # difference -155 and -161 dB re peak, rms -192 and -198 dB).
   it 'keeps swarms unchanged' do
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('101635532e470ae6')
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('2f97ec1c69d19302')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('245658de1a896ab9')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('d92266a8028ae4a3')
   end
 
   it 'keeps smoothing and envelopes unchanged' do

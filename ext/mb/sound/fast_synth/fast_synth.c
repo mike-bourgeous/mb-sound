@@ -51,6 +51,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_bl_osc.h"
+#include "mb_phase.h"
 
 static ID sym_ramp, sym_square, sym_triangle, sym_sine, sym_parabola;
 
@@ -398,6 +399,9 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	_Bool constant = !freqptr;
+	if (!constant) {
+		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
+	}
 	double steps = 0;
 	double p = 0, inc = 0;
 	for (size_t i = 0; i < length; i++) {
@@ -410,7 +414,7 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 			steps = inc * i;
 		}
 
-		p = mb_wrap(phi + steps, 1.0);
+		p = constant ? mb_wrap(phi + steps, 1.0) : phi;
 		double theta = p * (2.0 * M_PI);
 
 		_Bool continued = primed && (i > 0 || fabs(mb_wrap(prev_p + prev_inc - p + 0.5, 1.0) - 0.5) < 1e-6);
@@ -443,7 +447,7 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 		primed = 1;
 
 		if (!constant) {
-			steps += inc;
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
@@ -1158,6 +1162,9 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 	mb_read_signal_input(&level, length, "Level", &lvl, &lvlptr, &lvlstep);
 
 	_Bool constant = !freqptr;
+	if (!constant) {
+		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
+	}
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -1178,7 +1185,7 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 			steps = inc * i;
 		}
 
-		double ph = mb_wrap(phi + steps, 1.0);
+		double ph = constant ? mb_wrap(phi + steps, 1.0) : phi;
 		double radians = ph * (2.0 * M_PI);
 		double avg = y1 + y2;
 		avg = avg * 0.5;
@@ -1209,7 +1216,7 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 		out[i] = v + off;
 
 		if (!constant) {
-			steps += inc;
+			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 

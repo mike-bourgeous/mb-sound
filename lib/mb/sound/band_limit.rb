@@ -47,17 +47,20 @@ module MB
         increments = freq * advance
 
         if increments.is_a?(Numo::NArray)
-          sums = increments.cumsum
-          steps = Numo::DFloat.zeros(count)
-          steps[1..] = sums[0...-1] if count > 1
+          # A frequency signal: the kernels' running phase (mb_phase.h)
+          phases = Numo::DFloat.zeros(count)
+          ph = Tone.wrap_phase(phi)
+          count.times do |i|
+            phases[i] = ph
+            ph = Tone.wrap_phase(ph + increments[i])
+          end
           incs = increments
         else
           steps = Numo::DFloat.new(count).seq * increments
           incs = Numo::DFloat.new(count).fill(increments)
+          phases = steps + phi
+          phases -= phases.floor
         end
-
-        phases = steps + phi
-        phases -= phases.floor
 
         # A phase within rounding of the wrap is on it (see .snap and
         # bl_snap in fast_synth.c): e.g. at 2000 Hz, 23/24 + 1/24 is just
@@ -462,6 +465,7 @@ module MB
         points = breakpoints(wave_type, w, false, o)
 
         phi = state[0].to_f
+        phi = Tone.wrap_phase(phi) if freqs # a running phase (mb_phase.h)
         prev_e, prev_inc, prev_pm, primed = bl_state
         fresh = primed == 0
         primed = primed == 1
@@ -487,7 +491,7 @@ module MB
           inc = freq * advance
           steps = inc * i unless freqs
 
-          e = wrap(phi + steps)
+          e = freqs ? phi : wrap(phi + steps)
           e = wrap(e + pm) if pm != 0
           snapped = snap(points, e)
           if snapped
@@ -525,7 +529,7 @@ module MB
           prev_pm = pm
           primed = true
 
-          steps += inc if freqs
+          phi = Tone.wrap_phase(phi + inc) if freqs
         end
 
         steps = freq * advance * count unless freqs
@@ -658,6 +662,7 @@ module MB
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         freq = freqs ? freqs[0] : freq.to_f
         phi = state[0].to_f
+        phi = Tone.wrap_phase(phi) if freqs # a running phase (mb_phase.h)
         yre, yim, gre, gim, prev_p, prev_inc, primed = blit_state
         primed = primed != 0
 
@@ -669,7 +674,7 @@ module MB
           inc = freq * advance
           steps = inc * i unless freqs
 
-          p = wrap(phi + steps)
+          p = freqs ? phi : wrap(phi + steps)
           theta = p * (2.0 * Math::PI)
 
           continued = primed && (i > 0 || (wrap(prev_p + prev_inc - p + 0.5) - 0.5).abs < 1e-6)
@@ -700,7 +705,7 @@ module MB
           prev_inc = inc
           primed = true
 
-          steps += inc if freqs
+          phi = Tone.wrap_phase(phi + inc) if freqs
         end
 
         steps = freq * advance * count unless freqs

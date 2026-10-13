@@ -266,7 +266,8 @@ module MB
       about <<~TEXT
         Mute and solo with a 5 ms declick or synced fades (muted players
         sleep); master effects run on the whole mix and swap at launch
-        points.
+        points.  The master gain comes before the master chain (a limiter
+        keeps its ceiling); `master_gain 2.db, post: true` moves it after.
       TEXT
       commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects

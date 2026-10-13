@@ -48,8 +48,11 @@ module MB
         # before it was recorded).
         attr_reader :seconds
 
-        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
+        # +:master_gain_post+ is where the master gain applied (see
+        # Session#master_gain_post?); takes saved before it existed (before
+        # 2026-10-13) don't give it, and played it after the master chain.
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
@@ -91,6 +94,7 @@ module MB
           (@start[:meters] || []).each { |pos, len| t.meter(len, at: pos) }
           t.bpm = @start[:bpm]
           session.master_gain = @start[:master_gain]
+          session.master_gain_post = !!@start[:master_gain_post]
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
           MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
