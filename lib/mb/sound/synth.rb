@@ -367,15 +367,16 @@ module MB
         @skip_idle
       end
 
-      # Aligns the synth's grid (SKIP_GRID: where idle lanes may fall asleep
-      # and lanes are measured for the allocator) with the frames of a
-      # Session whose frame +frame+ is the synth's first sample, so grid
-      # points fall on Session frames that are multiples of SKIP_GRID and
-      # 800-sample Session buffers never need splitting.  Called by Session
-      # when a player starts; does nothing once the synth has been sampled.
-      # Returns self.
+      # Aligns the grid where lanes are measured for the allocator (see
+      # #sample_lanes; SKIP_GRID samples) with the frames of a Session whose
+      # frame +frame+ is the synth's first sample, so its points fall on
+      # Session frames that are multiples of SKIP_GRID and 800-sample
+      # Session buffers never need splitting.  Idle skipping keeps its grid
+      # of the synth's own time (moving it would move where free-running
+      # oscillators pause).  Called by Session when a player starts; does
+      # nothing once the synth has been sampled.  Returns self.
       def align_grid(frame)
-        @skip_position = Integer(frame) % SKIP_GRID unless @grid_started
+        @grid_offset = Integer(frame) % SKIP_GRID unless @grid_started
         self
       end
 
@@ -516,6 +517,7 @@ module MB
         @skip_generation = Array.new(@lanes.length)
         @cell_loud = Array.new(@lanes.length, false)
         @skip_position = 0
+        @grid_offset = 0 # where the measuring grid starts (see #align_grid)
         @zeros = nil
 
         graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
@@ -732,22 +734,24 @@ module MB
       # result, and each lane's Array of channel buffers), for #mix_mono and
       # #mix_channels.
       #
-      # A block crossing a point of the synth's grid (SKIP_GRID) is read in
-      # two pieces split there, so every lane is on the grid point when the
-      # allocator reads the events after it: lanes become free for new
-      # notes by what they measured over whole grid cells, at the same
-      # points at any buffer size (see #record_cells; fixes-7, 2026-10-13:
-      # measured per buffer, a released lane was freed at a different note
-      # at 367/368 than at 800, and the note went to another lane).
+      # A block crossing a point of the synth's measuring grid (SKIP_GRID
+      # samples from its first sample, or aligned with a Session's frames;
+      # see #align_grid) is read in pieces split there, so every lane is on
+      # the grid point when the allocator reads the events after it: lanes
+      # become free for new notes by what they measured over whole grid
+      # cells, at the same points at any buffer size (see #record_cells;
+      # fixes-7, 2026-10-13: measured per buffer, a released lane was freed
+      # at a different note at 367/368 than at 800, and the note went to
+      # another lane).
       def sample_lanes(count)
         @grid_started = true
-        g = SKIP_GRID - @skip_position % SKIP_GRID
+        g = SKIP_GRID - (@skip_position + @grid_offset) % SKIP_GRID
         return sample_lanes_piece(count) if g >= count
 
         joined = (@joined_data ||= Array.new(@lanes.length))
         o = 0
         while o < count
-          n = MB::M.min(SKIP_GRID - @skip_position % SKIP_GRID, count - o)
+          n = MB::M.min(SKIP_GRID - (@skip_position + @grid_offset) % SKIP_GRID, count - o)
           data = sample_lanes_piece(n)
           if o == 0
             return nil if data.nil?
@@ -815,7 +819,7 @@ module MB
           shared&.end_block
         end
         @skip_position += count
-        record_cells if @skip_position % SKIP_GRID == 0
+        record_cells if (@skip_position + @grid_offset) % SKIP_GRID == 0
 
         any ? data : nil
       end
