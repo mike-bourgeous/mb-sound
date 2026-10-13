@@ -178,8 +178,10 @@ module MB
 
           unless bus_acyclic?
             @mutex.synchronize { old ? @routes[name] = old : @routes.delete(name); @bus_order = nil }
+            drop_send_knobs(knobs&.values || [])
             return MB::Sound.live_error(ArgumentError.new("routing #{name.inspect} there would make a loop (a bus can't feed what it reads)"))
           end
+          drop_send_knobs(old.sends.values) if knobs && old
 
           @render_lock.synchronize { apply_strip(nil) } unless @soloed.empty?
           name
@@ -337,6 +339,13 @@ module MB
             @send_knobs << k
           }
           k
+        end
+
+        # Stops advancing send level knobs no longer in use (replaced by
+        # #route).
+        def drop_send_knobs(list)
+          return if list.empty?
+          @render_lock.synchronize { @send_knobs.reject! { |k| list.any? { |o| o.equal?(k) } } }
         end
 
         # A send's level for listings: its value, or what it follows.
@@ -599,11 +608,11 @@ module MB
             d = d[0...len]
             d = d * ramp[0...len] if ramp
             r = offset...(offset + len)
-            m[r] = m[r] + d
-            stem[c][r] = stem[c][r] + d if stem
-            tap[c][r] = tap[c][r] + d if tap
+            m[r].inplace + d
+            stem[c][r].inplace + d if stem
+            tap[c][r].inplace + d if tap
             sends.each do |input, v|
-              input[c][r] = input[c][r] + (v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r])
+              input[c][r].inplace + (v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r])
             end
           end
         end
@@ -674,10 +683,10 @@ module MB
             ramp = ramp_levels(b, :strip_level, :strip_ramp, frame + p0, p1 - p0)
             r = p0...p1
             out.each_with_index do |o, c|
-              o = o * ramp if ramp
-              dest[c][r] = dest[c][r] + o
-              tap[c][r] = tap[c][r] + o if tap
-              stem[c][r] = stem[c][r] + o if stem
+              o.inplace * ramp if ramp
+              dest[c][r].inplace + o
+              tap[c][r].inplace + o if tap
+              stem[c][r].inplace + o if stem
             end
             p0 = p1
           end

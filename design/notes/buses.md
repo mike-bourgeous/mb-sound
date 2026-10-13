@@ -35,6 +35,14 @@ render('x.flac', stems: 'stems/') { ... }             # one stem per bus too
 - **Stems.** A track's stem is its main out (what it plays dry, wherever it goes); a bus's stem is its output.  With every main out on the master and every bus into the master, stems still sum to the mix before the master chain; tracks routed `to:` a bus are in their own stem and in the bus's.
 - **The master gain** applies to the sum of players' main outs and bus outputs (pre-chain by default), as before.
 
+## Measurements
+
+CPU per 800-frame stereo buffer (2026-10-13, Linux desktop, no YJIT, median of 600 after 60 warm-up buffers, two rounds agreeing within 5%; `/tmp/buses-1/bench.rb` in the branch report): 16 constant players 120 us; the same sending to one passthrough bus 209 us (~5.5 us per send: one multiply-add per channel); routed `to:` a passthrough bus 133 us; plus four asleep reverb buses nothing is sent to 101 us (asleep buses cost nothing, and the routed path's in-place adds are a little faster than the plain mix); 16 noise players each with their own `:hall` 1543 us vs sending to one `:hall` bus 544 us (the point of buses); a pad ducked by `duck(:drums, only: :kick)` 253 us vs the same pad ducked by a ghost kick 290 us (the reader replaces a second kick voice).  Worst case per send stays one vector multiply-add per channel per buffer; a bus costs its chain while awake and nothing asleep.
+
+Plans: bus chains are planned regions (installed like players' graphs; their `MixSource` input is the region boundary); readers (`BusTap`) are boundaries for now, so a `duck(:drums)` fuses with its sidechain as a boundary input, as before.
+
+Demo: `bin/songs/tunnel_vision.rb` (buses by default, `--no-buses` for Kez's original): the pad and liquid pluck dry, sending to a `:hall` bus ducked by the kick and an `:echo` bus (the `:space` knob is its send), and the basses ducked by the drums' own kick voice.  Same loudness as the original (-7.5 LUFS); the drop nulls to -44 dB against the ghost-kick version.  Renders and bench set: `/app/tmp/listening/buses-1/`.
+
 ## Later
 
 - Pre-fader sends; sends from buses (buses have only `to:`); latency compensation for buses with lookahead; scene keys for send levels (sends following knobs cover scenes today); saving buses in set documents (graph-io); per-bus gain faders (the block can scale); bus readers in plans (`p.param`).

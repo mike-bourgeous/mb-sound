@@ -194,8 +194,9 @@ module MB::Sound
       bus(:hall) { |sig| sig.reverb(:hall, mix: 1).duck(:drums, only: :kick, amount: -6.db, release: 1.n8) }
       bus(:echo) { |sig| sig.delay(1.n8.dotted, feedback: 0.4) }
       duck = ->(node, amount) { node.duck(:drums, only: :kick, amount: amount, release: 1.n16) }
-      track(:pad, send: { hall: 0.35 }) { |clip| kez_pad_voice(clip, hall: nil) * 0.6 }
-      track(:pluck, send: { echo: :space, hall: 0.25 }) { |clip| kez_pluck_voice(clip, send: nil, plate: nil) * 0.45 }
+      # (dry levels as the original's reverb mixes left them: 0.65 and 0.75)
+      track(:pad, send: { hall: 0.35 }) { |clip| kez_pad_voice(clip, hall: nil) * (0.6 * 0.65) }
+      track(:pluck, send: { echo: :space, hall: 0.25 }) { |clip| kez_pluck_voice(clip, send: nil, plate: nil) * (0.45 * 0.75) }
     else
       duck = ->(node, amount) { node.duck(tv_ghost_kick, amount: amount, release: 1.n16) }
       track(:pad) { |clip| kez_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
