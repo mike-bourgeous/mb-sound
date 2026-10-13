@@ -281,6 +281,9 @@ module MB
               raise ArgumentError, "Grid row #{row.inspect} doesn't name a TR-808 voice (voices: #{VOICES.keys.join(', ')})" unless key
               groups[key] << clip if only.nil? || only.include?(key)
             end
+            # Without the default, so reading a voice the grid doesn't play
+            # (e.g. the open hat's choke from the closed hat) gives nil
+            groups.default_proc = nil
             return groups
           end
 
