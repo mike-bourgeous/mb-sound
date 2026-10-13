@@ -112,11 +112,11 @@ module MB
           end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          return ping(@buf, x, f, d) unless @input_ended
+          return run_kernel(@buf, x, f, d) unless @input_ended
 
           # The ringing only decays now: find where it falls below QUIET
           saved = @state.dup
-          out = ping(@buf, x, f, d)
+          out = run_kernel(@buf, x, f, d)
           return out if ringing_level >= QUIET
 
           lo = 0 # still at least QUIET after lo samples
@@ -125,7 +125,7 @@ module MB
           while hi - lo > 1
             mid = (lo + hi) / 2
             @state[0..] = saved
-            ping(scratch[0...mid], x, slice(f, mid), slice(d, mid))
+            run_kernel(scratch[0...mid], x, slice(f, mid), slice(d, mid))
             if ringing_level < QUIET
               hi = mid
             else
@@ -135,14 +135,14 @@ module MB
 
           @state[0..] = saved
           @rung_out = true
-          ping(@buf[0...hi], x, slice(f, hi), slice(d, hi))
+          run_kernel(@buf[0...hi], x, slice(f, hi), slice(d, hi))
         end
 
         # Runs the kernel into +out+ (see #sample).
-        def ping(out, x, f, d)
+        def run_kernel(out, x, f, d)
           MB::Sound::FastResonator.ping(out, x, f, d, @state, @sample_rate, @cos_phase, @sin_phase)
         end
-        private :ping
+        private :run_kernel
 
         # The first +n+ samples of a kernel input (a number or NArray).
         def slice(v, n)
