@@ -37,7 +37,7 @@ module MB
 
           @members = members.freeze
           @index = members.each_with_index.to_h.compare_by_identity
-          @status = Array.new(members.length) # nil, :ready, :done
+          @status = Array.new(members.length) # nil, :ready, :done, :gone (replaced), :replacing
           @n = Array.new(members.length)
           @results = Array.new(members.length)
           @delivered = Array.new(members.length, true)
@@ -167,10 +167,13 @@ module MB
         # (a stereo Synth lane whose envelope stream ended stopped for good,
         # its envelope never going idle; fixes-6).
         def sample_gone(region, idx, count)
-          @status[idx] = :done
+          # Not :done until the block is computed, so the rebuild doesn't
+          # hand the stale result over (see #hand_off)
+          @status[idx] = :replacing
           inst = region.installation
           inst.rebuild if inst.stale?
           @results[idx] = region.installed? ? region.sample_alone(count) : region.root.sample(count)
+          @status[idx] = :done
         end
 
         # Runs every member for a +count+-sample block.
