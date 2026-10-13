@@ -1,0 +1,482 @@
+# Guard spec for console help (design/notes/help.md): names in topics and on
+# the sheet exist, every example plays in level bounds, every lesson runs,
+# and every console command is covered by a topic, the sheet, or an
+# exemption with a reason (Help::Coverage).
+require 'stringio'
+require 'mb/sound/help'
+
+RSpec.describe MB::Sound::Help do
+  let(:index) { MB::Sound::Help.index }
+
+  # Every name help may call: console commands, DSL methods, Numeric
+  # mixins, and public methods of MB::Sound classes and modules (clip,
+  # Notes, Session methods called on values in examples).
+  def self.known_names
+    @known_names ||= begin
+      index = MB::Sound::Help.index
+      names = index.console_methods.map(&:name) + index.dsl_methods.map(&:name) + index.numeric_methods
+      names += ObjectSpace.each_object(Module).select { |m| m.name&.start_with?('MB::Sound') }.flat_map { |m| m.public_instance_methods(false) rescue [] }
+      names.uniq
+    end
+  end
+
+  # Help state goes to a temp dir; the monitor trim (process-wide, set by
+  # the level) is restored after each example
+  around do |ex|
+    old = ENV['MB_SOUND_HELP_DIR']
+    old_trim = MB::Sound::Session.monitor_gain
+    ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
+    ex.run
+  ensure
+    ENV['MB_SOUND_HELP_DIR'] = old
+    MB::Sound::Session.monitor_gain = old_trim
+  end
+
+  # A NullOutput that keeps a copy of everything written to it.
+  let(:recording_output) {
+    Class.new(MB::Sound::NullOutput) {
+      def written = @written ||= []
+      def write(data)
+        written << data.map(&:dup)
+        super
+      end
+    }.new(channels: 2, sleep: false)
+  }
+
+  def written(output) = output.written.transpose.map { |c| Numo::SFloat.zeros(0).concatenate(*c) }
+
+  def new_session(master_gain: MB::Sound::Session::DEFAULT_MASTER_GAIN, output: nil, monitor: nil)
+    MB::Sound::Session.new(
+      master_gain: master_gain, output: output || MB::Sound::NullOutput.new(channels: 2, sleep: false),
+      transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 2, buffer_size: 800,
+      realtime: false, raise_errors: true, monitor: monitor
+    )
+  end
+
+  # Plays +bars+ bars (120 BPM); returns the output channels.
+  def play_bars(session, bars)
+    bufs = Array.new((96000 * bars) / 800) { session.process_buffer(800).map(&:dup) }
+    bufs.transpose.map { |c| Numo::SFloat.zeros(0).concatenate(*c) }
+  end
+
+  def peak_db(channels) = 20 * Math.log10([channels.map { |c| c.abs.max }.max, 1e-9].max)
+
+  def loudness(channels) = MB::Sound.loudness(channels.map { |c| Numo::DFloat.cast(c) }, true_peak: false).integrated
+
+  # The level check tone's loudness at the reference level (the yardstick
+  # for examples).
+  def self.reference
+    @reference ||= begin
+      s = nil
+      s = MB::Sound::Session.new(master_gain: MB::Sound::Session::DEFAULT_MASTER_GAIN, output: MB::Sound::NullOutput.new(channels: 2, sleep: false),
+        transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 2, buffer_size: 800, realtime: false, raise_errors: true)
+      MB::Sound::Help::Level::SessionPlayer.new(s).start(MB::Sound::Help::Level::REFERENCE_DB)
+      out = Array.new(240) { s.process_buffer(800).map(&:dup) }.transpose.map { |c| Numo::SFloat.zeros(0).concatenate(*c) }
+      {
+        peak: 20 * Math.log10(out.map { |c| c.abs.max }.max),
+        loudness: MB::Sound.loudness(out.map { |c| Numo::DFloat.cast(c) }, true_peak: false).integrated,
+      }
+    ensure
+      s&.close
+    end
+  end
+
+  describe 'topics' do
+    MB::Sound::Help::TOPICS.each_value do |topic|
+      it "#{topic.name}: lists only real methods" do
+        expect((topic.commands - index.console_methods.map(&:name)) - %i[now help lesson]).to eq([])
+        expect(topic.names - self.class.known_names).to eq([])
+      end
+
+      it "#{topic.name}: renders" do
+        text = MB::U.remove_ansi(MB::Sound::Help.topic_page(topic.name).to_s)
+        expect(text).to include(topic.title)
+        expect(text).not_to include('stale help entry')
+      end
+
+      topic.examples.each_with_index do |ex, i|
+        if ex.sound
+          it "#{topic.name}: example #{i + 1} (#{ex.title}) plays near the reference level" do
+            session = new_session
+            out = MB::Sound::Session.with_context(session: session) do
+              MB::Sound::Help::Try.run(ex, out: StringIO.new)
+              play_bars(session, ex.bars + 1)
+            end
+            ref = self.class.reference
+            # Peaks scale with the chosen level, as the tone does: at most
+            # EXAMPLE_PEAK_OVER_TONE_DB over it at any level
+            expect(peak_db(out) - ref[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
+            expect(loudness(out)).to be_within(MB::Sound::Help::Level::EXAMPLE_LOUDNESS_WINDOW).of(ref[:loudness])
+          ensure
+            session&.close
+          end
+        else
+          it "#{topic.name}: example #{i + 1} (#{ex.title}) runs" do
+            session = new_session
+            MB::Sound::Session.with_context(session: session) do
+              expect { MB::Sound::Help::Try.run(ex, out: StringIO.new) }.not_to raise_error
+            end
+          ensure
+            session&.close
+          end
+        end
+      end
+    end
+
+    it 'has unique example titles per topic and known groups' do
+      MB::Sound::Help::TOPICS.each_value do |t|
+        expect(t.examples.map(&:title).uniq.length).to eq(t.examples.length)
+        expect(MB::Sound::Help::GROUPS).to have_key(t.group)
+      end
+    end
+  end
+
+  describe 'sheet' do
+    MB::Sound::Help::Sheet::SHEET.each do |group, lines|
+      it "#{group}: calls only real methods" do
+        # Stand-ins for your own graphs and clips, and form section names
+        placeholders = %i[g b l r bass2 beat intro verse outro]
+        expect(lines.flat_map(&:call_names).uniq - self.class.known_names - placeholders).to eq([])
+      end
+    end
+
+    [80, 110, 160].each do |w|
+      it "fits one screen at #{w} columns" do
+        allow(MB::U).to receive(:width).and_return(w)
+        lines = MB::Sound.help.to_s.lines.map { |l| MB::U.remove_ansi(l.chomp) }
+        expect(lines.map(&:length).max).to be <= w
+        expect(lines.length).to be <= 48 if w >= 110
+      end
+    end
+  end
+
+  describe 'lessons' do
+    # Notes on a stand-in keyboard, two a bar for +bars+ bars.
+    def keyboard(bars)
+      ev = MB::Sound::MIDI::Event
+      events = (0...(bars * 2)).flat_map { |i|
+        t = i.to_r
+        n = [57, 60, 64, 67][i % 4]
+        [ev.parse([0x90, n, 90], time: t + 0.1r), ev.parse([0x80, n, 64], time: t + 0.6r)]
+      }
+      MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    end
+
+    before do
+      allow(MB::Sound::Take).to receive(:data_dir).and_return(tmp_path('takes'))
+      allow_any_instance_of(MB::Sound::Take).to receive(:home).and_return(nil)
+    end
+
+    MB::Sound::Help::LESSONS.each_value do |lesson|
+      it "#{lesson.name}: every step's check fails before its code and passes after" do
+        session = new_session
+        session.midi_in.input = keyboard(30) if lesson.needs.include?(:midi)
+        MB::Sound::Session.with_context(session: session) do
+          runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+          play_bars(session, 1)
+          lesson.steps.each do |step|
+            expect(runner.step).to equal(step)
+            expect(step.passed?).to eq(false), "step #{step.title.inspect} passes before its code runs" if step.check
+            MB::Sound.instance_exec(&step.code) if step.code
+            expect(step.passed?).to eq(true), "step #{step.title.inspect}: #{step.check_text} failed"
+            expect(runner.after_line).to include('✓')
+            play_bars(session, 1)
+          end
+          expect(runner.done?).to eq(true)
+          expect(peak_db(play_bars(session, 2)) - self.class.reference[:peak]).to be <= MB::Sound::Help::Level::EXAMPLE_PEAK_OVER_TONE_DB
+        end
+      ensure
+        session&.close
+      end
+    end
+
+    it 'saves progress, resumes, and lists lessons' do
+      lesson = MB::Sound::Help::LESSONS[:knobs]
+      runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+      runner.next
+      runner.next
+      expect(MB::Sound::Help::LessonRunner.new(lesson).index).to eq(2)
+      expect(File.exist?(File.join(ENV['MB_SOUND_HELP_DIR'], 'progress.json'))).to eq(true)
+      list = MB::U.remove_ansi(MB::Sound::Help::LessonList.new.to_s)
+      expect(list).to include(':record').and include('step 3/5')
+      text = MB::U.remove_ansi(runner.to_s)
+      expect(text).to include('step 3/5').and include('turn :l_cut')
+    end
+
+    it 'starts from the console command' do
+      MB::Sound::Help::LessonRunner.active = nil
+      expect(MB::Sound.lesson).to be_a(MB::Sound::Help::LessonList)
+      expect(MB::Sound.lesson(:set, restart: true).index).to eq(0)
+      expect(MB::Sound.lesson).to be_a(MB::Sound::Help::LessonRunner)
+      expect { MB::Sound.lesson(:sett) }.to raise_error(ArgumentError, /:set/)
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
+    end
+  end
+
+  describe 'level' do
+    # Records what the level check asks of the player.
+    let(:player) {
+      Class.new {
+        attr_reader :log
+        def initialize = @log = []
+        def start(db) = @log << [:start, db]
+        def level=(db)
+          @log << [:level, db]
+        end
+        def stop = @log << [:stop]
+      }.new
+    }
+
+    def calibrate(keys, start_db: nil)
+      out = StringIO.new
+      opts = { input: StringIO.new(keys), out: out, player: player }
+      opts[:start_db] = start_db if start_db
+      [MB::Sound::Help::Level::Calibration.new(**opts).run, MB::U.remove_ansi(out.string)]
+    end
+
+    it 'starts at the reference and saves nothing before a check' do
+      expect(MB::Sound::Help::Level.saved).to be_nil
+      expect(MB::Sound::Help::Level.db).to eq(-30)
+      expect(MB::U.remove_ansi(MB::Sound.help.level(input: StringIO.new).to_s)).to include('no level check yet')
+    end
+
+    it 'moves in 3 dB steps with up/down (arrows or +/-) and 1 dB with left/right, and saves on Enter' do
+      db, text = calibrate("\e[A\e[A+\e[D-\r")
+      expect(db).to eq(-30 + 9 - 1 - 3)
+      expect(MB::Sound::Help::Level.saved).to eq(-25)
+      expect(player.log).to eq([[:start, -30], [:level, -27], [:level, -24], [:level, -21], [:level, -22], [:level, -25], [:stop]])
+      expect(text).to include('level -25 dBFS: monitor trim +5 dB')
+    end
+
+    it 'cancels with q (or Escape, Ctrl-C, end of input), keeping the saved level' do
+      MB::Sound::Help::Level.save(-20)
+      expect(calibrate("++q").first).to be_nil
+      expect(calibrate("++\e").first).to be_nil
+      expect(calibrate("++\x03").first).to be_nil
+      expect(calibrate("++").first).to be_nil
+      expect(MB::Sound::Help::Level.saved).to eq(-20)
+      expect(player.log.last).to eq([:stop])
+    end
+
+    it 'stays in range and resets to the reference with r' do
+      expect(calibrate('+' * 40 + "\r").first).to eq(MB::Sound::Help::Level::RANGE.end)
+      expect(calibrate('-' * 40 + "\r").first).to eq(MB::Sound::Help::Level::RANGE.begin)
+      expect(calibrate("++r\r", start_db: -50).first).to eq(-30)
+    end
+
+    it 'sets the level directly' do
+      expect(MB::U.remove_ansi(MB::Sound.help.level(-18).to_s)).to include('-18.0 dBFS').and include('monitor trim +12.0 dB')
+      expect(MB::Sound::Help::Level.db).to eq(-18)
+      expect(MB::Sound::Help::Level.save(5)).to eq(MB::Sound::Help::Level::RANGE.end)
+    end
+
+    it 'turns the saved level into the monitor trim' do
+      expect(MB::Sound::Help::Level.trim_for(-30)).to be_within(1e-12).of(1)
+      MB::Sound::Help::Level.save(-18)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(12)
+      MB::Sound::Session.monitor_gain = 1
+      expect(MB::Sound::Help::Level.apply.to_db).to be_within(1e-9).of(12)
+      expect(MB::Sound::Help::Level.save(-3)).to eq(-3)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(27)
+    end
+
+    it 'plays the level check tone at the asked peak through a monitored Session, and restores the trim' do
+      MB::Sound::Session.monitor_gain = 2.db
+      out = recording_output
+      session = new_session(output: out, monitor: true)
+      p = MB::Sound::Help::Level::SessionPlayer.new(session)
+      p.start(-30)
+      play_bars(session, 1)
+      expect(peak_db(written(out))).to be_within(0.3).of(-30)
+      p.level = -18
+      out.written.clear
+      expect(peak_db(play_bars(session, 1))).to be_within(0.3).of(-30) # the mix before the trim
+      expect(peak_db(written(out))).to be_within(0.3).of(-18)
+      p.stop
+      play_bars(session, 0.1)
+      expect(session.players).not_to have_key(MB::Sound::Help::Level::PLAYER)
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(2)
+    ensure
+      session&.close
+    end
+
+    it 'saves and applies the level on Enter, and restores the old trim on cancel' do
+      MB::Sound::Session.monitor_gain = 1
+      session = new_session(monitor: true)
+      player = MB::Sound::Help::Level::SessionPlayer.new(session)
+      MB::Sound::Help::Level::Calibration.new(input: StringIO.new("++q"), out: StringIO.new, player: player).run
+      expect(MB::Sound::Session.monitor_gain).to eq(1)
+      MB::Sound::Help::Level::Calibration.new(input: StringIO.new("++\r"), out: StringIO.new, player: player).run
+      expect(MB::Sound::Session.monitor_gain.to_db).to be_within(1e-9).of(6)
+    ensure
+      session&.close
+    end
+
+    describe 'first launch' do
+      let(:tty) { StringIO.new("\r").tap { |io| def io.tty? = true } }
+
+      it 'runs before the prompt in a terminal with a sound card; Enter keeps the default' do
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: player)).to eq(-30)
+        expect(MB::Sound::Help::Level.saved).to eq(-30)
+        expect(MB::U.remove_ansi(out.string)).to include('First launch')
+        expect(player.log.first).to eq([:start, -30])
+      end
+
+      it 'skips without a terminal, without a sound card, when asked to, or once there is a level' do
+        expect(MB::Sound::Help.first_level_check(input: StringIO.new("\r"), out: StringIO.new, output_type: :device, player: player)).to be_nil
+        expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :null, player: player)).to be_nil
+        begin
+          ENV['MB_SOUND_LEVEL_CHECK'] = '0'
+          expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :device, player: player)).to be_nil
+        ensure
+          ENV.delete('MB_SOUND_LEVEL_CHECK')
+        end
+        MB::Sound::Help::Level.save(-24)
+        expect(MB::Sound::Help.first_level_check(input: tty, out: StringIO.new, output_type: :device, player: player)).to be_nil
+        expect(player.log).to eq([])
+      end
+
+      it 'skips with a note if the output fails' do
+        bad = Object.new.tap { |o| def o.start(_) = raise(IOError, 'no device'); def o.stop = nil }
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: bad)).to be_nil
+        expect(out.string).to include('Level check skipped')
+      end
+    end
+  end
+
+  describe 'pages' do
+    def text(x) = MB::U.remove_ansi(x.to_s)
+
+    it 'shows a method with its signature, aliases, and topics' do
+      t = text(MB::Sound.help(:turn))
+      expect(t).to include('turn(').and include('help :knobs')
+      expect(text(MB::Sound.help(:move))).to include('alias of turn')
+    end
+
+    it 'shows console commands and node methods of the same name' do
+      t = text(MB::Sound.help(:reverb))
+      expect(t).to include('node method')
+    end
+
+    it 'searches names and doc comments with a Regexp' do
+      t = text(MB::Sound.help(/reson/))
+      expect(t).to include('matches').and include('lp4')
+    end
+
+    it 'falls back to a search for unknown names' do
+      expect(text(MB::Sound.help(:xyzzy_nothing))).to include('0 matches')
+    end
+
+    it 'lists topics by group and answers topic names as methods' do
+      expect(text(MB::Sound.help.topics)).to include('Perform').and include(':knobs')
+      expect(text(MB::Sound.help.knobs)).to include('Knobs and snapshots')
+      expect { MB::Sound.help.knobz }.to raise_error(NoMethodError) { |e| expect(e.detailed_message).to include('knobs') }
+    end
+
+    it 'gives a random runnable tip' do
+      tip = MB::Sound.help.tip(random: Random.new(1))
+      expect(text(tip)).to include('tip').and include('play it: help(:')
+      expect(tip.example).to be_a(MB::Sound::Help::Topic::Example)
+    end
+
+    it 'explains a graph' do
+      g = 110.hz.saw.at(-20.db).lp4(800)
+      t = text(MB::Sound.help(g))
+      expect(t).to include('as Ruby').and include('lp4').and include('help :filters')
+    end
+
+    it 'refuses example numbers out of range' do
+      expect { MB::Sound.help(:knobs).try(2) }.to raise_error(ArgumentError, /1 examples/)
+      expect { MB::Sound.help(:flow).try }.to raise_error(ArgumentError, /no examples/)
+    end
+  end
+
+  describe 'now' do
+    def text(x) = MB::U.remove_ansi(x.to_s)
+
+    it 'suggests a start when nothing plays' do
+      session = new_session
+      MB::Sound::Session.with_context(session: session) do
+        t = text(MB::Sound.now)
+        expect(t).to include('now').and include('start something').and include('lesson')
+      end
+    ensure
+      session&.close
+    end
+
+    it 'shows players, knobs, scenes, the form, and queued changes mid-set, with commands for them' do
+      session = new_session
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.instance_exec do
+          knob :n_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
+          track(:n_bass, q: 1) { |c| c.tone.ramp.lp4(knob(:n_cut)) * c.amp_env }
+          scene :intro, n_bass: seq(MB::Sound::A1, rest).n8.loop
+          scene :verse, n_bass: seq(MB::Sound::A1, MB::Sound::A2).n8.loop
+          go :intro
+        end
+        play_bars(session, 1)
+        MB::Sound.turn(:n_cut, 4000, over: 2.bars)
+        MB::Sound.go(:verse, in: 4.bars)
+        play_bars(session, 1)
+        t = text(MB::Sound.now)
+        expect(t).to include(':n_bass').and include(':n_cut').and include('→').and include('scenes')
+        expect(t).to include('queued').and include('scene :verse').and include('▶verse').and include('undo')
+        expect(t).to include('turn :n_cut')
+      end
+    ensure
+      session&.close
+    end
+  end
+
+  describe 'welcome' do
+    it 'is a few lines plus one runnable tip' do
+      t = MB::U.remove_ansi(MB::Sound::Help.welcome(random: Random.new(3)))
+      expect(t).to include('help').and include('now').and include('tip').and include('play it')
+      expect(t.lines.length).to be <= 14
+    end
+
+    it 'mentions the level check until there is one, then the monitor trim' do
+      expect(MB::U.remove_ansi(MB::Sound::Help.welcome)).to include('help.level sets a comfortable')
+      MB::Sound::Help::Level.save(-24)
+      t = MB::U.remove_ansi(MB::Sound::Help.welcome)
+      expect(t).not_to include('sets a comfortable')
+      expect(t).to include('monitor trim +6 dB')
+    end
+  end
+
+  describe 'Pry setup' do
+    it "moves Pry's help to pry-help and prints pages as text" do
+      require 'pry'
+      commands = Pry::CommandSet.new.import(Pry::Commands)
+      config = Pry.config
+      allow(config).to receive(:commands).and_return(commands)
+      old_print = config.print
+      hooks = Pry::Hooks.new
+      allow(config).to receive(:hooks).and_return(hooks)
+      MB::Sound::Help.install_pry!
+      expect(commands.valid_command?('pry-help')).to eq(true)
+      expect(commands.valid_command?('help')).to eq(false)
+      out = StringIO.new
+      config.print.call(out, MB::Sound.help.topics, nil)
+      expect(out.string).not_to start_with('=>')
+      expect(hooks.hook_exists?(:after_eval, :mb_sound_lesson)).to eq(true)
+    ensure
+      config.print = old_print if old_print
+    end
+  end
+
+  describe 'coverage guard' do
+    it 'covers every console command with a topic, the sheet, or an exemption' do
+      expect(MB::Sound::Help::Coverage.uncovered).to eq([])
+    end
+
+    it 'exempts only real modules and methods' do
+      names = index.console_methods.map(&:name)
+      expect(MB::Sound::Help::Coverage::EXEMPT.keys - names).to eq([])
+      expect(MB::Sound::Help::Coverage::EXEMPT_MODULES.keys.reject { |m| Object.const_get(m) rescue false }).to eq([])
+    end
+  end
+end
