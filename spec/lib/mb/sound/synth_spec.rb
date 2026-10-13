@@ -589,24 +589,6 @@ RSpec.describe(MB::Sound::Synth) do
       expect(count).to be <= ended_at + 1
     end
 
-    # The number of +size+ buffers that reach the end of the first whole
-    # quiet grid cell after sample +last_sound+ (where a lane's quiet state
-    # is recorded; see Synth#quiet_lanes)
-    def grid_end(last_sound, size)
-      grid = described_class::SKIP_GRID
-      ((last_sound / grid + 2) * grid / size.to_f).ceil
-    end
-
-    # The last sample of the last grid cell of +data+ (one lane's output)
-    # whose swing (half the peak-to-peak range) is beyond Synth::QUIET.
-    def last_loud_cell(data)
-      grid = described_class::SKIP_GRID
-      (0...(data.length / grid)).select { |i|
-        c = data[(i * grid)...((i + 1) * grid)]
-        (c.max - c.min) * 0.5 > described_class.const_get(:QUIET)
-      }.last * grid + grid - 1
-    end
-
     it 'lets lanes without envelopes ring out after a finite source' do
       events = [ev.note_on(48), ev.note_off(48, time: 1/100r)]
       mk = -> {
@@ -625,12 +607,10 @@ RSpec.describe(MB::Sound::Synth) do
       data = out.reduce(:concatenate)
 
       # The ping rings for a while after the file's last event, and the synth
-      # ends with the buffer reaching the end of the first whole grid cell
-      # (SKIP_GRID) after the ring falls below -90 dB (fixes-7: measured per
-      # cell, so it ends at the same sample at any buffer size)
+      # ends one buffer after the ring falls below -90 dB
       last_sound = (data.abs > -90.db).where.to_a.last
       expect(last_sound / 48000.0).to be > 0.2
-      expect(ended_at).to eq(grid_end(last_loud_cell(data), 480))
+      expect(ended_at).to eq(last_sound / 480 + 2)
       expect(out.length).to eq(ended_at)
 
       # Repeatable
@@ -640,6 +620,29 @@ RSpec.describe(MB::Sound::Synth) do
         again << b.dup
       end
       expect(again.reduce(:concatenate)).to eq(data)
+    end
+
+    it 'with exact_lanes, ends at the grid point after the last loud grid cell' do
+      # Lanes measured over whole SKIP_GRID cells (Synth#exact_lanes?): the
+      # same end at any buffer size
+      grid = described_class::SKIP_GRID
+      quiet = described_class.const_get(:QUIET)
+      lengths = [480, 367, 1031].map { |size|
+        events = [ev.note_on(48), ev.note_off(48, time: 1/100r)]
+        s = described_class.new(source(*events, last: nil), voices: 2, tail: 0, exact_lanes: true) { |v|
+          v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
+        }
+        expect(s.exact_lanes?).to eq(true)
+        out = []
+        while (b = s.sample(size)) && out.length < 2000
+          out << b.dup
+        end
+        data = out.reduce(:concatenate)
+        loud = (0...(data.length / grid)).select { |i| c = data[(i * grid)...((i + 1) * grid)]; (c.max - c.min) * 0.5 > quiet }.last
+        expect(out.length).to eq(((loud + 2) * grid / size.to_f).ceil)
+        data
+      }
+      lengths.each { |d| expect(d[0...lengths.map(&:length).min]).to eq(lengths[0][0...lengths.map(&:length).min]) }
     end
 
     it 'lets an envelope into a resonant filter ring out after a finite source' do
@@ -658,7 +661,7 @@ RSpec.describe(MB::Sound::Synth) do
       expect(peak(data, 0.3, 0.4)).to be > 0.1
       last_sound = (data.abs > -90.db).where.to_a.last
       expect(last_sound / 48000.0).to be > 1
-      expect(out.length).to eq(grid_end(last_loud_cell(data), 480))
+      expect(out.length).to eq(last_sound / 480 + 2)
     end
 
     it 'ends lanes whose output settles at a constant offset' do
@@ -678,7 +681,7 @@ RSpec.describe(MB::Sound::Synth) do
       while (b = s.sample(480)) && out.length < 1000
         out << b.dup
       end
-      expect(out.length).to eq(grid_end(479, 480) + 50) # the note (one grid cell), a quiet cell, then 0.5 s of silence
+      expect(out.length).to be_within(1).of(2 + 50) # the note, then 0.5 s of silence
       expect(out[3..].reduce(:concatenate).abs.max).to eq(0)
       expect(s.ended?).to eq(true)
     end

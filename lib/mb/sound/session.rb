@@ -665,6 +665,12 @@ module MB
       # taps place the span's events from it (see MidiInput::Tap).
       attr_reader :player_frame
 
+      # True if Synths this Session starts free lanes by whole grid cells,
+      # the same at any buffer size (Synth#exact_lanes?; take replays and
+      # render(exact_lanes: true) turn it on).  Applies to players started
+      # after it is set.
+      attr_accessor :exact_lanes
+
       # Stops calling a block given to #add_tap.
       def remove_tap(block)
         @mutex.synchronize { @taps.delete(block) }
@@ -1208,7 +1214,10 @@ module MB
       def align_grids(p, frame)
         nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
         nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.each do |n|
-          n.align_grid(frame) if n.is_a?(Synth)
+          next unless n.is_a?(Synth)
+
+          n.exact_lanes = true if @exact_lanes
+          n.align_grid(frame)
         end
       end
 
