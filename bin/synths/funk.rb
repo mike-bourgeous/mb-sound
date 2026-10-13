@@ -24,7 +24,8 @@
 #   talkbox   the lead: a bright buzz an octave below the note through
 #             narrow formants opening "u -> o -> a -> e" on every note and
 #             moving with the groove (groove:, a mouth opening every
-#             eighth), delayed vibrato, a dotted-eighth echo
+#             eighth, the vowels drifting over 2 bars: vowel_rate:),
+#             delayed vibrato, a dotted-eighth echo
 #   choir     a soft "ooh" choir (two saws through an alto formant), with
 #             the audio looper behind it: --dub (the footswitch) sends the
 #             voice into a 4-bar loop that loses 1 - --keep every pass
@@ -77,7 +78,10 @@ module MB::Sound
   # every hit on a beat would say the same thing).  patches-3 (2026-10-13;
   # maintainer on the beatbox render: "Give it some more filter lfo and
   # it's golden"); before, the vowels held still (wobble: 0).
-  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar)
+  #
+  # +snare_width+ is the beatbox snare's formant width (wider is less
+  # resonant): FUNK_BEATBOX_SNARE_WIDTH by default.
+  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar, snare_width: FUNK_BEATBOX_SNARE_WIDTH)
     voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
@@ -101,7 +105,7 @@ module MB::Sound
     outs = tr808(source, only: voices.keys, velocity_curve: :midi, outputs: :separate, **voices)
     say = {
       kick: [[:u, :o], :bass, 0.35, 6],
-      snare: [[:a, :e], :tenor, 0.4, 3],
+      snare: [[:a, :e], :tenor, snare_width, 3],
       closed_hat: [[:i], :soprano, 0.5, 2],
       open_hat: [[:i, :e], :soprano, 0.5, 2],
     }
@@ -119,6 +123,11 @@ module MB::Sound
     mix += outs.names.map { |n| outs[n] }.reduce(:+) * (Math.sqrt(1 - amount) * dry) if amount < 1
     mix.softclip(0.7, 0.95) * level
   end
+
+  # The beatbox snare's formant width in .funk_beat: patches-4
+  # (2026-10-13; maintainer on the wobbling beatbox: "With the lfo a little
+  # less resonance is acceptable on the snare") widened it from 0.4.
+  FUNK_BEATBOX_SNARE_WIDTH = 0.55
 
   # .funk_beat's vowel LFO depth with +beatbox+ (the plain kit's is 0).
   FUNK_BEAT_WOBBLE = 0.8
@@ -196,18 +205,40 @@ module MB::Sound
   # maintainer on Loop Church: "Talk box needs filter changes with the
   # groove"); before, only the note's envelope moved the vowels (groove:
   # 0).
-  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e], groove: 0.6, groove_rate: 1.n8)
+  #
+  # +vowel_rate+ (a Duration; 2 bars by default; nil for none) is a
+  # slower triangle that carries most of the groove's vowel change (three
+  # quarters of it), so the vowels drift across a phrase while the
+  # +groove_rate+ eighths keep the mouth opening and closing: on each
+  # eighth the mouth closes a little (a quarter of the vowel sweep) and
+  # its formants drop up to 4 semitones times +groove+, a "wah" in time.
+  # patches-4 (2026-10-13; maintainer: "Put the vowel change on a slower
+  # lfo").  Fixed then too: the note's opening was a filter_env (a cutoff
+  # multiplier from 1 up to 4), which held the vowel morph (0..1 across
+  # +vowels+) at its last vowel, so from patches-2 to patches-3 every note
+  # said "e" and only the formant shift moved (a one-bar sine of +groove+
+  # semitones); `vowels: [:e]` is close to that sound.
+  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e], groove: 0.6, groove_rate: 1.n8, vowel_rate: 2.bars)
     synth(midi, voices: 1) { |v|
       f = v.hz.glide(glide).vibrato(5.2, depth: 0.25, delay: 0.25)
       buzz = f.transpose(12 * octave)
       src = buzz.saw * 0.6 + buzz.pulse(0.2) * 0.5
       src += src.filter(:highpass, cutoff: 1800, quality: 0.7) * air if air > 0
-      morph = v.filter_env(0.06, 0.35, 0.55, 0.2)
+      # (the note's opening, 0..1 across the vowels; until 2026-10-13 this was a filter_env, a cutoff
+      # multiplier of 1..4, which held the morph at its last vowel, "e")
+      morph = v.env(0.06, 0.35, 0.55, 0.2, gm: false)
       shift = (v.number - 62) * 0.25
       unless groove == 0
-        # (the triangle's trough at the beat: the mouth closes on it and opens between)
-        morph = morph * (1 - groove * 0.5) + v.lfo(groove_rate, shape: :triangle, unipolar: true, phase: 0.75) * groove
-        shift = shift + v.lfo(1.bar, shape: :sine) * groove
+        # (the mouth: a triangle closed on the beat, open between; the vowels: a slow triangle, lowest at the
+        # phrase's start)
+        open = v.lfo(groove_rate, shape: :triangle, unipolar: true, phase: 0.75)
+        if vowel_rate
+          drift = v.lfo(vowel_rate, shape: :triangle, unipolar: true, phase: 0.75)
+          morph = morph * (1 - groove * 0.5) + drift * (groove * 0.75) + open * (groove * 0.25)
+        else
+          morph = morph * (1 - groove * 0.5) + open * groove
+        end
+        shift = shift + (open - 1) * (groove * 4)
       end
       mouth = src.formant(*vowels, morph: morph, shift: shift, width: width)
       (mouth * 2).softclip(0.6, 0.95) * v.amp_env(0.01, 0.4, 0.75, 0.12) * 1.05
