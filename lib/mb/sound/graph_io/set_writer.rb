@@ -119,7 +119,11 @@ module MB
           if t.meters.length > 1
             @warnings << "meter changes after bar 1 aren't saved (#{t.meters.length - 1})"
           end
-          lines << "master_gain #{lit(@session.master_gain)}" unless @session.master_gain == Session::DEFAULT_MASTER_GAIN
+          if @session.master_gain_post?
+            lines << "master_gain #{lit(@session.master_gain)}, post: true"
+          elsif @session.master_gain != Session::DEFAULT_MASTER_GAIN
+            lines << "master_gain #{lit(@session.master_gain)}"
+          end
           lines << "quant #{lit(@arrangement.quant)}" unless @arrangement.quant == 1
           lines
         end

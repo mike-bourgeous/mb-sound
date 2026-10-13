@@ -415,16 +415,25 @@ module MB
       alias master_fx master
 
       # Returns the master bus gain of the current session (linear, -10 dB by
-      # default), applied to the whole mix after master effects, live and in
-      # renders alike (renders start with the current session's gain, or
+      # default), applied to the whole mix live and in renders alike
+      # (renders start with the current session's gain and placement, or
       # pass +gain:+ to #render).  With a +gain+, changes it first.
+      #
+      # The gain applies before the master effects (see #master) by default,
+      # so a limiter or clipper there keeps its ceiling whatever the gain.
+      # +post: true+ moves it after them (the placement before 2026-10-13;
+      # like a DAW's pre/post-fader switch for master inserts), +post: false+
+      # back; the placement stays until changed.  Without master effects
+      # both give the same samples.
       #
       # Example (bin/sound.rb):
       #     master_gain -6.db
       #     master_gain.to_db   # => -6.0
-      def master_gain(gain = nil)
+      #     master_gain 2.db, post: true   # after the master chain
+      def master_gain(gain = nil, post: nil)
         session = Session.current
         session.master_gain = gain if gain
+        session.master_gain_post = post unless post.nil?
         session.master_gain
       end
 
@@ -755,7 +764,7 @@ module MB
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
-        session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+        session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)

@@ -223,7 +223,7 @@ Phases 1-4 of the arrangement plan (`research-arrangement`), built to the interc
 
 ### Master effects (`design/notes/master_effects.md`)
 
-`Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades, `fade: 0` cuts); `master nil` bypasses; `render` adds the tail.  `resample`/`oversample` can't be used in a master chain yet.
+`Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades, `fade: 0` cuts); `master nil` bypasses; `render` adds the tail.  The master gain applies before the chain, so a limiter keeps its ceiling (`master_gain 2.db, post: true` / `Session#master_gain_post` after it).  `resample`/`oversample` can't be used in a master chain yet.
 
 ### Audio I/O (`design/notes/audio_io.md`)
 

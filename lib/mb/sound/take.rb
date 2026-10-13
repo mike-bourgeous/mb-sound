@@ -311,6 +311,7 @@ module MB
           bar_length: s.transport.bar_length(0),
           meters: s.transport.meters.drop(1).map { |m| [m.pos, m.bar_length] },
           master_gain: s.master_gain,
+          master_gain_post: s.master_gain_post?,
           fade_in: s.fade_in,
           fade_out: s.fade_out,
           rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),

@@ -215,15 +215,31 @@ module MB
       # full-scale oscillators.
       DEFAULT_MASTER_GAIN = 10 ** (-10 / 20.0)
 
-      # The linear gain applied to the whole mix after master effects, before
-      # it's written to the output (and seen by taps).  See
-      # PlaybackMethods#master_gain.
+      # The linear gain applied to the whole mix: before the master effects
+      # by default (pre-chain, so a limiter's ceiling holds whatever the
+      # gain), or after them with #master_gain_post (the placement before
+      # 2026-10-13), and before the output and taps either way.  Without
+      # master effects the two are the same.  See PlaybackMethods#master_gain.
       attr_reader :master_gain
 
       # Sets the master bus gain (linear; e.g. `-6.db`).
       def master_gain=(gain)
         raise ArgumentError, "Master gain must be a Numeric (got #{gain.inspect})" unless gain.is_a?(Numeric)
         @master_gain = gain.to_f
+      end
+
+      # True if the master gain applies after the master effects (post, like
+      # a DAW's post-fader inserts switched off: the chain hears the mix at
+      # unity, and the gain scales its output, so a limiter's ceiling moves
+      # with it), false (the default) for before them (see #master_gain).
+      def master_gain_post?
+        @master_gain_post
+      end
+
+      # Sets where the master gain applies (see #master_gain_post?).
+      def master_gain_post=(post)
+        raise ArgumentError, "master_gain_post must be true or false (got #{post.inspect})" unless post == true || post == false
+        @master_gain_post = post
       end
 
       # The number of output channels.  Mono graphs play on every channel.
@@ -241,10 +257,11 @@ module MB
       #                           and #fade_out).
       # +:monitor+ - If true, the output hears the monitor trim (see
       #              MonitorTrim; by default when +:realtime+).
-      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil)
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil)
         @transport = transport
         @tuning = tuning
         self.master_gain = master_gain
+        self.master_gain_post = master_gain_post
         self.fade_in = fade_in
         self.fade_out = fade_out
         @output = output
@@ -709,7 +726,8 @@ module MB
         # whether master chains can crossfade
         @load = (MB::U.clock_now - started) * output.sample_rate / count
 
-        mix = mix.map { |c| c * @master_gain } if @master_gain != 1
+        # Post-chain master gain (pre-chain is in #render_span)
+        mix = mix.map { |c| c * @master_gain } if @master_gain_post && @master_gain != 1
 
         # The monitor trim reaches only the output (see MonitorTrim)
         output.write(monitored(mix))
@@ -763,6 +781,8 @@ module MB
 
         playing = !players.empty? || queued_start?
         @transport.advance(to - from) if playing
+        # Pre-chain master gain (the default; see #master_gain_post?)
+        mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
 
         @frame += count

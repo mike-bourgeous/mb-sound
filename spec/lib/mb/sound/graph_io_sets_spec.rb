@@ -136,6 +136,18 @@ RSpec.describe('set documents', :aggregate_failures) do
     RUBY
   end
 
+  it 'saves and loads a post-chain master gain' do
+    a = session
+    within(a) { MB::Sound.master_gain(-3.db, post: true) }
+    text = io.dump(a.arrangement, name: 'post')
+    expect(text).to include("master_gain -3.db, post: true\n")
+
+    b = session
+    io.load(text, session: b)
+    expect(b.master_gain_post?).to eq(true)
+    expect(b.master_gain).to eq(-3.db.to_f)
+  end
+
   it 'loads a set into a session that plays it like the original' do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build(drums: false) }
