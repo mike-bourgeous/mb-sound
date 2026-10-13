@@ -311,7 +311,7 @@ module MB
         Every graph prints itself back as Ruby (`ruby node`); `save` writes a
         graph document (or the whole set), `preset` loads one with new
         inputs and params.  mb-sound comes with presets too (`presets`
-        lists them): drum & bass, jungle, ambient, and neo-soul instruments,
+        lists them): drum & bass, jungle, ambient, and funk instruments,
         like `preset :dnb_reese, midi: midi` or `preset :ambient_tape, input: mic`.
       TEXT
       commands :ruby, :save, :preset, :presets, :set, :named_proc

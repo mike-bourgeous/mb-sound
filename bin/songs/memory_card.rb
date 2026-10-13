@@ -203,7 +203,7 @@ module MB::Sound
     track(:perc) { |kit| jungle_perc(kit) }
     track(:sub) { |clip| jungle_sub_voice(clip) }
     track(:reese) { |clip| jungle_reese_voice(clip) }
-    track(:keys) { |clip| jungle_rhodes_voice(clip) }
+    track(:keys) { |clip| jungle_keys_voice(clip) }
     track(:pad) { |clip| jungle_pad_voice(clip) }
     track(:lead) { |clip| jungle_flute_voice(clip, send: knob(:space)) }
     track(:riser, fade: 1/8r) { |_clip| memory_card_riser }

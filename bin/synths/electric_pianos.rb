@@ -3,7 +3,7 @@
 # (Rhodes-style) and a reed piano (Wurlitzer-style), playable from MIDI.
 #
 # Where they came from: the maintainer's listening notes on the jungle
-# Rhodes (bin/synths/jungle.rb, 2026-10-13: "As a separate patch can we try
+# keys (jungle_keys_voice in bin/synths/jungle.rb, 2026-10-13: "As a separate patch can we try
 # another FM version of this to get closer to a physical Rhodes or
 # Wurlitzer sound?"); patches-2, 2026-10-13.
 #
@@ -97,7 +97,7 @@ module MB::Sound
   def self.electric_pianos_description(what)
     what = { tine: 'Tine piano (Rhodes-style FM)', reed: 'Reed piano (Wurlitzer-style FM)' }.fetch(what, "Patch :#{what}") if what.is_a?(Symbol)
     "#{what} from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical " \
-      'alternative to the jungle Rhodes (bin/synths/jungle.rb, from the persona panel experiment).'
+      'alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).'
   end
 
   if main_script?(__FILE__)

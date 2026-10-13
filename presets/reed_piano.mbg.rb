@@ -3,10 +3,10 @@
 graph 2,
   name: "reed_piano",
   kind: :synth,
-  saved: "2026-10-13T14:59:50Z",
-  mb_sound: "0.12.0.usegit (82c87ef8)",
+  saved: "2026-10-13T15:40:34Z",
+  mb_sound: "0.12.0.usegit (31ee3867)",
   from: "bin/synths/electric_pianos.rb",
-  description: "Reed piano (Wurlitzer-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle Rhodes (bin/synths/jungle.rb, from the persona panel experiment).",
+  description: "Reed piano (Wurlitzer-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :reed, tremolo: 0.3 }
 inputs :midi
 param :bark, 1.0, range: 0.0..2.0, description: "Velocity-driven bark (FM index and pickup growl) scale"

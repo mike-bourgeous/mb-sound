@@ -5,7 +5,7 @@
 # (so its numeric options become the document's params), and each effect
 # preset an effect method from one of those scripts saved with GraphIO.save.
 # The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
-# ambient.rb, neo_soul.rb, named for their genres) were the first, then
+# ambient.rb, funk.rb, named for their genres) were the first, then
 # bin/synths/electric_pianos.rb; each document's description says where it
 # came from (the scripts' <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
@@ -15,7 +15,7 @@
 #
 # Examples:
 #     $0                     # saves every preset into presets/
-#     $0 dnb_reese jungle_rhodes
+#     $0 dnb_reese jungle_keys
 #     $0 --check             # lists presets whose saved text is out of date
 #     $0 --list
 
@@ -37,7 +37,7 @@ module MB::Sound
     jungle_breaks: ['bin/synths/jungle.rb', :breaks],
     jungle_sub: ['bin/synths/jungle.rb', :sub],
     jungle_reese: ['bin/synths/jungle.rb', :reese],
-    jungle_rhodes: ['bin/synths/jungle.rb', :rhodes],
+    jungle_keys: ['bin/synths/jungle.rb', :keys],
     jungle_pad: ['bin/synths/jungle.rb', :pad],
     jungle_flute: ['bin/synths/jungle.rb', :flute],
     jungle_perc: ['bin/synths/jungle.rb', :perc],
@@ -48,13 +48,13 @@ module MB::Sound
     ambient_harp: ['bin/synths/ambient.rb', :harp],
     ambient_drone: ['bin/synths/ambient.rb', :drone],
     ambient_rainstick: ['bin/synths/ambient.rb', :rainstick],
-    neo_soul_beat: ['bin/synths/neo_soul.rb', :beat],
-    neo_soul_perc: ['bin/synths/neo_soul.rb', :perc],
-    neo_soul_bass: ['bin/synths/neo_soul.rb', :bass],
-    neo_soul_keys: ['bin/synths/neo_soul.rb', :keys],
-    neo_soul_clav: ['bin/synths/neo_soul.rb', :clav],
-    neo_soul_talkbox: ['bin/synths/neo_soul.rb', :talkbox],
-    neo_soul_choir: ['bin/synths/neo_soul.rb', :choir],
+    funk_beat: ['bin/synths/funk.rb', :beat],
+    funk_perc: ['bin/synths/funk.rb', :perc],
+    funk_bass: ['bin/synths/funk.rb', :bass],
+    funk_keys: ['bin/synths/funk.rb', :keys],
+    funk_clav: ['bin/synths/funk.rb', :clav],
+    funk_talkbox: ['bin/synths/funk.rb', :talkbox],
+    funk_choir: ['bin/synths/funk.rb', :choir],
     tine_piano: ['bin/synths/electric_pianos.rb', :tine],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed],
   }.freeze
@@ -68,11 +68,11 @@ module MB::Sound
                  ->(input, p) { ambient_room(input, space: p[:space]) }],
     dnb_master: ['bin/synths/dnb.rb', { air: { value: 20.0, range: 20.0..400.0, description: 'Highpass in Hz' } },
                  ->(input, p) { dnb_master(input, air: p[:air]) }],
-    neo_soul_dub_loop: ['bin/synths/neo_soul.rb', {
+    funk_dub_loop: ['bin/synths/funk.rb', {
                       dub: { value: 1.0, range: 0.0..1.0, description: 'Footswitch: 1 records into the 4-bar loop' },
                       keep: { value: 0.82, range: 0.0..0.99, description: 'Loop feedback per pass' },
                     },
-                    ->(input, p) { neo_soul_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
+                    ->(input, p) { funk_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
   }.freeze
 
   # The MIDI file script patches are saved from.

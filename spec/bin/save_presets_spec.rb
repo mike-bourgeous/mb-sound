@@ -7,7 +7,7 @@ require File.expand_path('../../bin/save_presets.rb', __dir__)
 
 RSpec.describe('bin/save_presets.rb') do
   before(:all) do
-    %w[dnb jungle ambient neo_soul electric_pianos].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
+    %w[dnb jungle ambient funk electric_pianos].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
   end
 
   after { MB::Sound.rewind }

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # 90s atmospheric jungle patches (a sliced-break sampler, sub, Reese,
-# Rhodes-ish keys, string pad, flute, ride and shaker), playable from MIDI.
+# electric piano keys, string pad, flute, ride and shaker), playable from MIDI.
 #
 # Where they came from: the persona panel experiment of 2026-10-13
 # (research branch research-persona-jungle, research/persona-panel/jungle/),
@@ -26,7 +26,7 @@
 #   sub     a sine with a little 2nd harmonic, gliding between legato notes
 #   reese   two saws 16 cents apart and an octave sine, a lowpass breathing
 #           on a 2-bar LFO, warm softclip
-#   rhodes  a phase-modulated sine whose index decays fast (the bark), a
+#   keys    a phase-modulated sine whose index decays fast (the bark), a
 #           faint tine, a stereo tremolo, a hall
 #   pad     five saws per note, slow attack, Juno chorus, hall
 #   flute   triangle and sine with bandpassed breath, delayed vibrato, a
@@ -35,13 +35,13 @@
 #
 # Every patch is one method taking a MIDI source (Notes, Clip, MIDI file, or
 # Stream) and its knobs as keywords: jungle_breaks_voice(midi, cutoff:),
-# jungle_sub_voice, jungle_reese_voice, jungle_rhodes_voice, jungle_pad_voice,
+# jungle_sub_voice, jungle_reese_voice, jungle_keys_voice, jungle_pad_voice,
 # jungle_flute_voice(midi, send:), jungle_perc.  Each is also a preset
 # (presets/jungle_*.mbg.rb; the breaks are a bundle holding the slices):
-# `preset :jungle_rhodes, midi: midi`.
+# `preset :jungle_keys, midi: midi`.
 #
 # Usage:
-#     bin/synths/jungle.rb                          # live MIDI, the Rhodes
+#     bin/synths/jungle.rb                          # live MIDI, the keys
 #     bin/synths/jungle.rb -p breaks -c 2500 song.mid breaks.flac
 #     bin/synths/jungle.rb -p flute -e 0.6 song.mid flute.flac
 #
@@ -51,7 +51,7 @@
 #     amen = seq(k[:k], T, k[:h], k[:g], k[:sk], T, T, T, k[:h], T, k[:kk], T, k[:s2], T, T, T).n16.loop
 #     bg :breaks, jungle_breaks_voice(amen)
 #     swap :breaks, amen.transpose(2)                            # chops pitched up a tone
-#     bg :keys, jungle_rhodes_voice(seq([C3, E3, F3, A3].map(&:n2).reduce(:&), R.n2).loop)
+#     bg :keys, jungle_keys_voice(seq([C3, E3, F3, A3].map(&:n2).reduce(:&), R.n2).loop)
 #     bg :sub, jungle_sub_voice(seq(D2.n2.d, D2.n8, C2.n8, D2.n1).loop)
 
 require 'bundler/setup'
@@ -191,10 +191,10 @@ module MB::Sound
     }.softclip(0.5, 0.95) * level
   end
 
-  # The Rhodes: a phase-modulated sine whose index decays fast (the bark;
+  # The keys (an electric piano): a phase-modulated sine whose index decays fast (the bark;
   # +bark+ the index), a faint tine, a stereo tremolo at +tremolo+ Hz, a
   # hall (+hall+ wet).
-  def self.jungle_rhodes_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22)
+  def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22)
     keys = synth(midi, voices: 8) { |v|
       p = v.hz
       index = v.env(0.001, 0.5, 0.15, 0.3, gm: false)
@@ -229,12 +229,12 @@ module MB::Sound
 
   # The script's patches by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
-  def self.jungle_patch(midi, patch = :rhodes, cutoff: 16000.0, echo: 0.3)
+  def self.jungle_patch(midi, patch = :keys, cutoff: 16000.0, echo: 0.3)
     case patch
     when :breaks then jungle_breaks_voice(midi, cutoff: cutoff.constant.named('cutoff'))
     when :sub then jungle_sub_voice(midi)
     when :reese then jungle_reese_voice(midi)
-    when :rhodes then jungle_rhodes_voice(midi)
+    when :keys then jungle_keys_voice(midi)
     when :pad then jungle_pad_voice(midi)
     when :flute then jungle_flute_voice(midi, send: echo.constant.named('echo'))
     when :perc then jungle_perc(midi)
@@ -255,7 +255,7 @@ module MB::Sound
   if main_script?(__FILE__)
     synth_script(
       description: ->(p) { jungle_description(p.patch) },
-      patch: [:rhodes, Symbol, '-p', 'Patch to play', [:breaks, :sub, :reese, :rhodes, :pad, :flute, :perc]],
+      patch: [:keys, Symbol, '-p', 'Patch to play', [:breaks, :sub, :reese, :keys, :pad, :flute, :perc]],
       cutoff: [16000.0, Float, '-c', 'Breaks lowpass in Hz', 200.0..16000.0],
       echo: [0.3, Float, '-e', 'Flute echo send 0..1', 0.0..1.0],
     ) { |midi, p|

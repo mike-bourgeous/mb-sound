@@ -55,7 +55,7 @@ RSpec.describe('bin/synths/jungle.rb') do
     {
       sub: [MB::Sound.jungle_sub_voice(patch_notes([MB::Sound::D2.number, 0, 1])), -20],
       reese: [MB::Sound.jungle_reese_voice(patch_notes([MB::Sound::D2.number, 0, 1])), -25],
-      rhodes: [MB::Sound.jungle_rhodes_voice(patch_notes([MB::Sound::F3.number, 0, 1], [MB::Sound::A3.number, 0, 1])), -35],
+      keys: [MB::Sound.jungle_keys_voice(patch_notes([MB::Sound::F3.number, 0, 1], [MB::Sound::A3.number, 0, 1])), -35],
       pad: [MB::Sound.jungle_pad_voice(patch_notes([MB::Sound::F4.number, 0, 2])), -50],
       flute: [MB::Sound.jungle_flute_voice(patch_notes([MB::Sound::A4.number, 0, 1])), -35],
     }.each do |name, (graph, floor)|

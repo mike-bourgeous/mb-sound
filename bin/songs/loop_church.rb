@@ -6,7 +6,7 @@
 # API and each wrote a 2-3 minute demo with it; research branch
 # research-persona-looper, research/persona-panel/looper/, with Tiko's
 # review, friction log, and a saved take).  The set moved here from that
-# branch; its patches live in bin/synths/neo_soul.rb (playable from
+# branch; its patches live in bin/synths/funk.rb (playable from
 # MIDI, and saved as presets).
 #
 # Funk / neo-soul at 96 BPM in D dorian, 62 bars (about 2:35 plus the
@@ -55,7 +55,7 @@
 require 'bundler/setup'
 require 'mb-sound'
 require 'tmpdir'
-require_relative '../synths/neo_soul'
+require_relative '../synths/funk'
 
 module MB::Sound
   LOOP_CHURCH_BPM = 96
@@ -80,7 +80,7 @@ module MB::Sound
   # live input while the track is armed)
   # ------------------------------------------------------------------
 
-  # The patches are in bin/synths/neo_soul.rb.  tr808 can't take a
+  # The patches are in bin/synths/funk.rb.  tr808 can't take a
   # track's live input (a LiveClip) or the looper's empty placeholder clip,
   # so drum patches play a Stream of either (friction log F2/F3).
   def self.loop_church_drum_source(clip)
@@ -240,16 +240,16 @@ module MB::Sound
     # (gain inside the chain: master_gain comes after it, past the limiter)
     master { |mix| (mix * 2.5.db).compress(threshold: -16.db, ratio: 2.5, attack: 10.ms, release: 120.ms, makeup: 2).limit(ceiling: -1.db) }
 
-    track(:beat, q: 1) { |c| neo_soul_beat(loop_church_drum_source(c)) }
-    track(:perc, q: 1) { |c| neo_soul_perc(loop_church_drum_source(c)) }
-    track(:bass, q: 1) { |c| neo_soul_bass_voice(c) }
-    track(:bass_b, q: 1) { |c| neo_soul_bass_voice(c) }
-    track(:keys, q: 1) { |c| neo_soul_keys_voice(c) }
-    track(:keys_b, q: 1) { |c| neo_soul_keys_voice(c) }
-    track(:stabs, q: 1) { |c| neo_soul_clav_voice(c) }
-    track(:lead, q: 1) { |c| neo_soul_talkbox_voice(c) }
-    track(:hook, q: 1) { |c| neo_soul_talkbox_voice(c, level: 0.6).pan(-0.3) }
-    track(:choir, q: 1) { |c| neo_soul_dub_loop(neo_soul_choir_voice(c), dub: knob(:dub), keep: knob(:keep)) }
+    track(:beat, q: 1) { |c| funk_beat(loop_church_drum_source(c)) }
+    track(:perc, q: 1) { |c| funk_perc(loop_church_drum_source(c)) }
+    track(:bass, q: 1) { |c| funk_bass_voice(c) }
+    track(:bass_b, q: 1) { |c| funk_bass_voice(c) }
+    track(:keys, q: 1) { |c| funk_keys_voice(c) }
+    track(:keys_b, q: 1) { |c| funk_keys_voice(c) }
+    track(:stabs, q: 1) { |c| funk_clav_voice(c) }
+    track(:lead, q: 1) { |c| funk_talkbox_voice(c) }
+    track(:hook, q: 1) { |c| funk_talkbox_voice(c, level: 0.6).pan(-0.3) }
+    track(:choir, q: 1) { |c| funk_dub_loop(funk_choir_voice(c), dub: knob(:dub), keep: knob(:keep)) }
     knob :dub, 0, smooth: 20.ms
     knob :keep, 0.82
     nil
