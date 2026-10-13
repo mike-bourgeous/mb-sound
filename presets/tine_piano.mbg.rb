@@ -3,14 +3,15 @@
 graph 2,
   name: "tine_piano",
   kind: :synth,
-  saved: "2026-10-13T16:48:44Z",
-  mb_sound: "0.12.0.usegit (5f5c51c6)",
+  saved: "2026-10-13T18:59:23Z",
+  mb_sound: "0.12.0.usegit (01f36fe8)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :tine, tremolo: 0.3 }
 inputs :midi
 param :bark, 1.0, range: 0.0..2.0, description: "Velocity-driven bark (FM index and pickup growl) scale"
-param :pickup, 1.0, range: 0.0..3.0, description: "Pickup drive scale (follows velocity; the reed also grows on low keys)"
+param :pickup, 0.5, range: 0.0..3.0, description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
+param :amp, 1.0, range: 0.25..8.0, description: "Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level)"
 
 ((synth(midi, voices: 8, retrigger: :string) { |v|
   f = v.hz
@@ -21,5 +22,5 @@ param :pickup, 1.0, range: 0.0..3.0, description: "Pickup drive scale (follows v
   bell = f.sine.free(true).pm(f.transpose(45.68825906469125).sine.free(true) * v.env(0, 0.12, 0, 0.05, gm: false).no_velocity * (sig * 0.25))
   bar = f.transpose(12).sine.free(true) * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
   x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
-  x + x * x * (sig * pickup * (0.5 * bark))
-}.filter(:highpass, cutoff: 30, quality: 0.7) * 0.25).softclip(0.8, 0.95) * 1.3).pan(4.8.hz.lfo.at(0.3))
+  x * (x * (sig * pickup * (0.5 * bark)) + 1)
+}.filter(:highpass, cutoff: 30, quality: 0.7) * (amp * 0.18)).softclip(0.8, 0.95) * (1.8 / amp)).pan(4.8.hz.lfo.at(0.3))

@@ -26,11 +26,12 @@
 # the tremolo depth (0 for none).  The pickup drive follows velocity
 # (pickup_velocity: 1, or 0 to ignore it) and, with pickup_key:, grows on
 # low keys (doubling every 1 / pickup_key octaves below C4; the reed's
-# default 0.5 drives F2 about 1.7 times as hard as C4).  Methods:
+# default 1 drives F2 about 3 times as hard as C4).  The tine's --amp
+# pushes its amp (1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up).  Methods:
 # tine_piano_voice(midi, bark:, tremolo:, pickup:, pickup_velocity:,
-# pickup_key:, drive:), reed_piano_voice(midi, bark:, tremolo:, pickup:,
-# pickup_velocity:, pickup_key:); presets :tine_piano and :reed_piano
-# (`preset :tine_piano, midi: midi, bark: 1.5, pickup: 0.7`).
+# pickup_key:, drive:, amp:), reed_piano_voice(midi, bark:, tremolo:,
+# pickup:, pickup_velocity:, pickup_key:); presets :tine_piano and
+# :reed_piano (`preset :tine_piano, midi: midi, bark: 1.5, pickup: 0.7, amp: 4`).
 #
 # patches-3 (2026-10-13; maintainer: "The tine pickup needs less
 # distortion by default at high velocity, the reed pickup could use a
@@ -43,6 +44,18 @@
 # than before: the old clipper had squeezed the velocity range).  The reed's pickup grows below C4 (pickup_key: 0.5;
 # patches-2: 0).
 #
+# patches-4 (2026-10-13; maintainer: "Still a tiny bit of crunch at 0.6;
+# would like default to be a little easier but with the option to crank
+# down the pressure on the amp", and on the reed's low phrase "Could use
+# even more low drive"): the tine's pickup defaults to 0.5 (was 1.0), with
+# --amp / amp: to push the amp; the reed's pickup_key to 1 (was 0.5).
+# The amp's clipper still touched a hard four-note chord struck at once
+# (residue -27.6 dB under the clean chord), so the voices go in at
+# drive: 0.18 (was 0.25) at level 1.8 (was 1.3): the same level below the
+# clipper's knee, the chord clean (-84 dB), peaks up to about +3.6 dBFS
+# (the master's headroom takes them); `drive: 0.25, level: 1.3` is
+# patches-3's amp.
+#
 # Usage:
 #     bin/synths/electric_pianos.rb                              # live MIDI, the tine piano
 #     bin/synths/electric_pianos.rb -p reed spec/test_data/note_velocity.mid reed.flac
@@ -53,7 +66,8 @@
 #     bg :keys, tine_piano_voice(seq([F3, A3, C4, E4].map(&:n2).reduce(:&), [E3, G3, B3, D4].map(&:n2).reduce(:&)).loop)
 #     bg :wurli, reed_piano_voice(seq(A3, C4, E4, G4).n8.vel(1.0).loop, tremolo: 0.2)
 #     bg :keys, tine_piano_voice(chords, drive: 1, level: 0.5)            # patches-2's hot amp
-#     bg :wurli, reed_piano_voice(chords, pickup: 1.5, pickup_key: 1)      # a dirtier reed, much grittier low down
+#     bg :wurli, reed_piano_voice(chords, pickup: 1.5, pickup_key: 1.5)    # a dirtier reed, much grittier low down
+#     knob :amp, 1, range: 1..8; bg :keys, tine_piano_voice(chords, amp: knob(:amp))   # turn :amp, 6 for a crunchy suitcase
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -61,11 +75,16 @@ require 'mb-sound'
 module MB::Sound
   # A tine piano (Rhodes-style; see the header): +bark+ scales the
   # velocity-driven FM index and pickup growl, +pickup+ (a number or a
-  # node), +pickup_velocity+, and +pickup_key+ the pickup's drive (see
-  # .electric_piano_pickup), +drive+ the gain of the voices' sum into the
-  # amp's softclipper, +tremolo+ the stereo tremolo depth at +rate+ Hz.
-  # Stereo.
-  def self.tine_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 4.8, level: 1.3, voices: 8, drive: 0.25, pickup: 1.0, pickup_velocity: 1.0, pickup_key: 0.0)
+  # node; TINE_PIANO_PICKUP by default), +pickup_velocity+, and
+  # +pickup_key+ the pickup's drive (see .electric_piano_pickup), +drive+
+  # the gain of the voices' sum into the amp's softclipper, +amp+ (a
+  # number or a node, 1 by default) how hard the amp is pushed: it
+  # multiplies +drive+ and divides the output level, so quiet passages
+  # stay as loud and only the clipping grows (on a hard four-note chord:
+  # clean at 1, a warm edge at 1.3-1.5 (residue -30 to -25 dB under the
+  # clean chord), crunch at 2 (-18 dB), a broken-up suitcase at 4-8 (-8
+  # to -4 dB)), +tremolo+ the stereo tremolo depth at +rate+ Hz.  Stereo.
+  def self.tine_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 4.8, level: 1.8, voices: 8, drive: 0.18, amp: 1.0, pickup: TINE_PIANO_PICKUP, pickup_velocity: 1.0, pickup_key: 0.0)
     keys = synth(midi, voices: voices, retrigger: :string) { |v|
       f = v.hz
       vel2 = v.velocity * v.velocity
@@ -78,18 +97,27 @@ module MB::Sound
       bar = f.transpose(12).sine.free * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
       x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
       # The pickup: an asymmetric (squared) term, larger for harder strikes
-      x + x * x * (electric_piano_pickup(v, pickup, pickup_velocity, pickup_key) * (0.5 * bark))
+      x * (x * (electric_piano_pickup(v, pickup, pickup_velocity, pickup_key) * (0.5 * bark)) + 1)
     }
-    out = (keys.filter(:highpass, cutoff: 30, quality: 0.7) * drive).softclip(0.8, 0.95) * level
+    clean = amp.is_a?(Numeric) && amp == 1
+    out = (keys.filter(:highpass, cutoff: 30, quality: 0.7) * (clean ? drive : amp * drive)).softclip(0.8, 0.95) * (clean ? level : level / amp)
     tremolo > 0 ? out.pan(rate.hz.lfo.at(tremolo)) : stereo(out, out)
   end
+
+  # The tine piano's default pickup drive: patches-4 (2026-10-13;
+  # maintainer: "Still a tiny bit of crunch at 0.6; would like default to
+  # be a little easier but with the option to crank down the pressure on
+  # the amp") lowered it from 1.0 (patches-3 rendered 0.6 too); the amp's
+  # clipper doesn't act on the velocity phrase, so the remaining growl is
+  # the pickup's squared term, and +amp+ adds the amp's own drive.
+  TINE_PIANO_PICKUP = 0.5
 
   # A reed piano (Wurlitzer-style; see the header): +bark+ scales the
   # velocity-driven FM index and pickup drive, +pickup+ (a number or a
   # node), +pickup_velocity+, and +pickup_key+ the pickup's drive (see
   # .electric_piano_pickup), +tremolo+ the amplitude tremolo depth at
   # +rate+ Hz.  Mono.
-  def self.reed_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 5.6, level: 0.4, voices: 8, pickup: 1.0, pickup_velocity: 1.0, pickup_key: 0.5)
+  def self.reed_piano_voice(midi, bark: 1.0, tremolo: 0.3, rate: 5.6, level: 0.4, voices: 8, pickup: 1.0, pickup_velocity: 1.0, pickup_key: REED_PIANO_PICKUP_KEY)
     keys = synth(midi, voices: voices, retrigger: :string) { |v|
       f = v.hz
       vel2 = v.velocity * v.velocity
@@ -106,6 +134,12 @@ module MB::Sound
     honk * level
   end
 
+  # The reed piano's default key scaling of its pickup drive (doubling
+  # every octave below C4: F2 3.0 times C4's): patches-4 (2026-10-13;
+  # maintainer on pickup_key: 1 on the low phrase: "Could use even more
+  # low drive"); patches-3 had 0.5, patches-2 0.
+  REED_PIANO_PICKUP_KEY = 1.0
+
   # The pickup drive of an electric piano voice +v+ (a Notes): +pickup+
   # (a number or a node) times the velocity scaling (+velocity+ 0..1: 1
   # follows velocity fully, 0 ignores it) times the key scaling (+key+:
@@ -119,11 +153,13 @@ module MB::Sound
 
   # The script's patches by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
-  def self.electric_pianos_patch(midi, patch = :tine, bark: 1.0, tremolo: 0.3, pickup: 1.0)
+  # +pickup+ nil is the patch's own default (TINE_PIANO_PICKUP, or the
+  # reed's 1.0); +amp+ is the tine's amp drive.
+  def self.electric_pianos_patch(midi, patch = :tine, bark: 1.0, tremolo: 0.3, pickup: nil, amp: 1.0)
     bark = bark.constant.named('bark')
-    pickup = pickup.constant.named('pickup')
+    pickup = (pickup || (patch == :tine ? TINE_PIANO_PICKUP : 1.0)).constant.named('pickup')
     case patch
-    when :tine then tine_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup)
+    when :tine then tine_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup, amp: amp.constant.named('amp'))
     when :reed then reed_piano_voice(midi, bark: bark, tremolo: tremolo, pickup: pickup)
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
@@ -143,9 +179,10 @@ module MB::Sound
       patch: [:tine, Symbol, '-p', 'Patch to play', [:tine, :reed]],
       bark: [1.0, Float, '-b', 'Velocity-driven bark (FM index and pickup growl) scale', 0.0..2.0],
       tremolo: [0.3, Float, '-t', 'Tremolo depth 0..1 (0 for none)', 0.0..1.0],
-      pickup: [1.0, Float, '-k', 'Pickup drive scale (follows velocity; the reed also grows on low keys)', 0.0..3.0],
+      pickup: [nil, Float, '-k', 'Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)', 0.0..3.0],
+      amp: [1.0, Float, '-a', 'Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level)', 0.25..8.0],
     ) { |midi, p|
-      electric_pianos_patch(midi, p.patch, bark: p.bark, tremolo: p.tremolo, pickup: p.pickup)
+      electric_pianos_patch(midi, p.patch, bark: p.bark, tremolo: p.tremolo, pickup: p.pickup, amp: p.amp)
     }
   end
 end

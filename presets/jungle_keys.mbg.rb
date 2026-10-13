@@ -3,18 +3,21 @@
 graph 2,
   name: "jungle_keys",
   kind: :synth,
-  saved: "2026-10-13T15:39:01Z",
-  mb_sound: "0.12.0.usegit (31ee3867)",
+  saved: "2026-10-13T18:58:01Z",
+  mb_sound: "0.12.0.usegit (01f36fe8)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :keys from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :keys, cutoff: 16000.0, echo: 0.3 }
 inputs :midi
 
-voice = synth(midi, voices: 8) { |v|
-  p = v.hz
-  index = v.env(0.001, 0.5, 0.15, 0.3, gm: false)
-  tine = p.transpose(33.68825906469125).sine * v.env(0.0005, 0.08, 0, 0.05, gm: false) * 0.06
-  (p.sine.pm(p.sine, index * 0.22) + tine) * v.env(0.002, 1.6, 0.35, 0.35, gm: false)
-}
-lfo = 4.6.hz.lfo
-stereo(voice * (lfo * 0.22 + 0.78), voice * (lfo * -0.22 + 0.78)).reverb(:hall, mix: 0.22) * 0.15
+((synth(midi, voices: 8, retrigger: :string) { |v|
+  f = v.hz
+  sig = v.velocity
+  vel2 = sig * sig
+  index = v.env(0, 1.2, 0.1, 0.4, gm: false).no_velocity * (vel2 * 0.3 + 0.03)
+  body = f.sine.free(true).pm(f.sine.free(true) * index)
+  bell = f.sine.free(true).pm(f.transpose(45.68825906469125).sine.free(true) * v.env(0, 0.12, 0, 0.05, gm: false).no_velocity * (sig * 0.25))
+  bar = f.transpose(12).sine.free(true) * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
+  x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
+  x * (x * (sig * 0.5 * 0.5) + 1)
+}.filter(:highpass, cutoff: 30, quality: 0.7) * 0.18).softclip(0.8, 0.95) * 1.8).pan(4.6.hz.lfo.at(0.22)).reverb(:hall, mix: 0.22) * 0.48

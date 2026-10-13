@@ -19,7 +19,8 @@
 #   rin       a small high bowl: faster beating, a shorter room
 #   gong      a tam-tam: dense low partials gliding down after the stroke
 #             and a high shimmer swelling in over seconds, ringing at 16
-#             high partials spread in stereo (ring:, partials:, spread:)
+#             high partials spread in stereo (ring:, partials:, spread:;
+#             --tune moves the shimmer up or down in semitones)
 #             (D2 plays 55 Hz; other notes transpose it)
 #   koto      a plucked FM tone (1:1 body, faint 7:1 tine; more a koto or
 #             a hammered string than an e-piano) through worn tape
@@ -42,6 +43,7 @@
 # Usage:
 #     bin/synths/ambient.rb                           # live MIDI, the bowls
 #     bin/synths/ambient.rb -p gong song.mid gong.flac
+#     bin/synths/ambient.rb -p gong --tune -7 song.mid low_shimmer.flac
 #     bin/synths/ambient.rb -p koto -w 0.8 song.mid worn.flac
 #
 # Snippets (bin/sound.rb, after `load 'bin/synths/ambient.rb'`):
@@ -129,7 +131,18 @@ module MB::Sound
   # mono (`partials: 7, spread: 0` is close to it; ring: 0 is the earlier
   # noise-only shimmer); patches-3 (2026-10-13: "Having more shimmer
   # partials to spread around would be even better") has 16, wider.
-  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, ring: 0.6, ring_decay: 0.8, partials: 16, spread: 0.7, space: 0.5)
+  #
+  # +tune+ (semitones, a number or a node such as a knob; 0 by default)
+  # moves the whole shimmer up or down: the partials and the noise band
+  # they ring from, keeping their spacing (the low partials stay on the
+  # note).  -12 is a darker, closer shimmer; +7 a glassier one (up to
+  # +12 at D2: higher, the top partials near the Nyquist frequency).
+  # patches-4 (2026-10-13; maintainer on the 16 partials: "Could be a good
+  # knob on the gong to change the shimmer tuning up or down").
+  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, ring: 0.6, ring_decay: 0.8, partials: 16, spread: 0.7, space: 0.5, tune: 0)
+    # (the shimmer's frequency ratio; a plain 0 leaves the graph as before 2026-10-13)
+    up = 2 ** (tune / 12.0)
+    up = nil if up.is_a?(Numeric) && up == 1
     gong = synth(midi, voices: 1) { |n|
       hit = n.trigger
       fall = adsr(0, 4, 0, 0, trigger: hit, curve: :linear)
@@ -139,11 +152,12 @@ module MB::Sound
         hit.ping(f * r * (1 + fall * glide), decay: 24.0 / (1 + i * 0.35)) * (0.6 / (1 + i * 0.25))
       }.reduce(:+)
       swell = n.env(2.2, 7, 0, 3, curve: :swell, gm: false)
-      band = noise.filter(:bandpass, cutoff: ambient_walk(0.7, 2400, 5200), quality: 1.5)
+      band = noise.filter(:bandpass, cutoff: up ? ambient_walk(0.7, 2400, 5200) * up : ambient_walk(0.7, 2400, 5200), quality: 1.5)
       if ring > 0
+        top = up ? f * up : f
         sides = ambient_gong_shimmer(partials).each_with_index.group_by { |_r, i| i % 2 }.values.map { |rs|
           rs.map { |(r, g), _i|
-            band.ping(f * r * (1 + fall * glide * g), decay: ring_decay * (60.0 / r)**0.5)
+            band.ping(top * r * (1 + fall * glide * g), decay: ring_decay * (60.0 / r)**0.5)
           }.reduce(:+)
         }
         # (each side's resonator sum is about 51 sqrt(partials) times the band's RMS at 0.8 s, RMS growing about
@@ -237,11 +251,11 @@ module MB::Sound
 
   # The script's instruments by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
-  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.0)
+  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.0, tune: 0.0)
     case patch
     when :bowl then ambient_bowl_voice(midi, space: space.constant.named('space'))
     when :rin then ambient_rin_voice(midi, space: space.constant.named('space'))
-    when :gong then ambient_gong_voice(midi, space: space.constant.named('space'))
+    when :gong then ambient_gong_voice(midi, space: space.constant.named('space'), tune: tune.constant.named('tune'))
     when :koto then ambient_koto_voice(midi, wear: wear.constant.named('wear'), space: space.constant.named('space'))
     when :harp then ambient_harp_voice(midi, wear: wear.constant.named('wear'), space: space.constant.named('space'))
     when :drone then ambient_drone_voice(midi)
@@ -266,8 +280,9 @@ module MB::Sound
       patch: [:bowl, Symbol, '-p', 'Instrument to play', [:bowl, :rin, :gong, :koto, :harp, :drone, :rainstick]],
       space: [0.5, Float, '-s', 'Room level 0..1 (bowls, rin, gong, koto, harp)', 0.0..1.0],
       wear: [0.0, Float, '-w', 'Tape wear 0..1 (koto, harp)', 0.0..1.0],
+      tune: [0.0, Float, '-t', 'Gong shimmer tuning in semitones (the shimmer partials and their noise band)', -24.0..12.0],
     ) { |midi, p|
-      ambient_patch(midi, p.patch, space: p.space, wear: p.wear)
+      ambient_patch(midi, p.patch, space: p.space, wear: p.wear, tune: p.tune)
     }
   end
 end

@@ -55,8 +55,9 @@ module MB::Sound
     funk_clav: ['bin/synths/funk.rb', :clav],
     funk_talkbox: ['bin/synths/funk.rb', :talkbox],
     funk_choir: ['bin/synths/funk.rb', :choir],
-    tine_piano: ['bin/synths/electric_pianos.rb', :tine],
-    reed_piano: ['bin/synths/electric_pianos.rb', :reed],
+    # (--pickup given, so it saves as a param: the script's default is each patch's own, nil)
+    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5'],
+    reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
   }.freeze
 
   # Effect presets: { name => [script, params, builder] }; the builder gets
