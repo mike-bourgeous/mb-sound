@@ -125,6 +125,41 @@ RSpec.describe(MB::Sound::Session::Strip) do
       expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
     end
 
+    # fixes-11: :b's own branch of the LFO wasn't read while it slept,
+    # because the LFO's other branch (inside x) is in :b's graph too
+    it 'keeps a muted player in step with a node it reads both directly and through a node another player plays' do
+      lfo = 3.hz.lfo
+      x = lfo * 2
+      data = mute_and_back({ a: x * 0.5, b: x * 0.1 + lfo * 0.1 }, [128, 801, 7])
+
+      ref = new_session
+      ref.add(3.hz.lfo * 1.3)
+      expected = run_in(ref, 800 + 72000 + 24000, [800])[-24000..]
+      ref.close
+      expect(data.abs.max).to be > 1
+      expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
+    end
+
+    it 'starts a queued graph in step with a node it reads both directly and through a node a playing graph plays' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        x = lfo * 2
+        s = new_session
+        s.add(x * 0.5, name: :a)
+        run_in(s, 800, sizes)
+        s.add(x * 0.1 + lfo * 0.1, name: :b, fade: 0, on: :bar) # frame 96000
+        data = run_in(s, 96000 + 24000 - 800, sizes)[(96000 - 800)..]
+
+        ref = new_session
+        ref.add(3.hz.lfo * 1.3)
+        expected = run_in(ref, 96000 + 24000, [800])[96000..]
+        ref.close
+        expect((data - expected).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
     it "pauses a muted player's node that only unused nodes share" do
       outs = [false, true].map { |extra|
         lfo = 3.hz.lfo

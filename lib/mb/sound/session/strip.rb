@@ -23,9 +23,9 @@ module MB
         # #asleep_reads.
         KeptGraph = Struct.new(:input, :read_to, :asleep_reads)
 
-        # A graph waiting to start (see #catch_up_waiting): +branches+ is
-        # the cache of #waiting_branches.
-        WaitingGraph = Struct.new(:input, :branches)
+        # A graph waiting to start (see #catch_up_waiting): +asleep_reads+
+        # is the cache of #asleep_reads.
+        WaitingGraph = Struct.new(:input, :asleep_reads)
 
         # Mutes the players named +names+ (or mute groups; see #mute_group).
         # Returns the changes (see Changes#change).
@@ -201,8 +201,9 @@ module MB
         end
 
         # What sleeping player +p+ (or a kept graph; see #read_kept_graphs)
-        # still reads (like a skipped Synth lane; see Synth#boundary): its
-        # branches of Tees with a branch in another graph in the Session
+        # still reads (like a skipped Synth lane; see Synth#boundary), and
+        # what a graph waiting to start skips (see #catch_up_waiting): its
+        # own branches of Tees with a branch in another graph in the Session
         # (another player's, sleeping or not, or a graph kept for #resume or
         # #undo), less those that another of these reads through.  Branches
         # nothing in the Session plays (an unused `lfo * 2`, or a graph not
@@ -217,8 +218,6 @@ module MB
           return cache[2] if cache && cache[0] == changes && cache[1].equal?(graphs)
 
           input = p.input
-          own = input.graph(include_tees: true)
-          set = own.to_h { |n| [n.__id__, true] }
           others = {}
           graphs.each do |g|
             next if g.equal?(input)
@@ -226,8 +225,17 @@ module MB
             g.graph(include_tees: true).each { |n| others[n.__id__] = true }
           end
 
-          shared = own.select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && n.owner_tee.branches.any? { |b| !set[b.__id__] && others[b.__id__] }
+          # Branches only this graph reads (a branch inside a node another
+          # graph also plays, e.g. the LFO branch in `x = lfo * 2` shared
+          # by both, is read through that node), of Tees with another
+          # branch in another graph: before fixes-11 a Tee counted only if
+          # one of its branches was outside this graph, so a graph playing
+          # `x * 0.1 + lfo * 0.1` while another played `x` left its own
+          # `lfo` branch unread, and unmuting it after a second raised
+          # BranchBufferOverflow
+          shared = input.graph(include_tees: true).select { |n|
+            n.is_a?(GraphNode::Tee::Branch) && n.reader && !others[n.__id__] &&
+              n.owner_tee.branches.any? { |b| !b.equal?(n) && others[b.__id__] }
           }
           upstream = {}
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
@@ -239,7 +247,7 @@ module MB
 
         # The inputs of the Session's graphs (players' and kept graphs'):
         # one list per span, the same object while they stay the same (for
-        # the caches of #asleep_reads and #waiting_branches).
+        # the caches of #asleep_reads).
         def span_graphs
           @span_graphs ||= begin
             list = (@span_players || @mutex.synchronize { @players.values }).map(&:input)
@@ -255,7 +263,7 @@ module MB
         end
 
         # Moves the branches of shared nodes in graphs waiting to start (see
-        # #waiting_branches) to their Tees' leaders: graphs queued by #add
+        # #asleep_reads) to their Tees' leaders: graphs queued by #add
         # (a `bg` while playing lands on the next bar; scene builds run up
         # to two bars ahead) and players that start later in this span.
         # Before, nothing read a waiting graph's branch while a playing
@@ -283,41 +291,12 @@ module MB
 
             live[input] = true
             w = (@waiting_graphs[input] ||= WaitingGraph.new(input, nil))
-            waiting_branches(w).each(&:catch_up)
+            asleep_reads(w).each(&:catch_up)
           rescue => e
             raise if @raise_errors
             warn "A graph waiting to start couldn't keep in step with shared nodes: #{e.class}: #{e.message}"
           end
           @waiting_graphs.select! { |input, _| live[input] } if @waiting_graphs.size > live.size
-        end
-
-        # The branches of waiting graph +w+ (see #catch_up_waiting) that
-        # only it reads, of Tees with a branch in another of the Session's
-        # graphs (a player's, playing, sleeping, or waiting to start later
-        # in the span, or a kept graph's).  Their Tees' sources are in the
-        # other graphs too, so nothing upstream of them is the waiting
-        # graph's own.  Cached until a Tee gains or loses a branch or the
-        # Session's graphs change.
-        def waiting_branches(w)
-          graphs = span_graphs
-          changes = GraphNode::Tee.branch_changes
-          cache = w.branches
-          return cache[2] if cache && cache[0] == changes && cache[1].equal?(graphs)
-
-          input = w.input
-          others = {}
-          graphs.each do |g|
-            next if g.equal?(input)
-
-            g.graph(include_tees: true).each { |n| others[n.__id__] = true }
-          end
-
-          list = input.graph(include_tees: true).select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && n.reader && !others[n.__id__] &&
-              n.owner_tee.branches.any? { |b| !b.equal?(n) && others[b.__id__] }
-          }
-          w.branches = [changes, graphs, list]
-          list
         end
 
         # Reads the first +offset+ frames of the span on the shared
@@ -329,7 +308,7 @@ module MB
           w = @waiting_graphs.delete(p.input) unless @waiting_graphs.empty?
           return unless w && offset > 0
 
-          waiting_branches(w).each { |b| b.internal_raw_sample(offset) }
+          asleep_reads(w).each { |b| b.internal_raw_sample(offset) }
         end
 
         # Notes that player +p+ has left the Session's players (stopped,
