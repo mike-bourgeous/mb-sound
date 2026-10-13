@@ -33,23 +33,25 @@ module MB
       clip :rin, events([0, 1/16r, E5, 0.6], length: 311/40r, loop: true)
       clip :gong, seq(D2).n1
       # (quarter notes: 8 bars, 32 s, per pass; eighths until 2026-10-13,
-      # when the maintainer asked to "slow the koto")
+      # when the maintainer asked to "slow the koto"; then "maybe half as
+      # many notes" (patches-5): about 4 notes per pass, was 7)
       clip :motif, seq(
-        A4, R, R, D5, R, B4, R, R,   R, R, E5.maybe(0.6), R, R, R, R, R,
-        G4, R, R, A4, R, R, R, R,    R, D5, R, R, B4.maybe(0.5), R, R, R,
+        A4, R, R, D5, R, R, R, R,    R, R, R, E5.maybe(0.6), R, R, R, R,
+        R, R, R, G4, R, R, R, R,     R, R, R, B4.maybe(0.5), R, R, R, R,
       ).n4.humanize(1.n32, velocity: 0.15).loop(align: :launch)
       clip :harp, seq(D5, R, A4, B4.maybe(0.7), R, D5, R, E5, R, G4, R, R, A4.maybe(0.5), R, R, R).n16.swing(0.6).loop(align: :launch)
       clip :stick, seq(D5, T, T).n1
 
       knob :space, 0.5, range: 0..1   # the rooms' level (bowls, rin, gong, koto, harp)
       knob :wear, 0, range: 0..1      # how old the tape is (koto, harp)
-      knob :shimmer, 0, range: -12..7 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
+      knob :shimmer, -7, range: -12..7 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
+      knob :spread, 0.7, range: 0..1   # the gong's shimmer width (0 mono, 1 wide)
 
       role :drone, :ambient_drone, about: 'two sine generators drifting against each other on the root and fifth'
       role :bowls, :ambient_bowl, params: { space: :space }, about: 'singing bowl strikes, every partial a beating doublet'
       role :bowls2, :ambient_bowl, params: { space: :space }, about: 'a second bowl on its own loop length'
       role :rin, :ambient_rin, params: { space: :space }, about: 'a small rin, the still point'
-      role :gong, :ambient_gong, params: { space: :space, tune: :shimmer }, level: -3.db, about: 'a tam-tam stroke whose shimmer blooms over seconds'
+      role :gong, :ambient_gong, params: { space: :space, tune: :shimmer, spread: :spread }, level: -3.db, about: 'a tam-tam stroke whose shimmer blooms over seconds'
       role :motif, :ambient_koto, params: { space: :space, wear: :wear }, about: 'a sparse FM koto motif, humanized, some notes by chance'
       role :harp, :ambient_harp, params: { space: :space, wear: :wear }, level: -2.db, about: 'a swung Karplus-Strong figure'
       role :stick, :ambient_rainstick, level: -4.db, about: 'a rain stick tipping across'

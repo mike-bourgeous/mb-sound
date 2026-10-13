@@ -3,11 +3,11 @@
 graph 2,
   name: "ambient_bowl",
   kind: :synth,
-  saved: "2026-10-13T18:58:06Z",
-  mb_sound: "0.12.0.usegit (01f36fe8)",
+  saved: "2026-10-13T22:45:06Z",
+  mb_sound: "0.12.0.usegit (af720dbd)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :bowl from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :bowl, wear: 0.0, tune: 0.0 }
+  options: { patch: :bowl, wear: 0.0, tune: -7.0, spread: 0.7 }
 inputs :midi
 param :space, 0.5, range: 0.0..1.0, description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 
