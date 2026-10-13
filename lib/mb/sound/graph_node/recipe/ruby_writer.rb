@@ -849,6 +849,9 @@ module MB
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
+            when MB::Sound::Sample then sample_text(v, indent)
+            when MB::Sound::Sample::Slices then slices_text(v, indent)
+            when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
@@ -1001,6 +1004,10 @@ module MB
                 suffix << ".#{mode}#{"(#{name.inspect})" if name}"
                 rebuilt = rebuilt.public_send(mode, name)
               end
+              if v.pitch
+                suffix << ".pitch(#{num(v.pitch)})"
+                rebuilt = rebuilt.pitch(v.pitch)
+              end
               rebuilt = MB::Sound::Sequence::Seq.step(rebuilt)
               prefix = ''
               if v.accented
@@ -1134,6 +1141,88 @@ module MB
               return "Wavetable[#{asset.inspect}]"
             end
             fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          # A Sample: the calls that cut or edited it (Sample#lineage) on its
+          # origin, which prints as an asset in bundles (or its file).
+          def sample_text(s, indent)
+            # Edits (new audio: bits, lofi, stretch, mono) save as assets in
+            # bundles, so loading neither redoes them nor rounds differently
+            if @assets && s.lineage && MB::Sound::Sample::EDITS.include?(s.lineage[1]) && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
+            if s.lineage
+              parent, name, args, kwargs = s.lineage
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            if @assets && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
+            return "Sample[#{s.file.inspect}]" if s.file
+
+            fixme("a Sample made from audio in memory (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          def slices_text(s, indent)
+            return fixme('Slices without a recipe') unless s.lineage
+            parent, name, args, kwargs = s.lineage
+            "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+          end
+
+          # An Instrument: from slices (keymap) or an SFZ file; others print
+          # as a FIXME for now.
+          def instrument_text(i, indent)
+            if i.lineage
+              parent, name, args, kwargs = i.lineage
+              if parent == :sfz
+                extra = kwargs.map { |k, v| ", #{key_text(k)} #{value(v, indent)}" }.join
+                return "sfz(#{leaf(args[0], indent)}#{extra})"
+              end
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            instrument_block_text(i, indent)
+          end
+
+          # An Instrument built region by region, as its constructor with a
+          # block of `i.region` calls (only settings that differ from
+          # Instrument#region's defaults).
+          def instrument_block_text(inst, indent)
+            kw = {}
+            kw[:split] = inst.split if inst.split
+            kw[:mips] = inst.mips unless inst.mips == :default
+            kw[:envelope] = inst.envelope if inst.envelope
+            kw[:name] = inst.name if inst.name
+            args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            inner = "#{indent}  "
+            lines = inst.regions.map { |r|
+              opts = {}
+              opts[:keys] = r.keys[0]..r.keys[1] unless r.keys == [0, 127]
+              opts[:vel] = r.vel[0]..r.vel[1] unless r.vel == [0, 127]
+              opts[:seq] = r.seq if r.seq
+              opts[:rand] = r.rand[0]...r.rand[1] if r.rand
+              opts[:root] = r.root if r.root
+              opts[:keytrack] = r.keytrack unless r.keytrack == 1
+              opts[:veltrack] = r.veltrack unless r.veltrack == 0
+              opts[:tune] = r.tune unless r.tune == 0
+              opts[:gain] = r.gain unless r.gain == 1
+              opts[:offset] = r.offset unless r.offset == 0
+              list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
+              "#{inner}i.region(#{list.join(', ')})"
+            }
+            head = args.empty? ? 'Sampler::Instrument.new' : "Sampler::Instrument.new(#{args.join(', ')})"
+            "#{head} { |i|\n#{lines.join("\n")}\n#{indent}}"
+          end
+
+          # (Samples, Slices, and Instruments print as postfix chains, so
+          # they need no parentheses as receivers)
+          def lineage_receiver(parent, indent)
+            leaf(parent, indent)
+          end
+
+          def lineage_call(name, args, kwargs, indent)
+            list = args.map { |a| value(a, indent) } + kwargs.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            return "[#{list.join(', ')}]" if name == :[]
+            list.empty? ? ".#{name}" : ".#{name}(#{list.join(', ')})"
           end
 
           # A number: Decibels as k.db, and Float gains that are exactly k/10

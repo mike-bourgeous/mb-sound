@@ -72,6 +72,22 @@ module MB
               reason: 'iteration (rows taken with kit.rows or kit[:name] print as kit[:name])',
               names: %i[each],
             },
+            'MB::Sound::Sample' => {
+              reason: 'value readers and views (Samples print through their lineage; GraphIO::Registry::VALUES lets documents call the views)',
+              names: %i[
+                [] at audio bits bpm channel_count chops data duration fade fade_in fade_out file gain length level lineage lofi loop_mode
+                loop_points looped mono name normalize one_shot onsets origin peak position rev reverse root save seconds size slice slices
+                start stop stretch tags to_a to_instrument transport transpose trim tune with
+              ],
+            },
+            'MB::Sound::Sample::Slices' => {
+              reason: 'value readers and views (Slices print through their lineage)',
+              names: %i[[] absolute bounds chop_list count each fade first instrument keymap last length lineage name names sample size starts to_a],
+            },
+            'MB::Sound::Sampler::Instrument' => {
+              reason: 'readers and the region builder (instruments print through their lineage)',
+              names: %i[channel_count envelope kernel_tables lineage mips name region regions samples split],
+            },
           }.freeze
 
           # Top-level MB::Sound modules whose methods build graphs, with the
@@ -86,6 +102,10 @@ module MB
               midi: 'live MIDI input (printed as an input)',
               midi_stream: 'a MIDI::Stream for live input', close_midi: 'closes live input',
               per_voice: 'returns a plain value for the current lane (lanes that differ print with per_voice)',
+            },
+            'SamplerMethods' => {
+              bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
+              resample_to_sample: 'alias of bounce', capture_audio: 'live capture (performance, not graph structure)',
             },
             'SequenceMethods' => {
               bpm: 'transport tempo (session state)', transport: 'the session transport',
@@ -127,7 +147,7 @@ module MB
               MB::Sound::Tone, MB::Sound::Pitch, MB::Sound::Notes::NotePitch, MB::Sound::Notes,
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
               MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
-              MB::Sound::Sequence::Kit,
+              MB::Sound::Sequence::Kit, MB::Sound::Sample, MB::Sound::Sample::Slices, MB::Sound::Sampler::Instrument,
             ]
           end
         end
@@ -238,6 +258,7 @@ module MB
               names |= dsl + ELEMENT_ACCESS + [:coerce] if c == Channels
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
               names |= [:named] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named
+              names |= MB::Sound::Sampler::ClipMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Clip
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end

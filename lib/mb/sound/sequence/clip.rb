@@ -371,7 +371,14 @@ module MB
 
         # Returns a clip with every event's value shifted by +semitones+.
         def transpose(semitones)
-          map_clip { |e| e.with(value: Sequence.transpose_value(e.value, semitones)) }
+          map_clip { |e|
+            if e.pitch
+              # A pitch-marked note (a sampler chop hit) keeps its key
+              e.with(pitch: e.pitch + Interval.semitones(semitones).to_f)
+            else
+              e.with(value: Sequence.transpose_value(e.value, semitones))
+            end
+          }
         end
 
         # Returns a clip that plays this clip backward: each event ends where

@@ -1,0 +1,1 @@
+fast_sampler.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_wavetable.h $(srcdir)/../include/mb_phase.h

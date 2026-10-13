@@ -149,6 +149,39 @@ module MB
       end
     end
 
+    Help.topic :sampler, 'Sampler: bounce, slice, chop', group: :sound do
+      about <<~TEXT
+        Samples are sounds in memory: `Sample['kick.flac']`, `bounce(graph,
+        2.bars, bpm:)` (any graph, offline, at its own tempo), or
+        `capture_audio(4.bars)` (the master bus or a node, live).  Cut them
+        with `rec.slices(16)` (or `slices(:onsets)`), name runs of slices
+        (`brk.name(k: 0..1, s: 4..5)`), and edit them as values: `.rev`,
+        `.at(7.n16)` (a tracker's 9xx offset), `.looped`, `.bits(12)`,
+        `.lofi(:s950)`, `.stretch(1.25)`.  `brk.chop(:k, T, :s, [:s, 2],
+        brk[:s].rev)` writes a chop clip: keys of `brk.keymap` (slices from
+        C2) with a pitch mark on each hit, so `amen.transpose(2)` pitches
+        every hit and a keyboard plays the same slices.  `brk.keymap(split:
+        C4)` plays the last slice chromatically above C4.  Play with
+        `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
+        synth, `sfz(path)` instruments, or `sample.node`.
+      TEXT
+      commands :bounce, :capture_audio, :chop, :sampler, :sfz
+      dsl :bounce
+      note :sampler
+      see :drums, :sequences
+      example 'a chopped break' do
+        rec = bounce(2.bars, bpm: 138.75) {
+          tr808(grid(16, kick: 'X.....x...X.....|X.x.......X..x..', snare: '....X..3.3..X..3|.3..X..3....X.3.', hat: 'x.x.x.x.x.xxx.x.|x.x.x.x.x.x.x.xx'))
+        }
+        brk = rec.slices(32).name(k: 0..1, h: 2..3, s: 4..5, g: 7)
+        bg :try, brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k, T, :k, :h, T, :s, T, [:s, 3], brk[:s].rev).loop.transpose(3).sampler(brk).at(-14.db)
+      end
+      example 'a resampled bass, looped' do
+        bass = 55.hz.ramp.lp4(700, resonance: 0.3).bounce(1.beat, root: A1).looped(0.1..0.4, mode: :ping_pong)
+        bg :try, seq(A1, C2, E1, G1).n4.loop.sampler(bass).at(-12.db).until(2.bars)
+      end
+    end
+
     Help.topic :random, 'Randomness and seeds', group: :sound do
       about <<~TEXT
         Everything random (phases, noise, unison layouts, synth lanes) draws

@@ -27,12 +27,12 @@ module MB
       end
 
       # Note marks an #events row may give in its trailing Hash.
-      EVENT_MARKS = [:probability, :accented, :slid, :condition, :fill_mark].freeze
+      EVENT_MARKS = [:probability, :accented, :slid, :condition, :fill_mark, :pitch].freeze
 
       # Returns a Sequence::Clip of explicit events, one Array per event:
       # [start, length, value, velocity], plus a Hash of note marks
       # (probability:, accented:, slid:, condition: [n, from], fill_mark:
-      # [:fill or :nofill, name]) when it has any.  Starts and lengths are
+      # [:fill or :nofill, name], pitch: semitones) when it has any.  Starts and lengths are
       # whole notes (exact Rationals); values are note numbers (or any
       # number, or a Pitch).  This is how graph documents and #to_ruby
       # write clips that have no recipe (a recorded or captured clip,

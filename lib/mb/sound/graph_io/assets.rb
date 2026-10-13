@@ -78,6 +78,20 @@ module MB
           @by_table[table].name
         end
 
+        # The bundle name for Sample +sample+ (one without a lineage): its
+        # source file when it was read from one without options, else a FLAC
+        # written by Sample#save (the audio and the settings as tags).
+        def sample(sample)
+          src = sample.file
+          if src && File.file?(src)
+            real = File.realpath(src)
+            return(@by_source[real] ||= add(Entry.new(unique(File.basename(real)), real, nil))).name
+          end
+          base = sample.name.to_s.sub(/\.[A-Za-z0-9]+\z/, '')
+          @by_table[sample] ||= add(Entry.new(unique("#{base.empty? ? 'sample' : base}.flac"), nil, sample))
+          @by_table[sample].name
+        end
+
         # Copies and saves the assets into bundle directory +dir+.  Returns
         # the entries with their SHA-256 sums.
         def write(dir)

@@ -121,6 +121,8 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'wavetable sample mode reset' => "a Wavetable that isn't a library table",
       'ArrayInput' => "can't print a Numo::SFloat",
       'MixSource (master chain input)' => 'a class defined outside the library',
+      'sampler voices (SamplerVoice)' => 'a Sample made from audio in memory',
+      'capture tap (CaptureTap)' => "can't print a MB::Sound::Sampler::AudioCapture",
     }.freeze
 
     # Factories whose documents keep values but not moves: they save with a

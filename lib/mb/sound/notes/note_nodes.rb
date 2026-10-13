@@ -139,6 +139,35 @@ module MB
         end
       end
 
+      # The latest note-on's pitch mark in semitones (MIDI::Event#pitch; 0
+      # for notes without one), held until the next note-on (see
+      # Notes#pitch_mark).
+      class PitchMark < NoteNode
+        def initialize(stream, notes: nil, sample_rate: 48000)
+          super
+          @pitch = stream.first_note&.pitch.to_f
+          @node_type_name = 'Notes PitchMark'
+        end
+
+        def value
+          @pitch
+        end
+
+        private
+
+        def level
+          @pitch
+        end
+
+        def note_on(event)
+          @pitch = event.pitch.to_f
+        end
+
+        def chase(event)
+          @pitch = event.pitch.to_f
+        end
+      end
+
       # 1 while the latest note's velocity is at least +threshold+, else 0
       # (see Notes#accent).
       class Accent < Velocity
