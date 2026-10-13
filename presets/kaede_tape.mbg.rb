@@ -3,8 +3,8 @@
 graph 2,
   name: "kaede_tape",
   kind: :effect,
-  saved: "2026-10-13T09:31:44Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:56Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kaede_rowntree.rb"
 inputs :input
 param :wear, 0.3, range: 0.0..1.0, description: "Tape wear 0..1"

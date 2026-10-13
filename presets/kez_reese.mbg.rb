@@ -3,8 +3,8 @@
 graph 2,
   name: "kez_reese",
   kind: :synth,
-  saved: "2026-10-13T09:29:43Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T09:59:55Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kez_volta.rb",
   options: { patch: :reese, grit: 0.25, echo: 0.4 }
 inputs :midi

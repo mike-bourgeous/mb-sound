@@ -3,8 +3,8 @@
 graph 2,
   name: "tiko_talkbox",
   kind: :synth,
-  saved: "2026-10-13T09:31:39Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:51Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/tiko_marvell.rb",
   options: { patch: :talkbox, dub: 0.0, keep: 0.82 }
 inputs :midi

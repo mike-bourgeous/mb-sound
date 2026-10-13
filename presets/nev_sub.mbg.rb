@@ -3,8 +3,8 @@
 graph 2,
   name: "nev_sub",
   kind: :synth,
-  saved: "2026-10-13T09:30:17Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:00:31Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/skylark_junction.rb",
   options: { patch: :sub, cutoff: 16000.0, echo: 0.3 }
 inputs :midi

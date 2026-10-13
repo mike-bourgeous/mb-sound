@@ -3,8 +3,8 @@
 graph 2,
   name: "tiko_dub_loop",
   kind: :effect,
-  saved: "2026-10-13T09:31:44Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:56Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/tiko_marvell.rb"
 inputs :input
 param :dub, 1.0, range: 0.0..1.0, description: "Footswitch: 1 records into the 4-bar loop"

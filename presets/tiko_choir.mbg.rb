@@ -3,8 +3,8 @@
 graph 2,
   name: "tiko_choir",
   kind: :synth,
-  saved: "2026-10-13T09:31:44Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:55Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/tiko_marvell.rb",
   options: { patch: :choir }
 inputs :midi

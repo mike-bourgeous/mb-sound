@@ -3,8 +3,8 @@
 graph 2,
   name: "kaede_harp",
   kind: :synth,
-  saved: "2026-10-13T09:31:06Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:16Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kaede_rowntree.rb",
   options: { patch: :harp }
 inputs :midi
@@ -25,7 +25,7 @@ voice = synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
   sig7 = sig * (6.0 - 4.0 * v.cc(1, range: 0.0..1.0, name: "Damping", description: "Darkens the string (loop lowpass)"))
   (osc.filter(:lowpass, cutoff: sig * 6.0.constant ** fx, quality: 0.6) * v.env(0, 0, 1, 0, gate: false, gm: false, hold: sig2 * 1.0, sensitivity: 0.3..1.0) * (fx2 + (1 - fx2) * sig3 ** 0.5)).feedback { |fb, input|
     line = fb + input
-    d = line.delay(sig2, smoothing: false, max_delay: 0.08)
+    d = line.delay(sig2, smooth: false, max_delay: 0.08)
     s = ((d + d.delay(1.samples)) * (sig6 * 0.5)).filter(:lowpass, cutoff: sig7, quality: 0.7071067811865476)
     s + sig5
   } * v.amp_env([[0, sig2 * sig4, 0, :exp], [1, sig2 * (sig4 + 1), 0, :exp], [0, 0.08]]) * 4

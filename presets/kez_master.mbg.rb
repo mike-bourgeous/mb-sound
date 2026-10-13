@@ -3,8 +3,8 @@
 graph 2,
   name: "kez_master",
   kind: :effect,
-  saved: "2026-10-13T09:31:44Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:56Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kez_volta.rb"
 inputs :input
 param :air, 20.0, range: 20.0..400.0, description: "Highpass in Hz"

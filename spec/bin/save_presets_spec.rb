@@ -42,7 +42,7 @@ RSpec.describe('bin/save_presets.rb') do
         end
       }
 
-      MB::Sound.seed(MB::Sound.default_seed) # as the script saw it
+      MB::Sound.seed(MB::Sound::Internal.default_seed) # as the script saw it
       direct = MB::Sound.public_send("#{File.basename(script, '.rb')}_patch", midi.(), patch)
       expected = render_buffers(direct, 40)
 

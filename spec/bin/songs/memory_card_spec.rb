@@ -23,8 +23,14 @@ RSpec.describe('bin/songs/memory_card.rb') do
     end
     mono = MB::Sound.read(path)[0]
     bar = 48000 * 240 / 165.0
-    expect(peak_db(mono[0...2400])).to be > -12
-    expect(peak_db(mono[(bar * 2 - 4800).round...(bar * 2 - 1200).round])).to be < peak_db(mono[0...2400]) # before the next downbeat
+    sixteenth = bar / 16
+    # A kick (low) on each downbeat, the snare (higher) on beat 2
+    [0, bar].each do |down|
+      kick = mono[down.round...(down + 0.05 * 48000).round]
+      snare = mono[(down + 4 * sixteenth).round...(down + 4 * sixteenth + 0.05 * 48000).round]
+      expect(peak_db(kick)).to be > -12
+      expect(band_share(kick, 20, 150)).to be > band_share(snare, 20, 150) * 2
+    end
     peak = MB::Sound.read(path).map { |c| c.abs.max }.max
     expect(peak).to be <= -1.db + 1e-3
   end

@@ -3,8 +3,8 @@
 graph 2,
   name: "kez_pad",
   kind: :synth,
-  saved: "2026-10-13T09:29:55Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:00:07Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kez_volta.rb",
   options: { patch: :pad, cutoff: 2400.0, grit: 0.25, echo: 0.4 }
 inputs :midi

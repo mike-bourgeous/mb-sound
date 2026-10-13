@@ -3,8 +3,8 @@
 graph 2,
   name: "kez_pluck",
   kind: :synth,
-  saved: "2026-10-13T09:29:59Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:00:12Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kez_volta.rb",
   options: { patch: :pluck, cutoff: 2400.0, grit: 0.25 }
 inputs :midi

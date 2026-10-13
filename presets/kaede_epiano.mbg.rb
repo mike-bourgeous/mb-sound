@@ -3,8 +3,8 @@
 graph 2,
   name: "kaede_epiano",
   kind: :synth,
-  saved: "2026-10-13T09:30:57Z",
-  mb_sound: "0.12.0.usegit (2c1a463c)",
+  saved: "2026-10-13T10:01:11Z",
+  mb_sound: "0.12.0.usegit (97429bc6)",
   from: "bin/synths/kaede_rowntree.rb",
   options: { patch: :epiano }
 inputs :midi
