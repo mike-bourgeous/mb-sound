@@ -81,6 +81,9 @@ size_t mb_jack_cycles(void);
 // servers, when the client was late; see mb_jack.c), since it opened.
 size_t mb_jack_cycles_skipped(void);
 size_t mb_jack_cycles_repeated(void);
+// For specs: sleep +microseconds+ at the start of every +every+-th process
+// callback (0 microseconds stops; +every+ must be at least 1).
+void mb_jack_stall(unsigned microseconds, unsigned every);
 
 // Registers +count+ ports named +names+ on the shared client for +unit+
 // (audio or MIDI, +output+ or input).  Returns NULL or an error message;
