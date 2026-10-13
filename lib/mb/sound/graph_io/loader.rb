@@ -118,6 +118,9 @@ module MB
           @session = session
           raise ArgumentError, "seeds: must be :saved or :fresh (got #{seeds.inspect})" unless %i[saved fresh].include?(seeds)
           @fresh_seeds = seeds == :fresh
+          # Whether the document marks drawn seeds (format 2 and later; see
+          # GraphIO::FORMAT); otherwise :fresh counts every seed as drawn
+          @seed_marks = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -320,11 +323,12 @@ module MB
             when :graph
               raise error(node, 'graph must come first') unless i == 0
               version = args[0]
-              raise error(node, 'graph needs a format version (graph 1)') unless version.is_a?(Integer)
+              raise error(node, "graph needs a format version (graph #{GraphIO::FORMAT})") unless version.is_a?(Integer)
               if version > GraphIO::FORMAT
                 raise error(node, "the document is format #{version}, newer than this mb-sound reads (#{GraphIO::FORMAT}); update mb-sound")
               end
               @document.format = version
+              @seed_marks = version >= 2
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
@@ -747,6 +751,7 @@ module MB
             end
             return complex(node, scope) if name == :Complex
             return named_proc(node, scope) if name == :named_proc
+            return drawn_seed(node, scope) if name == :drawn_seed
             if Document::HEADER.include?(name)
               raise error(node, "#{name} belongs in the header, before the graph")
             end
@@ -779,11 +784,26 @@ module MB
           block = call_block(node, scope)
           check_limits(node, receiver, name, args, kwargs)
           check_file(node, name, args) if Registry::FILE_METHODS.include?(name)
-          # seeds: :fresh draws new random seeds instead of the saved ones
-          kwargs.delete(:seed) if @fresh_seeds
+          drawn = kwargs[:seed].is_a?(DrawnSeed) ? kwargs.delete(:seed) : nil
+          if (args + kwargs.values).any?(DrawnSeed)
+            raise error(node, 'drawn_seed(n) goes only in seed:')
+          end
+          if @fresh_seeds && (drawn || !@seed_marks)
+            # seeds: :fresh draws new random seeds instead of the ones the
+            # save drew (all seeds in documents that don't mark them)
+            kwargs.delete(:seed)
+            drawn = nil
+          elsif drawn
+            kwargs[:seed] = drawn.seed
+          end
 
           begin
-            result = receiver.public_send(name, *args, **kwargs, &block)
+            result = if drawn
+              # Recorded as drawn, so saving the graph again marks it again
+              GraphNode::Recipe.given_drawn_seed(drawn.seed) { receiver.public_send(name, *args, **kwargs, &block) }
+            else
+              receiver.public_send(name, *args, **kwargs, &block)
+            end
           rescue GraphIO::FileError => e
             raise error(node, e.message)
           rescue GraphIO::LoadError
@@ -958,6 +978,20 @@ module MB
           args, kwargs = call_args(node, scope)
           raise error(node, 'Complex takes two numbers') unless kwargs.empty? && args.length.between?(1, 2) && args.all? { |a| a.is_a?(Numeric) && a.real? }
           Complex(*args)
+        end
+
+        # A seed drawn when the graph was saved (see GraphIO::FORMAT), for
+        # seed: only.
+        DrawnSeed = Struct.new(:seed)
+
+        # seed: drawn_seed(n): a seed the save drew (GraphIO.dump marks
+        # them), which seeds: :fresh leaves out.
+        def drawn_seed(node, scope)
+          args, kwargs = call_args(node, scope)
+          unless kwargs.empty? && args.length == 1 && args[0].is_a?(Integer)
+            raise error(node, 'drawn_seed takes an Integer (seed: drawn_seed(1234))')
+          end
+          DrawnSeed.new(args[0])
         end
 
         # &named_proc(:name): a block from GraphIO.procs.

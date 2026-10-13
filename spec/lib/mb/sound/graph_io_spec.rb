@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
     end
 
     it 'refuses documents of a newer format' do
-      expect_load_error("graph 2\n220.hz.ramp", 1, /format 2, newer than this mb-sound reads \(1\)/)
+      expect_load_error("graph #{io::FORMAT + 1}\n220.hz.ramp", 1, /format #{io::FORMAT + 1}, newer than this mb-sound reads \(#{io::FORMAT}\)/)
     end
 
     it 'keeps the header first' do

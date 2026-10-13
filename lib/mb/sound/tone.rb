@@ -989,10 +989,30 @@ module MB
       #
       #     sig.delay(2.bars.lfo.square.at(3.n16..5.n16))   # alternates each bar
       #
-      # A graph node multiplies after the tone, as GraphNode#at does for
-      # every node (`tone * node`; see #gain to multiply inside the tone).
+      # A graph node becomes the tone's output gain (#gain: it multiplies
+      # inside the oscillator, after the scale and offset, the same samples
+      # as `tone * node`, and fuses into the tone's plan op) and returns
+      # this tone.  A numeric gain already set merges with it into one gain
+      # input (`node * gain`; maintainer 2026-10-13: within float32
+      # rounding of `tone.gain(g) * node`).  A gain that is already a node
+      # goes through MB::Sound.live_error (raises in scripts; live, warns),
+      # then the node multiplies after the tone as GraphNode#at does for
+      # every node (`tone * node`, a new node), as it also does for phasors
+      # and tones already playing, so `.at(node)` never fails live.
+      #
+      #     play 220.hz.saw.at(adsr(0.01, 0.3, 0.5, 0.4, hold: 1))
       def at(amplitude)
-        return super if amplitude.is_a?(GraphNode)
+        if amplitude.is_a?(GraphNode)
+          return super if @started || phasor? || @in_or_at
+          return gain(amplitude) if @out_gain.nil?
+          return gain(amplitude * @out_gain) if @out_gain.is_a?(Numeric)
+
+          MB::Sound.live_error(ArgumentError.new(
+            "#{self.class.name} #{wave_name} already has a gain node (#{@out_gain.class.name}); " \
+            'multiply after it instead (tone * node), or give #gain one node'
+          ))
+          return super
+        end
 
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
@@ -1714,7 +1734,7 @@ module MB
           buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain, pivot: pivot)
           add_jump_residual(buf)
         end
-        buf.inplace * out_gain if out_gain # Numo: the mirror of FastArithmetic.scale
+        scale_output(buf, out_gain) if out_gain # Numo: the mirror of FastArithmetic.scale
 
         @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
         @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
@@ -2195,7 +2215,19 @@ module MB
       def apply_output_gain(buf, out_gain)
         return if MB::Sound::FastArithmetic.scale(buf, out_gain)
 
-        buf.inplace * out_gain
+        scale_output(buf, out_gain)
+      end
+
+      # Multiplies +buf+ by +gain+ in place with Numo.  A gain of a wider
+      # type (a DFloat input for a float32 tone) multiplies in that type and
+      # rounds once into +buf+ (`inplace *` would return a new array and
+      # leave +buf+ unscaled).
+      def scale_output(buf, gain)
+        if gain.is_a?(Numo::NArray) && buf.class.upcast(gain.class) != buf.class
+          buf[true] = buf * gain
+        else
+          buf.inplace * gain
+        end
       end
 
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled

@@ -1,11 +1,11 @@
 module MB
   module Sound
     module GraphIO
-      # Writes a set document (`graph 1, kind: :set`): the Set layer of a
+      # Writes a set document (`graph 2, kind: :set`): the Set layer of a
       # Session (an Arrangement) as the console commands that make it, so a
       # set can be reopened (graph-io phase 3):
       #
-      #     graph 1, name: "night_bus", kind: :set, saved: ..., mb_sound: ...
+      #     graph 2, name: "night_bus", kind: :set, saved: ..., mb_sound: ...
       #     knob :cut, 700.0, range: 100.0..8000.0, curve: :exp, unit: "Hz"
       #
       #     bpm 124
@@ -204,7 +204,7 @@ module MB
         def writer_for(root, inputs)
           named = (@clip_names || {}).each_with_object({}) { |(obj, n), h| h[n] = obj unless inputs.values.any? { |i| i.equal?(obj) } || root.equal?(obj) }
           GraphNode::Recipe::RubyWriter.new(
-            root, inputs: named.merge(inputs.transform_keys(&:to_s)), seeds: true, knob_nodes: @knob_nodes, assets: @assets
+            root, inputs: named.merge(inputs.transform_keys(&:to_s)), seeds: :marked, knob_nodes: @knob_nodes, assets: @assets
           )
         end
 
