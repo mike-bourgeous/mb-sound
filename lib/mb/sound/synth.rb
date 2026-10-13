@@ -785,6 +785,15 @@ module MB
               lane_ended(idx)
               return nil
             end
+            if buf.length < piece
+              # A lane's last buffer may be short (e.g. a resonator ringing
+              # out after the lane's trigger ended stops where it falls
+              # quiet): zeros after it, as for non-skippable lanes; the
+              # lane ends at its next read
+              padded = buf.class.zeros(piece)
+              padded[0...buf.length] = buf
+              buf = padded
+            end
             raise "Lane #{idx} gave #{buf.length} samples, not #{piece}" if buf.length != piece
             got << buf
           end

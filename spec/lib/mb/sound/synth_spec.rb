@@ -672,6 +672,28 @@ RSpec.describe(MB::Sound::Synth) do
   end
 
   describe 'idle lane skipping', :check_shared do
+    it 'takes the short last buffer of a lane that rings out after its source ends, at any buffer size' do
+      # A resonator rings out after its input (the lane's trigger) ends and
+      # returns a short last buffer, cut where it falls quiet; the lane
+      # length check raised for it (a regression on master-ai)
+      runs = [[800], [367, 368], [64]].map { |sizes|
+        s = described_class.new(source(ev.note_on(60, 100), ev.note_off(60, time: 1/20r), last: 1/10r), voices: 2) { |v|
+          v.trigger.ping(220, decay: 0.3)
+        }
+        out = []
+        sizes.cycle do |n|
+          b = s.sample(n)
+          break if b.nil?
+          out << b.dup
+        end
+        out.reduce(:concatenate)
+      }
+      expect(runs[0].abs.max).to be > 0.1
+      expect(runs[0].length).to be > 0.3 * 48000
+      tail = [runs.map(&:length).min, 2 * 48000].min
+      runs[1..].each { |r| expect(r[0...tail]).to eq(runs[0][0...tail]) }
+    end
+
     # Lanes grouped by the plan layer are computed every buffer (see
     # Plan::LaneGroup), so these run without lane groups
     around do |ex|
