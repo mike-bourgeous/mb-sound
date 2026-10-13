@@ -107,6 +107,35 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect { x.lofi }.to raise_error(ArgumentError, /preset or rate/)
     end
 
+    it 'reads lofi presets drop-sample with no levels unless told otherwise' do
+      x = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.3) })]
+      expect([x.interpolation, x.mips]).to eq([nil, nil])
+      [:s950, :sp1200, :mpc60].each do |p|
+        expect([x.lofi(p).interpolation, x.lofi(p).mips]).to eq([:none, false])
+      end
+      expect(x.lofi(:mpc60).to_s).to include('drop read')
+
+      clean = x.lofi(:mpc60, read: :clean)
+      expect([clean.interpolation, clean.mips]).to eq([nil, nil])
+      expect(clean.data).to eq(x.lofi(:mpc60).data)
+      expect(x.lofi(:s950, read: { interpolation: :cubic }).interpolation).to eq(:cubic)
+      expect(x.lofi(rate: 8000).interpolation).to be_nil # custom converters keep the read
+
+      # Views and later edits keep the read; read_as changes it (a view)
+      d = x.lofi(:sp1200)
+      expect(d.slices(4)[2].interpolation).to eq(:none)
+      expect(d.rev.bits(8).mips).to eq(false)
+      c = d.read_as(:clean)
+      expect(c.audio).to equal(d.audio)
+      expect([c.interpolation, c.mips]).to eq([nil, nil])
+      expect(c.lineage[1..2]).to eq([:read_as, [:clean]])
+      expect([x.read_as(:drop).interpolation, x.read_as(:drop, mips: :octave).mips]).to eq([:none, :octave])
+      expect(x.read_as(interpolation: :cubic).interpolation).to eq(:cubic)
+      expect { x.read_as(:wobbly) }.to raise_error(ArgumentError, /Unknown read style/)
+      expect { x.read_as(speed: 2) }.to raise_error(ArgumentError, /read_as takes/)
+      expect { x.with(interpolation: :blurry) }.to raise_error(ArgumentError, /Unknown interpolation/)
+    end
+
     it 'stretches cyclically to the asked length at the same pitch' do
       sine = ->(n) { Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| Math.sin(i * 2 * Math::PI * 500 / 48000) }) }
       x = MB::Sound::Sample[sine.(4800)]
@@ -211,6 +240,20 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect(back.bpm).to eq(140)
       expect(back.file).to eq(File.expand_path(path))
       expect((back.data - v.data).abs.max).to be < 1e-5
+    end
+
+    it 'saves and reads back the read settings' do
+      path = tmp_path('drop.flac')
+      s.read_as(:drop, mips: :octave).save(path)
+      back = MB::Sound::Sample[path]
+      expect([back.interpolation, back.mips]).to eq([:none, :octave])
+
+      path = tmp_path('ratio.flac')
+      s.read_as(interpolation: :cubic, mips: false).save(path)
+      expect([MB::Sound::Sample[path].interpolation, MB::Sound::Sample[path].mips]).to eq([:cubic, false])
+      path = tmp_path('spacing.flac')
+      s.read_as(mips: 1.5).save(path)
+      expect(MB::Sound::Sample[path].mips).to eq(1.5)
     end
   end
 end

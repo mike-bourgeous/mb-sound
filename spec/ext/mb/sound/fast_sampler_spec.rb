@@ -78,6 +78,65 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     })
   end
 
+  it "reads each region as its sample says when the voice doesn't (lofi drop-sample reads)" do
+    s = base.with(root: 60)
+    drop = s.read_as(:drop)
+    sinc = s.read_as(interpolation: :sinc)
+    inst = instrument { |i|
+      i.region(s, keys: 0..59)
+      i.region(drop, keys: 60..71, root: 60)
+      i.region(sinc, keys: 72..127, root: 72)
+    }
+    specs, regions = inst.kernel_tables(0, 48000)
+    expect(regions[true, mirror::INTERP].to_a).to eq([3, 0, 4].map(&:to_f))
+    expect(specs.length).to eq(3)
+
+    n = 9000
+    trig = signal(n, [[0, 1.0], [3000, 1.0], [6000, 1.0]])
+    num = signal(n, [[0...3000, 55.0], [3000...6000, 67.0], [6000...n, 79.0]])
+    sinc_kernel = MB::Sound::Wavetable::SINC_KERNEL
+    config = ->(code) { [440.0, 64, -1, code, sinc_kernel, 0.0] }
+    # (kernel_tables gives every region a code; -1 means config's)
+    regions[0, mirror::INTERP] = -1
+    outs = [3, 2].map { |code|
+      sa = Numo::DFloat.zeros(mirror::STATE_LENGTH)
+      sa[mirror::LAST_REGION] = -1
+      sb = sa.dup
+      a = Numo::SFloat.zeros(n)
+      b = Numo::SFloat.zeros(n)
+      fast.play(a, specs, regions, sa, Numo::DFloat.zeros(128), Numo::UInt64[1], [trig, num, nil, nil, 0.0, 0.0], config.(code))
+      mirror.play(b, specs, regions, sb, Numo::DFloat.zeros(128), Numo::UInt64[1], [trig, num, nil, nil, 0.0, 0.0], config.(code))
+      expect(a).to eq(b)
+      a
+    }
+    # Only the region without a code follows config's
+    expect(outs[0][0...3000]).not_to eq(outs[1][0...3000])
+    expect(outs[0][3064...6000]).to eq(outs[1][3064...6000])
+    expect(outs[0][6064..]).to eq(outs[1][6064..])
+
+    # The drop region reads the raw samples: a fifth up, every output sample
+    # is one of the sample's own values
+    raw = s.data.to_a.map(&:to_f)
+    expect(outs[0][3064...4000].to_a.all? { |v| raw.include?(v.to_f) }).to eq(true)
+
+    # A sinc region needs the sinc kernel
+    no_sinc = [440.0, 64, -1, 3, nil, 0.0]
+    expect {
+      fast.play(Numo::SFloat.zeros(10), specs, regions, Numo::DFloat.zeros(mirror::STATE_LENGTH).tap { |x| x[mirror::LAST_REGION] = -1 },
+                Numo::DFloat.zeros(128), Numo::UInt64[1], [1.0, 60.0, nil, nil, 0.0, 0.0], no_sinc)
+    }.to raise_error(ArgumentError, /sinc kernel/)
+    bad = regions.dup
+    bad[0, mirror::INTERP] = 7
+    expect {
+      fast.play(Numo::SFloat.zeros(10), specs, bad, Numo::DFloat.zeros(mirror::STATE_LENGTH).tap { |x| x[mirror::LAST_REGION] = -1 },
+                Numo::DFloat.zeros(128), Numo::UInt64[1], [1.0, 60.0, nil, nil, 0.0, 0.0], config.(3))
+    }.to raise_error(ArgumentError, /bad interpolation/)
+
+    # The voice's own options win over the samples'
+    _, all_cubic = inst.kernel_tables(0, 48000, interpolation: :cubic, mips: :octave)
+    expect(all_cubic[true, mirror::INTERP].to_a.uniq).to eq([2.0])
+  end
+
   it 'starts a one-shot on the trigger sample and ends at the end of the sample' do
     s = base
     inst = instrument { |i| i.region(s, keytrack: 0) }

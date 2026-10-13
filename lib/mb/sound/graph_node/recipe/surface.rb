@@ -75,8 +75,8 @@ module MB
             'MB::Sound::Sample' => {
               reason: 'value readers and views (Samples print through their lineage; GraphIO::Registry::VALUES lets documents call the views)',
               names: %i[
-                [] at audio bits bpm channel_count chops data duration fade fade_in fade_out file gain length level lineage lofi loop_mode
-                loop_points looped mono name normalize one_shot onsets origin peak position rev reverse root save seconds size slice slices
+                [] at audio bits bpm channel_count chops data duration fade fade_in fade_out file gain interpolation length level lineage lofi loop_mode
+                loop_points looped mips mono name normalize one_shot onsets origin peak position read_as rev reverse root save seconds size slice slices
                 start stop stretch tags to_a to_instrument transport transpose trim tune with
               ],
             },

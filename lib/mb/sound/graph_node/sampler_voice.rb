@@ -18,7 +18,9 @@ module MB
       # Playback reads the samples' band-limited levels (sample-mode
       # Wavetable levels, +mips+ apart, +interpolation+ :optimal), so
       # pitching up doesn't alias; `interpolation: :none, mips: false` is
-      # the old drop-sample sound.  The kernel is MB::Sound::FastSampler.play
+      # the old drop-sample sound.  Left nil, each sample reads as it says
+      # (Sample#read_as: the lofi presets read drop-sample with no levels),
+      # else :optimal at the instrument's #mips.  The kernel is MB::Sound::FastSampler.play
       # (exact Ruby mirror Sampler::KernelRuby.play); output is the same at
       # any buffer size.  Never ends (like other voices), except with +once+
       # (Sample#node): one note at the first sample, ending when it does.
@@ -38,7 +40,7 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: :optimal, mips: instrument.mips, seed: nil, once: false, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -59,7 +61,7 @@ module MB
           @transpose = Interval.semitones(transpose).to_f
           @declick = Integer(declick)
           raise ArgumentError, "Declick is a number of samples, 0 or more (got #{declick})" if @declick < 0
-          @interpolation = interpolation.to_sym
+          @interpolation = interpolation&.to_sym
           @mips = mips
           @seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           @sample_rate = sample_rate.to_f
@@ -148,13 +150,19 @@ module MB
           a4 = MB::Sound.tuning.frequency_of(69).to_f
           return @config if @config && @config[0] == a4
 
-          sinc = @interpolation == :sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
-          code = MB::Sound::Wavetable::INTERPOLATIONS.fetch(@interpolation) { raise ArgumentError, "Unknown interpolation #{@interpolation.inspect}" }
+          # (every region carries its own interpolation code; the sinc kernel
+          # goes along whenever a region reads with it)
+          interp = @interpolation || :optimal
+          code = MB::Sound::Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
+          sinc = interp == :sinc || @sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
           @config = [a4, @declick, @instrument.split || -1, code, sinc, @transpose].freeze
         end
 
         def build_tables
           @specs, @regions = @instrument.kernel_tables(@channel, @sample_rate, mips: @mips, interpolation: @interpolation)
+          sinc = MB::Sound::Wavetable::INTERPOLATIONS[:sinc]
+          @sinc = @regions[true, Sampler::KernelRuby::INTERP].to_a.include?(sinc.to_f)
+          @config = nil
         end
 
         def input(x)

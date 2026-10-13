@@ -10,7 +10,7 @@ module MB
         # Region columns (FastSampler::REGION_COLS of them; see
         # Sampler::Instrument#region_table).
         TABLE, LOKEY, HIKEY, LOVEL, HIVEL, SEQ_LENGTH, SEQ_POSITION, LORAND, HIRAND, ROOT, KEYTRACK, TUNE, GAIN,
-          START, STOP, LOOP_START, LOOP_END, LOOP_MODE, REVERSE, FADE_IN, FADE_OUT, VELTRACK, RATE, OFFSET = (0..23).to_a
+          START, STOP, LOOP_START, LOOP_END, LOOP_MODE, REVERSE, FADE_IN, FADE_OUT, VELTRACK, RATE, OFFSET, INTERP = (0..24).to_a
 
         # One note's state (as in C): SMP_VOICE values.
         VOICE = 10
@@ -142,7 +142,9 @@ module MB
 
           m = sp.abs
           spec = ctx[:specs][r[TABLE].to_i]
-          re = Wavetable::KernelRuby.value(spec, p, m, 0.0, ctx[:interp])
+          mode = r[INTERP].to_i
+          mode = ctx[:interp] if mode < 0
+          re = Wavetable::KernelRuby.value(spec, p, m, 0.0, mode)
 
           g = v.gain
           fi = r[FADE_IN]
