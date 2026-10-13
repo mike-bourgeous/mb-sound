@@ -169,5 +169,27 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
       expect(l).to eq([0.75, 1, 1.25])
       expect(r).to eq([0.75, 0.5, 0.25])
     end
+
+    it 'keep each output buffer until the frame after, so Tees can share it', :check_shared do
+      # Outputs used twice: sampling the left output starts the next frame
+      # while the right one's Tee still shares the last (Pan's C path and
+      # the matrix mix wrote into the same buffers each frame, raising
+      # SharedBufferModified)
+      [
+        -> { 220.hz.saw.at(0.5).pan(0.3) },
+        -> { MB::Sound.stereo(220.hz.saw.at(0.5), 330.hz.saw.at(0.25)).width(1.5) },
+      ].each do |make|
+        p = make.()
+        l, r = (p * 1 + p * 0.5).to_a
+        ref = make.()
+        rl, rr = ref.to_a
+        8.times do
+          a = l.sample(480).dup
+          b = r.sample(480).dup
+          expect((a - rl.sample(480) * 1.5).abs.max).to be < 1e-6
+          expect((b - rr.sample(480) * 1.5).abs.max).to be < 1e-6
+        end
+      end
+    end
   end
 end
