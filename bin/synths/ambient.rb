@@ -179,7 +179,9 @@ module MB::Sound
         if spread.is_a?(Numeric)
           a = (1 + spread) / 2.0
           b = (1 - spread) / 2.0
-          air = noise_part + stereo(l * a + r * b, l * b + r * a) * (swell * shimmer * (k / Math.sqrt(a * a + b * b)))
+          # (spread 1: no cross terms, so no 0 * x for the plan to fold)
+          mixed = b == 0 ? stereo(l * a, r * a) : stereo(l * a + r * b, l * b + r * a)
+          air = noise_part + mixed * (swell * shimmer * (k / Math.sqrt(a * a + b * b)))
         else
           # (the same mix with spread a node: each side's share a, the
           # other's b, the power kept by 1 / sqrt(a^2 + b^2) = sqrt(2 / (1 + spread^2)))
