@@ -84,6 +84,24 @@ module MB
           end
         end
 
+        # Calls the block with #buffers showing +count+ samples from
+        # +offset+ of the current block's buffers (read-only views), for a
+        # Synth lane rendering part of a block (one woken mid-block or
+        # split where it may fall asleep; see Synth#sample_skippable_lane).
+        def window(offset, count)
+          return yield if !@active || @buffers.empty?
+
+          full = @buffers
+          views = {}.compare_by_identity
+          full.each { |src, buf| views[src] = buf && (offset == 0 && buf.length == count ? buf : buf[offset...(offset + count)].freeze) }
+          @buffers = views
+          begin
+            yield
+          ensure
+            @buffers = full
+          end
+        end
+
         # Ends the block (clears any replays #guard! left unread).
         def end_block
           return unless @active
