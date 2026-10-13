@@ -18,8 +18,9 @@
 #          for the bare sine; [0.4, 0.2] is Small Talk's louder pair)
 #   neuro  the "switch-up" bass: saws plus a square an octave up into a
 #          diode ladder jumping on 16ths, talking formants morphing on 8ths,
-#          a key-tracked crusher (--grit wet), squeezed (sync:, fold:, and
-#          noise: add more high end: a synced saw, a wavefolded sine, AM noise)
+#          a key-tracked crusher (--grit wet), squeezed; AM noise and a
+#          little hard sync on top (noise: 0.5, sync: 0.2; fold: a
+#          wavefolded sine; 0 for none)
 #   pad    minor-9th pad: three detuned saws per note, slow swell, hall
 #   pluck  liquid pluck: a square through a closing lowpass, a dotted-eighth
 #          delay (--send) and a plate
@@ -48,7 +49,8 @@
 #     bg :sub, dnb_sub_voice(riff) * 0.5
 #     swap :reese, riff.transpose(5)
 #     bg :neuro, dnb_neuro_voice(riff, grit: 0.6)            # the switch-up
-#     bg :neuro, dnb_neuro_voice(riff, sync: 0.5)            # with screaming sync harmonics (or fold:, noise:)
+#     bg :neuro, dnb_neuro_voice(riff, sync: 0.5)            # more screaming sync harmonics (or fold:, noise:)
+#     bg :neuro, dnb_neuro_voice(riff, sync: 0, noise: 0)    # the darker neuro before 2026-10-13
 #     bg :pad, dnb_pad_voice(seq(F2.n1, Db2.n1).bake(chord(0, 7, 15, 19, 26)).loop) * 0.6
 #     bg :drums, dnb_drums(grid(16, kick: 'X.........X.....', snare: '....X.......X...', hat: '7.4.7.4.7.4.7.45').loop)
 #     bg :drums, dnb_drums(grid(16, kick: 'X.........X.....', snare: '....X.......X...').loop, room: true, glue: true)
@@ -110,6 +112,11 @@ module MB::Sound
     }
   end
 
+  # dnb_neuro_voice's default top end (patches-4, 2026-10-13; maintainer
+  # on the patches-3 layers, picking noise: 0.5: "Noise with a bit of sync
+  # maybe?"); before, every layer was 0 (`sync: 0, noise: 0`).
+  DNB_NEURO_TOP = { sync: 0.2, noise: 0.5 }.freeze
+
   # The neuro switch-up: saws plus a square an octave up into a diode
   # ladder whose cutoff (+cutoff+ Hz, opened two octaves by the note's
   # envelope) jumps on a 16th square LFO, through talking formants that
@@ -118,8 +125,9 @@ module MB::Sound
   # the sub.
   #
   # Three more sources of high end, each a level (0..1, a number or a
-  # node; default 0) of a layer added after the formants, so the ladder
-  # and the vowels don't darken it (patches-3, 2026-10-13: "Is there some
+  # node; DNB_NEURO_TOP by default: noise 0.5, a little sync, no fold) of
+  # a layer added after the formants, so the ladder and the vowels don't
+  # darken it (patches-3, 2026-10-13: "Is there some
   # other source of high end available? E.g. harmonics from the
   # oscillator or AM noise?"):
   # +sync+   a hard-synced saw whose ratio sweeps 2..9 times the note
@@ -132,7 +140,7 @@ module MB::Sound
   # +noise+  noise amplitude-modulated by a pulse train at the note's
   #          pitch (a buzzy, pitched hiss like a hard-driven reed),
   #          highpassed at 3 kHz
-  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140, sync: 0, fold: 0, noise: 0)
+  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140, sync: DNB_NEURO_TOP[:sync], fold: 0, noise: DNB_NEURO_TOP[:noise])
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(0.02, legato: true)
       src = pitch.unison(3, detune: 0.18) { |p, _i| p.saw } + pitch.transpose(12).square * 0.4
@@ -209,9 +217,20 @@ module MB::Sound
   # attack, fast release pumping that glues the hits together (patches-3,
   # 2026-10-13: "Some gated room reverb and compression would be a nice
   # addon too").  Both default off.
+  #
+  # The room's gate opens while the sent drums are above +room_threshold+
+  # and closes +room_gate+ seconds after they fall below it, in a room
+  # decaying over +room_decay+ seconds (RT60), so only the loud backbeat
+  # hits splash (ghost snares stay dry) and each splash is gone in about
+  # an eighth note at 174 BPM (220 ms after the hit to -40 dB).
+  # patches-4 (2026-10-13; maintainer: "Tail is way too long on snare
+  # room"): patches-3's room (`room_gate: 0.18, room_threshold: -30.db,
+  # room_decay: 2.5`) stayed open about 420 ms, as long as the snare's
+  # own tail stayed above -30 dBFS plus the gate.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
-    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.18, glue: false
+    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
+    room_threshold: -12.db, room_decay: 1.0
   )
     settings = {
       kick: kick, snare: snare,
@@ -234,7 +253,7 @@ module MB::Sound
                sent = outs.names.select { |name| DNB_DRUMS_ROOM_SENDS.include?(name) }.map { |name| outs[name] }
                wet = room == true ? DNB_DRUMS_ROOM : room
                splash = GraphNode::Mixer.new(sent, stop_early: false)
-                 .reverb(:gated, gate: room_gate, dry: 0, wet: 1, output_channels: 2)
+                 .reverb(:gated, gate: room_gate, threshold: room_threshold, decay: room_decay, dry: 0, wet: 1, output_channels: 2)
                  .filter(:highpass, cutoff: 250, quality: 0.7)
                # (a sum ends when any of its inputs ends: each waits for the other, as when a MIDI file ends)
                mixed.and_then(silence(2)) + (splash * wet).and_then(silence(2))

@@ -49,13 +49,19 @@ RSpec.describe('bin/synths/dnb.rb') do
   end
 
   it 'adds high end to the neuro bass with sync:, fold:, and noise:' do
-    plain = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1])) }, 1)[0]
+    plain = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), sync: 0, noise: 0) }, 1)[0]
     top = band_share(seconds(plain, 0.1, 0.9), 4000, 24000)
     [:sync, :fold, :noise].each do |k|
-      bright = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), k => 1) }, 1)[0]
+      bright = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), sync: 0, noise: 0, k => 1) }, 1)[0]
       expect(band_share(seconds(bright, 0.1, 0.9), 4000, 24000)).to be > top * 1.5, k.to_s
       expect(peak_db(bright)).to be_between(-20, 6), k.to_s
     end
+
+    # The default top end: noise 0.5 and a little sync (patches-4)
+    default = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1])) }, 1)[0]
+    explicit = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), sync: 0.2, noise: 0.5) }, 1)[0]
+    expect(default).to eq(explicit)
+    expect(band_share(seconds(default, 0.1, 0.9), 4000, 24000)).to be > top * 1.5
   end
 
   it 'crushes the neuro bass more with more grit' do
@@ -108,6 +114,20 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(roomy[0]).not_to eq(roomy[1])
     expect(rms_db(seconds(roomy[0], 0.12, 0.22))).to be > rms_db(seconds(snare[0], 0.12, 0.22)) + 6 # the splash
     expect(rms_db(seconds(roomy[0], 0.6, 1.0))).to be < rms_db(seconds(roomy[0], 0.12, 0.22)) - 40 # gated
+  end
+
+  it 'closes the room within an eighth note at 174 BPM, and leaves quiet (ghost) snares dry' do
+    snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0) }, 1)
+    roomy = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, room: true) }, 1)
+    long = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, room: true, room_gate: 0.18, room_threshold: -30.db, room_decay: 2.5) }, 1)
+    wet = ->(x) { x[0][0...snare[0].length] - snare[0] }
+    splash = rms_db(seconds(wet.(roomy), 0.03, 0.12))
+    expect(rms_db(seconds(wet.(roomy), 0.25, 0.45))).to be < splash - 40 # closed an eighth (0.17 s) after the hit
+    expect(rms_db(seconds(wet.(long), 0.25, 0.45))).to be > splash - 20 # (patches-3's room was still open)
+
+    ghost = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 0.2]), parallel: 0) }, 1)
+    ghost_room = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 0.2]), parallel: 0, room: true) }, 1)
+    expect(rms_db(seconds(ghost_room[0][0...ghost[0].length] - ghost[0], 0.03, 0.12))).to be < rms_db(seconds(ghost[0], 0.03, 0.12)) - 20
   end
 
   it 'compresses the kit as a bus with glue:' do
