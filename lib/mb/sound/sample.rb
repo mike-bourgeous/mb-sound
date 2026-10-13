@@ -45,7 +45,16 @@ module MB
 
           @sample_rate = sample_rate.to_f
           @tables = {}
+          @edits = {}
           @mutex = Mutex.new
+        end
+
+        # The Sample made by an edit (see Sample#edit) of this audio named
+        # by +key+, made by the block the first time (so the same edit of
+        # the same sample, e.g. each `Sample["x.flac"].bits(12)` a graph
+        # document prints, is one Sample sharing its playback tables).
+        def edit(key)
+          @mutex.synchronize { @edits[key] } || yield.tap { |s| @mutex.synchronize { @edits[key] ||= s } }
         end
 
         def length
@@ -150,6 +159,10 @@ module MB
           out
         end
       end
+
+      # Methods that make new audio (the others are views of the same
+      # audio); bundles save their results as assets.
+      EDITS = %i[bits lofi stretch mono].freeze
 
       # The prefix of the tags #save writes.
       TAG_PREFIX = 'mb_sample_'
@@ -587,7 +600,12 @@ module MB
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
       # the length).
-      def edit(method, args, kwargs = {}, channels: nil)
+      def edit(method, args, kwargs = {}, channels: nil, &block)
+        key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, method, args, kwargs]
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, &block) }
+      end
+
+      def edit_uncached(method, args, kwargs, channels: nil)
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
         out = channels || src.map { |d| Numo::SFloat.cast(yield(d)) }
         len = out[0].length

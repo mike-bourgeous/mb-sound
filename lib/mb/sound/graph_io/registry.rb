@@ -63,6 +63,8 @@ module MB
           # Sample views and edits (how Samples print: Sample#lineage)
           'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with],
           'MB::Sound::Sample::Slices' => %i[[] name keymap],
+          # Instruments built region by region (in Instrument.new's block)
+          'MB::Sound::Sampler::Instrument' => %i[region],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -77,6 +79,7 @@ module MB
         CLASS_METHODS = {
           'MB::Sound::Wavetable' => %i[[]],
           'MB::Sound::Sample' => %i[[]],
+          'MB::Sound::Sampler::Instrument' => %i[new],
           'MB::Sound::Wavetable::KeyMap' => %i[zones new],
           'MB::Sound::Sequence::Duration' => %i[new],
         }.freeze

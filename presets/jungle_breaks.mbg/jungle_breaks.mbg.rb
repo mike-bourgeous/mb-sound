@@ -3,26 +3,27 @@
 graph 2,
   name: "jungle_breaks",
   kind: :synth,
-  saved: "2026-10-13T14:42:43Z",
-  mb_sound: "0.12.0.usegit (d86d4454)",
+  saved: "2026-10-13T16:33:39Z",
+  mb_sound: "0.12.0.usegit (d402ae90)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :breaks from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :breaks, echo: 0.3 }
 inputs :midi
 param :cutoff, 16000.0, range: 200.0..16000.0, description: "Breaks lowpass in Hz"
-asset "assets/wavetable.flac", sha256: "49bb79cedad0b7747983a595be3f803373d3c5e25af4ad2d735cf69502457079"
-asset "assets/wavetable_2.flac", sha256: "386150a78f3ee55ce9c0d3821ea7de4915bf91d905b9cf13e43fc95a8828cd4e"
-asset "assets/wavetable_3.flac", sha256: "7d3664eabae68f1c67356a9dc509886a6140e9346dd24760b6b16a82e94f1489"
-asset "assets/wavetable_4.flac", sha256: "378bd45f23090c202d4aea8d49a5276eb5fab289d0a6cdf1fd7d7170779316d2"
-asset "assets/wavetable_5.flac", sha256: "3b161e6f43a25dd58c7a1afe8e0e9f25f9a3ce4806ad4c322eb8aab6d3226553"
-asset "assets/wavetable_6.flac", sha256: "291bf7d451c58329b2e3f7727dfce4f5a417d375d351bdff0e4848ea3365bfe5"
-asset "assets/wavetable_7.flac", sha256: "73ca93cc1f4be9ea1df3d100016e545d067f3c6c6733b5da68c9ae31b514c2bb"
-asset "assets/wavetable_8.flac", sha256: "56782942b17aed4ea49b75d90d95ca1b48d678442716c4f89e56e75d75067f22"
-asset "assets/wavetable_9.flac", sha256: "de21bb96f9ac88672224c2f911c193bccbfb6f433c971222d301345efd7944bb"
-asset "assets/wavetable_10.flac", sha256: "6486e01b016711a253fee2abf3388e2465a71dc6a9d0720490ec9a671b6a7a4e"
-asset "assets/wavetable_11.flac", sha256: "2b154e971b49ba58ab5386b51e5399a6fa14b6f8d4bd0cdd30f9c4a093965638"
+asset "assets/jungle_record.flac", sha256: "c12085b491e7bc732add4dd49016650b5e93affdf8b7ef5af4f4b5f64829bb96"
 
-sig = Wavetable::KeyMap.new({ 2...13 => Wavetable["assets/wavetable.flac"], 13...24 => Wavetable["assets/wavetable_2.flac"], 24...35 => Wavetable["assets/wavetable_3.flac"], 35...46 => Wavetable["assets/wavetable_4.flac"], 46...57 => Wavetable["assets/wavetable_5.flac"], 57...68 => Wavetable["assets/wavetable_6.flac"], 68...79 => Wavetable["assets/wavetable_7.flac"], 79...90 => Wavetable["assets/wavetable_8.flac"], 90...101 => Wavetable["assets/wavetable_9.flac"], 101...112 => Wavetable["assets/wavetable_10.flac"], 112...123 => Wavetable["assets/wavetable_11.flac"] })
-synth(midi, voices: 1) { |v|
-  v.hz.wavetable(sig) * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * 1.3333333333333333)
+Sampler::Instrument.new { |i|
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:k], keys: 2..12, root: 3.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:h], keys: 13..23, root: 14.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:s], keys: 24..34, root: 25.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:sk], keys: 35..45, root: 36.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:g], keys: 46..56, root: 47.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:kk], keys: 57..67, root: 58.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:s2], keys: 68..78, root: 69.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:k2], keys: 79..89, root: 80.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:s3], keys: 90..100, root: 91.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[:full], keys: 101..111, root: 102.0)
+  i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[12...16].reverse, keys: 112..122, root: 113.0)
+}.sampler(midi, seed: drawn_seed(900450186894289455)) { |v, s|
+  s * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * 1.3333333333333333)
 }.filter(:lowpass, cutoff: 13000, quality: 0.6).decimate(30000, mix: 0.25).filter(:lowpass, cutoff: cutoff, quality: 0.9).softclip(0.6, 0.98) * 1.6

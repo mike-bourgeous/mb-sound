@@ -1138,6 +1138,11 @@ module MB
           # A Sample: the calls that cut or edited it (Sample#lineage) on its
           # origin, which prints as an asset in bundles (or its file).
           def sample_text(s, indent)
+            # Edits (new audio: bits, lofi, stretch, mono) save as assets in
+            # bundles, so loading neither redoes them nor rounds differently
+            if @assets && s.lineage && MB::Sound::Sample::EDITS.include?(s.lineage[1]) && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
             if s.lineage
               parent, name, args, kwargs = s.lineage
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
@@ -1164,7 +1169,36 @@ module MB
               return "sfz(#{leaf(args[0], indent)})" if parent == :sfz
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
             end
-            fixme('a Sampler::Instrument built region by region')
+            instrument_block_text(i, indent)
+          end
+
+          # An Instrument built region by region, as its constructor with a
+          # block of `i.region` calls (only settings that differ from
+          # Instrument#region's defaults).
+          def instrument_block_text(inst, indent)
+            kw = {}
+            kw[:chops] = inst.chops unless inst.chops.empty?
+            kw[:envelope] = inst.envelope if inst.envelope
+            kw[:name] = inst.name if inst.name
+            args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            inner = "#{indent}  "
+            lines = inst.regions.map { |r|
+              opts = {}
+              opts[:keys] = r.keys[0]..r.keys[1] unless r.keys == [0, 127]
+              opts[:vel] = r.vel[0]..r.vel[1] unless r.vel == [0, 127]
+              opts[:seq] = r.seq if r.seq
+              opts[:rand] = r.rand[0]...r.rand[1] if r.rand
+              opts[:root] = r.root if r.root
+              opts[:keytrack] = r.keytrack unless r.keytrack == 1
+              opts[:veltrack] = r.veltrack unless r.veltrack == 0
+              opts[:tune] = r.tune unless r.tune == 0
+              opts[:gain] = r.gain unless r.gain == 1
+              opts[:offset] = r.offset unless r.offset == 0
+              list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
+              "#{inner}i.region(#{list.join(', ')})"
+            }
+            head = args.empty? ? 'Sampler::Instrument.new' : "Sampler::Instrument.new(#{args.join(', ')})"
+            "#{head} { |i|\n#{lines.join("\n")}\n#{indent}}"
           end
 
           # (Samples, Slices, and Instruments print as postfix chains, so

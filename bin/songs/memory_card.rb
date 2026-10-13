@@ -12,14 +12,14 @@
 # In D minor / F major, 96 bars (about 2:20 plus the ring-out).  Written
 # with the public mb-sound API only.
 #
-# The break is the point.  There is no sampler in mb-sound yet, so the
-# song first presses its own "record": a two-bar funk break played on
+# The break is the point.  The song first presses its own "record"
+# (bounced into a Sample; when Nev wrote it there was no sampler yet, and
+# the slices were sample-mode Wavetables in a KeyMap): a two-bar funk break played on
 # the TR-808 kit (tuned up to sound more like a kit than a drum machine)
 # at 138.75 BPM in a small room, softclipped like tape (.jungle_record).
 # Then it does what we did on the S950: cuts the record into slices,
 # truncates them to 12 bits, puts each slice on its own key zone
-# (Wavetable::KeyMap of sample-mode tables, 11 semitones per zone;
-# .jungle_sampler) and
+# (a Sampler::Instrument, 11 semitones per zone; .jungle_sampler) and
 # plays the slices from note patterns, three semitones up so 138.75 BPM
 # lands on 165 (2^(3/12) * 138.75 = 165.0: pitch it up until it fits).  The
 # whole record is a slice too (:full), so rolling sections loop it in
@@ -183,7 +183,7 @@ module MB::Sound
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
   def self.memory_card(drive: 5.0, ceiling: -1.0)
-    map = jungle_sampler(bpm: MEMORY_CARD_RECORD_BPM) # (renders the record at its own tempo first)
+    map = jungle_sampler(bpm: MEMORY_CARD_RECORD_BPM) # (the record bounces at its own tempo)
     chops = memory_card_chops
     c = memory_card_clips
     k = memory_card_kits
