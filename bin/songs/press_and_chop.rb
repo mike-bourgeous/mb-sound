@@ -3,8 +3,9 @@
 # presses itself with the sampler (design/notes/sampler.md, 2026-10-13).
 #
 # Nothing here is a recording: a funk break is played on a tuned-up TR-808
-# at 138.75 BPM and bounced into a Sample (the "record"), cut into 32nds,
-# run through an S950-ish converter, and chopped; three semitones up the
+# at 138.75 BPM and bounced into a Sample (the "record"), cut into 32nds
+# (clean by default: the maintainer's pick; `-l` runs it through a
+# sampler's converter first), and chopped; three semitones up the
 # record lands on the song's 165 BPM grid.  A detuned saw is bounced into a
 # Reese sample and played back as the bass (a ping-pong loop under a held
 # note); a formant chord is bounced and cyclically timestretched into a
@@ -19,7 +20,7 @@
 #     bin/songs/press_and_chop.rb                 # plays live
 #     bin/songs/press_and_chop.rb out.flac        # renders
 #     bin/songs/press_and_chop.rb --stems dir/ out.flac
-#     bin/songs/press_and_chop.rb -l sp1200 out.flac   # grittier converter (or mpc60, none)
+#     bin/songs/press_and_chop.rb -l mpc60 out.flac    # through a converter (mpc60, s950, or sp1200: grittiest)
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/press_and_chop.rb'
@@ -60,9 +61,9 @@ module MB::Sound
   end
 
   # The record through a sampler's converter (+lofi+: a Sample::Lofi
-  # preset, or :none), cut into its 32 sixteenths with names for the hits
+  # preset, or :none, the default), cut into its 32 sixteenths with names for the hits
   # (a Sample::Slices).
-  def self.press_and_chop_break(record = press_and_chop_record, lofi: :s950)
+  def self.press_and_chop_break(record = press_and_chop_record, lofi: :none)
     record = record.lofi(lofi) unless lofi.nil? || lofi == :none
     record.slices(32).name(
       full: 0..31, k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23,
@@ -107,8 +108,8 @@ module MB::Sound
   end
 
   # Starts the song on the current session, the break through +lofi+'s
-  # converter.
-  def self.press_and_chop(lofi: :s950)
+  # converter (:none by default).
+  def self.press_and_chop(lofi: :none)
     bpm PRESS_AND_CHOP_BPM
     brk = press_and_chop_break(lofi: lofi)
     chops = press_and_chop_chops(brk)
@@ -143,7 +144,7 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: PRESS_AND_CHOP_BARS,
-      lofi: [:s950, Symbol, '-l', "The break's converter", [:s950, :sp1200, :mpc60, :none]],
+      lofi: [:none, Symbol, '-l', "The break's converter", [:none, :mpc60, :s950, :sp1200]],
     ) { |p| press_and_chop(lofi: p.lofi) }
   end
 end
