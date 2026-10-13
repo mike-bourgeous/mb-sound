@@ -16,7 +16,7 @@ module MB
     # MB::Sound.noise; each noise tone keeps its own splitmix64 state, see
     # Tone::State#noise), Synth (per-lane seeds through #with_seed),
     # Pitch#unison (a sub-seed for the random detune layout), and spectral
-    # Noise (draws from #root_rng).  Older randomness keeps its own
+    # Noise (draws from Internal.root_rng).  Older randomness keeps its own
     # generators for now: Clip seeds (probability, #permute) and Reverb
     # seeds; they could move to sub-seeds from here later.
     module RandomMethods
@@ -34,29 +34,12 @@ module MB
       def seed(seed = nil)
         return random_seed if seed.nil?
 
-        @root_seed = Integer(seed)
-        @root_rng = Random.new(@root_seed)
-        @root_seed
+        Internal.reseed(seed)
       end
 
       # The root seed (see #seed).
       def random_seed
-        root_rng
-        @root_seed
-      end
-
-      # The root random number generator (a Random), for code that can
-      # control the order of its draws.
-      def root_rng
-        seed(default_seed) if @root_rng.nil?
-        @root_rng
-      end
-
-      # The root seed at startup: RANDOM_SEED from the environment, or
-      # DEFAULT_SEED (restore it with `seed default_seed`; the specs do
-      # before every example).
-      def default_seed
-        ENV['RANDOM_SEED'] ? Integer(ENV['RANDOM_SEED']) : DEFAULT_SEED
+        Internal.root_seed
       end
 
       # Runs the block, then puts the root random generator back as it
@@ -64,16 +47,17 @@ module MB
       # documents build set patches once to save them; see
       # GraphIO::SetWriter).  Returns the block's value.
       def keeping_random_state
-        rng = root_rng.dup
+        rng = Internal.root_rng.dup
+        seed = Internal.root_seed
         yield
       ensure
-        @root_rng = rng if rng
+        Internal.restore_rng(rng, seed) if rng
       end
 
       # Draws a seed for a sub-generator from the root generator (a
       # non-negative Integer below 2**62), e.g. `Random.new(MB::Sound.next_seed)`.
       def next_seed
-        root_rng.rand(1 << 62)
+        Internal.root_rng.rand(1 << 62)
       end
 
       # Returns +seed+: graph documents write seeds drawn when the graph
@@ -96,14 +80,11 @@ module MB
       #     b = MB::Sound.with_seed(5) { 110.hz.saw.rnd }   # same phase as a
       def with_seed(seed)
         old_seed = random_seed
-        old_rng = @root_rng
+        old_rng = Internal.root_rng
         seed(seed)
         yield
       ensure
-        if old_rng
-          @root_seed = old_seed
-          @root_rng = old_rng
-        end
+        Internal.restore_rng(old_rng, old_seed) if old_rng
       end
     end
   end

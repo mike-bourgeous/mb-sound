@@ -75,7 +75,7 @@ module MB
           session.master_gain = @start[:master_gain]
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
-          MB::Sound.instance_variable_set(:@root_rng, Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
+          MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding
           @base_epoch = session.epoch

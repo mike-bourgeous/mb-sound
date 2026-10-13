@@ -81,7 +81,7 @@ module MB
             end
 
           else
-            data = any_sound_to_array(file_tone_data).map { |c| c * (master_gain * trim) }
+            data = Internal.any_sound_to_array(file_tone_data).map { |c| c * (master_gain * trim) }
             data = Session.monitor_clip(data, trim).first
             data = data * 2 if data.length < 2
             channels = data.length
@@ -280,7 +280,7 @@ module MB
           return out.respond_to?(:profile) ? out.profile : nil
         end
 
-        type = detect_output == :null ? :null : :device
+        type = Internal.detect_output == :null ? :null : :device
         use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: profile))
         profile.to_s.delete_prefix(':').to_sym
       end
@@ -304,7 +304,7 @@ module MB
       # Example (bin/sound.rb; #midi calls it):
       #     live_midi_latency    # => :low
       def live_midi_latency(quiet: false)
-        return nil if !ENV['AUDIO_PROFILE'].to_s.empty? || Session.output_chosen? || detect_output != :device
+        return nil if !ENV['AUDIO_PROFILE'].to_s.empty? || Session.output_chosen? || Internal.detect_output != :device
 
         session = Session.default
         if session.output_open?

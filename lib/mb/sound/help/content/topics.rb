@@ -274,7 +274,7 @@ module MB
         MIDI source; transforms (echo, arp, chord, strum, ...) work on
         Streams, Notes, and Clips; mod_sum and friends route modulation.
       TEXT
-      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale, :mod_source
+      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
       see :record
