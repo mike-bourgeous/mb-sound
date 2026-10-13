@@ -3,11 +3,11 @@
 graph 2,
   name: "ambient_rainstick",
   kind: :synth,
-  saved: "2026-10-13T14:43:34Z",
-  mb_sound: "0.12.0.usegit (d86d4454)",
+  saved: "2026-10-13T18:58:36Z",
+  mb_sound: "0.12.0.usegit (01f36fe8)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :rainstick from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :rainstick, space: 0.5, wear: 0.0 }
+  options: { patch: :rainstick, space: 0.5, wear: 0.0, tune: 0.0 }
 inputs :midi
 
 synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |n|
