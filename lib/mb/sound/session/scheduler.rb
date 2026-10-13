@@ -22,7 +22,12 @@ module MB
         # With an +epoch+, it runs only while Session#epoch is that number
         # (the timeline between two seeks; see Session::Seeks), so a take's
         # lines run at their time in the right pass over the timeline.
-        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, keyword_init: true)
+        # With +exact+ (a take replay's console lines; see Take::Replay), a
+        # rendering (not realtime) session runs it at the start of the
+        # buffer span containing its time, before the span's tempo is read
+        # (see #dispatch_exact), like a line typed between two buffers,
+        # instead of a lookahead ahead.
+        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :exact, keyword_init: true)
 
         # Raised (through MB::Sound.live_error) when a scheduled block
         # finishes after its time (see #lookahead).
@@ -128,7 +133,7 @@ module MB
         end
 
         # See Session#schedule.
-        def schedule(time, period: nil, description: nil, epoch: nil, &block)
+        def schedule(time, period: nil, description: nil, epoch: nil, exact: false, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
           raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
 
@@ -141,7 +146,8 @@ module MB
               period: period&.to_r,
               block: block,
               description: description || "bar #{@transport.bar_at(time).floor}",
-              epoch: epoch
+              epoch: epoch,
+              exact: exact && !@realtime
             )
             @next_id
           }
@@ -209,7 +215,7 @@ module MB
             list = []
             epoch = @session.epoch
             @entries.values.each do |e|
-              next if e.epoch && e.epoch != epoch
+              next if e.exact || (e.epoch && e.epoch != epoch)
               while e.time <= horizon
                 list << [e, e.time]
                 break @entries.delete(e.id) unless e.period
@@ -230,6 +236,21 @@ module MB
               run(e, time, deadline)
             end
           end
+        end
+
+        # Runs the exact entries (see Entry) whose time is before +to+ (or
+        # has come), at the start of the span [+from+, +to+), before
+        # Session#process_buffer reads the span's tempo.  Returns true if any
+        # ran.
+        def dispatch_exact(from, to)
+          due = @mutex.synchronize {
+            epoch = @session.epoch
+            list = @entries.values.select { |e| e.exact && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) }
+            list.each { |e| @entries.delete(e.id) }
+            list
+          }
+          due.sort_by { |e| [e.time, e.id] }.each { |e| run(e, e.time, e.time > from ? e.time : nil) }
+          !due.empty?
         end
 
         # Stops the scheduler thread.

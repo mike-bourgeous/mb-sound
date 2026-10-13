@@ -466,6 +466,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(out).to be_closed
     end
 
+    it 'stops at MAX_RENDER_SECONDS with a warning when the timeline never reaches the end bar' do
+      stub_const('MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS', 0.5)
+      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+      # A seek back to bar 1 every half bar: bar 3 never comes
+      expect {
+        expect(MB::Sound.render(out, bars: 2, bpm: 120) {
+          MB::Sound.bg(:pad, 0.1.constant)
+          MB::Sound.every(1/2r) { MB::Sound.seek 1 }
+        }).to eq(0.5)
+      }.to output(/after 0.5 seconds at 1:2, short of bar 3 /).to_stderr
+      expect(out.frames_written).to eq(24000)
+    end
+
     describe 'with loudness:' do
       it 'normalizes the file to a number of LUFS or a named target' do
         expect(MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 2, loudness: -16)).to eq(2)

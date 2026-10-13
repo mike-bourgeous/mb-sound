@@ -86,6 +86,7 @@ module MB
         @mutex = Mutex.new
         @start = start_state
         @start_epoch = (@session || Session.default).epoch
+        @start_frame = (@session || Session.default).frame
         @midi_from = (@session || Session.default).midi_log_length
       end
 
@@ -239,6 +240,7 @@ module MB
         end
         out << "  ends: #{ruby_value(session.transport.position)},\n"
         out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
+        out << "  seconds: #{length_seconds.round(3)},\n"
         out << ") do |r|\n"
         midi.each do |name, rows|
           out << "  r.midi [\n"
@@ -261,7 +263,7 @@ module MB
       # A Replay of this take (see Replay), as #save would write it.
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
-        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch) do |r|
+        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
           lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
         end
@@ -295,6 +297,13 @@ module MB
         else
           File.join(ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME'], 'mb-sound', 'takes')
         end
+      end
+
+      # How long the take has run, in seconds of the session's output (a
+      # replay's time limit counts from it; see Replay#render).
+      def length_seconds
+        s = session
+        (s.frame - @start_frame).to_f / (s.output_open? ? s.sample_rate : 48000)
       end
 
       private

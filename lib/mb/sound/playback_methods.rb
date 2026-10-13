@@ -749,6 +749,11 @@ module MB
 
         if bars.nil? && seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
+        elsif bars && seconds.nil? && frames >= max_frames && end_time.call > transport.position
+          # A timeline that keeps jumping back (a looping form) or crawling
+          # (a very slow tempo) never reaches the end bar
+          end_bar = bars.to_r + 1
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds at #{session.stamp(transport.position)}, short of bar #{end_bar.denominator == 1 ? end_bar.to_i : end_bar.to_f} (the limit is MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS)"
         end
 
         frames.to_f / rate

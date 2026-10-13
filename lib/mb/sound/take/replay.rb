@@ -32,12 +32,27 @@ module MB
           attr_accessor :last
         end
 
+        # The longest a replay of a take without a recorded length (see
+        # +:seconds+ in #initialize) renders or plays before stopping with a
+        # warning; pass +max_seconds:+ to #render or #play for longer takes.
+        MAX_SECONDS = 3600
+
+        # How much longer than the live take (its +:seconds+) a replay may
+        # run before it stops with a warning (a replay that never reaches
+        # the take's end, e.g. code that changed since the take).
+        EXTRA_SECONDS = 60
+
         attr_reader :lines, :ends
 
-        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0)
+        # The take's length in seconds as performed (nil for takes saved
+        # before it was recorded).
+        attr_reader :seconds
+
+        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
           @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
+          @seconds = seconds
           @lines = []
           @midi = {}
           yield self if block_given?
@@ -85,7 +100,7 @@ module MB
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands].min
-            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i) do
+            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, exact: true) do
               run_line(session, binding, l, i)
             end
           end
@@ -98,7 +113,15 @@ module MB
         # everything and adds +:tail+ seconds for master effects tails.
         # Yields each buffer of the mix if a block is given.  Returns the
         # frames rendered.
-        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, &tap)
+        #
+        # The render also ends (before the tail) when the session has gone
+        # quiet for good short of +:finish+: nothing playing or due, so the
+        # timeline has stopped (see Session; a take's end is where the live
+        # timeline was when it was saved).  It stops with a warning after
+        # +:max_seconds+ (the live take's length plus EXTRA_SECONDS, or
+        # MAX_SECONDS for takes without a recorded length), so a replay that
+        # never reaches its end can't run forever.
+        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, &tap)
           raise ArgumentError, 'Pass finish: (whole notes) for a take without an end' if finish.nil?
 
           output = MB::Sound.file_output(output, channels: channels, overwrite: true) if output.is_a?(String)
@@ -109,12 +132,24 @@ module MB
           MB::Sound.live = true
           schedule(session)
 
+          max_seconds ||= default_max_seconds
+          max_frames = (max_seconds * output.sample_rate).round
           frames = 0
           sizes = buffer_sizes.cycle
           until transport.position >= finish && session.epoch >= @base_epoch + @ends_epoch
-            n = sizes.next
+            if frames >= max_frames
+              warn "Stopped replaying the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, finish)}; at #{stamp(session, transport.position)}); pass max_seconds: to render longer"
+              break
+            end
+
+            before = transport.position
+            n = [sizes.next, max_frames - frames].min
             session.process_buffer(n)
             frames += n
+
+            # The timeline stops when nothing plays; with nothing playing or
+            # due, it never moves again
+            break if transport.position == before && session.idle? && !session.schedule_due? && ended_short(session, finish)
           end
 
           if tail && tail > 0
@@ -135,8 +170,9 @@ module MB
         end
 
         # Plays the take in the background session until its end, then
-        # fades out and waits for the tails.
-        def play
+        # fades out and waits for the tails.  Gives up with a warning after
+        # +:max_seconds+ (see #render).
+        def play(max_seconds: nil)
           session = Session.default
           raise 'Stop the background players first (e.g. panic)' unless session.idle?
           MB::Sound.rewind
@@ -144,7 +180,15 @@ module MB
           MB::Sound.live = true
           schedule(session)
           session.add(0.constant, name: :take_clock, on: :now) # keeps the timeline moving between lines
-          sleep 0.1 until session.transport.position >= (@ends || 0) && session.epoch >= @base_epoch + @ends_epoch
+          max_seconds ||= default_max_seconds
+          deadline = MB::U.clock_now + max_seconds
+          until session.transport.position >= (@ends || 0) && session.epoch >= @base_epoch + @ends_epoch
+            if MB::U.clock_now > deadline
+              warn "Stopped playing the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, @ends || 0)}); pass max_seconds: to play longer"
+              break
+            end
+            sleep 0.1
+          end
           MB::Sound.outro
           MB::Sound.wait
         ensure
@@ -176,6 +220,28 @@ module MB
         end
 
         private
+
+        # The default +:max_seconds+ (see #render).
+        def default_max_seconds
+          @seconds ? @seconds + EXTRA_SECONDS : MAX_SECONDS
+        end
+
+        # A timeline position for messages: bar:beat and whole notes.
+        def stamp(session, pos)
+          "#{session.stamp(pos)}, #{pos.to_f.round(4)} whole notes"
+        end
+
+        # Called when the replay's timeline has stopped for good short of
+        # +finish+ (see #render): warns if take lines never ran (they were
+        # typed further along the timeline, so the replay went quiet where
+        # the performance didn't).  Returns true.
+        def ended_short(session, finish)
+          left = session.scheduled.count { |_, d| d.start_with?('take line ') }
+          if left > 0
+            warn "The take's replay went quiet at #{stamp(session, session.transport.position)} with #{left} take line#{left == 1 ? '' : 's'} left to run (the take ends at #{stamp(session, finish)})"
+          end
+          true
+        end
 
         def run_line(session, binding, line, index)
           Session.with_context(session: session, time: line.issued, source: :replay) do

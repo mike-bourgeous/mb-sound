@@ -497,9 +497,10 @@ module MB
 
       # Schedules the block to run at +time+ (whole notes on the timeline),
       # and then every +period+ whole notes if given.  Returns an id for
-      # #cancel.  See Scheduler for how and when blocks run.
-      def schedule(time, period: nil, description: nil, epoch: nil, &block)
-        @scheduler.schedule(time, period: period, description: description, epoch: epoch, &block)
+      # #cancel.  See Scheduler for how and when blocks run (and
+      # Scheduler::Entry for +:exact+).
+      def schedule(time, period: nil, description: nil, epoch: nil, exact: false, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, exact: exact, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -673,6 +674,14 @@ module MB
             @scheduler.apply_timed_changes
             commit_due_seeks unless @changes.empty?
             per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            # A take replay's lines run before the span whose time they were
+            # typed in, like live lines typed between buffers, so a tempo
+            # they set covers the whole span (see Scheduler::Entry#exact)
+            if @scheduler.dispatch_exact(@transport.position, @transport.position + remaining * per_sample)
+              @scheduler.apply_timed_changes
+              commit_due_seeks unless @changes.empty?
+              per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             parts << render_span(n, per_sample)
             remaining -= n
