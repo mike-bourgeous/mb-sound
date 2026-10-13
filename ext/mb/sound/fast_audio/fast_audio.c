@@ -287,6 +287,28 @@ static VALUE ruby_jack_info(VALUE self)
 }
 
 /*
+ * call-seq: MB::Sound::FastAudio.jack_stall(microseconds, every) -> nil
+ *
+ * For specs: makes every +every+-th callback of the shared JACK client sleep
+ * for +microseconds+ before it reads the frame time or runs any port (0
+ * microseconds stops), like a process thread the system didn't schedule in
+ * time.  An asynchronous server then skips and repeats cycles for the
+ * client (see playback_jack_process).  Opening the client clears it; costs
+ * one relaxed load per callback when off.
+ */
+static VALUE ruby_jack_stall(VALUE self, VALUE microseconds, VALUE every)
+{
+	(void)self;
+	unsigned us = NUM2UINT(microseconds);
+	unsigned n = NUM2UINT(every);
+	if (us > 1000000 || n == 0) {
+		rb_raise(rb_eArgError, "Stalls are up to a second, every 1 or more callbacks");
+	}
+	mb_jack_stall(us, n);
+	return Qnil;
+}
+
+/*
  * call-seq: MB::Sound::FastAudio.jack_close -> nil
  *
  * Closes the shared JACK client; its outputs and inputs stop.
@@ -1743,6 +1765,10 @@ static void capture_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 	size_t ch = c->channels;
 	const float *buffers[MB_JACK_MAX_PORTS];
 
+	// Frame time alone tells a repeat: both calls of a repeated cycle read
+	// the same port buffers, so the second's frames are the first's (a
+	// fingerprint, as MIDI input uses, would cost a pass over the period
+	// on every callback)
 	uint32_t frame = mb_jack_last_frame_time();
 	if (c->jack_cycled && frame == c->jack_frame) {
 		atomic_fetch_add_explicit(&c->jack_repeated, 1, memory_order_relaxed);
@@ -2933,6 +2959,7 @@ void Init_fast_audio(void)
 	rb_define_module_function(fast_audio, "jack_open", ruby_jack_open, 1);
 	rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
 	rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
+	rb_define_module_function(fast_audio, "jack_stall", ruby_jack_stall, 2);
 	rb_define_module_function(fast_audio, "jack_ports", ruby_jack_ports, 3);
 	rb_define_module_function(fast_audio, "jack_connect", ruby_jack_connect, 2);
 	rb_define_module_function(fast_audio, "jack_disconnect", ruby_jack_disconnect, 2);

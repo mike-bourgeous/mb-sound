@@ -84,6 +84,13 @@ static _Atomic size_t cycles_skipped;
 static _Atomic size_t cycles_repeated;
 static uint32_t prev_frame;
 static int have_prev_frame;
+
+// mb_jack_stall (specs): sleep stall_us at the start of every
+// stall_every-th callback, before anything reads the frame time, like a
+// process thread the system didn't schedule in time
+static _Atomic unsigned stall_us;
+static _Atomic unsigned stall_every;
+static unsigned stall_count; // process thread only
 static pthread_mutex_t change_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Released ports, kept registered for reuse (see mb_jack.h: libjack can't
@@ -293,6 +300,12 @@ static int process(jack_nframes_t nframes, void *arg)
 
 	atomic_fetch_add(&cycles_started, 1);
 
+	unsigned stall = atomic_load_explicit(&stall_us, memory_order_relaxed);
+	if (stall != 0 && ++stall_count % atomic_load_explicit(&stall_every, memory_order_relaxed) == 0) {
+		struct timespec ts = { stall / 1000000, (stall % 1000000) * 1000L };
+		nanosleep(&ts, NULL);
+	}
+
 	uint32_t frame = jack.last_frame_time(client);
 	if (have_prev_frame && nframes > 0) {
 		uint32_t delta = frame - prev_frame;
@@ -369,6 +382,8 @@ const char *mb_jack_open(const char *name)
 	atomic_store(&cycles_skipped, 0);
 	atomic_store(&cycles_repeated, 0);
 	have_prev_frame = 0; // no process thread yet
+	atomic_store(&stall_us, 0); // a new client starts unstalled
+	stall_count = 0;
 	if (jack.set_process_callback(c, process, NULL) != 0) {
 		jack.client_close(c);
 		return "Could not set the JACK process callback";
@@ -467,6 +482,12 @@ uint32_t mb_jack_buffer_size(void)
 size_t mb_jack_cycles(void)
 {
 	return atomic_load(&cycles_done);
+}
+
+void mb_jack_stall(unsigned microseconds, unsigned every)
+{
+	atomic_store(&stall_every, every);
+	atomic_store(&stall_us, microseconds);
 }
 
 size_t mb_jack_cycles_skipped(void)

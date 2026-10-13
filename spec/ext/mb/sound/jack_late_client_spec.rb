@@ -1,6 +1,6 @@
 # A shared client whose JACK thread is late (FastAudio::JackMIDIInput#stall
-# sleeps in its callbacks, like a thread the system didn't schedule in
-# time), receiving MIDI from an outside client as in the MIDI specs, and
+# or FastAudio.jack_stall sleeps in its callbacks, like a thread the system
+# didn't schedule in time), receiving MIDI from an outside client as in the MIDI specs, and
 # playing and recording audio to and from one.  An asynchronous server
 # (jackd's default) then skips cycles for it, losing what arrived in them,
 # and calls it twice for one cycle; MIDI input drops the repeat instead of
@@ -20,6 +20,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
   end
 
   after(:each) do
+    fa.jack_stall(0, 1)
     @opened.each(&:close)
     @keyboard&.close
     fa.jack_close
@@ -133,20 +134,20 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
 
   # A DeviceOutput and DeviceInput on the shared client, playing a ramp to
   # and recording one from an outside client for 1.5 s (the shared client
-  # stalled meanwhile if +stall+).  Returns the ramp recorded here, the one
-  # the outside client recorded, and the output and input.
+  # stalled meanwhile by FastAudio.jack_stall if +stall+).  Returns the
+  # ramp recorded here, the one the outside client recorded, and the output
+  # and input.
   def late_audio(stall:)
     name, go, recording = outside_client(2)
 
-    # A unit before the audio units, so the stall delays them too, like a
-    # thread the system didn't schedule in time for the callback
-    staller = fa::JackMIDIInput.new(MB::Sound::DeviceOutput.client_name, 'stall', 4096).tap { |m| @opened << m }
     output = MB::Sound::DeviceOutput.new(channels: 1, device: 'none', backends: [:jack], adaptive: false).tap { |o| @opened << o }
     input = MB::Sound::DeviceInput.new(channels: 1, device: 'none', backends: [:jack]).tap { |i| @opened << i }
     expect(fa.jack_connect(output.jack_ports[0], "#{name}:in_1")).to eq(true)
     expect(fa.jack_connect("#{name}:out_1", input.jack_ports[0])).to eq(true)
     sleep 0.1
-    staller.stall(12000, 7) if stall
+    # The whole client's callback is late, before it reads the frame time,
+    # like a process thread the system didn't schedule in time
+    fa.jack_stall(12000, 7) if stall
     go.call
 
     writer = Thread.new do
@@ -161,7 +162,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     deadline = MB::U.clock_now + 1.5
     got.concat(input.read(512)[0].to_a) while MB::U.clock_now < deadline
     writer.join
-    staller.stall(0, 1)
+    fa.jack_stall(0, 1)
 
     [got, recording.call, output, input]
   end
