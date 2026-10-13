@@ -69,10 +69,10 @@ The limiter's sliding minimum and moving average loop over the window every samp
 
 ## Reverb ducking
 
-The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms after a 50 ms peak follower; the maintainer asked for a faster duck release).  Instead of new reverb parameters, a reverb can now be ducked by its input with any times: `wet = sig.reverb(:hall, dry: 0); sig + wet.duck(sig, amount: -12, release: 80.ms)` (sig used twice branches through a Tee).  Not yet a reverb option.
+The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms after a 50 ms peak follower; the maintainer asked for a faster duck release).  Instead of new reverb parameters, a reverb can now be ducked by its input with any times: `wet = sig.reverb(:hall, dry: 0); sig + wet.duck(sig, amount: -12.db, release: 80.ms)` (sig used twice branches through a Tee).  Not yet a reverb option.
 
 ## Later
 
 - Node-valued thresholds/ratios (the curve is fixed per node; times and the sidechain already take nodes); crossover frequencies as nodes.
 - A plan-layer op for the compander (state already in one DFloat).
-- Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).
+- Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30.db, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).
