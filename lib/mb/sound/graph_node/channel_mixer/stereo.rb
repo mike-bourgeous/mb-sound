@@ -33,8 +33,11 @@ module MB
             if @pan_gains.nil? || @pan_gains[0].length != length
               @pan_gains = Array.new(2) { Numo::SFloat.zeros(length) }
               @pan_rows = @pan_gains.map { |g| [g] }
-              @pan_outputs = Array.new(2) { Numo::SFloat.zeros(length) }
+              # Two sets of outputs alternate, so the last frame's stay
+              # valid while a Tee shares them (see ChannelMixer#sample_internal)
+              @pan_output_sets = Array.new(2) { Array.new(2) { Numo::SFloat.zeros(length) } }
             end
+            @pan_outputs = @pan_output_sets.reverse!.first
 
             return nil unless MB::Sound::FastArithmetic.pan(FAST_LAWS.fetch(option(:law)), position, input, @pan_gains, @pan_outputs)
 

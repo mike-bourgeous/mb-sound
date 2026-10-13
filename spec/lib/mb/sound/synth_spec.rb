@@ -544,6 +544,22 @@ RSpec.describe(MB::Sound::Synth) do
       expect(l.graph).to include(s)
     end
 
+    it 'keeps each channel buffer until the frame after, so Tees can share it', :check_shared do
+      # A stereo synth used twice: every output feeds a Tee of two
+      # branches, and sampling the left output starts the next frame
+      # while the right one's Tee still shares the last (it raised
+      # SharedBufferModified before the channel buffers alternated)
+      s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/20r)), voices: 1) { |v|
+        x = v.hz.saw * v.amp_env(0.001, 0.05, 0.6, 0.05)
+        MB::Sound.stereo(x, x * 0.5)
+      }
+      out = s * 1 + s * 0.5
+      l, r = out.to_a
+      data = 20.times.map { [l.sample(480).dup, r.sample(480).dup] }
+      expect(data[1][0].abs.max).to be > 0.1
+      expect(data.map { |a, b| (a * 0.5 - b).abs.max }.max).to be < 1e-6
+    end
+
     it 'renders in a session' do
       s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/10r), last: nil), voices: 2) { |v, i|
         (v.hz.saw * v.amp_env(0.001, 0.01, 0.5, 0.05)).pan(i.even? ? -0.5 : 0.5)
