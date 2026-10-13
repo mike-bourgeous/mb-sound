@@ -16,8 +16,8 @@
 #     bin/songs/acid_song.rb                    # plays live in the background session
 #     bin/songs/acid_song.rb acid.flac          # renders to a file instead (-f to overwrite)
 #     bin/songs/acid_song.rb -F lp4 lp4.flac    # the lp4 filter instead of the diode ladder
-#     bin/songs/acid_song.rb -M -10 acid.flac   # gentler mastering (about -15 LUFS; the default -M -7: -12.9)
-#     bin/songs/acid_song.rb -d 10 -M -7.5 acid.flac   # drums even louder (-13.3 LUFS)
+#     bin/songs/acid_song.rb -M -10 acid.flac   # gentler mastering (about -15 LUFS; the default -M -7.5: -13.3)
+#     bin/songs/acid_song.rb -d 9 -M -7 acid.flac      # patches-4's mix (drums 1 dB softer, -12.9 LUFS)
 #     bin/songs/acid_song.rb --help             # all options
 #
 # Or in bin/sound.rb:
@@ -67,8 +67,12 @@ module MB::Sound
   # -10.8 LUFS, the kicks squashed instead), so the master comes down to
   # keep the limiter at about 3 dB on the highest peaks, as before: -12.9
   # LUFS, -1.0 dBTP.  `-d 5 -M -4` is the song before.
-  ACID_SONG_DRUMS = 9.0
-  ACID_SONG_MASTER = -7.0
+  #
+  # patches-5 (2026-10-13; the maintainer picked patches-4's louder
+  # variant on the Listening Bench): drums +10 dB, -7.5 dB into the
+  # limiter (-13.3 LUFS, -1.0 dBTP).  `-d 9 -M -7` is patches-4's mix.
+  ACID_SONG_DRUMS = 10.0
+  ACID_SONG_MASTER = -7.5
 
   # Starts the song on the current session (live, or inside a render
   # block); +filter+ is :diode or :lp4.  +drive+ is the filter's drive and
@@ -120,7 +124,7 @@ module MB::Sound
       drive: [ACID_SONG_DRIVE, Float, '-D', 'Acid filter drive (acid.rb: 1.5)', 0.1..10.0],
       gain: [ACID_SONG_GAIN, Float, '-G', 'Acid makeup gain into its soft clipper (acid.rb: 3)', 0.1..30.0],
       level: [ACID_SONG_LEVEL, Float, '-l', 'Acid level in the mix', 0.0..2.0],
-      drums: [ACID_SONG_DRUMS, Float, '-d', 'Drums gain in dB (0 before 2026-10-13, then 5)', -20.0..20.0],
+      drums: [ACID_SONG_DRUMS, Float, '-d', 'Drums gain in dB (0 before 2026-10-13, then 5, then 9)', -20.0..20.0],
       master: [ACID_SONG_MASTER, Float, '-M', 'Gain in dB into the mastering limiter', -30.0..20.0],
     ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level, drums: p.drums, master: p.master) }
   end
