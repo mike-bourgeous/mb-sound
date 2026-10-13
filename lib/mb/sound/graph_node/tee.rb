@@ -153,8 +153,35 @@ module MB
               Thread.current[:mb_sound_tee_rate_pins] = nil
             end
           end
+
+          # A count of branches added to and removed from every Tee, for
+          # callers that cache something derived from Tee#branches (see
+          # Synth#boundary).
+          attr_accessor :branch_changes
+
+          # Runs the block, returning an ObjectSpace::WeakMap (Branch =>
+          # true, by identity) of the branches made on this thread while it
+          # ran (nested calls add theirs to the outer map too).  Weak, so
+          # branches nothing reads are still collected (a Notes node's
+          # stream reader held here would hold its stream back from
+          # ending).  Graphs that skip work while
+          # idle (Synth lanes, drum voices) use it to tell a branch made
+          # while building them but left unread (e.g. `band * 0.5` made in a
+          # voice block and never used) from a reader elsewhere, which they
+          # must keep in step with while skipped.
+          def collect_branches
+            outer = Thread.current[:mb_sound_tee_new_branches]
+            made = ObjectSpace::WeakMap.new
+            Thread.current[:mb_sound_tee_new_branches] = made
+            yield
+            made
+          ensure
+            Thread.current[:mb_sound_tee_new_branches] = outer
+            made&.each { |b, v| outer[b] = v } if outer
+          end
         end
 
+        self.branch_changes = 0
         self.shared = ENV['MB_SOUND_SHARED_TEE'] != '0'
         self.shared_check = case ENV['MB_SOUND_CHECK_SHARED']
                             when nil, '', '0' then nil
@@ -390,8 +417,12 @@ module MB
           branch.frame = @frame || 0
 
           @branch_index += 1
+          Tee.branch_changes += 1
 
           @branches << branch
+          if (made = Thread.current[:mb_sound_tee_new_branches])
+            made[branch] = true
+          end
           Plan.changed(self)
           Plan.changed(@source)
 
@@ -401,6 +432,7 @@ module MB
         # For internal use by Branch#destroy.
         def remove_branch(b)
           @branches.delete(b)
+          Tee.branch_changes += 1
           Plan.changed(self)
           Plan.changed(@source)
         end

@@ -238,6 +238,17 @@ module MB
         # unfused block, a rebuilt installation's output, or nil once the
         # region's graph ended).
         def prepare(count)
+          # A block a lane group computed for this root's replaced region
+          # (see LaneGroup#hand_off)
+          if (handoff = @root.instance_variable_get(:@plan_handoff))
+            @root.instance_variable_set(:@plan_handoff, nil)
+            buf = handoff[0].take_handoff(handoff[1], count)
+            unless buf.equal?(LaneGroup::NO_HANDOFF)
+              @result = buf
+              return :done
+            end
+          end
+
           if @installation.stale?
             @installation.rebuild
             @result = @root.sample(count)

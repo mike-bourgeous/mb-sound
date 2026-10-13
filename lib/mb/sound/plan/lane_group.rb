@@ -37,7 +37,7 @@ module MB
 
           @members = members.freeze
           @index = members.each_with_index.to_h.compare_by_identity
-          @status = Array.new(members.length) # nil, :ready, :done
+          @status = Array.new(members.length) # nil, :ready, :done, :gone (replaced), :replacing
           @n = Array.new(members.length)
           @results = Array.new(members.length)
           @delivered = Array.new(members.length, true)
@@ -95,6 +95,46 @@ module MB
           "Lane group of #{@members.length} regions (#{Plan.node_label(@members[0].root)}, ...)"
         end
 
+        # What #take_handoff returns when there is no block to hand off.
+        NO_HANDOFF = Object.new.freeze
+
+        # Called by Installation#uninstall for member +region+, about to be
+        # replaced by a rebuild: if the group ran (or is running) the
+        # member's block and its owner hasn't read it yet, the next read of
+        # the member's root takes that block (see #take_handoff,
+        # Planned#sample, Region#prepare) instead of computing it again.
+        # A rebuild in the middle of a group run (a member's fallback
+        # reading another region of its installation, whose stale check
+        # rebuilds it) otherwise moved the root's hook to a new region
+        # after the group had computed the block, so the owner's read
+        # computed it a second time, advancing noise and free-running
+        # states twice (fixes-8: a lane's `band * 0.5` left unread made
+        # its band a separate region).
+        def hand_off(region)
+          idx = @index[region]
+          return if idx.nil? || (!@running && @delivered[idx])
+
+          region.root.instance_variable_set(:@plan_handoff, [self, region])
+        end
+
+        # The block of replaced member +region+ for a +count+-sample read
+        # (see #hand_off), or NO_HANDOFF if the group has none waiting for
+        # it.
+        def take_handoff(region, count)
+          idx = @index[region]
+          return NO_HANDOFF if idx.nil? || @delivered[idx] || @count != count
+
+          case @status[idx]
+          when :done
+            @delivered[idx] = true
+            @results[idx]
+          when :ready
+            @running ? sample_during_run(region, idx, count) : NO_HANDOFF
+          else
+            NO_HANDOFF
+          end
+        end
+
         private
 
         # A member asked for while the group is gathering (an input of
@@ -127,10 +167,13 @@ module MB
         # (a stereo Synth lane whose envelope stream ended stopped for good,
         # its envelope never going idle; fixes-6).
         def sample_gone(region, idx, count)
-          @status[idx] = :done
+          # Not :done until the block is computed, so the rebuild doesn't
+          # hand the stale result over (see #hand_off)
+          @status[idx] = :replacing
           inst = region.installation
           inst.rebuild if inst.stale?
           @results[idx] = region.installed? ? region.sample_alone(count) : region.root.sample(count)
+          @status[idx] = :done
         end
 
         # Runs every member for a +count+-sample block.

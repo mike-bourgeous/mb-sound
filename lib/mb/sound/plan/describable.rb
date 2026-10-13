@@ -82,6 +82,14 @@ module MB
       module Planned
         def sample(count)
           unless @plan_bypass
+            # A block a lane group computed for this root's replaced region
+            # (see LaneGroup#hand_off)
+            if (handoff = @plan_handoff)
+              @plan_handoff = nil
+              buf = handoff[0].take_handoff(handoff[1], count)
+              return buf unless buf.equal?(LaneGroup::NO_HANDOFF)
+            end
+
             if (region = @plan_region)
               return region.sample(count) unless region.unfused
             elsif (region = @plan_member) && !region.unfused
