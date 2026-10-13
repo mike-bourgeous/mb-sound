@@ -279,6 +279,34 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound::Plan.enabled = old
     end
 
+    # fixes-8: an unread `band * 0.5` makes each lane's band its own region.
+    # When the stream ends, a lane's envelope leaves the plan in the middle
+    # of a group run and its fallback reads its band region, which rebuilds
+    # the lane's installation; the root's hook then pointed at a new region
+    # after the group had computed the lane's block, so the Synth's read
+    # computed it again (noise advanced twice, the last lane changed and
+    # the synth ended a buffer early).  The group hands the block over.
+    it 'hands a block computed before a rebuild to the replaced region' do
+      run = ->(lanes) {
+        MB::Sound::Plan.lanes = lanes
+        MB::Sound.seed(5)
+        notes = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*[[50, 0.05, 0.5], [55, 0.1, 0.4], [57, 0.6, 0.9]].flat_map { |n, on, off|
+          [MB::Sound::MIDI::Event.note_on(n, 0.8, time: on.to_r), MB::Sound::MIDI::Event.note_off(n, time: off.to_r)]
+        }))
+        s = MB::Sound.synth(notes, voices: 2, skip_idle: false) { |v|
+          band = MB::Sound.noise.filter(:lowpass, cutoff: 3000, quality: 1.5)
+          _unread = band * 0.5 # never read
+          band * v.env(0.1, 0.2, 0.5, 0.1, gm: false)
+        }
+        [render(s, [800] * 80), s]
+      }
+      a, s = run.(true)
+      b, _ = run.(false)
+      expect(s.lane_groups.groups.sum(&:lane_runs)).to be > 0
+      expect(a.length).to be > 48000
+      expect(a).to eq(b)
+    end
+
     it 'regroups after a rebuild' do
       b = make_bundle(true)
       inst = MB::Sound::Plan.install(b)

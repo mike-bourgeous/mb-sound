@@ -53,6 +53,7 @@
 #     bin/songs/tunnel_vision.rb tv.flac         # renders (-f to overwrite)
 #     bin/songs/tunnel_vision.rb --stems stems/ tv.flac
 #     bin/songs/tunnel_vision.rb -D 8 -C -1 tv.flac   # gentler master
+#     bin/songs/tunnel_vision.rb --no-buses tv.flac   # Kez's original ambience (no buses)
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/tunnel_vision.rb'
@@ -63,6 +64,10 @@
 #     go :drop; turn :cut, 600, over: 2; turn :cut, 5000, over: 1.n4   # Reese filter ride
 #     turn :grit, 0.6, over: 4      # more crusher on the neuro bass
 #     move :air, 180; undo          # low end out, then back next bar
+#     feed :pad, :hall, 1, over: 2  # drown the pad in the hall (buses)
+#     turn :lift, 1, over: 4        # lift the hall's tail in the rests (upward compression)
+#     solo :hall                    # just the reverb return (and what feeds it)
+#     mute :echo; unmute :echo, on: :bar
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -75,6 +80,13 @@ module MB::Sound
   # Master drive (dB into the clipper/limiter) and true-peak ceiling (dBTP).
   TV_DRIVE = 11.0
   TV_CEILING = -0.5
+
+  # The :hall bus's return gain in dB (buses): its reverb is wet only and
+  # energy-normalized (about 20 dB under its input), so the return needs
+  # this to sit around -34 dBFS RMS in the breakdown (maintainer, round 2
+  # of buses-1: "way more hall (-30dBFS or more?)"; round 3, after hearing
+  # +18/+24/+30: "18 sounds right during the notes").
+  TV_HALL = 18.0
 
   # The kick, shared by the drums and the ghost kicks that duck the bass.
   TV_KICK = dnb_kick_settings.freeze
@@ -160,7 +172,15 @@ module MB::Sound
   end
 
   # Sets up the song on the current session.  Returns the clips.
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING)
+  #
+  # +buses+ (default; buses-1, 2026-10-13) plays the ambience through
+  # shared buses: the pad and pluck dry, sending to a :hall reverb bus
+  # (ducked by the kick) and the pluck to an :echo bus (dotted eighths,
+  # the :space knob as its send), and the basses duck by the drums'
+  # own kick (`duck(:drums, only: :kick)`) instead of a ghost kick.
+  # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
+  # kick for the ducks).
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: 0.0)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -170,19 +190,44 @@ module MB::Sound
     knob :grit, 0.25, range: 0..1                              # the neuro crusher's wet share
     knob :space, 0.4, range: 0..1                              # the pluck's delay send
     knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'     # a master highpass
+    knob :lift, lift, range: 0..1                              # upward lift of the hall's tail in rests (buses)
 
     # A club master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1
     master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
 
-    track(:drums) { |kit| dnb_drums(kit, kick: TV_KICK) }
-    track(:reese) { |clip| (dnb_reese_voice(clip, cutoff: knob(:cut)) * 1.0).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:sub) { |clip| (dnb_sub_voice(clip) * 0.5).duck(tv_ghost_kick, amount: -12.db, release: 1.n16) }
-    track(:neuro) { |clip| (dnb_neuro_voice(clip, grit: knob(:grit)) * 0.85).duck(tv_ghost_kick, amount: -8.db, release: 1.n16) }
-    track(:pad) { |clip| dnb_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
-    track(:pluck) { |clip| dnb_pluck_voice(clip, send: knob(:space)) * 0.45 }
-    track(:boom) { |clip| dnb_boom_voice(clip) }
-    track(:riser, fade: 1/8r) { |_clip| tv_riser(8) }
+    # A little of every other track in the hall (maintainer, round 3: "a
+    # tiny bit of send from every track"; not the sub)
+    halls = ->(level) { buses ? { hall: level } : nil }
+    if buses
+      # The sidechain: the drums' kick voice itself, read on the exact
+      # sample (no ghost kick to keep in step with the kit)
+      # The hall: highpassed (the drums send a little too, kick included),
+      # +hall dB on the wet-only reverb, an optional upward compressor
+      # lifting the tail in rests (the :lift knob blends it in; off by
+      # default), ducked by the kick
+      bus(:hall) { |sig|
+        wet = sig.filter(:highpass, cutoff: 250, quality: 0.7).reverb(:hall, mix: 1) * hall.db
+        lifted = wet.compress(threshold: 0.db, ratio: 1, upward_threshold: -36.db, upward_ratio: 4, max_gain: 12,
+                              attack: 0.01, release: 0.15, upward_attack: 0.02, detector: :rms, rms: 0.05)
+        (wet * (knob(:lift) * -1 + 1) + lifted * knob(:lift)).duck(:drums, only: :kick, amount: -6.db, release: 1.n8)
+      }
+      bus(:echo) { |sig| sig.delay(1.n8.dotted, feedback: 0.4) }
+      duck = ->(node, amount) { node.duck(:drums, only: :kick, amount: amount, release: 1.n16) }
+      # (dry levels as the original's reverb mixes left them: 0.65 and 0.75)
+      track(:pad, send: { hall: 0.35 }) { |clip| dnb_pad_voice(clip, hall: nil) * (0.6 * 0.65) }
+      track(:pluck, send: { echo: :space, hall: 0.25 }) { |clip| dnb_pluck_voice(clip, send: nil, plate: nil) * (0.45 * 0.75) }
+    else
+      duck = ->(node, amount) { node.duck(tv_ghost_kick, amount: amount, release: 1.n16) }
+      track(:pad) { |clip| dnb_pad_voice(clip) * 0.6 } # (no lead: 0.3.attack: a lead at the form start broke exact take replay on the research branch)
+      track(:pluck) { |clip| dnb_pluck_voice(clip, send: knob(:space)) * 0.45 }
+    end
+    track(:drums, send: halls.(-24.db)) { |kit| dnb_drums(kit, kick: TV_KICK) }
+    track(:reese, send: halls.(-20.db)) { |clip| duck.(dnb_reese_voice(clip, cutoff: knob(:cut)) * 1.0, -8.db) }
+    track(:sub) { |clip| duck.(dnb_sub_voice(clip) * 0.5, -12.db) }
+    track(:neuro, send: halls.(-20.db)) { |clip| duck.(dnb_neuro_voice(clip, grit: knob(:grit)) * 0.85, -8.db) }
+    track(:boom, send: halls.(-20.db)) { |clip| dnb_boom_voice(clip) }
+    track(:riser, fade: 1/8r, send: halls.(-18.db)) { |_clip| tv_riser(8) }
 
     scene :intro, drums: k[:intro], pad: c[:pad], reese: c[:bar], neuro: c[:bar], cut: 250, air: 20
     scene :build, drums: k[:build], reese: c[:riff], neuro: c[:bar], cut: [2500, from: 250, over: 8, curve: :smooth]
@@ -218,8 +263,11 @@ module MB::Sound
       bars: TV_BARS,
       drive: [TV_DRIVE, Float, '-D', 'Gain in dB into the master clipper and limiter', -20.0..24.0],
       ceiling: [TV_CEILING, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
+      hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
+      lift: [0.0, Float, '-U', 'Upward lift of the hall tail in rests, 0..1 (the :lift knob; with buses)', 0.0..1.0],
+      buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling)
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift)
       tunnel_vision_form
     }
   end
