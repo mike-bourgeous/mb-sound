@@ -309,7 +309,7 @@ RSpec.describe(MB::Sound::Take) do
     # Live in 1000-frame buffers: the timeline stops at the end of the
     # buffer in which the last player ends (bar 2 + 1000 frames), which a
     # replay in other buffer sizes may never reach
-    live, t = perform_lines({ 0 => ['bg :x, 0.1.constant.until(1.bar)'] }, buffers: 120, size: 1000)
+    _live, t = perform_lines({ 0 => ['bg :x, 0.1.constant.until(1.bar)'] }, buffers: 120, size: 1000)
     expect(t.replay.ends).to eq(97000r / 96000)
     expect(t.to_ruby).to include("seconds: 2.5,\n")
 
