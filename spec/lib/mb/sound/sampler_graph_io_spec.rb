@@ -48,7 +48,7 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
   end
 
   it 'keeps lofi drop-sample reads and read_as views in bundles' do
-    dirty = rec.lofi(:mpc60).slices(8)
+    dirty = rec.lofi(:s950).slices(8)
     clean = rec.lofi(:sp1200).read_as(:clean).slices(8)
     clip = MB::Sound.seq(MB::Sound::C2, MB::Sound::D2.pitch(7), MB::Sound::E2.pitch(12)).n8.loop
     g = clip.sampler(dirty) + clip.sampler(clean)

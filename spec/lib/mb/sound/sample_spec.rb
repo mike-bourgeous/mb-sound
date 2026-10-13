@@ -107,17 +107,22 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect { x.lofi }.to raise_error(ArgumentError, /preset or rate/)
     end
 
-    it 'reads lofi presets drop-sample with no levels unless told otherwise' do
+    it 'reads :s950 and :sp1200 drop-sample, :mpc60 clean, unless told otherwise' do
       x = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.3) })]
       expect([x.interpolation, x.mips]).to eq([nil, nil])
-      [:s950, :sp1200, :mpc60].each do |p|
+      [:s950, :sp1200].each do |p|
         expect([x.lofi(p).interpolation, x.lofi(p).mips]).to eq([:none, false])
       end
-      expect(x.lofi(:mpc60).to_s).to include('drop read')
+      expect([x.lofi(:mpc60).interpolation, x.lofi(:mpc60).mips]).to eq([nil, nil])
+      expect(x.lofi(:s950).to_s).to include('drop read')
+      expect(x.lofi(:mpc60).to_s).not_to include('drop read')
 
-      clean = x.lofi(:mpc60, read: :clean)
+      drop = x.lofi(:mpc60, read: :drop)
+      expect([drop.interpolation, drop.mips]).to eq([:none, false])
+      expect(drop.data).to eq(x.lofi(:mpc60).data)
+      clean = x.lofi(:s950, read: :clean)
       expect([clean.interpolation, clean.mips]).to eq([nil, nil])
-      expect(clean.data).to eq(x.lofi(:mpc60).data)
+      expect(clean.data).to eq(x.lofi(:s950).data)
       expect(x.lofi(:s950, read: { interpolation: :cubic }).interpolation).to eq(:cubic)
       expect(x.lofi(rate: 8000).interpolation).to be_nil # custom converters keep the read
 
@@ -136,23 +141,42 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect { x.with(interpolation: :blurry) }.to raise_error(ArgumentError, /Unknown interpolation/)
     end
 
-    it 'stretches cyclically to the asked length at the same pitch' do
+    it 'stretches cyclically to the asked length at the same pitch with fit: :fixed' do
       sine = ->(n) { Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| Math.sin(i * 2 * Math::PI * 500 / 48000) }) }
       x = MB::Sound::Sample[sine.(4800)]
-      y = x.stretch(2, cycle: 20.ms)
+      y = x.stretch(2, cycle: 20.ms, fit: :fixed)
       expect(y.length).to eq(9600)
       # 20 ms cycles of 500 Hz taken every 10 ms: whole periods, so seamless
       expect((y.data[0...9000] - sine.(9000)).abs.max).to be < 1e-5
-      z = x.stretch(1.5, cycle: 7.ms, crossfade: 1.ms)
+      z = x.stretch(1.5, cycle: 7.ms, crossfade: 1.ms, fit: :fixed)
       expect(z.length).to eq(7200)
+      # nil and false mean :fixed (what they meant before :auto was the default)
+      expect(x.stretch(2, cycle: 20.ms, fit: nil).data).to eq(y.data)
+      expect(x.stretch(2, cycle: 20.ms, fit: false).data).to eq(y.data)
+      expect(y.lineage[1..3]).to eq([:stretch, [2], { cycle: 20.ms, fit: :fixed }])
     end
 
-    it 'fits stretch cycles to the sound with fit: :auto' do
+    it 'keeps a bass at its pitch with fit: :auto, where :fixed retunes it' do
+      # A 55 Hz sine at 2x in 30 ms cycles: :fixed turns it into partials at
+      # 27.5 + 33.3 m Hz, the strongest at 60.8 Hz (Lofi::FITS)
+      sine = Numo::SFloat.cast(Numo::DFloat.new(48000).seq.map { |i| Math.sin(i * 2 * Math::PI * 55 / 48000) })
+      x = MB::Sound::Sample[sine]
+      peak = ->(s) {
+        d = Numo::DFloat.cast(s.data[12000...60000])
+        d *= 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(48000).seq * (2 * Math::PI / 48000))
+        Numo::Pocketfft.rfft(d).abs[0..200].max_index
+      }
+      expect(peak.(x.stretch(2, cycle: 30.ms, fit: :fixed))).to eq(61)
+      expect(peak.(x.stretch(2, cycle: 30.ms))).to eq(55)
+    end
+
+    it 'fits stretch cycles to the sound with fit: :auto (the default)' do
       sine = ->(n, f) { Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| Math.sin(i * 2 * Math::PI * f / 48000) }) }
       jump = ->(d) { (d[1..] - d[0...-1]).abs.max }
       x = MB::Sound::Sample[sine.(24000, 110)]
-      fixed = x.stretch(2, cycle: 30.ms)
-      auto = x.stretch(2, cycle: 30.ms, fit: :auto)
+      fixed = x.stretch(2, cycle: 30.ms, fit: :fixed)
+      auto = x.stretch(2, cycle: 30.ms)
+      expect(x.stretch(2, cycle: 30.ms, fit: :auto).data).to eq(auto.data)
       expect(auto.length).to eq(48000)
       # 30 ms isn't a whole number of 110 Hz periods: the plain stretch
       # cuts mid-cycle, the fitted one splices on matching phase
@@ -183,7 +207,7 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect(noise.stretch(3, fit: :auto, crossfade: 1.ms).length).to eq(28800)
       expect(MB::Sound::Sample[sine.(500, 440)].stretch(2, cycle: 30.ms, fit: :auto).length).to eq(1000) # shorter than a cycle
 
-      expect(auto.lineage[1..3]).to eq([:stretch, [2], { cycle: 30.ms, fit: :auto }])
+      expect(auto.lineage[1..3]).to eq([:stretch, [2], { cycle: 30.ms }])
       expect { x.stretch(2, fit: :wobble) }.to raise_error(ArgumentError, /Unknown stretch fit/)
     end
 

@@ -219,18 +219,34 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       buf = Numo::SFloat.zeros(500) + 0.25
       max_queued = 0
 
-      start = MB::U.clock_now
+      # Gaps longer than LATE between the writer's calls (a writer that
+      # load or another thread holding the GVL kept from running) may run
+      # the queue dry: real underruns, not pacing errors (fixes-9: 1 in 7
+      # under load; a busy Ruby thread makes every write wait ~110 ms).
+      # Paced writes return every 500 frames (10.4 ms).
+      late = 0
+      stats = nil
+      last = start = MB::U.clock_now
       40.times do
         pb.write([buf, buf])
-        max_queued = [max_queued, pb.stats[:queued]].max
+        stats = pb.stats
+        now = MB::U.clock_now
+        late += 1 if now - last > 0.03
+        last = now
+        max_queued = [max_queued, stats[:queued]].max
       end
-      elapsed = MB::U.clock_now - start
+      elapsed = last - start
 
       # 20000 frames, all but the last <= 2048 waiting for the device
       expect(max_queued).to be <= 2048
-      expect(elapsed).to be_within(0.06).of((20000 - 2048).to_f / rate)
-      expect(pb.stats[:underruns]).to eq(0)
-      expect(pb.stats[:max_callback]).to eq(pb.period)
+      expect(stats[:max_callback]).to eq(pb.period)
+      expect(elapsed).to be >= (20000 - 2048).to_f / rate - 0.06
+      if late == 0
+        expect(elapsed).to be_within(0.06).of((20000 - 2048).to_f / rate)
+        expect(stats[:underruns]).to eq(0)
+      else
+        expect(stats[:underruns]).to be <= late
+      end
     end
 
     it 'counts each time the audio runs out, not every silent callback' do

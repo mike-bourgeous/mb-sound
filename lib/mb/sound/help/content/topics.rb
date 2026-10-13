@@ -141,11 +141,30 @@ module MB
     end
 
     Help.topic :drums, 'Drums', group: :sound do
-      about 'A TR-808-flavored kit driven by a grid (Sequence::Kit) or MIDI.'
-      commands :tr808, :grid, :euclid
+      about <<~TEXT
+        Drum machines driven by a grid (Sequence::Kit) or MIDI (GM notes):
+        `tr808`, `tr909` (analog kick, snare, toms, clap; 6-bit sampled hats
+        and cymbals; `shuffle:` 0..6, flams as note marks: 'f' in a grid or
+        `D1.flam`), and kits of your own:
+        `kit { voice :kick, tune: 50 do |h| h.body(h.tune, sweep: 3) +
+        h.click end; choke :open_hat, by: :closed_hat }` with layers
+        (body, noise, click, metal, sample, fm, bursts, env, sweep) and
+        voices borrowed from the machines (`tr909 :clap`, `tr808 :cowbell`).
+      TEXT
+      commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
       example 'four on the floor' do
         bg :try, tr808(grid(16, kick: 'x...x...x...x...', hat: 'x.x.x.x.x.x.x.x.').loop).at(-14.db)
+      end
+      example 'a 909 with shuffle' do
+        bg :try, tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', hat: 'x.xxx.xxx.xxx.xx', oh: '..x...x...x...x.').loop, shuffle: 2).at(-16.db)
+      end
+      example 'a kit of your own' do
+        bg :try, kit(grid(16, kick: 'X..x..x...x..x..', snare: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.').loop) {
+          voice(:kick, tune: 45) { |h| h.body(h.tune, decay: 0.4, sweep: 4).softclip(0.6) + h.click(0.3) }
+          voice(:snare) { |h| h.fm(240, ratio: 2.3, index: 1, decay: 0.12, index_decay: 0.03) * 0.5 + h.noise(decay: 0.15, highpass: 2000) * 0.4 }
+          tr909 :closed_hat
+        }.at(-14.db)
       end
     end
 
@@ -168,12 +187,15 @@ module MB
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle
         classic), `:sp1200` the dirtiest (26 kHz, no filters: crunchy hats);
-        a whole song often wants none.  The presets read drop-sample with
-        no band-limited levels, aliasing as hits pitch up like the hardware
-        (`.lofi(:mpc60, read: :clean)` or `.read_as(:clean)` for the clean
-        read).  `.stretch(2, cycle: 30.ms)` is the S950's cyclic stretch
-        (a buzz at 1 / cycle); `fit: :auto` fits each cycle to the sound
-        (whole periods, matching splices) for smoother tones.
+        a whole song often wants none.  `:mpc60` reads clean
+        (band-limited, interpolated); `:s950` and `:sp1200` read
+        drop-sample with no band-limited levels, aliasing as hits pitch up
+        like the hardware (`read: :clean` / `read: :drop`, or
+        `.read_as(...)`, says otherwise).  `.stretch(2, cycle: 30.ms)` is
+        the S950's cyclic stretch with each cycle fitted to the sound
+        (whole periods, matching splices), so tones keep their pitch;
+        `fit: :fixed` is the plain version (a buzz at 1 / cycle, stutter
+        on breaks, and basses that sound lower).
       TEXT
       commands :bounce, :capture_audio, :chop, :sampler, :sfz
       dsl :bounce

@@ -20,7 +20,10 @@ module MB
       # Seq::Step#fill, Clip#fill, and FillMap).  +pitch+ is nil or a pitch
       # mark in semitones (Seq::Step#pitch; samplers play the note's slice
       # that much higher; Clip#transpose moves it instead of +value+).
-      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, :fill_mark, :pitch, keyword_init: true) do
+      # +flam+ is nil, true, or seconds: a flam mark (Seq::Step#flam; drum
+      # kits play a grace stroke, then the hit that long later, true for
+      # the kit's own spacing).
+      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, :fill_mark, :pitch, :flam, keyword_init: true) do
         # True if the event plays when the fills named +names+ (an Array,
         # empty outside fills) are playing (see +fill_mark+).
         def plays_in_fill?(names)
@@ -50,6 +53,7 @@ module MB
           s << ' !' if accented
           s << ' ~' if slid
           s << " pitch#{pitch >= 0 ? '+' : ''}#{MB::M.sigfigs(pitch, 4)}" if pitch
+          s << (flam == true ? ' flam' : " flam#{MB::M.sigfigs(flam * 1000, 3)}ms") if flam
           s
         end
       end

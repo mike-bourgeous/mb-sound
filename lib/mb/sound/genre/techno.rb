@@ -1,11 +1,11 @@
 module MB
   module Sound
     # Techno (a stub from general knowledge, not from the persona panel):
-    # four on the floor at 132, a rolling bass, a filtered stab.  The drums
-    # are tr808 until drums-2's tr909 lands (change the :drums role's patch).
+    # four on the floor at 132, a rolling bass, a filtered stab, on the
+    # tr909.
     Genre.define :techno, 'Techno (stub)' do
       about 'A stub from general knowledge (not researched by the panel): a driving four on the floor, ' \
-            '16th hats, a rolling offbeat bass, one stab opening up over long phrases.  The drums wait for a TR-909.'
+            '16th hats, a rolling offbeat bass, one stab opening up over long phrases, on a TR-909.'
       tempo 132, range: 125..140
       meter 4, 4
       phrases 16, 32
@@ -30,7 +30,7 @@ module MB
 
       knob :cut, 400, range: 150..6000, curve: :exp, unit: 'Hz'
 
-      role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the techno kit'
+      role :drums, :tr909, level: -4.db, about: 'the tr909, the techno kit'
       # (the roller: a short sub with a noise tick in a small room, ducked
       # under the kick, so it rolls between the kicks instead of booming
       # under them; patches-4, 2026-10-13: "clashes with 808 kick")
@@ -50,7 +50,10 @@ module MB
       true_peak(-1.db)
       mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      master :at, 11.db
+      # (for the 909's peaky kick: more drive into a softclip, then the
+      # limiter; drums-2 round 2, short form -8.7 LUFS)
+      master :at, 13.db
+      master :softclip, 0.35, 0.95
       master :limit, ceiling: -1.db
       master_gain 0.db
 

@@ -539,17 +539,21 @@ module MB
 
       # The sample through a classic sampler's converters (see Sample::Lofi):
       # a preset (:s950, :sp1200, :mpc60) or +rate+ (Hz), +bits+, and an
-      # output +filter+ (Hz, or nil).  The presets also read drop-sample
-      # with no band-limited levels, like the hardware (aliasing as notes
-      # pitch up; maintainer's pick for dirty lofi, 2026-10-13); +read+
-      # (:clean, :drop, or a Hash as for #read_as) says otherwise.
+      # output +filter+ (Hz, or nil).  Each preset also says how voices
+      # read it (Lofi::PRESET_READS): :mpc60, the cleanest, reads clean;
+      # :s950 and :sp1200 read drop-sample with no band-limited levels,
+      # like the hardware (aliasing as notes pitch up; maintainer's Bench
+      # verdicts, 2026-10-13).  +read+ (:clean, :drop, or a Hash as for
+      # #read_as) says otherwise.
       #
-      #     brk = rec.lofi(:mpc60).slices(16)              # dirty: drop-sample reads
+      #     brk = rec.lofi(:mpc60).slices(16)              # 12-bit grit, read clean
+      #     brk = rec.lofi(:sp1200).slices(16)             # dirty: drop-sample reads
       #     pad = rec.lofi(:s950, read: :clean)            # the converter, read clean
+      #     hat = rec.lofi(:mpc60, read: :drop)            # the MPC60 read like an S950
       def lofi(preset = nil, read: nil, **options)
         settings = Lofi.settings(preset, **options)
         args = preset ? [preset] : []
-        style = read.nil? && preset ? :drop : read
+        style = read.nil? && preset ? Lofi::PRESET_READS.fetch(preset.to_sym) : read
         kwargs = read.nil? ? options : options.merge(read: read)
         edit(:lofi, args, kwargs, read: read_settings(style)) { |d| Lofi.process(d, sample_rate: sample_rate, **settings) }
       end
@@ -571,27 +575,30 @@ module MB
       end
 
       # The sample stretched to +ratio+ times its length at the same pitch,
-      # S950-style cyclic timestretch: cycles of +cycle+ (25 ms) taken from
-      # the input in step and repeated or skipped, with +crossfade+ (0) of
-      # overlap; short cycles buzz at 1 / cycle (metallic), long ones
-      # stutter.  +fit+ :auto lets each cycle fit the sound (Lofi::FITS):
-      # its length snapped to the local period near +cycle+ (by
-      # autocorrelation), each splice where the sound matches what would
-      # have followed (the S950's "cycle fudging"), cut at rising zero
-      # crossings, so tones stretch without the buzz and breaks with
-      # smaller seams.  Every channel cuts in the same places.
+      # S950-style cyclic timestretch: cycles of about +cycle+ (25 ms)
+      # taken from the input in step and repeated or skipped, with
+      # +crossfade+ (0) of overlap.  +fit+ (Lofi::FITS) :auto, the default,
+      # fits each cycle to the sound: its length snapped to the local
+      # period near +cycle+ (by autocorrelation), each splice where the
+      # sound matches what would have followed (the S950's "cycle
+      # fudging"), cut at rising zero crossings, so tones keep their pitch
+      # and breaks get smaller seams.  :fixed is the plain cyclic stretch:
+      # cycles of exactly +cycle+, cut anywhere; short cycles buzz at 1 /
+      # cycle (metallic), long ones stutter, and tones whose period doesn't
+      # divide the cycle retune (a 55 Hz bass at 2x with 30 ms cycles
+      # sounds about an octave low; see Lofi::FITS).  Every channel cuts in
+      # the same places.
       #
-      #     pad.stretch(2, cycle: 30.ms)               # the plain cyclic stretch
-      #     pad.stretch(2, cycle: 30.ms, fit: :auto)   # cycles fitted to the sound
-      def stretch(ratio, cycle: 25.ms, crossfade: 0, fit: nil)
-        fit = fit&.to_sym
-        raise ArgumentError, "Unknown stretch fit #{fit.inspect} (#{Lofi::FITS.map(&:inspect).join(', ')})" unless Lofi::FITS.include?(fit)
+      #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
+      #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
+      def stretch(ratio, cycle: 25.ms, crossfade: 0, fit: :auto)
+        fit = Lofi.fit_name(fit)
         c = position(cycle).round
         x = position(crossfade).round
-        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v.nil? : v == 0) }
+        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == 0) }
         guide = nil
         edit(:stretch, [ratio], kw) { |d|
-          guide ||= fit && mono_mix
+          guide ||= fit == :auto ? mono_mix : nil
           Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end

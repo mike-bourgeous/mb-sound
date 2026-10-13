@@ -279,7 +279,8 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound::Plan.enabled = old
     end
 
-    # fixes-8: an unread `band * 0.5` makes each lane's band its own region.
+    # fixes-8: an unread `band * 0.5` makes each lane's band its own region
+    # (made outside the voice block since fixes-9).
     # When the stream ends, a lane's envelope leaves the plan in the middle
     # of a group run and its fallback reads its band region, which rebuilds
     # the lane's installation; the root's hook then pointed at a new region
@@ -293,11 +294,15 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
         notes = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*[[50, 0.05, 0.5], [55, 0.1, 0.4], [57, 0.6, 0.9]].flat_map { |n, on, off|
           [MB::Sound::MIDI::Event.note_on(n, 0.8, time: on.to_r), MB::Sound::MIDI::Event.note_off(n, time: off.to_r)]
         }))
+        bands = []
         s = MB::Sound.synth(notes, voices: 2, skip_idle: false) { |v|
           band = MB::Sound.noise.filter(:lowpass, cutoff: 3000, quality: 1.5)
-          _unread = band * 0.5 # never read
+          bands << band
           band * v.env(0.1, 0.2, 0.5, 0.1, gm: false)
         }
+        # Never read, but made outside the voice block, so they count as
+        # readers (fixes-9: unread branches made in the block don't)
+        _outside = bands.map { |b| b * 0.5 }
         [render(s, [800] * 80), s]
       }
       a, s = run.(true)
@@ -305,6 +310,54 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       expect(s.lane_groups.groups.sum(&:lane_runs)).to be > 0
       expect(a.length).to be > 48000
       expect(a).to eq(b)
+    end
+
+    # fixes-9: the plans counted unread branches made in the voice block
+    # as readers, so each lane's band became its own region.  With a spy on
+    # lane 0's band (a bus tap's `only:`), lane 0's region differed from
+    # lane 1's, so lane 0 stayed ungrouped and slept while idle (its noise
+    # paused); with the unread nodes every lane's band region grouped and
+    # ran every buffer (max difference 0.81 at a peak of 0.54), and the
+    # unread `mod * 2` stopped the controller's sharing.  Plans now treat
+    # those branches as absent (Installation#live_branches).
+    it 'fuses, groups, shares, and skips as if unread voice nodes were not there' do
+      ev = MB::Sound::MIDI::Event
+      run = ->(extra) {
+        MB::Sound::Plan.lanes = true
+        MB::Sound.seed(5)
+        src = MB::Sound::MIDI::Stream.new(MIDIListSource.new(
+          ev.note_on(50, 0.8, time: 0.05r), ev.note_off(50, time: 0.3r), ev.note_on(50, 0.8, time: 2.0r), ev.note_off(50, time: 2.2r)
+        ))
+        bands = []
+        s = MB::Sound.synth(src, voices: 2) { |v|
+          band = MB::Sound.noise.filter(:bandpass, cutoff: 3000, quality: 1.5)
+          bands << band
+          mod = v.mod
+          if extra
+            _unread = band * 0.5 # never read
+            _unread_mod = mod * 2
+          end
+          band * v.env(0.01, 0.1, 0.5, 0.1, gm: false) * (mod + 1)
+        }
+        taps = []
+        bands[0].spy { |d| taps << d.dup if d }
+        skipped = []
+        out = 150.times.map { b = s.sample(800).dup; skipped << s.skipped_lanes.dup; b }
+        [
+          out.reduce(:concatenate), taps.reduce(:concatenate), s.skippable_lanes, skipped,
+          s.lane_groups.groups.map { |g| g.members.length }, s.shared_inputs.sources.length,
+        ]
+      }
+
+      a = run.(false)
+      b = run.(true)
+      expect(a[0].abs.max).to be > 0.3
+      expect(a[2]).to eq([0])
+      expect(a[3].flatten.length).to be > 100
+      expect(a[5]).to eq(1)
+      expect(b[2..]).to eq(a[2..])
+      expect(b[0]).to eq(a[0])
+      expect(b[1]).to eq(a[1])
     end
 
     it 'regroups after a rebuild' do

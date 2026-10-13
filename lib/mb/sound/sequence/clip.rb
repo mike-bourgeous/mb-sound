@@ -588,6 +588,21 @@ module MB
           [mode, name].freeze
         end
 
+        # Validates a flam spacing for Seq::Step#flam: true (the kit's
+        # spacing) or a positive time (seconds or a Length), returned as
+        # true or Float seconds (up to MAX_FLAM).
+        def self.check_flam(spacing)
+          return true if spacing == true
+          s = MB::Sound::Length.seconds(spacing) rescue nil
+          unless s.is_a?(Numeric) && s > 0 && s <= MAX_FLAM
+            raise ArgumentError, "A flam's spacing is true or a time over 0 up to #{MAX_FLAM} s (got #{spacing.inspect})"
+          end
+          s.to_f
+        end
+
+        # The longest flam spacing (seconds).
+        MAX_FLAM = 0.25
+
         # Validates a probability (0..1) for #chance and Seq::Step#chance.
         def self.check_probability(p)
           raise ArgumentError, "A probability is a number from 0 to 1 (got #{p.inspect})" unless p.is_a?(Numeric) && p >= 0 && p <= 1

@@ -295,6 +295,20 @@ module GraphSweep
       ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
       ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.ramp * v.env).pan(0.3) } }],
       ['drums (Kit, Voice)', ->(c) { c.s.tr808(c.s.grid(16, bd: 'x.x.', snare: '.x..', hat: 'xxxx')) }],
+      # Kit builder (Drums::Machine, Hit layers, Repeats bursts, Flams,
+      # ChokeGate) and the TR-909 (sampled hats through SamplerVoice)
+      ['drums 909 (Repeats, ChokeGate)', ->(c) {
+        c.s.tr909(c.s.grid(32, bd: 'x.x.', clap: '.x..', hat: 'x.x.', oh: 'xx..', ride: '..x.', snare: '..f.'), flam: 0.001, shuffle: 2)
+      }],
+      ['drums kit builder', ->(c) {
+        c.s.kit(c.s.grid(32, kick: 'x.x.', snare: '.x.x', hat: 'xx..', oh: '..xx')) {
+          voice(:kick) { |h| h.body(50, sweep: 2, drop: 0.3).softclip(0.6) + h.click }
+          voice(:snare) { |h| h.fm(200, index_decay: 0.01) + h.noise(bandpass: 2000) + h.bursts(3, 0.0003) }
+          voice(:closed_hat) { metal * env(0.01) * velocity }
+          tr808 :open_hat
+          choke :open_hat, :closed_hat
+        }
+      }],
 
       # Plan lane groups (Plan::LaneGroup: FastPlan.run_lanes with the
       # lane-major SVF, four-pole, diode, and biquad kernels, wavetable
