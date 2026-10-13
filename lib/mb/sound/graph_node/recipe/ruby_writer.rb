@@ -52,7 +52,10 @@ module MB
           # +root+ is the graph (a node, bundle, Synth, ...); +inputs+ names
           # free inputs ({ midi: notes }); +seeds: true+ prints the random
           # seeds drawn (seed: N) so the code rebuilds the same noise in any
-          # order (off by default for reading; documents will include them).
+          # order (off by default for reading; documents will include them);
+          # +seeds: :marked+ (graph documents) prints them as
+          # `seed: drawn_seed(N)`, so a loader can tell them from seeds the
+          # code gave (GraphIO.load's seeds: :fresh redraws only those).
           # +knobs+ ({ 'drive' => 1.0 }) prints Constants named after a
           # knob with its value as the knob's bare name, as do the nodes of
           # +knob_nodes+ ({ node => 'drive' }; graph documents' params).
@@ -544,7 +547,17 @@ module MB
             kwargs = c.kwargs.dup
             seed = drawn_seed(c)
             kwargs[:seed] = seed if seed
-            args += kwargs.map { |k, v| k.is_a?(Symbol) ? "#{key_text(k)} #{value(v, indent)}" : "#{value(k, indent)} => #{value(v, indent)}" }
+            args += kwargs.map { |k, v|
+              if k == :seed && seed && @seeds == :marked
+                # Graph documents mark drawn seeds, so seeds: :fresh can
+                # redraw them and keep the ones the code gave
+                "seed: drawn_seed(#{seed})"
+              elsif k.is_a?(Symbol)
+                "#{key_text(k)} #{value(v, indent)}"
+              else
+                "#{value(k, indent)} => #{value(v, indent)}"
+              end
+            }
             named = c.block && c.block_kind == :runtime && proc_name(c.block)
             args << "&named_proc(#{named.inspect})" if named
 

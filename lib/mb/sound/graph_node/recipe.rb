@@ -76,8 +76,10 @@ module MB
           end
         end
 
-        # Thread-local recording state.
-        State = Struct.new(:depth, :current, :scopes, :seeded)
+        # Thread-local recording state.  +drawn+ is a seed the next
+        # outermost call is given that was drawn when its graph was saved
+        # (see #given_drawn_seed).
+        State = Struct.new(:depth, :current, :scopes, :seeded, :drawn)
 
         # Methods that take build blocks (run while the graph is built, their
         # nodes part of the recipe), by name.  Every other recorded method's
@@ -204,8 +206,19 @@ module MB
               end
             end
 
+            # A seed drawn when a document was saved, given back by its
+            # loader: recorded as drawn (not in kwargs), so the graph saves
+            # it as drawn again
+            drawn = st.drawn
+            st.drawn = nil
+            seeds = nil
+            if drawn && kwargs[:seed] == drawn
+              kwargs = kwargs.except(:seed)
+              seeds = [drawn]
+            end
+
             kind = block && (BUILD_BLOCKS.include?(name) ? :build : :runtime)
-            call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, nil, lane(st))
+            call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, seeds, lane(st))
             pass = kind == :build ? wrap_block(block, call) : block
 
             st.depth += 1
@@ -278,6 +291,19 @@ module MB
           # their seeds derive from the parent's), or nil.
           def lane(st = state)
             MB::Sound::Synth.current_lane || (st.seeded > 0 ? :seeded : nil)
+          end
+
+          # Runs the block (which makes one recorded call given +seed:
+          # seed+, e.g. a graph document's loader) so that call records
+          # +seed+ as a seed it drew rather than one it was given: the
+          # graph's recipe then prints it as drawn (drawn_seed(N) in graph
+          # documents), and GraphIO.load(seeds: :fresh) redraws it.
+          def given_drawn_seed(seed)
+            st = state
+            st.drawn = seed
+            yield
+          ensure
+            st.drawn = nil
           end
 
           # Called by MB::Sound.next_seed: remembers the seed on the call
