@@ -197,6 +197,12 @@ module MB
           }
         end
 
+        # This instrument with lineage +lineage+ (how it prints; see
+        # GraphNode::Recipe::RubyWriter).
+        def with_lineage(lineage)
+          Instrument.new(@regions, chops: @chops, envelope: @envelope, name: @name, lineage: lineage)
+        end
+
         def to_s
           "#{@name || 'Instrument'} (#{@regions.length} region#{'s' if @regions.length != 1}#{", #{@chops.length} chops" unless @chops.empty?})"
         end

@@ -49,7 +49,7 @@ module MB
           path = path.to_s
           real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading an SFZ file') : path
           text = File.read(real)
-          parse(text, base: path, name: name || File.basename(path, '.*'))
+          parse(text, base: path, name: name || File.basename(path, '.*')).with_lineage([:sfz, :sfz, [path], {}])
         end
 
         # Parses SFZ +text+; sample paths are relative to the directory of

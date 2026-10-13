@@ -1093,7 +1093,8 @@ module MB
         def check_file(node, name, args)
           file = args[0]
           return unless file.is_a?(String)
-          args[0] = FileGuard.check(file, file_context, name.to_s)
+          resolved = FileGuard.check(file, file_context, name.to_s)
+          args[0] = resolved unless Registry::KEEP_NAME.include?(name)
         rescue GraphIO::FileError => e
           raise error(node, e.message)
         end

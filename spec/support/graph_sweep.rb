@@ -207,6 +207,23 @@ module GraphSweep
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) }],
 
+      # Sampler (SamplerVoice: keys, velocity layers, loops, reverse, chops,
+      # stereo samples; CaptureTap)
+      ['sampler voices (SamplerVoice)', ->(c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-i / 2000.0) })
+        smp = MB::Sound::Sample[d]
+        inst = MB::Sound::Sampler::Instrument.new { |i|
+          i.region(smp.looped(500...1500, mode: :ping_pong), keys: 0..62, vel: 0..90)
+          i.region(smp.rev.fade(in: 10, out: 30), keys: 0..62, vel: 91..127, seq: [1, 1])
+          i.region(smp.looped(200...900, mode: :release), keys: 63..127, rand: 0.0...1.0, veltrack: 1)
+        }
+        st = MB::Sound::Sample[[d, d * -0.5]]
+        brk = smp.slices(4)
+        c.clip.synth(voices: 2) { |v, _i| inst.play(v) * 0.5 + st.play(v, transpose: 3)[0] * 0.25 } +
+          brk.chop(0, [1, 3], brk[2].rev, MB::Sound::Rest).loop.sampler(brk) * 0.5 + smp[0...400].node
+      }],
+      ['capture tap (CaptureTap)', ->(c) { MB::Sound::GraphNode::CaptureTap.new(c.sig, MB::Sound::Sampler::AudioCapture.new(100_000)) + c.sig }],
+
       # Delays and reverbs
       ['delay modulated', ->(c) { c.sig.delay(c.mod(0.001, 0.004, 3), feedback: c.mod(0, 0.6), wet: 0.5, dry: 0.5) }],
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],

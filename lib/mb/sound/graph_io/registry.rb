@@ -60,6 +60,9 @@ module MB
           # Note marks (`!A1`, `~C2`, `G2.chance(0.5)`), on Notes and steps
           'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill],
           'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct],
+          # Sample views and edits (how Samples print: Sample#lineage)
+          'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with],
+          'MB::Sound::Sample::Slices' => %i[[] name keymap],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -73,13 +76,19 @@ module MB
         # every class the recorder records .new for).
         CLASS_METHODS = {
           'MB::Sound::Wavetable' => %i[[]],
+          'MB::Sound::Sample' => %i[[]],
           'MB::Sound::Wavetable::KeyMap' => %i[zones new],
           'MB::Sound::Sequence::Duration' => %i[new],
         }.freeze
 
         # Methods that read files (allowed only with a path relative to the
         # document's directory; see Loader#check_file).
-        FILE_METHODS = Set[:file_input, :midi_file].freeze
+        FILE_METHODS = Set[:file_input, :midi_file, :sfz].freeze
+
+        # FILE_METHODS that get the document's file name rather than its
+        # resolved path, after the check, so the files they name in turn
+        # follow the same rules (an SFZ's samples).
+        KEEP_NAME = Set[:sfz].freeze
 
         # Top-level names besides the recorded MB::Sound methods (scale:
         # Scale values for transforms such as Clip#ghost_chords).

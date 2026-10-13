@@ -241,7 +241,7 @@ module MB
           idx ||= Integer(slice) % length if slice.is_a?(Integer)
           raise ArgumentError, "Unknown chop step #{slice.inspect}" unless idx
           v = Sampler.chop_note(idx, Interval.semitones(semitones).to_f)
-          vel ? Sequence::Seq.step(v).marked(velocity: vel.to_f) : v
+          vel ? Sequence::Seq::Step.new(**Sequence::Seq.step(v).to_h.merge(velocity: vel.to_f)) : v
         end
       end
     end

@@ -849,6 +849,9 @@ module MB
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
+            when MB::Sound::Sample then sample_text(v, indent)
+            when MB::Sound::Sample::Slices then slices_text(v, indent)
+            when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
@@ -1130,6 +1133,50 @@ module MB
               return "Wavetable[#{asset.inspect}]"
             end
             fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          # A Sample: the calls that cut or edited it (Sample#lineage) on its
+          # origin, which prints as an asset in bundles (or its file).
+          def sample_text(s, indent)
+            if s.lineage
+              parent, name, args, kwargs = s.lineage
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            if @assets && (asset = @assets.sample(s))
+              return "Sample[#{asset.inspect}]"
+            end
+            return "Sample[#{s.file.inspect}]" if s.file
+
+            fixme("a Sample made from audio in memory (bundles save it as a file: GraphIO.save(..., bundle: true))")
+          end
+
+          def slices_text(s, indent)
+            return fixme('Slices without a recipe') unless s.lineage
+            parent, name, args, kwargs = s.lineage
+            "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+          end
+
+          # An Instrument: from slices (keymap) or an SFZ file; others print
+          # as a FIXME for now.
+          def instrument_text(i, indent)
+            if i.lineage
+              parent, name, args, kwargs = i.lineage
+              return "sfz(#{leaf(args[0], indent)})" if parent == :sfz
+              return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            fixme('a Sampler::Instrument built region by region')
+          end
+
+          # (Samples, Slices, and Instruments print as postfix chains, so
+          # they need no parentheses as receivers)
+          def lineage_receiver(parent, indent)
+            leaf(parent, indent)
+          end
+
+          def lineage_call(name, args, kwargs, indent)
+            list = args.map { |a| value(a, indent) } + kwargs.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
+            return "[#{list.join(', ')}]" if name == :[]
+            list.empty? ? ".#{name}" : ".#{name}(#{list.join(', ')})"
           end
 
           # A number: Decibels as k.db, and Float gains that are exactly k/10

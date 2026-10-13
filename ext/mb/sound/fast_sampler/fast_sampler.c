@@ -4,7 +4,8 @@
  *
  * play(out, specs, regions, state, counters, rng, inputs, config)
  *
- * Plays one channel of one voice into +out+ (a 1D SFloat).  +specs+ is an
+ * Plays one channel of one voice into +out+ (a contiguous 1D SFloat,
+ * written in place and returned).  +specs+ is an
  * Array of sample-mode Wavetable#kernel_spec Arrays (without loops: the
  * sampler loops by itself), read through mb_wavetable.h, so playback uses
  * the band-limited levels (mipmaps) and interpolators of sample-mode
@@ -405,8 +406,9 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	double *cnt = smp_dfloat(counters, 128, "Sampler counters");
 	uint64_t *rs = (uint64_t *)(nary_get_pointer_for_write(rng) + nary_get_offset(rng));
 
-	_Bool was_inplace;
-	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
+	if (CLASS_OF(buffer) != numo_cSFloat || RNARRAY_NDIM(buffer) != 1 || !RTEST(nary_check_contiguous(buffer))) {
+		rb_raise(rb_eArgError, "The sampler's output must be a contiguous 1D SFloat (written in place)");
+	}
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *out = mb_sfloat_ptr(buffer);
 

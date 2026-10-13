@@ -71,6 +71,60 @@ module MB
       end
     end
 
+    Help.lesson :chop, 'Chopping a break', minutes: 4 do
+      about 'Press a record, cut it into slices, and play a chop pattern from it.'
+
+      step 'Press a record' do
+        say <<~TEXT
+          `bounce` renders any graph into a Sample offline, at its own tempo
+          (the session's stays put).  This is a two-bar funk break played a
+          little slow, the way records were sampled at 33 and pitched up.
+        TEXT
+        type {
+          @l_rec = bounce(2.bars, bpm: 138.75) {
+            tr808(grid(16, kick: 'X.....x...X.....|X.x.......X..x..', snare: '....X..3.3..X..3|.3..X..3....X.3.', hat: 'x.x.x.x.x.xxx.x.|x.x.x.x.x.x.x.xx'))
+          }
+        }
+        check('a two-bar Sample in @l_rec') { @l_rec.is_a?(Sample) && @l_rec.bpm == 138.75 }
+      end
+
+      step 'Cut it into slices' do
+        say <<~TEXT
+          `slices(32)` cuts it into 32nd notes; `name` names runs of them (a
+          kick is two slices long here).  `slices(:onsets)` would cut at the
+          hits instead.
+        TEXT
+        type { @l_brk = @l_rec.slices(32).name(k: 0..1, h: 2..3, s: 4..5, g: 7) }
+        check('32 slices with names in @l_brk') { @l_brk.is_a?(Sample::Slices) && @l_brk.names.key?(:s) }
+      end
+
+      step 'Write a chop' do
+        say <<~TEXT
+          A chop is a clip of slices, a sixteenth each: names or numbers,
+          T (tie) to hold, R (rest), [:s, 2] for a slice two semitones up,
+          and slices themselves (`@l_brk[:s].rev` plays backwards).
+        TEXT
+        type { @l_amen = @l_brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k, T, :k, :h, T, :s, T, [:s, 3], @l_brk[:s].rev).loop }
+        check('a chop clip in @l_amen') { @l_amen.is_a?(Sequence::Clip) && @l_amen.events.length == 11 }
+      end
+
+      step 'Play it' do
+        say <<~TEXT
+          `clip.sampler(slices)` plays it on one voice, each hit cutting the
+          last (with a 1 ms declick).  Three semitones up puts the 138.75 BPM
+          record on a 165 BPM grid.
+        TEXT
+        type { bg :l_breaks, @l_amen.transpose(3).sampler(@l_brk).at(-14.db) }
+        check('a player :l_breaks') { players.key?(:l_breaks) }
+      end
+
+      step 'Out' do
+        say 'Fade it out.  `help :sampler` has more: lofi, loops, SFZ, capture.'
+        type { stop :l_breaks, fade: 1 }
+        check(':l_breaks fading out') { !players.key?(:l_breaks) || players[:l_breaks].to_s.match?(/fad|stop/) }
+      end
+    end
+
     Help.lesson :knobs, 'Knobs you can turn', minutes: 4 do
       about 'Knobs in graphs, turns with ramps and launch points, snapshots.'
 

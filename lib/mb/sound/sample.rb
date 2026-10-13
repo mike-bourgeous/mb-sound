@@ -1,3 +1,5 @@
+require 'weakref'
+
 module MB
   module Sound
     # A sound to play in a sampler (see design/notes/sampler.md): audio in
@@ -83,12 +85,38 @@ module MB
         # document (GraphIO::FileGuard).
         def from_file(path, **options)
           path = path.to_s
+          key = cache_key(path, options)
+          cached = key && @cache&.[](key)
+          if cached
+            begin
+              return cached.__getobj__ if cached.weakref_alive?
+            rescue WeakRef::RefError
+              nil
+            end
+          end
+          from_file_uncached(path, **options).tap { |s| (@cache ||= {})[key] = WeakRef.new(s) if key }
+        end
+
+        # A key for the file cache (the same file read again with the same
+        # options is the same Sample, sharing its playback tables), or nil
+        # for a file that can't be checked.
+        def cache_key(path, options)
+          real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading a sample') : path
+          st = File.stat(real.to_s)
+          [File.expand_path(real.to_s), st.mtime.to_r, st.size, options.to_a]
+        rescue SystemCallError
+          nil
+        end
+
+        def from_file_uncached(path, **options)
+          # (graph documents: the file inside the document's directory)
+          real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading a sample') : path
           tags = {}
           channels = MB::Sound.read(path, metadata_out: tags)
           info = saved_tags(tags)
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
-          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(path) : nil, **info.merge(options))
+          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **info.merge(options))
         end
 
         # A Sample of a sample-mode Wavetable's sound, root, and loop.
@@ -108,7 +136,7 @@ module MB
 
           out = {}
           out[:root] = Float(t[:root]) if t[:root]
-          out[:loop] = Range.new(Float(t[:loop_start]), Float(t[:loop_end]), true) if t[:loop_start] && t[:loop_end]
+          out[:loop] = [Float(t[:loop_start]), Float(t[:loop_end])] if t[:loop_start] && t[:loop_end] # absolute
           out[:loop_mode] = t[:loop_mode].to_sym if t[:loop_mode]
           out[:start] = Integer(t[:start]) if t[:start]
           out[:stop] = Integer(t[:stop]) if t[:stop]
@@ -296,9 +324,11 @@ module MB
         @loop_mode == :one_shot
       end
 
-      # A copy with +changes+ (any of #initialize's keywords) sharing the
-      # audio.
+      # A copy with +changes+ (any of #initialize's keywords: root, loop,
+      # loop_mode, start, stop, reverse, fade_in, fade_out, tune, level,
+      # bpm, name) sharing the audio.
       def with(**changes)
+        changes = { lineage: [self, :with, [], changes.dup].freeze, **changes } unless changes.key?(:lineage)
         mode = @loop_mode
         if changes.key?(:loop) && !changes.key?(:loop_mode)
           looping = %i[forward ping_pong release]

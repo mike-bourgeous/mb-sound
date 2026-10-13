@@ -87,6 +87,7 @@ module MB
         BUILD_BLOCKS = Set[
           :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
           :fill, # Kit#fill { grid(...) }
+          :sampler, # clip.sampler(brk) { |v, s| ... }, Instrument#sampler, MB::Sound.sampler
         ].freeze
 
         # Recorded names that only raise the depth (the call itself isn't
