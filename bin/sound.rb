@@ -38,44 +38,10 @@ end
 puts
 clear if ARGV.include?('--clear')
 
-def show_intro
-  puts <<-EOF
-\e[33;1mWelcome to the interactive sound environment!\e[0m
-
-If you're new to \e[1;31mRuby\e[0m, see \e[1;34mhttps://www.ruby-lang.org/en/documentation/quickstart/\e[0m.
-If you're new to \e[1;31mPry\e[0m, check out \e[1;34mhttps://pry.github.io/\e[0m.
-
-EOF
-
-  examples = {
-    "\e[1mls\e[0m" => "(for \"list\") to get a list of the easiest to use sound functions.",
-    "\e[1;32m#{MB::U.syntax("list")}\e[0m" => "to get a list of included sounds.",
-    "\e[1;33m#{MB::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m" => "to play a sound file.",
-    "\e[1;33m#{MB::U.syntax("play 123.hz")}\e[0m" => "to play a 123Hz sine tone (press Ctrl-C to stop).",
-    "\e[1;33m#{MB::U.syntax("play 123.hz.triangle.at(-20.db)")}\e[0m" => "to play a quieter 123Hz triangle wave.",
-    "\e[1;33m#{MB::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m" => "to play a sawtooth wave through a low-pass filter.",
-    "\e[1;33m#{MB::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10), spectrum: true")}\e[0m" => "to play a sawtooth wave through a low-pass filter and view its frequency spectrum.",
-    "\e[1;35m#{MB::U.syntax("plot 123.hz")}\e[0m" => "to graph part of a 123Hz tone.",
-    "\e[1;35m#{MB::U.syntax("plot 123.hz, all: true")}\e[0m" => "to graph one second of a 123Hz tone, a slice at a time.",
-    "\e[1;35m#{MB::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m" => "to graph a sound file at the same speed it would be played.",
-    "\e[1;35m#{MB::U.syntax("plot 'sounds/sine/log_sweep_20_20k.flac', all: true, spectrum: true")}\e[0m" => "to graph the frequency spectrum of a sound file at the same speed it would be played.",
-    "\e[1;33m#{MB::U.syntax("123.hz.wavelength")}\e[0m" => "to show the wavelength of a 123Hz tone (at room temperature at sea level).",
-    "\e[1m#{MB::U.syntax('cd ::')}\e[0m" => "for experienced Ruby/Pry users to leave the sound context.",
-  }
-
-  width = [MB::U.width - 3, 90].min
-  examples.each do |code, description|
-    colorless_line = MB::U.remove_ansi(code.lines.last)
-    line_length = colorless_line.length
-    ref_string = '.' * (line_length) + ' ' + description
-    wrapped = MB::U.wrap(ref_string, width: width)[line_length..-1].gsub(/\n/m, "\n   ").strip
-    puts " * #{code} #{wrapped}"
-  end
-
-  puts
-end
-
-show_intro
+# Console help (lib/mb/sound/help.rb): help, now, lesson; Pry's own help
+# moves to pry-help.  The welcome screen is a few lines and one random tip.
+require 'mb/sound/help'
+puts MB::Sound::Help.welcome, ''
 
 # The take: an always-on log of every line typed and exactly where each change
 # it made landed (see MB::Sound::Take); `take.save` writes a script that
@@ -88,6 +54,7 @@ Pry.config.hooks.add_hook(:after_eval, :mb_sound_take) { |_result, _pry| MB::Sou
 Pry.config.commands.rename_command('pry-play', 'play')
 Pry.config.commands.rename_command('pry-reset', 'reset')
 Pry.config.commands.rename_command('pry-hist', 'hist')
+MB::Sound::Help.install_pry!
 
 # Work around issue introduced in pry-byebug 3.10.x that breaks Pry when
 # launched from a console script like this one.
