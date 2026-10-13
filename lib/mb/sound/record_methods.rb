@@ -70,7 +70,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("rec takes a length in bars (rec 4, rec 4.bars, rec :lead, 4) or an audio path (got #{args.inspect})"))
         end
 
-        attach_session_midi(session, input)
+        attach_recording_midi(session, input, names)
         session.arrangement.record(length, *names, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
       end
       alias record rec
@@ -116,7 +116,7 @@ module MB
         end
 
         session = Session.current
-        attach_session_midi(session, input)
+        attach_recording_midi(session, input, names)
         session.arrangement.capture(*names, length: length, at: point, input: input, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
       end
       alias capture_midi capture
@@ -142,6 +142,19 @@ module MB
         attach_live_midi(session, input)
       rescue => e
         warn "No live MIDI input (#{e.class}: #{e.message})"
+      end
+
+      # Attaches the MIDI inputs #rec and #capture read: +input+ if given,
+      # else each track's armed input (the tracks +names+, or the armed
+      # ones), so recording a track armed on a named input doesn't also
+      # open the default input.
+      def attach_recording_midi(session, input, names)
+        return attach_session_midi(session, input) if input
+
+        armed = session.arrangement.armed
+        names = armed.keys if names.empty?
+        inputs = names.map { |n| armed[n] }.uniq
+        (inputs.empty? ? [nil] : inputs).each { |i| attach_session_midi(session, i) }
       end
 
       # The scheduled block's time inside one (see Session::Changes#now).

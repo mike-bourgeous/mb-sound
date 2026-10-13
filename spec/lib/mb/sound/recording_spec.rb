@@ -236,6 +236,23 @@ RSpec.describe(MB::Sound::RecordMethods) do
     end
   end
 
+  describe 'MIDI inputs' do
+    it "rec and capture open the armed tracks' inputs, not the default one" do
+      s = new_session
+      s.midi_in(:pads).input = keyboard(*RECORDING_PLAYED)
+      setup_lead(s)
+      opened = []
+      allow(MB::Sound).to receive(:attach_live_midi) { |_session, connect = nil, **| opened << connect }
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.arm(:lead, input: :pads, monitor: false)
+        MB::Sound.rec(1)
+        MB::Sound.rec(1, :lead)
+        MB::Sound.rec(1, input: :keys)
+      end
+      expect(opened).to eq([:pads, :pads, :pads, :keys])
+    end
+  end
+
   describe 'arm and disarm in scheduled blocks' do
     it "land at the block's time, not when the scheduler runs it (half a bar early)" do
       s = new_session
