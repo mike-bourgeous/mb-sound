@@ -19,14 +19,17 @@ module MB
     module Genre
       # A track role: the +patch+ that plays it (a preset name, else an
       # MB::Sound method taking a MIDI source, like :tr808), its +level+ (a
-      # gain, written in dB; nil for none), preset +params+ (numbers), a knob
+      # gain, written in dB; nil for none), preset +params+ (numbers, or
+      # Symbols naming template knobs: the preset's param reads the knob), a knob
       # name whose value drives a lowpass on the output (+filter+), a ducking
       # +amount+ keyed by the template's pulse kick (+duck+), the track's
       # launch quantization +q+ and launch +fade+, and a few words +about+ it.
       Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about) do
         def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil)
           raise ArgumentError, "A role's patch is a preset or method name (got #{patch.inspect})" unless patch.is_a?(Symbol)
-          raise ArgumentError, "params: must be a Hash of numbers (got #{params.inspect})" unless params.is_a?(Hash) && params.values.all?(Numeric)
+          unless params.is_a?(Hash) && params.values.all? { |v| v.is_a?(Numeric) || v.is_a?(Symbol) }
+            raise ArgumentError, "params: must be a Hash of numbers or knob names (got #{params.inspect})"
+          end
           raise ArgumentError, "filter: names a knob (got #{filter.inspect})" unless filter.nil? || filter.is_a?(Symbol)
           super(patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade, about: about&.dup&.freeze)
         end
@@ -61,8 +64,10 @@ module MB
         end
 
         # Compares a Loudness::Result (or anything with #integrated and
-        # #true_peak in dB) with the targets.  Returns lines of text.
-        def report(result)
+        # #true_peak in dB) with the targets, and with +data+ (the audio, an
+        # Array of channels) the side below 120 Hz (or #mono_below) against
+        # the mid.  Returns lines of text.
+        def report(result, data = nil)
           lines = []
           lufs = result.integrated
           if loudness
@@ -78,6 +83,12 @@ module MB
             lines << format('true peak %.2f dBTP (ceiling %.1f: %s)', tp, ceiling, tp > ceiling + 0.1 ? 'over' : 'ok')
           else
             lines << format('true peak %.2f dBTP', tp)
+          end
+          if data && (side = Genre.low_side_db(data, frequency: mono_below || 120))
+            hz = mono_below || 120
+            text = side.finite? ? format('%.1f dB', side) : '-inf dB'
+            verdict = mono_below ? (side < -30 ? ': mono' : ': not mono') : ''
+            lines << "side below #{hz} Hz #{text} re mid (#{mono_below ? "mono_below #{hz}" : 'no mono_below'}#{verdict})"
           end
           lines
         end
@@ -168,15 +179,36 @@ module MB
         # source.
         def build_patch(patch, source, params = {})
           if GraphIO.find_preset(patch)
-            MB::Sound.preset(patch, midi: source, **params)
+            MB::Sound.preset(patch, midi: source, **params) # (knob names bind there; see GraphIO's Loader)
           elsif Patches.respond_to?(patch)
-            Patches.public_send(patch, source, **params)
+            Patches.public_send(patch, source, **knob_params(params))
           elsif MB::Sound.respond_to?(patch)
-            MB::Sound.public_send(patch, source, **params)
+            MB::Sound.public_send(patch, source, **knob_params(params))
           else
             names = GraphIO.presets.values.flatten
             raise ArgumentError, "No preset or method #{patch.inspect} for a genre role#{Form.suggest(patch, names)}"
           end
+        end
+
+        # +params+ with Symbol values replaced by those knobs' nodes (for
+        # methods; presets take knob names themselves).
+        def knob_params(params)
+          params.transform_values { |v| v.is_a?(Symbol) ? MB::Sound.knob(v) : v }
+        end
+
+        # Side (L - R) power below +frequency+ Hz relative to mid (L + R)
+        # power there, in dB, for a stereo pair of Numo arrays (-Float::INFINITY
+        # for identical channels; nil for one channel or a silent low end).
+        def low_side_db(data, frequency: 120, sample_rate: 48000)
+          return nil if data.length < 2
+          l, r = Numo::DFloat.cast(data[0]), Numo::DFloat.cast(data[1])
+          bins = (frequency.to_f * l.length / sample_rate).floor
+          return nil if bins < 1
+          power = ->(x) { (Numo::Pocketfft.rfft(x.dup)[1..bins].abs**2).sum }
+          mid = power.((l + r) * 0.5)
+          side = power.((l - r) * 0.5)
+          return nil if mid <= 0
+          side <= 0 ? -Float::INFINITY : 10 * Math.log10(side / mid)
         end
 
         # The master chain for +mix+ (a node or bundle) from Mix#master steps
@@ -187,7 +219,7 @@ module MB
             if GraphIO.find_preset(name)
               MB::Sound.preset(name, input: m, **params)
             else
-              m.public_send(name, *args, **params)
+              m.public_send(name, *args, **knob_params(params))
             end
           }
         end
@@ -299,9 +331,10 @@ module MB
           MB::Sound.quant(1)
           knobs.each { |n, (default, options)| MB::Sound.knob(n, default, **options) }
           MB::Sound.master_gain(mix.gain) if mix.gain
-          unless mix.master.empty?
+          unless mix.master.empty? && !mix.mono_below
             chain = mix.master
-            MB::Sound.master { |m| Genre.master_chain(m, chain) }
+            mono = mix.mono_below
+            MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
           end
           template = self
           roles.each { |n, r| MB::Sound.track(n, q: r.q, fade: r.fade) { |c| template.patch(n, c) } }
@@ -525,7 +558,9 @@ module MB
           @mix[:true_peak] = db
         end
 
-        # Keep the low end mono below +hz+.
+        # Makes the low end mono below +hz+ (GraphNode#mono_below, the first
+        # stage of the master chain): an option for club systems and vinyl,
+        # not for headphone or ambient mixes.  `mono_below nil` removes it.
         def mono_below(hz)
           @mix[:mono_below] = hz
         end
@@ -625,6 +660,10 @@ module MB
             raise ArgumentError, "#{where}: roles duck under the pulse kick, but there is no pulse"
           end
           t.roles.each do |n, r|
+            r.params.each do |k, v|
+              next unless v.is_a?(Symbol) && !t.knobs.key?(v)
+              raise ArgumentError, "#{where}: role #{n.inspect} param #{k}: names #{v.inspect}, which is no knob#{Form.suggest(v, t.knobs.keys)}"
+            end
             next unless r.filter
             raise ArgumentError, "#{where}: role #{n.inspect} filters with #{r.filter.inspect}, which is no knob#{Form.suggest(r.filter, t.knobs.keys)}" unless t.knobs.key?(r.filter)
           end

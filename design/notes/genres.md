@@ -20,10 +20,10 @@ Branch `genre-1` (2026-10-13).  Maintainer, after the persona panel: "The person
 | `scenes` | `{name => {track => kit/clip name, knob => value}}` | `drop: { drums: :drop, bass: :riff, sub: :riff, cut: 2400 }` |
 | `knobs` | `{name => [default, options]}` | `cut: [2400, { range: 150..8000, curve: :exp }]` |
 | `pulse` | kit name whose kick row keys ducks | `:drop` |
-| `mix` | `Genre::Mix` | `loudness: -8..-6, true_peak: -0.5.db, mono_below: 120, master: [[:dnb_master, [], {}]], gain: 0.db` (master: steps run in order, each a preset with an `:input` or a GraphNode method with arguments: jungle's `master :compress, ...; master :at, 5.db; master :limit, ceiling: -1.db`) |
+| `mix` | `Genre::Mix` | `loudness: -8..-6, true_peak: -0.5.db, mono_below: 120, master: [[:dnb_master, [], { air: :air }]], gain: 0.db` (master: steps run in order, each a preset with an `:input` or a GraphNode method with arguments: jungle's `master :compress, ...; master :at, 5.db; master :limit, ceiling: -1.db`) |
 | `tips` | Array of Strings | "Drop on a 32-bar boundary for DJs ...", "Keep the sub mono ..." |
 
-Roles name a **patch**: a preset (`presets/*.mbg.rb`, shipped with mb-sound: the genre patch scripts saved by `bin/save_presets.rb`), else a `Genre::Patches` method (a noise `riser`, from Tunnel Vision), else an `MB::Sound` method taking a MIDI source (`:tr808`, or a voice method such as `:dnb_reese_voice` once its script is loaded).  So a template plays without requiring any bin/ script, and stays data: no Procs, nothing that can't print.  Role options: `level:` (a gain, written in dB), `params:` (preset params, numbers only: graph documents' params take numbers, not nodes), `filter:` (a knob name: a lowpass on the role's output that the knob drives, so filter builds and rides work on any patch), `duck:` (an amount: sidechain ducking keyed by a ghost kick of `pulse`'s kick row, Kez's workaround until buses-1's bus sidechain; the ghost is a short 808 kick, `Genre::PULSE_KICK`, since the default 2.4 s decay held the bass down 6-9 dB), `q:`, `fade:`, `about:`.
+Roles name a **patch**: a preset (`presets/*.mbg.rb`, shipped with mb-sound: the genre patch scripts saved by `bin/save_presets.rb`), else a `Genre::Patches` method (a noise `riser`, from Tunnel Vision), else an `MB::Sound` method taking a MIDI source (`:tr808`, or a voice method such as `:dnb_reese_voice` once its script is loaded).  So a template plays without requiring any bin/ script, and stays data: no Procs, nothing that can't print.  Role options: `level:` (a gain, written in dB), `params:` (preset params: numbers, or Symbols naming template knobs, which the preset's param then reads: `params: { cutoff: :cut }`; round 2, after graph documents' params learned to take nodes and knob names), `filter:` (a knob name: a lowpass on the role's output that the knob drives, for patches without a fitting param, like the house stub's tine piano), `duck:` (an amount: sidechain ducking keyed by a ghost kick of `pulse`'s kick row, Kez's workaround until buses-1's bus sidechain; the ghost is a short 808 kick, `Genre::PULSE_KICK`, since the default 2.4 s decay held the bass down 6-9 dB), `q:`, `fade:`, `about:`.
 
 ## Building, composing, printing
 
@@ -46,6 +46,10 @@ Genre.define(:my_dnb, 'Mine') { like :dnb; tempo 168 }   # register a new one (l
 - Registered templates are built lazily (the first `genre(:x)`): building clips and forms needs `MB::Sound` loaded and a Session for form knob options, which templates don't use (section knob values live in scenes, which a template's knobs exist for).
 - Scenes name kits and clips by Symbol; `Template#scene(name)` resolves them (a role-named key whose value isn't a kit or clip name is passed on: `:on`, `:off`, `nil`, `:keep`), and knob keys pass through (`cut: [2500, { from: 250, over: 8 }]`).  `Template#check` validates: every scene track is a role, every kit/clip name exists, every form section has a scene, knob keys are knobs, the tempo is in its range.
 
+## Mono low end (round 2)
+
+Maintainer, 2026-10-13: "Mono bass should be an option; headphones and ambient would not want it unless pressing to vinyl."  `mono_below 120` in a template makes `GraphNode#mono_below(120)` (`DynamicsMethods`: an LR4 crossover per channel, the lows averaged into one channel, the highs untouched; the sum is an allpass) the first stage of its master chain; without it the low end stays as mixed.  Decisions per genre: `:dnb` 120 Hz (club systems; the sub is mono anyway), `:jungle` 150 Hz (cut for vinyl and dubplates, from Nev's research), `:house`/`:techno` 120 Hz (club stubs); `:ambient` and `:funk` never (headphone listening, wide rooms and pads).  `Mix#report(result, data)` adds `side below 120 Hz -38.3 dB re mid (mono_below 120: mono)` (side vs mid power in the FFT bins below the template's frequency, or 120 Hz; "mono" under -30 dB; the crossover's slope leaves side content just above the frequency leaking into the bins below it, so a mono_below master measures about -35 to -40 dB, not -inf).
+
 ## The templates
 
 Each cites the persona research it came from (the persona branches' `research.md`; tips are the panel's practical lessons).
@@ -62,9 +66,11 @@ Each cites the persona research it came from (the persona branches' `research.md
 
 Measured (2026-10-13, short forms, `Mix#report` on the render; LUFS integrated, target in parentheses): dnb -7.5 (-8..-6), its drop -6.6 and drop2 -6.3 (Tunnel Vision's drop -6.8); jungle -11.5 (-12..-9; Memory Card -11.5); ambient -16.6 (-19..-16; no rain or river, so the chain drives 4 dB into its safety limiter); funk -13.8 (-14..-10); house -9.5 (-10..-8), techno about -9 (-9..-7) after 11 dB of drive (stubs).  Stem levels were set against the songs' stems (the dnb bass and sub within 1 dB of Tunnel Vision's).  A render takes 6-12 s of CPU for a minute.
 
+Round 2 measured (renders in /app/tmp/listening/genre-1/r2/, side below the frequency re mid, round 1 without the stage -> round 2 with it): dnb -35.0 -> -38.3 dB (the sub is mono already and the Reese highpassed), jungle -33.6 -> -42.2 (150 Hz), house -49.3 -> -61.9, techno -70.0 -> -71.1; ambient -3.1 dB and funk -58.1 dB without a stage (funk renders sample-identical to round 1). Loudness moved at most 0.1 LU.
+
 ## Later
 
-- Buses (buses-1): `duck:` and `mono_below` become bus routing; mix roles (`:drums` bus, a room send for ambient) can be template data.
+- Buses (buses-1): `duck:` becomes bus routing; mix roles (`:drums` bus, a room send for ambient) can be template data.
 - `drums-2`: `tr909` for `:house`/`:techno`.
 - A sampler (the panel's A): jungle's break role becomes a slice player; tempo-per-clip (D) for the record.
 - Template-driven generation (picks between variations per section, `ghost_chords` over the key's progression), and section-level knob values once forms take them without a Session.

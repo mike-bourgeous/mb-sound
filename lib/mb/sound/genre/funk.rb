@@ -74,7 +74,6 @@ module MB
 
       loudness(-14..-10)
       true_peak(-1.db)
-      mono_below 120
       master :at, 3.5.db
       master :compress, threshold: -16.db, ratio: 2.5, attack: 0.01, release: 0.12, makeup: 2
       master :limit, ceiling: -1.db

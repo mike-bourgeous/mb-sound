@@ -63,15 +63,16 @@ module MB
       ).loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
-      knob :brk, 16000, range: 200..16000, curve: :exp, unit: 'Hz'
+      knob :brk, 16000, range: 200..16000, curve: :exp, unit: 'Hz'   # the break's lowpass
+      knob :space, 0.3, range: 0..1                                  # the lead's echo send
 
-      role :breaks, :jungle_breaks, filter: :brk, about: 'the sliced break: one voice, each slice cuts the last, 12-bit'
+      role :breaks, :jungle_breaks, params: { cutoff: :brk }, about: 'the sliced break: one voice, each slice cuts the last, 12-bit'
       role :perc, :jungle_perc, about: 'ride and shaker over the break'
       role :sub, :jungle_sub, about: 'sine sub, long notes under busy breaks'
       role :reese, :jungle_reese, level: -3.db, about: 'a warm Reese for the second drop, used sparingly'
       role :keys, :jungle_keys, about: 'Rhodes-ish stabs in jazz chords'
       role :pad, :jungle_pad, about: 'slow string pad, Juno chorus, hall'
-      role :lead, :jungle_flute, about: 'flute with a dotted-eighth echo'
+      role :lead, :jungle_flute, params: { echo: :space }, about: 'flute with a dotted-eighth echo'
       role :riser, :riser, params: { bars: 4, from: 400, to: 8000, level: 0.12 }, fade: 1/8r, about: 'noise riser (in the build fill)'
 
       scene :intro, pad: :pad, perc: :ride, breaks: :no_break, brk: 16000
@@ -85,7 +86,7 @@ module MB
 
       loudness(-12..-9)
       true_peak(-1.db)
-      mono_below 150
+      mono_below 150 # cut for vinyl: mono below 150 Hz
       master :compress, threshold: -14.db, ratio: 2, knee: 8, attack: 0.02, release: 0.15
       master :at, 5.db
       master :limit, ceiling: -1.db, release: 0.1

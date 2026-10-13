@@ -124,6 +124,8 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, duck: -6.db } }.to raise_error(ArgumentError, /no pulse/)
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, filter: :cut } }.to raise_error(ArgumentError, /no knob/)
       expect { build { flow { a 1 }; scene :a } }.to raise_error(ArgumentError, /needs a tempo/)
+      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, params: { cutoff: :cutt } } }.to raise_error(ArgumentError, /param cutoff: names :cutt, which is no knob/)
+      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, params: { cutoff: 'x' } } }.to raise_error(ArgumentError, /numbers or knob names/)
       expect { genre[:nope] }.to raise_error(ArgumentError, /No genre :nope/)
     end
   end
@@ -135,6 +137,24 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(mix.report(result)).to eq(['loudness -7.2 LUFS (target -8..-6: on target)', 'true peak -0.30 dBTP (ceiling -0.5: over)'])
       expect(mix.report(result.class.new(-10.0, -1.0)).first).to include('quiet')
       expect(mix.summary).to include('-8..-6 LUFS', 'mono below 120 Hz', 'master dnb_master')
+    end
+
+    it 'reports the side below 120 Hz (or mono_below) against the mid' do
+      t = 48000
+      lo = Numo::SFloat.new(t).seq.map { |i| Math.sin(2 * Math::PI * 50 * i / 48000.0) }
+      hi = Numo::SFloat.new(t).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000.0) }
+      result = Struct.new(:integrated, :true_peak).new(-7.0, -1.0)
+      mono = [lo + hi, lo - hi]  # side only above 120 Hz
+      wide = [lo + hi, -lo + hi] # all of the lows in the side
+      expect(genre[:dnb].mix.report(result, mono).last).to match(/\Aside below 120 Hz -\d\d+\.\d dB re mid \(mono_below 120: mono\)\z/)
+      expect(genre[:dnb].mix.report(result, wide).last).to match(/side below 120 Hz \d+\.\d dB re mid \(mono_below 120: not mono\)/)
+      expect(genre[:ambient].mix.report(result, mono).last).to include('(no mono_below)')
+      expect(genre[:jungle].mix.report(result, mono).last).to start_with('side below 150 Hz')
+      expect(genre[:dnb].mix.report(result, [lo]).length).to eq(2)
+    end
+
+    it 'uses mono_below only for club and vinyl targets' do
+      expect(genre.names.select { |n| genre[n].mix.mono_below }).to match_array([:dnb, :jungle, :house, :techno])
     end
   end
 
@@ -152,6 +172,14 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       peak = data.map { |c| c.abs.max }.max
       expect(peak).to be_between(0.05, 0.9)
       expect(data[0].length).to be_within(48).of((3 * 4 * 60 / 96.0 * 48000).round)
+    end
+
+    it 'lets template knobs drive preset params and puts mono_below first in the master chain' do
+      MB::Sound.knob(:cut, 600, range: 150..8000, curve: :exp)
+      bass = genre[:dnb].patch(:bass, genre[:dnb].clips[:riff])
+      expect(bass.to_ruby).to include('lp4(knob(:cut)')
+      master = MB::Sound::Genre.master_chain(MB::Sound.stereo(1.constant, 1.constant).mono_below(120), genre[:jungle].mix.master)
+      expect(master.to_ruby).to include('mono_below(120).compress(')
     end
 
     it 'filters, levels, and ducks a role under the pulse kick' do

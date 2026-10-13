@@ -32,7 +32,7 @@ module MB
 
       role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the techno kit'
       role :bass, :dnb_sub, level: -3.db, about: 'a rolling offbeat sub'
-      role :stab, :dnb_reese, filter: :cut, level: -6.db, about: 'a detuned stab opening over the phrase'
+      role :stab, :dnb_reese, params: { cutoff: :cut }, level: -6.db, about: 'a detuned stab opening over the phrase'
 
       scene :intro, drums: :intro, cut: 400
       scene :build, drums: :intro, bass: :bass, stab: :stab, cut: [1500, { from: 400, over: 16 }]
@@ -43,7 +43,7 @@ module MB
 
       loudness(-9..-7)
       true_peak(-1.db)
-      mono_below 120
+      mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
       master :at, 11.db
       master :limit, ceiling: -1.db

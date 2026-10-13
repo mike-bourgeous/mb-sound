@@ -39,23 +39,24 @@ module MB
       clip :harp, seq(D5, R, A4, B4.maybe(0.7), R, D5, R, E5, R, G4, R, R, A4.maybe(0.5), R, R, R).n16.swing(0.6).loop(align: :launch)
       clip :stick, seq(D5, T, T).n1
 
-      knob :dusk, 9000, range: 300..12000, curve: :exp, unit: 'Hz'
+      knob :space, 0.5, range: 0..1   # the rooms' level (bowls, rin, gong, koto, harp)
+      knob :wear, 0, range: 0..1      # how old the tape is (koto, harp)
 
       role :drone, :ambient_drone, about: 'two sine generators drifting against each other on the root and fifth'
-      role :bowls, :ambient_bowl, about: 'singing bowl strikes, every partial a beating doublet'
-      role :bowls2, :ambient_bowl, about: 'a second bowl on its own loop length'
-      role :rin, :ambient_rin, about: 'a small rin, the still point'
-      role :gong, :ambient_gong, level: -3.db, about: 'a tam-tam stroke whose shimmer blooms over seconds'
-      role :motif, :ambient_koto, filter: :dusk, about: 'a sparse FM koto motif, humanized, some notes by chance'
-      role :harp, :ambient_harp, filter: :dusk, level: -2.db, about: 'a swung Karplus-Strong figure'
+      role :bowls, :ambient_bowl, params: { space: :space }, about: 'singing bowl strikes, every partial a beating doublet'
+      role :bowls2, :ambient_bowl, params: { space: :space }, about: 'a second bowl on its own loop length'
+      role :rin, :ambient_rin, params: { space: :space }, about: 'a small rin, the still point'
+      role :gong, :ambient_gong, params: { space: :space }, level: -3.db, about: 'a tam-tam stroke whose shimmer blooms over seconds'
+      role :motif, :ambient_koto, params: { space: :space, wear: :wear }, about: 'a sparse FM koto motif, humanized, some notes by chance'
+      role :harp, :ambient_harp, params: { space: :space, wear: :wear }, level: -2.db, about: 'a swung Karplus-Strong figure'
       role :stick, :ambient_rainstick, level: -4.db, about: 'a rain stick tipping across'
 
-      scene :emerge, drone: :drone, dusk: 9000
+      scene :emerge, drone: :drone, space: 0.5, wear: 0
       scene :drift, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b
       scene :bloom, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, gong: :gong, motif: :motif, harp: :harp
       scene :hush, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin
       scene :tide, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, stick: :stick, gong: :gong, motif: :motif, harp: :harp
-      scene :dissolve, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, motif: :motif, harp: :harp, dusk: [600, { over: 4, curve: :smooth }]
+      scene :dissolve, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, motif: :motif, harp: :harp, wear: [0.7, { over: 4 }], space: [0.8, { over: 4 }]
 
       loudness(-19..-16)
       true_peak(-1.db)

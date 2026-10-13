@@ -52,31 +52,34 @@ module MB
       clip :hit, seq(F1, R, R, R, R, R, R, R).n1.loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
-      knob :cut, 2400, range: 150..8000, curve: :exp, unit: 'Hz'
+      knob :cut, 2400, range: 150..8000, curve: :exp, unit: 'Hz'   # the Reese lowpass
+      knob :grit, 0.25, range: 0..1                                # the neuro crusher's wet share
+      knob :space, 0.4, range: 0..1                                # the pluck's delay send
+      knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'       # the master highpass
 
       role :drums, :dnb_drums, about: 'two-step 808 kit at DnB tunings, parallel compression'
-      role :bass, :dnb_reese, filter: :cut, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
+      role :bass, :dnb_reese, params: { cutoff: :cut }, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
       role :sub, :dnb_sub, level: -6.db, duck: -12.db, about: 'a clean mono sine an octave down'
-      role :neuro, :dnb_neuro, level: -1.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
+      role :neuro, :dnb_neuro, params: { grit: :grit }, level: -1.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
       role :pad, :dnb_pad, level: -4.5.db, about: 'minor 9th pads'
-      role :pluck, :dnb_pluck, level: -7.db, about: 'liquid pluck with a dotted-eighth delay'
+      role :pluck, :dnb_pluck, params: { echo: :space }, level: -7.db, about: 'liquid pluck with a dotted-eighth delay'
       role :impact, :dnb_boom, about: 'a falling sine hit on the downbeat'
       role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser (a fill scene)'
 
-      scene :intro, drums: :intro, pad: :chords, cut: 250
+      scene :intro, drums: :intro, pad: :chords, cut: 250, air: 20
       scene :build, drums: :build, bass: :riff, cut: [2500, { from: 250, over: 8, curve: :smooth }]
-      scene :drop, drums: :drop, bass: :riff, sub: :riff, impact: :hit, cut: 2400
-      scene :breakdown, drums: :breakdown, pad: :chords, pluck: :pluck
+      scene :drop, drums: :drop, bass: :riff, sub: :riff, impact: :hit, cut: 2400, air: 20
+      scene :breakdown, drums: :breakdown, pad: :chords, pluck: :pluck, air: [180, { over: 1.beat }]
       scene :pullup, riser: :bar
-      scene :drop2, drums: :drop2, neuro: :neuro, sub: :riff, impact: :hit
+      scene :drop2, drums: :drop2, neuro: :neuro, sub: :riff, impact: :hit, air: 20, grit: [0.6, { over: 8 }]
       scene :outro, drums: :outro, sub: :riff
       scene :riser, riser: :bar, others: :keep
       pulse :drop
 
       loudness(-8..-6)
       true_peak(-0.5.db)
-      mono_below 120
-      master :dnb_master
+      mono_below 120 # club systems: a mono low end (and the sub is mono already)
+      master :dnb_master, air: :air
       master_gain 0.db
 
       tip 'Sections come in 8s; phrases in 16 and 32.  DJs want a 32-bar intro of drums and light elements, and the drop on a 32-bar line.'

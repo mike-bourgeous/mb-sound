@@ -344,6 +344,21 @@ module MB
         end
         alias multiband bands
 
+        # Makes everything below +frequency+ (Hz or a Pitch) mono: a
+        # Linkwitz-Riley crossover (+order+ as for #bands) splits each
+        # channel, the low bands are averaged into one shared channel, and
+        # the highs stay as they were (untouched, the sum is the input
+        # through an allpass).  A mastering option for club systems and
+        # vinyl, not something headphone or ambient mixes usually want.
+        # One-channel nodes come back unchanged.
+        #
+        # Example (bin/sound.rb):
+        #     master { |mix| mix.mono_below(120).limit(ceiling: -1.db) }
+        def mono_below(frequency, order: 4)
+          return self if outputs.length < 2
+          bands(frequency, order: order) { |lo, hi| [lo.mono, hi] }
+        end
+
         # Presets for #squeeze: crossovers (Hz), depth (the parallel mix),
         # the upward boost's fall time, and per band (low, mid, high) the
         # downward threshold (dB) and ratio, upward threshold (dB) and

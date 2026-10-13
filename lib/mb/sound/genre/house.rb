@@ -48,7 +48,7 @@ module MB
 
       loudness(-10..-8)
       true_peak(-1.db)
-      mono_below 120
+      mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
       master :at, 8.db
       master :limit, ceiling: -1.db
