@@ -519,8 +519,9 @@ module MB
         end
         update_skippable
 
-        # What a skipped lane still reads: its own Notes nodes, and its
-        # branches of Tees whose other branches are in other lanes
+        # What a skipped lane still reads: its own Notes nodes, its
+        # branches of Tees whose other branches are in other lanes, and its
+        # knob readers
         @boundary = graphs.each_with_index.map { |g, idx|
           next [] unless @skippable_base[idx]
 
@@ -534,7 +535,11 @@ module MB
           shared = g.select { |n|
             n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.owner_tee.branches.any? { |b| !sets[idx][b.__id__] }
           }
-          own + shared
+
+          # Knob readers keep their place in the Session's buffer (see
+          # GraphNode::Knob::Reader), so they read past skipped stretches
+          knobs = g.select { |n| n.is_a?(GraphNode::Knob::Reader) && !upstream[n.__id__] }
+          own + shared + knobs
         }
         @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
       end

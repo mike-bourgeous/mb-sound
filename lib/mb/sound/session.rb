@@ -1131,8 +1131,15 @@ module MB
           frames = MB::M.min(frames, silent_from - (base + offset))
         end
 
+        # Knob readers in the graph read from this player's first frame
+        # (see GraphNode::Knob#clock_frame)
         t = MB::U.clock_now
-        data = p.input.read(frames)
+        begin
+          @knob_frame = base + offset if @knob_frame
+          data = p.input.read(frames)
+        ensure
+          @knob_frame = base if @knob_frame
+        end
         check_speed(p, MB::U.clock_now - t, frames)
 
         if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }

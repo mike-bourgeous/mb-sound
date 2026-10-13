@@ -150,6 +150,55 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       end
     end
 
+    it 'gives players starting or waking partway through a buffer the values of their own frames' do
+      # fixes-7: readers read from the buffer's first frame, so a player
+      # launched (or unmuted) partway through a buffer read the knob up to
+      # a buffer early, differing with the buffer size (a persona take's
+      # harp, -18 dB at 367/368 vs 800)
+      results = [800, [367, 368], 64, 1031].map { |size|
+        s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        k = s.knob(:x, 0, smooth: 0)
+        s.turn(:x, 1, over: 4.beats)                    # frames 0...96000
+        s.add(k * 1, name: :a, start_time: 1/3r)        # frame 32000
+        s.mute(:a, start_time: 1/2r)                    # frame 48000, then asleep
+        s.unmute(:a, start_time: 5/7r, fade: 0)         # frame 68571 (a fraction)
+        data = render(s, 96_000, size)
+        s.close
+        data
+      }
+      results.each { |r| expect(r).to eq(results[0]) }
+
+      d = results[0]
+      expect(d[31_999]).to eq(0)
+      expect(d[32_000]).to be_within(1e-4).of(32_000 / 96_000.0)
+      expect(d[60_000]).to eq(0)
+      first = d[60_000..].ne(0).where[0] + 60_000
+      expect(d[first + 1000]).to be_within(1e-4).of((first + 1000) / 96_000.0) # (after the declick)
+    end
+
+    it 'keeps readers in step through Synth lanes skipped while idle' do
+      # A skipped lane's graph is read in pieces around its idle stretches;
+      # its knob readers read past them (fixes-7)
+      clip = -> { MB::Sound.seq(MB::Sound::C4.n16, MB::Sound::Rest.n4, MB::Sound::E4.n16, MB::Sound::Rest.n2).loop }
+      old = MB::Sound::Plan.lanes
+      MB::Sound::Plan.lanes = false # (lanes in lane groups are never skipped)
+      results = [800, [367, 368], 64, 1031].map { |size|
+        s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        s.knob(:x, 0, smooth: 0)
+        s.turn(:x, 1, over: 8.beats)
+        syn = within(s) { clip.().synth(voices: 2) { |v| (v.hz.aramp * 0 + MB::Sound.knob(:x)) * v.env(0.001, 0.05, 0, 0.05) } }
+        s.add(syn, name: :a, start_time: 1/5r)
+        data = render(s, 192_000, size)
+        expect(syn.skippable_lanes).not_to be_empty
+        s.close
+        data
+      }
+      expect(results[0].abs.max).to be > 0.1
+      results.each { |r| expect(r).to eq(results[0]) }
+    ensure
+      MB::Sound::Plan.lanes = old
+    end
+
     it 'lands turns on their exact frame at any buffer size' do
       results = [800, 367, 64, [1001, 13]].map { |size|
         s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
