@@ -200,7 +200,14 @@ module MB
       #     track(:swell, lead: :attack, lead_max: 2) { |c| c.synth { |v| v.hz.saw * v.amp_env(4, 1, 0.8, 2) } }
       #     track(:pad, lead: 0.5.attack) { |c| ... }   # half the attack before the beat
       #     track(:drums, nudge: 5.ms) { |k| tr808(k) }
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, &patch)
+      #
+      # +send:+ (bus name => level) and +to:+ (a bus for the track's main
+      # out, or :master) set the track's routing (see Session::Buses#route;
+      # left as they are when not given):
+      #
+      #     track(:keys, send: { verb: -12.db }) { |c| c.synth { |v| v.hz.triangle * v.amp_env } }
+      #     track(:kick, to: :drums) { |k| tr808(k) }
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
@@ -212,6 +219,7 @@ module MB
         raise ArgumentError, "lead_max: caps an attack lead (lead: :attack or 0.5.attack; got lead: #{lead.inspect})" if lead_max && !lead.is_a?(Length::Attack)
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
         return nil unless @session.names.claim(name, :track)
+        @session.route(name, to: to || :keep, send: send) if to || send
 
         tr = nil
         @mutex.synchronize {

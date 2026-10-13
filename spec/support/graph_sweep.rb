@@ -256,6 +256,7 @@ module GraphSweep
       ['loudness_meter', ->(c) { c.stereo_sig.loudness_meter }],
       ['resample and oversample', ->(c) { c.sig.resample(44100) + c.sig.oversample(2) { |n| n.softclip } }],
       ['MixSource (master chain input)', ->(c) { MixFeeder.new(c.stereo_sig) { |mix| mix.softclip.filter(:highpass, cutoff: 50).mixdown } }],
+      ['BusTap (bus and track readers; silence outside a Session, see buses_spec)', ->(c) { c.sig.duck(:sweep_drums, only: :kick) + MB::Sound.bus(:sweep_bus).mixdown + c.sig.compress(sidechain: MB::Sound.bus(:sweep_bus)) }],
 
       # Envelopes
       ['adsr', ->(c) { c.sig.adsr(0.001, 0.002, 0.5, 0.003) }],

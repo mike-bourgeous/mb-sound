@@ -56,6 +56,7 @@ require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
+require_relative 'sound/bus_methods'
 require_relative 'sound/record_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
@@ -89,6 +90,7 @@ module MB
     extend ArrangementMethods
     extend FormMethods
     extend KnobMethods
+    extend BusMethods
     extend RecordMethods
     extend MultichannelMethods
     extend TuningMethods

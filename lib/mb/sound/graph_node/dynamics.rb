@@ -244,6 +244,8 @@ module MB
           @max_gain = DynamicsMethods.db_param(max_gain).to_f
           raise ArgumentError, 'min_gain must not be above max_gain' if @min_gain > @max_gain
 
+          # A Symbol names a bus or track to read (see BusTap)
+          sidechain = BusTap.from(sidechain) if sidechain.is_a?(Symbol)
           if sidechain
             sc = Array(sidechain).flat_map { |n| GraphNode.dynamics_channels(n, 'Sidechains') }
             raise ArgumentError, 'Sidechain needs at least one channel' if sc.empty?

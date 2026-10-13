@@ -751,6 +751,7 @@ module MB
             end
             return complex(node, scope) if name == :Complex
             return named_proc(node, scope) if name == :named_proc
+            return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
             if Document::HEADER.include?(name)
               raise error(node, "#{name} belongs in the header, before the graph")
@@ -1002,6 +1003,21 @@ module MB
         end
 
         # &named_proc(:name): a block from GraphIO.procs.
+        # bus(:drums) or bus(:drums, only: :kick): a node reading a bus or
+        # track of the Session that plays the graph (GraphNode::BusTap).
+        # Documents only read buses; defining one (a block, to:) is the
+        # console's or a set's.
+        def bus_reader(node, scope)
+          raise error(node, 'documents read buses (bus(:name)); define them in the console or a set') if node.block
+          args, kwargs = call_args(node, scope)
+          only = kwargs.delete(:only)
+          unless args.length == 1 && args[0].is_a?(Symbol) && kwargs.empty? && (only.nil? || only.is_a?(Symbol))
+            raise error(node, 'bus takes a bus or track name and only: a node name (bus(:drums, only: :kick))')
+          end
+          check_limits(node, MB::Sound, :bus, args, {})
+          GraphNode::BusTap.new(args[0], only: only, channels: Session.existing&.channels || 2).node
+        end
+
         def named_proc(node, scope)
           args, = call_args(node, scope)
           name = args[0]

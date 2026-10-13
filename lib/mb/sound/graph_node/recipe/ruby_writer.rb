@@ -201,7 +201,7 @@ module MB
             seeded = [] if seeded.length < 2
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
-              next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader)
+              next false if knob_for(o) || o.is_a?(Knob) || o.is_a?(Knob::Reader) || o.is_a?(BusTap::Channel)
               info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
@@ -500,11 +500,16 @@ module MB
               # each knob(:name) is its own reader, so it prints inline
               # (2026-10-12: before, as a free input)
               return [knob_text(o), ATOM]
+            when BusTap::Channel
+              # A reader of a Session bus or track: bus(:name) (see #bus_text)
+              return [bus_text(o), ATOM]
             when MB::Sound::Notes::NotePitch
               # falls through to an input
             when MB::Sound::Pitch
               return [pitch_text(o), ATOM]
             when Channels
+              tap = o.to_a.first.is_a?(BusTap::Channel) && o.to_a.first.original_source
+              return [bus_text(tap), ATOM] if tap && o.to_a == tap.outputs
               if channels_printable?(o)
                 return ["channels(#{o.to_a.map { |x| expr(x, indent: indent) }.join(', ')})", ATOM]
               end
@@ -517,13 +522,22 @@ module MB
             [input_name(o), ATOM]
           end
 
+          # bus(:name), bus(:name, only: :node), or one channel of a bus,
+          # bus(:name)[1], for a BusTap or one of its channels.
+          def bus_text(o)
+            tap = o.is_a?(BusTap) ? o : o.original_source
+            text = "bus(#{tap.source_name.inspect}#{tap.only ? ", only: #{tap.only.inspect}" : ''})"
+            return text if o.is_a?(BusTap) || tap.outputs.length == 1
+            "#{text}[#{tap.outputs.index(o)}]"
+          end
+
           # knob(:name) for a Knob or Knob::Reader.
           def knob_text(o)
             "knob(#{(o.is_a?(Knob::Reader) ? o.knob : o).name.to_sym.inspect})"
           end
 
           def channels_printable?(o)
-            o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) }
+            o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) || x.is_a?(BusTap::Channel) }
           end
 
           # Names a free input.

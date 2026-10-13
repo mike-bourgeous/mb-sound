@@ -162,7 +162,10 @@ module MB
       #     stop       # stops the last one started (player 1)
       #     outro      # fades everything out over four bars
       #     panic      # stops everything right away
-      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil)
+      #
+      # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
+      # (a bus for its main out) route a named player (see BusMethods).
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil)
         point = LaunchPoint.of(binding) or return nil
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -188,7 +191,7 @@ module MB
         end
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
-          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
+          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
         }
       end
 
@@ -273,7 +276,7 @@ module MB
           waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
           cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
 
-          session.remove(fade: 0, time: time).tap { session.reset_master(time: time) }
+          session.remove(fade: 0, time: time).tap { session.reset_master(time: time); session.reset_buses(time: time) }
         }
         return stops if Session.context&.[](:batch)
 
@@ -860,7 +863,7 @@ module MB
       # stops (see #render), for up to +max_frames+.  Returns the number of
       # frames rendered.
       def render_tail(session, max_frames, buffer_size)
-        return 0 unless session.master_active?
+        return 0 unless session.master_active? || session.buses_awake?
 
         rate = session.output.sample_rate
         max_frames = MB::M.min(max_frames, (Session::MAX_TAIL_SECONDS * rate).round)
