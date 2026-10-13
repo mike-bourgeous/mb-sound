@@ -22,6 +22,11 @@ module MB
         # With an +epoch+, it runs only while Session#epoch is that number
         # (the timeline between two seeks; see Session::Seeks), so a take's
         # lines run at their time in the right pass over the timeline.
+        # With +exact+ (a take replay's console lines; see Take::Replay), a
+        # rendering (not realtime) session runs it at the start of the
+        # buffer span containing its time, before the span's tempo is read
+        # (see #dispatch_exact), like a line typed between two buffers,
+        # instead of a lookahead ahead.
         #
         # +owner+ says who scheduled it: :user (ScheduleMethods, at_marker),
         # :form (a song form's own blocks), :take (a take's replayed lines),
@@ -30,7 +35,7 @@ module MB
         # +label+ is the command for display (e.g. "at_bar 9"), +status+
         # :pending (waiting for its time), :due (handed to the runner),
         # :running, :ran, or :cancelled.
-        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :owner, :label, :status, keyword_init: true)
+        Entry = Struct.new(:id, :time, :period, :block, :description, :epoch, :owner, :label, :status, :exact, keyword_init: true)
 
         # A printable handle for a scheduled block, returned by
         # ScheduleMethods#at_bar, #after, #every (and Session#schedule):
@@ -266,7 +271,7 @@ module MB
         end
 
         # See Session#schedule.  Returns a Handle.
-        def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, &block)
+        def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
           raise ArgumentError, 'Pass a block to schedule' unless block
           raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
 
@@ -282,7 +287,8 @@ module MB
               epoch: epoch,
               owner: owner,
               label: label,
-              status: :pending
+              status: :pending,
+              exact: exact && !@realtime
             )
           }
           Handle.new(self, entry)
@@ -413,7 +419,7 @@ module MB
             list = []
             epoch = @session.epoch
             @entries.values.each do |e|
-              next if e.epoch && e.epoch != epoch
+              next if e.exact || (e.epoch && e.epoch != epoch)
               next unless e.status == :pending
               while e.time <= horizon
                 list << [e, e.time]
@@ -435,6 +441,21 @@ module MB
               run(e, time, deadline)
             end
           end
+        end
+
+        # Runs the exact entries (see Entry) whose time is before +to+ (or
+        # has come), at the start of the span [+from+, +to+), before
+        # Session#process_buffer reads the span's tempo.  Returns true if any
+        # ran.
+        def dispatch_exact(from, to)
+          due = @mutex.synchronize {
+            epoch = @session.epoch
+            list = @entries.values.select { |e| e.exact && e.status == :pending && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) }
+            list.each { |e| e.status = :due }
+            list
+          }
+          due.sort_by { |e| [e.time, e.id] }.each { |e| run(e, e.time, e.time > from ? e.time : nil) }
+          !due.empty?
         end
 
         # Stops the scheduler thread.

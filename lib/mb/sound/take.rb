@@ -63,7 +63,10 @@ module MB
         def note_change(session, change)
           take, line = Thread.current[:mb_sound_take_line]
           return unless line && take.session_ok?(session)
-          line.lands << (change.lands&.pos || change.time)
+          land = change.lands&.pos
+          # A change for a time already past lands now, but its action
+          # sees its own time (a lead: track starting before the beat)
+          line.lands << (land && change.time && change.time < land ? [land, change.time] : (land || change.time))
         end
       end
 
@@ -86,6 +89,7 @@ module MB
         @mutex = Mutex.new
         @start = start_state
         @start_epoch = (@session || Session.default).epoch
+        @start_frame = (@session || Session.default).frame
         @midi_from = (@session || Session.default).midi_log_length
       end
 
@@ -206,7 +210,7 @@ module MB
       def inspect
         lines = @mutex.synchronize { @lines.last(12) }
         body = lines.map { |l|
-          lands = l.lands.map { |t| session.stamp(t).to_s }.uniq
+          lands = l.lands.map { |t| session.stamp(Array(t).first).to_s }.uniq
           "  #{l.issued}#{lands.empty? ? '' : " -> #{lands.join(', ')}"}  #{l.code.lines.first.to_s.strip[0, 70]}"
         }
         ["#<#{self}", *body].join("\n") + '>'
@@ -239,6 +243,7 @@ module MB
         end
         out << "  ends: #{ruby_value(session.transport.position)},\n"
         out << "  ends_epoch: #{session.epoch - @start_epoch},\n" if session.epoch > @start_epoch
+        out << "  seconds: #{length_seconds.round(3)},\n"
         out << ") do |r|\n"
         midi.each do |name, rows|
           out << "  r.midi [\n"
@@ -261,7 +266,7 @@ module MB
       # A Replay of this take (see Replay), as #save would write it.
       def replay
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
-        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch) do |r|
+        Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
           lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
         end
@@ -295,6 +300,13 @@ module MB
         else
           File.join(ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME'], 'mb-sound', 'takes')
         end
+      end
+
+      # How long the take has run, in seconds of the session's output (a
+      # replay's time limit counts from it; see Replay#render).
+      def length_seconds
+        s = session
+        (s.frame - @start_frame).to_f / (s.output_open? ? s.sample_rate : 48000)
       end
 
       private

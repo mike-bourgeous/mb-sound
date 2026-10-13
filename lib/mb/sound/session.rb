@@ -507,9 +507,9 @@ module MB
       # Scheduler::Handle (prints when it runs; #cancel).  +owner+ is who
       # scheduled it (:user, :form, :take, :script; see Scheduler::Entry)
       # and +label+ the command to show.  See Scheduler for how and when
-      # blocks run.
-      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, &block)
-        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, &block)
+      # blocks run (and Scheduler::Entry for +:exact+).
+      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, exact: exact, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -698,6 +698,14 @@ module MB
             @scheduler.apply_timed_changes
             commit_due_seeks unless @changes.empty?
             per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            # A take replay's lines run before the span whose time they were
+            # typed in, like live lines typed between buffers, so a tempo
+            # they set covers the whole span (see Scheduler::Entry#exact)
+            if @scheduler.dispatch_exact(@transport.position, @transport.position + remaining * per_sample)
+              @scheduler.apply_timed_changes
+              commit_due_seeks unless @changes.empty?
+              per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             parts << render_span(n, per_sample)
             remaining -= n
