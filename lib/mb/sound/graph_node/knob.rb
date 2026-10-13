@@ -169,6 +169,13 @@ module MB
             v.is_a?(Numo::NArray) ? v : @knob.steady_buffer(count, v)
           end
 
+          # Moves past +count+ samples without reading them (a Synth lane
+          # skipped while idle), returning self.
+          def advance(count)
+            next_frame_for(count)
+            self
+          end
+
           def sample_rate
             @knob.sample_rate
           end

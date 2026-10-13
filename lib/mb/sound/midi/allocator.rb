@@ -154,6 +154,12 @@ module MB
           # released lane can be reused without a choke.  Set by +synth+.
           attr_accessor :idle_check
 
+          # A Proc returning the stream time where the #idle_check's answer
+          # was measured (Synth: the last point of its grid), or nil for
+          # the lane's read position: notes sent to the lane from that
+          # time on keep it busy.
+          attr_accessor :idle_position
+
           # A Proc returning the lane's current level, for the :quietest
           # steal policy and +retrigger: :louder+ (optional).
           attr_accessor :level_check
@@ -711,7 +717,8 @@ module MB
         def idle?(voice)
           lane = @lanes[voice.index]
           return false unless lane.idle_check
-          return false if voice.last_time && voice.last_time >= @lane_sources[voice.index].position
+          pos = lane.idle_position&.call || @lane_sources[voice.index].position
+          return false if voice.last_time && voice.last_time >= pos
           lane.idle? == true
         end
 

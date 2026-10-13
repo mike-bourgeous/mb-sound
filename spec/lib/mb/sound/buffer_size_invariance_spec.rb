@@ -281,6 +281,25 @@ RSpec.describe 'Buffer size invariance' do
       MB::Sound.bpm(old)
     end
 
+    # Lanes become free for new notes by their quiet state over whole grid
+    # cells (fixes-7): measured per buffer, a released lane was free at
+    # 367/368 but not at 800 when a note came, so the note went to another
+    # lane, whose free-running sine had another phase (a persona take's
+    # keys, +1.2 dB)
+    [:string, :reuse].each do |retrigger|
+      it "allocates the same lanes at any buffer size (retrigger: #{retrigger})" do
+        notes = MB::Sound.seq(
+          MB::Sound::C4.n32, MB::Sound::E4.n32, MB::Sound::Rest.n64, MB::Sound::C4.n32, MB::Sound::G4.n64,
+          MB::Sound::Rest.n32.t, MB::Sound::E4.n32, MB::Sound::C4.n64.d, MB::Sound::Rest.n16
+        ).humanize(1.n128).loop
+        make = -> {
+          MB::Sound.seed(3)
+          notes.synth(voices: 3, retrigger: retrigger) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+        }
+        expect_invariant(make, seconds: 3, sizes: [[367, 368], [1], [1031], [64]])
+      end
+    end
+
     it 'skips lanes in the invariance cases (so the cases test something)' do
       old = MB::Sound::Plan.lanes
       MB::Sound::Plan.lanes = false
