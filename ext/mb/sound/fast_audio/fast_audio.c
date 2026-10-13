@@ -505,6 +505,12 @@ struct playback {
 	_Atomic size_t jack_read_pos;
 	_Atomic size_t jack_played;
 
+	// JACK only: periods written again for a cycle the server ran twice
+	// (see playback_jack_process); jack_cycled is set after the first
+	// cycle (process thread only)
+	_Atomic size_t jack_repeated;
+	int jack_cycled;
+
 	// Optional record of the first capture_frames frames played (for specs)
 	float *capture;
 	size_t capture_frames;
@@ -609,21 +615,14 @@ static struct playback *get_playback(VALUE self)
 	return p;
 }
 
-// Takes +frames+ interleaved frames from the ring into +out+ (silence where
-// it runs out), for miniaudio's device thread or JACK's.  Realtime safe: no
-// Ruby, no allocation, no blocking locks.
-static void playback_pull(struct playback *p, float *out, size_t frames)
+// Copies +count+ interleaved frames from ring position +pos+ into +out+,
+// then silence up to +frames+.
+static void playback_copy(struct playback *p, float *out, size_t pos, size_t count, size_t frames)
 {
 	size_t ch = p->out_channels;
-	size_t mask = p->capacity - 1;
-
-	size_t rp = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
-	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
-	size_t available = wp - rp;
-	size_t count = available < frames ? available : frames;
 
 	// Copy in up to two pieces, around the end of the ring
-	size_t start = rp & mask;
+	size_t start = pos & (p->capacity - 1);
 	size_t first = p->capacity - start;
 	if (first > count) {
 		first = count;
@@ -633,7 +632,24 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 
 	if (count < frames) {
 		memset(out + count * ch, 0, (frames - count) * ch * sizeof(float));
+	}
+}
 
+// Takes +frames+ interleaved frames from the ring into +out+ (silence where
+// it runs out), for miniaudio's device thread or JACK's.  Realtime safe: no
+// Ruby, no allocation, no blocking locks.
+static void playback_pull(struct playback *p, float *out, size_t frames)
+{
+	size_t ch = p->out_channels;
+
+	size_t rp = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
+	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
+	size_t available = wp - rp;
+	size_t count = available < frames ? available : frames;
+
+	playback_copy(p, out, rp, count, frames);
+
+	if (count < frames) {
 		// Count each time the audio runs out, not every silent callback
 		// (audio shorter than one callback ran out too)
 		if (count > 0 || !p->starving) {
@@ -677,6 +693,16 @@ static void playback_callback(ma_device *device, void *output, const void *input
 }
 
 // JACK's thread: the ring's interleaved frames to one buffer per port
+//
+// An asynchronous JACK server (jackd without --sync) can call a late client
+// twice in one server cycle (see midi_in_process): both calls get the
+// cycle's frame time and its port buffers, and only what the last one
+// leaves in them is played.  Pulling a new period in the second call would
+// lose the first one, so a cycle with the last cycle's frame time writes
+// that cycle's period again (still in the ring: the ring holds a period
+// more than the queue, so the writer can't have reached it), leaving the
+// ring, the device clock, and #jack_clock as they were.  Frame times
+// always move between real cycles, so nothing else changes.
 static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 {
 	struct playback *p = unit->user;
@@ -687,19 +713,40 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 		buffers[c] = mb_jack_port_buffer(unit->ports[c], nframes);
 	}
 
-	// Publish where this cycle starts (see #jack_clock); the reader retries
-	// while the sequence is odd or changed
-	unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
-	atomic_store_explicit(&p->jack_seq, seq + 1, memory_order_relaxed);
-	atomic_thread_fence(memory_order_release);
-	atomic_store_explicit(&p->jack_frame, mb_jack_last_frame_time(), memory_order_relaxed);
-	atomic_store_explicit(&p->jack_read_pos, atomic_load_explicit(&p->read_pos, memory_order_relaxed), memory_order_relaxed);
-	atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
-	atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
+	uint32_t frame = mb_jack_last_frame_time();
+	int repeat = p->jack_cycled && frame == atomic_load_explicit(&p->jack_frame, memory_order_relaxed);
+	size_t start = 0, count = 0;
+	if (repeat) {
+		atomic_fetch_add_explicit(&p->jack_repeated, 1, memory_order_relaxed);
+		start = atomic_load_explicit(&p->jack_read_pos, memory_order_relaxed);
+		count = atomic_load_explicit(&p->read_pos, memory_order_relaxed) - start;
+		if (count > nframes || count + p->max_queue > p->capacity) {
+			// The period grew since opening, so the writer may have
+			// reused those frames; leave the buffers as the first call
+			// left them (jackd2 keeps an output port's buffer).
+			return;
+		}
+	} else {
+		// Publish where this cycle starts (see #jack_clock); the reader
+		// retries while the sequence is odd or changed
+		unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
+		atomic_store_explicit(&p->jack_seq, seq + 1, memory_order_relaxed);
+		atomic_thread_fence(memory_order_release);
+		atomic_store_explicit(&p->jack_frame, frame, memory_order_relaxed);
+		atomic_store_explicit(&p->jack_read_pos, atomic_load_explicit(&p->read_pos, memory_order_relaxed), memory_order_relaxed);
+		atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
+		atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
+		p->jack_cycled = 1;
+	}
 
 	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
 		size_t n = nframes - done < JACK_CHUNK ? nframes - done : JACK_CHUNK;
-		playback_pull(p, jack_scratch, n);
+		if (repeat) {
+			size_t have = count > done ? count - done : 0;
+			playback_copy(p, jack_scratch, start + done, have < n ? have : n, n);
+		} else {
+			playback_pull(p, jack_scratch, n);
+		}
 		for (size_t i = 0; i < n; i++) {
 			for (size_t c = 0; c < ch; c++) {
 				buffers[c][done + i] = jack_scratch[i * ch + c];
@@ -847,8 +894,11 @@ static void playback_setup_queue(struct playback *p, struct open_args *a)
 		p->max_queue = p->queue_limit;
 	}
 
+	// JACK's ring holds a period more, so the last period is still there
+	// when a repeated cycle writes it again (see playback_jack_process).
+	size_t need = p->max_queue + (p->jack ? (size_t)p->info.period : 0);
 	size_t capacity = 16;
-	while (capacity < p->max_queue) {
+	while (capacity < need) {
 		capacity <<= 1;
 	}
 
@@ -1440,12 +1490,14 @@ static VALUE playback_set_queue_limit(VALUE self, VALUE frames)
 
 /*
  * call-seq:
- *   playback.stats -> { queued:, frames_written:, frames_played:, underruns: }
+ *   playback.stats -> { queued:, frames_written:, frames_played:, underruns:, max_callback:, repeated: }
  *
  * :queued frames are waiting to play; :frames_played counts every frame the
  * device has played since opening, including silence (the device clock);
  * :underruns counts the times the queue ran out while the device needed
- * audio (once per gap, so a pause between sounds counts once).
+ * audio (once per gap, so a pause between sounds counts once); :repeated
+ * counts JACK cycles an asynchronous server ran twice for this client
+ * (#repeated), which played their period once.
  */
 static VALUE playback_stats(VALUE self)
 {
@@ -1459,8 +1511,19 @@ static VALUE playback_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("frames_played")), SIZET2NUM(atomic_load(&p->frames_played)));
 	rb_hash_aset(h, ID2SYM(rb_intern("underruns")), SIZET2NUM(atomic_load(&p->underruns)));
 	rb_hash_aset(h, ID2SYM(rb_intern("max_callback")), SIZET2NUM(atomic_load(&p->max_callback)));
+	rb_hash_aset(h, ID2SYM(rb_intern("repeated")), SIZET2NUM(atomic_load(&p->jack_repeated)));
 
 	return h;
+}
+
+/*
+ * The JACK cycles an asynchronous server ran twice for this output, which
+ * wrote their period again instead of losing it (stats[:repeated], without
+ * allocating a Hash; DeviceOutput checks it on every write).
+ */
+static VALUE playback_repeated(VALUE self)
+{
+	return SIZET2NUM(atomic_load(&get_playback(self)->jack_repeated));
 }
 
 /*
@@ -1517,6 +1580,13 @@ struct capture {
 	struct dev_info info; // see dev_info
 	int jack; // ports on the shared JACK client instead of a miniaudio device
 	struct mb_jack_unit unit;
+
+	// JACK only: cycles an asynchronous server ran twice, captured once (see
+	// capture_jack_process), and the last cycle's frame time (process
+	// thread only; jack_cycled is set after the first cycle)
+	_Atomic size_t jack_repeated;
+	uint32_t jack_frame;
+	int jack_cycled;
 
 	ma_uint32 output_rate; // the rate #read returns
 	SRC_STATE *src;
@@ -1661,11 +1731,25 @@ static void capture_callback(ma_device *device, void *output, const void *input,
 }
 
 // JACK's thread: one buffer per port to the ring's interleaved frames
+//
+// An asynchronous JACK server can call a late client twice in one server
+// cycle (see playback_jack_process), with the cycle's frame time and port
+// buffers both times; the second call's frames are the first's again, so a
+// cycle with the last cycle's frame time is dropped (counted in #stats),
+// leaving the device clock as it was.
 static void capture_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 {
 	struct capture *c = unit->user;
 	size_t ch = c->channels;
 	const float *buffers[MB_JACK_MAX_PORTS];
+
+	uint32_t frame = mb_jack_last_frame_time();
+	if (c->jack_cycled && frame == c->jack_frame) {
+		atomic_fetch_add_explicit(&c->jack_repeated, 1, memory_order_relaxed);
+		return;
+	}
+	c->jack_frame = frame;
+	c->jack_cycled = 1;
 
 	for (size_t k = 0; k < ch; k++) {
 		buffers[k] = mb_jack_port_buffer(unit->ports[k], nframes);
@@ -2223,12 +2307,14 @@ static VALUE capture_queue_limit(VALUE self)
 
 /*
  * call-seq:
- *   capture.stats -> { queued:, frames_captured:, overruns:, skipped: }
+ *   capture.stats -> { queued:, pending:, frames_captured:, overruns:, skipped:, repeated: }
  *
  * :queued device frames are waiting for #read (plus resampled frames
  * pending); :frames_captured counts every frame the device captured (its
  * clock); :overruns counts callbacks that found the ring full (audio
- * lost); :skipped counts frames #read skipped to stay near real time.
+ * lost); :skipped counts frames #read skipped to stay near real time;
+ * :repeated counts JACK cycles an asynchronous server ran twice for this
+ * client (#repeated), captured once.
  */
 static VALUE capture_stats(VALUE self)
 {
@@ -2240,8 +2326,19 @@ static VALUE capture_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("frames_captured")), SIZET2NUM(atomic_load(&c->frames_captured)));
 	rb_hash_aset(h, ID2SYM(rb_intern("overruns")), SIZET2NUM(atomic_load(&c->overruns)));
 	rb_hash_aset(h, ID2SYM(rb_intern("skipped")), SIZET2NUM(c->skipped));
+	rb_hash_aset(h, ID2SYM(rb_intern("repeated")), SIZET2NUM(atomic_load(&c->jack_repeated)));
 
 	return h;
+}
+
+/*
+ * The JACK cycles an asynchronous server ran twice for this input, captured
+ * once (stats[:repeated], without allocating a Hash; DeviceInput checks it
+ * on every read).
+ */
+static VALUE capture_repeated(VALUE self)
+{
+	return SIZET2NUM(atomic_load(&get_capture(self)->jack_repeated));
 }
 
 /* JACK MIDI ---------------------------------------------------------------- */
@@ -2864,6 +2961,7 @@ void Init_fast_audio(void)
 	rb_define_method(playback, "device_channels", playback_device_channels, 0);
 	rb_define_method(playback, "queue_limit", playback_queue_limit, 0);
 	rb_define_method(playback, "stats", playback_stats, 0);
+	rb_define_method(playback, "repeated", playback_repeated, 0);
 	rb_define_method(playback, "captured", playback_captured, 0);
 
 	VALUE capture = rb_define_class_under(fast_audio, "Capture", rb_cObject);
@@ -2883,6 +2981,7 @@ void Init_fast_audio(void)
 	rb_define_method(capture, "channels", capture_channels, 0);
 	rb_define_method(capture, "queue_limit", capture_queue_limit, 0);
 	rb_define_method(capture, "stats", capture_stats, 0);
+	rb_define_method(capture, "repeated", capture_repeated, 0);
 
 	init_jack_midi(fast_audio);
 }
