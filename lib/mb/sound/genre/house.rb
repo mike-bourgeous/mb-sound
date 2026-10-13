@@ -1,11 +1,10 @@
 module MB
   module Sound
     # House (a stub from general knowledge, not from the persona panel):
-    # four on the floor at 124.  The drums are tr808 until drums-2's tr909
-    # lands (change the :drums role's patch).
+    # four on the floor at 124 on the tr909.
     Genre.define :house, 'House (stub)' do
       about 'A stub from general knowledge (not researched by the panel): four on the floor, offbeat open hats, ' \
-            'a bouncing bass, electric piano stabs, 16- and 32-bar phrases.  The drums wait for a TR-909.'
+            'a bouncing bass, electric piano stabs, 16- and 32-bar phrases, on a TR-909.'
       tempo 124, range: 118..128
       meter 4, 4
       phrases 8, 16, 32
@@ -50,7 +49,10 @@ module MB
       true_peak(-1.db)
       mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      master :at, 8.db
+      # (for the 909's peaky kick: more drive into a softclip, then the
+      # limiter; drums-2 round 2, short form -8.9 LUFS)
+      master :at, 9.db
+      master :softclip, 0.45, 0.95
       master :limit, ceiling: -1.db
       master_gain 0.db
 
