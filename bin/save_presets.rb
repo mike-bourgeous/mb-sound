@@ -56,7 +56,8 @@ module MB::Sound
     funk_talkbox: ['bin/synths/funk.rb', :talkbox],
     funk_choir: ['bin/synths/funk.rb', :choir],
     # (--pickup given, so it saves as a param: the script's default is each patch's own, nil)
-    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5'],
+    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1'],
+    tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4'],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
   }.freeze
 

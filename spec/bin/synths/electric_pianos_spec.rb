@@ -70,9 +70,10 @@ RSpec.describe('bin/synths/electric_pianos.rb') do
     upper = ->(x, f) { 10 * Math.log10(band_share(seconds(x, 0.01, 0.21), f * 1.5, 24000)) }
     reed = ->(n, vel = 0.6, **o) { render_patch(MB::Sound.reed_piano_voice(patch_notes([n.number, 0, 0.5, vel]), tremolo: 0, **o), 0.3)[0] }
     expect(upper.(reed.(f2), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 0), f2.frequency) + 0.5
-    expect((reed.(f2) - reed.(f2, pickup_key: 1)).abs.max).to be < 1e-6 # (the default since patches-4)
-    expect(upper.(reed.(f2), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 0.5), f2.frequency) + 0.3
-    expect(upper.(reed.(f2, pickup: 2), f2.frequency)).to be > upper.(reed.(f2), f2.frequency) + 1
+    expect((reed.(f2) - reed.(f2, pickup_key: 1.5)).abs.max).to be < 1e-6 # (the default since patches-5)
+    expect(upper.(reed.(f2), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 1), f2.frequency) + 0.3
+    expect(upper.(reed.(f2, pickup_key: 1), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 0.5), f2.frequency) + 0.3
+    expect(upper.(reed.(f2, pickup: 2, pickup_key: 1), f2.frequency)).to be > upper.(reed.(f2, pickup_key: 1), f2.frequency) + 1
     c5 = MB::Sound::C5
     expect((reed.(c5) - reed.(c5, pickup_key: 0)).abs.max).to be < 1e-6 # (no key scaling above C4)
     # pickup_velocity: 0 drives soft notes as hard as hard ones
