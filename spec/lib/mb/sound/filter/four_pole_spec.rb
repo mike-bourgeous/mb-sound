@@ -94,14 +94,25 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(out).to equal(buf)
     end
 
-    it 'flushes tiny states to zero' do
-      s = [1e-35, -1e-31, 0.5, 1e-29]
+    it 'flushes tiny states to zero on the 800-sample flush grid' do
+      # The fifth entry counts samples since the last grid point (fixes-7)
+      s = [1e-35, -1e-31, 0.5, 1e-29, 799.0]
       MB::Sound::FastFilter.four_pole(Numo::SFloat[0], 1, 0, s, 48000, 3.9, 0.375, 0.0, FP::MODES[:lp4])
       expect(s[0]).to eq(0)
       expect(s[1]).to eq(0)
-      s2 = [1e-35, -1e-31, 0.5, 1e-29]
+      expect(s[4]).to eq(0.0)
+      s2 = [1e-35, -1e-31, 0.5, 1e-29, 799.0]
       FP.process_ruby(Numo::SFloat[0], 1, 0, s2, 48000, 3.9, 0.375, 0.0, FP::MODES[:lp4])
       expect(s2).to eq(s)
+
+      # Off the grid point: no flush, the count moves on
+      t = [1e-35, -1e-31, 0.5, 1e-29]
+      MB::Sound::FastFilter.four_pole(Numo::SFloat[0], 1, 0, t, 48000, 3.9, 0.375, 0.0, FP::MODES[:lp4])
+      expect(t[1]).not_to eq(0)
+      expect(t[4]).to eq(1.0)
+      t2 = [1e-35, -1e-31, 0.5, 1e-29]
+      FP.process_ruby(Numo::SFloat[0], 1, 0, t2, 48000, 3.9, 0.375, 0.0, FP::MODES[:lp4])
+      expect(t2).to eq(t)
     end
 
     it 'raise for bad arguments' do

@@ -23,9 +23,8 @@
 
 #include "plan_filters.h"
 
-// FastFilter's lowest kept state (fast_filter.c's FP_FLUSH) and highest
-// cutoff ratio
-#define PF_FLUSH 1e-30
+// FastFilter's highest cutoff ratio (states flush on the grid of
+// MB_FLUSH_GRID in mb_svf.h)
 #define PF_MAX_CUTOFF_RATIO 0.49
 
 // Samples per pass of the lane-major kernels: each pass first works out
@@ -57,6 +56,7 @@ struct pf_svf_lane {
 	int type;
 	double pi_over_rate, fc_max;
 	double ic1, ic2;
+	long fk; // samples since the last flush grid point (see MB_FLUSH_GRID)
 };
 
 static void pf_svf_read(struct pf_svf_lane *f, VALUE filter)
@@ -64,8 +64,8 @@ static void pf_svf_read(struct pf_svf_lane *f, VALUE filter)
 	f->filter = filter;
 	f->state = rb_ivar_get(filter, id_state);
 	Check_Type(f->state, T_ARRAY);
-	if (RARRAY_LEN(f->state) != 2) {
-		rb_raise(rb_eArgError, "SVF state must have two elements");
+	if (RARRAY_LEN(f->state) != 2 && RARRAY_LEN(f->state) != 3) {
+		rb_raise(rb_eArgError, "SVF state must have two elements (three with the flush grid count)");
 	}
 
 	f->type = NUM2INT(rb_ivar_get(filter, id_type_id));
@@ -79,24 +79,31 @@ static void pf_svf_read(struct pf_svf_lane *f, VALUE filter)
 
 	f->ic1 = mb_finite_entry(f->state, 0);
 	f->ic2 = mb_finite_entry(f->state, 1);
+	f->fk = mb_flush_count_read(f->state, 2);
 	f->pi_over_rate = M_PI / rate;
 	f->fc_max = rate * PF_MAX_CUTOFF_RATIO;
 }
 
-// Flushes and stores the state, and remembers the last parameters as
-// SVF#remember does (cutoff, quality, and with a gain input the gain).
+// Counts one sample of lane +f+ on the flush grid, flushing its states
+// *ic1 and *ic2 at the grid point.
+static inline void pf_svf_tick(struct pf_svf_lane *f, double *ic1, double *ic2)
+{
+	if (++f->fk >= MB_FLUSH_GRID) {
+		f->fk = 0;
+		mb_flush_value(ic1);
+		mb_flush_value(ic2);
+	}
+}
+
+// Stores the state (flushed on the grid while running) with its flush grid
+// count, and remembers the last parameters as SVF#remember does (cutoff,
+// quality, and with a gain input the gain).
 static void pf_svf_write(struct pf_svf_lane *f, const struct mb_plan_param *fc, const struct mb_plan_param *q,
 		const struct mb_plan_param *g, _Bool remember_gain, size_t n)
 {
-	double ic1 = f->ic1, ic2 = f->ic2;
-	if (!isfinite(ic1) || fabs(ic1) < PF_FLUSH) {
-		ic1 = 0.0;
-	}
-	if (!isfinite(ic2) || fabs(ic2) < PF_FLUSH) {
-		ic2 = 0.0;
-	}
-	rb_ary_store(f->state, 0, rb_float_new(ic1));
-	rb_ary_store(f->state, 1, rb_float_new(ic2));
+	rb_ary_store(f->state, 0, rb_float_new(f->ic1));
+	rb_ary_store(f->state, 1, rb_float_new(f->ic2));
+	rb_ary_store(f->state, 2, rb_float_new((double)f->fk));
 
 	if (n > 0) {
 		rb_ivar_set(f->filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
@@ -119,6 +126,7 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 	for (size_t i = 0; i < n; i++) {
 		mb_svf_coefficients(&svf, f.type, mb_plan_param_at(fc, i), mb_plan_param_at(q, i), mb_plan_param_at(g, i), f.pi_over_rate, f.fc_max);
 		d[i] = mb_svf_step(&svf, a[i], &f.ic1, &f.ic2);
+		pf_svf_tick(&f, &f.ic1, &f.ic2);
 	}
 
 	pf_svf_write(&f, fc, q, g, remember_gain, n);
@@ -246,6 +254,7 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 				double *x = X + k * L;
 				for (size_t l = 0; l < L; l++) {
 					x[l] = mb_svf_step_with(B1[l], B2[l], B3[l], N0[l], N1[l], N2[l], x[l], &IC1[l], &IC2[l]);
+					pf_svf_tick(&f[l], &IC1[l], &IC2[l]);
 				}
 			}
 		} else {
@@ -253,6 +262,7 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 				for (size_t l = 0; l < L; l++) {
 					size_t j = k * L + l;
 					X[j] = mb_svf_step_with(A1[j], A2[j], A3[j], M0[j], M1[j], M2[j], X[j], &IC1[l], &IC2[l]);
+					pf_svf_tick(&f[l], &IC1[l], &IC2[l]);
 				}
 			}
 		}
@@ -284,6 +294,7 @@ struct pf_fp_lane {
 	struct mb_fp_args args;
 	_Bool diode;
 	double st[4];
+	long fk; // samples since the last flush grid point (see MB_FLUSH_GRID)
 };
 
 static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
@@ -291,8 +302,8 @@ static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
 	f->filter = filter;
 	f->state = rb_ivar_get(filter, id_state);
 	Check_Type(f->state, T_ARRAY);
-	if (RARRAY_LEN(f->state) != 4) {
-		rb_raise(rb_eArgError, "Four-pole state must have four elements");
+	if (RARRAY_LEN(f->state) != 4 && RARRAY_LEN(f->state) != 5) {
+		rb_raise(rb_eArgError, "Four-pole state must have four elements (five with the flush grid count)");
 	}
 	double rate = NUM2DBL(rb_ivar_get(filter, id_sample_rate));
 	if (!(rate > 0) || !isfinite(rate)) {
@@ -316,16 +327,17 @@ static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
 	for (int j = 0; j < 4; j++) {
 		f->st[j] = mb_finite_entry(f->state, j);
 	}
+	f->fk = mb_flush_count_read(f->state, 4);
 }
 
-// Flushes and stores the state, and remembers the last parameters
-// (FourPole#remember).
+// Stores the state (flushed on the grid while running) with its flush grid
+// count, and remembers the last parameters (FourPole#remember).
 static void pf_fp_write(struct pf_fp_lane *f, const struct mb_plan_param *fc, const struct mb_plan_param *res, size_t n)
 {
-	mb_fp_flush(f->st);
 	for (int j = 0; j < 4; j++) {
 		rb_ary_store(f->state, j, rb_float_new(f->st[j]));
 	}
+	rb_ary_store(f->state, 4, rb_float_new((double)f->fk));
 
 	if (n > 0) {
 		rb_ivar_set(f->filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
@@ -344,9 +356,9 @@ void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc,
 	struct mb_signal res_sig = { .scalar = res->scalar, .ptr = res->p, .step = 1 };
 
 	if (f.diode) {
-		mb_diode_ladder_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st);
+		mb_diode_ladder_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st, &f.fk);
 	} else {
-		mb_four_pole_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st);
+		mb_four_pole_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st, &f.fk);
 	}
 
 	pf_fp_write(&f, fc, res, n);
@@ -424,6 +436,7 @@ void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, 
 					size_t l = fp_lane[j];
 					const struct mb_fp_coef *c = steady[j] ? &cc[j].c : &FC[k * nfp + j];
 					X[k * nfp + j] = mb_fp_step(&f[l].args, c, inv_drive[j], driven[j], X[k * nfp + j], f[l].st);
+					mb_fp_flush_tick(&f[l].fk, f[l].st);
 				}
 			}
 			for (size_t j = 0; j < nfp; j++) {
@@ -471,6 +484,7 @@ void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, 
 					size_t l = dl_lane[j];
 					const struct mb_dl_coef *c = steady[j] ? &cc[j].c : &DC[k * ndl + j];
 					X[k * ndl + j] = mb_dl_step(&f[l].args, c, driven[j], X[k * ndl + j], f[l].st);
+					mb_fp_flush_tick(&f[l].fk, f[l].st);
 				}
 			}
 			for (size_t j = 0; j < ndl; j++) {

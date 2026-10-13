@@ -305,6 +305,33 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  # Filters flush states below 1e-30 on an 800-sample grid of their own
+  # time (MB_FLUSH_GRID; fixes-7: after each buffer before, so tails below
+  # 1e-30 differed by buffer size)
+  describe 'filter state flushing' do
+    tiny = -> { MB::Sound::GraphNode::Constant.new(1e-31, sample_rate: 48000) }
+    {
+      'SVF' => -> { tiny.().filter(:lowpass, cutoff: 500, quality: 0.7) },
+      'four-pole' => -> { tiny.().lp4(500, resonance: 0.3) },
+      'diode ladder' => -> { tiny.().diode(500, resonance: 0.3) },
+      'formant' => -> { tiny.().formant(:a, :o, morph: 0.5) },
+      # (sustain: false: the sustain shelf's pitch tracking still differs in
+      # the last bit by buffer size, fixes-7 found)
+      'SVF in a feedback loop' => -> { tiny.().feedback(sustain: false) { |fb, input| input + fb.delay(30.samples).filter(:lowpass, cutoff: 3000, quality: 0.7) * 0.5 } },
+    }.each do |name, make|
+      [false, true].each do |planned|
+        it "gives the same tiny tails at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
+          build = -> {
+            g = make.() * 1e30
+            MB::Sound::Plan.install(g) if planned
+            g
+          }
+          expect_invariant(build, seconds: 0.1, sizes: [[367, 368], [1], [1031]])
+        end
+      end
+    end
+  end
+
   describe 'Synth idle lane skipping' do
     clip = -> { MB::Sound.seq(MB::Sound::C4.n16, MB::Sound::Rest.n4, MB::Sound::E4.n16, MB::Sound::Rest.n2, MB::Sound::G4.n8.d, MB::Sound::Rest.n4).loop }
     patches = {
@@ -345,8 +372,9 @@ RSpec.describe 'Buffer size invariance' do
       MB::Sound.bpm(old)
     end
 
-    # Lanes become free for new notes by their quiet state over whole grid
-    # cells (fixes-7): measured per buffer, a released lane was free at
+    # With exact_lanes (Synth#exact_lanes?; renders and takes can ask for
+    # it), lanes become free for new notes by their quiet state over whole
+    # grid cells (fixes-7): measured per buffer, a released lane was free at
     # 367/368 but not at 800 when a note came, so the note went to another
     # lane, whose free-running sine had another phase (a persona take's
     # keys, +1.2 dB)
@@ -358,7 +386,7 @@ RSpec.describe 'Buffer size invariance' do
         ).humanize(1.n128).loop
         make = -> {
           MB::Sound.seed(3)
-          notes.synth(voices: 3, retrigger: retrigger) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+          notes.synth(voices: 3, retrigger: retrigger, exact_lanes: true) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
         }
         expect_invariant(make, seconds: 3, sizes: [[367, 368], [1], [1031], [64]])
       end
@@ -372,6 +400,7 @@ RSpec.describe 'Buffer size invariance' do
       results = [[800], [367, 368], [1031]].map { |sizes|
         out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
         s = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        s.exact_lanes = true
         MB::Sound.seed(3)
         syn = clip.call.synth(voices: 2, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
         pieces = 0
@@ -384,12 +413,24 @@ RSpec.describe 'Buffer size invariance' do
           i += 1
         end
         s.close
+        expect(syn.exact_lanes?).to eq(true)
         expect(pieces).to eq(i - 17) if sizes == [800] # one piece per buffer once it started (frame 13714, in buffer 17)
         data.reduce(:concatenate)
       }
       n = results.map(&:length).min
       results.each { |r| expect(r[0...n]).to eq(results[0][0...n]) }
       expect(results[0].abs.max).to be > 0.1
+    ensure
+      MB::Sound.rewind
+    end
+
+    it 'reads whole buffers without exact_lanes (the default) at any buffer size' do
+      syn = clip.call.synth(voices: 2) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
+      expect(syn.exact_lanes?).to eq(false)
+      pieces = 0
+      syn.define_singleton_method(:sample_lanes_piece) { |n| pieces += 1; super(n) }
+      100.times { syn.sample(367) }
+      expect(pieces).to eq(100)
     ensure
       MB::Sound.rewind
     end

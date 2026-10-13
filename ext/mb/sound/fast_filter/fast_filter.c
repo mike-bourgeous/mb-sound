@@ -104,8 +104,8 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	}
 
 	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 4) {
-		rb_raise(rb_eArgError, "Four-pole state must have four elements");
+	if (RARRAY_LEN(state) != 4 && RARRAY_LEN(state) != 5) {
+		rb_raise(rb_eArgError, "Four-pole state must have four elements (five with the flush grid count)");
 	}
 	Check_Type(mix_v, T_ARRAY);
 	if (RARRAY_LEN(mix_v) != 5) {
@@ -137,11 +137,12 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = 0,
 	};
 	double st[4] = { s0, s1, s2, s3 };
-	mb_four_pole_run(&args, data, data, length, &fc_in, &res_in, st);
-	mb_fp_flush(st);
+	long fk = mb_flush_count_read(state, 4);
+	mb_four_pole_run(&args, data, data, length, &fc_in, &res_in, st, &fk);
 	for (int j = 0; j < 4; j++) {
 		rb_ary_store(state, j, rb_float_new(st[j]));
 	}
+	rb_ary_store(state, 4, rb_float_new((double)fk));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -193,7 +194,8 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
  * Filters +buffer+ (SFloat; modified in place if marked inplace).
  * +cutoff+ (Hz), +quality+, and +gain+ (linear; used by bandpass, peak,
  * and shelves) are Numerics or NArrays of the buffer's length (read as
- * float32).  +state+ is [ic1, ic2], updated.
+ * float32).  +state+ is [ic1, ic2] or [ic1, ic2, flush grid count] (see
+ * MB_FLUSH_GRID in mb_svf.h), updated (with the count).
  */
 static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VALUE gain, VALUE type_v, VALUE state, VALUE rate_v)
 {
@@ -206,11 +208,12 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
 	}
 	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 2) {
-		rb_raise(rb_eArgError, "SVF state must have two elements");
+	if (RARRAY_LEN(state) != 2 && RARRAY_LEN(state) != 3) {
+		rb_raise(rb_eArgError, "SVF state must have two elements (three with the flush grid count)");
 	}
 	double ic1 = mb_finite_entry(state, 0);
 	double ic2 = mb_finite_entry(state, 1);
+	long fk = mb_flush_count_read(state, 2);
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -235,16 +238,16 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 	for (size_t i = 0; i < length; i++) {
 		mb_svf_coefficients(&svf, type, mb_signal_at(&fc_in, i), mb_signal_at(&q_in, i), mb_signal_at(&g_in, i), pi_over_rate, fc_max);
 		data[i] = mb_svf_step(&svf, data[i], &ic1, &ic2);
+		if (++fk >= MB_FLUSH_GRID) {
+			fk = 0;
+			mb_flush_value(&ic1);
+			mb_flush_value(&ic2);
+		}
 	}
 
-	if (!isfinite(ic1) || fabs(ic1) < FP_FLUSH) {
-		ic1 = 0.0;
-	}
-	if (!isfinite(ic2) || fabs(ic2) < FP_FLUSH) {
-		ic2 = 0.0;
-	}
 	rb_ary_store(state, 0, rb_float_new(ic1));
 	rb_ary_store(state, 1, rb_float_new(ic2));
+	rb_ary_store(state, 2, rb_float_new((double)fk));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -294,10 +297,12 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 	if (table_length == 0 || table_length % (3 * FORMANT_SECTIONS) != 0) {
 		rb_raise(rb_eArgError, "The formant tables must have 3 * %d values per vowel", FORMANT_SECTIONS);
 	}
-	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 || RNARRAY_SHAPE(state)[0] != 2 * FORMANT_SECTIONS ||
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 ||
+			(RNARRAY_SHAPE(state)[0] != 2 * FORMANT_SECTIONS && RNARRAY_SHAPE(state)[0] != 2 * FORMANT_SECTIONS + 1) ||
 			!RTEST(nary_check_contiguous(state))) {
-		rb_raise(rb_eArgError, "The formant state must be a contiguous DFloat of %d values", 2 * FORMANT_SECTIONS);
+		rb_raise(rb_eArgError, "The formant state must be a contiguous DFloat of %d values (%d with the flush grid count)", 2 * FORMANT_SECTIONS, 2 * FORMANT_SECTIONS + 1);
 	}
+	_Bool counted = RNARRAY_SHAPE(state)[0] == 2 * FORMANT_SECTIONS + 1;
 	rb_check_frozen(out);
 	rb_check_frozen(state);
 
@@ -330,6 +335,13 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 	struct mb_svf svf[FORMANT_SECTIONS];
 	for (int k = 0; k < FORMANT_SECTIONS; k++) {
 		mb_svf_init(&svf[k]);
+	}
+
+	// Samples since the last flush grid point (see MB_FLUSH_GRID in mb_svf.h;
+	// a state without the count flushes per call, as before)
+	long fk = 0;
+	if (counted && st[2 * FORMANT_SECTIONS] >= 0 && st[2 * FORMANT_SECTIONS] < MB_FLUSH_GRID) {
+		fk = (long)st[2 * FORMANT_SECTIONS];
 	}
 
 	double last_m = NAN, last_s = NAN, last_w = NAN;
@@ -385,11 +397,20 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 			sum += mb_svf_step(&svf[k], xi, &st[2 * k], &st[2 * k + 1]);
 		}
 		op[i] = (float)sum;
+
+		if (counted && ++fk >= MB_FLUSH_GRID) {
+			fk = 0;
+			for (int k = 0; k < 2 * FORMANT_SECTIONS; k++) {
+				mb_flush_value(&st[k]);
+			}
+		}
 	}
 
-	for (int k = 0; k < 2 * FORMANT_SECTIONS; k++) {
-		if (!isfinite(st[k]) || fabs(st[k]) < FP_FLUSH) {
-			st[k] = 0.0;
+	if (counted) {
+		st[2 * FORMANT_SECTIONS] = (double)fk;
+	} else {
+		for (int k = 0; k < 2 * FORMANT_SECTIONS; k++) {
+			mb_flush_value(&st[k]);
 		}
 	}
 
@@ -501,8 +522,8 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	}
 
 	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 4) {
-		rb_raise(rb_eArgError, "Diode ladder state must have four elements");
+	if (RARRAY_LEN(state) != 4 && RARRAY_LEN(state) != 5) {
+		rb_raise(rb_eArgError, "Diode ladder state must have four elements (five with the flush grid count)");
 	}
 
 	double s0 = mb_finite_entry(state, 0);
@@ -525,11 +546,12 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = normalize,
 	};
 	double st[4] = { s0, s1, s2, s3 };
-	mb_diode_ladder_run(&args, data, data, length, &fc_in, &res_in, st);
-	mb_fp_flush(st);
+	long fk = mb_flush_count_read(state, 4);
+	mb_diode_ladder_run(&args, data, data, length, &fc_in, &res_in, st, &fk);
 	for (int j = 0; j < 4; j++) {
 		rb_ary_store(state, j, rb_float_new(st[j]));
 	}
+	rb_ary_store(state, 4, rb_float_new((double)fk));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);

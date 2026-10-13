@@ -374,11 +374,12 @@ module MB
           raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
-          raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && state.length == 4
+          raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
           raise ArgumentError, 'Four-pole mix must have five elements' unless mix.is_a?(Array) && mix.length == 5
 
           m0, m1, m2, m3, m4 = mix.map(&:to_f)
-          s0, s1, s2, s3 = state.map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          s0, s1, s2, s3 = state.first(4).map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          fk = SVF.flush_count(state, 4) # (the flush grid; see SVF::FLUSH)
 
           data = Numo::SFloat.cast(buffer)
           raise ArgumentError, "Only 1D NArrays may be processed (got #{data.ndim} dimensions)" unless data.ndim == 1
@@ -486,12 +487,18 @@ module MB
             s3 = y4 + v
 
             out[i] = m0 * u + m1 * y1 + m2 * y2 + m3 * y3 + m4 * y4
+
+            if (fk += 1) >= SVF::FLUSH_GRID
+              fk = 0
+              s0 = SVF.flush_value(s0)
+              s1 = SVF.flush_value(s1)
+              s2 = SVF.flush_value(s2)
+              s3 = SVF.flush_value(s3)
+            end
           end
 
-          [s0, s1, s2, s3].each_with_index do |s, j|
-            s = 0.0 if !s.finite? || s.abs < FLUSH
-            state[j] = s
-          end
+          [s0, s1, s2, s3].each_with_index { |s, j| state[j] = s }
+          state[4] = fk.to_f
 
           out
         end
@@ -511,9 +518,10 @@ module MB
           raise ArgumentError, 'Diode ladder drive mode must be 0 (input) or 2 (feedback)' unless [0, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
           raise ArgumentError, 'Normalize must be 0 (off) or 1 (on)' unless [0, 1].include?(normalize)
-          raise ArgumentError, 'Diode ladder state must have four elements' unless state.is_a?(Array) && state.length == 4
+          raise ArgumentError, 'Diode ladder state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
 
-          s0, s1, s2, s3 = state.map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          s0, s1, s2, s3 = state.first(4).map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          fk = SVF.flush_count(state, 4) # (the flush grid; see SVF::FLUSH)
 
           data = Numo::SFloat.cast(buffer)
           raise ArgumentError, "Only 1D NArrays may be processed (got #{data.ndim} dimensions)" unless data.ndim == 1
@@ -627,12 +635,18 @@ module MB
             s3 = 2.0 * y4 - s3
 
             out[i] = y4
+
+            if (fk += 1) >= SVF::FLUSH_GRID
+              fk = 0
+              s0 = SVF.flush_value(s0)
+              s1 = SVF.flush_value(s1)
+              s2 = SVF.flush_value(s2)
+              s3 = SVF.flush_value(s3)
+            end
           end
 
-          [s0, s1, s2, s3].each_with_index do |s, j|
-            s = 0.0 if !s.finite? || s.abs < FLUSH
-            state[j] = s
-          end
+          [s0, s1, s2, s3].each_with_index { |s, j| state[j] = s }
+          state[4] = fk.to_f
 
           out
         end

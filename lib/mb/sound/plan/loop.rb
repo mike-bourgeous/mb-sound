@@ -328,7 +328,8 @@ module MB
           # this many samples (LOOP_SINC_BLEND in fast_loop.c).
           SINC_BLEND = 4.0
 
-          # SVF states below this flush to zero after each sample.
+          # SVF states below this flush to zero on the flush grid (see
+          # Filter::SVF::FLUSH).
           SVF_FLUSH = 1e-30
 
           class << self

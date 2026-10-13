@@ -160,4 +160,39 @@ static inline double mb_svf_step(const struct mb_svf *s, double x, double *ic1p,
 	return mb_svf_step_with(s->a1, s->a2, s->a3, s->m0, s->m1, s->m2, x, ic1p, ic2p);
 }
 
+// Filters (SVF, four-pole, diode ladder, formant) flush states below
+// MB_FLUSH_MIN, or not finite, to zero on a grid of MB_FLUSH_GRID samples of
+// the filter's own time (fixes-7, 2026-10-13: at the end of each buffer
+// before, so tails below 1e-30 differed by buffer size), right after the
+// grid point's last sample.  For a run of 800-sample buffers starting with
+// the filter this flushes where the buffers ended before.  Each state
+// Array keeps the samples since the last grid point after the states (a
+// Float; absent in an old state: 0).
+#define MB_FLUSH_GRID 800
+#define MB_FLUSH_MIN 1e-30
+
+// Flushes *x (see MB_FLUSH_GRID).
+static inline void mb_flush_value(double *x)
+{
+	if (!isfinite(*x) || fabs(*x) < MB_FLUSH_MIN) {
+		*x = 0.0;
+	}
+}
+
+// The samples since the last flush grid point, from entry +idx+ of state
+// Array +state+ (0 if absent or out of range).
+static inline long mb_flush_count_read(VALUE state, long idx)
+{
+	if (RARRAY_LEN(state) > idx) {
+		VALUE v = rb_ary_entry(state, idx);
+		if (RB_FLOAT_TYPE_P(v)) {
+			double k = RFLOAT_VALUE(v);
+			if (k >= 0 && k < MB_FLUSH_GRID) {
+				return (long)k;
+			}
+		}
+	}
+	return 0;
+}
+
 #endif
