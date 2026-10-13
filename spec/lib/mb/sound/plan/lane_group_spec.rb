@@ -295,7 +295,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
         }))
         s = MB::Sound.synth(notes, voices: 2, skip_idle: false) { |v|
           band = MB::Sound.noise.filter(:lowpass, cutoff: 3000, quality: 1.5)
-          band * 0.5
+          _unread = band * 0.5 # never read
           band * v.env(0.1, 0.2, 0.5, 0.1, gm: false)
         }
         [render(s, [800] * 80), s]

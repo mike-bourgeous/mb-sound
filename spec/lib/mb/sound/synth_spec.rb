@@ -847,8 +847,8 @@ RSpec.describe(MB::Sound::Synth) do
           band = MB::Sound.noise.filter(:bandpass, cutoff: 3000, quality: 1.5)
           env = v.amp_env(0.002, 0.02, 0.5, 0.02)
           if extra
-            band * 0.5
-            env * 0.5
+            _unread = band * 0.5 # never read
+            _unread_env = env * 0.5
           end
           band * env
         }
