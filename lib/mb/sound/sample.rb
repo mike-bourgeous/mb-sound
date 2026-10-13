@@ -135,6 +135,16 @@ module MB
           new(table.frames, root: root, loop: table.loop, sample_rate: table.sample_rate, name: table.name, **options)
         end
 
+        # A level spacing (see #mips) from its tag.
+        def saved_mips(text)
+          case text
+          when Numeric then text.to_f
+          when 'false' then false
+          when /\A[0-9.]+\z/ then Float(text)
+          else text.to_sym
+          end
+        end
+
         # The settings read back from tags written by #save.
         def saved_tags(tags)
           t = tags.each_with_object({}) { |(k, v), h|
@@ -155,6 +165,8 @@ module MB
           out[:tune] = Float(t[:tune]) if t[:tune]
           out[:level] = Float(t[:level]) if t[:level]
           out[:bpm] = Float(t[:bpm]) if t[:bpm]
+          out[:interpolation] = t[:interpolation].to_sym if t[:interpolation]
+          out[:mips] = saved_mips(t[:mips]) if t[:mips]
           out[:scale] = Float(t[:scale]) if t[:scale]
           out
         end
@@ -197,6 +209,21 @@ module MB
       # A name for listings.
       attr_reader :name
 
+      # How voices read this sample unless told otherwise (see #read_as):
+      # an interpolation (Wavetable::INTERPOLATIONS; :none is the classic
+      # drop-sample read) and a level spacing (Wavetable mips; false for no
+      # band-limited levels), each nil for the voice's own (:optimal and
+      # band-limited).  The lofi presets read :none without levels.
+      attr_reader :interpolation, :mips
+
+      # Named read styles for #read_as: the classic drop-sample read with no
+      # band-limited levels (aliasing as it pitches up, like the hardware),
+      # or the voice's own clean read.
+      READ_STYLES = {
+        drop: { interpolation: :none, mips: false }.freeze,
+        clean: { interpolation: nil, mips: nil }.freeze,
+      }.freeze
+
       # How this sample was made from another: [parent, method, args,
       # kwargs], or nil for a sample made from audio.
       attr_reader :lineage
@@ -207,7 +234,7 @@ module MB
       # +loop_mode+ one of LOOP_MODES (:forward with a loop, else
       # :one_shot).
       def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
-                     bpm: nil, name: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil)
+                     bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil)
         @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
         @start = Integer(start || 0)
         @stop = Integer(stop || @audio.length)
@@ -230,6 +257,11 @@ module MB
         @tune = tune.to_f
         @level = level.to_f
         @name = name
+        @interpolation = interpolation&.to_sym
+        if @interpolation && !Wavetable::INTERPOLATIONS.key?(@interpolation)
+          raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (#{Wavetable::INTERPOLATIONS.keys.join(', ')}, or nil for the voice's)"
+        end
+        @mips = mips.is_a?(String) ? mips.to_sym : mips
         @lineage = lineage
         @file = file
         freeze
@@ -339,7 +371,7 @@ module MB
 
       # A copy with +changes+ (any of #initialize's keywords: root, loop,
       # loop_mode, start, stop, reverse, fade_in, fade_out, tune, level,
-      # bpm, name) sharing the audio.
+      # bpm, name, interpolation, mips) sharing the audio.
       def with(**changes)
         changes = { lineage: [self, :with, [], changes.dup].freeze, **changes } unless changes.key?(:lineage)
         mode = @loop_mode
@@ -354,7 +386,7 @@ module MB
         kw = {
           root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
           reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
-          audio: @audio, lineage: @lineage,
+          interpolation: @interpolation, mips: @mips, audio: @audio, lineage: @lineage,
         }
         Sample.new(nil, **kw.merge(changes))
       end
@@ -507,23 +539,60 @@ module MB
 
       # The sample through a classic sampler's converters (see Sample::Lofi):
       # a preset (:s950, :sp1200, :mpc60) or +rate+ (Hz), +bits+, and an
-      # output +filter+ (Hz, or nil).
-      def lofi(preset = nil, **options)
+      # output +filter+ (Hz, or nil).  The presets also read drop-sample
+      # with no band-limited levels, like the hardware (aliasing as notes
+      # pitch up; maintainer's pick for dirty lofi, 2026-10-13); +read+
+      # (:clean, :drop, or a Hash as for #read_as) says otherwise.
+      #
+      #     brk = rec.lofi(:mpc60).slices(16)              # dirty: drop-sample reads
+      #     pad = rec.lofi(:s950, read: :clean)            # the converter, read clean
+      def lofi(preset = nil, read: nil, **options)
         settings = Lofi.settings(preset, **options)
         args = preset ? [preset] : []
-        edit(:lofi, args, options) { |d| Lofi.process(d, sample_rate: sample_rate, **settings) }
+        style = read.nil? && preset ? :drop : read
+        kwargs = read.nil? ? options : options.merge(read: read)
+        edit(:lofi, args, kwargs, read: read_settings(style)) { |d| Lofi.process(d, sample_rate: sample_rate, **settings) }
+      end
+
+      # The same sample read by voices as +style+ says unless the voice is
+      # told otherwise: :drop (interpolation :none, no band-limited levels:
+      # the classic sampler read, aliasing as it pitches up) or :clean (the
+      # voice's own read: :optimal, band-limited), with +interpolation+
+      # (Wavetable::INTERPOLATIONS, or nil) and +mips+ (a level spacing,
+      # false, or nil) changed.  A view (no new audio).
+      #
+      #     rec.lofi(:sp1200).read_as(:clean)            # the converter without the aliasing read
+      #     kick.read_as(:drop)                          # a clean sample read like an S950
+      #     pad.read_as(interpolation: :cubic, mips: false)
+      def read_as(style = nil, **changes)
+        bad = changes.keys - [:interpolation, :mips]
+        raise ArgumentError, "read_as takes a style (#{READ_STYLES.keys.join(', ')}) and interpolation:/mips: (got #{bad.inspect})" unless bad.empty?
+        view(:read_as, style.nil? ? [] : [style], changes, **read_settings(style).merge(changes))
       end
 
       # The sample stretched to +ratio+ times its length at the same pitch,
       # S950-style cyclic timestretch: cycles of +cycle+ (25 ms) taken from
       # the input in step and repeated or skipped, with +crossfade+ (0) of
       # overlap; short cycles buzz at 1 / cycle (metallic), long ones
-      # stutter.
-      def stretch(ratio, cycle: 25.ms, crossfade: 0)
+      # stutter.  +fit+ :auto lets each cycle fit the sound (Lofi::FITS):
+      # its length snapped to the local period near +cycle+ (by
+      # autocorrelation), each splice where the sound matches what would
+      # have followed (the S950's "cycle fudging"), cut at rising zero
+      # crossings, so tones stretch without the buzz and breaks with
+      # smaller seams.  Every channel cuts in the same places.
+      #
+      #     pad.stretch(2, cycle: 30.ms)               # the plain cyclic stretch
+      #     pad.stretch(2, cycle: 30.ms, fit: :auto)   # cycles fitted to the sound
+      def stretch(ratio, cycle: 25.ms, crossfade: 0, fit: nil)
+        fit = fit&.to_sym
+        raise ArgumentError, "Unknown stretch fit #{fit.inspect} (#{Lofi::FITS.map(&:inspect).join(', ')})" unless Lofi::FITS.include?(fit)
         c = position(cycle).round
         x = position(crossfade).round
-        edit(:stretch, [ratio], { cycle: cycle, crossfade: crossfade }.reject { |k, v| k == :cycle ? v == 25.ms : v == 0 }) { |d|
-          Lofi.stretch(d, ratio.to_f, c, x)
+        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v.nil? : v == 0) }
+        guide = nil
+        edit(:stretch, [ratio], kw) { |d|
+          guide ||= fit && mono_mix
+          Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end
 
@@ -549,7 +618,7 @@ module MB
       def tags
         t = {
           root: @root, start: @start, stop: @stop, loop_mode: @loop_mode, reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out,
-          tune: @tune, level: @level, bpm: @bpm,
+          tune: @tune, level: @level, bpm: @bpm, interpolation: @interpolation, mips: @mips.nil? ? nil : @mips.to_s,
         }
         t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
         t.compact.to_h { |k, v| [:"#{TAG_PREFIX}#{k}", v.is_a?(Numeric) || v.is_a?(String) ? v : v.to_s] }
@@ -573,6 +642,7 @@ module MB
         parts << "root #{Sample.note_name(@root)}"
         parts << "loop #{@loop_mode}" if @loop_points
         parts << 'reversed' if @reversed
+        parts << read_style_name if @interpolation || !@mips.nil?
         parts << "#{MB::M.sigfigs(@tune, 3)} st" if @tune != 0
         "#{@name || 'Sample'} (#{parts.join(', ')})"
       end
@@ -599,13 +669,13 @@ module MB
       # A new sample from the region's audio in stored order, edited by the
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
-      # the length).
-      def edit(method, args, kwargs = {}, channels: nil, &block)
-        key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, method, args, kwargs]
-        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, &block) }
+      # the length) and read as +read+ says (see #read_as).
+      def edit(method, args, kwargs = {}, channels: nil, read: { interpolation: @interpolation, mips: @mips }, &block)
+        key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips, method, args, kwargs]
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, read: read, &block) }
       end
 
-      def edit_uncached(method, args, kwargs, channels: nil)
+      def edit_uncached(method, args, kwargs, channels: nil, read: { interpolation: @interpolation, mips: @mips })
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
         out = channels || src.map { |d| Numo::SFloat.cast(yield(d)) }
         len = out[0].length
@@ -619,8 +689,31 @@ module MB
         Sample.new(
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name, sample_rate: sample_rate,
-          lineage: [self, method, args, kwargs].freeze
+          interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze
         )
+      end
+
+      # The region's channels mixed (stored order, before #level), as a
+      # DFloat.
+      def mono_mix
+        chans = Array.new(channel_count) { |c| Numo::DFloat.cast(@audio.channels[c][@start...@stop]) }
+        chans.sum / channel_count
+      end
+
+      # The read settings ({ interpolation:, mips: }) of +style+ (a
+      # READ_STYLES name, a Hash of them, or nil for this sample's own).
+      def read_settings(style)
+        case style
+        when nil then { interpolation: @interpolation, mips: @mips }
+        when Hash then { interpolation: @interpolation, mips: @mips }.merge(style.slice(:interpolation, :mips))
+        else READ_STYLES.fetch(style.to_sym) { raise ArgumentError, "Unknown read style #{style.inspect} (#{READ_STYLES.keys.join(', ')})" }
+        end
+      end
+
+      # :drop, :clean, or the settings, for #to_s.
+      def read_style_name
+        style = READ_STYLES.key({ interpolation: @interpolation, mips: @mips })
+        style ? "#{style} read" : "read #{@interpolation || 'default'}, mips #{@mips.inspect}"
       end
 
       # The loop clipped to a new region (nil if it falls outside).

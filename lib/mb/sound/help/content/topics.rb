@@ -183,6 +183,16 @@ module MB
         C4)` plays the last slice chromatically above C4.  Play with
         `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
         synth, `sfz(path)` instruments, or `sample.node`.
+
+        Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
+        that sits in a mix), `:s950` darker (31.25 kHz, the jungle
+        classic), `:sp1200` the dirtiest (26 kHz, no filters: crunchy hats);
+        a whole song often wants none.  The presets read drop-sample with
+        no band-limited levels, aliasing as hits pitch up like the hardware
+        (`.lofi(:mpc60, read: :clean)` or `.read_as(:clean)` for the clean
+        read).  `.stretch(2, cycle: 30.ms)` is the S950's cyclic stretch
+        (a buzz at 1 / cycle); `fit: :auto` fits each cycle to the sound
+        (whole periods, matching splices) for smoother tones.
       TEXT
       commands :bounce, :capture_audio, :chop, :sampler, :sfz
       dsl :bounce

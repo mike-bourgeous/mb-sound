@@ -28,7 +28,9 @@
  *   hits' per-note pitch), read at note-on.
  *
  * +config+ is [a4 Hz, declick samples, split key, interpolation code, sinc
- * kernel, transpose semitones].  With a split key (-1 for none), notes from
+ * kernel, transpose semitones].  Each region's REGION_INTERP column is its
+ * own interpolation code (a lofi Sample's drop-sample read), or -1 for
+ * config's; the sinc kernel must be given if any region reads with sinc.  With a split key (-1 for none), notes from
  * it up play the region the voice last played below it, chromatically
  * from the split key (a sampler's split keyboard: slices below, the last
  * slice pitched above).
@@ -85,6 +87,7 @@ enum {
 	REGION_VELTRACK,
 	REGION_RATE,
 	REGION_OFFSET,
+	REGION_INTERP, // the region's interpolation code, or -1 for config's
 	SMP_REGION_COLS
 };
 
@@ -205,7 +208,11 @@ static inline double smp_step(struct smp_ctx *c, struct smp_voice *v, double sp)
 	double m = fabs(sp);
 	wt_reselect(&c->tables[v->slot], m, 0, &c->sels[v->slot]);
 	double re, im;
-	wt_value_dispatch(&c->tables[v->slot], p, &c->sels[v->slot], c->mode, &c->ks, &re, &im);
+	int mode = (int)r[REGION_INTERP];
+	if (mode < 0) {
+		mode = c->mode;
+	}
+	wt_value_dispatch(&c->tables[v->slot], p, &c->sels[v->slot], mode, &c->ks, &re, &im);
 
 	double g = v->gain;
 	double fi = r[REGION_FADE_IN];
@@ -393,6 +400,29 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	wt_read_table(rb_ary_entry(specs, 0), &probe);
 	memset(&c.ks, 0, sizeof(c.ks));
 	c.mode = wt_read_interp(rb_ary_entry(config, 3), rb_ary_entry(config, 4), &probe, &c.ks);
+
+	// Regions' own interpolation codes (Sample#read_as); a sinc region needs
+	// config's sinc kernel even when config's own mode isn't sinc
+	_Bool need_sinc = 0;
+	for (long k = 0; k < c.nregions; k++) {
+		double m = c.regions[k * SMP_REGION_COLS + REGION_INTERP];
+		if (!(m >= -1 && m <= WT_SINC) || m != floor(m)) {
+			rb_raise(rb_eArgError, "Sampler region %ld has a bad interpolation code", k);
+		}
+		if (m == WT_SINC) {
+			need_sinc = 1;
+		}
+	}
+	if (need_sinc && c.mode != WT_SINC) {
+		VALUE sinc = rb_ary_entry(config, 4);
+		if (NIL_P(sinc)) {
+			rb_raise(rb_eArgError, "A sampler region reads with sinc interpolation, so config needs the sinc kernel");
+		}
+		wt_read_sinc(sinc, &c.ks);
+		if (c.ks.half + 4 > probe.guard) {
+			rb_raise(rb_eArgError, "The sinc kernel is too long for the guard samples");
+		}
+	}
 
 	double a4 = NUM2DBL(rb_ary_entry(config, 0));
 	long declick = NUM2LONG(rb_ary_entry(config, 1));
