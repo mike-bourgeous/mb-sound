@@ -27,6 +27,13 @@ RSpec.describe(MB::Sound::Session) do
   end
 
   describe '#add' do
+    it 'describes a player limited with #until (or rung down) by the graph it limits' do
+      session.add(220.hz.saw.lp4(800).until(2.bars), name: :pad)
+      session.add(220.hz.saw.ringdown.until(1.5), name: :saw)
+      expect(session.players[:pad]).to match(%r{\Alp4/id=\d+ until 2 bars -- lp4\(800})
+      expect(session.players[:saw]).to match(%r{\ATone/id=\d+ ringdown until 1.5s -- ramp})
+    end
+
     it "sets graphs at another rate to the session's rate" do
       tone = 1000.hz.ramp.at_rate(44100)
       session.add(tone)

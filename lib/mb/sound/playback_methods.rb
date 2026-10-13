@@ -834,6 +834,20 @@ module MB
 
       # Returns a String with info to display when playing the given
       # +file_tone_data+.
+      # The description of a graph for #playback_info: its last node's #to_s,
+      # looking through wrapper nodes (TimeLimit, Ringdown; anything with
+      # #wrapped_description) and Tee branches to the node they wrap, with
+      # the wrapper's label after its name (e.g. "lp4/id=12 until 2 bars --
+      # lp4(800.0 Hz, r=0.0)").
+      def graph_description(node)
+        node = node.tee.original_source while node.is_a?(GraphNode::Tee::Branch) && node.tee.original_source
+        return node.to_s unless node.respond_to?(:wrapped_description)
+
+        inner, label = node.wrapped_description
+        head, sep, rest = graph_description(inner).partition(' -- ')
+        "#{head} #{label}#{sep}#{rest}"
+      end
+
       def playback_info(file_tone_data)
         case file_tone_data
         when Array
@@ -841,7 +855,7 @@ module MB
 
         when GraphNode
           filename = file_tone_data.graph.detect { |n| n.respond_to?(:filename) }&.filename
-          filename || file_tone_data.to_s
+          filename || graph_description(file_tone_data)
 
         when String
           "\e[1m#{file_tone_data}\e[22m: #{MB::U.highlight(FFMPEGInput.parse_info(file_tone_data).dig(:format, :tags))}"
