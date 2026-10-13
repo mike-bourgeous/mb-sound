@@ -135,9 +135,14 @@ module MB
 
         private
 
+        # The kernel's config, made again only when the tuning's A4 changes.
         def config
+          a4 = MB::Sound.tuning.frequency_of(69).to_f
+          return @config if @config && @config[0] == a4
+
           sinc = @interpolation == :sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
-          [MB::Sound.tuning.frequency_of(69).to_f, @declick, @instrument.regions.length, MB::Sound::Wavetable::INTERPOLATIONS.fetch(@interpolation) { raise ArgumentError, "Unknown interpolation #{@interpolation.inspect}" }, sinc, @transpose]
+          code = MB::Sound::Wavetable::INTERPOLATIONS.fetch(@interpolation) { raise ArgumentError, "Unknown interpolation #{@interpolation.inspect}" }
+          @config = [a4, @declick, @instrument.regions.length, code, sinc, @transpose].freeze
         end
 
         def build_tables
