@@ -202,7 +202,8 @@ module MB::Sound
   # tine.  patches-4 (2026-10-13; the maintainer preferred the tine piano
   # to these keys on the Listening Bench); before, the keys were :fm.
   # +level+ is the same for both (the tine is trimmed to the FM keys'
-  # loudness on the jungle template's stabs: -24.8 vs -24.3 LUFS).
+  # loudness on the jungle template's stabs plus 5 dB: see
+  # JUNGLE_KEYS_TINE_TRIM).
   def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22, piano: :tine)
     if piano == :tine
       tine = tine_piano_voice(midi, bark: bark / 0.22, tremolo: 0.22, rate: tremolo)
@@ -242,9 +243,15 @@ module MB::Sound
     (lead * level).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).reverb(:hall, mix: 0.25)
   end
 
-  # The tine piano's trim in .jungle_keys_voice (+10.1 dB), so +level+
-  # means about the same loudness as the FM keys'.
-  JUNGLE_KEYS_TINE_TRIM = 3.2
+  # The tine piano's trim in .jungle_keys_voice: +15.1 dB since patches-5
+  # (2026-10-13; maintainer on genre :jungle with the tine keys: "Both
+  # keys mix levels are too low now; need to bump them up"), 5 dB over
+  # patches-4's +10.1 (which matched the FM keys' loudness on the stabs,
+  # -24.8 vs -24.3 LUFS, but the tine's rounder stabs sat under the pad):
+  # in genre :jungle the keys' bars now average -23..-26 dB RMS on the
+  # stem (pad -24, flute -23; were -28..-31).  Memory Card's keys and the
+  # :jungle_keys preset follow.
+  JUNGLE_KEYS_TINE_TRIM = 3.2 * 5.db
 
   # The script's patches by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
