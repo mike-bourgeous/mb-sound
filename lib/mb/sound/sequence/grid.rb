@@ -23,7 +23,7 @@ module MB
         # More row names: drum machine voices and short names, with the GM
         # notes they play (see MB::Sound::Drums::TR808::GM_MAP).
         ROW_ALIASES = {
-          bd: 36, sd: 38, rim: 37, cp: 39, ch: 42, oh: 46, cb: 56, cy: 49, cymbal: 49,
+          bd: 36, sd: 38, rim: 37, cp: 39, ch: 42, hh: 42, oh: 46, cb: 56, cy: 49, cymbal: 49,
           lt: 45, mt: 47, ht: 50, conga: 63, high_conga: 62, mid_conga: 63,
           lc: 64, mc: 63, hc: 62, clave: 75,
         }.freeze

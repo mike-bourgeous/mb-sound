@@ -153,3 +153,7 @@ end
 require_relative 'drums/voice'
 require_relative 'drums/kit'
 require_relative 'drums/tr808'
+require_relative 'drums/nodes'
+require_relative 'drums/hit'
+require_relative 'drums/machine'
+require_relative 'drums/tr909'

@@ -141,11 +141,29 @@ module MB
     end
 
     Help.topic :drums, 'Drums', group: :sound do
-      about 'A TR-808-flavored kit driven by a grid (Sequence::Kit) or MIDI.'
-      commands :tr808, :grid, :euclid
+      about <<~TEXT
+        Drum machines driven by a grid (Sequence::Kit) or MIDI (GM notes):
+        `tr808`, `tr909` (analog kick, snare, toms, clap; 6-bit sampled hats
+        and cymbals; `shuffle:` 0..6, `flams:`), and kits of your own:
+        `kit { voice :kick, tune: 50 do |h| h.body(h.tune, sweep: 3) +
+        h.click end; choke :open_hat, by: :closed_hat }` with layers
+        (body, noise, click, metal, sample, fm, bursts, env, sweep) and
+        voices borrowed from the machines (`tr909 :clap`, `tr808 :cowbell`).
+      TEXT
+      commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
       example 'four on the floor' do
         bg :try, tr808(grid(16, kick: 'x...x...x...x...', hat: 'x.x.x.x.x.x.x.x.').loop).at(-14.db)
+      end
+      example 'a 909 with shuffle' do
+        bg :try, tr909(grid(16, kick: 'X...x...x...x...', clap: '....X.......X...', hat: 'x.xxx.xxx.xxx.xx', oh: '..x...x...x...x.').loop, shuffle: 2).at(-15.db)
+      end
+      example 'a kit of your own' do
+        bg :try, kit(grid(16, kick: 'X..x..x...x..x..', snare: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.').loop) {
+          voice(:kick, tune: 45) { |h| h.body(h.tune, decay: 0.4, sweep: 4).softclip(0.6) + h.click(0.3) }
+          voice(:snare) { |h| h.fm(240, ratio: 2.3, index: 1, decay: 0.12, index_decay: 0.03) * 0.5 + h.noise(decay: 0.15, highpass: 2000) * 0.4 }
+          tr909 :closed_hat
+        }.at(-14.db)
       end
     end
 

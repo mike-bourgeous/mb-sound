@@ -312,6 +312,24 @@ module MB
           voices.to_h { |v| [v, MB::Sound::Notes.new(stream.keys(*gm.fetch(v)), sustain: false)] }
         end
 
+        # The 808's voices as a Drums::Machine (kit builder design), for
+        # mixing them into kits of your own (Drums::Builder#tr808): the same
+        # Build graphs, knobs, GM notes, and aliases, the open hat choked by
+        # the closed hat; each hat and cymbal has its own metal bank.  (.kit
+        # remains the 808 itself: shared metal banks, more_cowbell, and its
+        # own voice seeds.)
+        def machine
+          @machine ||= Drums.machine(:tr808) do |b|
+            VOICES.each do |name, defaults|
+              aliases = ALIASES.select { |_, v| v == name }.keys
+              b.voice(name, **defaults, gm: GM_MAP[name], as: aliases) do |h|
+                Build.public_send(name, h.trigger, **h.knobs, level: 1.0)
+              end
+            end
+            b.choke :open_hat, by: :closed_hat
+          end
+        end
+
         # The six metal oscillators (naive squares, like the circuit) mixed
         # at 1/6 each, with the lowest at +tune+ Hz (number or node) and the
         # others at their 808 ratios.

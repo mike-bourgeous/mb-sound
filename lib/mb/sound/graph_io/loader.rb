@@ -16,9 +16,20 @@ module MB
         class Scope
           attr_reader :vars, :parent
 
+          # The object a block without parameters runs on (a drum kit's
+          # builder or hit, see Drums::Machine), where receiverless calls go
+          # before MB::Sound.
+          attr_writer :implicit_self
+
           def initialize(parent = nil)
             @parent = parent
             @vars = {}
+            @implicit_self = nil
+          end
+
+          # The innermost implicit self (see #implicit_self=), or nil.
+          def implicit_self
+            @implicit_self || @parent&.implicit_self
           end
 
           # The scope +depth+ levels up (Prism's depth of a local).
@@ -758,16 +769,20 @@ module MB
             if @header
               raise error(node, "the header holds values only (#{name} isn't one)")
             end
-            unless Registry.top_level.include?(name) && MB::Sound.respond_to?(name)
+            implicit = scope.implicit_self
+            if implicit && Registry.allowed?(implicit, name)
+              receiver = implicit
+            elsif !(Registry.top_level.include?(name) && MB::Sound.respond_to?(name))
               if node.variable_call?
                 known = scope.names + (@inputs&.keys || []) + (@knobs&.keys || [])
                 hint = GraphIO.suggest(name, known + Registry.top_level.to_a)
                 raise error(node, "undefined name #{name}#{hint}#{" (the document's inputs: #{@document.inputs.join(', ')})" unless @document.inputs.empty?}")
               end
-              hint = GraphIO.suggest(name, Registry.top_level.to_a)
+              hint = GraphIO.suggest(name, Registry.top_level.to_a + (implicit ? Registry.names_for(implicit).to_a : []))
               raise error(node, "#{name} isn't a graph method#{hint}")
+            else
+              receiver = MB::Sound
             end
-            receiver = MB::Sound
           else
             receiver = eval_node(node.receiver, scope)
             if @header && !receiver.is_a?(Numeric)
@@ -893,6 +908,9 @@ module MB
             # gets the limits afresh
             loader.fresh_limits! if loader.loaded?
             scope = Scope.new(outer)
+            # Run with instance_exec (a drum kit's parameterless blocks):
+            # receiverless calls go to that object first
+            scope.implicit_self = self unless self.equal?(loader)
             names.each_with_index { |n, i| scope.vars[n] = args[i] }
             scope.vars[rest] = args[count..] || [] if rest
             last = scope
@@ -1046,6 +1064,8 @@ module MB
             count(node, name, kwargs[:voices], :voices) if receiver.is_a?(Class) && receiver <= MB::Sound::Synth && kwargs.key?(:voices)
           when :unison, :swarm
             count(node, name, args[0], :copies) if args[0].is_a?(Numeric)
+          when :bursts
+            count(node, name, args[0], :copies) if receiver.is_a?(MB::Sound::Drums::Hit)
           when :repeat, :loop, :ratchet, :roll, :every, :euclid, :grid, :*
             if receiver.is_a?(MB::Sound::Sequence::Clip) || receiver.is_a?(MB::Sound::Sequence::Seq) || name != :*
               args.each { |a| count(node, name, a, :repeats) if a.is_a?(Numeric) }
