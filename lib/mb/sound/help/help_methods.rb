@@ -3,8 +3,9 @@ module MB
     # Console help (see MB::Sound::Help and design/notes/help.md): the
     # one-screen sheet, topic and method pages generated from doc comments,
     # what is playing now, and lessons.  bin/sound.rb loads it (it is not
-    # part of `require 'mb/sound'`); MB::Sound then extends itself with this
-    # module.
+    # part of `require 'mb/sound'`; in other scripts the first #help, #now,
+    # or #lesson loads it, see HelpAutoload); MB::Sound then extends itself
+    # with this module.
     #
     # Example (bin/sound.rb):
     #     help                # the one-screen sheet
@@ -36,7 +37,8 @@ module MB
       end
 
       # Lessons: with a name, starts or resumes one (+restart: true+ from
-      # its first step); without, the lesson being taken, or the list.  A
+      # its first step); without, the lesson being taken (the list once it
+      # is done).  A
       # lesson moves on when its step's check passes after a console line;
       # `lesson.run` types the step for you, `lesson.next`, `lesson.back`,
       # `lesson.hint`, `lesson.quit`.
@@ -45,9 +47,14 @@ module MB
           l = Help::LESSONS.fetch(name.to_sym) {
             raise ArgumentError, "No lesson #{name.inspect} (#{Help::LESSONS.keys.map(&:inspect).join(', ')})"
           }
+          if (why = l.busy)
+            return MB::Sound.live_error(RuntimeError.new(why))
+          end
           Help::LessonRunner.active = Help::LessonRunner.new(l, restart ? 0 : nil)
         else
-          Help::LessonRunner.active || Help::LessonList.new
+          runner = Help::LessonRunner.active
+          Help::LessonRunner.active = runner = nil if runner&.done?
+          runner || Help::LessonList.new
         end
       end
     end

@@ -46,7 +46,7 @@ module MB
             FastAudio.jack_connect(@output.port_name, @connected_to) if @connected_to
           else
             @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_out')
-            @output = FastMIDI::Output.new(@api, client, index, @port_name)
+            @output = Input.rtmidi_quietly { FastMIDI::Output.new(@api, client, index, @port_name) }
           end
 
           DeviceOutput.track(self, true)

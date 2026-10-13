@@ -34,10 +34,17 @@ RSpec.describe(MB::Sound::RandomMethods) do
     end
   end
 
-  describe '#root_rng' do
+  describe 'Internal.root_rng' do
     it 'is a Random' do
-      expect(MB::Sound.root_rng).to be_a(Random)
+      expect(MB::Sound::Internal.root_rng).to be_a(Random)
     end
+  end
+
+  it 'keeps plumbing out of the console' do
+    names = [:root_rng, :default_seed, :is_numeric_array?, :convert_sound_to_narray, :any_sound_to_array,
+      :any_sound_to_hash, :detect_input, :detect_output, :close_plotter, :reset_plotter, :generate_negative_freqs]
+    expect(names & (MB::Sound.methods + MB::Sound.private_methods)).to eq([])
+    expect(MB::Sound.respond_to?(:mod_source)).to eq(false) # private (Notes keeps its public one)
   end
 
   describe '#with_seed' do

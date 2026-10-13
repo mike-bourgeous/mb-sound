@@ -87,11 +87,15 @@ module MB
           entries = nil
           @session.command("disarm #{names.map(&:inspect).join(', ')}") {
             before = undo_state
+            # At Session#now, like the :disarm change: a scheduled block's
+            # time, not when the scheduler runs it (up to Session#lookahead
+            # earlier, which cut the end of the monitored phrase; the looper persona, 2026-10-13)
+            time = @session.now
             entries = names.map { |n|
               mon = Recording.monitor_name(n)
-              @session.remove(mon, fade: @session.declick_bars) if @session.playing_after_queue?(mon)
+              @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
               @mutex.synchronize { (@armed ||= {}).delete(n) }
-              @session.change(:disarm, n, @session.now) { |_t| }
+              @session.change(:disarm, n, time) { |_t| }
             }
             @session.note_undo_extra(self, before, undo_state)
           }
@@ -108,15 +112,20 @@ module MB
         # for Clip#quantize, e.g. 16 or 1.n16, or [grid, {amount:}]) and
         # +humanize:+ (a time for Clip#humanize, or [time, {velocity:}])
         # clean up or loosen the clip; +channel:+ keeps one channel's notes;
-        # +sustain: false+ ignores the sustain pedal.  Returns the :rec
-        # journal entries (one, or an Array).
-        def record(length, *names, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+        # +sustain: false+ ignores the sustain pedal.  The loop follows the
+        # timeline's phase (a 2-bar loop recorded from bar 2 plays the bar
+        # recorded first on even bars; see MIDI::Capture), or with +align:
+        # :launch+ starts from what was played first where it closes or is
+        # launched (see Sequence::Clip#loop).  Returns the :rec journal
+        # entries (one, or an Array).
+        def record(length, *names, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
           point = LaunchPoint.of(binding) or return nil
           names = names.flatten
           names = armed.keys if names.empty?
           return MB::Sound.live_error(ArgumentError.new('Arm a track to record into (arm :lead), or name it: rec 4, :lead')) if names.empty?
           trs = names.map { |n| recording_track(n) or return nil }
           len = recording_length(length) or return nil
+          recording_align(align) or return nil
 
           entries = nil
           @session.command("rec #{names.map(&:inspect).join(', ')}") {
@@ -125,7 +134,7 @@ module MB
               hub = @session.midi_in(input || armed[tr.name])
               start = resolve(tr.q || @quant, tr, point)
               rec = @session.change(:rec, tr.name, start, data: { length: len, ends: @session.stamp(start + len) }) { |_t| }
-              capture_into(tr, hub, close: start + len, length: len, from: start, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+              capture_into(tr, hub, close: start + len, length: len, from: start, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
               rec
             }
             @session.note_undo_extra(self, before, undo_state)
@@ -142,13 +151,14 @@ module MB
         # rounded up to 1, 2, 4, 8, or 16 bars) becomes a looping clip on
         # the track, playing on in phase with the timeline.  Options as in
         # #record.  Returns the :capture journal entries.
-        def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true)
+        def capture(*names, length: nil, at: nil, on: nil, in: nil, input: nil, quantize: nil, humanize: nil, channel: nil, sustain: true, align: :timeline)
           point = LaunchPoint.of(binding) or return nil
           names = names.flatten
           names = armed.keys if names.empty?
           return MB::Sound.live_error(ArgumentError.new('Arm a track to capture into (arm :lead), or name it: capture :lead')) if names.empty?
           trs = names.map { |n| recording_track(n) or return nil }
           len = length && (recording_length(length) or return nil)
+          recording_align(align) or return nil
 
           entries = nil
           @session.command("capture #{names.map(&:inspect).join(', ')}") {
@@ -159,7 +169,7 @@ module MB
                 MB::Sound.live_error(ArgumentError.new("Nothing played on #{hub} to capture")) or next
               end
               close = resolve(tr.q || @quant, tr, point)
-              capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain)
+              capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
             }.compact
             @session.note_undo_extra(self, before, undo_state)
           }
@@ -214,12 +224,20 @@ module MB
           len
         end
 
+        # +align+ if it is a loop alignment, else nil (after live_error).
+        def recording_align(align)
+          return align if Sequence::Clip::ALIGNMENTS.include?(align)
+          MB::Sound.live_error(ArgumentError.new("align: is :timeline (in phase with the timeline) or :launch (from what was played first; got #{align.inspect})"))
+        end
+
         # Queues the track's change to a placeholder clip at +close+ (whole
         # notes) and the :capture change that fills it with the clip of
         # what +hub+ saw from +from+ for +length+ (both nil for the last
         # phrase, found when it lands).  Returns the :capture Change.
-        def capture_into(tr, hub, close:, length:, from:, quantize:, humanize:, channel:, sustain:)
-          placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true).named(:"#{tr.name}_rec")
+        def capture_into(tr, hub, close:, length:, from:, quantize:, humanize:, channel:, sustain:, align:)
+          # (performed, like the clip it stands for, so a drum kit built for it
+          # plays any recorded note at live velocities; see TR808.kit)
+          placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true, performed: true).named(:"#{tr.name}_rec")
           set_track(tr, placeholder, close, fade: nil)
 
           data = { length: length || :phrase, from: from && @session.stamp(from) }.compact
@@ -229,7 +247,7 @@ module MB
             start = from || close - len
 
             g = MIDI::Capture::GRACE
-            clip = MIDI::Capture.clip(hub.history(start - g, start + len - g), from: start, length: len, channel: channel, sustain: sustain)
+            clip = MIDI::Capture.clip(hub.history(start - g, start + len - g), from: start, length: len, channel: channel, sustain: sustain, align: align)
             clip = feel(clip, :quantize, quantize) if quantize
             clip = feel(clip, :humanize, humanize) if humanize
 
@@ -266,7 +284,7 @@ module MB
                     warn "Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}); recording still works"
                     return nil
                   end
-          @session.add(graph, name: Recording.monitor_name(tr.name), on: :now, fade: 0, description: "#{tr.name}: live MIDI")
+          @session.add(graph, name: Recording.monitor_name(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")
         end
       end
     end

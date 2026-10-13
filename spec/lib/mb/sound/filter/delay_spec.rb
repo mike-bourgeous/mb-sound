@@ -16,7 +16,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
   end
 
   it 'can be created by DSL methods' do
-    expect(100.hz.delay(seconds: 0.01).base_filter).to be_a(MB::Sound::Filter::Delay)
+    expect(100.hz.delay(0.01).base_filter).to be_a(MB::Sound::Filter::Delay)
     expect(100.hz.delay(5.samples).base_filter).to be_a(MB::Sound::Filter::Delay)
   end
 
@@ -170,7 +170,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
     # A ramp input reads back as the delay in seconds: t - output
     def glide(delay, os, smoothing:)
       sig = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(48000).seq / 48000.0]).with_buffer(800).resample(mode: :libsamplerate_fastest)
-      node = sig.delay(seconds: delay, smoothing: smoothing, interpolation: :linear).oversample(os)
+      node = sig.delay(delay, smoothing: smoothing, interpolation: :linear).oversample(os)
       out = Numo::SFloat.zeros(0).concatenate(*Array.new(30) { node.sample(800).dup })
       Numo::SFloat.new(out.length).seq / 48000.0 - out
     end
@@ -246,7 +246,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
     it 'accepts every length in #delay' do
       expect(100.hz.delay(250.ms).base_filter.delay_samples).to eq(12000)
       expect(100.hz.delay(0.25.seconds).base_filter.delay_samples).to eq(12000)
-      expect(100.hz.delay(seconds: 0.25).base_filter.delay_samples).to eq(12000)
+      expect(100.hz.delay(0.25).base_filter.delay_samples).to eq(12000)
       expect { 100.hz.delay(samples: 5) }.to raise_error(ArgumentError, /samples/)
     end
   end

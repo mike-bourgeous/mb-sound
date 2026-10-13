@@ -1269,7 +1269,7 @@ module MB
           buffer_time = MB::M.max(max + 0.2, 1.0)
           nodes = Array.new(@channels) do |c|
             input[c]
-              .delay((stage[:delays][c] * @sample_rate).round.samples, smoothing: false, max_delay: buffer_time, ring_out: false)
+              .delay((stage[:delays][c] * @sample_rate).round.samples, smooth: false, max_delay: buffer_time, ring_out: false)
               .named("Diffuse #{idx + 1} #{c + 1}")
           end
 
@@ -1312,7 +1312,7 @@ module MB
             hhmx.outputs[o]
               .proc { |v| record_feedback_input(idx, v) }
               .named("Feedback tap #{idx + 1}")
-              .delay((@layout.taps[idx] * @sample_rate).round.samples, smoothing: false, max_delay: buffer_time, ring_out: false)
+              .delay((@layout.taps[idx] * @sample_rate).round.samples, smooth: false, max_delay: buffer_time, ring_out: false)
               .named("Feedback delay #{idx + 1}")
           }
 

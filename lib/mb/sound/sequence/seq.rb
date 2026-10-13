@@ -327,7 +327,7 @@ module MB
         # See Clip#permute for +order+ and +:seed+; +order+ indexes the note
         # steps only.
         def permute(order = nil, seed: @seed, vary: false)
-          return Clip.new(@events, length: @length, loop: @loop, seed: @seed, align: @align).permute(order, seed: seed, vary: vary) if vary
+          return Clip.new(@events, length: @length, loop: @loop, seed: @seed, align: @align, performed: @performed).permute(order, seed: seed, vary: vary) if vary
 
           notes = @steps.each_index.select { |i| @steps[i].value }
           order = Clip.check_permutation(order, notes.length, seed)

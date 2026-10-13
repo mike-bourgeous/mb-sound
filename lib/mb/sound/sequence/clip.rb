@@ -99,9 +99,11 @@ module MB
         # Creates a clip from a list of Events.  The +:length+ defaults to the
         # end of the last event.  +:align+ only matters for looping clips
         # (see #loop).  +:variations+ are Variations applied per loop cycle
-        # (see #variations).
-        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [])
+        # (see #variations).  +:performed+ marks velocities as played on a
+        # MIDI controller (see #performed?).
+        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false)
           @events = events.sort_by(&:start).freeze
+          @performed = !!performed
           max_end = @events.map(&:end_time).max || 0
           @length = (length || max_end).to_r
           @loop = !!loop
@@ -153,6 +155,16 @@ module MB
           @loop
         end
 
+        # True if this clip's velocities were played on a MIDI controller
+        # (recorded with Arrangement#record or #capture, see MIDI::Capture),
+        # rather than written as steps: drum kits play them with the same
+        # velocity curve as live MIDI (see Drums.velocity_curve), so a
+        # recorded loop plays back at the level it was played.  Transforms
+        # of a performed clip are performed too.
+        def performed?
+          @performed
+        end
+
         # Returns true if this clip loops from where it was launched rather
         # than in phase with the timeline (see #loop).
         def launch_aligned?
@@ -179,7 +191,7 @@ module MB
         #
         #     bg :ball, bounce_hits(3.beats).loop(align: :launch).synth { |v| ... }
         def loop(seed: @seed, align: @align)
-          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations)
+          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations, performed: @performed)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
@@ -187,14 +199,14 @@ module MB
         def |(other)
           other = Clip.from(other)
           shifted = other.first_cycle_events.map { |e| e.with(start: e.start + @length) }
-          Clip.new(first_cycle_events + shifted, length: @length + other.length, seed: @seed)
+          Clip.new(first_cycle_events + shifted, length: @length + other.length, seed: @seed, performed: @performed && other.performed?)
         end
 
         # Returns a non-looping clip that plays this clip and +other+ at the
         # same time.  The length is the longer of the two.
         def &(other)
           other = Clip.from(other)
-          Clip.new(first_cycle_events + other.first_cycle_events, length: MB::M.max(@length, other.length), seed: @seed)
+          Clip.new(first_cycle_events + other.first_cycle_events, length: MB::M.max(@length, other.length), seed: @seed, performed: @performed && other.performed?)
         end
 
         # The events of cycle 0 (see #events_for) with early starts (see
@@ -734,7 +746,7 @@ module MB
         # Example (bin/sound.rb), a comb resonator plucked by noise bursts:
         #     notes = seq(A2, E3, C3).n4.loop
         #     excite = noise.at(1) * notes.env(0, 0.004, 0, 0.001)
-        #     bg :string, excite.delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
+        #     bg :string, excite.delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smooth: false) * 0.3
         #
         # The delay's feedback is a plain gain, so this rings brightly like
         # a comb filter rather than a damped Karplus-Strong string.
@@ -844,7 +856,7 @@ module MB
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
         def with_events(events, length: @length, variations: @variations)
-          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations)
+          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations, performed: @performed)
         end
 
         # Returns a Clip with each event transformed by the block.
@@ -906,7 +918,8 @@ module MB
                 .map { |e| e.with(start: MB::M.max(e.start + c * @length, 0r), condition: nil) }
             }.flatten,
             length: @length * count,
-            seed: @seed
+            seed: @seed,
+            performed: @performed
           )
         end
 

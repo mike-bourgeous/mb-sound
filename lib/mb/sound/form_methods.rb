@@ -154,7 +154,7 @@ module MB
           warn "at_marker: no marker #{name.inspect} yet; the block runs when one is set#{hint}" unless hint.empty?
         end
         session.markers.on(name) { |_m, pos|
-          session.schedule(pos, description: "marker #{name.inspect}", &block)
+          session.schedule(pos, description: "marker #{name.inspect}", label: "at_marker #{name.inspect}", &block)
         }
       end
       alias on_marker at_marker

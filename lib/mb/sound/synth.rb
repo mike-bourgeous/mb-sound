@@ -239,7 +239,6 @@ module MB
 
         @notes = []
         @quiet = Array.new(@allocator.lanes.length, true)
-        @silent = Array.new(@allocator.lanes.length, true)
         @peaks = Array.new(@allocator.lanes.length, 0.0)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
           v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
@@ -449,6 +448,13 @@ module MB
       # output; see #setup_idle_skipping).
       SILENCE = 1e-6
 
+      # Idle skipping's grid (samples of the synth's own time, counted from
+      # its first sample): lanes (and Drums::Voice) fall asleep only on
+      # its points, so the same samples are skipped at any buffer size, and
+      # a run of 800-sample buffers starting with the synth sleeps as it
+      # did before the grid (see #setup_idle_skipping).
+      SKIP_GRID = 800
+
       # Node classes whose state can hold sound that comes back after a
       # silent stretch (delays, reverbs, long FIR filters) or that follow
       # the timeline (tempo LFOs), so lanes using them are never skipped.
@@ -465,17 +471,20 @@ module MB
       end
 
       # Idle lane skipping (+:skip_idle+, on by default).  A lane is skipped
-      # (its graph isn't sampled, and it outputs zeros) from the buffer
-      # after one in which
-      # - its Notes is idle (Notes#idle?: no held note, every envelope made
-      #   through it idle), and
-      # - every output channel of the lane stayed within -120 dB (SILENCE),
-      # and its graph has no long-memory nodes (see .long_memory?).  While
-      # skipped, the lane's own Notes nodes and its branches of nodes shared
-      # with other lanes (controllers, bend) are still read every buffer, so
-      # their readers and Tees stay in step; the lane wakes (renders again)
-      # at the first buffer with an event for it (note, controller, choke,
-      # glide) or after a content jump.
+      # (its graph isn't sampled, and it outputs zeros) from a point of the
+      # SKIP_GRID (every 800 samples of the synth's own time) where
+      # - its Notes is idle (Notes#voice_idle?: no held note, every
+      #   envelope made through it idle), and
+      # - every output channel of the lane stayed within -120 dB (SILENCE)
+      #   over the grid cell before it,
+      # and its graph has no long-memory nodes (see .long_memory?).  Blocks
+      # are split at grid points where a lane may fall asleep (see
+      # #sleep_candidate), so the same samples are skipped at any buffer
+      # size.  While skipped, the lane's own Notes nodes and its branches of
+      # nodes shared with other lanes (controllers, bend) are still read,
+      # so their readers and Tees stay in step; the lane wakes (renders
+      # again) on the exact sample of its next event (note, controller,
+      # choke, glide; see #wake_offset) or at a content jump.
       #
       # Differences from rendering every lane (why it isn't sample-exact):
       # free-running oscillators and LFOs in a skipped lane pause instead of
@@ -487,6 +496,8 @@ module MB
         @skip_idle = !!enabled
         @skipping = Array.new(@lanes.length, false)
         @skip_generation = Array.new(@lanes.length)
+        @cell_loud = Array.new(@lanes.length, false)
+        @skip_position = 0
         @zeros = nil
 
         graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
@@ -551,16 +562,6 @@ module MB
         @skippable.each_with_index { |s, idx| @skipping[idx] = false unless s }
       end
 
-      # True if lane +idx+ should be skipped from the next buffer (see
-      # #setup_idle_skipping): its Notes is idle and the buffer just
-      # rendered was silent (within SILENCE).
-      def start_skipping?(idx)
-        return false unless @silent[idx]
-
-        @skip_generation[idx] = @allocator.lanes[idx].generation
-        true
-      end
-
       # Records the level of lane +idx+'s channel buffers +bufs+ (for
       # Notes#level), and whether the lane is quiet (QUIET; see
       # #quiet_lanes) and silent (SILENCE; see #start_skipping?).  Quiet
@@ -580,12 +581,11 @@ module MB
         idle = @notes[idx].voice_idle?
         @peaks[idx] = swing
         @quiet[idx] = idle && swing <= QUIET
-        @silent[idx] = idle && hi <= SILENCE && lo >= -SILENCE
       end
 
       # Marks lane +idx+ as ended (silent from now on).
       def lane_ended(idx)
-        @done[idx] = @quiet[idx] = @silent[idx] = true
+        @done[idx] = @quiet[idx] = true
         @peaks[idx] = 0.0
       end
 
@@ -607,29 +607,43 @@ module MB
         r
       end
 
-      # Skips lane +idx+ for +count+ samples, reading its boundary nodes
-      # (see #setup_idle_skipping): returns :skipped, :ended if one of them
-      # ended, or :wake (rendering resumes with this buffer) if the lane
-      # has an event in this buffer or its content jumped.
-      def skip_lane(idx, count)
+      # The offset in the block (from +o+, of +count+) where skipped lane
+      # +idx+ wakes: +o+ if its content jumped (a new generation, at the
+      # start of a block), the exact sample of its next event (at the
+      # offset Notes nodes give it), or nil if it stays asleep.
+      def wake_offset(idx, o, count)
         lane = @allocator.lanes[idx]
-        clock = @clock_node[idx]
-        if lane.generation != @skip_generation[idx] || lane.pending_before?(clock.next_cursor(count))
-          @skipping[idx] = false
-          return :wake
-        end
+        return o if lane.generation != @skip_generation[idx]
 
+        clock = @clock_node[idx]
+        from = clock.cursor
+        time = lane.first_pending_time(from, clock.next_cursor(count - o))
+        return nil if time.nil?
+
+        o + ((time - from) * @sample_rate.to_r).floor
+      end
+
+      # Skips lane +idx+ for +count+ samples, reading its boundary nodes
+      # (see #setup_idle_skipping): returns :ended (marking the lane
+      # ended) if one of them ended, else :skipped.
+      def skip_span(idx, count)
         shared = @shared_inputs
         @boundary[idx].each do |n|
           # Shared controllers were read for every lane (Plan::SharedInputs)
           if shared && n.is_a?(GraphNode::Tee::Branch) && shared.shared_tee?(n.owner_tee)
-            return :ended if shared.buffers[n.owner_tee.sources[:input]].nil?
+            if shared.buffers[n.owner_tee.sources[:input]].nil?
+              lane_ended(idx)
+              return :ended
+            end
             next
           end
           next if shared&.shared_node?(n)
 
           # Notes nodes advance without a buffer (also inside fused plans)
-          return :ended if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?
+          if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?
+            lane_ended(idx)
+            return :ended
+          end
         end
 
         :skipped
@@ -700,6 +714,7 @@ module MB
         ensure
           shared&.end_block
         end
+        @skip_position += count
 
         any ? data : nil
       end
@@ -707,18 +722,9 @@ module MB
       # One lane's entry of #sample_lanes.
       def sample_lane(idx, count)
         return nil if @done[idx]
+        return sample_skippable_lane(idx, count) if @skippable[idx]
 
         outs = @lanes[idx]
-        if @skipping[idx]
-          case skip_lane(idx, count)
-          when :ended
-            lane_ended(idx)
-            return nil
-          when :skipped
-            return outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
-          end
-        end
-
         bufs = ((@lane_bufs ||= [])[idx] ||= [])
         bufs.clear
         outs.each do |o|
@@ -731,12 +737,155 @@ module MB
         end
 
         measure_lane(idx, bufs)
-        @skipping[idx] = start_skipping?(idx) if @skippable[idx]
-
         outs.length == 1 && @channels == 1 ? bufs[0] : bufs
       end
 
-      # Sums the lanes into one buffer, with the output gain.
+      # #sample_lane for a lane that may be skipped while idle (see
+      # #setup_idle_skipping): skipped stretches give zeros, and the graph
+      # is read in pieces split where the lane may fall asleep (a grid
+      # point ending a silent cell, unless a held note keeps it awake) or
+      # wakes (on the exact sample of its event).
+      def sample_skippable_lane(idx, count)
+        outs = @lanes[idx]
+        pos = @skip_position
+        bufs = ((@lane_bufs ||= [])[idx] ||= [])
+        whole = nil
+        pieces = false
+        o = 0
+
+        while o < count
+          if @skipping[idx]
+            wake = wake_offset(idx, o, count)
+            stop = wake || count
+            if stop > o
+              return nil if skip_span(idx, stop - o) == :ended
+
+              if o == 0 && wake.nil?
+                whole = :zeros
+              else
+                pieces = true
+                lane_piece_bufs(idx, outs.length, count).each { |b| b[o...stop] = 0 }
+              end
+            end
+            o = stop
+            next if wake.nil?
+
+            @skipping[idx] = false
+            @cell_loud[idx] = false
+          end
+
+          stop = sleep_candidate(idx, pos, o, count)
+          piece = stop - o
+          got = ((@piece_bufs ||= [])[idx] ||= [])
+          got.clear
+          window = o != 0 || stop != count
+          outs.each do |out|
+            buf = window ? sample_window(out, o, piece) : out.sample(count)
+            if buf.nil?
+              lane_ended(idx)
+              return nil
+            end
+            raise "Lane #{idx} gave #{buf.length} samples, not #{piece}" if buf.length != piece
+            got << buf
+          end
+
+          track_lane_cells(idx, got, pos + o)
+
+          if window
+            pieces = true
+            lane_piece_bufs(idx, outs.length, count).each_with_index { |b, c| b[o...stop] = got[c] }
+          else
+            whole = got
+          end
+          o = stop
+        end
+
+        if pieces
+          bufs.replace(@lane_piece_bufs[idx])
+        elsif whole == :zeros
+          measure_lane(idx, [zeros(count)])
+          return outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
+        else
+          bufs.replace(whole)
+        end
+
+        measure_lane(idx, bufs)
+        outs.length == 1 && @channels == 1 ? bufs[0] : bufs
+      end
+
+      # Samples lane output +out+ for +count+ samples from offset +offset+
+      # of the current block (shared controller buffers are handed over
+      # from there; see Plan::SharedInputs#window).
+      def sample_window(out, offset, count)
+        shared = @shared_inputs
+        return out.sample(count) unless shared&.active?
+
+        shared.window(offset, count) { out.sample(count) }
+      end
+
+      # The reused per-channel buffers of lane +idx+ for blocks read in
+      # pieces (see #sample_skippable_lane).
+      def lane_piece_bufs(idx, channels, count)
+        list = ((@lane_piece_bufs ||= [])[idx] ||= [])
+        list.clear if list.length != channels || (list[0] && list[0].length != count)
+        list << Numo::SFloat.zeros(count) while list.length < channels
+        list
+      end
+
+      # The end of the piece of the block starting at offset +o+ (of
+      # +count+, the synth at sample +pos+ at offset 0) that lane +idx+
+      # renders before it may fall asleep: the first grid point
+      # (SKIP_GRID) whose cell may be silent, or the end of the block.  A
+      # lane holding a note with no event for it in the block can't become
+      # idle, so it renders the whole block.
+      def sleep_candidate(idx, pos, o, count)
+        g = ((pos + o) / SKIP_GRID + 1) * SKIP_GRID - pos
+        return count if g > count
+
+        g += SKIP_GRID if @cell_loud[idx]
+        return count if g > count
+
+        if @notes[idx].held?
+          clock = @clock_node[idx]
+          return count unless @allocator.lanes[idx].pending_before?(clock.next_cursor(count - o))
+        end
+
+        g
+      end
+
+      # Updates lane +idx+'s silent cell state (see #setup_idle_skipping)
+      # for its channel buffers +bufs+ starting at synth sample +start+,
+      # and starts skipping the lane at a grid point ending a silent cell
+      # with the lane idle there (only the end of +bufs+, where
+      # #sleep_candidate split the block; idle is known there).
+      def track_lane_cells(idx, bufs, start)
+        len = bufs[0].length
+        i = 0
+        while i < len
+          g = (start + i) / SKIP_GRID * SKIP_GRID + SKIP_GRID
+          stop = [g - start, len].min
+          @cell_loud[idx] ||= bufs.any? { |b| lane_loud?(i == 0 && stop == len ? b : b[i...stop]) }
+          if start + stop == g
+            silent = !@cell_loud[idx]
+            @cell_loud[idx] = false
+            if silent && stop == len && @notes[idx].voice_idle?
+              @skipping[idx] = true
+              @skip_generation[idx] = @allocator.lanes[idx].generation
+            end
+          end
+          i = stop
+        end
+      end
+
+      # True if channel buffer +b+ has a sample beyond SILENCE.
+      def lane_loud?(b)
+        return false if b.equal?(@zeros)
+
+        lo, hi = range_of(b)
+        hi > SILENCE || lo < -SILENCE
+      end
+
+            # Sums the lanes into one buffer, with the output gain.
       def mix_mono(count)
         data = sample_lanes(count)
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count

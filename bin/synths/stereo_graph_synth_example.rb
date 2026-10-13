@@ -30,8 +30,8 @@ MB::Sound.synth_script { |midi|
 
   b = s.oversample(2)
 
-  left = b.delay(0.4.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smoothing: false).softclip
-  right = b.delay(0.3.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smoothing: false).softclip
+  left = b.delay(0.4.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smooth: false).softclip
+  right = b.delay(0.3.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smooth: false).softclip
 
   [left, right]
 }

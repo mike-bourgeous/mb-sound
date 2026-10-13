@@ -99,7 +99,7 @@ RSpec.configure do |config|
     MB::Sound.close_outputs
     MB::Sound::Tuning.default.reset
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN
-    MB::Sound.seed(MB::Sound.default_seed) # random phases etc. don't depend on example order
+    MB::Sound.seed(MB::Sound::Internal.default_seed) # random phases etc. don't depend on example order
     MB::Sound::Notes.control_smoothing = MB::Sound::Notes::CONTROL_SMOOTHING
     MB::Sound::Notes.bend_smoothing = MB::Sound::Notes::BEND_SMOOTHING
   end

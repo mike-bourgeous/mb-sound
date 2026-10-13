@@ -36,7 +36,8 @@ MB::Sound.synth_script { |midi|
   # drawn from the synth lane's seed)
   side = -> {
     midi.synth(voices: 1) { |v|
-      detune = -> { DETUNE * MB::Sound.root_rng.rand(-1.0..1.0) }
+      rng = Random.new(MB::Sound.next_seed)
+      detune = -> { DETUNE * rng.rand(-1.0..1.0) }
 
       cc1 = v.cc(1, name: 'Wavetable').filter(:lowpass, cutoff: 10, quality: 0.5)
       cc2 = v.cc(2, range: 1..10, name: 'Drive').filter(:lowpass, cutoff: 10, quality: 0.5)

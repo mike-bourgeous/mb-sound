@@ -75,16 +75,23 @@ module MB
       # The velocity curve (see .accented) for drum +sources+ (one or an
       # Array): :grid if every source is sequenced (a Clip, a grid, a Notes
       # or MIDI::Stream reading a clip) or a plain trigger signal, :midi if
-      # any plays MIDI from elsewhere (a file, live input, another Source).
+      # any plays MIDI from elsewhere (a file, live input, another Source)
+      # or a performed clip (recorded from live input, see
+      # Sequence::Clip#performed?), so a recorded loop plays at the level
+      # it was played.
       def velocity_curve(sources)
-        Array(sources).all? { |s| sequenced?(s) } ? :grid : :midi
+        (sources.is_a?(Array) ? sources : [sources]).all? { |s| sequenced?(s) } ? :grid : :midi
       end
 
       # True if +source+ is a clip, grid, or trigger signal, or reads one
       # (through Notes, Streams, and transforms); see .velocity_curve.
       def sequenced?(source)
         case source
-        when Sequence::Clip, Sequence::Kit, MIDI::ClipSource
+        when Sequence::Clip
+          !source.performed?
+        when MIDI::ClipSource
+          sequenced?(source.clip)
+        when Sequence::Kit
           true
         when MB::Sound::Notes
           sequenced?(source.stream)

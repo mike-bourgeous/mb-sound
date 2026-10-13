@@ -36,7 +36,7 @@ module MB
         #     # the delay line, the string is the loop's output (and_then keeps
         #     # the input going, or the loop ends with it)
         #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 110.hz.period)).and_then(0.constant)
-        #     play exc.feedback { |fb, input| d = (fb + input).delay(110.hz.period, smoothing: false); (d + d.delay(1.samples)) * 0.498 }
+        #     play exc.feedback { |fb, input| d = (fb + input).delay(110.hz.period, smooth: false); (d + d.delay(1.samples)) * 0.498 }
         def feedback(*args, compensate: true, sustain: true, &block)
           unless args.empty?
             raise ArgumentError, "#feedback is graph feedback and takes a block (`sig.feedback { |fb, input| ... }`); for FM operator self-feedback use #fm_feedback(#{args.map(&:inspect).join(', ')})"

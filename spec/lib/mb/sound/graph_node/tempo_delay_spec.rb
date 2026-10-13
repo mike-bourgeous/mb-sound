@@ -28,7 +28,7 @@ RSpec.describe('Tempo-synced delays') do
     end
 
     it 'accepts a Duration for seconds:' do
-      session.add(bar_clicks.delay(seconds: 1.n8.dotted, smoothing: false))
+      session.add(bar_clicks.delay(1.n8.dotted, smoothing: false))
       expect(clicks(run(96000))).to eq([18000])
     end
 

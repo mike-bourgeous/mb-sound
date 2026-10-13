@@ -23,8 +23,8 @@ module MB
             @transforms.reduce(@input.stream) { |s, (m, args, kwargs)| s.public_send(m, *args, **kwargs) }
           end
 
-          # A new #stream, so the input plays wherever a MIDI source is
-          # taken (MIDI::Stream.for: MB::Sound.synth, Synth.new, tr808).
+          # A new #stream, for MIDI::Stream.for (so anything that plays a
+          # MIDI source, such as a drum kit, plays live input too).
           def to_midi_stream
             stream
           end
@@ -89,6 +89,11 @@ module MB
 
           def to_s
             "live #{@input}"
+          end
+
+          # Short (the input's inspect would show the whole Session).
+          def inspect
+            "#<LiveClip #{self}>"
           end
 
           def method_missing(name, *args, **kwargs, &block)

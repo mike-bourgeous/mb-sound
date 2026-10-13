@@ -153,12 +153,7 @@ module MB
           when Input then new(LiveSource.new(obj))
           when Sequence::Clip then new(ClipSource.new(obj))
           when MIDIFile, String then new(FileSource.new(obj))
-          else
-            # (the class only for other objects: inspecting a large one,
-            # e.g. a LiveClip holding its Session, built a string of
-            # gigabytes)
-            desc = obj.nil? || obj.is_a?(Numeric) || obj.is_a?(Symbol) ? obj.inspect : "a #{obj.class}"
-            raise ArgumentError, "Cannot make a MIDI stream from #{desc}"
+          else raise ArgumentError, "Cannot make a MIDI stream from #{obj.inspect}"
           end
         end
 

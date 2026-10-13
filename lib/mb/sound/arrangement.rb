@@ -581,7 +581,7 @@ module MB
           check_clip(tr, value)
           if playing && tr.clip.equal?(value)
             nil
-          elsif playing && tr.patch? && (tr.clip.nil? || new_rows?(tr.clip, value))
+          elsif playing && tr.patch? && (tr.clip.nil? || new_rows?(tr.clip, value) || !swappable?(tr, value))
             start_track(tr, value, musical, fade)
           elsif playing && tr.patch?
             begin
@@ -680,6 +680,7 @@ module MB
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
           graph = tr.patch.call(clip)
+          @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}")
@@ -708,6 +709,20 @@ module MB
         return false unless value.is_a?(Sequence::Kit)
         return true unless old.is_a?(Sequence::Kit)
         !(value.rows.keys - old.rows.keys).empty?
+      end
+
+      # False if the graph last built for track +tr+ has a node that can't
+      # play clip +value+ by a swap (a node with #plays_clip?, e.g. a drum
+      # kit built for another clip's notes or velocity curve; see
+      # Drums::Kit#plays_clip?), so the patch is built again for it.
+      def swappable?(tr, value)
+        graph = @mutex.synchronize { @built&.[](tr.name) }
+        return true if graph.nil? || !value.is_a?(Sequence::Clip)
+
+        outputs = graph.respond_to?(:outputs) ? graph.outputs : Array(graph)
+        outputs.flat_map { |n| n.is_a?(GraphNode) ? GraphNode.graph(n) : [] }.uniq.all? { |n|
+          !n.respond_to?(:plays_clip?) || n.plays_clip?(value)
+        }
       end
 
       def check_clip(tr, value)

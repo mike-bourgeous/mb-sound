@@ -142,13 +142,13 @@ RSpec.describe(MB::Sound::IOMethods) do
     ['arm64-darwin24', 'x86_64-linux'].each do |platform|
       it "uses the sound card on #{platform}" do
         stub_const('RUBY_PLATFORM', platform)
-        expect(MB::Sound.detect_output).to eq(:device)
+        expect(MB::Sound::Internal.detect_output).to eq(:device)
       end
     end
 
     it 'uses OUTPUT_TYPE' do
       ENV['OUTPUT_TYPE'] = ':ffmpeg'
-      expect(MB::Sound.detect_output).to eq(:ffmpeg)
+      expect(MB::Sound::Internal.detect_output).to eq(:ffmpeg)
     end
 
     it 'rejects the removed JACK and ALSA output types' do
@@ -169,17 +169,17 @@ RSpec.describe(MB::Sound::IOMethods) do
     ['arm64-darwin24', 'x86_64-linux'].each do |platform|
       it "uses the sound card on #{platform}" do
         stub_const('RUBY_PLATFORM', platform)
-        expect(MB::Sound.detect_input(nil)).to eq(:device)
+        expect(MB::Sound::Internal.detect_input(nil)).to eq(:device)
       end
     end
 
     it 'uses the null input for a null device' do
-      expect(MB::Sound.detect_input(:null)).to eq(:null)
+      expect(MB::Sound::Internal.detect_input(:null)).to eq(:null)
     end
 
     it 'uses INPUT_TYPE' do
       ENV['INPUT_TYPE'] = 'null'
-      expect(MB::Sound.detect_input(nil)).to eq(:null)
+      expect(MB::Sound::Internal.detect_input(nil)).to eq(:null)
     end
 
     it 'rejects the removed JACK and ALSA input types' do

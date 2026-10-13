@@ -7,92 +7,6 @@ module MB
     # See the modules MB::Sound extends itself with to find all command-line
     # interface methods.
     module IOMethods
-      # Returns true if the given Array looks like a (possibly nested) numeric
-      # array, false if it's not an array or contains non-numeric data.  Only
-      # checks the first element of an array.
-      def is_numeric_array?(array)
-        return false unless array.is_a?(Array)
-
-        case array[0]
-        when Array
-          is_numeric_array?(array[0])
-
-        when Numeric
-          true
-
-        else
-          false
-        end
-      end
-
-      # Converts a single Tone, Pitch, or Numeric Array to NArray.  If given
-      # an Array of these, returns an Array of NArray.
-      def convert_sound_to_narray(sound, depth = 0)
-        case sound
-        when Tone, Pitch
-          # One second, so FFT bins are 1 Hz apart
-          sound.sample(sound.sample_rate.round)
-
-        when String
-          # If the filename is within an array, only return the first channel
-          read(sound).yield_self { |v| depth > 0 ? v[0] : v }
-
-        when Array
-          if is_numeric_array?(sound)
-            Numo::NArray.cast(sound)
-          else
-            sound.map { |el| convert_sound_to_narray(el, depth + 1) }
-          end
-
-        when GraphNode
-          # TODO: this could be improved for plotting or saving signal chains/graphs
-          sound.sample(960)
-
-        else
-          sound
-        end
-      end
-
-      # Like #any_sound_to_array, but ensures everything is in a Hash.  If
-      # given an Array, returns a Hash mapping array indices to the converted
-      # sounds.
-      def any_sound_to_hash(sounds)
-        if sounds.is_a?(Array) && !sounds[0].is_a?(Numeric)
-          sounds = sounds.map.with_index { |v, idx|
-            case v
-            when String
-              k = "#{idx}: #{File.basename(v)}"
-
-            when Tone
-              k = "#{idx}: #{v.frequency.round(2)}Hz #{v.wave_type}"
-
-            when Pitch
-              k = "#{idx}: #{v.frequency.round(2)}Hz"
-
-            else
-              k = idx
-            end
-
-            [k, v]
-          }.to_h
-        elsif !sounds.is_a?(Hash)
-          sounds = {0 => sounds}
-        end
-
-        any_sound_to_array(sounds)
-      end
-
-      # Like #convert_sound_to_narray, but wraps everything in a top-level
-      # Array if it is not already in one.  If given a Hash, then preserves the
-      # keys and maps them to the new values.
-      def any_sound_to_array(array)
-        if array.is_a?(Hash)
-          return array.keys.zip(any_sound_to_array(array.values)).to_h
-        end
-
-        convert_sound_to_narray(array).yield_self { |v| v.is_a?(Array) ? v : [v] }
-      end
-
       # Reads an entire sound file into an array of Numo::NArrays, one per
       # channel.  Resamples to 48kHz unless a different +:sample_rate+ is
       # specified.  Pass nil for +:sample_rate+ to disable resampling.
@@ -156,7 +70,7 @@ module MB
             output.write(d)
           end
         else
-          data = any_sound_to_array(data)
+          data = Internal.any_sound_to_array(data)
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
           output.write(data)
         end
@@ -216,7 +130,7 @@ module MB
       def input(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil)
         @inputs ||= {}
 
-        input_type = detect_input(device)
+        input_type = Internal.detect_input(device)
         info = {input_type: input_type, sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size}
 
         inp = @inputs[info]
@@ -240,15 +154,6 @@ module MB
         inp
       end
 
-      # Returns a Symbol describing the type of input that should be used:
-      # INPUT_TYPE, :null for a +device+ of 'null', else :device.  See
-      # #input.
-      def detect_input(device)
-        return ENV['INPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['INPUT_TYPE']
-        return :null if device == 'null' || device == ':null' || device == :null
-
-        :device
-      end
 
       # Opens sound output for playing sound.  Returns a sound output stream
       # with a :write method.
@@ -305,7 +210,7 @@ module MB
         end
 
         o = nil
-        output_type ||= detect_output
+        output_type ||= Internal.detect_output
         case output_type
         when :ffmpeg
           # Any live ffmpeg output: OUTPUT_FORMAT is ffmpeg's -f (default
@@ -356,14 +261,6 @@ module MB
         @plot_outputs = {}
         @outputs = {}
         nil
-      end
-
-      # Returns a Symbol describing the type of output that should be used:
-      # OUTPUT_TYPE, else :device (see #output).
-      def detect_output
-        return ENV['OUTPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['OUTPUT_TYPE']
-
-        :device
       end
 
       # Endlessly streams audio in non-overlapping +:block_size+ chunks from

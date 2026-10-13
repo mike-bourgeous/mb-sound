@@ -43,7 +43,7 @@ def measure(f0, fm, center, depth, seconds, options)
 
   input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::NMath.sin(2 * Math::PI * f0 * Numo::DFloat.new(n).seq / RATE))])
   times = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(d / RATE)])
-  out = Numo::DFloat.cast(input.delay(seconds: times, smoothing: false, max_delay: 2.0 * pad / RATE, **options).multi_sample(800, (n / 800.0).ceil)[0...n])
+  out = Numo::DFloat.cast(input.delay(times, smooth: false, max_delay: 2.0 * pad / RATE, **options).multi_sample(800, (n / 800.0).ceil)[0...n])
 
   valid = Numo::Bit.cast(i >= pad)
   in_band = valid & (out_freq < 0.45 * RATE)

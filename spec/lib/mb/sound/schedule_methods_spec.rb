@@ -182,7 +182,8 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       end
       run(96000 * 9)
       expect(times).to eq([3, 7])
-      expect(session.scheduled.values).to eq(['every 4 bars from bar 4'])
+      expect(session.scheduled.map(&:description)).to eq(['every 4 bars from bar 4'])
+      expect(session.scheduled.map(&:to_s)).to eq(['every 4, offset: 3 runs next 12:1'])
     end
 
     it 'accepts Durations' do
@@ -213,11 +214,116 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       within do
         a = MB::Sound.at_bar(5) { }
         b = MB::Sound.every(2) { }
-        expect(MB::Sound.scheduled).to eq(a => 'bar 5', b => 'every 2 bars from bar 1')
+        expect(MB::Sound.scheduled).to eq([b, a])
+        expect(MB::Sound.scheduled.map(&:to_s)).to eq(['every 2 runs next 1:1', 'at_bar 5 runs 5:1'])
+        expect(a.inspect).to eq("#<Schedule #{a.id}: at_bar 5 runs 5:1>")
         expect(MB::Sound.cancel(a)).to eq([a])
-        expect(MB::Sound.cancel).to eq([b])
+        expect(a.to_s).to eq('at_bar 5 cancelled')
+        expect(MB::Sound.cancel(b.id)).to eq([b])
         expect(MB::Sound.scheduled).to be_empty
       end
+    end
+
+    it 'cancels every block with no arguments, or one with its handle' do
+      ran = []
+      h = nil
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        h = MB::Sound.at_bar(2) { ran << 2 }
+        MB::Sound.at_bar(3) { ran << 3 }
+        MB::Sound.at_bar(4) { ran << 4 }
+      end
+      expect(h.cancel).to equal(h)
+      expect(h).to be_cancelled
+      expect(session.scheduled.length).to eq(2)
+      within { expect(MB::Sound.cancel.length).to eq(2) }
+      run(96000 * 4)
+      expect(ran).to eq([])
+    end
+
+    it 'cancels a block handed to the runner ahead of its time' do
+      ran = false
+      h = nil
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        h = MB::Sound.at_bar(2) { ran = true }
+      end
+      # Blocks run up to half a bar ahead; render to just before that
+      run(96000 / 2 - 800)
+      expect(h.status).to eq(:pending)
+      expect(h.to_s).to eq('at_bar 2 runs 2:1')
+      run(800 * 2)
+      expect(h).to be_ran
+      expect(h.to_s).to eq('at_bar 2 ran 2:1')
+      expect(ran).to eq(true)
+    end
+  end
+
+  describe 'launch points' do
+    it 'runs at_bar at in:, at:, and on: launch points' do
+      times = {}
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        expect(MB::Sound.at_bar(in: 3.beats) { times[:in] = MB::Sound::Session.context[:time] }.to_s).to eq('at_bar in: 3 beats runs 1:4')
+        MB::Sound.at_bar(at: MB::Sound.bar(2, beat: 2)) { times[:at] = MB::Sound::Session.context[:time] }
+        MB::Sound.at_bar(2, on: 1.n2) { times[:on] = MB::Sound::Session.context[:time] }
+      end
+      run(800)
+      within { MB::Sound.at_bar(on: :beat) { times[:beat] = MB::Sound::Session.context[:time] } }
+      run(96000 * 2)
+      expect(times).to eq(in: 3/4r, at: 5/4r, on: 1r, beat: 1/4r)
+    end
+
+    it 'runs after at a launch point' do
+      times = []
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        MB::Sound.after(in: 1.n8) { times << MB::Sound::Session.context[:time] }
+        MB::Sound.after(2, on: :beat) { times << MB::Sound::Session.context[:time] }
+      end
+      run(96000 * 2)
+      expect(times).to eq([1/8r, 1r])
+    end
+
+    it 'starts every at a launch point' do
+      times = []
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        h = MB::Sound.every(1, at: MB::Sound.bar(2, beat: 3)) { times << MB::Sound::Session.context[:time] }
+        expect(h.to_s).to eq('every 1, at: bar(2, beat: 3) runs next 2:3')
+      end
+      run(96000 * 3)
+      expect(times.first(2)).to eq([3/2r, 5/2r])
+    end
+
+    it 'refuses mixed forms' do
+      within do
+        expect { MB::Sound.at_bar(2, in: 1) { } }.to raise_error(ArgumentError, /not both/)
+        expect { MB::Sound.at_bar { } }.to raise_error(ArgumentError, /launch point/)
+        expect { MB::Sound.every(2, offset: 1, on: :bar) { } }.to raise_error(ArgumentError, /not both/)
+        expect { MB::Sound.after(2, at: MB::Sound.bar(3)) { } }.to raise_error(ArgumentError, /not both/)
+      end
+    end
+  end
+
+  describe '#reset_scheduler' do
+    it 'cancels every scheduled block and says so' do
+      ran = false
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        MB::Sound.at_bar(2) { ran = true }
+        MB::Sound.every(1) { ran = true }
+        expect(MB::Sound).to receive(:warn).with('reset_scheduler: cancelled 2 scheduled blocks (at_bar 2, every 1)')
+        expect(MB::Sound.reset_scheduler.length).to eq(2)
+      end
+      run(96000 * 2)
+      expect(ran).to eq(false)
+      expect(session.scheduled).to be_empty
+    end
+
+    it 'keeps quiet when nothing was scheduled' do
+      expect(MB::Sound).not_to receive(:warn)
+      within { expect(MB::Sound.reset_scheduler).to eq([]) }
     end
   end
 

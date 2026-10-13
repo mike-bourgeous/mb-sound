@@ -176,25 +176,25 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'stops the most recently started player with no arguments' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine)
-        expect(MB::Sound.stop(fade: 0)).to eq([:b])
-        expect(MB::Sound.stop(fade: 0)).to eq([:a])
+        expect(MB::Sound.stop(fade: 0)).to have_attributes(kind: :stop, name: :b)
+        expect(MB::Sound.stop(fade: 0).name).to eq(:a)
         expect(MB::Sound.stop).to eq([])
       end
 
       it 'stops named players' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine)
-        expect(MB::Sound.stop(:a, fade: 0)).to eq([:a])
+        expect(MB::Sound.stop(:a, fade: 0).to_s).to match(/\Astop :a landed \d+:/)
         expect(MB::Sound.players.keys).to eq([:b])
       end
 
       it 'stops everything with :all or #outro' do
         MB::Sound.bg(220.hz.sine)
         MB::Sound.bg(330.hz.sine)
-        expect(MB::Sound.stop(:all, fade: 0)).to eq([1, 2])
+        expect(MB::Sound.stop(:all, fade: 0).map(&:name)).to eq([1, 2])
 
         MB::Sound.bg(220.hz.sine)
-        expect(MB::Sound.outro(fade: 0)).to eq([1])
+        expect(MB::Sound.outro(fade: 0).name).to eq(1)
         expect(MB::Sound.players).to be_empty
       end
 
@@ -202,14 +202,14 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine, at: :now)
         sleep 0.05
-        expect(MB::Sound.outro).to contain_exactly(:a, :b)
+        expect(MB::Sound.outro.map(&:name)).to contain_exactly(:a, :b)
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
       it 'has #fadeout as an alias for #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
-        expect(MB::Sound.fadeout(fade: 0)).to eq([:a])
+        expect(MB::Sound.fadeout(fade: 0).name).to eq(:a)
         expect(MB::Sound.players).to be_empty
       end
 
@@ -228,7 +228,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'can fade out over a given number of bars' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
-        expect(MB::Sound.stop(:a, fade: 1/10r)).to eq([:a])
+        expect(MB::Sound.stop(:a, fade: 1/10r).name).to eq(:a)
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
         deadline = MB::U.clock_now + 5
         sleep 0.05 until MB::Sound.players.empty? || MB::U.clock_now > deadline
@@ -242,17 +242,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.stop(:a)                       # fading out over four bars
         expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
 
-        expect(MB::Sound.panic).to contain_exactly(:a, :b)
+        entries = nil
+        expect { entries = MB::Sound.panic }.to output("panic: stopped 2 players\n").to_stderr
+        expect(entries.map { |e| [e.kind, e.name] }).to contain_exactly([:stop, :a], [:stop, :b])
         expect(MB::Sound.players).to be_empty
         expect(MB::Sound::Session.default).to be_idle
       end
 
       it 'keeps master effects but clears their tails with #panic' do
         MB::Sound.bg(:a, 220.hz.sine)
-        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.5) }
+        MB::Sound.master(at: :now) { |mix| mix.delay(0.5) }
         sleep 0.05 until MB::Sound.master.start_with?('master:')
 
-        MB::Sound.panic
+        expect { MB::Sound.panic }.to output(/\Apanic: stopped 1 player/).to_stderr
         expect(MB::Sound.master).to start_with('master:')
         expect(MB::Sound::Session.default.instance_variable_get(:@master_chains).length).to be <= 2
       end
@@ -322,7 +324,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
         MB::Sound.bg(1.constant.until(0.05))
-        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        MB::Sound.master(at: :now) { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
         expect(MB::Sound.wait(timeout: 30)).to eq(true)
       end
     end
@@ -562,7 +564,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'adds the master tail after the bars limit with tail: true' do
       song = proc do
         MB::Sound.bg(0.5.constant)
-        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+        MB::Sound.master { |mix| mix.delay(0.2) }
       end
       expect(MB::Sound.render(filename, bars: 1, bpm: 120, &song)).to eq(2)
 
@@ -585,7 +587,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'renders the tail of master effects after the last sound ends' do
       seconds = MB::Sound.render(filename, bpm: 120) do
         MB::Sound.bg(0.5.constant.until(0.1))
-        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+        MB::Sound.master { |mix| mix.delay(0.2) }
       end
 
       # The delay ends at 0.3 seconds, followed by a second of silence
@@ -600,7 +602,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       infinite = proc do
         MB::Sound.bg(0.5.constant.until(0.1))
-        MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        MB::Sound.master { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
       end
       expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
       expect(MB::Sound.render(filename, seconds: 0.5, overwrite: true, &infinite)).to eq(0.5)

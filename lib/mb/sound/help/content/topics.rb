@@ -20,7 +20,7 @@ module MB
         (Ctrl-C to stop).  Commands return journal entries that say where
         they land.  Sounds end through envelopes, clips, `until`, or `stop`.
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :play, :wait, :master_gain, :monitor_gain, :warm_up
+      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
       note :method_modules
       see :sets, :now, :files
@@ -197,13 +197,23 @@ module MB
     Help.topic :schedule, 'Scheduling', group: :time do
       about <<~TEXT
         Blocks on the Session timeline: commands inside them land exactly at
-        the block's time, and each block is one undo step.
+        the block's time, and each block is one undo step.  `at_bar`,
+        `after`, and `every` take launch points too (`at_bar in: 2.beats`,
+        `every 1.n4, on: :beat`) and return a handle that prints when it
+        runs and has `cancel`.  `reset_scheduler` (or `panic`, which also
+        stops the players) cancels everything scheduled, stops a song
+        form, and replaces a stuck scheduler.
       TEXT
-      commands :at_bar, :after, :every, :scheduled, :cancel, :marker, :at_marker
+      commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules
       example 'a note that answers itself' do
         bg :try, 330.hz.triangle.at(-20.db).until(1.bar)
         after(1) { bg :try2, 440.hz.triangle.at(-22.db).until(1.bar) }
+      end
+      example 'ticks you can cancel' do
+        bg :try, 330.hz.triangle.at(-20.db).until(2.bars)
+        ticks = every(1.n4, on: :beat) { bg :tick, 880.hz.triangle.at(-26.db).until(1.n16) }
+        after(1) { ticks.cancel }
       end
     end
 
@@ -274,7 +284,7 @@ module MB
         MIDI source; transforms (echo, arp, chord, strum, ...) work on
         Streams, Notes, and Clips; mod_sum and friends route modulation.
       TEXT
-      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale, :mod_source
+      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
       see :record
@@ -283,9 +293,12 @@ module MB
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`
-        replays it exactly).  `rec`/`capture` record MIDI into armed tracks,
-        `rec_audio` the master bus to a file; `render` bounces graphs
-        offline.
+        replays it exactly).  `rec`/`capture` record MIDI into armed tracks
+        (loops follow the timeline's phase; `align: :launch` starts from
+        what you played first); an armed track's live monitor is its own
+        player, :"name/live", which `stop :name` leaves playing and
+        `disarm` stops.  `rec_audio` records the master bus to a file;
+        `render` bounces graphs offline.
       TEXT
       commands :take, :arm, :disarm, :armed, :rec, :capture, :captures, :rec_audio, :stop_rec_audio, :recordings, :render, :write
       note :arrangement

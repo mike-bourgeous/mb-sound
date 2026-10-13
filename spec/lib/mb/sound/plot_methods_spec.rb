@@ -3,12 +3,12 @@
 # structural checks (see spec/lib/mb/sound/plot/ for each renderer).
 RSpec.describe(MB::Sound::PlotMethods) do
   before(:each) do
-    MB::Sound.close_plotter
+    MB::Sound::Internal.close_plotter
     MB::Sound.plotter(width: 80, height: 40, look: :ascii, color: :none).print = false
   end
 
   after(:each) do
-    MB::Sound.close_plotter
+    MB::Sound::Internal.close_plotter
   end
 
   let(:tone) { 357.2.hz.gauss }
