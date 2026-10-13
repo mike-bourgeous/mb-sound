@@ -69,12 +69,13 @@ module MB
       end
 
       # An SFZ instrument (Sampler::Instrument) from +path+ (see
-      # Sampler::SFZ).
+      # Sampler::SFZ), its voices reading tables at level spacing +mips+
+      # (:octave by default, the lighter one for big sets).
       #
       #     piano = sfz('piano/piano.sfz')
       #     synth(midi) { |v| piano.play(v) }
-      def sfz(path, name: nil)
-        Sampler::SFZ.load(path, name: name)
+      def sfz(path, name: nil, mips: :octave)
+        Sampler::SFZ.load(path, name: name, mips: mips)
       end
 
       # A chop pattern for +slices+ (see Sample::Slices#chop).

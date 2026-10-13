@@ -157,19 +157,43 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect(MB::Sound::Sample[x].slices(:onsets).length).to eq(4)
     end
 
-    it 'makes chop clips addressing slices with pitch and reverse apart' do
+    it 'makes chop clips of keys with pitch marks: slices, runs, then all reversed from C2' do
       b = s.slices(4).name(two: 2..3)
       c = b.chop(0, MB::Sound::Tie, [1, 2], :two, b[1].rev.transpose(-3), MB::Sound::Rest, [3, 0, { vel: 0.3 }])
-      vals = c.events.map(&:value)
-      expect(vals).to eq([
-        MB::Sound::Sampler.chop_note(0), MB::Sound::Sampler.chop_note(1, 2), MB::Sound::Sampler.chop_note(4),
-        MB::Sound::Sampler.chop_note(1, -3, reverse: true), MB::Sound::Sampler.chop_note(3),
-      ])
+      # Keys: slices 36..39, the run :two 40, reversed 41..45
+      expect(c.events.map(&:value)).to eq([36, 37, 40, 42, 39])
+      expect(c.events.map(&:pitch)).to eq([0.0, 2.0, 0.0, -3.0, 0.0])
       expect(c.events[0].length).to eq(1/8r)
       expect(c.events.last.velocity).to eq(0.3)
-      expect(c.transpose(2).events[1].value).to eq(MB::Sound::Sampler.chop_note(1, 4))
-      expect(MB::Sound::Sampler.chop_hit(MB::Sound::Sampler.chop_note(5, -2.5, reverse: true))).to eq([5, -2.5, true])
+      t = c.transpose(2)
+      expect(t.events.map(&:value)).to eq([36, 37, 40, 42, 39])
+      expect(t.events.map(&:pitch)).to eq([2.0, 4.0, 2.0, -1.0, 2.0])
+      expect(t.loop.transpose(-2).events.map(&:pitch)).to eq([0.0, 2.0, 0.0, -3.0, 0.0])
+      expect(b.chop(0, from: 48).events[0].value).to eq(48)
       expect { b.chop(:nope) }.to raise_error(ArgumentError)
+      expect { b.chop(0, from: 125) }.not_to raise_error
+      expect { b.chop(b[0].rev, from: 125) }.to raise_error(ArgumentError, /past 127/)
+
+      inst = b.keymap(from: MB::Sound::C2)
+      expect(inst.regions.map(&:keys)).to eq((36..45).map { |k| [k, k] })
+      expect(inst.regions[5].sample).to be_reversed
+      expect(b.keymap(spread: 3).regions.first.keys).to eq([36, 38])
+      expect { b.keymap(from: 125) }.to raise_error(ArgumentError, /don't fit/)
+      sp = b.keymap(from: 48, split: 58)
+      expect(sp.split).to eq(58)
+      expect(sp.regions.length).to eq(10) # 48..57, below the split
+    end
+
+    it 'pitch marks notes and steps, printing and reading them' do
+      st = MB::Sound::C4.pitch(1.5)
+      expect(st.pitch).to eq(1.5)
+      expect(st.value).to eq(60)
+      c = MB::Sound.seq(MB::Sound::C4.pitch(-2), MB::Sound::E4).n8
+      expect(c.events.map(&:pitch)).to eq([-2.0, nil])
+      expect(c.transpose(1).events.map { |e| [e.value, e.pitch] }).to eq([[60, -1.0], [65, nil]])
+      expect(c.events[0].to_s).to include('pitch-2')
+      e = MB::Sound.events([0r, 1r/8, 38, 0.75, { pitch: 3.0 }], length: 1r/4)
+      expect(e.events[0].pitch).to eq(3.0)
     end
   end
 

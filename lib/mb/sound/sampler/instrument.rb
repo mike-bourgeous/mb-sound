@@ -3,9 +3,12 @@ module MB
     module Sampler
       # Samples mapped to keys, velocities, and round robins (SFZ's
       # regions), played by GraphNode::SamplerVoice: each note-on plays the
-      # first region whose keys, velocities, and round-robin slot match.
-      # Also holds chop regions (slices addressed by Sampler.chop_note
-      # numbers; see Sample::Slices#chop).
+      # first region whose keys, velocities, and round-robin slot match,
+      # pitched by its note's pitch mark too (Seq::Step#pitch: chop hits).
+      # With a +split+ key, notes from it up play the region last played
+      # below it, chromatically from the split key (a split keyboard:
+      # slices on the low keys, the last slice played as an instrument
+      # above; see Sample::Slices#keymap).
       #
       #     inst = Sampler::Instrument.new { |i|
       #       i.region soft, keys: C1..B3, vel: 0..63, root: C3
@@ -18,8 +21,15 @@ module MB
         # One region: a Sample with where and how it plays (see #region).
         Region = Struct.new(:sample, :keys, :vel, :seq, :rand, :root, :keytrack, :veltrack, :tune, :gain, :offset, keyword_init: true)
 
-        # The keyboard regions (in match order) and the chop regions (Samples).
-        attr_reader :regions, :chops
+        # The regions, in match order.
+        attr_reader :regions
+
+        # The split key (a note number) or nil (see the class description).
+        attr_reader :split
+
+        # The level spacing voices read the samples' tables with by default
+        # (Wavetable mips: :default, :octave, ...; sfz instruments :octave).
+        attr_reader :mips
 
         # [attack, decay, sustain, release] for #play to multiply in (from
         # SFZ ampeg_*), or nil.
@@ -27,12 +37,15 @@ module MB
 
         attr_reader :name, :lineage
 
-        # Creates an instrument from +regions+ (Regions) and +chops+ (Samples),
-        # then calls the block (if any) with the instrument to add regions
-        # (#region) before it is frozen.
-        def initialize(regions = [], chops: [], envelope: nil, name: nil, lineage: nil)
+        # Creates an instrument from +regions+ (Regions), then calls the
+        # block (if any) with the instrument to add regions (#region) before
+        # it is frozen.  +split+: a key (Note or number) for a split
+        # keyboard, or nil; +mips+: the voices' default table level spacing.
+        def initialize(regions = [], split: nil, mips: :default, envelope: nil, name: nil, lineage: nil)
           @regions = regions.dup
-          @chops = chops.dup
+          @split = split.nil? ? nil : Sample.note_number(split).round
+          raise ArgumentError, "The split key must be 0 to 127 (got #{@split})" if @split && !@split.between?(0, 127)
+          @mips = mips
           @envelope = envelope&.map(&:to_f)&.freeze
           @name = name
           @lineage = lineage
@@ -40,8 +53,7 @@ module MB
           yield self if block_given?
           @building = false
           @regions.freeze
-          @chops.freeze
-          raise ArgumentError, 'An instrument needs at least one region or chop' if @regions.empty? && @chops.empty?
+          raise ArgumentError, 'An instrument needs at least one region' if @regions.empty?
         end
 
         # Adds a region playing +sample+ (while building; see .new):
@@ -83,9 +95,9 @@ module MB
           self
         end
 
-        # Every Sample the instrument plays (regions and chops).
+        # Every Sample the instrument plays.
         def samples
-          (@regions.map(&:sample) + @chops).uniq
+          @regions.map(&:sample).uniq
         end
 
         # The most channels of any sample.
@@ -107,7 +119,7 @@ module MB
         # [specs, regions DFloat] for the kernel for channel +c+ at
         # +sample_rate+ (see FastSampler.play), with level spacing +mips+ and
         # +interpolation+.
-        def kernel_tables(c, sample_rate, mips: :default, interpolation: :optimal)
+        def kernel_tables(c, sample_rate, mips: @mips, interpolation: :optimal)
           tables = []
           index = {}.compare_by_identity
           spec_of = ->(s) {
@@ -120,29 +132,29 @@ module MB
             row(s, spec_of.(s), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
                 veltrack: r.veltrack, tune: r.tune, gain: r.gain, offset: r.offset)
           }
-          rows += @chops.map { |s| row(s, spec_of.(s), sample_rate, keys: [-1, -1], vel: [0, 127], root: s.root, keytrack: 0.0) }
           [tables, Numo::DFloat.cast(rows)]
         end
 
         # A voice playing this instrument (GraphNode::SamplerVoice; a
         # Channels bundle of one per channel for stereo samples).  +source+
         # is a Notes (a synth's `v`), giving the trigger, note number,
-        # frequency (bends and glides), and gate; or give +trigger+ and
-        # +number+ (nodes or numbers) yourself.  A MIDI source that isn't a
+        # frequency (bends and glides), gate, and pitch marks; or give
+        # +trigger+ and +number+ (nodes or numbers) yourself.  A MIDI source that isn't a
         # Notes (a Clip, Stream, file) makes a synth (#sampler).
         #
         # Options: +transpose+ (semitones), +start+ (a 0..1 fraction of the
         # region, a number or node read at each note-on), +declick+ (samples
         # a re-struck note fades over; Sampler::DECLICK), +interpolation+
         # (:optimal; :none for the classic aliasing read), +mips+
-        # (:default; false for no band-limited levels), +seed+ (round
-        # robins), +freq+ (a node of Hz or a Pitch, instead of the Notes'
-        # frequency), +gate+.
+        # (#mips by default; false for no band-limited levels), +seed+
+        # (round robins), +freq+ (a node of Hz or a Pitch, instead of the
+        # Notes' frequency), +gate+, +shift+ (semitones read at each
+        # note-on, instead of the Notes' #pitch_mark).
         #
         # With an #envelope (SFZ), the voice is multiplied by
         # `source.env(*envelope)`.
-        def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: :optimal, mips: :default, seed: nil)
+        def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
+                 interpolation: :optimal, mips: @mips, seed: nil)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
             return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips)
@@ -151,19 +163,21 @@ module MB
           if source
             trigger ||= source.trigger
             number ||= source.number
-            freq = @regions.empty? ? nil : source.freq if freq == :auto
+            freq = source.freq if freq == :auto
             gate = release_loop? ? source.gate : nil if gate == :auto
+            shift = source.pitch_mark if shift == :auto
           else
             raise ArgumentError, 'Give a synth voice (v) or trigger: and number:' unless trigger && number
             freq = nil if freq == :auto
             gate = nil if gate == :auto
+            shift = nil if shift == :auto
           end
           freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
-              self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, start: start, transpose: transpose,
+              self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
               declick: declick, interpolation: interpolation, mips: mips, seed: seed
             )
           }
@@ -200,11 +214,11 @@ module MB
         # This instrument with lineage +lineage+ (how it prints; see
         # GraphNode::Recipe::RubyWriter).
         def with_lineage(lineage)
-          Instrument.new(@regions, chops: @chops, envelope: @envelope, name: @name, lineage: lineage)
+          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, name: @name, lineage: lineage)
         end
 
         def to_s
-          "#{@name || 'Instrument'} (#{@regions.length} region#{'s' if @regions.length != 1}#{", #{@chops.length} chops" unless @chops.empty?})"
+          "#{@name || 'Instrument'} (#{@regions.length} region#{'s' if @regions.length != 1}#{", split at #{Sample.note_name(@split)}" if @split})"
         end
 
         def inspect

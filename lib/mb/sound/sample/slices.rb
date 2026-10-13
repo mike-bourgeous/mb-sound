@@ -13,10 +13,14 @@ module MB
       #     inst = brk.keymap(from: C2)    # one key per slice (Sampler::Instrument)
       #     amen = brk.chop(:k, T, :h, :g, [:s, 2], brk[:s].rev, R)   # a Clip
       #     bg :breaks, amen.sampler(brk)
+      #     brk.keymap(from: C1, split: C4)  # slices below C4, the last one played chromatically above
       #
-      # Chop clips address slices directly with note numbers above the MIDI
-      # range (Sampler.chop_note), so pitch and slice stay separate:
-      # `amen.transpose(2)` plays every hit a tone up.
+      # Keys (#keymap): from +from+ (C2), every slice in order, then every
+      # named run that isn't a single slice, then the same again reversed.
+      # Chop clips play those keys with a pitch mark on every hit
+      # (Seq::Step#pitch), so slice and pitch stay separate:
+      # `amen.transpose(2)` moves the marks (every hit a tone up), not the
+      # keys.
       class Slices
         # Each slice's fade-out (seconds), so cuts don't click.
         DEFAULT_FADE = 0.002
@@ -124,27 +128,41 @@ module MB
           end
         end
 
-        # The slices on keys (a Sampler::Instrument): slice i on +spread+
-        # keys from +from+ (a Note or number) + i × +spread+, its own pitch
-        # at the zone's first key (with +spread+ 1 every key plays its slice
-        # at its own pitch; wider zones play it higher up the zone), plus
-        # every slice and named run for chop hits (#chop).  +region+
+        # The slices on keys (a Sampler::Instrument), +spread+ keys each
+        # from +from+ (a Note or number; C2): every slice in order, then
+        # every named run that isn't a single slice, then all of those
+        # reversed (#chop's keys; keys past 127 or from +split+ up are left
+        # out).  With +spread+ 1 each key plays its slice at its own pitch;
+        # wider zones track the keys from the zone's first.  +split+ (a key)
+        # makes a split keyboard: from it up, the last slice played below
+        # plays chromatically (the split key at its own pitch).  +region+
         # options go to each region (see Sampler::Instrument#region).
-        def keymap(from: 36, spread: 1, **region)
+        def keymap(from: 36, spread: 1, split: nil, **region)
           from = Sample.note_number(from).round
           spread = Integer(spread)
           raise ArgumentError, "Spread is a positive number of keys (got #{spread})" unless spread > 0
+          top = split.nil? ? 128 : Sample.note_number(split).round
+          entries = chop_entries
+          if from + entries.length * spread > top
+            raise ArgumentError, "#{entries.length} slices and runs of #{spread} key#{'s' if spread != 1} from #{from} don't fit below #{top} (start lower, or use fewer slices)"
+          end
+          kw = { from: from }
+          kw[:spread] = spread if spread != 1
+          kw[:split] = split if split
           slices = self
-          zones = Array.new(length) { |i| from + i * spread }.select { |k| k <= 127 }
-          Sampler::Instrument.new(chops: chop_list.map { |b| chop_sample(b) }, lineage: [self, :keymap, [], { from: from, spread: spread }.merge(region)]) { |inst|
-            zones.each_with_index do |k, i|
-              inst.region(slices[i], keys: k..(k + spread - 1).clamp(0, 127), root: k, keytrack: spread > 1 ? 1 : 0, **region)
+          Sampler::Instrument.new(split: split, lineage: [self, :keymap, [], kw.merge(region)]) { |inst|
+            [false, true].each_with_index do |rev, bank|
+              entries.each_with_index do |(arg, _), i|
+                k = from + (bank * entries.length + i) * spread
+                break if k + spread > top
+                s = slices[arg]
+                inst.region(rev ? s.rev : s, keys: k..(k + spread - 1), root: k, keytrack: spread > 1 ? 1 : 0, **region)
+              end
             end
           }
         end
 
-        # The instrument chop clips play (#keymap from C2 with one key per
-        # slice).
+        # The instrument chop clips play (#keymap from C2).
         def instrument
           @instrument ||= keymap
         end
@@ -161,27 +179,28 @@ module MB
           instrument.sampler(source, **options, &block)
         end
 
-        # A chop pattern (a looping-ready Clip) in steps of +per+ (1/16 of a
-        # whole note by default): each step a slice (an Integer index or a
-        # Symbol name), [slice, semitones] (or [slice, semitones, vel: v]),
-        # a slice Sample from these slices (`brk[:s].rev.transpose(2)`), Tie
-        # (T) to hold the last hit, or Rest (R) / nil for silence.  Hits play
-        # on #instrument (or any keymap of these slices) with slice and
-        # pitch separate.
+        # A chop pattern (a Clip) in steps of +per+ (1/16 of a whole note by
+        # default): each step a slice (an Integer index or a Symbol name),
+        # [slice, semitones] (or [slice, semitones, vel: v]), a slice Sample
+        # from these slices (`brk[:s].rev.transpose(2)`), Tie (T) to hold
+        # the last hit, or Rest (R) / nil for silence.  Each hit is its
+        # slice's key in #keymap (from +from+, +spread+ keys apart; C2 and 1
+        # for #instrument) with a pitch mark of its semitones
+        # (Seq::Step#pitch), so `clip.transpose(n)` pitches hits without
+        # moving slices, and played live the keys trigger the same slices.
         #
         #     brk.chop(:k, T, :h, :g, [:s, 2], brk[:s].rev, R, :kk)
-        def chop(*steps, per: 1/16r)
+        def chop(*steps, per: 1/16r, from: 36, spread: 1)
+          from = Sample.note_number(from).round
           list = chop_list
-          values = steps.map { |s| chop_step(s, list) }
+          values = steps.map { |s| chop_step(s, list, from, Integer(spread)) }
           MB::Sound.seq(*values).len(per)
         end
 
-        # The chop regions: every slice, then every named run that isn't a
-        # single slice (absolute [start, stop] pairs).
+        # The chop regions' bounds: every slice, then every named run that
+        # isn't a single slice (absolute [start, stop] pairs).
         def chop_list
-          list = Array.new(length) { |i| absolute(i) }
-          @names.each_value { |v| list << absolute(v) unless list.include?(absolute(v)) }
-          list
+          chop_entries.map(&:last)
         end
 
         def to_s
@@ -214,34 +233,45 @@ module MB
           @sample.with(start: a, stop: b, loop: nil, loop_mode: :one_shot, fade_out: @fade, lineage: [self, :[], args, {}].freeze)
         end
 
-        # A one-shot Sample for chop region bounds +b+.
-        def chop_sample(b)
-          @sample.with(start: b[0], stop: b[1], loop: nil, loop_mode: :one_shot, fade_out: @fade, tune: 0, lineage: nil)
+        # [index or name, absolute bounds] for every slice and every named
+        # run that isn't a single slice, in key order.
+        def chop_entries
+          list = Array.new(length) { |i| [i, absolute(i)] }
+          @names.each { |name, v| list << [name, absolute(v)] unless list.any? { |_, b| b == absolute(v) } }
+          list
         end
 
-        def chop_step(s, list)
+        # The chop key of entry +idx+ (reversed in the second bank).
+        def chop_key(idx, rev, count, from, spread)
+          k = from + ((rev ? count : 0) + idx) * spread
+          raise ArgumentError, "Chop key #{k} for #{rev ? 'reversed ' : ''}slice entry #{idx} is past 127 (chop from a lower key, or use fewer slices)" if k > 127
+          k
+        end
+
+        def chop_step(s, list, from, spread)
           case s
           when nil, :rest then nil
-          when Symbol, Integer then chop_value(s, 0, nil, list)
+          when Symbol, Integer then chop_value(s, 0, nil, list, from, spread)
           when Array
             raise ArgumentError, "A chop step Array is [slice, semitones] (got #{s.inspect})" unless (2..3).cover?(s.length)
             opts = s[2] || {}
-            chop_value(s[0], s[1], opts[:vel] || opts[:velocity], list)
+            chop_value(s[0], s[1], opts[:vel] || opts[:velocity], list, from, spread)
           when Sample
             idx = list.index([s.start, s.stop])
             raise ArgumentError, "#{s} isn't one of these slices or named runs" unless idx
-            Sampler.chop_note(idx, s.tune - @sample.tune, reverse: s.reversed? != @sample.reversed?)
+            key = chop_key(idx, s.reversed? != @sample.reversed?, list.length, from, spread)
+            Sequence::Seq.step(key).pitch(s.tune - @sample.tune)
           else
             s # Tie, Rest, Steps
           end
         end
 
-        def chop_value(slice, semitones, vel, list)
+        def chop_value(slice, semitones, vel, list, from, spread)
           idx = slice.is_a?(Symbol) ? list.index(absolute(@names.fetch(slice) { raise ArgumentError, "No slice named #{slice.inspect}" })) : nil
           idx ||= Integer(slice) % length if slice.is_a?(Integer)
           raise ArgumentError, "Unknown chop step #{slice.inspect}" unless idx
-          v = Sampler.chop_note(idx, Interval.semitones(semitones).to_f)
-          vel ? Sequence::Seq::Step.new(**Sequence::Seq.step(v).to_h.merge(velocity: vel.to_f)) : v
+          step = Sequence::Seq.step(chop_key(idx, false, list.length, from, spread)).pitch(semitones)
+          vel ? Sequence::Seq::Step.new(**step.to_h.merge(velocity: vel.to_f)) : step
         end
       end
     end

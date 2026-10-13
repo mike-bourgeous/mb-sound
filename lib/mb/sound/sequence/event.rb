@@ -17,8 +17,10 @@ module MB
       # out of fills) or [mode, name]: mode :fill plays only during fills
       # (only fill +name+ if given), :nofill only outside them (outside fill
       # +name+ if given); fills come from a playing song form (see
-      # Seq::Step#fill, Clip#fill, and FillMap).
-      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, :fill_mark, keyword_init: true) do
+      # Seq::Step#fill, Clip#fill, and FillMap).  +pitch+ is nil or a pitch
+      # mark in semitones (Seq::Step#pitch; samplers play the note's slice
+      # that much higher; Clip#transpose moves it instead of +value+).
+      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, :fill_mark, :pitch, keyword_init: true) do
         # True if the event plays when the fills named +names+ (an Array,
         # empty outside fills) are playing (see +fill_mark+).
         def plays_in_fill?(names)
@@ -47,6 +49,7 @@ module MB
           s << " #{fill_mark[0]}#{fill_mark[1] ? ":#{fill_mark[1]}" : ''}" if fill_mark
           s << ' !' if accented
           s << ' ~' if slid
+          s << " pitch#{pitch >= 0 ? '+' : ''}#{MB::M.sigfigs(pitch, 4)}" if pitch
           s
         end
       end

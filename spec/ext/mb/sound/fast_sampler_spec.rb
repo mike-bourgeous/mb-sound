@@ -38,8 +38,9 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
   def compare(inst, n, inputs, block: 128, declick: 64, interpolation: :optimal, transpose: 0.0, seed: 99, mips: :default)
     specs, regions = inst.kernel_tables(0, 48000, mips: mips, interpolation: interpolation)
     sinc = interpolation == :sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
-    config = [440.0, declick, inst.regions.length, MB::Sound::Wavetable::INTERPOLATIONS[interpolation], sinc, transpose]
+    config = [440.0, declick, inst.split || -1, MB::Sound::Wavetable::INTERPOLATIONS[interpolation], sinc, transpose]
     sa = Numo::DFloat.zeros(mirror::STATE_LENGTH)
+    sa[mirror::LAST_REGION] = -1
     sb = sa.dup
     ca = Numo::DFloat.zeros(128)
     cb = ca.dup
@@ -65,8 +66,9 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
   # The kernel alone at +block+ samples per call.
   def run(inst, n, inputs, block:, declick: 64, seed: 99)
     specs, regions = inst.kernel_tables(0, 48000)
-    config = [440.0, declick, inst.regions.length, 3, nil, 0.0]
+    config = [440.0, declick, inst.split || -1, 3, nil, 0.0]
     st = Numo::DFloat.zeros(mirror::STATE_LENGTH)
+    st[mirror::LAST_REGION] = -1
     cnt = Numo::DFloat.zeros(128)
     r = Numo::UInt64[seed]
     Numo::SFloat.hstack((0...n).step(block).map { |at|
@@ -80,7 +82,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     s = base
     inst = instrument { |i| i.region(s, keytrack: 0) }
     n = 8000
-    out = compare(inst, n, [signal(n, [[100, 1.0]]), 60.0, nil, nil, 0.0])
+    out = compare(inst, n, [signal(n, [[100, 1.0]]), 60.0, nil, nil, 0.0, 0.0])
     expect(out[0...100].abs.max).to eq(0)
     expect(out[100...6100].abs.max).to be > 0.3
     expect(out[6200..].abs.max).to eq(0)
@@ -92,13 +94,13 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     s = base.with(root: 60)
     inst = instrument { |i| i.region(s) }
     n = 6000
-    up = compare(inst, n, [signal(n, [[0, 1.0]]), 72.0, nil, nil, 0.0])
+    up = compare(inst, n, [signal(n, [[0, 1.0]]), 72.0, nil, nil, 0.0, 0.0])
     # An octave up plays the sample in half the samples
     expect(up[2900...3000].abs.max).to be > 0
     expect(up[3010..].abs.max).to eq(0)
 
     half = instrument { |i| i.region(s, keytrack: 0.5, tune: 1) }
-    out = compare(half, n, [signal(n, [[0, 1.0]]), 72.0, nil, nil, 0.0])
+    out = compare(half, n, [signal(n, [[0, 1.0]]), 72.0, nil, nil, 0.0, 0.0])
     len = 6000 / 2**(7 / 12.0)
     expect(out[(len - 20).floor...(len - 2).floor].abs.max).to be > 0
     expect(out[(len + 2).ceil..].abs.max).to eq(0)
@@ -109,7 +111,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     inst = instrument { |i| i.region(s) }
     n = 6000
     freq = Numo::SFloat.new(n).fill(440.0 * 2) # an octave above A4
-    out = compare(inst, n, [signal(n, [[0, 1.0]]), 69.0, freq, nil, 0.0])
+    out = compare(inst, n, [signal(n, [[0, 1.0]]), 69.0, freq, nil, 0.0, 0.0])
     # Root C4 played at A4 and bent an octave up
     len = 6000 / (2**(9 / 12.0) * 2)
     expect(out[(len + 2).ceil..].abs.max).to eq(0)
@@ -120,7 +122,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     s = base.rev.fade(in: 100, out: 200)
     inst = instrument { |i| i.region(s, keytrack: 0) }
     n = 6400
-    out = compare(inst, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0])
+    out = compare(inst, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0, 0.0])
     expect(out[0]).to eq(0)
     expect(out[50].abs).to be < out[150].abs + 0.5
     expect(out[6000..].abs.max).to eq(0)
@@ -129,17 +131,17 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
   it 'loops forward, ping-pong, and while held (release loops)' do
     n = 30_000
     fwd = base.looped(1000...3000)
-    out = compare(instrument { |i| i.region(fwd, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0])
+    out = compare(instrument { |i| i.region(fwd, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0, 0.0])
     expect(out[25_000..].abs.max).to be > 0.01
 
     pp = base.looped(1000...3000, mode: :ping_pong)
-    out = compare(instrument { |i| i.region(pp, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0], block: 77)
+    out = compare(instrument { |i| i.region(pp, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0, 0.0], block: 77)
     expect(out[25_000..].abs.max).to be > 0.01
 
     rel = base.looped(1000...3000, mode: :release)
     gate = signal(n, [], 1.0)
     gate[10_000..] = 0
-    out = compare(instrument { |i| i.region(rel, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, gate, 0.0], block: 800)
+    out = compare(instrument { |i| i.region(rel, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, gate, 0.0, 0.0], block: 800)
     expect(out[9000...10_000].abs.max).to be > 0.01
     expect(out[16_100..].abs.max).to eq(0) # the rest of the sample (3000 more at most) after the release
   end
@@ -147,7 +149,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
   it 'loops reversed samples' do
     n = 20_000
     s = base.looped(1000...3000).rev
-    out = compare(instrument { |i| i.region(s, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0], block: 333)
+    out = compare(instrument { |i| i.region(s, keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0, 0.0], block: 333)
     expect(out[15_000..].abs.max).to be > 0.01
   end
 
@@ -162,7 +164,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     }
     n = 4 * 6400
     trig = signal(n, [[0, 0.3], [6400, 0.9], [12_800, 0.9], [19_200, 0.9]])
-    out = compare(inst, n, [trig, 60.0, nil, nil, 0.0], block: 800)
+    out = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], block: 800)
     peaks = (0...4).map { |k| out[(k * 6400)...((k + 1) * 6400)].abs.max }
     # Every note-on counts for the key's round robin, so notes 2, 3, and 4
     # are its 2nd, 3rd, and 4th: c, b, c
@@ -180,25 +182,46 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     }
     n = 12_000
     trig = signal(n, (0...10).map { |k| [k * 1200, 0.2 + k * 0.08] })
-    out1 = compare(inst, n, [trig, 60.0, nil, nil, 0.0], seed: 5)
-    out2 = compare(inst, n, [trig, 60.0, nil, nil, 0.0], seed: 5)
-    out3 = compare(inst, n, [trig, 60.0, nil, nil, 0.0], seed: 6)
+    out1 = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], seed: 5)
+    out2 = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], seed: 5)
+    out3 = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], seed: 6)
     expect(out1).to eq(out2)
     expect(out1).not_to eq(out3)
   end
 
-  it 'plays chop hits from note numbers above 127 with slices and pitch apart' do
+  it 'plays slices from keys, pitched by the shift (pitch mark) read at the note-on' do
     brk = base.slices(4)
-    inst = brk.instrument
+    inst = brk.instrument # slices on C2 (36) up, then reversed
     n = 6000
-    plain = compare(inst, n, [signal(n, [[0, 1.0]]), MB::Sound::Sampler.chop_note(2).to_f, nil, nil, 0.0])
-    expect(plain[0...1500]).to eq(compare(inst, n, [signal(n, [[0, 1.0]]), 36.0 + 2, nil, nil, 0.0])[0...1500])
-    up = compare(inst, n, [signal(n, [[0, 1.0]]), MB::Sound::Sampler.chop_note(2, 12).to_f, nil, nil, 0.0])
+    plain = compare(inst, n, [signal(n, [[0, 1.0]]), 38.0, nil, nil, 0.0, 0.0])
+    expect(plain[0...1490]).to eq(compare(MB::Sound::Sampler::Instrument.new { |i| i.region(brk[2], keytrack: 0) }, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, 0.0, 0.0])[0...1490])
+    shift = Numo::SFloat.new(n).fill(12.0)
+    shift[100..] = 0 # read only at the note-on
+    up = compare(inst, n, [signal(n, [[0, 1.0]]), 38.0, nil, nil, 0.0, shift])
     expect(up[752..].abs.max).to eq(0) # 1500 samples an octave up
     expect(up[700...748].abs.max).to be > 0
-    rev = compare(inst, n, [signal(n, [[0, 1.0]]), MB::Sound::Sampler.chop_note(2, reverse: true).to_f, nil, nil, 0.0])
+    rev = compare(inst, n, [signal(n, [[0, 1.0]]), 38.0 + 4, nil, nil, 0.0, 0.0])
     expect(rev[0...1500]).not_to eq(plain[0...1500])
     expect(rev[1500..].abs.max).to eq(0)
+  end
+
+  it 'plays the last slice chromatically above a split key' do
+    brk = base.slices(4)
+    inst = brk.keymap(from: 36, split: 60)
+    expect(inst.regions.length).to eq(8)
+    n = 8000
+    trig = signal(n, [[0, 1.0], [2000, 1.0], [4000, 1.0]])
+    num = Numo::SFloat.new(n).fill(37.0)
+    num[2000...4000] = 72.0 # the last slice (1) an octave up
+    num[4000..] = 60.0      # at its own pitch
+    out = compare(inst, n, [trig, num, nil, nil, 0.0, 0.0], block: 300)
+    one = compare(MB::Sound::Sampler::Instrument.new { |i| i.region(brk[1], keytrack: 0) }, n, [trig, 60.0, nil, nil, 0.0, 0.0])
+    expect(out[4000...5490]).to eq(one[4000...5490])
+    expect(out[2752...4000].abs.max).to eq(0)
+    expect(out[2700...2748].abs.max).to be > 0
+
+    # Nothing played below the split yet: silence
+    expect(compare(inst, 2000, [signal(2000, [[0, 1.0]]), 64.0, nil, nil, 0.0, 0.0]).abs.max).to eq(0)
   end
 
   it 'fades a re-struck note out over the declick length' do
@@ -206,8 +229,8 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     inst = instrument { |i| i.region(s, keytrack: 0) }
     n = 4000
     trig = signal(n, [[0, 1.0], [1000, 1.0]])
-    out = compare(inst, n, [trig, 60.0, nil, nil, 0.0], declick: 64, block: 61)
-    cut = compare(inst, n, [trig, 60.0, nil, nil, 0.0], declick: 0)
+    out = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], declick: 64, block: 61)
+    cut = compare(inst, n, [trig, 60.0, nil, nil, 0.0, 0.0], declick: 0)
     expect(out[0...1000]).to eq(cut[0...1000])
     expect(out[1000...1064]).not_to eq(cut[1000...1064])
     expect(out[1064..]).to eq(cut[1064..])
@@ -217,7 +240,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     s = base
     inst = instrument { |i| i.region(s, keytrack: 0, offset: 1000) }
     n = 6000
-    out = compare(inst, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, Numo::SFloat.new(n).fill(0.5)])
+    out = compare(inst, n, [signal(n, [[0, 1.0]]), 60.0, nil, nil, Numo::SFloat.new(n).fill(0.5), 0.0])
     expect(out[1990...1999].abs.max).to be > 0
     expect(out[2001..].abs.max).to eq(0) # 6000 - 1000 - 3000 left
   end
@@ -226,7 +249,7 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     s = base
     inst = instrument { |i| i.region(s) }
     n = 3000
-    ins = [signal(n, [[0, 1.0], [1500, 0.5]]), 66.5, nil, nil, 0.0]
+    ins = [signal(n, [[0, 1.0], [1500, 0.5]]), 66.5, nil, nil, 0.0, Numo::SFloat.new(n).fill(0.5)]
     [:none, :linear, :cubic, :optimal, :sinc].each do |interp|
       compare(inst, n, ins, interpolation: interp)
     end
@@ -241,9 +264,9 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     num = Numo::SFloat.new(n).fill(62.0)
     num[2500..] = 70.5
     freq = Numo::SFloat.cast(Array.new(n) { |i| 440 * 2**(Math.sin(i / 300.0) / 12) })
-    ref = run(inst, n, [trig, num, freq, nil, 0.0], block: n)
+    ref = run(inst, n, [trig, num, freq, nil, 0.0, 0.0], block: n)
     [1, 7, 128, 367, 800].each do |b|
-      expect(run(inst, n, [trig, num, freq, nil, 0.0], block: b)).to eq(ref), "block #{b}"
+      expect(run(inst, n, [trig, num, freq, nil, 0.0, 0.0], block: b)).to eq(ref), "block #{b}"
     end
   end
 
@@ -253,8 +276,9 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     st = Numo::DFloat.zeros(mirror::STATE_LENGTH)
     cnt = Numo::DFloat.zeros(128)
     r = Numo::UInt64[1]
-    cfg = [440.0, 64, 1, 3, nil, 0.0]
-    ins = [0.0, 60.0, nil, nil, 0.0]
+    st[mirror::LAST_REGION] = -1
+    cfg = [440.0, 64, -1, 3, nil, 0.0]
+    ins = [0.0, 60.0, nil, nil, 0.0, 0.0]
     out = Numo::SFloat.zeros(10)
     expect { fast.play(out, specs, regions, st, cnt, r, ins[0..3], cfg) }.to raise_error(ArgumentError, /inputs/)
     expect { fast.play(out, specs, regions, st, cnt, r, ins, cfg[0..4]) }.to raise_error(ArgumentError, /config/)
@@ -262,7 +286,10 @@ RSpec.describe('MB::Sound::FastSampler', :aggregate_failures) do
     expect { fast.play(out, specs, regions, st, Numo::DFloat.zeros(3), r, ins, cfg) }.to raise_error(ArgumentError, /counters/)
     expect { fast.play(out, specs, regions.cast_to(Numo::SFloat), st, cnt, r, ins, cfg) }.to raise_error(ArgumentError, /regions/)
     expect { fast.play(out, [], regions, st, cnt, r, ins, cfg) }.to raise_error(ArgumentError, /table/)
-    expect { fast.play(out, specs, regions, st, cnt, r, ins, [440.0, 64, 5, 3, nil, 0.0]) }.to raise_error(ArgumentError, /key region/)
-    expect { fast.play(out, specs, regions, st, cnt, r, ins, [440.0, 64, 1, 9, nil, 0.0]) }.to raise_error(ArgumentError, /interpolation/i)
+    expect { fast.play(out, specs, regions, st, cnt, r, ins, [440.0, 64, 200, 3, nil, 0.0]) }.to raise_error(ArgumentError, /split/)
+    expect { fast.play(out, specs, regions, st, cnt, r, ins, [440.0, 64, -1, 9, nil, 0.0]) }.to raise_error(ArgumentError, /interpolation/i)
+    bad = st.dup
+    bad[mirror::LAST_REGION] = 5
+    expect { fast.play(out, specs, regions, bad, cnt, r, ins, cfg) }.to raise_error(ArgumentError, /last region/)
   end
 end

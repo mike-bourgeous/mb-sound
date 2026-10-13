@@ -43,18 +43,21 @@ module MB
 
         module_function
 
-        # Reads the SFZ file at +path+ into an Instrument (+mips+ goes to
-        # the samples' playback tables; see GraphNode::SamplerVoice).
-        def load(path, name: nil)
+        # Reads the SFZ file at +path+ into an Instrument whose voices read
+        # the samples' playback tables with level spacing +mips+ (:octave by
+        # default: about 8 times the audio in memory instead of :default's
+        # 13.7, for big multisample sets; :default for the smoothest
+        # brightness when pitching far from the roots).
+        def load(path, name: nil, mips: :octave)
           path = path.to_s
           real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading an SFZ file') : path
           text = File.read(real)
-          parse(text, base: path, name: name || File.basename(path, '.*')).with_lineage([:sfz, :sfz, [path], {}])
+          parse(text, base: path, name: name || File.basename(path, '.*'), mips: mips).with_lineage([:sfz, :sfz, [path], mips == :octave ? {} : { mips: mips }])
         end
 
         # Parses SFZ +text+; sample paths are relative to the directory of
         # +base+ (a file name; a document String keeps its file rules).
-        def parse(text, base: nil, name: nil)
+        def parse(text, base: nil, name: nil, mips: :octave)
           headers = tokenize(text)
           control = {}
           global = {}
@@ -81,7 +84,7 @@ module MB
           envelope = nil
           skipped = 0
 
-          inst = Instrument.new(name: name, lineage: nil) { |i|
+          inst = Instrument.new(name: name, mips: mips, lineage: nil) { |i|
             regions.each do |r|
               if r['trigger'] && r['trigger'] != 'attack' && r['trigger'] != 'first' && r['trigger'] != 'legato'
                 skipped += 1
@@ -128,7 +131,7 @@ module MB
             end
           }
           warn "SFZ #{name}: skipped #{skipped} release-triggered region#{'s' if skipped != 1}" if skipped > 0
-          envelope ? Instrument.new(inst.regions, chops: inst.chops, envelope: envelope, name: name) : inst
+          envelope ? Instrument.new(inst.regions, mips: mips, envelope: envelope, name: name) : inst
         end
 
         # [header, { opcode => value }] pairs of +text+ (comments removed,

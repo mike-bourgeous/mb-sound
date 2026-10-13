@@ -102,10 +102,12 @@ module MB
         say <<~TEXT
           A chop is a clip of slices, a sixteenth each: names or numbers,
           T (tie) to hold, R (rest), [:s, 2] for a slice two semitones up,
-          and slices themselves (`@l_brk[:s].rev` plays backwards).
+          and slices themselves (`@l_brk[:s].rev` plays backwards).  Each
+          hit is a key (the slices sit on keys from C2) with a pitch mark,
+          so transposing the clip pitches the hits, not the slices.
         TEXT
         type { @l_amen = @l_brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k, T, :k, :h, T, :s, T, [:s, 3], @l_brk[:s].rev).loop }
-        check('a chop clip in @l_amen') { @l_amen.is_a?(Sequence::Clip) && @l_amen.events.length == 11 }
+        check('a chop clip in @l_amen') { @l_amen.is_a?(Sequence::Clip) && @l_amen.events.length == 11 && @l_amen.events.all?(&:pitch) }
       end
 
       step 'Play it' do

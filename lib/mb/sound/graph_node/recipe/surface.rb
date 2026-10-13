@@ -86,7 +86,7 @@ module MB
             },
             'MB::Sound::Sampler::Instrument' => {
               reason: 'readers and the region builder (instruments print through their lineage)',
-              names: %i[channel_count chops envelope kernel_tables lineage name region regions samples],
+              names: %i[channel_count envelope kernel_tables lineage mips name region regions samples split],
             },
           }.freeze
 

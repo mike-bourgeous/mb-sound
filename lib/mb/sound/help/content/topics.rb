@@ -158,10 +158,12 @@ module MB
         (`brk.name(k: 0..1, s: 4..5)`), and edit them as values: `.rev`,
         `.at(7.n16)` (a tracker's 9xx offset), `.looped`, `.bits(12)`,
         `.lofi(:s950)`, `.stretch(1.25)`.  `brk.chop(:k, T, :s, [:s, 2],
-        brk[:s].rev)` writes a chop clip: slice and pitch stay separate, so
-        `amen.transpose(2)` pitches every hit.  Play with `clip.sampler(brk)`
-        (one truncating voice), `sample.play(v)` in a synth, `sfz(path)`
-        instruments, or `sample.node`.
+        brk[:s].rev)` writes a chop clip: keys of `brk.keymap` (slices from
+        C2) with a pitch mark on each hit, so `amen.transpose(2)` pitches
+        every hit and a keyboard plays the same slices.  `brk.keymap(split:
+        C4)` plays the last slice chromatically above C4.  Play with
+        `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
+        synth, `sfz(path)` instruments, or `sample.node`.
       TEXT
       commands :bounce, :capture_audio, :chop, :sampler, :sfz
       dsl :bounce

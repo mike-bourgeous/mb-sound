@@ -1004,6 +1004,10 @@ module MB
                 suffix << ".#{mode}#{"(#{name.inspect})" if name}"
                 rebuilt = rebuilt.public_send(mode, name)
               end
+              if v.pitch
+                suffix << ".pitch(#{num(v.pitch)})"
+                rebuilt = rebuilt.pitch(v.pitch)
+              end
               rebuilt = MB::Sound::Sequence::Seq.step(rebuilt)
               prefix = ''
               if v.accented
@@ -1166,7 +1170,10 @@ module MB
           def instrument_text(i, indent)
             if i.lineage
               parent, name, args, kwargs = i.lineage
-              return "sfz(#{leaf(args[0], indent)})" if parent == :sfz
+              if parent == :sfz
+                extra = kwargs.map { |k, v| ", #{key_text(k)} #{value(v, indent)}" }.join
+                return "sfz(#{leaf(args[0], indent)}#{extra})"
+              end
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
             end
             instrument_block_text(i, indent)
@@ -1177,7 +1184,8 @@ module MB
           # Instrument#region's defaults).
           def instrument_block_text(inst, indent)
             kw = {}
-            kw[:chops] = inst.chops unless inst.chops.empty?
+            kw[:split] = inst.split if inst.split
+            kw[:mips] = inst.mips unless inst.mips == :default
             kw[:envelope] = inst.envelope if inst.envelope
             kw[:name] = inst.name if inst.name
             args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }

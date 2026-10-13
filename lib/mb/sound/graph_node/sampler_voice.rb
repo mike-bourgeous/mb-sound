@@ -9,7 +9,10 @@ module MB
       # node of Hz relative to the note's own frequency: bends and glides),
       # looping as the sample's loop mode says (+gate+ ends release loops),
       # with the sample's fades, reverse, and start offset (+start+: a 0..1
-      # fraction read at each note-on).  A re-struck note fades out over
+      # fraction read at each note-on), and +shift+ semitones higher (the
+      # note's pitch mark, read at each note-on: chop hits).  The
+      # instrument's split key, if any, plays the last region chromatically
+      # above it.  A re-struck note fades out over
       # +declick+ samples under the new one.
       #
       # Playback reads the samples' band-limited levels (sample-mode
@@ -34,8 +37,8 @@ module MB
         # The random seed for round robins.
         attr_reader :seed
 
-        def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: :optimal, mips: :default, seed: nil, once: false, sample_rate: 48000)
+        def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
+                       interpolation: :optimal, mips: instrument.mips, seed: nil, once: false, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -43,7 +46,7 @@ module MB
           if @once
             first = instrument.regions.first
             trigger = 1.0
-            number = first ? (first.root || first.sample.root) : Sampler.chop_note(0)
+            number = first.keytrack == 0 ? first.keys[0] : (first.root || first.sample.root)
           end
           raise ArgumentError, 'A sampler voice needs a trigger and a note number' if trigger.nil? || number.nil?
 
@@ -52,6 +55,7 @@ module MB
           @freq = freq.nil? ? nil : input(freq)
           @gate = gate.nil? ? nil : input(gate)
           @start = start.nil? ? 0.0 : input(start)
+          @shift = shift.nil? ? 0.0 : input(shift)
           @transpose = Interval.semitones(transpose).to_f
           @declick = Integer(declick)
           raise ArgumentError, "Declick is a number of samples, 0 or more (got #{declick})" if @declick < 0
@@ -68,6 +72,7 @@ module MB
         # Silences the voice and restarts its round robins.
         def reset
           @state = Numo::DFloat.zeros(Sampler::KernelRuby::STATE_LENGTH)
+          @state[Sampler::KernelRuby::LAST_REGION] = -1
           @counters = Numo::DFloat.zeros(128)
           @rng = Numo::UInt64[@seed & Tone::MASK64]
           @started = false
@@ -101,9 +106,10 @@ module MB
           freq = @freq && (read(@freq, count) or return nil)
           gate = @gate && (read(@gate, count) or return nil)
           start = read(@start, count) or return nil
+          shift = read(@shift, count) or return nil
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastSampler.play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start], config)
+          MB::Sound::FastSampler.play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift], config)
         end
 
         # The same samples through the Ruby mirror (for specs).
@@ -113,8 +119,9 @@ module MB
           freq = @freq && (read(@freq, count) or return nil)
           gate = @gate && (read(@gate, count) or return nil)
           start = read(@start, count) or return nil
+          shift = read(@shift, count) or return nil
           out = Numo::SFloat.zeros(count)
-          Sampler::KernelRuby.play(out, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start], config)
+          Sampler::KernelRuby.play(out, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift], config)
         end
 
         def sources
@@ -122,6 +129,7 @@ module MB
           s[:freq] = @freq if @freq
           s[:gate] = @gate if @gate
           s[:start] = @start unless @start.is_a?(Numeric)
+          s[:shift] = @shift unless @shift.is_a?(Numeric)
           s.reject { |_, v| v.is_a?(Numeric) }
         end
 
@@ -142,7 +150,7 @@ module MB
 
           sinc = @interpolation == :sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
           code = MB::Sound::Wavetable::INTERPOLATIONS.fetch(@interpolation) { raise ArgumentError, "Unknown interpolation #{@interpolation.inspect}" }
-          @config = [a4, @declick, @instrument.regions.length, code, sinc, @transpose].freeze
+          @config = [a4, @declick, @instrument.split || -1, code, sinc, @transpose].freeze
         end
 
         def build_tables

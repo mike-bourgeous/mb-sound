@@ -18,8 +18,11 @@ module MB
         # The tail's samples left.
         TAIL_LEFT = 2 * VOICE
 
+        # The region last played below the split (-1 for none).
+        LAST_REGION = 2 * VOICE + 1
+
         # The state's length.
-        STATE_LENGTH = 2 * VOICE + 1
+        STATE_LENGTH = 2 * VOICE + 2
 
         # A note: active, region, pos, dir, base, gain, nhz, inloop, released,
         # speed, and its table slot.
@@ -28,17 +31,17 @@ module MB
         module_function
 
         def play(out, specs, regions, state, counters, rng, inputs, config)
-          raise ArgumentError, 'Sampler inputs are [trigger, number, freq, gate, start]' unless inputs.length == 5
-          raise ArgumentError, 'Sampler config is [a4, declick, nkeys, interpolation, sinc, transpose]' unless config.length == 6
+          raise ArgumentError, 'Sampler inputs are [trigger, number, freq, gate, start, shift]' unless inputs.length == 6
+          raise ArgumentError, 'Sampler config is [a4, declick, split, interpolation, sinc, transpose]' unless config.length == 6
 
           count = out.length
           rows = regions.shape[0]
           regs = Array.new(rows) { |k| regions[k, true].to_a }
-          a4, declick, nkeys, interp, _sinc, transpose = config
+          a4, declick, split, interp, _sinc, transpose = config
           a4 = a4.to_f
           declick = Integer(declick)
           transpose = transpose.to_f
-          ctx = { specs: specs, regions: regs, nkeys: Integer(nkeys), interp: interp }
+          ctx = { specs: specs, regions: regs, split: Integer(split), interp: interp, last: state[LAST_REGION].to_i }
 
           trig_s, trig_a = Wavetable::KernelRuby.signal(inputs[0], count)
           num_s, num_a = Wavetable::KernelRuby.signal(inputs[1], count)
@@ -47,6 +50,7 @@ module MB
           has_gate = !inputs[3].nil?
           gate_s, gate_a = Wavetable::KernelRuby.signal(inputs[3], count)
           start_s, start_a = Wavetable::KernelRuby.signal(inputs[4], count)
+          shift_s, shift_a = Wavetable::KernelRuby.signal(inputs[5], count)
 
           cur = get(state, 0)
           tail = get(state, VOICE)
@@ -70,7 +74,7 @@ module MB
                 slot = 1 - tail.slot
               end
               vel = t > 1 ? 1.0 : t
-              note_on(ctx, cur, slot, n, vel, start_a ? start_a[i] : start_s, counters, seed, a4, transpose)
+              note_on(ctx, cur, slot, n, vel, start_a ? start_a[i] : start_s, shift_a ? shift_a[i] : shift_s, counters, seed, a4, transpose)
             end
 
             cur.released = true if has_gate && (gate_a ? gate_a[i] : gate_s) <= 0
@@ -96,6 +100,7 @@ module MB
           put(state, 0, cur)
           put(state, VOICE, tail)
           state[TAIL_LEFT] = left
+          state[LAST_REGION] = ctx[:last]
           rng[0] = seed[0]
 
           out[true] = values
@@ -183,28 +188,28 @@ module MB
           val
         end
 
-        def note_on(ctx, v, slot, n, vel, frac, counters, seed, a4, transpose)
+        def note_on(ctx, v, slot, n, vel, frac, shift, counters, seed, a4, transpose)
           rnd = Tone.noise_random(seed)
           v127 = (vel * 127.0 + 0.5).floor.to_f
           v127 = 127.0 if v127 > 127
           v127 = 0.0 if v127 < 0
 
           regs = ctx[:regions]
-          nkeys = ctx[:nkeys]
+          split = ctx[:split]
           j = -1
           expo = 0.0
-          rev = false
-          chop = n >= 128
+          key = (n + 0.5).floor
+          count = 0.0
+          if key >= 0 && key < 128
+            counters[key] = counters[key] + 1
+            count = counters[key]
+          end
 
-          if !chop
-            key = (n + 0.5).floor
-            count = 0.0
-            if key >= 0 && key < 128
-              counters[key] = counters[key] + 1
-              count = counters[key]
-            end
-            nkeys.times do |k|
-              r = regs[k]
+          if split >= 0 && key >= split
+            j = ctx[:last]
+            expo = ((n - split.to_f) + regs[j][TUNE] + transpose + shift) / 12.0 if j >= 0
+          else
+            regs.each_with_index do |r, k|
               next if key < r[LOKEY] || key > r[HIKEY]
               next if v127 < r[LOVEL] || v127 > r[HIVEL]
               next if rnd < r[LORAND] || rnd >= r[HIRAND]
@@ -215,22 +220,8 @@ module MB
             end
             if j >= 0
               r = regs[j]
-              expo = ((n - r[ROOT]) * r[KEYTRACK] + r[TUNE] + transpose) / 12.0
-            end
-          else
-            q = (n / 128.0).floor.to_f
-            code = q.to_i - 1
-            slice = code / 2
-            rev = code.odd?
-            semis = n - q * 128.0 - 64.0
-            if slice < regs.length - nkeys
-              j = nkeys + slice
-              r = regs[j]
-              if v127 < r[LOVEL] || v127 > r[HIVEL]
-                j = -1
-              else
-                expo = (semis + r[TUNE] + transpose) / 12.0
-              end
+              expo = ((n - r[ROOT]) * r[KEYTRACK] + r[TUNE] + transpose + shift) / 12.0
+              ctx[:last] = j
             end
           end
 
@@ -241,7 +232,7 @@ module MB
           start = r[START]
           stop = r[STOP]
           off = r[OFFSET] + frac * (stop - start)
-          reverse = (r[REVERSE] != 0) != rev
+          reverse = r[REVERSE] != 0
 
           v.region = j
           v.dir = reverse ? -1.0 : 1.0
@@ -250,7 +241,7 @@ module MB
           vt = r[VELTRACK]
           vv = v127 / 127.0
           v.gain = r[GAIN] * ((1.0 - vt) + vt * (vv * vv))
-          v.nhz = chop ? 0.0 : a4 * 2.0**((n - 69.0) / 12.0)
+          v.nhz = a4 * 2.0**((n - 69.0) / 12.0)
           v.released = false
           v.speed = v.base
           v.inloop = r[LOOP_END] > r[LOOP_START] && v.pos >= r[LOOP_START] && v.pos < r[LOOP_END]

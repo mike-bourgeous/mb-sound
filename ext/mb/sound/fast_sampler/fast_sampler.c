@@ -10,36 +10,37 @@
  * sampler loops by itself), read through mb_wavetable.h, so playback uses
  * the band-limited levels (mipmaps) and interpolators of sample-mode
  * wavetables.  +regions+ is a contiguous 2D DFloat with a row of
- * SMP_REGION_COLS values per region (see the REGION_* indices): the first
- * +nkeys+ rows are keyboard regions picked by note number and velocity
- * (the first that matches), the rest are chop slices addressed by note
- * numbers above the MIDI range (see below).
+ * SMP_REGION_COLS values per region (see the REGION_* indices), picked by
+ * note number and velocity (the first that matches).
  *
- * +inputs+ is [trigger, number, freq, gate, start], signal inputs (a
+ * +inputs+ is [trigger, number, freq, gate, start, shift], signal inputs (a
  * Numeric, nil, or an NArray of out.length values read as float32):
  * - trigger: a note-on at every sample above 0, its value the velocity
  *   (0..1; Notes#trigger), so starts are sample-exact.
- * - number: the note number (Notes#number, a Float).  Numbers of 128 and
- *   above are chop hits: q = floor(n / 128), code = q - 1, slice = code / 2
- *   (row nkeys + slice), reversed if code is odd, played +semitones (n - q *
- *   128 - 64) above its own pitch (MB::Sound::Sampler.chop_note).
+ * - number: the note number (Notes#number, a Float).
  * - freq: nil, or the voice's frequency in Hz (Notes#freq: pitch bend,
  *   glides), relative to the note's own frequency config[0] * 2^((n - 69) /
- *   12), multiplying the speed every sample (key regions only).
+ *   12), multiplying the speed every sample.
  * - gate: nil (held) or the note's gate; a release loop stops looping on
  *   the first sample at or below 0.
  * - start: the play start as a fraction of the region (read at note-on).
+ * - shift: the note's pitch mark in semitones (Notes#pitch_mark: chop
+ *   hits' per-note pitch), read at note-on.
  *
- * +config+ is [a4 Hz, declick samples, nkeys, interpolation code, sinc
- * kernel, transpose semitones].
- *
+ * +config+ is [a4 Hz, declick samples, split key, interpolation code, sinc
+ * kernel, transpose semitones].  With a split key (-1 for none), notes from
+ * it up play the region the voice last played below it, chromatically
+ * from the split key (a sampler's split keyboard: slices below, the last
+ * slice pitched above).
+
  * Each note-on moves a sounding note to the tail, which keeps playing at its
  * last speed while fading out linearly over the declick length, so
  * re-struck voices don't click; so at most two notes sound in a voice, and
  * every sample reads at most two positions (two levels each).
  *
  * +state+ is a DFloat of SMP_STATE_LENGTH values (the current note, the
- * tail, and the tail's samples left), +counters+ a DFloat of 128 note-on
+ * tail, the tail's samples left, and the region last played below the
+ * split), +counters+ a DFloat of 128 note-on
  * counts per key (sequential round robins), +rng+ a one-value UInt64
  * splitmix64 state (one random draw per note-on, for random round robins).
  * All are updated in place.
@@ -112,7 +113,8 @@ enum {
 };
 
 #define SMP_TAIL_LEFT (2 * SMP_VOICE)
-#define SMP_STATE_LENGTH (2 * SMP_VOICE + 1)
+#define SMP_LAST_REGION (2 * SMP_VOICE + 1)
+#define SMP_STATE_LENGTH (2 * SMP_VOICE + 2)
 
 struct smp_voice {
 	_Bool active;
@@ -127,7 +129,8 @@ struct smp_ctx {
 	VALUE specs;
 	const double *regions;
 	long nregions;
-	long nkeys;
+	long split;
+	long last_region;
 	struct wt_table tables[2];
 	struct wt_sel sels[2];
 	long loaded[2]; // table index in each slot (-1 none)
@@ -257,9 +260,10 @@ static inline double smp_step(struct smp_ctx *c, struct smp_voice *v, double sp)
 	return val;
 }
 
-// Starts a note at number +n+ with velocity +vel+ (0..1) and start fraction
-// +frac+ into *v (which must be inactive), using table slot +slot+.
-static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double n, double vel, double frac,
+// Starts a note at number +n+ with velocity +vel+ (0..1), start fraction
+// +frac+, and pitch mark +shift+ (semitones) into *v (which must be
+// inactive), using table slot +slot+.
+static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double n, double vel, double frac, double shift,
 		double *counters, uint64_t *rng, double a4, double transpose)
 {
 	double rnd = wt_noise_random(rng);
@@ -269,17 +273,23 @@ static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double
 
 	long j = -1;
 	double expo = 0;
-	_Bool rev = 0;
-	_Bool chop = n >= 128;
+	long key = (long)floor(n + 0.5);
+	double count = 0;
+	if (key >= 0 && key < 128) {
+		counters[key] = counters[key] + 1;
+		count = counters[key];
+	}
 
-	if (!chop) {
-		long key = (long)floor(n + 0.5);
-		double count = 0;
-		if (key >= 0 && key < 128) {
-			counters[key] = counters[key] + 1;
-			count = counters[key];
+	if (c->split >= 0 && key >= c->split) {
+		// The split keyboard's upper zone: the last region played below it,
+		// chromatically from the split key
+		j = c->last_region;
+		if (j >= 0) {
+			const double *r = c->regions + j * SMP_REGION_COLS;
+			expo = ((n - (double)c->split) + r[REGION_TUNE] + transpose + shift) / 12.0;
 		}
-		for (long k = 0; k < c->nkeys; k++) {
+	} else {
+		for (long k = 0; k < c->nregions; k++) {
 			const double *r = c->regions + k * SMP_REGION_COLS;
 			if (key < r[REGION_LOKEY] || key > r[REGION_HIKEY]) continue;
 			if (v127 < r[REGION_LOVEL] || v127 > r[REGION_HIVEL]) continue;
@@ -294,22 +304,8 @@ static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double
 		}
 		if (j >= 0) {
 			const double *r = c->regions + j * SMP_REGION_COLS;
-			expo = ((n - r[REGION_ROOT]) * r[REGION_KEYTRACK] + r[REGION_TUNE] + transpose) / 12.0;
-		}
-	} else {
-		double q = floor(n / 128.0);
-		long code = (long)q - 1;
-		long slice = code / 2;
-		rev = (code % 2) != 0;
-		double semis = n - q * 128.0 - 64.0;
-		if (slice < c->nregions - c->nkeys) {
-			j = c->nkeys + slice;
-			const double *r = c->regions + j * SMP_REGION_COLS;
-			if (v127 < r[REGION_LOVEL] || v127 > r[REGION_HIVEL]) {
-				j = -1;
-			} else {
-				expo = (semis + r[REGION_TUNE] + transpose) / 12.0;
-			}
+			expo = ((n - r[REGION_ROOT]) * r[REGION_KEYTRACK] + r[REGION_TUNE] + transpose + shift) / 12.0;
+			c->last_region = j;
 		}
 	}
 
@@ -322,7 +318,7 @@ static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double
 	double start = r[REGION_START];
 	double end = r[REGION_END];
 	double off = r[REGION_OFFSET] + frac * (end - start);
-	_Bool reverse = (r[REGION_REVERSE] != 0) != rev;
+	_Bool reverse = r[REGION_REVERSE] != 0;
 
 	v->region = j;
 	v->dir = reverse ? -1.0 : 1.0;
@@ -331,7 +327,7 @@ static void smp_note_on(struct smp_ctx *c, struct smp_voice *v, int slot, double
 	double vt = r[REGION_VELTRACK];
 	double vv = v127 / 127.0;
 	v->gain = r[REGION_GAIN] * ((1.0 - vt) + vt * (vv * vv));
-	v->nhz = chop ? 0.0 : a4 * pow(2.0, (n - 69.0) / 12.0);
+	v->nhz = a4 * pow(2.0, (n - 69.0) / 12.0);
 	v->released = 0;
 	v->speed = v->base;
 	v->inloop = r[REGION_LOOP_END] > r[REGION_LOOP_START] && v->pos >= r[REGION_LOOP_START] && v->pos < r[REGION_LOOP_END];
@@ -356,11 +352,11 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	Check_Type(specs, T_ARRAY);
 	Check_Type(inputs, T_ARRAY);
 	Check_Type(config, T_ARRAY);
-	if (RARRAY_LEN(inputs) != 5) {
-		rb_raise(rb_eArgError, "Sampler inputs are [trigger, number, freq, gate, start]");
+	if (RARRAY_LEN(inputs) != 6) {
+		rb_raise(rb_eArgError, "Sampler inputs are [trigger, number, freq, gate, start, shift]");
 	}
 	if (RARRAY_LEN(config) != 6) {
-		rb_raise(rb_eArgError, "Sampler config is [a4, declick, nkeys, interpolation, sinc, transpose]");
+		rb_raise(rb_eArgError, "Sampler config is [a4, declick, split, interpolation, sinc, transpose]");
 	}
 	if (RARRAY_LEN(specs) < 1) {
 		rb_raise(rb_eArgError, "A sampler needs at least one table");
@@ -378,9 +374,9 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	c.specs = specs;
 	c.regions = (const double *)(nary_get_pointer_for_read(regions) + nary_get_offset(regions));
 	c.nregions = RNARRAY_SHAPE(regions)[0];
-	c.nkeys = NUM2LONG(rb_ary_entry(config, 2));
-	if (c.nkeys < 0 || c.nkeys > c.nregions) {
-		rb_raise(rb_eArgError, "The key region count must be 0 to the region count");
+	c.split = NUM2LONG(rb_ary_entry(config, 2));
+	if (c.split < -1 || c.split > 127) {
+		rb_raise(rb_eArgError, "The split key must be -1 (none) or 0 to 127");
 	}
 	for (long k = 0; k < c.nregions; k++) {
 		const double *r = c.regions + k * SMP_REGION_COLS;
@@ -417,19 +413,25 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	VALUE freq_v = rb_ary_entry(inputs, 2);
 	VALUE gate_v = rb_ary_entry(inputs, 3);
 	VALUE start_v = rb_ary_entry(inputs, 4);
+	VALUE shift_v = rb_ary_entry(inputs, 5);
 	_Bool has_freq = !NIL_P(freq_v);
 	_Bool has_gate = !NIL_P(gate_v);
-	struct mb_signal trig, num, freq, gate, startf;
+	struct mb_signal trig, num, freq, gate, startf, shift;
 	mb_signal_input(&trig_v, length, "Trigger", &trig);
 	mb_signal_input(&num_v, length, "Number", &num);
 	mb_signal_input(&freq_v, length, "Frequency", &freq);
 	mb_signal_input(&gate_v, length, "Gate", &gate);
 	mb_signal_input(&start_v, length, "Start", &startf);
+	mb_signal_input(&shift_v, length, "Shift", &shift);
 
 	struct smp_voice cur, tail;
 	smp_get(st, &cur);
 	smp_get(st + SMP_VOICE, &tail);
 	double left = st[SMP_TAIL_LEFT];
+	c.last_region = (long)st[SMP_LAST_REGION];
+	if (c.last_region < -1 || c.last_region >= c.nregions) {
+		rb_raise(rb_eArgError, "The sampler state's last region is out of range");
+	}
 	cur.slot = 0;
 	tail.slot = 1;
 	if (cur.active) smp_load(&c, 0, (long)c.regions[cur.region * SMP_REGION_COLS + REGION_TABLE]);
@@ -449,7 +451,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 				slot = 1 - tail.slot;
 			}
 			double vel = t > 1 ? 1.0 : t;
-			smp_note_on(&c, &cur, slot, n, vel, mb_signal_at(&startf, i), cnt, rs, a4, transpose);
+			smp_note_on(&c, &cur, slot, n, vel, mb_signal_at(&startf, i), mb_signal_at(&shift, i), cnt, rs, a4, transpose);
 		}
 
 		if (has_gate && mb_signal_at(&gate, i) <= 0) {
@@ -481,12 +483,14 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	smp_put(st, &cur);
 	smp_put(st + SMP_VOICE, &tail);
 	st[SMP_TAIL_LEFT] = left;
+	st[SMP_LAST_REGION] = (double)c.last_region;
 
 	RB_GC_GUARD(trig_v);
 	RB_GC_GUARD(num_v);
 	RB_GC_GUARD(freq_v);
 	RB_GC_GUARD(gate_v);
 	RB_GC_GUARD(start_v);
+	RB_GC_GUARD(shift_v);
 
 	return buffer;
 }

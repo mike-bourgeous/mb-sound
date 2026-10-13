@@ -84,6 +84,39 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
     end
   end
 
+  describe 'pitch marks' do
+    it 'travel as per-note pitch, and as a bend at 24 semitones before the note-on in MIDI 1.0 bytes' do
+      e = MB::Sound::MIDI::Event.note_on(38, 0.75, channel: 2, pitch: 3.0)
+      expect(e.pitch).to eq(3.0)
+      bend, note = MB::Sound::MIDI::Event.parse_all(e.bytes)
+      expect(bend.type).to eq(:bend)
+      expect(bend.channel).to eq(2)
+      expect(bend.value).to be_within(1e-3).of(3 / 24.0)
+      expect([note.type, note.note]).to eq([:note_on, 38])
+      expect(MB::Sound::MIDI::Event.note_on(38, 0.75).bytes.bytesize).to eq(3)
+      expect(MB::Sound::MIDI::Event.note_on(38, 0.75, pitch: 0.0).bytes.bytesize).to eq(6)
+    end
+
+    it 'reach a voice as Notes#pitch_mark from a clip, held from each note-on' do
+      notes = MB::Sound.seq(MB::Sound::C4.pitch(2), MB::Sound::D4, MB::Sound::E4.pitch(-1.5)).n8.notes
+      m = take(notes.pitch_mark, 72000)
+      expect(m[0]).to eq(2)
+      expect(m[18000]).to eq(0)
+      expect(m[30000]).to eq(-1.5)
+    end
+
+    it 'pitch keyboard slices played live with bend, and split keyboards play the last slice above the split' do
+      rec = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.05) })]
+      brk = rec.slices(4)
+      inst = brk.keymap(from: 36, split: 60)
+      transport = MB::Sound::Sequence::Transport.new(bpm: 120)
+      clip = MB::Sound.seq(37, 72).n8.stream(transport: transport) # slice 1, then slice 1 an octave up
+      out = take(inst.sampler(clip), 24000)
+      expect((out[0...12000].abs > 0).where[-1]).to be_within(2).of(1199)
+      expect((out[12000..].abs > 0).where[-1]).to be_within(2).of(599)
+    end
+  end
+
   describe 'SFZ' do
     let(:dir) { File.dirname(tmp_path('x')) }
 
@@ -126,6 +159,8 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(a.veltrack).to eq(1)
       expect(c.sample.name).to eq('hard b.wav')
       expect(inst.envelope).to eq([0.01, 0.0, 0.8, 0.3])
+      expect(inst.mips).to eq(:octave)
+      expect { expect(MB::Sound.sfz(File.join(dir, 'kit.sfz'), mips: :default).mips).to eq(:default) }.to output(/ignoring/).to_stderr
       expect(MB::Sound::Sampler::SFZ.note('db3')).to eq(49)
     end
 
