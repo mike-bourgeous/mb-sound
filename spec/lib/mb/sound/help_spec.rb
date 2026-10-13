@@ -3,6 +3,7 @@
 # and every console command is covered by a topic, the sheet, or an
 # exemption with a reason (Help::Coverage).
 require 'stringio'
+require 'open3'
 require 'mb/sound/help'
 
 RSpec.describe MB::Sound::Help do
@@ -150,6 +151,17 @@ RSpec.describe MB::Sound::Help do
     end
   end
 
+  it "loads with the first help, now, or lesson in a plain script (no require 'mb/sound/help')" do
+    code = <<~RUBY
+      require 'mb/sound'
+      print MB::Sound.const_defined?(:Help, false), ' '
+      print MB::Sound.help(:knobs).class, ' ', MB::Sound.method(:lesson).owner
+    RUBY
+    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../../../../lib', __dir__), '-e', code, chdir: File.dirname(tmp_path('script')))
+    expect(status.success?).to eq(true), err
+    expect(out).to eq('false MB::Sound::Help::TopicPage MB::Sound::HelpMethods')
+  end
+
   describe 'lessons' do
     # Notes on a stand-in keyboard, two a bar for +bars+ bars.
     def keyboard(bars)
@@ -188,6 +200,85 @@ RSpec.describe MB::Sound::Help do
       ensure
         session&.close
       end
+    end
+
+    it 'record: files the lesson makes go to the help directory, never the take directory' do
+      takes = tmp_path('takes')
+      session = new_session
+      session.midi_in.input = keyboard(30)
+      lesson = MB::Sound::Help::LESSONS[:record]
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound::Help::LessonRunner.active = runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+        lesson.steps.each do |step|
+          MB::Sound.instance_exec(&step.code)
+          expect(runner.after_line).to include('✓')
+          play_bars(session, 1)
+        end
+      end
+      paths = session.recordings.map(&:path)
+      session.close
+      dir = File.join(ENV['MB_SOUND_HELP_DIR'], 'lessons', 'record')
+      expect(paths.length).to eq(1)
+      expect(File.dirname(paths[0])).to eq(dir)
+      expect(Dir.exist?(takes) ? Dir.children(takes) : []).to eq([])
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
+      session&.close
+    end
+
+    it "record: the capture step doesn't pass when capture failed, even once the rec's loop adds to captures" do
+      session = new_session
+      session.midi_in.input = keyboard(0) # no keyboard: nothing played
+      lesson = MB::Sound::Help::LESSONS[:record]
+      MB::Sound::Session.with_context(session: session) do
+        runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+        2.times { MB::Sound.instance_exec(&runner.step.code); runner.after_line }
+        play_bars(session, 5) # the rec 2 closes: captures has :l_keys_1
+        expect(MB::Sound.captures).to include(:l_keys_1)
+        expect(runner.step.title).to eq('Capture what you played')
+        MB::Sound.live = true
+        expect { MB::Sound.instance_exec(&runner.step.code) }.to output(/Nothing played/).to_stderr
+        expect(runner.step.passed?).to eq(false)
+        expect(runner.after_line).to be_nil
+      ensure
+        MB::Sound.live = false
+      end
+    ensure
+      session&.close
+    end
+
+    it "flow: uses its own scene names and won't start over a playing form" do
+      session = new_session
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.track(:drums, q: 1) { |c| c.tone.ramp * c.gate }
+        MB::Sound.scene(:intro, drums: MB::Sound.seq(MB::Sound::C3).n4.loop)
+        MB::Sound.scene(:outro, drums: MB::Sound.seq(MB::Sound::C2).n4.loop)
+        mine = session.arrangement.scenes.slice(:intro, :outro)
+        MB::Sound.flow { intro 4; outro 4 }
+        play_bars(session, 1)
+
+        expect { MB::Sound.lesson(:flow, restart: true) }.to raise_error(RuntimeError, /lesson :flow plays its own form.*finish/)
+        expect { MB::Sound.lesson(:set, restart: true) }.to raise_error(RuntimeError, /lesson :set plays its own form/)
+        expect(MB::Sound::Help::LessonRunner.active).to be_nil
+        expect(MB::Sound.lesson(:knobs, restart: true)).to be_a(MB::Sound::Help::LessonRunner) # knobs don't touch the set
+
+        # Its steps never touch the song's scenes
+        MB::Sound.instance_exec(&MB::Sound::Help::LESSONS[:flow].steps.first.code)
+        expect(session.arrangement.scenes.slice(:intro, :outro)).to eq(mine)
+      ensure
+        MB::Sound::Help::LessonRunner.active = nil
+      end
+    ensure
+      session&.close
+    end
+
+    it 'lists the lessons once the active one is done' do
+      lesson = MB::Sound::Help::LESSONS[:knobs]
+      MB::Sound::Help::LessonRunner.active = MB::Sound::Help::LessonRunner.new(lesson, lesson.steps.length)
+      expect(MB::Sound.lesson).to be_a(MB::Sound::Help::LessonList)
+      expect(MB::Sound::Help::LessonRunner.active).to be_nil
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
     end
 
     it 'saves progress, resumes, and lists lessons' do

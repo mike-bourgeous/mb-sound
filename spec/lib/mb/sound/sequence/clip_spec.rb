@@ -6,6 +6,23 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     clip.events.map { |e| [e.value, e.start, e.length] }
   end
 
+  describe '#performed?' do
+    it 'is false for written clips, and kept by transforms of a performed clip' do
+      written = MB::Sound.seq(60, 62).n8
+      expect(written.performed?).to eq(false)
+      expect(written.loop.performed?).to eq(false)
+
+      played = MB::Sound::Sequence::Clip.new(written.events, length: 1, performed: true)
+      [
+        played.loop, played.transpose(2), played.quantize(16), played.humanize(1/64r), played.swing,
+        played.legato(0.5), played.reverse, played.permute([1, 0]), played * 2, played.bake { |s| s.transpose(1) },
+        played.ghost_chords(1, per: 1/2r), played | played, played & played,
+      ].each { |c| expect(c.performed?).to eq(true), c.inspect }
+      expect((played | written).performed?).to eq(false)
+      expect(MB::Sound.events([0r, 1/8r, 60, 0.5], length: 1r, performed: true).performed?).to eq(true)
+    end
+  end
+
   describe '#|' do
     it 'plays clips one after another' do
       c = c4.n8 | e4.n4

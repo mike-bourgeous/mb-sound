@@ -117,8 +117,8 @@ module MB
           !data.any? { |d| d.respond_to?(:read) }
       end
 
-      # The longest #render will run when no length is given and the sounds
-      # never end.
+      # The longest #render will run when neither +:bars+ nor +:seconds+ is
+      # given and the sounds never end (+:max_seconds+ overrides it).
       MAX_RENDER_SECONDS = 600
 
       # Plays a sound in the background and returns its player name for
@@ -222,8 +222,15 @@ module MB
             session.remove(fade: fade, time: time, ring: ring)
           else
             session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
-              (names - stopped).each do |name|
-                warn "No background player #{name.inspect} is playing"
+              names.each do |name|
+                # An armed track's live monitor keeps playing (maintainer,
+                # 2026-10-13: stop stops the clips; "Keep, but add hints")
+                mon = name.is_a?(Symbol) && !names.include?(Arrangement::Recording.monitor_name(name)) && Arrangement::Recording.monitor_name(name)
+                if mon && session.playing_after_queue?(mon)
+                  warn "stop #{name.inspect}: its live monitor #{mon.inspect} is still playing (disarm #{name.inspect} or stop #{mon.inspect})"
+                elsif !stopped.include?(name)
+                  warn "No background player #{name.inspect} is playing"
+                end
               end
             }
           end
@@ -683,6 +690,14 @@ module MB
       # tempo changes during the render are followed) or +:seconds+, or when
       # every sound has ended.  Returns the number of seconds rendered.
       #
+      # A +:bars+ render always reaches its end bar (plus the tail, below),
+      # however long that takes (a song form that loops back renders until
+      # it gets there).  Only renders without +:bars+ or +:seconds+ stop at
+      # MAX_RENDER_SECONDS (ten minutes, with a warning) if their sounds
+      # never end.  +:max_seconds+ caps any render explicitly, tail
+      # included, without a warning (for renders without a length it
+      # replaces MAX_RENDER_SECONDS).
+      #
       # If a block is given, it runs first with the rendering session as the
       # current session, so #bg, #at_bar, #every, #bpm, etc. inside it
       # arrange a song on the file's timeline (see ScheduleMethods).
@@ -758,8 +773,9 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, max_seconds: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
+        raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
@@ -776,7 +792,19 @@ module MB
         # The end bar's position through the meter map (read every buffer,
         # so meter changes made while rendering count)
         end_time = bars && -> { transport.bar_position(bars.to_r + 1) }
-        max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
+        # A bars: render has no time limit of its own (it ends at its end
+        # bar plus the tail); the others stop at seconds: or
+        # MAX_RENDER_SECONDS (maintainer decision 2026-10-13), and
+        # max_seconds: caps any of them (replacing MAX_RENDER_SECONDS)
+        max_frames =
+          if seconds
+            (seconds * rate).round
+          elsif bars || max_seconds
+            Float::INFINITY
+          else
+            (MAX_RENDER_SECONDS * rate).round
+          end
+        max_frames = MB::M.min(max_frames, (max_seconds * rate).round) if max_seconds
 
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
@@ -805,10 +833,11 @@ module MB
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
-          frames += render_tail(session, (MAX_RENDER_SECONDS * rate).round - frames, buffer_size)
+          # (up to Session::MAX_TAIL_SECONDS, or what max_seconds: leaves)
+          frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && !session.idle?
+        if bars.nil? && seconds.nil? && max_seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
         end
 

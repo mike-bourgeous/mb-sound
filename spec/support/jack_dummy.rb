@@ -37,6 +37,18 @@ require 'fileutils'
 # Servers also run under `setpriv --pdeathsig TERM`, so they stop (cleanly,
 # freeing their slot) when the spec process dies without running #stop, and
 # #stop runs at exit.
+#
+# Servers run in synchronous mode (--sync) unless #start is given
+# sync: false.  jackd's default asynchronous mode starts every cycle on time
+# even when a client hasn't finished the last one: a client thread the
+# system doesn't schedule for a period (non-realtime here, so any busy
+# moment of a loaded machine) misses cycles, and what another client's
+# output port held in them is gone, or gets two callbacks for one cycle.
+# Those dropped or doubled MIDI messages between the specs' clients
+# (2026-10-13, branch jack-flake-1: a note-on lost and its note-off read
+# twice in a full parallel run).  A synchronous server waits for its
+# clients (up to its client timeout), so a late client only delays the
+# cycle.
 module JackDummy
   SHM_DIR = '/dev/shm'
 
@@ -65,7 +77,7 @@ module JackDummy
 
     # Starts the server and waits until a client can connect.  Returns nil
     # on success, or a reason to skip the specs.
-    def start
+    def start(sync: true)
       return 'jackd is not installed (apt install jackd2)' unless system('which jackd > /dev/null 2>&1')
       raise 'JackDummy is already running a server' if @pid
 
@@ -79,7 +91,7 @@ module JackDummy
       2.times do
         clean_stale
         wait_for_room
-        reason = launch
+        reason = launch(sync)
         return nil if reason.nil?
       end
 
@@ -186,9 +198,9 @@ module JackDummy
 
     # Starts jackd as @name; returns nil once a client can connect, or the
     # reason it failed (the server is stopped then).
-    def launch
+    def launch(sync)
       @log = File.join(defined?(SpecTmp) ? SpecTmp::ROOT : Dir.tmpdir, "jackd-#{@name}.log")
-      @pid = spawn_server(@name, @log)
+      @pid = spawn_server(@name, @log, sync)
 
       # Wait for the server's socket before connecting: a JACK MIDI output
       # created while no server runs leaks RtMidi's ring buffers (see
@@ -214,8 +226,8 @@ module JackDummy
     # Spawns jackd for server +name+, logging to +log+.  With setpriv, the
     # server gets SIGTERM when this process dies (PR_SET_PDEATHSIG; that
     # follows the spawning thread, which is RSpec's main thread here).
-    def spawn_server(name, log)
-      cmd = ['jackd', '--no-realtime', '--port-max', '64', '-n', name, '-d', 'dummy', '-r', '48000', '-p', '256']
+    def spawn_server(name, log, sync)
+      cmd = ['jackd', '--no-realtime', *('--sync' if sync), '--port-max', '64', '-n', name, '-d', 'dummy', '-r', '48000', '-p', '256']
       cmd = ['setpriv', '--pdeathsig', 'TERM', *cmd] if setpriv?
       spawn(*cmd, out: File::NULL, err: [log, 'w'])
     end

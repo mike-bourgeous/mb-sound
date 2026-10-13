@@ -103,6 +103,14 @@ module MB
             if forced.nil?
               warn "Replay: #{kind} #{subject.inspect} wasn't in the take; it lands where it resolves now" unless perform[:overrun_warned]
               perform[:overrun_warned] = true
+            elsif forced.is_a?(Array)
+              # Landed at forced[0] for an earlier time forced[1] (e.g. a
+              # track with lead: launched now): the action gets the
+              # earlier time, as it did live (see Take.note_change)
+              time, given = forced
+              given = given.to_r
+              inner = action
+              action = ->(_t) { inner.call(given) }
             else
               time = forced
             end

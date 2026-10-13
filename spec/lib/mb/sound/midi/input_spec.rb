@@ -6,6 +6,25 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
   end
 
+  describe '.rtmidi_quietly' do
+    it "puts what RtMidi and ALSA print on stderr into the error's message (one line) instead of the terminal" do
+      expect {
+        expect {
+          described_class.rtmidi_quietly {
+            STDERR.syswrite("\nALSA lib seq_hw.c:540:(snd_seq_hw_open) open /dev/snd/seq failed\n\nMidiInAlsa::initialize: error creating client.\n\n")
+            raise MB::Sound::FastMIDI::Error, "Starting MIDI input failed (see RtMidi's message above)"
+          }
+        }.to raise_error(MB::Sound::FastMIDI::Error, 'Starting MIDI input failed: ALSA lib seq_hw.c:540:(snd_seq_hw_open) open /dev/snd/seq failed; MidiInAlsa::initialize: error creating client.')
+      }.not_to output.to_stderr_from_any_process
+    end
+
+    it 'prints the text after all when the block succeeds, and returns its value' do
+      expect {
+        expect(described_class.rtmidi_quietly { STDERR.syswrite("a warning\n"); 42 }).to eq(42)
+      }.to output("a warning\n").to_stderr_from_any_process
+    end
+  end
+
   describe '.api' do
     it 'uses MIDI_API over the argument' do
       ENV['MIDI_API'] = 'alsa'

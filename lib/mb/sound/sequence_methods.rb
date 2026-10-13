@@ -37,10 +37,11 @@ module MB
       # number, or a Pitch).  This is how graph documents and #to_ruby
       # write clips that have no recipe (a recorded or captured clip,
       # Clip.new in a script); seq and grid read better for writing by
-      # hand.
+      # hand.  +performed: true+ marks velocities as played (see
+      # Sequence::Clip#performed?).
       #
       #     events([0r, 1r/8, 57, 0.75], [1r/4, 1r/8, 60, 1.0, { accented: true }], length: 1r/2, loop: true)
-      def events(*rows, length: nil, loop: false, seed: 0, align: :timeline)
+      def events(*rows, length: nil, loop: false, seed: 0, align: :timeline, performed: false)
         list = rows.map { |row|
           raise ArgumentError, "Event rows are Arrays [start, length, value, velocity, { marks }] (got #{row.inspect})" unless row.is_a?(Array) && row.length.between?(4, 5)
           start, len, value, velocity, marks = row
@@ -57,7 +58,7 @@ module MB
           Sequence::Event.new(start: start.to_r, length: len.to_r, value: value, velocity: velocity, **marks)
         }
         length = length.whole_notes if length.is_a?(Sequence::Duration)
-        Sequence::Clip.new(list, length: length&.to_r, loop: loop, seed: seed, align: align)
+        Sequence::Clip.new(list, length: length&.to_r, loop: loop, seed: seed, align: align, performed: performed)
       end
 
       # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such

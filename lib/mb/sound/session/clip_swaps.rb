@@ -50,6 +50,17 @@ module MB
 
         private
 
+        # True if #swap_now has something to swap for +name+: a current or
+        # stopped player, or a start waiting in the change queue (a capture
+        # landing after its track was removed, e.g. in a render's tail, has
+        # none).  Called with @render_lock held.
+        def swap_target?(name)
+          @mutex.synchronize {
+            @players.each_value.any? { |p| p.name == name && p.current? } || @stopped.key?(name) ||
+              @changes.any? { |c| c.subject == name && c.starts }
+          }
+        end
+
         # Finds the player whose clips #swap changes: the current player
         # named +name+, the stopped one, or the one waiting in the change
         # queue to start.  Returns [player, stopped?, clip sources].  Called

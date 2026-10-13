@@ -282,17 +282,19 @@ module MB
             end
             @sampled.clear
 
-            # Outputs are written into the previous output buffers, so an
-            # input that is one of them (e.g. a direct feedback loop) is
-            # copied first.  The input and parameter lists are reused (no
-            # allocations per buffer when the lengths match).
+            # Outputs are written into the output buffers of the frame
+            # before last (two sets alternate, so the last frame's buffers
+            # stay valid while a Tee shares them), so an input that is one
+            # of them (e.g. a direct feedback loop) is copied first.  The
+            # input and parameter lists are reused (no allocations per
+            # buffer when the lengths match).
             data = (@data_list ||= Array.new(@inputs.length))
             length = nil
             ended = false
             idx = 0
             while idx < @inputs.length
               d = @inputs[idx].sample(count)
-              d = d.dup if d && @output_data&.any? { |o| o.equal?(d) }
+              d = d.dup if d && (@output_data&.any? { |o| o.equal?(d) } || @spare_output&.any? { |o| o.equal?(d) })
               data[idx] = d
               if d.nil?
                 ended = true
@@ -330,8 +332,8 @@ module MB
 
           @sampled << index
 
-          # A reused buffer, like most nodes return; it is overwritten after
-          # every output has been read
+          # A reused buffer, like most nodes return; it is overwritten two
+          # frames later
           @output_data[index]
         end
 
@@ -402,7 +404,9 @@ module MB
           if @fast_gains && data.all? { |d| d.is_a?(Numo::SFloat) }
             length = data.map(&:length).min
             data = data.map { |d| d.contiguous? ? d : d.dup }
-            into = @output_data
+            # (into the buffers of the frame before last; see #sample_internal)
+            into = @spare_output
+            @spare_output = @output_data
             if into.nil? || into.length != @fast_gains.shape[0] || into.any? { |o| !o.is_a?(Numo::SFloat) || o.length != length }
               into = Array.new(@fast_gains.shape[0]) { Numo::SFloat.zeros(length) }
             end

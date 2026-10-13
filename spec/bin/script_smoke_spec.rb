@@ -27,6 +27,8 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/feedback_song.rb' => ['--bars', '0.5', '-e', '0.7'],
+    'bin/songs/loop_church.rb' => ['--bars', '0.5', '-S', '0.6'],
+    'bin/songs/memory_card.rb' => ['--bars', '0.5', '-C', '-2'],
     'bin/songs/midi_transforms_song.rb' => ['--bars', '0.5', '-s'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
@@ -42,6 +44,8 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/swap_song.rb' => ['--bars', '0.5'],
     'bin/songs/swarm_song.rb' => ['--bars', '0.5', '-c', '8'],
     'bin/songs/tempo_song.rb' => ['--bars', '0.5'],
+    'bin/songs/tin_roof.rb' => ['--bars', '0.5', '-s', '2'],
+    'bin/songs/tunnel_vision.rb' => ['--bars', '0.5', '-D', '8'],
     'bin/songs/tween_song.rb' => ['--bars', '0.5', '-c', '4'],
     'bin/songs/unison_song.rb' => ['--bars', '0.5', '-l', 'even'],
     'bin/songs/vocal_lead_song.rb' => ['--bars', '0.5', '-S', 'pulse', '-t', '1'],
@@ -107,10 +111,14 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/fm_experimental_bell.rb' => [],
     'bin/synths/fm_kick.rb' => [],
     'bin/synths/fm_synth.rb' => [],
+    'bin/synths/kaede_rowntree.rb' => ['-p', 'epiano', '-w', '0.5'], # (bowls and the gong ring past the 10 s check)
+    'bin/synths/kez_volta.rb' => ['-p', 'neuro', '-G', '0.5'],
     'bin/synths/pluck.rb' => ['--stretch', '1', '--damping', '4'],
+    'bin/synths/skylark_junction.rb' => ['-p', 'breaks', '-c', '4000'],
     'bin/synths/sinewave.rb' => [],
     'bin/synths/sq80_voice.rb' => [],
     'bin/synths/stereo_graph_synth_example.rb' => [],
+    'bin/synths/tiko_marvell.rb' => ['-p', 'choir', '-d', '1'],
     'bin/synths/vocal_lead.rb' => ['-V', 'i,a,u', '-j', '0.2'],
     'bin/synths/wavetable_bass.rb' => [],
     'bin/wavetable_pr_example.rb' => [],
@@ -188,7 +196,9 @@ RSpec.describe('script runner scripts', :smoke) do
       end
 
       it 'renders a short file' do
-        text = `#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
+        # (Loop Church records the master bus with rec_audio)
+        env = script == 'bin/songs/loop_church.rb' ? "LOOP_CHURCH_AUDIO=#{tmp_path('rec_audio.flac').shellescape} " : ''
+        text = `#{env}#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")
 

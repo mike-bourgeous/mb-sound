@@ -18,8 +18,15 @@ module MB
         # The voices by name (a frozen Hash).
         attr_reader :voices
 
-        def initialize(voices, machine:, sample_rate: 48000)
+        # +:clip_notes+ (the note numbers its voices play, when it was built
+        # for a clip's notes) and +:velocity_curve+ (the curve chosen from
+        # its source, nil if given) describe the clips it can take in a
+        # swap (see #plays_clip?).
+        def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, sample_rate: 48000)
           raise ArgumentError, 'A drum kit needs at least one voice' if voices.empty?
+
+          @clip_notes = clip_notes&.uniq&.freeze
+          @auto_curve = velocity_curve
 
           @voices = voices.dup.freeze
           @samplers = @voices.transform_values(&:get_sampler)
@@ -57,6 +64,19 @@ module MB
           end
 
           any ? @buf : nil
+        end
+
+        # True if swapping +clip+ (a Sequence::Clip) into this kit's clip
+        # source plays it as a kit built for +clip+ would: a kit built for
+        # a clip has only the voices that clip plays, and a kit chooses its
+        # velocity curve from its source (a performed clip plays like live
+        # MIDI; see Drums.velocity_curve).  Arrangement tracks build the
+        # patch again for a clip a playing kit can't take.
+        def plays_clip?(clip)
+          return false if @auto_curve && Drums.velocity_curve(clip) != @auto_curve
+          return true if @clip_notes.nil?
+
+          clip.events.all? { |e| @clip_notes.any? { |n| e.value == n } }
         end
 
         # True once every voice has ended.

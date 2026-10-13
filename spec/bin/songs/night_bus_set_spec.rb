@@ -1,5 +1,5 @@
 RSpec.describe('bin/songs/night_bus_set.rb') do
-  before(:all) { load File.expand_path('../../../bin/songs/night_bus_set.rb', __dir__) }
+  before(:all) { require File.expand_path('../../../bin/songs/night_bus_set.rb', __dir__) } # require: other scripts require_relative it (a second load redefines constants)
 
   after { MB::Sound.rewind }
 

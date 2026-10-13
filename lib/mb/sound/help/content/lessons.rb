@@ -2,8 +2,10 @@
 # synthesis but not the newest console layers.  Every step's code is a block
 # that the guard spec runs in order, then checks (each check must fail
 # before its code and pass after), so a lesson that drifts from the API
-# fails a spec instead of confusing a reader.  Names start with l_ so a
-# lesson never stops your own players.  Levels follow the topics' (tones at
+# fails a spec instead of confusing a reader.  Names (tracks, scenes,
+# sections, knobs, players) start with l_ so a lesson never changes your own
+# song; lessons that launch scenes or forms (needs :idle_set) refuse to
+# start over a playing form or scene (see Help::Lesson#busy).  Levels follow the topics' (tones at
 # about -20 dB before the master bus), which the monitor trim (help.level)
 # brings to the listening level.
 #
@@ -13,6 +15,7 @@ module MB
   module Sound
     Help.lesson :set, 'A set in five minutes', minutes: 5 do
       about 'Tracks, scenes, launch points, undo, and the take.'
+      needs :idle_set
 
       step 'A track' do
         say <<~TEXT
@@ -108,16 +111,17 @@ module MB
 
     Help.lesson :flow, 'Song forms', minutes: 6 do
       about 'A form over scenes: labels, gotos, and steering it live.'
+      needs :idle_set
 
       step 'Scenes for sections' do
         say 'Sections play the scenes of the same name.'
         type do
           track(:l_lead, q: 1) { |c| c.tone.triangle.at(-12.db) * c.amp_env }
-          scene :intro, l_lead: seq(A4, E4).n4.loop
-          scene :verse, l_lead: seq(A4, C5, E5, C5).n8.loop
-          scene :outro, l_lead: seq(A4).n2.loop
+          scene :l_intro, l_lead: seq(A4, E4).n4.loop
+          scene :l_verse, l_lead: seq(A4, C5, E5, C5).n8.loop
+          scene :l_outro, l_lead: seq(A4).n2.loop
         end
-        check('scenes :intro, :verse, :outro') { %i[intro verse outro].all? { |s| scenes.key?(s) } }
+        check('scenes :l_intro, :l_verse, :l_outro') { %i[l_intro l_verse l_outro].all? { |s| scenes.key?(s) } }
       end
 
       step 'A form' do
@@ -128,14 +132,14 @@ module MB
         TEXT
         type do
           flow do
-            intro 1
+            l_intro 1
             label :top
-            verse 2
+            l_verse 2
             goto :top, times: 1
-            outro 1
+            l_outro 1
           end
         end
-        check('a form playing') { !flow.nil? }
+        check('the form playing') { flow && !flow.ended? && flow.form.sections.key?(:l_verse) }
       end
 
       step 'Steer it' do
@@ -188,15 +192,21 @@ module MB
           if you like (`quantize: 16`).  `captures` lists every clip so far.
         TEXT
         type { capture :l_keys, 1 }
-        start { captures.length }
-        check('a new clip in captures') { |before| captures.length > before }
+        # (a capture this step queued: the rec above adds to captures by
+        # itself when it closes, and a capture with nothing played queues
+        # nothing)
+        start { Session.current.journal.changes.map(&:seq).max || 0 }
+        check('a capture queued on :l_keys') { |before|
+          Session.current.journal.changes.any? { |e| e.kind == :capture && e.subject == :l_keys && e.seq > before && !%i[failed cancelled].include?(e.status) }
+        }
       end
 
       step 'Record the mix' do
         say <<~TEXT
           `rec_audio` writes the master bus to a file from a launch point
           until `stop_rec_audio`; with no path it makes a timestamped file
-          next to your takes.  `recordings` lists them.
+          next to your takes (during a lesson, in the help folder).
+          `recordings` lists them.
         TEXT
         type { rec_audio }
         check('the mix recording') { Session.current.journal.changes.any? { |e| e.kind == :record && e.subject == :audio } }

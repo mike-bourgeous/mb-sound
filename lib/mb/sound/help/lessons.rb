@@ -33,13 +33,32 @@ module MB
           @needs = []
         end
 
+        # Why the lesson can't start now (a String), or nil: a lesson that
+        # launches its own scenes and form (needs :idle_set) would take
+        # over a form or scene of yours that is playing (the jungle
+        # persona's song lost its scenes to `lesson :flow`, 2026-10-13).
+        def busy
+          return nil unless @needs.include?(:idle_set)
+
+          set = Session.current.arrangement
+          pb = set.playback
+          if pb && !pb.ended?
+            "lesson #{@name.inspect} plays its own form, which would take over the form playing now; `finish` (or `stop :all`) first"
+          elsif (scene = set.current_scene) && !scene.to_s.start_with?('l_') &&
+                (mine = set.tracks.keys.reject { |t| t.to_s.start_with?('l_') }.select { |t| Session.current.playing_after_queue?(t) }).any?
+            "lesson #{@name.inspect} launches its own scenes, which would stop #{mine.map(&:inspect).join(', ')} (scene #{scene.inspect}); `stop :all` first"
+          end
+        end
+
         # Lesson builder: `step 'title' do ... end`.
         class Builder
           def initialize(lesson) = @lesson = lesson
           def about(text) = @lesson.about.replace(text.gsub(/\s+/, ' ').strip)
 
           # What the lesson needs besides a sound card (:midi, a keyboard;
-          # the guard spec plays a stand-in keyboard).
+          # the guard spec plays a stand-in keyboard; :idle_set, no form or
+          # scene playing, for lessons that launch their own; see
+          # Lesson#busy).
           def needs(*things) = @lesson.needs.concat(things)
 
           def step(title, &block)
@@ -117,6 +136,13 @@ module MB
 
         def step = @lesson.steps[@index]
         def done? = @index >= @lesson.steps.length
+
+        # Where files the lesson's code makes without a path go while the
+        # lesson runs (e.g. `rec_audio` alone; see
+        # RecordMethods#rec_audio): a folder for the lesson in the help
+        # directory (Help.data_dir), so lessons never write next to the
+        # performer's own takes.  Nil once the lesson is done.
+        def files_dir = done? ? nil : File.join(Help.data_dir, 'lessons', @lesson.name.to_s)
 
         # Called after each console line: moves on when the step's check
         # passes; returns the text to print (or nil).

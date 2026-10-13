@@ -1065,6 +1065,7 @@ module MB
             kwargs[:loop] = true if clip.looping?
             kwargs[:seed] = clip.seed unless clip.seed == 0
             kwargs[:align] = clip.align unless clip.align == :timeline
+            kwargs[:performed] = true if clip.performed?
             text = events_text(rows, kwargs, indent)
             text += ".named(#{clip.name.inspect})" if clip.named?
             text
@@ -1102,6 +1103,16 @@ module MB
                 n = MB::Sound::Note.new(name) rescue nil
                 return name if n && n.frequency == p.frequency
               end
+            end
+            unless p.constant?
+              # A tempo-synced pitch (`1.bar.hz`) prints as its duration (it
+              # printed its frequency at the current tempo before
+              # 2026-10-13, losing the tempo sync; patches-1)
+              src = p.freq
+              if src.is_a?(MB::Sound::Sequence::TempoNode) && src.mode == :hz && !src.freewheel?
+                return "#{duration_text(src.duration)}.hz"
+              end
+              return fixme("a #{p.class} with a node frequency") unless src.is_a?(Constant)
             end
             f = p.frequency
             return fixme("a #{p.class} with a node frequency") unless f.is_a?(Numeric)

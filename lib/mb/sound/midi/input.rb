@@ -1,3 +1,5 @@
+require 'tempfile'
+
 module MB
   module Sound
     module MIDI
@@ -29,6 +31,9 @@ module MB
       #     input.read_raw  # => [[0.0, "\x90<d"], [0.012, "\x80<\x00"]] (RtMidi deltas)
       class Input
         class << self
+          # True once an input has warned about a repeated JACK cycle.
+          attr_accessor :repeats_reported
+
           # The MIDI APIs available: RtMidi's (:core, :alsa) plus :jack (the
           # shared JACK client, loaded at run time) except on macOS, where
           # CoreMIDI covers everything.
@@ -59,7 +64,7 @@ module MB
               FastAudio.jack_ports(nil, true, flags)
             else
               client = DeviceOutput.client_name
-              kind == :input ? FastMIDI.input_ports(api, client) : FastMIDI.output_ports(api, client)
+              rtmidi_quietly { kind == :input ? FastMIDI.input_ports(api, client) : FastMIDI.output_ports(api, client) }
             end
           end
 
@@ -92,6 +97,44 @@ module MB
             end
 
             [lists.keys.first, nil, nil, lists]
+          end
+
+          # Runs the block (RtMidi calls) with the process's stderr (file
+          # descriptor 2) captured, since RtMidi and ALSA print their errors
+          # there: a FastMIDI::Error raised by the block is raised again
+          # with that text in its message (one line, instead of a wall of
+          # ALSA and RtMidi messages for every attempt when there is no MIDI
+          # device; the looper persona, 2026-10-13), and on success the text
+          # is printed after all.  Other threads' output to stderr in the
+          # meantime is held until the block returns.
+          def rtmidi_quietly
+            $stderr.flush
+            STDERR.flush
+            saved = STDERR.dup
+            Tempfile.create('mb_sound_rtmidi') do |f|
+              error = nil
+              begin
+                STDERR.reopen(f)
+                result = yield
+              rescue FastMIDI::Error => e
+                error = e
+              ensure
+                STDERR.flush
+                STDERR.reopen(saved)
+                saved.close
+              end
+
+              f.rewind
+              text = f.read
+              if error
+                detail = text.lines.map(&:strip).reject(&:empty?).uniq.join('; ')
+                message = error.message.sub(" (see RtMidi's message above)", '')
+                raise FastMIDI::Error, detail.empty? ? message : "#{message}: #{detail}"
+              end
+
+              STDERR.write(text) unless text.empty?
+              result
+            end
           end
 
           # Formats the port lists from .find_port for error messages.
@@ -167,7 +210,7 @@ module MB
             FastAudio.jack_connect(@connected_to, @input.port_name) if @connected_to
           else
             @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
-            @input = FastMIDI::Input.new(@api, client, index, @port_name, queue_size)
+            @input = self.class.rtmidi_quietly { FastMIDI::Input.new(@api, client, index, @port_name, queue_size) }
           end
 
           DeviceOutput.track(self, true)
@@ -182,7 +225,11 @@ module MB
         # previous message received (across reads; 0 for the first message
         # since opening).  Never waits.
         def read_raw
-          @api == :jack ? @input.read(false) : @input.read
+          return @input.read unless @api == :jack
+
+          events = @input.read(false)
+          warn_repeats if @input.repeated != 0
+          events
         end
 
         # True if #read_raw gives JACK frame times, false for RtMidi deltas.
@@ -229,6 +276,21 @@ module MB
           "#<#{self.class.name} #{@api} #{connections.first}#{' closed' if closed?}>"
         end
         alias inspect to_s
+
+        private
+
+        # Says once per process that JACK ran a cycle twice for an input
+        # (the input received its messages once; see Jack.info).
+        def warn_repeats
+          return if Input.repeats_reported
+
+          Input.repeats_reported = true
+          skipped = Jack.info&.dig(:skipped_cycles)
+          warn "JACK ran a cycle twice for MIDI input #{port}: the server is asynchronous and this " \
+            "client was late, so its #{@input.repeated} repeated messages were dropped.  The " \
+            "#{skipped || 'unknown number of'} cycles it skipped lost whatever arrived in them.  " \
+            '`jackd --sync` or a lighter load avoids this (MB::Sound::Jack.info counts them).'
+        end
       end
     end
   end
