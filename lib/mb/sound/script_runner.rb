@@ -201,8 +201,10 @@ module MB
       # effects, +input_channels+ is the default input channel count for
       # files and live input, and +live_channels+ for live input only.  For
       # general scripts, +args+ is the number of positional arguments
-      # allowed (an Integer or Range; nil for any number).
-      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil, args: nil, profile: nil)
+      # allowed (an Integer or Range; nil for any number).  +description+
+      # is the document description --save writes (a String, or a Proc
+      # called with the parameters).
+      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil, args: nil, profile: nil, description: nil)
         raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song, :script].include?(kind)
 
         @kind = kind
@@ -211,6 +213,7 @@ module MB
         @live_channels = live_channels
         @arg_count = args
         @profile = profile
+        @description = description
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
         apply_latency_profile
@@ -531,10 +534,13 @@ module MB
       # as Constants named after the parameter, e.g. Values#midi_cc
       # without MIDI or `p.drive.constant.named('drive')`; the rest are
       # baked in and listed as options), others are listed as options.
+      # The script's description (see #initialize) goes in the header.
       # Prints and returns the path.
       def save_graph(result, inputs)
         params, options = graph_params
-        path = GraphIO.save(@options[:save], result, inputs: inputs, params: params, options: options, from: script_label, kind: @kind)
+        description = @description.respond_to?(:call) ? @description.call(@params) : @description
+        meta = description ? { description: description.to_s } : {}
+        path = GraphIO.save(@options[:save], result, inputs: inputs, params: params, options: options, from: script_label, kind: @kind, meta: meta)
         puts "Saved #{File.basename(@script)}'s graph to #{path}"
         path
       end

@@ -4,8 +4,10 @@
 # Each instrument preset is a bin/synths/ script's patch saved with --save
 # (so its numeric options become the document's params), and each effect
 # preset an effect method from one of those scripts saved with GraphIO.save.
-# The persona panel's patches (2026-10-13; bin/synths/kez_volta.rb,
-# skylark_junction.rb, kaede_rowntree.rb, tiko_marvell.rb) are the first.
+# The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
+# ambient.rb, neo_soul.rb, named for their genres) are the first; each
+# document's description says where it came from (the scripts'
+# <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
 # again after a library change shows what changed in `git diff presets/`.
 #
@@ -13,7 +15,7 @@
 #
 # Examples:
 #     $0                     # saves every preset into presets/
-#     $0 kez_reese nev_rhodes
+#     $0 dnb_reese jungle_rhodes
 #     $0 --check             # lists presets whose saved text is out of date
 #     $0 --list
 
@@ -25,50 +27,50 @@ module MB::Sound
   # The library's preset sources: { name => [script, patch, extra args] }
   # for script patches (saved with --save from spec/test_data/c_major.mid).
   LIBRARY_PRESET_PATCHES = {
-    kez_reese: ['bin/synths/kez_volta.rb', :reese],
-    kez_sub: ['bin/synths/kez_volta.rb', :sub],
-    kez_neuro: ['bin/synths/kez_volta.rb', :neuro],
-    kez_pad: ['bin/synths/kez_volta.rb', :pad],
-    kez_pluck: ['bin/synths/kez_volta.rb', :pluck],
-    kez_boom: ['bin/synths/kez_volta.rb', :boom],
-    kez_drums: ['bin/synths/kez_volta.rb', :drums],
-    nev_breaks: ['bin/synths/skylark_junction.rb', :breaks],
-    nev_sub: ['bin/synths/skylark_junction.rb', :sub],
-    nev_reese: ['bin/synths/skylark_junction.rb', :reese],
-    nev_rhodes: ['bin/synths/skylark_junction.rb', :rhodes],
-    nev_pad: ['bin/synths/skylark_junction.rb', :pad],
-    nev_flute: ['bin/synths/skylark_junction.rb', :flute],
-    nev_perc: ['bin/synths/skylark_junction.rb', :perc],
-    kaede_bowl: ['bin/synths/kaede_rowntree.rb', :bowl],
-    kaede_rin: ['bin/synths/kaede_rowntree.rb', :rin],
-    kaede_gong: ['bin/synths/kaede_rowntree.rb', :gong],
-    kaede_epiano: ['bin/synths/kaede_rowntree.rb', :epiano],
-    kaede_harp: ['bin/synths/kaede_rowntree.rb', :harp],
-    kaede_drone: ['bin/synths/kaede_rowntree.rb', :drone],
-    kaede_rainstick: ['bin/synths/kaede_rowntree.rb', :rainstick],
-    tiko_beat: ['bin/synths/tiko_marvell.rb', :beat],
-    tiko_perc: ['bin/synths/tiko_marvell.rb', :perc],
-    tiko_bass: ['bin/synths/tiko_marvell.rb', :bass],
-    tiko_keys: ['bin/synths/tiko_marvell.rb', :keys],
-    tiko_clav: ['bin/synths/tiko_marvell.rb', :clav],
-    tiko_talkbox: ['bin/synths/tiko_marvell.rb', :talkbox],
-    tiko_choir: ['bin/synths/tiko_marvell.rb', :choir],
+    dnb_reese: ['bin/synths/dnb.rb', :reese],
+    dnb_sub: ['bin/synths/dnb.rb', :sub],
+    dnb_neuro: ['bin/synths/dnb.rb', :neuro],
+    dnb_pad: ['bin/synths/dnb.rb', :pad],
+    dnb_pluck: ['bin/synths/dnb.rb', :pluck],
+    dnb_boom: ['bin/synths/dnb.rb', :boom],
+    dnb_drums: ['bin/synths/dnb.rb', :drums],
+    jungle_breaks: ['bin/synths/jungle.rb', :breaks],
+    jungle_sub: ['bin/synths/jungle.rb', :sub],
+    jungle_reese: ['bin/synths/jungle.rb', :reese],
+    jungle_rhodes: ['bin/synths/jungle.rb', :rhodes],
+    jungle_pad: ['bin/synths/jungle.rb', :pad],
+    jungle_flute: ['bin/synths/jungle.rb', :flute],
+    jungle_perc: ['bin/synths/jungle.rb', :perc],
+    ambient_bowl: ['bin/synths/ambient.rb', :bowl],
+    ambient_rin: ['bin/synths/ambient.rb', :rin],
+    ambient_gong: ['bin/synths/ambient.rb', :gong],
+    ambient_koto: ['bin/synths/ambient.rb', :koto],
+    ambient_harp: ['bin/synths/ambient.rb', :harp],
+    ambient_drone: ['bin/synths/ambient.rb', :drone],
+    ambient_rainstick: ['bin/synths/ambient.rb', :rainstick],
+    neo_soul_beat: ['bin/synths/neo_soul.rb', :beat],
+    neo_soul_perc: ['bin/synths/neo_soul.rb', :perc],
+    neo_soul_bass: ['bin/synths/neo_soul.rb', :bass],
+    neo_soul_keys: ['bin/synths/neo_soul.rb', :keys],
+    neo_soul_clav: ['bin/synths/neo_soul.rb', :clav],
+    neo_soul_talkbox: ['bin/synths/neo_soul.rb', :talkbox],
+    neo_soul_choir: ['bin/synths/neo_soul.rb', :choir],
   }.freeze
 
   # Effect presets: { name => [script, params, builder] }; the builder gets
   # the input and a Hash of param Constants (named after the params).
   LIBRARY_PRESET_EFFECTS = {
-    kaede_tape: ['bin/synths/kaede_rowntree.rb', { wear: { value: 0.3, range: 0.0..1.0, description: 'Tape wear 0..1' } },
-                 ->(input, p) { kaede_tape(input, wear: p[:wear]) }],
-    kaede_room: ['bin/synths/kaede_rowntree.rb', { space: { value: 0.5, range: 0.0..1.0, description: 'Room level 0..1' } },
-                 ->(input, p) { kaede_room(input, space: p[:space]) }],
-    kez_master: ['bin/synths/kez_volta.rb', { air: { value: 20.0, range: 20.0..400.0, description: 'Highpass in Hz' } },
-                 ->(input, p) { kez_master(input, air: p[:air]) }],
-    tiko_dub_loop: ['bin/synths/tiko_marvell.rb', {
+    ambient_tape: ['bin/synths/ambient.rb', { wear: { value: 0.3, range: 0.0..1.0, description: 'Tape wear 0..1' } },
+                 ->(input, p) { ambient_tape(input, wear: p[:wear]) }],
+    ambient_room: ['bin/synths/ambient.rb', { space: { value: 0.5, range: 0.0..1.0, description: 'Room level 0..1' } },
+                 ->(input, p) { ambient_room(input, space: p[:space]) }],
+    dnb_master: ['bin/synths/dnb.rb', { air: { value: 20.0, range: 20.0..400.0, description: 'Highpass in Hz' } },
+                 ->(input, p) { dnb_master(input, air: p[:air]) }],
+    neo_soul_dub_loop: ['bin/synths/neo_soul.rb', {
                       dub: { value: 1.0, range: 0.0..1.0, description: 'Footswitch: 1 records into the 4-bar loop' },
                       keep: { value: 0.82, range: 0.0..0.99, description: 'Loop feedback per pass' },
                     },
-                    ->(input, p) { tiko_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
+                    ->(input, p) { neo_soul_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
   }.freeze
 
   # The MIDI file script patches are saved from.
@@ -97,7 +99,11 @@ module MB::Sound
         constants = params.to_h { |k, spec| [k, spec[:value].constant.named(k.to_s)] }
         graph = builder.call(input, constants)
         Dir.chdir(root) do
-          GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), graph, inputs: { input: input }, params: params, from: script, kind: :effect)
+          description = MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", "Effect :#{name}")
+          GraphIO.save(
+            File.join(dir, "#{name}#{GraphIO::EXTENSION}"), graph,
+            inputs: { input: input }, params: params, from: script, kind: :effect, meta: { description: description }
+          )
         end
       end
     else
