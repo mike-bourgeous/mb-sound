@@ -322,11 +322,34 @@ module MB
       TEXT
       commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
-      see :dynamics
+      see :buses, :dynamics
       example 'a quick master chain' do
         bg :try, 110.hz.saw.at(-20.db).until(2.bars)
         master { |mix| mix.softclip.limit(ceiling: -1.db) }
         after(3) { master nil }
+      end
+    end
+
+    Help.topic :buses, 'Buses, sends, sidechains', group: :perform do
+      about <<~TEXT
+        Named buses with their own effects: tracks send to them (`send:`,
+        `feed`) or play into them (`to:`), and they ring out on their own,
+        sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
+        read a bus or track by name on the exact sample.  Buses mute and
+        solo like tracks (a solo keeps the buses it feeds).
+      TEXT
+      commands :bus, :buses, :feed, :routes
+      dsl :duck, :compress
+      note :buses
+      see :mixing, :dynamics
+      example 'a shared reverb send' do
+        bus(:try_verb) { |sig| sig.reverb(:room, mix: 1) }
+        bg :try, seq(A3, C4, E4, rest).n8.loop.tone.triangle.at(-20.db).until(1.bar), send: { try_verb: -6.db }
+      end
+      example 'duck a pad by the kick of a drum track' do
+        track(:try_drums) { |k| tr808(k).at(-14.db) }
+        bg :try_drums, grid(16, kick: 'x...x...x...x...').loop
+        bg :try, 110.hz.saw.at(-24.db).lp4(900).duck(:try_drums, only: :kick).until(1.bar)
       end
     end
 
