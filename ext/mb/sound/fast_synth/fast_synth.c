@@ -419,6 +419,7 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 		mb_grid_phase_read(state, &grid);
 		mb_grid_phase_start(&grid, phi, freq * adv);
 	}
+	double gbase = grid.base, gk = grid.k; // (locals: blit_derivative is a call)
 	double p = 0, inc = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -427,7 +428,7 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 
 		inc = freq * adv;
 
-		p = constant ? mb_wrap(grid.base + grid.inc * grid.k, 1.0) : phi;
+		p = constant ? mb_wrap(gbase + grid.inc * gk, 1.0) : phi;
 		double theta = p * (2.0 * M_PI);
 
 		_Bool continued = primed && (i > 0 || fabs(mb_wrap(prev_p + prev_inc - p + 0.5, 1.0) - 0.5) < 1e-6);
@@ -460,13 +461,20 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 		primed = 1;
 
 		if (constant) {
-			mb_grid_phase_next(&grid);
+			// mb_grid_phase_next on the locals
+			gk += 1.0;
+			if (gk >= MB_PHASE_GRID) {
+				gbase = mb_wrap(gbase + grid.inc * MB_PHASE_GRID, 1.0);
+				gk = 0;
+			}
 		} else {
 			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
 	if (constant) {
+		grid.base = gbase;
+		grid.k = gk;
 		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
 		mb_grid_phase_write(state, &grid);
 	} else {
