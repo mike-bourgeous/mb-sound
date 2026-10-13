@@ -58,8 +58,12 @@ module MB
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
-        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        #
+        # With +:ring_out+ (the default), a SampleWrapper keeps playing the
+        # delay's tail after its input ends (see #ring_out).
+        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
           @sample_rate = sample_rate.to_f
+          @ring_out = ring_out
           @smooth_limit = nil
           @filter = nil
 
@@ -289,6 +293,8 @@ module MB
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
             delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state, out: @read_buf)
           end
+          @ring_read = delayed
+          @ring_feedback = feedback
 
           # Numeric gains on SFloat buffers: the same products and sum in
           # one allocation-free pass, into the input (as below) or a reused
@@ -311,6 +317,42 @@ module MB
           else
             result
           end
+        end
+
+        # Rings out after the input ends (called by SampleWrapper in place of
+        # #process once its source ends): processes +count+ samples of
+        # silence and returns the output, shortened to end on the exact
+        # sample where the delay line has held only silence (below -90 dB,
+        # see MB::Sound::RingOut) for the longest delay plus the
+        # interpolation reach, then nil.  A plain delay plays its last echo;
+        # with feedback, the repeats decay away.  A loop gain of 1 or more
+        # never ends.
+        def ring_out(count)
+          @ring ||= MB::Sound::RingOut.new
+          return nil if @ring.done?
+
+          @ring_zeros = Numo::SFloat.zeros(count) if @ring_zeros.nil? || @ring_zeros.length != count
+          @ring_zeros.fill(0)
+          out = process(@ring_zeros)
+          return nil if out.nil?
+
+          # The delay line now holds the feedback (the input is silent)
+          fb = @ring_feedback
+          written = fb && fb != 0 ? @ring_read * fb : nil
+          window = (@max_delay_samples.to_f.finite? ? @max_delay_samples.to_f.ceil : 0) + MB::Sound::DelayLine::MARGIN
+          keep = @ring.advance(written, out.length, window)
+          keep && keep < out.length ? out[0...keep] : out
+        end
+
+        # True if the delay rings out after its input ends (the default; see
+        # #ring_out), false if it ends with its input.
+        def rings_out?
+          @ring_out
+        end
+
+        # True once #ring_out has played the whole tail.
+        def rung_out?
+          !!@ring&.done?
         end
 
         def response

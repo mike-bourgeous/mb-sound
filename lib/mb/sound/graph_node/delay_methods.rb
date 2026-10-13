@@ -30,6 +30,12 @@ module MB
         # high frequencies or alias), :cubic, or :linear (cheapest, and the
         # lo-fi sound of older delays).  See MB::Sound::DelayLine.
         #
+        # When the input ends, the delay rings out: its last echo plays, and
+        # with feedback the repeats go on until they fall below -90 dB (see
+        # MB::Sound::RingOut); then the delay ends.  Pass `ring_out: false`
+        # to end with the input instead (e.g. inside a structure with its own
+        # tail handling, like Reverb's extra_time).
+        #
         # Examples (bin/sound.rb):
         #     sig.delay(0.25, feedback: -6.db, dry: 1)           # seconds
         #     sig.delay(250.ms, feedback: -6.db, dry: 1)         # the same
@@ -73,8 +79,10 @@ module MB
         # With d.fb the echoes come from a second delay line outside the
         # loop (the loop's own delay reads early by the insert's latency),
         # so pipeline delays cost about one more delay.
-        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
           if insert
+            raise ArgumentError, "ring_out: false isn't supported with an insert block (the feedback loop rings out)" unless ring_out
+
             return feedback_delay(
               time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, feedback: feedback,
               dry: dry, wet: wet, interpolation: interpolation, &insert
@@ -83,7 +91,7 @@ module MB
 
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, seconds: seconds, smoothing: smoothing, max_delay: max_delay,
-            feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
+            feedback: feedback, dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           ))
         end
 
@@ -111,13 +119,20 @@ module MB
             # The loop outputs the processed repeats; the echoes on their
             # way out are the delay line's own output (first echo clean),
             # rebuilt outside the loop from the same input and repeats
-            echoes = (self + loop * feedback).delay(time, **delay_opts)
+            echoes = DelayMethods.ring_sum(self, loop * feedback).delay(time, **delay_opts)
           end
           echoes = pipeline.apply_wet(echoes) if pipeline.pipeline?
 
           out = wet.is_a?(Numeric) && wet == 1 ? echoes : echoes * wet
-          out = out + self * dry unless dry.is_a?(Numeric) && dry == 0
+          out = DelayMethods.ring_sum(out, self * dry) unless dry.is_a?(Numeric) && dry == 0
           out
+        end
+
+        # The sum of +a+ and +b+ that plays on until both end (a Mixer with
+        # stop_early: false), so a delay's echoes ring out after its input
+        # (and the dry signal) ends.
+        def self.ring_sum(a, b)
+          Mixer.new([a, b], sample_rate: a.sample_rate, stop_early: false)
         end
 
         # The argument of #delay's insert block: the delayed signal (a graph
@@ -210,14 +225,14 @@ module MB
 
         # Builds the MB::Sound::Filter::Delay for #delay and
         # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        def self.delay_filter(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true)
           raise ArgumentError, 'Pass a delay time or seconds:, not more than one' if time && seconds
           time ||= seconds || 0
 
           MB::Sound::Filter::Delay.new(
             delay: time, smoothing: smoothing,
             delay_buffer_size: MB::Sound::Length.samples(max_delay, sample_rate: 48000).ceil, feedback: feedback,
-            dry: dry, wet: wet, interpolation: interpolation
+            dry: dry, wet: wet, interpolation: interpolation, ring_out: ring_out
           )
         end
 

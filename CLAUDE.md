@@ -153,7 +153,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 
 ### Delays (`design/notes/delays.md`)
 
-`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors).  Interpolation `:sinc` default (no aliasing up to 4x), `:cubic`, `:linear`.  Delay times are any length or node (`96.samples`, `3.n16`, `lfo.samples`); `feedback:`/`wet:`/`dry:` numbers or nodes; `#delay` smooths time changes by default.  Tools: `bin/delay_gallery.rb`, `bin/delay_benchmark.rb`, `bin/delay_quality.rb`.
+`#delay` (`Filter::Delay`) and `#multitap` share `MB::Sound::DelayLine` (C reads, exact mirrors).  Interpolation `:sinc` default (no aliasing up to 4x), `:cubic`, `:linear`.  Delay times are any length or node (`96.samples`, `3.n16`, `lfo.samples`); `feedback:`/`wet:`/`dry:` numbers or nodes; `#delay` smooths time changes by default.  Delays, multitaps, and feedback loops ring out after their input ends (until what they feed back stays below -90 dB for their longest delay, on an exact sample; `MB::Sound::RingOut`).  Tools: `bin/delay_gallery.rb`, `bin/delay_benchmark.rb`, `bin/delay_quality.rb`.
 
 ### Chorus (`design/notes/chorus.md`)
 
