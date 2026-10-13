@@ -808,7 +808,7 @@ module MB
 
           def leaf(v, indent)
             case v
-            when Integer, Float, Rational, Complex then num(v)
+            when Integer, Float, Rational, Complex, MB::Sound::Decibels then num(v)
             when nil, true, false, Symbol then v.inspect
             when String
               # A file name, in a bundle: the asset's name
@@ -1101,7 +1101,8 @@ module MB
             fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
           end
 
-          # A number, with gains that are exactly k/10 dB printed as k.db.
+          # A number: Decibels as k.db, and Float gains that are exactly k/10
+          # dB as k.db too.
           def num(n)
             case n
             when Integer then n.to_s
@@ -1117,6 +1118,9 @@ module MB
               end
             when Rational
               n.denominator == 1 ? "#{n.numerator}r" : "#{n.numerator}r/#{n.denominator}"
+            when MB::Sound::Decibels
+              d = num(n.decibels)
+              d.include?('/') || d.include?('::') ? "(#{d}).db" : "#{d}.db"
             when Complex
               "Complex(#{num(n.real)}, #{num(n.imaginary)})"
             else n.inspect

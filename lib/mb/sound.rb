@@ -13,6 +13,7 @@ require_relative 'sound/length'
 require_relative 'sound/interval'
 require_relative 'sound/phase'
 require_relative 'sound/curve'
+require_relative 'sound/decibels'
 require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions

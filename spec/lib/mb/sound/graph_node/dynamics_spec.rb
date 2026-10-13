@@ -138,6 +138,73 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
   end
 
+  describe 'levels' do
+    let(:sig) { 0.5.constant }
+
+    # A fresh call site each time, so the once-per-site warnings show
+    def fresh_site(code)
+      eval(code, binding, "level_site_#{rand(1 << 30)}.rb", 1) # rubocop:disable Security/Eval
+    end
+
+    it 'reads Decibels exactly as dB, without warnings' do
+      expect {
+        sig.compress(threshold: -20.db, upward_threshold: -40.db)
+        sig.expand(threshold: -45.db, range: -30.db)
+        sig.noise_gate(threshold: -30.db)
+        sig.duck(1.constant, amount: -10.db, threshold: -30.db)
+        sig.limit(ceiling: -1.db)
+        sig.squeeze(:eleven)
+        sig.compress
+        sig.limit
+      }.not_to output.to_stderr
+      expect(MB::Sound::GraphNode::DynamicsMethods.level_db(-20.db, 'threshold')).to eq(-20.0)
+      expect(MB::Sound::GraphNode::DynamicsMethods.level(-1.db, 'ceiling')).to eq((-1).db.to_f)
+    end
+
+    it 'warns once per call site about bare dB numbers, which still mean dB' do
+      expect { fresh_site('2.times { sig.compress(threshold: -20) }') }.to output(/level_site_\d+\.rb:1: warning: threshold: -20 is read as -20 dB for now; write -20\.db/).to_stderr
+      expect { fresh_site("sig.compress(threshold: -20)\nsig.compress(threshold: -20)") }.to output(/:1: warning.*\n.*:2: warning/).to_stderr
+      expect { fresh_site('sig.limit(ceiling: -1)') }.to output(/ceiling: -1 is read as -1 dB/).to_stderr
+      expect { fresh_site('sig.duck(1.constant, amount: -10)') }.to output(/amount: -10/).to_stderr
+      expect { fresh_site('sig.noise_gate(threshold: -30.db, range: -60)') }.to output(/range: -60/).to_stderr
+
+      a = sig.compress(threshold: -20.db, attack: 0, release: 0).sample(4)
+      b = nil
+      expect { b = fresh_site('sig.compress(threshold: -20, attack: 0, release: 0)').sample(4) }.to output.to_stderr
+      expect(a).to eq(b)
+    end
+
+    it 'warns about linear levels above full scale' do
+      expect { fresh_site('sig.compress(threshold: 6)') }.to output(/threshold: 6 is a linear gain of 15\.6 dB, above full scale; did you mean -6\.db\?/).to_stderr
+      expect { fresh_site('sig.compress(threshold: 0.1)') }.not_to output.to_stderr
+      expect(MB::Sound::GraphNode::DynamicsMethods.level_db(0.1, 'threshold')).to eq(-20.0)
+    end
+
+    it 'reads Decibels makeup, gains, and compander points as dB' do
+      a = sig.compress(threshold: -20.db, makeup: 3.db, attack: 0, release: 0)
+      b = sig.compress(threshold: -20.db, makeup: 3, attack: 0, release: 0)
+      expect(a.sample(4)).to eq(b.sample(4))
+
+      c = sig.compand(-60.db => -80.db, 0.db => -12.db, attack: 0, release: 0)
+      d = sig.compand(-60 => -80, 0 => -12, attack: 0, release: 0)
+      expect(c.sample(4)).to eq(d.sample(4))
+
+      e = sig.squeeze(gain: 3.db, max_gain: 12.db)
+      f = sig.squeeze(gain: 3, max_gain: 12)
+      expect(e.sample(800)).to eq(f.sample(800))
+    end
+
+    it 'loads graph documents with bare levels quietly, in their old meaning' do
+      g = nil
+      expect { g = MB::Sound::GraphIO.load('0.5.constant.compress(threshold: -20, attack: 0, release: 0)') }.not_to output.to_stderr
+      expect(g.sample(4)).to eq(sig.compress(threshold: -20.db, attack: 0, release: 0).sample(4))
+    end
+
+    it 'prints Decibels levels back as k.db' do
+      expect(sig.compress(threshold: -18.db, makeup: 2.db).to_ruby).to eq('0.5.constant.compress(threshold: -18.db, makeup: 2.db)')
+    end
+  end
+
   describe '#duck' do
     it 'ducks by the amount while the sidechain is loud, then releases' do
       kick = Numo::SFloat.zeros(96000)

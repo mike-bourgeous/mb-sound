@@ -155,7 +155,7 @@ module MB
               unless r[0].is_a?(Numeric) && r[1].is_a?(Numeric) && r[0].to_f.finite? && r[1].to_f.finite?
                 raise ArgumentError, "Transfer points must be finite dB numbers (got #{r.inspect})"
               end
-              [r[0].to_f, r[1].to_f, r[2] || interpolation]
+              [DynamicsMethods.db_param(r[0]).to_f, DynamicsMethods.db_param(r[1]).to_f, r[2] || interpolation]
             }
             raise ArgumentError, 'A transfer curve needs at least two points' if rows.length < 2
             rows.sort_by!(&:first)

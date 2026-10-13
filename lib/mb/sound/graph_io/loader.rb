@@ -798,11 +798,15 @@ module MB
           end
 
           begin
-            result = if drawn
-              # Recorded as drawn, so saving the graph again marks it again
-              GraphNode::Recipe.given_drawn_seed(drawn.seed) { receiver.public_send(name, *args, **kwargs, &block) }
-            else
-              receiver.public_send(name, *args, **kwargs, &block)
+            # Documents keep their own meaning for bare dynamics levels (dB
+            # at 0 and below), so loading them doesn't warn
+            result = GraphNode::DynamicsMethods.quiet_levels do
+              if drawn
+                # Recorded as drawn, so saving the graph again marks it again
+                GraphNode::Recipe.given_drawn_seed(drawn.seed) { receiver.public_send(name, *args, **kwargs, &block) }
+              else
+                receiver.public_send(name, *args, **kwargs, &block)
+              end
             end
           rescue GraphIO::FileError => e
             raise error(node, e.message)

@@ -206,9 +206,13 @@ module MB
         Pitch.new(self)
       end
 
-      # Converts this number as a decibel value to a linear gain value.
+      # Converts this number as a decibel value to a linear gain value: a
+      # Decibels, which acts as the Float gain everywhere and remembers its
+      # dB value (so dB-taking parameters like dynamics thresholds read it
+      # exactly, and graph export prints it back as `-6.db`).
       def db
-        10.0 ** (self / 20.0)
+        return 10.0 ** (self / 20.0) unless real?
+        Decibels.new(self)
       end
       alias dB db
 
