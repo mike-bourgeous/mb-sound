@@ -35,6 +35,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/night_bus_set.rb' => ['--bars', '0.5', '-c', '900'],
     'bin/songs/night_bus_flow.rb' => ['--bars', '0.5', '--seed', '2'],
     'bin/songs/night_bus_capture.rb' => ['--bars', '0.5', '-Q', '0.5'],
+    'bin/songs/press_and_chop.rb' => ['--bars', '0.5', '-l', 'sp1200'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
     'bin/songs/scheduled_song.rb' => ['--bars', '0.5'],
     'bin/songs/small_talk.rb' => ['--bars', '0.5', '--seed', '2', '-m', '0.6'],
