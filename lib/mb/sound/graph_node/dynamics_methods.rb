@@ -61,6 +61,13 @@ module MB
           value.is_a?(Decibels) ? value.db_value : value
         end
 
+        # The methods taking levels and their level keywords (graph export
+        # prints bare dB levels among them as `-20.db`).
+        LEVEL_METHODS = %i[
+          compress compressor expand expander noise_gate duck sidechain_duck limit limiter brickwall
+        ].freeze
+        LEVEL_KEYWORDS = %i[threshold upward_threshold ceiling amount range].freeze
+
         # Linear levels this far above 1 (full scale) get the "louder than
         # full scale" warning; a little above 1 is fine (e.g. 1.0001).
         LINEAR_WARN_ABOVE = 1.0

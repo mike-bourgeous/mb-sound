@@ -408,8 +408,8 @@ module MB::Sound
     master_gain 1
     master { |mix|
       glued = mix.filter(:highpass, cutoff: knob(:air), quality: 0.8)
-        .compress(threshold: -16, ratio: 2, knee: 8, attack: 0.02, release: 0.2)
-      (glued * drive.db).limit(ceiling: ceiling, release: 0.08)
+        .compress(threshold: -16.db, ratio: 2, knee: 8, attack: 0.02, release: 0.2)
+      (glued * drive.db).limit(ceiling: ceiling.db, release: 0.08)
     }
 
     track(:drums) { |kit|
@@ -421,7 +421,7 @@ module MB::Sound
       )
       # Parallel ("New York") compression: the hits keep their shape, the
       # room between them comes up
-      beat.compress(threshold: -26, ratio: 4, attack: 0.003, release: 0.08, makeup: 8, mix: 0.3)
+      beat.compress(threshold: -26.db, ratio: 4, attack: 0.003, release: 0.08, makeup: 8, mix: 0.3)
     }
     track(:bong) { |clip| small_talk_bong(clip, tom: bong_tom) }
     track(:talk) { |clip| small_talk_bass(clip, cutoff: knob(:cut), sub: knob(:sub), crush_mix: crush_mix, air: air, skew: skew, round1: round1, sub_harmonics: sub_harmonics) }

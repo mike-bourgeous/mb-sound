@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::Decibels, :aggregate_failures) do
     expect(Numo::SFloat.zeros(3).fill(d)).to eq(Numo::SFloat.zeros(3).fill(gain))
     expect(Numo::SFloat[d, 1]).to eq(Numo::SFloat[gain, 1])
     b = Numo::SFloat[1, 2]
-    b.inplace * d
+    _ = b.inplace * d
     expect(b).to eq(Numo::SFloat[1, 2] * gain)
   end
 
