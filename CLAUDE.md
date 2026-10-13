@@ -180,7 +180,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 
 ### Drum machines (`design/notes/drums.md`)
 
-`tr808(source, **knobs)` (`lib/mb/sound/drums.rb`, `drums/`): a TR-808-flavored `Drums::Kit` of resonator, metal-bank, and noise voices, driven by a grid `Sequence::Kit` or any MIDI source (`TR808::GM_MAP`); per-voice knob Hashes; `velocity_curve:`/`accent:`; `more_cowbell:`; `outputs: :separate` returns named Channels.  Demo `bin/songs/drums_808.rb`, MIDI script `bin/synths/drums_808.rb`.
+`tr808(source, **knobs)` (`lib/mb/sound/drums.rb`, `drums/`): a TR-808-flavored `Drums::Kit` of resonator, metal-bank, and noise voices, driven by a grid `Sequence::Kit` or any MIDI source (`TR808::GM_MAP`); per-voice knob Hashes; `velocity_curve:`/`accent:` (recorded clips are `Clip#performed?` and play with live MIDI's curve; kits are armable/recordable tracks); `more_cowbell:`; `outputs: :separate` returns named Channels.  Demo `bin/songs/drums_808.rb`, MIDI script `bin/synths/drums_808.rb`.
 
 ### Sequences (`design/notes/sequences.md`)
 
