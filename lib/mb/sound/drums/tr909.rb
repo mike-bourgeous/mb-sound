@@ -118,7 +118,7 @@ module MB
         # The TR-909 design (a Drums::Machine); see the module description.
         def machine
           @machine ||= Drums.machine(:tr909) do
-            voice :kick, tune: 50.0, decay: 0.55, attack: 0.5, punch: 0.6, drive: 0.4, gm: GM_MAP[:kick], as: [:bd, :bass_drum] do |h|
+            voice :kick, tune: 50.0, decay: 0.55, attack: 0.8, punch: 0.9, drive: 0.8, gm: GM_MAP[:kick], as: [:bd, :bass_drum] do |h|
               body = h.body(h.tune, decay: h.decay, sweep: h.punch * 5, sweep_time: 0.018, drop: 0.25, drop_time: 0.15)
               drive = Drums.exp2(h.drive * 2)
               punch = (body * drive).softclip(0.6, 1.0) * (1.25 / (1 + 0.25 * drive))
@@ -148,20 +148,23 @@ module MB
             end
 
             {
-              low_tom: [95.0, 0.55, [:lt]], mid_tom: [135.0, 0.5, [:mt, :tom]], high_tom: [190.0, 0.45, [:ht]],
+              low_tom: [100.0, 1.1, [:lt]], mid_tom: [145.0, 0.95, [:mt, :tom]], high_tom: [200.0, 0.8, [:ht]],
             }.each do |name, (tune, decay, aliases)|
-              voice name, tune: tune, decay: decay, gm: GM_MAP[name], as: aliases, level: 0.75 do |h|
+              # Round 2 (the maintainer preferred the 808's toms): a gentle
+              # strike and a long glide down, rounded by a soft clip, with a
+              # darker breath of noise
+              voice name, tune: tune, decay: decay, gm: GM_MAP[name], as: aliases, level: 0.7 do |h|
                 f = h.hz(h.tune)
-                body = h.body(f, decay: h.decay, sweep: 0.9, sweep_time: 0.01, drop: 0.4, drop_time: 0.25)
-                h.mix(body, h.noise(decay: 0.05, bandpass: f * 5, quality: 1.0) * 0.12)
+                body = h.body(f, decay: h.decay, sweep: 0.3, sweep_time: 0.02, drop: 0.35, drop_time: 0.35)
+                h.mix(body.softclip(0.7, 1.0), h.noise(decay: 0.08, bandpass: f * 3, quality: 0.8) * 0.1)
               end
             end
 
-            voice :closed_hat, decay: 0.16, tune: 0, gm: GM_MAP[:closed_hat], as: [:hat, :hh, :ch], level: 0.45 do |h|
+            voice :closed_hat, decay: 0.06, tune: -3, gm: GM_MAP[:closed_hat], as: [:hat, :hh, :ch], level: 0.45 do |h|
               h.sample(TR909.rom(:closed_hat), tune: h.tune, decay: h.decay, curve: 40)
             end
 
-            voice :open_hat, decay: 0.9, tune: 0, gm: GM_MAP[:open_hat], as: [:oh], level: 0.45 do |h|
+            voice :open_hat, decay: 0.3, tune: -3, gm: GM_MAP[:open_hat], as: [:oh], level: 0.45 do |h|
               h.sample(TR909.rom(:open_hat), tune: h.tune, decay: h.decay, curve: 40)
             end
 

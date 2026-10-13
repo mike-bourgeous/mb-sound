@@ -39,7 +39,7 @@ module MB
         OUTPUTS = [:mix, :separate, :individual].freeze
 
         # The default flam spacing (seconds; see #kit).
-        DEFAULT_FLAM = 0.018
+        DEFAULT_FLAM = 0.016
 
         # The machine's name (e.g. :tr909, or :kit).
         attr_reader :name
@@ -180,7 +180,7 @@ module MB
         # - +flam:+ the spacing of flam-marked notes without their own
         #   (`snare.flam`, 'f' in a grid; see Seq::Step#flam): a grace
         #   stroke (Flams::GRACE of the velocity), then the hit this much
-        #   later (seconds or a Length; DEFAULT_FLAM, 18 ms);
+        #   later (seconds or a Length; DEFAULT_FLAM, 16 ms);
         # - +outputs:+ :mix (a Kit) or :separate (alias :individual: a
         #   Channels bundle of the voices, named, in definition order,
         #   adding up to the mix exactly);

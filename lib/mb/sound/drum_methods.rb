@@ -36,7 +36,7 @@ module MB
       # sampled hats, crash, and ride (see Drums::TR909 for voices and
       # knobs, Drums::Machine#kit for options).  +shuffle:+ (0..6) swings
       # grids and clips like the 909's shuffle; flam-marked notes ('f' or
-      # 'F' in a grid, `D1.flam` in a seq) play as flams, +flam:+ apart (18
+      # 'F' in a grid, `D1.flam` in a seq) play as flams, +flam:+ apart (16
       # ms by default; tr808 kits play them too).
       #
       # Voices: kick, snare, rimshot, clap, low/mid/high_tom, closed_hat

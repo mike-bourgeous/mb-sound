@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::Drums::TR909, :aggregate_failures) do
   end
 
   it 'chokes the open hat with the closed hat' do
-    k = MB::Sound.tr909(MB::Sound.grid(16, oh: 'x...', ch: '..x.'))
+    k = MB::Sound.tr909(MB::Sound.grid(16, oh: 'x...', ch: '..x.'), open_hat: { decay: 0.9 })
     x = collect(k[:open_hat], 0.6)
     expect(x[(step + 1000)...(2 * step)].abs.max).to be > 0.01
     expect(x[(2 * step + 200)..].abs.max).to eq(0)

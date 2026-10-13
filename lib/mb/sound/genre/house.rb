@@ -23,7 +23,8 @@ module MB
       offbeat = '..6...6...6...6.'
       roll = { clap: grid(16, '....3.4.5.6.7.8X') }
       kit :intro, grid(16, kick: four, closed_hat: '5.3.5.3.5.3.5.3.').loop(align: :launch)
-      kit :groove, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '5.3.5.3.5.3.5.3.').loop(align: :launch)
+      # (ghost 16ths on the closed hat so the 909's shuffle 2 swings them)
+      kit :groove, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '5.3.5.335.3.5.32').loop(align: :launch)
         .nofill(:clap, name: :clap_roll).fill(:clap_roll, **roll)
       kit :breakdown, grid(16, closed_hat: '..3...3...3...3.').loop(align: :launch)
 
@@ -33,7 +34,7 @@ module MB
 
       knob :cut, 8000, range: 200..12000, curve: :exp, unit: 'Hz'
 
-      role :drums, :tr909, level: -4.db, about: 'the tr909, the house kit'
+      role :drums, :tr909, level: -4.db, params: { shuffle: 2 }, about: 'the tr909 with shuffle 2, the house kit'
       role :bass, :funk_bass, about: 'an offbeat bass bouncing between octaves'
       role :keys, :tine_piano, filter: :cut, level: -4.db, about: 'electric piano stabs'
       role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser'

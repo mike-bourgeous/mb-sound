@@ -124,7 +124,7 @@ module MB
           # Returns a copy of this step with a flam mark: drum kits (tr808,
           # tr909, kit) play it as a grace stroke (Drums::Flams::GRACE of
           # its velocity) and then the hit +spacing+ later (seconds or a
-          # Length; true, the default, for the kit's flam: spacing, 18 ms
+          # Length; true, the default, for the kit's flam: spacing, 16 ms
           # unless set).  Other voices ignore it.  `snare.flam`,
           # `D1.flam(25.ms)`, or 'f' / 'F' in a grid.  Read the mark with
           # `step[:flam]`.

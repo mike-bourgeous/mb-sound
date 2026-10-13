@@ -64,7 +64,7 @@ RSpec.describe('flam marks', :aggregate_failures) do
     x = Numo::SFloat.hstack(x)
     step = (MB::Sound::Length.seconds(1.n4) * 48000).round
     flam = (MB::Sound::Drums::Machine::DEFAULT_FLAM * 48000).round
-    # The second hit's grace stroke, then the full hit 18 ms later
+    # The second hit's grace stroke, then the full hit 16 ms later
     expect(x[(step + flam)...(step + flam + 2000)].abs.max).to be > x[step...(step + flam)].abs.max
   end
 end
