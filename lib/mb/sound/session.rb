@@ -659,6 +659,18 @@ module MB
         block
       end
 
+      # The session frame of the first sample the player being rendered
+      # reads in this span (a player starting or waking partway through a
+      # span starts there), or nil outside a player's read.  MIDI input
+      # taps place the span's events from it (see MidiInput::Tap).
+      attr_reader :player_frame
+
+      # True if Synths this Session starts free lanes by whole grid cells,
+      # the same at any buffer size (Synth#exact_lanes?; take replays and
+      # render(exact_lanes: true) turn it on).  Applies to players started
+      # after it is set.
+      attr_accessor :exact_lanes
+
       # Stops calling a block given to #add_tap.
       def remove_tap(block)
         @mutex.synchronize { @taps.delete(block) }
@@ -1071,6 +1083,7 @@ module MB
           p.start = start
           p.started = true
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
+          align_grids(p, base + offset)
         end
 
         ringing = p.ring&.active && !p.fade_out
@@ -1131,8 +1144,18 @@ module MB
           frames = MB::M.min(frames, silent_from - (base + offset))
         end
 
+        # Knob readers and MIDI input taps in the graph read from this
+        # player's first frame (see GraphNode::Knob#clock_frame and
+        # #player_frame)
         t = MB::U.clock_now
-        data = p.input.read(frames)
+        begin
+          @knob_frame = base + offset if @knob_frame
+          @player_frame = base + offset
+          data = p.input.read(frames)
+        ensure
+          @knob_frame = base if @knob_frame
+          @player_frame = nil
+        end
         check_speed(p, MB::U.clock_now - t, frames)
 
         if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
@@ -1183,6 +1206,19 @@ module MB
         retire(p)
         raise if @raise_errors
         warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+      end
+
+      # Aligns the grids of the Synths in player +p+'s graph with the
+      # Session's frames (see Synth#align_grid), +frame+ being the player's
+      # first frame.
+      def align_grids(p, frame)
+        nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
+        nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.each do |n|
+          next unless n.is_a?(Synth)
+
+          n.exact_lanes = true if @exact_lanes
+          n.align_grid(frame)
+        end
       end
 
       # Retires a player after a buffer if it ended, was cut off by its

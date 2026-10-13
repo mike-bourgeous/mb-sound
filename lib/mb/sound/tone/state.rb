@@ -15,7 +15,8 @@ module MB
       #   FastSynth.oscillate_bl/blit).
       # - +blep+: [previous effective phase, previous increment, previous
       #   phase modulation, primed: 1, or 0 before the first sample, 2 after
-      #   a phase jump] (FastSynth.oscillate_bl).
+      #   a phase jump, previous width, previous pivot in use]
+      #   (FastSynth.oscillate_bl).
       # - +blit+: [integrator re, im, gain re, im, previous phase, previous
       #   increment, primed 0/1] (FastSynth.blit).
       # - +sync+: [phase, previous increment, direction +1/-1, ring
@@ -70,8 +71,8 @@ module MB
           extra = fields.keys - FIELDS
           raise ArgumentError, "Unknown state fields #{extra.inspect}" unless extra.empty?
 
-          @phase = [phase.to_f]
-          @blep = [0.0, 0.0, 0.0, 0]
+          @phase = phase.is_a?(Array) ? phase.dup : [phase.to_f] # (an Array: with a constant frequency's grid; see #to_h)
+          @blep = [0.0, 0.0, 0.0, 0, 0.5, 0.0]
           @blit = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
           @sync = [@phase[0], 0.0, 1.0, 0, 0]
           @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
@@ -142,7 +143,7 @@ module MB
         # saving a graph; State.new(**state.to_h) restores it.
         def to_h
           {
-            phase: @phase[0],
+            phase: @phase.length > 1 ? @phase.dup : @phase[0], # (with a constant frequency's grid; see mb_phase.h)
             blep: @blep.dup,
             blit: @blit.dup,
             sync: @sync.dup,

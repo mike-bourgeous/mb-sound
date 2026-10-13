@@ -169,6 +169,13 @@ module MB
             v.is_a?(Numo::NArray) ? v : @knob.steady_buffer(count, v)
           end
 
+          # Moves past +count+ samples without reading them (a Synth lane
+          # skipped while idle), returning self.
+          def advance(count)
+            next_frame_for(count)
+            self
+          end
+
           def sample_rate
             @knob.sample_rate
           end
@@ -217,11 +224,11 @@ module MB
           end
 
           def plan_snapshot
-            @frame
+            [@frame, @clock]
           end
 
           def plan_restore(snapshot)
-            @frame = snapshot
+            @frame, @clock = snapshot
           end
 
           # Reads +knob+ from now on instead (a graph document's knob
@@ -231,15 +238,28 @@ module MB
             raise ArgumentError, "Readers read Knobs (got #{knob.class})" unless knob.is_a?(Knob)
             @knob = knob
             @frame = nil
+            @clock = nil
             self
           end
 
           private
 
-          # The first frame of the block this read covers: the Session's
-          # buffer, or this reader's own count.
+          # The first frame of the block this read covers: the first frame
+          # the Session is rendering for this reader's player (see
+          # Knob#clock_frame), then on from there for further reads in the
+          # same buffer (a graph read in pieces, e.g. a Synth's lanes split
+          # where they fall asleep), or this reader's own count outside a
+          # Session.
           def next_frame_for(count)
-            f = @knob.clock_frame || @frame || @knob.block_frame
+            c = @knob.clock_frame
+            f = if c.nil?
+                  @frame || @knob.block_frame
+                elsif c == @clock && @frame && @frame > c
+                  @frame
+                else
+                  c
+                end
+            @clock = c
             @frame = f + count
             f
           end
@@ -408,9 +428,10 @@ module MB
           @self_reader&.plan_restore(snapshot)
         end
 
-        # The first frame of the buffer the knob's Session is rendering, or
-        # nil when no Session is rendering it (readers then count frames
-        # themselves).
+        # The first frame the knob's Session is rendering for the player
+        # being rendered (a player starting or waking partway through a
+        # buffer starts there), or nil when no Session is rendering it
+        # (readers then count frames themselves).
         def clock_frame
           @session&.knob_frame
         end
@@ -580,6 +601,15 @@ module MB
               out = @span_out
               return out if count == @span_count || !out.is_a?(Numo::NArray)
               return out[0...count].dup.freeze
+            end
+
+            # Part of the span from a later frame (a player starting or
+            # waking partway through the buffer, or a graph read in pieces)
+            if @span_frame && frame > @span_frame && frame + count <= @span_frame + @span_count
+              out = @span_out
+              return out unless out.is_a?(Numo::NArray)
+              o = frame - @span_frame
+              return out[o...(o + count)].dup.freeze
             end
 
             if frame >= @next_frame

@@ -54,6 +54,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 
 	struct mb_wt_osc_state st;
 	st.phi = wt_read_state(state, 1, "Phase state");
+	mb_grid_phase_read(state, &st.grid);
 	wt_read_state(tstate, 5, "Wavetable state");
 	double adv = NUM2DBL(advance);
 	double rndadv = NIL_P(random_advance) ? 0 : NUM2DBL(random_advance);
@@ -87,6 +88,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 	st.prev_pm = NUM2DBL(rb_ary_entry(tstate, 1));
 	st.prev_e = NUM2DBL(rb_ary_entry(tstate, 3));
 	st.prev_inc = NUM2DBL(rb_ary_entry(tstate, 4));
+	mb_wt_read_corner_state(tstate, &st);
 
 	mb_wt_oscillate(&t, mode, &ks, out, length, &f, &p, &w, warped, &sc, adv, rndadv, g, off, RTEST(remove_dc), &st);
 
@@ -94,11 +96,15 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 		rb_ary_store(noise, 0, ULL2NUM(st.rng));
 	}
 	rb_ary_store(state, 0, rb_float_new(st.phi));
+	if (!isnan(st.grid.inc)) {
+		mb_grid_phase_write(state, &st.grid);
+	}
 	if (length > 0) {
 		rb_ary_store(tstate, 1, rb_float_new(st.prev_pm));
 		rb_ary_store(tstate, 2, INT2NUM(1));
 		rb_ary_store(tstate, 3, rb_float_new(st.prev_e));
 		rb_ary_store(tstate, 4, rb_float_new(st.prev_inc));
+		mb_wt_write_corner_state(tstate, &st);
 	}
 
 	if (!was_inplace) {
@@ -282,6 +288,16 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
  * the loop's end; the phase in state[0] advances by frequency * advance as
  * for any tone.  Positions outside the sound read silence.
  */
+// Wraps source position +p+ back into table +t+'s loop (if any) once it
+// reaches the loop's end (FastWavetable.play).
+static inline double wt_loop_position(const struct wt_table *t, double p)
+{
+	if (t->has_loop && p >= t->loop_end) {
+		p = t->loop_start + wt_wrap(p - t->loop_start, t->loop_end - t->loop_start);
+	}
+	return p;
+}
+
 static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VALUE advance, VALUE speed,
 		VALUE gain, VALUE offset, VALUE state, VALUE tstate, VALUE interp, VALUE sinc)
 {
@@ -310,49 +326,73 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 	size_t freqptr_step = 1;
 	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqptr_step);
 
-	double ls = t.loop_start;
-	double len = t.loop_end - t.loop_start;
-
 	_Bool constant = !freqptr;
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase and position (see mb_phase.h)
 	}
-	double steps = 0, psteps = 0;
+
+	// A constant frequency counts the phase and the position from their
+	// grids (see mb_phase.h; the position's in tstate[8..10], after the
+	// entries cycle-mode tables use)
+	struct mb_grid_phase grid = { NAN, NAN, NAN }, pgrid = { NAN, NAN, NAN };
+	if (constant) {
+		mb_grid_phase_read(state, &grid);
+		mb_grid_phase_start(&grid, phi, freq * adv);
+
+		double sp = freq * spd;
+		pgrid.base = pgrid.k = pgrid.inc = NAN;
+		if (RARRAY_LEN(tstate) >= 11) {
+			VALUE b = rb_ary_entry(tstate, 8), k = rb_ary_entry(tstate, 9), inc = rb_ary_entry(tstate, 10);
+			if (RB_FLOAT_TYPE_P(b) && RB_FLOAT_TYPE_P(k) && RB_FLOAT_TYPE_P(inc)) {
+				pgrid.base = RFLOAT_VALUE(b);
+				pgrid.k = RFLOAT_VALUE(k);
+				pgrid.inc = RFLOAT_VALUE(inc);
+			}
+		}
+		if (!(pgrid.inc == sp && pgrid.k >= 0 && pgrid.k < MB_PHASE_GRID && wt_loop_position(&t, pgrid.base + sp * pgrid.k) == pos)) {
+			pgrid.base = pos;
+			pgrid.k = 0;
+			pgrid.inc = sp;
+		}
+	}
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = freqptr[i * freqptr_step];
 
 		double inc = freq * adv;
 		double sp = freq * spd;
-		if (constant) {
-			steps = inc * i;
-			psteps = sp * i;
-		}
 
-		double p = constant ? pos + psteps : pos;
-		if (t.has_loop && p >= t.loop_end) {
-			p = ls + wt_wrap(p - ls, len);
-		}
+		double p = wt_loop_position(&t, constant ? pgrid.base + pgrid.inc * pgrid.k : pos);
 
 		double re, im;
 		wt_reselect(&t, fabs(sp), 0, &sel);
 		wt_value_dispatch(&t, p, &sel, mode, &ks, &re, &im);
 		wt_store(out, t.cs, i, re, im, g, off);
 
-		if (!constant) {
+		if (constant) {
+			mb_grid_phase_next(&grid);
+			pgrid.k += 1.0;
+			if (pgrid.k >= MB_PHASE_GRID) {
+				pgrid.base = wt_loop_position(&t, pgrid.base + pgrid.inc * MB_PHASE_GRID);
+				pgrid.k = 0;
+			}
+		} else {
 			phi = mb_wrap_phase(phi + inc);
 			pos = p + sp;
 		}
 	}
 
+	double p;
 	if (constant) {
-		steps = freq * adv * length;
-		psteps = freq * spd * length;
-	}
-	rb_ary_store(state, 0, rb_float_new(wt_wrap(phi + steps, 1.0)));
-	double p = pos + psteps;
-	if (t.has_loop && p >= t.loop_end) {
-		p = ls + wt_wrap(p - ls, len);
+		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
+		mb_grid_phase_write(state, &grid);
+		p = wt_loop_position(&t, pgrid.base + pgrid.inc * pgrid.k);
+		rb_ary_store(tstate, 8, rb_float_new(pgrid.base));
+		rb_ary_store(tstate, 9, rb_float_new(pgrid.k));
+		rb_ary_store(tstate, 10, rb_float_new(pgrid.inc));
+	} else {
+		rb_ary_store(state, 0, rb_float_new(wt_wrap(phi, 1.0)));
+		p = wt_loop_position(&t, pos);
 	}
 	rb_ary_store(tstate, 0, rb_float_new(p));
 	if (length > 0) {

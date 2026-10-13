@@ -64,8 +64,28 @@ module MB
         MIN_QUALITY = 1e-10
         MIN_GAIN = 1e-10
 
-        # States smaller than this are flushed to zero after each buffer.
+        # States smaller than this (or not finite) are flushed to zero on a
+        # grid of FLUSH_GRID samples of the filter's own time (MB_FLUSH_GRID
+        # in mb_svf.h, shared by the SVF, four-pole, diode ladder, and
+        # formant kernels; fixes-7: after each buffer before, so tails below
+        # 1e-30 differed by buffer size).  States keep the samples since the
+        # last grid point after their values.
         FLUSH = 1e-30
+
+        # See FLUSH.
+        FLUSH_GRID = 800
+
+        # The samples since the last flush grid point from entry +idx+ of
+        # state Array +state+ (mb_flush_count_read; 0 if absent).
+        def self.flush_count(state, idx)
+          k = state[idx]
+          k.is_a?(Float) && k >= 0 && k < FLUSH_GRID ? k.to_i : 0
+        end
+
+        # +v+ flushed (see FLUSH).
+        def self.flush_value(v)
+          !v.finite? || v.abs < FLUSH ? 0.0 : v
+        end
 
         # Parameter info for SampleWrapper constants (see Cookbook).
         DYNAMIC_INPUTS = {
@@ -287,9 +307,10 @@ module MB
           raise ArgumentError, 'SVF filter type must be 0..8' unless (0..8).cover?(type_id)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
-          raise ArgumentError, 'SVF state must have two elements' unless state.is_a?(Array) && state.length == 2
+          raise ArgumentError, 'SVF state must have two elements' unless state.is_a?(Array) && (state.length == 2 || state.length == 3)
 
-          ic1, ic2 = state.map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          ic1, ic2 = state.first(2).map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+          fk = flush_count(state, 2)
 
           data = Numo::SFloat.cast(buffer)
           raise ArgumentError, "Only 1D NArrays may be processed (got #{data.ndim} dimensions)" unless data.ndim == 1
@@ -332,12 +353,17 @@ module MB
             ic1 = 2.0 * v1 - ic1
             ic2 = 2.0 * v2 - ic2
             out[i] = m0 * x + m1 * v1 + m2 * v2
+
+            if (fk += 1) >= FLUSH_GRID
+              fk = 0
+              ic1 = flush_value(ic1)
+              ic2 = flush_value(ic2)
+            end
           end
 
-          ic1 = 0.0 if !ic1.finite? || ic1.abs < FLUSH
-          ic2 = 0.0 if !ic2.finite? || ic2.abs < FLUSH
           state[0] = ic1
           state[1] = ic2
+          state[2] = fk.to_f
 
           Numo::SFloat.cast(out)
         end

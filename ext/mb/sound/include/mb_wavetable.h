@@ -789,12 +789,38 @@ static inline void wt_corner_step(const struct wt_table *t, double e, double d, 
 // noise generator.
 struct mb_wt_osc_state {
 	double phi;
+	struct mb_grid_phase grid; // a constant frequency's phase grid (see mb_phase.h)
 	double prev_pm;
 	_Bool primed;
 	double prev_e;
 	double prev_inc;
+	double prev_w, prev_m, prev_sc; // the last sample's width, level measure, and scan (NAN if unknown)
 	uint64_t rng;
 };
+
+// Reads the last sample's width, level measure, and scan from entries 5..7
+// of cycle-mode wavetable state +tstate+ (NAN if absent; see
+// mb_wt_oscillate's corners).
+static inline void mb_wt_read_corner_state(VALUE tstate, struct mb_wt_osc_state *s)
+{
+	s->prev_w = s->prev_m = s->prev_sc = NAN;
+	if (RARRAY_LEN(tstate) >= 8) {
+		VALUE w = rb_ary_entry(tstate, 5), m = rb_ary_entry(tstate, 6), sc = rb_ary_entry(tstate, 7);
+		if (RB_FLOAT_TYPE_P(w) && RB_FLOAT_TYPE_P(m) && RB_FLOAT_TYPE_P(sc)) {
+			s->prev_w = RFLOAT_VALUE(w);
+			s->prev_m = RFLOAT_VALUE(m);
+			s->prev_sc = RFLOAT_VALUE(sc);
+		}
+	}
+}
+
+// Stores them back (see mb_wt_read_corner_state).
+static inline void mb_wt_write_corner_state(VALUE tstate, const struct mb_wt_osc_state *s)
+{
+	rb_ary_store(tstate, 5, rb_float_new(s->prev_w));
+	rb_ary_store(tstate, 6, rb_float_new(s->prev_m));
+	rb_ary_store(tstate, 7, rb_float_new(s->prev_sc));
+}
 
 // FastWavetable.oscillate's loop: +length+ samples of cycle-mode table +t+
 // (interpolation +mode+, sinc kernel +ks+) into +out+ (floats, two per
@@ -832,13 +858,17 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 	double prev_inc = s->prev_inc;
 	_Bool corners = warped && isfinite(t->hi[0]); // band-limited levels
 	double pending_re = 0, pending_im = 0, pending_d = 0;
+	double m = s->prev_m;
 
 	_Bool constant = !freqptr && rndadv == 0;
 	_Bool running = !constant && rndadv == 0; // a frequency signal (see mb_phase.h)
 	if (running) {
 		phi = mb_wrap_phase(phi);
 	}
-	double steps = 0;
+	struct mb_grid_phase grid = s->grid;
+	if (constant) {
+		mb_grid_phase_start(&grid, phi, wt_increment(freq, adv, 0, &rng));
+	}
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = freqptr[i * freqptr_step];
@@ -847,11 +877,8 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 		if (scptr) sc = scptr[i * scptr_step];
 
 		double inc = wt_increment(freq, adv, rndadv, &rng);
-		if (constant) {
-			steps = inc * i;
-		}
 
-		double e = running ? phi : wt_wrap(phi + steps, 1.0);
+		double e = running ? phi : wt_wrap(constant ? grid.base + grid.inc * grid.k : phi, 1.0);
 		if (pm != 0) {
 			e = wt_wrap(e + pm, 1.0);
 		}
@@ -871,7 +898,7 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 		// phase gives white noise with the table's distribution of values
 		// at any level)
 		double d = (rndadv != 0 ? freq * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm);
-		double m = fabs(d) * wf;
+		m = fabs(d) * wf;
 		double re, im;
 		wt_reselect(t, m, sc, &sel);
 		wt_value_dispatch(t, u, &sel, mode, ks, &re, &im);
@@ -886,8 +913,14 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 				re += pending_re;
 				im += pending_im;
 			} else if (primed && (i > 0 || fabs(wt_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
+				// The corners of the previous sample's warp, level, and
+				// scan, as the pending correction would have used (fixes-7)
 				double bre, bim, are, aim;
-				wt_corner_step(t, prev_e, d_back, w, m, sc, mode, ks, &bre, &bim, &are, &aim);
+				if (i == 0 && s->prev_w == s->prev_w) {
+					wt_corner_step(t, prev_e, d_back, s->prev_w, s->prev_m, s->prev_sc, mode, ks, &bre, &bim, &are, &aim);
+				} else {
+					wt_corner_step(t, prev_e, d_back, w, m, sc, mode, ks, &bre, &bim, &are, &aim);
+				}
 				re += are;
 				im += aim;
 			}
@@ -922,19 +955,26 @@ static inline void mb_wt_oscillate(const struct wt_table *t, int mode, const str
 			phi = wt_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
 		} else if (running) {
 			phi = mb_wrap_phase(phi + inc);
+		} else {
+			mb_grid_phase_next(&grid);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		s->phi = mb_grid_phase_now(&grid);
+		s->grid = grid;
+	} else {
+		s->phi = wt_wrap(phi, 1.0);
 	}
-	s->phi = wt_wrap(phi + steps, 1.0);
 	s->rng = rng;
 	if (length > 0) {
 		s->prev_pm = prev_pm;
 		s->primed = 1;
 		s->prev_e = prev_e;
 		s->prev_inc = prev_inc;
+		s->prev_w = w;
+		s->prev_m = m;
+		s->prev_sc = sc;
 	}
 }
 

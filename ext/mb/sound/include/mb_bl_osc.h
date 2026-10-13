@@ -556,11 +556,31 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
 
 // The state of a band-limited oscillator between buffers (see
 // mb_bl_oscillate): the phase (cycles) and the bl_state Array's values.
+// +prev_w+ and +prev_o+ are the (clamped) width and the pivot in use at the
+// previous sample, NAN if unknown (a four-element bl_state from before they
+// were kept): the edges between the previous sample and a buffer's first
+// one are those of the previous sample's warp, as within a buffer, so a
+// width signal gives the same samples at any buffer size.
 struct mb_bl_state {
 	double phi;
+	struct mb_grid_phase grid; // a constant frequency's phase grid (see mb_phase.h)
 	double prev_e, prev_inc, prev_pm;
 	int primed; // 1 primed, 0 a tone's first sample, 2 just after a jump
+	double prev_w, prev_o;
 };
+
+// Reads +prev_w+ and +prev_o+ from a bl_state Array (NAN for a
+// four-element one; see struct mb_bl_state).
+static inline void mb_bl_read_prev_warp(VALUE bl_state, struct mb_bl_state *st)
+{
+	if (RARRAY_LEN(bl_state) >= 6) {
+		st->prev_w = NUM2DBL(rb_ary_entry(bl_state, 4));
+		st->prev_o = NUM2DBL(rb_ary_entry(bl_state, 5));
+	} else {
+		st->prev_w = NAN;
+		st->prev_o = NAN;
+	}
+}
 
 /*
  * The band-limited oscillator loop of FastSynth.oscillate_bl (see
@@ -616,7 +636,10 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 	if (!constant) {
 		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
 	}
-	double steps = 0;
+	struct mb_grid_phase grid = st->grid;
+	if (constant) {
+		mb_grid_phase_start(&grid, phi, freq * adv);
+	}
 	double e = 0, inc = 0;
 	double pending = 0, pending_d = 0;
 	for (size_t i = 0; i < length; i++) {
@@ -645,11 +668,8 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		}
 
 		inc = freq * adv;
-		if (constant) {
-			steps = inc * i;
-		}
 
-		e = constant ? mb_wrap(phi + steps, 1.0) : phi;
+		e = constant ? mb_wrap(grid.base + grid.inc * grid.k, 1.0) : phi;
 		if (pm != 0) {
 			e = mb_wrap(e + pm, 1.0);
 		}
@@ -678,8 +698,17 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		if (i > 0 && d_back == pending_d) {
 			v += pending;
 		} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
+			// The edges of the previous sample's warp, as the pending
+			// correction would have used (within a buffer d_back equals
+			// pending_d unless it isn't finite)
 			double after;
-			bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			if (i == 0 && st->prev_w == st->prev_w && (st->prev_w != w || st->prev_o != o)) {
+				struct bl_breakpoint pbp[BL_MAX_BREAKPOINTS];
+				int npbp = bl_breakpoints(wt, st->prev_w, pbp, 0, st->prev_o);
+				bl_step(pbp, npbp, prev_e, d_back, adv, lo, hi, &after);
+			} else {
+				bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			}
 			v += after;
 		} else if (fresh && i == 0) {
 			// A tone's first sample, corrected as if it had always run at
@@ -713,21 +742,27 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		prev_pm = pm;
 		primed = 1;
 
-		if (!constant) {
+		if (constant) {
+			mb_grid_phase_next(&grid);
+		} else {
 			phi = mb_wrap_phase(phi + inc);
 		}
 	}
 
 	if (constant) {
-		steps = freq * adv * length;
+		st->phi = mb_grid_phase_now(&grid);
+		st->grid = grid;
+	} else {
+		st->phi = mb_wrap(phi, 1.0);
 	}
-	st->phi = mb_wrap(phi + steps, 1.0);
 
 	if (length > 0) {
 		st->prev_e = prev_e;
 		st->prev_inc = prev_inc;
 		st->prev_pm = prev_pm;
 		st->primed = 1;
+		st->prev_w = w;
+		st->prev_o = o;
 	}
 }
 
