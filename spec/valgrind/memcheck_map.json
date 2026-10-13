@@ -220,6 +220,55 @@
         "FastWavetable.sync"
       ]
     },
+    "spec/ext/mb/sound/jack_late_client_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_info",
+        "FastAudio.jack_open",
+        "FastAudio.jack_ports",
+        "FastAudio.jack_stall",
+        "FastAudio::Capture#backend",
+        "FastAudio::Capture#close",
+        "FastAudio::Capture#device_name",
+        "FastAudio::Capture#device_rate",
+        "FastAudio::Capture#initialize",
+        "FastAudio::Capture#jack_ports",
+        "FastAudio::Capture#period",
+        "FastAudio::Capture#periods",
+        "FastAudio::Capture#read",
+        "FastAudio::Capture#repeated",
+        "FastAudio::Capture#resampling?",
+        "FastAudio::Capture#sample_rate",
+        "FastAudio::Capture#stats",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#port_name",
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIInput#repeated",
+        "FastAudio::JackMIDIInput#stall",
+        "FastAudio::JackMIDIInput#stats",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#jack_ports",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#periods",
+        "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#repeated",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output#send_bytes",
+        "FastMIDI::Output.new"
+      ]
+    },
     "spec/ext/mb/sound/jack_port_teardown_spec.rb": {
       "fast_audio": [
         "FastAudio.jack_close",
@@ -305,6 +354,7 @@
         "FastAudio::Capture#periods",
         "FastAudio::Capture#queue_limit",
         "FastAudio::Capture#read",
+        "FastAudio::Capture#repeated",
         "FastAudio::Capture#resampling?",
         "FastAudio::Capture#sample_rate",
         "FastAudio::Capture#stats"
@@ -325,6 +375,7 @@
         "FastAudio::Playback#periods",
         "FastAudio::Playback#queue_limit",
         "FastAudio::Playback#queue_limit=",
+        "FastAudio::Playback#repeated",
         "FastAudio::Playback#resampling?",
         "FastAudio::Playback#sample_rate",
         "FastAudio::Playback#stats",
@@ -461,6 +512,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -791,6 +844,7 @@
         "FastAudio::Capture#period",
         "FastAudio::Capture#periods",
         "FastAudio::Capture#read",
+        "FastAudio::Capture#repeated",
         "FastAudio::Capture#resampling?",
         "FastAudio::Capture#sample_rate",
         "FastAudio::JackMIDIInput#close",
@@ -806,6 +860,7 @@
         "FastAudio::Playback#period",
         "FastAudio::Playback#periods",
         "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#repeated",
         "FastAudio::Playback#resampling?",
         "FastAudio::Playback#sample_rate",
         "FastAudio::Playback#stats",
@@ -838,7 +893,8 @@
         "FastAudio::JackMIDIInput#closed?",
         "FastAudio::JackMIDIInput#initialize",
         "FastAudio::JackMIDIInput#port_name",
-        "FastAudio::JackMIDIInput#read"
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIInput#repeated"
       ],
       "fast_midi": [
         "FastMIDI.compiled_apis",
@@ -859,6 +915,7 @@
         "FastAudio::JackMIDIInput#initialize",
         "FastAudio::JackMIDIInput#port_name",
         "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIInput#repeated",
         "FastAudio::Playback#backend",
         "FastAudio::Playback#captured",
         "FastAudio::Playback#close",
@@ -870,6 +927,7 @@
         "FastAudio::Playback#period",
         "FastAudio::Playback#periods",
         "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#repeated",
         "FastAudio::Playback#resampling?",
         "FastAudio::Playback#sample_rate",
         "FastAudio::Playback#stats",
@@ -1075,6 +1133,7 @@
       "fast_sound": [
         "FastSound.cookbook",
         "FastSound.dynamic_biquad",
+        "FastSound.matrix_mix",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
@@ -1203,6 +1262,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1255,6 +1316,8 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
