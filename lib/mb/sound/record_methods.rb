@@ -79,7 +79,8 @@ module MB
       # the launch point (now by default) until #stop_rec_audio: to +path+,
       # or without one a timestamped file in the take directory (Take#home,
       # `sets/` with +repo: true+, else the user data directory, as
-      # Take#save chooses).  An existing file needs +overwrite: true+.
+      # Take#save chooses; during a lesson, the lesson's folder in the help
+      # directory, see Help::LessonRunner#files_dir).  An existing file needs +overwrite: true+.
       # Returns the journal entry.  Also available as #record_audio.
       def rec_audio(path = nil, at: nil, on: nil, in: nil, repo: false, overwrite: false)
         point = LaunchPoint.of(binding) or return nil
@@ -164,7 +165,10 @@ module MB
       end
 
       def record_audio_file(session, path, point, repo:, overwrite:)
-        path ||= File.join(Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir), "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
+        # (Help loads with bin/sound.rb)
+        dir = Help::LessonRunner.active&.files_dir if !repo && defined?(Help::LessonRunner)
+        dir ||= Take.current.home || (repo ? File.expand_path('../../../sets', __dir__) : Take.data_dir)
+        path ||= File.join(dir, "rec_#{Time.now.strftime('%Y%m%d_%H%M%S')}.flac")
         path = File.expand_path(path)
         replay = Session.perform&.[](:source) == :replay
         unless replay
