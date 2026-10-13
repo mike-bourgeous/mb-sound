@@ -29,7 +29,7 @@ RSpec.describe('bin/synths/skylark_junction.rb') do
 
   it 'plays a slice from its key: the record at 165 BPM, 12 bits' do
     key = MB::Sound.nev_slice_keys[:full].number
-    out = render_patch(MB::Sound.nev_breaks_voice(note_stream([key, 0, 3, 0.75]), map: @map, grit: 0), 3.5)[0]
+    out = render_patch(MB::Sound.nev_breaks_voice(patch_notes([key, 0, 3, 0.75]), map: @map, grit: 0), 3.5)[0]
     bar = 48000 * 240 / 165.0
     expect(peak_db(seconds(out, 0, 0.02))).to be > -10 # the first kick
     # A kick again on beat 1 of the second bar (the record's beats land on the song's)
@@ -45,30 +45,30 @@ RSpec.describe('bin/synths/skylark_junction.rb') do
 
   it 'cuts the last slice with each new one (one voice)' do
     keys = MB::Sound.nev_slice_keys
-    one = render_patch(MB::Sound.nev_breaks_voice(note_stream([keys[:full].number, 0, 1, 0.75]), map: @map), 1)[0]
-    cut = render_patch(MB::Sound.nev_breaks_voice(note_stream([keys[:full].number, 0, 0.5, 0.75], [keys[:h].number, 0.5, 0.6, 0.75]), map: @map), 1)[0]
+    one = render_patch(MB::Sound.nev_breaks_voice(patch_notes([keys[:full].number, 0, 1, 0.75]), map: @map), 1)[0]
+    cut = render_patch(MB::Sound.nev_breaks_voice(patch_notes([keys[:full].number, 0, 0.5, 0.75], [keys[:h].number, 0.5, 0.6, 0.75]), map: @map), 1)[0]
     expect(seconds(cut, 0, 0.49)).to eq(seconds(one, 0, 0.49))
     expect(rms_db(seconds(cut, 0.7, 1.0))).to be < rms_db(seconds(one, 0.7, 1.0)) - 20
   end
 
   it 'plays the melodic patches' do
     {
-      sub: [MB::Sound.nev_sub_voice(note_stream([MB::Sound::D2.number, 0, 1])), -20],
-      reese: [MB::Sound.nev_reese_voice(note_stream([MB::Sound::D2.number, 0, 1])), -25],
-      rhodes: [MB::Sound.nev_rhodes_voice(note_stream([MB::Sound::F3.number, 0, 1], [MB::Sound::A3.number, 0, 1])), -35],
-      pad: [MB::Sound.nev_pad_voice(note_stream([MB::Sound::F4.number, 0, 2])), -50],
-      flute: [MB::Sound.nev_flute_voice(note_stream([MB::Sound::A4.number, 0, 1])), -35],
+      sub: [MB::Sound.nev_sub_voice(patch_notes([MB::Sound::D2.number, 0, 1])), -20],
+      reese: [MB::Sound.nev_reese_voice(patch_notes([MB::Sound::D2.number, 0, 1])), -25],
+      rhodes: [MB::Sound.nev_rhodes_voice(patch_notes([MB::Sound::F3.number, 0, 1], [MB::Sound::A3.number, 0, 1])), -35],
+      pad: [MB::Sound.nev_pad_voice(patch_notes([MB::Sound::F4.number, 0, 2])), -50],
+      flute: [MB::Sound.nev_flute_voice(patch_notes([MB::Sound::A4.number, 0, 1])), -35],
     }.each do |name, (graph, floor)|
       out = render_patch(graph, 2)
       expect(peak_db(out[0])).to be_between(floor, 0), "#{name}: #{peak_db(out[0]).round(1)} dB"
     end
 
-    sub = render_patch(MB::Sound.nev_sub_voice(note_stream([MB::Sound::D2.number, 0, 1])), 1)[0]
+    sub = render_patch(MB::Sound.nev_sub_voice(patch_notes([MB::Sound::D2.number, 0, 1])), 1)[0]
     expect(peak_hz(seconds(sub, 0.2, 0.9), 20, 200)).to be_within(1.5).of(MB::Sound::D2.frequency)
   end
 
   it 'plays the ride and shaker from GM notes, highpassed' do
-    out = render_patch(MB::Sound.nev_perc(note_stream([51, 0, 0.1, 1.0], [70, 0.5, 0.6, 1.0])), 1)[0]
+    out = render_patch(MB::Sound.nev_perc(patch_notes([51, 0, 0.1, 1.0], [70, 0.5, 0.6, 1.0])), 1)[0]
     expect(peak_db(seconds(out, 0, 0.4))).to be > -30
     expect(peak_db(seconds(out, 0.5, 0.7))).to be > -40
     expect(band_share(out, 0, 150)).to be < 0.01

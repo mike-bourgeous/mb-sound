@@ -3,7 +3,7 @@
 module PatchHelpers
   # A MIDI::Stream of notes: [note number, on seconds, off seconds,
   # velocity 0..1 (0.8 if left out)] each.
-  def note_stream(*notes)
+  def patch_notes(*notes)
     events = notes.flat_map { |n, on, off, vel|
       [MB::Sound::MIDI::Event.note_on(n, vel || 0.8, time: on.to_r), MB::Sound::MIDI::Event.note_off(n, time: off.to_r)]
     }
@@ -70,5 +70,6 @@ module PatchHelpers
 end
 
 RSpec.configure do |c|
-  c.include PatchHelpers
+  # Only the patch script specs (the names are generic)
+  c.include PatchHelpers, file_path: %r{spec/bin/(synths|songs)/|spec/bin/save_presets_spec}
 end

@@ -36,7 +36,7 @@ RSpec.describe('bin/save_presets.rb') do
       # Drum kits play GM drum notes (kick, hat, snare, shaker, ride, conga)
       midi = -> {
         if [:drums, :perc, :beat].include?(patch)
-          MB::Sound::Notes.new(note_stream([36, 0, 0.1, 1.0], [42, 0.1, 0.2], [38, 0.2, 0.3], [70, 0.3, 0.4], [51, 0.4, 0.5], [64, 0.5, 0.6]))
+          MB::Sound::Notes.new(patch_notes([36, 0, 0.1, 1.0], [42, 0.1, 0.2], [38, 0.2, 0.3], [70, 0.3, 0.4], [51, 0.4, 0.5], [64, 0.5, 0.6]))
         else
           MB::Sound::Notes.new(midi_file)
         end
