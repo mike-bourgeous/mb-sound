@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       RUBY
       g = io.load(code, inputs: { midi: MB::Sound::Notes.new(midi_path) })
       expect(g.to_ruby).to include('base = v.hz.glide(100.ms).transpose(per_voice(-0.1..0.1))')
-      expect(render(g, buffers: 40).map { |c| c.abs.max }.max).to be > 0.01
+      expect(render(g, buffers: 100).map { |c| c.abs.max }.max).to be > 0.01
     end
   end
 

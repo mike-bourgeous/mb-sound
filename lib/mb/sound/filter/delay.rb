@@ -120,6 +120,8 @@ module MB
           # sample from the signal node?  Maybe set a flag that triggers a
           # reset in #sample?
           samples ||= @time.constant_samples(@sample_rate) unless @time.node?
+          # A tempo-synced delay starts at its time at the current tempo
+          samples ||= (tempo = @time.tempo_node) && tempo.value * @sample_rate
           @filter.reset(samples) if samples && @filter
         end
 
