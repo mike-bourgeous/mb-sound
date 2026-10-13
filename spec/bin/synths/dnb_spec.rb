@@ -35,6 +35,28 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(rms_db(seconds(rich, 0.2, 0.9))).to be_within(0.5).of(rms_db(seconds(plain, 0.2, 0.9)))
   end
 
+  it 'adds quieter dnb harmonics to the sub with harmonics: true' do
+    rich = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: true), 1)[0]
+    f = MB::Sound::F1.frequency
+    h2, h3 = MB::Sound::DNB_SUB_HARMONICS
+    power = 1 + h2**2 + h3**2
+    loud = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: [0.4, 0.2]), 1)[0]
+    # (the lowpass takes a little of the fundamental, so the shares are a bit over h**2 / power)
+    expect(band_share(seconds(rich, 0.2, 0.9), f * 1.5, f * 2.5)).to be_between(h2**2 / power, h2**2 / power * 1.5)
+    expect(band_share(seconds(rich, 0.2, 0.9), f * 2.5, f * 3.5)).to be_between(h3**2 / power, h3**2 / power * 1.5)
+    expect(band_share(seconds(rich, 0.2, 0.9), f * 1.5, f * 3.5)).to be < band_share(seconds(loud, 0.2, 0.9), f * 1.5, f * 3.5) / 3
+  end
+
+  it 'adds high end to the neuro bass with sync:, fold:, and noise:' do
+    plain = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1])) }, 1)[0]
+    top = band_share(seconds(plain, 0.1, 0.9), 4000, 24000)
+    [:sync, :fold, :noise].each do |k|
+      bright = render_patch(MB::Sound.with_seed(4) { MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), k => 1) }, 1)[0]
+      expect(band_share(seconds(bright, 0.1, 0.9), 4000, 24000)).to be > top * 1.5, k.to_s
+      expect(peak_db(bright)).to be_between(-20, 6), k.to_s
+    end
+  end
+
   it 'crushes the neuro bass more with more grit' do
     clean = render_patch(MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), grit: 0), 1)[0]
     gritty = render_patch(MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), grit: 1), 1)[0]
@@ -74,6 +96,28 @@ RSpec.describe('bin/synths/dnb.rb') do
     snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0) }, 0.5)[0]
     tight_snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, tight: true) }, 0.5)[0]
     expect((tight_snare - snare).abs.max).to be < 1e-6
+  end
+
+  it 'splashes the snare (not the kick) into a gated room with room:, in stereo' do
+    kick = render_patch(MB::Sound.dnb_drums(patch_notes([36, 0, 0.1, 1.0]), parallel: 0), 1)
+    kick_room = render_patch(MB::Sound.dnb_drums(patch_notes([36, 0, 0.1, 1.0]), parallel: 0, room: true), 1)
+    expect((kick_room[0][0...kick[0].length] - kick[0]).abs.max).to be < 1e-6
+    snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0) }, 1)
+    roomy = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, room: true) }, 1)
+    expect(roomy[0]).not_to eq(roomy[1])
+    expect(rms_db(seconds(roomy[0], 0.12, 0.22))).to be > rms_db(seconds(snare[0], 0.12, 0.22)) + 6 # the splash
+    expect(rms_db(seconds(roomy[0], 0.6, 1.0))).to be < rms_db(seconds(roomy[0], 0.12, 0.22)) - 40 # gated
+  end
+
+  it 'compresses the kit as a bus with glue:' do
+    hits = -> { patch_notes([36, 0, 0.1, 1.0], [38, 0.25, 0.35, 1.0], [42, 0.5, 0.55, 0.5]) }
+    plain = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.()) }, 1)[0]
+    glued = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { makeup: 0 }) }, 1)[0]
+    # (a slow attack: the hits' first ms mostly pass, their bodies come down)
+    expect(rms_db(seconds(glued, 0.03, 0.2))).to be < rms_db(seconds(plain, 0.03, 0.2)) - 1
+    expect(peak_db(seconds(glued, 0, 0.004))).to be_within(2).of(peak_db(seconds(plain, 0, 0.004)))
+    gentle = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { ratio: 1.2, makeup: 0 }) }, 1)[0]
+    expect(rms_db(seconds(gentle, 0.03, 0.2))).to be > rms_db(seconds(glued, 0.03, 0.2))
   end
 
   it 'masters a mix to its true-peak ceiling' do
