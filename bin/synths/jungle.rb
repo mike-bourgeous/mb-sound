@@ -169,11 +169,13 @@ module MB::Sound
   end
 
   # The sub: a sine with a little 2nd harmonic, gliding between legato
-  # notes, mono.
+  # notes, mono.  The oscillators run free (.free): resetting their phase
+  # at a note-on while the last note's release still rang clicked
+  # (patches-2, 2026-10-13); the same for the Reese and the flute.
   def self.jungle_sub_voice(midi, level: 0.3, glide: 0.05)
     synth(midi, voices: 1) { |v|
       p = v.hz.glide(glide, legato: true)
-      (p.sine + p.transpose(12).sine * 0.15) * v.env(0.006, 0.2, 0.85, 0.12, gm: false).legato
+      (p.sine.free + p.transpose(12).sine.free * 0.15) * v.env(0.006, 0.2, 0.85, 0.12, gm: false).legato
     } * level
   end
 
@@ -182,10 +184,10 @@ module MB::Sound
   def self.jungle_reese_voice(midi, level: 0.32, detune: 16.cents, low: 260, high: 700)
     synth(midi, voices: 1) { |v|
       p = v.hz.glide(0.06, legato: true)
-      saws = p.unison(2, detune: detune, phase: 0.0) { |c, _i| c.saw }
+      saws = p.unison(2, detune: detune, phase: 0.0) { |c, _i| c.saw.free }
       breath = 1.bar.hz.transpose(-12).lfo.at(low..high)
       body = saws.lp4(breath, resonance: 0.2)
-      (body * 0.9 + p.sine * 0.6) * v.env(0.02, 0.3, 0.9, 0.15, gm: false).legato
+      (body * 0.9 + p.sine.free * 0.6) * v.env(0.02, 0.3, 0.9, 0.15, gm: false).legato
     }.softclip(0.5, 0.95) * level
   end
 
@@ -220,7 +222,7 @@ module MB::Sound
     lead = synth(midi, voices: 1) { |v|
       p = v.hz.glide(0.04, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)
       air = noise.filter(:bandpass, cutoff: 2600, quality: 1.2) * breath
-      (p.triangle * 0.6 + p.sine * 0.5 + air) * v.env(0.04, 0.3, 0.8, 0.25, gm: false)
+      (p.triangle.free * 0.6 + p.sine.free * 0.5 + air) * v.env(0.04, 0.3, 0.8, 0.25, gm: false)
     }
     (lead * level).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).reverb(:hall, mix: 0.25)
   end
