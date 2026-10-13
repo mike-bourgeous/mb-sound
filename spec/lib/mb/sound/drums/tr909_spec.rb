@@ -78,6 +78,25 @@ RSpec.describe(MB::Sound::Drums::TR909, :aggregate_failures) do
     expect { MB::Sound::Drums::TR909.rom(:cowbell) }.to raise_error(ArgumentError, /ROM/)
   end
 
+  it 'gives its kick to a bus reader with only: :kick, as tr808 does' do
+    out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+    session = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+    MB::Sound.seed(1)
+    session.add(MB::Sound.tr909(MB::Sound.grid(4, kick: 'x...', clap: '..x.').loop), name: :drums)
+    spy = []
+    session.add(session.bus_tap(:drums, only: :kick).spy { |d| spy << d.dup if d } * 0, name: :rd)
+    60.times { session.process_buffer(800) }
+    kick = spy.reduce(:concatenate)
+
+    MB::Sound.seed(1)
+    alone = MB::Sound.tr909(MB::Sound.grid(4, kick: 'x...', clap: '..x.').loop, outputs: :separate)[:kick]
+    expected = Array.new(60) { alone.sample(800).dup }.reduce(:concatenate)
+    expect(kick).to eq(expected)
+    expect(kick.abs.max).to be > 0.1
+  ensure
+    session&.close
+  end
+
   it 'prints itself and loads back from a graph document' do
     k = MB::Sound.tr909(MB::Sound.grid(16, kick: 'x...', hat: 'x.x.').loop, kick: { tune: 45 }, shuffle: 2, seed: 3)
     expect(k.to_ruby).to eq('tr909(grid(16, kick: "x...", hat: "x.x.").loop, kick: { tune: 45 }, shuffle: 2, seed: 3)')
