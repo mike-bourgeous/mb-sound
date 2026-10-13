@@ -140,7 +140,6 @@ module MB::Sound
       }.reduce(:+)
       swell = n.env(2.2, 7, 0, 3, curve: :swell, gm: false)
       band = noise.filter(:bandpass, cutoff: ambient_walk(0.7, 2400, 5200), quality: 1.5)
-      air = band * swell * shimmer
       if ring > 0
         sides = ambient_gong_shimmer(partials).each_with_index.group_by { |_r, i| i % 2 }.values.map { |rs|
           rs.map { |(r, g), _i|
@@ -157,7 +156,7 @@ module MB::Sound
         noise_part = (band * Math.sqrt(1 - ring) * swell * shimmer).pan(0.2)
         air = noise_part + stereo(l * a + r * b, l * b + r * a) * (swell * shimmer * (k / Math.sqrt(a * a + b * b)))
       else
-        air = air.pan(0.2)
+        air = (band * swell * shimmer).pan(0.2)
       end
       low = low.filter(:highpass, cutoff: 38, quality: 0.6) * 0.12
       stereo(low, low) + air
