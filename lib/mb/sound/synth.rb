@@ -749,20 +749,29 @@ module MB
       # Sums each channel of the lanes (narrower lanes repeat across
       # channels), with the output gain.  Returns :ended once every lane has
       # ended.
+      #
+      # Frames alternate between two sets of channel buffers: sampling one
+      # output starts the next frame of every channel, so with one set a
+      # channel's last buffer changed while a Tee was still sharing it (the
+      # shared-buffer check caught a stereo synth used twice, patches-1;
+      # 2026-10-13).
       def mix_channels(count)
         data = sample_lanes(count)
-        @channel_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) } if @channel_bufs.nil? || @channel_bufs[0].length != count
+        @channel_set = @channel_set == 0 ? 1 : 0
+        @channel_bufs ||= [nil, nil]
+        bufs = @channel_bufs[@channel_set]
+        bufs = @channel_bufs[@channel_set] = Array.new(@channels) { Numo::SFloat.zeros(count) } if bufs.nil? || bufs[0].length != count
         if data.nil?
           return :ended unless tail_silence(count)
-          return @channel_bufs.map { |b| b.fill(0) }
+          return bufs.map { |b| b.fill(0) }
         end
 
         gain = gain_data(count)
         return :ended if @gain && gain.nil?
 
         Array.new(@channels) { |c|
-          out = sum_into(@channel_bufs[c], data, c)
-          @channel_bufs[c] = out if out.length == count && !out.equal?(@channel_bufs[c]) # a promoted (e.g. complex) buffer
+          out = sum_into(bufs[c], data, c)
+          bufs[c] = out if out.length == count && !out.equal?(bufs[c]) # a promoted (e.g. complex) buffer
           gain ? scale(out, gain) : out
         }
       end
