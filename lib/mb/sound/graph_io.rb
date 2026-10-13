@@ -269,10 +269,17 @@ module MB
           end
         end
 
+        # The presets that come with mb-sound (the checkout's or gem's
+        # presets/ folder: the persona panel's patches and others made from
+        # bin/ scripts with --save), searched after the user's own.
+        def library_presets_dir
+          File.expand_path('../../../presets', __dir__)
+        end
+
         # Directories searched for presets, in order (the save directory
-        # first, then the user directory).
+        # first, then the user directory, then mb-sound's own presets).
         def preset_dirs
-          [presets_dir, user_presets_dir].uniq
+          [presets_dir, user_presets_dir, library_presets_dir].uniq
         end
 
         # The file of preset +name+ (the first found in .preset_dirs), or
