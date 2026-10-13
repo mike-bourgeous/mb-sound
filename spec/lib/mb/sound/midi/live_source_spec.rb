@@ -378,8 +378,8 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
     # note-on read, [note, event time, the read's start, the output's
     # #jack_clock values the source read when it stamped the note].
     #
-    # The dummy JACK server skips cycles when it wakes up late (e.g. under
-    # the full suite's load): its frame clock then moves a period or more
+    # The dummy JACK server can skip cycles when it wakes up late (e.g.
+    # under the full suite's load): its frame clock then moves a period or more
     # ahead of the audio played (frame_time - frames_played grows by 256).
     # That is a server xrun, not a placement error, so expectations use the
     # clock the source read when it stamped each event (recorded by wrapping
@@ -448,10 +448,12 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
     # scheduling, not on the code under test:
     #
     # - JACK delivers every note once.  When a client's process thread
-    #   (non-realtime here) doesn't finish in time, the dummy server's
+    #   (non-realtime here) doesn't finish in time, an asynchronous server's
     #   cycle fails ("JackAudioDriver::ProcessGraphAsyncMaster: Process
-    #   error" in its log) and a MIDI message can be lost or repeated for
-    #   every reader; the reference input shows what JACK delivered.
+    #   error" in its log) and a MIDI message can be lost for every reader;
+    #   the reference input shows what JACK delivered.  JackDummy's servers
+    #   run with --sync since 2026-10-13 (jack-flake-1), which waits for
+    #   late clients instead, so this should be rare now.
     # - No underrun after the first write, and no late events: both mean
     #   this thread was starved for longer than the output's queue.
     def play_delivered_notes(timing:)
