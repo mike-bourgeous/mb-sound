@@ -46,6 +46,7 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 	st.prev_pm = NUM2DBL(rb_ary_entry(tstate, 1));
 	st.prev_e = NUM2DBL(rb_ary_entry(tstate, 3));
 	st.prev_inc = NUM2DBL(rb_ary_entry(tstate, 4));
+	mb_wt_read_corner_state(tstate, &st);
 	st.rng = 0;
 	if (rndadv != 0) {
 		Check_Type(noise, T_ARRAY);
@@ -69,6 +70,7 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 		rb_ary_store(tstate, 2, INT2NUM(1));
 		rb_ary_store(tstate, 3, rb_float_new(st.prev_e));
 		rb_ary_store(tstate, 4, rb_float_new(st.prev_inc));
+		mb_wt_write_corner_state(tstate, &st);
 	}
 
 	RB_GC_GUARD(tinfo);

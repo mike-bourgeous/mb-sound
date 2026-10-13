@@ -39,6 +39,11 @@ module MB
           prev_pm = primed ? tstate[1].to_f : pm_s
           prev_e = tstate[3].to_f
           prev_inc = tstate[4].to_f
+          # The last sample's width, level measure, and scan (mb_wt_read_corner_state)
+          pw, pmm, psc = tstate[5], tstate[6], tstate[7]
+          pw = pmm = psc = nil unless pw.is_a?(Float) && pmm.is_a?(Float) && psc.is_a?(Float)
+          m = pmm || Float::NAN
+          sc = sc_s
           corners = warped && spec[5][0].finite?
           pending = 0.0
           pending_d = 0.0
@@ -85,7 +90,9 @@ module MB
               if i > 0 && d_back == pending_d
                 v = add(v, pending)
               elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
-                _before, after = corner_step(spec, prev_e, d_back, w, m, sc, interp)
+                # The corners of the previous sample's warp, level, and scan,
+                # as the pending correction would have used (fixes-7)
+                _before, after = i == 0 && pw && !pw.nan? ? corner_step(spec, prev_e, d_back, pw, pmm, psc, interp) : corner_step(spec, prev_e, d_back, w, m, sc, interp)
                 v = add(v, after)
               end
 
@@ -126,6 +133,9 @@ module MB
             tstate[2] = 1
             tstate[3] = prev_e
             tstate[4] = prev_inc
+            tstate[5] = w.to_f
+            tstate[6] = m.to_f
+            tstate[7] = sc.to_f
           end
 
           store(out, values)
@@ -288,11 +298,11 @@ module MB
           values = Array.new(count)
 
           # A constant frequency counts the phase and the position from
-          # their grids (mb_phase.h; the position's in tstate[5..7])
+          # their grids (mb_phase.h; the position's in tstate[8..10])
           if constant
             grid = Tone.grid_phase_start(state, phi, f_s * adv)
             sp0 = f_s * speed
-            b, k, i = tstate[5], tstate[6], tstate[7]
+            b, k, i = tstate[8], tstate[9], tstate[10]
             pgrid = if b.is_a?(Float) && k.is_a?(Float) && i.is_a?(Float) && i == sp0 && k >= 0 && k < Tone::PHASE_GRID && loop_pos.(b + sp0 * k) == pos
                       [b, k, i]
                     else
@@ -325,7 +335,7 @@ module MB
           if constant
             Tone.grid_phase_store(state, grid)
             p = loop_pos.(pgrid[0] + pgrid[2] * pgrid[1])
-            tstate[5], tstate[6], tstate[7] = pgrid
+            tstate[8], tstate[9], tstate[10] = pgrid
           else
             state[0] = wrap(phi)
             p = loop_pos.(pos)

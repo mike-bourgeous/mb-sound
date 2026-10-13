@@ -186,6 +186,7 @@ RSpec.describe 'Buffer size invariance' do
       'PolyBLEP saw, pwm signal' => -> { fm.().saw.pwm(0.5.hz.lfo.at(0.1..0.9)) },
       'PolyBLEP triangle, skew signal' => -> { fm.().triangle.skew(2.hz.lfo.at(0.2..0.8)) },
       'PolyBLEP square, pivot signal' => -> { fm.().square.pwm(0.3, pivot: 1.5.hz.lfo.at(0..0.5)) },
+      'cycle wavetable, pwm signal' => -> { fm.().wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
       'BLIT complex ramp' => -> { fm.().complex_ramp },
       'feedback sine' => -> { fm.().sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { fm.().wavetable(cycle.()) },
@@ -259,6 +260,7 @@ RSpec.describe 'Buffer size invariance' do
       'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
       'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { 220.3.hz.wavetable(cycle.()) },
+      'cycle wavetable, pwm signal' => -> { 220.3.hz.wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
       'sample wavetable (looped)' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_samples(sound.(), mode: :sample, root: 200, loop: 1000...4000)) },
       'wraps port' => -> { (1.0 / 0.311).hz.lfo.with_phase(0.93).wraps.ping(400, decay: 0.2) },
     }
@@ -282,13 +284,22 @@ RSpec.describe 'Buffer size invariance' do
       'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
       'cycle wavetable' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
       'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.3) },
+      'cycle wavetable, width signal' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], size: 64)).pwm(MB::Sound.noise.at(0.1..0.9)) },
+      'sample wavetable (looped)' => -> {
+        s = Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) }
+        220.3.hz.wavetable(MB::Sound::Wavetable.from_samples(s, mode: :sample, root: 200, loop: 1000...4000))
+      },
     }.each do |name, make|
       it "gives the Ruby mirror's samples and state for a #{name} across grid points" do
-        tones = [:sample_c, :sample_ruby].map { |m| [m, make.()] }
+        tones = [:sample_c, :sample_ruby].map { |m|
+          MB::Sound.seed(5)
+          [m, make.()]
+        }
         [367, 1, 1031, 800, 433].each do |n|
           a, b = tones.map { |m, t| t.public_send(m, n).dup }
           expect(b.to_a).to eq(a.to_a)
           expect(tones[1][1].state.phase).to eq(tones[0][1].state.phase)
+          expect(tones[1][1].state.table).to eq(tones[0][1].state.table)
         end
       end
     end

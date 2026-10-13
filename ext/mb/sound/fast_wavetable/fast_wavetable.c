@@ -88,6 +88,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 	st.prev_pm = NUM2DBL(rb_ary_entry(tstate, 1));
 	st.prev_e = NUM2DBL(rb_ary_entry(tstate, 3));
 	st.prev_inc = NUM2DBL(rb_ary_entry(tstate, 4));
+	mb_wt_read_corner_state(tstate, &st);
 
 	mb_wt_oscillate(&t, mode, &ks, out, length, &f, &p, &w, warped, &sc, adv, rndadv, g, off, RTEST(remove_dc), &st);
 
@@ -103,6 +104,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 		rb_ary_store(tstate, 2, INT2NUM(1));
 		rb_ary_store(tstate, 3, rb_float_new(st.prev_e));
 		rb_ary_store(tstate, 4, rb_float_new(st.prev_inc));
+		mb_wt_write_corner_state(tstate, &st);
 	}
 
 	if (!was_inplace) {
@@ -330,7 +332,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 	}
 
 	// A constant frequency counts the phase and the position from their
-	// grids (see mb_phase.h; the position's in tstate[5..7], after the
+	// grids (see mb_phase.h; the position's in tstate[8..10], after the
 	// entries cycle-mode tables use)
 	struct mb_grid_phase grid = { NAN, NAN, NAN }, pgrid = { NAN, NAN, NAN };
 	if (constant) {
@@ -339,8 +341,8 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 
 		double sp = freq * spd;
 		pgrid.base = pgrid.k = pgrid.inc = NAN;
-		if (RARRAY_LEN(tstate) >= 8) {
-			VALUE b = rb_ary_entry(tstate, 5), k = rb_ary_entry(tstate, 6), inc = rb_ary_entry(tstate, 7);
+		if (RARRAY_LEN(tstate) >= 11) {
+			VALUE b = rb_ary_entry(tstate, 8), k = rb_ary_entry(tstate, 9), inc = rb_ary_entry(tstate, 10);
 			if (RB_FLOAT_TYPE_P(b) && RB_FLOAT_TYPE_P(k) && RB_FLOAT_TYPE_P(inc)) {
 				pgrid.base = RFLOAT_VALUE(b);
 				pgrid.k = RFLOAT_VALUE(k);
@@ -385,9 +387,9 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 		rb_ary_store(state, 0, rb_float_new(mb_grid_phase_now(&grid)));
 		mb_grid_phase_write(state, &grid);
 		p = wt_loop_position(&t, pgrid.base + pgrid.inc * pgrid.k);
-		rb_ary_store(tstate, 5, rb_float_new(pgrid.base));
-		rb_ary_store(tstate, 6, rb_float_new(pgrid.k));
-		rb_ary_store(tstate, 7, rb_float_new(pgrid.inc));
+		rb_ary_store(tstate, 8, rb_float_new(pgrid.base));
+		rb_ary_store(tstate, 9, rb_float_new(pgrid.k));
+		rb_ary_store(tstate, 10, rb_float_new(pgrid.inc));
 	} else {
 		rb_ary_store(state, 0, rb_float_new(wt_wrap(phi, 1.0)));
 		p = wt_loop_position(&t, pos);
