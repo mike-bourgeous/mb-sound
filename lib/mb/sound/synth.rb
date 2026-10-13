@@ -245,20 +245,23 @@ module MB
         @cell_lo = Array.new(@allocator.lanes.length) { [] }
         @cell_hi = Array.new(@allocator.lanes.length) { [] }
         @cell_fresh = Array.new(@allocator.lanes.length, true)
-        @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
-          v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
-          v.quiet_check = -> { @quiet[idx] && (!@exact_lanes || cell_quiet?(idx)) }
-          v.level_check = -> { @peaks[idx] }
-          graph = Synth.with_lane(idx, @allocator.lanes.length) {
-            MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
+        # Branches made while building the lanes (see #setup_idle_skipping)
+        @built_branches = GraphNode::Tee.collect_branches {
+          @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
+            v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
+            v.quiet_check = -> { @quiet[idx] && (!@exact_lanes || cell_quiet?(idx)) }
+            v.level_check = -> { @peaks[idx] }
+            graph = Synth.with_lane(idx, @allocator.lanes.length) {
+              MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
+            }
+            lane.idle_check = -> { @exact_lanes ? @quiet[idx] : v.idle? }
+            lane.idle_position = -> { @exact_lanes ? @quiet_pos[idx] : nil }
+            lane.level_check = -> { v.level }
+            lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
+            v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
+            @notes << v
+            lane_outputs(graph, idx).map(&:get_sampler)
           }
-          lane.idle_check = -> { @exact_lanes ? @quiet[idx] : v.idle? }
-          lane.idle_position = -> { @exact_lanes ? @quiet_pos[idx] : nil }
-          lane.level_check = -> { v.level }
-          lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
-          v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
-          @notes << v
-          lane_outputs(graph, idx).map(&:get_sampler)
         }
         @notes.freeze
 
@@ -559,10 +562,12 @@ module MB
         update_skippable
 
         # What a skipped lane still reads: its own Notes nodes, its
-        # branches of Tees whose other branches are in other lanes, and its
-        # knob readers
+        # branches of Tees that others read (see #boundary), and its knob
+        # readers
+        @in_lanes = {}
+        sets.each { |set| @in_lanes.merge!(set) }
         @boundary = graphs.each_with_index.map { |g, idx|
-          next [] unless @skippable_base[idx]
+          next [[], [], []] unless @skippable_base[idx]
 
           # Nodes read by other boundary nodes (e.g. a Glide's time input)
           # are read through them
@@ -571,16 +576,42 @@ module MB
           own.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           own.reject! { |n| upstream[n.__id__] }
 
-          shared = g.select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.owner_tee.branches.any? { |b| !sets[idx][b.__id__] }
-          }
+          tee_branches = g.select { |n| n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] }
 
           # Knob readers keep their place in the Session's buffer (see
           # GraphNode::Knob::Reader), so they read past skipped stretches
           knobs = g.select { |n| n.is_a?(GraphNode::Knob::Reader) && !upstream[n.__id__] }
-          own + shared + knobs
+          [own, tee_branches, knobs]
         }
-        @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
+        @lane_sets = sets
+        @boundary_cache = Array.new(@lanes.length)
+        @clock_node = @boundary.map { |own, _, _| own.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # The nodes skipped lane +idx+ still reads (see #setup_idle_skipping):
+      # its own Notes nodes, its knob readers, and its branches of Tees
+      # read elsewhere, by another lane or by a graph outside the synth
+      # (whose branch may be made after the synth), so their Tees stay in
+      # step.  Branches made while building the lanes but read by no lane
+      # (e.g. a `band * 0.5` left unused in the voice block) don't count:
+      # reading for them would run the lane's nodes while it sleeps,
+      # changing its sound.  Cached until a Tee's branches change.
+      def boundary(idx)
+        own, tee_branches, knobs = @boundary[idx]
+        return own if tee_branches.empty? && knobs.empty?
+
+        cache = @boundary_cache[idx]
+        changes = 0
+        tee_branches.each { |b| changes += b.owner_tee.branch_changes }
+        return cache[1] if cache && cache[0] == changes
+
+        set = @lane_sets[idx]
+        shared = tee_branches.select { |n|
+          n.owner_tee.branches.any? { |b| !set[b.__id__] && (@in_lanes[b.__id__] || !@built_branches[b]) }
+        }
+        list = own + shared + knobs
+        @boundary_cache[idx] = [changes, list]
+        list
       end
 
       # True if every graph node of lane +idx+'s graph (+graphs+, with the
@@ -711,7 +742,7 @@ module MB
       # ended) if one of them ended, else :skipped.
       def skip_span(idx, count)
         shared = @shared_inputs
-        @boundary[idx].each do |n|
+        boundary(idx).each do |n|
           # Shared controllers were read for every lane (Plan::SharedInputs)
           if shared && n.is_a?(GraphNode::Tee::Branch) && shared.shared_tee?(n.owner_tee)
             if shared.buffers[n.owner_tee.sources[:input]].nil?

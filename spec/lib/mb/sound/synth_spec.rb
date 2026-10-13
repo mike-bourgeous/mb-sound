@@ -836,6 +836,42 @@ RSpec.describe(MB::Sound::Synth) do
       expect(skipped.flatten).not_to be_empty
       expect(out.abs.max).to be > 0.1
     end
+
+    # fixes-8: a node made from a voice's node and never read (`band * 0.5`
+    # left unused) gave `band` a Tee branch outside the lane, so the lane's
+    # branch counted as shared and was read while the lane slept, running
+    # its noise and filter on (max difference 21.8 at a peak of 12.2)
+    it "isn't changed by unread nodes made in the voice block" do
+      outs = [false, true].map { |extra|
+        s = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1) { |v|
+          band = MB::Sound.noise.filter(:bandpass, cutoff: 3000, quality: 1.5)
+          env = v.amp_env(0.002, 0.02, 0.5, 0.02)
+          if extra
+            band * 0.5
+            env * 0.5
+          end
+          band * env
+        }
+        out, skipped = run(s, 80)
+        expect(skipped.flatten).not_to be_empty
+        out
+      }
+      expect(outs[0].abs.max).to be > 0.1
+      expect(outs[1].to_a).to eq(outs[0].to_a)
+    end
+
+    it 'keeps a branch read outside the synth in step, even one made after the synth' do
+      lfo = 3.hz.lfo
+      events = [ev.note_on(48), ev.note_off(48, time: 0.05r), ev.note_on(48, time: 1.5r), ev.note_off(48, time: 1.6r)]
+      s = described_class.new(source(*events), voices: 1, spares: 0) { |v| v.hz.saw * v.amp_env(0.002, 0.02, 0.5, 0.02) * lfo }
+      outside = lfo * 1
+      # The lane's branch overflowed (BranchBufferOverflow) on waking after
+      # more than a second asleep while the outside branch read on
+      skipped = []
+      out = 180.times.map { b = s.sample(480).dup; skipped << s.skipped_lanes; outside.sample(480); b }
+      expect(skipped[100]).to eq([0])
+      expect(out.reduce(:concatenate)[(1.5 * 48000).round..].abs.max).to be > 0.1
+    end
   end
 
   it 'never modifies shared buffers', :check_shared do
