@@ -63,6 +63,12 @@ module MB
           to_step.pitch(semitones)
         end
 
+        # A Seq::Step of this note with a flam mark (see Seq::Step#flam):
+        # drum kits play a grace stroke, then the hit +spacing+ later.
+        def flam(spacing = true)
+          to_step.flam(spacing)
+        end
+
         # A step that plays only during fills (see Seq::Step#fill).
         def fill(name = nil)
           to_step.fill(name)

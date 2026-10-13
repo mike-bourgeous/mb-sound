@@ -58,13 +58,15 @@ module MB
           # Unattached MIDI transform chains: echo(...).strum(...)
           'MB::Sound::MIDI::Transform::Spec' => MB::Sound::MIDI::Stream::TRANSFORMS.to_a,
           # Note marks (`!A1`, `~C2`, `G2.chance(0.5)`), on Notes and steps
-          'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill pitch],
-          'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct pitch],
+          'MB::Sound::Sequence::NoteMarks' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill pitch flam],
+          'MB::Sound::Sequence::Seq::Step' => %i[! ~ accent acc a! slide s! chance maybe every fill nofill up dn down oct pitch flam],
           # Sample views and edits (how Samples print: Sample#lineage)
           'MB::Sound::Sample' => %i[slices slice chops at reverse rev trim [] looped one_shot fade gain normalize transpose bits lofi stretch mono with read_as],
           'MB::Sound::Sample::Slices' => %i[[] name keymap],
           # Instruments built region by region (in Instrument.new's block)
           'MB::Sound::Sampler::Instrument' => %i[region],
+          'MB::Sound::Drums::Builder' => %i[voice choke tr808 tr909],
+          'MB::Sound::Drums::Hit' => MB::Sound::Drums::Hit::METHODS - %i[knobs name machine],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -99,7 +101,10 @@ module MB
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.
-        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet]).freeze
+        # Drum kit blocks (DrumMethods#kit, Drums::Builder#voice) print as
+        # their source (runtime blocks to the recorder) and load as build
+        # blocks, whose parameterless forms run on the builder or hit.
+        BUILD_BLOCKS = (MB::Sound::GraphNode::Recipe::BUILD_BLOCKS | Set[:wet, :kit, :drum_kit, :voice]).freeze
 
         # Methods allowed in the safe subset of runtime blocks (proc bodies
         # and lambda values, run while sampling): arithmetic and math on
@@ -180,6 +185,8 @@ module MB
             if obj.singleton_methods.include?(:wet)
               names = names | Set[:wet, :fb]
             end
+            # A drum hit's knob readers (see Drums::Hit)
+            names = names | obj.knobs.keys.to_set if obj.is_a?(MB::Sound::Drums::Hit)
             names
           end
 

@@ -42,6 +42,12 @@ module MB
       #   slice or sample this much higher (Notes#pitch_mark).  As MIDI 1.0
       #   bytes, a marked note-on is a pitch bend at PITCH_MARK_BEND_RANGE
       #   (set that bend range on the receiver) followed by the note-on.
+      # - +flam+: a note-on's flam mark (a clip step's #flam): true (the
+      #   drum kit's spacing) or seconds, or nil.  Drum kits read it through
+      #   Notes#flam_mark and play a grace stroke, then the hit that much
+      #   later (Drums::Flams).  MIDI 1.0 has no per-note flam: as bytes a
+      #   flam-marked note-on is the plain note-on (outside gear hears one
+      #   hit), so flams live in clips and Streams, not in .mid files.
       #
       # Voice allocation events (made by Allocator for its lanes; they have
       # no MIDI bytes):
@@ -59,7 +65,7 @@ module MB
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato, :pitch)
+      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato, :pitch, :flam)
         # The pitch bend range in semitones when nothing else sets it.
         DEFAULT_BEND_RANGE = 2
 
@@ -88,12 +94,13 @@ module MB
         # (0xf1 to 0xf6; sysex and realtime messages are handled separately).
         SYSTEM_DATA_BYTES = { 0xf1 => 1, 0xf2 => 2, 0xf3 => 1, 0xf6 => 0 }.freeze
 
-        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false, pitch: nil)
+        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false, pitch: nil, flam: nil)
           bytes = bytes.pack('C*') if bytes.is_a?(Array)
           bytes = bytes.b.freeze if bytes && !(bytes.frozen? && bytes.encoding == Encoding::BINARY)
           super(
             type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes,
-            time: time.to_r, bend_range: bend_range, legato: !!legato, pitch: pitch&.to_f
+            time: time.to_r, bend_range: bend_range, legato: !!legato, pitch: pitch&.to_f,
+            flam: flam == true ? true : flam&.to_f
           )
         end
 
@@ -234,7 +241,7 @@ module MB
         # A note-on event.  +velocity+ is 0..1 and is kept as given (not
         # rounded to a MIDI value); the raw velocity is at least 1, since 0
         # would mean note-off.  See the class description for +:legato+.
-        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false, pitch: nil)
+        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false, pitch: nil, flam: nil)
           raw = MB::M.max(raw7(velocity), 1)
           bytes = note_bytes(:note_on, channel, note, raw)
           if bytes && pitch
@@ -243,7 +250,7 @@ module MB
           end
           new(
             type: :note_on, channel: channel, note: note, value: velocity.to_f, velocity: velocity.to_f,
-            raw: raw, bytes: bytes, time: time, legato: legato, pitch: pitch
+            raw: raw, bytes: bytes, time: time, legato: legato, pitch: pitch, flam: flam
           )
         end
 

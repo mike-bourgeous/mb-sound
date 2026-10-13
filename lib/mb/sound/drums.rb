@@ -128,6 +128,46 @@ module MB
         GraphNode::Mixer.new(nodes, stop_early: false)
       end
 
+      # The hits of +notes+ (a Notes): its trigger, or with a +flam+
+      # spacing (seconds; nil for none) the trigger through Drums::Flams,
+      # so flam-marked notes play as flams (see Seq::Step#flam).
+      def hits(notes, flam = nil)
+        return notes.trigger if flam.nil?
+        Flams.new(notes.trigger, notes.flam_mark, spacing: flam)
+      end
+
+      # True if +source+ may play flam-marked notes: a clip or grid with a
+      # flam mark, or a Notes or Stream reading one (see .sequenced?).
+      # Live input and MIDI files have none (MIDI 1.0 has no flam).
+      def flams?(source)
+        case source
+        when Sequence::Kit
+          source.rows.each_value.any? { |c| flams?(c) }
+        when Sequence::Clip
+          source.events.any?(&:flam)
+        when MIDI::ClipSource
+          flams?(source.clip)
+        when MB::Sound::Notes
+          flams?(source.stream)
+        when MIDI::Stream
+          flams?(source.source)
+        when MIDI::Transform
+          flams?(source.parent)
+        when Array
+          source.any? { |s| flams?(s) }
+        else
+          false
+        end
+      end
+
+      # +node+ times +gain+ (a number or node), or 0 for a gain of 0 (which
+      # .mix leaves out), so a layer turned off costs nothing.
+      def scale(node, gain)
+        return node if gain.is_a?(Numeric) && gain == 1
+        return 0 if gain.is_a?(Numeric) && gain == 0
+        node * gain
+      end
+
       # A frequency in Hz from a number, Pitch/Note, or node.
       def hz(value)
         value.is_a?(MB::Sound::Pitch) ? value.oscillator_frequency : value
@@ -153,3 +193,7 @@ end
 require_relative 'drums/voice'
 require_relative 'drums/kit'
 require_relative 'drums/tr808'
+require_relative 'drums/nodes'
+require_relative 'drums/hit'
+require_relative 'drums/machine'
+require_relative 'drums/tr909'

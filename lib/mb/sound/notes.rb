@@ -366,6 +366,14 @@ module MB
         memo(:pitch_mark) { PitchMark.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
+      # The flam mark of the latest note-on (a Notes::FlamMark; see
+      # Seq::Step#flam): 0 without one, the spacing in seconds, or
+      # FlamMark::DEFAULT for the kit's own spacing.  Drum kits read it at
+      # each hit (Drums::Flams).
+      def flam_mark
+        memo(:flam_mark) { FlamMark.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+
       # The release velocity (0..1) of the latest note-off (a Notes::Lift),
       # 64/127 until the first one.
       def lift

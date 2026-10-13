@@ -22,11 +22,13 @@ module MB
         # for a clip's notes) and +:velocity_curve+ (the curve chosen from
         # its source, nil if given) describe the clips it can take in a
         # swap (see #plays_clip?).
-        def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, sample_rate: 48000)
+        # +:flams+ is true if the kit plays flam marks (see Drums.flams?).
+        def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, flams: false, sample_rate: 48000)
           raise ArgumentError, 'A drum kit needs at least one voice' if voices.empty?
 
           @clip_notes = clip_notes&.uniq&.freeze
           @auto_curve = velocity_curve
+          @flams = !!flams
 
           @voices = voices.dup.freeze
           @samplers = @voices.transform_values(&:get_sampler)
@@ -74,6 +76,7 @@ module MB
         # patch again for a clip a playing kit can't take.
         def plays_clip?(clip)
           return false if @auto_curve && Drums.velocity_curve(clip) != @auto_curve
+          return false if !@flams && Drums.flams?(clip)
           return true if @clip_notes.nil?
 
           clip.events.all? { |e| @clip_notes.any? { |n| e.value == n } }

@@ -137,7 +137,8 @@ module MB
             Drums.mix(list.map { |s|
               n = Drums.notes_for(s)
               notes << n if n
-              n ? n.trigger : s
+              # Flam-marked notes play as flams (Seq::Step#flam)
+              n ? Drums.hits(n, Drums.flams?(s) ? Machine::DEFAULT_FLAM : nil) : s
             })
           }
 
@@ -255,7 +256,7 @@ module MB
             # What a clip swapped in later must look like for this kit to
             # play it as if built for it (see Kit#plays_clip?)
             clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
-            Kit.new(voices, machine: :tr808, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil)
+            Kit.new(voices, machine: :tr808, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: Drums.flams?(source))
           else
             GraphNode::Channels.new(voices.values, names: voices.keys).named('tr808 outputs')
           end
@@ -311,6 +312,24 @@ module MB
           end
           stream = MB::Sound::MIDI::Stream.for(source)
           voices.to_h { |v| [v, MB::Sound::Notes.new(stream.keys(*gm.fetch(v)), sustain: false)] }
+        end
+
+        # The 808's voices as a Drums::Machine (kit builder design), for
+        # mixing them into kits of your own (Drums::Builder#tr808): the same
+        # Build graphs, knobs, GM notes, and aliases, the open hat choked by
+        # the closed hat; each hat and cymbal has its own metal bank.  (.kit
+        # remains the 808 itself: shared metal banks, more_cowbell, and its
+        # own voice seeds.)
+        def machine
+          @machine ||= Drums.machine(:tr808) do |b|
+            VOICES.each do |name, defaults|
+              aliases = ALIASES.select { |_, v| v == name }.keys
+              b.voice(name, **defaults, gm: GM_MAP[name], as: aliases) do |h|
+                Build.public_send(name, h.trigger, **h.knobs, level: 1.0)
+              end
+            end
+            b.choke :open_hat, by: :closed_hat
+          end
         end
 
         # The six metal oscillators (naive squares, like the circuit) mixed

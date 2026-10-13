@@ -1,11 +1,10 @@
 module MB
   module Sound
     # House (a stub from general knowledge, not from the persona panel):
-    # four on the floor at 124.  The drums are tr808 until drums-2's tr909
-    # lands (change the :drums role's patch).
+    # four on the floor at 124 on the tr909.
     Genre.define :house, 'House (stub)' do
       about 'A stub from general knowledge (not researched by the panel): four on the floor, offbeat open hats, ' \
-            'a bouncing bass, electric piano stabs, 16- and 32-bar phrases.  The drums wait for a TR-909.'
+            'a bouncing bass, electric piano stabs, 16- and 32-bar phrases, on a TR-909.'
       tempo 124, range: 118..128
       meter 4, 4
       phrases 8, 16, 32
@@ -24,7 +23,8 @@ module MB
       offbeat = '..6...6...6...6.'
       roll = { clap: grid(16, '....3.4.5.6.7.8X') }
       kit :intro, grid(16, kick: four, closed_hat: '5.3.5.3.5.3.5.3.').loop(align: :launch)
-      kit :groove, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '5.3.5.3.5.3.5.3.').loop(align: :launch)
+      # (ghost 16ths on the closed hat so the 909's shuffle 2 swings them)
+      kit :groove, grid(16, kick: four, clap: '....X.......X...', open_hat: offbeat, closed_hat: '5.3.5.335.3.5.32').loop(align: :launch)
         .nofill(:clap, name: :clap_roll).fill(:clap_roll, **roll)
       kit :breakdown, grid(16, closed_hat: '..3...3...3...3.').loop(align: :launch)
 
@@ -34,7 +34,7 @@ module MB
 
       knob :cut, 8000, range: 200..12000, curve: :exp, unit: 'Hz'
 
-      role :drums, :tr808, level: -4.db, about: 'tr808 for now; tr909 (drums-2) is the house kit'
+      role :drums, :tr909, level: -4.db, params: { shuffle: 2 }, about: 'the tr909 with shuffle 2, the house kit'
       role :bass, :funk_bass, about: 'an offbeat bass bouncing between octaves'
       role :keys, :tine_piano, filter: :cut, level: -4.db, about: 'electric piano stabs'
       role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser'
@@ -50,7 +50,10 @@ module MB
       true_peak(-1.db)
       mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      master :at, 8.db
+      # (for the 909's peaky kick: more drive into a softclip, then the
+      # limiter; drums-2 round 2, short form -8.9 LUFS)
+      master :at, 9.db
+      master :softclip, 0.45, 0.95
       master :limit, ceiling: -1.db
       master_gain 0.db
 
