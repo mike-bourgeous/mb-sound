@@ -16,6 +16,7 @@
 #     bin/songs/acid_song.rb                    # plays live in the background session
 #     bin/songs/acid_song.rb acid.flac          # renders to a file instead (-f to overwrite)
 #     bin/songs/acid_song.rb -F lp4 lp4.flac    # the lp4 filter instead of the diode ladder
+#     bin/songs/acid_song.rb -M -8 acid.flac    # gentler mastering (-14 LUFS; -M -4 default: -10.5)
 #     bin/songs/acid_song.rb --help             # all options
 #
 # Or in bin/sound.rb:
@@ -50,13 +51,26 @@ module MB::Sound
   ACID_SONG_GAIN = 12.0
   ACID_SONG_LEVEL = 0.75
 
+  # The drums' gain and the master's gain into its limiter (patches-3,
+  # 2026-10-13: "Drums need about 5dB, then a mastering limiter on all, to
+  # bring this up to date"): the song at -10.5 LUFS, -1.0 dBTP, the
+  # limiter taking up to about 3 dB off the peaks (-16.5 LUFS, -7.0 dBTP
+  # before; -M -8 is about where the limiter starts to act).  Before, the
+  # drums were at 0 dB and the master was a softclip(0.6, 0.98) at the
+  # session's -10 dB master gain.
+  ACID_SONG_DRUMS = 5.0
+  ACID_SONG_MASTER = -4.0
+
   # Starts the song on the current session (live, or inside a render
   # block); +filter+ is :diode or :lp4.  +drive+ is the filter's drive and
   # +gain+ the makeup gain into the voice's soft clipper (acid_patch;
   # 1.5 and 3.0 there), pushed here so the acid distorts (maintainer
   # 2026-10-13: "Acid should be pushed into its distortion a fair amount
   # anyway; try cranking the acid up"); +level+ is its level in the mix.
-  def self.acid_song(filter: :diode, drive: ACID_SONG_DRIVE, gain: ACID_SONG_GAIN, level: ACID_SONG_LEVEL)
+  # +drums+ is the drums' gain in dB, +master+ the gain in dB into the
+  # mastering limiter (-1 dBTP true peak), which replaces the session's
+  # master gain.
+  def self.acid_song(filter: :diode, drive: ACID_SONG_DRIVE, gain: ACID_SONG_GAIN, level: ACID_SONG_LEVEL, drums: ACID_SONG_DRUMS, master: ACID_SONG_MASTER)
     bpm 128
 
     main = acid(A1, !A1, ~A2, A1, R, C2, !A1, T, ~D2, E2, A1.up, R, !G1, ~A1, A2, R).loop
@@ -76,10 +90,12 @@ module MB::Sound
     hats = noise.at(1).filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02, sensitivity: 0.3..1, curve: :linear) * 0.2
     clap = noise.at(1).filter(:bandpass, cutoff: 1500, quality: 2) * beat[:clap].env(0, 0.08, 0, 0.04, curve: :linear) * 0.6
 
-    master { |mix| mix.softclip(0.6, 0.98) }
+    # (the gain inside the chain: master_gain comes after the limiter)
+    master_gain(0.db)
+    master { |mix| (mix * master.db).limit(ceiling: -1.db, true_peak: true) }
 
     bg :acid, acid * level, fade: 0
-    bg :drums, kick + hats + clap, fade: 0
+    bg :drums, (kick + hats + clap) * drums.db, fade: 0
 
     at_bar(5) { swap :acid, poly }
     at_bar(9) { swap :acid, main.permute(seed: 4) }
@@ -95,6 +111,8 @@ module MB::Sound
       drive: [ACID_SONG_DRIVE, Float, '-D', 'Acid filter drive (acid.rb: 1.5)', 0.1..10.0],
       gain: [ACID_SONG_GAIN, Float, '-G', 'Acid makeup gain into its soft clipper (acid.rb: 3)', 0.1..30.0],
       level: [ACID_SONG_LEVEL, Float, '-l', 'Acid level in the mix', 0.0..2.0],
-    ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level) }
+      drums: [ACID_SONG_DRUMS, Float, '-d', 'Drums gain in dB (0 before 2026-10-13)', -20.0..20.0],
+      master: [ACID_SONG_MASTER, Float, '-M', 'Gain in dB into the mastering limiter', -30.0..20.0],
+    ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level, drums: p.drums, master: p.master) }
   end
 end

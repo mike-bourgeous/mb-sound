@@ -246,6 +246,24 @@ module MB
       see :sets
     end
 
+    Help.topic :genres, 'Genre templates', group: :arrange do
+      about <<~TEXT
+        `genre :dnb` is a template of a genre: tempo, form, drum grids and
+        fills, track roles with suggested presets, scenes, mix targets, and
+        tips.  `genre(:dnb).short.play` plays it, `.setup` makes its tracks
+        and scenes to play by hand, `.to_ruby` prints it, and a block or
+        keywords change any part (:dnb, :jungle, :ambient, :funk; :house and
+        :techno are stubs).
+      TEXT
+      commands :genre, :genres
+      note :genres
+      see :flow, :sets, :presets
+      example 'a genre in numbers', sound: false do
+        t = genre(:jungle)
+        [t.tempo, t.form.steps.first(3), t.roles.keys, t.mix.summary]
+      end
+    end
+
     Help.topic :knobs, 'Knobs and snapshots', group: :perform do
       about <<~TEXT
         Named values that graphs read (`knob(:cut)`) and you turn, with

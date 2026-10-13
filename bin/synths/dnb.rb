@@ -14,17 +14,20 @@
 #   reese  six detuned saws (unison), a 4-pole lowpass breathing on a 2-bar
 #          LFO around --cutoff, softclipped, highpassed at 150 Hz off the sub
 #   sub    one sine through a 110 Hz lowpass, gliding between legato notes
-#          (harmonics: [0.4, 0.2] adds a 2nd and 3rd for small speakers)
+#          with a quiet 2nd and 3rd for small speakers (harmonics: false
+#          for the bare sine; [0.4, 0.2] is Small Talk's louder pair)
 #   neuro  the "switch-up" bass: saws plus a square an octave up into a
 #          diode ladder jumping on 16ths, talking formants morphing on 8ths,
-#          a key-tracked crusher (--grit wet), squeezed
+#          a key-tracked crusher (--grit wet), squeezed (sync:, fold:, and
+#          noise: add more high end: a synced saw, a wavefolded sine, AM noise)
 #   pad    minor-9th pad: three detuned saws per note, slow swell, hall
 #   pluck  liquid pluck: a square through a closing lowpass, a dotted-eighth
 #          delay (--send) and a plate
 #   boom   the impact: a sine falling two octaves onto the note, into a hall
 #   drums  the song's tr808 kit pushed to DnB tunings (GM note map), with
 #          parallel compression (tight: true tunes the kick up, shortens
-#          and highpasses it, so the sub takes center stage)
+#          and highpasses it, so the sub takes center stage; room: true a
+#          gated room on the backbeat; glue: true drum-bus compression)
 #
 # Every patch is one method taking a MIDI source (Notes, Clip, MIDI file, or
 # Stream) and its knobs as keywords: dnb_reese_voice(midi, cutoff:),
@@ -45,8 +48,10 @@
 #     bg :sub, dnb_sub_voice(riff) * 0.5
 #     swap :reese, riff.transpose(5)
 #     bg :neuro, dnb_neuro_voice(riff, grit: 0.6)            # the switch-up
+#     bg :neuro, dnb_neuro_voice(riff, sync: 0.5)            # with screaming sync harmonics (or fold:, noise:)
 #     bg :pad, dnb_pad_voice(seq(F2.n1, Db2.n1).bake(chord(0, 7, 15, 19, 26)).loop) * 0.6
 #     bg :drums, dnb_drums(grid(16, kick: 'X.........X.....', snare: '....X.......X...', hat: '7.4.7.4.7.4.7.45').loop)
+#     bg :drums, dnb_drums(grid(16, kick: 'X.........X.....', snare: '....X.......X...').loop, room: true, glue: true)
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -75,13 +80,21 @@ module MB::Sound
     }
   end
 
+  # The 2nd and 3rd harmonic levels of the sub's harmonics: true: half of
+  # Small Talk's [0.4, 0.2] (patches-3, 2026-10-13: "For dnb the harmonic
+  # levels should be a bit lower if present").
+  DNB_SUB_HARMONICS = [0.2, 0.1].freeze
+
   # The sub: one sine, mono, lowpassed at +cutoff+ Hz, gliding between
-  # legato notes.  +harmonics+ ([2nd, 3rd] levels, e.g. [0.4, 0.2] like
-  # Small Talk's sub; default none) adds sines at 2x and 3x after the
-  # lowpass, phase-locked to the sub, scaled to keep its RMS, so the sub
-  # carries on speakers that can't play its fundamental.
-  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: [0, 0])
-    h2, h3 = harmonics
+  # legato notes.  +harmonics+ (true, the default, for DNB_SUB_HARMONICS;
+  # false for none, the sub before 2026-10-13; or [2nd, 3rd] levels, e.g.
+  # [0.4, 0.2] like Small Talk's sub) adds sines
+  # at 2x and 3x after the lowpass, phase-locked to the sub, scaled to keep
+  # its RMS, so the sub carries on speakers that can't play its
+  # fundamental.
+  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: true)
+    harmonics = DNB_SUB_HARMONICS if harmonics == true
+    h2, h3 = harmonics || [0, 0]
     unless h2 > 0 || h3 > 0
       return synth(midi, voices: 1) { |v|
         pitch = v.hz.glide(glide, legato: true)
@@ -103,14 +116,44 @@ module MB::Sound
   # morph on 8th notes, a softclipper, a key-tracked crusher (+grit+ wet;
   # a number or a node), and a squeeze (+squeeze+ depth).  Highpassed off
   # the sub.
-  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140)
+  #
+  # Three more sources of high end, each a level (0..1, a number or a
+  # node; default 0) of a layer added after the formants, so the ladder
+  # and the vowels don't darken it (patches-3, 2026-10-13: "Is there some
+  # other source of high end available? E.g. harmonics from the
+  # oscillator or AM noise?"):
+  # +sync+   a hard-synced saw whose ratio sweeps 2..9 times the note
+  #          with the envelope and jumps with the 16th LFO (the classic
+  #          screaming sync harmonics), band-passed 1.2-14 kHz
+  # +fold+   a sine wavefolded (an antialiased mirror fold, #ease) harder
+  #          as the envelope and the 16ths open: bright, glassy harmonics
+  #          of the note, band-passed 1-14 kHz (above 14 kHz, the layers
+  #          made the softclipper's half-sample allpass overshoot by 6 dB)
+  # +noise+  noise amplitude-modulated by a pulse train at the note's
+  #          pitch (a buzzy, pitched hiss like a hard-driven reed),
+  #          highpassed at 3 kHz
+  def self.dnb_neuro_voice(midi, grit: 0.25, cutoff: 600, resonance: 0.55, squeeze: 0.7, highpass: 140, sync: 0, fold: 0, noise: 0)
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(0.02, legato: true)
       src = pitch.unison(3, detune: 0.18) { |p, _i| p.saw } + pitch.transpose(12).square * 0.4
-      jump = 2 ** v.lfo(1.n16, shape: :square, depth: 1.3)
+      lfo = v.lfo(1.n16, shape: :square, depth: 1.3)
+      jump = 2 ** lfo
       env = v.env(0.002, 0.12, 0.6, 0.04, gm: false)
       ladder = src.diode(cutoff * jump * (2 ** (env * 2)), resonance: resonance)
       talk = ladder.formant(:o, :a, :i, voice: :bass, morph: v.lfo(1.n8, shape: :triangle, unipolar: true) * 2)
+      # (each layer's level: a little under the talk's RMS at 1)
+      unless sync == 0
+        ratio = (env * 4 + lfo * 1.5 + 3.5).aclip(2, 9)
+        talk += pitch.saw.sync(ratio: ratio).filter(:highpass, cutoff: 1200, quality: 0.7).filter(:lowpass, cutoff: 14000, quality: 0.7) * (sync * 0.8)
+      end
+      unless fold == 0
+        folded = (pitch.sine * (env * 12 + jump * 3 + 2)).ease(:linear, range: -1..1, edges: :mirror)
+        talk += folded.filter(:highpass, cutoff: 1000, quality: 0.7).filter(:lowpass, cutoff: 14000, quality: 0.7) * (fold * 2.5)
+      end
+      unless noise == 0
+        buzz = (pitch.pulse(0.3) + 1) * 0.5
+        talk += MB::Sound.noise.filter(:highpass, cutoff: 3000, quality: 0.7) * buzz * (noise * 0.3)
+      end
       crushed = (talk * 3).softclip(0.3, 0.95).decimate(v.freq * 24, mix: grit)
       crushed * env.legato
     }.squeeze(:default, depth: squeeze, split: [250, 2500]).filter(:highpass, cutoff: highpass, quality: 0.7)
@@ -159,9 +202,20 @@ module MB::Sound
   # (above the sub's notes), decays faster, clicks brighter, and only the
   # kick is highpassed (24 dB/octave), so it is a punch above the sub
   # instead of a boom under it.
+  #
+  # +room+ (true, or the wet level; true is DNB_DRUMS_ROOM) sends the
+  # snare, clap, rimshot, and toms (not the kick or the cymbals) into a
+  # gated room (Reverb's :gated, closed +room_gate+ seconds after the
+  # hit), so the backbeat gets a short, bright splash that never smears
+  # the next hit; the drums are stereo then.  +glue+ (true, or a Hash of
+  # #compress options over DNB_DRUMS_GLUE) compresses the whole kit after
+  # the parallel compression, as a drum-bus compressor: a few dB of slow
+  # attack, fast release pumping that glues the hits together (patches-3,
+  # 2026-10-13: "Some gated room reverb and compression would be a nice
+  # addon too").  Both default off.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
-    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false
+    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.18, glue: false
   )
     settings = {
       kick: kick, snare: snare,
@@ -169,19 +223,43 @@ module MB::Sound
       closed_hat: { decay: hat_decay, tone: 0.85, level: 0.55 }, open_hat: { decay: 0.16, tone: 0.7, level: 0.25 },
       cymbal: { decay: 1.4, tone: 0.7, level: 0.3 }, maracas: { level: 0.25 }, low_tom: { tune: 120, decay: 0.35 }, accent: accent
     }
-    beat = if tight
-             cut = tight == true ? 65 : tight
-             tuned = kick.merge(tune: kick.fetch(:tune, 52) * 2**(5 / 12.0), decay: 0.15, tone: 0.8, level: kick.fetch(:level, 1.0) * 1.6)
-             outs = tr808(source, **settings, kick: tuned, outputs: :separate)
+    beat = if tight || room
+             if tight
+               cut = tight == true ? 65 : tight
+               tuned = kick.merge(tune: kick.fetch(:tune, 52) * 2**(5 / 12.0), decay: 0.15, tone: 0.8, level: kick.fetch(:level, 1.0) * 1.6)
+               settings = settings.merge(kick: tuned)
+             end
+             outs = tr808(source, **settings, outputs: :separate)
              parts = outs.names.map { |name|
-               name == :kick ? outs[name].filter(:highpass, cutoff: cut, quality: 0.7).filter(:highpass, cutoff: cut, quality: 0.7) : outs[name]
+               tight && name == :kick ? outs[name].filter(:highpass, cutoff: cut, quality: 0.7).filter(:highpass, cutoff: cut, quality: 0.7) : outs[name]
              }
-             GraphNode::Mixer.new(parts, stop_early: false) # (until every voice has ended, like the mixed kit)
+             mixed = GraphNode::Mixer.new(parts, stop_early: false) # (until every voice has ended, like the mixed kit)
+             if room
+               sent = outs.names.select { |name| DNB_DRUMS_ROOM_SENDS.include?(name) }.map { |name| outs[name] }
+               wet = room == true ? DNB_DRUMS_ROOM : room
+               splash = GraphNode::Mixer.new(sent, stop_early: false)
+                 .reverb(:gated, gate: room_gate, dry: 0, wet: 1, output_channels: 2)
+                 .filter(:highpass, cutoff: 250, quality: 0.7)
+               # (a sum ends when any of its inputs ends: each waits for the other, as when a MIDI file ends)
+               mixed.and_then(silence(2)) + (splash * wet).and_then(silence(2))
+             else
+               mixed
+             end
            else
              tr808(source, **settings)
            end
-    beat.compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9, mix: parallel)
+    beat = beat.compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9, mix: parallel)
+    glue ? beat.compress(**DNB_DRUMS_GLUE, **(glue == true ? {} : glue)) : beat
   end
+
+  # The gated room's wet level for dnb_drums(room: true).
+  DNB_DRUMS_ROOM = 0.3
+
+  # The kit voices dnb_drums(room:) sends into its gated room.
+  DNB_DRUMS_ROOM_SENDS = [:snare, :clap, :rimshot, :low_tom, :mid_tom, :high_tom].freeze
+
+  # dnb_drums(glue: true)'s drum-bus compressor (#compress options).
+  DNB_DRUMS_GLUE = { threshold: -18.db, ratio: 3, knee: 6, attack: 0.01, release: 0.08, makeup: 4 }.freeze
 
   # A ghost kick for sidechains: the drums' kick alone playing +source+,
   # never heard (duck a bass with it: `bass.duck(dnb_ghost_kick(kit))`).
