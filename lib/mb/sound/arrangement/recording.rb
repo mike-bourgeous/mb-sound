@@ -240,8 +240,12 @@ module MB
               tr.clip = clip if tr.clip.equal?(placeholder)
               clip.name
             }
-            @session.send(:swap_now, tr.name, { placeholder => clip }, t)
-            @session.describe_player(tr.name, "#{tr.name}: #{name}")
+            # (the track may be gone: stopped before the loop closed, or a
+            # render's song ended; the capture is kept for later)
+            if @session.send(:swap_target?, tr.name)
+              @session.send(:swap_now, tr.name, { placeholder => clip }, t)
+              @session.describe_player(tr.name, "#{tr.name}: #{name}")
+            end
             name
           }
         end
