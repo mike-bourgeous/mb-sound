@@ -12,8 +12,9 @@
 #
 # Patches (-p):
 #   beat      mouth drums: a short, dry tr808 kit (kick, snare, hats; GM note
-#             map) half through a formant "mouth" (beatbox: true says each
-#             drum through its own narrow vowel)
+#             map) half through a formant "mouth" whose vowel sweeps over
+#             each bar (wobble:; beatbox: true says each drum through its
+#             own narrow vowel)
 #   perc      shaker, rim, and congas (GM note map), highpassed
 #   bass      a round funk bass: a sine body plus a lowpassed saw opening
 #             with velocity; ghost notes are just thumps
@@ -21,8 +22,9 @@
 #             tine bark for hard strikes, auto-pan tremolo
 #   clav      a clav-ish stab: a narrow pulse, highpassed and quick
 #   talkbox   the lead: a bright buzz an octave below the note through
-#             narrow formants opening "u -> o -> a -> e" on every note,
-#             delayed vibrato, a dotted-eighth echo
+#             narrow formants opening "u -> o -> a -> e" on every note and
+#             moving with the groove (groove:, a mouth opening every
+#             eighth), delayed vibrato, a dotted-eighth echo
 #   choir     a soft "ooh" choir (two saws through an alto formant), with
 #             the audio looper behind it: --dub (the footswitch) sends the
 #             voice into a 4-bar loop that loses 1 - --keep every pass
@@ -60,7 +62,20 @@ module MB::Sound
   # beatboxer says them: the kick a bass "boo" (u to o), the snare a
   # tenor "ka" (a to e), the hats a soprano "ts" (i); +beatbox+ is the
   # share of those (power), the rest the plain kit.
-  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false)
+  #
+  # +wobble+ (0..1; 0 for none) sweeps the mouth's vowels and slides its
+  # formants (5 semitones either way at 1; 3 for the beatbox) on a
+  # tempo-synced triangle LFO every +wobble_rate+ (a Duration; a bar by
+  # default), like a beatboxer's mouth opening and closing over the
+  # groove: the plain kit's mouth between "a" and "u" (its o-u vowel at
+  # the center), each beatbox drum across its own vowels at its own phase
+  # (FUNK_WOBBLE_PHASES).  At a bar, the LFO crosses the center on beats 1
+  # and 3 and peaks on 2 and 4, so the two backbeat snares say different
+  # vowels (a half-note LFO would cross the center on every beat, and
+  # every hit on a beat would say the same thing).  patches-3 (2026-10-13;
+  # maintainer on the beatbox render: "Give it some more filter lfo and
+  # it's golden"); before, the vowels held still (wobble: 0).
+  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: 0.8, wobble_rate: 1.bar)
     voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
@@ -69,7 +84,13 @@ module MB::Sound
     }
     unless beatbox
       kit = tr808(source, only: voices.keys, velocity_curve: :midi, **voices)
-      vowel = kit.formant(:o, :u, morph: 0.4, width: 1.6)
+      vowel = if wobble == 0
+                kit.formant(:o, :u, morph: 0.4, width: 1.6)
+              else
+                # (o-u at 0.4 is 0.7 across a-o-u: the sweep opens to "a" and closes to "u")
+                lfo = funk_wobble_lfo(wobble_rate)
+                kit.formant(:a, :o, :u, morph: lfo * (wobble * 0.4) + 0.7, shift: lfo * (wobble * -5), width: 1.6)
+              end
       return (kit * dry + vowel * mouth).softclip(0.7, 0.95) * level
     end
 
@@ -83,11 +104,29 @@ module MB::Sound
     }
     said = outs.names.map { |n|
       vowels, voice, width, drive = say.fetch(n)
-      (outs[n] * drive).softclip(0.3, 0.95).formant(*vowels, morph: 0.5, voice: voice, width: width) * (3.5 / drive)
+      morph, shift = 0.5, 0
+      unless wobble == 0
+        lfo = funk_wobble_lfo(wobble_rate, phase: FUNK_WOBBLE_PHASES.fetch(n, 0))
+        morph = lfo * (wobble * 0.5) + 0.5
+        shift = lfo * (wobble * 3)
+      end
+      (outs[n] * drive).softclip(0.3, 0.95).formant(*vowels, morph: morph, shift: shift, voice: voice, width: width) * (3.5 / drive)
     }.reduce(:+)
     mix = said * Math.sqrt(amount)
     mix += outs.names.map { |n| outs[n] }.reduce(:+) * (Math.sqrt(1 - amount) * dry) if amount < 1
     mix.softclip(0.7, 0.95) * level
+  end
+
+  # The beatbox drums' phases in .funk_beat's vowel LFO (cycles): the
+  # snare at 0 says "e" on 2 and "a" on 4, the kick a quarter cycle on
+  # opens to "o" on the downbeat, the hats an eighth apart.
+  FUNK_WOBBLE_PHASES = { kick: 0.25, snare: 0, closed_hat: 0.125, open_hat: 0.375 }.freeze
+
+  # The vowel LFO of .funk_beat: a triangle every +rate+ (a Duration,
+  # locked to the timeline), +phase+ cycles in.
+  def self.funk_wobble_lfo(rate, phase: 0)
+    lfo = rate.lfo.triangle
+    phase == 0 ? lfo : lfo.with_phase(phase)
   end
 
   # The overdub percussion: shaker, rim, congas (+source+ as for
@@ -140,14 +179,31 @@ module MB::Sound
   # formants"): before, the buzz was at the note, unbrightened, through
   # "o -> a -> e" formants at width 1.0 (`octave: 0, air: 0, width: 1.0,
   # vowels: [:o, :a, :e]` is close to it).
-  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e])
+  #
+  # +groove+ (0..1; 0 for none) moves the mouth with the groove as well as
+  # with each note: a tempo-synced triangle every +groove_rate+ (an
+  # eighth by default, locked to the timeline, so it lands on the beat)
+  # sweeps the vowel morph +groove+ of the way across the vowels, and a
+  # sine every bar slides the formants a semitone either way (shift), so
+  # held notes say "wah-wah" in time and a phrase's notes open differently
+  # depending on where they fall in the bar.  patches-3 (2026-10-13;
+  # maintainer on Loop Church: "Talk box needs filter changes with the
+  # groove"); before, only the note's envelope moved the vowels (groove:
+  # 0).
+  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e], groove: 0.6, groove_rate: 1.n8)
     synth(midi, voices: 1) { |v|
       f = v.hz.glide(glide).vibrato(5.2, depth: 0.25, delay: 0.25)
       buzz = f.transpose(12 * octave)
       src = buzz.saw * 0.6 + buzz.pulse(0.2) * 0.5
       src += src.filter(:highpass, cutoff: 1800, quality: 0.7) * air if air > 0
       morph = v.filter_env(0.06, 0.35, 0.55, 0.2)
-      mouth = src.formant(*vowels, morph: morph, shift: (v.number - 62) * 0.25, width: width)
+      shift = (v.number - 62) * 0.25
+      unless groove == 0
+        # (the triangle's trough at the beat: the mouth closes on it and opens between)
+        morph = morph * (1 - groove * 0.5) + v.lfo(groove_rate, shape: :triangle, unipolar: true, phase: 0.75) * groove
+        shift = shift + v.lfo(1.bar, shape: :sine) * groove
+      end
+      mouth = src.formant(*vowels, morph: morph, shift: shift, width: width)
       (mouth * 2).softclip(0.6, 0.95) * v.amp_env(0.01, 0.4, 0.75, 0.12) * 1.05
     }.delay(1.n8.dotted, feedback: 0.25, wet: echo, dry: 1) * (0.75 * level)
   end
