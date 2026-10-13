@@ -162,7 +162,10 @@ module MB
       #     stop       # stops the last one started (player 1)
       #     outro      # fades everything out over four bars
       #     panic      # stops everything right away
-      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil)
+      #
+      # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
+      # (a bus for its main out) route a named player (see BusMethods).
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil)
         point = LaunchPoint.of(binding) or return nil
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -188,7 +191,7 @@ module MB
         end
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
-          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
+          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
         }
       end
 
@@ -273,7 +276,7 @@ module MB
           waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
           cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
 
-          session.remove(fade: 0, time: time).tap { session.reset_master(time: time) }
+          session.remove(fade: 0, time: time).tap { session.reset_master(time: time); session.reset_buses(time: time) }
         }
         return stops if Session.context&.[](:batch)
 
@@ -746,7 +749,11 @@ module MB
       # the mix before the chain (see Session::Stems).  +:stem_gain+ scales
       # every stem (headroom: before a master limiter a part may peak above
       # full scale, which integer formats clip; the render warns).
-      # +:loudness+ normalizes only the mix file.
+      # A track that sends or plays into buses (see BusMethods) carries its
+      # own share of each bus in its stem (its own copy of every bus it
+      # reaches, fed only by it), so stems still sum to the mix before the
+      # master chain; +:bus_stems+ (true) also writes each bus's output as
+      # "<bus>.<ext>".  +:loudness+ normalizes only the mix file.
       #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
@@ -777,7 +784,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, max_seconds: nil, exact_lanes: false, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -788,7 +795,7 @@ module MB
         session.exact_lanes = exact_lanes
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
-          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain)
+          session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
         end
 
         rate = output.sample_rate
@@ -865,7 +872,7 @@ module MB
       # stops (see #render), for up to +max_frames+.  Returns the number of
       # frames rendered.
       def render_tail(session, max_frames, buffer_size)
-        return 0 unless session.master_active?
+        return 0 unless session.master_active? || session.buses_awake?
 
         rate = session.output.sample_rate
         max_frames = MB::M.min(max_frames, (Session::MAX_TAIL_SECONDS * rate).round)
