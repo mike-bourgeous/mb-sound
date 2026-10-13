@@ -1,0 +1,89 @@
+module MB
+  module Sound
+    # Modern UK drum & bass, from the persona panel (2026-10-13): Kez Volta's
+    # research (research-persona-edm, research/persona-panel/edm/research.md)
+    # and "Tunnel Vision" (bin/songs/tunnel_vision.rb, patches in
+    # bin/synths/dnb.rb and presets/dnb_*.mbg.rb).
+    Genre.define :dnb, 'Drum & bass (modern UK)' do
+      about 'A DJ-friendly roller: two-step drums, a Reese over a separate mono sub, ' \
+            'a breakdown of minor 9th pads and a liquid pluck, a switch-up second drop.  ' \
+            'From Kez Volta ("Tunnel Vision") in the persona panel of 2026-10-13.'
+      tempo 174, range: 170..176
+      meter 4, 4
+      phrases 8, 16, 32
+      key :minor, :f
+
+      flow do
+        fill :roll, every: 16
+        intro     32
+        build     8, fill: [:riser, 4]
+        drop      32
+        breakdown 15, fill: [:riser, 8]
+        pullup    1
+        drop2     32
+        outro     32
+      end
+
+      two_step = 'X.........X.....'
+      hats = '7.4.7.4.7.4.7.45'
+      shaker = '3524352435243524'
+      ghosts = '....X..2.2..X..2'
+      roll = { snare: grid(16, '2.3.4.5.5656778X') }
+      kit :intro, grid(16, kick: two_step, rim: '....6.......6...', hat: hats, shaker: shaker).loop(align: :launch)
+      kit :build, grid(16, kick: two_step, snare: ghosts, hat: hats, open_hat: '..5...5...5...5.').loop(align: :launch)
+        .nofill(:snare, name: :roll).fill(:roll, **roll)
+      kit :drop, grid(16, kick: two_step, snare: ghosts, clap: '....X.......X...', hat: hats, open_hat: '..4.......4.....', shaker: shaker).loop(align: :launch)
+        .nofill(:snare, :clap, name: :roll).fill(:roll, **roll)
+      kit :breakdown, grid(16, hat: '4.2.4.2.4.2.4.2.', shaker: shaker).loop(align: :launch)
+      kit :drop2, grid(16, kick: two_step + 'X.........X..x..', snare: '....X.2..2..X.2.....X..2.2.2X..3', clap: '....X.......X...', hat: hats).loop(align: :launch)
+        .nofill(:snare, :clap, name: :roll).fill(:roll, **roll)
+      kit :outro, grid(16, kick: two_step, snare: '....X.......X...', hat: hats, shaker: shaker).loop(align: :launch)
+
+      clip :riff, seq(
+        F1, T, T, T, T, T, R, F1, T, R, Ab1, T, F1, T, R, R,
+        F1, T, T, T, T, T, R, C2, T, R, Bb1, T, Ab1, T, Eb1, T,
+      ).n16.loop(align: :launch)
+      clip :neuro, seq(
+        F1, R, F1, F1, R, F1, R, F1, T, R, Ab1, R, F1, F1, R, Eb1,
+        F1, R, F1, F1, R, F1, R, C2, T, R, Bb1, Ab1, R, Ab1, Eb1, T,
+      ).n16.loop(align: :launch)
+      clip :chords, seq(F2.n1, Db2.n1, Bb1.n1, C2.n1).bake(chord(0, 7, 15, 19, 26)).legato(0.97).loop(align: :launch)
+      clip :pluck, seq(C5, Ab4, F4, Eb5, R, C5, Ab4, G4).n8.loop(align: :launch)
+      clip :hit, seq(F1, R, R, R, R, R, R, R).n1.loop(align: :launch)
+      clip :bar, seq(R).n1.loop
+
+      knob :cut, 2400, range: 150..8000, curve: :exp, unit: 'Hz'
+
+      role :drums, :dnb_drums, about: 'two-step 808 kit at DnB tunings, parallel compression'
+      role :bass, :dnb_reese, filter: :cut, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
+      role :sub, :dnb_sub, level: -6.db, duck: -12.db, about: 'a clean mono sine an octave down'
+      role :neuro, :dnb_neuro, level: -1.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
+      role :pad, :dnb_pad, level: -4.5.db, about: 'minor 9th pads'
+      role :pluck, :dnb_pluck, level: -7.db, about: 'liquid pluck with a dotted-eighth delay'
+      role :impact, :dnb_boom, about: 'a falling sine hit on the downbeat'
+      role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser (a fill scene)'
+
+      scene :intro, drums: :intro, pad: :chords, cut: 250
+      scene :build, drums: :build, bass: :riff, cut: [2500, { from: 250, over: 8, curve: :smooth }]
+      scene :drop, drums: :drop, bass: :riff, sub: :riff, impact: :hit, cut: 2400
+      scene :breakdown, drums: :breakdown, pad: :chords, pluck: :pluck
+      scene :pullup, riser: :bar
+      scene :drop2, drums: :drop2, neuro: :neuro, sub: :riff, impact: :hit
+      scene :outro, drums: :outro, sub: :riff
+      scene :riser, riser: :bar, others: :keep
+      pulse :drop
+
+      loudness(-8..-6)
+      true_peak(-0.5.db)
+      mono_below 120
+      master :dnb_master
+      master_gain 0.db
+
+      tip 'Sections come in 8s; phrases in 16 and 32.  DJs want a 32-bar intro of drums and light elements, and the drop on a 32-bar line.'
+      tip 'The two-step: kick on 1 and on the "and" of 3, snares on 2 and 4, ghost snares between; a snare-roll fill at the end of every 16 tells the crowd something is coming.'
+      tip 'Keep the sub a separate clean mono sine below about 100-120 Hz and highpass the Reese above it, so phase wobble never cancels the low end; duck both under the kick.'
+      tip 'Tension: a filter build (turn :cut), a riser, and a one-bar pull-up of near silence before the drop; the second drop is a variation (a switch-up bass), not a copy.'
+      tip 'Club masters are loud (drops around -6 LUFS short-term, crest factor 6-8 dB): glue, softclip, then a true-peak limiter (clip, then limit).'
+    end
+  end
+end

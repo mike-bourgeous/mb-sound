@@ -981,7 +981,7 @@ module MB
 
             note = MB::Sound::Note.new(v.value)
             base = pitch_text(note)
-            return nil unless base.match?(/\A[A-G]/)
+            return nil unless base.match?(/\A([A-G]|Note\.new\()/)
 
             # Applied innermost first, as `~!A1.chance(p)` evaluates
             suffix = []
@@ -1099,9 +1099,13 @@ module MB
           def pitch_text(p)
             if p.instance_of?(MB::Sound::Note)
               name = p.to_s
-              if name.match?(/\A[A-G][sb]?-?\d+\z/)
+              if name.match?(/\A[A-G][sb]?\d+\z/)
                 n = MB::Sound::Note.new(name) rescue nil
                 return name if n && n.frequency == p.frequency
+              elsif name.match?(/\A[A-G][sb]?-\d+\z/) && p.number == p.number.round
+                # Octave -1 has no constant (Fs-1 would be Fs minus 1)
+                n = MB::Sound::Note.new(p.number.round)
+                return "Note.new(#{p.number.round})" if n.frequency == p.frequency
               end
             end
             unless p.constant?
