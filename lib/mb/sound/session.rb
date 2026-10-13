@@ -659,6 +659,12 @@ module MB
         block
       end
 
+      # The session frame of the first sample the player being rendered
+      # reads in this span (a player starting or waking partway through a
+      # span starts there), or nil outside a player's read.  MIDI input
+      # taps place the span's events from it (see MidiInput::Tap).
+      attr_reader :player_frame
+
       # Stops calling a block given to #add_tap.
       def remove_tap(block)
         @mutex.synchronize { @taps.delete(block) }
@@ -1131,14 +1137,17 @@ module MB
           frames = MB::M.min(frames, silent_from - (base + offset))
         end
 
-        # Knob readers in the graph read from this player's first frame
-        # (see GraphNode::Knob#clock_frame)
+        # Knob readers and MIDI input taps in the graph read from this
+        # player's first frame (see GraphNode::Knob#clock_frame and
+        # #player_frame)
         t = MB::U.clock_now
         begin
           @knob_frame = base + offset if @knob_frame
+          @player_frame = base + offset
           data = p.input.read(frames)
         ensure
           @knob_frame = base if @knob_frame
+          @player_frame = nil
         end
         check_speed(p, MB::U.clock_now - t, frames)
 

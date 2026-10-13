@@ -78,6 +78,22 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
     expect([d[12000], d[24000], d[33600], d[38400]]).to eq([1, 60, 63, 62])
   end
 
+  it 'gives graphs reading a span in pieces the events on their frames (a Synth split at its grid points)' do
+    # fixes-7: a span's events were placed as if the first read covered
+    # the end of the span, so a Synth starting off its grid (reading the
+    # span in two pieces) heard them early or not at all
+    results = MIDI_INPUT_SIZES.map { |sizes|
+      s = new_session
+      s.midi_in.input = keyboard(*notes_at(0.3r, 0.41r, 0.7r))
+      syn = MB::Sound::Synth.new(s.midi_in.stream, voices: 2) { |v| v.gate }
+      s.add(syn, name: :keys, start_time: 1/7r) # frame 13714, off the 800 grid
+      render(s, 48000, sizes)
+    }
+
+    results.each { |d| expect(d).to eq(results[0]) }
+    expect(edges(results[0])).to eq([14400, 19200, 19680, 24480, 33600, 38400])
+  end
+
   it 'leaves out events from before a graph started reading' do
     s = new_session
     s.add(0.constant, name: :clock, on: :now)
