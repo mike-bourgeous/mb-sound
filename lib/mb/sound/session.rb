@@ -19,6 +19,7 @@ require_relative 'session/knobs'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
+require_relative 'session/monitor_trim'
 
 module MB
   module Sound
@@ -68,6 +69,7 @@ module MB
       include MidiIn
       include AudioRecording
       include Stems
+      include MonitorTrim
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -237,7 +239,9 @@ module MB
       #                   #process_buffer instead of printed.
       # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
       #                           and #fade_out).
-      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+      # +:monitor+ - If true, the output hears the monitor trim (see
+      #              MonitorTrim; by default when +:realtime+).
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil)
         @transport = transport
         @tuning = tuning
         self.master_gain = master_gain
@@ -267,6 +271,7 @@ module MB
         init_knobs
         init_midi_in
         init_audio_recording
+        init_monitor(monitor.nil? ? realtime : monitor)
         @names = Names.new
         @arrangement = nil
       end
@@ -651,9 +656,10 @@ module MB
       end
 
       # Renders +count+ frames from every player, mixes them, runs the mix
-      # through the master effects (see #master), writes it to the output,
-      # and advances the timeline (unless idle).  Returns the mix (an Array
-      # of Numo::SFloat, one per channel).
+      # through the master effects (see #master), writes it to the output
+      # (with the monitor trim, see MonitorTrim), and advances the timeline
+      # (unless idle).  Returns the mix (an Array of Numo::SFloat, one per
+      # channel) before the monitor trim.
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
 
@@ -680,7 +686,8 @@ module MB
 
         mix = mix.map { |c| c * @master_gain } if @master_gain != 1
 
-        output.write(mix)
+        # The monitor trim reaches only the output (see MonitorTrim)
+        output.write(monitored(mix))
         record_mix(mix, @frame - count)
         call_taps(mix)
         mix

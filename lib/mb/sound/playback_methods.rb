@@ -16,6 +16,10 @@ module MB
       #
       # +:clear+ - Whether to clear the screen before beginning playback.
       def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false)
+        # The monitor trim (see #monitor_gain) applies to the live output,
+        # not to an output given by the caller
+        trim = output.nil? ? Session.monitor_gain : 1.0
+
         clear_esc = clear ? "\e[H\e[J" : ''
         header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n")
         # Oscillators play forever, so graphs usually play until interrupted
@@ -40,10 +44,10 @@ module MB
 
         case file_tone_data
         when String
-          return play_file(file_tone_data, gain: gain, plot: plot, device: device, output: output)
+          return play_file(file_tone_data, gain: gain * trim, plot: plot, device: device, output: output)
 
         when IOInput, InputBufferWrapper
-          return play_input(file_tone_data, gain: gain, plot: plot, device: device, output: output)
+          return play_input(file_tone_data, gain: gain * trim, plot: plot, device: device, output: output)
 
         when Array
           if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
@@ -68,16 +72,17 @@ module MB
 
             input = nodes.as_input(output.channels)
 
-            gain = master_gain
+            gain = master_gain * trim
             loop do
               buf = input.read(output.buffer_size)
               break if buf.nil? || buf.empty? || buf.any? { |d| d.nil? || d.empty? }
 
-              output.write(buf.map { |c| c * gain })
+              output.write(Session.monitor_clip(buf.map { |c| c * gain }, trim).first)
             end
 
           else
-            data = any_sound_to_array(file_tone_data).map { |c| c * master_gain }
+            data = any_sound_to_array(file_tone_data).map { |c| c * (master_gain * trim) }
+            data = Session.monitor_clip(data, trim).first
             data = data * 2 if data.length < 2
             channels = data.length
 
@@ -380,6 +385,25 @@ module MB
       def master_gain=(gain)
         master_gain(gain)
       end
+
+      # Returns the monitor trim (linear, 1.0 = 0 dB): a listening gain for
+      # live playback only, after the master chain, any limiter, and the
+      # master gain, that never reaches #render, stems, #rec_audio files,
+      # vis, or takes (see Session::MonitorTrim).  With a +gain+ (linear,
+      # up to +27 dB), sets it first.  The listening level check
+      # (`help.level`) sets it too.  Peaks the trim pushes over full scale
+      # are clipped on the way out, with a warning.  Also available as
+      # #monitor.
+      #
+      # Example (bin/sound.rb):
+      #     monitor_gain 6.db       # louder in the speakers, renders unchanged
+      #     monitor_gain.to_db      # => 6.0
+      #     monitor 0.db
+      def monitor_gain(gain = nil)
+        Session.monitor_gain = gain if gain
+        Session.monitor_gain
+      end
+      alias monitor monitor_gain
 
       # Changes the sequence a background player (see #bg) plays, keeping
       # its synth and effects as they are, e.g. to try a new bass line
