@@ -396,7 +396,9 @@ module MB
         graph document (or the whole set), `preset` loads one with new
         inputs and params.  mb-sound comes with presets too (`presets`
         lists them): drum & bass, jungle, ambient, and funk instruments,
-        like `preset :dnb_reese, midi: midi` or `preset :ambient_tape, input: mic`.
+        like `preset :dnb_reese, midi: midi` or `preset :ambient_tape, input: mic`,
+        and electric pianos: `:tine_piano` clean, `:tine_crunch` with its amp
+        pushed (`amp: 1..8`), `:reed_piano`.
       TEXT
       commands :ruby, :save, :preset, :presets, :set, :named_proc
       note :graph_io
