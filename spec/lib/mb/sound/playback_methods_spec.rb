@@ -249,7 +249,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       it 'keeps master effects but clears their tails with #panic' do
         MB::Sound.bg(:a, 220.hz.sine)
-        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.5) }
+        MB::Sound.master(at: :now) { |mix| mix.delay(0.5) }
         sleep 0.05 until MB::Sound.master.start_with?('master:')
 
         MB::Sound.panic
@@ -322,7 +322,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
         MB::Sound.bg(1.constant.until(0.05))
-        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        MB::Sound.master(at: :now) { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
         expect(MB::Sound.wait(timeout: 30)).to eq(true)
       end
     end
@@ -562,7 +562,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'adds the master tail after the bars limit with tail: true' do
       song = proc do
         MB::Sound.bg(0.5.constant)
-        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+        MB::Sound.master { |mix| mix.delay(0.2) }
       end
       expect(MB::Sound.render(filename, bars: 1, bpm: 120, &song)).to eq(2)
 
@@ -585,7 +585,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'renders the tail of master effects after the last sound ends' do
       seconds = MB::Sound.render(filename, bpm: 120) do
         MB::Sound.bg(0.5.constant.until(0.1))
-        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+        MB::Sound.master { |mix| mix.delay(0.2) }
       end
 
       # The delay ends at 0.3 seconds, followed by a second of silence
@@ -600,7 +600,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       infinite = proc do
         MB::Sound.bg(0.5.constant.until(0.1))
-        MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        MB::Sound.master { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
       end
       expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
       expect(MB::Sound.render(filename, seconds: 0.5, overwrite: true, &infinite)).to eq(0.5)

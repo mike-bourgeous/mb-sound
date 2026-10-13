@@ -347,7 +347,7 @@ module MB
       # Example (bin/sound.rb):
       #     master { |mix| mix.softclip(0.5, 0.95) }
       #     master { |mix| mix.filter(:highpass, cutoff: 30).reverb(:room).softclip(0.5, 0.95) }
-      #     master { |l, r| [l, r.delay(seconds: 0.012)] }   # Haas widening
+      #     master { |l, r| [l, r.delay(0.012)] }   # Haas widening
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
       def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, &block)

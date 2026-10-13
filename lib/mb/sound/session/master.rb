@@ -67,7 +67,7 @@ module MB
         #
         # Examples:
         #     session.master { |mix| mix.softclip(0.5, 0.95) }
-        #     session.master { |l, r| [l, r.delay(seconds: 0.01)] }
+        #     session.master { |l, r| [l, r.delay(0.01)] }
         #     session.master # bypass
         #
         # The change goes through the change queue (see Changes), so several

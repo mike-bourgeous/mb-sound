@@ -45,10 +45,10 @@ MB::Sound.song_script(bars: 30) {
   delay_lfo = 0.0897.hz.sine.at(0..250)
   filter_lfo = (1.0 / 12.0).hz.sine.at(3500..7500)
 
-  flange1 = chords + chords.delay(delay_lfo.samples).softclip(0.1) + chords.delay(seconds: 0.5).delay(seconds: 1.01, feedback: 0.7) + chords.delay(seconds: 0.51)
-  flange2 = chords + chords.delay((250 - delay_lfo).samples).softclip(0.1) + chords.delay(seconds: 0.99, feedback: 0.6)
-  echo1 = drums + drums.delay(seconds: 1.0 / 32.0, feedback: 0.5) + drums.delay(seconds: 3.0 / 6.0, feedback: 0.5)
-  echo2 = drums + drums.delay(seconds: 1.0 / 64.0, feedback: 0.7) + drums.delay(seconds: 5.0 / 6.0, feedback: 0.4)
+  flange1 = chords + chords.delay(delay_lfo.samples).softclip(0.1) + chords.delay(0.5).delay(1.01, feedback: 0.7) + chords.delay(0.51)
+  flange2 = chords + chords.delay((250 - delay_lfo).samples).softclip(0.1) + chords.delay(0.99, feedback: 0.6)
+  echo1 = drums + drums.delay(1.0 / 32.0, feedback: 0.5) + drums.delay(3.0 / 6.0, feedback: 0.5)
+  echo2 = drums + drums.delay(1.0 / 64.0, feedback: 0.7) + drums.delay(5.0 / 6.0, feedback: 0.4)
   graph1 = (1.1 * echo1 + 0.2 * flange1).filter(:lowpass, cutoff: filter_lfo, quality: 5)
   graph2 = (1.1 * echo2 + 0.2 * flange2).filter(:lowpass, cutoff: filter_lfo, quality: 5)
 
