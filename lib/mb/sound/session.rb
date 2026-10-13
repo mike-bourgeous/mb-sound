@@ -86,14 +86,15 @@ module MB
       # time (see Sequence::TimelineNode#start_at).
       #
       # +strip_level+ and +strip_ramp+ are the mute/solo level (see Strip);
-      # +asleep+ is true while a muted player isn't being rendered.
+      # +asleep+ is true while a muted player isn't being rendered;
+      # +asleep_reads+ caches what it still reads (see Strip#asleep_reads).
       #
       # +ring+ is a Tails::Ring while the player rings out after a stop
       # (see Tails).
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep, :ring,
+        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -801,6 +802,8 @@ module MB
         advance_knobs(@frame, count) unless @knobs.empty?
 
         players = @mutex.synchronize { @players.values }
+        @span_players = players # for Strip#asleep_reads
+        @span_serials = nil
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
         playing = !players.empty? || queued_start?
@@ -1146,6 +1149,7 @@ module MB
           if wake.nil? || wake >= offset + frames
             p.asleep = true
             fade_ramp(p, base + offset, frames) # keeps fades moving while asleep
+            read_while_asleep(p, frames)
             return finish_player(p, false, base + offset + frames)
           end
 
@@ -1154,6 +1158,7 @@ module MB
             p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
             p.asleep = false
           end
+          read_while_asleep(p, wake - offset)
           frames -= wake - offset
           offset = wake
         end
@@ -1161,6 +1166,7 @@ module MB
         # A mute ramp ending in this buffer: the graph stops on the ramp's
         # last frame (not the end of the buffer), so free-running
         # oscillators sleep at the same point whatever the buffer size
+        asleep_after = 0
         if p.strip_ramp && p.strip_ramp.to <= 0 && !sidechained
           silent_from = p.strip_ramp.start + p.strip_ramp.length
           if silent_from <= base + offset
@@ -1168,9 +1174,13 @@ module MB
             p.strip_ramp = nil
             p.asleep = true
             fade_ramp(p, base + offset, frames)
+            read_while_asleep(p, frames)
             return finish_player(p, false, base + offset + frames)
           end
-          frames = MB::M.min(frames, silent_from - (base + offset))
+          if silent_from < base + offset + frames
+            asleep_after = base + offset + frames - silent_from
+            frames -= asleep_after
+          end
         end
 
         routed = @routed_span
@@ -1188,6 +1198,7 @@ module MB
           @player_frame = nil
         end
         check_speed(p, MB::U.clock_now - t, frames)
+        read_while_asleep(p, asleep_after) # the rest of the buffer after a mute ramp
 
         if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
           retire(p)
