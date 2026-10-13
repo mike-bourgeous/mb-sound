@@ -105,7 +105,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/ambient.rb' => ['-p', 'koto', '-w', '0.5'], # (bowls and the gong ring past the 10 s check)
     'bin/synths/dnb.rb' => ['-p', 'neuro', '-G', '0.5'],
     'bin/synths/drums_808.rb' => ['-c', '6'],
-    'bin/synths/drums_909.rb' => ['-k', '0.8'],
+    'bin/synths/drums_909.rb' => ['-k', '0.8', '-d', '2'], # (a long kick: the kit ends when its voices go quiet)
     'bin/synths/electric_pianos.rb' => ['-p', 'reed', '-b', '1.5'],
     'bin/synths/ep2_syn.rb' => [],
     'bin/synths/filter_ping.rb' => [],
