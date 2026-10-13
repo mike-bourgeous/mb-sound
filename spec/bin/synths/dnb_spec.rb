@@ -125,6 +125,13 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(rms_db(seconds(wet.(roomy), 0.25, 0.45))).to be < splash - 40 # closed an eighth (0.17 s) after the hit
     expect(rms_db(seconds(wet.(long), 0.25, 0.45))).to be > splash - 20 # (patches-3's room was still open)
 
+    # An audible decay while the gate is open (patches-5): the splash falls 10+ dB from its peak (40-60 ms) by
+    # 130-150 ms, still sounding; patches-4's bigger, longer room held within a few dB until the gate cut it
+    p4 = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, room: true, room_size: 0.7, room_decay: 1.0) }, 1)
+    fall = ->(x) { rms_db(seconds(wet.(x), 0.04, 0.06)) - rms_db(seconds(wet.(x), 0.13, 0.15)) }
+    expect(fall.(roomy)).to be_between(10, 25)
+    expect(fall.(p4)).to be < 7
+
     ghost = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 0.2]), parallel: 0) }, 1)
     ghost_room = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 0.2]), parallel: 0, room: true) }, 1)
     expect(rms_db(seconds(ghost_room[0][0...ghost[0].length] - ghost[0], 0.03, 0.12))).to be < rms_db(seconds(ghost[0], 0.03, 0.12)) - 20
