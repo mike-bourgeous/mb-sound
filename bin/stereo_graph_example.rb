@@ -17,8 +17,8 @@ MB::Sound.song_script(bars: 8) {
     (360.3.hz.pm(q) + 481.4.hz.pm(q)).oversample(3) + 30.hz.ramp.at(0.3).filter(:lowpass, cutoff: 0.23.hz.lfo.at(130..2500))
   ).softclip.oversample(2)
 
-  left = a.delay(seconds: 0.4.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smoothing: false).softclip
-  right = a.delay(seconds: 0.3.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smoothing: false).softclip
+  left = a.delay(0.4.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smooth: false).softclip
+  right = a.delay(0.3.hz.lfo.at(0..0.01), feedback: -0.5, dry: 1, smooth: false).softclip
 
   MB::Sound.bg(:example, [left, right], fade: 0)
 }

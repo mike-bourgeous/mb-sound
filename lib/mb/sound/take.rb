@@ -313,7 +313,7 @@ module MB
           master_gain: s.master_gain,
           fade_in: s.fade_in,
           fade_out: s.fade_out,
-          rng: [Marshal.dump(MB::Sound.root_rng)].pack('m0'),
+          rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),
           time: Time.now.strftime('%Y-%m-%d %H:%M:%S'),
         }
       end

@@ -39,6 +39,7 @@ require_relative 'sound/fast_recipe'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'
+require_relative 'sound/internal'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot'
 require_relative 'sound/plot_methods'

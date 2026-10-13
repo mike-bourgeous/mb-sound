@@ -26,7 +26,7 @@
 # filter, and ratcheted amp envelopes, and the delay, all follow the swaps):
 #     s = seq(A3, C3, G3, D3).n1.loop
 #     master { |*c| c.reverb(:hall) }
-#     bg :riff, s.then { |riff| (riff.tone.triangle.log_fm(2 * riff.env(0.0, 0.5, 0, 0.5)).at(1).filter(:lowpass, quality: 4, cutoff: 250 + riff.env(0.001, 0.5, 0, 0.5) * 4000).softclip(0.1, 0.5) * riff.ratchet(4).env(0.001, 0.5, 0, 0.5)).delay(seconds: 0.375, feedback: -2.db, dry: 1, wet: -5.db) }
+#     bg :riff, s.then { |riff| (riff.tone.triangle.log_fm(2 * riff.env(0.0, 0.5, 0, 0.5)).at(1).filter(:lowpass, quality: 4, cutoff: 250 + riff.env(0.001, 0.5, 0, 0.5) * 4000).softclip(0.1, 0.5) * riff.ratchet(4).env(0.001, 0.5, 0, 0.5)).delay(0.375, feedback: -2.db, dry: 1, wet: -5.db) }
 #     swap :riff, s.stretch(2).transpose(5)
 #     swap :riff, s.stretch(4).transpose(7)
 
@@ -64,7 +64,7 @@ module MB::Sound
     bass_tone = bass_a.tone.ramp.at(1) + bass_a.transpose(12).tone.ramp.at(0.25)
     bass = (bass_tone.filter(:lowpass, cutoff: 150 + 2500 * bass_a.env(0.001, 0.15, 0.1, 0.05), quality: 5) *
       bass_a.env(0.003, 0.2, 0.5, 0.08) * 0.14)
-    bass = bass + bass.delay(seconds: 0.375) * 0.3
+    bass = bass + bass.delay(0.375) * 0.3
 
     pad = fifth_pad(chords_a, cutoff: 1100).map { |c| c * 0.45 }
 

@@ -59,7 +59,7 @@ MB::Sound.effect_script(
     # The tape loop: drive into the delay, the feedback through the tape
     # sim (band limits and saturation) on every pass, including the first
     # echo (as the old spy loop did)
-    echo = (inp * p.drive.constant.named('drive')).delay(time, feedback: p.feedback, smoothing: p.smoothing) { |fb|
+    echo = (inp * p.drive.constant.named('drive')).delay(time, feedback: p.feedback, smooth: p.smoothing) { |fb|
       fb
         .filter(200.hz.highpass(quality: 0.5)).named('highpass')
         .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')

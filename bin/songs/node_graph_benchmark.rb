@@ -69,10 +69,10 @@ def benchmark_song
   l = m + -6.db * s
   r = m - -6.db * s
 
-  flanger_l = -4.db * l - -5.db * l.delay(seconds: 0.1.hz.triangle.lfo.at(0.001..0.008))
+  flanger_l = -4.db * l - -5.db * l.delay(0.1.hz.triangle.lfo.at(0.001..0.008))
   final_l = flanger_l.softclip(0.5, 0.99)
 
-  flanger_r = -4.db * r - -5.db * r.delay(seconds: 0.1.hz.triangle.lfo.with_phase(0.5).at(0.001..0.008))
+  flanger_r = -4.db * r - -5.db * r.delay(0.1.hz.triangle.lfo.with_phase(0.5).at(0.001..0.008))
   final_r = flanger_r.softclip(0.5, 0.99)
 
   [final_l, final_r, envelopes]

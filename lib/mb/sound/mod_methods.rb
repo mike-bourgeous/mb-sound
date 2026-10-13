@@ -36,6 +36,8 @@ module MB
       end
       alias mod_octaves mod_scale
 
+      private
+
       # The graph node for a modulation source: a node as is, a Numeric as a
       # constant.  Notes overrides this to resolve Symbols.
       def mod_source(source)
@@ -44,8 +46,6 @@ module MB
 
         raise ArgumentError, "Modulation sources must be graph nodes (got #{source.inspect}; Symbols need a Notes voice, e.g. v.mod_sum)"
       end
-
-      private
 
       # A Mixer of +base+ and source × amount pairs, amounts converted from
       # Intervals to +unit+ (:semitones or :octaves).

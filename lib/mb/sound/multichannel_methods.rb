@@ -9,7 +9,7 @@ module MB
       #
       # Examples (bin/sound.rb):
       #     play channels(220.hz.at(0.2), 330.hz.at(0.2), 440.hz.at(0.2))  # Ctrl-C stops
-      #     bg 220.hz.ramp.at(0.3).delay(seconds: channels(0.010, 0.013))   # mono in, stereo out
+      #     bg 220.hz.ramp.at(0.3).delay(channels(0.010, 0.013))   # mono in, stereo out
       def channels(*items)
         items = items[0] if items.length == 1 && items[0].is_a?(Array)
         nodes = items.count { |i| i.is_a?(GraphNode) || i.is_a?(GraphNode::MultiOutput) }

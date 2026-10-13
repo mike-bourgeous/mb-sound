@@ -382,8 +382,8 @@ module MB
       # scheduled and stops every player, letting master effects ring out.
       def stop_after_bars(bars)
         session = Session.current
-        session.schedule(bars * session.transport.bar_length, description: "end of --bars #{bars}") do
-          MB::Sound.cancel
+        session.schedule(bars * session.transport.bar_length, description: "end of --bars #{bars}", owner: :script) do
+          session.reset_scheduler
           MB::Sound.stop(:all, fade: 0)
         end
       end

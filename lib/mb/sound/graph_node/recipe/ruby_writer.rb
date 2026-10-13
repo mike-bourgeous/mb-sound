@@ -548,6 +548,10 @@ module MB
             MB::Sound::Decibels.new(v)
           end
 
+          # Calls whose delay keywords print in their current spelling (see
+          # #call_text).
+          DELAY_CALLS = [:delay, :feedback_delay, :multitap, :multitap_delay].freeze
+
           # receiver.name(args) { block } for call +c+.
           def call_text(recv, c, indent)
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
@@ -555,6 +559,12 @@ module MB
             end
             args = c.args.map { |a| value(a, indent) }
             kwargs = c.kwargs.dup
+            if DELAY_CALLS.include?(c.name)
+              # Current spellings: delay(t), not the deprecated
+              # delay(seconds: t); smooth:, not smoothing:
+              args = [value(kwargs.delete(:seconds), indent)] if kwargs.key?(:seconds) && args.empty?
+              kwargs = kwargs.to_h { |k, v| [k == :smoothing && !kwargs.key?(:smooth) ? :smooth : k, v] }
+            end
             seed = drawn_seed(c)
             kwargs[:seed] = seed if seed
             args += kwargs.map { |k, v|
