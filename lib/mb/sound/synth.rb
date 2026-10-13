@@ -521,7 +521,7 @@ module MB
           own.reject! { |n| upstream[n.__id__] }
 
           shared = g.select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.tee.branches.any? { |b| !sets[idx][b.__id__] }
+            n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.owner_tee.branches.any? { |b| !sets[idx][b.__id__] }
           }
           own + shared
         }
@@ -622,8 +622,8 @@ module MB
         shared = @shared_inputs
         @boundary[idx].each do |n|
           # Shared controllers were read for every lane (Plan::SharedInputs)
-          if shared && n.is_a?(GraphNode::Tee::Branch) && shared.shared_tee?(n.tee)
-            return :ended if shared.buffers[n.tee.sources[:input]].nil?
+          if shared && n.is_a?(GraphNode::Tee::Branch) && shared.shared_tee?(n.owner_tee)
+            return :ended if shared.buffers[n.owner_tee.sources[:input]].nil?
             next
           end
           next if shared&.shared_node?(n)

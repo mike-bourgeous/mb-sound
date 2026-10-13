@@ -139,7 +139,7 @@ module MB
             # them themselves; see Synth#skip_lane)
             next if insts_of[src].length < 2
 
-            tees = list.map { |h| h.respond_to?(:tee) ? h.tee : nil }.uniq
+            tees = list.map { |h| h.is_a?(GraphNode::Tee::Branch) ? h.owner_tee : nil }.uniq
             next unless tees.length == 1 && tees[0]
 
             tee = tees[0]

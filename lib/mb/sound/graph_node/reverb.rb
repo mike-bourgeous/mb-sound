@@ -317,7 +317,9 @@ module MB
 
           def_delegators :@reverb, :sample_rate, :sample_rate=, :at_rate
 
-          attr_reader :reverb, :index
+          # The output channel index (0-based).  The Reverb itself is @reverb
+          # (no reader: +reverb+ is the DSL method that adds another reverb).
+          attr_reader :index
 
           # Creates an output handle for channel +:index+ (0-based) on the
           # given +:reverb+.

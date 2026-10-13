@@ -159,12 +159,14 @@ module MB
 
         KINDS = [:velocity, :key].freeze
 
-        attr_reader :seconds, :source, :kind, :amount
+        # The unscaled time (seconds; not +seconds+, a Length DSL name), the
+        # control node, :velocity or :key, and the amount.
+        attr_reader :time_seconds, :source, :kind, :amount
 
         def initialize(seconds, source, kind, amount, sample_rate: 48000)
           raise ArgumentError, "Time scale kind must be one of #{KINDS} (got #{kind.inspect})" unless KINDS.include?(kind)
 
-          @seconds = seconds.to_f
+          @time_seconds = seconds.to_f
           @source = source.get_sampler
           @kind = kind
           @amount = amount.to_f
@@ -197,8 +199,8 @@ module MB
         # The scaled time for a control value +v+.
         def time(v)
           case @kind
-          when :velocity then @seconds * (1.0 - @amount * v)
-          else @seconds * 2.0 ** (-@amount * (v - 60.0) / 12.0)
+          when :velocity then @time_seconds * (1.0 - @amount * v)
+          else @time_seconds * 2.0 ** (-@amount * (v - 60.0) / 12.0)
           end
         end
 
@@ -216,7 +218,7 @@ module MB
         end
 
         def to_s
-          "#{@node_type_name} #{MB::M.sigfigs(@seconds, 4)} s"
+          "#{@node_type_name} #{MB::M.sigfigs(@time_seconds, 4)} s"
         end
       end
 

@@ -11,32 +11,105 @@ module MB
       # and returns a node for one channel or a bundle for several.  They
       # handle channels themselves (ChannelDispatch::EXCLUDED).
       #
-      # Units: levels (+threshold+, +ceiling+, +amount+, +range+) are dB
-      # numbers (-12) or linear gains (-12.db, which is 0.251): numbers
-      # above zero are linear gains, zero and below are dB.  +makeup+ and
-      # compander points are dB numbers.  Times are seconds, Lengths
-      # (5.ms), Durations (1.n8, following the tempo), or nodes.
+      # Units: write levels (+threshold+, +ceiling+, +amount+, +range+) in
+      # dB with #db (`threshold: -12.db`, a Decibels value, read as exactly
+      # -12 dB).  Bare numbers still work as before: above zero they are
+      # linear gains (0.25), zero and below dB (-12), with a warning once
+      # per call site ("write -12.db"), since bare negatives will become
+      # linear gains like everywhere else (after the genre experiment; see
+      # design/notes/dynamics.md).  A linear level above 1 (louder than full
+      # scale, e.g. `threshold: 6`, +15.6 dB) also warns.  +makeup+,
+      # +min_gain+/+max_gain+, and compander points are dB numbers, and
+      # take Decibels as their dB values too (`makeup: 3.db` is +3 dB).
+      # Times are seconds, Lengths (5.ms), Durations (1.n8, following the
+      # tempo), or nodes.
       #
       # Examples (bin/sound.rb):
-      #     drums.compress(threshold: -18, ratio: 4, attack: 10.ms, release: 120.ms, makeup: :auto)
+      #     drums.compress(threshold: -18.db, ratio: 4, attack: 10.ms, release: 120.ms, makeup: :auto)
       #     bass.duck(kick)                                  # tech house pumping (-18 dB, 1/16 release)
-      #     drums.compress(threshold: -30, ratio: 8, attack: 3.ms, release: 80.ms, makeup: :auto, mix: 0.4)  # parallel ("New York")
-      #     mix.limit(ceiling: -1, lookahead: 1.5.ms)        # true-peak brickwall
-      #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1, release: 60.ms) }  # hot mixes: softclip into the limiter
+      #     drums.compress(threshold: -30.db, ratio: 8, attack: 3.ms, release: 80.ms, makeup: :auto, mix: 0.4)  # parallel ("New York")
+      #     mix.limit(ceiling: -1.db, lookahead: 1.5.ms)        # true-peak brickwall
+      #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1.db, release: 60.ms) }  # hot mixes: softclip into the limiter
       #     pad.compand(-60 => -80, -40 => -40, 0 => -12)    # expander + 3.3:1 compressor
       #     mix.bands(120.hz, 2000.hz) { |lo, mid, hi| [lo.compress(ratio: 3), mid, hi.at(-2.db)] }
       #     mix.squeeze(:eleven).limit
       module DynamicsMethods
-        # Converts a level (dB number, or linear gain above zero) to linear.
+        # Converts a level to a linear gain: a Decibels value (-6.db) is its
+        # gain; a bare number above zero is a linear gain, zero and below dB
+        # (with a warning; see the Units note above).
         def self.level(value, name)
-          raise ArgumentError, "#{name} must be a number (dB, or a linear gain like -6.db; got #{value.inspect})" unless value.is_a?(Numeric) && !value.to_f.nan?
+          check_level(value, name)
+          return value.to_f if value.is_a?(Decibels)
+
           value > 0 ? value.to_f : 10.0 ** (value.to_f / 20.0)
         end
 
-        # Converts a level (dB number, or linear gain above zero) to dB.
+        # Converts a level to dB: a Decibels value (-6.db) is its exact dB
+        # value; a bare number above zero is a linear gain, zero and below dB
+        # (with a warning; see the Units note above).
         def self.level_db(value, name)
-          raise ArgumentError, "#{name} must be a number (dB, or a linear gain like -6.db; got #{value.inspect})" unless value.is_a?(Numeric) && !value.to_f.nan?
+          check_level(value, name)
+          return value.db_value if value.is_a?(Decibels)
+
           value > 0 ? 20.0 * Math.log10(value.to_f) : value.to_f
+        end
+
+        # A dB parameter (+makeup+, +min_gain+, compander points): a number
+        # of dB, or a Decibels value as its dB value (`makeup: 3.db` is +3
+        # dB, not a gain of 1.41 read as dB).
+        def self.db_param(value)
+          value.is_a?(Decibels) ? value.db_value : value
+        end
+
+        # The methods taking levels and their level keywords (graph export
+        # prints bare dB levels among them as `-20.db`).
+        LEVEL_METHODS = %i[
+          compress compressor expand expander noise_gate duck sidechain_duck limit limiter brickwall
+        ].freeze
+        LEVEL_KEYWORDS = %i[threshold upward_threshold ceiling amount range].freeze
+
+        # Linear levels this far above 1 (full scale) get the "louder than
+        # full scale" warning; a little above 1 is fine (e.g. 1.0001).
+        LINEAR_WARN_ABOVE = 1.0
+
+        @level_warnings = {}
+        @level_lock = Mutex.new
+
+        # Warns about a level given as a bare dB number or as a linear gain
+        # above full scale, once per call site (the first caller outside
+        # the library) and kind.  Quiet inside a block given to
+        # .quiet_levels (graph documents load with their own rules).
+        def self.check_level(value, name)
+          raise ArgumentError, "#{name} must be a number (dB like -6.db, or a linear gain; got #{value.inspect})" unless value.is_a?(Numeric) && value.real? && !value.to_f.nan?
+          return if value.is_a?(Decibels) || Thread.current[:mb_sound_quiet_levels]
+
+          if value <= 0
+            warn_level(:bare_db, "#{name}: #{value.inspect} is read as #{value.inspect} dB for now; write #{value.inspect}.db (bare negative levels will become linear gains, like gains everywhere else)")
+          elsif value > LINEAR_WARN_ABOVE
+            warn_level(:above_one, "#{name}: #{value.inspect} is a linear gain of #{MB::M.sigfigs(20.0 * Math.log10(value.to_f), 3)} dB, above full scale; did you mean #{(-value).inspect}.db?")
+          end
+        end
+
+        # Runs the block without level warnings (for graph document loading).
+        def self.quiet_levels
+          old = Thread.current[:mb_sound_quiet_levels]
+          Thread.current[:mb_sound_quiet_levels] = true
+          yield
+        ensure
+          Thread.current[:mb_sound_quiet_levels] = old
+        end
+
+        # The library's own directory, skipped when looking for call sites.
+        LIBRARY_DIR = File.expand_path('../../..', __dir__) + File::SEPARATOR
+
+        def self.warn_level(kind, message)
+          site = caller_locations(2).find { |l|
+            path = l.absolute_path || l.path
+            !path.start_with?(LIBRARY_DIR) && !path.start_with?('<internal:')
+          }
+          where = site ? "#{site.path}:#{site.lineno}" : '(unknown)'
+          first = @level_lock.synchronize { @level_warnings[[where, kind, message]] ? false : (@level_warnings[[where, kind, message]] = true) }
+          warn "#{where}: warning: #{message}" if first
         end
 
         # A compressor ratio as a slope above the threshold (1/ratio).
@@ -68,9 +141,9 @@ module MB
         # plain one (parallel or "New York" compression), phase-aligned.
         #
         # Examples (bin/sound.rb):
-        #     play file_input('drums.flac').compress(threshold: -20, ratio: 4, attack: 10.ms, release: 100.ms, makeup: :auto)
-        #     play voice.compress(threshold: -30, ratio: 3, upward_threshold: -50, upward_ratio: 2)
-        def compress(threshold: -20, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0,
+        #     play file_input('drums.flac').compress(threshold: -20.db, ratio: 4, attack: 10.ms, release: 100.ms, makeup: :auto)
+        #     play voice.compress(threshold: -30.db, ratio: 3, upward_threshold: -50.db, upward_ratio: 2)
+        def compress(threshold: -20.db, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0,
                      sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
                      upward_threshold: nil, upward_ratio: 2, upward_attack: 0.001, max_gain: 24, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
@@ -87,7 +160,7 @@ module MB
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, max_gain: upward_threshold ? max_gain.to_f : 0.0, boost: upward_attack, mix: mix,
+            makeup: makeup, max_gain: upward_threshold ? DynamicsMethods.db_param(max_gain).to_f : 0.0, boost: upward_attack, mix: mix,
           ))
         end
         alias compressor compress
@@ -98,8 +171,8 @@ module MB
         # open after the level falls.
         #
         # Example (bin/sound.rb):
-        #     play noisy.expand(threshold: -45, ratio: 3, range: -30)
-        def expand(threshold: -40, ratio: 2, knee: 6, range: -40, attack: 0.001, release: 0.1, hold: 0, makeup: 0,
+        #     play noisy.expand(threshold: -45.db, ratio: 3, range: -30.db)
+        def expand(threshold: -40.db, ratio: 2, knee: 6, range: -40.db, attack: 0.001, release: 0.1, hold: 0, makeup: 0,
                    sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
           raise ArgumentError, "Expander ratio must be at least 1 (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio >= 1 && ratio.finite?
@@ -119,13 +192,13 @@ module MB
         # +hold+ after the level falls, then closing over +release+.
         #
         # Example (bin/sound.rb):
-        #     play snare.noise_gate(threshold: -30, hold: 30.ms, release: 50.ms)
-        def noise_gate(threshold: -50, range: -80, ratio: 20, knee: 0, attack: 0.0005, hold: 0.02, release: 0.05, **options)
+        #     play snare.noise_gate(threshold: -30.db, hold: 30.ms, release: 50.ms)
+        def noise_gate(threshold: -50.db, range: -80.db, ratio: 20, knee: 0, attack: 0.0005, hold: 0.02, release: 0.05, **options)
           expand(threshold: threshold, range: range, ratio: ratio, knee: knee, attack: attack, hold: hold, release: release, **options)
         end
 
-        # Sidechain ducking: turns this signal down by up to +amount+ (dB,
-        # e.g. -18, or -18.db) while +sidechain+ (e.g. a kick) is above
+        # Sidechain ducking: turns this signal down by up to +amount+ (e.g.
+        # -18.db) while +sidechain+ (e.g. a kick) is above
         # +threshold+, the reduction growing 1 dB per dB above it (an
         # infinite-ratio compressor with a range) so loud hits duck fully;
         # recovering over +release+ (a one-pole time constant: seconds, a
@@ -138,15 +211,15 @@ module MB
         # suggested): -18 dB, 1 ms attack, 20 ms hold, 1/16 release.  Behind
         # an 808 kick at 124 BPM the gain is -7 dB at the offbeat and -1 dB
         # by the next kick (a 1/8 release: -11 and -4, never recovering).
-        # Lighter: `amount: -8`; snappier: `release: 1.n32`; longer:
+        # Lighter: `amount: -8.db`; snappier: `release: 1.n32`; longer:
         # `release: 1.n8`; flat-topped: `hold: 1.n16, release: 1.n32`.
         #
         # Example (bin/sound.rb):
         #     kick = grid('x...x...x...x...').loop.trigger.ping(50, decay: 0.3)
         #     bass = seq(A1, A1, C2, A1).n8.loop.tone.saw.lp4(400)
         #     bg [kick, bass.duck(kick)].sum
-        #     bg [kick, bass.duck(kick, amount: -10, release: 1.n32)].sum   # lighter and snappier
-        def duck(sidechain, amount: -18, threshold: -30, knee: 6, attack: 0.001, release: 1.n16, hold: 0.02,
+        #     bg [kick, bass.duck(kick, amount: -10.db, release: 1.n32)].sum   # lighter and snappier
+        def duck(sidechain, amount: -18.db, threshold: -30.db, knee: 6, attack: 0.001, release: 1.n16, hold: 0.02,
                  detector: :peak, rms: 0.01, link: true, lookahead: 0)
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
           a = DynamicsMethods.level_db(amount, 'amount')
@@ -218,11 +291,11 @@ module MB
         # Adds +lookahead+ of latency (plus 6 samples with +true_peak+).
         #
         # Example (bin/sound.rb):
-        #     master { |mix| mix.limit(ceiling: -1, release: 80.ms) }
+        #     master { |mix| mix.limit(ceiling: -1.db, release: 80.ms) }
         #     # Hot mixes: a softclip in front takes the peaks the limiter
         #     # would pump on (the maintainer's pick on the dynamics bench)
-        #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1, release: 60.ms) }
-        def limit(ceiling: -1, lookahead: 0.0015, release: 0.1, true_peak: true, link: true)
+        #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1.db, release: 60.ms) }
+        def limit(ceiling: -1.db, lookahead: 0.0015, release: 0.1, true_peak: true, link: true)
           finish_dynamics(Dynamics::Limiter.new(outputs, ceiling: ceiling, lookahead: lookahead, release: release, true_peak: true_peak, link: link))
         end
         alias limiter limit
@@ -284,17 +357,17 @@ module MB
           default: {
             split: [120, 2500].freeze, depth: 0.5, upward_attack: 0.002,
             bands: [
-              { down: -24, down_ratio: 3, up: -42, up_ratio: 1.5, attack: 0.005, release: 0.2 }.freeze,
-              { down: -26, down_ratio: 3, up: -44, up_ratio: 1.5, attack: 0.0025, release: 0.15 }.freeze,
-              { down: -28, down_ratio: 3, up: -46, up_ratio: 1.5, attack: 0.00125, release: 0.1 }.freeze,
+              { down: -24.db, down_ratio: 3, up: -42.db, up_ratio: 1.5, attack: 0.005, release: 0.2 }.freeze,
+              { down: -26.db, down_ratio: 3, up: -44.db, up_ratio: 1.5, attack: 0.0025, release: 0.15 }.freeze,
+              { down: -28.db, down_ratio: 3, up: -46.db, up_ratio: 1.5, attack: 0.00125, release: 0.1 }.freeze,
             ].freeze,
           }.freeze,
           eleven: {
             split: [88.3, 2500].freeze, depth: 1.0, upward_attack: 0.0005,
             bands: [
-              { down: -28, down_ratio: 66, up: -46, up_ratio: 4, attack: 0.003, release: 0.15 }.freeze,
-              { down: -30, down_ratio: 66, up: -48, up_ratio: 4, attack: 0.0015, release: 0.1 }.freeze,
-              { down: -32, down_ratio: 66, up: -50, up_ratio: 4, attack: 0.00075, release: 0.06 }.freeze,
+              { down: -28.db, down_ratio: 66, up: -46.db, up_ratio: 4, attack: 0.003, release: 0.15 }.freeze,
+              { down: -30.db, down_ratio: 66, up: -48.db, up_ratio: 4, attack: 0.0015, release: 0.1 }.freeze,
+              { down: -32.db, down_ratio: 66, up: -50.db, up_ratio: 4, attack: 0.00075, release: 0.06 }.freeze,
             ].freeze,
           }.freeze,
         }.freeze
@@ -339,6 +412,7 @@ module MB
               )
             }
           }
+          gain = DynamicsMethods.db_param(gain)
           gain == 0 ? out : out * (10.0 ** (gain / 20.0))
         end
 
