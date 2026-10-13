@@ -28,8 +28,9 @@
 #     bg :b, brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k).loop.transpose(3).sampler(brk).at(-10.db)
 #     swap :b, brk.chop(:k, :k, :s, brk[:s].rev).loop.transpose(5)   # same slices, higher
 #     play press_and_chop_record.rev.node         # the whole record backwards, once
-#     play press_and_chop_record.stretch(2, cycle: 30.ms, fit: :auto).node   # half speed, cycles fitted to the hits
-#     brk = press_and_chop_break(lofi: :sp1200)   # drop-sample reads; .read_as(:clean) on the record for the clean read
+#     play press_and_chop_record.stretch(2, cycle: 30.ms).node                # half speed, cycles fitted to the hits
+#     play press_and_chop_record.stretch(2, cycle: 30.ms, fit: :fixed).node   # the plain cyclic stretch: stutter and buzz
+#     brk = press_and_chop_break(lofi: :sp1200)   # drop-sample reads (mpc60 reads clean); .read_as(:clean) on the record for the clean read
 require 'bundler/setup'
 require 'mb-sound'
 
@@ -99,12 +100,13 @@ module MB::Sound
   end
 
   # The pad: a formant-filtered C minor 9 chord, bounced and stretched to
-  # twice its length in 30 ms cycles (the S950's cyclic timestretch: a
-  # metallic buzz at 33 Hz).
+  # twice its length in 30 ms cycles (the S950's cyclic timestretch, each
+  # cycle fitted to whole periods with matching splices; fit: :fixed is
+  # the plain version, a metallic buzz at 33 Hz).
   def self.press_and_chop_pad
     chord = [C3, Eb3, G3, Bb3, D4].map(&:ramp).sum * 0.2
     chord.formant(:a, :o, morph: 0.4.hz.lfo.at(0..1)).bounce(2.bars, bpm: PRESS_AND_CHOP_BPM, root: C3)
-      .fade(in: 0.4, out: 1.5).stretch(2, cycle: 30.ms, crossfade: 3.ms)
+      .fade(in: 0.4, out: 1.5).stretch(2, cycle: 30.ms, crossfade: 3.ms, fit: :auto)
   end
 
   # Starts the song on the current session, the break through +lofi+'s

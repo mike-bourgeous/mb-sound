@@ -168,12 +168,15 @@ module MB
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle
         classic), `:sp1200` the dirtiest (26 kHz, no filters: crunchy hats);
-        a whole song often wants none.  The presets read drop-sample with
-        no band-limited levels, aliasing as hits pitch up like the hardware
-        (`.lofi(:mpc60, read: :clean)` or `.read_as(:clean)` for the clean
-        read).  `.stretch(2, cycle: 30.ms)` is the S950's cyclic stretch
-        (a buzz at 1 / cycle); `fit: :auto` fits each cycle to the sound
-        (whole periods, matching splices) for smoother tones.
+        a whole song often wants none.  `:mpc60` reads clean
+        (band-limited, interpolated); `:s950` and `:sp1200` read
+        drop-sample with no band-limited levels, aliasing as hits pitch up
+        like the hardware (`read: :clean` / `read: :drop`, or
+        `.read_as(...)`, says otherwise).  `.stretch(2, cycle: 30.ms)` is
+        the S950's cyclic stretch with each cycle fitted to the sound
+        (whole periods, matching splices), so tones keep their pitch;
+        `fit: :fixed` is the plain version (a buzz at 1 / cycle, stutter
+        on breaks, and basses that sound lower).
       TEXT
       commands :bounce, :capture_audio, :chop, :sampler, :sfz
       dsl :bounce
