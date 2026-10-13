@@ -176,25 +176,25 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'stops the most recently started player with no arguments' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine)
-        expect(MB::Sound.stop(fade: 0)).to eq([:b])
-        expect(MB::Sound.stop(fade: 0)).to eq([:a])
+        expect(MB::Sound.stop(fade: 0)).to have_attributes(kind: :stop, name: :b)
+        expect(MB::Sound.stop(fade: 0).name).to eq(:a)
         expect(MB::Sound.stop).to eq([])
       end
 
       it 'stops named players' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine)
-        expect(MB::Sound.stop(:a, fade: 0)).to eq([:a])
+        expect(MB::Sound.stop(:a, fade: 0).to_s).to match(/\Astop :a landed \d+:/)
         expect(MB::Sound.players.keys).to eq([:b])
       end
 
       it 'stops everything with :all or #outro' do
         MB::Sound.bg(220.hz.sine)
         MB::Sound.bg(330.hz.sine)
-        expect(MB::Sound.stop(:all, fade: 0)).to eq([1, 2])
+        expect(MB::Sound.stop(:all, fade: 0).map(&:name)).to eq([1, 2])
 
         MB::Sound.bg(220.hz.sine)
-        expect(MB::Sound.outro(fade: 0)).to eq([1])
+        expect(MB::Sound.outro(fade: 0).name).to eq(1)
         expect(MB::Sound.players).to be_empty
       end
 
@@ -202,14 +202,14 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine, at: :now)
         sleep 0.05
-        expect(MB::Sound.outro).to contain_exactly(:a, :b)
+        expect(MB::Sound.outro.map(&:name)).to contain_exactly(:a, :b)
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
       it 'has #fadeout as an alias for #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
-        expect(MB::Sound.fadeout(fade: 0)).to eq([:a])
+        expect(MB::Sound.fadeout(fade: 0).name).to eq(:a)
         expect(MB::Sound.players).to be_empty
       end
 
@@ -228,7 +228,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'can fade out over a given number of bars' do
         MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
-        expect(MB::Sound.stop(:a, fade: 1/10r)).to eq([:a])
+        expect(MB::Sound.stop(:a, fade: 1/10r).name).to eq(:a)
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
         deadline = MB::U.clock_now + 5
         sleep 0.05 until MB::Sound.players.empty? || MB::U.clock_now > deadline
@@ -242,7 +242,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.stop(:a)                       # fading out over four bars
         expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
 
-        expect(MB::Sound.panic).to contain_exactly(:a, :b)
+        entries = MB::Sound.panic
+        expect(entries.map { |e| [e.kind, e.name] }).to contain_exactly([:stop, :a], [:stop, :b])
         expect(MB::Sound.players).to be_empty
         expect(MB::Sound::Session.default).to be_idle
       end

@@ -85,7 +85,7 @@ module MB
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands].min
-            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i) do
+            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take) do
               run_line(session, binding, l, i)
             end
           end

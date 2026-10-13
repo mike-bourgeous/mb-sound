@@ -196,16 +196,26 @@ module MB
       # recently started one; with names or numbers, those players; with
       # :all, every player (see also #outro and #panic).  Players fade out
       # over four bars by default; pass +:fade+ for a different number of
-      # bars, or 0 to stop right away.  Returns the names of the players that
-      # were stopped.  When nothing is left playing, the timeline pauses where
-      # it is (see SequenceMethods#seek and #rewind).
+      # bars, or 0 to stop right away.  When nothing is left playing, the
+      # timeline pauses where it is (see SequenceMethods#seek and #rewind).
+      #
+      # Stops land right away (or at a scheduled block's time) unless given
+      # a launch point (see LaunchPoint): `stop :bass, on: :bar`, `stop
+      # :bass, in: 2.beats`, `stop :all, at: bar(17)`.
       #
       # +ring: true+ rings the players out instead (as scenes do; see
       # Session::Tails): their clips stop sending notes and each keeps
       # playing until its tail is silent, e.g. `stop :bass, ring: true`.
-      def stop(*names, fade: nil, ring: false)
+      #
+      # Returns the stop's journal entry (see #bg; e.g. `stop :bass lands
+      # 9:1 (queued)`), an Array of entries for several players, or an
+      # empty Array if nothing was playing.  Inside a scheduled block,
+      # returns the names.
+      def stop(*names, fade: nil, ring: false, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
         names = names.map { |n| player_name(n) }
-        session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip) { |session, time|
+        session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip, kind: :stop, all: true) { |session, time|
+          time = session.send(:launch_time, point, [], default: nil) if point.given?
           if names.empty?
             [session.remove_last(fade: fade, time: time, ring: ring)].compact
           elsif names == [:all]
@@ -221,10 +231,13 @@ module MB
       end
 
       # Ends everything playing in the background, fading out over four bars
-      # by default (+:fade+ sets the number of bars).  Also available as
-      # #fadeout.  See #stop, and #panic to stop everything right away.
-      def outro(fade: nil)
-        stop(:all, fade: fade)
+      # by default (+:fade+ sets the number of bars), starting now or at a
+      # launch point (`outro on: 4`, `outro at: bar(33)`).  Also available as
+      # #fadeout.  Returns the journal entries, as #stop.  See #stop, and
+      # #panic to stop everything right away.
+      def outro(fade: nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        stop(:all, fade: fade, at: point)
       end
       alias fadeout outro
 
@@ -232,11 +245,32 @@ module MB
       # players that are fading out or waiting to start.  The master effects
       # (see #master) stay, but their reverb and delay tails are cleared.
       # Audio already sent to the sound card may play for a moment longer.
-      # Returns the names of the players that were stopped.
+      #
+      # Panic also stops what would start things again: changes still
+      # waiting to land (players waiting to start, scene launches, swaps,
+      # mutes, ...) are cancelled, and the scheduler is reset (see
+      # ScheduleMethods#reset_scheduler: the song form stops, every
+      # scheduled block is cancelled, and a stuck or dead scheduler thread
+      # is replaced), with a message saying what that did.
+      #
+      # Returns the journal entries of the stops and of the cancelled
+      # changes (one entry, or an Array; see #stop).
       def panic
-        session_command([], label: 'panic') { |session, time|
+        cancelled = []
+        stops = session_command([], label: 'panic', kind: :stop, all: true) { |session, time|
+          report = session.reset_scheduler
+          message = Session::Scheduler.reset_message(report)
+          warn "panic: #{message}" if message
+
+          waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
+          cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
+
           session.remove(fade: 0, time: time).tap { session.reset_master(time: time) }
         }
+        return stops if Session.context&.[](:batch)
+
+        entries = [*Array(stops).grep(Session::Journal::Entry), *cancelled]
+        entries.length == 1 ? entries.first : entries
       end
 
       # Plays background sounds (#bg, songs) through +output+ from now on:
@@ -474,9 +508,14 @@ module MB
       end
 
       # Discards stopped background players so they can't be resumed (all of
-      # them if no names are given).  Returns the names discarded.
+      # them if no names are given); undoable (see #undo).  Returns the
+      # journal entry (an Array for several, empty if nothing was stopped),
+      # like #stop.
       def forget(*names)
-        Session.current.forget(*names)
+        names = names.map { |n| player_name(n) }
+        session_command(names, label: "forget #{names.map(&:inspect).join(', ')}".strip, kind: :forget, all: true) { |session, time|
+          session.forget(*names, time: time)
+        }
       end
 
       # Plots the background mix (see #bg) live until you press Ctrl-C, then
@@ -796,8 +835,9 @@ module MB
       #
       # With a +kind+, returns the journal entry of the command's last
       # change of that kind (as it is now; see Session::Journal), or the
-      # command's value if it made none.
-      def session_command(result, label: nil, kind: nil, &command)
+      # command's value if it made none.  With +all+, every entry of that
+      # kind: one entry, or an Array for several.
+      def session_command(result, label: nil, kind: nil, all: false, &command)
         context = Session.context
         session = Session.current
         time = context&.[](:time)
@@ -808,6 +848,11 @@ module MB
         else
           value, changes = session.command(label) { command.call(session, time) }
           return value if kind.nil? || value.nil?
+          if all
+            entries = (changes || []).select { |c| c.kind == kind }.map { |c| session.journal[c.seq] }
+            return value if entries.empty?
+            return entries.length == 1 ? entries.first : entries
+          end
           changes&.reverse&.find { |c| c.kind == kind }&.then { |c| session.journal[c.seq] } || value
         end
       end
