@@ -67,6 +67,16 @@ RSpec.describe('bin/synths/jungle.rb') do
     expect(peak_hz(seconds(sub, 0.2, 0.9), 20, 200)).to be_within(1.5).of(MB::Sound::D2.frequency)
   end
 
+  it 'plays the keys on the tine piano by default (piano: :fm for the persona\'s own), at about the same loudness' do
+    notes = -> { patch_notes(*[MB::Sound::F3, MB::Sound::A3, MB::Sound::C4, MB::Sound::E4].map { |n| [n.number, 0, 0.5, 0.8] }) }
+    tine = render_patch(MB::Sound.jungle_keys_voice(notes.()), 1.5)
+    fm = render_patch(MB::Sound.jungle_keys_voice(notes.(), piano: :fm), 1.5)
+    hall = render_patch(MB::Sound.tine_piano_voice(notes.(), bark: 1, tremolo: 0.22, rate: 4.6).reverb(:hall, mix: 0.22) * (0.15 * MB::Sound::JUNGLE_KEYS_TINE_TRIM), 1.5)
+    expect((tine[0] - hall[0]).abs.max).to be < 1e-6
+    expect(rms_db(tine[0])).to be_within(4).of(rms_db(fm[0]))
+    expect { MB::Sound.jungle_keys_voice(notes.(), piano: :wurli) }.to raise_error(ArgumentError, /:tine or :fm/)
+  end
+
   it 'plays the ride and shaker from GM notes, highpassed' do
     out = render_patch(MB::Sound.jungle_perc(patch_notes([51, 0, 0.1, 1.0], [70, 0.5, 0.6, 1.0])), 1)[0]
     expect(peak_db(seconds(out, 0, 0.4))).to be > -30

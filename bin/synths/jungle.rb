@@ -26,8 +26,9 @@
 #   sub     a sine with a little 2nd harmonic, gliding between legato notes
 #   reese   two saws 16 cents apart and an octave sine, a lowpass breathing
 #           on a 2-bar LFO, warm softclip
-#   keys    a phase-modulated sine whose index decays fast (the bark), a
-#           faint tine, a stereo tremolo, a hall
+#   keys    the tine piano (bin/synths/electric_pianos.rb) with a
+#           stereo tremolo, in a hall (piano: :fm for the persona's own
+#           phase-modulated keys)
 #   pad     five saws per note, slow attack, Juno chorus, hall
 #   flute   triangle and sine with bandpassed breath, delayed vibrato, a
 #           dotted-eighth echo (--echo) and a hall
@@ -56,6 +57,7 @@
 
 require 'bundler/setup'
 require 'mb-sound'
+require_relative 'electric_pianos'
 
 module MB::Sound
   # The sampler's slices: { name => [first 16th of the record, length in
@@ -191,10 +193,22 @@ module MB::Sound
     }.softclip(0.5, 0.95) * level
   end
 
-  # The keys (an electric piano): a phase-modulated sine whose index decays fast (the bark;
-  # +bark+ the index), a faint tine, a stereo tremolo at +tremolo+ Hz, a
-  # hall (+hall+ wet).
-  def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22)
+  # The keys (an electric piano), in a hall (+hall+ wet) with a stereo
+  # tremolo at +tremolo+ Hz.  +piano+ :tine (the default) plays the tine
+  # piano from bin/synths/electric_pianos.rb (.tine_piano_voice; +bark+
+  # 0.22 is its bark 1); :fm is the persona's own keys: a phase-modulated
+  # sine whose index decays fast (the bark; +bark+ the index) and a faint
+  # tine.  patches-4 (2026-10-13; the maintainer preferred the tine piano
+  # to these keys on the Listening Bench); before, the keys were :fm.
+  # +level+ is the same for both (the tine is trimmed to the FM keys'
+  # loudness on the jungle template's stabs: -24.8 vs -24.3 LUFS).
+  def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22, piano: :tine)
+    if piano == :tine
+      tine = tine_piano_voice(midi, bark: bark / 0.22, tremolo: 0.22, rate: tremolo)
+      return tine.reverb(:hall, mix: hall) * (level * JUNGLE_KEYS_TINE_TRIM)
+    end
+    raise ArgumentError, "Unknown jungle keys piano #{piano.inspect} (:tine or :fm)" unless piano == :fm
+
     keys = synth(midi, voices: 8) { |v|
       p = v.hz
       index = v.env(0.001, 0.5, 0.15, 0.3, gm: false)
@@ -226,6 +240,10 @@ module MB::Sound
     }
     (lead * level).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).reverb(:hall, mix: 0.25)
   end
+
+  # The tine piano's trim in .jungle_keys_voice (+10.1 dB), so +level+
+  # means about the same loudness as the FM keys'.
+  JUNGLE_KEYS_TINE_TRIM = 3.2
 
   # The script's patches by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
