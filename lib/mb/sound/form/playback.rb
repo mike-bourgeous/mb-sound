@@ -369,7 +369,7 @@ module MB
         end
 
         def schedule(time, what, &block)
-          @session.schedule(time, description: "form: #{what}", &block)
+          @session.schedule(time, description: "form: #{what}", owner: :form, &block)
         end
 
         # The length in whole notes of a section length (a Duration, or bars

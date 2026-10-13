@@ -382,7 +382,7 @@ module MB
       alias frequency freq
 
       # The period of #freq in seconds (a node: 1 / freq), e.g. the delay
-      # of a Karplus-Strong string (`y.delay(v.period, smoothing: false)`;
+      # of a Karplus-Strong string (`y.delay(v.period, smooth: false)`;
       # see GraphNode#feedback and bin/synths/pluck.rb).
       def period
         memo(:period) { 1 / freq }

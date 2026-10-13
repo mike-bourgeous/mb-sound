@@ -75,6 +75,12 @@ RSpec.describe('Tone null-test reference') do
     # 2026-10-10: noise tones keep a running phase wrapped every sample, so
     # the output no longer depends on block sizes (last-bit differences;
     # RMS and peak equal to 9 digits)
+    # 2026-10-13: naive jumps landing exactly on a sample (3520 Hz is 11/150
+    # cycles per sample) snap onto the jump (the value after it), so they
+    # land on the same sample at any block size; 1-2 samples each
+    'aramp_3520' => 'naive edges on samples snap to the jump (sample 1125)',
+    'asquare_3520' => 'naive edges on samples snap to the jump (samples 1050, 1125)',
+    'gauss_3520' => 'naive edges on samples snap to the jump (sample 1125)',
     'noise_root_seed' => 'noise: block-size independent phase (last bits)',
     'noise_seeded_blend' => 'noise: block-size independent phase (last bits)',
     # 2026-10-10: phase modulation is in cycles (kernels add it to the phase

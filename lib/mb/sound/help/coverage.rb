@@ -20,20 +20,9 @@ module MB
 
         # Single console methods that are plumbing, with the reason.
         EXEMPT = {
-          any_sound_to_array: 'IOMethods internal conversion',
-          any_sound_to_hash: 'IOMethods internal conversion',
-          convert_sound_to_narray: 'IOMethods internal conversion',
-          is_numeric_array?: 'IOMethods internal check',
-          detect_input: 'chooses the default input type (INPUT_TYPE)',
-          detect_output: 'chooses the default output type (OUTPUT_TYPE)',
           plotter: 'the shared plotter object behind plot',
-          close_plotter: 'plot internals',
-          reset_plotter: 'plot internals',
-          default_seed: 'RandomMethods internal (seed is the console command)',
-          root_rng: 'RandomMethods internal',
           keeping_random_state: 'library code that must not move the random state',
           live_midi_latency: 'the latency live MIDI input adds (read by MIDI sources)',
-          forget: 'Session bookkeeping for stopped players',
           drawn_seed: 'a mark graph documents write around seeds (seed: drawn_seed(N)), read by their loader',
         }.freeze
 

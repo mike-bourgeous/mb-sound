@@ -5,50 +5,6 @@ module MB
     # (pure Ruby: terminal text, SVG, PNG, inline terminal images); no
     # gnuplot process is involved.
     module PlotMethods
-      # Sets up SIGWINCH (window-size change) handler when MB::Sound extends
-      # itself with this module.
-      def self.extended(within)
-        # Make sure that plotters are resized when the terminal window changes
-        # size.
-        old_handler = trap :WINCH do
-          Thread.new do
-            within.reset_plotter
-          end
-
-          old_handler.call if old_handler.respond_to?(:call)
-        end
-      end
-
-      # Called by the SIGWINCH signal handler to resize plots when the terminal
-      # window is resized.  Closes any existing plotters and recreates any that
-      # previously existed (necessary if SIGWINCH arrives in the middle of a
-      # function that is using a plotter through instance variables).
-      def reset_plotter
-        @pt ||= nil
-        @pg ||= nil
-        old_pt = @pt
-        old_pg = @pg
-
-        @plot_outputs ||= {}
-        @plot_outputs.clear
-
-        close_plotter
-
-        plotter(graphical: false) if old_pt
-        plotter(graphical: true) if old_pg
-      end
-
-      # Closes existing plotters without creating new ones.  Useful for
-      # cleaning up between tests.
-      def close_plotter
-        @pt ||= nil
-        @pg ||= nil
-        @pt&.close
-        @pg&.close
-        @pt = nil
-        @pg = nil
-      end
-
       # Returns a terminal text plotter (MB::Sound::Plot::Plotter, sized to
       # 80% of the terminal's height) if +graphical+ is false, or an image
       # plotter (inline terminal images where supported, else text) if
@@ -60,9 +16,7 @@ module MB
       # used by the CLI DSL (methods that build charts call #draw when the
       # plotter has it).
       def plotter(graphical: false, **kwargs)
-        @pt ||= Plot::Plotter.terminal(height_fraction: 0.8, **(graphical ? {} : kwargs))
-        @pg ||= Plot::Plotter.graphical(**kwargs) if graphical
-        graphical ? @pg : @pt
+        Internal.plotter(graphical: graphical, **kwargs)
       end
 
       # Builds a chart from a block (see MB::Sound::Plot.chart and
@@ -93,7 +47,7 @@ module MB
           case sound
           when String then read(sound)
           when Tone, Pitch, GraphNode then sound.sample((seconds * sample_rate).round)
-          else any_sound_to_array(sound)
+          else Internal.any_sound_to_array(sound)
           end
         data = data.map { |c| c.respond_to?(:imag) ? c.real : c } if data.is_a?(Array)
         title ||= sound.is_a?(String) ? File.basename(sound) : 'spectrogram'
@@ -113,7 +67,7 @@ module MB
       # default; DC left out) at the filter's sample rate, else
       # +sample_rate+.
       def time_freq(data, graphical: false, time_samples: 800, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true, columns: nil, sample_rate: 48000)
-        data = any_sound_to_hash(data)
+        data = Internal.any_sound_to_hash(data)
 
         time = data.map { |label, c|
           c = c.is_a?(Filter) ? c.impulse_response(time_samples) : c
@@ -174,7 +128,7 @@ module MB
       # default; DC left out) at the filter's sample rate, else
       # +sample_rate+.
       def mag_phase(data, graphical: false, freq_samples: 2000, freq_yrange: nil, logarithmic: true, sample_rate: 48000)
-        data = any_sound_to_hash(data)
+        data = Internal.any_sound_to_hash(data)
 
         axes = {}
         freq = data.map { |k, c|
@@ -227,7 +181,7 @@ module MB
       #     arcsine = ->(x) { x.abs < 1 ? 1 / (Math::PI * Math.sqrt(1 - x * x)) : 0 }
       #     MB::Sound.hist(1.hz.sine.noise.sample(100000), bins: 100, pdf: arcsine)
       def hist(data, bins: 800, log: false, graphical: false, range: nil, density: false, pdf: nil)
-        data = any_sound_to_hash(data)
+        data = Internal.any_sound_to_hash(data)
 
         dmax = data.values.map { |d| d.abs.max }.max
 
@@ -415,7 +369,7 @@ module MB
             data = file_tone_data
           end
 
-          data = any_sound_to_array(data)
+          data = Internal.any_sound_to_array(data)
 
         when String
           # TODO: Read speaker names
@@ -527,11 +481,10 @@ module MB
       ensure
         if all == true
           if graphical
-            @pg.close
-            @pg = nil
+            Internal.close_plotter(text: false)
 
-          elsif @pt.respond_to?(:height)
-            puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
+          elsif (pt = Internal.text_plotter).respond_to?(:height)
+            puts "\e[#{pt.height + (header_lines || 2) + 2}H"
           end
         end
       end
@@ -579,7 +532,7 @@ module MB
       #      1.0       | 0.0       | 1.5708
       def table(data, range: -1..1, steps: 21)
         # Gradually coerce any incoming data type into a Hash of callable or NArray
-        data = Numo::NArray.cast(data) if is_numeric_array?(data)
+        data = Numo::NArray.cast(data) if Internal.is_numeric_array?(data)
         data = [data] unless data.is_a?(Array) || data.is_a?(Hash)
         data = data.map.with_index { |v, idx| [table_key(v, idx), v] }.to_h if data.is_a?(Array)
 
@@ -641,7 +594,7 @@ module MB
             data[idx]
           }
         elsif try_convert
-          evaluate(convert_sound_to_narray(data), range: range, steps: steps, try_convert: false)
+          evaluate(Internal.convert_sound_to_narray(data), range: range, steps: steps, try_convert: false)
         else
           raise "Don't know how to evaluate #{data.class} data"
         end

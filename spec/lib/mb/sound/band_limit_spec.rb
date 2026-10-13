@@ -269,12 +269,12 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
 
     it 'has DSL shortcuts' do
-      expect(100.hz.pulse(0.3).width).to eq(0.3)
+      expect(100.hz.pulse(0.3).pwm_width).to eq(0.3)
       expect(100.hz.pulse(0.3).wave_type).to eq(:square)
       expect(100.hz.apulse(0.3).band_limited?).to eq(false)
-      expect(100.hz.triangle.skew(0.2).width).to eq(0.2)
-      expect(100.hz.skew(0.2).width).to eq(0.2)
-      expect(100.hz.pwm(0.2).square.width).to eq(0.2)
+      expect(100.hz.triangle.skew(0.2).pwm_width).to eq(0.2)
+      expect(100.hz.skew(0.2).pwm_width).to eq(0.2)
+      expect(100.hz.pwm(0.2).square.pwm_width).to eq(0.2)
       expect(100.hz.pulse(0.3).to_s).to include('pwm=0.3')
     end
 

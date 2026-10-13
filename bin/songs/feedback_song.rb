@@ -30,9 +30,9 @@
 #     # A Karplus-Strong string excited by a kick drum, tuned by a clip (the kick goes into the
 #     # delay line only, so it is heard through the string; add input to the result for a dry kick)
 #     bass = seq(E2, G2, D2, A1).n4.loop
-#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |fb, input| d = (fb + input * 0.3).delay(bass.period, smoothing: false); (d + d.delay(1.samples)) * 0.496 }
+#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |fb, input| d = (fb + input * 0.3).delay(bass.period, smooth: false); (d + d.delay(1.samples)) * 0.496 }
 #     # Feedback through a moving delay: a flanger (try --feedback near -1 in bin/effects/flanger.rb)
-#     bg :flange, 110.hz.saw.at(0.2).feedback { |fb, input| (input + fb.delay(0.1.hz.lfo.at(0.0005..0.005), smoothing: false) * -0.85).softclip(0.8, 1) }
+#     bg :flange, 110.hz.saw.at(0.2).feedback { |fb, input| (input + fb.delay(0.1.hz.lfo.at(0.0005..0.005), smooth: false) * -0.85).softclip(0.8, 1) }
 #     # What a loop costs and does
 #     l = noise.at(0.1).delay(0.3, feedback: 0.6) { |fb| fb.filter(3000.hz.lowpass).softclip }
 #     puts l.explain    # the loop program
@@ -72,7 +72,7 @@ module MB::Sound
     chords = seq(A2, F2, C3, G2).n1.loop
     pad = chords.synth(voices: 2) { |v| (v.hz.saw + v.hz.transpose(7.01).saw) * v.amp_env(0.6, 1, 0.8, 1.5) * 0.12 }
     flanged = pad.feedback { |fb, input|
-      (input + fb.delay(0.07.hz.lfo.at(0.0008..0.006), smoothing: false) * -0.8).softclip(0.6, 0.95)
+      (input + fb.delay(0.07.hz.lfo.at(0.0008..0.006), smooth: false) * -0.8).softclip(0.6, 0.95)
     }
 
     # Drums ringing through a comb tuned to the bass line: the loop's delay
@@ -84,7 +84,7 @@ module MB::Sound
       hat:   'x.x.x.x.x.xxx.x.',
     ).loop, kick: { tune: 48 })
     drum_string = kit.feedback { |fb, input|
-      d = fb.delay(bass.period, smoothing: false)
+      d = fb.delay(bass.period, smooth: false)
       input * 0.6 + (d + d.delay(1.samples)) * 0.49
     } * 0.3
 

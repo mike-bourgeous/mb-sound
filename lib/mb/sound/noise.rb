@@ -3,12 +3,12 @@ module MB
     # Methods for generating noise with different spectral characteristics.
     module Noise
       # Spectral noise draws its phases from the root generator
-      # (MB::Sound.root_rng, see RandomMethods), so it follows `seed`,
+      # (MB::Sound::Internal.root_rng, see RandomMethods), so it follows `seed`,
       # RANDOM_SEED, and MB::Sound.with_seed like other randomness, and
       # repeats from run to run (user decision 2026-10-10; it used to keep
       # its own generator, seeded at load time, so forks of a loaded process
       # couldn't change it).
-      def self.rng = MB::Sound.root_rng
+      def self.rng = MB::Sound::Internal.root_rng
 
       # Returns the given number of (positive plus zero) bins of frequency
       # domain white noise.  For example, to generate 4800 time domain samples,

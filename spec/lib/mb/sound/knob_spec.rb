@@ -274,7 +274,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       MB::Sound::Plan.check = :raise
       begin
         k = session.knob(:rel, 0.05, range: 0.001..0.5)
-        g = (110.hz.ramp * 0.9).compress(threshold: -20, release: k) * 0.5
+        g = (110.hz.ramp * 0.9).compress(threshold: -20.db, release: k) * 0.5
         expect(MB::Sound::Plan.explain(g)).to match(/1 planned region.*param 0: GraphNode::Knob::Reader.*dynamics\(/m)
         session.add(g, name: :x, on: :now)
         session.turn(:rel, 0.2, over: 1.beat)

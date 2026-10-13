@@ -116,9 +116,6 @@ module MB
         # The formant shift in semitones (a Float or a node).
         attr_reader :shift
 
-        # The bandwidth scale (a Float or a node).
-        attr_reader :width
-
         # Whether vowels are level-normalized (see the class description).
         attr_reader :normalize
 

@@ -69,7 +69,7 @@ param :drive, 1.0, description: "Input gain into the tape"
 
 input2 = input[0].resample(mode: :libsamplerate_fastest).named("input")
 ...
-[(dry * input2 + wet * (input2 * drive).delay(0.1, feedback: 0.75, smoothing: 2.0) { |fb| ... }, ...].channels
+[(dry * input2 + wet * (input2 * drive).delay(0.1, feedback: 0.75, smooth: 2.0) { |fb| ... }, ...].channels
 ```
 
 - Header: `graph N, **meta` first (N is `GraphIO::FORMAT`, 2 since omnibus7, 2026-10-13: format 2 marks drawn seeds, below; newer versions refuse to load; meta is informational: name, kind, saved, mb_sound version and commit, from, and `options:`, the script parameters baked into the graph), then `inputs :a, :b`, one `param :name, value, range:, description:, cc:, curve:, unit:` per param (ControlSpec-shaped), and one `knob :name, value, range:, curve:, unit:, cc:, takeover:, smooth:, description:` per `GraphNode::Knob` in the graph (omnibus4, 2026-10-11: the console's `knob` syntax; loads as one Knob per line, read by every use, overridable like a param, `Document#knob?`, `Document#set` turns it at the knob's next frame with its declick glide; knobs join a Session when it plays the graph or the console's `preset` loads it (omnibus6; see arrangement.md, Knobs, graph-io); a moving knob saves its last rendered value after a `# :cut was ramping to 3000 when saved; ...` comment; two different knobs with one name, or a knob named like a param or input, raise DumpError).  Headerless text (plain `to_ruby` output) loads too, with inputs from its `# inputs:` comment.

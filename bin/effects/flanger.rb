@@ -83,7 +83,7 @@ MB::Sound.effect_script(
     lfo_mod = (lfo * lfo_scale + lfo_base).aclip(0, nil)
 
     # The input through the swept delay
-    inp_delayed = inp.delay(lfo_mod.samples, smoothing: delay_smoothing)
+    inp_delayed = inp.delay(lfo_mod.samples, smooth: delay_smoothing)
 
     # The flanged signal feeds back through the same sweep, one sample at a
     # time (GraphNode#feedback), so the loop's period is exactly the swept
@@ -91,7 +91,7 @@ MB::Sound.effect_script(
     # half sample).  Until 2026-10-09 this ran in internal blocks with a
     # spy, the feedback delay shortened by a block.
     wet = inp.feedback { |fb, _|
-      (p.feedback * fb.delay(lfo_mod.samples, smoothing: delay_smoothing2) - inp_delayed).softclip(0.85, 0.95)
+      (p.feedback * fb.delay(lfo_mod.samples, smooth: delay_smoothing2) - inp_delayed).softclip(0.85, 0.95)
     }.named('flanger loop')
 
     (inp * dryconst + wet * wetconst)

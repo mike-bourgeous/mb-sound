@@ -32,10 +32,10 @@ module MB
           attr_reader :ceiling, :lookahead, :release, :true_peak, :link
 
           # Creates a limiter for +inputs+ (a node or bundle, or an Array of
-          # them).  +ceiling+ is linear (e.g. -1.db) or dB (numbers 0 and
-          # below); +lookahead+ and +release+ are lengths (seconds by
+          # them).  +ceiling+ is a level (e.g. -1.db; see
+          # DynamicsMethods for bare numbers); +lookahead+ and +release+ are lengths (seconds by
           # default).
-          def initialize(inputs, ceiling: -1, lookahead: 0.0015, release: 0.1, true_peak: true, link: true)
+          def initialize(inputs, ceiling: -1.db, lookahead: 0.0015, release: 0.1, true_peak: true, link: true)
             inputs = Array(inputs).flat_map { |n| GraphNode.dynamics_channels(n, 'Limiter inputs') }
             raise ArgumentError, 'A limiter needs at least one channel' if inputs.empty?
 

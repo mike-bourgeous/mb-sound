@@ -440,7 +440,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         220.hz.saw * env + 330.hz.saw * env2 + dive * 0.1
       }
       expect(code).to include('.legato.retrigger(:add).curve(:snappy).shape(release: :s)')
-      expect(code).to include('.sensitivity(-12.db..1.0, scale: :db).set_time(:attack, 0.02).set_level(:decay, 0.3)')
+      expect(code).to include('.sensitivity(-12.db..0.db, scale: :db).set_time(:attack, 0.02).set_level(:decay, 0.3)')
       expect(code).to include('.hold_last.no_velocity')
 
       code = round_trip(inputs: -> { { midi: MB::Sound::Notes.new(midi_path) } }) { |i|

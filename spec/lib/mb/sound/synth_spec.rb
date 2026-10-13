@@ -126,14 +126,15 @@ RSpec.describe(MB::Sound::Synth) do
         v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
       }
       quiet_at = skipped_at = nil
-      data = 300.times.map { |i|
-        b = s.sample(480).dup
+      # 800-sample buffers, the idle skipping grid (Synth::SKIP_GRID)
+      data = 180.times.map { |i|
+        b = s.sample(800).dup
         quiet_at ||= i if s.quiet_lanes == [0]
         skipped_at ||= i if s.skipped_lanes == [0]
         b
       }.reduce(:concatenate)
 
-      buf_peak = ->(i) { data[(i * 480)...((i + 1) * 480)].abs.max }
+      buf_peak = ->(i) { data[(i * 800)...((i + 1) * 800)].abs.max }
       expect(buf_peak.(quiet_at)).to be <= -90.db
       expect(buf_peak.(quiet_at - 1)).to be > -90.db
       expect(buf_peak.(skipped_at)).to be <= -120.db
@@ -706,8 +707,12 @@ RSpec.describe(MB::Sound::Synth) do
       out1, skipped = run(s1, 80)
       out2, _ = run(s2, 80)
 
-      expect(skipped[0]).to eq([1, 2]) # unused lanes from the first buffer
-      expect(skipped[20]).to include(0) # after the first note's release
+      expect(skipped[0]).to eq([]) # lanes fall asleep on the 800-sample grid
+      expect(skipped[1]).to eq([1, 2]) # unused lanes from sample 800
+      # After the first note's release (woken at 0.2 s by the glide
+      # position event every lane gets, asleep again at the next grid point)
+      expect(skipped[19]).to include(0)
+      expect(skipped[21]).to include(0)
       expect(skipped.flatten.uniq.sort).to eq([0, 1, 2])
       expect(out1.abs.max).to be > 0.3
       expect(out1.to_a).to eq(out2.to_a)

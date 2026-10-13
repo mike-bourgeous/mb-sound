@@ -602,15 +602,15 @@ module MB
       # Times in seconds (lengths converted at the current tempo), or nil for
       # times from graph nodes.
       def attack_time
-        seconds(@times[@names[0]])
+        segment_seconds(@times[@names[0]])
       end
 
       def decay_time
-        seconds(@times[@names[1]])
+        segment_seconds(@times[@names[1]])
       end
 
       def release_time
-        seconds(@times[@names[@release_node]])
+        segment_seconds(@times[@names[@release_node]])
       end
 
       # The time of segment +name+ (a name or index) as given.
@@ -1649,12 +1649,12 @@ module MB
 
       # A time in seconds for defaults (0 for graph nodes).
       def fixed_seconds(source)
-        seconds(source) || 0.0
+        segment_seconds(source) || 0.0
       end
 
       # A length source in seconds (Durations at the current tempo), or nil
       # if it comes from a graph node.
-      def seconds(source)
+      def segment_seconds(source)
         return nil if source.node? && source.tempo_node.nil?
         Length.seconds(source.length, sample_rate: @sample_rate).to_f
       end

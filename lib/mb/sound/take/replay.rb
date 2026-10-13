@@ -93,7 +93,7 @@ module MB
           session.master_gain = @start[:master_gain]
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
-          MB::Sound.instance_variable_set(:@root_rng, Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
+          MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding
           @base_epoch = session.epoch
@@ -103,7 +103,7 @@ module MB
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
-            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, exact: true) do
+            session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do
               run_line(session, binding, l, i)
             end
           end
@@ -239,7 +239,7 @@ module MB
         # typed further along the timeline, so the replay went quiet where
         # the performance didn't).  Returns true.
         def ended_short(session, finish)
-          left = session.scheduled.count { |_, d| d.start_with?('take line ') }
+          left = session.scheduled.count { |h| h.owner == :take }
           if left > 0
             warn "The take's replay went quiet at #{stamp(session, session.transport.position)} with #{left} take line#{left == 1 ? '' : 's'} left to run (the take ends at #{stamp(session, finish)})"
           end

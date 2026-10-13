@@ -324,6 +324,9 @@ module MB
                 p.stop_at = time
                 p.fade_out = declick
               end
+            elsif state.stopped && !@stopped.key?(name)
+              # Undo of #forget: resumable again
+              @stopped[name] = state.stopped
             end
           }
 

@@ -467,7 +467,7 @@ module MB
       class << self
         # The node behind +handle+ (climbing Tee branches).
         def origin(handle)
-          handle = handle.tee.sources[:input] while handle.is_a?(GraphNode::Tee::Branch)
+          handle = handle.owner_tee.sources[:input] while handle.is_a?(GraphNode::Tee::Branch)
           handle
         end
 

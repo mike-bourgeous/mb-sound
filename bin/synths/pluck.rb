@@ -64,21 +64,21 @@
 # (adding the burst to the output instead plays it raw, far above the ring;
 # and_then keeps the input going after the burst so the loop rings on):
 #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 220.hz.period)).and_then(0.constant)
-#     play exc.feedback { |fb, input| d = (fb + input).delay(220.hz.period, smoothing: false); (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback { |fb, input| d = (fb + input).delay(220.hz.period, smooth: false); (d + d.delay(1.samples)) * 0.498 }
 #     # The same string, out of tune without latency compensation (about 4 cents flat at 220 Hz)
-#     play exc.feedback(compensate: false) { |fb, input| d = (fb + input).delay(220.hz.period, smoothing: false); (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback(compensate: false) { |fb, input| d = (fb + input).delay(220.hz.period, smooth: false); (d + d.delay(1.samples)) * 0.498 }
 #     # A loop lowpass at 2x the pitch: in tune at the played pitch (the
 #     # default), about 10 cents flat with compensate: :dc
 #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 440.hz.period)).and_then(0.constant)
-#     play exc.feedback { |fb, input| d = (fb + input).delay(440.hz.period, smoothing: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
-#     play exc.feedback(compensate: :dc) { |fb, input| d = (fb + input).delay(440.hz.period, smoothing: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     play exc.feedback { |fb, input| d = (fb + input).delay(440.hz.period, smooth: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     play exc.feedback(compensate: :dc) { |fb, input| d = (fb + input).delay(440.hz.period, smooth: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
 #     # sustain (the default) keeps the ring time while the lowpass darkens it: without it the
 #     # fundamental's T60 falls from 4.7 s to 0.47 s (sweep the cutoff with a slow LFO to compare)
-#     play exc.feedback(sustain: false) { |fb, input| d = (fb + input).delay(440.hz.period, smoothing: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
-#     play exc.feedback { |fb, input| d = (fb + input).delay(440.hz.period, smoothing: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
+#     play exc.feedback(sustain: false) { |fb, input| d = (fb + input).delay(440.hz.period, smooth: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
+#     play exc.feedback { |fb, input| d = (fb + input).delay(440.hz.period, smooth: false); ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
 #     # A delay time that moves: the string bends (try a slow LFO)
 #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 220.hz.period)).and_then(0.constant)
-#     play exc.feedback { |fb, input| d = (fb + input).delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smoothing: false); (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback { |fb, input| d = (fb + input).delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smooth: false); (d + d.delay(1.samples)) * 0.498 }
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -308,7 +308,7 @@ module MB::Sound
     string = clean.feedback { |fb, input|
       line = fb + input
       line += bright_string if bright_string
-      d = line.delay(period, smoothing: false, max_delay: MAX_PLUCK_PERIOD)
+      d = line.delay(period, smooth: false, max_delay: MAX_PLUCK_PERIOD)
       s = (d + d.delay(1.samples)) * (gain * 0.5)
       s = s.filter(:lowpass, cutoff: cutoff, quality: 0.5**0.5) if damping > 0
       s = (s * (1 + stretch)).softclip(0.3, 1) * (1.0 / (1 + stretch)) if stretch > 0
@@ -393,8 +393,8 @@ module MB::Sound
   # note that starts with no note held, +hammer_level+ for a legato note
   # above the last one, +pull_level+ for one below (or the same).
   def self.pluck_hammer_picks(v, hammer_level:, pull_level:)
-    held = v.gate.delay(1.samples, smoothing: false)
-    step = v.number - v.number.delay(1.samples, smoothing: false)
+    held = v.gate.delay(1.samples, smooth: false)
+    step = v.number - v.number.delay(1.samples, smooth: false)
     up = step.aclip(0, 1)
     trigger = ((v.trigger + step * step) * 1e6).aclip(0, 1)
     legato_level = up * (hammer_level - pull_level) + pull_level

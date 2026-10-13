@@ -178,6 +178,20 @@ module MB
             (!@log.empty? && @log.first.time < to) || source.pending_before?(to)
           end
 
+          # The stream time of the lane's first event from stream time
+          # +from+ (its readers' cursor) up to before +to+, or nil (unlike
+          # #pending_before?, events before +from+ that the stream hasn't
+          # dropped yet don't count, so the answer doesn't depend on block
+          # sizes).  Used by Synth to wake a skipped lane on the exact
+          # sample of its event.
+          def first_pending_time(from, to)
+            @allocator.advance(to)
+            i = @log.bsearch_index { |e| e.time >= from }
+            log = i && @log[i].time < to ? @log[i].time : nil
+            queued = source.first_pending_time(from, to)
+            log && queued ? [log, queued].min : log || queued
+          end
+
           # The result of the idle check, or nil if there isn't one.
           def idle?
             @idle_check ? !!@idle_check.call : nil
@@ -236,6 +250,14 @@ module MB
           # (see Lane#pending_before?).
           def pending_before?(to)
             !@queue.empty? && @queue.first.time < to
+          end
+
+          # The time of the first event queued for the lane from stream
+          # time +from+ up to before +to+, or nil (see
+          # Lane#first_pending_time).
+          def first_pending_time(from, to)
+            i = @queue.bsearch_index { |e| e.time >= from }
+            i && @queue[i].time < to ? @queue[i].time : nil
           end
 
           # Used by Allocator to send an event to this lane (in time order).

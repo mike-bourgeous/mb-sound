@@ -538,6 +538,20 @@ module MB
             name
           end
 
+          # A dynamics level given as a bare dB number (0 and below) as the
+          # Decibels it means, so it prints as `-20.db` (same value; see
+          # DynamicsMethods.check_level).
+          def dynamics_level(name, key, v)
+            return v unless DynamicsMethods::LEVEL_KEYWORDS.include?(key) && DynamicsMethods::LEVEL_METHODS.include?(name)
+            return v unless v.is_a?(Numeric) && !v.is_a?(MB::Sound::Decibels) && v.real? && v.finite? && v <= 0
+
+            MB::Sound::Decibels.new(v)
+          end
+
+          # Calls whose delay keywords print in their current spelling (see
+          # #call_text).
+          DELAY_CALLS = [:delay, :feedback_delay, :multitap, :multitap_delay].freeze
+
           # receiver.name(args) { block } for call +c+.
           def call_text(recv, c, indent)
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
@@ -545,6 +559,12 @@ module MB
             end
             args = c.args.map { |a| value(a, indent) }
             kwargs = c.kwargs.dup
+            if DELAY_CALLS.include?(c.name)
+              # Current spellings: delay(t), not the deprecated
+              # delay(seconds: t); smooth:, not smoothing:
+              args = [value(kwargs.delete(:seconds), indent)] if kwargs.key?(:seconds) && args.empty?
+              kwargs = kwargs.to_h { |k, v| [k == :smoothing && !kwargs.key?(:smooth) ? :smooth : k, v] }
+            end
             seed = drawn_seed(c)
             kwargs[:seed] = seed if seed
             args += kwargs.map { |k, v|
@@ -553,7 +573,7 @@ module MB
                 # redraw them and keep the ones the code gave
                 "seed: drawn_seed(#{seed})"
               elsif k.is_a?(Symbol)
-                "#{key_text(k)} #{value(v, indent)}"
+                "#{key_text(k)} #{value(dynamics_level(c.name, k, v), indent)}"
               else
                 "#{value(k, indent)} => #{value(v, indent)}"
               end
@@ -808,7 +828,7 @@ module MB
 
           def leaf(v, indent)
             case v
-            when Integer, Float, Rational, Complex then num(v)
+            when Integer, Float, Rational, Complex, MB::Sound::Decibels then num(v)
             when nil, true, false, Symbol then v.inspect
             when String
               # A file name, in a bundle: the asset's name
@@ -1101,7 +1121,8 @@ module MB
             fixme("a Wavetable#{" (#{name})" if name} that isn't a library table (bundles save it as a file: GraphIO.save(..., bundle: true))")
           end
 
-          # A number, with gains that are exactly k/10 dB printed as k.db.
+          # A number: Decibels as k.db, and Float gains that are exactly k/10
+          # dB as k.db too.
           def num(n)
             case n
             when Integer then n.to_s
@@ -1117,6 +1138,9 @@ module MB
               end
             when Rational
               n.denominator == 1 ? "#{n.numerator}r" : "#{n.numerator}r/#{n.denominator}"
+            when MB::Sound::Decibels
+              d = num(n.decibels)
+              d.include?('/') || d.include?('::') ? "(#{d}).db" : "#{d}.db"
             when Complex
               "Complex(#{num(n.real)}, #{num(n.imaginary)})"
             else n.inspect
