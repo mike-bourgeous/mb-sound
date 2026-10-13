@@ -314,6 +314,25 @@ static inline double complex cot_int(double complex z)
 	return -M_2_PI * clog(cexp(I * z) + I) + I;
 }
 
+// A wrapped phase (radians) within OSC_EDGE_EPS (1e-9 cycles, like
+// BL_EPS) of a naive shape's jump lands on it, taking the value after the
+// jump: the phase accumulates with different rounding at different block
+// sizes, so an edge falling exactly on a sample (e.g. 800 Hz at 48 kHz, a
+// 60-sample period) would otherwise land on either side by block size.
+// +wrap_too+ also snaps phases just below 2pi to 0 (the square's second
+// jump).  Mirrored by MB::Sound::Tone.snap_edges_ruby.
+#define OSC_EDGE_EPS (1e-9 * 2.0 * M_PI)
+static inline double osc_snap_edge(double phi, _Bool wrap_too)
+{
+	if (fabs(phi - M_PI) < OSC_EDGE_EPS) {
+		return M_PI;
+	}
+	if (wrap_too && phi > 2.0 * M_PI - OSC_EDGE_EPS) {
+		return 0.0;
+	}
+	return phi;
+}
+
 static inline double complex osc_sample(enum wave_types wave_type, complex double phi)
 {
 	double x;
@@ -347,7 +366,7 @@ static inline double complex osc_sample(enum wave_types wave_type, complex doubl
 
 		case OSC_SQUARE:
 			// TODO: Normalize for RMS instead of peak?
-			phi = mb_wrap(creal(phi), 2*M_PI);
+			phi = osc_snap_edge(mb_wrap(creal(phi), 2*M_PI), 1);
 			if (creal(phi) < M_PI) {
 				return 1.0;
 			} else {
@@ -370,7 +389,7 @@ static inline double complex osc_sample(enum wave_types wave_type, complex doubl
 			return z;
 
 		case OSC_RAMP:
-			phi = mb_wrap(creal(phi), 2*M_PI);
+			phi = osc_snap_edge(mb_wrap(creal(phi), 2*M_PI), 0);
 			if (creal(phi) < M_PI) {
 				// Initial rise from 0..1 in 0..pi
 				return phi / M_PI;
@@ -392,7 +411,7 @@ static inline double complex osc_sample(enum wave_types wave_type, complex doubl
 			return z;
 
 		case OSC_GAUSS:
-			phi = mb_wrap(creal(phi), 2*M_PI);
+			phi = osc_snap_edge(mb_wrap(creal(phi), 2*M_PI), 0);
 			x = creal(phi) / M_PI;
 			if (x < 1.0) {
 				x = (sqrt(2.0 * log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;

@@ -13,12 +13,17 @@ module MB
       #
       # Idle skipping (+skip_idle: true+, the default): after SLEEP_TIME of
       # output within -120 dB, the voice stops sampling its graph (giving
-      # zeros) until its next hit, like Synth's idle lanes.  Not
-      # sample-exact: free-running oscillators (the 808's metal bank) and
-      # noise pause while skipped, which only changes their phase.  Graphs
-      # with delays, reverbs, FIR filters, or tempo nodes are never skipped
-      # (see Synth.long_memory?); nodes shared with other voices (e.g. a
-      # kit's metal bank) are still read while skipped.
+      # zeros) until its next hit, like Synth's idle lanes.  Not exactly
+      # the same as rendering every sample (free-running oscillators and
+      # noise pause while skipped, which only changes their phase), but the
+      # same at any buffer size: the voice falls asleep only on its own
+      # grid of Synth::SKIP_GRID samples (after SLEEP_TIME rounded up to
+      # whole grid cells of silence), splitting a buffer there if needed,
+      # and wakes on the exact sample of the hit (2026-10-13; before, both
+      # moved with the buffer edges).  Graphs with delays, reverbs, FIR
+      # filters, or tempo nodes are never skipped (see
+      # Synth.long_memory?); nodes shared with other voices (e.g. a kit's
+      # metal bank) are still read while skipped.
       class Voice
         include GraphNode
 
@@ -96,8 +101,12 @@ module MB
           @knobs = knobs.dup.freeze
           @sample_rate = sample_rate.to_f
           @quiet_samples = 0
-          @silent_samples = 0
+          @position = 0
+          @silent_cells = 0
+          @cell_loud = false
           @sleeping = false
+          @out = nil
+          @range = [0.0, 0.0]
           @ended = false
           @zeros = nil
           @node_type_name = "#{machine} #{name}"
@@ -119,29 +128,14 @@ module MB
             b
           }
 
-          if @sleeping
-            hit = bufs[0].abs.max > 0
-            unless hit
-              @boundary.each { |n| n.sample(count) }
-              return check_end(zeros(count))
-            end
-            @sleeping = false
-            @silent_samples = 0
-          end
-
-          buf = @graph.sample(count)
-          if buf.nil? || buf.empty?
-            @ended = true
-            return nil
-          end
-
           if @skippable
-            peak = buf.abs.max
-            if peak < SILENCE
-              @silent_samples += buf.length
-              @sleeping = true if @silent_samples >= SLEEP_TIME * @sample_rate
-            else
-              @silent_samples = 0
+            buf = sample_skipping(count, bufs)
+            return nil if buf.nil?
+          else
+            buf = @graph.sample(count)
+            if buf.nil? || buf.empty?
+              @ended = true
+              return nil
             end
           end
 
@@ -202,6 +196,117 @@ module MB
           end
 
           buf
+        end
+
+        # Samples the graph for +count+ samples while it may be skipped (see
+        # the class description), with +bufs+ the inputs' buffers: sleeping
+        # stretches give zeros, and the graph is read in pieces split where
+        # the voice may fall asleep (a grid point after enough silent cells)
+        # or wakes (a hit).  Returns nil if the graph ended.
+        def sample_skipping(count, bufs)
+          grid = MB::Sound::Synth::SKIP_GRID
+          need = (SLEEP_TIME * @sample_rate / grid).ceil
+          pos = @position
+          whole = nil
+          o = 0
+
+          while o < count
+            if @sleeping
+              hit = first_hit(bufs[0], o)
+              stop = hit || count
+              if stop > o
+                @boundary.each { |n| n.sample(stop - o) }
+                if o == 0 && hit.nil?
+                  whole = zeros(count)
+                else
+                  out_buf(count)[o...stop] = 0
+                end
+              end
+              o = stop
+              next if hit.nil?
+
+              @sleeping = false
+              @silent_cells = 0
+              @cell_loud = false
+            end
+
+            # The earliest grid point where the voice could fall asleep
+            # (cells not yet rendered might be silent)
+            stop = count
+            cells = @cell_loud ? -1 : @silent_cells
+            g = ((pos + o) / grid + 1) * grid - pos
+            while g <= count
+              cells += 1
+              if cells >= need
+                stop = g
+                break
+              end
+              g += grid
+            end
+
+            if o == 0 && stop == count
+              b = @graph.sample(count)
+            else
+              @inputs.each_with_index { |(_, tap), i| tap.buffer = bufs[i][o...stop] }
+              b = @graph.sample(stop - o)
+            end
+            if b.nil? || b.empty?
+              @ended = true
+              return nil
+            end
+            raise "#{@node_type_name} gave #{b.length} samples, not #{stop - o}" if b.length != stop - o
+
+            track_cells(b, pos + o, grid, need)
+            if o == 0 && stop == count
+              whole = b
+            else
+              out_buf(count)[o...stop] = b
+            end
+            o = stop
+          end
+
+          @position += count
+          whole || @out
+        end
+
+        # The reused output buffer for buffers read in pieces.
+        def out_buf(count)
+          @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
+          @out
+        end
+
+        # Updates the silent cell count (see #sample_skipping) for graph
+        # output +b+ starting at voice sample +start+, falling asleep at a
+        # grid point that ends +need+ silent cells.
+        def track_cells(b, start, grid, need)
+          i = 0
+          while i < b.length
+            g = (start + i) / grid * grid + grid
+            stop = [g - start, b.length].min
+            @cell_loud ||= loud?(i == 0 && stop == b.length ? b : b[i...stop])
+            if start + stop == g
+              @silent_cells = @cell_loud ? 0 : @silent_cells + 1
+              @cell_loud = false
+              @sleeping = true if @silent_cells >= need
+            end
+            i = stop
+          end
+        end
+
+        # True if +b+ has a sample beyond SILENCE.
+        def loud?(b)
+          r = MB::Sound::FastArithmetic.min_max(b, @range)
+          r ? (r[1] > SILENCE || r[0] < -SILENCE) : b.abs.max > SILENCE
+        end
+
+        # The index of the first nonzero sample of +b+ at or after +from+, or
+        # nil.
+        def first_hit(b, from)
+          rest = from == 0 ? b : b[from..]
+          r = MB::Sound::FastArithmetic.min_max(rest, @range)
+          return nil if r ? (r[0] == 0 && r[1] == 0) : rest.abs.max == 0
+
+          rest.ne(0).where[0] + from
         end
 
         def zeros(count)

@@ -201,6 +201,30 @@ module MB
         radians_value_ruby(wave_type, Phase.cycles(phase) * TWOPI)
       end
 
+      # Naive shapes' jumps: a wrapped phase within this many radians (1e-9
+      # cycles) of a jump lands on it, taking the value after the jump, so
+      # an edge falling exactly on a sample lands on the same side at every
+      # block size (OSC_EDGE_EPS in mb_osc_shapes.h; see .snap_edge_ruby).
+      EDGE_EPS = 1e-9 * 2.0 * Math::PI
+
+      # Snaps wrapped phase +phi+ (radians, a Float or DFloat) onto a naive
+      # shape's jump at pi, and with +wrap_too+ phases just below 2pi to 0
+      # (Ruby mirror of osc_snap_edge in mb_osc_shapes.h).
+      def self.snap_edge_ruby(phi, wrap_too)
+        if phi.is_a?(Numo::NArray)
+          phi = phi.dup
+          phi[(phi - Math::PI).abs.lt(EDGE_EPS)] = Math::PI
+          phi[phi.gt(2.0 * Math::PI - EDGE_EPS)] = 0.0 if wrap_too
+          phi
+        elsif (phi - Math::PI).abs < EDGE_EPS
+          Math::PI
+        elsif wrap_too && phi > 2.0 * Math::PI - EDGE_EPS
+          0.0
+        else
+          phi
+        end
+      end
+
       # The formulas of .value_at_ruby, at +phi+ radians (the unit of the
       # shapes' math; FastSound.osc's osc_sample in C).
       def self.radians_value_ruby(wave_type, phi)
@@ -238,7 +262,7 @@ module MB
           s = MB::M.csc_int_int(phi + Math::PI / 2) * 1i / 2.46740110027234
 
         when :square
-          phi %= TWOPI
+          phi = snap_edge_ruby(phi % TWOPI, true)
 
           if phi < Math::PI
             s = 1.0
@@ -259,7 +283,7 @@ module MB
           s = Complex(s.real, 3.8) if s.imag > 3.8
 
         when :ramp
-          phi %= TWOPI
+          phi = snap_edge_ruby(phi % TWOPI, false)
 
           if phi < Math::PI
             # Initial rise from 0..1 in 0..pi
@@ -277,7 +301,7 @@ module MB
           s = Complex(s.real, 3.5) if s.imag > 3.5
 
         when :gauss
-          phi %= TWOPI
+          phi = snap_edge_ruby(phi % TWOPI, false)
 
           # Sideways Gaussian attempt 2
           # This has an approximately Gaussian distribution, but the crest
@@ -353,13 +377,13 @@ module MB
           s
 
         when :square
-          phi = wrap_radians(radians)
+          phi = snap_edge_ruby(wrap_radians(radians), true)
           s = Numo::DFloat.ones(phi.length)
           s[phi.ge(Math::PI)] = -1.0
           s
 
         when :ramp
-          phi = wrap_radians(radians)
+          phi = snap_edge_ruby(wrap_radians(radians), false)
           s = phi / Math::PI
           s[phi.ge(Math::PI)] -= 2.0
           s
@@ -372,7 +396,7 @@ module MB
           s
 
         when :gauss
-          x = wrap_radians(radians) / Math::PI
+          x = snap_edge_ruby(wrap_radians(radians), false) / Math::PI
           s = Numo::DFloat.zeros(x.length)
           lower = x.lt(1.0)
           upper = ~lower
