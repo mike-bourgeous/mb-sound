@@ -111,11 +111,12 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       deadline = MB::U.clock_now + seconds
       got.concat(inp.read(512)[0].to_a) while MB::U.clock_now < deadline
       writer.join
+      info = fa.jack_info.slice(:skipped_cycles, :repeated_cycles).merge(out_repeated: out.stats[:repeated], in_repeated: inp.stats[:repeated])
       # Closed before exiting: a synchronous server would wait for a dead
       # client until its timeout (5 s)
       [out, inp].each(&:close)
       fa.jack_close
-      wr.write(Marshal.dump(got))
+      wr.write(Marshal.dump([got, info]))
       wr.close
       exit!(0)
     end
@@ -128,7 +129,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     expect(fa.jack_ports("^#{name}:", false, 0).length).to eq(2)
 
     go = -> { go_wr.write('g'); go_wr.close }
-    recording = -> { Marshal.load(rd.read).tap { Process.wait(pid); rd.close } }
+    recording = -> { Marshal.load(rd.read).tap { Process.wait(pid); rd.close; @outside_info = _1[1] }[0] }
     [name, go, recording]
   end
 
@@ -211,8 +212,19 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       # Without the dedupe, the outside client lost a period of the ramp for
       # each repeated cycle, and this input recorded one twice (cycles this
       # client missed are gone, so frames may be lost here)
-      expect(ramp_errors(there)).to eq(lost: 0, dup: 0)
-      expect(ramp_errors(here)[:dup]).to eq(0)
+      # A cycle the outside client missed on its own (load can keep the
+      # forked process from running in time too) loses that period of its
+      # recording, and its output port keeps the period it wrote last,
+      # which this input records again (fixes-9: 3 of 8 runs under 32 busy
+      # loops, each with lost: 256 there, dup: 256 here, and the outside
+      # client counting one skipped cycle more than this one; passing runs
+      # counted the same)
+      info = fa.jack_info
+      extra = [@outside_info[:skipped_cycles] - info[:skipped_cycles], 0].max * info[:buffer_size]
+      there_errors = ramp_errors(there)
+      expect(there_errors[:dup]).to eq(0)
+      expect(there_errors[:lost]).to be <= extra
+      expect(ramp_errors(here)[:dup]).to be <= extra
     end
   end
 
