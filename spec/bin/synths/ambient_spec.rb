@@ -31,6 +31,19 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(band_share(seconds(d2, 2.5, 3.5), 2000, 8000)).to be > band_share(seconds(d2, 0, 0.5), 2000, 8000) * 3
   end
 
+  it 'rings the gong\'s shimmer at high partials with ring:' do
+    noisy = render_patch(MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0, ring: 0), 4)[0]
+    rung = render_patch(MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0), 4)[0]
+    # Tonal: the strongest 1% of the 2-6 kHz bins hold more of its power
+    peaky = ->(x) {
+      s = Numo::Pocketfft.rfft(Numo::DFloat.cast(seconds(x, 2.5, 3.5))).abs**2
+      band = s[2000..6000].sort
+      band[-(band.length / 100)..].sum / band.sum
+    }
+    expect(peaky.(rung)).to be > peaky.(noisy) * 3
+    expect(rms_db(seconds(rung, 2.5, 3.5))).to be_within(3).of(rms_db(seconds(noisy, 2.5, 3.5)))
+  end
+
   it 'wears the koto and harp with the tape' do
     notes = -> { patch_notes([MB::Sound::A4.number, 0, 0.5], [MB::Sound::D5.number, 0.5, 1]) }
     new = render_patch(MB::Sound.ambient_koto_voice(notes.(), wear: 0, space: 0), 2)[0]

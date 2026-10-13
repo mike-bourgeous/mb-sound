@@ -26,6 +26,15 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(band_share(seconds(sub, 0.2, 0.9), 300, 24000)).to be < 5e-3
   end
 
+  it 'adds the 2nd and 3rd harmonics to the sub with harmonics:, keeping its RMS' do
+    plain = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1])), 1)[0]
+    rich = render_patch(MB::Sound.dnb_sub_voice(patch_notes([f1, 0, 1]), harmonics: [0.4, 0.2]), 1)[0]
+    f = MB::Sound::F1.frequency
+    expect(band_share(seconds(rich, 0.2, 0.9), f * 1.5, f * 2.5)).to be_within(0.03).of(0.4**2 / 1.2)
+    expect(band_share(seconds(rich, 0.2, 0.9), f * 2.5, f * 3.5)).to be_within(0.02).of(0.2**2 / 1.2)
+    expect(rms_db(seconds(rich, 0.2, 0.9))).to be_within(0.5).of(rms_db(seconds(plain, 0.2, 0.9)))
+  end
+
   it 'crushes the neuro bass more with more grit' do
     clean = render_patch(MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), grit: 0), 1)[0]
     gritty = render_patch(MB::Sound.dnb_neuro_voice(patch_notes([f1, 0, 1]), grit: 1), 1)[0]
@@ -53,6 +62,18 @@ RSpec.describe('bin/synths/dnb.rb') do
     expect(peak_db(drums)).to be > -12
     expect(peak_hz(seconds(ghost, 0.05, 0.4), 30, 200)).to be_within(6).of(54)
     expect(peak_hz(seconds(drums, 0.05, 0.4), 30, 200)).to be_within(6).of(54)
+  end
+
+  it 'tightens and highpasses only the kick with tight:, leaving the snare alone' do
+    hits = -> { patch_notes([36, 0, 0.1, 1.0], [38, 0.5, 0.6, 1.0]) }
+    full = render_patch(MB::Sound.dnb_drums(hits.(), parallel: 0), 1)[0]
+    tight = render_patch(MB::Sound.dnb_drums(hits.(), parallel: 0, tight: true), 1)[0]
+    expect(band_share(seconds(tight, 0, 0.45), 0, 60)).to be < band_share(seconds(full, 0, 0.45), 0, 60) / 4
+    expect(peak_hz(seconds(tight, 0.01, 0.2), 30, 200)).to be_within(8).of(54 * 2**(5 / 12.0))
+    expect(rms_db(seconds(tight, 0.25, 0.45))).to be < rms_db(seconds(full, 0.25, 0.45)) - 20 # (a shorter decay)
+    snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0) }, 0.5)[0]
+    tight_snare = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(patch_notes([38, 0, 0.1, 1.0]), parallel: 0, tight: true) }, 0.5)[0]
+    expect((tight_snare - snare).abs.max).to be < 1e-6
   end
 
   it 'masters a mix to its true-peak ceiling' do

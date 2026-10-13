@@ -12,16 +12,17 @@
 #
 # Patches (-p):
 #   beat      mouth drums: a short, dry tr808 kit (kick, snare, hats; GM note
-#             map) half through a formant "mouth"
+#             map) half through a formant "mouth" (beatbox: true says each
+#             drum through its own narrow vowel)
 #   perc      shaker, rim, and congas (GM note map), highpassed
 #   bass      a round funk bass: a sine body plus a lowpassed saw opening
 #             with velocity; ghost notes are just thumps
 #   keys      an FM electric piano: a 1:1 body whose index falls, a 14:1
 #             tine bark for hard strikes, auto-pan tremolo
 #   clav      a clav-ish stab: a narrow pulse, highpassed and quick
-#   talkbox   the lead: a gliding saw and pulse through a vowel opening
-#             "o -> a -> e" on every note, delayed vibrato, a
-#             dotted-eighth echo
+#   talkbox   the lead: a bright buzz an octave below the note through
+#             narrow formants opening "u -> o -> a -> e" on every note,
+#             delayed vibrato, a dotted-eighth echo
 #   choir     a soft "ooh" choir (two saws through an alto formant), with
 #             the audio looper behind it: --dub (the footswitch) sends the
 #             voice into a 4-bar loop that loses 1 - --keep every pass
@@ -52,15 +53,41 @@ module MB::Sound
   # and open hats) playing +source+ (a grid Kit, a clip, or MIDI), half of
   # it through a formant filter (+mouth+ wet) so it reads as a mouth more
   # than a machine.
-  def self.neo_soul_beat(source, mouth: 0.7, dry: 0.55, level: 2.0)
-    kit = tr808(source, only: [:kick, :snare, :closed_hat, :open_hat], velocity_curve: :midi,
+  #
+  # +beatbox+ (true, or 0..1) is a much more aggressive mouth: each drum
+  # driven into a softclipper (so even the kick's sine has harmonics for
+  # the formants to shape) and through its own narrow vowel, as a
+  # beatboxer says them: the kick a bass "boo" (u to o), the snare a
+  # tenor "ka" (a to e), the hats a soprano "ts" (i); +beatbox+ is the
+  # share of those (power), the rest the plain kit.
+  def self.neo_soul_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false)
+    voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
       closed_hat: { decay: 0.035, tone: 0.5 },
       open_hat: { decay: 0.22 },
-    )
-    vowel = kit.formant(:o, :u, morph: 0.4, width: 1.6)
-    (kit * dry + vowel * mouth).softclip(0.7, 0.95) * level
+    }
+    unless beatbox
+      kit = tr808(source, only: voices.keys, velocity_curve: :midi, **voices)
+      vowel = kit.formant(:o, :u, morph: 0.4, width: 1.6)
+      return (kit * dry + vowel * mouth).softclip(0.7, 0.95) * level
+    end
+
+    amount = beatbox == true ? 1.0 : beatbox.to_f
+    outs = tr808(source, only: voices.keys, velocity_curve: :midi, outputs: :separate, **voices)
+    say = {
+      kick: [[:u, :o], :bass, 0.35, 6],
+      snare: [[:a, :e], :tenor, 0.4, 3],
+      closed_hat: [[:i], :soprano, 0.5, 2],
+      open_hat: [[:i, :e], :soprano, 0.5, 2],
+    }
+    said = outs.names.map { |n|
+      vowels, voice, width, drive = say.fetch(n)
+      (outs[n] * drive).softclip(0.3, 0.95).formant(*vowels, morph: 0.5, voice: voice, width: width) * (3.5 / drive)
+    }.reduce(:+)
+    mix = said * Math.sqrt(amount)
+    mix += outs.names.map { |n| outs[n] }.reduce(:+) * (Math.sqrt(1 - amount) * dry) if amount < 1
+    mix.softclip(0.7, 0.95) * level
   end
 
   # The overdub percussion: shaker, rim, congas (+source+ as for
@@ -101,16 +128,27 @@ module MB::Sound
     }
   end
 
-  # The talkbox lead: a glided saw and pulse through a vowel that opens
-  # "o -> a -> e" on every note (a filter envelope driving the morph),
-  # with a delayed vibrato and a dotted-eighth echo (+echo+ wet).
-  def self.neo_soul_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045)
+  # The talkbox lead: a glided buzz (saw and narrow pulse) +octave+
+  # octaves below the note, brightened (+air+, a highpassed copy added:
+  # a talkbox wants a bright carrier), through narrow formants (+width+)
+  # that open "u -> o -> a -> e" on every note (a filter envelope driving
+  # the morph) and a little saturation, with a delayed vibrato and a
+  # dotted-eighth echo (+echo+ wet).
+  #
+  # patches-2 (2026-10-13; maintainer: "Not talkboxy enough; needs maybe
+  # an octave lower input with some more top end and more aggressive
+  # formants"): before, the buzz was at the note, unbrightened, through
+  # "o -> a -> e" formants at width 1.0 (`octave: 0, air: 0, width: 1.0,
+  # vowels: [:o, :a, :e]` is close to it).
+  def self.neo_soul_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e])
     synth(midi, voices: 1) { |v|
       f = v.hz.glide(glide).vibrato(5.2, depth: 0.25, delay: 0.25)
-      src = f.saw * 0.6 + f.pulse(0.3) * 0.4
+      buzz = f.transpose(12 * octave)
+      src = buzz.saw * 0.6 + buzz.pulse(0.2) * 0.5
+      src += src.filter(:highpass, cutoff: 1800, quality: 0.7) * air if air > 0
       morph = v.filter_env(0.06, 0.35, 0.55, 0.2)
-      src.formant(:o, :a, :e, morph: morph, shift: (v.number - 62) * 0.25, width: 1.0) *
-        v.amp_env(0.01, 0.4, 0.75, 0.12) * 0.45
+      mouth = src.formant(*vowels, morph: morph, shift: (v.number - 62) * 0.25, width: width)
+      (mouth * 2).softclip(0.6, 0.95) * v.amp_env(0.01, 0.4, 0.75, 0.12) * 1.05
     }.delay(1.n8.dotted, feedback: 0.25, wet: echo, dry: 1) * (0.75 * level)
   end
 

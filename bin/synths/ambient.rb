@@ -18,8 +18,8 @@
 #             in a long soft room (--space)
 #   rin       a small high bowl: faster beating, a shorter room
 #   gong      a tam-tam: dense low partials gliding down after the stroke
-#             and a high shimmer swelling in over seconds (D2 plays 55 Hz;
-#             other notes transpose it)
+#             and a high shimmer swelling in over seconds, ringing at high
+#             partials (ring:) (D2 plays 55 Hz; other notes transpose it)
 #   koto      a plucked FM tone (1:1 body, faint 7:1 tine; more a koto or
 #             a hammered string than an e-piano) through worn tape
 #             (--wear) and a room
@@ -114,8 +114,14 @@ module MB::Sound
   # A tam-tam: dense low inharmonic partials (from +freq+ Hz at D2,
   # following the note) gliding down a little after the stroke (a
   # flat-centered gong), and a high shimmer swelling in over a couple of
-  # seconds (energy cascading up), then fading; in a big room.
-  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, space: 0.5)
+  # seconds (energy cascading up), then fading; in a big room.  The
+  # shimmer is a wandering band of noise, +ring+ (0..1, power share) of
+  # it ringing through resonators at seven high partials of the gong
+  # (44-90 times its pitch, gliding with it; +ring_decay+ seconds): more
+  # tone and resonance in the shimmer (patches-2, 2026-10-13: "a little
+  # more tonality and resonance in the shimmer would be good"; ring: 0 is
+  # the earlier noise-only shimmer).
+  def self.ambient_gong_voice(midi, freq: 55.0, glide: 0.05, shimmer: 0.07, ring: 0.6, ring_decay: 0.8, space: 0.5)
     gong = synth(midi, voices: 1) { |n|
       hit = n.trigger
       fall = adsr(0, 4, 0, 0, trigger: hit, curve: :linear)
@@ -125,7 +131,13 @@ module MB::Sound
         hit.ping(f * r * (1 + fall * glide), decay: 24.0 / (1 + i * 0.35)) * (0.6 / (1 + i * 0.25))
       }.reduce(:+)
       swell = n.env(2.2, 7, 0, 3, curve: :swell, gm: false)
-      air = noise.filter(:bandpass, cutoff: ambient_walk(0.7, 2400, 5200), quality: 1.5) * swell * shimmer
+      band = noise.filter(:bandpass, cutoff: ambient_walk(0.7, 2400, 5200), quality: 1.5)
+      if ring > 0
+        # (the resonators' sum is about 245 times the band's RMS at 0.8 s; RMS grows about as decay ** 0.6)
+        tones = [44.1, 50.3, 57.8, 63.9, 71.6, 80.2, 89.7].map { |r| band.ping(f * r * (1 + fall * glide), decay: ring_decay) }.reduce(:+)
+        band = band * Math.sqrt(1 - ring) + tones * (Math.sqrt(ring) / 245 * (0.8 / ring_decay)**0.6)
+      end
+      air = band * swell * shimmer
       low = low.filter(:highpass, cutoff: 38, quality: 0.6) * 0.12
       stereo(low, low) + air.pan(0.2)
     }

@@ -14,6 +14,7 @@
 #   reese  six detuned saws (unison), a 4-pole lowpass breathing on a 2-bar
 #          LFO around --cutoff, softclipped, highpassed at 150 Hz off the sub
 #   sub    one sine through a 110 Hz lowpass, gliding between legato notes
+#          (harmonics: [0.4, 0.2] adds a 2nd and 3rd for small speakers)
 #   neuro  the "switch-up" bass: saws plus a square an octave up into a
 #          diode ladder jumping on 16ths, talking formants morphing on 8ths,
 #          a key-tracked crusher (--grit wet), squeezed
@@ -22,7 +23,8 @@
 #          delay (--send) and a plate
 #   boom   the impact: a sine falling two octaves onto the note, into a hall
 #   drums  the song's tr808 kit pushed to DnB tunings (GM note map), with
-#          parallel compression
+#          parallel compression (tight: true tunes the kick up, shortens
+#          and highpasses it, so the sub takes center stage)
 #
 # Every patch is one method taking a MIDI source (Notes, Clip, MIDI file, or
 # Stream) and its knobs as keywords: dnb_reese_voice(midi, cutoff:),
@@ -74,11 +76,24 @@ module MB::Sound
   end
 
   # The sub: one sine, mono, lowpassed at +cutoff+ Hz, gliding between
-  # legato notes.
-  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035)
+  # legato notes.  +harmonics+ ([2nd, 3rd] levels, e.g. [0.4, 0.2] like
+  # Small Talk's sub; default none) adds sines at 2x and 3x after the
+  # lowpass, phase-locked to the sub, scaled to keep its RMS, so the sub
+  # carries on speakers that can't play its fundamental.
+  def self.dnb_sub_voice(midi, cutoff: 110, glide: 0.035, harmonics: [0, 0])
+    h2, h3 = harmonics
+    unless h2 > 0 || h3 > 0
+      return synth(midi, voices: 1) { |v|
+        pitch = v.hz.glide(glide, legato: true)
+        (pitch.sine * v.env(0.003, 0.3, 0.9, 0.05, gm: false).legato).filter(:lowpass, cutoff: cutoff, quality: 0.7)
+      }
+    end
+
     synth(midi, voices: 1) { |v|
       pitch = v.hz.glide(glide, legato: true)
-      (pitch.sine * v.env(0.003, 0.3, 0.9, 0.05, gm: false).legato).filter(:lowpass, cutoff: cutoff, quality: 0.7)
+      env = v.env(0.003, 0.3, 0.9, 0.05, gm: false).legato
+      upper = pitch.transpose(12).sine * h2 + pitch.transpose(12 * Math.log2(3)).sine * h3
+      ((pitch.sine * env).filter(:lowpass, cutoff: cutoff, quality: 0.7) + upper * env) * (1 / Math.sqrt(1 + h2**2 + h3**2))
     }
   end
 
@@ -134,17 +149,33 @@ module MB::Sound
   # high tight snare, short hats) playing +source+ (a grid Kit, a clip, or
   # MIDI with tr808's GM note map), with parallel compression (+parallel+
   # wet).  Voice settings as tr808 Hashes.
+  #
+  # +tight+ (true, or a highpass frequency in Hz; true is 65 Hz) makes
+  # room for the sub, as a lot of DnB does: the kick is tuned up a fourth
+  # (above the sub's notes), decays faster, clicks brighter, and only the
+  # kick is highpassed (24 dB/octave), so it is a punch above the sub
+  # instead of a boom under it.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
-    hat_decay: 0.035, accent: 6, parallel: 0.35
+    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false
   )
-    beat = tr808(
-      source,
+    settings = {
       kick: kick, snare: snare,
       clap: { decay: 0.16, tone: 0.8, level: 0.5 }, rimshot: { level: 0.35 },
       closed_hat: { decay: hat_decay, tone: 0.85, level: 0.55 }, open_hat: { decay: 0.16, tone: 0.7, level: 0.25 },
       cymbal: { decay: 1.4, tone: 0.7, level: 0.3 }, maracas: { level: 0.25 }, low_tom: { tune: 120, decay: 0.35 }, accent: accent
-    )
+    }
+    beat = if tight
+             cut = tight == true ? 65 : tight
+             tuned = kick.merge(tune: kick.fetch(:tune, 52) * 2**(5 / 12.0), decay: 0.15, tone: 0.8, level: kick.fetch(:level, 1.0) * 1.6)
+             outs = tr808(source, **settings, kick: tuned, outputs: :separate)
+             parts = outs.names.map { |name|
+               name == :kick ? outs[name].filter(:highpass, cutoff: cut, quality: 0.7).filter(:highpass, cutoff: cut, quality: 0.7) : outs[name]
+             }
+             GraphNode::Mixer.new(parts, stop_early: false) # (until every voice has ended, like the mixed kit)
+           else
+             tr808(source, **settings)
+           end
     beat.compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9, mix: parallel)
   end
 

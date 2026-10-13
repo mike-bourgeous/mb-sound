@@ -13,6 +13,18 @@ RSpec.describe('bin/synths/neo_soul.rb') do
     expect(band_share(perc, 0, 100)).to be < 0.02
   end
 
+  it 'says the drums as vowels with beatbox:' do
+    hits = -> { patch_notes([36, 0, 0.1, 1.0], [38, 0.5, 0.6, 1.0], [42, 0.75, 0.8, 1.0]) }
+    plain = render_patch(MB::Sound.neo_soul_beat(hits.()), 1)[0]
+    boxed = render_patch(MB::Sound.neo_soul_beat(hits.(), beatbox: true), 1)[0]
+    expect(peak_db(boxed)).to be_within(4).of(peak_db(plain))
+    # The kick's sine gets harmonics for its "boo"; the snare and hats move up
+    expect(band_share(seconds(boxed, 0, 0.4), 150, 1000)).to be > band_share(seconds(plain, 0, 0.4), 150, 1000) * 2
+    expect(rms_db(seconds(boxed, 0.5, 1))).to be_within(6).of(rms_db(seconds(plain, 0.5, 1)))
+    half = render_patch(MB::Sound.neo_soul_beat(hits.(), beatbox: 0.5), 1)[0]
+    expect((half - boxed).abs.max).to be > 0.01
+  end
+
   it 'plays the bass louder and a little brighter with velocity' do
     d2 = MB::Sound::D2.number
     soft = render_patch(MB::Sound.neo_soul_bass_voice(patch_notes([d2, 0, 0.5, 0.3])), 0.5)[0]
