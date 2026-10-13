@@ -133,6 +133,14 @@ module MB
           @undo_stack = []
           @redo_stack = []
           @undo_lock = Mutex.new
+          @undo_inputs = [].freeze
+        end
+
+        # Graph inputs the undo and redo lists hold (playing, kept for
+        # #resume, or retired), for Strip#read_kept_graphs.  Updated by
+        # #prune_steps after every change to the lists.
+        def undo_inputs
+          @undo_inputs
         end
 
         # Adds a command's changes as an undo step and clears the redo list.
@@ -159,6 +167,7 @@ module MB
               break if stack.empty?
               stack.shift
             end
+            @undo_inputs = held_inputs(@undo_stack + @redo_stack).freeze
           }
         end
 
@@ -171,10 +180,14 @@ module MB
         # Distinct graph inputs held by +steps+' snapshots that aren't in
         # +live+.
         def retired_inputs(steps, live)
-          inputs = steps.flat_map { |s|
+          held_inputs(steps).reject { |i| live.any? { |l| l.equal?(i) } }
+        end
+
+        # Distinct graph inputs held by +steps+' snapshots.
+        def held_inputs(steps)
+          steps.flat_map { |s|
             s.changes.flat_map { |c| [c.before, c.after] }.grep(PlayerState).flat_map { |st| [st.player&.input, st.stopped&.input] }
           }.compact.uniq(&:__id__)
-          inputs.reject { |i| live.any? { |l| l.equal?(i) } }
         end
 
         # Pops up to +count+ steps from +from+, launches the state from

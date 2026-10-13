@@ -17,6 +17,12 @@ module MB
       # oscillators, envelopes, delays, and reverbs carry on from where they
       # stopped.
       module Strip
+        # A graph kept for #resume or #undo that still reads its branches of
+        # shared nodes (see #read_kept_graphs): +read_to+ is the session
+        # frame it has read up to, +asleep_reads+ the cache of
+        # #asleep_reads.
+        KeptGraph = Struct.new(:input, :read_to, :asleep_reads)
+
         # Mutes the players named +names+ (or mute groups; see #mute_group).
         # Returns the changes (see Changes#change).
         def mute(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
@@ -111,6 +117,7 @@ module MB
           @soloed = ::Set.new
           @mute_groups = {}
           @landing_frame = nil
+          @kept_graphs = {}.compare_by_identity
         end
 
         # Expands mute group names.
@@ -188,33 +195,42 @@ module MB
           asleep_reads(p).each { |b| b.sample(frames) }
         end
 
-        # What sleeping player +p+ still reads (like a skipped Synth lane;
-        # see Synth#boundary): its branches of Tees with a branch in another
-        # player's graph (sleeping or not), less those that another of
-        # these reads through.  Branches nothing in the Session plays (an
-        # unused `lfo * 2`, or a graph not started yet) don't count: reading
-        # for them would run the node while the player sleeps, so a muted
-        # player's sound would depend on unused nodes.  Cached until a Tee
-        # gains or loses a branch or the players change.
+        # What sleeping player +p+ (or a kept graph; see #read_kept_graphs)
+        # still reads (like a skipped Synth lane; see Synth#boundary): its
+        # branches of Tees with a branch in another graph in the Session
+        # (another player's, sleeping or not, or a graph kept for #resume or
+        # #undo), less those that another of these reads through.  Branches
+        # nothing in the Session plays (an unused `lfo * 2`, or a graph not
+        # started yet) don't count: reading for them would run the node
+        # while the player sleeps, so a muted player's sound would depend on
+        # unused nodes.  Cached until a Tee gains or loses a branch or the
+        # Session's graphs change.
         def asleep_reads(p)
-          players = @span_players || @mutex.synchronize { @players.values }
-          # One list of the players' serials per span, the same object while
-          # the players stay the same
-          serials = (@span_serials ||= begin
-            list = players.map(&:serial)
-            list == @asleep_serials ? @asleep_serials : (@asleep_serials = list)
+          # One list of the Session's graphs per span, the same object while
+          # they stay the same
+          graphs = (@span_graphs ||= begin
+            list = (@span_players || @mutex.synchronize { @players.values }).map(&:input)
+            list.concat(@kept_graphs.keys) unless @kept_graphs.empty?
+            ids = list.map(&:__id__)
+            if ids == @asleep_ids
+              @asleep_graphs
+            else
+              @asleep_ids = ids
+              @asleep_graphs = list
+            end
           end)
           changes = GraphNode::Tee.branch_changes
           cache = p.asleep_reads
-          return cache[2] if cache && cache[0] == changes && cache[1].equal?(serials)
+          return cache[2] if cache && cache[0] == changes && cache[1].equal?(graphs)
 
-          own = p.input.graph(include_tees: true)
+          input = p.input
+          own = input.graph(include_tees: true)
           set = own.to_h { |n| [n.__id__, true] }
           others = {}
-          players.each do |o|
-            next if o.equal?(p)
+          graphs.each do |g|
+            next if g.equal?(input)
 
-            o.input.graph(include_tees: true).each { |n| others[n.__id__] = true }
+            g.graph(include_tees: true).each { |n| others[n.__id__] = true }
           end
 
           shared = own.select { |n|
@@ -224,8 +240,62 @@ module MB
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           shared.reject! { |n| upstream[n.__id__] }
 
-          p.asleep_reads = [changes, serials, shared]
+          p.asleep_reads = [changes, graphs, shared]
           shared
+        end
+
+        # Notes that player +p+ has left the Session's players (stopped,
+        # replaced, or ended), so #read_kept_graphs can keep its graph in
+        # step while it is kept for #resume or #undo.  Called on the
+        # rendering thread or with @render_lock held.
+        def note_retired(p)
+          return unless p.read_to
+
+          k = (@kept_graphs[p.input] ||= KeptGraph.new(p.input, p.read_to, nil))
+          k.read_to = p.read_to
+        end
+
+        # Reads the branches of shared nodes (see #asleep_reads) of graphs
+        # kept for #resume or #undo (stopped, replaced, or forgotten graphs
+        # the undo list still holds) up to session frame +frame+ (the end
+        # of the span), like sleeping players: a kept graph sharing a node
+        # with a playing graph fell a whole CircularBuffer behind after a
+        # second, and resuming it raised BranchBufferOverflow (fixes-9
+        # reproduced it).  Each graph reads exactly the frames since it
+        # stopped, so it comes back in step at any buffer size.  Graphs no
+        # longer kept, or playing again, are dropped; a graph waiting to
+        # start reads up to its first frame in #catch_up_kept.  Called once
+        # per span after the players, on the rendering thread.
+        def read_kept_graphs(frame)
+          return if @kept_graphs.empty?
+
+          kept = {}.compare_by_identity
+          @mutex.synchronize {
+            @stopped.each_value { |s| kept[s.input] = true }
+            @players.each_value { |o| kept[o.input] = false if o.started }
+          }
+          undo_inputs.each { |i| kept[i] = true unless kept.key?(i) }
+          @kept_graphs.select! { |input, _| kept[input] }
+
+          @kept_graphs.each_value do |k|
+            read_while_asleep(k, frame - k.read_to)
+            k.read_to = frame
+          rescue => e
+            @kept_graphs.delete(k.input)
+            raise if @raise_errors
+            warn "A kept graph stopped keeping in step with an error: #{e.class}: #{e.message}"
+          end
+        end
+
+        # Reads a kept graph's shared branches (see #read_kept_graphs) up to
+        # player +p+'s first frame, +frame+, when +p+ plays it again
+        # (#resume, #undo).
+        def catch_up_kept(p, frame)
+          k = @kept_graphs.delete(p.input) unless @kept_graphs.empty?
+          p.read_to = frame
+          return unless k
+
+          read_while_asleep(p, frame - k.read_to)
         end
 
         # The mute/solo level a new player named +name+ starts at.
