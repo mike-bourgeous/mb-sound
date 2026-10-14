@@ -84,7 +84,7 @@ module MB::Sound
   # GraphNode::ModalResonator).  +flat+ in cents.  Until textures-1
   # (2026-10-14) this was a sum of eight pings; the modal bank is the same
   # sound (an 8-bar render nulls to -85 dB below its peak) at about a
-  # third of the cost.
+  # sixth of the cost (10.5 against 66.7 ns/sample per voice).
   def self.ambient_bowl(strike, freq, flat: 0, decay: 24, beat: 0.7)
     freq *= 2 ** (-flat / 1200.0)
     strike.resonate(:bowl, freq, decay: decay, beat: beat, normalize: false)
