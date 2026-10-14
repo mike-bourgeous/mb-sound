@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 2,
+graph 3,
   name: "tine_crunch",
   kind: :synth,
-  saved: "2026-10-13T22:46:21Z",
-  mb_sound: "0.12.0.usegit (af720dbd)",
+  saved: "2026-10-14T02:46:03Z",
+  mb_sound: "0.12.0.usegit (94c421d7)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) through a crunchy amp (amp 4) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :crunch, tremolo: 0.3 }

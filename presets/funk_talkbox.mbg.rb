@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 2,
+graph 3,
   name: "funk_talkbox",
   kind: :synth,
-  saved: "2026-10-13T22:46:06Z",
-  mb_sound: "0.12.0.usegit (af720dbd)",
+  saved: "2026-10-14T02:45:49Z",
+  mb_sound: "0.12.0.usegit (94c421d7)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :talkbox from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :talkbox, dub: 0.0, keep: 0.82 }
