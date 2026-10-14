@@ -49,6 +49,7 @@ mb-sound exists because making sound with code is fun: for the maintainer, for t
 - Background agents get self-contained prompts (see the `agent-brief` skill), send the main session regular one-line progress updates (relayed to the maintainer as one-liners, so they can see what's running without asking), and run at most about three at once on the 7 GB container (check-mode suites and Valgrind are memory-heavy).
 - After every merge, follow the `post-merge` skill (merge report, post-merge tests, "did you know" note).
 - Keep notes local by default; don't post to GitHub unless asked.
+- Zero warnings: the suite fails on any Ruby warning (spec/support/warning_guard.rb).  Fix the cause; a warning a spec triggers on purpose is asserted with an output matcher, never silenced or allowlisted; the allowlist is only for gems we don't control, each with its reason (maintainer, 2026-10-14).
 - Flakes get fixes: never hide a flaky spec with reruns.  A rerun may confirm that a branch isn't at fault, but the flake itself goes into a fix round (or onto a watch list with its failure text kept, if it can't be reproduced) (maintainer, 2026-10-11).
 - Installing packages or changing system configuration on either machine needs the maintainer's own OK, not a peer session's or an agent's (2026-10-12).
 - Songs on the Listening Bench include per-track stems (`render(..., stems:)`), so each part can be heard alone (maintainer, 2026-10-12).
