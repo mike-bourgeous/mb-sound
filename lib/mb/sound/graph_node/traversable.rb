@@ -129,7 +129,7 @@ module MB
           boxes = expand_channels ? {}.compare_by_identity : Traversable.channel_boxes(nodes, include_tees)
           id = ->(n) { (g = boxes[n]) ? "channels #{g.__id__}" : n.__id__.to_s }
 
-          digraph = "digraph {\n"
+          digraph = +"digraph {\n"
 
           digraph << "  graph [ bgcolor=\"#000000e0\" rankdir=\"LR\" pad=\"0.25\" ];\n"
           digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"

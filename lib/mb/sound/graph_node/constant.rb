@@ -250,7 +250,19 @@ module MB
         # buffer: returns the value (a Numeric) while it holds, or this
         # block's buffer (from #sample) while changes are queued.
         def plan_param(count)
-          return sample(count) unless @changes.empty?
+          unless @changes.empty?
+            # #sample without Plan::Planned's hook, which would take this
+            # read by the constant's own region for a reader outside the
+            # plan and replan with the constant as a boundary (until
+            # 2026-10-14 every change made the constant a boundary for good)
+            bypass = @plan_bypass
+            @plan_bypass = true
+            begin
+              return sample(count)
+            ensure
+              @plan_bypass = bypass
+            end
+          end
 
           @elapsed_samples += count
           @old_constant = @constant

@@ -77,7 +77,7 @@ module MB
 
         # Joins +items+ with two spaces into lines no wider than +w+.
         def pack(items, w)
-          items.each_with_object(['']) { |item, lines|
+          items.each_with_object([+'']) { |item, lines|
             if !lines.last.empty? && visible_length(lines.last) + 2 + visible_length(item) > w
               lines << item.dup
             else

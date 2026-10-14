@@ -935,10 +935,14 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(n2).to receive(:sources).at_least(3).times.and_return({input: n1})
         expect(n3).to receive(:sources).at_least(3).times.and_return({input: n2})
 
-        expect(n1.graph[0]).to equal(n3)
-        expect(n1.graph.map(&:to_s)).to eq([n3, n2, n1].map(&:to_s))
-        expect(n2.graph.map(&:to_s)).to eq([n1, n3, n2].map(&:to_s))
-        expect(n3.graph.map(&:to_s)).to eq([n2, n1, n3].map(&:to_s))
+        # A loop without #feedback_sources falls back to the path walk, which
+        # warns when it stops following a node it keeps reaching
+        expect {
+          expect(n1.graph[0]).to equal(n3)
+          expect(n1.graph.map(&:to_s)).to eq([n3, n2, n1].map(&:to_s))
+          expect(n2.graph.map(&:to_s)).to eq([n1, n3, n2].map(&:to_s))
+          expect(n3.graph.map(&:to_s)).to eq([n2, n1, n3].map(&:to_s))
+        }.to output(/Possible infinite loop on .*started from/).to_stderr
       end
 
       # fixes-12: #graph walked every path, which grows exponentially with

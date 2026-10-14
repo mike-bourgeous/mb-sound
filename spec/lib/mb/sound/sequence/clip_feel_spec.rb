@@ -218,7 +218,8 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
       c = riff.loop.permute(vary: true, seed: 5)
       t = c.transpose(12)
       expect(t.events_for(2).map(&:value)).to eq(c.events_for(2).map { |e| e.value + 12 })
-      r = c.repeat(2)
+      r = nil
+      expect { r = c.repeat(2) }.to output(/repeat makes a finite clip.*call \.loop on the result/).to_stderr
       expect(r.events.map(&:value)).to eq(c.events_for(0).map(&:value) + c.events_for(1).map(&:value))
     end
 
@@ -283,7 +284,9 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
       c = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4.every(2, from: 2)).n4.loop
       b = c.bake(->(s) { s }, cycles: 2)
       expect(b.events.map { |e| [e.value, e.start] }).to eq([[60, 0r], [60, 1/2r], [64, 3/4r]])
-      expect(c.repeat(2).events.map { |e| [e.value, e.start] }).to eq([[60, 0r], [60, 1/2r], [64, 3/4r]])
+      r = nil
+      expect { r = c.repeat(2) }.to output(/repeat makes a finite clip/).to_stderr
+      expect(r.events.map { |e| [e.value, e.start] }).to eq([[60, 0r], [60, 1/2r], [64, 3/4r]])
     end
 
     it 'needs a transform' do

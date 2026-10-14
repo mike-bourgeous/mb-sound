@@ -18,7 +18,10 @@ module SubprocessCoverage
   FileUtils.mkdir_p(DIR)
 
   ENV['MB_SOUND_SUBPROCESS_COVERAGE'] = DIR
-  ENV['RUBYOPT'] = "-r#{File.expand_path('../subprocess_coverage_helper.rb', __dir__)}"
+  # Replaces the inherited RUBYOPT (Bundler's -rbundler/setup), keeping
+  # the warning helper (support/warning_guard_hooks.rb); the coverage helper
+  # loads the script itself, so it comes last.
+  ENV['RUBYOPT'] = "#{WarningGuard.rubyopt} -r#{File.expand_path('../subprocess_coverage_helper.rb', __dir__)}"
 
   @results = []
 

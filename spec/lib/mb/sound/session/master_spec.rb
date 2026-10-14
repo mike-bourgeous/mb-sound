@@ -228,10 +228,11 @@ RSpec.describe(MB::Sound::Session::Master) do
         session.instance_variable_set(:@load, 0.9)
         m.call(*args, **kw)
       end
+      # Both switches warn: the first (from no chain) and the one checked
+      expect(session).to receive(:warn).with(/busy \(90%\).*without spillover/).twice
       session.master(at: :now) { |m| m.delay(4000.samples) }
       run(8000)
 
-      expect(session).to receive(:warn).with(/busy \(90%\).*without spillover/)
       session.master(at: :now) { |m| m * 1 }
       expect(run(800)[0].to_a.uniq).to eq([1])
     end
