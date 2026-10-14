@@ -43,7 +43,9 @@ RSpec.describe MB::Sound do
     end
 
     it 'raises NameError for names shaped almost like notes' do
-      [:H4, :C10, :Cx4, :TV_BARS, :Q3].each do |name|
+      # (not TV_BARS itself: bin/songs/tunnel_vision.rb defines it, and
+      # tunnel_vision_spec loads it into the same process in some orders)
+      [:H4, :C10, :Cx4, :TV_BARZ, :Q3].each do |name|
         expect { MB::Sound.const_get(name) }.to raise_error(NameError) { |e| expect(e.cause).to be_nil }
       end
     end
