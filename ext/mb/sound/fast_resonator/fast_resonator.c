@@ -188,6 +188,7 @@ static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE de
 	double *z = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
 
 	double coef[2 * RES_MODES_MAX];
+	double radius[RES_MODES_MAX];
 	double last_f = NAN, last_d = NAN;
 
 	for (size_t i = 0; i < n; i++) {
@@ -195,14 +196,24 @@ static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE de
 		double f = f_ptr ? f_ptr[i * f_step] : f_scalar;
 		double d = d_ptr ? d_ptr[i * d_step] : d_scalar;
 
-		if (f != last_f || d != last_d) {
+		// Decay factors only when the decay changes (a gliding pitch
+		// recomputes only the rotations)
+		_Bool new_d = d != last_d;
+		if (new_d) {
+			for (size_t k = 0; k < m; k++) {
+				double dk = d * table[k * RES_MODE_FIELDS + 3];
+				radius[k] = dk > 0 ? exp(-RES_LN_1000 / dk) : 0.0;
+			}
+			last_d = d;
+		}
+
+		if (new_d || f != last_f) {
 			for (size_t k = 0; k < m; k++) {
 				const double *mode = table + k * RES_MODE_FIELDS;
 				double fk = f * mode[0] + mode[1];
-				double dk = d * mode[3];
-				if (fk > 0 && fk < RES_MODE_CEILING * fs && dk > 0) {
+				double r = radius[k];
+				if (fk > 0 && fk < RES_MODE_CEILING * fs && r > 0) {
 					double w = 2.0 * M_PI * fk / fs;
-					double r = exp(-RES_LN_1000 / dk);
 					coef[2 * k] = r * cos(w);
 					coef[2 * k + 1] = r * sin(w);
 				} else {
@@ -211,7 +222,6 @@ static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE de
 				}
 			}
 			last_f = f;
-			last_d = d;
 		}
 
 		double sum = 0.0;

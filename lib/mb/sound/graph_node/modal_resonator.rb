@@ -217,6 +217,7 @@ module MB
 
           z = state.to_a
           coef = Array.new(2 * m, 0.0)
+          radius = Array.new(m, 0.0)
           last_f = last_d = nil
 
           n.times do |i|
@@ -224,14 +225,22 @@ module MB
             f = f_in.is_a?(Array) ? f_in[i] : f_in
             d = d_in.is_a?(Array) ? d_in[i] : d_in
 
-            if f != last_f || d != last_d
+            new_d = d != last_d
+            if new_d
               m.times do |k|
-                ratio, offset, _amp, share = table[k * FIELDS, FIELDS]
+                dk = d * table[k * FIELDS + 3]
+                radius[k] = dk > 0 ? Math.exp(-LN_1000 / dk) : 0.0
+              end
+              last_d = d
+            end
+
+            if new_d || f != last_f
+              m.times do |k|
+                ratio, offset = table[k * FIELDS, 2]
                 fk = f * ratio + offset
-                dk = d * share
-                if fk > 0 && fk < CEILING * fs && dk > 0
+                r = radius[k]
+                if fk > 0 && fk < CEILING * fs && r > 0
                   w = 2.0 * Math::PI * fk / fs
-                  r = Math.exp(-LN_1000 / dk)
                   coef[2 * k] = r * Math.cos(w)
                   coef[2 * k + 1] = r * Math.sin(w)
                 else
@@ -240,7 +249,6 @@ module MB
                 end
               end
               last_f = f
-              last_d = d
             end
 
             sum = 0.0
