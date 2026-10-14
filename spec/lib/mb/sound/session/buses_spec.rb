@@ -372,4 +372,179 @@ RSpec.describe(MB::Sound::Session::Buses) do
       expect(session.bus_info[:verb]).to match(/to master/)
     end
   end
+
+  # fixes-13: bus chains run in segments of a span and sleep, so a chain
+  # sharing a node with a player (`bus(:fx) { |sig| sig * lfo }`) read it
+  # late after waiting to start, sleeping, or being muted, and raised
+  # BranchBufferOverflow after a second; a muted player sharing a node
+  # only with a bus chain did the same on unmuting (fixes-12 fixed this
+  # for master chains; see master_spec).
+  describe 'nodes shared with players' do
+    # Buffer sizes to render in (mixed, the usual, tiny)
+    let(:buffer_sizes) { [[128, 801, 7], [800], [7]] }
+
+    # The LFO's first +frames+ samples.
+    def lfo_values(frames)
+      3.hz.lfo.sample(frames).dup
+    end
+
+    # Runs the block for each buffer size pattern with a new session (closed
+    # afterwards).
+    def each_size(sizes = buffer_sizes)
+      sizes.each do |sz|
+        s = new_session
+        yield s, sz
+      ensure
+        s&.close
+      end
+    end
+
+    [[0.3, 25_933], [1.5, 800]].each do |wait, added|
+      it "starts a bus chain queued for #{wait} s in step with a node a player plays, at any buffer size" do
+        start = added + (wait * 48000).round # not on a buffer edge
+        each_size do |s, sizes|
+          lfo = 3.hz.lfo
+          s.bus(:fx) { |sig| sig }
+          s.add(lfo * 0.5, name: :a)
+          s.add(0.25.constant, name: :b, to: :fx)
+          data = run(added, sizes, s: s)
+          s.bus(:fx, start_time: Rational(start, 96000)) { |sig| sig * (lfo * 0.5 + 1) }
+          expect(s.queued.map(&:kind)).to eq([:bus])
+          data = data.concatenate(run(start + 24000 - added, sizes, s: s))
+
+          l = lfo_values(data.length)
+          expected = l * 0.5 + 0.25
+          expected[start..] = l[start..] * 0.5 + (l[start..] * 0.5 + 1) * 0.25
+          expect((data - expected).abs.max).to be < 1e-6
+          expect(s.instance_variable_get(:@waiting_graphs)).to be_empty
+        end
+      end
+    end
+
+    it 'starts a new bus defined while playing in step with a node a player plays' do
+      each_size([[128, 801, 7], [800]]) do |s, sizes|
+        lfo = 3.hz.lfo
+        s.add(lfo * 0.5, name: :a)
+        data = run(800, sizes, s: s)
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) } # lands on the next bar
+        s.add(0.25.constant, name: :b, to: :fx)
+        data = data.concatenate(run(96_000 + 24_000 - 800, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5 + (l * 0.5 + 1) * 0.25
+        expected[0...96_000] = l[0...96_000] * 0.5
+        expect((data - expected).abs.max).to be < 1e-6
+      end
+    end
+
+    it 'keeps a sleeping bus chain in step, waking on its first input off a buffer edge' do
+      each_size do |s, sizes|
+        lfo = 3.hz.lfo
+        s.add(lfo * 0.5, name: :a)
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+        data = run(96_000, sizes, s: s)
+        expect(bus_struct(:fx, s: s).asleep).to eq(true)
+        start = 96_000 + 50_001
+        s.add(0.25.constant, name: :b, to: :fx, start_time: Rational(start, 96000))
+        data = data.concatenate(run(start + 24_000 - 96_000, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5
+        expected[start..] = l[start..] * 0.5 + (l[start..] * 0.5 + 1) * 0.25
+        expect((data - expected).abs.max).to be < 1e-6
+      end
+    end
+
+    it 'keeps a muted bus chain in step until it is unmuted' do
+      each_size([[128, 801, 7], [800]]) do |s, sizes|
+        lfo = 3.hz.lfo
+        s.add(lfo * 0.5, name: :a)
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+        s.add(0.25.constant, name: :b, to: :fx)
+        data = run(800, sizes, s: s)
+        s.mute(:fx)
+        data = data.concatenate(run(72_000, sizes, s: s))
+        expect(data[-1]).to be_within(1e-6).of(lfo_values(data.length)[-1] * 0.5)
+        s.unmute(:fx)
+        data = data.concatenate(run(24_000, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5 + (l * 0.5 + 1) * 0.25
+        expect((data[-20_000..] - expected[-20_000..]).abs.max).to be < 1e-6
+      end
+    end
+
+    it 'keeps a muted player in step with a node only a bus chain also reads' do
+      each_size([[128, 801, 7], [800]]) do |s, sizes|
+        lfo = 3.hz.lfo
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+        s.add(lfo * 0.5, name: :a)
+        s.add(0.25.constant, name: :b, to: :fx)
+        data = run(800, sizes, s: s)
+        s.mute(:a)
+        data = data.concatenate(run(72_000, sizes, s: s))
+        s.unmute(:a)
+        data = data.concatenate(run(24_000, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5 + (l * 0.5 + 1) * 0.25
+        expect((data[-20_000..] - expected[-20_000..]).abs.max).to be < 1e-6
+      end
+    end
+
+    it 'starts a replacement bus chain in step with a node the spilling chain reads' do
+      each_size do |s, sizes|
+        lfo = 3.hz.lfo
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+        s.add(0.5.constant, name: :b, to: :fx)
+        data = run(800, sizes, s: s)
+        start = 800 + 72_001
+        s.bus(:fx, start_time: Rational(start, 96000)) { |sig| sig * (lfo * 0.25 + 1) }
+        data = data.concatenate(run(start + 24_000 - 800, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = (l * 0.5 + 1) * 0.5
+        expected[start..] = (l[start..] * 0.25 + 1) * 0.5
+        expect((data - expected).abs.max).to be < 1e-6
+      end
+    end
+
+    it 'restores an undone bus chain in step with a node a player plays' do
+      each_size([[128, 801, 7], [800]]) do |s, sizes|
+        lfo = 3.hz.lfo
+        within = ->(&block) { MB::Sound::Session.with_context(session: s, &block) }
+        s.add(lfo * 0.5, name: :a)
+        s.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+        s.add(0.25.constant, name: :b, to: :fx)
+        data = run(800, sizes, s: s)
+        within.() { MB::Sound.bus(:fx, on: :now) { |sig| sig * 0.5 } }
+        data = data.concatenate(run(800, sizes, s: s))
+        within.() { MB::Sound.undo } # lands on the next bar
+        expect(s.queued.map(&:kind)).to eq([:bus])
+        data = data.concatenate(run(96_000 + 24_000 - 1600, sizes, s: s))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5 + (l * 0.5 + 1) * 0.25
+        expect((data[96_000..] - expected[96_000..]).abs.max).to be < 1e-6
+        expect((data[1600...96_000] - (l[1600...96_000] * 0.5 + 0.125)).abs.max).to be < 1e-6
+      end
+    end
+
+    it "keeps a track's stem copy of a bus in step with a node a player plays" do
+      dir = File.dirname(tmp_path('mix.flac'))
+      begin
+        lfo = 3.hz.lfo
+        MB::Sound.render(File.join(dir, 'mix.flac'), channels: 1, gain: 1, seconds: 1, stems: dir) do
+          MB::Sound.bus(:fx) { |sig| sig * (lfo * 0.5 + 1) }
+          MB::Sound.bg(:a, lfo * 0.25)
+          MB::Sound.bg(:b, 0.25.constant, to: :fx)
+        end
+        read = ->(n) { MB::Sound.read(File.join(dir, "#{n}.flac"))[0] }
+        a, b, mix = %w[a b mix].map { |n| read.(n) }
+        l = lfo_values(mix.length)
+        expect((b - (l * 0.5 + 1) * 0.25).abs.max).to be < 1e-4
+        expect((a + b - mix).abs.max).to be < 1e-4
+      end
+    end
+  end
 end
