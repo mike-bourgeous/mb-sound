@@ -2050,8 +2050,8 @@ module MB
       #     500.hz.at(3.db).peak
       #     500.hz.peak(octaves: 2, gain: -3.db)
       def peak(octaves: 0.5, gain: nil)
-        gain ||= @amplitude
-        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, @frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: gain.to_db)
+        db_gain = gain.nil? ? @amplitude.to_db : Decibels.db_of(gain, 'gain')
+        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, @frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: db_gain)
       end
 
       # Returns a LinearFollower with its max_rise and max_fall set to allow

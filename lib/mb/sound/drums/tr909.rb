@@ -19,7 +19,7 @@ module MB
       # - toms: tune (Hz), decay; rimshot: tune, decay; clap: tone, decay
       # - hats: decay (closed, open), tune (semitones); crash, ride: tune
       #   (semitones), decay (nil: the sample's own)
-      # - every voice: level, accent (dB), velocity_curve, flam (see
+      # - every voice: level, accent (6.db), velocity_curve, flam (see
       #   Machine#kit)
       #
       # The kit takes +shuffle:+ (0..6, the 909's shuffle steps) and

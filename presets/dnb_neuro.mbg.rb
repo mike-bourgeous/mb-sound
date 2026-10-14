@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 2,
+graph 3,
   name: "dnb_neuro",
   kind: :synth,
-  saved: "2026-10-13T18:57:56Z",
-  mb_sound: "0.12.0.usegit (01f36fe8)",
+  saved: "2026-10-14T03:16:25Z",
+  mb_sound: "0.12.0.usegit (796a1077)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :neuro from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
   options: { patch: :neuro, cutoff: 2400.0, echo: 0.4 }

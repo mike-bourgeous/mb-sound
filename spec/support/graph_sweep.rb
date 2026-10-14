@@ -203,7 +203,7 @@ module GraphSweep
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['formant (Formant) constant and morphing', ->(c) {
-        c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0, 50], [900, -6, 60], [2500, -12, 100], [3300, -20, 120], [4000, -30, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
+        c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) }],
 
@@ -237,7 +237,7 @@ module GraphSweep
         c.sig.reverb(room_size: 0.2, decay: 0.4, mod: { depth: c.mod(0, 0.001), rate: c.mod(0.2, 2) }, lowpass: c.mod(500, 8000), freeze: c.mod(0, 1), stretch: c.mod(0.8, 1.2), shimmer: c.mod(0, 1), drive: c.mod(0, 3), drive_mode: :fold, duck: c.mod(0, 12), gate: c.mod(0, 0.1))
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
-      ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60) }],
+      ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
 
       # Dynamics
       ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {
@@ -245,9 +245,9 @@ module GraphSweep
                               upward_threshold: -40.db, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
-        c.sig.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
       }],
-      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60, -70, :smooth], [-20, -20], [0, -8]], link: false) }],
+      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60.db, -70.db, :smooth], [-20.db, -20.db], [0.db, -8.db]], link: false) }],
       ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3.db, link: false) }],
       ['squeeze default, mono', ->(c) { c.sig.squeeze(time: 0.5) }],
       ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],

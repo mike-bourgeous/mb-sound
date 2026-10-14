@@ -27,7 +27,7 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
   it 'matches expanders, gates, and companders in a chain' do
     r = plan_compare {
       x = src.new(seed: 3, scale: 0.7) * 1
-      x.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -50.db) * 1
+      x.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -50.db) * 1
     }
     expect(dyn_ops(r).length).to eq(3)
   end

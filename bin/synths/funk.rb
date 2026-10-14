@@ -148,13 +148,14 @@ module MB::Sound
   # The beatbox snare's vowels ("a" to "e", the tenor's) with formants 2-5
   # +top+ times as wide and 10 log10(+top+) dB lower, so each passes the
   # same power with a lower, broader peak (the first formant unchanged),
-  # as custom vowels (five [Hz, dB, bandwidth Hz] triples each); the plain
+  # as custom vowels (five [Hz, level (Decibels), bandwidth Hz] triples
+  # each); the plain
   # Symbols at 1.
   def self.funk_snare_vowels(top)
     return [:a, :e] if top == 1
     [:a, :e].map { |v|
       GraphNode::Formant::VOICES[:tenor][v].map.with_index { |(hz, db, bw), i|
-        i == 0 ? [hz, db, bw] : [hz, db - 10 * Math.log10(top), bw * top]
+        i == 0 ? [hz, db.db, bw] : [hz, (db - 10 * Math.log10(top)).db, bw * top]
       }
     }
   end

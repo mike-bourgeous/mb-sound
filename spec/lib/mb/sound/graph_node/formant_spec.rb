@@ -137,10 +137,15 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
   end
 
   it 'takes custom vowels as five triples' do
-    custom = [[500, 0, 50], [1500, -6, 80], [2500, -12, 100], [3500, -20, 120], [4500, -30, 150]]
+    custom = [[500, 0.db, 50], [1500, -6.db, 80], [2500, -12.db, 100], [3500, -20.db, 120], [4500, -30.db, 150]]
     node = 110.hz.ramp.formant(custom, :a)
     expect(node.table.length).to eq(2)
     expect(collect(node, 1000).abs.max).to be > 0.05
+
+    # Levels are Decibels (exact) or linear gains; bare negatives raise
+    linear = [[500, 1, 50], [1500, 0.5, 80], [2500, 0.25, 100], [3500, 0.1, 120], [4500, 0.03, 150]]
+    expect(110.hz.ramp.formant(linear, normalize: false).table[0].map { |f| f[1] }).to eq(linear.map { |f| 20 * Math.log10(f[1]) })
+    expect { 110.hz.ramp.formant([[500, 0, 50], [1500, -6, 80], [2500, -12, 100], [3500, -20, 120], [4500, -30, 150]]) }.to raise_error(ArgumentError, /formant level/)
   end
 
   it 'runs per channel on bundles' do

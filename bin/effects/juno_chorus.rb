@@ -51,6 +51,6 @@ MB::Sound.effect_script(
     mix: p.mix,
     bbd: p.bbd,
     cutoff: p.cutoff,
-    hiss: p.hiss
+    hiss: p.hiss&.db
   ).softclip(0.9)
 }

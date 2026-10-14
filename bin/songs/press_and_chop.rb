@@ -56,7 +56,7 @@ module MB::Sound
         snare: { tune: 205, decay: 0.16, tone: 0.7, snappy: 0.75 },
         closed_hat: { decay: 0.045, tone: 0.75, level: 0.3 },
         open_hat: { decay: 0.25, tone: 0.7, level: 0.3 },
-        accent: 8, velocity_curve: :grid, seed: 165
+        accent: 8.db, velocity_curve: :grid, seed: 165
       ).reverb(:room, mix: 0.18).softclip(0.5, 0.95)
     }
   end

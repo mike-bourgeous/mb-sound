@@ -11,16 +11,24 @@ module MB
       # and returns a node for one channel or a bundle for several.  They
       # handle channels themselves (ChannelDispatch::EXCLUDED).
       #
-      # Units: write levels (+threshold+, +ceiling+, +amount+, +range+) in
-      # dB with #db (`threshold: -12.db`, a Decibels value, read as exactly
-      # -12 dB).  Bare numbers still work as before: above zero they are
-      # linear gains (0.25), zero and below dB (-12), with a warning once
-      # per call site ("write -12.db"), since bare negatives will become
-      # linear gains like everywhere else (after the genre experiment; see
-      # design/notes/dynamics.md).  A linear level above 1 (louder than full
-      # scale, e.g. `threshold: 6`, +15.6 dB) also warns.  +makeup+,
-      # +min_gain+/+max_gain+, and compander points are dB numbers, and
-      # take Decibels as their dB values too (`makeup: 3.db` is +3 dB).
+      # Units: every level and gain in dB is written with #db: levels
+      # (+threshold+, +upward_threshold+, +ceiling+, +amount+, +range+),
+      # gains (+makeup+, +min_gain+/+max_gain+, squeeze's +gain+), and
+      # compander points (`compand(-60.db => -80.db, 0.db => -12.db)`).  A
+      # Decibels value (`-12.db`) is read as exactly that many dB.  Bare
+      # numbers are linear gains, as everywhere else (`threshold: 0.25` is
+      # about -12 dB, `makeup: 2` +6 dB).  A negative bare number is a
+      # mistake (it raises in scripts and specs; live mode reads it as dB
+      # with a warning), and so is a bare 0 where -inf dB means nothing
+      # (thresholds, ceilings, makeup, +max_gain+, compander points;
+      # MB::Sound.live_error, live mode reads it as 0 dB).  See
+      # Decibels.gain_of and .db_of.  A linear level
+      # above 1 (louder than full scale, e.g. `threshold: 6`, +15.6 dB)
+      # warns once per call site.  Until 2026-10-14 bare numbers at 0 and
+      # below meant dB here; graph documents older than format 3 load with
+      # that meaning (see .from_old_document).  Knee widths, compand's
+      # +over+ and +step+, and compand blocks are plain dB numbers (widths
+      # and positions on the dB axis, not levels).
       # Times are seconds, Lengths (5.ms), Durations (1.n8, following the
       # tempo), or nodes.
       #
@@ -30,86 +38,89 @@ module MB
       #     drums.compress(threshold: -30.db, ratio: 8, attack: 3.ms, release: 80.ms, makeup: :auto, mix: 0.4)  # parallel ("New York")
       #     mix.limit(ceiling: -1.db, lookahead: 1.5.ms)        # true-peak brickwall
       #     master { |mix| mix.softclip(0.7, 1).limit(ceiling: -1.db, release: 60.ms) }  # hot mixes: softclip into the limiter
-      #     pad.compand(-60 => -80, -40 => -40, 0 => -12)    # expander + 3.3:1 compressor
+      #     pad.compand(-60.db => -80.db, -40.db => -40.db, 0.db => -12.db)    # expander + 3.3:1 compressor
       #     mix.bands(120.hz, 2000.hz) { |lo, mid, hi| [lo.compress(ratio: 3), mid, hi.at(-2.db)] }
       #     mix.squeeze(:eleven).limit
       module DynamicsMethods
-        # Converts a level to a linear gain: a Decibels value (-6.db) is its
-        # gain; a bare number above zero is a linear gain, zero and below dB
-        # (with a warning; see the Units note above).
-        def self.level(value, name)
-          check_level(value, name)
-          return value.to_f if value.is_a?(Decibels)
-
-          value > 0 ? value.to_f : 10.0 ** (value.to_f / 20.0)
+        # A level as a linear gain: a Decibels value (-6.db) is its gain, a
+        # bare number a linear gain (Decibels.gain_of; see the Units note
+        # above).  +zero+ allows a bare 0 (-inf dB: a full cut, for +range+
+        # and +amount+).
+        def self.level(value, name, zero: false)
+          Decibels.gain_of(value, name, zero: zero, above_one: true)
         end
 
-        # Converts a level to dB: a Decibels value (-6.db) is its exact dB
-        # value; a bare number above zero is a linear gain, zero and below dB
-        # (with a warning; see the Units note above).
-        def self.level_db(value, name)
-          check_level(value, name)
-          return value.db_value if value.is_a?(Decibels)
-
-          value > 0 ? 20.0 * Math.log10(value.to_f) : value.to_f
+        # A level in dB: a Decibels value (-6.db) is its exact dB value, a
+        # bare number a linear gain (Decibels.db_of).
+        def self.level_db(value, name, zero: false)
+          Decibels.db_of(value, name, zero: zero, above_one: true)
         end
 
-        # A dB parameter (+makeup+, +min_gain+, compander points): a number
-        # of dB, or a Decibels value as its dB value (`makeup: 3.db` is +3
-        # dB, not a gain of 1.41 read as dB).
+        # A gain or compander point in dB (+makeup+, +min_gain+/+max_gain+,
+        # squeeze +gain+): a Decibels value is its exact dB value, a bare
+        # number a linear gain (`makeup: 2` is +6 dB), without the warning
+        # above full scale (gains above 1 are what makeup is for).
+        def self.gain_db(value, name, zero: false)
+          Decibels.db_of(value, name, zero: zero)
+        end
+
+        # A dB number for the classes under the DSL (Dynamics, Transfer),
+        # which take dB: a Decibels value as its dB value, numbers as they
+        # are.
         def self.db_param(value)
           value.is_a?(Decibels) ? value.db_value : value
         end
 
-        # The methods taking levels and their level keywords (graph export
-        # prints bare dB levels among them as `-20.db`).
+        # The methods taking levels and their level keywords.
         LEVEL_METHODS = %i[
           compress compressor expand expander noise_gate duck sidechain_duck limit limiter brickwall
         ].freeze
         LEVEL_KEYWORDS = %i[threshold upward_threshold ceiling amount range].freeze
 
-        # Linear levels this far above 1 (full scale) get the "louder than
-        # full scale" warning; a little above 1 is fine (e.g. 1.0001).
-        LINEAR_WARN_ABOVE = 1.0
+        # Keywords holding dB gains, by method (compand's points too).
+        GAIN_KEYWORDS = {
+          compress: %i[makeup max_gain], compressor: %i[makeup max_gain],
+          expand: %i[makeup], expander: %i[makeup], noise_gate: %i[makeup],
+          compand: %i[makeup min_gain max_gain], compander: %i[makeup min_gain max_gain],
+          squeeze: %i[gain max_gain],
+        }.freeze
 
-        @level_warnings = {}
-        @level_lock = Mutex.new
-
-        # Warns about a level given as a bare dB number or as a linear gain
-        # above full scale, once per call site (the first caller outside
-        # the library) and kind.  Quiet inside a block given to
-        # .quiet_levels (graph documents load with their own rules).
-        def self.check_level(value, name)
-          raise ArgumentError, "#{name} must be a number (dB like -6.db, or a linear gain; got #{value.inspect})" unless value.is_a?(Numeric) && value.real? && !value.to_f.nan?
-          return if value.is_a?(Decibels) || Thread.current[:mb_sound_quiet_levels]
-
-          if value <= 0
-            warn_level(:bare_db, "#{name}: #{value.inspect} is read as #{value.inspect} dB for now; write #{value.inspect}.db (bare negative levels will become linear gains, like gains everywhere else)")
-          elsif value > LINEAR_WARN_ABOVE
-            warn_level(:above_one, "#{name}: #{value.inspect} is a linear gain of #{MB::M.sigfigs(20.0 * Math.log10(value.to_f), 3)} dB, above full scale; did you mean #{(-value).inspect}.db?")
+        # Arguments for dynamics method +name+ from a graph document older
+        # than format 3 (see GraphIO::FORMAT), which wrote dB levels as bare
+        # numbers at 0 and below and dB gains and compander points as bare
+        # numbers: returns [args, kwargs, changed], those numbers turned
+        # into the Decibels they meant (an unlimited -Float::INFINITY or
+        # Float::INFINITY +min_gain+/+max_gain+ is left out, the default).
+        def self.from_old_document(name, args, kwargs)
+          changed = false
+          old_db = ->(v) { changed = true; Decibels.new(v) }
+          bare = ->(v) { v.is_a?(Numeric) && !v.is_a?(Decibels) && v.real? }
+          kwargs = kwargs.dup
+          if LEVEL_METHODS.include?(name)
+            LEVEL_KEYWORDS.each do |k|
+              kwargs[k] = old_db.(kwargs[k]) if bare.(kwargs[k]) && kwargs[k] <= 0
+            end
           end
-        end
-
-        # Runs the block without level warnings (for graph document loading).
-        def self.quiet_levels
-          old = Thread.current[:mb_sound_quiet_levels]
-          Thread.current[:mb_sound_quiet_levels] = true
-          yield
-        ensure
-          Thread.current[:mb_sound_quiet_levels] = old
-        end
-
-        # The library's own directory, skipped when looking for call sites.
-        LIBRARY_DIR = File.expand_path('../../..', __dir__) + File::SEPARATOR
-
-        def self.warn_level(kind, message)
-          site = caller_locations(2).find { |l|
-            path = l.absolute_path || l.path
-            !path.start_with?(LIBRARY_DIR) && !path.start_with?('<internal:')
-          }
-          where = site ? "#{site.path}:#{site.lineno}" : '(unknown)'
-          first = @level_lock.synchronize { @level_warnings[[where, kind, message]] ? false : (@level_warnings[[where, kind, message]] = true) }
-          warn "#{where}: warning: #{message}" if first
+          GAIN_KEYWORDS.fetch(name, []).each do |k|
+            next unless bare.(kwargs[k])
+            if kwargs[k].infinite? && %i[min_gain max_gain].include?(k)
+              kwargs.delete(k)
+              changed = true
+            else
+              kwargs[k] = old_db.(kwargs[k])
+            end
+          end
+          if name == :compand || name == :compander
+            point = ->(p) { p.is_a?(Array) && (2..3).cover?(p.length) ? [*p[0, 2].map { |v| bare.(v) ? old_db.(v) : v }, *p[2..]] : p }
+            args = args.dup
+            if args[0].is_a?(Hash)
+              args[0] = args[0].to_h { |a, b| point.([a, b]) }
+            elsif args[0].is_a?(Array)
+              args[0] = args[0].map(&point)
+            end
+            kwargs = kwargs.to_h { |k, v| k.is_a?(Symbol) ? [k, v] : point.([k, v]) }
+          end
+          [args, kwargs, changed]
         end
 
         # A compressor ratio as a slope above the threshold (1/ratio).
@@ -122,8 +133,8 @@ module MB
         # per +ratio+ dB (Float::INFINITY for a limiter-like flat top),
         # rounded by a +knee+ dB wide soft knee.  +attack+ and +release+ are
         # the gain's fall and rise times (one-pole time constants), +hold+
-        # keeps the reduction that long before releasing.  +makeup+ is dB or
-        # :auto (half the gain change at 0 dBFS back).
+        # keeps the reduction that long before releasing.  +makeup+ is a gain
+        # (`6.db`) or :auto (half the gain change at 0 dBFS back).
         #
         # +sidechain+ (any node or bundle, or a bus or track name such as
         # :drums; see BusMethods#bus) drives the detector instead of the
@@ -133,7 +144,7 @@ module MB
         #
         # Upward compression: +upward_threshold+ (dB) and +upward_ratio+ lift
         # levels below that threshold toward it (2 = half as far below), at
-        # most +max_gain+ dB (default 24).  When the level rises, the gain
+        # most +max_gain+ (default 24.db).  When the level rises, the gain
         # falls over +upward_attack+ (default 1 ms) while it is above 0 dB,
         # then over +attack+, so hits after quiet stretches don't burst
         # through boosted.
@@ -144,9 +155,9 @@ module MB
         # Examples (bin/sound.rb):
         #     play file_input('drums.flac').compress(threshold: -20.db, ratio: 4, attack: 10.ms, release: 100.ms, makeup: :auto)
         #     play voice.compress(threshold: -30.db, ratio: 3, upward_threshold: -50.db, upward_ratio: 2)
-        def compress(threshold: -20.db, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0,
+        def compress(threshold: -20.db, ratio: 4, knee: 6, attack: 0.005, release: 0.1, hold: 0, makeup: 0.db,
                      sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
-                     upward_threshold: nil, upward_ratio: 2, upward_attack: 0.001, max_gain: 24, mix: 1)
+                     upward_threshold: nil, upward_ratio: 2, upward_attack: 0.001, max_gain: 24.db, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
           slope = DynamicsMethods.ratio_slope(ratio)
           corners = [[t, 1.0, slope]]
@@ -161,35 +172,35 @@ module MB
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, max_gain: upward_threshold ? DynamicsMethods.db_param(max_gain).to_f : 0.0, boost: upward_attack, mix: mix,
+            makeup: dyn_makeup(makeup), max_gain: upward_threshold ? DynamicsMethods.gain_db(max_gain, 'max_gain') : 0.0, boost: upward_attack, mix: mix,
           ))
         end
         alias compressor compress
 
         # A downward expander: below +threshold+ the level falls +ratio+ dB
-        # per dB, by at most +range+ (dB, default -40).  +attack+ is how fast
+        # per dB, by at most +range+ (default -40.db).  +attack+ is how fast
         # it opens, +release+ how fast it closes, +hold+ how long it stays
         # open after the level falls.
         #
         # Example (bin/sound.rb):
         #     play noisy.expand(threshold: -45.db, ratio: 3, range: -30.db)
-        def expand(threshold: -40.db, ratio: 2, knee: 6, range: -40.db, attack: 0.001, release: 0.1, hold: 0, makeup: 0,
+        def expand(threshold: -40.db, ratio: 2, knee: 6, range: -40.db, attack: 0.001, release: 0.1, hold: 0, makeup: 0.db,
                    sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0, mix: 1)
           t = DynamicsMethods.level_db(threshold, 'threshold')
           raise ArgumentError, "Expander ratio must be at least 1 (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio >= 1 && ratio.finite?
-          r = DynamicsMethods.level_db(range, 'range')
+          r = DynamicsMethods.level_db(range, 'range', zero: true)
           raise ArgumentError, 'range must be at most 0 dB' if r > 0
           transfer = Dynamics::Transfer.corners(t, [[t, ratio.to_f, 1.0]], knee: knee, description: "expand #{dyn_fmt_db(t)} dB 1:#{dyn_fmt_ratio(ratio, false)}, range #{dyn_fmt_db(r)} dB")
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: release, up: attack, hold: hold, hold_up: false,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, min_gain: r, max_gain: 0.0, mix: mix,
+            makeup: dyn_makeup(makeup), min_gain: r, max_gain: 0.0, mix: mix,
           ))
         end
         alias expander expand
 
         # A noise gate: an expander with a steep ratio (+ratio+, default 20)
-        # and +range+ (default -80 dB), opening in +attack+, staying open
+        # and +range+ (default -80.db), opening in +attack+, staying open
         # +hold+ after the level falls, then closing over +release+.
         #
         # Example (bin/sound.rb):
@@ -199,7 +210,9 @@ module MB
         end
 
         # Sidechain ducking: turns this signal down by up to +amount+ (e.g.
-        # -18.db) while +sidechain+ (e.g. a kick) is above
+        # -18.db; 18.db is the same, since ducking never boosts; a bare
+        # number is a linear gain at most 1, see Decibels.reduction_db)
+        # while +sidechain+ (e.g. a kick) is above
         # +threshold+, the reduction growing 1 dB per dB above it (an
         # infinite-ratio compressor with a range) so loud hits duck fully;
         # recovering over +release+ (a one-pole time constant: seconds, a
@@ -231,8 +244,7 @@ module MB
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
           raise ArgumentError, 'only: picks a node inside a bus or track named by a Symbol (duck(:drums, only: :kick))' if only && !sidechain.is_a?(Symbol)
           sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
-          a = DynamicsMethods.level_db(amount, 'amount')
-          raise ArgumentError, 'Duck amount must be at most 0 dB' if a > 0
+          a = -Decibels.reduction_db(amount, 'amount')
           t = DynamicsMethods.level_db(threshold, 'threshold')
           transfer = Dynamics::Transfer.corners(t, [[t, 1.0, 0.0]], knee: knee, description: "duck #{dyn_fmt_db(a)} dB above #{dyn_fmt_db(t)} dB")
           finish_dynamics(Dynamics.new(
@@ -246,30 +258,31 @@ module MB
         # An arbitrary compander: a transfer curve from input level (dB) to
         # output level (dB), as points, a block, or a Dynamics::Transfer.
         #
-        # Points are a Hash (`compand(-60 => -80, -40 => -40, 0 => -12)`) or
-        # an Array of [input, output] or [input, output, shape] (shape for
-        # the segment to the next point: :linear, :cubic, or a Curve name
-        # such as :smooth, a Curve, or a Proc on 0..1).  +interpolation+ is
+        # Points are levels (`-60.db`) in a Hash (`compand(-60.db => -80.db,
+        # -40.db => -40.db, 0.db => -12.db)`) or an Array of [input, output]
+        # or [input, output, shape] (shape for the segment to the next
+        # point: :linear, :cubic, or a Curve name such as :smooth, a Curve,
+        # or a Proc on 0..1).  +interpolation+ is
         # :linear (default) or :cubic (monotone cubics through every point:
         # smooth knees, never overshooting).  Outputs must not decrease.
         # Outside the points the curve continues its end slopes.
         #
-        # A block maps input dB to output dB, sampled every +step+ dB over
+        # A block maps input dB to output dB (plain numbers), sampled every +step+ dB over
         # +over+ (default -100..12) and joined by monotone cubics.
         #
         # Times: +attack+ is how fast the gain falls, +release+ how fast it
         # rises, +upward_attack+ (default +attack+) how fast it falls while
         # above 0 dB (a boost).  The gain is limited to
-        # +min_gain+..+max_gain+ (dB).  The other options are as for
-        # #compress.
+        # +min_gain+..+max_gain+ (gains like -40.db and 12.db; unlimited by
+        # default).  The other options are as for #compress.
         #
         # Examples (bin/sound.rb):
-        #     play drums.compand(-60 => -70, -30 => -30, 0 => -10, interpolation: :cubic)   # glue with a soft floor
-        #     play pad.compand([[-60, -80], [-40, -40, :smooth], [0, -12]])
+        #     play drums.compand(-60.db => -70.db, -30.db => -30.db, 0.db => -10.db, interpolation: :cubic)   # glue with a soft floor
+        #     play pad.compand([[-60.db, -80.db], [-40.db, -40.db, :smooth], [0.db, -12.db]])
         #     play noisy.compand { |db| db < -50 ? db * 2 + 50 : db }                      # 1:2 expander below -50
         def compand(points = nil, interpolation: :linear, over: -100..12, step: 1, attack: 0.005, release: 0.1, hold: 0,
-                    makeup: 0, sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
-                    min_gain: -Float::INFINITY, max_gain: Float::INFINITY, upward_attack: nil, mix: 1, **more_points, &block)
+                    makeup: 0.db, sidechain: nil, detector: :peak, rms: 0.01, link: true, lookahead: 0,
+                    min_gain: nil, max_gain: nil, upward_attack: nil, mix: 1, **more_points, &block)
           bad = more_points.keys.reject { |k| k.is_a?(Numeric) }
           raise ArgumentError, "Unknown compand options: #{bad.map(&:inspect).join(', ')}" unless bad.empty?
 
@@ -282,13 +295,20 @@ module MB
           else
             pts = points.is_a?(Hash) ? points.to_a : points.to_a
             pts += more_points.to_a
+            pts = pts.map { |p|
+              next p unless p.is_a?(Array) && (2..3).cover?(p.length)
+              [DynamicsMethods.gain_db(p[0], 'compand point input'), DynamicsMethods.gain_db(p[1], 'compand point output'), *p[2..]]
+            }
             Dynamics::Transfer.points(pts, interpolation: interpolation)
           end
 
           finish_dynamics(Dynamics.new(
             outputs, transfer: transfer, down: attack, up: release, hold: hold, hold_up: true,
             detector: detector, rms: rms, link: link, sidechain: sidechain, lookahead: lookahead,
-            makeup: makeup, min_gain: min_gain, max_gain: max_gain, boost: upward_attack, mix: mix,
+            makeup: dyn_makeup(makeup),
+            min_gain: min_gain.nil? ? -Float::INFINITY : DynamicsMethods.gain_db(min_gain, 'min_gain', zero: true),
+            max_gain: max_gain.nil? ? Float::INFINITY : DynamicsMethods.gain_db(max_gain, 'max_gain'),
+            boost: upward_attack, mix: mix,
           ))
         end
         alias compander compand
@@ -398,14 +418,14 @@ module MB
 
         # Multiband upward + downward compression ("squeeze it to eleven"):
         # three LR4 bands, each compressed downward above a threshold and
-        # upward below a lower one (at most +max_gain+ dB of lift), with
+        # upward below a lower one (upward below a lower one (at most +max_gain+ of lift, default 24.db)), with
         # :auto makeup per band.  +preset+ is :default (gentle glue) or
         # :eleven (the extreme, OTT-style setting; see SQUEEZE_PRESETS).
         # +downward+ and +upward+ (0..1) scale the ratios toward 1:1; +time+
         # scales attack and release; +depth+ (0..1, default from the
         # preset) mixes each compressed band with the plain band
         # (phase-aligned); +split+ overrides the crossovers; +gain+ is an
-        # output gain in dB.  Every band looks +lookahead+ ahead (default 2
+        # output gain (`3.db`).  Every band looks +lookahead+ ahead (default 2
         # ms, the node's latency) so the fast attacks catch transients.
         # Master-chain friendly (about 0.7% of realtime per stereo
         # 800-sample buffer).
@@ -414,7 +434,7 @@ module MB
         #     play drums.squeeze                     # gentle
         #     play drums.squeeze(:eleven).limit       # crunchy, loud
         #     master { |mix| mix.squeeze(depth: 0.3, time: 0.5) }
-        def squeeze(preset = :default, depth: nil, time: 1.0, upward: 1.0, downward: 1.0, split: nil, gain: 0, max_gain: 24, lookahead: 0.002)
+        def squeeze(preset = :default, depth: nil, time: 1.0, upward: 1.0, downward: 1.0, split: nil, gain: 0.db, max_gain: 24.db, lookahead: 0.002)
           settings = SQUEEZE_PRESETS[preset]
           raise ArgumentError, "Unknown squeeze preset #{preset.inspect} (use #{SQUEEZE_PRESETS.keys.map(&:inspect).join(' or ')})" unless settings
           depth ||= settings[:depth]
@@ -436,11 +456,17 @@ module MB
               )
             }
           }
-          gain = DynamicsMethods.db_param(gain)
+          gain = DynamicsMethods.gain_db(gain, 'gain')
           gain == 0 ? out : out * (10.0 ** (gain / 20.0))
         end
 
         private
+
+        # +makeup+ for Dynamics: :auto, or dB from a Decibels value or a
+        # linear gain (see the Units note above).
+        def dyn_makeup(makeup)
+          makeup == :auto ? :auto : DynamicsMethods.gain_db(makeup, 'makeup')
+        end
 
         # Returns +node+'s single output for one channel, else the bundle.
         def finish_dynamics(node)

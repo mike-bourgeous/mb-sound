@@ -28,7 +28,7 @@ module MB::Sound
         'beat = grid(16, kick: "x...x...", hat: "x.x.x.x.").loop.named(:beat)',
       ],
       'kit fills into tr808' => [
-        -> { tr808(grid(16, kick: 'x...x...', clap: '....x...').fill { grid(16, clap: '......xx') }.nofill(:kick).loop, accent: 6) },
+        -> { tr808(grid(16, kick: 'x...x...', clap: '....x...').fill { grid(16, clap: '......xx') }.nofill(:kick).loop, accent: 6.db) },
         "fill {\n  grid(16, clap: \"......xx\")\n}.nofill(:kick).loop",
       ],
       'kit rows taken with kit.rows' => [
@@ -113,7 +113,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
 
     it 'marks drawn seeds and leaves seeds the code gave as they were written' do
       expect(doc).to start_with("# mb-sound graph document").and include("graph #{io::FORMAT},")
-      expect(io::FORMAT).to eq(2)
+      expect(io::FORMAT).to eq(3)
       expect(doc).to include('melody(scale(:minor, A4), 8, seed: 3).named(:pinned)')
       expect(doc).to match(/melody\(scale\(:minor, A4\), 8, seed: drawn_seed\(\d+\)\)\.named\(:drawn\)/)
       expect(doc).to match(/noise\(seed: drawn_seed\(\d+\)\)/)
