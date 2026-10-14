@@ -3,8 +3,8 @@
 graph 3,
   name: "ambient_drone",
   kind: :synth,
-  saved: "2026-10-14T02:45:21Z",
-  mb_sound: "0.12.0.usegit (94c421d7)",
+  saved: "2026-10-14T03:17:47Z",
+  mb_sound: "0.12.0.usegit (796a1077)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :drone from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :drone, space: 0.5, wear: 0.0, tune: -7.0, spread: 0.7 }

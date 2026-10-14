@@ -3,8 +3,8 @@
 graph 3,
   name: "tine_piano",
   kind: :synth,
-  saved: "2026-10-14T02:45:58Z",
-  mb_sound: "0.12.0.usegit (94c421d7)",
+  saved: "2026-10-14T03:18:28Z",
+  mb_sound: "0.12.0.usegit (796a1077)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :tine, tremolo: 0.3 }

@@ -3,8 +3,8 @@
 graph 3,
   name: "jungle_flute",
   kind: :synth,
-  saved: "2026-10-14T02:44:51Z",
-  mb_sound: "0.12.0.usegit (94c421d7)",
+  saved: "2026-10-14T03:17:12Z",
+  mb_sound: "0.12.0.usegit (796a1077)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :flute from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :flute, cutoff: 16000.0 }
