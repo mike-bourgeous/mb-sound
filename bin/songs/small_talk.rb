@@ -417,11 +417,11 @@ module MB::Sound
         kit,
         kick: SMALL_TALK_KICK, clap: { decay: 0.3, tone: 0.75, level: 0.75 },
         closed_hat: { decay: 0.035, tone: 0.6, level: 0.4 }, open_hat: { decay: 0.22 }, cymbal: { decay: 1.0, tone: 0.65 },
-        maracas: { level: 0.3 }, low_tom: { decay: 0.5 }, mid_tom: { decay: 0.45 }, accent: 6
+        maracas: { level: 0.3 }, low_tom: { decay: 0.5 }, mid_tom: { decay: 0.45 }, accent: 6.db
       )
       # Parallel ("New York") compression: the hits keep their shape, the
       # room between them comes up
-      beat.compress(threshold: -26.db, ratio: 4, attack: 0.003, release: 0.08, makeup: 8, mix: 0.3)
+      beat.compress(threshold: -26.db, ratio: 4, attack: 0.003, release: 0.08, makeup: 8.db, mix: 0.3)
     }
     track(:bong) { |clip| small_talk_bong(clip, tom: bong_tom) }
     track(:talk) { |clip| small_talk_bass(clip, cutoff: knob(:cut), sub: knob(:sub), crush_mix: crush_mix, air: air, skew: skew, round1: round1, sub_harmonics: sub_harmonics) }

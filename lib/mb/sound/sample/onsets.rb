@@ -9,12 +9,15 @@ module MB
       # frame, at least +min_gap+ (seconds or a Length) apart, each placed on
       # the first sample of its frame's attack that reaches a fifth of the
       # attack's peak (then back to the last quieter sample before it).
-      # Pure Ruby and Numo; returns sample positions from the region start
+      # +threshold+ and +floor+ are written in dB (`9.db`, `-45.db`; bare
+      # numbers are linear gains, see Decibels.db_of).  Pure Ruby and Numo; returns sample positions from the region start
       # in play order.
       module Onsets
         module_function
 
-        def detect(sample, threshold: 9.0, floor: -45.0, min_gap: 0.04, hop: 64, window: 256)
+        def detect(sample, threshold: 9.db, floor: -45.db, min_gap: 0.04, hop: 64, window: 256)
+          threshold = Decibels.db_of(threshold, 'threshold')
+          floor = Decibels.db_of(floor, 'floor', zero: true)
           x = sample.to_a.sum / sample.channel_count
           x = Numo::DFloat.cast(x)
           n = x.length

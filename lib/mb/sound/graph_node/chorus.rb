@@ -80,7 +80,7 @@ module MB
         # docs/calibration-report.md) estimate -84 dB re a 4 Vp-p sine from
         # the datasheet; players describe the Juno-60/106 chorus hiss as
         # clearly audible (no compander), so this stays louder.  UNVERIFIED.
-        BBD_HISS = -72
+        BBD_HISS = -72.db
 
         # Seconds after the longest delay that the chorus keeps running once
         # its input ends (filter ring-out), and over which the hiss fades.
@@ -152,7 +152,7 @@ module MB
             w = taps.values_at(*(side...taps.length).step(2)).reduce(:+)
             w = w * tap_gain unless rates.length == 1
             if hiss
-              noise = MB::Sound.noise(seed: seeds[side]).at(hiss.db).at_rate(sample_rate)
+              noise = MB::Sound.noise(seed: seeds[side]).at(Decibels.gain_of(hiss, 'hiss', zero: true)).at_rate(sample_rate)
               w = w + HissGate.new(noise, dry_inputs, enders, tail)
             end
             w = bbd_filter(w, BBD_POST_POLES, scale) if cutoff
@@ -327,7 +327,8 @@ module MB
         #             filters (Chorus::BBD_CUTOFF, 5420, the Juno's; all
         #             poles scale with it); also turns the filters on
         #             without bbd: true; may be a node.
-        # +:hiss+ - Hiss level in dBFS (also without bbd: true).
+        # +:hiss+ - Hiss level (-72.db; a bare number is a linear gain, see
+        #           Decibels.gain_of), also without bbd: true.
         # +:seed+ - Hiss seed (default: a sub-seed of MB::Sound.seed); the right
         # side's hiss uses seed + 1, so one seed repeats both.
         # +:interpolation+ - Delay reads (:sinc default, :cubic, :linear;

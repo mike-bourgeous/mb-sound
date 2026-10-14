@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
 
     it 'lifts quiet levels with upward compression, up to max_gain' do
-      node = ->(level) { (10.0**(level / 20.0)).constant.compress(threshold: -10.db, ratio: 2, knee: 0, upward_threshold: -40.db, upward_ratio: 2, max_gain: 12, attack: 0, release: 0) }
+      node = ->(level) { (10.0**(level / 20.0)).constant.compress(threshold: -10.db, ratio: 2, knee: 0, upward_threshold: -40.db, upward_ratio: 2, max_gain: 12.db, attack: 0, release: 0) }
       expect(db(node.(-50).sample(4)[-1])).to be_within(1e-4).of(-45)
       expect(db(node.(-80).sample(4)[-1])).to be_within(1e-4).of(-68)
       expect(db(node.(-20).sample(4)[-1])).to be_within(1e-4).of(-20)
@@ -126,11 +126,11 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect { 1.constant.compress(upward_threshold: -10.db, threshold: -20.db) }.to raise_error(ArgumentError, /below/)
     end
 
-    it 'accepts linear thresholds like -20.db' do
+    it 'reads bare thresholds as linear gains' do
       a = 0.5.constant.compress(threshold: -20.db, attack: 0, release: 0).sample(4)
-      b = nil
-      expect { b = 0.5.constant.compress(threshold: -20, attack: 0, release: 0).sample(4) }.to output(/write -20\.db/).to_stderr
+      b = 0.5.constant.compress(threshold: 0.1, attack: 0, release: 0).sample(4)
       expect(a).to eq(b)
+      expect { 0.5.constant.compress(threshold: -20) }.to raise_error(ArgumentError, /threshold: -20 is a linear gain.*write -20\.db/)
     end
 
     it 'adds :auto makeup of half the gain change at 0 dBFS' do
@@ -162,52 +162,97 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect(MB::Sound::GraphNode::DynamicsMethods.level(-1.db, 'ceiling')).to eq((-1).db.to_f)
     end
 
-    it 'warns once per call site about bare dB numbers, which still mean dB' do
-      expect { fresh_site('2.times { sig.compress(threshold: -20) }') }.to output(/level_site_\d+\.rb:1: warning: threshold: -20 is read as -20 dB for now; write -20\.db/).to_stderr
-      expect { fresh_site("sig.compress(threshold: -20)\nsig.compress(threshold: -20)") }.to output(/:1: warning.*\n.*:2: warning/).to_stderr
-      expect { fresh_site('sig.limit(ceiling: -1)') }.to output(/ceiling: -1 is read as -1 dB/).to_stderr
-      expect { fresh_site('sig.duck(1.constant, amount: -10)') }.to output(/amount: -10/).to_stderr
-      expect { fresh_site('sig.noise_gate(threshold: -30.db, range: -60)') }.to output(/range: -60/).to_stderr
+    it 'rejects bare negative numbers, which are linear gains' do
+      expect { sig.compress(threshold: -20) }.to raise_error(ArgumentError, /threshold: -20 is a linear gain, and gains can't be negative; for -20 dB write -20\.db/)
+      expect { sig.compress(threshold: -20.db, upward_threshold: -40) }.to raise_error(ArgumentError, /upward_threshold: -40/)
+      expect { sig.limit(ceiling: -1) }.to raise_error(ArgumentError, /ceiling: -1 is a linear gain/)
+      expect { sig.duck(1.constant, amount: -10) }.to raise_error(ArgumentError, /amount: -10/)
+      expect { sig.noise_gate(threshold: -30.db, range: -60) }.to raise_error(ArgumentError, /range: -60/)
+      expect { sig.compress(makeup: -3) }.to raise_error(ArgumentError, /makeup: -3 .*write -3\.db/)
+      expect { sig.compand(-60 => -80, 0 => -12) }.to raise_error(ArgumentError, /compand point input: -60/)
+      expect { sig.compand(-60.db => -80.db, 0.db => 0.db, min_gain: -20) }.to raise_error(ArgumentError, /min_gain: -20/)
+      expect { sig.squeeze(gain: -3) }.to raise_error(ArgumentError, /gain: -3/)
+    end
 
-      a = sig.compress(threshold: -20.db, attack: 0, release: 0).sample(4)
-      b = nil
-      expect { b = fresh_site('sig.compress(threshold: -20, attack: 0, release: 0)').sample(4) }.to output.to_stderr
-      expect(a).to eq(b)
+    it 'rejects a bare 0 where -inf dB means nothing, and takes it as a full cut' do
+      expect { sig.compress(threshold: 0) }.to raise_error(ArgumentError, /threshold: 0 is a linear gain of zero \(-inf dB\); for 0 dB write 0\.db/)
+      expect { sig.compress(makeup: 0) }.to raise_error(ArgumentError, /makeup: 0/)
+      expect { sig.limit(ceiling: 0) }.to raise_error(ArgumentError, /ceiling: 0/)
+      expect { sig.compand(0 => 0.5) }.to raise_error(ArgumentError, /compand point input: 0/)
+
+      gate = render(sig.noise_gate(threshold: 0.9, range: 0, ratio: 1000, knee: 0, attack: 0, release: 0, hold: 0), 4)[0]
+      expect(gate[-1]).to eq(0)
+      ducked = sig.duck(1.constant, amount: 0, threshold: -30.db, knee: 0, attack: 0, hold: 0).sample(4)
+      expect(db(ducked[-1] / 0.5)).to be_within(1e-3).of(-30) # unlimited by amount: 1 dB per dB above -30 dB
+    end
+
+    it 'reads bare negative numbers as dB in live mode, with a warning (and 0 as 0 dB)' do
+      MB::Sound.live = true
+      a = b = nil
+      expect { a = fresh_site('2.times.map { sig.compress(threshold: -20, makeup: -1, attack: 0, release: 0) }.last').sample(4) }.to output(
+        /\Alevel_site_\d+\.rb:1: warning: threshold: -20 is read as -20 dB in live mode; write -20\.db \(bare numbers are linear gains\)\n.*makeup: -1 is read as -1 dB in live mode.*\n\z/
+      ).to_stderr
+      expect(a).to eq(sig.compress(threshold: -20.db, makeup: -1.db, attack: 0, release: 0).sample(4))
+      expect { b = fresh_site('sig.compress(threshold: -20.db, makeup: 0, attack: 0, release: 0)').sample(4) }.to output(/makeup: 0 is a linear gain of zero.*live mode: ignored/).to_stderr
+      expect(b).to eq(sig.compress(threshold: -20.db, makeup: 0.db, attack: 0, release: 0).sample(4))
+      expect { fresh_site('sig.compand(-60 => -80, 0 => -12)') }.to output(/compand point input: -60 is read as -60 dB/).to_stderr
+    ensure
+      MB::Sound.live = false
     end
 
     it 'warns about linear levels above full scale' do
-      expect { fresh_site('sig.compress(threshold: 6)') }.to output(/threshold: 6 is a linear gain of 15\.6 dB, above full scale; did you mean -6\.db\?/).to_stderr
+      expect { fresh_site('2.times { sig.compress(threshold: 6) }') }.to output(/\Alevel_site_\d+\.rb:1: warning: threshold: 6 is a linear gain of 15\.6 dB, above full scale; did you mean -6\.db\?\n\z/).to_stderr
+      expect { fresh_site("sig.limit(ceiling: 2)\nsig.limit(ceiling: 2)") }.to output(/:1: warning.*\n.*:2: warning/).to_stderr
       expect { fresh_site('sig.compress(threshold: 0.1)') }.not_to output.to_stderr
       expect(MB::Sound::GraphNode::DynamicsMethods.level_db(0.1, 'threshold')).to eq(-20.0)
     end
 
-    it 'reads Decibels makeup, gains, and compander points as dB' do
-      a = sig.compress(threshold: -20.db, makeup: 3.db, attack: 0, release: 0)
-      b = sig.compress(threshold: -20.db, makeup: 3, attack: 0, release: 0)
-      expect(a.sample(4)).to eq(b.sample(4))
+    it 'reads Decibels makeup, gains, and compander points as dB, and bare numbers as linear gains' do
+      a = sig.compress(threshold: -20.db, makeup: 6.db, attack: 0, release: 0).sample(4)[-1]
+      b = sig.compress(threshold: -20.db, makeup: 2, attack: 0, release: 0).sample(4)[-1]
+      expect(db(a / b)).to be_within(1e-4).of(6 - 20 * Math.log10(2))
 
-      c = sig.compand(-60.db => -80.db, 0.db => -12.db, attack: 0, release: 0)
-      d = sig.compand(-60 => -80, 0 => -12, attack: 0, release: 0)
-      expect(c.sample(4)).to eq(d.sample(4))
+      c = sig.compand(-60.db => -80.db, 0.db => -12.db, attack: 0, release: 0).sample(4)
+      d = sig.compand(0.001 => 0.0001, 1 => 0.251188643150958, attack: 0, release: 0).sample(4)
+      expect(c[-1]).to be_within(1e-6).of(d[-1])
 
-      e = sig.squeeze(gain: 3.db, max_gain: 12.db)
-      f = sig.squeeze(gain: 3, max_gain: 12)
-      expect(e.sample(800)).to eq(f.sample(800))
+      e = sig.squeeze(gain: 3.db, max_gain: 12.db).sample(800)
+      f = sig.squeeze(gain: 3.db.to_f, max_gain: 12.db.to_f).sample(800)
+      expect(e).to eq(f)
+
+      g = sig.compand(-40.db => -40.db, 0.db => -40.db, min_gain: -6.db, attack: 0, release: 0).sample(4)[-1]
+      h = sig.compand(-40.db => -40.db, 0.db => -40.db, min_gain: 0.5, attack: 0, release: 0).sample(4)[-1]
+      expect(db(g / 0.5)).to be_within(1e-4).of(-6)
+      expect(db(h / 0.5)).to be_within(1e-4).of(20 * Math.log10(0.5))
     end
 
-    it 'loads graph documents with bare levels quietly, in their old meaning' do
+    it 'loads graph documents before format 3 in their old meaning, with a warning' do
+      old = <<~DOC
+        graph 2, name: "old"
+        0.5.constant.compress(threshold: -20, makeup: 3, attack: 0, release: 0).compand({ -60 => -80, 0 => -12 }, min_gain: -Float::INFINITY, max_gain: 6).limit(ceiling: -1).duck(1.constant, amount: 0)
+      DOC
       g = nil
-      expect { g = MB::Sound::GraphIO.load('0.5.constant.compress(threshold: -20.db, attack: 0, release: 0)') }.not_to output.to_stderr
-      expect(g.sample(4)).to eq(sig.compress(threshold: -20.db, attack: 0, release: 0).sample(4))
+      expect { g = MB::Sound::GraphIO.load(old) }.to output(/format 2 document: bare dB values .* read as dB.*\n\z/).to_stderr
+      expected = sig.compress(threshold: -20.db, makeup: 3.db, attack: 0, release: 0).compand({ -60.db => -80.db, 0.db => -12.db }, max_gain: 6.db).limit(ceiling: -1.db).duck(1.constant, amount: 0.db)
+      expect(g.sample(800)).to eq(expected.sample(800))
+      expect(g.to_ruby).to include('compress(threshold: -20.db, makeup: 3.db', 'compand({ -60.db => -80.db, 0.db => -12.db }, max_gain: 6.db)', 'limit(ceiling: -1.db)', 'amount: 0.db')
+
+      # Format 2 positive levels were linear gains already; Decibels load as they are
+      expect { g = MB::Sound::GraphIO.load(%(graph 2\n0.5.constant.compress(threshold: 0.1, makeup: 3.db))) }.not_to output.to_stderr
+      expect(g.sample(4)).to eq(sig.compress(threshold: 0.1, makeup: 3.db).sample(4))
+
+      # Format 3 reads bare numbers as linear gains
+      expect { MB::Sound::GraphIO.load(%(graph 3\n0.5.constant.compress(threshold: -20))) }.to raise_error(MB::Sound::GraphIO::LoadError, /:2: .*threshold: -20 is a linear gain/)
+      g = MB::Sound::GraphIO.load(%(graph 3\n0.5.constant.compress(threshold: 0.1, makeup: 2)))
+      expect(g.sample(4)).to eq(sig.compress(threshold: 0.1, makeup: 2).sample(4))
     end
 
     it 'prints Decibels levels back as k.db' do
       expect(sig.compress(threshold: -18.db, makeup: 2.db).to_ruby).to eq('0.5.constant.compress(threshold: -18.db, makeup: 2.db)')
 
-      g = nil
-      expect { g = fresh_site('sig.compress(threshold: -18, makeup: 2).limit(ceiling: -0.5)') }.to output(/write -18\.db.*\n.*write -0\.5\.db/).to_stderr
+      g = sig.compress(threshold: 0.125, makeup: 2).limit(ceiling: -0.5.db)
       code = g.to_ruby
-      expect(code).to eq('0.5.constant.compress(threshold: -18.db, makeup: 2).limit(ceiling: -0.5.db)')
+      expect(code).to eq('0.5.constant.compress(threshold: 0.125, makeup: 2).limit(ceiling: -0.5.db)')
       h = nil
       expect { h = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'levels')) }.not_to output.to_stderr
       expect(h.sample(800)).to eq(g.sample(800))
@@ -237,11 +282,16 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect(db(out[95999] / 0.5)).to be > -0.01
     end
 
-    it 'needs a sidechain and a negative amount' do
+    it 'needs a sidechain, and ducks by the magnitude of any dB amount (never boosts)' do
       expect { 1.constant.duck(nil) }.to raise_error(ArgumentError, /sidechain/)
-      expect {
-        expect { 1.constant.duck(1.constant, amount: 6) }.to raise_error(ArgumentError, /amount/)
-      }.to output(/amount: 6 is a linear gain/).to_stderr
+      expect { 1.constant.duck(1.constant, amount: 6) }.to raise_error(ArgumentError, /amount: 6 is a linear gain above 1.*write -6\.db/)
+      expect { 1.constant.duck(1.constant, amount: -6) }.to raise_error(ArgumentError, /amount: -6 is a linear gain/)
+
+      kick = Numo::SFloat.ones(4800)
+      d = ->(amount) { render(0.5.constant.duck(arr(kick), amount: amount, threshold: -30.db, attack: 0, hold: 0, knee: 0), 4800)[0][4000] }
+      expect(d.(12.db)).to eq(d.(-12.db))
+      expect(db(d.(-12.db) / 0.5)).to be_within(1e-4).of(-12)
+      expect(db(d.(0.25) / 0.5)).to be_within(1e-3).of(20 * Math.log10(0.25))
     end
   end
 
@@ -266,7 +316,7 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
   describe '#compand' do
     it 'follows linear points for steady levels and continues the end slopes' do
       [[-70, -100], [-60, -80], [-50, -60], [-40, -40], [-10, -18], [0, -15], [10, -12]].each do |level, expected|
-        node = (10.0**(level / 20.0)).constant.compand(-60 => -80, -40 => -40, -10 => -18, 0 => -15, attack: 0, release: 0)
+        node = (10.0**(level / 20.0)).constant.compand(-60.db => -80.db, -40.db => -40.db, -10.db => -18.db, 0.db => -15.db, attack: 0, release: 0)
         expect(db(node.sample(4)[-1])).to be_within(1e-3).of(expected), "level #{level}"
       end
     end
@@ -275,14 +325,14 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       pts = { -60 => -70, -30 => -30, 0 => -10 }
       pts.each do |level, expected|
         amp = 10.0**(level / 20.0) * Math.sqrt(2)
-        node = 40.hz.sine.at(amp).compand(pts, interpolation: :cubic, detector: :rms, rms: 0.25, attack: 0.3, release: 0.3)
+        node = 40.hz.sine.at(amp).compand(pts.to_h { |a, b| [a.db, b.db] }, interpolation: :cubic, detector: :rms, rms: 0.25, attack: 0.3, release: 0.3)
         out = render(node, 192000)[0][144000..]
         expect(db(Math.sqrt((out**2).mean))).to be_within(0.1).of(expected), "level #{level}"
       end
     end
 
     it 'takes per-segment shapes, a block, or a Transfer' do
-      a = 0.1.constant.compand([[-60, -80], [-40, -40, :smooth], [0, -12]], attack: 0, release: 0).sample(4)[-1]
+      a = 0.1.constant.compand([[-60.db, -80.db], [-40.db, -40.db, :smooth], [0.db, -12.db]], attack: 0, release: 0).sample(4)[-1]
       b = 0.1.constant.compand(attack: 0, release: 0) { |d| d < -50 ? d * 1.5 + 25 : d }.sample(4)[-1]
       t = MB::Sound::GraphNode::Dynamics::Transfer.points({ -40 => -40, 0 => -20 })
       c = 0.1.constant.compand(t, attack: 0, release: 0).sample(4)[-1]
@@ -292,10 +342,10 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     end
 
     it 'rejects decreasing outputs, unknown options, and mixed forms' do
-      expect { 1.constant.compand(-40 => -40, -20 => -50) }.to raise_error(ArgumentError, /decrease/)
-      expect { 1.constant.compand(-40 => -40, 0 => 0, bogus: 1) }.to raise_error(ArgumentError, /bogus/)
-      expect { 1.constant.compand(-40 => -40, 0 => 0) { |d| d } }.to raise_error(ArgumentError, /both/)
-      expect { 1.constant.compand([[-40, -40, :bounce], [0, 0]]) }.to raise_error(ArgumentError, /monotonic/)
+      expect { 1.constant.compand(-40.db => -40.db, -20.db => -50.db) }.to raise_error(ArgumentError, /decrease/)
+      expect { 1.constant.compand(-40.db => -40.db, 0.db => 0.db, bogus: 1) }.to raise_error(ArgumentError, /bogus/)
+      expect { 1.constant.compand(-40.db => -40.db, 0.db => 0.db) { |d| d } }.to raise_error(ArgumentError, /both/)
+      expect { 1.constant.compand([[-40.db, -40.db, :bounce], [0.db, 0.db]]) }.to raise_error(ArgumentError, /monotonic/)
     end
   end
 

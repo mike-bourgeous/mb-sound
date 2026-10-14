@@ -92,7 +92,7 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
     it 'has more cowbell' do
       plain = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'))
       more = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), more_cowbell: true)
-      even_more = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { level: 1 }, more_cowbell: 12)
+      even_more = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { level: 1 }, more_cowbell: 12.db)
       expect((more[:cowbell].knobs[:level] / plain[:cowbell].knobs[:level]).to_db).to be_within(0.01).of(6)
       expect(even_more[:cowbell].knobs[:level]).to be_within(1e-9).of(12.db)
 
@@ -100,7 +100,7 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
       expect(plain[:cowbell].knobs[:decay]).to eq(0.42)
       expect(more[:cowbell].knobs[:decay]).to be_within(1e-9).of(0.42 * Math.sqrt(2))
       expect(even_more[:cowbell].knobs[:decay]).to be_within(1e-9).of(0.84)
-      given = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { decay: 0.2 }, more_cowbell: -12)
+      given = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { decay: 0.2 }, more_cowbell: -12.db)
       expect(given[:cowbell].knobs[:decay]).to be_within(1e-9).of(0.1)
       expect(given[:cowbell].knobs[:level]).to be_within(1e-9).of(0.45 * -12.db)
     end

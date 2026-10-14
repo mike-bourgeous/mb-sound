@@ -15,9 +15,9 @@ module MB
       # cymbal, cowbell, low/mid/high_tom, low/mid/high_conga, claves,
       # maracas.  Knobs: tune (Hz), decay (s), tone (0..1), snappy (0..1,
       # snare and toms), level, and sigh (kick).  In grids, X is an
-      # accent (+:accent+ dB louder than x, 6 by default); MIDI files and
-      # live MIDI play velocity 127 +:accent+ dB louder than 64 (about
-      # linear velocity at 6 dB; see Drums.accented).
+      # accent (+:accent+ louder than x, 6.db by default); MIDI files and
+      # live MIDI play velocity 127 +:accent+ louder than 64 (about linear
+      # velocity at 6.db; see Drums.accented).
       #
       # Examples (bin/sound.rb):
       #     bg :drums, tr808(grid(16, kick: 'X..x..x...x.x...', snare: '....X.......X...', hat: 'x.xXx.x.x.xXx.x.').loop)

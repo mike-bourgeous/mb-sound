@@ -238,7 +238,7 @@ module MB::Sound
   def self.loop_church_setup(quantize: 0)
     master_gain(0.db)
     # (gain inside the chain: master_gain comes after it, past the limiter)
-    master { |mix| (mix * 2.5.db).compress(threshold: -16.db, ratio: 2.5, attack: 10.ms, release: 120.ms, makeup: 2).limit(ceiling: -1.db) }
+    master { |mix| (mix * 2.5.db).compress(threshold: -16.db, ratio: 2.5, attack: 10.ms, release: 120.ms, makeup: 2.db).limit(ceiling: -1.db) }
 
     track(:beat, q: 1) { |c| funk_beat(loop_church_drum_source(c)) }
     track(:perc, q: 1) { |c| funk_perc(loop_church_drum_source(c)) }

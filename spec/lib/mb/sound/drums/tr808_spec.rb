@@ -128,8 +128,8 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     expect(peak(free, 0.27, 0.35)).to be > 0.1 * peak(free, 0, 0.1)
   end
 
-  it 'makes every hit full level with accent: 0' do
-    data = collect(described_class.claves(hits, accent: 0), 1.5)
+  it 'makes every hit full level with accent: 0.db' do
+    data = collect(described_class.claves(hits, accent: 0.db), 1.5)
     expect(peak(data, 1, 1.5)).to be_within(0.01).of(peak(data, 0, 0.5))
   end
 
@@ -140,7 +140,7 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       MB::Sound::ArrayInput.new(data: [Numo::SFloat[*heights.flat_map { |h| [h, 0, 0, 0] }]])
     end
 
-    def levels(curve, accent = 6)
+    def levels(curve, accent = 6.db)
       out = MB::Sound::Drums.accented(impulses, accent, curve: curve).sample(16)
       heights.each_index.map { |i| (out[i * 4] / out[0]).to_db }
     end
@@ -149,7 +149,8 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       l = levels(:grid)
       expect(l[1]).to be_within(1e-4).of(-6)
       expect(l[2]).to be_within(0.01).of(-14.3)
-      expect(levels(:grid, 12)[1]).to be_within(1e-4).of(-12)
+      expect(levels(:grid, 12.db)[1]).to be_within(1e-4).of(-12)
+      expect(levels(:grid, 2)[1]).to be_within(1e-4).of(-20 * Math.log10(2)) # a bare number is a linear gain
     end
 
     it 'puts MIDI velocity 64 accent dB below 127 with :midi, about linear at 6 dB' do
@@ -157,11 +158,11 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       expect(l[1]).to be_within(0.05).of(-2.5)
       expect(l[2]).to be_within(1e-4).of(-6)
       expect(l[3]).to be_within(0.01).of(20 * Math.log10(16 / 127.0) * 1.008)
-      expect(levels(:midi, 12)[2]).to be_within(1e-4).of(-12)
+      expect(levels(:midi, 12.db)[2]).to be_within(1e-4).of(-12)
     end
 
     it 'raises for an unknown curve' do
-      expect { MB::Sound::Drums.accented(impulses, 6, curve: :log) }.to raise_error(ArgumentError, /Unknown velocity curve :log/)
+      expect { MB::Sound::Drums.accented(impulses, 6.db, curve: :log) }.to raise_error(ArgumentError, /Unknown velocity curve :log/)
     end
 
     it 'picks :grid for clips and grids, :midi for MIDI files, or the given curve' do

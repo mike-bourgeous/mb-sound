@@ -111,7 +111,7 @@ module MB::Sound
         kick: { tune: 58, decay: 0.32, tone: 0.65, level: 1.0 },
         snare: { tune: 205, decay: 0.16, tone: 0.7, snappy: 0.75, level: 1.0 },
         closed_hat: { decay: 0.045, tone: 0.75, level: 0.3 },
-        open_hat: { decay: 0.25, tone: 0.7, level: 0.3 }, accent: 8, velocity_curve: :grid, seed: seed
+        open_hat: { decay: 0.25, tone: 0.7, level: 0.3 }, accent: 8.db, velocity_curve: :grid, seed: seed
       ).reverb(:room, mix: 0.18).softclip(0.5, 0.95)
     }
   end
@@ -162,7 +162,7 @@ module MB::Sound
 
   # Ride, shaker, crash (+source+: a grid Kit with :ride, :maracas, :crash
   # rows, or MIDI with tr808's GM note map), highpassed at 300 Hz.
-  def self.jungle_perc(source, ride: { decay: 0.9, tone: 0.7, level: 0.4 }, shaker: { decay: 0.05, level: 0.3 }, accent: 6)
+  def self.jungle_perc(source, ride: { decay: 0.9, tone: 0.7, level: 0.4 }, shaker: { decay: 0.05, level: 0.3 }, accent: 6.db)
     tr808(
       source,
       cymbal: ride,

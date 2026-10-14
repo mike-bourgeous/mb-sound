@@ -10,7 +10,7 @@ module MB
         # decibels every +decay_s+ seconds, with the given +:sample_rate+.
         def initialize(sample_rate:, decay_db: -5.0, decay_s: 0.1)
           @sample_rate = sample_rate.to_f
-          @decay_db = decay_db.to_f
+          @decay_db = decay_db.is_a?(Decibels) ? decay_db.db_value : decay_db.to_f
           @decay_s = decay_s.to_f
           @decay_per_sample = @decay_db.db ** (1.0 / (@decay_s * @sample_rate))
 

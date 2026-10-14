@@ -23,7 +23,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     help.level          # the level check (keys: up/down 3 dB, left/right 1 dB, Enter, q)
-      #     help.level -18      # or set it directly (dBFS peak of the tone at the output)
+      #     help.level -18.db   # or set it directly (the tone's peak at the output)
       #     monitor_gain.to_db  # the trim it set (+12 here)
       module Level
         # The level check tone's peak at the output (dBFS) with no trim, and

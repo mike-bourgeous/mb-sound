@@ -244,7 +244,7 @@ module MB::Sound
   # takes it to -60 dB by about 200 ms.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
-    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
+    hat_decay: 0.035, accent: 6.db, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
     room_threshold: -12.db, room_decay: 0.35, room_size: DNB_DRUMS_ROOM_SIZE
   )
     settings = {
@@ -278,7 +278,7 @@ module MB::Sound
            else
              tr808(source, **settings)
            end
-    beat = beat.compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9, mix: parallel)
+    beat = beat.compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9.db, mix: parallel)
     glue ? beat.compress(**DNB_DRUMS_GLUE, **(glue == true ? {} : glue)) : beat
   end
 
@@ -293,7 +293,7 @@ module MB::Sound
   DNB_DRUMS_ROOM_SENDS = [:snare, :clap, :rimshot, :low_tom, :mid_tom, :high_tom].freeze
 
   # dnb_drums(glue: true)'s drum-bus compressor (#compress options).
-  DNB_DRUMS_GLUE = { threshold: -18.db, ratio: 3, knee: 6, attack: 0.01, release: 0.08, makeup: 4 }.freeze
+  DNB_DRUMS_GLUE = { threshold: -18.db, ratio: 3, knee: 6, attack: 0.01, release: 0.08, makeup: 4.db }.freeze
 
   # A ghost kick for sidechains: the drums' kick alone playing +source+,
   # never heard (duck a bass with it: `bass.duck(dnb_ghost_kick(kit))`).

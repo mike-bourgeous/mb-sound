@@ -93,7 +93,7 @@ module MB::Sound
     # Tracks: patches build each part from the clip a scene gives it
     track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 3, cutoff: cutoff, release: 3)) * 0.55 }
     track(:bass) { |clip| acid_voice(clip, cutoff: 260, reso: 0.72, decay: 0.9) * 0.6 }
-    track(:drums, q: 4) { |kit| tr808(kit, kick: { tune: 48, decay: 0.9 }, accent: 6) * 0.9 }
+    track(:drums, q: 4) { |kit| tr808(kit, kick: { tune: 48, decay: 0.9 }, accent: 6.db) * 0.9 }
     track(:lead) { |clip| clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 2.5, brightness: 8) }.delay(3.n16, feedback: 0.35, wet: 0.3) * 0.5 }
 
     # Scenes: whole states (tracks not named stop), and partial ones
