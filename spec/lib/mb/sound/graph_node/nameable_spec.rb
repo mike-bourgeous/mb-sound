@@ -1,5 +1,5 @@
 RSpec.describe(MB::Sound::GraphNode::Nameable) do
-  let(:obj) { 'Test'.tap { |o| o.extend(MB::Sound::GraphNode::Nameable) } }
+  let(:obj) { String.new('Test').tap { |o| o.extend(MB::Sound::GraphNode::Nameable) } }
 
   it 'allows an object to be named' do
     expect(obj.named?).to eq(false)
