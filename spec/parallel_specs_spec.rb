@@ -78,6 +78,24 @@ RSpec.describe(ParallelSpecs) do
     expect(output).to include('rspec ./spec/a_spec.rb:3 # spec/a_spec.rb works')
   end
 
+  it 'lists stray warnings with the examples that printed them, and reported ones apart' do
+    write_json(0, [example('spec/a_spec.rb', 0.5, 'failed')])
+    File.write(File.join(out_dir, '0.warnings.json'), JSON.generate([
+      { 'message' => "oops\n", 'origin' => 'lib/x.rb:3', 'example' => './spec/a_spec.rb:3' },
+      { 'message' => "oops\n", 'origin' => 'lib/x.rb:3', 'example' => './spec/a_spec.rb:9' },
+      { 'message' => "y.rb:1: warning: old\n", 'category' => 'deprecated', 'process' => 'bin/y.rb' },
+      { 'message' => "z.rb:2: warning: The class Z reached 8 shape variations\n", 'category' => 'performance', 'report_only' => true },
+    ]))
+
+    ok, output = report([['spec/a_spec.rb']], [status(code: 1)])
+    expect(ok).to eq(false)
+    expect(output).to include("Reported warnings (1; not failing")
+    expect(output).to include('  warning: The class Z reached 8 shape variations [performance]')
+    expect(output).to include("Stray warnings (2;")
+    expect(output).to include("  lib/x.rb:3: oops\n    from ./spec/a_spec.rb:3, ./spec/a_spec.rb:9")
+    expect(output).to include("  y.rb:1: warning: old [deprecated] (in bin/y.rb)\n    from outside examples")
+  end
+
   it 'makes rake spec:parallel exit nonzero when a process crashes' do
     rakefile = File.read(File.expand_path('../Rakefile', __dir__))
     expect(rakefile).to match(/ok = ParallelSpecs\.run\(.*\n\s*abort .* unless ok/)

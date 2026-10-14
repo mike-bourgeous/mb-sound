@@ -107,9 +107,9 @@ RSpec.configure do |config|
       File.write(path, JSON.pretty_generate((WarningGuard.all + WarningGuard.reported).map(&:to_h)) + "\n")
     elsif WarningGuard.reported.any?
       # (spec:parallel lists them from the report files instead)
-      texts = WarningGuard.reported.map { |r| r.to_s.sub(/\A\S+:\d+: /, '') }.uniq
+      texts = WarningGuard.reported.map { |r| "#{r.message.lines.first.chomp.sub(/\A\S+:\d+: /, '')} [#{r.category}]" }.uniq.sort
       puts "\nRuby #{WarningGuard::REPORT_ONLY.map { |c| ":#{c}" }.join('/')} warnings (reported, not failing; see spec/support/warning_guard.rb):"
-      texts.each { |t| puts "  #{t.lines.first.chomp}" }
+      texts.each { |t| puts "  #{t}" }
     end
 
     unless outside.empty?
