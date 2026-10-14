@@ -82,7 +82,7 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       expect { m.kit(MB::Sound.grid(16, kick: 'x'), kick: { tun: 4 }) }.to raise_error(ArgumentError, /Unknown kick knob :tun.*:tune/)
       expect { m.kit(MB::Sound.grid(16, kick: 'x'), snare: {}) }.to raise_error(ArgumentError, /Unknown kit voice :snare/)
       expect { MB::Sound.kit { voice(:kick, noise: 1) { t } } }.to raise_error(ArgumentError, /noise.*Hit method/)
-      expect { MB::Sound.kit { voice(:kick, accent: 1) { t } } }.to raise_error(ArgumentError, /accent/)
+      expect { MB::Sound.kit { voice(:kick, accent: 1.db) { t } } }.to raise_error(ArgumentError, /accent/)
       expect { MB::Sound.kit { voice(:kick) } }.to raise_error(ArgumentError, /needs a block/)
       expect { MB::Sound.kit { voice(:kick) { t }; voice(:kick) { t } } }.to raise_error(ArgumentError, /already/)
       expect { MB::Sound.kit { voice(:kick) { 5 } }.kit(MB::Sound.grid(16, kick: 'x')) }.to raise_error(ArgumentError, /not a graph node/)
@@ -96,7 +96,7 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       x = collect(m.kit(g), 0.5)
       expect(x[0]).to be_within(1e-6).of(0.5)
       expect(20 * Math.log10(x[0] / x[2 * step])).to be_within(1e-3).of(6)
-      y = collect(m.kit(g, kick: { accent: 12, level: 1 }), 0.5)
+      y = collect(m.kit(g, kick: { accent: 12.db, level: 1 }), 0.5)
       expect(20 * Math.log10(y[0] / y[2 * step])).to be_within(1e-3).of(12)
     end
 
@@ -157,7 +157,7 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
         kit = trigger_kit.kit(MB::Sound.grid(16, kick: 'x.F.'), flam: 10.ms)
         x = collect(kit, 0.6)
         expect(x.ne(0).where.to_a).to eq([0, 2 * step - 480, 2 * step])
-        grace = MB::Sound::Drums::Flams::GRACE**(MB::Sound::Drums::DEFAULT_ACCENT / -(20 * Math.log10(0.75)))
+        grace = MB::Sound::Drums::Flams::GRACE**(MB::Sound::Drums::DEFAULT_ACCENT.db_value / -(20 * Math.log10(0.75)))
         expect(x[2 * step - 480] / x[2 * step]).to be_within(1e-5).of(grace)
 
         # The main hit lands where an unmarked hit would

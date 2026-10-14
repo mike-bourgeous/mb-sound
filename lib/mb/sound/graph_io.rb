@@ -507,6 +507,7 @@ end
 require_relative 'graph_io/registry'
 require_relative 'graph_io/document'
 require_relative 'graph_io/loader'
+require_relative 'graph_io/old_decibels'
 require_relative 'graph_io/trusted_code'
 require_relative 'graph_io/file_guard'
 require_relative 'graph_io/assets'

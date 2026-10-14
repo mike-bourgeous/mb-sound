@@ -18,10 +18,11 @@ module MB
       # Decibels value (`-12.db`) is read as exactly that many dB.  Bare
       # numbers are linear gains, as everywhere else (`threshold: 0.25` is
       # about -12 dB, `makeup: 2` +6 dB).  A negative bare number is a
-      # mistake (MB::Sound.live_error: it raises in scripts and specs; live
-      # mode warns and uses its absolute value), and so is a bare 0 where
-      # -inf dB means nothing (thresholds, ceilings, makeup, +max_gain+,
-      # compander points; live mode reads it as 1, 0 dB).  A linear level
+      # mistake (it raises in scripts and specs; live mode reads it as dB
+      # with a warning), and so is a bare 0 where -inf dB means nothing
+      # (thresholds, ceilings, makeup, +max_gain+, compander points;
+      # MB::Sound.live_error, live mode reads it as 0 dB).  See
+      # Decibels.gain_of and .db_of.  A linear level
       # above 1 (louder than full scale, e.g. `threshold: 6`, +15.6 dB)
       # warns once per call site.  Until 2026-10-14 bare numbers at 0 and
       # below meant dB here; graph documents older than format 3 load with
@@ -42,21 +43,17 @@ module MB
       #     mix.squeeze(:eleven).limit
       module DynamicsMethods
         # A level as a linear gain: a Decibels value (-6.db) is its gain, a
-        # bare number a linear gain (see the Units note above).  +zero+
-        # allows a bare 0 (-inf dB: a full cut, for +range+ and +amount+).
+        # bare number a linear gain (Decibels.gain_of; see the Units note
+        # above).  +zero+ allows a bare 0 (-inf dB: a full cut, for +range+
+        # and +amount+).
         def self.level(value, name, zero: false)
-          return checked(value, name).to_f if value.is_a?(Decibels)
-
-          linear(value, name, zero: zero, above_one: true)
+          Decibels.gain_of(value, name, zero: zero, above_one: true)
         end
 
         # A level in dB: a Decibels value (-6.db) is its exact dB value, a
-        # bare number a linear gain (see the Units note above).
+        # bare number a linear gain (Decibels.db_of).
         def self.level_db(value, name, zero: false)
-          return checked(value, name).db_value if value.is_a?(Decibels)
-
-          v = linear(value, name, zero: zero, above_one: true)
-          v == 0 ? -Float::INFINITY : 20.0 * Math.log10(v)
+          Decibels.db_of(value, name, zero: zero, above_one: true)
         end
 
         # A gain or compander point in dB (+makeup+, +min_gain+/+max_gain+,
@@ -64,10 +61,7 @@ module MB
         # number a linear gain (`makeup: 2` is +6 dB), without the warning
         # above full scale (gains above 1 are what makeup is for).
         def self.gain_db(value, name, zero: false)
-          return checked(value, name).db_value if value.is_a?(Decibels)
-
-          v = linear(value, name, zero: zero, above_one: false)
-          v == 0 ? -Float::INFINITY : 20.0 * Math.log10(v)
+          Decibels.db_of(value, name, zero: zero)
         end
 
         # A dB number for the classes under the DSL (Dynamics, Transfer),
@@ -90,53 +84,6 @@ module MB
           compand: %i[makeup min_gain max_gain], compander: %i[makeup min_gain max_gain],
           squeeze: %i[gain max_gain],
         }.freeze
-
-        # Linear levels this far above 1 (full scale) get the "louder than
-        # full scale" warning; a little above 1 is fine (e.g. 1.0001).
-        LINEAR_WARN_ABOVE = 1.0
-
-        @level_warnings = {}
-        @level_lock = Mutex.new
-
-        # Raises unless +value+ is a real number (not NaN); returns it.
-        def self.checked(value, name)
-          unless value.is_a?(Numeric) && value.real? && !value.to_f.nan?
-            raise ArgumentError, "#{name} must be a number (dB like -6.db, or a linear gain; got #{value.inspect})"
-          end
-          value
-        end
-
-        # A bare number as a linear gain (see the Units note above): a
-        # negative one goes through MB::Sound.live_error (live mode uses its
-        # absolute value), a zero too unless +zero+ (live mode: 1), and with
-        # +above_one+ a gain above full scale warns once per call site.
-        def self.linear(value, name, zero:, above_one:)
-          v = checked(value, name).to_f
-          if v < 0
-            MB::Sound.live_error(ArgumentError.new(
-              "#{name}: #{value.inspect} is a linear gain, and gains can't be negative; for #{value.inspect} dB write #{value.inspect}.db"
-            ))
-            v = -v
-          end
-          if v == 0 && !zero
-            MB::Sound.live_error(ArgumentError.new("#{name}: 0 is a linear gain of zero (-inf dB); for 0 dB write 0.db"))
-            v = 1.0
-          end
-          if above_one && v > LINEAR_WARN_ABOVE && !Thread.current[:mb_sound_quiet_levels]
-            warn_level(:above_one, "#{name}: #{value.inspect} is a linear gain of #{MB::M.sigfigs(20.0 * Math.log10(v), 3)} dB, above full scale; did you mean #{(-value.abs).inspect}.db?")
-          end
-          v
-        end
-
-        # Runs the block without the "above full scale" warnings (graph
-        # documents load quietly).
-        def self.quiet_levels
-          old = Thread.current[:mb_sound_quiet_levels]
-          Thread.current[:mb_sound_quiet_levels] = true
-          yield
-        ensure
-          Thread.current[:mb_sound_quiet_levels] = old
-        end
 
         # Arguments for dynamics method +name+ from a graph document older
         # than format 3 (see GraphIO::FORMAT), which wrote dB levels as bare
@@ -174,19 +121,6 @@ module MB
             kwargs = kwargs.to_h { |k, v| k.is_a?(Symbol) ? [k, v] : point.([k, v]) }
           end
           [args, kwargs, changed]
-        end
-
-        # The library's own directory, skipped when looking for call sites.
-        LIBRARY_DIR = File.expand_path('../../..', __dir__) + File::SEPARATOR
-
-        def self.warn_level(kind, message)
-          site = caller_locations(2).find { |l|
-            path = l.absolute_path || l.path
-            !path.start_with?(LIBRARY_DIR) && !path.start_with?('<internal:')
-          }
-          where = site ? "#{site.path}:#{site.lineno}" : '(unknown)'
-          first = @level_lock.synchronize { @level_warnings[[where, kind, message]] ? false : (@level_warnings[[where, kind, message]] = true) }
-          warn "#{where}: warning: #{message}" if first
         end
 
         # A compressor ratio as a slope above the threshold (1/ratio).

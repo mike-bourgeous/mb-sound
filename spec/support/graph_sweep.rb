@@ -203,7 +203,7 @@ module GraphSweep
       ['ease (CurveShaper)', ->(c) { c.sig.ease(:elastic) + c.sig.aease(:smoothstep) + c.sig.ease(:bounce, edges: :mirror) }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
       ['formant (Formant) constant and morphing', ->(c) {
-        c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0, 50], [900, -6, 60], [2500, -12, 100], [3300, -20, 120], [4000, -30, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
+        c.sig.formant(:a) + c.sig.formant(:a, :e, [[300, 0.db, 50], [900, -6.db, 60], [2500, -12.db, 100], [3300, -20.db, 120], [4000, -30.db, 150]], morph: c.mod(0, 1), shift: c.mod(-5, 5, 3), width: c.mod(0.5, 1.5, 2), voice: :soprano)
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) }],
 
@@ -237,7 +237,7 @@ module GraphSweep
         c.sig.reverb(room_size: 0.2, decay: 0.4, mod: { depth: c.mod(0, 0.001), rate: c.mod(0.2, 2) }, lowpass: c.mod(500, 8000), freeze: c.mod(0, 1), stretch: c.mod(0.8, 1.2), shimmer: c.mod(0, 1), drive: c.mod(0, 3), drive_mode: :fold, duck: c.mod(0, 12), gate: c.mod(0, 0.1))
       }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
-      ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60) }],
+      ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
 
       # Dynamics
       ['compress (rms, sidechain, lookahead, hold, upward, node times)', ->(c) {

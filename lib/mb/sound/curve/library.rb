@@ -68,9 +68,10 @@ module MB
       # Envelope's signed-dB curve (see MB::Sound::Envelope): (1 - e^(cx)) /
       # (1 - e^c) with c = -+db+ ln(10) / 20.  Positive dB moves fast first
       # (+60 is like an analog decay), 0 is linear, negative moves slowly
-      # first.  Curve.db(d).reverse equals Curve.db(-d).
+      # first.  Curve.db(d).reverse equals Curve.db(-d).  +db+ is a number
+      # of dB or a Decibels value (`Curve.db(60.db)`, read as 60).
       def self.db(db)
-        db = db.to_f
+        db = db.is_a?(Decibels) ? db.db_value : db.to_f
         c = db * DB_SCALE
         return linear if c.abs < LINEAR_LIMIT
 
@@ -83,6 +84,7 @@ module MB
       # smoothstep of Curve.db(+db+), so zero slope at both ends, skewed
       # toward the start for positive dB.  Curve.s(0) is the smoothstep.
       def self.s(db = 0)
+        db = db.db_value if db.is_a?(Decibels)
         return smoothstep if (db.to_f * DB_SCALE).abs < LINEAR_LIMIT
 
         p = Curve.db(db)

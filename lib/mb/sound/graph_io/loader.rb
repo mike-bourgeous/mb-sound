@@ -849,13 +849,13 @@ module MB
             kwargs[:seed] = drawn.seed
           end
 
-          args, kwargs = old_db_arguments(name, args, kwargs) if @old_db && receiver.is_a?(GraphNode::DynamicsMethods)
+          args, kwargs = old_db_arguments(receiver, name, args, kwargs) if @old_db
 
           begin
             # Documents load without the dynamics "above full scale"
             # warnings, and keep delay(seconds:) loading, so loading them
             # doesn't warn
-            result = GraphNode::DynamicsMethods.quiet_levels do
+            result = Decibels.quietly do
               GraphNode::DelayMethods.quiet_seconds do
                 if drawn
                   # Recorded as drawn, so saving the graph again marks it again
@@ -876,15 +876,14 @@ module MB
           result
         end
 
-        # Arguments for dynamics method +name+ in a document older than
-        # format 3, whose bare dB levels and gains become the Decibels they
-        # meant (GraphNode::DynamicsMethods.from_old_document), with one
-        # warning per document.
-        def old_db_arguments(name, args, kwargs)
-          args, kwargs, changed = GraphNode::DynamicsMethods.from_old_document(name, args, kwargs)
+        # Arguments for a call in a document older than format 3, whose
+        # bare dB values become the Decibels they meant (OldDecibels), with
+        # one warning per document.
+        def old_db_arguments(receiver, name, args, kwargs)
+          args, kwargs, changed = OldDecibels.convert(receiver, name, args, kwargs)
           if changed && !@old_db_warned
             @old_db_warned = true
-            warn "#{@label}: warning: format #{@document.format} document: bare dynamics levels and gains (like makeup: 9) are read as dB, as when it was saved; " \
+            warn "#{@label}: warning: format #{@document.format} document: bare dB values (like makeup: 9 or accent: 6) are read as dB, as when it was saved; " \
               "save it again to write them as 9.db (bare numbers are linear gains since format #{GraphIO::FORMAT})"
           end
           [args, kwargs]

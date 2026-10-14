@@ -357,7 +357,7 @@ RSpec.describe MB::Sound::Help do
     end
 
     it 'sets the level directly' do
-      expect(MB::U.remove_ansi(MB::Sound.help.level(-18).to_s)).to include('-18.0 dBFS').and include('monitor trim +12.0 dB')
+      expect(MB::U.remove_ansi(MB::Sound.help.level(-18.db).to_s)).to include('-18.0 dBFS').and include('monitor trim +12.0 dB')
       expect(MB::Sound::Help::Level.db).to eq(-18)
       expect(MB::Sound::Help::Level.save(5)).to eq(MB::Sound::Help::Level::RANGE.end)
     end

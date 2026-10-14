@@ -25,8 +25,10 @@ module MB
         #
         # Filter types are the cookbook responses (:lowpass, :highpass,
         # :bandpass (0 dB peak), :bandpass_skirt (peak gain = quality),
-        # :notch, :allpass, :peak, :lowshelf, :highshelf; +gain:+ is a linear
-        # gain for the last three and an output gain for the bandpasses) and
+        # :notch, :allpass, :peak, :lowshelf, :highshelf; +gain:+ is a gain
+        # for the last three and an output gain for the bandpasses: `6.db`
+        # exactly, a bare number linear, or a node of linear gains; see
+        # Decibels.gain_of) and
         # the four-pole types (FOUR_POLE_TYPES, see #lp4).
         #
         # Cookbook responses (types, and Cookbook objects such as
@@ -96,14 +98,14 @@ module MB
 
             if structure == :biquad
               raise ArgumentError, 'The biquad structure takes a numeric gain: (use the default SVF for gain nodes)' if gain && !gain.is_a?(Numeric)
-              f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
+              f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain && Decibels.db_of(gain, 'gain'))
               MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })
             else
               raise ArgumentError, "Invalid filter type #{filter_or_type.inspect}" unless MB::Sound::Filter::SVF::FILTER_TYPE_IDS.include?(f)
               gain_node = gain.respond_to?(:sample) ? gain : nil
               f = MB::Sound::Filter::SVF.new(
                 filter_or_type, sample_rate, 1, quality: 1,
-                gain: gain_node ? 1.0 : gain&.to_f
+                gain: gain_node ? 1.0 : gain && Decibels.gain_of(gain, 'gain')
               )
               inputs = { cutoff: cutoff, quality: quality }
               inputs[:gain] = gain_node if gain_node
@@ -288,10 +290,11 @@ module MB
               bandwidth = 1.0 / 3.0
             end
 
+            db_gain = Decibels.db_of(gain, 'gain')
             if structure == :biquad
-              MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+              MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: db_gain, bandwidth_oct: bandwidth)
             else
-              MB::Sound::Filter::SVF.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+              MB::Sound::Filter::SVF.new(:peak, self.sample_rate, freq, db_gain: db_gain, bandwidth_oct: bandwidth)
             end
           }
 
@@ -360,7 +363,7 @@ module MB
               freq = f_hz * (1 + r * idx)
 
               if freq.respond_to?(:sample) || q.respond_to?(:sample)
-                f = filter_class.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: g.to_db)
+                f = filter_class.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: Decibels.db_of(g, 'gain'))
                 {
                   filter: f,
                   inputs: {
@@ -369,7 +372,7 @@ module MB
                   },
                 }
               else
-                filter_class.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: g.to_db)
+                filter_class.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: Decibels.db_of(g, 'gain'))
               end
             end
           )

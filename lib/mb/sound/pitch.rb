@@ -469,12 +469,13 @@ module MB
         MB::Sound::Filter::Cookbook.new(:highpass, @sample_rate, frequency, quality: quality)
       end
 
-      # A peaking filter at this frequency with +gain+ (linear, default 1)
+      # A peaking filter at this frequency with +gain+ (`3.db`, or a bare
+      # linear gain; default 1)
       # and a bandwidth of +octaves+ (a number or an Interval, `1.oct`).
       # `500.hz.at(3.db).peak` uses the
       # amplitude as the gain (see Tone#peak).
       def peak(octaves: 0.5, gain: 1.0)
-        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: gain.to_db)
+        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, frequency, bandwidth_oct: Interval.octaves(octaves).to_f, db_gain: Decibels.db_of(gain, 'gain'))
       end
 
       # A LinearFollower that follows full-scale changes no faster than this

@@ -244,7 +244,7 @@ module MB::Sound
   # takes it to -60 dB by about 200 ms.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
-    hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
+    hat_decay: 0.035, accent: 6.db, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
     room_threshold: -12.db, room_decay: 0.35, room_size: DNB_DRUMS_ROOM_SIZE
   )
     settings = {

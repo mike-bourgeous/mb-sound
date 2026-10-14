@@ -417,7 +417,7 @@ module MB::Sound
         kit,
         kick: SMALL_TALK_KICK, clap: { decay: 0.3, tone: 0.75, level: 0.75 },
         closed_hat: { decay: 0.035, tone: 0.6, level: 0.4 }, open_hat: { decay: 0.22 }, cymbal: { decay: 1.0, tone: 0.65 },
-        maracas: { level: 0.3 }, low_tom: { decay: 0.5 }, mid_tom: { decay: 0.45 }, accent: 6
+        maracas: { level: 0.3 }, low_tom: { decay: 0.5 }, mid_tom: { decay: 0.45 }, accent: 6.db
       )
       # Parallel ("New York") compression: the hits keep their shape, the
       # room between them comes up

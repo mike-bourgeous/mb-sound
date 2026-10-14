@@ -28,7 +28,7 @@ module MB::Sound
         'beat = grid(16, kick: "x...x...", hat: "x.x.x.x.").loop.named(:beat)',
       ],
       'kit fills into tr808' => [
-        -> { tr808(grid(16, kick: 'x...x...', clap: '....x...').fill { grid(16, clap: '......xx') }.nofill(:kick).loop, accent: 6) },
+        -> { tr808(grid(16, kick: 'x...x...', clap: '....x...').fill { grid(16, clap: '......xx') }.nofill(:kick).loop, accent: 6.db) },
         "fill {\n  grid(16, clap: \"......xx\")\n}.nofill(:kick).loop",
       ],
       'kit rows taken with kit.rows' => [

@@ -14,7 +14,7 @@ module MB
       # How much louder (dB) a grid accent (X, velocity 1) is than a plain
       # hit (x, velocity Sequence::Clip::DEFAULT_VELOCITY) by default, and a
       # MIDI velocity of 127 than 64; see .accented.
-      DEFAULT_ACCENT = 6.0
+      DEFAULT_ACCENT = 6.db
 
       # The level (dB) of the default grid velocity (0.75) relative to 1.
       DEFAULT_VELOCITY_DB = 20 * Math.log10(Sequence::Clip::DEFAULT_VELOCITY)
@@ -60,16 +60,19 @@ module MB
       #   +accent+ dB below 127; e = accent / 5.95, so the default 6 dB is
       #   about linear in amplitude (velocity ** 1.008: 96 is -2.5 dB, 32
       #   -12 dB, 16 -18 dB).
-      # An accent of 0 makes every hit full level.  See .velocity_curve.
+      # +accent+ is a gain (`6.db`; a bare number is a linear gain, so 2 is
+      # about 6 dB; see Decibels.db_of).  An accent of 0.db makes every hit
+      # full level.  See .velocity_curve.
       def accented(trigger, accent = DEFAULT_ACCENT, curve: :grid)
         reference = VELOCITY_REFERENCES.fetch(curve) {
           raise ArgumentError, "Unknown velocity curve #{curve.inspect} (curves: #{VELOCITY_REFERENCES.keys.map(&:inspect).join(', ')})"
         }
-        exponent = accent.to_f / -(20 * Math.log10(reference))
+        accent_db = Decibels.db_of(accent, 'accent')
+        exponent = accent_db / -(20 * Math.log10(reference))
         raise ArgumentError, "Accent must be 0 dB or more (got #{accent.inspect})" if exponent < 0
         return trigger if exponent == 1
 
-        (trigger.aabs ** [exponent, 1e-3].max).named("accent #{MB::M.sigfigs(accent.to_f, 3)} dB")
+        (trigger.aabs ** [exponent, 1e-3].max).named("accent #{MB::M.sigfigs(accent_db, 3)} dB")
       end
 
       # The velocity curve (see .accented) for drum +sources+ (one or an

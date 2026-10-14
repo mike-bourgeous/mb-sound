@@ -181,7 +181,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
 
     it 'has independent hiss on each side' do
-      l, r = render(0.constant.chorus(hiss: -40), 0.2)
+      l, r = render(0.constant.chorus(hiss: -40.db), 0.2)
       expect(l.abs.max).to be_within(6.db).of(-40.db)
       expect(l).not_to eq(r)
     end
@@ -294,7 +294,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
 
     it 'fades the hiss out once an upstream Ringdown has ended' do
       input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(4800)]).ringdown
-      l, r = render(input.chorus(hiss: -40, seed: 1), 0.5)
+      l, r = render(input.chorus(hiss: -40.db, seed: 1), 0.5)
       expect(l[0...4800].abs.max).to be > -46.db
       tail = (0.00535 + MB::Sound::GraphNode::Chorus::TAIL_EXTRA) * 48000
       expect(l[(4800 + tail.ceil + 480)..].abs.max).to eq(0)
@@ -302,7 +302,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
 
     it 'keeps the hiss for inputs that never end' do
-      l, _ = render(0.constant.chorus(hiss: -40), 1)
+      l, _ = render(0.constant.chorus(hiss: -40.db), 1)
       expect(l[-4800..].abs.max).to be > -46.db
     end
   end
@@ -332,8 +332,8 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
       end
       # The bilinear transform cuts more near Nyquist (24 kHz)
       expect(wet_db(12000, cutoff: 5420)).to be_between(analog_db(poles, 12000) - 7, analog_db(poles, 12000))
-      expect(wet_db(5420, bbd: true, hiss: -200)).to be_within(0.6).of(-3)
-      expect(wet_db(500, bbd: true, hiss: -200)).to be_within(0.1).of(0)
+      expect(wet_db(5420, bbd: true, hiss: -200.db)).to be_within(0.6).of(-3)
+      expect(wet_db(500, bbd: true, hiss: -200.db)).to be_within(0.1).of(0)
     end
 
     it 'scales every pole with cutoff:, also as a node' do

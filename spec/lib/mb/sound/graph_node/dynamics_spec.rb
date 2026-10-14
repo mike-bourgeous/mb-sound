@@ -186,14 +186,16 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect(db(ducked[-1] / 0.5)).to be_within(1e-3).of(-30) # unlimited by amount: 1 dB per dB above -30 dB
     end
 
-    it 'warns in live mode and uses the absolute value (or 0 dB for 0)' do
+    it 'reads bare negative numbers as dB in live mode, with a warning (and 0 as 0 dB)' do
       MB::Sound.live = true
-      a = b = c = nil
-      expect { a = fresh_site('sig.compress(threshold: -0.1, ratio: Float::INFINITY, knee: 0, attack: 0, release: 0)').sample(4) }.to output(/ArgumentError: threshold: -0\.1 is a linear gain.*live mode: ignored/).to_stderr
-      expect(a).to eq(sig.compress(threshold: 0.1, ratio: Float::INFINITY, knee: 0, attack: 0, release: 0).sample(4))
-      expect { b = fresh_site('sig.compress(threshold: -20.db, makeup: 0, attack: 0, release: 0)').sample(4) }.to output(/makeup: 0 is a linear gain of zero/).to_stderr
+      a = b = nil
+      expect { a = fresh_site('2.times.map { sig.compress(threshold: -20, makeup: -1, attack: 0, release: 0) }.last').sample(4) }.to output(
+        /\Alevel_site_\d+\.rb:1: warning: threshold: -20 is read as -20 dB in live mode; write -20\.db \(bare numbers are linear gains\)\n.*makeup: -1 is read as -1 dB in live mode.*\n\z/
+      ).to_stderr
+      expect(a).to eq(sig.compress(threshold: -20.db, makeup: -1.db, attack: 0, release: 0).sample(4))
+      expect { b = fresh_site('sig.compress(threshold: -20.db, makeup: 0, attack: 0, release: 0)').sample(4) }.to output(/makeup: 0 is a linear gain of zero.*live mode: ignored/).to_stderr
       expect(b).to eq(sig.compress(threshold: -20.db, makeup: 0.db, attack: 0, release: 0).sample(4))
-      expect { c = fresh_site('sig.compress(threshold: -2)') }.to output(/live mode: ignored.*\n.*threshold: -2 is a linear gain of 6\.02 dB, above full scale; did you mean -2\.db\?/).to_stderr
+      expect { fresh_site('sig.compand(-60 => -80, 0 => -12)') }.to output(/compand point input: -60 is read as -60 dB/).to_stderr
     ensure
       MB::Sound.live = false
     end
@@ -230,7 +232,7 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
         0.5.constant.compress(threshold: -20, makeup: 3, attack: 0, release: 0).compand({ -60 => -80, 0 => -12 }, min_gain: -Float::INFINITY, max_gain: 6).limit(ceiling: -1).duck(1.constant, amount: 0)
       DOC
       g = nil
-      expect { g = MB::Sound::GraphIO.load(old) }.to output(/format 2 document: bare dynamics levels and gains .* read as dB.*\n\z/).to_stderr
+      expect { g = MB::Sound::GraphIO.load(old) }.to output(/format 2 document: bare dB values .* read as dB.*\n\z/).to_stderr
       expected = sig.compress(threshold: -20.db, makeup: 3.db, attack: 0, release: 0).compand({ -60.db => -80.db, 0.db => -12.db }, max_gain: 6.db).limit(ceiling: -1.db).duck(1.constant, amount: 0.db)
       expect(g.sample(800)).to eq(expected.sample(800))
       expect(g.to_ruby).to include('compress(threshold: -20.db, makeup: 3.db', 'compand({ -60.db => -80.db, 0.db => -12.db }, max_gain: 6.db)', 'limit(ceiling: -1.db)', 'amount: 0.db')

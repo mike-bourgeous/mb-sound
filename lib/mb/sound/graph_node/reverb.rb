@@ -654,9 +654,12 @@ module MB
         # +:freeze:+ - 0..1: 1 mutes the input and holds the tail (loop gain
         #              1, damping and highpass bypassed).
         # After the network (on the wet sound, keyed by the input's peak):
-        # +:duck:+ - dB to lower the wet sound while the input is above
-        #            +:threshold:+ (falls in 10 ms, recovers over 300 ms),
-        #            so the reverb blooms in the gaps.
+        # +:duck:+ - the wet sound's gain while the input is above
+        #            +:threshold:+ (e.g. -12.db; a bare number is a linear
+        #            gain, see Decibels.db_of; a node gives dB of
+        #            reduction, 12 for -12 dB), falling in 10 ms and
+        #            recovering over 300 ms, so the reverb blooms in the
+        #            gaps.
         # +:gate:+ - seconds (or a Length) the wet sound stays open after
         #            the input falls below +:threshold:+, then closes over
         #            20 ms: the classic gated reverb (big room or plate,
@@ -816,7 +819,7 @@ module MB
                 freeze: freeze == true ? 1 : (freeze || 0),
                 stretch: stretch,
                 crush: crush || 0,
-                duck: duck || 0,
+                duck: duck_db(duck),
                 gate: gate.is_a?(GraphNode) ? gate : MB::Sound::Length.seconds(gate || 0, sample_rate: @sample_rate).to_f,
                 threshold: threshold,
                 **modulation_params(modulation, MODULATION, ''),
@@ -828,7 +831,7 @@ module MB
               shimmer_window: MB::Sound::Length.seconds(shimmer_window, sample_rate: @sample_rate).to_f,
               max_stretch: max_stretch,
               seed: (seed || 0) * 1_000_003 + 0x5EED,
-              dynamics: [duck, gate].any? { |v| v.is_a?(GraphNode) || (v && v != 0) },
+              dynamics: [duck_db(duck), gate].any? { |v| v.is_a?(GraphNode) || (v && v != 0) },
             )
           end
 
@@ -1082,6 +1085,18 @@ module MB
         end
 
         private
+
+        # The kernel's duck amount (dB of reduction, 0 for none) for
+        # +duck+: nil or a node (dB of reduction) as is, else a gain at or
+        # below 0 dB (-12.db, or a linear gain; Decibels.db_of).
+        def duck_db(duck)
+          return 0 if duck.nil?
+          return duck if duck.is_a?(GraphNode)
+
+          d = Decibels.db_of(duck, 'duck', zero: true)
+          raise ArgumentError, "Reverb duck: is the wet gain while ducked, at most 0 dB (got #{duck.inspect}; for 12 dB of ducking write -12.db)" if d > 0
+          d == 0 ? 0 : -d
+        end
 
         # A cutoff (Hz number, Pitch, or node) for the kernel, 0 if nil.
         def hz(v)

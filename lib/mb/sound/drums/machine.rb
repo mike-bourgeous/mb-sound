@@ -171,7 +171,7 @@ module MB
         # Knobs per voice as Hashes (`kick: { tune: 45 }`; aliases work;
         # numbers, Lengths, or nodes), each voice's own knobs plus +level+,
         # +accent+, +velocity_curve+, and +flam+.  For the whole kit:
-        # - +accent:+ dB louder for a grid X than an x (or MIDI 127 than 64;
+        # - +accent:+ how much louder (6.db) a grid X is than an x (or MIDI 127 than 64;
         #   see Drums.accented), +velocity_curve:+ :grid or :midi (by
         #   default from the source);
         # - +shuffle:+ swing for grid and clip sources: 0..6 like a TR-909
