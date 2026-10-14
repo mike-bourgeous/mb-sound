@@ -214,6 +214,66 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
       end
     end
 
+    describe '#catch_up' do
+      let(:source) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(200_000).seq]) }
+
+      it 'skips the shared buffer a lockstep branch has not read' do
+        a, b = source.tee
+        a.sample(10)
+        expect(b.catch_up).to eq(10)
+        expect(b.catch_up).to eq(0)
+        x = a.sample(10)
+        y = b.sample(10)
+        expect(x).to equal(y) # still in lockstep
+        expect(y).to eq(Numo::SFloat.new(10).seq + 10)
+      end
+
+      it 'skips to the furthest-ahead branch while buffered, and returns to lockstep' do
+        a, b, c = source.tee(3)
+        3.times { a.sample(10) }
+        c.sample(10)
+        expect(b.catch_up).to eq(30)
+        expect(c.catch_up).to eq(20)
+        expect(b.catch_up).to eq(0)
+        x = a.sample(10)
+        expect(x).to eq(Numo::SFloat.new(10).seq + 30)
+        expect(b.sample(10)).to equal(x)
+        expect(c.sample(10)).to equal(x)
+      end
+
+      it 'gives the frames the leader reads next even when the caught-up branch reads first' do
+        a, b = source.tee
+        3.times { a.sample(10) }
+        b.catch_up
+        expect(b.sample(15)).to eq(Numo::SFloat.new(15).seq + 30)
+        expect(a.sample(15)).to eq(Numo::SFloat.new(15).seq + 30)
+      end
+
+      it 'does not move a branch that is ahead' do
+        a, b = source.tee
+        3.times { a.sample(10) }
+        b.sample(10)
+        expect(a.catch_up).to eq(0)
+        expect(a.sample(10)).to eq(Numo::SFloat.new(10).seq + 30)
+      end
+
+      it 'recovers a branch that overflowed, at the leader' do
+        a, b = source.tee
+        100.times { a.sample(800) }
+        expect { b.sample(10) }.to raise_error(MB::Sound::GraphNode::Tee::BranchBufferOverflow)
+        expect(b.catch_up).to be_nil
+        expect(b.sample(800)).to eq(Numo::SFloat.new(800).seq + 80000)
+        x = a.sample(800)
+        expect(x).to eq(Numo::SFloat.new(800).seq + 80000)
+        expect(b.sample(800)).to equal(a.sample(800)) # lockstep again
+      end
+
+      it 'raises for a destroyed branch' do
+        _a, b = source.tee
+        b.destroy
+        expect { b.catch_up }.to raise_error(MB::Sound::GraphNode::Tee::BranchDestroyedError)
+      end
+    end
   end
 
   describe 'shared buffers' do

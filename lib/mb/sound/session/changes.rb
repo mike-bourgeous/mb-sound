@@ -29,9 +29,11 @@ module MB
         # the landing time to apply it.  +before+ and +after+ are snapshots
         # of the subject around the change, for undo.  +starts+ is the
         # timeline nodes of a graph the change starts (for swaps queued
-        # behind it).
+        # behind it).  +graph+ is the graph input a :bg change starts (kept
+        # in step with shared nodes while it waits; see
+        # Strip#catch_up_waiting).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph,
           keyword_init: true
         )
 
@@ -92,7 +94,7 @@ module MB
         #
         # While a take replays, the landing time comes from the take instead
         # (see Take).
-        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, &action)
+        def change(kind, subject, time, data: {}, undoes: nil, starts: nil, graph: nil, &action)
           raise IOError, 'Session is closed' if @closed
           raise ArgumentError, 'Pass a block to apply the change' unless action
 
@@ -125,7 +127,7 @@ module MB
             pos = @transport.position
             check_late(kind, subject, time, pos) unless perform&.[](:forced)
             seq = @journal.next_seq
-            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts)
+            c = Change.new(seq: seq, kind: kind, subject: subject, time: time, action: action, starts: starts, graph: graph)
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,

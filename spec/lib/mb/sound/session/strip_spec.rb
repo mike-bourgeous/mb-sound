@@ -125,6 +125,41 @@ RSpec.describe(MB::Sound::Session::Strip) do
       expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
     end
 
+    # fixes-11: :b's own branch of the LFO wasn't read while it slept,
+    # because the LFO's other branch (inside x) is in :b's graph too
+    it 'keeps a muted player in step with a node it reads both directly and through a node another player plays' do
+      lfo = 3.hz.lfo
+      x = lfo * 2
+      data = mute_and_back({ a: x * 0.5, b: x * 0.1 + lfo * 0.1 }, [128, 801, 7])
+
+      ref = new_session
+      ref.add(3.hz.lfo * 1.3)
+      expected = run_in(ref, 800 + 72000 + 24000, [800])[-24000..]
+      ref.close
+      expect(data.abs.max).to be > 1
+      expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
+    end
+
+    it 'starts a queued graph in step with a node it reads both directly and through a node a playing graph plays' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        x = lfo * 2
+        s = new_session
+        s.add(x * 0.5, name: :a)
+        run_in(s, 800, sizes)
+        s.add(x * 0.1 + lfo * 0.1, name: :b, fade: 0, on: :bar) # frame 96000
+        data = run_in(s, 96000 + 24000 - 800, sizes)[(96000 - 800)..]
+
+        ref = new_session
+        ref.add(3.hz.lfo * 1.3)
+        expected = run_in(ref, 96000 + 24000, [800])[96000..]
+        ref.close
+        expect((data - expected).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
     it "pauses a muted player's node that only unused nodes share" do
       outs = [false, true].map { |extra|
         lfo = 3.hz.lfo
@@ -232,6 +267,80 @@ RSpec.describe(MB::Sound::Session::Strip) do
       expect(s.instance_variable_get(:@kept_graphs)).to be_empty
     ensure
       s&.close
+    end
+
+    # fixes-11: a graph queued to start later wasn't read while it waited,
+    # so it played a node it shares with a playing graph late by its wait,
+    # and after more than a second its first read raised
+    # BranchBufferOverflow.  Its branches now skip to the playing graph's
+    # at every span, and it starts reading the node on its first frame.
+    [[0.3, 25_933], [1.5, 800]].each do |wait, added|
+      it "starts a graph queued for #{wait} s in step with a node a playing graph plays, at any buffer size" do
+        start = added + (wait * 48000).round # not on a buffer edge
+        [[128, 801, 7], [800], [7]].each do |sizes|
+          lfo = 3.hz.lfo
+          s = new_session
+          s.add(lfo * 0.5, name: :a)
+          data = run_in(s, added, sizes)
+          s.add(lfo * 0.25, name: :b, fade: 0, start_time: Rational(start, 96000))
+          expect(s.queued.map(&:kind)).to eq([:bg])
+          data = data.concatenate(run_in(s, start + 24000 - added, sizes))
+
+          expected = never_stopped(start + 24000)
+          expect(data.abs.max).to be > 0.7
+          expect((data[start..] - expected[start..]).abs.max).to be < 1e-6
+          expect((data[0...start] - expected[0...start] * (0.5 / 0.75)).abs.max).to be < 1e-6
+          expect(s.instance_variable_get(:@waiting_graphs)).to be_empty
+        ensure
+          s&.close
+        end
+      end
+    end
+
+    it 'starts a queued replacement in step with a shared node' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = new_session
+        s.add(lfo * 0.5, name: :a)
+        s.add(lfo * 0.5, name: :b)
+        run_in(s, 800, sizes)
+        s.add(lfo * 0.25, name: :b, fade: 0, on: :bar) # frame 96000
+        data = run_in(s, 96000 + 24000 - 800, sizes)
+
+        expected = never_stopped(96000 + 24000)[800..]
+        bar = 96000 - 800
+        expect((data[bar..] - expected[bar..]).abs.max).to be < 1e-6
+        expect((data[0...bar] - expected[0...bar] / 0.75).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
+    it 'starts graphs a scene builds ahead in step with a shared node, with a clip swap in the same scene' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = new_session
+        set = s.arrangement
+        set.track(:a) { |c| lfo * 0.5 + c.number * 0.001 }
+        set.track(:b) { |c| lfo * 0.25 + c.number * 0.0001 }
+        set.scene(:one, a: MB::Sound.seq(MB::Sound::C3).n1.loop)
+        set.scene(:two, a: MB::Sound.seq(MB::Sound::D3).n1.loop, b: MB::Sound.seq(MB::Sound::C4).n1.loop)
+        set.go(:one, at: :now)
+        run_in(s, 800, sizes)
+        a_graph = s.instance_variable_get(:@players).values.find { |p| p.name == :a }.input
+        set.go(:two) # frame 96000, built half a bar ahead
+        data = run_in(s, 96000 + 24000 * 3 - 800, sizes)
+        expect(s.instance_variable_get(:@players).values.find { |p| p.name == :a && p.current? }.input).to equal(a_graph)
+
+        expected = never_stopped(96000 + 24000 * 3)[800..]
+        bar = 96000 - 800
+        notes = Numo::SFloat.zeros(data.length).fill(MB::Sound::C3.number * 0.001)
+        notes[bar..] = MB::Sound::D3.number * 0.001 + MB::Sound::C4.number * 0.0001
+        expect((data[bar..] - notes[bar..] - expected[bar..]).abs.max).to be < 1e-6
+        expect((data[0...bar] - notes[0...bar] - expected[0...bar] * (0.5 / 0.75)).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
     end
   end
 

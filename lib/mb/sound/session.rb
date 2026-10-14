@@ -402,7 +402,7 @@ module MB
           bind_bus_taps(nodes, name) or return nil
           attach_bus_spies(name, nodes) if @bus_only.key?(name)
 
-          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes) { |t|
+          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
           }
         }
@@ -808,6 +808,8 @@ module MB
         players = @mutex.synchronize { @players.values }
         @span_players = players # for Strip#asleep_reads
         @span_graphs = nil
+        # Graphs waiting to start keep in step with shared nodes (see Strip)
+        catch_up_waiting(players)
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
         playing = !players.empty? || queued_start?
@@ -1118,6 +1120,7 @@ module MB
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
           align_grids(p, base + offset)
           catch_up_kept(p, base + offset) # a graph kept since it stopped
+          catch_up_started(p, offset) # a graph that waited to start
         end
 
         ringing = p.ring&.active && !p.fade_out
