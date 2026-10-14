@@ -54,6 +54,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/tween_song.rb' => ['--bars', '0.5', '-c', '4'],
     'bin/songs/unison_song.rb' => ['--bars', '0.5', '-l', 'even'],
     'bin/songs/vocal_lead_song.rb' => ['--bars', '0.5', '-S', 'pulse', '-t', '1'],
+    'bin/songs/wind_chimes.rb' => ['--bars', '0.5', '-G', '2', '-s', '3'],
     'bin/songs/wavetable_song.rb' => ['--bars', '0.5'],
     'bin/stereo_graph_example.rb' => ['--bars', '0.5'],
     'bin/synths/fifth_pad.rb' => ['--bars', '0.5'],

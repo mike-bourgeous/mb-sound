@@ -252,6 +252,14 @@ module GraphSweep
       ['squeeze default, mono', ->(c) { c.sig.squeeze(time: 0.5) }],
       ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],
       ['ping (Resonator)', ->(c) { c.trigger.ping(c.mod(200, 2000), decay: 0.05) }],
+      ['resonate (ModalResonator), mono and spread', ->(c) {
+        c.trigger.resonate(:bowl, c.mod(200, 900), decay: c.mod(0.05, 0.2)) + c.trigger.resonate(:gong, 150, decay: 0.1, spread: c.mod(0, 1)).mono
+      }],
+      ['dust and drift (Dust, Drift)', ->(c) {
+        MB::Sound.dust(c.mod(100, 3000), bipolar: true, seed: 3).ping(c.mod(500, 2000), decay: 0.01) +
+          c.sig * MB::Sound.drift(c.mod(20, 400), smooth: :cosine, walk: 0.3, seed: 4) +
+          MB::Sound.dust(1.n32, seed: 5) * MB::Sound.drift(3.ms, range: 0..1, seed: 6)
+      }],
 
       # Feedback loops
       ['feedback one-pole', ->(c) { c.sig.feedback { |fb, input| input + (fb - input) * 0.9 } }],
