@@ -113,11 +113,16 @@ module MB
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
+    #
+    # Other missing constants (a typo'd TV_BARS in a song script) raise the
+    # usual NameError with did_you_mean suggestions.  Before fixes-12
+    # (2026-10-14) the NameError was raised while rescuing the Note's
+    # ArgumentError, so Ruby printed "Invalid note name format TV_BARS" as
+    # its cause.
     def self.const_missing(name)
-      super if !defined?(MB::Sound::Note) || name.to_s == 'Note'
+      return super unless defined?(MB::Sound::Note) && name != :Note && MB::Sound::Note.name?(name)
+
       MB::Sound::Note.new(name)
-    rescue ArgumentError
-      super
     end
   end
 

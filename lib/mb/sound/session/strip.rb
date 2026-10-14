@@ -245,13 +245,17 @@ module MB
           shared
         end
 
-        # The inputs of the Session's graphs (players' and kept graphs'):
-        # one list per span, the same object while they stay the same (for
-        # the caches of #asleep_reads).
+        # The inputs of the Session's graphs (players' and kept graphs', and
+        # the ChainGraphs of master chains: running, spilling over, or
+        # landed and starting in this span; fixes-12): one list per span,
+        # the same object while they stay the same (for the caches of
+        # #asleep_reads).
         def span_graphs
           @span_graphs ||= begin
             list = (@span_players || @mutex.synchronize { @players.values }).map(&:input)
             list.concat(@kept_graphs.keys) unless @kept_graphs.empty?
+            chains = @master_chains
+            chains&.each { |c| list << c.chain_graph unless c.bypass? }
             ids = list.map(&:__id__)
             if ids == @asleep_ids
               @asleep_graphs
@@ -276,10 +280,20 @@ module MB
         # any buffer size (#catch_up_started reads the frames of the span
         # before that).  Graphs kept for #resume or #undo read instead (see
         # #read_kept_graphs).
+        #
+        # Master chains waiting to start (queued by #master, or an undo's
+        # restore, and chains that landed in this span) do the same since
+        # fixes-12 (2026-10-14): before, `master { |mix| mix * lfo }` queued
+        # for the next bar played the LFO late by its wait and raised
+        # BranchBufferOverflow after a second.  A chain reads its first
+        # span from the span's first frame (its input is silent before its
+        # start), so it needs no #catch_up_started.
         def catch_up_waiting(players)
           waiting = nil
           @changes.each { |c| (waiting ||= []) << c.graph if c.graph }
           players.each { |p| (waiting ||= []) << p.input unless p.started }
+          chains = @master_chains
+          chains&.each { |c| (waiting ||= []) << c.chain_graph unless c.started || c.bypass? }
           if waiting.nil?
             @waiting_graphs.clear unless @waiting_graphs.empty?
             return

@@ -19,6 +19,11 @@ module MB
 
         private
 
+        # Its own NoteStack knows the held notes (see Node#end_held?).
+        def end_held?
+          @stack.held?
+        end
+
         def handle(event)
           case event.type
           when :note_on

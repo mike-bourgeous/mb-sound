@@ -941,6 +941,64 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(n3.graph.map(&:to_s)).to eq([n2, n1, n3].map(&:to_s))
       end
 
+      # fixes-12: #graph walked every path, which grows exponentially with
+      # nodes read by every lane and unison copy, and warned "Possible
+      # infinite loop on MIDI sustain" hundreds of times for the jungle pad.
+      it 'lists a big synth graph without warnings, each node after every node that reads it' do
+        require_relative '../../../../bin/synths/jungle'
+        g = MB::Sound.jungle_pad_voice(MB::Sound.seq(MB::Sound::C4).n1.notes)
+
+        [true, false].each do |tees|
+          list = nil
+          expect { list = g.graph(include_tees: tees) }.not_to output.to_stderr
+          expect(list.first).to equal(g)
+          expect(list.length).to be > (tees ? 500 : 150)
+          expect(list.uniq.length).to eq(list.length)
+
+          pos = list.each_with_index.to_h
+          list.each do |n|
+            next unless n.respond_to?(:sources)
+
+            n.sources.each_value do |s|
+              s = MB::Sound::GraphNode.graph_key(s, tees)
+              expect(pos.fetch(s)).to be > pos.fetch(n)
+            end
+          end
+        end
+      end
+
+      it 'gives the order of the path walk for random graphs' do
+        node = Struct.new(:id, :sources) do
+          def to_s = "n#{id}"
+        end
+        rng = Random.new(12)
+        compared = 0
+        300.times do
+          count = rng.rand(1..14)
+          nodes = Array.new(count) { |i| node.new(i, {}) }
+          nodes.each_with_index do |n, i|
+            rng.rand(0..3).times do |k|
+              n.sources[:"s#{k}"] = (i + 1 < count && rng.rand < 0.85) ? nodes[rng.rand(i + 1...count)] : [0, 2.0, 0.5].sample(random: rng)
+            end
+          end
+
+          # Skip graphs the walk cut short (it warns then)
+          walked = nil
+          stderr = $stderr
+          $stderr = StringIO.new
+          begin
+            walked = MB::Sound::GraphNode.graph_by_paths(nodes[0])
+            next unless $stderr.string.empty?
+          ensure
+            $stderr = stderr
+          end
+
+          compared += 1
+          expect(MB::Sound::GraphNode.graph(nodes[0])).to eq(walked)
+        end
+        expect(compared).to be > 250
+      end
+
       pending 'when include_tees is true'
     end
 

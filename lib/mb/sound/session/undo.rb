@@ -248,7 +248,7 @@ module MB
           if subject == :master
             state = original.before
             chain = state.is_a?(MasterState) ? build_master(state.block, description: state.description) : nil
-            return change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq) { |t|
+            return change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq, graph: chain&.chain_graph) { |t|
               if chain.nil?
                 st = original.before
                 chain = build_master(st&.block, description: st&.description)

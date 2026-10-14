@@ -38,6 +38,17 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
+      # Note names: letter, optional accidental (s, #, b, or the Unicode
+      # flat, natural, and sharp signs), octave (-9 to 9), optional detune
+      # in cents (e.g. A4, Cs3, Eb-1, A4+12.5).
+      NAME_FORMAT = /\A([A-G])([s#b\u266d\u266e\u266f]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
+
+      # Returns true if +name+ (a String or Symbol) is a note name that
+      # Note.new accepts (see NAME_FORMAT).
+      def self.name?(name)
+        NAME_FORMAT.match?(name.to_s)
+      end
+
       attr_reader :number, :name, :accidental, :detune, :octave
 
       # Name and accidental using Unicode U+266d and U+266f instead of letters.
@@ -157,7 +168,7 @@ module MB
       # Sets note name, number, and detuning from a note name string.
       def set_name(name)
         # =~ sets $1, $2, etc.
-        unless name =~ /\A([A-G])([s#b\u266d\u266e\u266f]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
+        unless name =~ NAME_FORMAT
           raise ArgumentError, "Invalid note name format #{name}"
         end
 
