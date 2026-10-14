@@ -98,6 +98,7 @@ module MB
 
           plan_smoother_feed(count) if @smoother
           @tail += count if ended
+          end_on_grid(nil, from, to, count) if ends_graph?
           nil
         end
 
