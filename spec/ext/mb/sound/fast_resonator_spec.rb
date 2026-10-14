@@ -75,4 +75,62 @@ RSpec.describe('MB::Sound::FastResonator', :aggregate_failures) do
     expect { fast.ping(Numo::SFloat.zeros(4), Numo::SFloat.zeros(3), 1, 1, state, 48000, 1, 0) }.to raise_error(ArgumentError, /length/)
     expect { fast.ping(Numo::SFloat.zeros(4), 0, 1, 1, state, 0, 1, 0) }.to raise_error(ArgumentError, /rate/)
   end
+
+  describe '.modes' do
+    let(:modal) { MB::Sound::GraphNode::ModalResonator }
+
+    def compare_modes(n, input, freq, decay, rows, rate: 48000, state: nil)
+      table = Numo::DFloat.cast(rows.flatten)
+      a = Numo::SFloat.zeros(n)
+      b = Numo::SFloat.zeros(n)
+      sa = state ? Numo::DFloat.cast(state) : Numo::DFloat.zeros(2 * rows.length)
+      sb = sa.dup
+      fast.modes(a, input, freq, decay, table, sa, rate)
+      modal.process_ruby(b, input, freq, decay, table, sb, rate)
+      expect(a).to eq(b), "n=#{n} freq=#{freq.class} decay=#{decay.class}"
+      expect(sa).to eq(sb)
+      a
+    end
+
+    let(:rows) { modal.expand(modal.preset(:bowl).modes, 0.7) }
+
+    it 'matches the Ruby mirror with scalar and moving inputs' do
+      impulse = Numo::SFloat.zeros(500)
+      impulse[0] = 1
+      impulse[321] = 0.4
+      compare_modes(500, impulse, 220.0, 48000.0, rows)
+      [1, 7, 128, 801].each do |n|
+        freq = (noise(n) + 0.5) * 3000 + 30
+        decay = (noise(n) + 0.5) * 50000 + 10
+        compare_modes(n, noise(n), freq, decay, rows, state: Array.new(2 * rows.length) { rng.rand })
+        compare_modes(n, noise(n), Numo::DFloat.cast(freq), 2000, rows, rate: 44100)
+      end
+    end
+
+    it 'equals the sum of single pings for one mode' do
+      impulse = Numo::SFloat.zeros(300)
+      impulse[0] = 1
+      one = compare_modes(300, impulse, 440.0, 4800.0, [[1.0, 0.0, 1.0, 1.0]])
+      ping = compare(300, impulse, 440.0, 4800.0)
+      expect(one).to eq(ping)
+    end
+
+    it 'silences modes above 0.45 of the sample rate or at or below 0 Hz' do
+      impulse = Numo::SFloat.zeros(100)
+      impulse[0] = 1
+      out = compare_modes(100, impulse, 1000.0, 4800.0, [[22.0, 0.0, 1.0, 1.0], [1.0, -1000.0, 1.0, 1.0], [1.0, 0.0, 1.0, 0.0]])
+      expect(out.abs.max).to eq(0)
+    end
+
+    it 'raises for bad tables and states' do
+      out = Numo::SFloat.zeros(4)
+      table = Numo::DFloat[1, 0, 1, 1]
+      expect { fast.modes(out, 0, 1, 1, Numo::DFloat[1, 0, 1], Numo::DFloat.zeros(2), 48000) }.to raise_error(ArgumentError, /per mode/)
+      expect { fast.modes(out, 0, 1, 1, Numo::SFloat[1, 0, 1, 1], Numo::DFloat.zeros(2), 48000) }.to raise_error(ArgumentError, /DFloat/)
+      expect { fast.modes(out, 0, 1, 1, table, Numo::DFloat.zeros(4), 48000) }.to raise_error(ArgumentError, /State/)
+      expect { fast.modes(out, 0, 1, 1, Numo::DFloat.zeros(4 * 129), Numo::DFloat.zeros(258), 48000) }.to raise_error(ArgumentError, /At most/)
+      expect { fast.modes(out, 0, 1, 1, table, Numo::DFloat.zeros(2), 0) }.to raise_error(ArgumentError, /rate/)
+      expect { fast.modes(out.freeze, 0, 1, 1, table, Numo::DFloat.zeros(2), 48000) }.to raise_error(FrozenError)
+    end
+  end
 end

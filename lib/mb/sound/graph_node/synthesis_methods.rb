@@ -46,6 +46,67 @@ module MB
         end
         alias resonator ping
 
+        # Strikes a modal resonator with this node (GraphNode::ModalResonator):
+        # every impulse rings all the modes of a struck object at once,
+        # +preset+ (ModalResonator::PRESETS: :bowl, :rin, :gong, :bell,
+        # :chime, :bar, :marimba, :vibes, :glass, :plate, :membrane) or a
+        # list of modes [[ratio, amplitude, decay share, beat multiple],
+        # ...], at +freq+ (Hz: a number, node, or Pitch; e.g. `v.freq` in a
+        # synth voice, so the object follows the keys).  The impulse's height
+        # is the strike's force (a trigger's velocity).  The preset and the
+        # frequency may come in either order.
+        #
+        # +decay+ (seconds to -60 dB for the longest-ringing modes; a number,
+        # Length, Duration, or node) and +beat+ (Hz between the two halves of
+        # each doublet, the slow beating of a bowl or bell; 0 for none)
+        # default to the preset's.  With +normalize+ (default) the amplitudes
+        # are scaled to sum to 1, so a strike of 1 never peaks above 1.
+        # +spread+ (0..1, a number or node) returns stereo, alternating
+        # modes between the sides (0 both sides alike, 1 hard left and
+        # right); nil (default) is mono.
+        #
+        # A softer mallet is a smoother strike: lowpass the impulses
+        # (`trig.filter(:lowpass, cutoff: 1500).resonate(:bar, 880)`); a
+        # steady quiet noise is a bowed or rubbed object.
+        #
+        # Examples:
+        #     play dust(0.7, range: 0.3..1).resonate(:bowl, 220).at(-6.db)
+        #     play grid(8, 'x..x..x.').loop.trigger.resonate(:marimba, 440).at(-6.db)
+        #     play noise.at(0.0005).resonate(:glass, 660, spread: 0.6)          # a rubbed rim
+        #     synth(midi) { |v| v.trigger.resonate(:vibes, v.freq) }
+        def resonate(preset = :bowl, freq = nil, decay: nil, beat: nil, spread: nil, normalize: true)
+          preset, freq = freq, preset unless preset.is_a?(Symbol) || preset.is_a?(Array)
+          raise ArgumentError, 'resonate needs a frequency (e.g. resonate(:bowl, 220) or resonate(:bowl, v.freq))' if freq.nil?
+
+          if preset.is_a?(Symbol)
+            p = ModalResonator.preset(preset)
+            modes = p.modes
+            decay ||= p.decay
+            beat ||= p.beat
+          else
+            modes = preset
+            decay ||= 2
+            beat ||= 0
+          end
+
+          rows = ModalResonator.expand(modes, beat)
+          gain = normalize ? 1.0 / rows.sum { |r| r[2].abs } : 1.0
+          return ModalResonator.new(self, freq: freq, modes: rows, decay: decay, gain: gain, sample_rate: sample_rate) if spread.nil?
+
+          # Stereo: alternate modes (doublet partners stay with their modes)
+          # between two banks on the same strike
+          sides = [[], []]
+          side = 1
+          rows.each do |r|
+            side = 1 - side if r[1] == 0
+            sides[side] << r
+          end
+          sides[1] = [[1.0, 0.0, 0.0, 1.0]] if sides[1].empty?
+          left, right = sides.map { |s| ModalResonator.new(self, freq: freq, modes: s, decay: decay, gain: gain, sample_rate: sample_rate) }
+          blend = spread.is_a?(Numeric) ? 1.0 - spread.to_f : 1 - spread
+          MB::Sound.stereo(left + right * blend, right + left * blend)
+        end
+
         # Reads a cycle-mode MB::Sound::Wavetable (+table+: anything
         # Wavetable.[] accepts) with this node as the phase in cycles (0...1
         # is one cycle), +scan+ (0..1, a number or node; a Tone without an

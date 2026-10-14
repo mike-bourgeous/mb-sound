@@ -14,6 +14,37 @@ module MB
         2000.hz.ramp.noise(seed: seed)
       end
 
+      # Sparse random impulses, about +rate+ per second (GraphNode::Dust):
+      # Hz as a number, Pitch, or node (a swell of density), or the average
+      # time between impulses (`1.beat`, `2.seconds`).  Heights are random
+      # over +range+ (0..1, or -1..1 with +bipolar+), so as triggers they
+      # strike at random velocities.  Seeded (+seed+, or drawn from
+      # MB::Sound.seed's generator), the same at any buffer size.
+      #
+      # Examples:
+      #     play dust(6).ping(3000, decay: 0.03).at(-6.db)              # drips
+      #     play dust(300, bipolar: true).filter(:bandpass, cutoff: 2500, quality: 0.7).at(-12.db)  # crackle
+      #     play dust(0.5, range: 0.4..1).resonate(:bowl, 196)          # a bowl struck now and then
+      def dust(rate, bipolar: false, range: nil, seed: nil)
+        MB::Sound::GraphNode::Dust.new(rate, bipolar: bipolar, range: range, seed: seed)
+      end
+
+      # A slow random line (GraphNode::Drift): +rate+ new random points per
+      # second (Hz as a number, Pitch, or node, or the time between points:
+      # `4.seconds`, `1.bar`) in +range+ (-1..1), joined by +smooth+ (:cubic
+      # default, :cosine, :linear, or :step for a stepped sample-and-hold
+      # line); +walk+ (0..1 of the range) makes each point stray at most
+      # that far from the last.  Seeded (+seed+), the same at any buffer
+      # size.  For detune, cutoffs, pans, tape wow, and wandering drones.
+      #
+      # Examples:
+      #     play 220.hz.transpose(drift(0.4, walk: 0.3).at(-0.15..0.15)).saw.lp4(1500).at(-20.db)
+      #     play noise.lp4(drift(0.3).at(200..2500), resonance: 0.3).at(-14.db)      # wind
+      #     play 330.hz.triangle.pan(drift(3.seconds)).at(-18.db)
+      def drift(rate = 0.2, range: -1.0..1.0, smooth: :cubic, walk: nil, seed: nil)
+        MB::Sound::GraphNode::Drift.new(rate, range: range, smooth: smooth, walk: walk, seed: seed)
+      end
+
       # Shortcut/DSL method for creating a tone with a given dynamic frequency
       # source, for full control over the FM signal graph.
       def tone(frequency)
