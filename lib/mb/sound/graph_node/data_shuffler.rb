@@ -8,16 +8,24 @@ module MB
         # TODO: should the data be resampled if we get a new sample rate?
         attr_accessor :sample_rate
 
+        # The seed of the shuffle order (see #initialize).
+        attr_reader :seed
+
         # Creates a shuffling source with the given Array of Numo::NArray sound
-        # samples.
-        def initialize(data, sample_rate: 48000)
+        # samples.  The order comes from its own Random started from +seed+
+        # (an Integer; a seed drawn from MB::Sound.next_seed by default, so
+        # MB::Sound.seed or RANDOM_SEED repeat it; before fixes-13 it used
+        # Ruby's global Random, so renders differed every run).
+        def initialize(data, sample_rate: 48000, seed: nil)
           # TODO: 2D NArray?
           raise 'Data must be an Array of Numo::NArray' unless data.is_a?(Array) && data.length > 0 && data.all?(Numo::NArray)
 
           # TODO: allow changing the data?  take data from a live stream of audio?
           # TODO: quickfade edges of shuffled blocks?  use overlapping windows?  how can we introduce overlapping windows into the node graph when there are IIR filters?
+          @seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+          @rng = Random.new(@seed)
           @data = data.map(&:dup)
-          @queue = @data.shuffle
+          @queue = @data.shuffle(random: @rng)
           @sample_rate = sample_rate
 
           # At least 16k buffer overhead allowing #sample +count+ to be up to 16k.
@@ -27,7 +35,7 @@ module MB
         # Returns +count+ frames from the queue of shuffled sound clips.
         def sample(count)
           while @cbuf.length < count
-            @queue = @data.shuffle if @queue.empty?
+            @queue = @data.shuffle(random: @rng) if @queue.empty?
             @cbuf.write(@queue.shift)
           end
 

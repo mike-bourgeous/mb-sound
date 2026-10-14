@@ -856,6 +856,77 @@ module MB
         @envelopes.empty? && @quiet_check.nil?
       end
 
+      # True if envelopes made through this instance (NoteEnvelopes that
+      # have rendered) end its graph on their grid (see NoteEnvelope#sample
+      # and #grid_idle; fixes-13).
+      def envelope_end?
+        envelope_grid? && @envelopes.any? { |e| e.respond_to?(:grid_frames) && e.grid_frames > 0 }
+      end
+
+      # True if this instance's envelopes may end its graph on their grid
+      # (see #envelope_end?): not for a Synth lane's Notes (with a
+      # #quiet_check), whose envelopes end the lane when the lane is quiet
+      # at a buffer start, as before; the Synth ends on its grid (see
+      # Synth#check_end).
+      def envelope_grid?
+        @quiet_check.nil?
+      end
+
+      # The frame (of the note nodes' and envelopes' own output, counted
+      # from their first sample) where this instance's envelopes ended its
+      # graph (see #grid_idle), or nil while it goes on.  A seek or restart
+      # of the note stream (a new generation) cancels it.
+      def grid_end_frame
+        return nil if @grid_end.nil?
+        return @grid_end if note_stream.generation == @grid_generation
+
+        @grid_end = nil
+        @grid_idle = nil
+      end
+
+      # Records that NoteEnvelope +envelope+ was idle at +frame+, a point of
+      # Notes::Node::END_GRID after the note stream's last event (see
+      # NoteEnvelope#sample), and returns true if the graph ends there: every
+      # envelope that has rendered was idle there (those that haven't
+      # rendered that far yet decide when they do: the last one to reach it
+      # in a buffer decides), other registered nodes (sampler voices) are
+      # idle, and the #quiet_check (a Synth lane's) says quiet.  So graphs
+      # with envelopes end on the same sample at any buffer size, where
+      # 800-sample buffers from their first sample ended them before
+      # (fixes-13; before, they ended at the first buffer start where every
+      # envelope was idle, so a filter after them was cut 0..799 samples
+      # earlier at other buffer sizes).
+      def grid_idle(envelope, frame)
+        gen = note_stream.generation
+        if gen != @grid_generation || @grid_idle.nil?
+          @grid_generation = gen
+          @grid_idle = {}
+          @grid_end = nil
+        end
+        return true if @grid_end && @grid_end <= frame
+
+        rec = (@grid_idle[frame] ||= {}.compare_by_identity)
+        rec[envelope] = true
+        slowest = nil
+        done = @envelopes.all? { |e|
+          next rec.key?(e) if e.equal?(envelope)
+          next e.idle? unless e.respond_to?(:grid_frames)
+
+          f = e.grid_frames
+          slowest = f if slowest.nil? || f < slowest
+          f == 0 || rec.key?(e)
+        }
+        if done && quiet?
+          @grid_end = frame
+          @grid_idle.clear
+          return true
+        end
+
+        # Points every rendering envelope has passed are decided (not ends)
+        @grid_idle.delete_if { |g, _| g < slowest } if slowest && @grid_idle.size > 2
+        false
+      end
+
       # True when no note is held, every envelope made through this
       # instance (see #env, #register) is idle, and the #quiet_check (if
       # any) says the output is quiet, so a voice allocator can reuse the

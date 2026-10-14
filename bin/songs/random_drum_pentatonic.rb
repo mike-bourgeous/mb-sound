@@ -5,12 +5,18 @@
 # Usage:
 #     bin/songs/random_drum_pentatonic.rb                # plays live until Ctrl-C
 #     bin/songs/random_drum_pentatonic.rb song.flac      # renders 30 bars (60 seconds)
+#     bin/songs/random_drum_pentatonic.rb -s 7 song.flac # another shuffle (same seed, same render)
 #     bin/songs/random_drum_pentatonic.rb --help         # all options
 
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::Sound.song_script(bars: 30) {
+MB::Sound.song_script(
+  bars: 30,
+  seed: [1, Integer, '-s', 'Random seed for the drum slice and chord shuffles (MB::Sound.seed)'],
+) { |p|
+  MB::Sound.seed(p.seed)
+
   d = MB::Sound.read(File.join(__dir__, '../../sounds/drums.flac')).sum
   d = d[0...MB::M.round_to(d.length - 16000, 16000)]
   d = d.reshape(nil, 8000)

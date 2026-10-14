@@ -17,5 +17,16 @@ RSpec.describe(MB::Sound::GraphNode::DataShuffler) do
       expect(r2).not_to eq(input * 3)
       expect(r2).to match_array(input * 3)
     end
+
+    it 'repeats its order for the same seed, drawn from MB::Sound.seed by default' do
+      make = ->(**kw) { MB::Sound::GraphNode::DataShuffler.new(input.map { |v| Numo::SFloat[v] }, **kw).sample(input.length * 3).to_a }
+      expect(make.(seed: 5)).to eq(make.(seed: 5))
+      expect(make.(seed: 5)).not_to eq(make.(seed: 6))
+
+      MB::Sound.seed(3)
+      a = make.()
+      MB::Sound.seed(3)
+      expect(make.()).to eq(a)
+    end
   end
 end

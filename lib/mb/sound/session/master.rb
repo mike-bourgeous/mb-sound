@@ -38,11 +38,15 @@ module MB
         # In the buffer where chains switch, +input_from+ and +input_until+
         # are the frames where the chain's input starts and stops, and
         # +ramp_from+ is the frame where its gain starts changing.
+        #
+        # +read_to+ is the session frame a bus's chain has read its branches
+        # of shared nodes up to (nil before its first span; see
+        # Buses#bus_read_shared).
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned, :loads,
-          :input_from, :input_until, :ramp_from,
+          :input_from, :input_until, :ramp_from, :read_to,
           keyword_init: true
         ) do
           def bypass?
@@ -62,8 +66,16 @@ module MB
         # error).  Running chains count as Session graphs for sleeping,
         # kept, and waiting players' shared nodes, and a chain waiting to
         # start keeps its branches of nodes it shares with them in step
-        # (see Strip#catch_up_waiting; fixes-12).
-        ChainGraph = Struct.new(:chain) do
+        # (see Strip#catch_up_waiting; fixes-12).  Bus chains do the same,
+        # and a sleeping bus's chains read their shared branches like a
+        # sleeping player (fixes-13; see Buses#bus_read_shared):
+        # +asleep_reads+ caches Strip#asleep_reads, and #input is the graph
+        # itself (Strip#asleep_reads takes a player-like object).
+        ChainGraph = Struct.new(:chain, :asleep_reads) do
+          def input
+            self
+          end
+
           def graph(include_tees: true)
             nodes = chain.nodes
             return [] if nodes.nil?

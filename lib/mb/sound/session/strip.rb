@@ -247,7 +247,8 @@ module MB
 
         # The inputs of the Session's graphs (players' and kept graphs', and
         # the ChainGraphs of master chains: running, spilling over, or
-        # landed and starting in this span; fixes-12): one list per span,
+        # landed and starting in this span; fixes-12; and of bus chains,
+        # asleep or not; fixes-13): one list per span,
         # the same object while they stay the same (for the caches of
         # #asleep_reads).
         def span_graphs
@@ -256,6 +257,7 @@ module MB
             list.concat(@kept_graphs.keys) unless @kept_graphs.empty?
             chains = @master_chains
             chains&.each { |c| list << c.chain_graph unless c.bypass? }
+            list.concat(bus_chain_graphs) # (fixes-13; see Buses)
             ids = list.map(&:__id__)
             if ids == @asleep_ids
               @asleep_graphs
@@ -287,13 +289,17 @@ module MB
         # for the next bar played the LFO late by its wait and raised
         # BranchBufferOverflow after a second.  A chain reads its first
         # span from the span's first frame (its input is silent before its
-        # start), so it needs no #catch_up_started.
+        # start), so it needs no #catch_up_started.  Bus chains waiting to
+        # start do the same since fixes-13 (their :bus changes carry their
+        # ChainGraphs); one starting in a later segment of the span reads
+        # the frames before it first (see Buses#bus_read_shared).
         def catch_up_waiting(players)
           waiting = nil
           @changes.each { |c| (waiting ||= []) << c.graph if c.graph }
           players.each { |p| (waiting ||= []) << p.input unless p.started }
           chains = @master_chains
           chains&.each { |c| (waiting ||= []) << c.chain_graph unless c.started || c.bypass? }
+          bus_chain_graphs(waiting: true).each { |g| (waiting ||= []) << g }
           if waiting.nil?
             @waiting_graphs.clear unless @waiting_graphs.empty?
             return

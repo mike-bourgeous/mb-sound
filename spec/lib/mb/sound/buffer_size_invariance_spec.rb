@@ -166,6 +166,70 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  # fixes-13: graphs with Notes envelopes ended at the first buffer start
+  # where every envelope was idle, and Synths at the first buffer start
+  # after their lanes, so a resonant filter after them was cut -52 to -99
+  # dB down, up to 800 samples earlier (or 1031 later).  They now end on
+  # their 800-sample grid, where 800-sample buffers ended them before.
+  describe 'Notes envelopes and Synths' do
+    # Every sample of the node from +make+ until it ends (nil or a short
+    # buffer), in buffers cycling through +sizes+.
+    def until_end(make, sizes)
+      MB::Sound.rewind
+      MB::Sound.seed(1)
+      node = make.call
+      out = []
+      i = 0
+      loop do
+        c = sizes[i % sizes.length]
+        b = node.sample(c)
+        break if b.nil?
+
+        out << b.dup
+        break if b.length < c
+
+        i += 1
+      end
+      out.reduce(:concatenate)
+    ensure
+      MB::Sound.rewind
+    end
+
+    lp = ->(n) { n.filter(:lowpass, cutoff: 800, quality: 8) }
+    {
+      'a saw times an envelope into a resonant lowpass' => [27_200, -> {
+        n = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.notes
+        lp.(n.hz.saw * n.amp_env(0.01, 0.1, 0.5, 0.05))
+      }],
+      'two envelopes (amp and filter) of one Notes' => [39_200, -> {
+        n = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.notes
+        (n.hz.saw * n.amp_env(0.01, 0.1, 0.5, 0.3)).filter(:lowpass, cutoff: 200 + 2000 * n.filter_env(0.01, 0.05, 0.2, 0.02), quality: 8)
+      }],
+      'a Synth into a resonant lowpass' => [39_200, -> {
+        lp.(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4).n8.synth(voices: 4) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05) })
+      }],
+      'a Synth with resonant filters in its lanes' => [44_800, -> {
+        lp.(MB::Sound.seq(MB::Sound::C3, MB::Sound::E4, MB::Sound::G4).n8.synth(voices: 4) { |v|
+          (v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05)).filter(:lowpass, cutoff: 300, quality: 20)
+        })
+      }],
+      'a Synth with a 1 s tail' => [75_200, -> {
+        lp.(MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8, voices: 2, tail: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05) })
+      }],
+    }.each do |what, (length, make)|
+      it "ends #{what} on the same sample at any buffer size" do
+        ref = until_end(make, [800])
+        expect(ref.length).to eq(length)
+        [[367, 368], [64], [1031], [1]].each do |s|
+          out = until_end(make, s)
+          expect(out.length).to eq(length), "at buffer sizes #{s}"
+          # (planned :fast sines differ within -100 dB at other block sizes)
+          expect((out - ref).abs.max).to be <= 1e-5 * ref.abs.max, "at buffer sizes #{s}"
+        end
+      end
+    end
+  end
+
   describe 'sampler' do
     let(:rec) { MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(48000).seq.map { |i| Math.sin(i * 0.03) * Math.exp(-(i % 6000) / 2000.0) })] }
 

@@ -37,6 +37,9 @@ module MB
         # The loudest send level (+24 dB).
         MAX_SEND = 16.0
 
+        # (#bus_chain_graphs without buses)
+        NO_GRAPHS = [].freeze
+
         # A bus: +to+ is the bus its output feeds (nil for the master),
         # +chains+ its effect chains (Master::Chain, the newest last), +input+
         # the span's input (one SFloat per channel, nil if nothing was sent),
@@ -111,7 +114,7 @@ module MB
           end
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
-          c = change(:bus, name, time, data: { description: chain.description, fade: fade, to: to || :master }) { |t|
+          c = change(:bus, name, time, data: { description: chain.description, fade: fade, to: to || :master }, graph: chain.chain_graph) { |t|
             start_bus_chain(name, chain, block, t)
           }
 
@@ -586,6 +589,7 @@ module MB
           items.sort_by! { |r, kind, i, _| [r, kind, i] }
 
           parts = @stems ? {} : nil
+          prepare_stem_shadows(players, to) if parts
           items.each do |_, kind, _, x|
             if kind == 0
               if parts
@@ -684,6 +688,7 @@ module MB
             if wake.nil? || muted
               b.asleep = true
               b.wake_at = nil if b.wake_at && b.wake_at < frame + count
+              bus_read_shared(b, frame + count)
               return
             end
             s = wake
@@ -749,9 +754,36 @@ module MB
             b.asleep = true
           end
 
+          # Frames it slept through after p0 (falling asleep, a mute ramp's end)
+          bus_read_shared(b, frame + count)
+
           if stem
             key = b.name.to_s.gsub(%r{[/\\\0]}, '_')
             parts[key] = parts[key] ? parts[key].each_with_index.map { |a, c| a + stem[c] } : stem
+          end
+        end
+
+        # Makes the stem copies of buses (see #stem_shadow) that +players+
+        # will feed this span before any of them renders (the sends
+        # #deliver_player would make them for), so a copy's branches of
+        # nodes it shares with players start on the span's first frame: made
+        # while delivering, after a player had read the span, a copy of
+        # `bus(:fx) { |sig| sig * lfo }` read the LFO a span ahead (0.039
+        # off in a 0.25 stem, fixes-13).
+        def prepare_stem_shadows(players, to)
+          players.each do |p|
+            next if p.start >= to
+
+            route = route_of(p.name) or next
+            track = stem_name(p)
+            stem_shadow(track, route.to) if route.to && @bus_span_buses.key?(route.to)
+            route.sends.each do |bus, k|
+              next unless @bus_span_buses.key?(bus)
+              v = k.read(@frame, @bus_span_count)
+              next if v.is_a?(Numeric) && v == 0
+
+              stem_shadow(track, bus)
+            end
           end
         end
 
@@ -848,13 +880,50 @@ module MB
 
           seg_from = from + p0 * per_sample
           activate_master(chains, seg_from, from + p1 * per_sample, per_sample, rate)
+          # Shared branches catch up with frames the chains didn't read
+          # (asleep, or not started yet) before the segment
+          bus_read_shared(b, @frame + p0, chains)
           begin_bus_read(p0)
           chains.each { |c| render_master_chain(c, seg, out, n, rate) }
+          chains.each { |c| c.read_to = @frame + p1 if c.started }
 
           @mutex.synchronize {
             chains.each { |c| b.chains.delete(c) if master_chain_done?(c, b.chains) }
           }
           out
+        end
+
+        # Reads the branches of shared nodes (see Strip#asleep_reads) of bus
+        # +b+'s started chains (or +chains+) from where each read up to (the
+        # span's first frame for a chain starting in this span) to session
+        # frame +upto+, like a sleeping player: a bus sleeps (nothing sent,
+        # or muted) and runs in segments of a span, and a chain starting
+        # later in a span skips the segments before it, so before fixes-13 a
+        # chain sharing a node with a player (`lfo = 3.hz.lfo; bg :a, lfo;
+        # bus(:fx) { |sig| sig * lfo }`) read it late after sleeping, and
+        # raised BranchBufferOverflow after a second.  The chains' own nodes
+        # still sleep.
+        def bus_read_shared(b, upto, chains = nil)
+          chains ||= @mutex.synchronize { b.chains.dup }
+          chains.each do |c|
+            next unless c.started && !c.bypass?
+
+            read_while_asleep(c.chain_graph, upto - (c.read_to || @frame))
+            c.read_to = upto
+          end
+        end
+
+        # The ChainGraphs of every bus chain that isn't a bypass (only those
+        # that haven't started with +waiting+), stem copies' included, for Strip#span_graphs and
+        # Strip#catch_up_waiting (fixes-13).
+        def bus_chain_graphs(waiting: false)
+          return NO_GRAPHS if @buses.empty?
+
+          list = []
+          add = ->(b) { b.chains.each { |c| list << c.chain_graph unless c.bypass? || (waiting && c.started) } }
+          @mutex.synchronize { @buses.each_value(&add) }
+          @stem_shadows.each_value { |l| l.each_value(&add) } # (stems renders)
+          list
         end
 
         # Prepares a chain built for bus +name+: binds its readers and
@@ -976,7 +1045,7 @@ module MB
             state = original.before
             chain = build_master(state&.block, description: state&.description, label: subject.name.to_s)
             prepare_bus_chain(subject.name, chain)
-            change(:bus, subject.name, time, data: { description: state&.description, to: state&.to || :master }, undoes: original.seq) { |t|
+            change(:bus, subject.name, time, data: { description: state&.description, to: state&.to || :master }, undoes: original.seq, graph: chain.chain_graph) { |t|
               @mutex.synchronize { b = @buses[subject.name]; b.to = state&.to if b; @bus_order = nil }
               start_bus_chain(subject.name, chain, state&.block, t)
             }
