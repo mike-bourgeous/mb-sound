@@ -87,6 +87,14 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       allow(MB::Sound::MIDI::Input).to receive(:new).and_return(fake_input)
     end
 
+    # The first MB::Sound.midi of an example switches the session output to
+    # the :low latency profile, saying so.
+    def first_midi
+      midi = nil
+      expect { midi = MB::Sound.midi }.to output(/:low latency profile/).to_stderr
+      midi
+    end
+
     it 'is a Notes on a cached live stream that follows the session output, switched to :low' do
       midi = nil
       expect { midi = MB::Sound.midi }.to output(/:low latency profile/).to_stderr
@@ -104,7 +112,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
 
     it 'applies the sustain pedals unless sustain: false, which is another Notes on the same input' do
-      midi = MB::Sound.midi
+      midi = first_midi
       expect(midi.sustain?).to eq(true)
       dry = MB::Sound.midi(sustain: false)
       expect(dry.sustain?).to eq(false)
@@ -117,7 +125,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
 
     it 'follows the output when the session switches outputs' do
-      midi = MB::Sound.midi
+      midi = first_midi
       old = midi.stream.source.live_source
       MB::Sound.latency(:safe)
       source = MB::Sound.midi_stream.source.live_source
@@ -127,7 +135,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
 
     it 'opens a new input after #close_midi' do
-      midi = MB::Sound.midi
+      midi = first_midi
       MB::Sound.close_midi
       expect(midi.stream.source).to be_closed
       expect(MB::Sound.midi).not_to equal(midi)
@@ -140,7 +148,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
 
     it 'makes synths with Notes#synth and Synth.new' do
-      expect(MB::Sound.midi.synth(voices: 2) { |v| v.hz.saw * v.amp_env }).to be_a(MB::Sound::Synth)
+      expect(first_midi.synth(voices: 2) { |v| v.hz.saw * v.amp_env }).to be_a(MB::Sound::Synth)
       expect(MB::Sound::Synth.new(MB::Sound.midi) { |v| v.gate }).to be_a(MB::Sound::Synth)
     end
   end

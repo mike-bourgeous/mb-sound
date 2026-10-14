@@ -120,7 +120,8 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
   describe 'sample rates' do
     it 'resamples to a sound card running at another rate' do
-      o = device_output(device_rate: 44100, latency: 0.1)
+      o = nil
+      expect { o = device_output(device_rate: 44100, latency: 0.1) }.to output(/runs at 44100 Hz; resampling from 48000 Hz \(fastest\)/).to_stderr
       expect(o.sample_rate).to eq(48000)
       expect(o.device_rate).to eq(44100)
       expect(o.resampling?).to eq(true)
@@ -132,7 +133,8 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     end
 
     it 'runs at the card rate with resample: false' do
-      o = device_output(device_rate: 44100, resample: false)
+      o = nil
+      expect { o = device_output(device_rate: 44100, resample: false) }.to output(/runs at 44100 Hz instead of 48000 Hz/).to_stderr
       expect([o.sample_rate, o.device_rate, o.resampling?]).to eq([44100, 44100, false])
     end
 
@@ -144,11 +146,12 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     it 'uses AUDIO_DEVICE_RATE and AUDIO_RESAMPLE' do
       ENV['AUDIO_DEVICE_RATE'] = '32000'
       ENV['AUDIO_RESAMPLE'] = 'medium'
-      o = device_output(resample: :best)
+      o = nil
+      expect { o = device_output(resample: :best) }.to output(/runs at 32000 Hz; resampling from 48000 Hz \(medium\)/).to_stderr
       expect([o.sample_rate, o.device_rate, o.resampling?]).to eq([48000, 32000, true])
 
       ENV['AUDIO_RESAMPLE'] = 'off'
-      o = device_output
+      expect { o = device_output }.to output(/runs at 32000 Hz instead of 48000 Hz/).to_stderr
       expect([o.sample_rate, o.resampling?]).to eq([32000, false])
     end
 

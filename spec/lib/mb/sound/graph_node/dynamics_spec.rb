@@ -448,8 +448,7 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
 
     it 'separates bands by frequency' do
       lo, hi = 50.hz.sine.bands(1000)
-      a = render(lo, 4800)[0][2400..].abs.max
-      b = render(hi, 4800)[0][2400..].abs.max
+      a, b = render(MB::Sound.channels(lo, hi), 4800).map { |d| d[2400..].abs.max } # bands sampled in turn
       expect(a).to be > 0.99
       expect(b).to be < 0.01
     end

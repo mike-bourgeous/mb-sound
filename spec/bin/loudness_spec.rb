@@ -67,6 +67,7 @@ RSpec.describe('bin/loudness.rb') do
     expect(text).to include("#{out}: +6.0 dB -> -14.0 LUFS, true peak -14.0 dBTP")
     expect(MB::Sound.loudness(out).integrated).to be_within(0.05).of(-14)
 
+    expect_script_warnings(/exists; use -f to overwrite/)
     expect(run('-n', '-14', a)).to include('exists; use -f')
     named = tmp_path('named.flac')
     run('-n', '-30', '-o', named, a)
@@ -77,6 +78,7 @@ RSpec.describe('bin/loudness.rb') do
 
   it 'warns when a normalized copy peaks above -1 dBTP' do
     a = tone('a.flac', -6, seconds: 1)
+    expect_script_warnings(/no limiter is applied/, /gain reduced from/)
     text = run('-n', '1', '-o', tmp_path('loud.flac'), a)
     expect(text).to include("is above 1 LUFS's -1.0 dBTP (clips in integer formats)")
 
