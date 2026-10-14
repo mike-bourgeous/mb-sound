@@ -2,9 +2,10 @@
 RSpec.describe(ForkScript) do
   it 'runs a script in a fork, returning its output and status' do
     script = tmp_path('ok.rb')
-    File.write(script, "puts ARGV.join(','); $stderr.puts $0; exit 3\n")
+    File.write(script, "puts ARGV.join(','), '\u00e9 \u2500'; $stderr.puts $0; exit 3\n")
     out, status = fork_script(script, 'a', 2)
-    expect(out).to eq("a,2\n#{script}\n")
+    expect(out).to eq("a,2\n\u00e9 \u2500\n#{script}\n")
+    expect(out.encoding).to eq(Encoding::UTF_8)
     expect(status.exitstatus).to eq(3)
   end
 

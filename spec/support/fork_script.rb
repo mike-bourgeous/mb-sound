@@ -73,22 +73,24 @@ module ForkScript
     [output, $?]
   end
 
-  # Reads +io+ to its end or until +seconds+ pass.  Returns the text and
-  # whether it timed out.
+  # Reads +io+ to its end or until +seconds+ pass.  Returns the text (in
+  # the default external encoding, as IO#read gives it) and whether it
+  # timed out.
   def self.read_until(io, seconds)
-    output = +''
+    output = String.new(encoding: Encoding::BINARY)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
-    loop do
+    timed_out = loop do
       left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      return [output, true] if left <= 0
+      break true if left <= 0
       next unless io.wait_readable(left)
 
       output << io.read_nonblock(65536)
     rescue IO::WaitReadable
       next
     rescue EOFError
-      return [output, false]
+      break false
     end
+    [output.force_encoding(Encoding.default_external), timed_out]
   end
 
   # What a hung child's threads and children wait on (from /proc), then
@@ -102,7 +104,7 @@ module ForkScript
 
     Process.kill(:QUIT, pid) rescue nil
     more, _ = read_until(reader, 2)
-    output << more
+    output << more.force_encoding(output.encoding)
     Process.kill(:KILL, pid) rescue nil
     Process.wait(pid) rescue nil
 
