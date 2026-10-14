@@ -67,6 +67,15 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(pad.stretch(2).lineage[3]).to eq({})
   end
 
+  it 'reads stretches longer than 30 s with octave-spaced levels unless the sample has its own' do
+    short = MB::Sound::Sample[chord]
+    expect(short.stretch(8, mode: :paul).mips).to be_nil
+    expect(short.stretch(64, mode: :paul).mips).to eq(:octave)
+    expect(short.stretch(64).mips).to eq(:octave)
+    expect(short.read_as(mips: :half_octave).stretch(64, mode: :paul).mips).to eq(:half_octave)
+    expect(short.read_as(:drop).stretch(64, mode: :paul).mips).to eq(false)
+  end
+
   it 'raises on bad modes and mixed options' do
     expect { pad.stretch(2, mode: :nope) }.to raise_error(ArgumentError, /mode/)
     expect { pad.stretch(2, window: 2048) }.to raise_error(ArgumentError, /spectral/)

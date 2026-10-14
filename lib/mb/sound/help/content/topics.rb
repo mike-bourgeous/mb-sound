@@ -231,14 +231,16 @@ module MB
         (:hann, :expodec for percussive grains, ...), `jitter:` (0 regular,
         1 Poisson), `seed:`, `read: :drop` for lofi reads.  Every option
         takes a number, a knob, or a node.  In a synth, `v.grains(pad,
-        ...)` tracks the keys.  `max_grains:` (32) caps the cost: about
-        3% of realtime for a full mono cloud, 6% stereo.
+        ...)` tracks the keys.  `max_grains:` caps the cost (32 for a
+        cloud, 16 per synth voice): about 3% of realtime for a full mono
+        cloud of 32, 6% stereo.
 
         Stretching keeps the pitch: `.stretch(4)` is the cyclic S950
         stretch (gritty), `.stretch(4, mode: :spectral)` a phase vocoder
         with locked phases and sharp transients (pads, chords, voices,
         bass), `.stretch(32, mode: :paul)` Paulstretch (endless washes).
-        They are offline edits: a new Sample, made once.
+        They are offline edits: a new Sample, made once; results over 30
+        s read with `mips: :octave` (smaller playback tables).
       TEXT
       dsl :grains, :stretch
       note :granular

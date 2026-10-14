@@ -537,7 +537,7 @@ module MB
       #   Array (Granular::WINDOWS)
       # - normalize: (true) scale grains by 1 / sqrt(overlap) so dense
       #   clouds keep the sample's level
-      # - max_grains: (32) the most grains at once (more onsets are
+      # - max_grains: (32; 16 through Notes#grains) the most grains at once (more onsets are
       #   skipped: a fixed worst-case cost)
       # - seed: the grains' random seed (MB::Sound.next_seed by default)
       # - read: :clean or :drop (lofi drop-sample reads), or
@@ -645,7 +645,10 @@ module MB
       # (:paulstretch) is Paulstretch: windows of +window+ (0.25 s), every
       # phase random (from +seed+, 0 by default, so the same stretch
       # gives the same audio): glacial washes at extreme ratios (8x to
-      # 1000x).  Both are offline (a new Sample, made once per audio and
+      # 1000x).  Results longer than LONG_STRETCH (30 s) read with
+      # `mips: :octave` unless this sample has its own mips (smaller
+      # playback tables for long drones; voices' and grains' mips: still
+      # win).  Both are offline (a new Sample, made once per audio and
       # arguments; spectral runs about 50x realtime per output channel).
       #
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
@@ -662,11 +665,24 @@ module MB
         x = position(crossfade).round
         kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == 0) }
         guide = nil
-        edit(:stretch, [ratio], kw) { |d|
+        edit(:stretch, [ratio], kw, read: stretch_read(ratio)) { |d|
           guide ||= fit == :auto ? mono_mix : nil
           Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end
+
+      # Stretch results longer than this (seconds) read with :octave level
+      # spacing unless the sample says otherwise (about 8x the audio for
+      # the band-limited levels instead of about 14x: a 160 s Paulstretch
+      # would take ~420 MB at the default spacing; maintainer, 2026-10-14).
+      LONG_STRETCH = 30
+
+      # The read settings for a stretch by +ratio+ (see LONG_STRETCH).
+      def stretch_read(ratio)
+        long = length * ratio.to_f / sample_rate > LONG_STRETCH
+        { interpolation: @interpolation, mips: @mips.nil? && long ? :octave : @mips }
+      end
+      private :stretch_read
 
       # The :spectral and :paul stretches (see #stretch).
       def spectral_stretch(ratio, mode, window, overlap, transients, seed)
@@ -679,10 +695,10 @@ module MB
           n = window.nil? ? Spectral::WINDOW : position(window).round
           n += 1 if n.odd?
           onsets = transients ? (@reversed ? reverse : self).onsets : nil
-          edit(:stretch, [ratio], kw, whole: true) { |chans| Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets) }
+          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets) }
         else
           n = position(window.nil? ? Spectral::PAUL_WINDOW : window).round
-          edit(:stretch, [ratio], kw, whole: true) { |chans| Spectral.paul(chans, ratio.to_f, window: n, seed: seed) }
+          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.paul(chans, ratio.to_f, window: n, seed: seed) }
         end
       end
       private :spectral_stretch

@@ -33,6 +33,10 @@ module MB
       # The default most grains at once.
       MAX_GRAINS = 32
 
+      # The default most grains at once in synth voices (Notes#grains):
+      # half a cloud's, since a synth runs several (maintainer, 2026-10-14).
+      VOICE_MAX_GRAINS = 16
+
       # The longest grain (seconds).
       MAX_SIZE = 10.0
 
@@ -76,11 +80,13 @@ module MB
         # A grain cloud of +sample+ (see Sample#grains) following this
         # voice: each grain's pitch tracks the note's frequency (bends and
         # glides included) against the sample's root, and every note-on
-        # restarts the scan playhead with a grain on its exact sample.
+        # restarts the scan playhead with a grain on its exact sample.  At
+        # most VOICE_MAX_GRAINS (16) grains per voice unless +max_grains:+
+        # says otherwise.
         #
         #     synth(midi) { |v| v.grains(pad, density: 40, size: 70.ms) * v.env(0.2, 0.3, 0.8, 1.2) }
         def grains(sample, **options)
-          Sample[sample].grains(freq: freq, trigger: trigger, **options)
+          Sample[sample].grains(freq: freq, trigger: trigger, **{ max_grains: VOICE_MAX_GRAINS }.merge(options))
         end
       end
     end

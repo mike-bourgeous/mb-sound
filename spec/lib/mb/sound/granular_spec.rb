@@ -105,6 +105,13 @@ RSpec.describe(MB::Sound::GraphNode::Grains, :aggregate_failures) do
     expect(out.map(&:abs).max).to be > 0.05
   end
 
+  it 'caps voices at 16 grains unless max_grains: says otherwise' do
+    notes = MB::Sound.seq(MB::Sound::C4.n4).notes
+    expect(core(notes.grains(noise)).max_grains).to eq(16)
+    expect(core(notes.grains(noise, max_grains: 40)).max_grains).to eq(40)
+    expect(core(noise.grains).max_grains).to eq(32)
+  end
+
   it 'repeats from its seed and differs by seed' do
     a = render(noise.grains(seed: 9, density: 100), 3000)
     b = render(noise.grains(seed: 9, density: 100), 3000)

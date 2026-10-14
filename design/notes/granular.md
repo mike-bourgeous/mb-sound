@@ -58,6 +58,12 @@ Offline edits like the cyclic stretch (baked into a new Sample, cached per audio
 - Transients: a noise burst stretched 4x rises (5% → 50% of its peak) in 2-6 samples with `transients: true`, ~2500 samples without.
 - Paulstretch frames are random-phase, so they add in power: the overlap-add divides by sqrt(Σw² × mean(w²)) instead of Σw² (the plain normalization played 6 dB low).
 
+## Round 2 (maintainer answers, 2026-10-14)
+
+- Clouds keep 32 slots; `v.grains` (Notes#grains) defaults to `Granular::VOICE_MAX_GRAINS` = 16 per voice (`max_grains:` still overrides), so 8 stereo grain voices cost at most ~23% of realtime instead of ~45%.
+- Stretch results longer than `Sample::LONG_STRETCH` (30 s) read with `mips: :octave` (about 8x the audio for levels instead of about 14x) unless the source sample has its own mips (an explicit `read_as(mips:)`, a drop read); voices' and grains' `mips:` options still win.
+- Later follow-ups, not now: the Clouds-style live grain buffer, and an opt-in grain layer for the ambient genre.
+
 ## Not yet
 
 Live rolling grain buffer; grains in plans; per-grain filters; spectral freeze as a node; the ambient genre's optional grain layer (not changing its default sound without the maintainer).
