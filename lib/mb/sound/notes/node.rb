@@ -27,6 +27,20 @@ module MB
       # end, and an oscillator's ended key sync trigger only stops its
       # resets, so oscillators keep playing through an envelope's release.
       #
+      # Without envelopes or a quiet check (Notes#grid_end?: a bare
+      # `clip.notes.gate.filter(...)` or `hit.trigger.ping(...)`), those
+      # nodes end on the first point of their END_GRID (every 800 samples
+      # of their own output, counted from their first sample) at or after
+      # the sample following the stream's last event (TAIL_SECONDS later
+      # if a note is still held then), returning a short last buffer, so a
+      # graph ends on the same sample at any buffer size: where a run of
+      # 800-sample buffers ended it before.  Before fixes-12 (2026-10-14)
+      # they ended at the first buffer start after the stream's end, so a
+      # filter ringing on a gate was cut a buffer-size-dependent number of
+      # samples after the last note (at full level for a 50 Hz lowpass on
+      # a gate).  Graphs with envelopes still end at a buffer start (an
+      # envelope's idle sample isn't known before it renders).
+      #
       # Subclasses implement #render(buf, items) (see Held and Impulse).
       class Node
         include GraphNode
@@ -36,6 +50,11 @@ module MB
         # even if envelopes are still sounding (the old MIDI file nodes'
         # limit).
         TAIL_SECONDS = MIDI::MIDIFile::TAIL_SECONDS
+
+        # The grid (samples of a node's own output) on which #ends_graph?
+        # nodes of a Notes without envelopes end (see the class
+        # description; the same 800 as Synth::SKIP_GRID).
+        END_GRID = 800
 
         # The MIDI::Stream this node reads.
         attr_reader :stream
@@ -57,6 +76,9 @@ module MB
           @sample_rate = sample_rate.to_f
           @buf = nil
           @tail = 0
+          @frames_read = 0
+          @grid_end = nil
+          @grid_generation = nil
         end
 
         # Returns +count+ samples (a buffer reused between calls), or nil if
@@ -90,6 +112,7 @@ module MB
           out = smooth_output(out) if @smoother
 
           @tail += count if ended?
+          out = end_on_grid(out, from, to, count) if ends_graph?
           out
         end
 
@@ -184,8 +207,78 @@ module MB
 
         # True if #sample should return nil (see the class description).
         def finished?
-          return false unless ends_graph? && ended?
+          return false unless ends_graph?
+          if grid_end?
+            return false if @grid_end.nil? || @reader.generation != @grid_generation
+            return @frames_read >= @grid_end
+          end
+
+          return false unless ended?
           (@notes.nil? || @notes.idle?) || @tail >= TAIL_SECONDS * @sample_rate
+        end
+
+        # True if this #ends_graph? node ends on its END_GRID (see the
+        # class description): its Notes has no envelopes and no quiet check.
+        def grid_end?
+          !@notes.nil? && @notes.grid_end?
+        end
+
+        # Counts the frames of a buffer an #ends_graph? node of a Notes
+        # without envelopes read (from stream time +from+ to +to+, +count+
+        # samples; Notes with envelopes never switch to the
+        # grid, since envelopes are only added), and
+        # once its stream's last event has been read, works out the
+        # END_GRID point where it ends (see the class description).
+        # Returns +out+, cut short if the node ends inside the buffer (nil
+        # if it ends at its start).  Also called (with nil) for planned
+        # blocks, which never hold a stream's end (Plan's #plan_finished?).
+        def end_on_grid(out, from, to, count)
+          return out unless grid_end?
+
+          start = @frames_read
+          @frames_read += count
+
+          gen = @reader.generation
+          if @grid_end && gen != @grid_generation
+            @grid_end = nil # a seek or a restart: the stream goes on
+          end
+
+          if @grid_end.nil?
+            last = @stream.music_end
+            return out if last.nil? || last >= to
+
+            over = start
+            over += [[((last - from) * step_rate).floor, 0].max, count - 1].min + 1 if last >= from
+            target = over
+            target = grid_ceil(over) + (TAIL_SECONDS * @sample_rate).round if end_held?
+            @grid_end = grid_ceil(target)
+            @grid_generation = gen
+          end
+
+          return out if out.nil? || @grid_end >= @frames_read
+          return nil if @grid_end <= start
+
+          out[0...(@grid_end - start)]
+        end
+
+        # +frames+ rounded up to the END_GRID.
+        def grid_ceil(frames)
+          (frames + END_GRID - 1) / END_GRID * END_GRID
+        end
+
+        # The node's sample rate as a Rational (see #step).
+        def step_rate
+          @rate_r || @sample_rate.to_r
+        end
+
+        # True if a note is still held after the stream's last event, for
+        # #end_on_grid: Gate nodes know from their NoteStack.  Trigger and
+        # choke nodes don't follow held notes (their planned blocks only
+        # see note-ons or chokes), so with a note left hanging they end on
+        # the grid after the stream's last event, where a gate waits
+        # TAIL_SECONDS.
+        def end_held?
+          false
         end
 
         # The length of +count+ samples in Rational seconds at the node's

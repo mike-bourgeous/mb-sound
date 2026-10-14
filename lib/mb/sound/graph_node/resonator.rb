@@ -88,15 +88,26 @@ module MB
         # node ended).  After the input ends, the last buffer stops on the
         # exact sample where the ringing falls below QUIET, so the end is
         # the same at any buffer size (2026-10-13; it used to end at the
-        # first buffer start below QUIET).
+        # first buffer start below QUIET).  A short input buffer is the
+        # input's last (like nil after it; fixes-12, 2026-10-14: a Notes
+        # trigger ends inside a buffer on its grid): the ringing goes on
+        # after it in the same buffer.
         def sample(count)
           return nil if @rung_out
 
           x = @input_ended ? nil : @input.sample(count)
+          head = nil
           if x.nil? || x.empty?
             @input_ended = true
             return nil if ringing_level < QUIET
             x = 0.0
+          elsif x.length < count
+            # The input's last samples, then the ring out
+            head = x.length
+            padded = x.class.zeros(count)
+            padded[0...head] = x
+            x = padded
+            @input_ended = true
           else
             count = x.length
           end
@@ -114,7 +125,8 @@ module MB
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           return run_kernel(@buf, x, f, d) unless @input_ended
 
-          # The ringing only decays now: find where it falls below QUIET
+          # The ringing only decays now (after the input's last +head+
+          # samples): find where it falls below QUIET
           saved = @state.dup
           out = run_kernel(@buf, x, f, d)
           return out if ringing_level >= QUIET
@@ -122,10 +134,21 @@ module MB
           lo = 0 # still at least QUIET after lo samples
           hi = count # below QUIET after hi samples
           scratch = Numo::SFloat.zeros(count)
+          if head
+            # Already below QUIET where the input ended: end there (as
+            # when the input ends at a buffer start)
+            @state[0..] = saved
+            run_kernel(scratch[0...head], slice(x, head), slice(f, head), slice(d, head))
+            if ringing_level < QUIET
+              hi = head
+            else
+              lo = head
+            end
+          end
           while hi - lo > 1
             mid = (lo + hi) / 2
             @state[0..] = saved
-            run_kernel(scratch[0...mid], x, slice(f, mid), slice(d, mid))
+            run_kernel(scratch[0...mid], slice(x, mid), slice(f, mid), slice(d, mid))
             if ringing_level < QUIET
               hi = mid
             else
@@ -135,7 +158,9 @@ module MB
 
           @state[0..] = saved
           @rung_out = true
-          run_kernel(@buf[0...hi], x, slice(f, hi), slice(d, hi))
+          return nil if hi == 0
+
+          run_kernel(@buf[0...hi], slice(x, hi), slice(f, hi), slice(d, hi))
         end
 
         # Runs the kernel into +out+ (see #sample).

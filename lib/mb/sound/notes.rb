@@ -849,6 +849,13 @@ module MB
         envelope
       end
 
+      # True if this instance's gate, trigger, and choke nodes end on their
+      # grid (no envelopes made through it and no #quiet_check; see
+      # Notes::Node).
+      def grid_end?
+        @envelopes.empty? && @quiet_check.nil?
+      end
+
       # True when no note is held, every envelope made through this
       # instance (see #env, #register) is idle, and the #quiet_check (if
       # any) says the output is quiet, so a voice allocator can reuse the

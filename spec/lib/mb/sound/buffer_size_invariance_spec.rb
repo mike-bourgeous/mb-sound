@@ -105,6 +105,67 @@ RSpec.describe 'Buffer size invariance' do
     end
   end
 
+  # fixes-12: a Notes gate or trigger without envelopes ended at the first
+  # buffer start after the clip's last event, so a filter ringing on it
+  # was cut 0..799 samples later depending on the buffer size (a 50 Hz
+  # lowpass on a gate at full level).  They now end on their 800-sample
+  # grid, where 800-sample buffers ended them before.
+  describe 'Notes gates and triggers without envelopes' do
+    # Total samples before the node from +make+ ends, at each size.
+    def lengths(make, sizes)
+      sizes.map { |s|
+        MB::Sound.rewind
+        node = make.call
+        n = 0
+        i = 0
+        loop do
+          b = node.sample(s[i % s.length])
+          break if b.nil?
+
+          n += b.length
+          break if b.length < s[i % s.length]
+
+          i += 1
+        end
+        n
+      }
+    ensure
+      MB::Sound.rewind
+    end
+
+    {
+      'a gate into a lowpass' => -> { MB::Sound.seq(MB::Sound::C4).n4.notes.gate.filter(:lowpass, cutoff: 50) },
+      'a trigger into a bandpass' => -> { MB::Sound.seq(MB::Sound::D2, MB::Sound::A2).n8.notes.trigger.filter(:bandpass, cutoff: 200, quality: 20) * 100 },
+      'a saw times a gate' => -> { n = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.notes; n.hz.saw * n.gate },
+    }.each do |what, make|
+      it "ends #{what} on the same sample at any buffer size" do
+        sizes = [[800], [367, 368], [64], [1031], [1]]
+        expect(lengths(make, sizes)).to eq([24_800] * sizes.length) # clip end 24000 (1/4 at 120 bpm)
+        expect_invariant(make, seconds: 0.6, sizes: [[367, 368], [64], [1031], [7]])
+      end
+    end
+
+    it 'keeps a graph going through a seek back before its end' do
+      make = -> { n = MB::Sound.seq(MB::Sound::C4).n4.notes; [n, n.gate.filter(:lowpass, cutoff: 50)] }
+      [[800], [367, 368]].each do |s|
+        MB::Sound.rewind
+        notes, node = make.call
+        n = 0
+        i = 0
+        while n < 24_400
+          c = s[i % s.length]
+          expect(node.sample(c)&.length).to eq(c)
+          n += c
+          i += 1
+        end
+        notes.stream.seek(0)
+        expect(node.sample(800)&.length).to eq(800)
+      ensure
+        MB::Sound.rewind
+      end
+    end
+  end
+
   describe 'sampler' do
     let(:rec) { MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(48000).seq.map { |i| Math.sin(i * 0.03) * Math.exp(-(i % 6000) / 2000.0) })] }
 
