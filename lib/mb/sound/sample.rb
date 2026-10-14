@@ -511,6 +511,51 @@ module MB
       end
       alias to_node node
 
+      # A granular cloud of this sample: a stereo Channels bundle of a
+      # GraphNode::Grains (see design/notes/granular.md).  Every option is a
+      # number or a node (knobs too), read per sample; each grain keeps the
+      # values of its onset:
+      # - density: grains per second (20; a Pitch, or a Duration for one
+      #   grain per note length at the current tempo)
+      # - jitter: 0 regular onsets (a buzz at the density) to 1 (default)
+      #   Poisson onsets, the classic cloud
+      # - size: grain length (100 ms; seconds, a Length, or a node)
+      # - position: grain centers as a 0..1 fraction of the sample (or a
+      #   Length); a number freezes (`position: 0.42`), a node scrubs
+      # - scan: a playhead added to position, moving at +scan+ times the
+      #   sample's own speed and wrapping (0.25 = a 4x granular stretch);
+      #   1 when no position is given (plays through, looping), else 0
+      # - spread: ± random position (0..1 of the sample, or a Length)
+      # - pitch: semitones (an Interval or number), or an Array of them to
+      #   pick from at random per grain (`[0, 12, 19]`); pitch_spread: ±
+      #   random semitones
+      # - pan_spread: 0 (center) to 1 (each grain anywhere left to right;
+      #   0.5 by default)
+      # - reverse: the chance a grain plays backwards (0..1, or true)
+      # - window: :hann (default), :triangle, :tukey, :gauss, :blackman,
+      #   :rect, :expodec (percussive), :rexpodec, a Proc of 0..1, or an
+      #   Array (Granular::WINDOWS)
+      # - normalize: (true) scale grains by 1 / sqrt(overlap) so dense
+      #   clouds keep the sample's level
+      # - max_grains: (32) the most grains at once (more onsets are
+      #   skipped: a fixed worst-case cost)
+      # - seed: the grains' random seed (MB::Sound.next_seed by default)
+      # - read: :clean or :drop (lofi drop-sample reads), or
+      #   interpolation:/mips: as for #read_as; default the sample's own
+      # - freq:, trigger: (Notes#grains sets them) key tracking against
+      #   #root and note-ons restarting the playhead
+      #
+      #     bg :drone, bowl.grains(position: 0.42, size: 120.ms, density: 30, spread: 0.02)
+      #     bg :rain, rain.grains(scan: 0.25, size: 60.ms, density: 80, pitch_spread: 3, reverse: 0.3)
+      #     bg :spray, pad.grains(pitch: [0, 12, 19], window: :expodec, density: 60)
+      def grains(read: nil, **options)
+        s = read.nil? ? self : read_as(read)
+        g = GraphNode::Grains.new(s, **options)
+        GraphNode::Channels.new(g.outputs)
+      end
+      alias granular grains
+      alias cloud grains
+
       # Slices of the region (a Sample::Slices): +count+ equal slices, or at
       # +at+ (an Array of positions from the region start), or at detected
       # transients with `slices(:onsets)` (see Sample::Onsets; +threshold+

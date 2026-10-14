@@ -62,6 +62,8 @@
 #include "mb_ext_helpers.h"
 #include "mb_wavetable.h"
 
+#include "granular.h"
+
 enum {
 	REGION_TABLE = 0,
 	REGION_LOKEY,
@@ -534,4 +536,6 @@ void Init_fast_sampler(void)
 	rb_define_module_function(fast_sampler, "play", ruby_play, 8);
 	rb_define_const(fast_sampler, "REGION_COLS", INT2FIX(SMP_REGION_COLS));
 	rb_define_const(fast_sampler, "STATE_LENGTH", INT2FIX(SMP_STATE_LENGTH));
+
+	mb_granular_init(fast_sampler);
 }
