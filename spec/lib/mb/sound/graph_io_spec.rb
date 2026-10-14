@@ -122,6 +122,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'ArrayInput' => "can't print a Numo::SFloat",
       'MixSource (master chain input)' => 'a class defined outside the library',
       'sampler voices (SamplerVoice)' => 'a Sample made from audio in memory',
+      'grains (Grains)' => 'a Sample made from audio in memory',
       'capture tap (CaptureTap)' => "can't print a MB::Sound::Sampler::AudioCapture",
     }.freeze
 
