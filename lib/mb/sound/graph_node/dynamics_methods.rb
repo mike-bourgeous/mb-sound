@@ -210,7 +210,9 @@ module MB
         end
 
         # Sidechain ducking: turns this signal down by up to +amount+ (e.g.
-        # -18.db) while +sidechain+ (e.g. a kick) is above
+        # -18.db; 18.db is the same, since ducking never boosts; a bare
+        # number is a linear gain at most 1, see Decibels.reduction_db)
+        # while +sidechain+ (e.g. a kick) is above
         # +threshold+, the reduction growing 1 dB per dB above it (an
         # infinite-ratio compressor with a range) so loud hits duck fully;
         # recovering over +release+ (a one-pole time constant: seconds, a
@@ -242,8 +244,7 @@ module MB
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
           raise ArgumentError, 'only: picks a node inside a bus or track named by a Symbol (duck(:drums, only: :kick))' if only && !sidechain.is_a?(Symbol)
           sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
-          a = DynamicsMethods.level_db(amount, 'amount', zero: true)
-          raise ArgumentError, 'Duck amount must be at most 0 dB' if a > 0
+          a = -Decibels.reduction_db(amount, 'amount')
           t = DynamicsMethods.level_db(threshold, 'threshold')
           transfer = Dynamics::Transfer.corners(t, [[t, 1.0, 0.0]], knee: knee, description: "duck #{dyn_fmt_db(a)} dB above #{dyn_fmt_db(t)} dB")
           finish_dynamics(Dynamics.new(

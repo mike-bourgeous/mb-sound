@@ -148,6 +148,28 @@ module MB
           v == 0 ? -Float::INFINITY : 20.0 * Math.log10(v)
         end
 
+        # A ducking amount as dB of reduction (0 or more; Infinity for a full
+        # cut): a Decibels value's magnitude, so -12.db and 12.db both duck
+        # by 12 dB (ducking never boosts; maintainer 2026-10-14), a bare
+        # linear gain at most 1 by its dB (0.25 ducks by 12 dB; 0 is a full
+        # cut).  A bare number above 1 raises ("for 12 dB of ducking write
+        # -12.db"), or in live mode is read as dB of reduction with a
+        # warning; a bare negative number follows .db_of.
+        def reduction_db(value, name)
+          return checked(value, name).db_value.abs if value.is_a?(Decibels)
+
+          v = checked(value, name).to_f
+          if v > 1
+            message = "#{name}: #{value.inspect} is a linear gain above 1, and ducking never boosts; for #{value.inspect} dB of ducking write -#{value.inspect}.db"
+            raise ArgumentError, message unless MB::Sound.live?
+
+            warn_once(:live_reduction, "#{name}: #{value.inspect} is read as #{value.inspect} dB of ducking in live mode; write -#{value.inspect}.db (bare numbers are linear gains)")
+            return v
+          end
+
+          db_of(value, name, zero: true).abs
+        end
+
         # Raises unless +value+ is a real number (not NaN); returns it.
         def checked(value, name)
           unless value.is_a?(Numeric) && value.real? && !value.to_f.nan?

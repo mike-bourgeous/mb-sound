@@ -282,11 +282,16 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect(db(out[95999] / 0.5)).to be > -0.01
     end
 
-    it 'needs a sidechain and a negative amount' do
+    it 'needs a sidechain, and ducks by the magnitude of any dB amount (never boosts)' do
       expect { 1.constant.duck(nil) }.to raise_error(ArgumentError, /sidechain/)
-      expect {
-        expect { 1.constant.duck(1.constant, amount: 6) }.to raise_error(ArgumentError, /amount/)
-      }.to output(/amount: 6 is a linear gain/).to_stderr
+      expect { 1.constant.duck(1.constant, amount: 6) }.to raise_error(ArgumentError, /amount: 6 is a linear gain above 1.*write -6\.db/)
+      expect { 1.constant.duck(1.constant, amount: -6) }.to raise_error(ArgumentError, /amount: -6 is a linear gain/)
+
+      kick = Numo::SFloat.ones(4800)
+      d = ->(amount) { render(0.5.constant.duck(arr(kick), amount: amount, threshold: -30.db, attack: 0, hold: 0, knee: 0), 4800)[0][4000] }
+      expect(d.(12.db)).to eq(d.(-12.db))
+      expect(db(d.(-12.db) / 0.5)).to be_within(1e-4).of(-12)
+      expect(db(d.(0.25) / 0.5)).to be_within(1e-3).of(20 * Math.log10(0.25))
     end
   end
 

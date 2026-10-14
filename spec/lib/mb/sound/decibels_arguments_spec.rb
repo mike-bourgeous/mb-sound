@@ -69,9 +69,22 @@ RSpec.describe('dB-valued arguments', :aggregate_failures) do
   end
 
   describe 'reverb duck:' do
-    it 'is the wet gain while ducked' do
-      expect { 1.constant.reverb(:room, duck: 2) }.to raise_error(ArgumentError, /at most 0 dB/)
+    it 'ducks by the magnitude of a dB amount, never boosting' do
+      expect { 1.constant.reverb(:room, duck: 2) }.to raise_error(ArgumentError, /duck: 2 is a linear gain above 1.*write -2\.db/)
       expect { 1.constant.reverb(:room, duck: -12) }.to raise_error(ArgumentError, /duck: -12/)
+      expect(MB::Sound::Decibels.reduction_db(12.db, 'duck')).to eq(12.0)
+      expect(MB::Sound::Decibels.reduction_db(-12.db, 'duck')).to eq(12.0)
+      expect(MB::Sound::Decibels.reduction_db(0.5, 'duck')).to eq(-20 * Math.log10(0.5))
+      expect(MB::Sound::Decibels.reduction_db(0, 'duck')).to eq(Float::INFINITY)
+    end
+
+    it 'reads a bare amount above 1 as dB of ducking in live mode, with a warning' do
+      MB::Sound.live = true
+      v = nil
+      expect { v = MB::Sound::Decibels.reduction_db(12, 'duck') }.to output(/duck: 12 is read as 12 dB of ducking in live mode; write -12\.db/).to_stderr
+      expect(v).to eq(12.0)
+    ensure
+      MB::Sound.live = false
     end
   end
 

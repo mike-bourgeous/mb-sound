@@ -285,6 +285,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       open = burst_rms
       ducked = burst_rms(duck: -12.db)
       expect(ducked[3] / open[3]).to be_within(0.05).of(-12.db)
+      expect(burst_rms(duck: 12.db)).to eq(ducked) # the same: ducking never boosts
       # Mostly recovered a second later (300 ms rise)
       expect(ducked[99] / open[99]).to be > 0.9
     end
