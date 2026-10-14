@@ -45,8 +45,13 @@ RSpec.describe('flam marks', :aggregate_failures) do
     notes = s.seq(MB::Sound::D2, MB::Sound::D2.flam, MB::Sound::D2.flam(0.03)).n4.notes
     m = []
     t = []
+    # Held here: Notes memoizes its nodes through WeakRefs, so calling
+    # notes.trigger each buffer gets a new node (with its own position) if
+    # GC ran in between (an order-dependent failure, 2026-10-14)
+    trigger = notes.trigger
+    mark = notes.flam_mark
     # (the trigger first, as Drums::Flams reads them)
-    80.times { t << notes.trigger.sample(800).dup; m << notes.flam_mark.sample(800).dup }
+    80.times { t << trigger.sample(800).dup; m << mark.sample(800).dup }
     m = Numo::SFloat.hstack(m)
     t = Numo::SFloat.hstack(t)
     hits = t.ne(0).where.to_a

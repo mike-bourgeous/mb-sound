@@ -151,9 +151,13 @@ RSpec.describe(MB::Sound::Notes) do
 
     it 'puts several Notes nodes on one sample when read in different buffer sizes' do
       v = notes_for(ev.note_on(60, time: 1/7r))
-      a = 8.times.map { v.trigger.sample(1000).dup }.reduce(:concatenate)
+      # (each trigger held: Notes memoizes nodes through WeakRefs, so a
+      # node fetched again after GC would be a new one)
+      vt = v.trigger
+      a = 8.times.map { vt.sample(1000).dup }.reduce(:concatenate)
       w = notes_for(ev.note_on(60, time: 1/7r))
-      b = 20.times.map { w.trigger.sample(400).dup }.reduce(:concatenate)
+      wt = w.trigger
+      b = 20.times.map { wt.sample(400).dup }.reduce(:concatenate)
       expect(a.ne(0).where.to_a).to eq([6857])
       expect(b.ne(0).where.to_a).to eq([6857])
     end
