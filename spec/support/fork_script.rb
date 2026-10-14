@@ -20,11 +20,25 @@ require 'coverage'
 # real process doing real work (not just --help), so load-order problems and
 # implicit dependencies masked by the spec process's loaded code still show.
 module ForkScript
+  # Seconds a forked script may run before fork_script stops it and fails
+  # (MB_SOUND_FORK_TIMEOUT overrides).  Forked scripts take seconds; a child
+  # once hung for hours with every thread in futex_wait (2026-10-14, a
+  # fork of a spec process running bin/graph_profile.rb on the flanger,
+  # not reproduced since), holding up the whole suite.
+  TIMEOUT = Float(ENV['MB_SOUND_FORK_TIMEOUT'] || 300)
+
+  # Raised when a forked script runs past TIMEOUT.
+  class TimedOut < StandardError; end
+
   # Runs +script+ with +args+ in a forked child, returning the combined
   # stdout/stderr text and the Process::Status.  +env+ is merged into ENV
-  # in the child.
-  def fork_script(script, *args, env: {})
+  # in the child.  A child still running after +timeout+ seconds is
+  # stopped (SIGQUIT for its Ruby backtraces, then SIGKILL), and
+  # ForkScript::TimedOut is raised with its output and what its threads
+  # were waiting on.
+  def fork_script(script, *args, env: {}, timeout: TIMEOUT)
     reader, writer = IO.pipe
+    parent_threads = Thread.list.map { |t| "#{t.name || 'unnamed'} (#{t.status})" }
 
     pid = fork do
       reader.close
@@ -46,11 +60,53 @@ module ForkScript
     end
 
     writer.close
-    output = reader.read
+    output, timed_out = ForkScript.read_until(reader, timeout)
+    if timed_out
+      diagnostics = ForkScript.stop_hung_child(pid, reader, output)
+      reader.close
+      raise TimedOut, "fork_script(#{[script, *args].map(&:to_s).join(' ')}) ran over #{timeout} s and was killed.\n" \
+        "Threads in the spec process at fork: #{parent_threads.join(', ')}\n#{diagnostics}\nOutput:\n#{output}"
+    end
     reader.close
     Process.wait(pid)
 
     [output, $?]
+  end
+
+  # Reads +io+ to its end or until +seconds+ pass.  Returns the text and
+  # whether it timed out.
+  def self.read_until(io, seconds)
+    output = +''
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    loop do
+      left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return [output, true] if left <= 0
+      next unless io.wait_readable(left)
+
+      output << io.read_nonblock(65536)
+    rescue IO::WaitReadable
+      next
+    rescue EOFError
+      return [output, false]
+    end
+  end
+
+  # What a hung child's threads and children wait on (from /proc), then
+  # SIGQUIT (MB::U.sigquit_backtrace prints every Ruby thread, if the child
+  # can still run Ruby code) and SIGKILL.  Adds what it printed to +output+.
+  def self.stop_hung_child(pid, reader, output)
+    lines = Dir["/proc/#{pid}/task/*"].map { |t|
+      "  thread #{File.basename(t)} #{File.read("#{t}/comm").strip rescue '?'}: #{File.read("#{t}/wchan") rescue '?'}"
+    }
+    kids = `ps --ppid #{pid} -o pid=,stat=,wchan:20=,args= 2>/dev/null`.lines.map { |l| "  child #{l.strip[0, 160]}" }
+
+    Process.kill(:QUIT, pid) rescue nil
+    more, _ = read_until(reader, 2)
+    output << more
+    Process.kill(:KILL, pid) rescue nil
+    Process.wait(pid) rescue nil
+
+    "Hung child #{pid} (Linux wchan per thread; futex_wait_queue = waiting on a lock or the GVL):\n#{(lines + kids).join("\n")}"
   end
 
   # Runs +script+ with +args+ in a fork (see #fork_script), or as a real
