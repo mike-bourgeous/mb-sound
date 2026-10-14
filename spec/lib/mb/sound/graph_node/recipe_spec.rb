@@ -427,7 +427,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       cases = {
         unison: proc { 220.hz.unison(5, detune: 0.2) { |p, _i| p.ramp.noise(0.1) } },
         swarm: proc { 220.hz.swarm(4, chord: [0, 4, 7], glide: nil, drift: 0.1) { |p, _i| p.ramp } },
-        chorus: proc { 110.hz.ramp.at(0.5).chorus(:juno1, hiss: -40) },
+        chorus: proc { 110.hz.ramp.at(0.5).chorus(:juno1, hiss: -40.db) },
         tr808: proc { MB::Sound.tr808(MB::Sound.grid(16, snare: 'x.x.', maracas: 'xxxx', clap: '..x.')) },
       }
       cases.each do |name, build|

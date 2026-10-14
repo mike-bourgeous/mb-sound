@@ -132,6 +132,10 @@ module MB
           # Whether the document marks drawn seeds (format 2 and later; see
           # GraphIO::FORMAT); otherwise :fresh counts every seed as drawn
           @seed_marks = false
+          # Whether bare dynamics levels and gains keep their dB meaning
+          # (documents before format 3; see GraphIO::FORMAT)
+          @old_db = false
+          @old_db_warned = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -341,6 +345,7 @@ module MB
               end
               @document.format = version
               @seed_marks = version >= 2
+              @old_db = version < 3
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
@@ -844,11 +849,13 @@ module MB
             kwargs[:seed] = drawn.seed
           end
 
+          args, kwargs = old_db_arguments(receiver, name, args, kwargs) if @old_db
+
           begin
-            # Documents keep their own meaning for bare dynamics levels (dB
-            # at 0 and below) and keep delay(seconds:) loading, so loading
-            # them doesn't warn
-            result = GraphNode::DynamicsMethods.quiet_levels do
+            # Documents load without the dynamics "above full scale"
+            # warnings, and keep delay(seconds:) loading, so loading them
+            # doesn't warn
+            result = Decibels.quietly do
               GraphNode::DelayMethods.quiet_seconds do
                 if drawn
                   # Recorded as drawn, so saving the graph again marks it again
@@ -867,6 +874,19 @@ module MB
           end
           check_result(node, result) if receiver.is_a?(Numeric) || result.is_a?(Integer)
           result
+        end
+
+        # Arguments for a call in a document older than format 3, whose
+        # bare dB values become the Decibels they meant (OldDecibels), with
+        # one warning per document.
+        def old_db_arguments(receiver, name, args, kwargs)
+          args, kwargs, changed = OldDecibels.convert(receiver, name, args, kwargs)
+          if changed && !@old_db_warned
+            @old_db_warned = true
+            warn "#{@label}: warning: format #{@document.format} document: bare dB values (like makeup: 9 or accent: 6) are read as dB, as when it was saved; " \
+              "save it again to write them as 9.db (bare numbers are linear gains since format #{GraphIO::FORMAT})"
+          end
+          [args, kwargs]
         end
 
         def call_args(node, scope)

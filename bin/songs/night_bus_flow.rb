@@ -281,7 +281,7 @@ module MB::Sound
         kit,
         kick: { tune: 50, decay: 0.5, tone: 0.4 }, clap: { decay: 0.25, tone: 0.6 },
         closed_hat: { decay: 0.04 }, open_hat: { decay: 0.25 }, cymbal: { decay: 0.9, tone: 0.65 },
-        maracas: { level: 0.22 }, low_tom: { decay: 0.6 }, accent: 6
+        maracas: { level: 0.22 }, low_tom: { decay: 0.6 }, accent: 6.db
       ) * 0.85
     }
     track(:sub) { |clip| last_stop_sub(clip) }

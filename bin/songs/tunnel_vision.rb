@@ -217,7 +217,7 @@ module MB::Sound
       # patches-5; the lifted return 6 dB down), ducked by the kick
       bus(:hall) { |sig|
         wet = sig.filter(:highpass, cutoff: 250, quality: 0.7).reverb(:hall, mix: 1) * hall.db
-        lifted = wet.compress(threshold: 0.db, ratio: 1, upward_threshold: -36.db, upward_ratio: 4, max_gain: 12,
+        lifted = wet.compress(threshold: 0.db, ratio: 1, upward_threshold: -36.db, upward_ratio: 4, max_gain: 12.db,
                               attack: 0.01, release: 0.15, upward_attack: 0.02, detector: :rms, rms: 0.05)
         (wet * (knob(:lift) * -1 + 1) + lifted * (knob(:lift) * TV_LIFT_TRIM)).duck(:drums, only: :kick, amount: -6.db, release: 1.n8)
       }

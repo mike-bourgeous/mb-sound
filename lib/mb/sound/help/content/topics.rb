@@ -116,7 +116,10 @@ module MB
     Help.topic :dynamics, 'Dynamics', group: :sound do
       about <<~TEXT
         One compander core: compress, expand, gates, ducking, compand
-        curves, a true-peak limiter, crossover bands, and squeeze.
+        curves, a true-peak limiter, crossover bands, and squeeze.  Levels
+        and gains in dB are written `-12.db` (`threshold: -18.db`,
+        `makeup: 3.db`, `compand(-60.db => -80.db, 0.db => -12.db)`);
+        bare numbers are linear gains.
       TEXT
       dsl :compress, :expand, :noise_gate, :duck, :compand, :limit, :bands, :squeeze, :loudness_meter
       note :dynamics

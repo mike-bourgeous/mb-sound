@@ -140,11 +140,11 @@ RSpec.describe('bin/synths/dnb.rb') do
   it 'compresses the kit as a bus with glue:' do
     hits = -> { patch_notes([36, 0, 0.1, 1.0], [38, 0.25, 0.35, 1.0], [42, 0.5, 0.55, 0.5]) }
     plain = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.()) }, 1)[0]
-    glued = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { makeup: 0 }) }, 1)[0]
+    glued = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { makeup: 0.db }) }, 1)[0]
     # (a slow attack: the hits' first ms mostly pass, their bodies come down)
     expect(rms_db(seconds(glued, 0.03, 0.2))).to be < rms_db(seconds(plain, 0.03, 0.2)) - 1
     expect(peak_db(seconds(glued, 0, 0.004))).to be_within(2).of(peak_db(seconds(plain, 0, 0.004)))
-    gentle = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { ratio: 1.2, makeup: 0 }) }, 1)[0]
+    gentle = render_patch(MB::Sound.with_seed(3) { MB::Sound.dnb_drums(hits.(), glue: { ratio: 1.2, makeup: 0.db }) }, 1)[0]
     expect(rms_db(seconds(gentle, 0.03, 0.2))).to be > rms_db(seconds(glued, 0.03, 0.2))
   end
 

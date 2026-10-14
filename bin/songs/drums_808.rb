@@ -18,7 +18,7 @@
 #     bg :drums, tr808(grid(16, kick: 'X..x..x...x.x...', snare: '....X.......X...', hat: 'x.xXx.x.x.xXx.x.').loop)
 #     bg :bell, tr808(grid(16, cowbell: 'X.x.x.X..x.X.x..').loop, more_cowbell: true)    # +6 dB of cowbell, rings 1.41x longer
 #     bg :snare, tr808(grid(16, snare: '....X...x..X.x.x').loop, snare: { decay: 0.75, snappy: 0.4 })  # the round 1 tonal snare, roughly
-#     bg :drums, tr808(grid(16, bd: 'x...x...', oh: '..x...x.', ch: 'x.x.x.x.').loop, kick: { tune: 45, decay: 1.2 }, accent: 10)
+#     bg :drums, tr808(grid(16, bd: 'x...x...', oh: '..x...x.', ch: 'x.x.x.x.').loop, kick: { tune: 45, decay: 1.2 }, accent: 10.db)
 #     bg :boom, tr808(grid(16, kick: 'X.......x.x.....').loop, kick: { tune: seq(E1, G1, D1, A0).n1.loop.freq, decay: 3 })  # a tuned 808 bass
 #     bg :wobble, tr808(grid(16, kick: 'x...').loop, kick: { tune: 0.25.hz.lfo.at(40..70), sigh: 1 })                     # moving knobs
 #     bg :pads, tr808(midi)                  # a MIDI drum pad (GM notes: 36 kick, 38 snare, 42/46 hats, 56 cowbell, ...)
@@ -47,7 +47,7 @@ module MB::Sound
 
   # Starts the song on the current session (live, or inside a render
   # block).  +cowbell+ is the extra cowbell level in dB.
-  def self.drums_808(cowbell: 6.0)
+  def self.drums_808(cowbell: 6.db)
     bpm 112
 
     # The kick's tune follows a bass line, one note per bar, with a long
@@ -124,6 +124,6 @@ module MB::Sound
     song_script(
       bars: DRUMS_808_BARS,
       cowbell: [6.0, Float, '-c', 'More cowbell, in dB', -24.0..24.0],
-    ) { |p| drums_808(cowbell: p.cowbell) }
+    ) { |p| drums_808(cowbell: p.cowbell.db) }
   end
 end

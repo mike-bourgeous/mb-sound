@@ -552,16 +552,6 @@ module MB
             name
           end
 
-          # A dynamics level given as a bare dB number (0 and below) as the
-          # Decibels it means, so it prints as `-20.db` (same value; see
-          # DynamicsMethods.check_level).
-          def dynamics_level(name, key, v)
-            return v unless DynamicsMethods::LEVEL_KEYWORDS.include?(key) && DynamicsMethods::LEVEL_METHODS.include?(name)
-            return v unless v.is_a?(Numeric) && !v.is_a?(MB::Sound::Decibels) && v.real? && v.finite? && v <= 0
-
-            MB::Sound::Decibels.new(v)
-          end
-
           # Calls whose delay keywords print in their current spelling (see
           # #call_text).
           DELAY_CALLS = [:delay, :feedback_delay, :multitap, :multitap_delay].freeze
@@ -587,7 +577,7 @@ module MB
                 # redraw them and keep the ones the code gave
                 "seed: drawn_seed(#{seed})"
               elsif k.is_a?(Symbol)
-                "#{key_text(k)} #{value(dynamics_level(c.name, k, v), indent)}"
+                "#{key_text(k)} #{value(v, indent)}"
               else
                 "#{value(k, indent)} => #{value(v, indent)}"
               end
