@@ -222,6 +222,14 @@ module GraphSweep
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) * 0.5 + st.play(v, transpose: 3)[0] * 0.25 } +
           brk.chop(0, [1, 3], brk[2].rev, MB::Sound::Rest).loop.sampler(brk) * 0.5 + smp[0...400].node
       }],
+      ['grains (Grains)', ->(c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-i / 2000.0) })
+        smp = MB::Sound::Sample[d]
+        st = MB::Sound::Sample[[d, d * -0.5]]
+        smp.grains(density: c.mod(200, 900), size: c.mod(0.001, 0.004), spread: 0.2, pitch: [0, 12], pitch_spread: c.mod(0, 2), reverse: 0.3, seed: 1).mixdown * 0.3 +
+          st.rev.grains(position: c.mod(0.1, 0.9), density: 500, size: 0.002, read: :drop, window: :expodec, jitter: 0, max_grains: 4, seed: 2)[1] * 0.3 +
+          c.clip.synth(voices: 2) { |v, _i| v.grains(smp, density: 400, size: 0.002, seed: 3)[0] * 0.3 }
+      }],
       ['capture tap (CaptureTap)', ->(c) { MB::Sound::GraphNode::CaptureTap.new(c.sig, MB::Sound::Sampler::AudioCapture.new(100_000)) + c.sig }],
 
       # Delays and reverbs

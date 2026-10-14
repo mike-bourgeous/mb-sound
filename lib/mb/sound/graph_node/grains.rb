@@ -161,7 +161,8 @@ module MB
         # Computes both outputs once per buffer and returns output +index+.
         def sample_internal(count, index)
           if @sampled.include?(index) || @out.nil?
-            warn "#{self} output #{index} sampled again before the other" if @sampled.length == 1
+            # (one output read alone, e.g. `grains[0]`, is fine: the other
+            # is simply not used)
             @sampled.clear
             @out = compute(count)
           end

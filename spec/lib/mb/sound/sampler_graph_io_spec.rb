@@ -47,6 +47,21 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
     expect { io.load(path) }.to raise_error(io::LoadError, /sha256|SHA-256|changed/i)
   end
 
+  it 'saves grain clouds and spectral stretches into bundles' do
+    pad = rec.stretch(2, mode: :spectral)
+    g = pad.grains(position: 0.3, density: 60, size: 30.ms, pitch: [0, 12], seed: 4).mixdown +
+      MB::Sound.seq(MB::Sound::C4, MB::Sound::G4).n8.loop.synth { |v| v.grains(rec, density: 80, size: 20.ms, seed: 5)[0] * v.env(0.001, 0.01, 1, 0.01, gm: false) }
+    dir = File.dirname(tmp_path('x'))
+    MB::Sound.seed(1)
+    path = io.save(File.join(dir, 'grains'), g, name: 'grains')
+    text = File.read(path)
+    expect(text).to include('.grains(')
+    back = io.load(path)
+    ref = render(g)
+    expect(max_diff(ref, render(back))).to be < 1e-5
+    expect(ref.map { |b| b.abs.max }.max).to be > 0.05
+  end
+
   it 'keeps lofi drop-sample reads and read_as views in bundles' do
     dirty = rec.lofi(:s950).slices(8)
     clean = rec.lofi(:sp1200).read_as(:clean).slices(8)
