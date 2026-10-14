@@ -77,16 +77,17 @@ module MB::Sound
   end
 
   # A singing bowl struck by +strike+ (impulses; their heights are the
-  # force) at +freq+ (Hz, a number or a node): four partials at bowl-like
-  # inharmonic ratios, each a doublet a little apart (+beat+ Hz for the
-  # first, wider above: beating), higher partials dying sooner (+decay+
-  # seconds for the first).  +flat+ in cents.
+  # force) at +freq+ (Hz, a number or a node): the :bowl modal resonator
+  # (four partials at bowl-like inharmonic ratios, each a doublet a little
+  # apart (+beat+ Hz for the first, wider above: beating), higher partials
+  # dying sooner (+decay+ seconds for the first); see
+  # GraphNode::ModalResonator).  +flat+ in cents.  Until textures-1
+  # (2026-10-14) this was a sum of eight pings; the modal bank is the same
+  # sound (an 8-bar render nulls to -85 dB below its peak) at about a
+  # third of the cost.
   def self.ambient_bowl(strike, freq, flat: 0, decay: 24, beat: 0.7)
     freq *= 2 ** (-flat / 1200.0)
-    [[1.0, 1.0, 1.0], [2.77, 0.45, 0.46], [5.15, 0.22, 0.25], [8.1, 0.1, 0.15]].map.with_index { |(r, amp, dec), i|
-      b = beat * (i + 1) ** 1.3
-      strike.ping(freq * r, decay: decay * dec) * amp + strike.ping(freq * r + b, decay: decay * dec * 0.8) * (amp * 0.7)
-    }.reduce(:+)
+    strike.resonate(:bowl, freq, decay: decay, beat: beat, normalize: false)
   end
 
   # Dry stereo +sig+ plus a reverb of it scaled by +space+ (a number or a
