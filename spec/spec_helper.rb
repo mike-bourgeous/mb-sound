@@ -1,5 +1,12 @@
 require 'fileutils'
 
+# Ruby warnings fail the example that printed them (or the run, for
+# warnings outside examples); see support/warning_guard.rb.  Installed
+# first, so warnings from loading the library count too (verbose-only
+# ones from then on, once config.warnings sets $VERBOSE below).
+require_relative 'support/warning_guard'
+WarningGuard.install!
+
 # Code coverage is opt-in, since it slows the suite: SIMPLECOV=1 (CI sets it)
 # measures the spec process and the Ruby subprocesses it starts (see
 # support/subprocess_coverage.rb), reporting to coverage/.
@@ -38,6 +45,7 @@ end
 SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 
 require_relative 'support/spec_tmp'
+require_relative 'support/warning_guard_hooks' # after spec_tmp, before subprocess_coverage
 require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
 require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
@@ -103,6 +111,11 @@ RSpec.configure do |config|
     MB::Sound.seed(MB::Sound::Internal.default_seed) # random phases etc. don't depend on example order
     MB::Sound::Notes.control_smoothing = MB::Sound::Notes::CONTROL_SMOOTHING
     MB::Sound::Notes.bend_smoothing = MB::Sound::Notes::BEND_SMOOTHING
+    # The plan layer's "folded 0 * x" notice prints once per kind of node
+    # per process, so whichever example folds first would print it
+    # (failing it; see support/warning_guard.rb).  Off here; the Plan::Fold
+    # specs turn it on to check it.
+    MB::Sound::Plan.fold_warnings = false
   end
 
   # rspec-expectations config goes here. You can use an alternate

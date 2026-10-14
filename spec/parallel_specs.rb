@@ -61,7 +61,8 @@ module ParallelSpecs
     pids = groups.each_with_index.map do |(group, _), i|
       log = File.join(OUT_DIR, "#{i}.log")
       json = File.join(OUT_DIR, "#{i}.json")
-      Process.spawn('bundle', 'exec', 'rspec', '--format', 'progress', '--format', 'json', '--out', json, *extra_args, *group,
+      env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json") }
+      Process.spawn(env, 'bundle', 'exec', 'rspec', '--format', 'progress', '--format', 'json', '--out', json, *extra_args, *group,
                     out: log, err: [:child, :out], chdir: ROOT)
     end
     statuses = pids.map { |pid| Process.wait2(pid).last }
@@ -106,10 +107,52 @@ module ParallelSpecs
     end
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
+    report_warnings(groups.length, out_dir)
     crashed.each { |i| report_crash(i, groups[i], statuses[i], out_dir) }
     bad = statuses.each_with_index.reject { |s, i| s.success? || crashed.include?(i) }
     bad.each { |s, i| puts "spec:parallel: process #{i} exited with #{s.exitstatus} (see #{display_path(File.join(out_dir, "#{i}.log"))})" }
+    $stdout.flush # before rake's abort message on stderr
     bad.empty? && crashed.empty?
+  end
+
+  # Lists the warnings that failed examples or processes (written by
+  # spec/support/warning_guard_hooks.rb to N.warnings.json), each with the
+  # examples that printed it, or "outside examples".  Returns the number
+  # of distinct warnings.
+  def report_warnings(count, out_dir)
+    records = (0...count).flat_map do |i|
+      JSON.parse(File.read(File.join(out_dir, "#{i}.warnings.json")))
+    rescue Errno::ENOENT, JSON::ParserError
+      []
+    end
+    reported, stray = records.partition { |r| r['report_only'] }
+
+    unless reported.empty?
+      # Ruby prints these once per process, from wherever they happen, so
+      # one line per message without the place
+      texts = reported.map { |r| warning_text(r.merge('origin' => nil, 'process' => nil)).sub(/\A\S+:\d+: /, '').lines.first.chomp }.uniq
+      puts "Reported warnings (#{texts.length}; not failing; see spec/support/warning_guard.rb):"
+      texts.sort.each { |t| puts "  #{t}" }
+    end
+    return 0 if stray.empty?
+
+    by_text = stray.group_by { |r| warning_text(r) }
+    puts "Stray warnings (#{by_text.length}; these fail the examples or processes listed; see spec/support/warning_guard.rb):"
+    by_text.each do |text, rs|
+      where = rs.map { |r| r['example'] || 'outside examples' }.uniq
+      puts "  #{text.gsub("\n", "\n    ")}"
+      puts "    from #{where.first(5).join(', ')}#{where.length > 5 ? " and #{where.length - 5} more" : ''}"
+    end
+    by_text.length
+  end
+
+  # A warning record's message with its origin, category, and process.
+  def warning_text(record)
+    text = record['message'].to_s.chomp
+    text = "#{record['origin']}: #{text}" if record['origin'] && !text.match?(/\A\S+:\d+: /)
+    text += " [#{record['category']}]" if record['category']
+    text += " (in #{record['process']})" if record['process']
+    text
   end
 
   # Lists a process that ended without its JSON report.

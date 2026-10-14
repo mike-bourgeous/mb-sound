@@ -36,6 +36,7 @@ module ForkScript
       writer.close
       $stdout.sync = true
       $stderr.sync = true
+      WarningGuard.forked_child!(script) # this child's warnings fail the example too
 
       ENV.update(env)
       $0 = script
