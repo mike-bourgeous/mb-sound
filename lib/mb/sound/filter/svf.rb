@@ -114,12 +114,14 @@ module MB
         # and +:quality+ or +:bandwidth_oct+ (bandpass, notch, peak) or
         # +:shelf_slope+ (shelves; converted to a quality at +f_center+ as
         # Cookbook does), and +:db_gain+ for bandpass (output gain), peak,
-        # and shelves, or +:gain+, the same as a linear gain.
+        # and shelves (dB, as its name says, or a Decibels value read as its
+        # exact dB), or +:gain+, the same as a linear gain.
         def initialize(filter_type, sample_rate, f_center, quality: nil, db_gain: nil, gain: nil, bandwidth_oct: nil, shelf_slope: nil)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           raise ArgumentError, 'Give db_gain: or gain:, not both' if db_gain && gain
           raise "Sample rate must be a positive numeric (got #{sample_rate.inspect})" unless sample_rate.is_a?(Numeric) && sample_rate > 0
 
+          db_gain = db_gain.db_value if db_gain.is_a?(Decibels)
           gain = 10.0 ** (db_gain / 20.0) if db_gain
           raise ArgumentError, "Missing gain for #{filter_type}" if gain.nil? && GAIN_REQUIRED.include?(filter_type)
 
@@ -163,8 +165,9 @@ module MB
           @gain = g&.to_f
         end
 
-        # Sets the gain in dB.
+        # Sets the gain in dB (a number, or a Decibels value as its dB).
         def db_gain=(db)
+          db = db.db_value if db.is_a?(Decibels)
           @gain = db && 10.0 ** (db / 20.0)
         end
 

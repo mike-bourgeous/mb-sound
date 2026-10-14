@@ -122,7 +122,10 @@ module MB
           set_parameters(type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
+        # +db_gain+ is a number of dB, as its name says, or a Decibels value
+        # read as its exact dB (`db_gain: 6.db` is 6 dB).
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          db_gain = db_gain.db_value if db_gain.is_a?(Decibels)
           set_parameters_c(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
           self
         end

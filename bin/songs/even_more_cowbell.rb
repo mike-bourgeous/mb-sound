@@ -22,7 +22,7 @@
 #
 # Snippets to try in bin/sound.rb:
 #     bg :bells, kit(grid(16, cb: 'x..x..x.x..x.x..').loop) { tr808 :cowbell }               # the 808's
-#     bg :more, tr808(grid(16, cowbell: 'X.x.x.X..x.X.x..').loop, more_cowbell: 12)            # more_cowbell: in dB
+#     bg :more, tr808(grid(16, cowbell: 'X.x.x.X..x.X.x..').loop, more_cowbell: 12.db)         # more_cowbell: a gain
 #     bg :fm, kit(grid(16, cb: 'x.x.').loop) { voice(:cowbell, gm: 56) { |h| h.fm(800, ratio: 1.48, index: 1.2, index_decay: 0.05, decay: 0.35) } }
 
 require 'bundler/setup'

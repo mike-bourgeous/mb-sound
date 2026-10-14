@@ -259,7 +259,10 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
     out = []
     while (b = t.sample(512))
       out << b.dup
-      break if out.length > 200
+      # (a short buffer ends the graph: the tone's own Notes, without
+      # envelopes, ends on its grid after the clip; reading on, the
+      # envelope's Notes ending on its grid too truncated the tone twice)
+      break if out.length > 200 || b.length < 512
     end
     out = Numo::SFloat.zeros(0).concatenate(*out)
     expect(out.abs.max).to be_between(0.5, 1.0)

@@ -74,6 +74,13 @@ module MB
           !last.nil? && last < @stream.advance(@reader.cursor, count, @sample_rate)
         end
 
+        # True: a short buffer from this node (its graph's end, on its grid;
+        # see #end_on_grid) makes a planned block reading it run unfused
+        # (see Plan::Region#gather).
+        def plan_ends_on_grid?
+          ends_graph?
+        end
+
         # One planned block: the node's #sample without the buffer (see
         # the class description).  A FeedGroup reads the events once for
         # all the nodes of a region on one stream.
@@ -125,8 +132,8 @@ module MB
         # plan that fuses the node.
         def advance(count)
           count = count.round
+          return nil if finished?(true) # (envelopes of a skipped lane don't render)
           if @plan_member || @plan_region
-            return nil if finished?
             plan_feed(count)
             # The smoother runs as #sample would run it (Op::Smooth isn't
             # run for a skipped lane)
@@ -484,6 +491,7 @@ module MB
           end
 
           @tail += count if ended
+          end_on_grid(nil, from, to, count) # (counts frames, as #sample does)
           nil
         end
 
@@ -597,19 +605,34 @@ module MB
       end
 
       class NoteEnvelope
+        # True: a short buffer from this envelope (its graph's end, on its
+        # grid; see #sample) makes a planned block reading it run unfused
+        # (see Plan::Region#gather).
+        def plan_ends_on_grid?
+          true
+        end
+
         # Notes envelopes' per-block bookkeeping (see #sample).
         def plan_feed(count)
           @start_time = @time
           @idle_at_start = idle?
           @time = plan_note_stream.advance(@time, count, @sample_rate)
+          @frames += count
           nil
         end
 
-        # True once the stream is over (#sample may start returning nil):
-        # #stream_over?.
+        # True once the stream's last event comes before the end of the next
+        # +count+ samples (#sample may end the graph on a grid point in that
+        # block; see #sample), so that block runs unfused, like a Notes
+        # node's (Node#plan_finished?).  Before fixes-13 this waited for the
+        # block after it (ends came at buffer starts), as it still does in
+        # Synth lanes (Notes#envelope_grid?; see #lane_sample).
         def plan_finished?(count)
           last = plan_note_stream.music_end
-          !last.nil? && last < @time
+          return false if last.nil?
+          return last < @time unless @notes.envelope_grid?
+
+          last < plan_note_stream.advance(@time, count, @sample_rate)
         end
 
         # The note stream's content generation (see Node#plan_generation).
@@ -629,7 +652,7 @@ module MB
         public
 
         def plan_snapshot
-          Plan::Snapshot.capture(self, [:@state, :@time, :@start_time, :@idle_at_start])
+          Plan::Snapshot.capture(self, [:@state, :@time, :@start_time, :@idle_at_start, :@frames])
         end
 
         def plan_restore(snapshot)

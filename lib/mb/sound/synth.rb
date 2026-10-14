@@ -224,7 +224,10 @@ module MB
 
         @sample_rate = sample_rate.to_f
         @tail = Length.seconds(tail).to_f
-        @tail_samples = 0
+        @out_position = 0 # frames returned (see #end_frame)
+        @last_event_frame = nil # where the stream's last event lands (see #tail_mode?)
+        @last_loud = 0 # frame after the lanes' last loud sample since then
+        @end_frame = nil
         @seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
 
         stream = MIDI::Stream.for(source)
@@ -249,7 +252,7 @@ module MB
         @built_branches = GraphNode::Tee.collect_branches {
           @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
             v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
-            v.quiet_check = -> { @quiet[idx] && (!@exact_lanes || cell_quiet?(idx)) }
+            v.quiet_check = -> { @quiet[idx] && (!cells? || cell_quiet?(idx)) }
             v.level_check = -> { @peaks[idx] }
             graph = Synth.with_lane(idx, @allocator.lanes.length) {
               MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
@@ -665,7 +668,7 @@ module MB
       # ranges gathered here, recorded at the grid point by #record_cells),
       # so the result is the same at any buffer size; else per buffer.
       def measure_lane(idx, bufs)
-        return measure_lane_buffer(idx, bufs) unless @exact_lanes
+        return measure_lane_buffer(idx, bufs) unless cells?
 
         lo = @cell_lo[idx]
         hi = @cell_hi[idx]
@@ -841,7 +844,8 @@ module MB
       # another lane).
       def sample_lanes(count)
         @grid_started = true
-        return sample_lanes_piece(count) unless @exact_lanes
+        tail = tail_mode?(count)
+        return sample_lanes_piece(count) unless @exact_lanes || tail
 
         g = SKIP_GRID - (@skip_position + @grid_offset) % SKIP_GRID
         return sample_lanes_piece(count) if g >= count
@@ -917,7 +921,8 @@ module MB
           shared&.end_block
         end
         @skip_position += count
-        record_cells if @exact_lanes && (@skip_position + @grid_offset) % SKIP_GRID == 0
+        record_cells if cells? && (@skip_position + @grid_offset) % SKIP_GRID == 0
+        check_end(any ? data : nil, @skip_position - count, @skip_position) if @last_event_frame
 
         any ? data : nil
       end
@@ -1125,12 +1130,18 @@ module MB
 
             # Sums the lanes into one buffer, with the output gain.
       def mix_mono(count)
+        start = @out_position
+        return nil if @end_frame && start >= @end_frame
+
+        @out_position += count
         data = sample_lanes(count)
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-        return (tail_silence(count) ? @buf.fill(0) : nil) if data.nil?
+        fallback_end(start) if data.nil?
+        n = @end_frame ? MB::M.min(@end_frame - start, count) : count
+        return n == 0 ? nil : @buf.fill(0)[0...n] if data.nil?
 
-        out = sum_into(@buf, data)
-        apply_gain(out, count)
+        out = apply_gain(sum_into(@buf, data), count)
+        n < count && out ? out[0...n] : out
       end
 
       # Sums each channel of the lanes (narrower lanes repeat across
@@ -1143,14 +1154,20 @@ module MB
       # shared-buffer check caught a stereo synth used twice, patches-1;
       # 2026-10-13).
       def mix_channels(count)
+        start = @out_position
+        return :ended if @end_frame && start >= @end_frame
+
+        @out_position += count
         data = sample_lanes(count)
+        fallback_end(start) if data.nil?
         @channel_set = @channel_set == 0 ? 1 : 0
         @channel_bufs ||= [nil, nil]
         bufs = @channel_bufs[@channel_set]
         bufs = @channel_bufs[@channel_set] = Array.new(@channels) { Numo::SFloat.zeros(count) } if bufs.nil? || bufs[0].length != count
+        n = @end_frame ? MB::M.min(@end_frame - start, count) : count
         if data.nil?
-          return :ended unless tail_silence(count)
-          return bufs.map { |b| b.fill(0) }
+          return :ended if n == 0
+          return bufs.map { |b| b.fill(0)[0...n] }
         end
 
         gain = gain_data(count)
@@ -1159,16 +1176,111 @@ module MB
         Array.new(@channels) { |c|
           out = sum_into(bufs[c], data, c)
           bufs[c] = out if out.length == count && !out.equal?(bufs[c]) # a promoted (e.g. complex) buffer
-          gain ? scale(out, gain) : out
+          out = gain ? scale(out, gain) : out
+          n < count ? out[0...n] : out
         }
       end
 
-      # Counts +count+ samples of silence after every lane has ended.
-      # Returns false once the +:tail+ is over (see the class description).
-      def tail_silence(count)
-        return false if @tail_samples >= @tail * @sample_rate
-        @tail_samples += count
+      # Where the synth ends once every lane has ended (nil from #sample_lanes)
+      # before #check_end decided it, from frame +start+ of its output: the
+      # first grid point a cell after the lanes' last loud sample (as
+      # #check_end would have found), and after the stream's last event,
+      # plus the +:tail+.
+      def fallback_end(start)
+        @end_frame ||= grid_end([@last_loud + SKIP_GRID, (@last_event_frame || 0) + 1, start].max)
+      end
+
+      # The first point of the measuring grid (SKIP_GRID, aligned like
+      # #align_grid's) at or after synth frame +frame+ plus the +:tail+.
+      def grid_end(frame)
+        target = frame + (@tail * @sample_rate).round + @grid_offset
+        (target + SKIP_GRID - 1) / SKIP_GRID * SKIP_GRID - @grid_offset
+      end
+
+      # True if the buffer of +count+ from the synth's current frame
+      # reaches past the stream's last event (the synth may end inside it:
+      # #sample_lanes then splits it at grid points, and #check_end looks
+      # at each), working out the synth frame where that event lands
+      # (+@last_event_frame+) the first time.  A seek or restart (a new
+      # stream generation) starts over.
+      def tail_mode?(count)
+        gen = @allocator.generation
+        if gen != @tail_generation
+          @tail_generation = gen
+          @last_event_frame = nil
+          @last_loud = 0
+          @end_frame = nil if @end_frame && @out_position - count < @end_frame
+        end
+        return true if @last_event_frame
+
+        last = @allocator.music_end
+        return false if last.nil?
+
+        t0 = @allocator.read_to
+        rate = @sample_rate.to_r
+        return false unless last < t0 + Rational(count) / rate
+
+        @last_event_frame = @skip_position + MB::M.max(((last - t0) * rate).floor, 0)
+        @cell_fresh.fill(true) unless @exact_lanes # (see #cells?)
         true
+      end
+
+      # True if lanes are measured over grid cells (see #measure_lane): with
+      # #exact_lanes?, or in #tail_mode? (fixes-13), where blocks are split
+      # at grid points and a lane's Notes ends it only after a quiet cell
+      # (measured per piece, the short pieces of the split looked quiet:
+      # a resonant filter inside a lane was cut at -66 dB).
+      def cells?
+        @exact_lanes || !@last_event_frame.nil?
+      end
+
+      # After a piece of #sample_lanes in #tail_mode? (+data+, the lanes'
+      # entries) from synth frame +from+ to +pos+: notes the lanes' last loud
+      # sample (above QUIET), and at a grid point after the stream's last
+      # event decides the synth's end (#end_frame) if every lane that
+      # hasn't ended is idle there (Notes#voice_idle?: its notes released
+      # and its envelopes idle, exactly at the point, since blocks are
+      # split there) and has been quiet for the whole grid cell before it:
+      # where a run of 800-sample buffers ended it before (its lanes ended
+      # on the first buffer start after a quiet buffer with idle envelopes),
+      # now at any buffer size (fixes-13, 2026-10-14).  Lanes still ring
+      # out inside themselves as before (their Notes end by their quiet
+      # checks, at buffer starts, below -90 dB).
+      def check_end(data, from, pos)
+        data&.each do |d|
+          next if d.nil?
+
+          (d.is_a?(Array) ? d : [d]).each do |b|
+            next if b.empty?
+
+            mn, mx = range_of(b)
+            next if mx <= QUIET && mn >= -QUIET
+
+            loud = b.abs.gt(QUIET).where
+            next if loud.empty?
+
+            e = from + loud[-1] + 1
+            @last_loud = e if e > @last_loud
+          end
+        end
+
+        return if @end_frame || pos <= @last_event_frame || (pos + @grid_offset) % SKIP_GRID != 0
+        return if @last_loud > pos - SKIP_GRID
+        return unless @notes.each_index.all? { |idx| @done[idx] || @notes[idx].voice_idle? }
+
+        @end_frame = grid_end(pos)
+      end
+
+      # The frame of the synth's output where it ends (see #check_end), or
+      # nil until it is known.  The synth returns silence after its lanes
+      # up to it, a short buffer there, then nil, so it ends on the same
+      # sample at any buffer size, where 800-sample buffers (from its first
+      # sample, or a Session's) ended it before (fixes-13, 2026-10-14: it
+      # ended at the first buffer start after its lanes had ended, so a
+      # filter after it was cut -52 to -98 dB down, up to 800 samples
+      # earlier or 1031 later).
+      def end_frame
+        @end_frame
       end
 
       # Adds the lane buffers of +data+ (from #sample_lanes; nil for ended

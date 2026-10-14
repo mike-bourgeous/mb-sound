@@ -349,7 +349,7 @@ module MB
             unless v.length == 5 && v.all? { |f| f.is_a?(Array) && f.length == 3 && f.all? { |e| e.is_a?(Numeric) } && f[0] > 0 && f[2] > 0 }
               raise ArgumentError, "A custom vowel is five [Hz, dB, bandwidth Hz] triples (got #{v.inspect})"
             end
-            v.map { |f| f.map(&:to_f) }
+            v.map { |f| [f[0].to_f, Decibels.db_of(f[1], 'formant level'), f[2].to_f] }
           else
             raise ArgumentError, "Vowels are Symbols (#{VOWELS.map(&:inspect).join(', ')}) or five [Hz, dB, bandwidth] triples (got #{v.inspect})"
           end

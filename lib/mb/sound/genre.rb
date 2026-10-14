@@ -79,7 +79,7 @@ module MB
           end
           tp = result.true_peak
           if true_peak
-            ceiling = true_peak.to_db
+            ceiling = Decibels.db_of(true_peak, 'true_peak')
             lines << format('true peak %.2f dBTP (ceiling %.1f: %s)', tp, ceiling, tp > ceiling + 0.1 ? 'over' : 'ok')
           else
             lines << format('true peak %.2f dBTP', tp)

@@ -116,7 +116,10 @@ module MB
     Help.topic :dynamics, 'Dynamics', group: :sound do
       about <<~TEXT
         One compander core: compress, expand, gates, ducking, compand
-        curves, a true-peak limiter, crossover bands, and squeeze.
+        curves, a true-peak limiter, crossover bands, and squeeze.  Levels
+        and gains in dB are written `-12.db` (`threshold: -18.db`,
+        `makeup: 3.db`, `compand(-60.db => -80.db, 0.db => -12.db)`);
+        bare numbers are linear gains.
       TEXT
       dsl :compress, :expand, :noise_gate, :duck, :compand, :limit, :bands, :squeeze, :loudness_meter
       note :dynamics
@@ -195,12 +198,14 @@ module MB
         the S950's cyclic stretch with each cycle fitted to the sound
         (whole periods, matching splices), so tones keep their pitch;
         `fit: :fixed` is the plain version (a buzz at 1 / cycle, stutter
-        on breaks, and basses that sound lower).
+        on breaks, and basses that sound lower).  `mode: :spectral` and
+        `mode: :paul` stretch in the frequency domain, and `.grains` plays
+        a sample as a grain cloud: see `help :granular`.
       TEXT
       commands :bounce, :capture_audio, :chop, :sampler, :sfz
       dsl :bounce
       note :sampler
-      see :drums, :sequences
+      see :drums, :sequences, :granular
       example 'a chopped break' do
         rec = bounce(2.bars, bpm: 138.75) {
           tr808(grid(16, kick: 'X.....x...X.....|X.x.......X..x..', snare: '....X..3.3..X..3|.3..X..3....X.3.', hat: 'x.x.x.x.x.xxx.x.|x.x.x.x.x.x.x.xx'))
@@ -211,6 +216,42 @@ module MB
       example 'a resampled bass, looped' do
         bass = 55.hz.ramp.lp4(700, resonance: 0.3).bounce(1.beat, root: A1).looped(0.1..0.4, mode: :ping_pong)
         bg :try, seq(A1, C2, E1, G1).n4.loop.sampler(bass).at(-12.db).until(2.bars)
+      end
+    end
+
+    Help.topic :granular, 'Grains and spectral stretch', group: :sound do
+      about <<~TEXT
+        `sample.grains(...)` plays a Sample as a cloud of short windowed
+        grains (a stereo bundle): `density:` grains per second, `size:`
+        (100 ms), `position:` 0..1 (a number freezes, a node or knob
+        scrubs), `scan:` (a moving playhead: 0.25 is a 4x granular
+        stretch; 1 when no position is given), `spread:`, `pitch:`
+        (semitones, or an Array to pick from: `[0, 12, 19]`),
+        `pitch_spread:`, `pan_spread:`, `reverse:` (a chance), `window:`
+        (:hann, :expodec for percussive grains, ...), `jitter:` (0 regular,
+        1 Poisson), `seed:`, `read: :drop` for lofi reads.  Every option
+        takes a number, a knob, or a node.  In a synth, `v.grains(pad,
+        ...)` tracks the keys.  `max_grains:` caps the cost (32 for a
+        cloud, 16 per synth voice): about 3% of realtime for a full mono
+        cloud of 32, 6% stereo.
+
+        Stretching keeps the pitch: `.stretch(4)` is the cyclic S950
+        stretch (gritty), `.stretch(4, mode: :spectral)` a phase vocoder
+        with locked phases and sharp transients (pads, chords, voices,
+        bass), `.stretch(32, mode: :paul)` Paulstretch (endless washes).
+        They are offline edits: a new Sample, made once; results over 30
+        s read with `mips: :octave` (smaller playback tables).
+      TEXT
+      dsl :grains, :stretch
+      note :granular
+      see :sampler, :random
+      example 'a frozen pad' do
+        pad = bounce(1.bar) { (220.hz.ramp + 277.2.hz.ramp + 330.hz.ramp).lp4(1800) * 0.3 }
+        bg :try, pad.grains(position: 0.5, size: 150.ms, density: 30, spread: 0.05, pitch: [0, 12], pan_spread: 0.8).at(-16.db)
+      end
+      example 'a 4x spectral stretch' do
+        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.ramp.lp4(1500) * c.amp_env } }
+        bg :try, riff.stretch(4, mode: :spectral).node.at(-12.db)
       end
     end
 

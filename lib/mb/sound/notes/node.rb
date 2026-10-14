@@ -206,15 +206,29 @@ module MB
         end
 
         # True if #sample should return nil (see the class description).
-        def finished?
+        # +skipping+ is true for #advance (a Synth lane skipped while idle,
+        # whose envelopes don't render, so they can't decide an end on the
+        # grid): it ends as before, when the Notes is idle at a buffer start
+        # (the lane is silent then, so where doesn't change its output).
+        def finished?(skipping = false)
           return false unless ends_graph?
           if grid_end?
             return false if @grid_end.nil? || @reader.generation != @grid_generation
             return @frames_read >= @grid_end
           end
 
+          unless skipping || @notes.nil?
+            e = @notes.grid_end_frame
+            return true if e && @frames_read >= e
+          end
+
           return false unless ended?
-          (@notes.nil? || @notes.idle?) || @tail >= TAIL_SECONDS * @sample_rate
+          return true if @tail >= TAIL_SECONDS * @sample_rate
+          # The Notes' envelopes end it on their grid (see
+          # NoteEnvelope#sample; fixes-13)
+          return false if !skipping && @notes&.envelope_end?
+
+          @notes.nil? || @notes.idle?
         end
 
         # True if this #ends_graph? node ends on its END_GRID (see the
@@ -233,10 +247,9 @@ module MB
         # if it ends at its start).  Also called (with nil) for planned
         # blocks, which never hold a stream's end (Plan's #plan_finished?).
         def end_on_grid(out, from, to, count)
-          return out unless grid_end?
-
           start = @frames_read
           @frames_read += count
+          return envelope_end(out, start) unless grid_end?
 
           gen = @reader.generation
           if @grid_end && gen != @grid_generation
@@ -259,6 +272,20 @@ module MB
           return nil if @grid_end <= start
 
           out[0...(@grid_end - start)]
+        end
+
+        # Cuts +out+ (a buffer read from frame +start+ of the node's output)
+        # at the frame where the envelopes of the node's Notes ended it (see
+        # NoteEnvelope#sample), if they did: nil if it starts there, short
+        # if inside.  Nodes read in the same buffer before the envelope that
+        # decided gave a full buffer; arithmetic (stop_early) cuts the graph
+        # at the shortest input, so the graph still ends there.
+        def envelope_end(out, start)
+          e = @notes&.grid_end_frame
+          return out if e.nil? || out.nil? || e >= @frames_read
+          return nil if e <= start
+
+          out[0...(e - start)]
         end
 
         # +frames+ rounded up to the END_GRID.

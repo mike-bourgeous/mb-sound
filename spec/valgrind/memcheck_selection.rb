@@ -62,7 +62,10 @@ module MemcheckSelection
     'spec/lib/mb/sound/graph_node/formant_spec.rb',  # FastFilter.formant through Formant
     'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
     'spec/lib/mb/sound/graph_node/decimator_spec.rb', # FastLofi.decimate through Decimator
+    'spec/lib/mb/sound/graph_node/modal_resonator_spec.rb', # FastResonator.modes through ModalResonator
+    'spec/lib/mb/sound/graph_node/texture_spec.rb',  # FastTexture.dust/drift through Dust and Drift
     'spec/lib/mb/sound/sampler_spec.rb',             # FastSampler.play through SamplerVoice (synths, chops, SFZ)
+    'spec/lib/mb/sound/granular_spec.rb',            # FastSampler.grains through Grains (scans, voices, buffer sizes)
     'spec/lib/mb/sound/graph_node/dynamics_spec.rb', # FastDynamics.compand/limit/crossover through the nodes
     'spec/lib/mb/sound/graph_node/reverb_spec.rb',   # FastReverb::Network through Reverb (modulation, loop processing, graph mode)
     'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak

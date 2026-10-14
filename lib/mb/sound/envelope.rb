@@ -358,6 +358,7 @@ module MB
 
         values.transform_values { |v|
           case v
+          when Decibels then v.db_value
           when Numeric then v.to_f
           else
             raise ArgumentError, "Curves must be numbers (dB) or graph nodes (got #{v.inspect})" unless v.respond_to?(:sample)

@@ -184,13 +184,13 @@ module MB
         #   Sequence::Clip#performed?).
         #
         # Voice knobs are Hashes by voice name (aliases work), e.g. `kick: {
-        # tune: 48, decay: 1.2 }`; +:accent+ (dB, see Drums.accented) applies
+        # tune: 48, decay: 1.2 }`; +:accent+ (a gain like 6.db, see Drums.accented) applies
         # to every voice unless a voice's Hash sets its own, and so does
         # +:velocity_curve+ (:grid or :midi, by default from the source:
         # :grid for grids and clips, :midi for MIDI files and live MIDI;
         # see Drums.accented).  +:more_cowbell+
         # raises the cowbell and lengthens its decay: true for +6 dB, or a
-        # number of dB (see .more_cowbell).
+        # gain like 3.db (see .more_cowbell).
         #
         # The open hat is choked by the closed hat, and the hats and cymbal
         # share one metal oscillator bank when their tunes are the same
@@ -263,13 +263,14 @@ module MB
         end
 
         # Returns cowbell +knobs+ with more cowbell: +amount+ is true (+6
-        # dB) or dB.  The level rises by +amount+ dB and the decay (given or
+        # dB) or a gain (`6.db`, or a bare linear gain; Decibels.db_of).
+        # The level rises by +amount+ and the decay (given or
         # default) grows with it, doubling every MORE_COWBELL_DOUBLING dB:
         # decay × 2 ** (dB / 12), so +6 dB rings about 1.41x as long (0.71
         # s by default) and +12 dB twice as long (1 s).  Negative amounts
         # give less (and shorter) cowbell.
         def more_cowbell(knobs, amount)
-          db = amount == true ? MORE_COWBELL : amount.to_f
+          db = amount == true ? MORE_COWBELL : Decibels.db_of(amount, 'more_cowbell')
           knobs.merge(
             level: knobs.fetch(:level, VOICES[:cowbell][:level]) * 10 ** (db / 20.0),
             decay: knobs.fetch(:decay, VOICES[:cowbell][:decay]) * 2 ** (db / MORE_COWBELL_DOUBLING),

@@ -34,12 +34,13 @@ module MB
         end
 
         # The listening level (see Help::Level), which sets the monitor
-        # trim for live playback: with a number, sets it (dBFS peak of the
-        # level check tone); without, runs the level check when the console
+        # trim for live playback: with a level, sets it (the level check
+        # tone's peak, `help.level -20.db`; a bare negative number is read
+        # as dB with a warning in the console, see Decibels.db_of); without, runs the level check when the console
         # is interactive (keys move the level), else shows it.
         def level(db = nil, input: $stdin, out: $stdout)
           if db
-            Level.save(db)
+            Level.save(Decibels.db_of(db, 'level'))
           elsif input.tty?
             Level::Calibration.new(input: input, out: out).run
           end
@@ -80,10 +81,10 @@ module MB
           trim = format('%+.1f dB', 20 * Math.log10([Session.monitor_gain, 1e-9].max))
           if Level.saved?
             "#{c(:title, 'level')} #{c(:key, "#{Level.db.round(1)} dBFS")} (the level check tone's peak): monitor trim #{trim} for live playback\n" \
-              "#{c(:dim, '  renders and recordings are unchanged; help.level checks it again, help.level -20 sets it')}"
+              "#{c(:dim, '  renders and recordings are unchanged; help.level checks it again, help.level -20.db sets it')}"
           else
             "#{c(:title, 'level')} no level check yet (monitor trim #{trim}; the tone's reference is #{Level::REFERENCE_DB.round} dBFS)\n" \
-              "#{c(:dim, '  help.level runs the check (keys move the level); help.level -20 sets it')}"
+              "#{c(:dim, '  help.level runs the check (keys move the level); help.level -20.db sets it')}"
           end
         end
       end

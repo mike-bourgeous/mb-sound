@@ -311,7 +311,7 @@ module MB
             @result = nil
             return :done
           end
-          if gathered.equal?(:mismatch)
+          if gathered.equal?(:mismatch) || gathered.equal?(:short)
             @result = replay_unfused(count)
             return :done
           end
@@ -437,13 +437,14 @@ module MB
         end
 
         # Reads every boundary input and Constant for one block.  Returns
-        # the sample count to run (shorter if an input gave a short
-        # buffer), :ended if a required input ended, or :mismatch if a
-        # buffer doesn't fit the program.
+        # the sample count to run, :ended if a required input ended, :mismatch if a
+        # buffer doesn't fit the program, or :short if a Notes node ending
+        # on its grid gave a short buffer (the block runs unfused).
         def gather(count)
           min = count
           ended = false
           mismatch = false
+          short = false
           inputs = @inputs
           ops = @input_ops
           shared = @installation.shared&.buffers
@@ -513,7 +514,11 @@ module MB
                 # block itself
                 mismatch = true
               end
-              min = buf.length if buf.length < min
+              if buf.length < min
+                min = buf.length
+                src = Plan.origin(op.source)
+                short = true if src.respond_to?(:plan_ends_on_grid?) && src.plan_ends_on_grid?
+              end
               inputs[i] = buf
             end
 
@@ -526,6 +531,15 @@ module MB
             @program = nil
             return :mismatch
           end
+
+          # A short input from a Notes envelope or note node ending its
+          # graph on its grid (#plan_ends_on_grid?): the block runs unfused,
+          # as the graph would run it (arithmetic samples its other inputs
+          # for the whole block and cuts the result), so the nodes keep the
+          # states the unfused graph gives them (fixes-13: with envelopes
+          # ending inside a block, a planned tone ran only up to the end,
+          # and check mode found its phase different)
+          return :short if short
 
           params = @params
           pops = @param_ops

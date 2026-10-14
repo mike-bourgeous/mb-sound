@@ -607,11 +607,14 @@ RSpec.describe(MB::Sound::Synth) do
       data = out.reduce(:concatenate)
 
       # The ping rings for a while after the file's last event, and the synth
-      # ends one buffer after the ring falls below -90 dB
+      # ends on the first grid point (SKIP_GRID) a whole grid cell after the
+      # ring falls below -90 dB (fixes-13; before, one buffer after it)
+      grid = described_class::SKIP_GRID
       last_sound = (data.abs > -90.db).where.to_a.last
       expect(last_sound / 48000.0).to be > 0.2
-      expect(ended_at).to eq(last_sound / 480 + 2)
-      expect(out.length).to eq(ended_at)
+      expect(data.length).to eq((last_sound + 1 + grid + grid - 1) / grid * grid)
+      expect(out.length).to eq((data.length / 480.0).ceil)
+      expect(ended_at).to be <= out.length
 
       # Repeatable
       again = []
@@ -661,7 +664,10 @@ RSpec.describe(MB::Sound::Synth) do
       expect(peak(data, 0.3, 0.4)).to be > 0.1
       last_sound = (data.abs > -90.db).where.to_a.last
       expect(last_sound / 48000.0).to be > 1
-      expect(out.length).to eq(last_sound / 480 + 2)
+      # (on the grid a whole cell after the ring falls below -90 dB; see
+      # the example above)
+      grid = described_class::SKIP_GRID
+      expect(data.length).to eq((last_sound + 1 + grid + grid - 1) / grid * grid)
     end
 
     it 'ends lanes whose output settles at a constant offset' do

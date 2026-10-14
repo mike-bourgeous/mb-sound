@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-13",
+  "generated": "2026-10-14",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -180,6 +180,7 @@
     },
     "spec/ext/mb/sound/fast_resonator_spec.rb": {
       "fast_resonator": [
+        "FastResonator.modes",
         "FastResonator.ping"
       ]
     },
@@ -187,6 +188,14 @@
       "fast_reverb": [
         "FastReverb::Network#initialize",
         "FastReverb::Network#process"
+      ]
+    },
+    "spec/ext/mb/sound/fast_sampler_grains_spec.rb": {
+      "fast_sampler": [
+        "FastSampler.grains"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
       ]
     },
     "spec/ext/mb/sound/fast_sampler_spec.rb": {
@@ -197,6 +206,12 @@
     "spec/ext/mb/sound/fast_synth_feedback_spec.rb": {
       "fast_synth": [
         "FastSynth.feedback_sine"
+      ]
+    },
+    "spec/ext/mb/sound/fast_texture_spec.rb": {
+      "fast_texture": [
+        "FastTexture.drift",
+        "FastTexture.dust"
       ]
     },
     "spec/ext/mb/sound/fast_unison_spec.rb": {
@@ -520,6 +535,21 @@
         "FastWavetable.oscillate"
       ]
     },
+    "spec/lib/mb/sound/granular_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_sampler": [
+        "FastSampler.grains"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/constant_spec.rb": {
       "fast_sound": [
         "FastSound.smoothstep_buf"
@@ -636,6 +666,22 @@
         "FastWavetable.oscillate"
       ]
     },
+    "spec/lib/mb/sound/graph_node/modal_resonator_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_resonator": [
+        "FastResonator.modes",
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_texture": [
+        "FastTexture.dust"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/multitap_delay_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_write",
@@ -710,6 +756,24 @@
         "FastSound.cookbook",
         "FastSound.matrix_mix",
         "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/texture_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ],
+      "fast_texture": [
+        "FastTexture.drift",
+        "FastTexture.dust"
       ]
     },
     "spec/lib/mb/sound/graph_node/wavetable_spec.rb": {
@@ -791,6 +855,7 @@
         "FastResample#setup_converter_type"
       ],
       "fast_resonator": [
+        "FastResonator.modes",
         "FastResonator.ping"
       ],
       "fast_reverb": [
@@ -798,6 +863,7 @@
         "FastReverb::Network#process"
       ],
       "fast_sampler": [
+        "FastSampler.grains",
         "FastSampler.play"
       ],
       "fast_sound": [
@@ -818,6 +884,10 @@
         "FastSynth.feedback_sine",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync"
+      ],
+      "fast_texture": [
+        "FastTexture.drift",
+        "FastTexture.dust"
       ],
       "fast_unison": [
         "FastUnison.exact",
@@ -1237,6 +1307,8 @@
     },
     "spec/lib/mb/sound/plan/stream_restart_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.product"
       ],
       "fast_envelope": [

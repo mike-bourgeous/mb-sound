@@ -29,7 +29,7 @@ MB::Sound.synth_script(
 ) { |midi, p|
   MB::Sound.tr909(
     midi,
-    accent: p.accent,
+    accent: p.accent.db,
     kick: {
       tune: p.kick_tune,
       decay: p.midi_cc(16, :kick_decay, range: 0.25..2.0),

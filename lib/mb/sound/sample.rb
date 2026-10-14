@@ -511,6 +511,51 @@ module MB
       end
       alias to_node node
 
+      # A granular cloud of this sample: a stereo Channels bundle of a
+      # GraphNode::Grains (see design/notes/granular.md).  Every option is a
+      # number or a node (knobs too), read per sample; each grain keeps the
+      # values of its onset:
+      # - density: grains per second (20; a Pitch, or a Duration for one
+      #   grain per note length at the current tempo)
+      # - jitter: 0 regular onsets (a buzz at the density) to 1 (default)
+      #   Poisson onsets, the classic cloud
+      # - size: grain length (100 ms; seconds, a Length, or a node)
+      # - position: grain centers as a 0..1 fraction of the sample (or a
+      #   Length); a number freezes (`position: 0.42`), a node scrubs
+      # - scan: a playhead added to position, moving at +scan+ times the
+      #   sample's own speed and wrapping (0.25 = a 4x granular stretch);
+      #   1 when no position is given (plays through, looping), else 0
+      # - spread: ± random position (0..1 of the sample, or a Length)
+      # - pitch: semitones (an Interval or number), or an Array of them to
+      #   pick from at random per grain (`[0, 12, 19]`); pitch_spread: ±
+      #   random semitones
+      # - pan_spread: 0 (center) to 1 (each grain anywhere left to right;
+      #   0.5 by default)
+      # - reverse: the chance a grain plays backwards (0..1, or true)
+      # - window: :hann (default), :triangle, :tukey, :gauss, :blackman,
+      #   :rect, :expodec (percussive), :rexpodec, a Proc of 0..1, or an
+      #   Array (Granular::WINDOWS)
+      # - normalize: (true) scale grains by 1 / sqrt(overlap) so dense
+      #   clouds keep the sample's level
+      # - max_grains: (32; 16 through Notes#grains) the most grains at once (more onsets are
+      #   skipped: a fixed worst-case cost)
+      # - seed: the grains' random seed (MB::Sound.next_seed by default)
+      # - read: :clean or :drop (lofi drop-sample reads), or
+      #   interpolation:/mips: as for #read_as; default the sample's own
+      # - freq:, trigger: (Notes#grains sets them) key tracking against
+      #   #root and note-ons restarting the playhead
+      #
+      #     bg :drone, bowl.grains(position: 0.42, size: 120.ms, density: 30, spread: 0.02)
+      #     bg :rain, rain.grains(scan: 0.25, size: 60.ms, density: 80, pitch_spread: 3, reverse: 0.3)
+      #     bg :spray, pad.grains(pitch: [0, 12, 19], window: :expodec, density: 60)
+      def grains(read: nil, **options)
+        s = read.nil? ? self : read_as(read)
+        g = GraphNode::Grains.new(s, **options)
+        GraphNode::Channels.new(g.outputs)
+      end
+      alias granular grains
+      alias cloud grains
+
       # Slices of the region (a Sample::Slices): +count+ equal slices, or at
       # +at+ (an Array of positions from the region start), or at detected
       # transients with `slices(:onsets)` (see Sample::Onsets; +threshold+
@@ -589,19 +634,74 @@ module MB
       # sounds about an octave low; see Lofi::FITS).  Every channel cuts in
       # the same places.
       #
+      #
+      # +mode+ :spectral (aliases :pv, :vocoder) is a phase vocoder with
+      # identity phase locking (Laroche & Dolson): Hann windows of +window+
+      # (4096 samples) with +overlap+ (4) frames per window, every channel
+      # rotated by the phases of their mix (a steady stereo image), and
+      # with +transients+ (true) each detected onset (Sample::Onsets) kept
+      # unstretched with its phases reset, so attacks stay sharp; best on
+      # pads, chords, voices, and basses (pitch is kept exactly).  :paul
+      # (:paulstretch) is Paulstretch: windows of +window+ (0.25 s), every
+      # phase random (from +seed+, 0 by default, so the same stretch
+      # gives the same audio): glacial washes at extreme ratios (8x to
+      # 1000x).  Results longer than LONG_STRETCH (30 s) read with
+      # `mips: :octave` unless this sample has its own mips (smaller
+      # playback tables for long drones; voices' and grains' mips: still
+      # win).  Both are offline (a new Sample, made once per audio and
+      # arguments; spectral runs about 50x realtime per output channel).
+      #
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
-      def stretch(ratio, cycle: 25.ms, crossfade: 0, fit: :auto)
+      #     pad.stretch(8, mode: :spectral)            # phase vocoder
+      #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
+      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: 0, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: true, seed: 0)
+        mode = Spectral.mode_name(mode)
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed) unless mode == :cyclic
+        raise ArgumentError, 'window:, overlap:, transients:, and seed: are for mode: :spectral and :paul' unless window.nil? && overlap == Spectral::OVERLAP && transients == true && seed == 0
+
         fit = Lofi.fit_name(fit)
         c = position(cycle).round
         x = position(crossfade).round
         kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == 0) }
         guide = nil
-        edit(:stretch, [ratio], kw) { |d|
+        edit(:stretch, [ratio], kw, read: stretch_read(ratio)) { |d|
           guide ||= fit == :auto ? mono_mix : nil
           Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end
+
+      # Stretch results longer than this (seconds) read with :octave level
+      # spacing unless the sample says otherwise (about 8x the audio for
+      # the band-limited levels instead of about 14x: a 160 s Paulstretch
+      # would take ~420 MB at the default spacing; maintainer, 2026-10-14).
+      LONG_STRETCH = 30
+
+      # The read settings for a stretch by +ratio+ (see LONG_STRETCH).
+      def stretch_read(ratio)
+        long = length * ratio.to_f / sample_rate > LONG_STRETCH
+        { interpolation: @interpolation, mips: @mips.nil? && long ? :octave : @mips }
+      end
+      private :stretch_read
+
+      # The :spectral and :paul stretches (see #stretch).
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed)
+        kw = { mode: mode }
+        kw[:window] = window unless window.nil?
+        kw[:overlap] = overlap unless overlap == Spectral::OVERLAP
+        kw[:transients] = transients unless transients == true || mode == :paul
+        kw[:seed] = seed unless seed == 0 || mode == :spectral
+        if mode == :spectral
+          n = window.nil? ? Spectral::WINDOW : position(window).round
+          n += 1 if n.odd?
+          onsets = transients ? (@reversed ? reverse : self).onsets : nil
+          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets) }
+        else
+          n = position(window.nil? ? Spectral::PAUL_WINDOW : window).round
+          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.paul(chans, ratio.to_f, window: n, seed: seed) }
+        end
+      end
+      private :spectral_stretch
 
       # The channels mixed to one.
       def mono
@@ -677,14 +777,14 @@ module MB
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
       # the length) and read as +read+ says (see #read_as).
-      def edit(method, args, kwargs = {}, channels: nil, read: { interpolation: @interpolation, mips: @mips }, &block)
+      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, &block)
         key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips, method, args, kwargs]
-        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, read: read, &block) }
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, &block) }
       end
 
-      def edit_uncached(method, args, kwargs, channels: nil, read: { interpolation: @interpolation, mips: @mips })
+      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips })
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
-        out = channels || src.map { |d| Numo::SFloat.cast(yield(d)) }
+        out = channels || (whole ? yield(src).map { |d| Numo::SFloat.cast(d) } : src.map { |d| Numo::SFloat.cast(yield(d)) })
         len = out[0].length
         loop = nil
         if @loop_points
@@ -737,3 +837,4 @@ end
 require_relative 'sample/slices'
 require_relative 'sample/onsets'
 require_relative 'sample/lofi'
+require_relative 'sample/spectral'

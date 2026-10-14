@@ -29,8 +29,8 @@ MB::Sound.synth_script(
 ) { |midi, p|
   MB::Sound.tr808(
     midi,
-    accent: p.accent,
-    more_cowbell: p.cowbell,
+    accent: p.accent.db,
+    more_cowbell: p.cowbell.db,
     kick: { tune: p.midi_cc(16, :kick_tune, range: 0.5..2.0), decay: p.midi_cc(17, :kick_decay, range: 0.1..3.0) },
     snare: { snappy: p.midi_cc(18, :snappy, range: 0.0..1.0, relative: false) },
     open_hat: { decay: p.midi_cc(19, :hat_decay, range: 0.2..4.0) },

@@ -119,6 +119,141 @@ static VALUE ruby_ping(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE dec
 	return out;
 }
 
+// The most modes a modal bank may have (coefficients live on the stack).
+#define RES_MODES_MAX 128
+
+// Values per mode in the mode table: ratio, offset (Hz), amplitude, decay
+// share.
+#define RES_MODE_FIELDS 4
+
+// Modes at or above this share of the sample rate are silent (they would
+// fold back below Nyquist), as are modes at or below 0 Hz.
+#define RES_MODE_CEILING 0.45
+
+/*
+ * call-seq:
+ *   MB::Sound::FastResonator.modes(out, input, freq, decay, modes, state, rate) -> out
+ *
+ * A bank of struck resonators (GraphNode::ModalResonator): each mode k of
+ * the flat Numo::DFloat +modes+ table (RES_MODE_FIELDS values per mode:
+ * ratio, offset in Hz, amplitude, decay share) is a ping as above at
+ * freq * ratio + offset Hz, falling 60 dB in decay * share samples, all
+ * pinged by the same +input+; the output is the sum of each mode's ring
+ * (phase 0: Im z) times its amplitude, summed in double in mode order.
+ * Modes at or above RES_MODE_CEILING of the sample rate, or at or below 0
+ * Hz, are silent.  +state+ is a contiguous DFloat of 2 values per mode
+ * [zr0, zi0, zr1, zi1, ...], updated in place.  Coefficients are recomputed
+ * only when the frequency or decay changes.  Exact Ruby mirror:
+ * MB::Sound::GraphNode::ModalResonator.process_ruby.
+ */
+static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE decay, VALUE modes, VALUE state, VALUE rate)
+{
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "Output must be a contiguous 1D Numo::SFloat");
+	}
+	if (CLASS_OF(modes) != numo_cDFloat || RNARRAY_NDIM(modes) != 1 || !RTEST(nary_check_contiguous(modes))) {
+		rb_raise(rb_eArgError, "Modes must be a contiguous 1D Numo::DFloat");
+	}
+	size_t mode_values = RNARRAY_SHAPE(modes)[0];
+	if (mode_values == 0 || mode_values % RES_MODE_FIELDS != 0) {
+		rb_raise(rb_eArgError, "Modes must have %d values per mode", RES_MODE_FIELDS);
+	}
+	size_t m = mode_values / RES_MODE_FIELDS;
+	if (m > RES_MODES_MAX) {
+		rb_raise(rb_eArgError, "At most %d modes (got %zu)", RES_MODES_MAX, m);
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 || RNARRAY_SHAPE(state)[0] != 2 * m ||
+			!RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "State must be a contiguous Numo::DFloat of 2 values per mode");
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	size_t n = RNARRAY_SHAPE(out)[0];
+
+	double x_scalar, f_scalar, d_scalar;
+	const float *x_ptr, *f_ptr, *d_ptr;
+	size_t x_step, f_step, d_step;
+	mb_read_signal_input(&input, n, "Input", &x_scalar, &x_ptr, &x_step);
+	mb_read_signal_input(&freq, n, "Frequency", &f_scalar, &f_ptr, &f_step);
+	mb_read_signal_input(&decay, n, "Decay", &d_scalar, &d_ptr, &d_step);
+
+	double fs = NUM2DBL(rate);
+	if (!(fs > 0)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive");
+	}
+
+	const double *table = (const double *)(nary_get_pointer_for_read(modes) + nary_get_offset(modes));
+	float *y = mb_sfloat_ptr(out);
+	double *z = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+
+	double coef[2 * RES_MODES_MAX];
+	double radius[RES_MODES_MAX];
+	double last_f = NAN, last_d = NAN;
+
+	for (size_t i = 0; i < n; i++) {
+		double x = x_ptr ? x_ptr[i * x_step] : x_scalar;
+		double f = f_ptr ? f_ptr[i * f_step] : f_scalar;
+		double d = d_ptr ? d_ptr[i * d_step] : d_scalar;
+
+		// Decay factors only when the decay changes (a gliding pitch
+		// recomputes only the rotations)
+		_Bool new_d = d != last_d;
+		if (new_d) {
+			for (size_t k = 0; k < m; k++) {
+				double dk = d * table[k * RES_MODE_FIELDS + 3];
+				radius[k] = dk > 0 ? exp(-RES_LN_1000 / dk) : 0.0;
+			}
+			last_d = d;
+		}
+
+		if (new_d || f != last_f) {
+			for (size_t k = 0; k < m; k++) {
+				const double *mode = table + k * RES_MODE_FIELDS;
+				double fk = f * mode[0] + mode[1];
+				double r = radius[k];
+				if (fk > 0 && fk < RES_MODE_CEILING * fs && r > 0) {
+					double w = 2.0 * M_PI * fk / fs;
+					coef[2 * k] = r * cos(w);
+					coef[2 * k + 1] = r * sin(w);
+				} else {
+					coef[2 * k] = 0.0;
+					coef[2 * k + 1] = 0.0;
+				}
+			}
+			last_f = f;
+		}
+
+		double sum = 0.0;
+		for (size_t k = 0; k < m; k++) {
+			double c = coef[2 * k];
+			double s = coef[2 * k + 1];
+			double zr = z[2 * k];
+			double zi = z[2 * k + 1];
+			double nr = c * zr - s * zi + x;
+			double ni = s * zr + c * zi;
+			if (fabs(nr) < RES_FLUSH && fabs(ni) < RES_FLUSH) {
+				nr = 0.0;
+				ni = 0.0;
+			}
+			z[2 * k] = nr;
+			z[2 * k + 1] = ni;
+			sum += table[k * RES_MODE_FIELDS + 2] * ni;
+		}
+
+		y[i] = (float)sum;
+	}
+
+	RB_GC_GUARD(input);
+	RB_GC_GUARD(freq);
+	RB_GC_GUARD(decay);
+	RB_GC_GUARD(modes);
+	RB_GC_GUARD(state);
+	RB_GC_GUARD(out);
+
+	return out;
+}
+
 void Init_fast_resonator(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -126,4 +261,5 @@ void Init_fast_resonator(void)
 	VALUE fast_resonator = rb_define_module_under(sound, "FastResonator");
 
 	rb_define_module_function(fast_resonator, "ping", ruby_ping, 8);
+	rb_define_module_function(fast_resonator, "modes", ruby_modes, 7);
 }
