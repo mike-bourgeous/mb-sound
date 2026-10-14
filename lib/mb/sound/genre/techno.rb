@@ -33,9 +33,14 @@ module MB
       role :drums, :tr909, level: -4.db, about: 'the tr909, the techno kit'
       # (the roller: a short sub with a noise tick in a small room, ducked
       # under the kick, so it rolls between the kicks instead of booming
-      # under them; patches-4, 2026-10-13: "clashes with 808 kick")
-      role :bass, :roller, level: -3.db, duck: -9.db, about: 'a rolling offbeat sub with a noise tick, ducked under the kick'
-      role :stab, :dnb_reese, params: { cutoff: :cut }, level: -6.db, about: 'a detuned stab opening over the phrase'
+      # under them; patches-4, 2026-10-13: "clashes with 808 kick"; level
+      # +2 dB and duck -4 dB from the maintainer's Bench pick, drums-3)
+      role :bass, :roller, level: 2.db, duck: -4.db, about: 'a rolling offbeat sub with a noise tick, ducked under the kick'
+      # (Genre::Patches.stab: the Reese's voice with a gentle drive; drums-3,
+      # after "an insane amount of distortion on the stab note".  The heavy
+      # one: `role :stab, :stab, params: { cutoff: :cut, drive: 1 }`, or the
+      # Reese itself, `role :stab, :dnb_reese, params: { cutoff: :cut }`)
+      role :stab, :stab, params: { cutoff: :cut }, level: -9.db, about: 'a detuned stab opening over the phrase'
 
       pulse :peak
 
@@ -50,11 +55,14 @@ module MB
       true_peak(-1.db)
       mono_below 120 # club systems
       master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      # (for the 909's peaky kick: more drive into a softclip, then the
-      # limiter; drums-2 round 2, short form -8.7 LUFS)
-      master :at, 13.db
-      master :softclip, 0.35, 0.95
-      master :limit, ceiling: -1.db
+      # (limiting only, no clipper, driven so the limiter does light work:
+      # short form -11.4 LUFS, about 1 dB of gain reduction on average,
+      # 3.5 dB at the 95th percentile; under the -9..-7 target, which needs
+      # a clipper or heavy limiting with the 909's peaky kick.  drums-3,
+      # 2026-10-13, maintainer: "Mix needs rebalancing and lowering, and
+      # switching back to limiting")
+      master :at, 7.db
+      master :limit, ceiling: -1.db, release: 0.06 # (60 ms)
       master_gain 0.db
 
       tip 'A stub: tempo, form, and grids from general knowledge; a later panel should research and refine it.'

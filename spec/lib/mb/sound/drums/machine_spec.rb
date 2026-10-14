@@ -153,14 +153,33 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
         expect { trigger_kit.kit(MB::Sound.midi_file('spec/test_data/c2_sustain.mid'), shuffle: 2) }.to raise_error(ArgumentError, /grids and clips/)
       end
 
-      it 'plays flam marks as a grace stroke and the hit flam: later' do
+      it 'plays flam marks from grids as a grace stroke flam: early and the hit on the step' do
         kit = trigger_kit.kit(MB::Sound.grid(16, kick: 'x.F.'), flam: 10.ms)
         x = collect(kit, 0.6)
-        expect(x.ne(0).where.to_a).to eq([0, 2 * step, 2 * step + 480])
+        expect(x.ne(0).where.to_a).to eq([0, 2 * step - 480, 2 * step])
         grace = MB::Sound::Drums::Flams::GRACE**(MB::Sound::Drums::DEFAULT_ACCENT / -(20 * Math.log10(0.75)))
-        expect(x[2 * step] / x[2 * step + 480]).to be_within(1e-5).of(grace)
+        expect(x[2 * step - 480] / x[2 * step]).to be_within(1e-5).of(grace)
 
-        # The kit's default, a voice's own flam:, and a mark's own time
+        # The main hit lands where an unmarked hit would
+        plain = collect(trigger_kit.kit(MB::Sound.grid(16, kick: 'x.X.'), flam: 10.ms), 0.6)
+        expect(plain.ne(0).where.to_a).to eq([0, 2 * step])
+        expect(x[2 * step]).to eq(plain[2 * step])
+
+        # A flam right at the launch (nothing to read ahead of) plays its
+        # grace on the step; in a loop, later cycles play it early
+        loop_kit = trigger_kit.kit(MB::Sound.grid(16, kick: 'F...').loop, flam: 10.ms)
+        expect(hits(loop_kit, 0.6)).to eq([0, 480, 4 * step - 480, 4 * step])
+
+        # A clip's shared stream plays early with one spacing for every voice
+        clip = MB::Sound.seq(MB::Sound::C2, MB::Sound::D2.flam, MB::Sound::C2.flam(5.ms), MB::Sound::D2).n16
+        k = trigger_kit.kit(clip)
+        early = (MB::Sound::Drums::Machine::DEFAULT_FLAM * 48000).round
+        expect(hits(k[:kick], 0.4)).to eq([0, 2 * step - 240, 2 * step])
+        expect(hits(k[:snare], 0.4)).to eq([step - early, step, 3 * step])
+
+        # The kit's default, a voice's own flam:, and a mark's own time (a
+        # voice with its own spacing: the clip's stream plays them late,
+        # like live MIDI)
         clip = MB::Sound.seq(MB::Sound::C2.flam, MB::Sound::D2.flam, MB::Sound::C2.flam(5.ms), MB::Sound::D2).n16
         k = trigger_kit.kit(clip, snare: { flam: 0.001 })
         expect(hits(k[:kick], 0.4)).to eq([0, (MB::Sound::Drums::Machine::DEFAULT_FLAM * 48000).round, 2 * step, 2 * step + 240])

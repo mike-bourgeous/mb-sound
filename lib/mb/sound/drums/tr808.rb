@@ -138,7 +138,7 @@ module MB
               n = Drums.notes_for(s)
               notes << n if n
               # Flam-marked notes play as flams (Seq::Step#flam)
-              n ? Drums.hits(n, Drums.flams?(s) ? Machine::DEFAULT_FLAM : nil) : s
+              n ? Drums.hits(n, Drums.flams?(s) ? Machine::DEFAULT_FLAM : nil, early: s.is_a?(Sequence::Clip)) : s
             })
           }
 
@@ -224,7 +224,7 @@ module MB
           }
           settings[:cowbell] = TR808.more_cowbell(settings[:cowbell] || {}, more_cowbell) if more_cowbell
 
-          sources = voice_sources(source, only: only, map: map)
+          sources = voice_sources(source, only: only, map: map, early_flam: Drums.flams?(source) ? Machine::DEFAULT_FLAM : nil)
           raise ArgumentError, "Nothing in #{source} plays a TR-808 voice" if sources.empty?
 
           # Shared metal bank for voices with the same (numeric) tune
@@ -283,7 +283,8 @@ module MB
         end
 
         # Sources by voice name for .kit (see there).
-        def voice_sources(source, only:, map:)
+        # +early_flam+: see Drums::Machine#voice_sources.
+        def voice_sources(source, only:, map:, early_flam: nil)
           only = only && Array(only).map { |v| voice_name(v) || raise(ArgumentError, "Unknown TR-808 voice #{v.inspect}") }
 
           if source.is_a?(Sequence::Kit)
@@ -311,6 +312,7 @@ module MB
             voices = voices.select { |v| gm.fetch(v).any? { |n| values.include?(n) } }
           end
           stream = MB::Sound::MIDI::Stream.for(source)
+          stream.source.play_flams_early(early_flam) if early_flam && source.is_a?(Sequence::Clip) && stream.source.is_a?(MIDI::ClipSource)
           voices.to_h { |v| [v, MB::Sound::Notes.new(stream.keys(*gm.fetch(v)), sustain: false)] }
         end
 

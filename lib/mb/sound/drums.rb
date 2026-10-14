@@ -130,9 +130,18 @@ module MB
 
       # The hits of +notes+ (a Notes): its trigger, or with a +flam+
       # spacing (seconds; nil for none) the trigger through Drums::Flams,
-      # so flam-marked notes play as flams (see Seq::Step#flam).
-      def hits(notes, flam = nil)
+      # so flam-marked notes play as flams (see Seq::Step#flam).  With
+      # +early+ (for a Notes the kit made for a clip or grid, whose notes
+      # are known ahead), the clip plays flam-marked note-ons early by
+      # their spacing (MIDI::ClipSource#play_flams_early), so the grace
+      # stroke comes before the step and the main hit lands on it; other
+      # sources (live MIDI, a shared Notes or Stream) play the grace on the
+      # step and the main hit the spacing later.
+      def hits(notes, flam = nil, early: false)
         return notes.trigger if flam.nil?
+        if early && (src = notes.stream.source).is_a?(MIDI::ClipSource)
+          src.play_flams_early(flam, sample_rate: notes.sample_rate)
+        end
         Flams.new(notes.trigger, notes.flam_mark, spacing: flam)
       end
 

@@ -148,15 +148,16 @@ module MB
             end
 
             {
-              low_tom: [100.0, 1.1, [:lt]], mid_tom: [145.0, 0.95, [:mt, :tom]], high_tom: [200.0, 0.8, [:ht]],
+              low_tom: [95.0, 0.55, [:lt]], mid_tom: [135.0, 0.5, [:mt, :tom]], high_tom: [190.0, 0.45, [:ht]],
             }.each do |name, (tune, decay, aliases)|
-              # Round 2 (the maintainer preferred the 808's toms): a gentle
-              # strike and a long glide down, rounded by a soft clip, with a
-              # darker breath of noise
-              voice name, tune: tune, decay: decay, gm: GM_MAP[name], as: aliases, level: 0.7 do |h|
+              # The round 1 toms (drums-3: the maintainer on the rounder
+              # round 2 toms, "the round 1 toms are fine, I just like the 808
+              # toms a lot"): a quick strike and a short drop, with a breath
+              # of noise
+              voice name, tune: tune, decay: decay, gm: GM_MAP[name], as: aliases, level: 0.75 do |h|
                 f = h.hz(h.tune)
-                body = h.body(f, decay: h.decay, sweep: 0.3, sweep_time: 0.02, drop: 0.35, drop_time: 0.35)
-                h.mix(body.softclip(0.7, 1.0), h.noise(decay: 0.08, bandpass: f * 3, quality: 0.8) * 0.1)
+                body = h.body(f, decay: h.decay, sweep: 0.9, sweep_time: 0.01, drop: 0.4, drop_time: 0.25)
+                h.mix(body, h.noise(decay: 0.05, bandpass: f * 5, quality: 1.0) * 0.12)
               end
             end
 

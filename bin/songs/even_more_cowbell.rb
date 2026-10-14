@@ -1,10 +1,13 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Even more cowbell: a kit-builder kit that stacks every cowbell we can
-# make over the scratch kick and snare (the Bench favourite): the 808's
-# cowbell tuned to a little melody, an FM bell, a sampled cowbell (an 808
-# cowbell bounced, crushed to 12 bits at 26 kHz, and played an octave
-# down), and "fever", a cowbell whose one knob turns up the level and the
-# ring together.  Each 2 bars add another one.
+# Even more cowbell: a kit-builder kit where every row is a cowbell.  The
+# kick is an 808 cowbell bounced to a sample and played two octaves down
+# (a dull clank) over a sub, the snare the same cowbell a fourth down with
+# noise, the hats the 808 cowbell's two partials five times higher (bright
+# metal, the open hat choked by the closed one); over them the 808's
+# cowbell tuned to a little melody, an FM bell, a sampled cowbell (crushed
+# to 12 bits at 26 kHz and played an octave down), and "fever", a cowbell
+# whose one knob turns up the level and the ring together.  Each 2 bars
+# add another one.
 #
 # Usage:
 #     bin/songs/even_more_cowbell.rb                 # plays live in the background session
@@ -15,7 +18,7 @@
 # Or in bin/sound.rb:
 #     load 'bin/songs/even_more_cowbell.rb'
 #     cb = MB::Sound.cowbell_kit
-#     bg :cb, cb.kit(cb.grid(16, kick: 'X...x..x..x.x...', snare: '....X.......X...', fever: 'x.xx.x.xx.x.x.xx').loop, fever: { fever: 2 })
+#     bg :cb, cb.kit(cb.grid(16, kick: 'X...x..x..x.x...', snare: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.', fever: 'x.xx.x.xx.x.x.xx').loop, fever: { fever: 2 })
 #
 # Snippets to try in bin/sound.rb:
 #     bg :bells, kit(grid(16, cb: 'x..x..x.x..x.x..').loop) { tr808 :cowbell }               # the 808's
@@ -29,16 +32,41 @@ module MB::Sound
   # The song's length in bars.
   EVEN_MORE_COWBELL_BARS = 12
 
-  # A kit-builder kit (a Drums::Machine): the scratch kick and snare plus
-  # four cowbells (see the file's header).
+  # A kit-builder kit (a Drums::Machine) made only of cowbells (see the
+  # file's header): kick, snare, closed and open hats, and four cowbells.
+  # (drums-3, 2026-10-13: the maintainer on the first version, "sounds
+  # like it still has regular kick and snare... I think I wanted *all* the
+  # rows to be based on cowbells")
   def self.cowbell_kit
-    # A sampled cowbell: the 808's, bounced and crushed like an SP-1200
-    sampled = bounce(1.beat, bpm: 112) { tr808(grid(4, cowbell: 'X'), cowbell: { decay: 0.6 }) }.lofi(:sp1200)
+    # The 808's cowbell bounced to a sample, for the kick and snare, and
+    # crushed like an SP-1200 for the sampled cowbell
+    bell = bounce(1.beat, bpm: 112) { tr808(grid(4, cowbell: 'X'), cowbell: { decay: 0.6 }) }
+    sampled = bell.lofi(:sp1200)
 
     kit(name: :cowbell) {
-      # The scratch kick and snare
-      voice(:kick, tune: 48) { body(tune, decay: 0.6, sweep: 4).softclip(0.6) + click(0.4) }
-      voice(:snare, snappy: 0.7) { body(190, decay: 0.1) * 0.5 + noise(decay: 0.2, highpass: 1500, lowpass: 9000) * snappy }
+      # Kick: the cowbell two octaves down (its squares at 135 and 200 Hz,
+      # lowpassed to a clank) over a swept sub
+      voice :kick, tune: 48, clank: 1 do |h|
+        sub = h.body(h.tune, decay: 0.45, sweep: 3).softclip(0.6, 1.0)
+        clank = h.sample(bell, tune: -24, decay: 0.15).filter(:lowpass, cutoff: 700, quality: 0.9)
+        h.mix(sub * 0.85, clank * (1.6 * h.clank))
+      end
+
+      # Snare: the cowbell a fourth down, short, with a burst of noise
+      voice :snare, snappy: 0.7, tune: -5 do |h|
+        h.mix(h.sample(bell, tune: h.tune, decay: 0.12) * 0.9, h.noise(decay: 0.2, highpass: 1500, lowpass: 9000) * h.snappy)
+      end
+
+      # Hats: the 808 cowbell's two partials (540 and 800 Hz) five times
+      # higher, highpassed into a bright metal tick; the open hat rings
+      # until the closed hat chokes it
+      voice :closed_hat, decay: 0.05, level: 0.5, as: [:hat, :hh, :ch] do |h|
+        h.metal(2700, freqs: [540.0, 800.0]).filter(:highpass, cutoff: 6500, quality: 0.7) * h.env(h.decay)
+      end
+      voice :open_hat, decay: 0.35, level: 0.4, as: [:oh] do |h|
+        h.metal(2700, freqs: [540.0, 800.0]).filter(:highpass, cutoff: 6500, quality: 0.7) * h.env(h.decay)
+      end
+      choke :open_hat, by: :closed_hat
 
       # The 808's cowbell (its tune knob plays a melody in the song)
       tr808 :cowbell
@@ -70,6 +98,8 @@ module MB::Sound
     rows = {
       kick:    'X...x..x..x.x...',
       snare:   '....X.......X...',
+      hat:     'x.x.x.x.x.x.x.x.',
+      oh:      '..............x.',
       cowbell: 'x..x..x.x..x.x..',
       fm_bell: '..x...x...x..x.x',
       sampled: 'x.......x.....x.',
@@ -83,10 +113,11 @@ module MB::Sound
     master_gain(-3.db)
     master { |mix| mix.softclip(0.7, 0.98) }
 
-    bg :cowbells, play_rows.([:kick, :snare])
-    at_bar(3) { swap_in(:cowbells, play_rows.([:kick, :snare, :cowbell])) }
-    at_bar(5) { swap_in(:cowbells, play_rows.([:kick, :snare, :cowbell, :fm_bell])) }
-    at_bar(7) { swap_in(:cowbells, play_rows.([:kick, :snare, :cowbell, :fm_bell, :sampled])) }
+    beat = [:kick, :snare, :hat, :oh]
+    bg :cowbells, play_rows.(beat)
+    at_bar(3) { swap_in(:cowbells, play_rows.(beat + [:cowbell])) }
+    at_bar(5) { swap_in(:cowbells, play_rows.(beat + [:cowbell, :fm_bell])) }
+    at_bar(7) { swap_in(:cowbells, play_rows.(beat + [:cowbell, :fm_bell, :sampled])) }
     at_bar(9) { swap_in(:cowbells, play_rows.(rows.keys)) }
     at_bar(11) { outro fade: 2 }
   end

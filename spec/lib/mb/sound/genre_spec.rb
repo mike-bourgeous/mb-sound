@@ -198,7 +198,8 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
     it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked under the pulse kick' do
       t = genre[:techno]
       expect(t.roles[:bass].patch).to eq(:roller)
-      expect(t.roles[:bass].duck).to eq(-9.db)
+      expect(t.roles[:bass].duck).to eq(-4.db)
+      expect(t.roles[:bass].level).to eq(2.db)
       expect(t.pulse).to eq(:peak)
       MB::Sound.knob(:cut, 400, range: 150..6000, curve: :exp)
 
@@ -227,6 +228,25 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
         (0...4).sum { |b| (seconds(x, b * beat + beat / 4, b * beat + beat / 2)**2).sum }
       }
       expect(10 * Math.log10(level.(t) / level.(plain))).to be < -3
+    end
+
+    it 'tames the techno stab, with the heavy drive as an option, and masters techno with a limiter only' do
+      t = genre[:techno]
+      expect(t.roles[:stab].patch).to eq(:stab)
+      expect(t.mix.master.map(&:first)).to eq([:compress, :at, :limit])
+
+      clip = MB::Sound.seq(MB::Sound::F3).n2
+      # Clipping a stab lowpassed at 300 Hz makes harmonics above 1 kHz:
+      # the heavy drive (the Reese's) has 8 dB more there than the default
+      high_share = ->(drive) {
+        MB::Sound.seed(5)
+        node = MB::Sound::Genre::Patches.stab(clip, cutoff: 300, drive: drive)
+        x = Numo::DFloat.cast(Numo::SFloat.hstack(Array.new(24) { node.outputs.map { |o| o.sample(800).dup }[0] })[4800..])
+        f = Numo::Pocketfft.rfft(x).abs**2
+        10 * Math.log10(f[(1000 * x.length / 48000.0).round..].sum / f.sum)
+      }
+      expect(high_share.(1.0) - high_share.(0.1)).to be > 6
+      expect { MB::Sound::Genre::Patches.stab(clip) }.not_to raise_error
     end
   end
 end

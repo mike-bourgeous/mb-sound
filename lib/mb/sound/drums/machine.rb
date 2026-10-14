@@ -199,7 +199,11 @@ module MB
           }
 
           source = Machine.shuffled(source, shuffle) if shuffle
-          sources = voice_sources(source, only: only, map: map)
+          # A clip's voices share one stream: its flams play early (see
+          # Drums.hits) when every voice uses the same spacing
+          spacings = settings.each_value.map { |k| k.fetch(:flam, flam) }
+          early = Drums.flams?(source) && spacings.all? { |f| f == flam } ? flam : nil
+          sources = voice_sources(source, only: only, map: map, early_flam: early)
           if sources.empty?
             raise ArgumentError, "Nothing in #{source} plays a #{@name} voice (voices: #{names.join(', ')})"
           end
@@ -246,7 +250,7 @@ module MB
             (src.is_a?(Array) ? src : [src]).map { |s|
               n = Drums.notes_for(s)
               notes << n if n
-              n ? Drums.hits(n, with_flams ? flam : nil) : s
+              n ? Drums.hits(n, with_flams ? flam : nil, early: s.is_a?(Sequence::Clip)) : s
             }
           }
 
@@ -290,7 +294,10 @@ module MB
         end
 
         # Sources by voice name for #kit (see there).
-        def voice_sources(source, only:, map:)
+        # +early_flam+ (seconds) makes a Clip's flam-marked notes play early
+        # by that spacing (MIDI::ClipSource#play_flams_early; grid rows get
+        # theirs from Drums.hits).
+        def voice_sources(source, only:, map:, early_flam: nil)
           only = only && Array(only).map { |v| key!(v) }
 
           if source.is_a?(Sequence::Kit)
@@ -312,6 +319,7 @@ module MB
             voices = voices.select { |v| gm.fetch(v).any? { |n| values.include?(n) } }
           end
           stream = MB::Sound::MIDI::Stream.for(source)
+          stream.source.play_flams_early(early_flam) if early_flam && source.is_a?(Sequence::Clip) && stream.source.is_a?(MIDI::ClipSource)
           voices.to_h { |v| [v, MB::Sound::Notes.new(stream.keys(*gm.fetch(v)), sustain: false)] }
         end
 
