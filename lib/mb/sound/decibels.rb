@@ -10,7 +10,8 @@ module MB
     # What the tag adds: methods that take levels in dB (dynamics thresholds,
     # ceilings, makeup, compander points) read a Decibels value as its exact
     # dB number, so `compress(threshold: -20.db)` and `makeup: 6.db` are
-    # unambiguous, and graph export prints it back as `-20.db`.
+    # unambiguous (bare numbers there are linear gains, like gains
+    # everywhere else), and graph export prints it back as `-20.db`.
     #
     #     g = -6.db        # => -6.db
     #     g.to_f           # => 0.5011872336272722

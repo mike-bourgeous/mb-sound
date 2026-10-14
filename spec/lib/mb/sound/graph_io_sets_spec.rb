@@ -90,7 +90,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     within(s) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
     text = io.dump(s.arrangement, name: 'demo')
     expect(text).to start_with('# mb-sound set document')
-    expect(text).to include('graph 2, name: "demo", kind: :set')
+    expect(text).to include('graph 3, name: "demo", kind: :set')
     expect(text).to include(<<~RUBY)
       knob :cut, 900.0, range: 100.0..8000.0, curve: :exp, unit: "Hz"
 

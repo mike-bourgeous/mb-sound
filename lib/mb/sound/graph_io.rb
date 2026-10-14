@@ -37,8 +37,13 @@ module MB
       # when the graph was built as `seed: drawn_seed(N)`; seeds: :fresh
       # redraws only those, keeping seeds the code gave (in format 1
       # documents, and in text without a header, every seed counts as
-      # drawn).
-      FORMAT = 2
+      # drawn).  Format 3 (2026-10-14) reads bare numbers given to
+      # dynamics levels, gains, and compander points as linear gains, like
+      # gains everywhere else (dB is written -12.db); older documents load
+      # with their old meaning (bare levels at 0 and below and every bare
+      # gain or point in dB, warning once; see
+      # GraphNode::DynamicsMethods.from_old_document).
+      FORMAT = 3
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

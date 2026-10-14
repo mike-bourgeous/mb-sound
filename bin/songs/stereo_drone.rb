@@ -49,7 +49,7 @@ module MB::Sound
       .softclip(0.6)
       .oversample(2)
       .delay(
-        seconds: stereo(0.4.hz.lfo.at(0..0.013), 0.3.hz.lfo.at(0..0.02)),
+        stereo(0.4.hz.lfo.at(0..0.013), 0.3.hz.lfo.at(0..0.02)),
         feedback: -0.5, dry: 1, smoothing: false
       )
       .softclip(0.8)

@@ -132,6 +132,10 @@ module MB
           # Whether the document marks drawn seeds (format 2 and later; see
           # GraphIO::FORMAT); otherwise :fresh counts every seed as drawn
           @seed_marks = false
+          # Whether bare dynamics levels and gains keep their dB meaning
+          # (documents before format 3; see GraphIO::FORMAT)
+          @old_db = false
+          @old_db_warned = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -341,6 +345,7 @@ module MB
               end
               @document.format = version
               @seed_marks = version >= 2
+              @old_db = version < 3
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
@@ -844,10 +849,12 @@ module MB
             kwargs[:seed] = drawn.seed
           end
 
+          args, kwargs = old_db_arguments(name, args, kwargs) if @old_db && receiver.is_a?(GraphNode::DynamicsMethods)
+
           begin
-            # Documents keep their own meaning for bare dynamics levels (dB
-            # at 0 and below) and keep delay(seconds:) loading, so loading
-            # them doesn't warn
+            # Documents load without the dynamics "above full scale"
+            # warnings, and keep delay(seconds:) loading, so loading them
+            # doesn't warn
             result = GraphNode::DynamicsMethods.quiet_levels do
               GraphNode::DelayMethods.quiet_seconds do
                 if drawn
@@ -867,6 +874,20 @@ module MB
           end
           check_result(node, result) if receiver.is_a?(Numeric) || result.is_a?(Integer)
           result
+        end
+
+        # Arguments for dynamics method +name+ in a document older than
+        # format 3, whose bare dB levels and gains become the Decibels they
+        # meant (GraphNode::DynamicsMethods.from_old_document), with one
+        # warning per document.
+        def old_db_arguments(name, args, kwargs)
+          args, kwargs, changed = GraphNode::DynamicsMethods.from_old_document(name, args, kwargs)
+          if changed && !@old_db_warned
+            @old_db_warned = true
+            warn "#{@label}: warning: format #{@document.format} document: bare dynamics levels and gains (like makeup: 9) are read as dB, as when it was saved; " \
+              "save it again to write them as 9.db (bare numbers are linear gains since format #{GraphIO::FORMAT})"
+          end
+          [args, kwargs]
         end
 
         def call_args(node, scope)

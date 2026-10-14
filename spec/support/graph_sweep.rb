@@ -245,9 +245,9 @@ module GraphSweep
                               upward_threshold: -40.db, attack: c.mod(0.001, 0.01), release: 1.n16, makeup: :auto)
       }],
       ['compand cubic, expand, noise_gate, duck', ->(c) {
-        c.sig.compand({ -60 => -70, -20 => -20, 0 => -10 }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
+        c.sig.compand({ -60.db => -70.db, -20.db => -20.db, 0.db => -10.db }, interpolation: :cubic).expand(threshold: -30.db).noise_gate(threshold: -60.db).duck(c.trigger, amount: -6.db)
       }],
-      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60, -70, :smooth], [-20, -20], [0, -8]], link: false) }],
+      ['compand unlinked with shaped segments', ->(c) { c.stereo_sig.compand([[-60.db, -70.db, :smooth], [-20.db, -20.db], [0.db, -8.db]], link: false) }],
       ['limit (true peak, unlinked) after squeeze', ->(c) { c.stereo_sig.squeeze(:eleven, depth: 0.5).limit(ceiling: -3.db, link: false) }],
       ['squeeze default, mono', ->(c) { c.sig.squeeze(time: 0.5) }],
       ['bands LR2 inside LR8', ->(c) { c.sig.bands(300, order: 2) { |lo, hi| [lo, hi.bands(3000, order: 8) { |a, b| [a, b * 0.5] }] } }],
