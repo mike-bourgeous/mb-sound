@@ -55,8 +55,9 @@ module MB::Sound
     funk_clav: ['bin/synths/funk.rb', :clav],
     funk_talkbox: ['bin/synths/funk.rb', :talkbox],
     funk_choir: ['bin/synths/funk.rb', :choir],
-    # (--pickup given, so it saves as a param: the script's default is each patch's own, nil)
-    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5'],
+    # (--pickup and --amp given, so they save as params: the script's defaults are each patch's own, nil)
+    tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1'],
+    tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4'],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
   }.freeze
 
@@ -67,8 +68,11 @@ module MB::Sound
                  ->(input, p) { ambient_tape(input, wear: p[:wear]) }],
     ambient_room: ['bin/synths/ambient.rb', { space: { value: 0.5, range: 0.0..1.0, description: 'Room level 0..1' } },
                  ->(input, p) { ambient_room(input, space: p[:space]) }],
-    dnb_master: ['bin/synths/dnb.rb', { air: { value: 20.0, range: 20.0..400.0, description: 'Highpass in Hz' } },
-                 ->(input, p) { dnb_master(input, air: p[:air]) }],
+    dnb_master: ['bin/synths/dnb.rb', {
+                   air: { value: 20.0, range: 20.0..400.0, description: 'Highpass in Hz' },
+                   drive: { value: 11.0, range: 0.0..24.0, description: 'Gain in dB into the clipper and limiter' },
+                 },
+                 ->(input, p) { dnb_master(input, air: p[:air], drive: p[:drive]) }],
     funk_dub_loop: ['bin/synths/funk.rb', {
                       dub: { value: 1.0, range: 0.0..1.0, description: 'Footswitch: 1 records into the 4-bar loop' },
                       keep: { value: 0.82, range: 0.0..0.99, description: 'Loop feedback per pass' },

@@ -50,6 +50,12 @@ RSpec.describe('bin/synths/ambient.rb') do
     side = ->((l, r)) { rms_db(seconds(l - r, 2.5, 3.5)) - rms_db(seconds(l + r, 2.5, 3.5)) }
     expect(side.(wide)).to be > side.(mono) + 6
     expect(rms_db(seconds(wide[0], 2.5, 3.5))).to be_within(2).of(rms_db(seconds(mono[0], 2.5, 3.5)))
+    # (a node, e.g. a knob: the same mix; patches-5)
+    seeded = ->(spread) { render_patch(MB::Sound.with_seed(5) { MB::Sound.ambient_gong_voice(patch_notes([MB::Sound::D2.number, 0, 4, 1.0]), space: 0, ring: 1, spread: spread) }, 4) }
+    plain = seeded.(MB::Sound::AMBIENT_GONG_SPREAD)
+    knobbed = seeded.(MB::Sound::AMBIENT_GONG_SPREAD.constant)
+    expect((knobbed[0] - plain[0]).abs.max).to be < 1e-4
+    expect((knobbed[1] - plain[1]).abs.max).to be < 1e-4
     low, high = MB::Sound.ambient_gong_shimmer(16).map(&:first).minmax
     expect(low).to be_within(2).of(30)
     expect(high).to be_within(4).of(125)
@@ -63,10 +69,11 @@ RSpec.describe('bin/synths/ambient.rb') do
       s = s[800..]
       (s * (Numo::DFloat.new(s.length).seq + 800)).sum / s.sum
     }
-    base = gong.()
+    base = gong.(tune: 0)
     low = gong.(tune: -12)
     high = gong.(tune: 5)
-    expect(gong.(tune: 0)).to eq(base)
+    expect(MB::Sound::AMBIENT_GONG_TUNE).to eq(-7) # (patches-5; 0 before)
+    expect(gong.()).to eq(gong.(tune: -7))
     expect(centroid.(low)).to be < centroid.(base) * 0.75
     expect(centroid.(high)).to be > centroid.(base) * 1.15
     expect(peak_hz(seconds(low, 3, 4), 40, 70)).to be_within(1.5).of(55)

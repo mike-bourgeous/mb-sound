@@ -61,6 +61,24 @@ RSpec.describe(MB::Sound::Arrangement) do
     expect(set.current_scene).to eq(:two)
   end
 
+  it 'silences kit rows the next scene\'s kit leaves out, swapping the rest' do
+    full = MB::Sound.grid(4, kick: 'X...', hat: '..x.').loop
+    hats = MB::Sound.grid(4, hat: '..x.').loop
+    set.track(:k) { |kit| MB::Sound.tr808(kit, kick: { decay: 0.1 }) }
+    set.scene(:full, k: full, others: :keep)
+    set.scene(:hats, k: hats, others: :keep)
+    within { set.go(:full, at: :now) }
+    bar1 = run(96000)
+    graph = player(:k).input
+    within { set.go(:hats) }
+    bar2 = run(96000)
+    expect(player(:k).input).to equal(graph) # swapped, not rebuilt
+    # (before patches-5 the kick row, missing from the new kit, played on)
+    expect(bar1[0...12000].abs.max).to be > 0.3
+    expect(bar2[1600...12000].abs.max).to be < 0.01
+    expect(bar2[48000...60000].abs.max).to be > 0.01 # the hat
+  end
+
   it 'stops tracks the scene leaves out, with a declick for others: :cut, unless others: :keep' do
     set.scene(:keep_a, b: b1, others: :keep)
     set.scene(:one_cut, a: a1, others: :cut)

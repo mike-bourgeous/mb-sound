@@ -3,8 +3,8 @@
 graph 2,
   name: "jungle_keys",
   kind: :synth,
-  saved: "2026-10-13T18:58:01Z",
-  mb_sound: "0.12.0.usegit (01f36fe8)",
+  saved: "2026-10-13T22:44:47Z",
+  mb_sound: "0.12.0.usegit (af720dbd)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :keys from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :keys, cutoff: 16000.0, echo: 0.3 }
@@ -20,4 +20,4 @@ inputs :midi
   bar = f.transpose(12).sine.free(true) * v.env(0.001, 1.4, 0, 0.3, gm: false).no_velocity * 0.12
   x = (body + bell * 0.3 + bar) * v.amp_env(0.001, 4.5, 0, 0.35, curve: [12, 40, 40])
   x * (x * (sig * 0.5 * 0.5) + 1)
-}.filter(:highpass, cutoff: 30, quality: 0.7) * 0.18).softclip(0.8, 0.95) * 1.8).pan(4.6.hz.lfo.at(0.22)).reverb(:hall, mix: 0.22) * 0.48
+}.filter(:highpass, cutoff: 30, quality: 0.7) * 0.18).softclip(0.8, 0.95) * 1.8).pan(4.6.hz.lfo.at(0.22)).reverb(:hall, mix: 0.22) * 0.853574116818683

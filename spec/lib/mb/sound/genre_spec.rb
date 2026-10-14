@@ -133,10 +133,11 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
   describe 'mix targets' do
     it 'reports loudness and true peak against the targets' do
       mix = genre[:dnb].mix
-      result = Struct.new(:integrated, :true_peak).new(-7.2, -0.3)
-      expect(mix.report(result)).to eq(['loudness -7.2 LUFS (target -8..-6: on target)', 'true peak -0.30 dBTP (ceiling -0.5: over)'])
-      expect(mix.report(result.class.new(-10.0, -1.0)).first).to include('quiet')
-      expect(mix.summary).to include('-8..-6 LUFS', 'mono below 120 Hz', 'master dnb_master')
+      result = Struct.new(:integrated, :true_peak).new(-9.2, -0.3)
+      expect(mix.report(result)).to eq(['loudness -9.2 LUFS (target -10..-8: on target)', 'true peak -0.30 dBTP (ceiling -0.5: over)'])
+      expect(mix.report(result.class.new(-12.0, -1.0)).first).to include('quiet')
+      expect(mix.report(result.class.new(-7.0, -1.0)).first).to include('loud')
+      expect(mix.summary).to include('-10..-8 LUFS', 'mono below 120 Hz', 'master dnb_master')
     end
 
     it 'reports the side below 120 Hz (or mono_below) against the mid' do

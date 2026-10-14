@@ -3,15 +3,15 @@
 graph 2,
   name: "tine_piano",
   kind: :synth,
-  saved: "2026-10-13T18:59:23Z",
-  mb_sound: "0.12.0.usegit (01f36fe8)",
+  saved: "2026-10-13T22:46:16Z",
+  mb_sound: "0.12.0.usegit (af720dbd)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :tine, tremolo: 0.3 }
 inputs :midi
 param :bark, 1.0, range: 0.0..2.0, description: "Velocity-driven bark (FM index and pickup growl) scale"
 param :pickup, 0.5, range: 0.0..3.0, description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
-param :amp, 1.0, range: 0.25..8.0, description: "Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level)"
+param :amp, 1.0, range: 0.25..8.0, description: "Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level; default tine 1, crunch 4)"
 
 ((synth(midi, voices: 8, retrigger: :string) { |v|
   f = v.hz

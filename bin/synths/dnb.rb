@@ -223,18 +223,29 @@ module MB::Sound
   # addon too").  Both default off.
   #
   # The room's gate opens while the sent drums are above +room_threshold+
-  # and closes +room_gate+ seconds after they fall below it, in a room
-  # decaying over +room_decay+ seconds (RT60), so only the loud backbeat
-  # hits splash (ghost snares stay dry) and each splash is gone in about
-  # an eighth note at 174 BPM (220 ms after the hit to -40 dB).
-  # patches-4 (2026-10-13; maintainer: "Tail is way too long on snare
-  # room"): patches-3's room (`room_gate: 0.18, room_threshold: -30.db,
-  # room_decay: 2.5`) stayed open about 420 ms, as long as the snare's
-  # own tail stayed above -30 dBFS plus the gate.
+  # and closes +room_gate+ seconds after they fall below it, in a room of
+  # +room_size+ (0..1, Reverb's room-size layout: it scales the diffusion
+  # and loop delays) decaying over +room_decay+ seconds (RT60), so only
+  # the loud backbeat hits splash (ghost snares stay dry) and each splash
+  # is gone in less than an eighth note at 174 BPM (about 200 ms after
+  # the hit to -60 dB).  patches-4 (2026-10-13; maintainer: "Tail is way
+  # too long on snare room"): patches-3's room (`room_gate: 0.18,
+  # room_threshold: -30.db, room_decay: 2.5`) stayed open about 420 ms,
+  # as long as the snare's own tail stayed above -30 dBFS plus the gate.
+  # patches-5 (2026-10-13; maintainer on patches-4's tighter variant:
+  # "Little shorter decay time, shorter diffusion time, so there is some
+  # audible decay within the gate open region"): a smaller, faster room
+  # (`room_size: 0.3, room_decay: 0.35, room_gate: 0.08`; patches-4 was
+  # `room_size: 0.7, room_decay: 1.0, room_gate: 0.08`, the :gated
+  # preset's size, and its tighter variant `room_decay: 0.8, room_gate:
+  # 0.05`): on a lone hard snare the splash peaks 40-50 ms after the hit
+  # and falls about 14 dB while the gate is open, to 150 ms (patches-4's
+  # held within 5 dB of its peak until the gate cut it), then the gate
+  # takes it to -60 dB by about 200 ms.
   def self.dnb_drums(
     source, kick: dnb_kick_settings, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 },
     hat_decay: 0.035, accent: 6, parallel: 0.35, tight: false, room: false, room_gate: 0.08, glue: false,
-    room_threshold: -12.db, room_decay: 1.0
+    room_threshold: -12.db, room_decay: 0.35, room_size: DNB_DRUMS_ROOM_SIZE
   )
     settings = {
       kick: kick, snare: snare,
@@ -257,7 +268,7 @@ module MB::Sound
                sent = outs.names.select { |name| DNB_DRUMS_ROOM_SENDS.include?(name) }.map { |name| outs[name] }
                wet = room == true ? DNB_DRUMS_ROOM : room
                splash = GraphNode::Mixer.new(sent, stop_early: false)
-                 .reverb(:gated, gate: room_gate, threshold: room_threshold, decay: room_decay, dry: 0, wet: 1, output_channels: 2)
+                 .reverb(:gated, room_size: room_size, gate: room_gate, threshold: room_threshold, decay: room_decay, dry: 0, wet: 1, output_channels: 2)
                  .filter(:highpass, cutoff: 250, quality: 0.7)
                # (a sum ends when any of its inputs ends: each waits for the other, as when a MIDI file ends)
                mixed.and_then(silence(2)) + (splash * wet).and_then(silence(2))
@@ -274,6 +285,10 @@ module MB::Sound
   # The gated room's wet level for dnb_drums(room: true).
   DNB_DRUMS_ROOM = 0.3
 
+  # The gated room's size for dnb_drums(room: true) (patches-5; the :gated
+  # preset's 0.7 before).
+  DNB_DRUMS_ROOM_SIZE = 0.3
+
   # The kit voices dnb_drums(room:) sends into its gated room.
   DNB_DRUMS_ROOM_SENDS = [:snare, :clap, :rimshot, :low_tom, :mid_tom, :high_tom].freeze
 
@@ -288,12 +303,13 @@ module MB::Sound
 
   # The club master for a mix (a node or bundle): a highpass at +air+
   # (Hz; a number or a node), glue compression, +drive+ dB into a
-  # softclipper, and a true-peak limiter at +ceiling+ dBTP (clip, then
-  # limit).
+  # softclipper (a number or a node, such as a preset param), and a
+  # true-peak limiter at +ceiling+ dBTP (clip, then limit).
   def self.dnb_master(mix, drive: 11.0, ceiling: -0.5, air: 20)
     glued = mix.filter(:highpass, cutoff: air, quality: 0.7)
       .compress(threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12)
-    (glued * drive.db).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
+    gain = drive.is_a?(Numeric) ? drive.db : 10 ** (drive / 20)
+    (glued * gain).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
   end
 
   # The script's patches by name (see the header), with the script's

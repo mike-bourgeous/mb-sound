@@ -64,17 +64,23 @@ RSpec.describe('bin/synths/funk.rb') do
     expect(spread.(moving)).to be > spread.(still) + 2
   end
 
-  it 'drifts the talkbox\'s vowels over two bars with vowel_rate:, the eighth-note mouth staying' do
+  it 'drifts the talkbox\'s vowels over four bars (by default) with vowel_rate:, the eighth-note mouth staying' do
     held = -> { MB::Sound.seq(MB::Sound::A4.n1).loop }
     bar = 60.0 / 96 * 4
-    # Each bar's note says different vowels as the 2-bar drift moves (lowest at bar 1, highest at bar 2);
+    # Each bar's note says different vowels as a 2-bar drift moves (lowest at bar 1, highest at bar 2);
     # without it every bar is the same
     # (third-octave band levels from 250 Hz to 4 kHz, phase-insensitive: the buzz runs free across notes)
     bands = ->(x) { (0...12).map { |k| lo = 250 * 2**(k / 3.0); 10 * Math.log10(band_share(x.dup, lo, lo * 2**(1 / 3.0))) } }
     change = ->(x) { bands.(seconds(x, 0, bar / 2)).zip(bands.(seconds(x, bar, bar * 1.5))).map { |p, q| (p - q).abs }.max }
-    slow = change.(render_bars(2) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) })
+    slow = change.(render_bars(2) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, vowel_rate: 2.bars) })
     still = change.(render_bars(2) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, vowel_rate: nil) })
     expect(slow).to be > still + 3
+    # The default drifts over 4 bars (patches-5; 2 before): its first bar moves less than the 2-bar drift's
+    expect(MB::Sound::FUNK_TALKBOX_VOWEL_RATE).to eq(4.bars)
+    two = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, vowel_rate: 2.bars) }
+    four = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0, vowel_rate: 4.bars) }
+    expect(render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) }).to eq(four)
+    expect((two - four).abs.max).to be > 0.01
     # ... and the mouth still opens and closes on the eighths
     x = render_bars(1) { MB::Sound.funk_talkbox_voice(held.(), echo: 0) }
     steps = band_steps(seconds(x, bar / 2, bar), bar / 8, 900, 2500).map { 10 * Math.log10(_1) }
@@ -89,14 +95,28 @@ RSpec.describe('bin/synths/funk.rb') do
     expect(rms_db(seconds(x, 0.5, 2) - seconds(e, 0.5, 2))).to be > rms_db(seconds(e, 0.5, 2)) - 10
   end
 
-  it 'opens the beatbox snare\'s formant (less resonance) with snare_width:' do
+  it 'opens the beatbox snare\'s formants with snare_width:, and its upper (whistling) formants more with snare_top:' do
     kit = -> { MB::Sound.grid(16, snare: '....X.......X...').loop }
-    narrow = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, snare_width: 0.4) }
-    default = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true) }
-    wide = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, snare_width: MB::Sound::FUNK_BEATBOX_SNARE_WIDTH) }
-    expect(default).to eq(wide)
-    expect(MB::Sound::FUNK_BEATBOX_SNARE_WIDTH).to be > 0.4
-    expect((default - narrow).abs.max).to be > 0.01
+    expect(MB::Sound::FUNK_BEATBOX_SNARE_WIDTH).to eq(0.4)
+    default = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0) }
+    explicit = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_width: 0.4, snare_top: MB::Sound::FUNK_BEATBOX_SNARE_TOP) }
+    expect(default).to eq(explicit)
+    wide = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_width: 0.7) }
+    expect((default - wide).abs.max).to be > 0.01
+
+    # The whistle: the second formant's spectrum peak (about 1.36 kHz) over the spectrum around it (+/-300 Hz)
+    whistle = ->(x) {
+      mag = Numo::Pocketfft.rfft(x.dup).abs
+      hz = 48000.0 / x.length
+      i = (1100 / hz).round + mag[(1100 / hz).round..(1650 / hz).round].max_index
+      near = mag[(i - 300 / hz).round..(i + 300 / hz).round].to_a.sort
+      20 * Math.log10(mag[i] / near[near.length / 2])
+    }
+    plain = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_top: 1) }
+    expect(whistle.(plain)).to be > 22 # (patches-4 at width 0.4: about 26 dB)
+    expect(whistle.(default)).to be < whistle.(plain) - 6
+    # (the upper formants keep their power: their peaks are lower and broader)
+    expect(10 * Math.log10(band_share(default, 1200, 4000))).to be_within(1).of(10 * Math.log10(band_share(plain, 1200, 4000)))
   end
 
   it 'plays the bass louder and a little brighter with velocity' do

@@ -24,7 +24,7 @@
 #   talkbox   the lead: a bright buzz an octave below the note through
 #             narrow formants opening "u -> o -> a -> e" on every note and
 #             moving with the groove (groove:, a mouth opening every
-#             eighth, the vowels drifting over 2 bars: vowel_rate:),
+#             eighth, the vowels drifting over 4 bars: vowel_rate:),
 #             delayed vibrato, a dotted-eighth echo
 #   choir     a soft "ooh" choir (two saws through an alto formant), with
 #             the audio looper behind it: --dub (the footswitch) sends the
@@ -80,8 +80,12 @@ module MB::Sound
   # it's golden"); before, the vowels held still (wobble: 0).
   #
   # +snare_width+ is the beatbox snare's formant width (wider is less
-  # resonant): FUNK_BEATBOX_SNARE_WIDTH by default.
-  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar, snare_width: FUNK_BEATBOX_SNARE_WIDTH)
+  # resonant): FUNK_BEATBOX_SNARE_WIDTH by default.  +snare_top+ widens
+  # its upper formants (2-5, from about 1.1 kHz up) by that much more
+  # (FUNK_BEATBOX_SNARE_TOP by default; 1 for the tenor's own vowels):
+  # the snare's noise rang them as whistles, while the first formant
+  # carries the "ka".
+  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar, snare_width: FUNK_BEATBOX_SNARE_WIDTH, snare_top: FUNK_BEATBOX_SNARE_TOP)
     voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
@@ -105,7 +109,7 @@ module MB::Sound
     outs = tr808(source, only: voices.keys, velocity_curve: :midi, outputs: :separate, **voices)
     say = {
       kick: [[:u, :o], :bass, 0.35, 6],
-      snare: [[:a, :e], :tenor, snare_width, 3],
+      snare: [funk_snare_vowels(snare_top), :tenor, snare_width, 3],
       closed_hat: [[:i], :soprano, 0.5, 2],
       open_hat: [[:i, :e], :soprano, 0.5, 2],
     }
@@ -126,8 +130,34 @@ module MB::Sound
 
   # The beatbox snare's formant width in .funk_beat: patches-4
   # (2026-10-13; maintainer on the wobbling beatbox: "With the lfo a little
-  # less resonance is acceptable on the snare") widened it from 0.4.
-  FUNK_BEATBOX_SNARE_WIDTH = 0.55
+  # less resonance is acceptable on the snare") widened it from 0.4;
+  # patches-5 (2026-10-13; maintainer, preferring 0.4: "I think it's all
+  # the formant filter that sounds like a whistle on the snare -- maybe
+  # that needs to be wider") went back to 0.4 and widened only the upper
+  # formants (FUNK_BEATBOX_SNARE_TOP).
+  FUNK_BEATBOX_SNARE_WIDTH = 0.4
+
+  # How much wider than +snare_width+ the beatbox snare's upper formants
+  # are (see .funk_beat): patches-5.  At 1 (before), the snare said "ka"
+  # through formants 32-52 Hz wide at 1.36, 2.6, and 3.1 kHz, spectrum
+  # peaks 19-26 dB over the spectrum around them (whistles); at 4 they
+  # stand 13-16 dB out, with the same power per band (within 1 dB below 4
+  # kHz).  See .funk_snare_vowels.
+  FUNK_BEATBOX_SNARE_TOP = 4.0
+
+  # The beatbox snare's vowels ("a" to "e", the tenor's) with formants 2-5
+  # +top+ times as wide and 10 log10(+top+) dB lower, so each passes the
+  # same power with a lower, broader peak (the first formant unchanged),
+  # as custom vowels (five [Hz, dB, bandwidth Hz] triples each); the plain
+  # Symbols at 1.
+  def self.funk_snare_vowels(top)
+    return [:a, :e] if top == 1
+    [:a, :e].map { |v|
+      GraphNode::Formant::VOICES[:tenor][v].map.with_index { |(hz, db, bw), i|
+        i == 0 ? [hz, db, bw] : [hz, db - 10 * Math.log10(top), bw * top]
+      }
+    }
+  end
 
   # .funk_beat's vowel LFO depth with +beatbox+ (the plain kit's is 0).
   FUNK_BEAT_WOBBLE = 0.8
@@ -206,7 +236,7 @@ module MB::Sound
   # groove"); before, only the note's envelope moved the vowels (groove:
   # 0).
   #
-  # +vowel_rate+ (a Duration; 2 bars by default; nil for none) is a
+  # +vowel_rate+ (a Duration; 4 bars by default; nil for none) is a
   # slower triangle that carries most of the groove's vowel change (three
   # quarters of it), so the vowels drift across a phrase while the
   # +groove_rate+ eighths keep the mouth opening and closing: on each
@@ -217,8 +247,10 @@ module MB::Sound
   # multiplier from 1 up to 4), which held the vowel morph (0..1 across
   # +vowels+) at its last vowel, so from patches-2 to patches-3 every note
   # said "e" and only the formant shift moved (a one-bar sine of +groove+
-  # semitones); `vowels: [:e]` is close to that sound.
-  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e], groove: 0.6, groove_rate: 1.n8, vowel_rate: 2.bars)
+  # semitones); `vowels: [:e]` is close to that sound.  patches-5
+  # (2026-10-13; maintainer on vowel_rate 2 bars: "Try even slower"):
+  # 4 bars by default (FUNK_TALKBOX_VOWEL_RATE; 2 bars before).
+  def self.funk_talkbox_voice(midi, level: 1, echo: 0.22, glide: 0.045, octave: -1, air: 0.7, width: 0.45, vowels: [:u, :o, :a, :e], groove: 0.6, groove_rate: 1.n8, vowel_rate: FUNK_TALKBOX_VOWEL_RATE)
     synth(midi, voices: 1) { |v|
       f = v.hz.glide(glide).vibrato(5.2, depth: 0.25, delay: 0.25)
       buzz = f.transpose(12 * octave)
@@ -244,6 +276,9 @@ module MB::Sound
       (mouth * 2).softclip(0.6, 0.95) * v.amp_env(0.01, 0.4, 0.75, 0.12) * 1.05
     }.delay(1.n8.dotted, feedback: 0.25, wet: echo, dry: 1) * (0.75 * level)
   end
+
+  # funk_talkbox_voice's vowel drift period (patches-5: 4 bars, was 2).
+  FUNK_TALKBOX_VOWEL_RATE = 4.bars
 
   # A soft "ooh" choir: two saws a little apart per note through an alto
   # "u -> o" formant, slow attack, highpassed at 220 Hz.
