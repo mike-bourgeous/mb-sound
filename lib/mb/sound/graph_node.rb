@@ -158,7 +158,106 @@ module MB
       end
 
       # Create a list of upstream nodes from the given graph node.  See #graph.
+      #
+      # The list starts with +node+, and every node comes after all the
+      # nodes in the graph that read it: nodes in order of their longest
+      # path from +node+, and nodes at the same distance in order of the
+      # last of those paths in a breadth-first walk (the order the original
+      # path walk, now .graph_by_paths, gave; a spec compares them).  Each
+      # node's #sources is read once, so this takes time linear in the
+      # graph's edges.  The path walk took one step per path, which grows
+      # exponentially with stacked diamonds (a node read by every lane of a
+      # Synth, through every unison copy...), and after a node had been
+      # reached more than 50 times plus the list's length it warned
+      # "Possible infinite loop" and stopped following that node, leaving
+      # it too early in the list (fixes-12, 2026-10-14: the jungle pad
+      # printed 994 such warnings for one #graph).  Graphs whose #sources
+      # form a loop (feedback goes through #feedback_sources instead) fall
+      # back to the path walk.
       def self.graph(node, include_tees: true)
+        root = graph_key(node, include_tees)
+
+        # Depth-first walk for the nodes, their sources, and a topological
+        # order (reverse post-order), finding loops
+        sources = { root => graph_source_list(root, include_tees) }
+        open = { root => true }
+        post = []
+        stack = [[root, 0]]
+        until stack.empty?
+          frame = stack.last
+          n = frame[0]
+          list = sources[n]
+          i = frame[1]
+          if i < list.length
+            frame[1] = i + 1
+            s = list[i]
+            if sources.include?(s)
+              return graph_by_paths(node, include_tees: include_tees) if open[s]
+            else
+              sources[s] = graph_source_list(s, include_tees)
+              open[s] = true
+              stack << [s, 0]
+            end
+          else
+            open.delete(n)
+            post << n
+            stack.pop
+          end
+        end
+
+        # Longest path from the root to each node
+        depth = { root => 0 }
+        post.reverse_each do |n|
+          d = depth[n] + 1
+          sources[n].each do |s|
+            depth[s] = d if (depth[s] || -1) < d
+          end
+        end
+
+        # Each level in order of the last edge into its nodes from the level
+        # before (insertion-ordered Hashes; delete and store moves a key to
+        # the end)
+        result = []
+        level = { root => true }
+        d = 0
+        until level.empty?
+          result.concat(level.keys)
+          d += 1
+          following = {}
+          level.each_key do |n|
+            sources[n].each do |s|
+              next unless depth[s] == d
+
+              following.delete(s)
+              following[s] = true
+            end
+          end
+          level = following
+        end
+
+        result
+      end
+
+      # The key .graph uses for +s+: whole Floats as Integers, and (without
+      # +include_tees+) the node a Tee branch or other NodeOutput reads.
+      def self.graph_key(s, include_tees)
+        s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
+        s = climb_tee_tree(s) unless include_tees
+        s
+      end
+
+      # The sources of +s+ as .graph keys, one per edge.
+      def self.graph_source_list(s, include_tees)
+        return [] unless s.respond_to?(:sources)
+
+        s.sources.values.map { |v| graph_key(v, include_tees) }
+      end
+
+      # The original #graph traversal, used now only for graphs whose
+      # #sources form a loop (see .graph): walks every path from +node+,
+      # moving a node seen again to the end of the list, until a node has
+      # been seen more often than the list is long.
+      def self.graph_by_paths(node, include_tees: true)
         # The list is an insertion-ordered Hash (keys only), so moving a
         # node seen again to the end is O(1) (an Array#delete scanned the
         # whole list each time: ~50 ms per traversal of a 1400-node scene
@@ -197,11 +296,7 @@ module MB
             # TODO: this would all be easier if source/dest links were bidirectional
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
-              # FIXME: node graph iteration is reporting possible infinite loops on code which shouldn't have any loops
-              # FIXME: only re-traverse a node if doing so would change its
-              # depth; I suspect we're doing an exponential traversal of all
-              # possible edge combinations in complex graphs.
-              warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
+              warn "Possible infinite loop on #{s} (started from #{node}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
 
