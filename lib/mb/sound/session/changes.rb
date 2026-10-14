@@ -29,9 +29,10 @@ module MB
         # the landing time to apply it.  +before+ and +after+ are snapshots
         # of the subject around the change, for undo.  +starts+ is the
         # timeline nodes of a graph the change starts (for swaps queued
-        # behind it).  +graph+ is the graph input a :bg change starts (kept
-        # in step with shared nodes while it waits; see
-        # Strip#catch_up_waiting).
+        # behind it).  +graph+ is the graph input a :bg change starts, or
+        # the Master::ChainGraph of a master chain a :master (or master
+        # :restore) change starts (kept in step with shared nodes while it
+        # waits; see Strip#catch_up_waiting).
         Change = Struct.new(
           :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph,
           keyword_init: true

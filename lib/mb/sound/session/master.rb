@@ -48,6 +48,28 @@ module MB
           def bypass?
             nodes.nil?
           end
+
+          # The chain's nodes as one graph (a ChainGraph, the same object
+          # for the chain's life), for the shared-node bookkeeping of
+          # Strip#span_graphs and Strip#catch_up_waiting.
+          def chain_graph
+            @chain_graph ||= ChainGraph.new(self)
+          end
+        end
+
+        # A master chain's nodes as one graph: #graph lists every node
+        # upstream of them (none for a bypass, or a chain bypassed after an
+        # error).  Running chains count as Session graphs for sleeping,
+        # kept, and waiting players' shared nodes, and a chain waiting to
+        # start keeps its branches of nodes it shares with them in step
+        # (see Strip#catch_up_waiting; fixes-12).
+        ChainGraph = Struct.new(:chain) do
+          def graph(include_tees: true)
+            nodes = chain.nodes
+            return [] if nodes.nil?
+
+            nodes.uniq(&:__id__).flat_map { |n| n.graph(include_tees: include_tees) }.uniq
+          end
         end
 
         # Sets the master effects chain, which starts at the same launch
@@ -81,7 +103,7 @@ module MB
           @master_block = block
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
-          change(:master, :master, time, data: { description: chain.description, fade: fade }) { |t|
+          change(:master, :master, time, data: { description: chain.description, fade: fade }, graph: chain.chain_graph) { |t|
             start_master(chain, t)
           }
 

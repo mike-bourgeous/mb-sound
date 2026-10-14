@@ -358,4 +358,126 @@ RSpec.describe(MB::Sound::Session::Master) do
       expect(data.to_a.values_at(0, 11999, 12000)).to eq([0, 0, 1])
     end
   end
+
+  # fixes-12: a master chain waiting to start (queued for a later launch
+  # point, or by an undo) wasn't read while it waited, so it played a node
+  # it shares with a playing graph late by its wait, and after more than a
+  # second its first read raised BranchBufferOverflow; a muted player
+  # sharing a node only with a master chain did the same on unmuting.
+  describe 'nodes shared with players' do
+    def mono_session
+      MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false),
+        transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+    end
+
+    # Renders +frames+ frames of session +s+ in buffers of +sizes+.
+    def run_in(s, frames, sizes)
+      out = []
+      sizes = sizes.cycle
+      while frames > 0
+        n = [sizes.next, frames].min
+        out << s.process_buffer(n)[0].dup
+        frames -= n
+      end
+      out.reduce(:concatenate)
+    end
+
+    # The LFO's first +frames+ samples.
+    def lfo_values(frames)
+      3.hz.lfo.sample(frames).dup
+    end
+
+    # Buffer sizes to render in (mixed, the usual, tiny)
+    def buffer_sizes
+      [[128, 801, 7], [800], [7]]
+    end
+
+    [[0.3, 25_933], [1.5, 800]].each do |wait, added|
+      it "starts a chain queued for #{wait} s in step with a node a player plays, at any buffer size" do
+        start = added + (wait * 48000).round # not on a buffer edge
+        buffer_sizes.each do |sizes|
+          lfo = 3.hz.lfo
+          s = mono_session
+          s.add(lfo * 0.5, name: :a)
+          data = run_in(s, added, sizes)
+          s.master(start_time: Rational(start, 96000)) { |mix| mix * (lfo * 0.5 + 1) }
+          expect(s.queued.map(&:kind)).to eq([:master])
+          data = data.concatenate(run_in(s, start + 24000 - added, sizes))
+
+          l = lfo_values(data.length)
+          expected = l * 0.5
+          expected[start..] = l[start..] * 0.5 * (l[start..] * 0.5 + 1)
+          expect(data.abs.max).to be > 0.7
+          expect((data - expected).abs.max).to be < 1e-6
+          expect(s.instance_variable_get(:@waiting_graphs)).to be_empty
+        ensure
+          s&.close
+        end
+      end
+    end
+
+    it 'starts a replacement chain in step with a node the spilling chain reads' do
+      buffer_sizes.each do |sizes|
+        lfo = 3.hz.lfo
+        s = mono_session
+        s.add(0.5.constant, name: :a)
+        s.master(on: :now) { |mix| mix * (lfo * 0.5 + 1) }
+        data = run_in(s, 800, sizes)
+        start = 800 + 72_001
+        s.master(start_time: Rational(start, 96000)) { |mix| mix * (lfo * 0.25 + 1) }
+        data = data.concatenate(run_in(s, start + 24000 - 800, sizes))
+
+        l = lfo_values(data.length)
+        expected = (l * 0.5 + 1) * 0.5
+        expected[start..] = (l[start..] * 0.25 + 1) * 0.5
+        expect((data - expected).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
+    it 'keeps a muted player in step with a node only a master chain also reads' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = mono_session
+        s.add(lfo * 0.5, name: :a)
+        s.add(0.5.constant, name: :b)
+        s.master(on: :now) { |mix| mix * (lfo * 0.5 + 1) }
+        data = run_in(s, 800, sizes)
+        s.mute(:a)
+        data = data.concatenate(run_in(s, 72_000, sizes))
+        s.unmute(:a)
+        data = data.concatenate(run_in(s, 24_000, sizes))
+
+        l = lfo_values(data.length)
+        expected = (l * 0.5 + 0.5) * (l * 0.5 + 1)
+        expect((data[-20_000..] - expected[-20_000..]).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+
+    it 'restores an undone chain in step with a node a player plays' do
+      [[128, 801, 7], [800]].each do |sizes|
+        lfo = 3.hz.lfo
+        s = mono_session
+        within = ->(&block) { MB::Sound::Session.with_context(session: s, &block) }
+        within.() { MB::Sound.bg(:a, lfo * 0.5) }
+        within.() { MB::Sound.master(at: :now) { |mix| mix * (lfo * 0.5 + 1) } }
+        data = run_in(s, 800, sizes)
+        within.() { MB::Sound.master(at: :now) { |mix| mix * 0.5 } }
+        data = data.concatenate(run_in(s, 800, sizes))
+        within.() { MB::Sound.undo } # lands on the next bar
+        expect(s.queued.map(&:kind)).to eq([:restore])
+        data = data.concatenate(run_in(s, 96_000 + 24_000 - 1600, sizes))
+
+        l = lfo_values(data.length)
+        expected = l * 0.5 * (l * 0.5 + 1)
+        expect((data[96_000..] - expected[96_000..]).abs.max).to be < 1e-6
+        expect((data[1600...96_000] - l[1600...96_000] * 0.25).abs.max).to be < 1e-6
+      ensure
+        s&.close
+      end
+    end
+  end
 end
