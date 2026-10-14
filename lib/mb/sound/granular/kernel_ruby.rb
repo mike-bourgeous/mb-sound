@@ -22,6 +22,7 @@ module MB
         MAX_SLOTS = 256
 
         MIN_Q = 1e-3
+        EPS = 1e-9
         SQRT2 = 1.4142135623730951
         QUARTER_PI = 0.78539816339744831
 
@@ -35,7 +36,7 @@ module MB
           fs, root_hz, choices, interp, _sinc, normalize, mw2, start, stop, reversed, rate, tune, level, max_len = config
           c = {
             specs: specs, nch: specs.length, mode: Integer(interp), fs: fs.to_f, root_hz: root_hz.to_f, choices: choices.map(&:to_f),
-            normalize: !!normalize, mw2: mw2.to_f, start: start.to_f, stop: stop.to_f, reversed: !!reversed, rate: rate.to_f,
+            normalize: Integer(normalize), mw2: mw2.to_f, start: start.to_f, stop: stop.to_f, reversed: !!reversed, rate: rate.to_f,
             tune: tune.to_f, level: level.to_f, max_len: Integer(max_len),
           }
           has_freq = !inputs[9].nil?
@@ -62,8 +63,9 @@ module MB
             end
 
             density = at.(1, i)
-            if phase >= 1
-              phase = phase - 1
+            if phase >= 1.0 - EPS
+              phase = phase - 1.0
+              phase = 0.0 if phase < 0
               phase = 0.0 if phase >= 1
               q = spawn(c, rows, seed, playhead, density, at.(2, i), at.(3, i), at.(4, i), at.(5, i), at.(6, i), at.(7, i), at.(8, i),
                         has_freq, at.(9, i), at.(11, i))
@@ -170,9 +172,9 @@ module MB
           gr = Math.sin(ang) * SQRT2
 
           g = c[:level]
-          if c[:normalize]
+          if c[:normalize] != 0
             o = density * (ls / c[:fs]) * c[:mw2]
-            g = g / Math.sqrt(o) if o > 1
+            g = c[:normalize] == 2 ? g / o : g / Math.sqrt(o) if o > 1
           end
 
           s[ACTIVE] = 1.0

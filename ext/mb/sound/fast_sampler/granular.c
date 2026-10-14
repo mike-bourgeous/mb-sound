@@ -23,8 +23,9 @@
  * nil means no key tracking.  A grain reads them at its onset sample.
  *
  * +config+ is [sample rate, root Hz, pitch choices (Array of semitones),
- * interpolation code, sinc kernel, normalize (true/false), mean window
- * square, region start, region stop, reversed, source rate / output rate,
+ * interpolation code, sinc kernel, normalization (0 none, 1 power: 1 /
+ * sqrt(overlap), 2 amplitude: 1 / overlap), the window's mean square (power)
+ * or mean (amplitude), region start, region stop, reversed, source rate / output rate,
  * tune semitones, level, longest grain (samples)].
  *
  * Every onset draws exactly six random numbers (position, pitch choice,
@@ -72,6 +73,7 @@ enum {
 #define GR_MAX_SLOTS 256
 #define GR_MAX_CHOICES 64
 #define GR_MIN_Q 1e-3
+#define GR_EPS 1e-9
 #define GR_SQRT2 1.4142135623730951
 #define GR_QUARTER_PI 0.78539816339744831
 
@@ -81,7 +83,8 @@ struct gr_ctx {
 	int mode;
 	struct wt_sinc ks;
 	double fs, root_hz, mw2, start, stop, rate, tune, level;
-	_Bool normalize, reversed;
+	int normalize;
+	_Bool reversed;
 	long max_len;
 	double choices[GR_MAX_CHOICES];
 	long nchoices;
@@ -198,10 +201,10 @@ static void gr_spawn(const struct gr_ctx *c, double *slots, long nslots, struct 
 	double gr = sin(ang) * GR_SQRT2;
 
 	double g = c->level;
-	if (c->normalize) {
+	if (c->normalize != 0) {
 		double o = density * (ls / c->fs) * c->mw2;
 		if (o > 1) {
-			g = g / sqrt(o);
+			g = c->normalize == 2 ? g / o : g / sqrt(o);
 		}
 	}
 
@@ -259,7 +262,10 @@ static VALUE ruby_grains(VALUE self, VALUE out_l, VALUE out_r, VALUE specs, VALU
 	for (long k = 0; k < c.nchoices; k++) {
 		c.choices[k] = NUM2DBL(rb_ary_entry(choices, k));
 	}
-	c.normalize = RTEST(rb_ary_entry(config, 5));
+	c.normalize = NUM2INT(rb_ary_entry(config, 5));
+	if (c.normalize < 0 || c.normalize > 2) {
+		rb_raise(rb_eArgError, "Grain normalization is 0, 1, or 2");
+	}
 	c.mw2 = NUM2DBL(rb_ary_entry(config, 6));
 	c.start = NUM2DBL(rb_ary_entry(config, 7));
 	c.stop = NUM2DBL(rb_ary_entry(config, 8));
@@ -344,8 +350,11 @@ static VALUE ruby_grains(VALUE self, VALUE out_l, VALUE out_r, VALUE specs, VALU
 		}
 
 		double density = mb_signal_at(&sig[1], i);
-		if (phase >= 1) {
-			phase = phase - 1;
+		// (onsets within GR_EPS of a sample land on it, so 100 grains per
+		// second at 48 kHz land every 480 samples despite rounding)
+		if (phase >= 1.0 - GR_EPS) {
+			phase = phase - 1.0;
+			if (phase < 0) phase = 0;
 			if (phase >= 1) phase = 0;
 			gr_spawn(&c, slots, nslots, sels, rs, &q, playhead, density, mb_signal_at(&sig[2], i), mb_signal_at(&sig[3], i),
 					mb_signal_at(&sig[4], i), mb_signal_at(&sig[5], i), mb_signal_at(&sig[6], i), mb_signal_at(&sig[7], i),

@@ -61,6 +61,9 @@ module MB
           end
         end
 
+        # normalize: options and their kernel codes.
+        NORMALIZE = { true => 1, power: 1, amplitude: 2, false => 0, nil => 0 }.freeze
+
         # The signal inputs in kernel order.
         INPUTS = %i[trigger density size position spread pitch pitch_spread pan_spread reverse freq scan jitter].freeze
 
@@ -115,8 +118,8 @@ module MB
 
           @window_shape = window
           @window = Granular.window(window)
-          @mean_square = Granular.mean_square(@window)
-          @normalize = !!normalize
+          @normalize = NORMALIZE.fetch(normalize) { raise ArgumentError, "normalize: is true/:power, :amplitude, or false (got #{normalize.inspect})" }
+          @mean_square = @normalize == 2 ? @window[0...-1].mean.to_f : Granular.mean_square(@window)
           @interpolation = (interpolation || sample.interpolation || :optimal).to_sym
           MB::Sound::Wavetable::INTERPOLATIONS.fetch(@interpolation) { raise ArgumentError, "Unknown interpolation #{interpolation.inspect}" }
           @mips = mips.nil? ? (sample.mips.nil? ? :default : sample.mips) : mips
