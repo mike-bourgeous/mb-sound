@@ -65,15 +65,31 @@ require_relative 'pluck'
 module MB::Sound
   # A dust generator: sparse single-sample impulses with random heights
   # (0..1), about +rate+ per second, from uniform noise above a threshold.
+  # (The persona's hand-made dust; the rain stick uses the library's
+  # dust() since textures-2, 2026-10-15; bin/songs/tin_roof.rb still uses
+  # this one.)
   def self.ambient_dust(rate)
     p = rate / 48000.0
     (noise.aabs - (1 - p)).aclip(0, nil) * (1 / p)
   end
 
   # A slow random walk between +lo+ and +hi+: a new random target +rate+
-  # times a second, glided over one step.
+  # times a second, glided over one step (a smoothstep), starting from the
+  # middle.  (The persona's hand-made walk; the tape and the drone use
+  # .ambient_drift since textures-2; the gong's shimmer band and
+  # bin/songs/tin_roof.rb still use this one.)
   def self.ambient_walk(rate, lo, hi)
     rate.hz.lfo.square.sample_hold.smooth(1.0 / rate).at(lo..hi)
+  end
+
+  # The library's drift() in the shape of .ambient_walk: +rate+ new points
+  # a second between +lo+ and +hi+, each glided to over a whole step along
+  # a smoothstep, starting from the middle (as the old walk did: the drone
+  # starts on its designed beats and only then wanders; textures-2,
+  # 2026-10-15, after the maintainer preferred the old drone to a drift
+  # starting at a random point).
+  def self.ambient_drift(rate, lo, hi)
+    drift(rate, range: lo..hi, smooth: :smoothstep, from: (lo + hi) / 2.0)
   end
 
   # A singing bowl struck by +strike+ (impulses; their heights are the
@@ -100,12 +116,17 @@ module MB::Sound
   end
 
   # Tape wear (+wear+ 0..1, a number or a node): wow (a slowly wandering
-  # delay), a lowpass that falls, and sample-rate crush that grows with
-  # wear.
+  # delay), sample-rate crush that grows with wear, and a lowpass that
+  # falls.  The lowpass comes after the crush (textures-2, 2026-10-15): the
+  # crush's images (the rate plus and minus each note: 9.4 kHz +- 300-600
+  # Hz at wear 0.6, again near 18.8 kHz) rang above the dark tape as a
+  # high metallic tone (the maintainer: "something resonating strongly at a
+  # very high frequency"); after it, 16-20 kHz falls 35 dB and 8-10 kHz 13
+  # dB, and the crunch below the cutoff stays.
   def self.ambient_tape(sig, wear: 0)
-    wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_walk(1.3, -0.0007, 0.0007))
-    dark = wow.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
-    dark.decimate(16000 - wear * 11000, mix: wear * 0.6)
+    wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_drift(1.3, -0.0007, 0.0007))
+    crushed = wow.decimate(16000 - wear * 11000, mix: wear * 0.6)
+    crushed.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
   end
 
   # Singing bowls struck at each note-on (velocity is the force), panned
@@ -249,7 +270,7 @@ module MB::Sound
   # little warmth, a 900 Hz lowpass.  Stereo.
   def self.ambient_drone(root, level: 1.0)
     side = ->(spread) {
-      gen = ->(f, depth) { (f + ambient_walk(0.05, -depth, depth)).tone.sine }
+      gen = ->(f, depth) { (f + ambient_drift(0.05, -depth, depth)).tone.sine }
       sig = gen.(root * 1.0, 0.15 + spread) * 0.5 + gen.(root * 2 ** (7 / 12.0) + 0.31, 0.2) * 0.3 + gen.(root * 2.0 - (0.17 + spread), 0.25) * 0.18
       sig.softclip(0.8, 0.95).filter(:lowpass, cutoff: 900, quality: 0.6)
     }
@@ -270,7 +291,7 @@ module MB::Sound
   def self.ambient_rainstick_voice(midi, tip: 2.8, across: 9, level: 1.6)
     stick = synth(midi, voices: 1) { |n|
       swell = n.env(tip, 5, 0, 1.5, curve: :gentle, gm: false)
-      clicks = ambient_dust(700)
+      clicks = dust(700)
       pitch = noise.sample_hold(clicks) * 1800 + 4200
       where = adsr(0, across, 0, 0, trigger: n.trigger, curve: :linear) * 1.4 - 0.7 # right to left
       (clicks.ping(pitch, decay: 0.012) * 0.25 * swell).pan(where)
