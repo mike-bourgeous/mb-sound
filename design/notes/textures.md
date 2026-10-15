@@ -9,7 +9,7 @@ Built on branch textures-1 (2026-10-14) from the persona panel's requests
 
 ## dust (`GraphNode::Dust`, `FastTexture.dust`)
 
-`dust(rate, bipolar: false, range: nil, seed: nil)`: sparse random
+`dust(rate, bipolar: false, range: nil, min_gap: nil, seed: nil)`: sparse random
 single-sample impulses, SuperCollider's Dust (heights 0..1) and Dust2
 (`bipolar: true`, -1..1); `range:` sets any height range (`0.3..1` so
 every hit is audible as a trigger, `1..1` for fixed heights).
@@ -21,6 +21,14 @@ every hit is audible as a trigger, `1..1` for fixed heights).
   same samples at any buffer size and a rate node can swell the density per
   sample.  Bernoulli per sample rather than exponential gaps: simpler, exact
   under moving rates, and ~1.4 ns/sample.
+- `min_gap:` (textures-2, 2026-10-15; the maintainer: "Some of the bowl hits
+  are too close together"): seconds, a Length, or a Duration.  The kernel
+  counts samples since the last impulse; none may come before the gap, and
+  allowed samples use p / (1 - p d) for the d = ceil(gap) - 1 samples each
+  impulse shuts out, so the average rate stays `rate` (a refractory
+  Poisson process) up to one impulse per gap, where they come like
+  clockwork (`dust(100, min_gap: 1.8.seconds)` is a click every turn of a
+  33 1/3 record).  Gaps of a sample or less are bit-identical to none.
 - Rate: Hz (number, Pitch, node), or the average time between impulses as a
   Length or Duration (`10.ms`, `1.beat`; Durations follow the tempo) through
   `Length::Source` (shared with Drift by `GraphNode::TextureRate`).
@@ -33,12 +41,13 @@ every hit is audible as a trigger, `1..1` for fixed heights).
 
 ## drift (`GraphNode::Drift`, `FastTexture.drift`)
 
-`drift(rate = 0.2, range: -1..1, smooth: :cubic, walk: nil, seed: nil)`: a
-slow random line.  Points (unit values 0...1, mapped to `range` on output)
-arrive at `rate` per second through a phase accumulator (phases within 1e-9
-of 1 count, as in `FastLofi.decimate`, so 1 Hz at 48 kHz steps exactly every
-48000 samples).  The state keeps four points p0..p3; the output moves from
-p1 to p2 over a step.
+`drift(rate = 0.2, range: -1..1, smooth: :cubic, walk: nil, hold: nil,
+jitter: nil, from: nil, seed: nil)`: a slow random line.  Points (unit
+values 0...1, mapped to `range` on output) arrive at `rate` per second on
+average through a phase accumulator (phases within 1e-9 of 1 count, as in
+`FastLofi.decimate`, so 1 Hz at 48 kHz steps exactly every 48000 samples).
+The state keeps four points p0..p3 (plus the step's hold and speed); the
+output moves from p1 to p2 over a step.
 
 - `smooth:` `:step` (p1; aliases `:hold`, `:sah`, `:sample_hold`),
   `:linear`, `:cosine` (half-cosine, a gentle stop at each point), `:cubic`
@@ -50,9 +59,41 @@ p1 to p2 over a step.
   and clamping would add flat tops, so the B-spline won.  All modes read the
   same points from the same seed (linear and cosine meet the step values at
   each point), so switching `smooth:` keeps the path.
+- Any tweening Curve as the step shape (textures-2, the maintainer's
+  request: "random walk and hold using an overshoot curve feels like it
+  would be a toy/animal-like unpredictability"): a Curve, a curve name other
+  than the four above (`:ease_in_out`, `:back`, `:elastic`, `:smoothstep`),
+  a Proc, anything `Curve.from` takes.  The kernel evaluates the curve's
+  value table (`Curve#value_table`) with the Hermite lookup glides use, now
+  shared in `ext/mb/sound/include/mb_curve_lookup.h` (fast_clip and
+  fast_texture; `Curve.lookup_ruby` is the mirror).  Overshooting curves
+  leave `range:` on purpose: not clamped (the overshoot is the point; clamp
+  downstream if something can't take it).  `Curve[:back]`'s `overshoot:` is
+  the distance past the target (0..1, default 0.1), not Penner's 1.70158.
+  Curves print in recipes and graph documents (`Curve#to_ruby`:
+  `Curve[:back, overshoot: 0.4]`, `Curve[30.0]`, bezier lists,
+  `.reverse`/`.in`/`.out` variants; Procs and compositions are FIXMEs).
+- `hold:` rests on each point before moving: a number is a share of the
+  step (0..1; 1 holds it all, like :step), a Length or Duration a time
+  (`80.ms`, `1.n16`), a Range of either a random hold per point, a node a
+  share read at each point (a knob, live).  The segment position is 0 until
+  the phase reaches the hold, then (phase - hold) / (1 - hold).
+- `jitter:` (0..1, a number or a node read at each point): step lengths
+  (1 - j) + j E in average steps, E exponential with mean 1 (at least
+  0.001), so 0 is even spacing, 1 Poisson-like, and the mean rate stays.
+- Three splitmix64 streams (the points; holds; spacing; seeds `seed`,
+  `seed ^ HOLD_STREAM`, `seed ^ SPACING_STREAM`), so the points are the same
+  whatever `hold:`, `jitter:`, and `smooth:` are.  Holds and spacing are
+  drawn at each step's first sample (and the very first sample: the state
+  holds NaN until then), so they're exact at any buffer size.  Without hold
+  and jitter the output is bit-identical to textures-1's.
 - `walk:` (0..1 of the range): each new point is p3 + walk (2u - 1),
   reflected at 0 and 1: a bounded random walk (one reflection suffices since
   walk <= 1).  nil: independent uniform points (smoothed noise).
+- `from:` starts the line at a value (p0 = p1 = from): exactly for step,
+  linear, cosine, and curves, near it for :cubic.  bin/synths/ambient.rb's
+  `ambient_drift` (smoothstep, from the middle) is the old hand-made walk's
+  shape.
 - `range:` takes numbers only; node ranges go through `.at(a..b)`.
 
 ## Modal resonators (`GraphNode::ModalResonator < Resonator`, `FastResonator.modes`)
@@ -81,26 +122,56 @@ Resonator#sample's exact ring-out (ends where the summed bound
     8.1, doublets b = beat (i + 1)^1.3; beat 0.7 / 1.6 Hz, decay 24 s).
     Equal to the old sum of pings within 1e-4 (float32 sums and frequency
     arithmetic in float32 nodes versus double in the kernel).
-  - `:gong`: a free circular plate's modes (2,0) (0,1) (3,0) (1,1) (4,0)
-    (5,0) (2,1) (0,2) (6,0) (7,0) (Rossing): 1, 1.73, 2.33, 3.91, 4.11,
-    6.3, 6.71, 7.34, 8.95, 11.1; slow beats on four of them.  (The ambient
-    gong's glide and shimmer are a different instrument and stay.)
-  - `:bell`: a minor-third church bell normalized to the nominal (the strike
-    note, 1): hum 0.25, prime 0.5, tierce 0.6, quint 0.75, nominal 1, major
-    third 1.25, fourth 1.335, twelfth 1.5, upper octave 2; the hum rings
-    longest.
-  - `:chime`: a free tube's bending modes (2n + 1)^2 for n = 2..7, scaled so
-    modes 4-6 (near 2 : 3 : 4) imply a virtual pitch at ratio 1 that no mode
-    plays (the tubular-bell strike note).
+  - `:gong` (textures-2): a free circular plate's modes (2,0) (0,1) (3,0)
+    (1,1) (4,0) (5,0) (2,1) (0,2) (6,0) (7,0) (Rossing): 1, 1.73, 2.33,
+    3.91, 4.11, 6.3, 6.71, 7.34, 8.95, 11.1, plus a denser cluster to 19.3;
+    slow beats on four of them; a 0.8-semitone tension glide over 2.5 s;
+    the modes from 3.91 up bloom (twins with rise shares 0.12 to 0.66 of
+    the 14 s decay): measured on one strike at 110 Hz, the 400-2400 Hz band
+    rises 8 dB over the first half second and stays near that for 2.5 s,
+    going from 18 dB under the 80-300 Hz band to even with it by 1.25 s
+    (textures-1's gong: falling from the strike, 7 dB under to 19 dB under).
+  - `:bell` (textures-2): a minor-third church bell with the prime on the
+    note (the maintainer: "Bell and gong are the least realistic"): hum
+    0.5, prime 1, tierce 1.2, quint 1.5, nominal 2 (loudest at the strike),
+    major tenth 2.5, eleventh 2.67, twelfth 3, double octave 4, upper fourth
+    5.33; the nominal, twelfth, and double octave (2 : 3 : 4) put the
+    virtual strike note on the prime; the hum rings longest (decay 14 s),
+    warbling doublets on hum, prime, tierce, and nominal.  textures-1's bell
+    had the nominal on the note, so it sounded an octave below what was
+    played.  Ratios from Rossing and the Did You Know note "bell-partials".
+  - `:chime` (textures-2): a wind chime, an aluminum tube hanging free:
+    free-free beam modes 1 : 2.756 : 5.404 : 8.933 : 13.34, the
+    fundamental on the note and the bright second mode loudest, long decays
+    (7 s), a slight beat.  textures-1's tubular-bell chime (virtual pitch
+    from modes 4-6, "rather bell like") is `:tubular` now.
   - `:bar`: free-free beam 1 : 2.756 : 5.404 : 8.933 : 13.34; `:marimba`
     1 : 3.99 : 9.14 (tuned wood, short); `:vibes` 1 : 4 : 10 (tuned
     aluminum, long).
   - `:glass`: wine-glass rim modes 1 : 2.32 : 4.25 : 6.63 (Rossing), with
-    small doublets.
+    small doublets.  Wine glasses ring at about 400-1000 Hz (the
+    maintainer: "octaves too low to be a wine glass unless it's for a
+    giant" of textures-1's D4 render); the preset's pitch is 660 Hz.
   - `:plate`: a simply supported rectangular plate, sides 1 : 1.4, modes
     m^2 + (n / 1.4)^2 (12 lowest).
   - `:membrane`: an ideal circular membrane (Bessel zeros) 1 : 1.594 : 2.136
     : 2.296 : 2.653 : 2.918 : 3.156 : 3.501.
+- Typical pitches (`Preset#pitch`, textures-2): `resonate(:glass)` with no
+  frequency plays 660 Hz (bowl 220, rin 880, gong 110, bell 262, chime 880,
+  tubular 440, bar 1760, marimba 440, vibes 440, plate 200, membrane 100).
+- Glides (`glide:` semitones or an Interval, `glide_time:`; presets'
+  defaults, :gong 0.8 over 2.5 s): the frequency becomes freq (1 + k
+  level), k = 2^(glide/12) - 1, level the strikes' sum through a leaky
+  integrator (`aabs.ping(0, decay: glide_time, phase: 0.25)`, clipped to
+  0..1): a tension glide, larger for harder strikes, settling as the object
+  calms.  Membranes at kick pitches take `glide: 7, glide_time: 0.12`.
+  Gliding costs ~10 ns per row per sample until the level is below
+  float32's resolution of the frequency (about 2.3 glide times).
+- Bloom (a fifth mode field, a share of the decay): `.expand` adds a twin
+  row of opposite amplitude decaying in that share, so the mode rings A
+  (e^(-t/T) - e^(-t/Tb)), from silence to a peak after about Tb ln(T / Tb).
+  Twins stay with their modes on a stereo side (`.expand_groups`), and
+  normalization ignores them.
 - `spread:` (number or node) returns stereo: two banks on the same strike,
   modes alternating (doublet partners stay with their mode), each side
   `own + other × (1 - spread)`.
@@ -120,6 +191,14 @@ Resonator#sample's exact ring-out (ends where the summed bound
 | `resonate(:plate)` 12 rows, gliding pitch (worst case) | 121 | 0.58 |
 | `resonate(:gong)` 14 rows, gliding pitch, 128-sample buffers | 153 | 0.73 |
 | `resonate(:bowl, spread: 0.6)` stereo | 24.4 | 0.12 |
+| `dust(300, min_gap: 5.ms)` (textures-2) | 1.6 | 0.01 |
+| `drift(3, smooth: Curve[:back])` | 6.1 | 0.03 |
+| `drift(3, Curve[:back], walk, hold: 0.2..0.9, jitter: 0.7)` | 5.0 | 0.02 |
+| `drift(300, Curve, hold: 1.ms..3.ms, jitter: node)`, 128-sample buffers | 16.1 | 0.08 |
+| `resonate(:bell)` 14 rows | 15.8 | 0.08 |
+| `resonate(:gong)` 31 rows (glide + bloom twins), fixed pitch (`glide: 0`) | 31.0 | 0.15 |
+| `resonate(:gong)` gliding, the 4 s after a strike | 145 | 0.70 |
+| `resonate(:gong)` struck every 0.5 s (always gliding), 128-sample buffers (worst case) | 333 | 1.60 |
 
 A gliding pitch costs ~10 ns per mode per sample (cos and sin per mode;
 decay factors are recomputed only when the decay changes), so the worst
@@ -130,13 +209,21 @@ realtime per voice).  Fixed pitches cost ~1 ns per mode per sample.
 
 `help :textures` and `help :recipes` (`lib/mb/sound/help/content/textures.rb`):
 rain, wind, vinyl crackle, tape wow and flutter, bells, a breathing drone, a
-noise riser, a sidechain pump; each example within the help guard's level
-rules.
+noise riser, a sidechain pump; a restless creature (drift with walk, random
+holds, jitter, and an overshooting curve); each example within the help
+guard's level rules.  textures-2 (Bench notes): the bowl example keeps its
+strikes 500 ms apart (`min_gap:`); symmetric ranges are a single number
+(`drift(...).at(0.12)`, which equals `.at(-0.12..0.12)` for a -1..1
+source, to within float rounding); the vinyl crackle is sparser, darker dust
+(14 per second through a 1.4 kHz bandpass) plus a scratch once a turn at 33
+1/3 rpm (`dust(100, min_gap: 1.8.seconds)`); the bells sit an octave lower
+now that the prime is on the note.
 
 ## Not built (ideas)
 
 - Plan ops for Dust/Drift/ModalResonator (plan boundaries now).
 - Per-mode strike position (amplitudes from a mode-shape at a strike point),
-  mallet hardness as a built-in strike filter, nonlinear gong pitch glides
-  as a preset option.
+  mallet hardness as a built-in strike filter.
+- A true vibraphone (many long-ringing voices, sympathetic resonance; the
+  maintainer, later).
 - Granular freezes (with the sampler's grains, granular-1).

@@ -49,12 +49,13 @@ module MB
         # Strikes a modal resonator with this node (GraphNode::ModalResonator):
         # every impulse rings all the modes of a struck object at once,
         # +preset+ (ModalResonator::PRESETS: :bowl, :rin, :gong, :bell,
-        # :chime, :bar, :marimba, :vibes, :glass, :plate, :membrane) or a
-        # list of modes [[ratio, amplitude, decay share, beat multiple],
-        # ...], at +freq+ (Hz: a number, node, or Pitch; e.g. `v.freq` in a
-        # synth voice, so the object follows the keys).  The impulse's height
-        # is the strike's force (a trigger's velocity).  The preset and the
-        # frequency may come in either order.
+        # :chime, :tubular, :bar, :marimba, :vibes, :glass, :plate,
+        # :membrane) or a list of modes [[ratio, amplitude, decay share,
+        # beat multiple, bloom share], ...], at +freq+ (Hz: a number, node,
+        # or Pitch; e.g. `v.freq` in a synth voice, so the object follows
+        # the keys; a preset's typical pitch when left out, e.g. 660 Hz for
+        # :glass).  The impulse's height is the strike's force (a trigger's
+        # velocity).  The preset and the frequency may come in either order.
         #
         # +decay+ (seconds to -60 dB for the longest-ringing modes; a number,
         # Length, Duration, or node) and +beat+ (Hz between the two halves of
@@ -65,6 +66,14 @@ module MB
         # modes between the sides (0 both sides alike, 1 hard left and
         # right); nil (default) is mono.
         #
+        # +glide+ (semitones, or an Interval) starts the pitch that much
+        # higher for a strike of 1 (in proportion to softer ones; strikes
+        # add up, at most 1) and lets it settle back over +glide_time+
+        # (seconds to -60 dB, or any length) as the object calms: the tension glide of a
+        # gong or a drum head (negative glides rise).  Defaults to the
+        # preset's (:gong 0.8 over 2.5 s; 0 for the others).  While gliding,
+        # the modes cost about 10 ns each per sample instead of 1.
+        #
         # A softer mallet is a smoother strike: lowpass the impulses
         # (`trig.filter(:lowpass, cutoff: 1500).resonate(:bar, 880)`); a
         # steady quiet noise is a bowed or rubbed object.
@@ -72,35 +81,54 @@ module MB
         # Examples:
         #     play dust(0.7, range: 0.3..1).resonate(:bowl, 220).at(-6.db)
         #     play grid(8, 'x..x..x.').loop.trigger.resonate(:marimba, 440).at(-6.db)
-        #     play noise.at(0.0005).resonate(:glass, 660, spread: 0.6)          # a rubbed rim
+        #     play noise.at(0.0005).resonate(:glass, spread: 0.6)               # a rubbed rim (660 Hz)
+        #     play grid(4, 'x...').loop.trigger.resonate(:membrane, 55, glide: 7, glide_time: 0.15)   # a kick
         #     synth(midi) { |v| v.trigger.resonate(:vibes, v.freq) }
-        def resonate(preset = :bowl, freq = nil, decay: nil, beat: nil, spread: nil, normalize: true)
+        def resonate(preset = :bowl, freq = nil, decay: nil, beat: nil, spread: nil, normalize: true, glide: nil, glide_time: nil)
           preset, freq = freq, preset unless preset.is_a?(Symbol) || preset.is_a?(Array)
-          raise ArgumentError, 'resonate needs a frequency (e.g. resonate(:bowl, 220) or resonate(:bowl, v.freq))' if freq.nil?
+          preset ||= :bowl
 
           if preset.is_a?(Symbol)
             p = ModalResonator.preset(preset)
             modes = p.modes
             decay ||= p.decay
             beat ||= p.beat
+            freq ||= p.pitch
+            glide ||= p.glide
+            glide_time ||= p.glide_time
           else
             modes = preset
             decay ||= 2
             beat ||= 0
+            glide ||= 0
+            glide_time ||= 1.0
+          end
+          raise ArgumentError, 'resonate needs a frequency for a list of modes (e.g. resonate([[1, 1], [2.7, 0.5]], 220))' if freq.nil?
+
+          glide = glide.semitones if glide.is_a?(MB::Sound::Interval)
+          raise ArgumentError, "Resonate glide must be semitones (a number or Interval; got #{glide.inspect})" unless glide.is_a?(Numeric) && glide.real?
+          if glide_time.is_a?(Numeric) && !(glide_time.real? && glide_time > 0)
+            raise ArgumentError, "Resonate glide_time must be above 0 (seconds, a Length, or a Duration; got #{glide_time.inspect})"
           end
 
-          rows = ModalResonator.expand(modes, beat)
-          gain = normalize ? 1.0 / rows.sum { |r| r[2].abs } : 1.0
-          return ModalResonator.new(self, freq: freq, modes: rows, decay: decay, gain: gain, sample_rate: sample_rate) if spread.nil?
+          # The pitch, starting high after each strike and settling as the
+          # strikes' sum (a leaky integrator: a 0 Hz ping at phase 1/4)
+          # decays
+          if glide != 0
+            freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
+            k = 2.0**(glide / 12.0) - 1
+            level = aabs.ping(0, decay: glide_time, phase: 0.25).aclip(0, 1)
+            freq = freq.is_a?(Numeric) ? level * (freq * k) + freq : freq * (level * k + 1)
+          end
 
-          # Stereo: alternate modes (doublet partners stay with their modes)
-          # between two banks on the same strike
+          groups = ModalResonator.expand_groups(modes, beat)
+          gain = normalize ? 1.0 / ModalResonator.expand(modes, beat, bloom: false).sum { |r| r[2].abs } : 1.0
+          return ModalResonator.new(self, freq: freq, modes: groups.flatten(1), decay: decay, gain: gain, sample_rate: sample_rate) if spread.nil?
+
+          # Stereo: alternate modes (doublet partners and bloom twins stay
+          # with their modes) between two banks on the same strike
           sides = [[], []]
-          side = 1
-          rows.each do |r|
-            side = 1 - side if r[1] == 0
-            sides[side] << r
-          end
+          groups.each_with_index { |g, i| sides[i % 2].concat(g) }
           sides[1] = [[1.0, 0.0, 0.0, 1.0]] if sides[1].empty?
           left, right = sides.map { |s| ModalResonator.new(self, freq: freq, modes: s, decay: decay, gain: gain, sample_rate: sample_rate) }
           blend = spread.is_a?(Numeric) ? 1.0 - spread.to_f : 1 - spread

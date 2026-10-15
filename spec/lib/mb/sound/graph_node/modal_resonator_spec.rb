@@ -56,10 +56,63 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
     end
   end
 
-  it 'scales with the strike height' do
-    a = collect(impulses(4800, { 0 => 1 }).resonate(:gong, 110), limit: 9600)
-    b = collect(impulses(4800, { 0 => 0.5 }).resonate(:gong, 110), limit: 9600)
+  it 'scales with the strike height (without a glide, which follows the strike)' do
+    a = collect(impulses(4800, { 0 => 1 }).resonate(:gong, 110, glide: 0), limit: 9600)
+    b = collect(impulses(4800, { 0 => 0.5 }).resonate(:gong, 110, glide: 0), limit: 9600)
     expect((b - a * 0.5).abs.max).to be < 1e-6
+  end
+
+  it 'plays a typical pitch for the preset when none is given' do
+    a = collect(impulses(4800, { 0 => 1 }).resonate(:glass), limit: 9600)
+    b = collect(impulses(4800, { 0 => 1 }).resonate(:glass, 660), limit: 9600)
+    expect(a).to eq(b)
+    expect(collect(impulses(4800, { 0 => 1 }).resonate, limit: 4800)).to eq(collect(impulses(4800, { 0 => 1 }).resonate(:bowl, 220), limit: 4800))
+  end
+
+  # The strongest frequency in +x+ (Hz, to the FFT bin) from +from+ to +to+.
+  def peak_hz(x, from = 0, to = 24000)
+    s = MB::Sound.real_fft(x.dup)
+    f = Numo::DFloat.new(s.length).seq * (48000.0 / x.length)
+    m = (f >= from) & (f <= to)
+    f[m][s.abs[m].max_index]
+  end
+
+  it 'glides a gong from above its pitch down onto it, more for harder strikes' do
+    expect(MB::Sound::GraphNode::ModalResonator.preset(:gong).glide).to be > 0
+    out = collect(impulses(96000, { 0 => 1 }).resonate(:gong, 110, glide: 5), limit: 96000)
+    early = peak_hz(out[0...8192], 100, 160)
+    late = peak_hz(out[(96000 - 32768)..], 100, 160)
+    expect(early).to be > late + 15
+    expect(late).to be_within(1.5).of(110)
+    soft = collect(impulses(96000, { 0 => 0.2 }).resonate(:gong, 110, glide: 5), limit: 8192)
+    expect(peak_hz(soft, 100, 160)).to be < early
+
+    kick = collect(impulses(9600, { 0 => 1 }).resonate(:membrane, 50, glide: 12, glide_time: 0.1), limit: 9600)
+    up = collect(impulses(9600, { 0 => 1 }).resonate(:membrane, 50, glide: -12.semitones, glide_time: 0.1), limit: 9600)
+    expect(kick).not_to eq(up)
+    expect { impulses(10, {}).resonate(:gong, glide: 'x') }.to raise_error(ArgumentError, /glide/)
+    expect { impulses(10, {}).resonate(:gong, glide_time: 0) }.to raise_error(ArgumentError, /glide_time/)
+  end
+
+  it 'blooms modes with a bloom share: silent at the strike, peaking later' do
+    modes = [[1.0, 1.0, 1.0, nil, 0.05]]
+    out = collect(impulses(48000, { 0 => 1 }).resonate(modes, 1000, decay: 4), limit: 48000)
+    env = (0...480).map { |k| out[(k * 100)...((k + 1) * 100)].abs.max }
+    expect(env[0]).to be < env.max / 4
+    expect(env.index(env.max)).to be_between(3, 200)
+    rows = MB::Sound::GraphNode::ModalResonator.expand(modes, 0)
+    expect(rows).to eq([[1.0, 0.0, 1.0, 1.0], [1.0, 0.0, -1.0, 0.05]])
+    expect { impulses(10, {}).resonate([[1, 1, 1, nil, 0]], 200) }.to raise_error(ArgumentError, /bloom/)
+    gong = collect(impulses(96000, { 0 => 1 }).resonate(:gong, 110, glide: 0), limit: 96000)
+    hi = ->(x) { x.dup.then { |y| MB::Sound.real_fft(y).abs[(x.length * 1200 / 48000)..].sum } }
+    expect(hi.(gong[24000...32192]) / hi.(gong[0...8192])).to be > 0.5 # the shimmer swells in
+  end
+
+  it 'puts the church bell\'s prime on the note, the hum an octave below, ringing longest' do
+    out = collect(impulses(48000 * 6, { 0 => 1 }).resonate(:bell, 220), limit: 48000 * 6)
+    tail = out[(48000 * 5)...(48000 * 5 + 32768)]
+    expect(peak_hz(tail)).to be_within(2).of(110)
+    expect(peak_hz(out[0...8192])).to be_within(3).of(440) # the nominal leads the strike
   end
 
   it 'matches the sum of pings for a bowl (the ambient bowl) within float32 rounding' do
@@ -128,7 +181,7 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
 
   it 'raises with suggestions for unknown presets and bad modes' do
     expect { impulses(10, {}).resonate(:bwol, 200) }.to raise_error(ArgumentError, /did you mean :bowl/)
-    expect { impulses(10, {}).resonate(:bowl) }.to raise_error(ArgumentError, /frequency/)
+    expect { impulses(10, {}).resonate([[1, 1]]) }.to raise_error(ArgumentError, /frequency/)
     expect { impulses(10, {}).resonate([], 200) }.to raise_error(ArgumentError, /Modes/)
     expect { impulses(10, {}).resonate([[1, 'x']], 200) }.to raise_error(ArgumentError, /mode/)
   end
