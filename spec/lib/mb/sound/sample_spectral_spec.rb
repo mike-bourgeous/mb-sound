@@ -41,6 +41,31 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     smeared = MB::Sound::Sample[x].stretch(4, mode: :spectral, transients: false).data(0)
     expect(rise.(sharp, 24000)).to be < 20
     expect(rise.(smeared, 24000)).to be > 500
+
+    # Paulstretch keeps frames holding an attack unrandomized with transients: true
+    paul = MB::Sound::Sample[x].stretch(4, mode: :paul, transients: true).data(0)
+    expect(rise.(paul, 24000)).to be < 20
+    expect(rms(paul[24000...24480]) / rms(x[6000...6480])).to be_within(0.05).of(1)
+    expect(rise.(MB::Sound::Sample[x].stretch(4, mode: :paul).data(0), 24000)).to be > 2000
+  end
+
+  it 'lands every hit of a dense pattern at ratio times its time, under a ringing bass' do
+    # Hits 107 ms apart (16ths at 140 BPM, about a span apart: granular-1
+    # merged their spans into one unstretched run, holding the first hit
+    # and rushing the rest) over a 55 Hz tone that keeps ringing
+    r = Random.new(2)
+    x = Numo::NMath.sin(Numo::DFloat.new(60000).seq * (2 * Math::PI * 55 / 48000)) * 0.3
+    hits = (0...10).map { |k| 4000 + k * 5143 }
+    hits.each { |o| 800.times { |i| x[o + i] += (r.rand * 2 - 1) * Math.exp(-i / 150.0) } }
+    s = MB::Sound::Sample[x]
+    [2, 4].each do |ratio|
+      y = s.stretch(ratio, mode: :spectral)
+      found = MB::Sound::Sample[y.data].onsets
+      hits.each { |o| expect(found.map { |f| (f - o * ratio).abs }.min).to be <= 48 } # 1 ms
+      # no dip before the hits: the bass keeps its phase through the resets
+      env = ->(c) { (1..12).map { |k| rms(y.data[(c - k * 256)...(c - k * 256 + 256)]) } }
+      hits.drop(1).each { |o| expect(env.(o * ratio).min).to be > 0.1 }
+    end
   end
 
   it 'Paulstretches with seeded random phases at the input level' do
@@ -51,6 +76,61 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(a.data(0).to_a).to eq(b.data(0).to_a)
     expect(a.data(0).to_a).not_to eq(c.data(0).to_a)
     expect(rms(a.data(0)) / rms(chord)).to be_within(0.15).of(1)
+  end
+
+  # The share of the energy within ±20 Hz of +hz+ that lies more than
+  # 1.5 Hz from it, in the middle 65536 samples of +d+ (how far random
+  # phases spread a partial).
+  def spread(d, hz)
+    n = 65536
+    m = d.length / 2
+    p = Numo::Pocketfft.rfft(Numo::DFloat.cast(d[(m - n / 2)...(m + n / 2)]) * described_class.hann(n)).abs**2
+    df = 48000.0 / n
+    near = ((hz - 20) / df).round..((hz + 20) / df).round
+    core = ((hz - 1.5) / df).round..((hz + 1.5) / df).round
+    1 - p[core].sum / p[near].sum
+  end
+
+  it 'goes from the vocoder to Paulstretch with randomize:, keeping the level' do
+    s = MB::Sound::Sample[Numo::DFloat.cast(chord).concatenate(chord)]
+    expect(s.stretch(4, mode: :spectral, randomize: 0).data.to_a).to eq(s.stretch(4, mode: :spectral).data.to_a)
+    widths = [0, 0.5, 1].map { |r|
+      y = s.stretch(6, mode: :spectral, randomize: r)
+      expect(rms(y.data[20000...-20000]) / rms(chord)).to be_within(0.1).of(1)
+      expect(peak_hz(y.data)).to be_within(6).of(220) if r < 1
+      spread(y.data, 220)
+    }
+    expect(widths[0]).to be < widths[1]
+    expect(widths[1]).to be < widths[2]
+    expect(s.stretch(4, mode: :spectral, randomize: 0.5, seed: 2).data.to_a).not_to eq(s.stretch(4, mode: :spectral, randomize: 0.5).data.to_a)
+    expect(s.stretch(4, mode: :spectral, randomize: 0.5).lineage[3]).to eq({ mode: :spectral, randomize: 0.5 })
+    expect(s.stretch(4, mode: :paul, randomize: 0.5).lineage[3]).to eq({ mode: :paul, randomize: 0.5 })
+    expect { s.stretch(4, mode: :spectral, randomize: 1.5) }.to raise_error(ArgumentError, /randomize/)
+    expect { s.stretch(4, randomize: 0.5) }.to raise_error(ArgumentError, /spectral/)
+  end
+
+  it "narrows Paulstretch partials with the original's window and overlap (shape: :paul, overlap: 2)" do
+    # Random phases smear each partial over the band of the frames'
+    # windows; Nasca Paul's flatter (1 - x²)^1.25 at overlap 2 smears
+    # less than Hann at overlap 4 (measured: 6.6 vs 10.3 Hz wide at -6 dB)
+    sine = MB::Sound::Sample[Numo::NMath.sin(Numo::DFloat.new(72000).seq * (2 * Math::PI * 440 / 48000)) * 0.5]
+    avg = ->(**kw) { (0..3).sum { |sd| spread(sine.stretch(8, mode: :paul, seed: sd, **kw).data, 440) } / 4 }
+    hann = avg.()
+    orig = avg.(overlap: 2, shape: :paul)
+    expect(orig).to be < 0.85 * hann
+    two = sine.stretch(8, mode: :paul, overlap: 2, shape: :paul)
+    expect(rms(two.data) / rms(sine.data)).to be_within(0.15).of(1)
+    expect(two.lineage[3]).to eq({ mode: :paul, overlap: 2, shape: :paul })
+    expect { sine.stretch(2, mode: :paul, shape: :kaiser) }.to raise_error(ArgumentError, /window shape/)
+  end
+
+  it 'draws random phases per channel with link: false' do
+    st = MB::Sound::Sample[[chord, chord]]
+    corr = ->(s) { a = Numo::DFloat.cast(s.data(0)); b = Numo::DFloat.cast(s.data(1)); (a * b).sum / Math.sqrt((a * a).sum * (b * b).sum) }
+    expect(corr.(st.stretch(8, mode: :paul))).to be > 0.999
+    expect(corr.(st.stretch(8, mode: :paul, link: false)).abs).to be < 0.3
+    expect(corr.(st.stretch(8, mode: :spectral, randomize: 0.5, link: false))).to be_between(0.3, 0.99)
+    expect(st.stretch(8, mode: :paul, link: false).lineage[3]).to eq({ mode: :paul, link: false })
   end
 
   it 'makes random phases independent of how the work is split' do

@@ -85,3 +85,5 @@ From the maintainer's Bench verdicts on sampler-2:
 ## Granular and spectral stretch (granular-1, 2026-10-14)
 
 `Sample#grains` (GraphNode::Grains, `FastSampler.grains` in `fast_sampler/granular.c`) and `Sample#stretch(mode: :spectral | :paul)` are in `granular.md`.  `stretch` keeps `mode: :cyclic` (with `fit: :auto`) as the default; `Sample#edit` takes `whole: true` for edits that need every channel at once.
+
+Round 3 (granular-2, 2026-10-15): the cyclic stretch crossfades 3 ms by default and fits whole local periods followed from cycle to cycle (the clicks and bass pitch jumps of the granular-1 Bench); details in `granular.md`.

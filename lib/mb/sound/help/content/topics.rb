@@ -198,7 +198,8 @@ module MB
         the S950's cyclic stretch with each cycle fitted to the sound
         (whole periods, matching splices), so tones keep their pitch;
         `fit: :fixed` is the plain version (a buzz at 1 / cycle, stutter
-        on breaks, and basses that sound lower).  `mode: :spectral` and
+        on breaks, and basses that sound lower).  Both crossfade 3 ms
+        between cycles (`crossfade: 0` for the raw splices).  `mode: :spectral` and
         `mode: :paul` stretch in the frequency domain, and `.grains` plays
         a sample as a grain cloud: see `help :granular`.
       TEXT
@@ -236,9 +237,18 @@ module MB
         cloud of 32, 6% stereo.
 
         Stretching keeps the pitch: `.stretch(4)` is the cyclic S950
-        stretch (gritty), `.stretch(4, mode: :spectral)` a phase vocoder
-        with locked phases and sharp transients (pads, chords, voices,
-        bass), `.stretch(32, mode: :paul)` Paulstretch (endless washes).
+        stretch (gritty; 3 ms `crossfade:` between cycles),
+        `.stretch(4, mode: :spectral)` a phase vocoder with locked phases
+        and sharp transients that land on the stretched beat (pads,
+        chords, voices, bass, breaks), `.stretch(32, mode: :paul)`
+        Paulstretch (endless washes).  They are one algorithm:
+        `randomize:` 0..1 goes from the vocoder (0) to Paulstretch (1)
+        (`mode: :spectral, randomize: 1`: Paulstretch phases in the
+        vocoder's shorter 4096-sample window), with `window:`,
+        `overlap:`, `shape: :paul` (the original's window), and `link:
+        false` (random phases per channel) for both; for voices try the
+        original's settings: `.stretch(8, mode: :paul, overlap: 2,
+        shape: :paul, link: false)`.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
@@ -252,6 +262,14 @@ module MB
       example 'a 4x spectral stretch' do
         riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.ramp.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(4, mode: :spectral).node.at(-12.db)
+      end
+      example 'Paulstretch phases in the vocoder (randomize: 1)' do
+        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.ramp.lp4(1500) * c.amp_env } }
+        bg :try, riff.stretch(8, mode: :spectral, randomize: 1).node.at(-12.db)
+      end
+      example "a voice Paulstretched the original's way" do
+        voice = bounce(1.bar) { seq(A3.n4, C4.n4, E4.n4, D4.n4).legato(1).then { |c| c.tone.ramp.formant(:a, :o) * c.amp_env * 0.5 } }
+        bg :try, voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false).node.at(-10.db)
       end
     end
 
