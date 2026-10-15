@@ -116,17 +116,18 @@ module MB::Sound
   end
 
   # Tape wear (+wear+ 0..1, a number or a node): wow (a slowly wandering
-  # delay), sample-rate crush that grows with wear, and a lowpass that
-  # falls.  The lowpass comes after the crush (textures-2, 2026-10-15): the
-  # crush's images (the rate plus and minus each note: 9.4 kHz +- 300-600
-  # Hz at wear 0.6, again near 18.8 kHz) rang above the dark tape as a
-  # high metallic tone (the maintainer: "something resonating strongly at a
-  # very high frequency"); after it, 16-20 kHz falls 35 dB and 8-10 kHz 13
-  # dB, and the crunch below the cutoff stays.
+  # delay), 10-bit grain, and a lowpass that falls with wear.  The grain is
+  # a 10-bit quantizer with half a step of dither (textures-4,
+  # 2026-10-15; the maintainer: "go with 10-bit for the tape hiss for
+  # now"): dithered quantizing leaves only a hiss-like grain, where the
+  # earlier sample-rate crush (decimate(16000 - wear * 11000, mix: wear *
+  # 0.6), textures-1/2) left images of each note (the rate plus and minus
+  # it) that rang as a high metallic tone.  The lowpass comes after the
+  # grain, so the hiss is tape-dark too.
   def self.ambient_tape(sig, wear: 0)
     wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_drift(1.3, -0.0007, 0.0007))
-    crushed = wow.decimate(16000 - wear * 11000, mix: wear * 0.6)
-    crushed.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
+    grain = (wow + noise.at(0.5 / 512)).quantize(10.bits)
+    grain.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
   end
 
   # Singing bowls struck at each note-on (velocity is the force), panned
