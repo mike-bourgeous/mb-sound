@@ -226,8 +226,12 @@ module MB
         its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
         `smpl` (root, loop points), cue points (`sample.markers`), FLAC
         tags, then tempo and key words in file and folder names ("98bpm",
-        "98 BPM", "Am_120").  `sample.bpm`, `.beats`, `.bars`, `.key`,
-        `.meta_source` (where each came from); `Sample[path, detect:
+        "98 BPM", "Am_120"; a name's tempo counts only when the file is a
+        whole number of its beats).  Loops loop the whole file; one-shots
+        (ACID's flag, words like kick or hit, short files, one hit
+        decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
+        `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
+        from, and why); `Sample[path, detect:
         true]` (or `.detect_tempo`) finds a missing tempo.  `loops
         '~/Loops/Funk'` lists a folder (headers and names only, nothing
         decoded or written), filtered by `bpm: 90..100`, `key: :Am`,

@@ -119,7 +119,9 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(e.key).to eq(:Gm)
       expect(e.beats).to eq(4)
       expect(e.bars).to eq(1)
-      expect(e.sources).to eq(bpm: :name, key: :name, beats: :name)
+      expect(e.sources).to eq(bpm: :name, key: :name, beats: :name, one_shot: :name)
+      expect(e.one_shot).to eq(false)
+      expect(e.why).to eq(bpm: 'name 100 (fits 4 beats)', one_shot: "name 'groove'")
     end
 
     it 'prefers chunks over names' do
@@ -146,7 +148,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
     it 'scans folders' do
       dir = tmp_path('lib')
       Dir.mkdir(dir)
-      MB::Sound::Sample::Riff.write(File.join(dir, 'a_90bpm.wav'), Numo::SFloat.zeros(100))
+      MB::Sound::Sample::Riff.write(File.join(dir, 'a_90bpm.wav'), Numo::SFloat.zeros(48000 * 8 / 3)) # 4 beats at 90
       MB::Sound::Sample::Riff.write(File.join(dir, 'b.wav'), Numo::SFloat.zeros(100), acid: { tempo: 120.0, beats: 1 })
       File.write(File.join(dir, 'notes.txt'), 'x')
       expect(info.scan(dir).map { |e| [File.basename(e.path), e.bpm] }).to eq([['a_90bpm.wav', 90.0], ['b.wav', 120.0]])
@@ -166,10 +168,11 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(s.bars).to eq(2)
       expect(s.meter).to eq([4, 4])
       expect(s.root).to eq(57)
-      expect(s.loop_points).to eq([109.0, 43537.0])
+      expect(s.loop_points).to eq([0.0, 48000.0]) # ACID loops loop the whole file, whatever smpl says
       expect(s.loop_mode).to eq(:forward)
+      expect(s.meta[:smpl_loops]).to eq([[109.0, 43537.0, :forward]])
       expect(s.markers.map(&:to_h)).to eq([{ position: 0, label: 'kick' }, { position: 12000, label: 'snare' }])
-      expect(s.meta_source).to include(bpm: :acid, loop: :smpl, markers: :cue)
+      expect(s.meta_source).to include(bpm: :acid, one_shot: :acid, markers: :cue)
 
       # Options win; views keep markers in play order; trims recount beats
       expect(MB::Sound::Sample[path, bpm: 120].bpm).to eq(120.0)
@@ -348,6 +351,91 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(l.sample(1).bpm).to eq(120.0)
       expect(Dir.glob(File.join(dir, '**', '*')).to_h { |f| [f, File.mtime(f)] }).to eq(before)
       expect(MB::Sound.loops(tmp_path('empty_dir').tap { |d| Dir.mkdir(d) }).to_s).to start_with('No loop files')
+    end
+  end
+
+  describe 'loop or one-shot, and name tempos that fit' do
+    # Files of +secs+ seconds of noise (or +data+) under a fresh folder
+    def file(name, secs = nil, data: nil, **chunks)
+      path = File.join(@dir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      data ||= Numo::SFloat.new((48000 * secs).round).rand(-0.1, 0.1)
+      MB::Sound::Sample::Riff.write(path, data, **chunks)
+    end
+
+    before { @dir = tmp_path('lib') }
+
+    def beats(n, bpm) = n * 60.0 / bpm
+
+    it 'takes a name tempo only when the length fits whole beats' do
+      e = info.read(file('funk 98bpm.wav', beats(8, 98)))
+      expect([e.bpm, e.beats, e.one_shot, e.why[:bpm]]).to eq([98.0, 8, false, 'name 98 (fits 8 beats)'])
+      e = info.read(file('funk 98bpm 2.wav', 3.3))
+      expect([e.bpm, e.one_shot, e.why[:bpm]]).to eq([nil, nil, 'name 98 (no fit to 3.300 s)'])
+      e = info.read(file('pad 120.wav', beats(16, 120) + 0.004)) # a padded end of 4 ms
+      expect([e.bpm, e.beats]).to eq([120.0, 16])
+      e = info.read(file('pad 120 b.wav', beats(16, 120) + 0.03))
+      expect(e.bpm).to be_nil
+    end
+
+    it 'tries double and half time and picks the best fit among the numbers' do
+      e = info.read(file('dnb 87.wav', beats(3, 174)))
+      expect([e.bpm, e.beats, e.why[:bpm]]).to eq([174.0, 3, 'name 87 as 174 (double time, fits 3 beats)'])
+      e = info.read(file('take 2 of 3 92 99.wav', beats(4, 99)))
+      expect([e.bpm, e.beats]).to eq([99.0, 4])
+      e = info.read(file('Funk 98 BPM/bass 3.wav', beats(8, 98)))
+      expect([e.bpm, e.why[:bpm]]).to eq([98.0, 'name 98 (fits 8 beats)'])
+    end
+
+    it 'reads loop and one-shot words, the file name before its folders' do
+      expect(info.read(file('Kick 100.wav', 0.6)).then { |e| [e.one_shot, e.bpm, e.why[:one_shot]] }).to eq([true, nil, "name 'kick'"])
+      expect(info.read(file('KickLoop 100.wav', beats(4, 100))).then { |e| [e.one_shot, e.bpm] }).to eq([false, 100.0])
+      expect(info.read(file('One Shots/thing.wav', 1.2)).then { |e| [e.one_shot, e.why[:one_shot]] }).to eq([true, "folder 'oneshot'"])
+      expect(info.read(file('One Shots/Loop 3 92.wav', beats(4, 92))).then { |e| [e.one_shot, e.bpm] }).to eq([false, 92.0])
+      expect(info.read(file('Loops/blip.wav', 0.5)).then { |e| [e.one_shot, e.why[:one_shot]] }).to eq([true, 'short (0.50 s)'])
+    end
+
+    it 'calls short files one-shots unless a tempo fits' do
+      expect(info.read(file('blip.wav', 0.5)).one_shot).to eq(true)
+      expect(info.read(file('tick.wav', 0.2)).then { |e| [e.one_shot, e.why[:one_shot]] }).to eq([true, '0.20 s'])
+      expect(info.read(file('blip 120.wav', 0.5)).then { |e| [e.one_shot, e.bpm, e.beats] }).to eq([false, 120.0, 1])
+      expect(info.read(file('pad.wav', 2.0)).one_shot).to be_nil
+    end
+
+    it 'lets ACID flags win and keeps smpl loops for non-ACID files' do
+      e = info.read(file('kick loop.wav', 0.4, acid: { one_shot: true }))
+      expect([e.one_shot, e.bpm]).to eq([true, nil])
+      e = info.read(file('crash 120.wav', beats(4, 120), acid: { tempo: 120.0, beats: 4 }, smpl: { loops: [[100, 20000]] }))
+      expect([e.one_shot, e.loop, e.smpl_loops]).to eq([false, nil, [[100, 20000, :forward]]])
+      s = MB::Sound::Sample[file('piano c3.wav', 1.0, smpl: { unity_note: 48, loops: [[100, 20000, :ping_pong]] })]
+      expect([s.loop_points, s.loop_mode, s.root]).to eq([[100.0, 20000.0], :ping_pong, 48.0])
+      expect(s.meta[:smpl_loops]).to eq([[100.0, 20000.0, :ping_pong]])
+    end
+
+    it 'loops loops and calls one hit decaying to silence a one-shot' do
+      s = MB::Sound::Sample[file('groove 100.wav', beats(4, 100))]
+      expect([s.loop_points, s.loop_mode, s.bpm]).to eq([[0.0, 115200.0], :forward, 100.0])
+
+      t = Numo::DFloat.new(96000).seq / 48000
+      hit = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 180) * Numo::NMath.exp(-t * 8) * 0.8)
+      s = MB::Sound::Sample[file('boom 120.wav', data: hit)] # 2 s = 4 beats at 120, but one decaying hit
+      expect([s.one_shot?, s.bpm, s.meta_source[:one_shot], s.meta[:why][:one_shot]]).to eq([true, nil, :decay, 'one hit decaying to silence'])
+      expect(s.meta[:why][:bpm]).to eq('name 120 (fits 4 beats); dropped: a one-shot')
+
+      drums = MB::Sound.bounce(1.bar, bpm: 120) { MB::Sound.tr808(MB::Sound.grid(16, kick: 'X...X...X...X...', hat: 'x.x.x.x.x.x.x.x.')) }
+      s = MB::Sound::Sample[file('drums 120.wav', data: drums.data(0))]
+      expect([s.one_shot?, s.bpm, s.loop_mode]).to eq([false, 120.0, :forward])
+    end
+
+    it 'shows kind and why in loops()' do
+      file('Funk 98 BPM/Am groove.wav', beats(8, 98))
+      file('Kick 100.wav', 0.6)
+      file('odd 98bpm.wav', 3.3)
+      text = MB::Sound.loops(@dir).to_s
+      expect(text.lines[1]).to match(/kind +why/)
+      expect(text).to match(/Am groove\.wav +98 +8 +Am +loop +name 98 \(fits 8 beats\); loop: name 'groove'/)
+      expect(text).to match(/Kick 100\.wav +- +- +- +one-shot +one-shot: name 'kick'/)
+      expect(text).to match(/odd 98bpm\.wav +- +- +- +- +name 98 \(no fit to 3\.300 s\)/)
     end
   end
 end

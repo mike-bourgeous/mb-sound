@@ -44,6 +44,29 @@ Order: our own tags (`Sample#save`) > ACID/smpl/cue chunks (WAV, and FLAC APPLIC
 - Every stretch now divides `bpm` by the ratio (before loops-1 a stretched bounce kept its old tempo for Durations).
 - `detect_tempo`: `Structure.analyze` on the loop tiled to at least 8 s (the loop repeats seamlessly, so the tracker sees several cycles), rounded so the loop holds whole beats when within 5%; the analysis is cached per audio and region.
 
+## Loop or one-shot, and name tempos that fit (round 2, maintainer 2026-10-15)
+
+Maintainer: bare numbers in names "should check that the length of the file plausibly matches the tempo, and default to one-shot below a certain length"; "I don't think ACID loops ever loop just a subset."
+
+- **Name tempos must fit** (`LoopInfo.fit_tempo`): every tempo in the file name and up to 3 folders (numbers next to "bpm", else every bare 60-200 number), and each one's double and half (double/half-time names), counts only if the length is a whole number k ≥ 1 of its beats within max(5 ms, 1.5% of a beat) (a trimmed tail or padded end of a few ms still fits).  Best score wins: the fit error over the tolerance, +0.75 for double/half time, +0.5 unless k is 1/2/4/8/16/32/64 or whole bars, +0.25 for bare numbers, +0.1 per folder level up.  The reason is kept in words (`entry.why[:bpm]`, `sample.meta[:why][:bpm]`): "name 98 (fits 8 beats)", "name 87 as 174 (double time, fits 3 beats)", "name 98 (no fit to 3.300 s)" (no tempo then; `detect: true` still works).  Without a known length (listing an mp3) the first explicit tempo, or the only bare number, counts unchecked ("length unknown"); `Sample.from_file` passes the decoded length.  ACID and tag tempos are not checked.
+- **Loop or one-shot** (`LoopInfo.classify`, `entry.one_shot` true/false/nil, `sources[:one_shot]`, `why[:one_shot]`), first rule that applies:
+  1. ACID's one-shot flag, always.
+  2. A `smpl` loop (non-ACID files): a loop at those points.
+  3. A word in the nearest name that has one (file name, then folders): loop words (loop, groove, break, beat, pattern, phrase, riff, top, fill, plurals) win over one-shot words (kick, snare, clap, rim, tom, crash, cymbal, cowbell, hit, shot, "one shot", stab, fx, sfx, impact, zap) in the same name, so "Kick Loop" is a loop and "One Shots/Loop 3.wav" a loop; a folder's loop word doesn't make a file shorter than `SHORT` a loop ("Loops/blip.wav").
+  4. Shorter than `TINY` (0.25 s, one beat at 240 BPM): a one-shot.
+  5. A name tempo that fits: a loop at that tempo.
+  6. Shorter than `SHORT` (0.75 s, one beat at 80 BPM, the slowest common loop tempo: a sound shorter than that with no fitting tempo is a hit): a one-shot.
+  7. In `Sample.from_file` only (it has the audio), files rules 1-4 didn't decide and rule 5 called loops: one hit decaying to silence is a one-shot (at most one onset, within 10 ms of the start, and the last tenth 30 dB below the loudest 10 ms; `Sample.decays?`).
+  One-shots keep no name tempo (the reason says "dropped: a one-shot").  Loops play `:forward` over the whole file unless a `smpl` loop applies; **ACID loops always loop the whole file**, keeping any `smpl` loops only as metadata (`sample.meta[:smpl_loops]`); smpl loops still apply to non-ACID files (sampler instruments).
+- `loops()` shows `kind` (loop, one-shot, -) and `why` (`Entry#reason`).  `LoopInfo.scan` ignores folder names above the listed folder (a library root called "Loops" says nothing about one file).
+
+Ideas not built (cheap signals for later):
+- An "attack-only" check in listings (read the first and last 100 ms of PCM WAVs directly; no ffmpeg) so `loops()` can apply rule 7.
+- A loop seam check: a loop's end flows into its start (small step at the seam, similar spectra) where a one-shot's tail doesn't.
+- Onset spacing: onsets on a regular grid at a fitting tempo (strong evidence of a loop, and a tempo for nameless files without full tempo detection).
+- Folder conventions of big libraries ("Drum Hits", "Loops/Drums", "Construction Kits"), and sample-pack name prefixes ("XX_120_Am_Bass_Loop_01").
+- Key words for one-shots ("bass C2" as root rather than key) and Apple Loops / AIFF `basc` flags.
+
 ## Slice stretch (`Sample::SliceStretch`, `stretch(r, mode: :slice)`)
 
 ACID/REX-style: cut at the hits, start slice i at round(r × its start), copy it exactly.

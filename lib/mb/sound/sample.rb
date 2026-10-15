@@ -134,16 +134,24 @@ module MB
           info = saved_tags(tags)
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
-          meta = info.empty? ? loop_metadata(real.to_s, tags, channels[0]&.length) : {}
+          meta = info.empty? ? loop_metadata(real.to_s, tags, channels) : {}
           new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **meta.merge(info).merge(options))
         end
 
         # Sample options from a file's loop metadata (Sample::LoopInfo),
         # positions scaled from the file's rate to 48 kHz (the rate
-        # MB::Sound.read gives) and kept inside +length+ samples.
-        def loop_metadata(path, tags, length, sample_rate: 48000)
-          e = LoopInfo.read(path)
+        # MB::Sound.read gives) and kept inside the decoded +channels+.
+        # Loops (ACID loops always over the whole file, whatever `smpl`
+        # says; files LoopInfo calls loops) loop :forward over the whole
+        # file unless a `smpl` loop applies; one-shots keep no name tempo.
+        # Files LoopInfo couldn't call (or called loops only from a
+        # fitting name tempo) are one-shots when they decay after one hit
+        # (.decays?).
+        def loop_metadata(path, tags, channels, sample_rate: 48000)
+          length = channels[0]&.length
+          e = LoopInfo.read(path, seconds: length && length.to_f / sample_rate)
           src = e.sources.dup
+          why = e.why.dup
           unless e.bpm && e.key
             f = { bpm: e.bpm, key: e.key }
             s2 = {}
@@ -151,19 +159,32 @@ module MB
             e = e.with(bpm: f[:bpm], key: f[:key])
             src.merge!(s2)
           end
+          if length && [nil, :tempo].include?(src[:one_shot]) && decays?(channels)
+            src[:one_shot] = :decay
+            why[:one_shot] = 'one hit decaying to silence'
+            e = e.with(one_shot: true)
+            if src[:bpm] == :name
+              why[:bpm] = "#{why[:bpm]}; dropped: a one-shot"
+              e = e.with(bpm: nil, beats: nil)
+              src.delete(:bpm)
+              src.delete(:beats)
+            end
+          end
+
           k = e.sample_rate && e.sample_rate > 0 ? sample_rate.to_f / e.sample_rate : 1.0
+          scale = ->(pts) { pts.map { |a, b, mode| x = (a * k).round.clamp(0, length - 1); [x.to_f, (b * k).round.clamp(x + 1, length).to_f, mode] } }
           out = { meta_source: src.freeze }
+          out[:meta] = { why: why.freeze, smpl_loops: (length ? scale.(e.smpl_loops) : []).freeze }.freeze
           out[:bpm] = e.bpm if e.bpm
           out[:beats] = e.beats if e.beats
           out[:meter] = e.meter if e.meter
           out[:key] = e.key if e.key
           out[:root] = e.root if e.root
           if e.loop && length
-            a = (e.loop[0] * k).round.clamp(0, length - 1)
-            b = (e.loop[1] * k).round.clamp(a + 1, length)
-            out[:loop] = [a.to_f, b.to_f]
-            out[:loop_mode] = e.loop[2]
-          elsif e.one_shot == false && e.sources[:one_shot] == :acid && length
+            a, b, mode = scale.([e.loop])[0]
+            out[:loop] = [a, b]
+            out[:loop_mode] = mode
+          elsif e.one_shot == false && length
             out[:loop] = [0.0, length.to_f]
             out[:loop_mode] = :forward
           end
@@ -174,6 +195,27 @@ module MB
         rescue SystemCallError, IOError, ArgumentError
           {}
         end
+
+        # The tail of a one-shot: true if +channels+ hold one hit at the
+        # start (at most one onset, within 10 ms of the start) whose last
+        # tenth is DECAY_DB quieter than its loudest 10 ms.
+        def decays?(channels)
+          mix = Numo::DFloat.cast(channels.sum) / channels.length
+          n = mix.length
+          return false if n < 4800
+          win = 480
+          frames = n / win
+          rms = Numo::NMath.sqrt((mix[0...(frames * win)].reshape(frames, win)**2).mean(axis: 1))
+          peak = rms.max
+          return false unless peak > 0
+          tail = Math.sqrt((mix[(n - n / 10)..]**2).mean)
+          return false unless tail <= peak * 10**(DECAY_DB / 20.0)
+          on = Onsets.detect(Sample.new([mix]))
+          on.length <= 1 && (on.empty? || on[0] < 480)
+        end
+
+        # How much quieter (dB) a one-shot's last tenth is than its peak.
+        DECAY_DB = -30
 
         # A Sample of a sample-mode Wavetable's sound, root, and loop.
         def from_wavetable(table, **options)
@@ -302,6 +344,15 @@ module MB
         @meta_source || {}
       end
 
+      # More loop-file metadata: { why: { bpm: "name 98 (fits 8 beats)",
+      # one_shot: "name 'kick'" } (the reasons in words), smpl_loops:
+      # [[start, stop, mode], ...] (every `smpl` loop in source samples,
+      # also for ACID loops, which ignore them) } (empty when not from a
+      # loop file).
+      def meta
+        @meta || {}
+      end
+
       # A position in a sample (Sample#markers): source samples from the
       # region start in play order, and a label (or nil).
       Marker = Data.define(:position, :label) do
@@ -353,7 +404,7 @@ module MB
       # :one_shot).
       def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
                      bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil,
-                     beats: nil, meter: nil, key: nil, markers: nil, meta_source: nil)
+                     beats: nil, meter: nil, key: nil, markers: nil, meta_source: nil, meta: nil)
         @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
         @start = Integer(start || 0)
         @stop = Integer(stop || @audio.length)
@@ -371,6 +422,7 @@ module MB
         @key = key&.to_sym
         @markers = markers.nil? ? nil : Sample.marker_list(markers)
         @meta_source = meta_source
+        @meta = meta
         @loop_points = loop.nil? ? nil : Sample.loop_points(loop, self)
         @loop_mode = (loop_mode || (@loop_points ? :forward : :one_shot)).to_sym
         raise ArgumentError, "Unknown loop mode #{@loop_mode.inspect} (#{LOOP_MODES.join(', ')})" unless LOOP_MODES.include?(@loop_mode)
@@ -527,7 +579,7 @@ module MB
           root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
           reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
           interpolation: @interpolation, mips: @mips, audio: @audio, lineage: @lineage,
-          beats: @beats, meter: @meter, key: @key, markers: @markers, meta_source: @meta_source,
+          beats: @beats, meter: @meter, key: @key, markers: @markers, meta_source: @meta_source, meta: @meta,
         }
         Sample.new(nil, **kw.merge(changes))
       end
@@ -1102,7 +1154,7 @@ module MB
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
           fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
           interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
-          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, meta_source: @meta_source
+          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, meta_source: @meta_source, meta: @meta
         )
       end
 

@@ -17,13 +17,17 @@ module MB
         # +bpm+ (Float), +beats+ (Integer when the file says so, else a
         # Float estimate from bpm and length), +meter+ ([numerator,
         # denominator]), +key+ (a Symbol like :Am, :"F#", :Eb), +root+ (a
-        # MIDI note number, Float), +one_shot+ (true/false from ACID),
-        # +loop+ ([start, stop, mode] frames, from `smpl`), +markers+
-        # ([[frame, label or nil], ...] from cue points), +seconds+,
-        # +sample_rate+, +format+ (:wav, :flac, :aiff, or :other), and
-        # +sources+ ({ bpm: :acid | :tags | :name, key: :name, ... } saying
-        # where each field came from).
-        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :markers, :seconds, :sample_rate, :sources) do
+        # MIDI note number, Float), +one_shot+ (true for one-shots, false
+        # for loops, nil if nothing says; see .classify), +loop+ ([start,
+        # stop, mode] frames, from `smpl`, never for ACID loops, which loop
+        # the whole file), +smpl_loops+ (every `smpl` loop, as metadata),
+        # +markers+ ([[frame, label or nil], ...] from cue points),
+        # +seconds+, +sample_rate+, +format+ (:wav, :flac, :aiff, or
+        # :other), +sources+ ({ bpm: :acid | :tags | :name, one_shot: :acid
+        # | :smpl | :name | :length | :tempo, ... } saying where each field
+        # came from), and +why+ ({ bpm: "name 98 (fits 8 beats)", one_shot:
+        # "name 'kick'" } in words, for listings).
+        Entry = Data.define(:path, :format, :bpm, :beats, :meter, :key, :root, :one_shot, :loop, :smpl_loops, :markers, :seconds, :sample_rate, :sources, :why) do
           # +beats+ / beats per bar (the meter's numerator, else 4).
           def bars
             return nil unless beats
@@ -40,10 +44,21 @@ module MB
           def to_s
             parts = []
             parts << "#{bpm == bpm.round ? bpm.round : bpm.round(2)} BPM" if bpm
-            parts << "#{beats.is_a?(Integer) ? beats : format('~%.1f', beats)} beats" if beats
+            parts << "#{beats.is_a?(Integer) ? beats : Kernel.format('~%.1f', beats)} beats" if beats
             parts << key.to_s if key
             parts << 'one-shot' if one_shot
             "#{File.basename(path.to_s)}: #{parts.empty? ? 'no loop info' : parts.join(', ')}"
+          end
+
+          # Why the tempo and loop/one-shot call are what they are, in a few
+          # words (the listing's "why" column), e.g. "acid", "name 98 (fits 8
+          # beats)", "one-shot: name 'kick'".
+          def reason
+            parts = []
+            parts << (why[:bpm] || sources[:bpm]&.to_s) if bpm || why[:bpm]
+            kind = why[:one_shot] || sources[:one_shot]&.to_s
+            parts << "#{one_shot ? 'one-shot' : 'loop'}: #{kind}" if kind && !one_shot.nil? && sources[:one_shot] != :tempo
+            parts.compact.join('; ')
           end
         end
 
@@ -58,6 +73,36 @@ module MB
         # fraction of a whole number.
         BEAT_TOLERANCE = 0.02
 
+        # A name-derived tempo counts only when the file's length is a
+        # whole number of its beats within this many seconds, or this
+        # fraction of a beat, whichever is larger (a trimmed tail or a
+        # padded end of a few ms still fits).
+        FIT_SECONDS = 0.005
+        FIT_BEAT = 0.015
+
+        # Beat counts that read as a loop length (1/2/4/8/16 bars of 4/4 and
+        # the halves; any whole number of bars fits too, a bit less well).
+        NICE_BEATS = [1, 2, 4, 8, 16, 32, 64].freeze
+
+        # Files shorter than this (seconds) are one-shots unless ACID, smpl,
+        # a loop word, or a fitting name tempo says otherwise: one beat at 80
+        # BPM, the slowest common loop tempo, so a sound shorter than that
+        # with no tempo that fits is a hit, not a groove.
+        SHORT = 0.75
+
+        # Files shorter than this are always one-shots unless ACID or smpl
+        # says otherwise: one beat at 240 BPM.
+        TINY = 0.25
+
+        # Name words that say one-shot or loop (a loop word wins in the same
+        # name: "Kick Loop"; the file name decides before its folders, so
+        # "One Shots/Loop 3.wav" is a loop).
+        ONE_SHOT_WORDS = %w[
+          oneshot oneshots kick kicks kik bd snare snares snr sd clap claps clp rim rimshot tom toms cowbell crash cymbal
+          hit hits shot shots stab stabs fx sfx impact impacts zap
+        ].freeze
+        LOOP_WORDS = %w[loop loops looped groove grooves break breaks breakbeat breakbeats beat beats pattern patterns phrase riff riffs top tops fill fills].freeze
+
         # Extensions read as sound files by LoopInfo.scan.
         EXTENSIONS = %w[.wav .wave .flac .aif .aiff .aifc .mp3 .ogg .m4a].freeze
 
@@ -65,8 +110,11 @@ module MB
 
         # The Entry of the file at +path+ (no audio is decoded).  Chunks
         # first, then tags, then the file and folder names (up to
-        # +folders+ levels).
-        def read(path, folders: 3)
+        # +folders+ levels; name tempos only when the length fits, see
+        # .fit_tempo), then .classify's loop/one-shot call.  +seconds+
+        # gives the length when the caller knows it (Sample.from_file, for
+        # formats whose headers aren't read).
+        def read(path, folders: 3, seconds: nil, root: nil)
           path = path.to_s
           ext = File.extname(path).downcase
           f = {}
@@ -84,12 +132,14 @@ module MB
             from_aiff(path, f, sources)
           end
 
-          named = from_name(path, folders: folders)
-          named.each do |k, v|
-            next if f.key?(k)
-            f[k] = v
-            sources[k] = :name
+          f[:seconds] = seconds.to_f if seconds
+          why = {}
+          names = names_of(path, folders: folders, root: root)
+          if !f[:key] && (k = names.lazy.map { |n| parse_name(n)[:key] }.find(&:itself))
+            f[:key] = k
+            sources[:key] = :name
           end
+          classify(names, f, sources, why)
 
           if f[:bpm] && f[:seconds] && !f[:beats]
             b = f[:seconds] * f[:bpm] / 60.0
@@ -99,9 +149,140 @@ module MB
 
           Entry.new(
             path: path, format: format, bpm: f[:bpm], beats: f[:beats], meter: f[:meter], key: f[:key], root: f[:root],
-            one_shot: f[:one_shot], loop: f[:loop], markers: (f[:markers] || []).freeze, seconds: f[:seconds],
-            sample_rate: f[:sample_rate], sources: sources.freeze
+            one_shot: f[:one_shot], loop: f[:loop], smpl_loops: (f[:smpl_loops] || []).freeze, markers: (f[:markers] || []).freeze,
+            seconds: f[:seconds], sample_rate: f[:sample_rate], sources: sources.freeze, why: why.freeze
           )
+        end
+
+        # The name tempo and the loop/one-shot call for +f+ (fields so far)
+        # from +names+ (file name first, then folders), in this order:
+        # 1. ACID's one-shot flag (already in +f+), always.
+        # 2. A `smpl` loop: a loop.
+        # 3. A one-shot or loop word in the nearest name that has one.
+        # 4. Shorter than TINY: a one-shot.
+        # 5. A name tempo whose beats fit the length (.fit_tempo): a loop at
+        #    that tempo.  One-shots keep no name tempo.
+        # 6. Shorter than SHORT: a one-shot.
+        # Otherwise nil.  Writes +f+, +sources+, and +why+.
+        def classify(names, f, sources, why)
+          secs = f[:seconds]
+          unless sources[:one_shot]
+            if f[:loop]
+              set_kind(f, sources, why, false, :smpl, 'smpl loop')
+            elsif (kind = names.each_with_index.lazy.map { |n, i| (k = name_kind(n)) && [*k, i] }.find(&:itself)) &&
+                  !(kind[0] == :loop && kind[2] > 0 && secs && secs < SHORT) # a short file in a "Loops" folder
+              where = kind[2] == 0 ? 'name' : 'folder'
+              set_kind(f, sources, why, kind[0] == :one_shot, :name, "#{where} '#{kind[1]}'")
+            elsif secs && secs < TINY
+              set_kind(f, sources, why, true, :length, format('%.2f s', secs))
+            end
+          end
+
+          unless f[:bpm] || f[:one_shot]
+            fit = fit_tempo(names, secs, f[:meter] ? f[:meter][0] : 4)
+            if fit
+              f[:bpm] = fit[:bpm]
+              sources[:bpm] = :name
+              why[:bpm] = fit[:why]
+              if fit[:beats]
+                f[:beats] = fit[:beats]
+                sources[:beats] = :name
+              end
+              set_kind(f, sources, why, false, :tempo, fit[:why]) if f[:one_shot].nil? && fit[:beats]
+            elsif (c = names.flat_map { |n| name_tempos(n) }.first)
+              why[:bpm] = "name #{num(c[0])} (no fit to #{format('%.3f', secs)} s)" if secs
+            end
+          end
+
+          set_kind(f, sources, why, true, :length, "short (#{format('%.2f', secs)} s)") if f[:one_shot].nil? && secs && secs < SHORT
+        end
+
+        def set_kind(f, sources, why, one_shot, source, reason)
+          f[:one_shot] = one_shot
+          sources[:one_shot] = source
+          why[:one_shot] = reason
+        end
+
+        # The best name tempo for a file +seconds+ long: every tempo in
+        # +names+ (.name_tempos; the file name first) and its double and
+        # half (double- and half-time names), counting only those whose
+        # beats fit the length within FIT_SECONDS or FIT_BEAT of a beat,
+        # preferring the tempo as written, NICE_BEATS or whole bars of
+        # +per_bar+, the closest fit, explicit "bpm" words, and nearer
+        # names.  Returns { bpm:, beats:, why: } or nil.  Without a length
+        # the first explicit tempo (or the only bare number) counts,
+        # unchecked.
+        def fit_tempo(names, seconds, per_bar = 4)
+          cands = names.each_with_index.flat_map { |n, i| name_tempos(n).map { |b, explicit| [b, explicit, i] } }
+          return nil if cands.empty?
+          unless seconds && seconds > 0
+            b, = cands.find { |_, e, _| e } || (cands.length == 1 ? cands[0] : nil)
+            return b && { bpm: b, beats: nil, why: "name #{num(b)} (length unknown)" }
+          end
+
+          best = nil
+          cands.each do |b, explicit, i|
+            [[b, 0, nil], [b * 2, 0.75, 'double time'], [b / 2.0, 0.75, 'half time']].each do |bpm, alt, label|
+              next unless BPM_RANGE.cover?(bpm)
+              beat = 60.0 / bpm
+              k = (seconds / beat).round
+              next if k < 1
+              err = (seconds - k * beat).abs
+              tol = [FIT_SECONDS, FIT_BEAT * beat].max
+              next if err > tol
+              nice = NICE_BEATS.include?(k) || k % per_bar == 0
+              score = err / tol + alt + (nice ? 0 : 0.5) + (explicit ? 0 : 0.25) + 0.1 * i
+              next if best && best[0] <= score
+              lead = label ? " as #{num(bpm)} (#{label}, " : ' ('
+              text = "name #{num(b)}#{lead}fits #{k} beat#{'s' if k != 1})"
+              best = [score, { bpm: bpm.to_f, beats: k, why: text }]
+            end
+          end
+          best&.last
+        end
+
+        def num(x)
+          x == x.round ? x.round.to_s : x.round(2).to_s
+        end
+
+        # The file name (without extension) and up to +folders+ folder
+        # names above it, stopping at +root+ (a listing's folder: names
+        # above what was listed say nothing about one file).
+        def names_of(path, folders: 3, root: nil)
+          names = [File.basename(path.to_s, '.*')]
+          dir = File.dirname(path.to_s)
+          root = root && File.expand_path(root)
+          folders.times do
+            base = File.basename(dir)
+            break if base.empty? || base == '.' || base == '/' || base == dir
+            break if root && !File.expand_path(dir).start_with?("#{root}/")
+            names << base
+            dir = File.dirname(dir)
+          end
+          names
+        end
+
+        # Tempo candidates in a name: [[bpm, explicit], ...], every number
+        # next to a "bpm" word, else every bare 60-200 number.
+        def name_tempos(name)
+          s = name.to_s.unicode_normalize(:nfkc)
+          found = s.scan(/(?<![\d.])(\d{2,3}(?:\.\d+)?)\s*[-_ ]?\s*bpm(?![a-z])/i).flatten +
+            s.scan(/(?<![a-z])bpm\s*[-_ ]?\s*(\d{2,3}(?:\.\d+)?)(?![\d.])/i).flatten
+          found = found.map(&:to_f).select { |v| BPM_RANGE.cover?(v) }.uniq
+          return found.map { |v| [v, true] } unless found.empty?
+          return [] if s =~ /bpm/i
+          s.split(/[\s_\-.,()\[\]{}+]+/).select { |w| w =~ /\A\d{2,3}\z/ && BARE_BPM_RANGE.cover?(w.to_i) }.map { |w| [w.to_f, false] }.uniq
+        end
+
+        # [:one_shot or :loop, the word] from a name's words (LOOP_WORDS
+        # win over ONE_SHOT_WORDS), or nil.
+        def name_kind(name)
+          s = name.to_s.unicode_normalize(:nfkc).gsub(/([a-z])([A-Z])/, '\\1 \\2').downcase.gsub(/one[\s_-]*shots?/, 'oneshot')
+          words = s.split(/[^a-z]+/).reject(&:empty?)
+          w = words.find { |x| LOOP_WORDS.include?(x) }
+          return [:loop, w] if w
+          w = words.find { |x| ONE_SHOT_WORDS.include?(x) }
+          w && [:one_shot, w]
         end
 
         # :wav, :flac, :aiff, or nil from the first bytes of the file.
@@ -145,8 +326,11 @@ module MB
               f[:root] = s.unity_note - s.pitch_fraction
               sources[:root] = :smpl
             end
-            l = s.loops.find { |lp| lp.stop > lp.start && (!info.frames || lp.stop <= info.frames) }
-            if l
+            valid = s.loops.select { |lp| lp.stop > lp.start && (!info.frames || lp.stop <= info.frames) }
+            f[:smpl_loops] = valid.map { |lp| [lp.start, lp.stop, lp.type == :ping_pong ? :ping_pong : :forward].freeze }
+            l = valid.first
+            acid_loop = sources[:one_shot] == :acid && f[:one_shot] == false # ACID loops loop the whole file
+            if l && !acid_loop
               f[:loop] = [l.start, l.stop, l.type == :ping_pong ? :ping_pong : :forward].freeze
               sources[:loop] = :smpl
             end
@@ -286,30 +470,9 @@ module MB
           sign * mant * 2.0**(exp - 16383 - 63)
         end
 
-        # Tempo and key from the file name, then its folders (nearest
-        # first): "98bpm", "98 BPM", "bpm98", a bare 60-200 number when the
-        # name has no "bpm" word; keys as words like Am, F#m, Ebmaj, C#min,
-        # or a bare note letter when the name also gives a tempo.
-        def from_name(path, folders: 3)
-          out = {}
-          names = [File.basename(path.to_s, '.*')]
-          dir = File.dirname(path.to_s)
-          folders.times do
-            base = File.basename(dir)
-            break if base.empty? || base == '.' || base == '/' || base == dir
-            names << base
-            dir = File.dirname(dir)
-          end
-          names.each do |n|
-            parsed = parse_name(n)
-            out[:bpm] ||= parsed[:bpm]
-            out[:key] ||= parsed[:key]
-            break if out[:bpm] && out[:key]
-          end
-          out.compact
-        end
-
-        # The tempo and key words of one name (see .from_name).
+        # The first tempo and the key of one name (keys: see .key_of; a
+        # lone letter only next to a tempo).  LoopInfo.read takes keys
+        # from here and tempos from .fit_tempo.
         def parse_name(name)
           s = name.to_s.unicode_normalize(:nfkc).tr('♯♭', '#b')
           bpm = nil
@@ -385,8 +548,8 @@ module MB
             @entries.fetch(i).sample(**options)
           end
 
-          # A table: index, file (relative to #dir), BPM, beats, key, and
-          # where the tempo came from.
+          # A table: index, file (relative to #dir), BPM, beats, key,
+          # loop or one-shot, and why (Entry#reason).
           def to_s
             return "No loop files in #{@dir}" if @entries.empty?
             rows = @entries.each_with_index.map { |e, i|
@@ -395,12 +558,13 @@ module MB
                 e.bpm ? (e.bpm == e.bpm.round ? e.bpm.round.to_s : format('%.2f', e.bpm)) : '-',
                 e.beats ? (e.beats.is_a?(Integer) ? e.beats.to_s : format('~%.1f', e.beats)) : '-',
                 e.key&.to_s || '-',
-                (e.one_shot ? 'one-shot ' : '') + (e.sources[:bpm]&.to_s || ''),
+                e.one_shot.nil? ? '-' : (e.one_shot ? 'one-shot' : 'loop'),
+                e.reason,
               ]
             }
-            head = ['#', 'file', 'bpm', 'beats', 'key', 'from']
+            head = ['#', 'file', 'bpm', 'beats', 'key', 'kind', 'why']
             widths = head.each_index.map { |c| ([head] + rows).map { |r| r[c].length }.max }
-            line = ->(r) { r.each_with_index.map { |v, c| c == 1 || c == 5 ? v.ljust(widths[c]) : v.rjust(widths[c]) }.join('  ').rstrip }
+            line = ->(r) { r.each_with_index.map { |v, c| c == 1 || c >= 5 ? v.ljust(widths[c]) : v.rjust(widths[c]) }.join('  ').rstrip }
             (["#{@entries.length} loop file#{'s' if @entries.length != 1} in #{@dir}", line.(head)] + rows.map(&line)).join("\n")
           end
 
@@ -432,7 +596,7 @@ module MB
           dir = File.expand_path(dir.to_s)
           raise ArgumentError, "#{dir} is not a directory" unless File.directory?(dir)
           pattern = recursive ? File.join(dir, '**', '*') : File.join(dir, '*')
-          Dir.glob(pattern).select { |p| EXTENSIONS.include?(File.extname(p).downcase) && File.file?(p) }.sort.map { |p| read(p) }
+          Dir.glob(pattern).select { |p| EXTENSIONS.include?(File.extname(p).downcase) && File.file?(p) }.sort.map { |p| read(p, root: dir) }
         end
       end
     end
