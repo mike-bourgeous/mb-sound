@@ -268,6 +268,38 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       r&.close
     end
 
+    it 'waits on a full non-blocking descriptor instead of raising EAGAIN (macOS terminals)' do
+      require 'io/nonblock'
+      g = native.new(200, 60)
+      rng = Random.new(3)
+      # A color per cell, so the frame is several pipe buffers long
+      60.times do |y|
+        200.times do |x|
+          g.text(x, y, '⠿⣿⡇'[rng.rand(3)], fg: [rng.rand(256), rng.rand(256), rng.rand(256)])
+        end
+      end
+      expected = g.frame(nil, :truecolor, row: 1, col: 1)
+      expect(expected.bytesize).to be > 200_000 # several pipe buffers
+
+      r, w = IO.pipe
+      w.nonblock = true
+      reader = Thread.new do
+        out = +''
+        while (chunk = r.read(4096))
+          out << chunk
+          sleep 0.0005
+        end
+        out
+      end
+      n = g.write_frame(w, nil, :truecolor, row: 1, col: 1)
+      w.close
+      bytes = reader.value
+      expect(n).to eq(expected.bytesize)
+      expect(bytes.force_encoding('UTF-8')).to eq(expected)
+    ensure
+      r&.close
+    end
+
     it 'composes every canvas like Canvas.cells + Panel#compose' do
       rng = Random.new(8)
       wave = Numo::DFloat.cast(Array.new(500) { |i| Math.sin(i * 0.05) + rng.rand(-0.2..0.2) })

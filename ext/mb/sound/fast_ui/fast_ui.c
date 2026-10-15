@@ -39,6 +39,7 @@
 #include <ruby/io.h>
 #include <ruby/thread.h>
 #include <errno.h>
+#include <poll.h>
 #include <unistd.h>
 #include "numo/narray.h"
 
@@ -1310,29 +1311,42 @@ struct write_job {
 	struct grid *g, *p;
 	int mode, sync, fd;
 	long row, col;
-	ssize_t written;
+	int encoded;
+	size_t off;
 	int err;
 };
 
+// Encodes the frame (once) and writes it from j->off on.  A non-blocking
+// descriptor (a terminal on macOS) returns EAGAIN when its buffer is full:
+// wait for it to drain with poll() and go on.  An interrupted write or poll
+// returns with err = EINTR so the caller can check Ruby interrupts
+// (Ctrl-C, Thread#kill) and call again, resuming at j->off.
 static void *write_frame_nogvl(void *arg)
 {
 	struct write_job *j = arg;
 	struct outbuf *o = &j->g->out;
-	o->len = 0;
-	encode_frame(j->g, j->p, j->mode, j->row, j->col, j->sync, o);
-	size_t off = 0;
-	while (off < o->len) {
-		ssize_t n = write(j->fd, o->p + off, o->len - off);
+	if (!j->encoded) {
+		o->len = 0;
+		encode_frame(j->g, j->p, j->mode, j->row, j->col, j->sync, o);
+		j->encoded = 1;
+		j->off = 0;
+	}
+	while (j->off < o->len) {
+		ssize_t n = write(j->fd, o->p + j->off, o->len - j->off);
 		if (n < 0) {
-			if (errno == EINTR) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd pfd = { .fd = j->fd, .events = POLLOUT };
+				if (poll(&pfd, 1, -1) < 0 && errno != EAGAIN) {
+					j->err = errno;
+					return NULL;
+				}
 				continue;
 			}
 			j->err = errno;
-			break;
+			return NULL;
 		}
-		off += (size_t)n;
+		j->off += (size_t)n;
 	}
-	j->written = (ssize_t)off;
 	return NULL;
 }
 
@@ -1354,7 +1368,8 @@ static VALUE grid_write_frame(VALUE self, VALUE io, VALUE prev_v, VALUE mode_v, 
 	j.col = NUM2LONG(col_v);
 	j.sync = RTEST(sync_v);
 	j.fd = rb_io_descriptor(io);
-	j.written = 0;
+	j.encoded = 0;
+	j.off = 0;
 	j.err = 0;
 	// The worst case: a cursor move per cell plus SGR codes, so the
 	// buffer never reallocates without the GVL
@@ -1363,11 +1378,20 @@ static VALUE grid_write_frame(VALUE self, VALUE io, VALUE prev_v, VALUE mode_v, 
 		g->sgr = sgr_cache_new();
 	}
 	rb_io_flush(io);
-	rb_thread_call_without_gvl(write_frame_nogvl, &j, RUBY_UBF_IO, NULL);
+	for (;;) {
+		j.err = 0;
+		rb_thread_call_without_gvl(write_frame_nogvl, &j, RUBY_UBF_IO, NULL);
+		if (j.err == EINTR) {
+			// Raises if Ruby has a pending interrupt; otherwise resume
+			rb_thread_check_ints();
+			continue;
+		}
+		break;
+	}
 	if (j.err) {
 		rb_syserr_fail(j.err, "write_frame");
 	}
-	return LONG2NUM((long)j.written);
+	return LONG2NUM((long)j.off);
 }
 
 void Init_fast_ui(void)
