@@ -23,14 +23,16 @@
 #
 # Usage:
 #     bin/songs/wind_chimes.rb                    # plays live
-#     bin/songs/wind_chimes.rb chimes.flac        # renders 24 bars (-f to overwrite)
-#     bin/songs/wind_chimes.rb -s 1 chimes.flac   # another wind (random seed; 7, the maintainer's pick, by default)
-#     bin/songs/wind_chimes.rb -G 2 chimes.flac   # gustier (chimes struck twice as often, a darker roar under the wind)
+#     bin/songs/wind_chimes.rb chimes.flac        # renders 24 bars (-f to overwrite): seed 1, gusty 2
+#     bin/songs/wind_chimes.rb -s 7 chimes.flac   # another wind (random seed; 1 by default)
+#     bin/songs/wind_chimes.rb -G 1 chimes.flac   # calmer (gusty 2 by default: chimes struck twice as often
+#                                                 # as at 1, with a darker roar under the wind)
+#   (The maintainer's Bench pick, 2026-10-15: seed 1 at -G 2.)
 #     bin/songs/wind_chimes.rb --stems stems/ chimes.flac   # with each part alone
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/wind_chimes.rb'
-#     wind_chimes                                 # plays the parts as players (rain, wind, chimes, bowls, wood)
+#     wind_chimes                                 # plays the parts as players (rain, wind, chimes, bowls, wood; gusty: 2)
 #
 # Snippets to try in bin/sound.rb:
 #     # One chime in the wind
@@ -119,7 +121,7 @@ module MB::Sound
 
   # The piece's parts as named stereo graphs (all following one wind, a
   # node they share, so they start together and play to the end).
-  def self.wind_chimes_parts(gusty: 1.0)
+  def self.wind_chimes_parts(gusty: 2.0)
     gust = drift(0.12, range: 0..1, walk: 0.35)
     wind = gust * wind_chimes_section(1, 23, fade: 2) # the wind dies over bars 21-22
 
@@ -133,7 +135,7 @@ module MB::Sound
   end
 
   # Plays the piece on the current session.
-  def self.wind_chimes(gusty: 1.0)
+  def self.wind_chimes(gusty: 2.0)
     bpm 60
     wind_chimes_parts(gusty: gusty).each { |name, part| bg name, part, fade: 0 }
   end
@@ -141,8 +143,8 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: 24,
-      seed: [7, 'random seed (each seed is another wind; 7, the maintainer\'s pick, by default)', '-s', Integer, 0..1_000_000],
-      gusty: [1.0, 'how often the wind strikes the chimes (scale)', '-G', Float, 0.1..5],
+      seed: [1, 'random seed (each seed is another wind)', '-s', Integer, 0..1_000_000],
+      gusty: [2.0, 'how often the wind strikes the chimes (scale; above 1 adds a roar)', '-G', Float, 0.1..5],
     ) { |p|
       MB::Sound.seed(p.seed)
       wind_chimes(gusty: p.gusty)
