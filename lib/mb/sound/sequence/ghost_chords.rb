@@ -56,7 +56,7 @@ module MB
           raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
           raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
 
-          span = per.nil? ? Sequence.transport.bar_length.to_r : Duration.whole_notes(per)
+          span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)
           short = passing.nil? ? nil : Duration.whole_notes(passing)
           sc = Scale[scale, root]
           sc = Clip.harmonic_scale(sc) if harmonic

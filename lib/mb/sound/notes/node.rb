@@ -79,6 +79,24 @@ module MB
           @frames_read = 0
           @grid_end = nil
           @grid_generation = nil
+
+          # Set later (here so every node has one instance variable layout;
+          # see GraphNode::IvarPreset)
+          @smooth_follow = nil
+          @smooth_generation = nil
+          @step_count = nil
+          @step_rate = nil
+          @rate_r = nil
+          @step = nil
+          @steady_value = nil
+          @steady = nil
+          @slots = nil
+          @first_fill = nil
+          @uniform = nil
+          @render_offset = nil
+          @plan_jumps = nil
+          @plan_lists = nil
+          @plan_recorder = nil
         end
 
         # Returns +count+ samples (a buffer reused between calls), or nil if

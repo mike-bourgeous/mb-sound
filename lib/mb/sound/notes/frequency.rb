@@ -31,6 +31,8 @@ module MB
           initial ||= number.respond_to?(:value) ? number.value : MB::Sound::Notes::DEFAULT_NUMBER
           @value = MB::Sound.tuning.frequency_of(initial + @constant)
           @buf = nil
+          @steady_key = nil
+          @steady = nil
           @node_type_name = 'Notes Frequency'
         end
 

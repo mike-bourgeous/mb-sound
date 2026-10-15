@@ -35,7 +35,8 @@ module MB
     # (see #add).  Looping clips play in phase with the timeline, so a clip
     # shared by several graphs plays the same notes in each, whenever they
     # started.  The timeline only advances while something is playing, so it
-    # pauses when the last graph stops (see Sequence::Transport#seek).
+    # pauses when the last graph stops (see Sequence::Transport#seek), except
+    # in offline renders waiting for scheduled blocks (see #advance_idle=).
     #
     # Each graph plays under a name: a Symbol given to #add, or the lowest
     # unused Integer.  Adding a graph under a name that is already playing
@@ -288,6 +289,7 @@ module MB
         @channels = channels
         @buffer_size = buffer_size
         @realtime = realtime
+        @advance_idle = false
         @raise_errors = raise_errors
 
         @players = {}
@@ -312,6 +314,25 @@ module MB
         init_buses
         @names = Names.new
         @arrangement = nil
+
+        # Set later, in varying orders (here so every Session has one
+        # instance variable layout; see GraphNode::IvarPreset)
+        @exact_lanes = nil
+        @stems = nil
+        @master_block = nil
+        @master_playing = nil
+        @markers = nil
+        @epoch = nil
+        @replay_epoch = nil
+        @at_exit_registered = nil
+        @span_players = nil
+        @span_graphs = nil
+        @player_frame = nil
+        @asleep_ids = nil
+        @asleep_graphs = nil
+        @bus_span_count = nil
+        @bus_span_buses = nil
+        @load = nil
       end
 
       # The Session's top-level names (see Names).
@@ -602,6 +623,36 @@ module MB
         @scheduler.due?
       end
 
+      # Returns true if something scheduled is still to come, whatever its
+      # time: a scheduled block waiting to run (any, or only one-shot blocks
+      # if +:repeating+ is false; with +:before+, only blocks timed before
+      # that timeline position), a block that ran ahead of its time (see
+      # #lookahead) whose time hasn't come, or a queued change or tempo
+      # change (with +:before+, only those timed before it).  PlaybackMethods#render keeps rendering while nothing plays
+      # as long as this is true.
+      def schedule_waiting?(repeating: true, before: nil)
+        @render_lock.synchronize {
+          @changes.any? { |c| before.nil? || c.time.nil? || c.time < before } ||
+            @scheduler.waiting?(@transport.position, repeating: repeating, before: before)
+        }
+      end
+
+      # True if this offline session's timeline keeps moving while nothing
+      # is playing (see #advance_idle=).
+      def advance_idle?
+        @advance_idle
+      end
+
+      # If true, an offline Session (+realtime: false+) keeps its timeline
+      # moving while nothing is playing, so scheduled blocks still come due
+      # (set by PlaybackMethods#render while it waits for blocks scheduled
+      # ahead, rendering silence until they start something).  Realtime
+      # sessions always pause while idle; setting it on one raises.
+      def advance_idle=(value)
+        raise ArgumentError, 'Only offline (realtime: false) sessions can advance while idle' if value && @realtime
+        @advance_idle = value ? true : false
+      end
+
       # How far ahead of their time scheduled blocks (song form sections,
       # at_bar blocks) run in a realtime session, so graphs they build are
       # ready when their changes land: :auto (the default; half a bar, more
@@ -750,7 +801,7 @@ module MB
       # Renders +count+ frames from every player, mixes them, runs the mix
       # through the master effects (see #master), writes it to the output
       # (with the monitor trim, see MonitorTrim), and advances the timeline
-      # (unless idle).  Returns the mix (an Array of Numo::SFloat, one per
+      # (unless idle; see #advance_idle=).  Returns the mix (an Array of Numo::SFloat, one per
       # channel) before the monitor trim.
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
@@ -815,7 +866,10 @@ module MB
           @scheduler.seeked(from)
         end
 
-        @scheduler.dispatch(from, to, playing: !idle?)
+        # Offline renders waiting for scheduled blocks keep time while idle
+        # (see #advance_idle=); otherwise the timeline pauses
+        keep_time = @advance_idle
+        @scheduler.dispatch(from, to, playing: keep_time || !idle?)
 
         # MIDI input lands on exact frames before changes (a recording
         # closing in this span needs its events) and graphs read it
@@ -851,14 +905,15 @@ module MB
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
 
-        @transport.advance(to - from) if playing
+        moving = playing || keep_time
+        @transport.advance(to - from) if moving
         # Pre-chain master gain (the default; see #master_gain_post?)
         mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
 
         @frame += count
-        @transport_record = transport_record_for(playing)
+        @transport_record = transport_record_for(moving)
         mix
       ensure
         @knob_frame = nil

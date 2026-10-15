@@ -245,6 +245,7 @@ module MB
           raise ArgumentError, 'min_gain must not be above max_gain' if @min_gain > @max_gain
 
           # A Symbol names a bus or track to read (see BusTap)
+          @sidechain_inputs = nil
           sidechain = BusTap.from(sidechain) if sidechain.is_a?(Symbol)
           if sidechain
             sc = Array(sidechain).flat_map { |n| GraphNode.dynamics_channels(n, 'Sidechains') }
@@ -281,6 +282,8 @@ module MB
           @ended = false
           @flushing = false
           @flushed = 0
+          @plan_curve = nil # (set later; see GraphNode::IvarPreset)
+          @params = nil
           reset_state
 
           super(@inputs.each_with_index.map { |input, idx| Output.new(owner: self, index: idx, input: input) })

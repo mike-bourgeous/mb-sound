@@ -7,8 +7,9 @@ module MB
       # Renders graphs offline into a Sample (resampling, pressing a break):
       # +graphs+ (or the graph the block returns; the block runs inside the
       # render's Session) for +length+ (a Duration like `2.bars`, a Length,
-      # or a plain number of bars) at +bpm+ (the session's tempo by
-      # default) on a private Transport, so the session's tempo never
+      # or a plain number of bars) at +bpm+ (by default the current tempo:
+      # the rendering or scheduling session's, including a tempo a scheduled
+      # block just queued; see Sequence.current_transport) on a private Transport, so the session's tempo never
       # changes.  The Sample is +channels+ wide (1, mono, by default), at
       # 0 dB master gain, exactly +length+ long, with +root+ (a Note; C4)
       # and the tempo kept for Durations (`rec.at(7.n16)`).  Also
@@ -22,8 +23,9 @@ module MB
         raise ArgumentError, 'Give bounce graphs or a block, not both' if block && !graphs.empty?
         raise ArgumentError, 'Give bounce a graph or a block' if graphs.empty? && block.nil?
 
-        bpm = (bpm || Sequence.transport.bpm).to_f
-        transport = Sequence::Transport.new(bpm: bpm, bar_length: Sequence.transport.bar_length)
+        current = Sequence.current_transport
+        bpm = (bpm || current.bpm).to_f
+        transport = Sequence::Transport.new(bpm: bpm, bar_length: current.bar_length)
         length = length.bars if length.is_a?(Numeric)
         frames = Length.samples(length, sample_rate: 48000, transport: transport).round
         raise ArgumentError, "A bounce needs a positive length (got #{length.inspect})" unless frames > 0

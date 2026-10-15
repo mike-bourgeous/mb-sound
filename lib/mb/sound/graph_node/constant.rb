@@ -66,6 +66,17 @@ module MB
           @elapsed_samples = 0.0
 
           @changes = []
+
+          # Set by BufferHelper#setup_buffer and #steady_buffer (here so
+          # every Constant has one instance variable layout; see
+          # GraphNode::IvarPreset)
+          @buflen = nil
+          @bufcomplex = nil
+          @buftemp = nil
+          @bufdouble = nil
+          @bufclass = nil
+          @steady_value = nil
+          @steady = nil
         end
 
         # Prevent @changes or @buf from causing problems due to duplicated

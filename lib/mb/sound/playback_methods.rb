@@ -691,9 +691,23 @@ module MB
       # beginning of a fresh timeline, at the current tempo unless +:bpm+ is
       # given.  Rendering stops after +:bars+ (counted on the timeline, so
       # tempo changes during the render are followed) or +:seconds+, or when
-      # every sound has ended.  Returns the number of seconds rendered.
+      # every sound has ended and no scheduled block is still to come.
+      # Returns the number of seconds rendered.
       #
-      # A +:bars+ render always reaches its end bar (plus the tail, below),
+      # Unlike a live session, whose timeline pauses while nothing plays, a
+      # render keeps time while it waits for scheduled blocks, rendering
+      # silence until they start something: `render('x.flac', bars: 3) {
+      # at_bar(2) { bg :a, a } }` is a bar of silence, then +a+ from bar 2's
+      # exact frame.  Blocks that count are one-shot blocks (#at_bar,
+      # #after) and, with +:bars+ (before the end bar) or +:seconds+,
+      # repeating ones (#every); without either, a render waiting on a block
+      # stops at MAX_RENDER_SECONDS like sounds that never end.  Once
+      # nothing is scheduled, the render ends when every sound has ended
+      # (what the last block started plays out; it is never cut at the
+      # block's time), without padding silence to the end bar.
+      #
+      # A +:bars+ render has no time limit of its own: it ends at its end
+      # bar (plus the tail, below), or earlier when its sounds end as above,
       # however long that takes (a song form that loops back renders until
       # it gets there).  Only renders without +:bars+ or +:seconds+ stop at
       # MAX_RENDER_SECONDS (ten minutes, with a warning) if their sounds
@@ -789,7 +803,8 @@ module MB
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
-        transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
+        current = Sequence.current_transport
+        transport = Sequence::Transport.new(bpm: bpm || current.bpm, bar_length: current.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         session.exact_lanes = exact_lanes
@@ -833,11 +848,23 @@ module MB
           left
         }
 
-        until frames_left.call <= 0 || (session.idle? && !session.schedule_due?)
+        # While nothing plays, the timeline keeps moving (rendering silence)
+        # as long as a scheduled block is still to come: any block before the
+        # end bar, or with seconds:, any block; without either, only one-shot
+        # blocks (a lone `every` would never end), up to the time limit
+        bounded = bars || seconds
+        waiting = -> {
+          session.schedule_due? ||
+            session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
+        }
+        session.advance_idle = true
+        until frames_left.call <= 0 || (session.idle? && !waiting.call)
           count = MB::M.min(buffer_size, frames_left.call)
           session.process_buffer(count)
           frames += count
         end
+        # Tails ring out on a paused timeline, as before
+        session.advance_idle = false
 
         if frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
@@ -849,8 +876,8 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && max_seconds.nil? && !session.idle?
-          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
+        if bars.nil? && seconds.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
         end
 
         frames.to_f / rate

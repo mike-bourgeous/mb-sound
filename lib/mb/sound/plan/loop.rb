@@ -377,6 +377,44 @@ module MB
             @compensated = @rings.find(&:compensated)
             @pitch_ring = @rings.find(&:pitched) || @compensated
             @lowered = nil
+
+            # Set by #lower, #latency, and the pitch tracker (here so every
+            # program has one instance variable layout; see
+            # GraphNode::IvarPreset)
+            @reg = nil
+            @ring_slots = nil
+            @hist_slots = nil
+            @fused_count = nil
+            @fused = nil
+            @lat_hit = nil
+            @lat_record = nil
+            @lat_record_rings = nil
+            @lat_gain = nil
+            @lat_deps = nil
+            @lat_rings = nil
+            @lat_key = nil
+            @lat_value = nil
+            @response_program = nil
+            @uneven_filters = nil
+            @resp_ar = nil
+            @resp_ai = nil
+            @resp_br = nil
+            @resp_bi = nil
+            @resp_ha = nil
+            @resp_hb = nil
+            @svf_coefs = nil
+            @ring_objects = nil
+            @pitch_code = nil
+            @pc_srcs = nil
+            @pc_prev = nil
+            @pc_have = nil
+            @pc_state = nil
+            @pc_outs = nil
+            @pitch_pos = nil
+            @pitch_t = nil
+            @pitch_a = nil
+            @pitch_b = nil
+            @stretch = nil
           end
 
           # True if every op gives exactly what its mirror gives (always: the

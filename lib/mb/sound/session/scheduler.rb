@@ -200,6 +200,8 @@ module MB
           @entries = {}
           @next_id = 0
           @timed_changes = []
+          @ran_ahead = nil
+          @ran_ahead_once = nil
           @mutex = Mutex.new
           @queue = nil
           @thread = nil
@@ -325,6 +327,25 @@ module MB
           @mutex.synchronize { @entries.each_value.any? { |e| e.status == :pending && e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
         end
 
+        # Returns true if a block is still to come at or after timeline
+        # position +position+ (see Session#schedule_waiting?): a block waiting
+        # to run in the current epoch (any, or only one-shot blocks if
+        # +repeating+ is false; with +before+, only blocks timed before that
+        # position), a block that ran ahead of a time still to come (with
+        # the same filters), or a timed change (e.g. a tempo change) still to
+        # apply (before +before+).
+        def waiting?(position, repeating: true, before: nil)
+          @mutex.synchronize {
+            ahead = repeating ? @ran_ahead : @ran_ahead_once
+            (ahead && ahead > position && (before.nil? || ahead < before)) ||
+              @timed_changes.any? { |time, _| before.nil? || time < before } ||
+              @entries.each_value.any? { |e|
+                e.status == :pending && (e.epoch.nil? || e.epoch == @session.epoch) &&
+                  (repeating || e.period.nil?) && (before.nil? || e.time < before)
+              }
+          }
+        end
+
         # The scheduler's panic button (see PlaybackMethods#panic and
         # ScheduleMethods#reset_scheduler): cancels every block except a
         # take's replayed lines (+keep+ owners), including blocks handed to
@@ -404,6 +425,7 @@ module MB
         # the timeline jumps.
         def seeked(from)
           @mutex.synchronize {
+            @ran_ahead = @ran_ahead_once = nil
             @entries.each_value do |e|
               e.time = from + (e.time - from) % e.period if e.period
             end
@@ -429,6 +451,14 @@ module MB
             end
             list
           }
+
+          # The latest time blocks ran ahead for (any, and one-shot only),
+          # for #waiting?
+          due.each do |e, time|
+            next unless time > from
+            @ran_ahead = time if @ran_ahead.nil? || time > @ran_ahead
+            @ran_ahead_once = time if e.period.nil? && (@ran_ahead_once.nil? || time > @ran_ahead_once)
+          end
 
           due.sort_by { |e, time| [time, e.id] }.each do |e, time|
             # Blocks for times still ahead must finish in time; blocks whose

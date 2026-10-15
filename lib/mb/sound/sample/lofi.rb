@@ -236,7 +236,7 @@ module MB
         # wins when it's within 10% of the best, so the period follows
         # glides and doesn't jump between multiples.
         def local_period(x, energy, src, min_lag, max_lag, win, previous)
-          lo, score = match_scores(x, energy, src, src + 1, src + max_lag + 1, win)
+          _lo, score = match_scores(x, energy, src, src + 1, src + max_lag + 1, win)
           return nil if score.nil?
           s = score.to_a
           # (s[i] is lag i + 1)

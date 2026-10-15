@@ -20,6 +20,16 @@ module WarningGuard
 
   HELPER = File.expand_path('../subprocess_warning_helper.rb', __dir__)
 
+  # Added to failures from "reached 8 shape variations" warnings, which
+  # Ruby prints once per process for whichever example happens to trigger
+  # them.
+  SHAPES_HINT = <<~HINT.chomp.prepend("\n")
+    Shape variations: the class sets instance variables in varying orders (lazily, or only in
+    some configurations); set each one in the constructor (nil until used), or declare a
+    GraphNode module's with GraphNode::IvarPreset.declare.  The example named here may only be
+    the first to trigger it in this process.
+  HINT
+
   # The RUBYOPT option that loads the subprocess helper.
   def self.rubyopt
     "-r#{HELPER}"
@@ -51,11 +61,12 @@ module WarningGuard
 
     def message_for(records, intro)
       lines = records.map(&:to_s).tally.map { |text, n| n > 1 ? "  #{text} (#{n} times)" : "  #{text}" }
+      shapes = records.any? { |r| r.category == 'performance' && r.message.include?('shape variations') }
       <<~MSG.chomp
         #{intro}
         #{lines.join("\n")}
         Fix the code, or expect a deliberate warning with `expect { ... }.to output(/.../).to_stderr`
-        (`expect_script_warnings(/.../)` for a script's); see spec/support/warning_guard.rb.
+        (`expect_script_warnings(/.../)` for a script's); see spec/support/warning_guard.rb.#{shapes ? SHAPES_HINT : ''}
       MSG
     end
   end

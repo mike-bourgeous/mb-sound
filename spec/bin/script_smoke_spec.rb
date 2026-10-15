@@ -25,6 +25,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/acid_song.rb' => ['--bars', '0.5', '-F', 'lp4'],
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
+    'bin/songs/critters.rb' => ['--bars', '0.5', '--binaural', '-s', '2'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/drums_909.rb' => ['--bars', '0.5', '-s', '4'],
     'bin/songs/even_more_cowbell.rb' => ['--bars', '0.5', '-F', '2'],
@@ -216,6 +217,21 @@ RSpec.describe('script runner scripts', :smoke) do
         expect(data.length).to eq(2)
         expect(data[0].length).to be >= 48000 * 0.5 # at least half a bar at up to 240 BPM
       end
+    end
+  end
+
+  # One song rendered to its end: half-bar renders never reach end-of-song
+  # cases like one-shot clips ending inside a buffer (fixes-14: drums_808's
+  # crash clip at bar 13 crashed every full render, "trigger has 685
+  # samples, not 800").  About 10 s.
+  describe 'bin/songs/drums_808.rb (full length)' do
+    it 'renders to its end and tail' do
+      outfile = tmp_path('smoke_drums_808_full.flac')
+      text = `bin/songs/drums_808.rb -q -f #{outfile.shellescape} 2>&1`
+      expect($?).to be_success, text
+
+      data = MB::Sound.read(outfile)
+      expect(data[0].length).to be >= (48000 * 60 * 4 * 16 / 112.0).floor # 16 bars at 112 BPM
     end
   end
 end

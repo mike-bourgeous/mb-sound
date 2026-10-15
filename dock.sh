@@ -74,7 +74,12 @@ else
 		mounts+=(-v "$src":"/claude/$dst")
 	done
 
+	# --shm-size: every JACK2 server maps ~40 MB of /dev/shm, and Docker's
+	# default 64 MB holds only one, so a second dummy server (another
+	# session's specs, a benchmark) died with SIGBUS (2026-10-14).  Applies
+	# when the container is created; an existing container keeps its size.
 	docker run --name $APPNAME -it -p 3000:3000 \
+		--shm-size=512m \
 		"${mounts[@]}" \
 		-e CLAUDE_CONFIG_DIR=/claude \
 		$APPNAME /bin/bash

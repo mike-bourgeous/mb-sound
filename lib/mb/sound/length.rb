@@ -147,7 +147,7 @@ module MB
           numeric_value.to_f
         end
 
-        def to_whole_notes(sample_rate: 48000, transport: Sequence.transport)
+        def to_whole_notes(sample_rate: 48000, transport: Sequence.current_transport)
           Sequence::Duration.rational(numeric_value * transport.whole_notes_per_second)
         end
 
@@ -171,7 +171,7 @@ module MB
           numeric_value.to_f
         end
 
-        def to_whole_notes(sample_rate: 48000, transport: Sequence.transport)
+        def to_whole_notes(sample_rate: 48000, transport: Sequence.current_transport)
           Sequence::Duration.rational(to_seconds(sample_rate: sample_rate) * transport.whole_notes_per_second)
         end
 
@@ -190,7 +190,7 @@ module MB
       end
 
       # The length in samples at +sample_rate+ (default protocol method).
-      def to_samples(sample_rate: 48000, transport: Sequence.transport)
+      def to_samples(sample_rate: 48000, transport: Sequence.current_transport)
         to_seconds(sample_rate: sample_rate, transport: transport) * sample_rate
       end
 
@@ -202,7 +202,7 @@ module MB
       # Returns +value+ in seconds: plain numbers are already seconds; lengths
       # convert at +sample_rate+ and +transport+'s tempo.  Raises an error for
       # graph nodes.
-      def self.seconds(value, sample_rate: 48000, transport: Sequence.transport)
+      def self.seconds(value, sample_rate: 48000, transport: Sequence.current_transport)
         case value
         when Length then value.to_seconds(sample_rate: sample_rate, transport: transport)
         when Numeric then value
@@ -212,7 +212,7 @@ module MB
 
       # Returns +value+ as a number of samples at +sample_rate+: plain numbers
       # are seconds.
-      def self.samples(value, sample_rate: 48000, transport: Sequence.transport)
+      def self.samples(value, sample_rate: 48000, transport: Sequence.current_transport)
         case value
         when Length then value.to_samples(sample_rate: sample_rate, transport: transport)
         when Numeric then value * sample_rate
@@ -362,7 +362,7 @@ module MB
 
         # This many of +attack+ (seconds, a Length, or a Duration) as a
         # Length::Seconds.
-        def of(attack, transport: Sequence.transport)
+        def of(attack, transport: Sequence.current_transport)
           t = Length.seconds(attack, transport: transport).to_f
           Seconds.new(@fraction == 1 ? t : t * @fraction)
         end

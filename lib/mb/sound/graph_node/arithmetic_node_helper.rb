@@ -9,6 +9,9 @@ module MB
         # TODO: should there be an actual standalone ArithmeticNode?
         # TODO: asking users to set instance variables isn't a great API
 
+        # Set on first use (see IvarPreset).
+        IvarPreset.declare(self, :@arithmetic_sampled, :@arithmetic_views, :@truncated)
+
         # Implements most of the #sample method by retrieving buffers from each
         # of the sources, skipping empty or nil buffers, padding or truncating
         # as necessary, and stopping when defined by +:stop_early+.

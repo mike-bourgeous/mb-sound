@@ -105,6 +105,10 @@ module MB
           @legato = !!legato
           @gm = time == :gm
           @time_node = nil
+          @gm_time = nil
+          @gm_raw = nil
+          @gm_on = nil
+          @seconds = nil
 
           case time
           when :gm
@@ -131,6 +135,11 @@ module MB
           @value = @number
           @gliding = false
           @had_note = false
+          @time_buf = nil
+          @segment_start = nil
+          @position = nil
+          @start = nil
+          @length = nil
           @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curve}" if @curve}"
         end
 

@@ -21,8 +21,8 @@
 #    vowels, two bars each), bars 13-21 Paulstretch (`mode: :paul`: the
 #    phrase coming back dissolved into a wash, its resolving D carried
 #    over the drone's D into the outro).
-# 4. "spray" (bars 9-18): the pad chord (Dm7) played as tempo-locked
-#    regular grains (four per beat, `jitter: 0`) sprayed over the octave
+# 4. "spray" (bars 9-18): the pad chord (Dm7) played as regular grains
+#    (8 a second, `jitter: 0`) sprayed over the octave
 #    and twelfth (`pitch: [0, 12, 19]`), the position sweeping through the
 #    chord once every 4 bars, moving through i - iv - v - i (Dm7, Gm7 at
 #    +5, Am7 at +7, Dm7) two bars each.
@@ -125,11 +125,13 @@ module MB::Sound
     sung_pv = voice.stretch(8, mode: :spectral).node.pan(-0.2) * -1.db
     sung_paul = voice.stretch(8, mode: :paul, window: 0.4.seconds).node.pan(0.2) * -1.db
 
-    # The pad (Dm7) as tempo-locked grains, moved by +pitch+ semitones
-    # (5: Gm7, 7: Am7)
+    # The pad (Dm7) as regular grains, moved by +pitch+ semitones (5: Gm7,
+    # 7: Am7).  8 a second is what the Bench pick heard: `density: 1.n16`
+    # was read at the default transport's 120 BPM in renders until
+    # fixes-14; at the song's 72 BPM it is 4.8 a second (A/B pending).
     spray = ->(pitch) {
       pad.grains(
-        position: 4.bars.hz.phasor * 0.8 + 0.1, size: 90.ms, density: 1.n16, jitter: 0,
+        position: 4.bars.hz.phasor * 0.8 + 0.1, size: 90.ms, density: 8, jitter: 0,
         pitch: [0, 12, 19].map { |p| p + pitch }, window: :tukey, pan_spread: 0.7, seed: 3
       ) * -1.db
     }

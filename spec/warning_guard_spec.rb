@@ -30,10 +30,24 @@ RSpec.describe(WarningGuard) do
     expect(WarningGuard.take).to be_empty
   end
 
-  it 'reports :performance warnings without printing or failing' do
-    expect(WarningGuard.handle("x.rb:1: warning: The class X reached 8 shape variations\n", :performance)).to eq(false)
+  it 'records :performance warnings without printing them, even under an output matcher' do
+    msg = "x.rb:1: warning: The class X reached 8 shape variations\n"
+    expect(WarningGuard.handle(msg, :performance)).to eq(false)
+    expect { expect(WarningGuard.handle(msg, :performance)).to eq(false) }.not_to output.to_stderr
     records = WarningGuard.take
-    expect(records.map(&:report_only)).to eq([true])
+    expect(records.map(&:category)).to eq(['performance', 'performance'])
+    expect(records.map(&:report_only)).to eq([WarningGuard::REPORT_ONLY.include?('performance')] * 2)
+  end
+
+  it 'fails :performance warnings unless MB_SOUND_WARNINGS_PERFORMANCE=report' do
+    expected = ENV['MB_SOUND_WARNINGS_PERFORMANCE'] == 'report' ? ['performance'] : []
+    expect(WarningGuard::REPORT_ONLY).to eq(expected)
+  end
+
+  it 'adds a hint to failures from shape variation warnings' do
+    rec = WarningGuard::Record.new(message: "x.rb:1: warning: The class X reached 8 shape variations\n", category: 'performance')
+    expect(WarningGuard.message_for([rec], 'intro')).to include('GraphNode::IvarPreset')
+    expect(WarningGuard.message_for([WarningGuard::Record.new(message: 'other')], 'intro')).not_to include('IvarPreset')
   end
 
   it 'collects warnings from Ruby subprocesses, with their script' do

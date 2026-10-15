@@ -678,6 +678,21 @@ module MB
           @seed = seed
           @show_internals = !!show_internals
 
+          # Set in only some configurations, or later (here so every Reverb
+          # has one instance variable layout; see GraphNode::IvarPreset)
+          @padded_inputs = nil
+          @diffusers = nil
+          @fdn_history = nil
+          @line_samplers = nil
+          @network = nil
+          @feedback_mod = nil
+          @diffusion_mod = nil
+          @feedback_delays = nil
+          @output_groups = nil
+          @dry_groups = nil
+          @output_bufs = nil
+          @dry_bufs = nil
+
           @sample_rate = sample_rate.to_f
 
           @upstreams = upstream

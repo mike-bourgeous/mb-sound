@@ -121,6 +121,7 @@ module MB
           @spec = spec
           smooth_with(smooth, spec.curve == :switch ? nil : :control)
           @value = spec.default_value
+          @plan_relevance_key = nil
           @node_type_name = "Notes CC #{spec.number} #{spec.name}"
         end
 
