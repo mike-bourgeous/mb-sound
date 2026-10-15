@@ -190,7 +190,9 @@ Brown: a one-pole leaky integrator at 5 Hz (matched z; within 1 dB of
 -6 dB/octave to 12 kHz; the bilinear form's zero at Nyquist fell 2 dB
 short).  Both scaled to RMS 0.2 (-14 dBFS) from `noise`'s uniform white;
 peaks pass full scale about once per 35 s.  64 ns/sample at 800-sample
-buffers (white 19), ~105 at 128.  Why pink for placing sounds (the
+buffers (white 19), ~105 at 128.  TODO (the maintainer: "Fuse later"):
+one C call for the whole biquad chain and gain (four `biquad_narray`
+calls plus a multiply per buffer now; pink costs ~3x white).  Why pink for placing sounds (the
 maintainer, on the restless creature): broadband sound gives the ears
 level and timing cues at every frequency, where a steady tone's direction
 blurs with a room's reflections.
@@ -218,7 +220,8 @@ fly sound synthesis ("Wing frequency varies with effort"); findings:
   amplitude around the mean; Gau et al. 2021, abstract as summarized by
   search, not read in full).  So louder and brighter with effort is well supported; pitch
   rising with effort (the maintainer's ear, and a bit of doppler) is an
-  artistic choice here, kept small (+2.5 semitones).
+  artistic choice here, kept small: +1 semitone (the maintainer, 2026-10-15:
+  "Smaller (+1 st)", after +2.5 in the first round).
 - Spectrum and direction: a tethered blowfly's buzz is a harmonic series
   from ~190 Hz; the fundamental radiates like a dipole (strongest ahead of
   the fly), the second harmonic like a monopole (strongest at the sides,
@@ -236,14 +239,15 @@ fly sound synthesis ("Wing frequency varies with effort"); findings:
   tutorial of his was found in a quick search, so none is cited.
 
 What critters.rb does with it: effort = speed / 5 m/s + climbing / 2 m/s
-(0..1, smoothed at 4 Hz) sets the wingbeat (190 Hz + 2.5 semitones at
+(0..1, smoothed at 4 Hz) sets the wingbeat (190 Hz + 1 semitone at
 full effort), stroke level (+7 dB), and brightness (lowpass 1.8-5.8 kHz);
 the heading (cosine between the flight and the line to the listener) sets
 the fundamental's dipole level (0.3..1; Tone#saw's fundamental is 2/pi of
 an in-phase sine, so adding (d - 1) 2/pi of the sine sets it alone), a
 second-harmonic sine at 0.25 is the monopole, and pink-noise wind rises
 behind the fly with effort.  Measured on the wings alone: effort 0 to 1
-raises the RMS 9 dB, the fundamental 190 to 220 Hz, and the 2-6 kHz band
+raises the RMS 9 dB, the fundamental 190 to 220 Hz (with the first
+round's +2.5 semitones; 201 Hz now), and the 2-6 kHz band
 18 dB relative to 150-600 Hz; side-on, the fundamental drops 10 dB.
 Mouse squeaks (the maintainer: "Squeaks should be longer and have a pitch
 envelope; these sound like plucks"): 80-300 ms tonal chirps around 3-6

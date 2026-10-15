@@ -77,7 +77,7 @@ module MB::Sound
   # from you to it; -1 flying at you, 1 flying away).  +wing+ Hz at rest
   # (house flies: about 190 Hz), up to +lift+ semitones faster at full
   # effort.
-  def self.critter_wings(effort, heading, wing: 190, lift: 2.5)
+  def self.critter_wings(effort, heading, wing: 190, lift: 1)
     pitch = wing.hz.transpose(effort * lift + drift(5, walk: 0.5).at(0.25))
     # The saw's fundamental is 2/pi of a sine in phase with it (Tone#saw),
     # so adding (dipole - 1) * 2/pi of the sine sets the fundamental alone.

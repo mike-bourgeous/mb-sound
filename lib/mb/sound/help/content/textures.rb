@@ -59,7 +59,7 @@ module MB
         speed = ((x - x.delay(20.ms)) ** 2 + (y - y.delay(20.ms)) ** 2) ** 0.5 * 50                                         # meters per second
         effort = (speed / 5).aclip(0, 1).filter(:lowpass, cutoff: 4)                                                       # 0 cruising .. 1 darting
         # darting, the wings beat a little faster, swing wider (louder), and sound brighter
-        fly = 190.hz.transpose(effort * 2.5).saw.lp4(effort * 4000 + 1800) * (effort * 0.55 + 0.45)
+        fly = 190.hz.transpose(effort).saw.lp4(effort * 4000 + 1800) * (effort * 0.55 + 0.45)
         # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it
         bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-18.db).until(2.bars)
       end
