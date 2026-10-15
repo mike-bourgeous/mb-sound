@@ -24,6 +24,11 @@ require 'shellwords'
 
 ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 
+# Realtime "is taking N% of its audio buffer time" warnings depend on
+# machine load, so specs (and the scripts they run, which inherit this)
+# turn them off; the slow-warning specs turn them back on.
+ENV['MB_SOUND_SPEED_WARNINGS'] ||= '0'
+
 require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'

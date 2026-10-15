@@ -121,6 +121,16 @@ module MB
       DEFAULT_FADE_IN = 1/2r
       DEFAULT_FADE_OUT = 4
 
+      class << self
+        # Whether realtime Sessions warn about players and master chains that
+        # take most of their buffer time (#check_speed, #check_master_speed).
+        # On by default; MB_SOUND_SPEED_WARNINGS=0 turns it off, which the
+        # specs do (the warning depends on machine load, so a busy machine
+        # would make unrelated script specs print it).
+        attr_accessor :speed_warnings
+      end
+      self.speed_warnings = ENV['MB_SOUND_SPEED_WARNINGS'] != '0'
+
       # The session used by PlaybackMethods#bg, created when first needed,
       # with DEFAULT_FADE_IN and DEFAULT_FADE_OUT.
       def self.default
@@ -1335,7 +1345,7 @@ module MB
       # Warns once if a player takes most of the time available for its
       # buffer, which means it will soon cause dropouts for every player.
       def check_speed(p, elapsed, frames)
-        return unless @realtime && !p.slow_warned
+        return unless @realtime && !p.slow_warned && Session.speed_warnings
 
         load = sustained_load(p, elapsed, frames)
         if load
