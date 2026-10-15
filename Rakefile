@@ -100,6 +100,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_sampler' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_ui' do |ext|
+  ext.name = 'fast_ui'
+  ext.ext_dir = 'ext/mb/sound/fast_ui'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_unison' do |ext|
   ext.name = 'fast_unison'
   ext.ext_dir = 'ext/mb/sound/fast_unison'

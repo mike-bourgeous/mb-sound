@@ -14,8 +14,22 @@ module MB
         # (faster).  With +ends+, each group's two points sit at its first
         # and last x (smooth slopes for vector output); otherwise both sit
         # at its center (whole spans per column for text rasters).
-        # Returns [xs, ys].
+        # Returns [xs, ys].  Uses FastUI.decimate when Plot.native is set
+        # (exactly the same points as #decimate_ruby).
         def decimate(xs, ys, columns, regular: false, ends: false)
+          return [xs, ys] if xs.length <= columns * 2 || columns < 1
+
+          if Plot.native
+            r = FastUI.decimate(xs, ys, columns, regular, ends)
+            return r if r
+          end
+          decimate_ruby(xs, ys, columns, regular: regular, ends: ends)
+        end
+
+        # The Ruby mirror of FastUI.decimate (see #decimate).  For irregular
+        # x, every group of three or more points keeps its first and last x
+        # (also for text rasters; kept as built in plot-1).
+        def decimate_ruby(xs, ys, columns, regular: false, ends: false)
           n = xs.length
           return [xs, ys] if n <= columns * 2 || columns < 1
 
@@ -195,8 +209,17 @@ module MB
 
         # Draws a polyline (device units, y down) in color index +c+.
         # With +dash+ (e.g. [3, 2]), draws only the first dash[0] of every
-        # dash.sum dots along the line.
+        # dash.sum dots along the line.  Uses FastUI.polyline when
+        # Plot.native is set (the same dots as #polyline_ruby).
         def polyline(xs, ys, c, dash: nil)
+          if Plot.native && (dash.nil? || (dash.all?(Integer) && dash.sum > 0))
+            return if FastUI.polyline(@dots, xs, ys, c, dash ? dash[0] : 0, dash ? dash.sum : 0)
+          end
+          polyline_ruby(xs, ys, c, dash: dash)
+        end
+
+        # The Ruby mirror of FastUI.polyline (see #polyline).
+        def polyline_ruby(xs, ys, c, dash: nil)
           ix, iy = Geometry.line_points(xs, ys)
           if dash
             keep = (Numo::Int32.new(ix.length).seq % dash.sum) < dash[0]
@@ -243,6 +266,18 @@ module MB
           rows = Numo::Int32.new(@height, 1).seq
           fill = (rows >= top.reshape(1, @width)) & (rows <= bot.reshape(1, @width)) & has.reshape(1, @width)
           @dots[fill] = c
+        end
+
+        # The dots and color table, for #restore.
+        def snapshot
+          [@dots.dup, @colors.dup, @color_ids.dup]
+        end
+
+        # Returns the raster to a #snapshot.
+        def restore(snap)
+          @dots[true, true] = snap[0]
+          @colors.replace(snap[1])
+          @color_ids.replace(snap[2])
         end
 
         # Paints a block of color indexes +ids+ (Numo::Integer, rows x cols)

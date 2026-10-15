@@ -43,40 +43,121 @@ module MB
         # columns (Array of Strings with ANSI colors unless +color+ is
         # :none).
         def self.render(figure, width:, height:, look: nil, color: nil, theme: nil)
-          figure = figure.figure
+          Frame.new(width: width, height: height, look: look, color: color, theme: theme).render(figure)
+        end
+
+        # The look, color mode, and theme for options as Text.render takes
+        # them: [Look, color mode Symbol, Theme].
+        def self.options(look, color, theme)
           look = look.is_a?(Look) ? look : LOOKS.fetch((look || Terminal.look).to_sym) { raise ArgumentError, "Unknown look #{look.inspect} (#{LOOKS.keys.join(', ')})" }
           color = (color || look.color || Terminal.color_mode).to_sym
           color = :ansi256 if color == :'256'
-          theme = Theme[theme || Terminal.theme]
-
-          cells = Cells.new(width, height)
-          top = 0
-          if figure.title && height > 3
-            cells.text((width - figure.title.length) / 2, 0, figure.title, fg: theme.ink, bold: true)
-            top = 1
-          end
-
-          rows = figure.rows
-          cols = figure.columns
-          gutter = cols > 1 ? 2 : 0
-          avail_w = width - gutter * (cols - 1)
-          avail_h = height - top
-          figure.charts.each_with_index do |chart, i|
-            r, c = i.divmod(cols)
-            x0 = c * avail_w / cols + c * gutter
-            x1 = (c + 1) * avail_w / cols + c * gutter
-            y0 = top + r * avail_h / rows
-            y1 = top + (r + 1) * avail_h / rows
-            Panel.new(chart, cells, x0, y0, x1 - x0, y1 - y0, look, theme, color).draw
-          end
-
-          cells.lines(color)
+          [look, color, Theme[theme || Terminal.theme]]
         end
 
-        # A grid of character cells with colors and attributes.
+        # Draws figures into cells in two steps: the layout (titles, axes,
+        # labels, legends, colorbars, grid lines; everything but the marks)
+        # and the marks.  Plot::Live keeps a Frame and redraws only the marks
+        # while the layout stays the same; Text.render uses a new one.
+        class Frame
+          attr_reader :width, :height, :look, :color, :theme
+
+          # The number of layouts built (Live redraws reuse them).
+          attr_reader :layouts
+
+          def initialize(width:, height:, look: nil, color: nil, theme: nil)
+            @width = width
+            @height = height
+            @look, @color, @theme = Text.options(look, color, theme)
+            @layouts = 0
+            @key = nil
+          end
+
+          # Renders +figure+ (a Figure or Chart) as an Array of lines.
+          def render(figure)
+            draw(figure)
+            @cells.lines(@color)
+          end
+
+          # Renders +figure+ as one String (lines joined by newlines).
+          def text(figure)
+            draw(figure)
+            @cells.to_text(@color)
+          end
+
+          private
+
+          def new_cells
+            Plot.native ? NativeCells.new(@width, @height) : Cells.new(@width, @height)
+          end
+
+          # Lays out (or reuses the layout) and paints the marks into @cells
+          def draw(figure)
+            figure = figure.figure
+            coords = figure.charts.map(&:coord)
+            key = [figure.title, figure.rows, figure.columns, figure.charts.zip(coords).map { |ch, co| Panel.layout_key(ch, co, @theme) }]
+
+            if @base && key == @key
+              @cells.copy_from(@base)
+              @panels.zip(figure.charts, coords).each do |(panel, layout), chart, coord|
+                panel.paint(layout, chart, coord, restore: true) if layout
+              end
+              return
+            end
+
+            # A new layout: static parts into @base, then marks into @cells
+            @layouts += 1
+            @key = key
+            @base = new_cells
+            @cells = new_cells
+            top = 0
+            if figure.title && @height > 3
+              @base.text((@width - figure.title.length) / 2, 0, figure.title, fg: @theme.ink, bold: true)
+              top = 1
+            end
+
+            rows = figure.rows
+            cols = figure.columns
+            gutter = cols > 1 ? 2 : 0
+            avail_w = @width - gutter * (cols - 1)
+            avail_h = @height - top
+            @panels = figure.charts.each_with_index.map { |chart, i|
+              r, c = i.divmod(cols)
+              x0 = c * avail_w / cols + c * gutter
+              x1 = (c + 1) * avail_w / cols + c * gutter
+              y0 = top + r * avail_h / rows
+              y1 = top + (r + 1) * avail_h / rows
+              panel = Panel.new(chart, @base, x0, y0, x1 - x0, y1 - y0, @look, @theme, @color)
+              [panel, panel.layout(coords[i])]
+            }
+
+            @cells.copy_from(@base)
+            @panels.zip(figure.charts, coords).each do |(panel, layout), chart, coord|
+              panel.cells = @cells
+              panel.paint(layout, chart, coord, restore: false) if layout
+            end
+          end
+        end
+
+        # A grid of character cells with colors (packed as 0xRRGGBB
+        # Integers, nil for none) and attributes: the Ruby mirror of
+        # NativeCells (MB::Sound::FastUI::Grid), which gives the same text.
         class Cells
           BOLD = 1
           REVERSE = 2
+
+          # Color modes by number, for FastUI::Grid#lines and #text.
+          MODES = { none: 0, truecolor: 1, ansi256: 2, ansi16: 3 }.freeze
+
+          # 0xRRGGBB for [r, g, b] (nil for nil).
+          def self.pack(rgb)
+            rgb && ((rgb[0] << 16) | (rgb[1] << 8) | rgb[2])
+          end
+
+          # [r, g, b] for 0xRRGGBB.
+          def self.unpack(c)
+            [(c >> 16) & 255, (c >> 8) & 255, c & 255]
+          end
 
           attr_reader :width, :height
 
@@ -96,16 +177,16 @@ module MB
 
             i = y * @width + x
             @ch[i] = ch
-            @fg[i] = fg
-            @bg[i] = bg
+            @fg[i] = Cells.pack(fg)
+            @bg[i] = Cells.pack(bg)
             @attr[i] = (bold ? BOLD : 0) | (reverse ? REVERSE : 0)
           end
 
           # Sets the cell at index +i+ (no bounds checks; for canvases).
           def put(i, ch, fg, bg, attr)
             @ch[i] = ch
-            @fg[i] = fg
-            @bg[i] = bg
+            @fg[i] = Cells.pack(fg)
+            @bg[i] = Cells.pack(bg)
             @attr[i] = attr
           end
 
@@ -124,10 +205,26 @@ module MB
             @ch[y * @width + x]
           end
 
+          # Copies every cell from +other+ (the same size).
+          def copy_from(other)
+            raise ArgumentError, 'Cells sizes differ' unless other.width == @width && other.height == @height
+
+            @ch.replace(other.instance_variable_get(:@ch))
+            @fg.replace(other.instance_variable_get(:@fg))
+            @bg.replace(other.instance_variable_get(:@bg))
+            @attr.replace(other.instance_variable_get(:@attr))
+            self
+          end
+
           # The lines, with SGR codes for +mode+ (:truecolor, :ansi256,
           # :ansi16, :none).
           def lines(mode)
             Array.new(@height) { |y| line(y, mode) }
+          end
+
+          # The lines joined by newlines.
+          def to_text(mode)
+            lines(mode).join("\n")
           end
 
           private
@@ -151,7 +248,7 @@ module MB
               f = fga[i]
               b = bga[i]
               a = aa[i]
-              unless f.equal?(pf) && b.equal?(pb) && a == pa
+              unless f == pf && b == pb && a == pa
                 out << "\e[0m" if styled
                 styled = !(f.nil? && b.nil? && a == 0)
                 out << (@sgr[[f, b, a, mode]] ||= sgr([f, b, a], mode)) if styled
@@ -171,9 +268,40 @@ module MB
             codes = []
             codes << '1' if attr & BOLD != 0
             codes << '7' if attr & REVERSE != 0
-            codes << ANSI.color(fg, mode, false) if fg
-            codes << ANSI.color(bg, mode, true) if bg
+            codes << ANSI.color(Cells.unpack(fg), mode, false) if fg
+            codes << ANSI.color(Cells.unpack(bg), mode, true) if bg
             "\e[#{codes.join(';')}m"
+          end
+        end
+
+        # Cells in C (MB::Sound::FastUI::Grid) with Cells' interface; the
+        # plot area's dots become characters in Grid#compose.
+        class NativeCells < FastUI::Grid
+          # Sets one cell.
+          def set(x, y, ch, fg: nil, bg: nil, bold: false, reverse: false)
+            set_cell(x, y, ch, Cells.pack(fg), Cells.pack(bg), (bold ? Cells::BOLD : 0) | (reverse ? Cells::REVERSE : 0))
+          end
+
+          # Sets the cell at index +i+.
+          def put(i, ch, fg, bg, attr)
+            y, x = i.divmod(width)
+            set_cell(x, y, ch, Cells.pack(fg), Cells.pack(bg), attr)
+          end
+
+          # Writes +str+ from (+x+, +y+), clipped to the grid (and to +max+
+          # columns).
+          def text(x, y, str, fg: nil, bold: false, max: nil)
+            put_text(x, y, str, Cells.pack(fg), bold ? Cells::BOLD : 0, max)
+          end
+
+          # The lines, with SGR codes for +mode+ (see Cells#lines).
+          def lines(mode)
+            super(Cells::MODES.fetch(mode, 3))
+          end
+
+          # The lines joined by newlines.
+          def to_text(mode)
+            super(Cells::MODES.fetch(mode, 3))
           end
         end
 
@@ -282,6 +410,16 @@ module MB
           end
 
           def area(xs, ys, base, rgb)
+            if Plot.native
+              fc = color(fill_color(rgb, 0.45), 2)
+              lc = color(rgb, 3)
+              return if FastUI.area(@raster.dots, xs, ys, base, fc, lc)
+            end
+            area_ruby(xs, ys, base, rgb)
+          end
+
+          # The Ruby mirror of FastUI.area (see #area).
+          def area_ruby(xs, ys, base, rgb)
             mask = @raster.line_mask(xs, ys)
             @raster.fill_between(mask, color(fill_color(rgb, 0.45), 2), base: base)
             @raster.dots[mask.eq(1)] = color(rgb, 3)
@@ -312,6 +450,20 @@ module MB
 
           def image_grid
             [@cols, @rows * 2]
+          end
+
+          # The surface's drawing so far (dots, colors, priorities), for
+          # #restore.
+          def snapshot
+            [@raster.snapshot, @prio.dup]
+          end
+
+          # Returns the surface to a #snapshot, clearing any image.
+          def restore(snap)
+            @raster.restore(snap[0])
+            @prio.replace(snap[1])
+            @image_ids = nil
+            @image_colors = nil
           end
 
           def image(ids, colormap)
@@ -345,10 +497,40 @@ module MB
             @cw, @ch = CANVASES.fetch(look.canvas)
           end
 
-          def draw
-            return if @w < 4 || @h < 1
+          # The cells drawn into (Frame points the marks at its own).
+          attr_writer :cells
 
+          # What decides a panel's layout for +chart+ with +coord+ (its
+          # scales fit to the data): equal keys draw the same axes, labels,
+          # legend, and grid.
+          def self.layout_key(chart, coord, theme)
+            heat = chart.heatmap
+            [
+              chart.title, chart.polar, chart.grid, chart.legend_entries(theme),
+              Panel.scale_key(coord.x), Panel.scale_key(coord.y),
+              heat && [Panel.scale_key(heat.z_scale), heat.colormap_for(theme).colors],
+            ]
+          end
+
+          # A scale's class and settings (scales are immutable values).
+          def self.scale_key(scale)
+            [scale.class, *scale.instance_variables.map { |v| scale.instance_variable_get(v) }]
+          end
+
+          # Draws the chart: #layout, then #paint.
+          def draw
             coord = @chart.coord
+            layout = layout(coord)
+            paint(layout, @chart, coord, restore: false) if layout
+          end
+
+          # Draws everything but the marks (title, legend, axes, labels,
+          # colorbar) into the cells, and the grid lines into a new Surface;
+          # returns the Layout for #paint, or nil if the panel is too small
+          # for a plot.
+          def layout(coord)
+            return nil if @w < 4 || @h < 1
+
             entries = @chart.legend_entries(@theme)
             frame = @chart.polar ? :none : @look.frame
             heat = @chart.heatmap
@@ -398,7 +580,7 @@ module MB
               plot_x += (plot_w - side) / 2
               plot_w = side
             end
-            return if plot_w < 2 || plot_h < 1
+            return nil if plot_w < 2 || plot_h < 1
 
             surface = Surface.new(plot_w, plot_h, @look, @theme)
 
@@ -411,8 +593,26 @@ module MB
               surface.grid(gx, gy, @theme.grid)
             end
 
-            colors = @chart.colors(@theme)
-            @chart.marks.zip(colors).each do |m, rgb|
+            draw_header(legend, legend_rows, coord, frame) if header
+            draw_y_axis(yticks, coord, plot_x, row, plot_h, frame, label_w) if left > 0
+            draw_x_axis(xticks, coord, plot_x, row + plot_h, plot_w, frame, notes) if bottom > 0
+            draw_colorbar(heat, plot_x + plot_w + 1, row, plot_h) if heat && cbar_w > 0
+
+            Layout.new(surface, surface.snapshot, plot_x, row, plot_w, plot_h)
+          end
+
+          # Where a panel's marks go: a Surface with the grid lines drawn
+          # (and a snapshot of it), and the plot area in cells.
+          Layout = Struct.new(:surface, :snapshot, :x, :y, :w, :h)
+
+          # Draws +chart+'s marks through +coord+ into the plot area of
+          # +layout+ (from #layout for a chart with the same layout key),
+          # first restoring the surface to its grid lines with +restore+.
+          def paint(layout, chart, coord, restore: true)
+            surface = layout.surface
+            surface.restore(layout.snapshot) if restore
+            colors = chart.colors(@theme)
+            chart.marks.zip(colors).each do |m, rgb|
               if m.is_a?(Mark::Heatmap)
                 m.draw(surface, coord, @theme)
               elsif m.is_a?(Mark::Line)
@@ -422,12 +622,7 @@ module MB
               end
             end
 
-            compose(surface, plot_x, row, plot_w, plot_h)
-
-            draw_header(legend, legend_rows, coord, frame) if header
-            draw_y_axis(yticks, coord, plot_x, row, plot_h, frame, label_w) if left > 0
-            draw_x_axis(xticks, coord, plot_x, row + plot_h, plot_w, frame, notes) if bottom > 0
-            draw_colorbar(heat, plot_x + plot_w + 1, row, plot_h) if heat && cbar_w > 0
+            compose(surface, layout.x, layout.y, layout.w, layout.h)
           end
 
           private
@@ -470,6 +665,13 @@ module MB
 
           # Turns the surface's dots into characters in the plot area
           def compose(surface, px, py, pw, ph)
+            if @cells.is_a?(NativeCells) && !surface.image_ids
+              colors = Numo::Int32.cast(surface.raster.colors.map { |c| c ? Cells.pack(c) : -1 })
+              @cells.compose(surface.raster.dots, Canvas::KINDS.fetch(@look.canvas), @cw, @ch, px, py, pw, ph,
+                surface.priorities, colors, Canvas::TABLES.fetch(@look.canvas))
+              return
+            end
+
             chars, fg, bg, rev = Canvas.cells(surface.raster, @look.canvas, pw, ph, surface.priorities)
             colors = surface.raster.colors
 
@@ -723,6 +925,17 @@ module MB
           BRAILLE = Array.new(256) { |c| c == 0 ? ' ' : (0x2800 + c).chr(Encoding::UTF_8).freeze }.freeze
           LOWER = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'].freeze
           ASCII = [' ', "'", '-', '|', '.', ':', '|', '|'].freeze
+
+          # Canvas numbers and codepoint tables for FastUI::Grid#compose
+          KINDS = { braille: 0, half: 1, quadrant: 2, sextant: 3, eighths: 4, ascii: 5 }.freeze
+          TABLES = {
+            braille: BRAILLE,
+            half: [' ', '█', '▀', '▄'],
+            quadrant: QUADRANTS,
+            sextant: SEXTANTS,
+            eighths: LOWER + ['▀', '▔'],
+            ascii: ASCII,
+          }.transform_values { |t| Numo::Int32.cast(t.map(&:ord)).freeze }.freeze
 
           module_function
 
