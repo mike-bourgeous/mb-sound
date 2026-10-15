@@ -114,9 +114,13 @@ module MB::Sound
 
   # A gain from 0, rising over +fade+ bars from bar +from+, falling over
   # +fade+ bars to 0 at bar +to+, then 0 (the song's sections).
+  # (hold: releases into the fall right after the plateau; the default hold,
+  # twice the time before the release, only matched it while renders built
+  # their graphs at the stale 120 BPM, fixes-14.)
   def self.wind_chimes_section(from, to, fade: 1)
     len = ->(bars) { bars > 0 ? bars.bars : 0 }
-    env([[0, 0], [0, len.(from - 1)], [1, len.(fade), 0], [1, len.(to - from - 2 * fade)], [0, len.(fade), 0]], hold_last: true)
+    env([[0, 0], [0, len.(from - 1)], [1, len.(fade), 0], [1, len.(to - from - 2 * fade)], [0, len.(fade), 0]],
+      hold: len.(to - 1 - fade), hold_last: true)
   end
 
   # The piece's parts as named stereo graphs (all following one wind, a
