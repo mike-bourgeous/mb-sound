@@ -8,9 +8,11 @@
 #
 #   weather  1-4   rain on leaves (dust drops pinged at random pitches over
 #                  a soft hiss) and wind (noise through a drifting bandpass)
-#   chimes   5-12  five tubular chimes (resonate :chime), each struck by its
-#                  own dust whose rate follows the gust, panned across the
-#                  field
+#   chimes   5-12  five wind chimes (resonate :chime, aluminum tubes), each
+#                  struck by its own dust whose rate follows the gust,
+#                  swinging in the wind: a slow pan sway whose width
+#                  follows the gust, with the strikes bunched where each
+#                  swing turns around (twice a swing)
 #   bowls    9-18  a singing bowl and a rin struck now and then, and a
 #                  wine glass rubbed by quiet noise (resonate :glass) that
 #                  swells with the gust
@@ -22,8 +24,8 @@
 # Usage:
 #     bin/songs/wind_chimes.rb                    # plays live
 #     bin/songs/wind_chimes.rb chimes.flac        # renders 24 bars (-f to overwrite)
-#     bin/songs/wind_chimes.rb -s 7 chimes.flac   # another wind (random seed)
-#     bin/songs/wind_chimes.rb -G 2 chimes.flac   # gustier (chimes struck twice as often)
+#     bin/songs/wind_chimes.rb -s 1 chimes.flac   # another wind (random seed; 7, the maintainer's pick, by default)
+#     bin/songs/wind_chimes.rb -G 2 chimes.flac   # gustier (chimes struck twice as often, a darker roar under the wind)
 #     bin/songs/wind_chimes.rb --stems stems/ chimes.flac   # with each part alone
 #
 # Or in bin/sound.rb:
@@ -59,19 +61,34 @@ module MB::Sound
   end
 
   # Wind: noise through a bandpass whose center and level follow +gust+
-  # (a node from 0 to 1).
-  def self.wind_chimes_wind(gust)
+  # (a node from 0 to 1).  Gustier winds (+gusty+ above 1) add a dark roar
+  # under it, brown-ish noise (white noise through a 12 dB/octave lowpass
+  # at 380 Hz) swelling with the square of the gust, so the strongest gusts
+  # sound strong (at a steady 0.8 gust, -G 2 is 3.3 LU louder than -G 1,
+  # -G 3 7.5 LU) (textures-2, 2026-10-15; the maintainer: "Gustier
+  # should mix in a bit of pink or brown noise maybe to make the wind more
+  # intense to match?").
+  def self.wind_chimes_wind(gust, gusty: 1.0)
     band = noise.filter(:bandpass, cutoff: gust * 1100 + 250, quality: 2.5)
-    (band * (gust * 0.85 + 0.15)).pan(drift(0.1, walk: 0.3) * 0.5)
+    air = band * (gust * 0.85 + 0.15)
+    roar = gusty > 1 ? noise.filter(:lowpass, cutoff: 380, quality: 0.5) * (gust * gust * [gusty - 1, 2].min * 3.0) : nil
+    (roar ? air + roar : air).pan(drift(0.1, walk: 0.3) * 0.5)
   end
 
   # Five chimes, each struck by its own dust at a rate following +gust+
-  # (+gusty+ scales it) times +gate+ (0 strikes none), panned across the
-  # field.
+  # (+gusty+ scales it) times +gate+ (0 strikes none), spread across the
+  # field and swinging: each chime sways on its own slow pendulum (0.5 to
+  # 0.8 swings a second), the sway as wide as the gust, and is struck
+  # mostly as its swing turns around at either end (the strike rate times
+  # 0.2 + 1.6 sin^2 of the swing, twice a swing, averaging the same
+  # density; textures-2, the maintainer's idea of a pan LFO that matches
+  # or doubles the strike density's variation).
   def self.wind_chimes_chimes(gust, gate, gusty: 1.0)
     WIND_CHIMES_NOTES.each_with_index.map { |note, i|
-      strikes = dust(gust * gate * (1.6 * gusty) + gate * 0.05, range: 0.15..1)
-      strikes.resonate(:chime, note, decay: 5).pan(i * 0.4 - 0.8)
+      swing = (0.5 + 0.075 * i).hz.lfo.with_phase(i * 0.29)
+      ends = swing * swing * 1.6 + 0.2
+      strikes = dust((gust * gate * (1.6 * gusty) + gate * 0.05) * ends, range: 0.15..1)
+      strikes.resonate(:chime, note, decay: 5).pan(swing * gust * 0.3 + (i * 0.4 - 0.8))
     }.sum
   end
 
@@ -108,7 +125,7 @@ module MB::Sound
 
     {
       rain: (wind_chimes_rain * wind_chimes_section(1, 20, fade: 2)).at(6.db),
-      wind: wind_chimes_wind(wind).at(-2.db),
+      wind: wind_chimes_wind(wind, gusty: gusty).at(-2.db),
       chimes: wind_chimes_chimes(wind, wind_chimes_section(5, 22, fade: 1), gusty: gusty).at(-6.db),
       bowls: wind_chimes_bowls(wind, wind_chimes_section(9, 19, fade: 1)).at(-2.db),
       wood: (wind_chimes_wood * wind_chimes_section(13, 21, fade: 1)).at(-4.db),
@@ -124,7 +141,7 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: 24,
-      seed: [1, 'random seed (each seed is another wind)', '-s', Integer, 0..1_000_000],
+      seed: [7, 'random seed (each seed is another wind; 7, the maintainer\'s pick, by default)', '-s', Integer, 0..1_000_000],
       gusty: [1.0, 'how often the wind strikes the chimes (scale)', '-G', Float, 0.1..5],
     ) { |p|
       MB::Sound.seed(p.seed)
