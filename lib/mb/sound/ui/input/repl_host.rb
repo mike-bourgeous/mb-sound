@@ -139,7 +139,8 @@ module MB
           # Sends a key (its bytes; legacy bytes for keys decoded from the
           # kitty protocol).
           def key(k)
-            write(k.bytes || Input.legacy_bytes(k))
+            b = k.bytes
+            write(b.nil? || b.match?(/\A\e\[[\d;:]*u\z/n) ? Input.legacy_bytes(k) : b)
           end
 
           # Pastes +text+ (bracketed when the program turned that on).

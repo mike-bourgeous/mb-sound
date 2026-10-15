@@ -56,9 +56,10 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
     ])
   end
 
-  it 'decodes kitty keyboard protocol keys' do
-    ev = d.feed("\e[27u\e[97;5u\e[13;2u")
-    expect(chords(ev)).to eq([[:escape, []], ['a', [:ctrl]], [:enter, [:shift]]])
+  it 'decodes kitty keyboard protocol keys, with legacy bytes for programs that read those' do
+    ev = d.feed("\e[27u\e[97;5u\e[13;2u\e[120;3u")
+    expect(chords(ev)).to eq([[:escape, []], ['a', [:ctrl]], [:enter, [:shift]], ['x', [:alt]]])
+    expect(ev.map { |k| input.legacy_bytes(k) }).to eq(["\e", "\x01", "\r", "\ex"])
   end
 
   it 'maps keys to actions with keymaps, passing digits from ranges' do
