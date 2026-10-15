@@ -49,6 +49,9 @@
 static VALUE mFastUI;
 static VALUE cGrid;
 
+// gvl_probe.c
+void mb_fast_ui_init_gvl_probe(VALUE mFastUI);
+
 // numo's double to Int32 conversion (xint_macro.h m_from_real)
 static inline int32_t to_i32(double x)
 {
@@ -1424,4 +1427,6 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "to_text", grid_text, 1);
 	rb_define_method(cGrid, "frame", grid_frame, 5);
 	rb_define_method(cGrid, "write_frame", grid_write_frame, 6);
+
+	mb_fast_ui_init_gvl_probe(mFastUI);
 }
