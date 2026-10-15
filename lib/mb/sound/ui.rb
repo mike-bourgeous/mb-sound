@@ -11,6 +11,13 @@ require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
 require_relative 'ui/warm_up'
+require_relative 'ui/data_file'
+require_relative 'ui/screen/vt'
+require_relative 'ui/input/events'
+require_relative 'ui/input/decoder'
+require_relative 'ui/viewports/tree'
+require_relative 'ui/viewports/tiler'
+require_relative 'ui/viewports/loader'
 
 module MB
   module Sound
