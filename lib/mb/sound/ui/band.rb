@@ -138,6 +138,7 @@ module MB
 
         private def refresh_unlocked(now)
           cpu0 = thread_cpu
+          @first_refresh ||= now
           parts = nil
           attach
           poll(now)
@@ -212,7 +213,7 @@ module MB
         # nothing to draw), :busy_cpu_ms (the same over refreshes that drew
         # a pane), :bytes (mean and max per written frame), :panes (mean
         # drawn per refresh), :yields (Thread.pass calls so far),
-        # :slowest (the slowest refreshes: when (the band's clock), CPU ms,
+        # :slowest (the slowest refreshes: when (seconds after the first), CPU ms,
         # and the poll or panes that took over half a millisecond).
         def stats
           busy = @frames.select { |f| f[2] > 0 }
@@ -291,7 +292,7 @@ module MB
         # Keeps the SLOWEST refreshes (time, CPU seconds, slow parts).
         def note_slow(now, cpu, parts)
           return if @slowest.length >= SLOWEST && cpu <= @slowest[-1][1]
-          @slowest << [now, cpu, parts]
+          @slowest << [now - (@first_refresh ||= now), cpu, parts]
           @slowest.sort_by! { |e| -e[1] }
           @slowest.pop if @slowest.length > SLOWEST
         end

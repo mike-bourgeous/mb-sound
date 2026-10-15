@@ -24,9 +24,8 @@
  * long long for negative values (numo's xint m_from_real), round() is C's.
  * Built with -ffp-contract=off so no multiply-add is fused.
  *
- * The step 2 dashboard will add frame diffing and writing (with the GVL
- * released) to the Grid; see research/terminal-ui-2/ARCHITECTURE.md on
- * branch research-ui-2.
+ * gvl_probe.c adds FastUI::GVLProbe (GVL wait and hold times of chosen
+ * threads) for the dashboard band (ui-3; design/notes/terminal_ui.md).
  */
 
 #include <stdint.h>
