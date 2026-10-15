@@ -645,24 +645,45 @@ module MB
       # landing at +ratio+ times its time with its attack unstretched (the
       # decay between hits drawn out) and the phases of its rising bins
       # reset, so attacks stay sharp and breaks keep their groove; best on
-      # pads, chords, voices, basses (pitch is kept exactly), and breaks.  :paul
-      # (:paulstretch) is Paulstretch: windows of +window+ (0.25 s), every
-      # phase random (from +seed+, 0 by default, so the same stretch
-      # gives the same audio): glacial washes at extreme ratios (8x to
-      # 1000x).  Results longer than LONG_STRETCH (30 s) read with
-      # `mips: :octave` unless this sample has its own mips (smaller
-      # playback tables for long drones; voices' and grains' mips: still
-      # win).  Both are offline (a new Sample, made once per audio and
-      # arguments; spectral runs about 50x realtime per output channel).
+      # pads, chords, voices, basses (pitch is kept exactly), and breaks.
+      # :paul (:paulstretch) is Paulstretch: windows of +window+ (0.25 s),
+      # +overlap+ (4; Nasca Paul's original uses 2: half as many phase
+      # changes per second, so each partial spreads over half the
+      # bandwidth, less chorus), every phase random (from +seed+, 0 by
+      # default, so the same stretch gives the same audio): glacial washes
+      # at extreme ratios (8x to 1000x); +transients+ (false for :paul)
+      # keeps the attack bins at onsets unrandomized.
+      #
+      # The two are one algorithm: +randomize+ (0..1; 0 for :spectral, 1
+      # for :paul) adds up to ± randomize × π of random phase to every bin
+      # each frame, from the locked vocoder (0) through a smeared, diffuse
+      # vocoder to Paulstretch (1); the modes only choose the defaults
+      # (window, randomize, transients).  +link+ (true) gives every channel
+      # the same random phases (the image keeps its level panning); false
+      # draws them per channel like the original Paulstretch (a wider,
+      # decorrelated stereo image; a mono sample stays mono).  +shape+
+      # (Spectral::SHAPES) is the window: :hann, or :paul, the original's
+      # flatter (1 - x²)^1.25 (random phases smear partials less: a
+      # Paulstretched sine measured 6.6 Hz wide at -6 dB instead of 10.3).
+      #
+      # Results longer than LONG_STRETCH (30 s) read with `mips: :octave`
+      # unless this sample has its own mips (smaller playback tables for
+      # long drones; voices' and grains' mips: still win).  Both are
+      # offline (a new Sample, made once per audio and arguments; spectral
+      # runs about 50x realtime per output channel).
       #
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
       #     pad.stretch(8, mode: :spectral)            # phase vocoder
+      #     pad.stretch(8, mode: :spectral, randomize: 0.3)   # a little Paulstretch haze
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
-      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: true, seed: 0)
+      #     voice.stretch(16, mode: :paul, overlap: 2, shape: :paul, link: false)   # like Nasca Paul's original
+      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann)
         mode = Spectral.mode_name(mode)
-        return spectral_stretch(ratio, mode, window, overlap, transients, seed) unless mode == :cyclic
-        raise ArgumentError, 'window:, overlap:, transients:, and seed: are for mode: :spectral and :paul' unless window.nil? && overlap == Spectral::OVERLAP && transients == true && seed == 0
+        return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape) unless mode == :cyclic
+        unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
+          raise ArgumentError, 'window:, overlap:, shape:, transients:, seed:, randomize:, and link: are for mode: :spectral and :paul'
+        end
 
         fit = Lofi.fit_name(fit)
         c = position(cycle).round
@@ -691,22 +712,36 @@ module MB
       end
       private :stretch_read
 
-      # The :spectral and :paul stretches (see #stretch).
-      def spectral_stretch(ratio, mode, window, overlap, transients, seed)
+      # The :spectral and :paul stretches (see #stretch): one phase
+      # vocoder whose +randomize+ goes from locked phases (0) to random
+      # ones (1, Spectral.paul's magnitude-only frames when no onsets are
+      # kept); the modes set the defaults.
+      def spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape)
+        paul = mode == :paul
+        transients = !paul if transients.nil?
+        randomize = paul ? 1 : 0 if randomize.nil?
+        raise ArgumentError, "randomize: is 0..1 (got #{randomize.inspect})" unless randomize.is_a?(Numeric) && randomize >= 0 && randomize <= 1
+
         kw = { mode: mode }
         kw[:window] = window unless window.nil?
         kw[:overlap] = overlap unless overlap == Spectral::OVERLAP
-        kw[:transients] = transients unless transients == true || mode == :paul
-        kw[:seed] = seed unless seed == 0 || mode == :spectral
-        if mode == :spectral
-          n = window.nil? ? Spectral::WINDOW : position(window).round
-          n += 1 if n.odd?
-          onsets = transients ? (@reversed ? reverse : self).onsets : nil
-          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets) }
-        else
-          n = position(window.nil? ? Spectral::PAUL_WINDOW : window).round
-          edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans| Spectral.paul(chans, ratio.to_f, window: n, seed: seed) }
-        end
+        kw[:transients] = transients unless transients == !paul
+        kw[:randomize] = randomize unless randomize == (paul ? 1 : 0)
+        kw[:link] = link unless link == true
+        kw[:shape] = shape unless shape == :hann
+        Spectral.shaped_window(shape, 64) # (checks the name)
+        kw[:seed] = seed unless seed == 0 || randomize == 0
+
+        n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
+        n += 1 if n.odd?
+        onsets = transients ? (@reversed ? reverse : self).onsets : nil
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans|
+          if randomize >= 1 && onsets.nil?
+            Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
+          else
+            Spectral.vocoder(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape)
+          end
+        }
       end
       private :spectral_stretch
 

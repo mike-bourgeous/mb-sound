@@ -36,6 +36,21 @@ module MB
           m
         end
 
+        # Window shapes for the spectral stretches (+shape:+): :hann, and
+        # :paul, Nasca Paul's (1 - x²)^1.25 from the Python Paulstretch
+        # (flatter on top: frames add up over a narrower band, so random
+        # phases smear each partial over about 2/3 the bandwidth of Hann's).
+        SHAPES = [:hann, :paul].freeze
+
+        # The +shape+ (SHAPES) window of +n+ samples.
+        def shaped_window(shape, n)
+          case shape
+          when :hann then hann(n)
+          when :paul then (1 - Numo::DFloat.linspace(-1, 1, n)**2)**1.25
+          else raise ArgumentError, "Unknown window shape #{shape.inspect} (#{SHAPES.map(&:inspect).join(', ')})"
+          end
+        end
+
         # A periodic Hann window of +n+ samples.
         def hann(n)
           Numo::DFloat.new(n).seq.tap { |x| x.inplace * (TWO_PI / n) }.then { |x| (1 - Numo::NMath.cos(x)) * 0.5 }
@@ -52,12 +67,21 @@ module MB
         end
 
         # Phase vocoder stretch of +channels+ by +ratio+ (see
-        # design/notes/granular.md): Hann windows of +window+ samples,
+        # design/notes/granular.md): +shape+ (SHAPES; Hann) windows of
+        # +window+ samples,
         # +overlap+ frames per window, identity phase locking around
         # spectral peaks, one phase rotation (computed on the channels'
         # mix) for every channel, and +onsets+ (sample positions; nil for
-        # none) kept unstretched with a phase reset.
-        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil)
+        # none) landing at +ratio+ times their time with their attacks
+        # unstretched (#time_map).  +randomize+ (0..1) adds a random offset
+        # of up to ± randomize × π to every output phase each frame (from
+        # +seed+; the same offsets for every channel with +link+, else
+        # each channel its own), so 0 is the phase-locked vocoder and 1 is
+        # Paulstretch (uniformly random phases; #paul does that case);
+        # attack bins near onsets stay unrandomized.
+        def vocoder(channels, ratio, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann)
+          randomize = randomize.to_f
+          raise ArgumentError, "randomize: is 0..1 (got #{randomize})" unless randomize >= 0 && randomize <= 1
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           n = Integer(window)
           raise ArgumentError, "The window must be an even number of samples, 64 or more (got #{window})" unless n >= 64 && n.even?
@@ -69,7 +93,7 @@ module MB
           out_len = (len * ratio).round
           mix = xs.length == 1 ? xs[0] : xs.sum / xs.length
           map, resets = time_map(len, ratio, onsets, n, hs)
-          w = hann(n)
+          w = shaped_window(shape, n)
           nb = n / 2 + 1
           omega = Numo::DFloat.new(nb).seq * (TWO_PI / n)
           hr = n / 8 # the fixed offset for instantaneous frequencies
@@ -78,6 +102,12 @@ module MB
           buf = Array.new(xs.length) { Numo::DFloat.zeros(frames * hs + n) }
           wsum = Numo::DFloat.zeros(frames * hs + n)
           w2 = w * w
+          # Partly random frames add partly in amplitude, partly in power:
+          # the mean of a frame's random phase offsets' unit vectors (its
+          # coherence, sinc(randomize)), summed with the windows for #finish
+          c = randomize > 0 ? Math.sin(Math::PI * randomize) / (Math::PI * randomize) : 1.0
+          csum = Numo::DFloat.zeros(wsum.length) if randomize > 0
+          c2sum = Numo::DFloat.zeros(wsum.length) if randomize > 0
 
           theta = nil
           phi_prev = nil
@@ -125,17 +155,32 @@ module MB
             prev_center = center
 
             rot = theta - phi
-            rotc = Numo::DComplex.cast(Numo::NMath.cos(rot)) + Numo::NMath.sin(rot) * Complex::I
+            # (frames holding an attack stay unrandomized: crisp attacks
+            # even in Paulstretch)
+            random = randomize > 0 && !(attack_until && center < attack_until)
+            rotc = nil
             pos = m * hs
             xs.each_with_index do |x, ch|
+              if random && (rotc.nil? || !link)
+                r = rot + (random_phases(seed, m, nb, link ? 0 : ch) - 0.5) * (TWO_PI * randomize)
+                rotc = Numo::DComplex.cast(Numo::NMath.cos(r)) + Numo::NMath.sin(r) * Complex::I
+              end
+              rotc ||= Numo::DComplex.cast(Numo::NMath.cos(rot)) + Numo::NMath.sin(rot) * Complex::I
               cs = ch == 0 && xs.length == 1 ? spec : Numo::Pocketfft.rfft(segment(x, center, n) * w)
               y = Numo::Pocketfft.irfft(cs * rotc) * w
               buf[ch][pos...(pos + n)] += y
             end
             wsum[pos...(pos + n)] += w2
+            if randomize > 0
+              cm = random ? c : 1.0
+              csum[pos...(pos + n)] += w2 * cm
+              c2sum[pos...(pos + n)] += w2 * (cm * cm)
+            end
           end
 
-          finish(buf, wsum, n, out_len)
+          return finish(buf, wsum, n, out_len) if randomize == 0
+
+          finish(buf, wsum, n, out_len, power: w2.mean.to_f, coherent: csum, coherent2: c2sum)
         end
 
         # Identity phase locking (Laroche & Dolson 1999): peak bins keep
@@ -161,21 +206,23 @@ module MB
           advanced[owner] + (phi - phi[owner])
         end
 
-        # Paulstretch (Nasca Paul) of +channels+ by +ratio+: Hann windows of
-        # +window+ samples hopping a quarter window in the output, every
+        # Paulstretch (Nasca Paul) of +channels+ by +ratio+: +shape+ (Hann)
+        # windows of +window+ samples hopping 1 / +overlap+ window in the output, every
         # bin's magnitude kept and its phase replaced by a random one from
-        # +seed+ (shared by the channels).
-        def paul(channels, ratio, window:, seed: 0)
+        # +seed+ (shared by the channels with +link+, else each channel its
+        # own, like the original).
+        def paul(channels, ratio, window:, overlap: OVERLAP, seed: 0, link: true, shape: :hann)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           n = Integer(window)
           n += 1 if n.odd?
           raise ArgumentError, "The window must be 64 samples or more (got #{window})" unless n >= 64
-          hs = n / 4
+          hs = n / Integer(overlap)
+          raise ArgumentError, 'The overlap must leave a hop of at least 8 samples' unless hs >= 8 && overlap >= 2
 
           xs = channels.map { |c| Numo::DFloat.cast(c) }
           len = xs[0].length
           out_len = (len * ratio).round
-          w = hann(n)
+          w = shaped_window(shape, n)
           nb = n / 2 + 1
           frames = out_len / hs + 2
           buf = Array.new(xs.length) { Numo::DFloat.zeros(frames * hs + n) }
@@ -184,10 +231,13 @@ module MB
 
           frames.times do |m|
             center = (m * hs / ratio.to_f).round
-            ph = random_phases(seed, m, nb) * TWO_PI
-            rot = Numo::DComplex.cast(Numo::NMath.cos(ph)) + Numo::NMath.sin(ph) * Complex::I
+            rot = nil
             pos = m * hs
             xs.each_with_index do |x, ch|
+              if rot.nil? || !link
+                ph = random_phases(seed, m, nb, link ? 0 : ch) * TWO_PI
+                rot = Numo::DComplex.cast(Numo::NMath.cos(ph)) + Numo::NMath.sin(ph) * Complex::I
+              end
               mag = Numo::Pocketfft.rfft(segment(x, center, n) * w).abs
               y = Numo::Pocketfft.irfft(rot * mag) * w
               buf[ch][pos...(pos + n)] += y
@@ -200,10 +250,10 @@ module MB
         end
 
         # +count+ uniform numbers in 0...1 for frame +frame+: a splitmix64
-        # hash of (seed, frame, bin), so the phases don't depend on how the
-        # work is split.
-        def random_phases(seed, frame, count)
-          base = (Integer(seed) * 0x9E3779B97F4A7C15 + frame * 0xD1B54A32D192ED03) & Tone::MASK64
+        # hash of (seed, frame, bin, +stream+ (a channel)), so the phases
+        # don't depend on how the work is split.
+        def random_phases(seed, frame, count, stream = 0)
+          base = (Integer(seed) * 0x9E3779B97F4A7C15 + frame * 0xD1B54A32D192ED03 + stream * 0x632BE59BD9B4E019) & Tone::MASK64
           z = Numo::UInt64.new(count).seq
           z.inplace * Numo::UInt64[0x9E3779B97F4A7C15]
           z.inplace + Numo::UInt64[base]
@@ -221,13 +271,23 @@ module MB
         # The overlap-added channels, each divided by the windows' summed
         # squares and cut to +out_len+ (output sample 0 is the first
         # frame's center).  With +power+ (the window's mean square, for
-        # incoherent frames), divided by sqrt(sum × power) instead.
-        def finish(buf, wsum, n, out_len, power: nil)
+        # incoherent frames), divided by sqrt(sum × power) instead, or for
+        # partly coherent frames (the sums of the squared windows times
+        # each frame's coherence c, the mean of its phase offsets' unit
+        # vectors, in +coherent+, and times c² in +coherent2+) by
+        # sqrt(coherent² + (sum - coherent2) × power).
+        def finish(buf, wsum, n, out_len, power: nil, coherent: nil, coherent2: nil)
           h = n / 2
           floor = wsum.max * 1e-3
           norm = wsum[h...(h + out_len)].dup
           norm[norm < floor] = floor
-          norm = Numo::NMath.sqrt(norm * power) if power
+          if power && coherent
+            cs = coherent[h...(h + out_len)]
+            norm = Numo::NMath.sqrt(cs * cs + (norm - coherent2[h...(h + out_len)]).clip(0, nil) * power)
+            norm[norm < floor] = floor
+          elsif power
+            norm = Numo::NMath.sqrt(norm * power)
+          end
           buf.map { |b| b[h...(h + out_len)] / norm }
         end
 
