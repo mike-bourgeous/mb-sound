@@ -621,18 +621,20 @@ module MB
 
       # The sample stretched to +ratio+ times its length at the same pitch,
       # S950-style cyclic timestretch: cycles of about +cycle+ (25 ms)
-      # taken from the input in step and repeated or skipped, with
-      # +crossfade+ (0) of overlap.  +fit+ (Lofi::FITS) :auto, the default,
-      # fits each cycle to the sound: its length snapped to the local
-      # period near +cycle+ (by autocorrelation), each splice where the
+      # taken from the input in step and repeated or skipped, each
+      # crossfading into the next over +crossfade+ (3 ms; raised-cosine
+      # fades, equal-gain where the two sides match and equal-power where
+      # they don't, Lofi.crossfade_gains; 0 for hard cuts).  +fit+
+      # (Lofi::FITS) :auto, the default, fits each cycle to the sound: a
+      # whole number of its local periods (autocorrelation, followed from
+      # cycle to cycle so the count doesn't jump), each splice where the
       # sound matches what would have followed (the S950's "cycle
-      # fudging"), cut at rising zero crossings, so tones keep their pitch
-      # and breaks get smaller seams.  :fixed is the plain cyclic stretch:
-      # cycles of exactly +cycle+, cut anywhere; short cycles buzz at 1 /
-      # cycle (metallic), long ones stutter, and tones whose period doesn't
-      # divide the cycle retune (a 55 Hz bass at 2x with 30 ms cycles
-      # sounds about an octave low; see Lofi::FITS).  Every channel cuts in
-      # the same places.
+      # fudging"), so tones keep their pitch and breaks get smaller seams.
+      # :fixed is the plain cyclic stretch: cycles of exactly +cycle+, cut
+      # anywhere; short cycles buzz at 1 / cycle (metallic), long ones
+      # stutter, and tones whose period doesn't divide the cycle retune (a
+      # 55 Hz bass at 2x with 30 ms cycles sounds about an octave low; see
+      # Lofi::FITS).  Every channel cuts in the same places.
       #
       #
       # +mode+ :spectral (aliases :pv, :vocoder) is a phase vocoder with
@@ -655,7 +657,7 @@ module MB
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
       #     pad.stretch(8, mode: :spectral)            # phase vocoder
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
-      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: 0, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: true, seed: 0)
+      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: true, seed: 0)
         mode = Spectral.mode_name(mode)
         return spectral_stretch(ratio, mode, window, overlap, transients, seed) unless mode == :cyclic
         raise ArgumentError, 'window:, overlap:, transients:, and seed: are for mode: :spectral and :paul' unless window.nil? && overlap == Spectral::OVERLAP && transients == true && seed == 0
@@ -663,13 +665,16 @@ module MB
         fit = Lofi.fit_name(fit)
         c = position(cycle).round
         x = position(crossfade).round
-        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == 0) }
+        kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == CROSSFADE) }
         guide = nil
         edit(:stretch, [ratio], kw, read: stretch_read(ratio)) { |d|
           guide ||= fit == :auto ? mono_mix : nil
           Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
       end
+
+      # The cyclic stretch's default crossfade between cycles.
+      CROSSFADE = 3.ms
 
       # Stretch results longer than this (seconds) read with :octave level
       # spacing unless the sample says otherwise (about 8x the audio for

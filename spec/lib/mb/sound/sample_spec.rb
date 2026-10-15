@@ -174,7 +174,7 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       sine = ->(n, f) { Numo::SFloat.cast(Numo::DFloat.new(n).seq.map { |i| Math.sin(i * 2 * Math::PI * f / 48000) }) }
       jump = ->(d) { (d[1..] - d[0...-1]).abs.max }
       x = MB::Sound::Sample[sine.(24000, 110)]
-      fixed = x.stretch(2, cycle: 30.ms, fit: :fixed)
+      fixed = x.stretch(2, cycle: 30.ms, fit: :fixed, crossfade: 0)
       auto = x.stretch(2, cycle: 30.ms)
       expect(x.stretch(2, cycle: 30.ms, fit: :auto).data).to eq(auto.data)
       expect(auto.length).to eq(48000)
@@ -209,6 +209,49 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
 
       expect(auto.lineage[1..3]).to eq([:stretch, [2], { cycle: 30.ms }])
       expect { x.stretch(2, fit: :wobble) }.to raise_error(ArgumentError, /Unknown stretch fit/)
+    end
+
+    it 'stretches a bass in whole periods with a steady cycle length, far from the asked cycle' do
+      # 55 Hz (872.7 samples) with 25 ms cycles: no multiple of the period
+      # lies within the old ±25% search (900..1500 samples), so granular-1
+      # took 900-sample cycles (1.03 periods) and the asked 1200 now and
+      # then: pitch jumps of up to 10 semitones at 8x
+      saw = Numo::SFloat.cast(Numo::DFloat.new(72000).seq.map { |i| (1..8).sum { |h| Math.sin(i * 2 * Math::PI * 55 * h / 48000) / h } * 0.4 })
+      plan = MB::Sound::Sample::Lofi.fit_plan(saw, 8.0, 1200, crossfade: 144)
+      lens = plan[0...-1].map { |c| c[2] }
+      expect(lens.all? { |l| (l - 48000 / 55.0).abs < 2 }).to eq(true)
+
+      st = MB::Sound::Sample[saw].stretch(8)
+      d = Numo::DFloat.cast(st.data[48000...144000])
+      d *= 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(96000).seq * (2 * Math::PI / 96000))
+      spec = Numo::Pocketfft.rfft(d).abs
+      expect(spec[0..300].max_index).to be_within(1).of(110) # 55 Hz at 0.5 Hz per bin
+      # no sidebands from phase jumps at the splices
+      expect(spec[60..100].max / spec[110]).to be < 0.01
+    end
+
+    it 'crossfades stretch cycles (3 ms by default) instead of cutting' do
+      d2 = ->(d) { d = Numo::DFloat.cast(d); (d[2..] - d[1...-1] * 2 + d[0...-2]).abs.max }
+      rng = Random.new(5)
+      noise = Numo::SFloat.cast(Array.new(24000) { rng.rand - 0.5 }) # no matching splices: hard cuts click
+      x = MB::Sound::Sample[MB::Sound::Sample::Lofi.lowpass(Numo::DFloat.cast(noise), 48000.0, 2000.0) * 4]
+      cut = x.stretch(4, crossfade: 0, fit: :fixed)
+      faded = x.stretch(4, fit: :fixed)
+      expect(d2.(cut.data)).to be > 4 * d2.(x.data)
+      expect(d2.(faded.data)).to be < 1.5 * d2.(x.data)
+      expect(faded.lineage[2..3]).to eq([[4], { fit: :fixed }])
+      expect(cut.lineage[3]).to eq({ crossfade: 0, fit: :fixed })
+
+      # Matching sides fade at equal gain, unrelated ones at equal power
+      a = Numo::DFloat.new(64).seq.map { |i| Math.sin(i * 0.3) }
+      g_out, g_in = MB::Sound::Sample::Lofi.crossfade_gains(a, a)
+      expect(((g_out + g_in) - 1).abs.max).to be < 1e-12
+      b = Numo::DFloat.cast(Array.new(64) { rng.rand - 0.5 })
+      b -= a * ((a * b).sum / (a * a).sum) # uncorrelated with a
+      g_out, g_in = MB::Sound::Sample::Lofi.crossfade_gains(a, b)
+      expect(((g_out**2 + g_in**2) - 1).abs.max).to be < 1e-12
+      expect(g_out[0]).to be > 0.99
+      expect(g_in[-1]).to be > 0.99
     end
 
     it 'mixes to mono' do
