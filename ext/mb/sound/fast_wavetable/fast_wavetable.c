@@ -468,36 +468,6 @@ struct wt_etab {
 	double *e0; // the rows at t = 0 (re, im interleaved), for the steady sums
 };
 
-// E e^(2 pi i G m1) at frequency +g+ (cycles per sample, either sign) and
-// +t+ samples after a switch, interpolated linearly in both (the same as
-// sync_sine_lookup in fast_synth.c); 0 past the table.
-static inline void wt_e_lookup(const struct wt_etab *et, double g, double t, double *re, double *im)
-{
-	double gr = fabs(g) * WT_E_ROWS_PER_CYCLE;
-	double x = t * et->os;
-	if (gr >= (double)(et->rows - 1) || x < 0 || x >= (double)(et->taps * et->os)) {
-		*re = 0.0;
-		*im = 0.0;
-		return;
-	}
-
-	size_t r = (size_t)gr;
-	double fg = gr - r;
-	size_t idx = (size_t)x;
-	double ft = x - idx;
-	const double *e00 = et->e + (r * et->len + idx) * 2;
-	const double *e10 = e00 + et->len * 2;
-	double are = e00[0] + (e00[2] - e00[0]) * ft;
-	double aim = e00[1] + (e00[3] - e00[1]) * ft;
-	double bre = e10[0] + (e10[2] - e10[0]) * ft;
-	double bim = e10[1] + (e10[3] - e10[1]) * ft;
-	*re = are + (bre - are) * fg;
-	*im = aim + (bim - aim) * fg;
-	if (g < 0) {
-		*im = -*im;
-	}
-}
-
 // The gain of harmonic +h+ in a level with +harmonics+ harmonics (1, or 0
 // above them).
 static inline double wt_harmonic_gain(long h, long harmonics)
@@ -568,9 +538,10 @@ static inline void wt_dc(const struct wt_harms *hs, double *re, double *im)
 // (ar, ai) at phase e^(2 pi i h (u + g (t - m1))) = (zr, zi) and frequency
 // +gh+ = h g (below the table's last row), switched on +t+ samples (0 to
 // 1) before the ring's current sample (at +pos+), rotating by (sr, si) =
-// e^(2 pi i gh) per tap.  The table is read at t + j for taps j as
-// wt_e_lookup does, with the row and the fraction between table points
-// found once (index t * os + j * os, fraction t * os - floor(t * os)).
+// e^(2 pi i gh) per tap.  The table E e^(2 pi i G m1) is read at t + j for
+// taps j, interpolated linearly in frequency and time (as sync_sine_lookup
+// in fast_synth.c does; 0 past the table), with the row and the fraction
+// between table points found once (index t * os + j * os, fraction t * os - floor(t * os)).
 static inline void wt_e_add(double *acc, size_t pos, const struct wt_etab *et, int cs, double t, double gh,
 		double ar, double ai, double zr, double zi, double sr, double si)
 {
@@ -760,7 +731,7 @@ static inline void wt_sync_move(const struct wt_etab *et, const struct wt_harms 
 // entries past hmax are zeroed for the chains).
 static void wt_steady_coefs(const struct wt_etab *et, const struct wt_harms *hs, double g, double *coef)
 {
-	// E(h g, 0) e^(2 pi i h g m1) as wt_e_lookup reads it at t = 0, from
+	// E(h g, 0) e^(2 pi i h g m1) as the table reads at t = 0, from
 	// the compact copy of the rows' first points (the rows themselves are
 	// 32 KB apart)
 	double rmax = (double)(et->rows - 1);
