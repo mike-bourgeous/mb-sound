@@ -15,11 +15,12 @@
 #    pitched ± 5 semitones, a third of them backwards, through a
 #    ping-pong delay (a dotted eighth left, a quarter right, darkening
 #    repeats) and a hall.
-# 3. "voice" (bars 5-16): a one-bar sung vowel phrase (a formant voice
+# 3. "voice" (bars 5-21): a one-bar sung vowel phrase (a formant voice
 #    gliding A3 → C4 → E4 → D4) stretched 8x: bars 5-12 the phase vocoder
 #    (`stretch(8, mode: :spectral)`: the notes keep their pitch and
-#    vowels, two bars each), bars 13-16 Paulstretch (`mode: :paul`: the
-#    phrase coming back dissolved into a wash).
+#    vowels, two bars each), bars 13-21 Paulstretch (`mode: :paul`: the
+#    phrase coming back dissolved into a wash, its resolving D carried
+#    over the drone's D into the outro).
 # 4. "spray" (bars 9-18): the pad chord (Dm7) played as tempo-locked
 #    regular grains (four per beat, `jitter: 0`) sprayed over the octave
 #    and twelfth (`pitch: [0, 12, 19]`), the position sweeping through the
@@ -119,7 +120,7 @@ module MB::Sound
     cloud = rain.grains(
       scan: 0.25, size: 40.ms, density: 120 * density, pitch_spread: 5, reverse: 0.35, window: :expodec, pan_spread: 1, seed: 2
     ).lp4(7000).delay(per_channel(1.n8.dotted, 1.n4), feedback: 0.45, dry: 1, wet: -5.db) { |fb| fb.filter(:lowpass, cutoff: 2500) }
-      .reverb(:hall, wet: -4.db) * 1.db
+      .reverb(:hall, wet: -16.db) * 1.db
 
     sung_pv = voice.stretch(8, mode: :spectral).node.pan(-0.2) * -1.db
     sung_paul = voice.stretch(8, mode: :paul, window: 0.4.seconds).node.pan(0.2) * -1.db
@@ -146,7 +147,8 @@ module MB::Sound
       # The sung phrase (A C E D, two bars a note), then the pad's chords
       # i - iv - v - i (Dm7 Gm7 Am7 Dm7) under its Paulstretched echo;
       # the close calls back to the opening: the drone alone with the
-      # rain, moving from G down to D (IV -> I)
+      # rain, moving from G down to D (IV -> I), under the echo's last
+      # note, the D, carried into the outro
       bg :drone, drone.(0), fade: 0
       at_bar(3) { bg :rain, cloud, fade: 1 }
       at_bar(5) { bg :voice, sung_pv, fade: 0 }
@@ -162,7 +164,6 @@ module MB::Sound
       at_bar(17) do
         bg :drone, drone.(-5), fade: 1
         stop :spray, fade: 2
-        stop :voice, fade: 2
       end
       at_bar(19) { outro fade: 2 }
     end
