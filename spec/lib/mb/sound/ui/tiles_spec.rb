@@ -184,4 +184,22 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     @tiles.router.midi(:note, 37, 0.0) # note-off: nothing
     expect(calls).to eq([:hit])
   end
+
+  it "reads ui.on bindings from the Session's MIDI log" do
+    ev = MB::Sound::MIDI::Event
+    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    events = [ev.parse([0x90, 36, 100], time: 0.01r), ev.parse([0x80, 36, 0], time: 0.05r), ev.parse([0xb0, 21, 127], time: 0.06r)]
+    session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    start(session: session)
+    @tiles.on(36, :zoom).on_cc(21, [:split, :rows])
+    sleep 0.1 # the painter has seen the (empty) log
+    10.times { session.process_buffer(800) }
+    deadline = MB::U.clock_now + 3
+    sleep 0.02 until @tiles.tiler.layout.panes.include?(:empty1) || MB::U.clock_now > deadline
+    expect(@tiles.tiler.layout.panes).to include(:empty1)
+    expect(@tiles.tiler.layout.zoom).to be_nil # the split ended the zoom the pad started
+    expect(@tiles.tiler.undo?).to eq(true)
+  ensure
+    session&.close
+  end
 end
