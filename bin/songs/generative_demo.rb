@@ -37,6 +37,9 @@
 #     bpm 84
 #     s = scale(:dorian, :d).weights            # a probability scale (prints as a bar chart)
 #     h = s.blur(0.2) + tones(D3, F3, A3) * 2   # blurred, with a chord layer on top
+#     h = s.blur(0.2) + chord(:min7, root: :d).weights * 2   # the same with a named chord (and the C)
+#     chords = harmony(0 => chord(:min7, root: :d3), 2.bars => chord(:'7', root: :g2), loop: 4.bars, curve: :step)
+#     bg :lead, ambient_koto_voice(melody(chords * 2 + s.blur(0.2), 8, range: A3..A5, vary: true).loop)   # (harmony first: Weights + Harmony raises)
 #     bg :lead, ambient_koto_voice(melody(h, 8, range: A3..A5, vary: true).loop)
 #     key = harmony(0 => scale(:dorian, :d), 4.bars => scale(:major, :f), loop: 8.bars)   # blends both ways
 #     bg :lead, ambient_koto_voice(melody(key.blur(0.2), 8, range: A3..A5, vary: true).loop)
