@@ -36,66 +36,127 @@ module MB
         # Lines kept above the screen by default.
         SCROLLBACK = 10_000
 
-        # One row of cells: characters (one String per cell, "\0" for the
-        # right half of a wide character), packed colors (nil: default),
-        # attribute bits, and whether the row continued onto the next one
-        # (an automatic wrap; joined when copying or searching).
+        # One row of cells: a String with one character per cell ("\0" for
+        # the right half of a wide character), and colors and attributes
+        # per cell, allocated only once a cell is styled (most rows are
+        # plain text, and the scrollback keeps thousands of them), plus
+        # whether the row continued onto the next one (an automatic wrap;
+        # joined when copying or searching).
         class Row
-          attr_reader :chars, :fg, :bg, :attr
+          # The cells' characters (one per cell).
+          attr_reader :text
+
           attr_accessor :wrapped
 
           def initialize(cols)
-            @chars = Array.new(cols, ' ')
-            @fg = Array.new(cols)
-            @bg = Array.new(cols)
-            @attr = Array.new(cols, 0)
+            @text = ' ' * cols
+            @fg = @bg = @attr = nil
             @wrapped = false
-            @plain = true
           end
 
           # True when no cell has a color or attribute (drawn in one run).
           def plain?
-            @plain
-          end
-
-          def styled!
-            @plain = false
+            @fg.nil?
           end
 
           def length
-            @chars.length
+            @text.length
+          end
+
+          # The character at cell +c+.
+          def char(c) = @text[c]
+
+          # Colors and attributes at cell +c+.
+          def fg_at(c) = @fg && @fg[c]
+          def bg_at(c) = @bg && @bg[c]
+          def attr_at(c) = @attr ? @attr[c] : 0
+
+          # Per-cell style Arrays (allocated on first use).
+          def styles
+            unless @fg
+              n = @text.length
+              @fg = Array.new(n)
+              @bg = Array.new(n)
+              @attr = Array.new(n, 0)
+            end
+            [@fg, @bg, @attr]
+          end
+
+          # Writes +str+ (one character per cell) from cell +c+ in one style.
+          def write(c, str, fg, bg, attr)
+            n = str.length
+            @text[c, n] = str
+            if @fg || fg || bg || attr != 0
+              f, b, a = styles
+              f.fill(fg, c, n)
+              b.fill(bg, c, n)
+              a.fill(attr, c, n)
+            end
           end
 
           # Blanks cells +from+...+to+ with background +bg+.
           def blank(from, to, bg = nil)
             return if to <= from
             n = to - from
-            @chars.fill(' ', from, n)
-            @fg.fill(nil, from, n)
-            @bg.fill(bg, from, n)
-            @attr.fill(0, from, n)
-            @plain = false if bg
+            @text[from, n] = ' ' * n
+            return unless @fg || bg
+            f, b, a = styles
+            f.fill(nil, from, n)
+            b.fill(bg, from, n)
+            a.fill(0, from, n)
           end
 
-          def resize(cols)
-            if cols < @chars.length
-              half = @chars[cols] == "\0"
-              [@chars, @fg, @bg, @attr].each { |a| a.slice!(cols..) }
-              @chars[-1] = ' ' if half # a wide character whose right half was cut
-            else
-              n = cols - @chars.length
-              @chars.concat(Array.new(n, ' '))
-              @fg.concat(Array.new(n))
-              @bg.concat(Array.new(n))
-              @attr.concat(Array.new(n, 0))
+          # Deletes +n+ cells at +c+, shifting the rest left (blank cells
+          # with background +bg+ come in at the end).
+          def delete(c, n, bg)
+            cols = @text.length
+            @text.slice!(c, n)
+            @text << ' ' * n
+            if @fg || bg
+              styles.each_with_index do |arr, k|
+                arr.slice!(c, n)
+                arr.concat(Array.new(n, k == 1 ? bg : k == 2 ? 0 : nil))
+              end
+            end
+            @text.slice!(cols..)
+          end
+
+          # Inserts +n+ blank cells at +c+, shifting the rest right (cut at
+          # the row's end).
+          def insert(c, n, bg)
+            cols = @text.length
+            @text.insert(c, ' ' * n)
+            @text.slice!(cols..)
+            if @fg || bg
+              styles.each_with_index do |arr, k|
+                arr.insert(c, *Array.new(n, k == 1 ? bg : k == 2 ? 0 : nil))
+                arr.slice!(cols..)
+              end
             end
           end
 
-          # The row's text (wide characters once), without trailing spaces
-          # when +strip+.
-          def text(strip: true)
-            s = @chars.join.delete("\0")
-            strip ? s.rstrip : s
+          def resize(cols)
+            n = @text.length
+            if cols < n
+              half = @text[cols] == "\0"
+              @text.slice!(cols..)
+              @text[-1] = ' ' if half # a wide character whose right half was cut
+              [@fg, @bg, @attr].each { |arr| arr&.slice!(cols..) }
+            else
+              @text << ' ' * (cols - n)
+              if @fg
+                @fg.concat(Array.new(cols - n))
+                @bg.concat(Array.new(cols - n))
+                @attr.concat(Array.new(cols - n, 0))
+              end
+            end
+          end
+
+          # The row's characters (wide characters once), without trailing
+          # spaces when +strip+.
+          def to_s(strip: true)
+            t = @text.delete("\0")
+            strip ? t.rstrip : t
           end
         end
 
@@ -173,7 +234,7 @@ module MB
 
         # The screen's lines as text (trailing spaces kept).
         def lines
-          screen.map { |r| r.chars.join.delete("\0") }
+          screen.map { |r| r.text.delete("\0") }
         end
 
         # The screen as text, lines joined by newlines.
@@ -335,7 +396,7 @@ module MB
             text, cols = row_text_columns(row)
             m = re.match(text) or next
             next if m[0].empty?
-            return [n, cols[m.begin(0)], cols[m.end(0) - 1] + (row.chars[cols[m.end(0) - 1] + 1] == "\0" ? 2 : 1)]
+            return [n, cols[m.begin(0)], cols[m.end(0) - 1] + (row.char(cols[m.end(0) - 1] + 1) == "\0" ? 2 : 1)]
           end
           nil
         end
@@ -349,7 +410,7 @@ module MB
             row = line_at(n) or next
             a = n == from ? from_col : 0
             b = n == to && to_col ? to_col : row.length
-            seg = row.chars[a...b].join.delete("\0")
+            seg = (row.text[a...b] || '').delete("\0")
             seg = seg.rstrip unless row.wrapped && n != to
             out << seg
             out << "\n" unless n == to || row.wrapped
@@ -432,13 +493,9 @@ module MB
               n = [room, len - pos].min
               row = scr[@row]
               # Overwriting half of a wide character blanks the other half
-              blank_cell(@row, @col - 1) if @col > 0 && row.chars[@col] == "\0"
-              blank_cell(@row, @col + n) if @col + n < @cols && row.chars[@col + n] == "\0"
-              row.chars[@col, n] = str[pos, n].chars
-              row.fg.fill(@fg, @col, n)
-              row.bg.fill(@bg, @col, n)
-              row.attr.fill(@attr, @col, n)
-              row.styled! if @fg || @bg || @attr != 0
+              blank_cell(@row, @col - 1) if @col > 0 && row.char(@col) == "\0"
+              blank_cell(@row, @col + n) if @col + n < @cols && row.char(@col + n) == "\0"
+              row.write(@col, pos == 0 && n == len ? str : str[pos, n], @fg, @bg, @attr)
               mark(@row)
               pos += n
               if @col + n >= @cols
@@ -472,8 +529,8 @@ module MB
           end
           row = screen[@row]
           # Overwriting half of a wide character blanks the other half
-          blank_cell(@row, @col - 1) if row.chars[@col] == "\0" && @col > 0
-          blank_cell(@row, @col + w) if @col + w < @cols && row.chars[@col + w] == "\0"
+          blank_cell(@row, @col - 1) if row.char(@col) == "\0" && @col > 0
+          blank_cell(@row, @col + w) if @col + w < @cols && row.char(@col + w) == "\0"
           set_cell(row, @col, ch)
           set_cell(row, @col + 1, "\0") if w == 2
           mark(@row)
@@ -486,19 +543,11 @@ module MB
         end
 
         def set_cell(row, c, ch)
-          row.chars[c] = ch
-          row.fg[c] = @fg
-          row.bg[c] = @bg
-          row.attr[c] = @attr
-          row.styled! if @fg || @bg || @attr != 0
+          row.write(c, ch, @fg, @bg, @attr)
         end
 
         def blank_cell(r, c)
-          row = screen[r]
-          row.chars[c] = ' '
-          row.fg[c] = nil
-          row.bg[c] = nil
-          row.attr[c] = 0
+          screen[r].blank(c, c + 1)
         end
 
         def wrap_now
@@ -796,12 +845,7 @@ module MB
         def delete_chars(n)
           row = screen[@row]
           n = [n, @cols - @col].min
-          [row.chars, row.fg, row.bg, row.attr].each { |a| a.slice!(@col, n) }
-          row.chars.concat(Array.new(n, ' '))
-          row.fg.concat(Array.new(n))
-          row.bg.concat(Array.new(n, @bg))
-          row.attr.concat(Array.new(n, 0))
-          row.styled! if @bg
+          row.delete(@col, n, @bg)
           @wrap_pending = false
           mark(@row)
         end
@@ -809,12 +853,7 @@ module MB
         def insert_chars(n)
           row = screen[@row]
           n = [n, @cols - @col].min
-          row.chars.insert(@col, *Array.new(n, ' '))
-          row.fg.insert(@col, *Array.new(n))
-          row.bg.insert(@col, *Array.new(n, @bg))
-          row.attr.insert(@col, *Array.new(n, 0))
-          row.resize(@cols)
-          row.styled! if @bg
+          row.insert(@col, n, @bg)
           @wrap_pending = false
           mark(@row)
         end
@@ -879,7 +918,7 @@ module MB
         def row_text_columns(row)
           text = +''
           cols = []
-          row.chars.each_with_index do |ch, c|
+          row.text.each_char.with_index do |ch, c|
             next if ch == "\0"
             text << ch
             cols << c
@@ -888,14 +927,12 @@ module MB
         end
 
         def draw_row(grid, x, y, w, row, marks)
-          chars = row.chars
-          n = [w, chars.length].min
+          text = row.text
+          n = [w, text.length].min
           if row.plain? && (marks.nil? || marks.empty?)
-            grid.put_run(x, y, chars[0, n].join, nil, nil, 0)
+            grid.put_run(x, y, n == text.length ? text : text[0, n], nil, nil, 0)
           else
-            fg = row.fg
-            bg = row.bg
-            at = row.attr
+            fg, bg, at = row.styles
             extra = Array.new(n, 0)
             marks&.each { |_, a, b, bits| (a...[b, n].min).each { |c| extra[c] |= bits if c >= 0 } }
             c = 0
@@ -905,7 +942,7 @@ module MB
               a = at[c] | extra[c]
               e = c + 1
               e += 1 while e < n && fg[e] == f && bg[e] == b && (at[e] | extra[e]) == a
-              grid.put_run(x + c, y, chars[c...e].join, f, b, a)
+              grid.put_run(x + c, y, text[c...e], f, b, a)
               c = e
             end
           end

@@ -2,9 +2,12 @@ require 'fileutils'
 
 require_relative 'ui/snapshot'
 require_relative 'ui/poll'
+require_relative 'ui/data_file'
+require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
 require_relative 'ui/pane'
 require_relative 'ui/panes'
+require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
 require_relative 'ui/follow'
@@ -12,7 +15,6 @@ require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
 require_relative 'ui/warm_up'
-require_relative 'ui/data_file'
 require_relative 'ui/screen/vt'
 require_relative 'ui/input/events'
 require_relative 'ui/input/decoder'
@@ -65,6 +67,7 @@ module MB
         attr_accessor :prompt_status_enabled
       end
       self.glyphs = ENV['MB_SOUND_UI_GLYPHS'] == 'ascii' ? :ascii : :unicode
+      Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
       self.default_layout = :band
       self.prompt_status_enabled = true
 
@@ -267,10 +270,57 @@ module MB
         @band if @band&.active?
       end
 
+      # Defines (or replaces) a pane kind: the block makes a Pane from a
+      # name and options (`pane :x, kind: :mine, ...` in pane files).
+      #
+      #     UI.pane_kind(:big_clock) { |name, **o| UI::Pane.new(name, height: 1, **o) { |c, s| c.puts [s&.stamp.to_s, :key] } }
+      def self.pane_kind(kind, &block)
+        raise ArgumentError, "Pane kinds are Symbols (got #{kind.inspect})" unless kind.is_a?(Symbol)
+        raise ArgumentError, 'pane_kind needs a block making a Pane' unless block
+        PaneFiles.kinds[kind] = block
+      end
+
+      # Defines (or replaces) pane +p+ (a Pane) by its name; redraws it if
+      # it is on screen.
+      def self.define_pane_object(p)
+        panes[p.name] = p
+        @band.layout = @band.layout if @band&.active? && @band.layout.pane_names.include?(p.name)
+        @tiles&.invalidate
+        p
+      end
+
+      # Reloads data files that changed (pane files, the current theme,
+      # saved layouts): called by the screens' painters about once a second.
+      # Returns {panes:, theme:, layouts:, errors:}.
+      def self.reload_files
+        errors = []
+        panes_defined = PaneFiles.reload(errors)
+        theme = begin
+          Themes.reload_changed
+        rescue DataFile::LoadError, ArgumentError => e
+          errors << e.message
+          false
+        end
+        layouts = []
+        (@layout_mtimes || {}).each do |path, m|
+          next unless File.file?(path) && File.mtime(path) != m
+          name = File.basename(path, '.rb').to_sym
+          begin
+            layout_named(name)
+            layouts << name
+          rescue DataFile::LoadError, LayoutLoader::LoadError, ArgumentError => e
+            @layout_mtimes[path] = File.mtime(path)
+            errors << e.message
+          end
+        end
+        { panes: panes_defined, theme: theme, layouts: layouts, errors: errors }
+      end
+
       # Defines (or replaces) a pane; redraws it if it is on screen.
       def self.define_pane(name, **opts, &block)
         p = Pane.new(name, **opts, &block)
         panes[name] = p
+        @tiles&.invalidate
         @band.layout = @band.layout if @band&.active? && @band.layout.pane_names.include?(name)
         p
       end

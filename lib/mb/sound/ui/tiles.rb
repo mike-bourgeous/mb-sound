@@ -97,6 +97,12 @@ module MB
 
         def active? = @active
 
+        # The painter thread (nil while off).
+        def thread = @painter
+
+        # The pty reader thread of the REPL (nil while off).
+        def pty_thread = @host&.reader
+
         # Sets up the terminal (alternate screen, raw input), moves the
         # REPL into its pane, and starts the threads (+thread: false+
         # paints only on #refresh and reads input only on #pump, for
@@ -177,7 +183,7 @@ module MB
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             repl_bytes: @host&.bytes_read.to_i,
             repl_reader_cpu_ms: ((@host&.reader_cpu || 0) * 1000).round(1),
-            slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3) } },
+            slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
         end
 
@@ -256,8 +262,11 @@ module MB
           path
         end
 
-        # Changes the theme (see UI::Themes).
-        def theme(name)
+        # Changes the theme (:default, :paper, :phosphor, :mono, or one in
+        # UI.layouts_dir/themes; see UI::Themes).  Without a name, the
+        # theme in use.
+        def theme(name = nil)
+          return Themes.current if name.nil?
           Themes.use(name)
           @full = true
           self
@@ -595,6 +604,25 @@ module MB
           @term ? @term.size : [24, 80]
         end
 
+        # Seconds between checks of the data files (pane files, theme, layouts).
+        RELOAD = 1.0
+
+        def reload_files(now)
+          return if @reloaded_at && now - @reloaded_at < RELOAD
+          @reloaded_at = now
+          r = UI.reload_files
+          flash(r[:errors].first, :bad) unless r[:errors].empty?
+          if r[:layouts].include?(@layout_name)
+            l = UI.tile_layouts[@layout_name]
+            @tiler.layout = l if l
+            flash("reloaded layout #{@layout_name.inspect}", :ok)
+          end
+          @full = true if r[:theme] || !r[:panes].empty?
+          flash("reloaded panes #{r[:panes].map(&:inspect).join(', ')}", :ok) unless r[:panes].empty? || !r[:errors].empty?
+        rescue StandardError => e
+          flash("reload: #{e.message}", :bad)
+        end
+
         def check_size(now)
           return unless @resized || @size_checked_at.nil? || now - @size_checked_at >= SIZE_CHECK
           @size_checked_at = now
@@ -609,7 +637,7 @@ module MB
         end
 
         # Placements, grids, and the separators for the current tree.
-        def relayout
+        def relayout(*)
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
@@ -640,6 +668,7 @@ module MB
           poll(now)
           poll_midi
           check_size(now)
+          reload_files(now)
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
           full = @full
@@ -664,7 +693,8 @@ module MB
               draw_placeholder(p) if full
               next
             end
-            next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / pane.rate - 0.001
+            rate = p.opts[:rate].is_a?(Numeric) && p.opts[:rate] > 0 ? p.opts[:rate] : pane.rate
+            next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
             begin
               r = p.rect
               if pane.bytes?
@@ -765,7 +795,7 @@ module MB
             r.h.times { |dy| covered[r.y + dy]&.fill(true, r.x, r.w) }
           end
           focus = @placed.find { |p| p.name == @tiler.focus }&.rect
-          glyph = @glyphs == :ascii ? '|' : '│'
+          glyph = Themes.glyphs(@glyphs)[:rule] || '|'
           dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
           key = Plot::Text::Cells.pack(Theme.rgb(:key))
           h.times do |y|

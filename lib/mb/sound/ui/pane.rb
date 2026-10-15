@@ -52,6 +52,27 @@ module MB
         # Drawn by subclasses.
         def draw_body(c, s, state); end
 
+        # Options #configured takes.
+        CONFIG = %i[rate height width title].freeze
+
+        # A copy named +name+ with other +rate+, +height+, +width+, or
+        # +title+ (pane files and layouts configure kinds this way).
+        def configured(name, **opts)
+          bad = opts.keys - CONFIG
+          raise ArgumentError, "Unknown pane option#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')} (#{CONFIG.map(&:inspect).join(', ')})" unless bad.empty?
+          raise ArgumentError, "Pane names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+          copy = dup
+          copy.instance_variable_set(:@name, name)
+          copy.instance_variable_set(:@rate, opts[:rate]) if opts.key?(:rate)
+          copy.instance_variable_set(:@height, opts[:height]) if opts.key?(:height)
+          copy.instance_variable_set(:@width, opts[:width]) if opts.key?(:width)
+          if opts.key?(:title)
+            copy.instance_variable_set(:@title, opts[:title])
+            copy.instance_variable_set(:@title_text, nil)
+          end
+          copy
+        end
+
         # True for panes that write their own terminal bytes (Plot::Live
         # panes) instead of cells (see ScopePane).
         def bytes?

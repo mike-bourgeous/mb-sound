@@ -40,7 +40,7 @@ module MB
           # can't hold the GVL for long).
           CHUNK = 4096
 
-          attr_reader :vt, :mode, :real_in, :real_out, :thread
+          attr_reader :vt, :mode, :real_in, :real_out, :thread, :reader
 
           # Bytes read from the program so far, and reader CPU seconds.
           attr_reader :bytes_read, :reader_cpu

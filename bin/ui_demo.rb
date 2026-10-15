@@ -19,6 +19,9 @@
 #     bin/ui_demo.rb --at bottom            # band under the scrolling text
 #     bin/ui_demo.rb -L low                 # the :low latency profile (256-frame writes)
 #     bin/ui_demo.rb --seek 41              # from the drop
+#     bin/ui_demo.rb --tiles                # the tiled screen (:tiles) with a REPL pane
+#     bin/ui_demo.rb --tiles --flood 10000  # ... printing 10 000 lines into the REPL while the song plays
+#     bin/ui_demo.rb --tiles -l studio --size 60x200
 #
 # Expected: the band at the top shows bar:beat moving, the form's section
 # and what comes next, tracks lighting up as scenes change, queued changes
@@ -60,9 +63,12 @@ module MB::Sound
       capture: [nil, 'Write ANSI and HTML captures of the band to this directory', String],
       latency: [nil, 'Latency profile: default, low, video, safe', '-L', Symbol],
       quiet: [false, 'Print only the summary', '-q'],
+      tiles: [false, 'The tiled screen (a layout with a repl pane; default :tiles) instead of the band'],
+      flood: [0, 'With --tiles: lines to print into the REPL pane, starting after 2 s (throughput under audio)', Integer],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
       tty = $stdout.tty?
+      quiet = p.quiet || (p.tiles && tty) # (with --tiles in a terminal, the screen is the tiles')
       rows, cols = p.size.split('x').map(&:to_i)
       io = tty ? $stdout : File.open(File::NULL, 'w')
 
@@ -75,8 +81,25 @@ module MB::Sound
       out = session.output
       underruns = -> { out.respond_to?(:underruns) ? out.underruns : nil }
 
-      band = UI::Band.new(layout: UI.layout_named(p.layout), io: io, at: p.at, look: p.look, color: p.color, size: tty ? nil : [rows, cols])
-      UI.instance_variable_set(:@band, band) # (so Reline's guard and `now` see it)
+      if p.tiles
+        layout = p.layout == :band ? :tiles : p.layout
+        if tty
+          term_in = $stdin
+          term_out = $stdout
+        else
+          # No terminal: a pty stands in, its output read and dropped
+          require 'pty'
+          pty_master, term_out = PTY.open
+          term_out.winsize = [rows, cols]
+          term_in = term_out
+          Thread.new { loop { pty_master.readpartial(65_536) } rescue nil }
+        end
+        band = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: term_in, output: term_out, repl: :thread, look: p.look, color: p.color, probe: tty)
+      else
+        band = UI::Band.new(layout: UI.layout_named(p.layout), io: io, at: p.at, look: p.look, color: p.color, size: tty ? nil : [rows, cols])
+        UI.instance_variable_set(:@band, band) # (so Reline's guard and `now` see it)
+      end
+      flood = nil
 
       waits = { on: [], off: [] }
       holds = []
@@ -96,17 +119,30 @@ module MB::Sound
         band.start if on && !band.active?
         band.stop if !on && band.active?
         scheduler = Thread.list.find { |th| th.name == 'MB::Sound::Session scheduler' }
-        names = [:render, :painter, :scheduler, :main]
-        threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, Thread.current]
+        # (GVLProbe watches up to 4 threads: with --tiles, the REPL's pty reader replaces main)
+        names = [:render, :painter, :scheduler, p.tiles ? :pty : :main]
+        threads = [session.render_thread, band.thread || Thread.current, scheduler || Thread.current, (p.tiles && band.pty_thread) || Thread.current]
         FastUI::GVLProbe.start(threads)
         x0 = underruns.call
         gc0 = [GC.count, GC.stat(:time)]
         stop_at = [start + elapsed + window, start + p.seconds].min
         t = MB::U.clock_now
         while (now = MB::U.clock_now) < stop_at
-          sleep([1.0, stop_at - now].min)
-          puts "#{format('%5.1f', now - start)} s  #{session.transport_record&.then { |r| Session::Stamp.at(r[:pos], session.transport).to_s }}  load #{((session.render_load || 0) * 100).round}%  band #{band.active? ? 'on' : 'off'}" unless p.quiet
-          if p.capture && band.active? && now - t >= 1.0
+          # (50 ms steps while a flood runs, so its time is measured closely)
+          sleep([flood && !flood[:done] ? 0.05 : 1.0, stop_at - now].min)
+          if p.tiles && p.flood > 0 && flood.nil? && band.active? && MB::U.clock_now - start >= 2
+            # Print into the REPL as if typed; done when its result shows
+            flood = { lines: p.flood, at: MB::U.clock_now, bytes: band.host.bytes_read }
+            band.host.write("#{p.flood}.times { |i| pry_instance.output.puts \"flood line \#{i} \#{'=' * 60}\" }; :flood_done\r")
+          end
+          if flood && !flood[:done] && band.host.synchronize { band.host.vt.text.include?('=> :flood_done') }
+            flood[:done] = MB::U.clock_now
+            flood[:bytes] = band.host.bytes_read - flood[:bytes]
+          end
+          next if flood && !flood[:done] && MB::U.clock_now - (flood[:printed] ||= 0) < 1.0 # (progress once a second)
+          flood[:printed] = MB::U.clock_now if flood
+          puts "#{format('%5.1f', now - start)} s  #{session.transport_record&.then { |r| Session::Stamp.at(r[:pos], session.transport).to_s }}  load #{((session.render_load || 0) * 100).round}%  band #{band.active? ? 'on' : 'off'}" unless quiet
+          if p.capture && !p.tiles && band.active? && now - t >= 1.0
             t = now
             band.invalidate
             frame = band.refresh
@@ -138,10 +174,12 @@ module MB::Sound
       end
       band_stats = band.stats
       band.stop
+      pty_master&.close
       MB::Sound.stop(:all, fade: 0)
 
       puts
-      puts "Render thread wake delay (GVL wait after each wake), #{session.buffer_size}-frame buffers, #{p.layout} band at #{band.rows}x#{band.cols} #{p.color} #{p.look}#{tty ? '' : ' (to /dev/null)'}:"
+      what = p.tiles ? "#{band.layout_name} tiles" : "#{p.layout} band"
+      puts "Render thread wake delay (GVL wait after each wake), #{session.buffer_size}-frame buffers, #{what} at #{band.rows}x#{band.cols} #{p.color} #{p.look}#{tty ? '' : p.tiles ? ' (to a pty)' : ' (to /dev/null)'}:"
       puts ui_demo_line('  band on', waits[:on]) if waits[:on].any? || p.ui
       puts ui_demo_line('  band off', waits[:off]) if waits[:off].any? || !p.ui
       puts ui_demo_line('Painter GVL holds', holds) if holds.any?
@@ -166,6 +204,14 @@ module MB::Sound
         puts "Underruns: n/a (#{out.class.name.split('::').last} output)"
       end
       puts "Captures: #{captured} in #{p.capture}" if p.capture
+      if flood
+        if flood[:done]
+          secs = flood[:done] - flood[:at]
+          puts "REPL flood: #{flood[:lines]} lines (#{flood[:bytes]} bytes from Pry) in #{secs.round(2)} s: #{(flood[:lines] / secs).round} lines/s; pty reader CPU #{s[:repl_reader_cpu_ms]} ms in all"
+        else
+          puts "REPL flood: #{flood[:lines]} lines not done in time (#{band.host&.bytes_read.to_i} bytes read)"
+        end
+      end
     }
   end
 end

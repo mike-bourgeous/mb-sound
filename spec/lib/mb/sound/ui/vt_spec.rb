@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   it 'writes text, wraps with a pending wrap, and scrolls lines into the scrollback' do
     vt.feed("hello\r\nabcdefghijKL\r\n3\r\n4\r\n5\r\n6")
     expect(rows).to eq(%w[KL 3 4 5 6])
-    expect(vt.scrollback.map(&:text)).to eq(%w[hello abcdefghij])
+    expect(vt.scrollback.map(&:to_s)).to eq(%w[hello abcdefghij])
     expect(vt.scrollback.last.wrapped).to eq(true)
     expect(vt.text_between(1, 3)).to eq("abcdefghijKL\n3")
 
@@ -27,9 +27,9 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   it 'keeps at most the scrollback limit, with stable absolute line numbers' do
     v = MB::Sound::UI::VT.new(2, 5, scrollback: 3)
     10.times { |i| v.feed("#{i}\r\n") }
-    expect(v.scrollback.map(&:text)).to eq(%w[6 7 8])
+    expect(v.scrollback.map(&:to_s)).to eq(%w[6 7 8])
     expect(v.dropped).to eq(6)
-    expect(v.line_at(6).text).to eq('6')
+    expect(v.line_at(6).to_s).to eq('6')
     expect(v.line_at(5)).to be_nil
     expect(v.search('7')).to eq([7, 0, 1])
   end
@@ -39,25 +39,25 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     vt.feed("1mred\e[0m \xE4".b)
     vt.feed("\xB8\xAD".b)
     expect(rows[0]).to eq('red 中')
-    expect(vt.screen[0].fg[0]).to eq(MB::Sound::UI::VT::INDEXED | 1)
-    expect(vt.screen[0].fg[3]).to be_nil
+    expect(vt.screen[0].fg_at(0)).to eq(MB::Sound::UI::VT::INDEXED | 1)
+    expect(vt.screen[0].fg_at(3)).to be_nil
   end
 
   it 'reads SGR colors and attributes' do
     vt.feed("\e[1;4;38;5;200;48;2;1;2;3mA\e[22;24;39;49;7mB\e[0;93;2;3mC")
     r = vt.screen[0]
-    expect(r.attr[0]).to eq(MB::Sound::UI::VT::BOLD | MB::Sound::UI::VT::UNDERLINE)
-    expect(r.fg[0]).to eq(MB::Sound::UI::VT::INDEXED | 200)
-    expect(r.bg[0]).to eq(0x010203)
-    expect([r.attr[1], r.fg[1], r.bg[1]]).to eq([MB::Sound::UI::VT::REVERSE, nil, nil])
-    expect([r.attr[2], r.fg[2]]).to eq([MB::Sound::UI::VT::DIM | MB::Sound::UI::VT::ITALIC, MB::Sound::UI::VT::INDEXED | 11])
+    expect(r.attr_at(0)).to eq(MB::Sound::UI::VT::BOLD | MB::Sound::UI::VT::UNDERLINE)
+    expect(r.fg_at(0)).to eq(MB::Sound::UI::VT::INDEXED | 200)
+    expect(r.bg_at(0)).to eq(0x010203)
+    expect([r.attr_at(1), r.fg_at(1), r.bg_at(1)]).to eq([MB::Sound::UI::VT::REVERSE, nil, nil])
+    expect([r.attr_at(2), r.fg_at(2)]).to eq([MB::Sound::UI::VT::DIM | MB::Sound::UI::VT::ITALIC, MB::Sound::UI::VT::INDEXED | 11])
   end
 
   it 'puts wide characters in two cells and wraps them whole' do
     vt.feed('abcdefghi中')
     expect(rows[0]).to eq('abcdefghi')
     expect(rows[1]).to eq('中')
-    expect(vt.screen[1].chars[0, 2]).to eq(['中', "\0"])
+    expect(vt.screen[1].text[0, 2]).to eq("中\0")
     vt.feed("\e[2;2Hx") # overwriting the right half blanks the left
     expect(rows[1]).to eq(' x')
   end
@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     vt.feed("1\r\n2\r\n3\r\n4\r\n5")
     vt.resize(3, 4)
     expect(rows).to eq(%w[3 4 5])
-    expect(vt.scrollback.map(&:text)).to eq(%w[1 2])
+    expect(vt.scrollback.map(&:to_s)).to eq(%w[1 2])
     vt.resize(4, 12)
     expect(vt.lines.map(&:length)).to all(eq(12))
     expect(vt.cols).to eq(12)
