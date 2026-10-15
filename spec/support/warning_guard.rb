@@ -38,10 +38,9 @@ module WarningGuard
   # short: our own warnings are fixed, or expected by the spec that
   # triggers them.
   ALLOWED = [
-    [%r{/gems/pry-[\d.]+/lib/pry/\S+\.rb:\d+: warning: OpenStruct use is discouraged},
-     'pry 0.14.2 uses OpenStruct for its config and state (:performance); pinned by the gemspec (~> 0.14.0) and pry-byebug 3.10 (< 0.15)'],
     [%r{/gems/prettyprint-[\d.]+/lib/prettyprint\.rb:\d+: warning: literal string will be frozen},
-     'prettyprint 0.2.0 (a pp dependency, locked in Gemfile.lock) appends to a chilled literal (:deprecated); 0.2.1 exists'],
+     "mb-util's MB::U.highlight (text_methods.rb:123) passes a chilled '' to Pry::ColorPrinter.pp, which prettyprint appends to (:deprecated); " \
+     'prettyprint 0.2.1 (fixes-14) still appends to its output, so the fix belongs in mb-util (+\'\')'],
     [%r{/gems/csv-[\d.]+/lib/csv/writer\.rb:\d+: warning: literal string will be frozen},
      'csv 3.3.6 (locked in Gemfile.lock; bin/resample_benchmark.rb writes CSV) appends to a chilled literal (:deprecated)'],
   ].freeze
