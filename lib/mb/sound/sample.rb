@@ -641,9 +641,11 @@ module MB
       # identity phase locking (Laroche & Dolson): Hann windows of +window+
       # (4096 samples) with +overlap+ (4) frames per window, every channel
       # rotated by the phases of their mix (a steady stereo image), and
-      # with +transients+ (true) each detected onset (Sample::Onsets) kept
-      # unstretched with its phases reset, so attacks stay sharp; best on
-      # pads, chords, voices, and basses (pitch is kept exactly).  :paul
+      # with +transients+ (true) each detected onset (Sample::Onsets)
+      # landing at +ratio+ times its time with its attack unstretched (the
+      # decay between hits drawn out) and the phases of its rising bins
+      # reset, so attacks stay sharp and breaks keep their groove; best on
+      # pads, chords, voices, basses (pitch is kept exactly), and breaks.  :paul
       # (:paulstretch) is Paulstretch: windows of +window+ (0.25 s), every
       # phase random (from +seed+, 0 by default, so the same stretch
       # gives the same audio): glacial washes at extreme ratios (8x to

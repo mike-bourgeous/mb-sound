@@ -22,6 +22,10 @@ module MB
 
         TWO_PI = 2 * Math::PI
 
+        # How much a bin's magnitude must grow from one frame to the next
+        # near an onset for the phase vocoder to reset its phase (2: 6 dB).
+        RESET_RISE = 2.0
+
         module_function
 
         # +mode+ as a MODES name.
@@ -64,7 +68,7 @@ module MB
           len = xs[0].length
           out_len = (len * ratio).round
           mix = xs.length == 1 ? xs[0] : xs.sum / xs.length
-          map = time_map(len, ratio, onsets, n, hs)
+          map, resets = time_map(len, ratio, onsets, n, hs)
           w = hann(n)
           nb = n / 2 + 1
           omega = Numo::DFloat.new(nb).seq * (TWO_PI / n)
@@ -77,8 +81,9 @@ module MB
 
           theta = nil
           phi_prev = nil
+          mag_prev = nil
           prev_center = nil
-          resets = onsets ? onsets.sort : []
+          attack_until = nil
           ri = 0
 
           frames.times do |m|
@@ -87,13 +92,12 @@ module MB
             phi = spec.arg
             mag = spec.abs
 
-            reset = false
             while ri < resets.length && center + n / 2 > resets[ri]
-              reset = true
+              attack_until = resets[ri] + n / 2
               ri += 1
             end
 
-            if theta.nil? || reset
+            if theta.nil?
               theta = phi.dup
             else
               ha = center - prev_center
@@ -107,8 +111,17 @@ module MB
                 winst_h = (omega + princarg(phi - ref - omega * hr) / hr) * hs
               end
               theta = lock(theta + winst_h, phi, mag)
+              if attack_until && center < attack_until
+                # Frames holding an onset: bins whose level jumps (the
+                # attack) take their analysis phases, so the attack is
+                # rebuilt as it was; steady bins (a bass note ringing
+                # through) keep their phases, so nothing cancels
+                rising = mag.gt(mag_prev * RESET_RISE)
+                theta[rising] = phi[rising] if rising.count_true > 0
+              end
             end
             phi_prev = phi
+            mag_prev = mag
             prev_center = center
 
             rot = theta - phi
@@ -218,42 +231,77 @@ module MB
           buf.map { |b| b[h...(h + out_len)] / norm }
         end
 
-        # A proc from output position to input position: output / +ratio+,
-        # except that each onset's span (a window before through half a
-        # window after, plus a hop) plays at ratio 1, the rest stretched
-        # more so the total stays +ratio+ times the length.
+        # [a proc from output position to input position, the onsets it
+        # keeps]: output / +ratio+, except that each onset lands exactly
+        # at +ratio+ times its input position, with a span around it (a
+        # window and a hop before it, half a window after: every frame
+        # that holds the attack) played at ratio 1, and the input between
+        # spans stretched to fill the time between them (so hits keep the
+        # groove: each one where +ratio+ says, its attack unstretched, its
+        # decay drawn out).  Where onsets are closer than a span (in the
+        # input, or in the output when compressing), the spans shrink to
+        # fit, leaving at least MIN_GAP hops between them; onsets closer
+        # than that are left in the span before.
         def time_map(len, ratio, onsets, n, hs)
-          plain = ->(t) { t / ratio.to_f }
-          return plain if onsets.nil? || onsets.empty?
+          r = ratio.to_f
+          plain = ->(t) { t / r }
+          return [plain, []] if onsets.nil? || onsets.empty?
 
-          spans = onsets.sort.map { |o| [[o - n / 2 - hs, 0].max, [o + n / 2, len].min] }.reject { |a, b| b <= a }
-          merged = []
-          spans.each { |a, b| merged.last && a <= merged.last[1] ? merged.last[1] = [merged.last[1], b].max : merged << [a, b] }
-          protected_len = merged.sum { |a, b| b - a }
-          rest = len - protected_len
-          out_total = len * ratio.to_f
-          return plain unless rest > 0 && out_total - protected_len > rest * 0.05 * ratio
+          pre = n / 2 + hs
+          post = n / 2
+          gap_min = MIN_GAP * hs
+          kept = []
+          onsets.sort.uniq.each do |o|
+            next if o < 0 || o >= len
+            next if kept.any? && [o - kept.last, (o - kept.last) * r].min < gap_min + 2 * hs
+            kept << o
+          end
 
-          ru = (out_total - protected_len) / rest
+          # Spans [pre, post] per onset, shrunk to fit between neighbours
+          spans = kept.map { [pre, post] }
+          kept.each_with_index do |o, i|
+            spans[i][0] = [spans[i][0], o, (o * r).floor].min if i == 0
+            if i == kept.length - 1
+              spans[i][1] = [spans[i][1], len - o, ((len - o) * r).floor].min
+            else
+              room = [kept[i + 1] - o, ((kept[i + 1] - o) * r).floor].min - gap_min
+              want = spans[i][1] + spans[i + 1][0]
+              if want > room
+                scale = room.to_f / want
+                spans[i][1] = (spans[i][1] * scale).floor
+                spans[i + 1][0] = (spans[i + 1][0] * scale).floor
+              end
+            end
+          end
+
           ins = [0.0]
           outs = [0.0]
-          merged.each do |a, b|
-            outs << outs.last + (a - ins.last) * ru
-            ins << a.to_f
-            outs << outs.last + (b - a)
-            ins << b.to_f
+          kept.each_with_index do |o, i|
+            a, b = spans[i]
+            [[o - a, o * r - a], [o + b, o * r + b]].each do |x, y|
+              next if x <= ins.last && y <= outs.last
+              ins << x.to_f
+              outs << y.to_f
+            end
           end
-          outs << outs.last + (len - ins.last) * ru
-          ins << len.to_f
+          if ins.last < len
+            ins << len.to_f
+            outs << len * r
+          end
 
           k = 0
-          ->(t) {
+          map = ->(t) {
             k = 0 if t < outs[k]
             k += 1 while k < outs.length - 2 && t >= outs[k + 1]
             span = outs[k + 1] - outs[k]
             span > 0 ? ins[k] + (t - outs[k]) * (ins[k + 1] - ins[k]) / span : ins[k]
           }
+          [map, kept]
         end
+
+        # The fewest hops of input (and output) Spectral.time_map leaves
+        # between two onsets' spans.
+        MIN_GAP = 1
       end
     end
   end

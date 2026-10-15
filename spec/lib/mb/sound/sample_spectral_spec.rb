@@ -43,6 +43,25 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(rise.(smeared, 24000)).to be > 500
   end
 
+  it 'lands every hit of a dense pattern at ratio times its time, under a ringing bass' do
+    # Hits 107 ms apart (16ths at 140 BPM, about a span apart: granular-1
+    # merged their spans into one unstretched run, holding the first hit
+    # and rushing the rest) over a 55 Hz tone that keeps ringing
+    r = Random.new(2)
+    x = Numo::NMath.sin(Numo::DFloat.new(60000).seq * (2 * Math::PI * 55 / 48000)) * 0.3
+    hits = (0...10).map { |k| 4000 + k * 5143 }
+    hits.each { |o| 800.times { |i| x[o + i] += (r.rand * 2 - 1) * Math.exp(-i / 150.0) } }
+    s = MB::Sound::Sample[x]
+    [2, 4].each do |ratio|
+      y = s.stretch(ratio, mode: :spectral)
+      found = MB::Sound::Sample[y.data].onsets
+      hits.each { |o| expect(found.map { |f| (f - o * ratio).abs }.min).to be <= 48 } # 1 ms
+      # no dip before the hits: the bass keeps its phase through the resets
+      env = ->(c) { (1..12).map { |k| rms(y.data[(c - k * 256)...(c - k * 256 + 256)]) } }
+      hits.drop(1).each { |o| expect(env.(o * ratio).min).to be > 0.1 }
+    end
+  end
+
   it 'Paulstretches with seeded random phases at the input level' do
     a = pad.stretch(8, mode: :paul)
     b = pad.stretch(8, mode: :paulstretch)
