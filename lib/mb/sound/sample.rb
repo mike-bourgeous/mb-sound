@@ -631,7 +631,8 @@ module MB
       # sound matches what would have followed (the S950's "cycle
       # fudging"), so tones keep their pitch and breaks get smaller seams.
       # :fixed is the plain cyclic stretch: cycles of exactly +cycle+, cut
-      # anywhere; short cycles buzz at 1 / cycle (metallic), long ones
+      # anywhere (crossfaded like :auto's; `crossfade: 0` for the raw
+      # splices); short cycles buzz at 1 / cycle (metallic), long ones
       # stutter, and tones whose period doesn't divide the cycle retune (a
       # 55 Hz bass at 2x with 30 ms cycles sounds about an octave low; see
       # Lofi::FITS).  Every channel cuts in the same places.
@@ -675,9 +676,9 @@ module MB
       #     pad.stretch(2, cycle: 30.ms)               # cycles fitted to the sound
       #     brk.stretch(2, cycle: 30.ms, fit: :fixed)  # the plain cyclic stretch (stutter, buzz)
       #     pad.stretch(8, mode: :spectral)            # phase vocoder
-      #     pad.stretch(8, mode: :spectral, randomize: 0.3)   # a little Paulstretch haze
+      #     pad.stretch(8, mode: :spectral, randomize: 1)     # Paulstretch-like phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
-      #     voice.stretch(16, mode: :paul, overlap: 2, shape: :paul, link: false)   # like Nasca Paul's original
+      #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # like Nasca Paul's original (voices)
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann)
         mode = Spectral.mode_name(mode)
         return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape) unless mode == :cyclic
