@@ -87,7 +87,7 @@ module MB
       #
       # See #setup_buffer.
       def expand_buffer(example_buf, length: nil, complex: @bufcomplex, double: @bufdouble, grow: true)
-        raise "BUG: Call #setup_buffer before calling #expand_buffer" unless defined?(@bufcomplex)
+        raise "BUG: Call #setup_buffer before calling #expand_buffer" if @bufclass.nil?
 
         complex ||= example_buf.is_a?(Numo::SComplex) || example_buf.is_a?(Numo::DComplex)
         double ||= example_buf.is_a?(Numo::DFloat) || example_buf.is_a?(Numo::DComplex) ||

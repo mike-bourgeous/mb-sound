@@ -84,6 +84,9 @@ module MB
           base.extend(ClassMethods)
         end
 
+        # Set on first use (see IvarPreset).
+        IvarPreset.declare(self, :@ports, :@frame_number, :@main_read, :@frame_count, :@main_data, :@port_read, :@port_data)
+
         # Returns the Port named +name+, creating it on first use.
         def port(name)
           raise ArgumentError, "#{self.class} has no port #{name.inspect}" unless self.class.port_specs.include?(name)
