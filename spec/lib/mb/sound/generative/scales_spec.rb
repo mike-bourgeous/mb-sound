@@ -160,6 +160,32 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect(looped.to_ruby).to eq('harmony(0 => scale(:dorian, D4).weights, 1.bar => scale(:major, F4).weights, curve: :step, loop: 2.bars)')
     end
 
+    it 'combines Weights with Harmonies on either side' do
+      key = MB::Sound.harmony(0 => dorian, 2.bars => f_major, loop: 4.bars)
+      chords = MB::Sound.harmony(0 => MB::Sound.chord(:min7, root: :d3), 1.bar => MB::Sound.chord(:'7', root: :g2), loop: 2.bars, curve: :step)
+      w = dorian.blur(0.2)
+      sum = w + chords * 2
+      expect(sum).to be_a(MB::Sound::Generative::Harmony)
+      expect(sum.to_ruby).to eq('scale(:dorian, D4).weights.blur(0.2) + harmony(0 => chord(:min7, root: :d3), 1.bar => chord(:"7", root: :g2), curve: :step, loop: 2.bars) * 2')
+      masked = w * chords
+      less = w - chords
+      [0r, 1r / 2, 1, 3r / 2, 7, 9r / 2].each do |t|
+        expect(sum.at(t)).to eq(chords.at(t) * 2 + w)
+        expect(sum.at(t).pc).to eq((chords * 2 + w).at(t).pc) # commutative, bit for bit
+        expect(masked.at(t).pc).to eq((chords * w).at(t).pc)
+        expect(less.at(t)).to eq(w - chords.at(t))
+        expect((w + key).at(t)).to eq(key.at(t) + w)
+      end
+      expect(sum.period).to eq(2)
+      expect((w + key).period).to eq(4)
+      expect((sum + key).period).to be_nil # (2 and 4)
+      expect((w + chords).blur(0.1).period).to eq(2)
+      expect((w + chords).blur(0.1).at(3r / 2)).to eq((w + chords.at(3r / 2)).blur(0.1))
+      expect(rebuild(sum).at(3r / 2)).to eq(sum.at(3r / 2))
+      expect(rebuild(less).at(1r / 2)).to eq(less.at(1r / 2))
+      expect((2 * chords + w).at(1)).to eq(sum.at(1))
+    end
+
     it 'requires lengths for keys and loops (0 may start), suggesting .bars' do
       expect { MB::Sound.harmony(0 => dorian, 12 => f_major) }.to raise_error(ArgumentError, /write 12\.bars/)
       expect { MB::Sound.harmony(0 => dorian, 1r / 2 => f_major) }.to raise_error(ArgumentError, %r{write \(\(1/2\)\)\.bars|write \(1/2r\)\.bars|write \(\(1/2r\)\)\.bars|\(1/2r\)})
