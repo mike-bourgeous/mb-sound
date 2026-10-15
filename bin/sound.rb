@@ -65,6 +65,12 @@ MB::Sound::Help.install_pry!
 # Symbol (see MB::Sound::UI::Completion)
 MB::Sound::UI::Completion.install
 
+# Pry 0.16 reads with Reline's multiline editor, which treats piped input as
+# one paste and evaluates it as a single block (so `printf 'a\nb\n' |
+# bin/sound.rb` stopped at the first error and printed no results).  Read
+# piped input a line at a time, as Pry 0.14 did.
+Pry.config.multiline = false unless $stdin.tty?
+
 # Work around issue introduced in pry-byebug 3.10.x that breaks Pry when
 # launched from a console script like this one.
 #

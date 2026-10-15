@@ -326,7 +326,7 @@ module MB
       # The Transport Durations are counted at: the sample's #bpm, else the
       # session's.
       def transport
-        @bpm ? Sequence::Transport.new(bpm: @bpm) : Sequence.transport
+        @bpm ? Sequence::Transport.new(bpm: @bpm) : Sequence.current_transport
       end
 
       def sample_rate

@@ -191,6 +191,45 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect { MB::Sound.bounce(100.hz.sine) }.to raise_error(ArgumentError, /length/)
     end
 
+    # granular-2 found bin/songs/granular_song.rb bouncing its sources at the
+    # default transport's 120 BPM in renders, after the song's `bpm 72` had
+    # set only the render's own transport (fixes-14)
+    it "bounces at the tempo a render's song just set, not the default transport's" do
+      expect(MB::Sound::Sequence.transport.bpm).to eq(120)
+      rec = nil
+      size = nil
+      out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
+      MB::Sound.render(out, seconds: 0.01, channels: 1) {
+        MB::Sound.bpm 72
+        rec = MB::Sound.bounce(1.bar) { 100.hz.ramp.at(0.5) }
+        size = MB::Sound::Length.samples(1.n16)
+      }
+      expect(rec.bpm).to eq(72)
+      expect(rec.length).to eq((48000 * 60 / 72.0 * 4).round)
+      expect(size).to eq(48000 * 60 / 72.0 / 4)
+      expect(MB::Sound::Sequence.transport.bpm).to eq(120)
+    end
+
+    it 'bounces at the tempo a scheduled block queued before it' do
+      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), realtime: false)
+      rec = nil
+      read = nil
+      MB::Sound::Session.with_context(session: session) {
+        MB::Sound.at_bar(1) {
+          MB::Sound.bpm 90
+          read = MB::Sound.bpm
+          rec = MB::Sound.bounce(1.beat) { 100.hz.ramp }
+        }
+      }
+      2.times { session.process_buffer(800) }
+      expect(read).to eq(90)
+      expect(rec.bpm).to eq(90)
+      expect(rec.length).to eq(32000)
+      expect(session.transport.bpm).to eq(90)
+    ensure
+      session&.close
+    end
+
     it 'presses a clip at its own tempo, its hits on the grid' do
       rec = MB::Sound.bounce(1.bar, bpm: 100) { MB::Sound.tr808(MB::Sound.grid(16, kick: 'X...X...X...X...')) }
       on = rec.onsets

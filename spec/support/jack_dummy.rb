@@ -17,11 +17,15 @@ require 'fileutils'
 #
 # - Shared memory: every JACK2 server maps about 38-40 MB of /dev/shm
 #   whatever its --port-max (16 ports: 38.2 MB, 64: 39.3 MB), so Docker's
-#   64 MB /dev/shm holds only one.  A second server dies with SIGBUS, often
-#   taking the first with it.  So servers started here take turns, through
-#   an exclusive lock (LOCK_PATH) held from #start to #stop, and wait while
-#   another server (one started without the lock: an older checkout, or a
-#   user's) leaves too little room (#wait_for_room).
+#   64 MB /dev/shm holds only one (dock.sh gives the container 512 MB since
+#   2026-10-15, from its next creation).  A second server dies with SIGBUS,
+#   often taking the first with it.  So servers started here take turns,
+#   through an exclusive lock (LOCK_PATH) held from #start to #stop, and
+#   wait while another server (one started without the lock: an older
+#   checkout, a benchmark, or a user's) leaves too little room, skipping
+#   their specs if it never does (#wait_for_room).  Tools outside the specs
+#   that run a dummy server can take the same lock (flock on LOCK_PATH, a
+#   local tmpfs, so it works across processes; not across machines).
 # - The server registry (/dev/shm/jack-shm-registry) has 8 server slots.  A
 #   server that dies without cleaning up (SIGKILL, SIGBUS) keeps its slot,
 #   and JACK only reclaims a dead server's slot for a server of the same
@@ -90,7 +94,11 @@ module JackDummy
       reason = nil
       2.times do
         clean_stale
-        wait_for_room
+        unless wait_for_room
+          stop
+          return "/dev/shm stayed too full for a JACK dummy server for #{LOCK_TIMEOUT} s " \
+            "(#{shm_free >> 20} MB free, #{SHM_NEEDED >> 20} MB needed; servers: #{running_servers.map { |pid, n| "#{n || '(unnamed)'} pid #{pid}" }.join(', ')})"
+        end
         reason = launch(sync)
         return nil if reason.nil?
       end
@@ -180,14 +188,19 @@ module JackDummy
     end
 
     # Waits up to LOCK_TIMEOUT while other servers run and /dev/shm has less
-    # than SHM_NEEDED free (starting anyway then).  Without running servers
-    # the new one starts at once: JACK frees the memory of dead servers when
-    # a server starts.
+    # than SHM_NEEDED free.  Returns true when there is room, false on
+    # timeout (#start then skips: starting anyway crashed both servers with
+    # SIGBUS, e.g. next to a benchmark's server, 2026-10-14).  Without
+    # running servers the new one starts at once: JACK frees the memory of
+    # dead servers when a server starts.
     def wait_for_room
       deadline = MB::U.clock_now + LOCK_TIMEOUT
-      while running_servers.any? && shm_free < SHM_NEEDED && MB::U.clock_now < deadline
+      while running_servers.any? && shm_free < SHM_NEEDED
+        return false if MB::U.clock_now >= deadline
+
         sleep 0.2
       end
+      true
     end
 
     # Free bytes in /dev/shm (from df; infinite if unknown).

@@ -171,4 +171,31 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
       MB::Sound.rewind
     end
   end
+
+  describe 'sources that end inside a buffer' do
+    # fixes-14: a full render of bin/songs/drums_808.rb crashed at bar 13
+    # ("trigger has 685 samples, not 800"): a one-step crash clip launched
+    # off the 800-sample grid ended inside a buffer while its cymbal rang on
+    [:tr808, :tr909].each do |machine|
+      it "rings on in #{machine} when a one-shot clip ends off the buffer grid" do
+        voice = machine == :tr808 ? :cymbal : :crash
+        out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        kit = nil
+        seconds = MB::Sound.render(out, bars: 2) {
+          MB::Sound.bpm 112
+          MB::Sound.bg :z, 0.constant, fade: 0
+          MB::Sound.at_bar(2) {
+            kit = machine == :tr808 ? MB::Sound.tr808(MB::Sound.grid(16, voice => 'X'), voice => { decay: 2.5 }) : MB::Sound.tr909(MB::Sound.grid(16, voice => 'X'))
+            MB::Sound.bg :crash, kit, fade: 0
+          }
+        }
+        # The launch (bar 2 at 112 BPM) and the clip's end are off the grid
+        launch = 48000 * 60 * 4 / 112r
+        expect(launch.denominator).not_to eq(1)
+        expect(((launch + 48000 * 60 / 112r / 4) % 800)).not_to eq(0)
+        expect(seconds).to be > 4
+        expect(kit).not_to be_nil
+      end
+    end
+  end
 end

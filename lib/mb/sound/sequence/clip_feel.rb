@@ -178,7 +178,8 @@ module MB
           raise ArgumentError, 'Pass a transform (e.g. echo(1.n8, 3)) or a block taking a MIDI::Stream' unless fx
           apply = fx.respond_to?(:apply) ? fx.method(:apply) : fx
 
-          transport = Transport.new(bpm: Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
+          current = Sequence.current_transport
+          transport = Transport.new(bpm: current.bpm, bar_length: current.bar_length)
 
           unless @loop
             notes, = Clip.bake_notes(self, apply, transport)

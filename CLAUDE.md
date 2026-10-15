@@ -219,7 +219,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 
 ### Tempo sync (`design/notes/tempo_sync.md`)
 
-`Sequence::Duration` lengths work wherever lengths do.  `1.beat.hz` is a Pitch from a `Sequence::TempoNode`; tones from it lock their phase to the timeline on jumps (`.freewheel` to keep running while paused).  `sig.delay(1.n8.dotted)` follows the tempo.  `Session` finds `TimelineNode`s in every graph; `render(bars:)` counts bars on the timeline.  Meter map: `Transport#meter`/`meters`, console `meter 7, 8`; bar numbers count through it.  Demo `bin/songs/tempo_song.rb`.
+`Sequence::Duration` lengths work wherever lengths do.  `1.beat.hz` is a Pitch from a `Sequence::TempoNode`; tones from it lock their phase to the timeline on jumps (`.freewheel` to keep running while paused).  `sig.delay(1.n8.dotted)` follows the tempo.  `Session` finds `TimelineNode`s in every graph; `render(bars:)` counts bars on the timeline.  Meter map: `Transport#meter`/`meters`, console `meter 7, 8`; bar numbers count through it.  Build-time conversions (default Length/Duration tempo, `2.bars`, `bounce`/`render` default tempo, `bake`) read `Sequence.current_transport`: the context Session's transport (a render or scheduled block; a tempo a scheduled block just queued with `bpm`), else the default transport.  Demo `bin/songs/tempo_song.rb`.
 
 ### Multichannel (`design/notes/multichannel.md`)
 

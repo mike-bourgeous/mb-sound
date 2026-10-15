@@ -53,8 +53,8 @@ Gem::Specification.new do |spec|
 
   # Interactive command line gems
   spec.add_development_dependency 'irb', '~> 1.16.0'
-  spec.add_development_dependency 'pry', '~> 0.14.0'
-  spec.add_development_dependency 'pry-byebug', '~> 3.10.0'
+  spec.add_development_dependency 'pry', '~> 0.16.0'
+  spec.add_development_dependency 'pry-byebug', '~> 3.12.0'
   spec.add_development_dependency 'pry-doc'
   spec.add_development_dependency 'yard'
 

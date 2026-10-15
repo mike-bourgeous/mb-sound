@@ -13,9 +13,9 @@ module MB
       # read as a time; use n32 and n64 for those.
       module NumericDurations
         # Returns a Duration of this many bars, using the bar length of the
-        # current Sequence.transport.
+        # current transport (see Sequence.current_transport).
         def bars
-          Duration.new(Duration.rational(self) * Sequence.transport.bar_length, label: "#{self} #{self == 1 ? 'bar' : 'bars'}")
+          Duration.new(Duration.rational(self) * Sequence.current_transport.bar_length, label: "#{self} #{self == 1 ? 'bar' : 'bars'}")
         end
         alias bar bars
 
