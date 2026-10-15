@@ -65,6 +65,9 @@ module MB
           # The number of layouts built (Live redraws reuse them).
           attr_reader :layouts
 
+          # The cells of the last frame drawn (Cells or NativeCells).
+          attr_reader :cells
+
           def initialize(width:, height:, look: nil, color: nil, theme: nil)
             @width = width
             @height = height
@@ -83,6 +86,12 @@ module MB
           def text(figure)
             draw(figure)
             @cells.to_text(@color)
+          end
+
+          # Draws +figure+ into #cells.
+          def update(figure)
+            draw(figure)
+            self
           end
 
           private
@@ -227,6 +236,78 @@ module MB
             lines(mode).join("\n")
           end
 
+          # Unchanged cells this short between changed ones are rewritten
+          # rather than skipped with a cursor move (#frame).
+          FRAME_GAP = 4
+
+          # The terminal bytes that draw these cells at 1-based screen
+          # (+row+, +col+): every cell (+prev+ nil) or only those that
+          # differ from +prev+ (Cells of the same size holding what the
+          # screen shows), as runs placed with cursor moves, styles as SGR
+          # codes like #lines, inside DEC 2026 synchronized output with
+          # +sync+.  The Ruby mirror of FastUI::Grid#frame.
+          def frame(prev, mode, row: 1, col: 1, sync: true)
+            raise ArgumentError, "The previous frame's size differs" if prev && (prev.width != @width || prev.height != @height)
+
+            pch, pfg, pbg, pat = prev && %i[@ch @fg @bg @attr].map { |v| prev.instance_variable_get(v) }
+            changed = ->(i) { prev.nil? || @ch[i] != pch[i] || @fg[i] != pfg[i] || @bg[i] != pbg[i] || @attr[i] != pat[i] }
+
+            @sgr ||= {}
+            out = +''
+            out << "\e[?2026h" if sync
+            out << "\e[0m" if mode != :none
+            styled = false
+            pf = pb = nil
+            pa = 0
+            @height.times do |y|
+              base = y * @width
+              cx = -1
+              x = 0
+              while x < @width
+                unless changed.(base + x)
+                  x += 1
+                  next
+                end
+
+                stop = x + 1
+                last = x
+                while stop < @width
+                  if changed.(base + stop)
+                    last = stop
+                    stop += 1
+                  elsif stop - last <= FRAME_GAP
+                    stop += 1
+                  else
+                    break
+                  end
+                end
+                stop = last + 1
+                out << "\e[#{row + y};#{col + x}H" if cx != x
+                (base + x).upto(base + stop - 1) do |i|
+                  if mode != :none
+                    f = @fg[i]
+                    b = @bg[i]
+                    a = @attr[i]
+                    unless f == pf && b == pb && a == pa
+                      out << "\e[0m" if styled
+                      styled = !(f.nil? && b.nil? && a == 0)
+                      out << (@sgr[[f, b, a, mode]] ||= sgr([f, b, a], mode)) if styled
+                      pf = f
+                      pb = b
+                      pa = a
+                    end
+                  end
+                  out << @ch[i]
+                end
+                cx = stop
+                x = stop
+              end
+            end
+            out << "\e[0m" if styled
+            out << "\e[?2026l" if sync
+            out
+          end
+
           private
 
           def line(y, mode)
@@ -302,6 +383,18 @@ module MB
           # The lines joined by newlines.
           def to_text(mode)
             super(Cells::MODES.fetch(mode, 3))
+          end
+
+          # Terminal bytes for the cells, all or those that differ from
+          # +prev+ (see Cells#frame).
+          def frame(prev, mode, row: 1, col: 1, sync: true)
+            super(prev, Cells::MODES.fetch(mode, 3), row, col, sync)
+          end
+
+          # Writes #frame to +io+ without holding the GVL; returns the bytes
+          # written.
+          def write_frame(io, prev, mode, row: 1, col: 1, sync: true)
+            super(io, prev, Cells::MODES.fetch(mode, 3), row, col, sync)
           end
         end
 

@@ -80,8 +80,23 @@ module MB
             [v.min, v.max]
           end
 
-          # Device coordinates of data points.
+          # Device coordinates of data points (FastUI.project for Cartesian
+          # coordinates on linear and log scales when Plot.native is set).
           def device(surface, coord, xs, ys)
+            if Plot.native && !coord.polar?
+              px = coord.x.projection
+              py = coord.y.projection
+              if px && py
+                dx = FastUI.project(xs, *px, surface.width - 1, false)
+                dy = dx && FastUI.project(ys, *py, surface.height - 1, true)
+                return [dx, dy] if dy
+              end
+            end
+            device_ruby(surface, coord, xs, ys)
+          end
+
+          # The Ruby mirror of FastUI.project (see #device).
+          def device_ruby(surface, coord, xs, ys)
             u, v = coord.project(xs, ys)
             [u * (surface.width - 1), (1 - v) * (surface.height - 1)]
           end
@@ -107,6 +122,9 @@ module MB
 
           def extent(xscale, yscale)
             ok = xscale.valid(@x) & yscale.valid(@y)
+            # (all valid: the same values without masked copies)
+            return [@x.min, @x.max, @y.min, @y.max] if @x.length > 0 && ok.all?
+
             range_of(@x, ok) + range_of(@y, ok)
           end
 

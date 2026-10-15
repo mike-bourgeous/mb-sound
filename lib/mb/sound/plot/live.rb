@@ -37,6 +37,44 @@ module MB
           @frame.render(chart)
         end
 
+        # Draws +chart+ and returns the terminal bytes that put it on the
+        # screen at 1-based (+row+, +col+): only the cells that changed
+        # since the last #frame or #write (every cell the first time, after
+        # #invalidate, or with +full+), placed with cursor moves, inside
+        # DEC 2026 synchronized output with +sync+.
+        #
+        #     print pane.frame(MB::Sound::Plot.waveform(buffer, range: -1.0..1.0), row: 2)
+        def frame(chart, row: 1, col: 1, full: false, sync: true)
+          @frame.update(chart)
+          prev = shown(full)
+          out = @frame.cells.frame(prev, color, row: row, col: col, sync: sync)
+          remember
+          out
+        end
+
+        # Like #frame, but writes the bytes to +io+ (with the C cells,
+        # encoding and writing without holding the GVL, so the audio
+        # thread can run); returns the number of bytes written.
+        def write(io, chart, row: 1, col: 1, full: false, sync: true)
+          @frame.update(chart)
+          prev = shown(full)
+          cells = @frame.cells
+          n =
+            if cells.is_a?(Text::NativeCells)
+              cells.write_frame(io, prev, color, row: row, col: col, sync: sync)
+            else
+              io.write(cells.frame(prev, color, row: row, col: col, sync: sync))
+            end
+          remember
+          n
+        end
+
+        # Makes the next #frame or #write draw every cell (after the screen
+        # was cleared or scrolled).
+        def invalidate
+          @shown = nil
+        end
+
         # How many layouts were built so far (one per change of scales,
         # titles, or legend).
         def layouts
@@ -47,6 +85,24 @@ module MB
         def look = @frame.look
         def color = @frame.color
         def theme = @frame.theme
+
+        private
+
+        # What the screen shows (nil to draw everything)
+        def shown(full)
+          return nil if full || @shown.nil? || @shown.class != @frame.cells.class
+
+          @shown
+        end
+
+        # Copies the frame just drawn as what the screen shows
+        def remember
+          cells = @frame.cells
+          @shown = cells.class.new(@width, @height) if @shown.nil? || @shown.class != cells.class
+          @shown.copy_from(cells)
+        end
+
+        public
 
         def inspect
           "#<#{self.class.name} #{@width}x#{@height} #{look.name} #{color} #{layouts} layout#{'s' unless layouts == 1}>"

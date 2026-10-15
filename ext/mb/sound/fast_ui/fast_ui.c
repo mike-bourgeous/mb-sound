@@ -36,6 +36,10 @@
 
 #include <ruby.h>
 #include <ruby/encoding.h>
+#include <ruby/io.h>
+#include <ruby/thread.h>
+#include <errno.h>
+#include <unistd.h>
 #include "numo/narray.h"
 
 // Geometry.line_points' limit on dots per polyline
@@ -227,6 +231,70 @@ static VALUE ruby_decimate(VALUE self, VALUE xs_v, VALUE ys_v, VALUE columns_v, 
 	xfree(tx);
 	xfree(ty);
 	return rb_assoc_new(ox_v, oy_v);
+}
+
+/*
+ * project(v, kind, lo, span, reverse, mul, flip) -> DFloat, or nil for
+ * inputs that aren't contiguous 1D DFloats: data values to device units
+ * (Mark::Base#device_ruby through a scale's #map).  +kind+ 0 is a linear
+ * scale ((v - lo) / span, Scale::Base#forward), 1 a log scale
+ * ((log10(v) - lo) / span, NaN for v <= 0, Scale::Log#forward); +reverse+
+ * maps u to 1 - u; the result is u * mul, or (1 - u) * mul with +flip+
+ * (device y grows downward).
+ */
+static VALUE ruby_project(VALUE self, VALUE v_v, VALUE kind_v, VALUE lo_v, VALUE span_v, VALUE reverse_v, VALUE mul_v, VALUE flip_v)
+{
+	if (!contiguous_1d(v_v, numo_cDFloat)) {
+		return Qnil;
+	}
+	int kind = NUM2INT(kind_v);
+	double lo = NUM2DBL(lo_v);
+	double span = NUM2DBL(span_v);
+	int reverse = RTEST(reverse_v);
+	double mul = NUM2DBL(mul_v);
+	int flip = RTEST(flip_v);
+	size_t n = RNARRAY_SHAPE(v_v)[0];
+	const double *v = dfloat_ptr(v_v);
+	double *out;
+	VALUE out_v = new_dfloat(n, &out);
+	for (size_t i = 0; i < n; i++) {
+		double u;
+		if (kind == 1) {
+			double x = v[i];
+			if (x <= 0) {
+				x = NAN;
+			}
+			u = (log10(x) - lo) / span;
+		} else {
+			u = (v[i] - lo) / span;
+		}
+		if (reverse) {
+			u = 1 - u;
+		}
+		out[i] = flip ? (1 - u) * mul : u * mul;
+	}
+	return out_v;
+}
+
+/*
+ * monotonic(xs) -> true if no finite step between neighbors decreases
+ * (Geometry.monotonic_ruby), or nil for inputs that aren't contiguous 1D
+ * DFloats.
+ */
+static VALUE ruby_monotonic(VALUE self, VALUE xs_v)
+{
+	if (!contiguous_1d(xs_v, numo_cDFloat)) {
+		return Qnil;
+	}
+	size_t n = RNARRAY_SHAPE(xs_v)[0];
+	const double *x = dfloat_ptr(xs_v);
+	for (size_t i = 0; i + 1 < n; i++) {
+		double d = x[i + 1] - x[i];
+		if (isfinite(d) && d < 0) {
+			return Qfalse;
+		}
+	}
+	return Qtrue;
 }
 
 // A visitor for the dots of a polyline, in Geometry.line_points' order:
@@ -451,6 +519,21 @@ static VALUE ruby_area(VALUE self, VALUE dots_v, VALUE xs_v, VALUE ys_v, VALUE b
 /* Grid                                                                 */
 /* ------------------------------------------------------------------ */
 
+// A growable byte buffer for encoding text
+struct outbuf {
+	char *p;
+	size_t len, cap;
+};
+
+// A direct-mapped cache of SGR sequences by style
+#define SGR_CACHE 64
+struct sgr_entry {
+	int32_t f, b;
+	int16_t a, mode; // mode -1: empty
+	int8_t len;
+	char seq[56];
+};
+
 #define ATTR_BOLD 1
 #define ATTR_REVERSE 2
 
@@ -460,6 +543,8 @@ struct grid {
 	int32_t *fg;
 	int32_t *bg;
 	uint8_t *attr;
+	struct outbuf out;       // encoding buffer, reused
+	struct sgr_entry *sgr;   // SGR cache (NULL until used)
 };
 
 static void grid_free(void *p)
@@ -469,6 +554,8 @@ static void grid_free(void *p)
 	xfree(g->fg);
 	xfree(g->bg);
 	xfree(g->attr);
+	xfree(g->out.p);
+	xfree(g->sgr);
 	xfree(g);
 }
 
@@ -704,12 +791,19 @@ static VALUE grid_compose(int argc, VALUE *argv, VALUE self)
 		for (long c = 0; c < pw; c++) {
 			long gx = px + c;
 			// The cell's dots in row-major order within the cell
+			int any = 0;
 			for (long dy = 0; dy < ch; dy++) {
 				for (long dx = 0; dx < cw; dx++) {
 					uint16_t v = dots[(r * ch + dy) * dw + c * cw + dx];
 					d[dy * cw + dx] = v;
 					pr[dy * cw + dx] = prio[v];
+					any |= v;
 				}
+			}
+			if (!any) {
+				// Every canvas draws an empty cell as a blank with no
+				// background, which leaves the cell as it was
+				continue;
 			}
 			// Foreground: the first dot of the highest priority
 			long best = 0;
@@ -915,10 +1009,29 @@ static int append_color(char *buf, int32_t c, int mode, int bg)
 	}
 }
 
-// Appends the SGR sequence for a style (Cells#sgr)
-static void append_sgr(VALUE out, int32_t f, int32_t b, int a, int mode)
+
+static inline void ob_reserve(struct outbuf *o, size_t extra)
 {
-	char buf[96];
+	if (o->len + extra > o->cap) {
+		size_t cap = o->cap ? o->cap * 2 : 4096;
+		while (cap < o->len + extra) {
+			cap *= 2;
+		}
+		REALLOC_N(o->p, char, cap);
+		o->cap = cap;
+	}
+}
+
+static inline void ob_cat(struct outbuf *o, const char *s, size_t n)
+{
+	ob_reserve(o, n);
+	memcpy(o->p + o->len, s, n);
+	o->len += n;
+}
+
+// The SGR sequence for a style (Cells#sgr) into +buf+; returns its length
+static int format_sgr(char *buf, int32_t f, int32_t b, int a, int mode)
+{
 	int n = 0;
 	int first = 1;
 	buf[n++] = '\033';
@@ -948,45 +1061,71 @@ static void append_sgr(VALUE out, int32_t f, int32_t b, int a, int mode)
 		n += append_color(buf + n, b, mode, 1);
 	}
 	buf[n++] = 'm';
-	rb_str_cat(out, buf, n);
+	return n;
 }
 
-static inline void append_cp(VALUE out, uint32_t cp)
+
+static struct sgr_entry *sgr_cache_new(void)
 {
-	char buf[4];
-	int n;
+	struct sgr_entry *c = ALLOC_N(struct sgr_entry, SGR_CACHE);
+	for (int i = 0; i < SGR_CACHE; i++) {
+		c[i].mode = -1;
+	}
+	return c;
+}
+
+static inline void append_sgr(struct outbuf *o, struct sgr_entry *cache, int32_t f, int32_t b, int a, int mode)
+{
+	uint32_t h = ((uint32_t)f * 2654435761u) ^ ((uint32_t)b * 40503u) ^ ((uint32_t)a << 7) ^ (uint32_t)mode;
+	struct sgr_entry *e = &cache[(h ^ (h >> 16)) & (SGR_CACHE - 1)];
+	if (!(e->mode == mode && e->f == f && e->b == b && e->a == a)) {
+		e->f = f;
+		e->b = b;
+		e->a = (int16_t)a;
+		e->mode = (int16_t)mode;
+		e->len = (int8_t)format_sgr(e->seq, f, b, a, mode);
+	}
+	ob_cat(o, e->seq, (size_t)e->len);
+}
+
+static inline void append_cp(struct outbuf *o, uint32_t cp)
+{
+	ob_reserve(o, 4);
+	char *buf = o->p + o->len;
 	if (cp < 0x80) {
 		buf[0] = (char)cp;
-		n = 1;
+		o->len += 1;
 	} else if (cp < 0x800) {
 		buf[0] = (char)(0xC0 | (cp >> 6));
 		buf[1] = (char)(0x80 | (cp & 0x3F));
-		n = 2;
+		o->len += 2;
 	} else if (cp < 0x10000) {
 		buf[0] = (char)(0xE0 | (cp >> 12));
 		buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
 		buf[2] = (char)(0x80 | (cp & 0x3F));
-		n = 3;
+		o->len += 3;
 	} else {
 		buf[0] = (char)(0xF0 | (cp >> 18));
 		buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
 		buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
 		buf[3] = (char)(0x80 | (cp & 0x3F));
-		n = 4;
+		o->len += 4;
 	}
-	rb_str_cat(out, buf, n);
 }
 
 // One row as text with SGR codes (Cells#line)
-static void grid_line(struct grid *g, long y, int mode, VALUE out)
+static void grid_line(struct grid *g, long y, int mode, struct outbuf *o)
 {
 	long start = y * g->width;
 	long stop = start + g->width;
 	if (mode == MODE_NONE) {
 		for (long i = start; i < stop; i++) {
-			append_cp(out, g->cp[i]);
+			append_cp(o, g->cp[i]);
 		}
 		return;
+	}
+	if (g->sgr == NULL) {
+		g->sgr = sgr_cache_new();
 	}
 	int styled = 0;
 	int32_t pf = -1, pb = -1;
@@ -997,20 +1136,20 @@ static void grid_line(struct grid *g, long y, int mode, VALUE out)
 		int a = g->attr[i];
 		if (!(f == pf && b == pb && a == pa)) {
 			if (styled) {
-				rb_str_cat(out, "\033[0m", 4);
+				ob_cat(o, "\033[0m", 4);
 			}
 			styled = !(f < 0 && b < 0 && a == 0);
 			if (styled) {
-				append_sgr(out, f, b, a, mode);
+				append_sgr(o, g->sgr, f, b, a, mode);
 			}
 			pf = f;
 			pb = b;
 			pa = a;
 		}
-		append_cp(out, g->cp[i]);
+		append_cp(o, g->cp[i]);
 	}
 	if (styled) {
-		rb_str_cat(out, "\033[0m", 4);
+		ob_cat(o, "\033[0m", 4);
 	}
 }
 
@@ -1021,10 +1160,9 @@ static VALUE grid_lines(VALUE self, VALUE mode_v)
 	int mode = NUM2INT(mode_v);
 	VALUE ary = rb_ary_new_capa(g->height);
 	for (long y = 0; y < g->height; y++) {
-		VALUE s = rb_enc_str_new(NULL, 0, rb_utf8_encoding());
-		rb_str_resize(s, 0);
-		grid_line(g, y, mode, s);
-		rb_ary_push(ary, s);
+		g->out.len = 0;
+		grid_line(g, y, mode, &g->out);
+		rb_ary_push(ary, rb_enc_str_new(g->out.p, (long)g->out.len, rb_utf8_encoding()));
 	}
 	return ary;
 }
@@ -1034,15 +1172,202 @@ static VALUE grid_text(VALUE self, VALUE mode_v)
 {
 	struct grid *g = get_grid(self);
 	int mode = NUM2INT(mode_v);
-	VALUE s = rb_enc_str_new(NULL, 0, rb_utf8_encoding());
-	rb_str_modify_expand(s, g->width * g->height * (mode == MODE_NONE ? 3 : 6));
+	g->out.len = 0;
 	for (long y = 0; y < g->height; y++) {
 		if (y > 0) {
-			rb_str_cat(s, "\n", 1);
+			ob_cat(&g->out, "\n", 1);
 		}
-		grid_line(g, y, mode, s);
+		grid_line(g, y, mode, &g->out);
 	}
-	return s;
+	return rb_enc_str_new(g->out.p, (long)g->out.len, rb_utf8_encoding());
+}
+
+// Unchanged cells this short between changed ones are rewritten rather
+// than skipped with a cursor move (FRAME_GAP in Plot::Text::Cells)
+#define FRAME_GAP 4
+
+static inline int cell_changed(const struct grid *g, const struct grid *p, long i)
+{
+	return p == NULL || g->cp[i] != p->cp[i] || g->fg[i] != p->fg[i] || g->bg[i] != p->bg[i] || g->attr[i] != p->attr[i];
+}
+
+static void append_int(struct outbuf *o, long v)
+{
+	char buf[24];
+	int n = snprintf(buf, sizeof(buf), "%ld", v);
+	ob_cat(o, buf, (size_t)n);
+}
+
+/*
+ * The terminal bytes that draw grid +g+ at 1-based screen (+row+, +col+):
+ * every cell (+p+ NULL) or only the cells that differ from +p+ (a grid of
+ * the same size holding what the screen shows), as runs placed with
+ * cursor moves (CUP), styles as SGR codes like #lines, optionally inside
+ * DEC 2026 synchronized output.  Mirrored by Plot::Text::Cells#frame.
+ */
+static void encode_frame(struct grid *g, struct grid *p, int mode, long row, long col, int sync, struct outbuf *o)
+{
+	if (sync) {
+		ob_cat(o, "\033[?2026h", 8);
+	}
+	if (mode != MODE_NONE) {
+		ob_cat(o, "\033[0m", 4);
+		if (g->sgr == NULL) {
+			g->sgr = sgr_cache_new();
+		}
+	}
+	int styled = 0;
+	int32_t pf = -1, pb = -1;
+	int pa = 0;
+	for (long y = 0; y < g->height; y++) {
+		long base = y * g->width;
+		long cx = -1; // the cursor's column on this row, -1 if elsewhere
+		long x = 0;
+		while (x < g->width) {
+			if (!cell_changed(g, p, base + x)) {
+				x++;
+				continue;
+			}
+			// A run: changed cells with gaps of at most FRAME_GAP
+			long end = x + 1;
+			long last = x;
+			while (end < g->width) {
+				if (cell_changed(g, p, base + end)) {
+					last = end;
+					end++;
+				} else if (end - last <= FRAME_GAP) {
+					end++;
+				} else {
+					break;
+				}
+			}
+			end = last + 1;
+			if (cx != x) {
+				ob_cat(o, "\033[", 2);
+				append_int(o, row + y);
+				ob_cat(o, ";", 1);
+				append_int(o, col + x);
+				ob_cat(o, "H", 1);
+			}
+			for (long i = base + x; i < base + end; i++) {
+				if (mode != MODE_NONE) {
+					int32_t f = g->fg[i];
+					int32_t b = g->bg[i];
+					int a = g->attr[i];
+					if (!(f == pf && b == pb && a == pa)) {
+						if (styled) {
+							ob_cat(o, "\033[0m", 4);
+						}
+						styled = !(f < 0 && b < 0 && a == 0);
+						if (styled) {
+							append_sgr(o, g->sgr, f, b, a, mode);
+						}
+						pf = f;
+						pb = b;
+						pa = a;
+					}
+				}
+				append_cp(o, g->cp[i]);
+			}
+			cx = end;
+			x = end;
+		}
+	}
+	if (styled) {
+		ob_cat(o, "\033[0m", 4);
+	}
+	if (sync) {
+		ob_cat(o, "\033[?2026l", 8);
+	}
+}
+
+static struct grid *frame_prev(struct grid *g, VALUE prev_v)
+{
+	if (NIL_P(prev_v)) {
+		return NULL;
+	}
+	if (!rb_typeddata_is_kind_of(prev_v, &grid_type)) {
+		rb_raise(rb_eTypeError, "The previous frame must be a Grid or nil");
+	}
+	struct grid *p = get_grid(prev_v);
+	if (p->width != g->width || p->height != g->height) {
+		rb_raise(rb_eArgError, "The previous frame's size differs");
+	}
+	return p;
+}
+
+/* frame(prev, mode, row, col, sync) -> String (see encode_frame) */
+static VALUE grid_frame(VALUE self, VALUE prev_v, VALUE mode_v, VALUE row_v, VALUE col_v, VALUE sync_v)
+{
+	struct grid *g = get_grid(self);
+	struct grid *p = frame_prev(g, prev_v);
+	g->out.len = 0;
+	encode_frame(g, p, NUM2INT(mode_v), NUM2LONG(row_v), NUM2LONG(col_v), RTEST(sync_v), &g->out);
+	return rb_enc_str_new(g->out.p, (long)g->out.len, rb_utf8_encoding());
+}
+
+struct write_job {
+	struct grid *g, *p;
+	int mode, sync, fd;
+	long row, col;
+	ssize_t written;
+	int err;
+};
+
+static void *write_frame_nogvl(void *arg)
+{
+	struct write_job *j = arg;
+	struct outbuf *o = &j->g->out;
+	o->len = 0;
+	encode_frame(j->g, j->p, j->mode, j->row, j->col, j->sync, o);
+	size_t off = 0;
+	while (off < o->len) {
+		ssize_t n = write(j->fd, o->p + off, o->len - off);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			j->err = errno;
+			break;
+		}
+		off += (size_t)n;
+	}
+	j->written = (ssize_t)off;
+	return NULL;
+}
+
+/*
+ * write_frame(io, prev, mode, row, col, sync) -> bytes written: encodes the
+ * frame like #frame and writes it to +io+'s file descriptor, both without
+ * the GVL (the render thread runs meanwhile).  The grids must not change
+ * during the call (the painter thread owns them).  The encoding buffer
+ * grows outside the GVL with Ruby's xrealloc, so it is reserved first.
+ */
+static VALUE grid_write_frame(VALUE self, VALUE io, VALUE prev_v, VALUE mode_v, VALUE row_v, VALUE col_v, VALUE sync_v)
+{
+	struct grid *g = get_grid(self);
+	struct write_job j;
+	j.g = g;
+	j.p = frame_prev(g, prev_v);
+	j.mode = NUM2INT(mode_v);
+	j.row = NUM2LONG(row_v);
+	j.col = NUM2LONG(col_v);
+	j.sync = RTEST(sync_v);
+	j.fd = rb_io_descriptor(io);
+	j.written = 0;
+	j.err = 0;
+	// The worst case: a cursor move per cell plus SGR codes, so the
+	// buffer never reallocates without the GVL
+	ob_reserve(&g->out, (size_t)(g->width * g->height) * (16 + 4 + 2 * 56 + 8) + 64);
+	if (g->sgr == NULL) {
+		g->sgr = sgr_cache_new();
+	}
+	rb_io_flush(io);
+	rb_thread_call_without_gvl(write_frame_nogvl, &j, RUBY_UBF_IO, NULL);
+	if (j.err) {
+		rb_syserr_fail(j.err, "write_frame");
+	}
+	return LONG2NUM((long)j.written);
 }
 
 void Init_fast_ui(void)
@@ -1057,6 +1382,8 @@ void Init_fast_ui(void)
 	rb_define_module_function(mFastUI, "decimate", ruby_decimate, 5);
 	rb_define_module_function(mFastUI, "polyline", ruby_polyline, 6);
 	rb_define_module_function(mFastUI, "area", ruby_area, 6);
+	rb_define_module_function(mFastUI, "project", ruby_project, 7);
+	rb_define_module_function(mFastUI, "monotonic", ruby_monotonic, 1);
 
 	cGrid = rb_define_class_under(mFastUI, "Grid", rb_cObject);
 	rb_define_alloc_func(cGrid, grid_alloc);
@@ -1071,4 +1398,6 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "compose", grid_compose, -1);
 	rb_define_method(cGrid, "lines", grid_lines, 1);
 	rb_define_method(cGrid, "to_text", grid_text, 1);
+	rb_define_method(cGrid, "frame", grid_frame, 5);
+	rb_define_method(cGrid, "write_frame", grid_write_frame, 6);
 }

@@ -104,8 +104,18 @@ module MB
           [out_x.flatten, out_y.flatten]
         end
 
-        # True if +xs+ never decreases (NaNs aside).
+        # True if +xs+ never decreases (NaNs aside).  Uses FastUI.monotonic
+        # when Plot.native is set.
         def monotonic?(xs)
+          if Plot.native
+            r = FastUI.monotonic(xs)
+            return r unless r.nil?
+          end
+          monotonic_ruby(xs)
+        end
+
+        # The Ruby mirror of FastUI.monotonic (see #monotonic?).
+        def monotonic_ruby(xs)
           return true if xs.length < 2
 
           d = xs[1..] - xs[0...-1]
@@ -221,7 +231,7 @@ module MB
         # The Ruby mirror of FastUI.polyline (see #polyline).
         def polyline_ruby(xs, ys, c, dash: nil)
           ix, iy = Geometry.line_points(xs, ys)
-          if dash
+          if dash && ix.length > 0
             keep = (Numo::Int32.new(ix.length).seq % dash.sum) < dash[0]
             ix = ix[keep]
             iy = iy[keep]
