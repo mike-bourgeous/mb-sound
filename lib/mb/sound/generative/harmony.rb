@@ -51,6 +51,9 @@ module MB
                    else MB::Sound::Curve[curve]
                    end
           @ops = ops.freeze
+          # Ops taking other harmonies change with the position even where
+          # this one holds still
+          @moving = @ops.any? { |_, args, _| args.any? { |a| a.is_a?(Harmony) } }
           @normalized = @keys.map { |_, w| w.send(:normalized_pc) }.freeze
           @keyframes = keyframes
           @options = { curve: curve, loop: loop }
@@ -80,18 +83,21 @@ module MB
         # The Weights at clip +position+ (whole notes, or a Duration).
         def at(position = 0r)
           pos = position.is_a?(Sequence::Duration) ? position.whole_notes : position.to_r
-          pos %= @loop_length if @loop_length
-          return @ops.empty? ? @keys[0][1] : apply_ops(@keys[0][1]) if @keys.length == 1
+          return apply_ops(@keys[0][1], pos) if @keys.length == 1 && @moving
+          return @ops.empty? ? @keys[0][1] : held(0) if @keys.length == 1
 
+          # (Harmonies taking other harmonies cache by the full position:
+          # the others may loop differently)
+          key = @loop_length && !@moving ? pos % @loop_length : pos
           @mutex.synchronize {
-            hit = @cache[pos]
+            hit = @cache[key]
             return hit if hit
           }
           b = blend_at(pos)
-          w = (i = @keys.index { |_, k| k.equal?(b) }) ? held(i) : apply_ops(b)
+          w = !@moving && (i = @keys.index { |_, k| k.equal?(b) }) ? held(i) : apply_ops(b, pos)
           @mutex.synchronize {
             @cache.shift if @cache.length >= 512
-            @cache[pos] = w
+            @cache[key] = w
           }
           w
         end
@@ -145,7 +151,7 @@ module MB
         private
 
         def with_op(name, args, kwargs = {})
-          args.each { |a| raise ArgumentError, "Harmony #{name} takes Weights or numbers (got #{a.inspect})" unless a.is_a?(Weights) || a.is_a?(Numeric) }
+          args.each { |a| raise ArgumentError, "Harmony #{name} takes Weights, Harmonies, or numbers (got #{a.inspect})" unless a.is_a?(Weights) || a.is_a?(Harmony) || a.is_a?(Numeric) }
           h = Harmony.new(@keyframes, **@options, ops: @ops + [[name, args, kwargs].freeze])
           h.with_recipe(self, name, args, kwargs)
         end
@@ -153,11 +159,11 @@ module MB
         # Keyframe +i+ with the ops applied (cached: a harmony holding still
         # costs nothing per note).
         def held(i)
-          @mutex.synchronize { (@held ||= {})[i] } || apply_ops(@keys[i][1]).tap { |w| @mutex.synchronize { @held[i] = w } }
+          @mutex.synchronize { (@held ||= {})[i] } || apply_ops(@keys[i][1], nil).tap { |w| @mutex.synchronize { @held[i] = w } }
         end
 
-        def apply_ops(w)
-          @ops.reduce(w) { |acc, (name, args, kwargs)| acc.public_send(name, *args, **kwargs) }
+        def apply_ops(w, pos)
+          @ops.reduce(w) { |acc, (name, args, kwargs)| acc.public_send(name, *args.map { |a| a.is_a?(Harmony) ? a.at(pos) : a }, **kwargs) }
         end
 
         # The blended Weights at +pos+ (no recipe: a moment's value).

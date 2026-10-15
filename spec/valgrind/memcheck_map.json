@@ -117,6 +117,16 @@
         "FastDynamics.limit"
       ]
     },
+    "spec/ext/mb/sound/fast_generative_spec.rb": {
+      "fast_generative": [
+        "FastGenerative.fold",
+        "FastGenerative.key",
+        "FastGenerative.pick",
+        "FastGenerative.rand",
+        "FastGenerative.rands",
+        "FastGenerative.start"
+      ]
+    },
     "spec/ext/mb/sound/fast_lofi_spec.rb": {
       "fast_lofi": [
         "FastLofi.decimate"
@@ -221,6 +231,12 @@
         "FastUI.monotonic",
         "FastUI.polyline",
         "FastUI.project",
+        "FastUI::GVLProbe.active?",
+        "FastUI::GVLProbe.blockers",
+        "FastUI::GVLProbe.holds",
+        "FastUI::GVLProbe.start",
+        "FastUI::GVLProbe.stop",
+        "FastUI::GVLProbe.waits",
         "FastUI::Grid#char",
         "FastUI::Grid#compose",
         "FastUI::Grid#copy_from",
@@ -688,8 +704,12 @@
     },
     "spec/lib/mb/sound/graph_node/modal_resonator_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.copy",
         "FastArithmetic.mix",
         "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
       ],
       "fast_resonator": [
         "FastResonator.modes",
@@ -1362,6 +1382,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
