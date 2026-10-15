@@ -109,7 +109,8 @@ module MB::Sound
       bowls: -> { ambient_bowl_voice(bowls, level: 0.1) },
       pad: -> { ambient_drone_voice(pad, level: 0.8, attack: 2.5, release: 3.5) },
     }
-    master { |mix| mix.limit }
+    # (the voices are soft; 7 dB into the limiter puts the piece near -17 LUFS)
+    master { |mix| (mix * 7.db).limit }
     parts.each { |name, make| bg name, make.(), fade: 0 if part == :all || part == name }
   end
 

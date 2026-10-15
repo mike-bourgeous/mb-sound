@@ -25,7 +25,7 @@ Maintainer, 2026-10-15: "Start G1 now"; on the proposal's four design choices, "
 - **Clip.generate** (`clip_generate.rb`, console `generate`): `generate(1.bar, values: notes, seed:, reach:) { |cycle, dice| rows }`.  Cycle lengths must be lengths (`2.bars`, `1r/2`): a plain Integer raises (it would be a note division, the spike's friction 2).  `dice` is `Dice.new(seed, cycle)`; `Dice.new(dice.seed)` for draws shared across cycles.  The clip's own events are cycle 0's (what it plays without looping, what listings and `first_note` see).
 - **Clip#values**: the notes a clip may play (`values:` for generator clips, else its events' values); drum kits (`Drums::Machine`, `TR808`, `Kit#plays_clip?`) choose voices from it instead of base events (the spike's placeholder events are gone).
 - **strikes** (`strikes.rb`, console): candidates on each step of `every:` with `chance:` (a number or a lambda of the cycle), keyed by the **global** step, so the cycle `length:` only sets caching; a candidate within `gap:` steps after another candidate is dropped (a look-back rule: any cycle needs only `gap - 1` steps before it); the note is drawn from the field at the strike's position, sharpened by `sharpen:`.
-- **melody** (`SequenceMethods#melody`, `generative/melody.rb`): with a Scale, the same notes as before G1 (`vary: true` is now a generator clip; each cycle still draws from `Random.new(Clip.cycle_seed(seed, cycle))`, and the walk's pick goes through `Dice.index`, the same arithmetic: 0 mismatches over 1000 seeds × parameter sets).  With Weights, a Harmony, a Field, or a FieldTimeline: a walk over the notes with weight (`leap:` of them at most), by weight / move size, from the strongest note nearest `start:`, reading the field where each note starts; counter-based dice.
+- **melody** (`SequenceMethods#melody`, `generative/melody.rb`): with a Scale, the same notes as before G1 (`vary: true` is now a generator clip; each cycle still draws from `Random.new(Clip.cycle_seed(seed, cycle))`, and the walk's pick goes through `Dice.index`, the same arithmetic: 0 mismatches over 1000 seeds × parameter sets; `bin/songs/midi_transforms_song.rb`, whose bass is a `melody(vary: true)`, renders byte-identical on master-ai and gen-1).  With Weights, a Harmony, a Field, or a FieldTimeline: a walk over the notes with weight (`leap:` of them at most), by weight / move size, from the strongest note nearest `start:`, reading the field where each note starts; counter-based dice.
 
 ## Seeds, takes, documents
 
@@ -33,20 +33,23 @@ Maintainer, 2026-10-15: "Start G1 now"; on the proposal's four design choices, "
 - Graph documents: `tones`, `weights`, `harmony` are top-level values (`Registry::TOP_EXTRA`); `Scale#weights` and the Weights/Harmony/Field methods are in `Registry::VALUES`; `strikes`/`melody`/`generate` are recorded DSL calls.  `generate` blocks print as their source and load with `trust: :code` (or a `named_proc`).  Limits: `LIMITS[:steps]` (4096) for melody counts; strikes check 4096 steps per cycle; Fields 128 notes; blur reach 1..6.
 - `Clip#event_at` (chases after seeks and launches) now takes the previous cycle's last note before a cycle's first note (it took the same cycle's last note, which differs for varying clips).
 
-## CPU (i9-9880H container, Ruby without YJIT, 2000 cycles each, thread CPU)
+## CPU (i9-9880H container, Ruby without YJIT, 2000 cycles each from a fresh generator, thread CPU)
 
 | generator | notes/cycle | mean | p99 | worst | per note | cold at cycle 10^6 |
 |---|---|---|---|---|---|---|
-| melody(Scale, 8, vary: true) | 8 | 103 us | 349 us | 9.5 ms (GC) | 12.9 us | 95 us |
-| melody(harmony, 8, vary: true) | 8 | 152 us | 510 us | 1.2 ms | 19.1 us | 131 us |
-| melody(harmony, 32 sixteenths) | 32 | 522 us | 1.3 ms | 2.1 ms | 16.3 us | 536 us |
-| strikes(harmony.over, 1.n8) | 1.9 | 42 us | 137 us | 0.8 ms | 21.9 us | 133 us |
-| strikes(1.n16, chance 0.9, gap 1) | 14.4 | 171 us | 497 us | 1.3 ms | 11.9 us | 105 us |
-| generate (16 rows × 16 steps) | 77 | 372 us | 1.3 ms | 2.6 ms | 4.8 us | 468 us |
+| melody(Scale, 8, vary: true) | 8 | 82 us | 315 us | 1.2 ms | 10.3 us | 77 us |
+| melody(harmony, 8, vary: true) | 8 | 140 us | 401 us | 0.8 ms | 17.5 us | 126 us |
+| melody(harmony, 32 sixteenths) | 32 | 536 us | 1.2 ms | 2.1 ms | 16.7 us | 935 us |
+| the demo's lead (key.blur + chords) | 5 | 92 us | 311 us | 1.6 ms | 18.4 us | 83 us |
+| **worst case**: melody, 32 sixteenths, a 4000-bar blend (every note a new blend position) | 32 | 1.34 ms | 2.7 ms | 10.4 ms | 41.8 us | 454 us |
+| strikes(harmony.over, 1.n8) | 1.9 | 44 us | 155 us | 1.0 ms | 22.6 us | 58 us |
+| strikes(1.n16, chance 0.9, gap 1) | 14.4 | 211 us | 1.0 ms | 1.5 ms | 14.6 us | 253 us |
+| generate (16 rows × 16 steps) | 77 | 358 us | 1.0 ms | 2.5 ms | 4.6 us | 421 us |
 
-- Cost per cycle is bounded by the generator's shape (slots × leap, steps × gap, rows × steps), never by search or retries; there are no memo chains in G1, so a cold jump costs one cycle.  The worst cycles are GC pauses or a harmony's first visit to a blend position (blend + operators + a Field: ~35-40 us per new position, then cached); a looping harmony costs that once per loop position.
-- A dice draw is ~0.3-0.5 us from Ruby (the C hash is a few ns; the rest is the method call), against ~150 us per note in the spike's Ruby-only dice.
+- Cost per cycle is bounded by the generator's shape (slots × leap, steps × gap, rows × steps), never by search or retries; there are no memo chains in G1, so a cold jump costs one cycle.  The worst single cycles (up to ~10 ms) are GC pauses and first calls; the worst steady cost is a harmony's first visit to a blend position (blend + operators + a Field, ~35-40 us), cached after that, so a looping harmony pays it once per loop position (harmonies combined with operators cache too when they all loop with the same length, `Harmony#period`).
+- A dice draw is ~0.3-0.5 us from Ruby (the C hash is a few ns; the rest is the method call), against ~150 us per note with the spike's Ruby-only dice.
 - Live, cycles are computed a cycle ahead on the scheduler thread, so the render thread reads cached cycles; the first cycle after a launch or a cold seek is computed where it's read (one cycle's cost, above).
+- Renders: the 32-bar demo (92 s) renders in ~33 s wall (2.8x realtime, instruments and rooms included).
 
 ## Not built yet (later phases)
 

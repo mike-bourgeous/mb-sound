@@ -133,6 +133,21 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect { MB::Sound.harmony(0 => dorian, 2 => f_major, loop: 1) }.to raise_error(ArgumentError, /loop/)
     end
 
+    it 'combines harmonies moment by moment' do
+      key = MB::Sound.harmony(0 => dorian, 2 => f_major, loop: 4)
+      chords = MB::Sound.harmony(0 => [MB::Sound::D3, MB::Sound::F3, MB::Sound::A3], 1 => [MB::Sound::G2, MB::Sound::B2, MB::Sound::D3], loop: 2, curve: :step)
+      both = key.blur(0.1) + chords * 2
+      [0r, 1r / 2, 1, 5r / 2, 3, 7r / 2].each do |t|
+        expect(both.at(t)).to eq(key.at(t).blur(0.1) + chords.at(t) * 2)
+        expect(both.at(t + 4)).to eq(both.at(t))
+      end
+      expect(both.period).to be_nil # (chords loop every 2, the key every 4)
+      same = key + MB::Sound.harmony(0 => dorian, 1 => f_major, loop: 4)
+      expect(same.period).to eq(4)
+      expect(same.at(9r / 2)).to eq(same.at(1r / 2))
+      expect(MB::Sound.harmony(0 => dorian).blur(0.1) + key).to be_a(MB::Sound::Generative::Harmony)
+    end
+
     it 'applies operators and blur at each moment, and prints back' do
       b = h.blur(0.2) + MB::Sound.tones(:d) * 2
       expect(b.at(16.bars)).to eq(h.at(16.bars).blur(0.2) + MB::Sound.tones(:d) * 2)

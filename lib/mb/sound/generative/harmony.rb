@@ -86,9 +86,9 @@ module MB
           return apply_ops(@keys[0][1], pos) if @keys.length == 1 && @moving
           return @ops.empty? ? @keys[0][1] : held(0) if @keys.length == 1
 
-          # (Harmonies taking other harmonies cache by the full position:
-          # the others may loop differently)
-          key = @loop_length && !@moving ? pos % @loop_length : pos
+          # (Harmonies taking other harmonies cache by the full position
+          # unless they all loop together)
+          key = (p = period) ? pos % p : pos
           @mutex.synchronize {
             hit = @cache[key]
             return hit if hit
@@ -100,6 +100,14 @@ module MB
             @cache[key] = w
           }
           w
+        end
+
+        # The length after which #at repeats (the loop length, when every
+        # harmony an operator takes loops with the same length), or nil.
+        def period
+          return @period if defined?(@period)
+          others = @ops.flat_map { |_, args, _| args.grep(Harmony) }
+          @period = @loop_length && others.all? { |o| o.period == @loop_length } ? @loop_length : nil
         end
 
         # The blend at each moment, blurred (see Weights#blur).
