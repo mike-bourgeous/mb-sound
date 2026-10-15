@@ -17,8 +17,6 @@ module MB
 
         attr_reader :smoothing, :smooth_limit
 
-        attr_reader :write_offset, :read_offset
-
         # Minimum, maximum, and final delay in samples from the previous call
         # to #process.  May not be an integer.
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples

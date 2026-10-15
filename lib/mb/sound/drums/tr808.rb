@@ -167,7 +167,6 @@ module MB
           define_method(v) do |source, **knobs|
             voice(v, source, **knobs)
           end
-          module_function v
         end
 
         # Builds a Drums::Kit of 808 voices played by +source+:

@@ -178,7 +178,6 @@ module MB
         on = @on.nil? ? default : @on
         on = :now if on.is_a?(Numeric) && on == 0
 
-        bar_length = transport.bar_length.to_r
         time = now.to_r
 
         if @at
