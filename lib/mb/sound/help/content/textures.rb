@@ -13,8 +13,9 @@ module MB
         `Curve[:back, overshoot: 0.4]`; `walk:` keeps each step small,
         `hold:` rests on each point, `jitter:` spaces them unevenly).
         `dust(rate, min_gap: 300.ms)` keeps strikes apart.
-        Noise colors: `noise` is white; filter it for pink-ish
-        (`noise.lp4(1200)`), dark wind (`.filter(:bandpass, ...)`), or hiss
+        Noise colors: `noise` is white, `noise(:pink)` equal power per
+        octave (softer, easy to place), `noise(:brown)` a deep rumble;
+        filter any of them for wind (`.filter(:bandpass, ...)`) or hiss
         (`.filter(:highpass, ...)`).
 
         Struck objects: `trig.ping(f, decay:)` rings one sine;
@@ -48,15 +49,19 @@ module MB
       example 'a restless creature (walk, holds, jitter, overshoot)' do
         seed 5
         wander = drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
-        bg :try, 220.hz.triangle.lp4(1800).pan(wander).at(-22.db).until(2.bars)
+        # pink noise: broadband sound is easier to place than a tone (a room's echoes blur a tone's direction)
+        bg :try, noise(:pink).pan(wander).at(-10.db).until(2.bars)
       end
-      example 'a fly buzzing around your head (doppler)' do
+      example 'a fly buzzing around your head (doppler, effort)' do
         x = drift(1.5, range: -3..3, walk: 0.6, hold: 30.ms..300.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.4]) # meters left/right
         y = drift(1, range: 0.3..2.5, walk: 0.5, smooth: :cosine)                                                         # meters ahead
         r = (x * x + y * y) ** 0.5
-        fly = 210.hz.saw.lp4(2500) * 23.hz.lfo.at(0.6..1) + noise.filter(:bandpass, cutoff: 3000, quality: 2).at(-24.db)
+        speed = ((x - x.delay(20.ms)) ** 2 + (y - y.delay(20.ms)) ** 2) ** 0.5 * 50                                         # meters per second
+        effort = (speed / 5).aclip(0, 1).filter(:lowpass, cutoff: 4)                                                       # 0 cruising .. 1 darting
+        # darting, the wings beat a little faster, swing wider (louder), and sound brighter
+        fly = 190.hz.transpose(effort * 2.5).saw.lp4(effort * 4000 + 1800) * (effort * 0.55 + 0.45)
         # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it
-        bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-20.db).until(2.bars)
+        bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-18.db).until(2.bars)
       end
       example 'a drum head as kick and toms' do
         kick = grid(8, 'x..x..x.').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)
