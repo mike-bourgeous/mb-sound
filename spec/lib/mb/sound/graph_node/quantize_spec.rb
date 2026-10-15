@@ -16,6 +16,16 @@ RSpec.describe(MB::Sound::GraphNode::Quantize, :aggregate_failures) do
     expect(data1.dup.aquantize(MB::Sound::ArrayInput.new(data: Numo::SFloat[0.33, 0.33, 0.5, 0.5, -1, 1])).sample(6)).to eq(Numo::SFloat[0.33, 0.66, 0.5, -0.5, -1, -1])
   end
 
+  it 'reads an increment node used elsewhere through a Tee branch (textures-4)' do
+    # The increment once read the node directly, so a node also read by
+    # another consumer advanced twice per buffer and overflowed the Tee of
+    # anything upstream shared with a third reader
+    w = 0.5.constant
+    step = w * 0.01
+    graph = (440.hz.sine.at(0.1) + step).quantize(step).filter(:lowpass, cutoff: 9000 - w * 7800)
+    expect { 100.times { graph.sample(800) } }.not_to raise_error
+  end
+
   it 'does not quantize if the numeric value is zero' do
     expect(data1.dup.aquantize(0).sample(6)).to eq(data1.dup.sample(6))
   end

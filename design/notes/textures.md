@@ -178,6 +178,99 @@ Resonator#sample's exact ring-out (ends where the summed bound
 - Exciters: dust, triggers (velocity = height), a lowpassed strike for a
   softer mallet, a steady quiet noise for a rubbed or bowed object.
 
+## Noise colors (`noise(:pink)`, `Filter::NoiseColor`; textures-4)
+
+`noise(:pink)` and `noise(:brown)` (alias `:red`) are white noise through
+`Filter::NoiseColor`, Biquads in C (no new kernel).  Pink: alternating
+first-order poles and zeros (poles 2.6x apart from 9.1 Hz, each zero half
+a step above its pole, up to 0.49 fs; ratio and first pole from a grid
+search for the least ripple), bilinear, paired into biquads (4 at 48
+kHz): within +-0.17 dB of -3 dB/octave from 20 Hz to 20 kHz at 48 kHz.
+Brown: a one-pole leaky integrator at 5 Hz (matched z; within 1 dB of
+-6 dB/octave to 12 kHz; the bilinear form's zero at Nyquist fell 2 dB
+short).  Both scaled to RMS 0.2 (-14 dBFS) from `noise`'s uniform white;
+peaks pass full scale about once per 35 s.  64 ns/sample at 800-sample
+buffers (white 19), ~105 at 128.  TODO (the maintainer: "Fuse later"):
+one C call for the whole biquad chain and gain (four `biquad_narray`
+calls plus a multiply per buffer now; pink costs ~3x white).  Why pink for placing sounds (the
+maintainer, on the restless creature): broadband sound gives the ears
+level and timing cues at every frequency, where a steady tone's direction
+blurs with a room's reflections.
+
+## Critters: flight sounds (`bin/songs/critters.rb`; textures-4, 2026-10-15)
+
+A house fly and a mouse whose sounds follow drift paths (x, y, z in
+meters around the listener).  The maintainer asked for a short review of
+fly sound synthesis ("Wing frequency varies with effort"); findings:
+
+- Wingbeat (the buzz's fundamental): house flies about 190 Hz (measured
+  180-197 Hz in classic studies; "more than 200 Hz" in a 2025 preprint on
+  fly flight control, bioRxiv 10.1101/2025.04.29.651276); Aedes aegypti
+  mosquitoes about 450-660 Hz females, 600-1000 Hz males (several studies;
+  rising ~8-13 Hz per degree C).  (The brief's ~230 Hz for honeybees was
+  not verified.)
+- Effort: flies make more force mostly by swinging the wings wider
+  (higher wing speed), not by beating faster: in Lehmann & Dickinson's
+  Drosophila power study (JEB 1997, abstract) extra force came with
+  "an increase in stroke amplitude and a decrease in stroke frequency";
+  their kinematics paper (JEB 201:385, 1998) has both changing; honeybees
+  in low-density heliox kept "nearly constant wingbeat frequency while
+  increasing stroke amplitude by nearly 50%" (Altshuler et al., PNAS
+  102:18213, 2005); hawkmoths modulate both (about 32% frequency and 37%
+  amplitude around the mean; Gau et al. 2021, abstract as summarized by
+  search, not read in full).  So louder and brighter with effort is well supported; pitch
+  rising with effort (the maintainer's ear, and a bit of doppler) is an
+  artistic choice here, kept small: +1 semitone (the maintainer, 2026-10-15:
+  "Smaller (+1 st)", after +2.5 in the first round).
+- Spectrum and direction: a tethered blowfly's buzz is a harmonic series
+  from ~190 Hz; the fundamental radiates like a dipole (strongest ahead of
+  the fly), the second harmonic like a monopole (strongest at the sides,
+  relatively), with broadband, wind-like "pseudo-sound" from the wing
+  vortices behind the fly (Sueur, Tuck & Robert 2005, JASA 118:530).
+- Procedural models: Farnell's Designing Sound (MIT Press 2010) builds a
+  housefly from a shaped sawtooth (separate up- and downstroke shapes, a
+  "wing resonance" parameter, a 700 Hz one-pole lowpass) with the wing
+  frequency (around 220 Hz) and resonance wandering by twice-lowpassed
+  noise (4-5 Hz); seen in a SuperCollider port (sccode.org/1-4QB, "Fig
+  50.13/50.14").  Amfivolia (the maintainer's memory: right channel) is a
+  sound artist who dissects ecosystem sound design on YouTube (Kilohearts
+  interview: audio-rate modulation for animal sounds, randomness tied to a
+  call's own amplitude or pulse rate; a bird synthesis project); no insect
+  tutorial of his was found in a quick search, so none is cited.
+
+What critters.rb does with it: effort = speed / 5 m/s + climbing / 2 m/s
+(0..1, smoothed at 4 Hz) sets the wingbeat (190 Hz + 1 semitone at
+full effort), stroke level (+7 dB), and brightness (lowpass 1.8-5.8 kHz);
+the heading (cosine between the flight and the line to the listener) sets
+the fundamental's dipole level (0.3..1; Tone#saw's fundamental is 2/pi of
+an in-phase sine, so adding (d - 1) 2/pi of the sine sets it alone), a
+second-harmonic sine at 0.25 is the monopole, and pink-noise wind rises
+behind the fly with effort.  Measured on the wings alone: effort 0 to 1
+raises the RMS 9 dB, the fundamental 190 to 220 Hz (with the first
+round's +2.5 semitones; 201 Hz now), and the 2-6 kHz band
+18 dB relative to 150-600 Hz; side-on, the fundamental drops 10 dB.
+Mouse squeaks (the maintainer: "Squeaks should be longer and have a pitch
+envelope; these sound like plucks"): 80-300 ms tonal chirps around 3-6
+kHz (4200 Hz +-4 semitones), each with a random slope (-5..+5 semitones)
+plus a random arch (-3..+6 at the middle), a 30-45 Hz quarter-semitone
+vibrato, a quiet second harmonic; the scurrying ticks are round 3's.
+(Audible squeak data is thin: a birch mouse's audible calls are tonal,
+6.2-9.9 kHz and ~0.46 s, BMC Res Notes 2019, 10.1186/s13104-019-4719-9.)
+
+Binaural (`--binaural`, optional): Brown & Duda's spherical head (1998):
+per-ear Woodworth delays ((a / c)(1 - cos t) facing the ear, (a / c)(1 +
+t - pi/2) around the head, a = 8.75 cm) through `aease` with Proc
+curves, and a head-shadow high shelf with gain alpha(t) = 1.05 + 0.95
+cos(t 180/150) (2x facing the ear, 0.1x at 150 degrees) at 1248 /
+sqrt(alpha) Hz; plus a rough rear cue (a -6 dB shelf above 4 kHz behind
+the listener: the pinnae shade sound from behind).  No pinna or
+elevation model, so front/back stays ambiguous without head movement, as
+with any spherical head.  Costs (whole script renders, Ruby graph): fly
+~6% of realtime, mouse ~6%, binaural fly ~9%.
+
+A `fly_by`/doppler helper waits for a second use (the maintainer); the
+placement lives in critters.rb's `critter_place`.
+
 ## Costs (Linux desktop 7950X, min of 3, 800-sample buffers unless noted)
 
 | node | ns/sample | % of realtime |
@@ -217,7 +310,9 @@ strikes 500 ms apart (`min_gap:`); symmetric ranges are a single number
 source, to within float rounding); the vinyl crackle is sparser, darker dust
 (14 per second through a 1.4 kHz bandpass) plus a scratch once a turn at 33
 1/3 rpm (`dust(100, min_gap: 1.8.seconds)`); the bells sit an octave lower
-now that the prime is on the note.
+now that the prime is on the note.  textures-4: the restless creature pans
+pink noise (easier to place than the triangle), and the fly's wings follow
+its effort (speed from its own path: pitch, brightness, level).
 
 ## Not built (ideas)
 

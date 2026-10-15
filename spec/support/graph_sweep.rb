@@ -143,6 +143,8 @@ module GraphSweep
       ['FilterChain', ->(c) { c.sig.filter(f::FilterChain.new(f::FirstOrder.new(:lowpass, 48000, 2000), f::Cookbook.new(:highpass, 48000, 100, quality: 0.7))) }],
       ['FilterSum', ->(c) { c.sig.filter(f::FilterSum.new(f::FirstOrder.new(:lowpass, 48000, 400), f::FirstOrder.new(:highpass, 48000, 4000))) }],
       ['Filter::Delay object', ->(c) { c.sig.filter(f::Delay.new(delay: 0.003, sample_rate: 48000, feedback: 0.5, wet: 0.5, dry: 1)) }],
+      ['NoiseColor pink', ->(c) { c.sig.filter(f::NoiseColor.new(:pink)) }],
+      ['NoiseColor brown', ->(c) { c.sig.filter(f::NoiseColor.new(:brown)) }],
     ]
   end
 

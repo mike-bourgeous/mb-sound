@@ -62,6 +62,56 @@ RSpec.describe(MB::Sound::GenerationMethods) do
       expect(b1.sample(500)).to eq(x1)
     end
 
+    context 'with a color' do
+      # Octave band powers (dB, relative to 500-1000 Hz) of 10 s of noise
+      def octave_powers(node)
+        x = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(600) { node.sample(800).dup }))
+        pw = MB::Sound.real_fft(x).abs**2
+        powers = [31.25, 125, 500, 2000, 8000].map { |f| i = (f * 10).round; 10 * Math.log10(pw[i...(2 * i)].sum) }
+        [powers.map { |p| p - powers[2] }, Math.sqrt((x**2).mean)]
+      end
+
+      it 'makes pink noise with equal power per octave at RMS 0.2' do
+        powers, rms = octave_powers(MB::Sound.noise(:pink, seed: 1))
+        powers.each { |p| expect(p).to be_within(0.6).of(0) }
+        expect(rms).to be_within(0.01).of(0.2)
+      end
+
+      it 'makes brown noise falling 6 dB per octave (3 dB more per octave band than pink)' do
+        powers, rms = octave_powers(MB::Sound.noise(:brown, seed: 1))
+        powers.each_with_index { |p, i| expect(p).to be_within(1.0).of(-6.02 * (i - 2)) }
+        expect(rms).to be_within(0.01).of(0.2)
+        expect(MB::Sound.noise(:red, seed: 1).sample(100)).to eq(MB::Sound.noise(:brown, seed: 1).sample(100))
+      end
+
+      it 'is white for :white and nil' do
+        expect(MB::Sound.noise(:white, seed: 2).sample(100)).to eq(MB::Sound.noise(seed: 2).sample(100))
+        expect(MB::Sound.noise(nil, seed: 2).sample(100)).to eq(MB::Sound.noise(seed: 2).sample(100))
+      end
+
+      it 'is the same at any buffer size' do
+        a = MB::Sound.noise(:pink, seed: 4)
+        b = MB::Sound.noise(:pink, seed: 4)
+        whole = a.sample(2000).dup
+        parts = [b.sample(7).dup, b.sample(1).dup, b.sample(1992).dup].reduce(:concatenate)
+        expect(parts).to eq(whole)
+      end
+
+      it 'raises for unknown colors' do
+        expect { MB::Sound.noise(:plaid) }.to raise_error(ArgumentError, /plaid/)
+      end
+
+      it 'prints itself back as Ruby' do
+        expect(MB::Sound.noise(:pink, seed: 3).to_ruby).to eq('noise(:pink, seed: 3)')
+      end
+
+      it 'stays within 0.25 dB of a -3 dB/octave slope from 20 Hz to 20 kHz' do
+        f = MB::Sound::Filter::NoiseColor.new(:pink, sample_rate: 48000)
+        errs = (0..60).map { |i| hz = 20 * 1000.0**(i / 60.0); 20 * Math.log10(f.response(2 * Math::PI * hz / 48000).abs * Math.sqrt(hz)) }
+        expect(errs.max - errs.min).to be < 0.5
+      end
+    end
+
     it 'takes an explicit seed' do
       expect(MB::Sound.noise(seed: 3).sample(100)).to eq(MB::Sound.noise(seed: 3).sample(100))
       expect(MB::Sound.noise(seed: 3).noise_seed).to eq(3)
