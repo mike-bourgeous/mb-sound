@@ -332,6 +332,18 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.1) + tones(D3, F3, A3) * 2, 8, range: A3..A5, vary: true, seed: 4).loop.tone.sine')
     end
 
+    it 'prints named chord layers back, and loads them (also as harmony keyframes)' do
+      MB::Sound.rewind
+      w = MB::Sound.scale(:dorian, :d).weights.blur(0.15) + MB::Sound.chord(:min7, root: :d).weights(2, 1, 1.5, 1) * 1.5
+      m = MB::Sound.melody(w, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 4).loop.tone.sine
+      expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.15) + chord(:min7, root: :d).weights(2, 1, 1.5, 1) * 1.5, 8, range: A3..A5, vary: true, seed: 4).loop.tone.sine')
+
+      MB::Sound.rewind
+      chords = MB::Sound.harmony(0 => MB::Sound.chord(:min7, root: MB::Sound::D3), 1.bar => MB::Sound.chord(:'7', root: :g2, inversion: 1), loop: 2.bars, curve: :step)
+      s = MB::Sound.strikes(chords.over(MB::Sound::A2..MB::Sound::A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).tone.sine
+      expect(round_trip(s)).to eq('strikes(harmony(0 => chord(:min7, root: D3), 1.bar => chord(:"7", root: :g2, inversion: 1), curve: :step, loop: 2.bars).over(A2..A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).tone.sine')
+    end
+
     it 'prints generate blocks as their source (loaded with trust: :code)' do
       MB::Sound.rewind
       c = MB::Sound.generate(1.bar, values: [60, 64], seed: 9) { |_c, d| [[0r, 1r / 4, d.pick([60, 64], 0), 0.8]] }.tone
