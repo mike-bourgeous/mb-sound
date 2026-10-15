@@ -701,9 +701,13 @@ module MB
       # exact frame.  Blocks that count are one-shot blocks (#at_bar,
       # #after) and, with +:bars+ (before the end bar) or +:seconds+,
       # repeating ones (#every); without either, a render waiting on a block
-      # stops at MAX_RENDER_SECONDS like sounds that never end.
+      # stops at MAX_RENDER_SECONDS like sounds that never end.  Once
+      # nothing is scheduled, the render ends when every sound has ended
+      # (what the last block started plays out; it is never cut at the
+      # block's time), without padding silence to the end bar.
       #
-      # A +:bars+ render always reaches its end bar (plus the tail, below),
+      # A +:bars+ render has no time limit of its own: it ends at its end
+      # bar (plus the tail, below), or earlier when its sounds end as above,
       # however long that takes (a song form that loops back renders until
       # it gets there).  Only renders without +:bars+ or +:seconds+ stop at
       # MAX_RENDER_SECONDS (ten minutes, with a warning) if their sounds

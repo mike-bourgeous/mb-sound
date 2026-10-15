@@ -731,6 +731,15 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         end
         expect(seconds).to be_within(0.02).of(0.5)
         expect(ran).to eq(1)
+
+        # Not even one that ran ahead (half a bar) while the sound played
+        stub_const('MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS', 5)
+        out2 = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        seconds = MB::Sound.render(out2, 0.25.constant.until(1.6), bpm: 120) do
+          MB::Sound.every(1) { ran += 1 }
+        end
+        expect(seconds).to be_within(0.02).of(1.6)
+        expect(ran).to eq(3)
       end
 
       it 'waits for repeating blocks before the end bar with bars:' do
@@ -740,6 +749,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         end
         expect(seconds).to eq(4) # bar 3's block; bar 4's is the end
         expect(ran).to eq(3)
+      end
+
+      it 'plays what the last repeating block started to silence, without padding to the end bar' do
+        data = record(out)
+        ran = 0
+        seconds = MB::Sound.render(out, 0.25.constant.until(0.5), bars: 3, bpm: 120) do
+          MB::Sound.every(1) { ran += 1; MB::Sound.bg(:b, 0.5.constant.until(1), fade: 0) if ran == 3 }
+        end
+        expect(ran).to be >= 3 # bar 4's block may run ahead while :b plays
+        expect(seconds).to be_within(0.02).of(5) # bar 3 (4 s) plus 1 s, not cut at 4 s, not padded to 6 s
+        d = data.call
+        expect(d.to_a.index(0.5)).to eq(192000)
+        expect(d[192000...240000].to_a.uniq).to eq([0.5])
       end
 
       it 'does not wait for blocks after the end bar' do

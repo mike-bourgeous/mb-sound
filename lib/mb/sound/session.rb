@@ -628,11 +628,12 @@ module MB
       # if +:repeating+ is false; with +:before+, only blocks timed before
       # that timeline position), a block that ran ahead of its time (see
       # #lookahead) whose time hasn't come, or a queued change or tempo
-      # change.  PlaybackMethods#render keeps rendering while nothing plays
+      # change (with +:before+, only those timed before it).  PlaybackMethods#render keeps rendering while nothing plays
       # as long as this is true.
       def schedule_waiting?(repeating: true, before: nil)
         @render_lock.synchronize {
-          !@changes.empty? || @scheduler.waiting?(@transport.position, repeating: repeating, before: before)
+          @changes.any? { |c| before.nil? || c.time.nil? || c.time < before } ||
+            @scheduler.waiting?(@transport.position, repeating: repeating, before: before)
         }
       end
 
