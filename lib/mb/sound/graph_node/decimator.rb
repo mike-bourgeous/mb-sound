@@ -19,6 +19,14 @@ module MB
       # MB::Sound's generator when jitter is on), for a looser, dirtier
       # clock.
       #
+      # +interpolation+ :hold (default) is the zero-order hold, the stepped
+      # sampler sound; :linear (a first-order hold) draws straight lines
+      # between the held samples instead, one hold period late: the same
+      # folding (grunge) with its high images falling much faster (sinc^2
+      # instead of sinc), so less of the metallic ringing far above the
+      # rate (textures-3, 2026-10-15; the maintainer: "linear interpolation
+      # decimation to get some grunge with less ringing").
+      #
       # +mix+ is the crushed share of the output (default 1, all crushed; 0
       # the input unchanged), a number or a node read every sample:
       # crushed * mix + input * (1 - mix).  TODO: consolidate with the
@@ -42,6 +50,12 @@ module MB
         # fraction).
         MAX_JITTER = 0.95
 
+        # Interpolation names and the kernel's mode numbers.
+        INTERPOLATION = { hold: 0, linear: 1 }.freeze
+
+        # Other names for INTERPOLATION entries.
+        INTERPOLATION_ALIASES = { zoh: :hold, step: :hold, none: :hold, foh: :linear, lerp: :linear }.freeze
+
         # Phases this close below a whole cycle count as reaching it (as in
         # the kernel), so rates dividing the sample rate hold every N samples.
         EDGE = 1e-9
@@ -62,10 +76,13 @@ module MB
         # branch).
         attr_reader :mix
 
+        # Between held samples: :hold or :linear.
+        attr_reader :interpolation
+
         # Creates a decimator on +input+ holding +rate+ samples per second (a
         # number, a node of Hz, or a Pitch for its frequency); see the class
         # description for +jitter+, +seed+, and +mix+.
-        def initialize(input, rate:, jitter: 0, seed: nil, mix: 1, sample_rate: nil)
+        def initialize(input, rate:, jitter: 0, seed: nil, mix: 1, interpolation: :hold, sample_rate: nil)
           raise ArgumentError, "Decimator input must be a graph node (got #{input.inspect})" unless input.respond_to?(:sample)
 
           rate = rate.oscillator_frequency if rate.is_a?(MB::Sound::Pitch)
@@ -81,6 +98,13 @@ module MB
             raise ArgumentError, "Decimator mix must be a real number or a node (got #{mix.inspect})"
           end
 
+          interp = INTERPOLATION_ALIASES.fetch(interpolation, interpolation)
+          unless INTERPOLATION.include?(interp)
+            raise ArgumentError, "Decimator interpolation must be one of #{(INTERPOLATION.keys + INTERPOLATION_ALIASES.keys).map(&:inspect).join(', ')} (got #{interpolation.inspect})"
+          end
+          @interpolation = interp
+          @mode = INTERPOLATION[interp]
+
           @input = input.get_sampler
           @mix = mix.is_a?(Numeric) ? mix.to_f : mix.get_sampler
           @rate = rate.is_a?(Numeric) ? rate.to_f : rate.get_sampler
@@ -95,7 +119,7 @@ module MB
         # Restarts the hold clock (the next sample is held) and the jitter's
         # random sequence.
         def reset
-          @state = Numo::DFloat[1.0, 0.0, 1.0]
+          @state = Numo::DFloat[1.0, 0.0, 1.0, 0.0]
           @rng = Numo::UInt64[(@seed || 0) & Tone::MASK64]
           self
         end
@@ -123,7 +147,7 @@ module MB
 
           n = x.length
           @buf = Numo::SFloat.zeros(n) if @buf.nil? || @buf.length != n
-          out = MB::Sound::FastLofi.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter)
+          out = MB::Sound::FastLofi.decimate(@buf, x, r, @state, @rng, @sample_rate, @jitter, @mode)
           m == 1.0 ? out : self.class.mix(out, x, m)
         end
 
@@ -147,6 +171,7 @@ module MB
         def to_s
           r = @rate.is_a?(Numeric) ? "#{MB::M.sigfigs(@rate, 4)} Hz" : 'node Hz'
           j = @jitter > 0 ? ", jitter #{MB::M.sigfigs(@jitter, 3)}" : ''
+          j += ', linear' if @mode == 1
           j += @mix.is_a?(Numeric) ? (@mix == 1 ? '' : ", mix #{MB::M.sigfigs(@mix, 3)}") : ', mix node'
           "Decimator #{r}#{j}"
         end
@@ -155,10 +180,11 @@ module MB
         # arguments and state; see ext/mb/sound/fast_lofi/fast_lofi.c): the
         # same double operations in the same order, inputs read as float32
         # values, so specs compare the two for equality.
-        def self.process_ruby(out, input, rate, state, rng, sample_rate, jitter)
+        def self.process_ruby(out, input, rate, state, rng, sample_rate, jitter, mode = 0)
           fs = sample_rate.to_f
           raise ArgumentError, 'The sample rate must be positive' unless fs > 0
           raise ArgumentError, 'The jitter must be from 0 to 0.95' unless jitter >= 0 && jitter <= MAX_JITTER
+          raise ArgumentError, 'The mode must be 0 (hold) or 1 (linear)' unless mode == 0 || mode == 1
 
           n = out.length
           xs = signal_values(input, n)
@@ -168,10 +194,12 @@ module MB
           phase = state[0]
           held = Numo::SFloat[state[1]][0]
           factor = state[2]
+          prev = Numo::SFloat[state[3]][0]
 
           n.times do |i|
             if phase >= 1.0 - EDGE
               phase -= (phase + EDGE).floor
+              prev = held
               held = xs.is_a?(Array) ? xs[i] : Numo::SFloat[xs][0]
               if jitter > 0
                 u = Tone.noise_random(seed)
@@ -179,7 +207,12 @@ module MB
                 factor = 1.0 + spread
               end
             end
-            out[i] = held
+            if mode == 1
+              t = phase < 1.0 ? phase : 1.0
+              out[i] = prev + (held - prev) * t
+            else
+              out[i] = held
+            end
 
             inc = (rs.is_a?(Array) ? rs[i] : rs) / fs
             if !(inc > 0)
@@ -193,6 +226,7 @@ module MB
           state[0] = phase
           state[1] = held
           state[2] = factor
+          state[3] = prev
           rng[0] = seed[0]
           out
         end

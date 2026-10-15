@@ -1,7 +1,7 @@
 /*
  * MB::Sound::FastLofi: lo-fi kernels (deliberate aliasing).
  *
- * decimate(out, x, rate, state, rng, sample_rate, jitter): a sample-rate
+ * decimate(out, x, rate, state, rng, sample_rate, jitter, mode): a sample-rate
  * reducer ("decimator", "rate crusher") for GraphNode::Decimator.  A phase
  * accumulator advances by rate / sample_rate cycles each sample; on the
  * sample where it reaches 1 it wraps and the output takes that sample of
@@ -15,8 +15,17 @@
  * infinite rates keep the phase finite); zero, negative, or NaN rates hold
  * the last value.
  *
- * +state+ is a DFloat [phase, held value, period factor], updated in place
- * (the phase starts at 1, so the first sample is taken).  With +jitter+ > 0
+ * +mode+ 1 (linear, a first-order hold) ramps instead of holding: the
+ * output moves in a straight line from the previous held value to the
+ * newest one over each hold period (the phase, 0 at a hold and 1 at the
+ * next, is the position), so the steps become corners: the images above
+ * half the rate fall with sinc^2 instead of sinc (much less high ringing,
+ * still folded), at the cost of one hold period of delay.  Mode 0 (the
+ * default) is the zero-order hold.
+ *
+ * +state+ is a DFloat [phase, held value, period factor, previous held
+ * value], updated in place (the phase starts at 1, so the first sample is
+ * taken).  With +jitter+ > 0
  * (0..0.95) each hold period's increment is scaled by a new factor 1 +
  * jitter * (2u - 1), u uniform from the splitmix64 generator state in +rng+
  * (a one-value Numo::UInt64; the same generator as the noise oscillators).
@@ -33,7 +42,7 @@
 
 #include "mb_ext_helpers.h"
 
-#define DECIMATE_STATE_LENGTH 3
+#define DECIMATE_STATE_LENGTH 4
 
 // Phases this close below a whole cycle count as reaching it, so rates that
 // divide the sample rate hold exactly every N samples despite rounding.
@@ -51,7 +60,7 @@ static inline double lofi_random(uint64_t *s)
 	return (double)(z >> 11) * 0x1.0p-53;
 }
 
-static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE state, VALUE rng, VALUE sample_rate, VALUE jitter_v)
+static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE state, VALUE rng, VALUE sample_rate, VALUE jitter_v, VALUE mode_v)
 {
 	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
 		rb_raise(rb_eArgError, "The output must be a contiguous 1D SFloat");
@@ -75,6 +84,10 @@ static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE sta
 	if (!(jitter >= 0 && jitter <= 0.95)) {
 		rb_raise(rb_eArgError, "The jitter must be from 0 to 0.95");
 	}
+	int mode = NUM2INT(mode_v);
+	if (mode != 0 && mode != 1) {
+		rb_raise(rb_eArgError, "The mode must be 0 (hold) or 1 (linear)");
+	}
 
 	size_t length = RNARRAY_SHAPE(out)[0];
 	struct mb_signal xs, rs;
@@ -88,10 +101,12 @@ static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE sta
 	double phase = st[0];
 	float held = (float)st[1];
 	double factor = st[2];
+	float prev = (float)st[3];
 
 	for (size_t i = 0; i < length; i++) {
 		if (phase >= 1.0 - DECIMATE_EDGE) {
 			phase -= mb_floor(phase + DECIMATE_EDGE);
+			prev = held;
 			held = (float)mb_signal_at(&xs, i);
 			if (jitter > 0) {
 				double u = lofi_random(rp);
@@ -99,7 +114,12 @@ static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE sta
 				factor = 1.0 + spread;
 			}
 		}
-		op[i] = held;
+		if (mode == 1) {
+			double t = phase < 1.0 ? phase : 1.0;
+			op[i] = (float)((double)prev + ((double)held - (double)prev) * t);
+		} else {
+			op[i] = held;
+		}
 
 		double inc = mb_signal_at(&rs, i) / fs;
 		if (!(inc > 0)) {
@@ -113,6 +133,7 @@ static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE sta
 	st[0] = phase;
 	st[1] = held;
 	st[2] = factor;
+	st[3] = prev;
 
 	RB_GC_GUARD(x);
 	RB_GC_GUARD(rate);
@@ -126,5 +147,5 @@ void Init_fast_lofi(void)
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	VALUE fast_lofi = rb_define_module_under(sound, "FastLofi");
 
-	rb_define_module_function(fast_lofi, "decimate", ruby_decimate, 7);
+	rb_define_module_function(fast_lofi, "decimate", ruby_decimate, 8);
 }
