@@ -84,6 +84,15 @@ size_t mb_jack_cycles_repeated(void);
 // For specs: sleep +microseconds+ at the start of every +every+-th process
 // callback (0 microseconds stops; +every+ must be at least 1).
 void mb_jack_stall(unsigned microseconds, unsigned every);
+// For specs: mb_jack_frame_log_start clears the log and starts recording,
+// for each process callback (up to MB_JACK_FRAME_LOG_MAX), the frame time it
+// read at its start and the one after its units ran; mb_jack_frame_log_stop
+// stops, points +frames+ at the log, and returns how many pairs it holds
+// (valid until the next start or client open; start it while it is off,
+// since a callback running at the stop may still add one past the count).
+#define MB_JACK_FRAME_LOG_MAX 65536
+void mb_jack_frame_log_start(void);
+size_t mb_jack_frame_log_stop(const uint32_t (**frames)[2]);
 
 // Registers +count+ ports named +names+ on the shared client for +unit+
 // (audio or MIDI, +output+ or input).  Returns NULL or an error message;

@@ -70,6 +70,21 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     Numo::SFloat.new(length).seq(start) * 2.0**-20
   end
 
+  # Compares two clients' FastAudio.jack_frame_log over the span both
+  # logged: the numbers of server cycles only the first ran, only the
+  # second ran, and callbacks of either that ran into the next cycle.
+  # (Frame times start near zero on the spec's fresh server, so they don't
+  # wrap.)
+  def compare_cycles(first, second)
+    lo = [first[0][0], second[0][0]].max
+    hi = [first[-1][0], second[-1][0]].min
+    a = first.select { _1[0].between?(lo, hi) }
+    b = second.select { _1[0].between?(lo, hi) }
+    a_frames = a.map(&:first).uniq
+    b_frames = b.map(&:first).uniq
+    [(a_frames - b_frames).length, (b_frames - a_frames).length, (a + b).count { _1[0] != _1[1] }]
+  end
+
   # Frames lost (jumped over) and duplicated (gone back over) between the
   # nonzero samples of a recorded ramp
   def ramp_errors(samples)
@@ -99,6 +114,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       out = fa::Playback.new(nil, -1, name, 1, 1, 48000, 0, 0, 2048, 0, 2, false, 0, ['out_1'])
       inp = fa::Capture.new(nil, -1, name, 1, 48000, 0, 0, 48000, 2, false, ['in_1'])
       go_rd.read(1)
+      fa.jack_frame_log(true)
       writer = Thread.new do
         n = 1
         deadline = MB::U.clock_now + seconds
@@ -112,11 +128,12 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       got.concat(inp.read(512)[0].to_a) while MB::U.clock_now < deadline
       writer.join
       info = fa.jack_info.slice(:skipped_cycles, :repeated_cycles).merge(out_repeated: out.stats[:repeated], in_repeated: inp.stats[:repeated])
+      frames = fa.jack_frame_log(false)
       # Closed before exiting: a synchronous server would wait for a dead
       # client until its timeout (5 s)
       [out, inp].each(&:close)
       fa.jack_close
-      wr.write(Marshal.dump([got, info]))
+      wr.write(Marshal.dump([got, info, frames]))
       wr.close
       exit!(0)
     end
@@ -129,7 +146,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     expect(fa.jack_ports("^#{name}:", false, 0).length).to eq(2)
 
     go = -> { go_wr.write('g'); go_wr.close }
-    recording = -> { Marshal.load(rd.read).tap { Process.wait(pid); rd.close; @outside_info = _1[1] }[0] }
+    recording = -> { Marshal.load(rd.read).tap { Process.wait(pid); rd.close; _, @outside_info, @outside_frames = _1 }[0] }
     [name, go, recording]
   end
 
@@ -137,7 +154,8 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
   # and recording one from an outside client for 1.5 s (the shared client
   # stalled meanwhile by FastAudio.jack_stall if +stall+).  Returns the
   # ramp recorded here, the one the outside client recorded, and the output
-  # and input.
+  # and input.  @late_frames and @outside_frames are the two clients'
+  # FastAudio.jack_frame_log, this one's spanning the outside client's.
   def late_audio(stall:)
     name, go, recording = outside_client(2)
 
@@ -149,6 +167,7 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     # The whole client's callback is late, before it reads the frame time,
     # like a process thread the system didn't schedule in time
     fa.jack_stall(12000, 7) if stall
+    fa.jack_frame_log(true)
     go.call
 
     writer = Thread.new do
@@ -164,8 +183,10 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
     got.concat(input.read(512)[0].to_a) while MB::U.clock_now < deadline
     writer.join
     fa.jack_stall(0, 1)
+    there = recording.call
+    @late_frames = fa.jack_frame_log(false)
 
-    [got, recording.call, output, input]
+    [got, there, output, input]
   end
 
   context 'with an asynchronous server' do
@@ -212,19 +233,38 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       # Without the dedupe, the outside client lost a period of the ramp for
       # each repeated cycle, and this input recorded one twice (cycles this
       # client missed are gone, so frames may be lost here)
-      # A cycle the outside client missed on its own (load can keep the
-      # forked process from running in time too) loses that period of its
-      # recording, and its output port keeps the period it wrote last,
-      # which this input records again (fixes-9: 3 of 8 runs under 32 busy
-      # loops, each with lost: 256 there, dup: 256 here, and the outside
-      # client counting one skipped cycle more than this one; passing runs
-      # counted the same)
-      info = fa.jack_info
-      extra = [@outside_info[:skipped_cycles] - info[:skipped_cycles], 0].max * info[:buffer_size]
+      # Beyond the stall (which delays the whole graph, so both clients
+      # miss its cycles), either client can be late on its own under load or
+      # Valgrind, losing audio that can't be recovered either:
+      # - A cycle the outside client misses and this one runs loses that
+      #   period of its recording, and its output port keeps the period it
+      #   wrote last, which this input records again (lost there, dup here).
+      # - A cycle this client misses leaves its output port holding its
+      #   last period, recorded again there (dup there; lost here).
+      # - A callback of either that runs into the next cycle (preempted
+      #   after reading the frame time) can read the other client's port
+      #   after that client's next cycle wrote it, or write its own after
+      #   the other read it, or (a unit reading the frame time again) see
+      #   the next cycle's frame time and drop that cycle as a repeat: up
+      #   to a period lost and one duplicated each way, though neither
+      #   client skipped a cycle.  (Units read the frame time themselves on
+      #   purpose: a unit stalled after process() read it must see the
+      #   repeat, as MIDI input's stall shows.)
+      # Jack.info's skip counters can't tell these apart (fixes-9 allowed
+      # the outside client's skips beyond this one's; jack-spec-1,
+      # 2026-10-15: 5 of 6 Valgrind runs and 3 of 5 under 16 busy loops
+      # still failed, e.g. 76 and 78 skips with 512 lost and 256 dup there,
+      # 512 dup here; a capture unit of the outside client read 21760 in
+      # the callback for 21504 and then dropped 21760), so the frame logs
+      # count each kind.
+      # Without the dedupe, 8960 frames (35 periods) are lost there and
+      # duplicated here.
+      period = fa.jack_info[:buffer_size]
+      outside_missed, here_missed, overran = compare_cycles(@late_frames, @outside_frames).map { _1 * period }
       there_errors = ramp_errors(there)
-      expect(there_errors[:dup]).to eq(0)
-      expect(there_errors[:lost]).to be <= extra
-      expect(ramp_errors(here)[:dup]).to be <= extra
+      expect(there_errors[:dup]).to be <= here_missed + overran
+      expect(there_errors[:lost]).to be <= outside_missed + overran
+      expect(ramp_errors(here)[:dup]).to be <= outside_missed + overran
     end
   end
 
