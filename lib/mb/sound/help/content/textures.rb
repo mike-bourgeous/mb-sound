@@ -50,6 +50,14 @@ module MB
         wander = drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
         bg :try, 220.hz.triangle.lp4(1800).pan(wander).at(-22.db).until(2.bars)
       end
+      example 'a fly buzzing around your head (doppler)' do
+        x = drift(1.5, range: -3..3, walk: 0.6, hold: 30.ms..300.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.4]) # meters left/right
+        y = drift(1, range: 0.3..2.5, walk: 0.5, smooth: :cosine)                                                         # meters ahead
+        r = (x * x + y * y) ** 0.5
+        fly = 210.hz.saw.lp4(2500) * 23.hz.lfo.at(0.6..1) + noise.filter(:bandpass, cutoff: 3000, quality: 2).at(-24.db)
+        # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it
+        bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-20.db).until(2.bars)
+      end
       example 'a drum head as kick and toms' do
         kick = grid(8, 'x..x..x.').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)
         toms = grid(8, '.x..xxxx').loop.trigger.resonate(:membrane, 131, glide: 2, glide_time: 0.25, decay: 0.8)
