@@ -15,18 +15,17 @@ module MB
       #
       # Roots are note names (`:d`, `:fs`, `:bb3`; octave 4 without a
       # number, as in `scale`), Notes (D3), note numbers, or Pitches
-      # (rounded to the nearest note).  Qualities are QUALITIES' names and
-      # their aliases (the same shapes as the MIDI transform, e.g.
-      # `midi.chord(:min7)`).  +inversion:+ moves that many of the lowest
+      # (rounded to the nearest note).  Qualities are the MIDI transform's
+      # chord names and aliases (MIDI::Transform::Chord::SHAPES, as in
+      # `midi.chord(:min7)`): :maj, :min, :dim, :aug, :sus2, :sus4, :'7'
+      # (:dom7), :maj7, :min7 (:m7), :m7b5, :dim7, :'6', :min6, :'9',
+      # :maj9, :min9, :add9, :power, ....  +inversion:+ moves that many of the lowest
       # notes up an octave (#notes only; the weights are pitch classes).
       class Chord
         include Value
 
-        # Other names for MIDI::Transform::Chord::SHAPES besides its own
-        # ALIASES (m7b5, 6, m6, M7, 7, 9, ...).
-        EXTRA_ALIASES = { m7b5: :min7b5, '6': :maj6, m6: :min6, M7: :maj7, dim5: :dim, dom: :dom7 }.freeze
-
-        # The chord shapes by name, in semitones above the root (root first).
+        # The chord shapes by name, in semitones above the root (root first;
+        # MIDI::Transform::Chord::SHAPES, with its ALIASES).
         def self.qualities
           MIDI::Transform::Chord::SHAPES
         end
@@ -36,7 +35,7 @@ module MB
         def self.shape_name(quality)
           return nil unless quality.is_a?(Symbol) || quality.is_a?(String)
           name = quality.to_sym
-          name = MIDI::Transform::Chord::ALIASES.fetch(name) { EXTRA_ALIASES.fetch(name, name) }
+          name = MIDI::Transform::Chord::ALIASES.fetch(name, name)
           qualities.key?(name) ? name : nil
         end
 
@@ -60,7 +59,7 @@ module MB
           n.round
         end
 
-        # The quality's shape name (a key of QUALITIES).
+        # The quality's shape name (a key of .qualities).
         attr_reader :quality
 
         # The root's note number.
@@ -71,7 +70,7 @@ module MB
 
         def initialize(quality, root:, inversion: 0)
           @quality = Chord.shape_name(quality)
-          raise ArgumentError, "Unknown chord quality #{quality.inspect} (#{Chord.qualities.keys.join(', ')}; aliases #{MIDI::Transform::Chord::ALIASES.merge(EXTRA_ALIASES).keys.join(', ')})" unless @quality
+          raise ArgumentError, "Unknown chord quality #{quality.inspect} (#{Chord.qualities.keys.join(', ')}; aliases #{MIDI::Transform::Chord::ALIASES.keys.join(', ')})" unless @quality
           @root = Chord.root_number(root)
           @offsets = Chord.qualities[@quality]
           unless inversion.is_a?(Integer) && inversion.between?(0, @offsets.length - 1)
