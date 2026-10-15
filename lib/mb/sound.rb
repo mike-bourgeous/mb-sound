@@ -208,3 +208,6 @@ require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
 require_relative 'sound/graph_io'
 require_relative 'sound/genre'
+
+# The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console
+require_relative 'sound/ui'

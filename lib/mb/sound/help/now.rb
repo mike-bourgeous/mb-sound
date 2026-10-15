@@ -97,6 +97,11 @@ module MB
           s << "#{code('loop!')} #{code('onward')} #{code('finish')}  #{c(:dim, 'the form')}" if flow
           s << "#{code('undo')}  #{c(:dim, 'cancels queued changes; else at the next bar')}" if queued.any? || @s.undo_steps.any?
           s << "#{code('take.save')}  #{c(:dim, 'keep this')}" unless players.empty?
+          if UI.band&.active?
+            s << "#{code('ui :deck')} / #{code('ui off')}  #{c(:dim, 'the dashboard band')}"
+          elsif !players.empty?
+            s << "#{code('ui')}  #{c(:dim, 'a live dashboard band above the prompt')}"
+          end
           s
         end
 

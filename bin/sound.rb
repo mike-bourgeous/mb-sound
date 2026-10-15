@@ -58,6 +58,11 @@ Pry.config.commands.rename_command('pry-reset', 'reset')
 Pry.config.commands.rename_command('pry-hist', 'hist')
 MB::Sound::Help.install_pry!
 
+# Tab completion of track, scene, knob, bus, layout, and pane names after the
+# commands that take them (`go :<Tab>`), and session names first for any
+# Symbol (see MB::Sound::UI::Completion)
+MB::Sound::UI::Completion.install
+
 # Work around issue introduced in pry-byebug 3.10.x that breaks Pry when
 # launched from a console script like this one.
 #
@@ -74,8 +79,12 @@ end
 Pry.start(
   MB::Sound,
   prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
+    # With a Session running, the prompt starts with its status: bar:beat,
+    # recording and armed tracks, render load (MB::Sound::UI.prompt_status;
+    # MB::Sound::UI.prompt_status_enabled = false turns it off)
     _pry_a = -> (obj, nest, pry) {
-      "\1\e[36m\2#{File.basename($0)}\1\e[0m\2 \1\e[32m\2#{obj}\1\e[0;2m\2(#{nest}) > \1\e[0m\2"
+      status = MB::Sound::UI.prompt_status
+      "\1\e[36m\2#{File.basename($0)}\1\e[0m\2 #{status ? "#{status} " : ''}\1\e[32m\2#{obj}\1\e[0;2m\2(#{nest}) > \1\e[0m\2"
     },
     -> (obj, nest, pry) {
       ' ' * _pry_a.call(obj, nest, pry).gsub(/(\x01|\x02|\e\[[0-9;]*[A-Za-z])/, '').length
