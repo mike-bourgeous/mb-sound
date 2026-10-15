@@ -544,8 +544,11 @@ module MB
           return nil if @events.empty? || position < 0
 
           phase = @loop ? position % @length : position
-          events = @loop ? events_for((position / @length).floor) : @events
-          events.reverse_each.find { |e| e.start <= phase } || (@loop ? events.last : nil)
+          cycle = @loop ? (position / @length).floor : 0
+          events = @loop ? events_for(cycle) : @events
+          # Before a cycle's first note: the last note of the cycle before
+          # (which differs for clips with variations)
+          events.reverse_each.find { |e| e.start <= phase } || (@loop ? events_for(cycle - 1).last : nil)
         end
 
         # Returns the Event before the one #event_at returns for +position+
