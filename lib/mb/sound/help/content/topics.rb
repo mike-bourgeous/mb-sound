@@ -236,9 +236,14 @@ module MB
         cloud of 32, 6% stereo.
 
         Stretching keeps the pitch: `.stretch(4)` is the cyclic S950
-        stretch (gritty), `.stretch(4, mode: :spectral)` a phase vocoder
-        with locked phases and sharp transients (pads, chords, voices,
-        bass), `.stretch(32, mode: :paul)` Paulstretch (endless washes).
+        stretch (gritty; 3 ms `crossfade:` between cycles),
+        `.stretch(4, mode: :spectral)` a phase vocoder with locked phases
+        and sharp transients that land on the stretched beat (pads,
+        chords, voices, bass, breaks), `.stretch(32, mode: :paul)`
+        Paulstretch (endless washes).  They are one algorithm:
+        `randomize:` 0..1 goes from the vocoder (0) to Paulstretch (1),
+        with `window:`, `overlap:`, `shape: :paul` (the original's
+        window), and `link: false` (random phases per channel) for both.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
