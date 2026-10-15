@@ -67,6 +67,7 @@ module MB
         voices: 64,
         copies: 64,
         repeats: 4096,
+        steps: 4096,
       }.freeze
 
       # A document that can't be loaded: syntax outside the subset, an

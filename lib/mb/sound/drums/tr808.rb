@@ -290,7 +290,7 @@ module MB
           if source.is_a?(Sequence::Kit)
             groups = Hash.new { |h, k| h[k] = [] }
             source.each do |row, clip|
-              key = voice_name(row) || voice_name(clip.events.first&.value)
+              key = voice_name(row) || voice_name(clip.values.first)
               raise ArgumentError, "Grid row #{row.inspect} doesn't name a TR-808 voice (voices: #{VOICES.keys.join(', ')})" unless key
               groups[key] << clip if only.nil? || only.include?(key)
             end
@@ -308,7 +308,7 @@ module MB
             # A clip's notes are known: only the voices it plays (a
             # performed clip may be a recording's placeholder, or be
             # swapped for the next take: every voice of the map)
-            values = source.events.map(&:value)
+            values = source.values
             voices = voices.select { |v| gm.fetch(v).any? { |n| values.include?(n) } }
           end
           stream = MB::Sound::MIDI::Stream.for(source)

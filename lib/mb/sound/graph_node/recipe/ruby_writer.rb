@@ -857,6 +857,8 @@ module MB
             when MB::Sound::Sample::Slices then slices_text(v, indent)
             when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
             when MB::Sound::Scale then scale_text(v)
+            when MB::Sound::Generative::Value then v.to_ruby { |x| value(x, indent) }
+            when MB::Sound::Generative::Dice then "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
             when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")

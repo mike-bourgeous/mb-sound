@@ -79,7 +79,7 @@ module MB
           return false if !@flams && Drums.flams?(clip)
           return true if @clip_notes.nil?
 
-          clip.events.all? { |e| @clip_notes.any? { |n| e.value == n } }
+          clip.values.all? { |v| @clip_notes.any? { |n| v == n } }
         end
 
         # True once every voice has ended.

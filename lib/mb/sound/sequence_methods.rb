@@ -104,19 +104,28 @@ module MB
       # the chance of a rest per note.  Choices come from +:seed+ (by
       # default drawn from MB::Sound's root seed, so scripts repeat; it is
       # the clip's #seed).  With +vary: true+ a looping melody picks new
-      # notes in every cycle, repeatably from the seed and the cycle.
+      # notes in every cycle, repeatably from the seed and the cycle (a
+      # generator clip, see Sequence::Clip.generate).
+      #
+      # +scale+ may also be a probability scale (Generative::Weights,
+      # Harmony, Field, or Harmony#over; see GenerativeMethods): the line
+      # then walks the notes with weight, +:leap+ of them at most per note,
+      # by their weights (a blurred scale plays its "wrong" notes now and
+      # then), reading the field where each note starts (a Harmony's key
+      # and chord changes steer it), from the strongest note nearest
+      # +:start+ (a note; the middle of the range by default).  +:range+
+      # spreads Weights and Harmonies (C3..C5 by default); +:weights+ is
+      # for Scales only.  Draws come from counter-based Dice.
       #
       #     melody(scale(:minor_pentatonic, :a), 8, seed: 3).loop
       #     melody(scale(:dorian, D3), rhythm: euclid(5, 8, D3), leap: 2).loop
       #     melody(scale(:major, :c), 16, vary: true).loop   # new every bar
-      def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: 0, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false)
-        scale = Scale[scale]
+      #     melody(scale(:dorian, :d).weights.blur(0.2), 8, range: A3..A5, vary: true).loop
+      def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: nil, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false)
+        probability = [Generative::Weights, Generative::Harmony, Generative::Field, Generative::FieldTimeline].any? { |c| scale.is_a?(c) }
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
-        range ||= (scale.root - 12)..(scale.root + 12)
-        lo = Scale.root_number(range.begin)
-        hi = Scale.root_number(range.end)
-        raise ArgumentError, "A melody range needs room (got #{range})" unless hi >= lo
         raise ArgumentError, "Melody rest must be from 0 to 1 (got #{rest.inspect})" unless rest.is_a?(Numeric) && rest.between?(0, 1)
+        raise ArgumentError, "Melody leap must be a positive Integer (got #{leap.inspect})" unless leap.is_a?(Integer) && leap > 0
 
         slots = if rhythm
                   Sequence::Clip.from(rhythm).events
@@ -125,6 +134,28 @@ module MB
                   Array.new(count) { |i| Sequence::Event.new(start: len * i, length: len, value: 0, velocity: Sequence::Clip::DEFAULT_VELOCITY) }
                 end
         length = rhythm ? Sequence::Clip.from(rhythm).length : Sequence::Duration.whole_notes(step) * count
+        reach = MB::M.max(length * 2, slots.map(&:end_time).max || 0)
+
+        if probability
+          raise ArgumentError, 'Melody weights: are per scale degree; a probability scale carries its own weights' if weights
+          if range && (scale.is_a?(Generative::Field) || scale.is_a?(Generative::FieldTimeline))
+            raise ArgumentError, 'A Field has its own range; leave out range: (or pass the Weights or Harmony)'
+          end
+          field = Generative.field(scale, range: range || Generative::DEFAULT_RANGE)
+          notes = Generative.notes_of(field)
+          raise ArgumentError, 'The melody\'s field has no notes' if notes.empty?
+          start = start.nil? ? (notes.first + notes.last) / 2 : Scale.root_number(start)
+          walk = Generative::Melody.new(field, slots, length: length, leap: leap, rest: rest, start: start)
+          gen = Sequence::Clip.generate(length, values: notes, seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false) { |cycle, dice| walk.events(cycle, dice) }
+          return vary ? gen : Sequence::Clip.new(gen.events, length: length, seed: seed)
+        end
+
+        scale = Scale[scale]
+        start ||= 0
+        range ||= (scale.root - 12)..(scale.root + 12)
+        lo = Scale.root_number(range.begin)
+        hi = Scale.root_number(range.end)
+        raise ArgumentError, "A melody range needs room (got #{range})" unless hi >= lo
 
         make = ->(s) {
           notes = Sequence::Generators.melody_notes(scale, slots.length, rng: Random.new(s), range: [lo, hi], weights: weights, leap: leap, rest: rest, start: start)
@@ -134,9 +165,12 @@ module MB
         clip = Sequence::Clip.new(make.(seed), length: length, seed: seed)
         return clip unless vary
 
-        Sequence::Clip.new(clip.events, length: length, seed: seed, variations: [Sequence::Clip::Variation.new(name: "melody(seed: #{seed})", block: ->(_events, cycle, _clip) {
+        # A generator clip: each cycle draws from its own seed (the same
+        # notes as before the generative layer; the clip's own events stay
+        # the seed's melody)
+        Sequence::Clip.generate(length, values: scale.notes(lo..hi), seed: seed, name: "melody(seed: #{seed})", reach: reach, loop: false, events: clip.events) { |cycle, _dice|
           make.(Sequence::Clip.cycle_seed(seed, cycle))
-        })])
+        }
       end
 
       # Unattached MIDI transforms (MIDI::Transform::Spec) for

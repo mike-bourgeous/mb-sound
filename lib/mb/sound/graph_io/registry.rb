@@ -69,6 +69,11 @@ module MB
           'MB::Sound::Drums::Hit' => MB::Sound::Drums::Hit::METHODS - %i[knobs name machine],
           # Curve variants (Curve#to_ruby)
           'MB::Sound::Curve' => %i[reverse in out in_out out_in],
+          # Probability scales (Generative::Value#to_ruby)
+          'MB::Sound::Scale' => %i[weights],
+          'MB::Sound::Generative::Weights' => %i[+ - * / ** blur floor normalize blend over],
+          'MB::Sound::Generative::Harmony' => %i[+ - * ** blur over],
+          'MB::Sound::Generative::Field' => %i[**],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -101,7 +106,7 @@ module MB
 
         # Top-level names besides the recorded MB::Sound methods (scale:
         # Scale values for transforms such as Clip#ghost_chords).
-        TOP_EXTRA = Set[:per_voice, :per_channel, :scale].freeze
+        TOP_EXTRA = Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony].freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.
