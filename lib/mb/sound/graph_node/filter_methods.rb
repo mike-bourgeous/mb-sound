@@ -132,7 +132,7 @@ module MB
               raise 'Cutoff, gain, and quality should only be specified when creating a new filter by type'
             end
 
-            MB::Sound::SampleWrapper.new(f, self, in_place: in_place)
+            MB::Sound::Filter::SampleWrapper.new(f, self, in_place: in_place)
 
           else
             raise "Unsupported filter type: #{filter_or_type.inspect}"

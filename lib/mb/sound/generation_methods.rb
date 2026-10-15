@@ -10,8 +10,20 @@ module MB
       # and MB::Sound::Tone.  Each call gives a new random stream, seeded
       # with +seed+ or a sub-seed from the root generator (see
       # MB::Sound.seed and Tone#noise), so renders repeat.
-      def noise(seed: nil)
-        2000.hz.ramp.noise(seed: seed)
+      #
+      # +color+ :pink (3 dB quieter each octave up: equal power per octave,
+      # softer and easier to place than white) or :brown (alias :red; 6 dB
+      # per octave, a deep rumble) filters the white noise
+      # (Filter::NoiseColor; RMS about -14 dBFS, peaks past full scale
+      # rare).
+      #
+      #     play noise(:pink).pan(drift(1)).at(-12.db)
+      #     play noise(:brown).at(-6.db)
+      def noise(color = :white, seed: nil)
+        white = 2000.hz.ramp.noise(seed: seed)
+        return white if color.nil? || color == :white
+
+        white.filter(MB::Sound::Filter::NoiseColor.new(color, sample_rate: white.sample_rate))
       end
 
       # Sparse random impulses, about +rate+ per second (GraphNode::Dust):
