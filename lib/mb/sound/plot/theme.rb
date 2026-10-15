@@ -106,6 +106,13 @@ module MB
           palette[i % palette.length]
         end
 
+        # Data.define's positional constructor would be Theme[...]; here [] looks
+        # a theme up by name instead (remove the generated one first, so -w
+        # doesn't warn about a redefinition).
+        class << self
+          remove_method :[]
+        end
+
         # A Theme by name, or +theme+ itself.
         def self.[](theme)
           return theme if theme.is_a?(Theme)

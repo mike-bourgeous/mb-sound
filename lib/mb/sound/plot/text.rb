@@ -1101,7 +1101,6 @@ module MB
               other = set & ~on
               n_other = Numo::Int32.cast(other).sum(axis: 2)
               n_empty = Numo::Int32.cast(~set).sum(axis: 2)
-              big = Numo::Int32.new(*dots.shape).fill(1 << 30)
               op = pr.dup
               op[~other] = 1 << 30
               second = op.min_index(axis: 2)

@@ -448,7 +448,7 @@ module MB
         # Warns once if a master chain takes most of the time available for
         # its buffer.
         def check_master_speed(c, elapsed, frames)
-          return unless @realtime && !c.slow_warned
+          return unless @realtime && !c.slow_warned && Session.speed_warnings
 
           load = sustained_load(c, elapsed, frames)
           if load

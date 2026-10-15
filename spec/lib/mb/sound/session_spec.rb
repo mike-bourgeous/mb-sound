@@ -533,6 +533,14 @@ RSpec.describe(MB::Sound::Session) do
   end
 
   describe 'slow player warnings' do
+    around do |ex|
+      was = MB::Sound::Session.speed_warnings
+      MB::Sound::Session.speed_warnings = true
+      ex.run
+    ensure
+      MB::Sound::Session.speed_warnings = was
+    end
+
     before do
       session.instance_variable_set(:@realtime, true)
       allow(session).to receive(:start_thread)

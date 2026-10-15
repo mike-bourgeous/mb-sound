@@ -170,7 +170,6 @@ module MB
           end
 
           def image(ids, colormap)
-            h, w = ids.shape
             rgb = Image.colorize(ids, colormap.colors, @theme.background || [0, 0, 0])
             png = Image.encode_png(rgb)
             @out << %(<image x="0" y="0" width="#{SVG.n(@width)}" height="#{SVG.n(@height)}" preserveAspectRatio="none" image-rendering="optimizeQuality" href="data:image/png;base64,#{[png].pack('m0')}"/>)
