@@ -65,7 +65,7 @@ module MB
 
           when Length
             # Seconds and samples, at the current tempo
-            wn = duration.to_whole_notes(transport: Sequence.transport)
+            wn = duration.to_whole_notes(transport: Sequence.current_transport)
             raise ArgumentError, "Duration must be positive (got #{duration})" unless wn > 0
             wn
 
@@ -177,12 +177,12 @@ module MB
         # tempo changes.  (Duration#seconds(transport), which did the same,
         # was removed 2026-10-11: `x.seconds` means "a Length of x seconds"
         # on numbers and nodes.)
-        def to_seconds(sample_rate: 48000, transport: Sequence.transport)
+        def to_seconds(sample_rate: 48000, transport: Sequence.current_transport)
           transport.seconds(@whole_notes).to_f
         end
 
         # Length protocol: the length in whole notes.
-        def to_whole_notes(sample_rate: 48000, transport: Sequence.transport)
+        def to_whole_notes(sample_rate: 48000, transport: Sequence.current_transport)
           @whole_notes
         end
 

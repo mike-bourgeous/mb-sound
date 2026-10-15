@@ -38,6 +38,29 @@ module MB
         @transport ||= Transport.new
       end
 
+      # The Transport that tempo-dependent conversions read by default
+      # (Durations and Lengths to seconds or samples, `2.bars`, #bounce's
+      # tempo, Clip#bake): the current Session context's transport (inside a
+      # PlaybackMethods#render block, a scheduled block, a scene build, ...),
+      # else the default .transport.  Inside a scheduled block that queued a
+      # tempo change with MB::Sound#bpm (it lands at the block's time), a
+      # Transport at that pending tempo, so what the block builds is measured
+      # at the tempo it will play at.  Before 2026-10-15 these read the
+      # default transport, so a song's `bpm 72` in a render (or a scheduled
+      # block) left bounces and build-time lengths at the old tempo.
+      def self.current_transport
+        context = MB::Sound::Session.context
+        current = context&.[](:session)&.transport || transport
+        pending = context&.[](:pending_bpm)
+        return current if pending.nil? || pending == current.bpm
+
+        cached = context[:pending_transport]
+        if cached.nil? || cached.bpm != pending || cached.bar_length != current.bar_length
+          cached = context[:pending_transport] = Transport.new(bpm: pending, bar_length: current.bar_length)
+        end
+        cached
+      end
+
       # Returns an event value (a note number, or a Pitch for a fixed
       # frequency) moved by +semitones+.
       def self.transpose_value(value, semitones)

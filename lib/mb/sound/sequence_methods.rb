@@ -363,18 +363,21 @@ module MB
       # speed right away.  Inside a scheduled block (see ScheduleMethods), the
       # change happens at the block's scheduled time instead.  A script's
       # --bpm option scales the tempos a song sets (see
-      # Sequence::Transport#override_bpm).
+      # Sequence::Transport#override_bpm).  In a scheduled block, the rest of
+      # the block reads the queued tempo (`bpm` returns it, and Durations,
+      # #bounce, etc. count at it; see Sequence.current_transport).
       def bpm(beats_per_minute = nil)
         context = MB::Sound::Session.context
         beats_per_minute = transport.scaled_bpm(beats_per_minute) if beats_per_minute
         if beats_per_minute && context&.[](:batch)
           session, time = context[:session], context[:time]
           context[:batch] << -> { session.change_tempo(beats_per_minute, time: time) }
+          context[:pending_bpm] = beats_per_minute
           return beats_per_minute
         end
 
         transport.bpm = beats_per_minute if beats_per_minute
-        transport.bpm
+        context&.[](:pending_bpm) || transport.bpm
       end
 
       private
