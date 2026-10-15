@@ -268,4 +268,86 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(r.data(0)).to eq(direct.data(0))
     end
   end
+
+  describe 'Sample#follow' do
+    let(:rec) { MB::Sound.bounce(2.bars, bpm: 100) { MB::Sound.tr909(MB::Sound.grid(16, kick: 'X...x...x..xx...', clap: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.').loop) } }
+
+    after { MB::Sound.bpm(120) }
+
+    it 'plays the loop as it is at its own tempo, stretched or resampled' do
+      MB::Sound.bpm(100)
+      expect(rec.follow.sample(rec.length)).to eq(rec.data(0))
+      expect(rec.follow(:resample).sample(rec.length)).to eq(rec.data(0))
+      expect(rec.node(follow: true)).to be_a(MB::Sound::GraphNode::LoopPlayer)
+    end
+
+    it 'plays the slice stretch at another tempo, the same at any buffer size' do
+      MB::Sound.bpm(125)
+      want = rec.stretch(0.8, mode: :slice).data(0)
+      [1, 7, 128, 800].each do |n|
+        f = rec.follow
+        out = Numo::SFloat.zeros(want.length)
+        i = 0
+        while i < want.length
+          k = [n, want.length - i].min
+          out[i...(i + k)] = f.sample(k)
+          i += k
+        end
+        expect(out).to eq(want)
+      end
+    end
+
+    it 'stays on the bar through a tempo change in a session' do
+      path = tmp_path('follow.flac')
+      MB::Sound.render(path, bars: 6, bpm: 100, gain: 1) {
+        MB::Sound.bg :brk, rec.follow
+        MB::Sound.at_bar(3) { MB::Sound.bpm 125 }
+      }
+      mono = MB::Sound.read(path)[0]
+      split = 4.8 * 48000
+      on = MB::Sound::Sample[mono].onsets
+      pos = on.map { |o| o < split ? o / (split / 32) : 32 + (o - split) / (1.92 * 48000 / 16) }
+      grid = pos.reject { |p| (p % 16 - 0.3).abs < 0.1 || (p % 16 - 0.375).abs < 0.1 } # the clap's second burst
+      expect(grid.length).to be >= 50
+      grid.each { |p| expect((p - p.round).abs).to be < 0.01 }
+      expect(pos.select { |p| p > 32 }.length).to be > 30
+    end
+
+    it 'needs a tempo' do
+      expect { MB::Sound::Sample[rec.to_a].follow }.to raise_error(ArgumentError, /no tempo/)
+      expect { rec.follow(:wobble) }.to raise_error(ArgumentError, /follow takes/)
+    end
+
+    it 'gives stereo samples a bundle' do
+      st = MB::Sound::Sample[[rec.data(0), rec.data(0) * 0.5], bpm: 100]
+      f = st.follow
+      expect(f).to be_a(MB::Sound::GraphNode::Channels)
+      expect(f.length).to eq(2)
+    end
+  end
+
+  describe 'MB::Sound#loops' do
+    it 'lists and filters a folder' do
+      dir = tmp_path('Loops')
+      Dir.mkdir(dir)
+      Dir.mkdir(File.join(dir, 'Funk 98 BPM'))
+      MB::Sound::Sample::Riff.write(File.join(dir, 'Funk 98 BPM', 'Am groove.wav'), Numo::SFloat.zeros(44100 * 60 / 98 * 4 / 1), sample_rate: 44100)
+      MB::Sound::Sample::Riff.write(File.join(dir, 'acid.wav'), Numo::SFloat.zeros(4800), acid: { tempo: 120.0, beats: 4 })
+      MB::Sound::Sample::Riff.write(File.join(dir, 'hit.wav'), Numo::SFloat.zeros(480), acid: { one_shot: true })
+      before = Dir.glob(File.join(dir, '**', '*')).to_h { |f| [f, File.mtime(f)] }
+
+      l = MB::Sound.loops(dir)
+      expect(l.length).to eq(3)
+      expect(l.to_s.lines.length).to eq(5)
+      expect(l.to_s).to include('Funk 98 BPM/Am groove.wav', 'one-shot', 'acid')
+      expect(l.inspect).to eq(l.to_s)
+      expect(MB::Sound.loops(dir, bpm: 95..100).map { |e| File.basename(e.path) }).to eq(['Am groove.wav'])
+      expect(MB::Sound.loops(dir, bpm: 120).map { |e| File.basename(e.path) }).to eq(['acid.wav'])
+      expect(MB::Sound.loops(dir, key: :Am).length).to eq(1)
+      expect(MB::Sound.loops(dir, beats: 4).length).to eq(2)
+      expect(l.sample(1).bpm).to eq(120.0)
+      expect(Dir.glob(File.join(dir, '**', '*')).to_h { |f| [f, File.mtime(f)] }).to eq(before)
+      expect(MB::Sound.loops(tmp_path('empty_dir').tap { |d| Dir.mkdir(d) }).to_s).to start_with('No loop files')
+    end
+  end
 end

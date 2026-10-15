@@ -220,6 +220,44 @@ module MB
       end
     end
 
+    Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
+      about <<~TEXT
+        Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
+        its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
+        `smpl` (root, loop points), cue points (`sample.markers`), FLAC
+        tags, then tempo and key words in file and folder names ("98bpm",
+        "98 BPM", "Am_120").  `sample.bpm`, `.beats`, `.bars`, `.key`,
+        `.meta_source` (where each came from); `Sample[path, detect:
+        true]` (or `.detect_tempo`) finds a missing tempo.  `loops
+        '~/Loops/Funk'` lists a folder (headers and names only, nothing
+        decoded or written), filtered by `bpm: 90..100`, `key: :Am`,
+        `beats: 8`; `list[3].sample` reads one.
+
+        `sample.follow` plays a loop in time with the session: its beats
+        fill the same span at any tempo, lined up with bar 1 (`align:
+        :launch` counts from the launch), restretched when `bpm` changes.
+        `follow` keeps the pitch with the slice stretch (`stretch:
+        :spectral` for pads); `follow(:resample)` lets the pitch follow
+        the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
+        the hits (markers, else onsets, else the 16th grid) and starts
+        each slice at its stretched time, attacks copied exactly:
+        slowing down leaves REX-style gaps (`fill: :stretch` draws each
+        decay out instead), speeding up truncates with a 4 ms fade.
+      TEXT
+      commands :loops
+      dsl :follow
+      note :loops
+      see :sampler, :granular, :tempo
+      example 'a break that follows the tempo' do
+        brk = bounce(2.bars, bpm: 100) { tr909(grid(16, kick: 'X...x...x..xx...', clap: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.', oh: '..x...x...x...x.')) }
+        bg :try, brk.follow.at(-16.db).until(2.bars)
+      end
+      example 'slice stretch vs varispeed' do
+        brk = bounce(1.bar, bpm: 100) { tr909(grid(16, kick: 'X..x..X...X.....', snare: '....X.......X..x', hat: 'xxxxxxxxxxxxxxxx')) }
+        bg :try, (brk.follow * 0.5 + brk.follow(:resample).pan(0.6) * 0.5).at(-14.db).until(2.bars)
+      end
+    end
+
     Help.topic :granular, 'Grains and spectral stretch', group: :sound do
       about <<~TEXT
         `sample.grains(...)` plays a Sample as a cloud of short windowed

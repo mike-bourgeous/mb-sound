@@ -31,7 +31,12 @@ module MB
             b.denominator == 1 ? b.to_i : b.to_f
           end
 
-          # A short label for listings, e.g. "98 BPM, 8 beats, Am (acid)".
+          # The file as a Sample (decodes the audio; see Sample.from_file).
+          def sample(**options)
+            Sample[path, **options]
+          end
+
+          # A short label for listings, e.g. "98 BPM, 8 beats, Am".
           def to_s
             parts = []
             parts << "#{bpm == bpm.round ? bpm.round : bpm.round(2)} BPM" if bpm
@@ -341,6 +346,84 @@ module MB
           acc = { 's' => '#', 'sharp' => '#', 'flat' => 'b' }.fetch(acc, acc)
           minor = %w[m min minor mi moll].include?(mode)
           :"#{letter.upcase}#{acc}#{'m' if minor}"
+        end
+
+        # A listing of loop files (MB::Sound#loops): Entries that print as a
+        # table.  `list[3]` is an Entry (`list[3].sample.follow`),
+        # `list.sample(3)` its Sample; Enumerable for the rest.
+        class List
+          include Enumerable
+
+          # The folder listed, and its Entries.
+          attr_reader :dir, :entries
+
+          def initialize(dir, entries)
+            @dir = dir
+            @entries = entries.freeze
+          end
+
+          def each(&block)
+            @entries.each(&block)
+          end
+
+          def [](i)
+            @entries[i]
+          end
+
+          def length
+            @entries.length
+          end
+          alias size length
+          alias count length
+
+          def empty?
+            @entries.empty?
+          end
+
+          # Entry +i+'s Sample.
+          def sample(i, **options)
+            @entries.fetch(i).sample(**options)
+          end
+
+          # A table: index, file (relative to #dir), BPM, beats, key, and
+          # where the tempo came from.
+          def to_s
+            return "No loop files in #{@dir}" if @entries.empty?
+            rows = @entries.each_with_index.map { |e, i|
+              [
+                i.to_s, e.path.delete_prefix("#{@dir}/"),
+                e.bpm ? (e.bpm == e.bpm.round ? e.bpm.round.to_s : format('%.2f', e.bpm)) : '-',
+                e.beats ? (e.beats.is_a?(Integer) ? e.beats.to_s : format('~%.1f', e.beats)) : '-',
+                e.key&.to_s || '-',
+                (e.one_shot ? 'one-shot ' : '') + (e.sources[:bpm]&.to_s || ''),
+              ]
+            }
+            head = ['#', 'file', 'bpm', 'beats', 'key', 'from']
+            widths = head.each_index.map { |c| ([head] + rows).map { |r| r[c].length }.max }
+            line = ->(r) { r.each_with_index.map { |v, c| c == 1 || c == 5 ? v.ljust(widths[c]) : v.rjust(widths[c]) }.join('  ').rstrip }
+            (["#{@entries.length} loop file#{'s' if @entries.length != 1} in #{@dir}", line.(head)] + rows.map(&line)).join("\n")
+          end
+
+          def inspect
+            to_s
+          end
+
+          def pretty_print(q)
+            q.text(to_s)
+          end
+        end
+
+        # A List of the sound files in +dir+ whose metadata matches: +bpm+
+        # (a number, within 1%, or a Range), +key+ (a key Symbol or an
+        # Array of them; :Am, :"F#"), +beats+ (a number or Range).  Reads
+        # headers and names only.
+        def list(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true)
+          entries = scan(dir, recursive: recursive)
+          entries = entries.select { |e| e.bpm && (bpm.is_a?(Range) ? bpm.cover?(e.bpm) : (e.bpm - bpm).abs <= bpm * 0.01) } if bpm
+          keys = Array(key).map { |k| k.to_s.tr('♯♭', '#b').to_sym } if key
+          entries = entries.select { |e| keys.include?(e.key) } if key
+          entries = entries.select { |e| e.beats && (beats.is_a?(Range) ? beats.cover?(e.beats) : e.beats == beats) } if beats
+          List.new(File.expand_path(dir.to_s), entries)
         end
 
         # Every sound file under +dir+ (recursively), as Entries, sorted by

@@ -647,10 +647,38 @@ module MB
 
       # A graph node playing the sample once from its start (then ending),
       # e.g. `play kick.node` or `kick.node.reverb(:room)`.  Alias #to_node.
-      def node(**options)
+      # With +follow+ (true, :stretch, or :resample) a loop following the
+      # session tempo instead (see #follow).
+      def node(follow: nil, **options)
+        return follow(follow == true ? :stretch : follow, **options) if follow
         to_instrument(keytrack: 0).node(**options)
       end
       alias to_node node
+
+      # The sample as a loop that follows the session tempo (a
+      # GraphNode::LoopPlayer per channel; a Channels bundle for stereo):
+      # its #beats fill the same span of the timeline at any tempo, lined up
+      # with bar 1 (+align+ :timeline) or the launch (:launch), staying on
+      # the bar through tempo changes.  +mode+ :stretch keeps the pitch
+      # (stretched offline per tempo with +stretch+, a stretch mode or a
+      # Hash of #stretch options: :slice by default, e.g. :spectral for
+      # pads); :resample speeds the sample up and down (pitch follows,
+      # like a varispeed).  Needs a tempo (#bpm: from the file, a name,
+      # `Sample[path, bpm: 98]`, or `detect: true`).
+      #
+      #     brk = Sample['Funk/break_98bpm.wav']
+      #     bg :brk, brk.follow                     # stays in time at the session's tempo
+      #     bg :pad, pad.follow(stretch: :spectral)  # pads keep their pitch through the vocoder
+      #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
+      #     bpm 128                                  # every follower restretches
+      def follow(mode = :stretch, stretch: :slice, align: :timeline)
+        mode = { true => :stretch, resample: :resample, varispeed: :resample, stretch: :stretch }.fetch(mode) {
+          raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
+        }
+        opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align) }
+        nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
+      end
 
       # A granular cloud of this sample: a stereo Channels bundle of a
       # GraphNode::Grains (see design/notes/granular.md).  Every option is a
