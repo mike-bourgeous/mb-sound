@@ -101,18 +101,19 @@ module MB::Sound
   end
 
   # Mouse squeaks on each impulse of +trigger+: tonal chirps around 3-6
-  # kHz, 80-300 ms long, each with its own pitch contour (a slope of -5 to
-  # +5 semitones over the squeak plus an arch of -3 to +6 in the middle),
+  # kHz, 80-300 ms long, each with its own pitch contour (a slope of -8 to
+  # +8 semitones over the squeak plus an arch of -4 to +9 in the middle),
   # a fast vibrato (30-45 Hz, a quarter semitone), and a quiet second
   # harmonic.  The trigger's height is the loudness.
   def self.critter_squeaks(trigger)
     held = ->(range) { noise.sample_hold(trigger).at(range) }
     length = held.(0.08..0.3)
     base = held.(-4.0..4.0)
-    slope = held.(-5.0..5.0)
-    arch = held.(-3.0..6.0)
-    ramp = env([[0, 0], [1, length, 0]], trigger: trigger, hold_last: true)
-    bump = env([[0, 0], [1, length * 0.5, -6], [0, length * 0.5, 6]], trigger: trigger)
+    slope = held.(-8.0..8.0)
+    arch = held.(-4.0..9.0)
+    # (each ends its first segment on the hold, so neither sustains)
+    ramp = env([[1, length, 0], [1, 0.1]], trigger: trigger, hold: length).no_velocity # back to 0 after the squeak
+    bump = env([[1, length * 0.5, -6], [0, length * 0.5, 6]], trigger: trigger, hold: length * 0.5).no_velocity
     vibrato = 37.hz.transpose(held.(-3.5..3.5)).sine.at(0.25)
     pitch = 4200.hz.transpose(base + ramp * slope + bump * arch + vibrato)
     amp = adsr(0.012, 0.03, 0.8, 0.04, hold: length, trigger: trigger)
@@ -123,7 +124,7 @@ module MB::Sound
   # as in textures round 3) and a squeak now and then.  Mono.
   def self.critter_mouse(x, y, z)
     steps = dust(25, range: 0.2..1, min_gap: 15.ms).filter(:bandpass, cutoff: 3500, quality: 1.5) * 0.8
-    squeaks = critter_squeaks(dust(0.8, range: 0.5..1, min_gap: 600.ms)) * 0.3
+    squeaks = critter_squeaks(dust(0.8, range: 0.5..1, min_gap: 600.ms)) * 0.05
     steps + squeaks
   end
 
@@ -136,7 +137,9 @@ module MB::Sound
   # 4 kHz behind you (the pinnae shade sound from behind; a rough cue
   # only).  Returns stereo.
   def self.critter_place(sig, x, y, z, doppler: 5, binaural: false)
-    r = (x * x + y * y + z * z) ** 0.5
+    # Paths that may pass behind cross the head; binaural keeps them 30 cm
+    # off it (in quadrature), so levels stay sane
+    r = binaural ? (x * x + y * y + z * z + 0.09) ** 0.5 : (x * x + y * y + z * z) ** 0.5
     late = r * (doppler / CRITTER_SOUND_SPEED)
     near = 1 / (r + 0.3)
     air = r * -1500 + 9000
@@ -156,18 +159,18 @@ module MB::Sound
       cutoff = 1248 / alpha ** 0.5
       sig.delay(late + path, max_delay: 0.2).lp4(air).filter(:highshelf, cutoff: cutoff, gain: alpha, quality: 0.5) * near
     }
-    stereo(*ears)
+    stereo(*ears) * 0.45 # -7 dB: closer paths and the lit ear's 2x shelf make binaural louder
   end
 
   # Plays the critters (:both, :fly, or :mouse) as players :fly and :mouse.
   def self.critters(which = :both, doppler: 5, binaural: false)
     if which == :both || which == :fly
       x, y, z = critter_fly_path(behind: binaural)
-      bg :fly, critter_place(critter_fly(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(12.db), fade: 0
+      bg :fly, critter_place(critter_fly(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(8.db), fade: 0
     end
     if which == :both || which == :mouse
       x, y, z = critter_mouse_path(behind: binaural)
-      bg :mouse, critter_place(critter_mouse(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(16.db), fade: 0
+      bg :mouse, critter_place(critter_mouse(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(28.db), fade: 0 # dust ticks through a bandpass are quiet
     end
   end
 
