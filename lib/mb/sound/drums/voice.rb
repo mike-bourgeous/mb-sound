@@ -130,6 +130,11 @@ module MB
           bufs = @inputs.map { |src, tap|
             b = src.sample(count)
             b = zeros(count) if b.nil? || b.empty?
+            # A source that ends inside this buffer (a one-shot clip whose
+            # end is off the buffer grid) gives fewer samples; it sends no
+            # more hits, so the rest is zeros while the voice rings on
+            # (fixes-14: drums_808's crash at the song's end)
+            b = padded(b, count) if b.length < count
             tap.buffer = b
             b
           }
@@ -320,6 +325,14 @@ module MB
         def zeros(count)
           @zeros = Numo::SFloat.zeros(count).freeze if @zeros.nil? || @zeros.length != count
           @zeros
+        end
+
+        # A new +count+-sample copy of +buf+ (shorter) padded with zeros
+        # (only where a source ends, so allocating is fine).
+        def padded(buf, count)
+          out = buf.class.zeros(count)
+          out[0...buf.length] = buf
+          out
         end
 
         # Finds whether the graph may be skipped, and what it still reads
