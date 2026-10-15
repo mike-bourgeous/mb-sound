@@ -63,11 +63,26 @@ module MB
           new(pc).with_recipe(scale, :weights, degrees)
         end
 
+        # Raises unless +x+ is Weights or a finite number at least 0.
+        def self.check_number(x, op)
+          return if x.is_a?(Weights)
+          raise ArgumentError, "Weights #{op} takes Weights or a number (got #{x.inspect})" unless x.is_a?(Numeric) && x.real?
+          raise ArgumentError, "Weights must be finite and not negative (Weights #{op} #{x})" unless x.finite? && x >= 0
+        end
+
         # The pitch class (0..11) of a Note, note number, or name.
         def self.pitch_class(n)
           v = n.is_a?(Integer) ? n : Scale.root_number(n)
           raise ArgumentError, "Pitch classes need whole note numbers (got #{n.inspect})" unless v == v.round
           v.round % 12
+        end
+
+        # Weights from 12 Floats known to be finite and not negative (the
+        # results of operations on Weights), skipping the checks.
+        def self.raw(pc)
+          w = allocate
+          w.instance_variable_set(:@pc, pc.freeze)
+          w
         end
 
         def initialize(pc)
@@ -97,20 +112,22 @@ module MB
         # Layers added class by class (another Weights), or +other+ added
         # to every class (a number).
         def +(other)
+          Weights.check_number(other, :+)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x + other.pc[i] } : @pc.map { |x| x + other.to_f }
-          Weights.new(w).with_recipe(self, :+, [other])
+          Weights.raw(w).with_recipe(self, :+, [other])
         end
 
         # Subtracts class by class (or a number from every class), floored at 0.
         def -(other)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x - other.pc[i] } : @pc.map { |x| x - other.to_f }
-          Weights.new(w.map { |x| x < 0 ? 0.0 : x }).with_recipe(self, :-, [other])
+          Weights.raw(w.map { |x| x < 0 ? 0.0 : x }).with_recipe(self, :-, [other])
         end
 
         # Scales by a number, or masks class by class by another Weights.
         def *(other)
+          Weights.check_number(other, :*)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x * other.pc[i] } : @pc.map { |x| x * other.to_f }
-          Weights.new(w).with_recipe(self, :*, [other])
+          Weights.raw(w).with_recipe(self, :*, [other])
         end
 
         # Divides by a number.
@@ -141,31 +158,38 @@ module MB
           raise ArgumentError, "Blur amount is from 0 to 1 (got #{amount.inspect})" unless amount.is_a?(Numeric) && amount.between?(0, 1)
           raise ArgumentError, "Blur reach is an Integer from 1 to 6 (got #{reach.inspect})" unless reach.is_a?(Integer) && reach.between?(1, 6)
 
-          total = (1..reach).sum { |d| reach + 1 - d }.to_f
+          total = (reach * (reach + 1) / 2).to_f
+          shares = (1..reach).map { |d| amount * (reach + 1 - d) / total / 2 }
           out = @pc.dup
-          @pc.each_with_index do |w, i|
-            next if w == 0
-            (1..reach).each do |d|
-              share = w * amount * (reach + 1 - d) / total / 2
-              out[(i + d) % 12] += share
-              out[(i - d) % 12] += share
+          i = 0
+          while i < 12
+            w = @pc[i]
+            if w != 0
+              d = 1
+              while d <= reach
+                share = w * shares[d - 1]
+                out[(i + d) % 12] += share
+                out[(i - d) % 12] += share
+                d += 1
+              end
+              out[i] -= w * amount
             end
-            out[i] -= w * amount
+            i += 1
           end
-          Weights.new(out.map { |x| x < 0 ? 0.0 : x }).with_recipe(self, :blur, [amount], reach == 1 ? {} : { reach: reach })
+          Weights.raw(out.map { |x| x < 0 ? 0.0 : x }).with_recipe(self, :blur, [amount], reach == 1 ? {} : { reach: reach })
         end
 
         # Every class at least +eps+ times the strongest (anything can
         # happen, rarely).
         def floor(eps)
           m = @pc.max * eps.to_f
-          Weights.new(@pc.map { |w| w < m ? m : w }).with_recipe(self, :floor, [eps])
+          Weights.raw(@pc.map { |w| w < m ? m : w }).with_recipe(self, :floor, [eps])
         end
 
         # The weights scaled to sum to 1 (unchanged if they're all 0).
         def normalize
           s = sum
-          Weights.new(s > 0 ? @pc.map { |w| w / s } : @pc).with_recipe(self, :normalize)
+          Weights.raw(s > 0 ? @pc.map { |w| w / s } : @pc).with_recipe(self, :normalize)
         end
 
         # The sum of the weights.
@@ -182,7 +206,7 @@ module MB
           tt = t.to_f.clamp(0.0, 1.0)
           a = normalized_pc
           b = o.normalized_pc
-          Weights.new(a.each_with_index.map { |x, i| x + (b[i] - x) * tt }).with_recipe(self, :blend, [other, t])
+          Weights.raw(a.each_with_index.map { |x, i| x + (b[i] - x) * tt }).with_recipe(self, :blend, [other, t])
         end
 
         # The weights spread over the notes in +range+ (Notes, note numbers,

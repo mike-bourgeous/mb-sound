@@ -31,6 +31,13 @@ module MB
 
         # A Field of +weights+ (Weights) over +range+ (see Weights#over).
         def self.build(weights, range, around: nil, width: nil)
+          notes, bell = Field.bell(range, around: around, width: width)
+          from_bell(notes, bell, weights.pc)
+        end
+
+        # The notes of +range+ and the bell's weight for each (see
+        # Weights#over), checking the arguments.
+        def self.bell(range, around: nil, width: nil)
           raise ArgumentError, "A Field's range is a Range of notes (got #{range.inspect})" unless range.is_a?(Range) && range.begin && range.end
           lo = Scale.root_number(range.begin)
           hi = Scale.root_number(range.end)
@@ -42,22 +49,37 @@ module MB
           lo = lo.round
           hi = hi.round
           center = around ? Scale.root_number(around).to_f : (lo + hi) / 2.0
-          notes = (lo..hi).to_a
-          bell = notes.map { |n| width ? Math.exp(-0.5 * ((n - center) / width.to_f)**2) : 1.0 }
-          pcs = weights.pc
-          new(
-            notes,
-            notes.each_with_index.map { |n, i| pcs[n % 12] * bell[i] },
-            notes.each_with_index.map { |n, i| bell[i] >= REGISTER ? pcs[n % 12] : 0.0 }
-          )
+          notes = (lo..hi).to_a.freeze
+          [notes, notes.map { |n| width ? Math.exp(-0.5 * ((n - center) / width.to_f)**2) : 1.0 }.freeze]
+        end
+
+        # A Field of pitch class weights +pcs+ (12 Floats) over +notes+
+        # with +bell+ (see .bell).
+        def self.from_bell(notes, bell, pcs)
+          lo = notes.first
+          len = notes.length
+          weights = Array.new(len)
+          harmonic = Array.new(len)
+          i = 0
+          while i < len
+            w = pcs[(lo + i) % 12]
+            b = bell[i]
+            weights[i] = w * b
+            harmonic[i] = b >= REGISTER ? w : 0.0
+            i += 1
+          end
+          new(notes, weights.freeze, harmonic.freeze)
         end
 
         def initialize(notes, weights, harmonic = weights)
           raise ArgumentError, 'A Field needs as many weights as notes' unless notes.length == weights.length && notes.length == harmonic.length
           @notes = notes.freeze
-          @weights = weights.map(&:to_f).freeze
-          @harmonic = harmonic.map(&:to_f).freeze
-          @index = notes.each_with_index.to_h.freeze
+          @weights = weights.frozen? ? weights : weights.map(&:to_f).freeze
+          @harmonic = harmonic.frozen? ? harmonic : harmonic.map(&:to_f).freeze
+          # Notes of a range (every Field the library makes) index by
+          # arithmetic; others through a Hash
+          @lo = notes.first
+          @index = notes.empty? || notes.last - notes.first == notes.length - 1 ? nil : notes.each_with_index.to_h.freeze
         end
 
         # Freezes after the recipe is set (see Value#with_recipe).
@@ -68,8 +90,9 @@ module MB
 
         # The weight of note +n+ (0 outside the field).
         def [](n)
-          i = @index[n.is_a?(Integer) ? n : Scale.root_number(n)]
-          i ? @weights[i] : 0.0
+          n = Scale.root_number(n) unless n.is_a?(Integer)
+          i = @index ? @index[n] : (@lo && n - @lo)
+          i && i >= 0 && i < @weights.length ? @weights[i] : 0.0
         end
 
         # A note number drawn by weight with the uniform +u+ (0...1), or nil

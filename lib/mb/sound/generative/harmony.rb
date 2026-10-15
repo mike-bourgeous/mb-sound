@@ -80,15 +80,17 @@ module MB
         # The Weights at clip +position+ (whole notes, or a Duration).
         def at(position = 0r)
           pos = position.is_a?(Sequence::Duration) ? position.whole_notes : position.to_r
+          pos %= @loop_length if @loop_length
           return @ops.empty? ? @keys[0][1] : apply_ops(@keys[0][1]) if @keys.length == 1
 
           @mutex.synchronize {
             hit = @cache[pos]
             return hit if hit
           }
-          w = apply_ops(blend_at(pos))
+          b = blend_at(pos)
+          w = (i = @keys.index { |_, k| k.equal?(b) }) ? held(i) : apply_ops(b)
           @mutex.synchronize {
-            @cache.shift if @cache.length >= 64
+            @cache.shift if @cache.length >= 512
             @cache[pos] = w
           }
           w
@@ -148,6 +150,12 @@ module MB
           h.with_recipe(self, name, args, kwargs)
         end
 
+        # Keyframe +i+ with the ops applied (cached: a harmony holding still
+        # costs nothing per note).
+        def held(i)
+          @mutex.synchronize { (@held ||= {})[i] } || apply_ops(@keys[i][1]).tap { |w| @mutex.synchronize { @held[i] = w } }
+        end
+
         def apply_ops(w)
           @ops.reduce(w) { |acc, (name, args, kwargs)| acc.public_send(name, *args, **kwargs) }
         end
@@ -186,7 +194,7 @@ module MB
           t = @curve.call(t) if @curve
           a = @normalized[a_i]
           b = @normalized[b_i]
-          Weights.new(a.each_with_index.map { |x, i| x + (b[i] - x) * t }).freeze
+          Weights.raw(a.each_with_index.map { |x, i| x + (b[i] - x) * t }).freeze
         end
       end
 
@@ -203,8 +211,8 @@ module MB
           @width = width
           @cache = {}
           @mutex = Mutex.new
-          # Checks the range now
-          @notes = Field.build(Weights.chromatic, range, around: around, width: width).notes
+          # (checks the range now)
+          @notes, @bell = Field.bell(range, around: around, width: width)
         end
 
         # Every note number in the range (what the timeline's Fields may play).
@@ -222,9 +230,9 @@ module MB
             hit = @cache[w.pc]
             return hit if hit
           }
-          f = Field.build(w, @range, around: @around, width: @width).freeze
+          f = Field.from_bell(@notes, @bell, w.pc).freeze
           @mutex.synchronize {
-            @cache.shift if @cache.length >= 64
+            @cache.shift if @cache.length >= 512
             @cache[w.pc] = f
           }
           f
