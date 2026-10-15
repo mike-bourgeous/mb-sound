@@ -25,6 +25,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/acid_song.rb' => ['--bars', '0.5', '-F', 'lp4'],
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
+    'bin/songs/critters.rb' => ['--bars', '0.5', '--binaural', '-s', '2'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/drums_909.rb' => ['--bars', '0.5', '-s', '4'],
     'bin/songs/even_more_cowbell.rb' => ['--bars', '0.5', '-F', '2'],
