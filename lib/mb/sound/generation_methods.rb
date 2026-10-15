@@ -20,13 +20,16 @@ module MB
       # over +range+ (0..1, or -1..1 with +bipolar+), so as triggers they
       # strike at random velocities.  Seeded (+seed+, or drawn from
       # MB::Sound.seed's generator), the same at any buffer size.
+      # +min_gap+ (seconds, a Length, or a Duration) keeps impulses at least
+      # that far apart (the rate stays the average, up to one per gap).
       #
       # Examples:
       #     play dust(6).ping(3000, decay: 0.03).at(-6.db)              # drips
       #     play dust(300, bipolar: true).filter(:bandpass, cutoff: 2500, quality: 0.7).at(-12.db)  # crackle
       #     play dust(0.5, range: 0.4..1).resonate(:bowl, 196)          # a bowl struck now and then
-      def dust(rate, bipolar: false, range: nil, seed: nil)
-        MB::Sound::GraphNode::Dust.new(rate, bipolar: bipolar, range: range, seed: seed)
+      #     play dust(1.5, min_gap: 400.ms).resonate(:bowl, 196)         # never two strikes too close
+      def dust(rate, bipolar: false, range: nil, min_gap: nil, seed: nil)
+        MB::Sound::GraphNode::Dust.new(rate, bipolar: bipolar, range: range, min_gap: min_gap, seed: seed)
       end
 
       # A slow random line (GraphNode::Drift): +rate+ new random points per
@@ -34,15 +37,25 @@ module MB
       # `4.seconds`, `1.bar`) in +range+ (-1..1), joined by +smooth+ (:cubic
       # default, :cosine, :linear, or :step for a stepped sample-and-hold
       # line); +walk+ (0..1 of the range) makes each point stray at most
-      # that far from the last.  Seeded (+seed+), the same at any buffer
+      # that far from the last.  +smooth+ may also be any tweening Curve
+      # (`Curve[:back, overshoot: 0.3]`, `:elastic`, `:ease_in_out`;
+      # overshooting curves leave +range+, unclamped).  +hold+ rests on each
+      # point first: a share of the step (0..1), a time (`80.ms`, `1.n16`),
+      # a Range of either for a random hold per point, or a node of shares.
+      # +jitter+ (0..1 or a node) spaces the points unevenly (1 is
+      # Poisson-like; the average rate stays).  +from+ starts the line at a
+      # value instead of a random point.  Seeded (+seed+; points, holds, and
+      # spacing each draw from their own stream), the same at any buffer
       # size.  For detune, cutoffs, pans, tape wow, and wandering drones.
       #
       # Examples:
-      #     play 220.hz.transpose(drift(0.4, walk: 0.3).at(-0.15..0.15)).saw.lp4(1500).at(-20.db)
+      #     play 220.hz.transpose(drift(0.4, walk: 0.3).at(0.15)).saw.lp4(1500).at(-20.db)
       #     play noise.lp4(drift(0.3).at(200..2500), resonance: 0.3).at(-14.db)      # wind
       #     play 330.hz.triangle.pan(drift(3.seconds)).at(-18.db)
-      def drift(rate = 0.2, range: -1.0..1.0, smooth: :cubic, walk: nil, seed: nil)
-        MB::Sound::GraphNode::Drift.new(rate, range: range, smooth: smooth, walk: walk, seed: seed)
+      #     # a restless creature: walk, random holds, uneven spacing, overshoot
+      #     play 440.hz.transpose(drift(3, walk: 0.5, hold: 0.2..0.9, jitter: 0.7, smooth: Curve[:back, overshoot: 0.5]).at(5)).triangle.at(-20.db)
+      def drift(rate = 0.2, range: -1.0..1.0, smooth: :cubic, walk: nil, hold: nil, jitter: nil, from: nil, seed: nil)
+        MB::Sound::GraphNode::Drift.new(rate, range: range, smooth: smooth, walk: walk, hold: hold, jitter: jitter, from: from, seed: seed)
       end
 
       # Shortcut/DSL method for creating a tone with a given dynamic frequency

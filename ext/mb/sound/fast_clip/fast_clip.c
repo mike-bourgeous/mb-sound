@@ -36,6 +36,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_clip_shape.h"
+#include "mb_curve_lookup.h"
 
 static ID sym_softclip, sym_clip, sym_abs, sym_quantize;
 
@@ -124,8 +125,6 @@ enum curve_edges {
 #define CURVE_MAX_COEFFS 16
 
 // Positions this close after a table node (in cells) take the node's value.
-#define CURVE_NODE_SNAP 1e-6
-
 struct curve_params {
 	enum curve_form form;
 	enum curve_edges edges;
@@ -442,12 +441,9 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
  *   curve_lookup(t, f_left, f_right, d_left, d_right)
  * The tables (DFloat, cells + 1 values) hold the curve's left and right
  * limits and slopes at each node (they differ only at jumps and kinks).
- * Between nodes the curve is a cubic Hermite from the right values of one
- * node to the left values of the next; exactly on a node it is the left
- * value (so staircases jump just after each node, like Curve.steps; within
- * CURVE_NODE_SNAP of a cell after it, as Curve.steps snaps rounding).  Used
- * by glides (Notes::Glide with a shape); Curve.lookup_ruby is the exact
- * Ruby mirror.
+ * The curve is evaluated as in mb_curve_lookup.h (cubic Hermites between
+ * nodes, the left value exactly on a node).  Used by glides (Notes::Glide
+ * with a shape); Curve.lookup_ruby is the exact Ruby mirror.
  */
 static VALUE ruby_curve_lookup(VALUE self, VALUE t, VALUE f_left, VALUE f_right, VALUE d_left, VALUE d_right)
 {
@@ -461,32 +457,19 @@ static VALUE ruby_curve_lookup(VALUE self, VALUE t, VALUE f_left, VALUE f_right,
 	if (nodes < 2) {
 		rb_raise(rb_eArgError, "A curve table needs at least two values");
 	}
-	const double *fl = curve_dfloat_ptr(f_left, nodes, "left values");
-	const double *fr = curve_dfloat_ptr(f_right, nodes, "right values");
-	const double *dl = curve_dfloat_ptr(d_left, nodes, "left slopes");
-	const double *dr = curve_dfloat_ptr(d_right, nodes, "right slopes");
-	size_t cells = nodes - 1;
-	double h = 1.0 / (double)cells;
+	struct mb_curve_table table = {
+		.fl = curve_dfloat_ptr(f_left, nodes, "left values"),
+		.fr = curve_dfloat_ptr(f_right, nodes, "right values"),
+		.dl = curve_dfloat_ptr(d_left, nodes, "left slopes"),
+		.dr = curve_dfloat_ptr(d_right, nodes, "right slopes"),
+		.cells = nodes - 1,
+	};
 
 	size_t length = RNARRAY_SIZE(t);
 	double *x = (double *)(nary_get_pointer_for_write(t) + nary_get_offset(t));
 
 	for (size_t i = 0; i < length; i++) {
-		double pos = x[i] * (double)cells;
-		if (!(pos > 0)) pos = 0; // also NaN
-		if (pos > (double)cells) pos = (double)cells;
-		size_t j = (size_t)pos;
-		double u = pos - (double)j;
-		if (u < CURVE_NODE_SNAP) {
-			x[i] = fl[j];
-			continue;
-		}
-		double u2 = u * u, u3 = u2 * u;
-		double h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
-		double h10 = u3 - 2.0 * u2 + u;
-		double h01 = -2.0 * u3 + 3.0 * u2;
-		double h11 = u3 - u2;
-		x[i] = h00 * fr[j] + h10 * h * dr[j] + h01 * fl[j + 1] + h11 * h * dl[j + 1];
+		x[i] = mb_curve_lookup(&table, x[i]);
 	}
 
 	RB_GC_GUARD(t);

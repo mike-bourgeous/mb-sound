@@ -67,6 +67,8 @@ module MB
           'MB::Sound::Sampler::Instrument' => %i[region],
           'MB::Sound::Drums::Builder' => %i[voice choke tr808 tr909],
           'MB::Sound::Drums::Hit' => MB::Sound::Drums::Hit::METHODS - %i[knobs name machine],
+          # Curve variants (Curve#to_ruby)
+          'MB::Sound::Curve' => %i[reverse in out in_out out_in],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -84,6 +86,8 @@ module MB
           'MB::Sound::Sampler::Instrument' => %i[new],
           'MB::Sound::Wavetable::KeyMap' => %i[zones new],
           'MB::Sound::Sequence::Duration' => %i[new],
+          # Tweening curves (Curve#to_ruby: `Curve[:back, overshoot: 0.3]`)
+          'MB::Sound::Curve' => %i[[]],
         }.freeze
 
         # Methods that read files (allowed only with a path relative to the
