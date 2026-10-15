@@ -101,7 +101,7 @@ module MB
                 end
                 ch = b.byteslice(i, len)
                 text = utf8(ch)
-                out << Key.new(key: text, mods: text =~ /\A[A-Z]\z/ ? [:shift] : [], bytes: ch)
+                out << Key.new(key: text, bytes: ch) # the character carries its case
                 i += len
               end
             end

@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
 
   it 'decodes text, controls, and Ctrl-] (the NAV key) with their bytes' do
     ev = d.feed("aZ中\r\t\x7f\x03\x1d")
-    expect(chords(ev)).to eq([['a', []], ['Z', [:shift]], ['中', []], [:enter, []], [:tab, []], [:backspace, []], ['c', [:ctrl]], [']', [:ctrl]]])
+    expect(chords(ev)).to eq([['a', []], ['Z', []], ['中', []], [:enter, []], [:tab, []], [:backspace, []], ['c', [:ctrl]], [']', [:ctrl]]])
     expect(ev.map(&:bytes).join.b).to eq("aZ中\r\t\x7f\x03\x1d".b)
   end
 

@@ -12,9 +12,14 @@ module MB
         # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:quad
         # default, :scope for Braille).  Returns the band (`ui.save`,
         # `ui.stats`).
-        def ui(layout = nil, at: nil, color: nil, look: nil)
+        #
+        # A layout with a `repl` pane takes the whole screen instead (`ui
+        # :tiles`, `ui :studio`): panes tiled around the console, NAV mode
+        # on Ctrl-] (see UI::Tiles; `help :ui`).  +mouse:+ true turns on
+        # mouse reports there, +nav_esc:+ seconds lets a lone Esc enter NAV.
+        def ui(layout = nil, at: nil, color: nil, look: nil, mouse: nil, nav_esc: nil)
           return UI.off if layout == :off || layout == false
-          UI.show(layout, at: at, color: color, look: look)
+          UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc)
         end
 
         # :off, so `ui off` reads as it sounds.
@@ -45,9 +50,19 @@ module MB
         #       cols { pane :transport; pane :form }
         #       cols { pane :meters; pane :scope, width: 50 }
         #     end
-        def layout(name, at: nil, &block)
+        #
+        # With a `repl` pane (`repl`), and tabs (`tabs :meters, :cpu`), it is
+        # a tiled layout: `ui :name` takes the whole screen.
+        #
+        #     layout :mine, focus: :repl do
+        #       cols do
+        #         repl
+        #         rows(width: 40) { pane :meters; pane :scope }
+        #       end
+        #     end
+        def layout(name, at: nil, focus: nil, zoom: nil, gap: nil, &block)
           return UI.layout_named(name) unless block
-          UI.define_layout(name, **{ at: at }.compact, &block)
+          UI.define_layout(name, **{ at: at, focus: focus, zoom: zoom, gap: gap }.compact, &block)
         end
       end
 
@@ -89,7 +104,7 @@ module MB
         # Names of one +kind+ (see CONTEXTS).
         def self.names_of(kind, session)
           case kind
-          when :layouts then UI.layouts.keys + UI.saved_layouts + [:off]
+          when :layouts then UI.layouts.keys + UI.tile_layouts.keys + UI.saved_layouts + [:off]
           when :panes then UI.panes.keys
           else
             return [] unless session

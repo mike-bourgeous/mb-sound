@@ -65,6 +65,10 @@ MB::Sound::Help.install_pry!
 # Symbol (see MB::Sound::UI::Completion)
 MB::Sound::UI::Completion.install
 
+# The tiled screen's `:` palette evaluates in the console's binding (see
+# MB::Sound::UI::Tiles)
+MB::Sound::UI.install_pry!
+
 # Work around issue introduced in pry-byebug 3.10.x that breaks Pry when
 # launched from a console script like this one.
 #
