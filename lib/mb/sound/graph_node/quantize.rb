@@ -36,7 +36,7 @@ module MB
 
           when GraphNode
             check_rate(increment, 'increment')
-            @increment = increment
+            @increment = increment.get_sampler # (a node used elsewhere too branches through a Tee)
 
           else
             raise "Increment must be a Numeric or a GraphNode (got #{increment.class})"
