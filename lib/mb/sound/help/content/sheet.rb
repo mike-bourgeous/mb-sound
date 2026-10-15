@@ -61,6 +61,7 @@ module MB
     Help::Sheet.group :look do
       line { plot g; spectrum g }
       line('the live mix') { vis }
+      line('dashboard band') { ui; ui :deck; ui off }
       line { loudness 'x.flac' }
       line('explain a graph') { help g }
     end

@@ -1,1 +1,2 @@
 # fast_ui.c includes only Ruby and Numo headers
+# gvl_probe.c includes only Ruby headers

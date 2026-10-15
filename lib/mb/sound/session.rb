@@ -21,6 +21,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/monitor_trim'
 require_relative 'session/buses'
+require_relative 'session/ui_feed'
 
 module MB
   module Sound
@@ -71,6 +72,7 @@ module MB
       include AudioRecording
       include Stems
       include MonitorTrim
+      include UIFeed
       include Buses # last: it extends Strip, Undo, and Seeks through super
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
@@ -93,10 +95,13 @@ module MB
       #
       # +ring+ is a Tails::Ring while the player rings out after a stop
       # (see Tails).
+      #
+      # +cpu+ is the seconds its graph took since the terminal UI's feed
+      # last read it (only counted while a feed is attached; see UIFeed).
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to,
+        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -693,6 +698,12 @@ module MB
         @mutex.synchronize { @taps.delete(block) }
       end
 
+      # The background rendering thread (nil before #add starts it), for
+      # measurements like the terminal UI's GVL probe (bin/ui_demo.rb).
+      def render_thread
+        @thread
+      end
+
       # Returns true if the background rendering thread is running (see
       # #add).
       def running?
@@ -756,6 +767,7 @@ module MB
             parts << render_span(n, per_sample)
             remaining -= n
           end
+          @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
           parts.length == 1 ? parts[0] : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
 
@@ -770,6 +782,7 @@ module MB
         output.write(monitored(mix))
         record_mix(mix, @frame - count)
         call_taps(mix)
+        @ui_feed&.publish(self, mix, count, @load)
         mix
       end
 
@@ -1213,7 +1226,9 @@ module MB
           @knob_frame = base if @knob_frame
           @player_frame = nil
         end
-        check_speed(p, MB::U.clock_now - t, frames)
+        elapsed = MB::U.clock_now - t
+        p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
+        check_speed(p, elapsed, frames)
         read_while_asleep(p, asleep_after) # the rest of the buffer after a mute ramp
         p.read_to = base + offset + frames + asleep_after
 

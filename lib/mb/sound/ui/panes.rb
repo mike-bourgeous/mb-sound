@@ -1,0 +1,285 @@
+module MB
+  module Sound
+    module UI
+      # The built-in panes (see UI.panes; `pane :name do ... end` adds
+      # more).
+      module Panes
+        # Meters show -60..0 dBFS.
+        METER_FLOOR = -60.0
+
+        # Meter zones: green to -18 dBFS, yellow to -6, then red.
+        DB_ZONES = [[42.0 / 60, :low], [54.0 / 60, :mid], [1.0, :high]].freeze
+
+        module_function
+
+        # A number for a pane: whole numbers without a decimal point, others
+        # to 3 significant figures.
+        def fmt(v)
+          return '-' if v.nil?
+          v = v.to_f
+          return '-inf' if v == -Float::INFINITY
+          v.abs >= 100 || v == v.round ? v.round.to_s : format('%.3g', v)
+        end
+
+        # A dB value to one decimal ("-8.1", "-inf").
+        def db(v)
+          return '-' if v.nil?
+          v.finite? ? format('%.1f', v) : '-inf'
+        end
+
+        # 0..1 for a dBFS level on the meter scale.
+        def db_frac(v)
+          return 0.0 if v.nil? || !v.finite?
+          ((v - METER_FLOOR) / -METER_FLOOR).clamp(0.0, 1.0)
+        end
+
+        # A load fraction as a percentage and its role.
+        def load_text(load)
+          return ['-', :dim] if load.nil?
+          pct = (load * 100).round
+          [format('%d%%', pct), load < 0.5 ? :ok : load < 0.8 ? :warn : :bad]
+        end
+
+        # Transport: play state, bar:beat, tempo, meter, render load, and
+        # output underruns.
+        class Transport < Pane
+          def initialize = super(:transport, rate: 30, height: 1, width: 44)
+
+          def draw_body(c, s, state)
+            unless s
+              c.puts ['no session yet ', :dim], ['(bg something to start one)', :dim]
+              return
+            end
+
+            hist = (state[:loads] ||= [])
+            if s.load && state[:seq] != s.seq
+              hist << s.load
+              hist.shift while hist.length > 16
+              state[:seq] = s.seq
+            end
+
+            load, role = Panes.load_text(s.load)
+            segs = [
+              [s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim], ' ',
+              [s.stamp.ljust(6), :key], ' ',
+              [Panes.fmt(s.bpm), :name], [' bpm ', :dim], [s.meter, :name],
+              ['  load ', :dim], [load.rjust(4), role], ' ',
+            ]
+            x = c.line(0, *segs)
+            x = c.sparkline(hist, lo: 0.0, hi: 1.0, width: 8, x: x, y: 0, role: role)
+            if s.underruns
+              c.line(0, ['  xruns ', :dim], [s.underruns.to_s, s.underruns > (state[:xruns_at_start] ||= s.underruns) ? :bad : :ok], x: x)
+            end
+          end
+        end
+
+        # Form: the section playing, how far through it, and what comes
+        # next; the current scene without a form.
+        class Form < Pane
+          def initialize = super(:form, rate: 8, height: 1, width: 44)
+
+          def draw_body(c, s, state)
+            return unless s
+
+            f = s.form
+            if f.nil? || f.ended
+              text = f&.ended ? 'form ended' : 'no form'
+              x = c.line(0, [text, :dim])
+              c.line(0, ['  scene ', :dim], [s.scene.to_s, :key], x: x) if s.scene
+              return
+            end
+
+            len = s.bar_length.to_r
+            bars = ((f.to - f.from) / len).to_f
+            bar = ((s.pos - f.from) / len).floor + 1
+            bar = bar.clamp(1, [bars.ceil, 1].max)
+            x = c.line(0, [f.section.to_s, :key], [" #{f.pass}#{f.looping ? ' ∞' : ''} ", :dim])
+            x = c.meter(bars > 0 ? (bar - 1 + (s.beat.to_f - 1) / (len * 4).to_f) / bars : 0.0, width: 8, x: x, y: 0, role: :key)
+            x = c.line(0, [" #{bar}/#{Panes.fmt(bars)}", :dim], x: x)
+            c.line(0, ["  #{c.glyph(:arrow)} ", :dim], [f.next ? f.next.to_s : '?', f.committed ? :name : :dim], [" #{f.next_at}", :dim], x: x)
+          end
+        end
+
+        # Tracks and other players: state, clip, armed and recording.
+        class Tracks < Pane
+          def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks')
+
+          STATE_ROLES = {
+            playing: :ok, starting: :queued, stopping: :warn, fading: :warn, ringing: :warn,
+            muted: :dim, asleep: :dim, stopped: :dim,
+          }.freeze
+
+          def draw_body(c, s, state)
+            return unless s
+
+            parts = s.players.to_h { |p| [p.name, p] }
+            rec = s.recording.to_h { |r| [r.name, r] }
+            rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed] }
+            names = s.tracks.map(&:name)
+            parts.each_value do |p|
+              next if names.include?(p.name) || Arrangement::Recording.monitored_track(p.name)
+              rows << [p.name, 'bg', p.state, false]
+            end
+            if rows.empty?
+              c.puts ['nothing playing', :dim]
+              return
+            end
+
+            name_w = [[rows.map { |r| r[0].to_s.length }.max, 6].max, 12].min
+            show = rows.length > c.h ? rows.first(c.h - 1) : rows
+            show.each_with_index do |(name, clip, st, armed), y|
+              r = rec[name]
+              glyph, role =
+                if r then [c.glyph(:rec), :rec]
+                elsif armed then [c.glyph(:armed), :armed]
+                elsif st == :stopped then [c.glyph(:off), :dim]
+                else [c.glyph(:on), STATE_ROLES.fetch(st, :text)]
+                end
+              x = c.line(y, [glyph, role], ' ', [c.pad(name, name_w), :name], ' ')
+              what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
+              c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
+            end
+            c.text(0, c.h - 1, "+#{rows.length - show.length} more", :dim) if show.length < rows.length
+          end
+        end
+
+        # Queued changes, soonest first, with where each lands.
+        class Queue < Pane
+          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued')
+
+          def draw_body(c, s, state)
+            return unless s
+
+            q = s.queued.sort_by { |e| [e.pos || Float::INFINITY, e.seq] }
+            if q.empty?
+              c.puts ['nothing queued', :dim]
+              return
+            end
+            q.first(c.h).each_with_index do |e, y|
+              x = c.line(y, [e.lands.ljust(6), :queued], ' ', [e.kind.to_s, :dim], ' ')
+              c.text(x, y, c.fit(e.subject.inspect, c.w - x), :name)
+            end
+          end
+        end
+
+        # Knobs: a meter at each knob's position in its range, and its value.
+        class Knobs < Pane
+          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs')
+
+          def draw_body(c, s, state)
+            return unless s
+
+            if s.knobs.empty?
+              c.puts ['no knobs', :dim]
+              return
+            end
+            name_w = [[s.knobs.map { |k| k.name.to_s.length }.max, 4].max, 8].min
+            s.knobs.first(c.h).each_with_index do |k, y|
+              spec = k.spec
+              value = "#{Panes.fmt(k.value)}#{spec.unit ? " #{spec.unit}" : ''}"
+              x = c.line(y, [c.pad(k.name, name_w), :name], ' ')
+              mw = [c.w - x - value.length - 1, 3].max
+              x = c.meter(spec.position(k.value).to_f, width: mw, x: x, y: y, role: :key)
+              c.text(x + 1, y, value, :text)
+            end
+          end
+        end
+
+        # Master meters: peak per channel (with a 1.5 s hold), RMS,
+        # short-term loudness, and true peak.
+        class Meters < Pane
+          # Seconds a peak is held.
+          HOLD = 1.5
+
+          def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master')
+
+          def draw_body(c, s, state)
+            m = s&.master
+            if m.nil?
+              c.puts ['no audio yet', :dim]
+              return
+            end
+
+            holds = (state[:holds] ||= [])
+            labels = m.peak.length == 2 ? %w[L R] : m.peak.each_index.map { |i| (i + 1).to_s }
+            rows = [c.h - 2, m.peak.length].min
+            rows.times do |ch|
+              peak = m.peak[ch]
+              h = holds[ch]
+              holds[ch] = h = [peak, s.time] if h.nil? || peak >= h[0] || s.time - h[1] > HOLD
+              x = c.line(ch, [labels[ch], :dim], ' ')
+              mw = [c.w - x - 6, 3].max
+              x = c.meter(Panes.db_frac(peak), width: mw, x: x, y: ch, zones: DB_ZONES, hold: Panes.db_frac(h[0]))
+              c.text(x + 1, ch, Panes.db(h[0]).rjust(5), h[0] > -1.0 ? :bad : :text)
+            end
+            y = rows
+            c.line(y, ['S ', :dim], [Panes.db(m.lufs_s), :key], [' LUFS  ', :dim], ['TP ', :dim], [Panes.db(m.true_peak), m.true_peak > -1.0 ? :bad : :text])
+            c.line(y + 1, ['RMS ', :dim], m.rms.map { |r| Panes.db(r) }.join(' '))
+          end
+        end
+
+        # CPU per part: render load, then each player, bus, and master
+        # chain by its share of the audio time.
+        class CPU < Pane
+          def initialize = super(:cpu, rate: 4, height: 6, width: 24, title: 'cpu')
+
+          def draw_body(c, s, state)
+            return unless s
+
+            load, role = Panes.load_text(s.load)
+            max, max_role = Panes.load_text(s.load_max)
+            c.puts ['all ', :dim], [load.rjust(4), role], [' max ', :dim], [max, max_role]
+            parts = s.parts.sort_by { |p| -p.load }
+            name_w = [[parts.map { |p| p.name.to_s.length }.max.to_i, 4].max, 8].min
+            parts.first(c.h - 1).each do |p|
+              pct, prole = Panes.load_text(p.load)
+              x = c.line(c.row, [c.pad(p.name, name_w), p.kind == :player ? :name : :title], ' ')
+              mw = [c.w - x - 5, 2].max
+              x = c.meter(p.load * 4, width: mw, x: x, y: c.row, role: prole) # full at 25%
+              c.text(x + 1, c.row, pct.rjust(4), prole)
+              c.row += 1
+            end
+          end
+        end
+
+        # A scope of the master mix through Plot::Live (look :quad by
+        # default; UI.start(look:) or ScopePane.new(look:) to change it).
+        # Writes its own terminal bytes: only the cells that changed.
+        class Scope < Pane
+          def initialize(name = :scope, look: nil)
+            super(name, rate: 30, height: 6, width: 40, needs: [:scope])
+            @look = look
+          end
+
+          def bytes?
+            true
+          end
+
+          # Terminal bytes for the pane at screen (+row+, +col+), +w+ x +h+,
+          # in color +mode+ (nil if there is nothing to draw).
+          def frame_bytes(s, state, row:, col:, w:, h:, mode:, look:, full: false)
+            live = state[:live]
+            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != (@look || look)
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: @look || look, color: mode)
+              state[:mode] = mode
+              state[:look] = @look || look
+            end
+            data = s&.scope
+            data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?
+            live.frame(chart(data, s&.sample_rate || 48000), row: row, col: col, full: full, sync: false)
+          end
+
+          private
+
+          def chart(data, rate)
+            Plot.chart(legend: false) { |c|
+              c.x :time, sample_rate: rate
+              c.y Plot::Scale::Linear.new(-1.0..1.0)
+              data.each { |d| c.line d }
+            }
+          end
+        end
+      end
+    end
+  end
+end

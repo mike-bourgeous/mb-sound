@@ -42,11 +42,14 @@ module MB
         # +read_to+ is the session frame a bus's chain has read its branches
         # of shared nodes up to (nil before its first span; see
         # Buses#bus_read_shared).
+        #
+        # +cpu+ is the seconds its nodes took since the terminal UI's feed
+        # last read it (see UIFeed).
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned, :loads,
-          :input_from, :input_until, :ramp_from, :read_to,
+          :input_from, :input_until, :ramp_from, :read_to, :cpu,
           keyword_init: true
         ) do
           def bypass?
@@ -390,7 +393,9 @@ module MB
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             d
           }
-          check_master_speed(c, MB::U.clock_now - t, count)
+          elapsed = MB::U.clock_now - t
+          c.cpu = (c.cpu || 0.0) + elapsed if @ui_feed
+          check_master_speed(c, elapsed, count)
           data
 
         rescue => e

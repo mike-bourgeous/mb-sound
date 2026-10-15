@@ -525,7 +525,24 @@ module MB
         `lesson` teaches the newer layers step by step.
       TEXT
       commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby
-      see :sets, :knobs
+      see :sets, :knobs, :ui
+    end
+
+    Help.topic :ui, 'Dashboard band', group: :look do
+      about <<~TEXT
+        `ui` puts a live dashboard band above the prompt (transport, form,
+        tracks, queued changes, master meters, a scope); Pry keeps the
+        rest of the screen.  `ui :deck` adds knobs and CPU per part, `ui
+        :mini` is one line, `ui off` hides it.  Write your own panes with
+        `pane :name do |c, s| ... end` (s is a snapshot of the session,
+        c the pane's canvas), arrange them with `layout`, and keep a
+        layout with `ui.save`.  The prompt shows bar:beat, armed or
+        recording tracks, and load; Tab completes track, scene, and knob
+        names after the commands that take them (`go :<Tab>`).
+      TEXT
+      commands :ui, :off, :pane, :layout
+      note :terminal_ui
+      see :now, :plots
     end
   end
 end
