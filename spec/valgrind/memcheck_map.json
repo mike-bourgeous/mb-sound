@@ -117,6 +117,16 @@
         "FastDynamics.limit"
       ]
     },
+    "spec/ext/mb/sound/fast_generative_spec.rb": {
+      "fast_generative": [
+        "FastGenerative.fold",
+        "FastGenerative.key",
+        "FastGenerative.pick",
+        "FastGenerative.rand",
+        "FastGenerative.rands",
+        "FastGenerative.start"
+      ]
+    },
     "spec/ext/mb/sound/fast_lofi_spec.rb": {
       "fast_lofi": [
         "FastLofi.decimate"

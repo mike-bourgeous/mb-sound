@@ -303,6 +303,32 @@ module MB
       end
     end
 
+    Help.topic :generative, 'Generative music', group: :time do
+      about <<~TEXT
+        Probability scales and generator clips.  `scale(:dorian, :d).weights`
+        is a probability scale: layer it with `+` and `*`
+        (`+ tones(D3, F3, A3) * 2`), `blur(0.2)` it so wrong notes sometimes
+        hit, `blend` it toward another key, change it over time with
+        `harmony(0 => a, 8.bars => b)`, and spread it over notes with
+        `over(A3..A5, around: E5)`.  `melody`, `strikes`, and
+        `generate(1.bar) { |cycle, dice| rows }` make looping clips whose
+        every cycle is a pure function of the seed and the cycle
+        (counter-based `dice`), so they seek, replay in takes, and save.
+      TEXT
+      commands :tones, :weights, :harmony, :generate, :strikes, :dice, :melody
+      note :generative
+      see :sequences, :random
+      example 'a melody that blurs and changes key' do
+        h = harmony(0 => scale(:dorian, :d), 1.bar => scale(:major, :f), loop: 2.bars).blur(0.2)
+        line = melody(h, 8, range: A3..A5, vary: true).loop
+        bg :try, line.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'sparse bells over a drone' do
+        bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
+        bg :try, bells.synth(voices: 4) { |v| v.hz.sine * v.env(0.002, 0.8, 0, 0.8) }.at(-12.db) + 110.hz.triangle.at(-26.db)
+      end
+    end
+
     Help.topic :tempo, 'Tempo, tuning, and the timeline', group: :time do
       about <<~TEXT
         One transport for everything: tempo, a meter map, and bar numbers

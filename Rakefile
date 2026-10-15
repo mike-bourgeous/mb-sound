@@ -88,6 +88,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_lofi' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_generative' do |ext|
+  ext.name = 'fast_generative'
+  ext.ext_dir = 'ext/mb/sound/fast_generative'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_texture' do |ext|
   ext.name = 'fast_texture'
   ext.ext_dir = 'ext/mb/sound/fast_texture'

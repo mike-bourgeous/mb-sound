@@ -143,7 +143,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 
 
 
-Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics, fast_lofi, fast_sampler, fast_recipe, fast_ui (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
+Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib/mb/sound/<name>.so`: fast_sound, fast_resample, fast_wavetable, fast_delay, fast_synth, fast_clip, fast_unison, fast_arithmetic, fast_envelope, fast_control, fast_audio, fast_midi, fast_resonator, fast_plan, fast_loop, fast_reverb, fast_loudness, fast_dynamics, fast_lofi, fast_generative, fast_sampler, fast_recipe, fast_ui (and fast_filter).  The note lists each one's kernels, shared headers, and compiler flags (several use `-ffp-contract=off` for exact mirrors).
 - New C code goes in purpose-specific extensions (user preference), not `fast_sound`.  Shared helpers are `static inline` in `ext/mb/sound/include/mb_ext_helpers.h`; shared kernels in `ext/mb/sound/include/mb_*.h`.
 - Every kernel has an exact Ruby mirror that specs compare sample for sample (keep operations identical, including float32 reads of signal inputs).
 - `depend` files list each extension's headers (`rake depend:check`); after changing `depend` or removing a source, `rm -rf tmp/<platform>/<extension>`.
@@ -216,6 +216,13 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 - Note marks: accent `!A1`, slide `~A1`, flam `D2.flam` (drum kits), `up`/`dn`/`oct`; `Rest`/`R`, `Tie`/`T`; `Seq#acid` and `acid(...)` for 303 patterns; voice helpers `v.accent`, `v.accent_sweep`, `v.acid_env`; demo `bin/synths/acid.rb`, `bin/songs/acid_song.rb`.  `!` is overridden only on Note and Step (test with `nil?`, never `!x`).
 - `clip.ghost_chords(1, 4, 7, 6, per: 1.bar, scale: scale(:minor, :a), harmonic:, tie: :contour)`: snaps a repeated melody to a silent chord progression (degrees from 1, note Arrays, nil), keeping rhythm and contour; looping clips repeat to fit.
 - `swap :bass, bass2` changes a player's clips on the next bar, keeping graph state; derived clips are rederived.  Demos `bin/songs/sequence_demo.rb`, `swap_song.rb`.
+
+### Generative music (`design/notes/generative.md`)
+
+Phase G1 of the `research-generative` proposal (2026-10-15; G2 rhythms, G3 phrase memory and knob decision points, G4 long form to come).  A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`: splitmix64 over the seed and a key path, in C `fast_generative` with an exact Ruby mirror, `Dice.mode = :ruby`), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).
+- Probability scales are values with operators: `scale(:dorian, :d).weights.blur(0.1) + tones(D3, F3, A3) * 2`, `.blend(other, t)`, `.over(A3..A5, around: E5)` (a `Field`), `harmony(0 => a, 12.bars => b, curve:, loop:)` (keyframes blended per moment; ops may take other harmonies); they print back as the expression that made them.
+- `generate(1.bar, values:) { |cycle, dice| rows }` (`Clip.generate`; lengths, not Integer divisions), `strikes(field, every:, chance:, gap:)`, `melody(weights_or_harmony, ...)` (Scale melodies keep their notes; `vary: true` is a generator).  `Clip#values` is what kits build voices for; `map_clip` transforms map generated events (`Generative::Producer`).
+- Live, reading cycle N queues N+1 on the realtime scheduler thread (`Scheduler#background`, `Generative::Ahead`); renders compute where read.  Demo `bin/songs/generative_demo.rb`; `help :generative`.
 
 ### Tempo sync (`design/notes/tempo_sync.md`)
 

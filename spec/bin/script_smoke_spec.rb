@@ -29,6 +29,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/drums_909.rb' => ['--bars', '0.5', '-s', '4'],
     'bin/songs/even_more_cowbell.rb' => ['--bars', '0.5', '-F', '2'],
     'bin/songs/feedback_song.rb' => ['--bars', '0.5', '-e', '0.7'],
+    'bin/songs/generative_demo.rb' => ['--bars', '0.5', '-s', '3', '-u', '0.3'],
     'bin/songs/genre_demo.rb' => ['--bars', '0.5', '-G', 'jungle', '-s', '20'],
     'bin/songs/granular_song.rb' => ['--bars', '0.5', '-d', '0.5'],
     'bin/songs/kit_builder.rb' => ['--bars', '0.5', '-s', '0'],

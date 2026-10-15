@@ -458,8 +458,22 @@ module MB
           !due.empty?
         end
 
+        # Queues +block+ to run on the scheduler thread between scheduled
+        # blocks (generator cycles computed ahead, see Generative::Ahead).
+        # Returns false without queuing for a session that renders (no
+        # scheduler thread) or a closed scheduler.
+        def background(&block)
+          return false unless @realtime && !@queue&.closed?
+          start_thread
+          @queue << [:background, block]
+          true
+        rescue ClosedQueueError
+          false
+        end
+
         # Stops the scheduler thread.
         def close
+          Generative::Ahead.detach(self)
           @queue&.close
           @thread&.join(5)
         end
@@ -547,6 +561,11 @@ module MB
           @queue ||= Queue.new
           @thread = Thread.new do
             while (item = @queue.pop)
+              if item[0] == :background
+                run_background(item[1])
+                next
+              end
+
               running = [item[0], MB::U.clock_now]
               @mutex.synchronize { @running = running }
               begin
@@ -560,6 +579,14 @@ module MB
           end
           @thread.name = 'MB::Sound::Session scheduler'
           @thread.priority = THREAD_PRIORITY
+          Generative::Ahead.attach(self)
+        end
+
+        # Runs a background job (see #background), reporting errors.
+        def run_background(job)
+          job.call
+        rescue StandardError => e
+          warn "Background job failed on the scheduler thread: #{e.class}: #{e.message}"
         end
       end
     end
