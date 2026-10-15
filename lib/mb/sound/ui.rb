@@ -10,6 +10,7 @@ require_relative 'ui/screen'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
+require_relative 'ui/warm_up'
 
 module MB
   module Sound
@@ -138,6 +139,7 @@ module MB
           @band.stop
         end
 
+        warm_up # once, before the first band (YJIT compiles the painter)
         @band = Band.new(layout: layout, io: io, **opts)
         @band.start
         unless @at_exit

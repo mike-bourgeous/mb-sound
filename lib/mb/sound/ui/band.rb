@@ -32,7 +32,17 @@ module MB
         # Frame statistics kept.
         STATS = 2000
 
+        # Painter CPU seconds above which a pane (or the poll) is listed in
+        # a slow refresh (Band#stats[:slowest]).
+        SLOW_PART = 0.0005
+
+        # Slowest refreshes kept for #stats.
+        SLOWEST = 5
+
         attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed, :fps
+
+        # The painter thread (nil while off or painting only on #refresh).
+        attr_reader :thread
 
         # +layout+ a Layout; +io+ the terminal; +session+ a Session (nil to
         # follow Session.existing); +at+ :top or :bottom; +color+ a
@@ -63,6 +73,7 @@ module MB
           @refresh_lock = Mutex.new
           @active = false
           @frames = []
+          @slowest = []
           @yields = 0
           @failures = {}
           relayout(*terminal_size)
@@ -126,11 +137,14 @@ module MB
         end
 
         private def refresh_unlocked(now)
-          cpu0 = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
+          cpu0 = thread_cpu
+          parts = nil
           attach
           poll(now)
           check_size(now)
           snap = snapshot
+          c = thread_cpu
+          (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
 
           reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
           if reassert
@@ -145,18 +159,23 @@ module MB
           @placed.each do |p|
             next unless @full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
 
+            c = thread_cpu
             begin
               if p.pane.bytes?
                 b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: @full)
                 bytes << b if b
               else
-                p.pane.draw(Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs), snap, p.state)
+                canvas = (p.state[:canvas] ||= Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs))
+                canvas.row = 0
+                p.pane.draw(canvas, snap, p.state)
               end
               @failures.delete(p.pane.name)
             rescue => e
               pane_failed(p, e)
             end
             p.drawn_at = now
+            d = thread_cpu - c
+            (parts ||= {})[p.pane.name] = d if d > SLOW_PART
             drawn += 1
             @yields += 1
             Thread.pass # the render thread waits at most one pane's draw for the GVL
@@ -175,9 +194,10 @@ module MB
             write(out)
           end
 
-          cpu = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - cpu0
+          cpu = thread_cpu - cpu0
           @frames << [cpu, out&.bytesize || 0, drawn]
           @frames.shift if @frames.length > STATS
+          note_slow(now, cpu, parts) if cpu > SLOW_PART
           out
         end
 
@@ -191,7 +211,9 @@ module MB
         # max of the painter's CPU time per refresh, including frames with
         # nothing to draw), :busy_cpu_ms (the same over refreshes that drew
         # a pane), :bytes (mean and max per written frame), :panes (mean
-        # drawn per refresh), :yields (Thread.pass calls so far).
+        # drawn per refresh), :yields (Thread.pass calls so far),
+        # :slowest (the slowest refreshes: when (the band's clock), CPU ms,
+        # and the poll or panes that took over half a millisecond).
         def stats
           busy = @frames.select { |f| f[2] > 0 }
           written = @frames.map { |f| f[1] }.reject(&:zero?)
@@ -202,6 +224,9 @@ module MB
             bytes: { mean: written.empty? ? 0 : written.sum / written.length, max: written.max || 0 },
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             yields: @yields,
+            slowest: @slowest.map { |at, cpu, parts|
+              { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: (parts || {}).transform_values { |v| MB::M.sigfigs(v * 1000, 3) } }
+            },
           }
         end
 
@@ -258,6 +283,18 @@ module MB
 
         # The bytes Cells#frame gives when no cell changed, per color mode.
         EMPTY_FRAMES = Plot::Text::Cells::MODES.keys.to_h { |m| [m, m == :none ? '' : "\e[0m"] }.freeze
+
+        def thread_cpu
+          Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
+        end
+
+        # Keeps the SLOWEST refreshes (time, CPU seconds, slow parts).
+        def note_slow(now, cpu, parts)
+          return if @slowest.length >= SLOWEST && cpu <= @slowest[-1][1]
+          @slowest << [now, cpu, parts]
+          @slowest.sort_by! { |e| -e[1] }
+          @slowest.pop if @slowest.length > SLOWEST
+        end
 
         def paint_loop
           Thread.current.name = 'MB::Sound::UI'
@@ -344,6 +381,8 @@ module MB
 
         def detach
           @attached.ui_feed = nil if @attached && @attached.ui_feed.equal?(@feed)
+          @poll&.close
+          @poll = nil
           @attached = nil
         end
 

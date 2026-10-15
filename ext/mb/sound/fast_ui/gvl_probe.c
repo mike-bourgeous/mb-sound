@@ -10,6 +10,8 @@
  *   delay".
  * - hold: RESUMED to SUSPENDED (it gave the GVL up): how long a thread kept
  *   others waiting.
+ * - blockers: for waits of 1 ms or more, which watched thread held the GVL
+ *   when the waiting thread became ready.
  *
  * This is instrumentation, not a signal kernel: Ruby code can't observe
  * these events, so there is no Ruby mirror.  The hook runs on the thread
@@ -27,6 +29,11 @@
 
 #define PROBE_SLOTS 4
 #define PROBE_RING 65536
+#define PROBE_BLOCKERS 4096
+
+// Waits of at least this long record which watched thread held the GVL
+// when the waiting thread became ready.
+#define PROBE_BLOCKER_NS 1000000
 
 struct probe_slot {
 	VALUE thread;
@@ -36,7 +43,15 @@ struct probe_slot {
 	uint64_t hold_count;
 	int32_t waits[PROBE_RING]; // nanoseconds, capped at 2.1 s
 	int32_t holds[PROBE_RING];
+	int holder_at_ready;
+	uint64_t blocker_count;
+	int32_t blocker_waits[PROBE_BLOCKERS];
+	int8_t blockers[PROBE_BLOCKERS];
 };
+
+// The watched slot holding the GVL (-1 for none or an unwatched thread).
+// Only the thread holding the GVL changes it (RESUMED, then SUSPENDED).
+static int probe_holder = -1;
 
 static struct probe_slot probe_slots[PROBE_SLOTS];
 static int probe_slot_count;
@@ -71,18 +86,29 @@ static void probe_event(rb_event_flag_t event, const rb_internal_thread_event_da
 		int64_t now = probe_now();
 		if (event & RUBY_INTERNAL_THREAD_EVENT_READY) {
 			s->ready_ns = now;
+			s->holder_at_ready = probe_holder;
 		} else if (event & RUBY_INTERNAL_THREAD_EVENT_RESUMED) {
 			if (s->ready_ns) {
-				s->waits[s->wait_count % PROBE_RING] = probe_clamp(now - s->ready_ns);
+				int32_t wait = probe_clamp(now - s->ready_ns);
+				s->waits[s->wait_count % PROBE_RING] = wait;
 				s->wait_count++;
 				s->ready_ns = 0;
+				if (wait >= PROBE_BLOCKER_NS) {
+					s->blocker_waits[s->blocker_count % PROBE_BLOCKERS] = wait;
+					s->blockers[s->blocker_count % PROBE_BLOCKERS] = (int8_t)s->holder_at_ready;
+					s->blocker_count++;
+				}
 			}
 			s->resumed_ns = now;
+			probe_holder = i;
 		} else if (event & RUBY_INTERNAL_THREAD_EVENT_SUSPENDED) {
 			if (s->resumed_ns) {
 				s->holds[s->hold_count % PROBE_RING] = probe_clamp(now - s->resumed_ns);
 				s->hold_count++;
 				s->resumed_ns = 0;
+			}
+			if (probe_holder == i) {
+				probe_holder = -1;
 			}
 		}
 		return;
@@ -117,9 +143,11 @@ static VALUE probe_start(VALUE self, VALUE threads)
 		struct probe_slot *s = &probe_slots[i];
 		memset(s, 0, sizeof(*s));
 		s->thread = RARRAY_AREF(threads, i);
+		s->holder_at_ready = -1;
 		rb_ary_push(probe_threads, s->thread);
 	}
 	probe_slot_count = (int)n;
+	probe_holder = -1;
 
 	probe_hook = rb_internal_thread_add_event_hook(
 		probe_event,
@@ -180,6 +208,22 @@ static VALUE probe_holds(VALUE self, VALUE index)
 	return probe_values(s->holds, s->hold_count);
 }
 
+// GVLProbe.blockers(i) -> Array of [seconds, slot]: watched thread i's
+// waits of 1 ms or more, each with the watched slot that held the GVL when
+// it became ready (-1: none of the watched threads, e.g. the GC or an
+// unwatched thread).
+static VALUE probe_blockers(VALUE self, VALUE index)
+{
+	struct probe_slot *s = probe_slot(index);
+	uint64_t count = s->blocker_count;
+	uint64_t n = count < PROBE_BLOCKERS ? count : PROBE_BLOCKERS;
+	VALUE out = rb_ary_new_capa((long)n);
+	for (uint64_t k = count - n; k < count; k++) {
+		rb_ary_push(out, rb_assoc_new(DBL2NUM(s->blocker_waits[k % PROBE_BLOCKERS] * 1e-9), INT2NUM(s->blockers[k % PROBE_BLOCKERS])));
+	}
+	return out;
+}
+
 void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 {
 	probe_threads = rb_ary_new();
@@ -191,4 +235,5 @@ void mb_fast_ui_init_gvl_probe(VALUE mFastUI)
 	rb_define_module_function(mProbe, "active?", probe_active, 0);
 	rb_define_module_function(mProbe, "waits", probe_waits, 1);
 	rb_define_module_function(mProbe, "holds", probe_holds, 1);
+	rb_define_module_function(mProbe, "blockers", probe_blockers, 1);
 }

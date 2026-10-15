@@ -14,6 +14,18 @@ module MB
 
         def initialize(session)
           @session = session
+          # Queued changes and recordings, kept from the journal's new
+          # entries (reading all of #changes grows with the session)
+          @open = {}
+          @lock = Mutex.new
+          @subscription = session.journal.subscribe { |e| note(e) }
+          session.journal.changes.each { |e| note(e) }
+        end
+
+        # Stops following the journal.
+        def close
+          @session.journal.unsubscribe(@subscription) if @subscription
+          @subscription = nil
         end
 
         # A new Slow, and the knobs to read per buffer ([name, knob] pairs)
@@ -26,7 +38,8 @@ module MB
             TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name))
           }.freeze
 
-          changes = s.journal.changes
+          s.journal.fold # new entries reach #note
+          changes = @lock.synchronize { @open.values }
           pos = s.transport.position
           queued = changes.select { |e| e.status == :queued }.last(QUEUED).map { |e|
             QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos)
@@ -52,6 +65,20 @@ module MB
         end
 
         private
+
+        # Keeps queued changes and recordings that may still be running.
+        def note(e)
+          @lock.synchronize {
+            if e.status == :queued || (e.kind == :rec && e.status == :landed)
+              @open[e.seq] = e
+            else
+              @open.delete(e.seq)
+            end
+            # Recordings that have ended
+            pos = @session.transport.position
+            @open.delete_if { |_, x| x.kind == :rec && x.status == :landed && (x.data[:ends].nil? || x.data[:ends].pos.to_r <= pos) }
+          }
+        end
 
         def form_info(pb)
           return nil if pb.nil?

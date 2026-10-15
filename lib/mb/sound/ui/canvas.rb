@@ -77,7 +77,7 @@ module MB
 
         # Blanks the rectangle and moves #row to the top.
         def clear
-          blank = ' ' * @w
+          blank = (@blank ||= (' ' * @w).freeze)
           @h.times { |r| @grid.text(@x, @y + r, blank) }
           @row = 0
           self

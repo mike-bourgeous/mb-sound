@@ -37,8 +37,10 @@ module MB
         def draw(c, s, state)
           c.clear
           if @title
-            c.text(0, 0, @title.to_s.upcase, :title)
-            c = c.sub(0, 1, c.w, c.h - 1)
+            c.text(0, 0, (@title_text ||= @title.to_s.upcase.freeze), :title)
+            body = (state[:body] ||= c.sub(0, 1, c.w, c.h - 1))
+            body.row = 0
+            c = body
           end
           if @block
             @block.arity == 3 ? @block.call(c, s, state) : @block.call(c, s)

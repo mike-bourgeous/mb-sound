@@ -698,6 +698,12 @@ module MB
         @mutex.synchronize { @taps.delete(block) }
       end
 
+      # The background rendering thread (nil before #add starts it), for
+      # measurements like the terminal UI's GVL probe (bin/ui_demo.rb).
+      def render_thread
+        @thread
+      end
+
       # Returns true if the background rendering thread is running (see
       # #add).
       def running?
