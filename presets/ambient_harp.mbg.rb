@@ -3,8 +3,8 @@
 graph 3,
   name: "ambient_harp",
   kind: :synth,
-  saved: "2026-10-15T05:39:09Z",
-  mb_sound: "0.12.0.usegit (a25e25a0)",
+  saved: "2026-10-15T06:44:07Z",
+  mb_sound: "0.12.0.usegit (0085cc6a)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :harp from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :harp, tune: -7.0, spread: 0.7 }
@@ -32,6 +32,7 @@ voice = synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
   } * v.amp_env([[0, sig2 * sig4, 0, :exp], [1, sig2 * (sig4 + 1), 0, :exp], [0, 0.08]]) * 4
 }
 sig = drift(1.3, range: -0.0007..0.0007, smooth: :smoothstep, from: 0.0, seed: drawn_seed(3969543146641149120))
-osc = noise(seed: drawn_seed(1895649597198586619)).at(0.0009765625)
-sig2 = ((voice * 0.14).delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig) + osc).quantize(0.001953125).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6).pan(0.3)
+fx = wear.aease(->(t) { (8**t - 1) / 7.0 }, out: 0.001953125..0.015625)
+osc = noise(seed: drawn_seed(1895649597198586619)).at(fx * 0.5)
+sig2 = ((voice * 0.14).delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig) + osc).quantize(fx).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6).pan(0.3)
 sig2.and_then(silence(10)) + sig2.reverb(room_size: 0.6, decay: 5, damping: 0.55, predelay: 0.03, dry: 0, wet: 1) * space
