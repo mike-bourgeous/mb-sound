@@ -21,11 +21,14 @@
 # are on (Ruby leaves both off by default; :experimental is already on).
 # :deprecated warnings fail like any other.  :performance warnings (so far
 # all "reached 8 shape variations" for classes that set instance variables
-# in varying orders) are only reported, silently, in a list after the run,
-# until the library is clean of them; MB_SOUND_WARNINGS_PERFORMANCE=fail
-# makes them fail too.  They're never printed during the run, since Ruby
-# emits each once per process at whichever example happens to trigger it,
-# which would make stderr assertions depend on example order.
+# in varying orders; fixed in warnings-2, 2026-10-15, by setting every
+# variable in the constructor, see GraphNode::IvarPreset) fail the example
+# that triggered them too, but are never printed during the run and are
+# recorded even while stderr is captured, since Ruby emits each once per
+# process at whichever example happens to trigger it, which would make
+# stderr assertions depend on example order.
+# MB_SOUND_WARNINGS_PERFORMANCE=report only lists them after the run (as
+# before warnings-2).
 #
 # In the spec process $VERBOSE is true (rspec's config.warnings, set after
 # the library loads), so verbose-only warnings (unused variables, method
@@ -49,9 +52,13 @@ module WarningGuard
   # Categories Ruby turns off by default, turned on by #install!.
   EXTRA_CATEGORIES = [:deprecated, :performance].freeze
 
+  # Categories whose warnings are never printed, and recorded even while
+  # stderr is captured (see above).
+  QUIET = ['performance'].freeze
+
   # Categories whose warnings are reported after the run instead of failing
   # (see above).
-  REPORT_ONLY = (ENV['MB_SOUND_WARNINGS_PERFORMANCE'] == 'fail' ? [] : ['performance']).freeze
+  REPORT_ONLY = (ENV['MB_SOUND_WARNINGS_PERFORMANCE'] == 'report' ? ['performance'] : []).freeze
 
   # A recorded warning: the message, its category (nil for plain
   # warnings), where it came from (the first stack frame outside Ruby's
@@ -134,10 +141,10 @@ module WarningGuard
       category = category&.to_s
       return false if reload_warning?(message)
 
-      if REPORT_ONLY.include?(category)
+      if QUIET.include?(category)
         return false if allowed?(message)
 
-        add(message, category, report_only: true)
+        add(message, category, report_only: REPORT_ONLY.include?(category))
         return false
       end
 

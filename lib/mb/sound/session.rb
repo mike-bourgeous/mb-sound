@@ -312,6 +312,25 @@ module MB
         init_buses
         @names = Names.new
         @arrangement = nil
+
+        # Set later, in varying orders (here so every Session has one
+        # instance variable layout; see GraphNode::IvarPreset)
+        @exact_lanes = nil
+        @stems = nil
+        @master_block = nil
+        @master_playing = nil
+        @markers = nil
+        @epoch = nil
+        @replay_epoch = nil
+        @at_exit_registered = nil
+        @span_players = nil
+        @span_graphs = nil
+        @player_frame = nil
+        @asleep_ids = nil
+        @asleep_graphs = nil
+        @bus_span_count = nil
+        @bus_span_buses = nil
+        @load = nil
       end
 
       # The Session's top-level names (see Names).

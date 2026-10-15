@@ -35,6 +35,10 @@ module MB
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
         Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, :flam, keyword_init: true) do
+          # #pitch and #flam below replace the members' readers (and read them
+          # without an argument).
+          remove_method :pitch, :flam
+
           include NoteMethods
 
           # True for a rest (no note, clip, or tie).

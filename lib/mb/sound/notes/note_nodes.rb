@@ -281,6 +281,8 @@ module MB
       class KeyTrigger < Trigger
         def initialize(stream, notes:, sample_rate: 48000)
           super
+          @from = nil
+          @adding = nil
           @node_type_name = 'Notes Key Trigger'
         end
 

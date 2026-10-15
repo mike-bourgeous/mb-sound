@@ -17,8 +17,6 @@ module MB
 
         attr_reader :smoothing, :smooth_limit
 
-        attr_reader :write_offset, :read_offset
-
         # Minimum, maximum, and final delay in samples from the previous call
         # to #process.  May not be an integer.
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
@@ -83,6 +81,18 @@ module MB
           self.wet = wet
 
           self.smoothing = smoothing
+
+          # Set while processing (here so every Delay has one instance
+          # variable layout; see GraphNode::IvarPreset)
+          @delay_range = nil
+          @read_buf = nil
+          @ring_read = nil
+          @ring_feedback = nil
+          @result_buf = nil
+          @ring = nil
+          @ring_zeros = nil
+          @frozen_copy = nil
+          @loop_offset = nil
         end
 
         # The size of the delay buffer in samples.

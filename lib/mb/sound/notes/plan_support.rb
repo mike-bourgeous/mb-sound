@@ -15,7 +15,8 @@ module MB
         PLAN_SKIP = [
           :@stream, :@notes, :@reader, :@buf, :@steady, :@steady_value, :@slots, :@smoother, :@jumps,
           :@step, :@step_count, :@step_rate, :@rate_r, :@outs, :@bufs,
-          :@node_type_name, :@graph_node_name, :@internal_tee, :@handled_spies, :@curve, :@gm_time,
+          :@node_type_name, :@graph_node_name, :@named, :@graph_recipe, :@graph_io_document, :@channel_group,
+          :@feedback_sources, :@internal_tee, :@handled_spies, :@curve, :@gm_time,
           :@delay, :@delay_buf, :@time_node, :@time_buf, :@spec, :@first_fill, :@uniform, :@render_offset, :@segment_start, :@adding, :@from,
         ].freeze
 

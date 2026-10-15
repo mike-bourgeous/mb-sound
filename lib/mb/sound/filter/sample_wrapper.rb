@@ -55,6 +55,12 @@ module MB
             [k, SampleWrapper.sample_or_narray(v, filter: @base_filter, field: k, sample_rate: @sample_rate)]
           }.to_h
 
+          # Set while sampling (here so every wrapper has one instance
+          # variable layout; see GraphNode::IvarPreset)
+          @ringing = nil
+          @frozen_copy = nil
+          @sampled_inputs = nil
+
           # TODO: detect and provide defaults for omitted inputs?
           unless @inputs.empty? || @base_filter.respond_to?(:dynamic_process)
             raise 'Cannot provide extra inputs to a filter that does not respond to #dynamic_process'

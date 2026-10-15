@@ -88,6 +88,19 @@ module MB
           @steady = nil
           @node_type_name = "Tempo #{mode == :hz ? 'Hz' : 'seconds'}"
           @graph_node_name = duration.to_s
+
+          # Set later (here so every TempoNode has one instance variable
+          # layout; see GraphNode::IvarPreset)
+          @parent = nil
+          @timeline_paused = nil
+          @timeline_launch = nil
+          @value_wnps = nil
+          @value_duration = nil
+          @value_mode = nil
+          @value = nil
+          @start_callbacks = nil
+          @steady_value = nil
+          @quiet = nil
         end
 
         # Makes this node ignore the timeline (see the class description), or

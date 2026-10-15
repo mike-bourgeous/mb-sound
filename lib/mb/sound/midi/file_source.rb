@@ -82,6 +82,16 @@ module MB
           raise ArgumentError, "Cannot loop a MIDI file with no length (#{@midi_file.filename})" if @loop && @duration <= 0
 
           @node_type_name = "MIDI File #{File.basename(@midi_file.filename.to_s)}"
+
+          # Set later by Source and the methods below (here so every source
+          # has one instance variable layout; see GraphNode::IvarPreset)
+          @position = nil
+          @generation = nil
+          @jump_pending = nil
+          @chase = nil
+          @sounding = nil
+          @music_end = nil
+          @notes = nil
         end
 
         # True if the file repeats forever.

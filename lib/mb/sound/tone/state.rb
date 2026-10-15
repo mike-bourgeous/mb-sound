@@ -59,7 +59,8 @@ module MB
           :jump_residual, :last_freq, :last_width, :last_pivot, :seed, :draws, :reset_ended, :table, :feedback,
         ].freeze
 
-        attr_accessor(*FIELDS)
+        attr_accessor(*(FIELDS - [:seed]))
+        attr_reader :seed # (#seed= below)
 
         # Scratch for the current frame's ports: [phase, frequency,
         # segments] (see the class description).

@@ -1,5 +1,10 @@
 require 'shellwords'
 
+# First, so every class that includes GraphNode gets its instance variable
+# layout (see IvarPreset).
+require_relative 'graph_node/ivar_preset'
+MB::Sound::GraphNode::IvarPreset.attach(MB::Sound::GraphNode)
+
 require_relative 'graph_node/nameable'
 require_relative 'graph_node/traversable'
 require_relative 'graph_node/node_output'
@@ -82,6 +87,15 @@ module MB
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
       attr_accessor :channel_group
+
+      # Set lazily by GraphNode's modules and the plan layer (see IvarPreset).
+      IvarPreset.declare(
+        self,
+        :@node_type_name, :@graph_node_name, :@named, :@graph_recipe, :@graph_io_document,
+        :@channel_group, :@internal_tee, :@feedback_sources, :@handled_spies,
+        :@plan_bypass, :@plan_installations, :@plan_member, :@plan_region,
+        :@plan_observed, :@plan_handoff, :@plan_restart
+      )
 
       # The nodes that carry this node's output channels.  Every node has
       # outputs: a single-channel node is its own only output, and nodes with

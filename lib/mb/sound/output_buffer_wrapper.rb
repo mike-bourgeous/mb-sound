@@ -11,7 +11,7 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      def_delegators :@output, :sample_rate, :channels, :buffer_size, :closed?
+      def_delegators :@output, :sample_rate, :channels, :closed?
 
       # Creates a buffer wrapper with the given +output+ instance (e.g.
       # MB::Sound::FFMPEGOutput or MB::Sound::DeviceOutput).

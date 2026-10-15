@@ -213,6 +213,35 @@ module MB
         unless RETRIGGER_MODES.include?(retrigger)
           raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
         end
+        # Set below in some configurations, or later (here first so every
+        # Synth has one instance variable layout; see GraphNode::IvarPreset)
+        @control_notes = nil
+        @skip_idle = nil
+        @skipping = nil
+        @skip_generation = nil
+        @cell_loud = nil
+        @skip_position = nil
+        @grid_offset = nil
+        @zeros = nil
+        @skippable_base = nil
+        @boundary = nil
+        @lane_sets = nil
+        @boundary_cache = nil
+        @clock_node = nil
+        @skippable = nil
+        @range = nil
+        @grid_started = nil
+        @joined_data = nil
+        @joined_bufs = nil
+        @lane_data = nil
+        @lane_bufs = nil
+        @piece_bufs = nil
+        @lane_piece_bufs = nil
+        @channel_set = nil
+        @tail_generation = nil
+        @sum_pairs = nil
+        @sum_pool = nil
+
         @retrigger = retrigger
         retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
         steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
