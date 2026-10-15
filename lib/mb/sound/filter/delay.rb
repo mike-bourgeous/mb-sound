@@ -81,6 +81,18 @@ module MB
           self.wet = wet
 
           self.smoothing = smoothing
+
+          # Set while processing (here so every Delay has one instance
+          # variable layout; see GraphNode::IvarPreset)
+          @delay_range = nil
+          @read_buf = nil
+          @ring_read = nil
+          @ring_feedback = nil
+          @result_buf = nil
+          @ring = nil
+          @ring_zeros = nil
+          @frozen_copy = nil
+          @loop_offset = nil
         end
 
         # The size of the delay buffer in samples.

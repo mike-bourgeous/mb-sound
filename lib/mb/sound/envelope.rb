@@ -504,6 +504,23 @@ module MB
         @sample_rate = sample_rate.to_f
         raise ArgumentError, "Sample rate must be positive (got #{sample_rate.inspect})" unless @sample_rate > 0
 
+        # Set below or later, in varying orders (here so every envelope has
+        # one instance variable layout; see GraphNode::IvarPreset)
+        @names = nil
+        @release_node = nil
+        @loop_node = nil
+        @default_hold = nil
+        @hold = nil
+        @retrigger = nil
+        @velocity_low = nil
+        @velocity_high = nil
+        @velocity_scale = nil
+        @octaves = nil
+        @args = nil
+        @idle_buf = nil
+        @preset_name = nil
+        @plan_ended = nil
+
         @times = {}
         @levels = {}
         if segments.nil?

@@ -44,6 +44,13 @@ module MB
 
           @callers = caller_locations(5, 24) # where it was made, for messages (a full backtrace costs ~5 us deep in a build)
           @cb = block
+
+          # Set by ArithmeticMethods and Tuning after construction (here so
+          # every ProcNode has one instance variable layout; see
+          # GraphNode::IvarPreset)
+          @operator = nil
+          @plan_operator = nil
+          @plan_tuning = nil
         end
 
         # Calls the block given to the constructor with the input data and

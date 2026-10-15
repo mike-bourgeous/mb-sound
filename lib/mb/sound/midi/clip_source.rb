@@ -53,6 +53,25 @@ module MB
           @early = true
           @ahead = 0r
           @node_type_name = 'MIDI Clip'
+
+          # Set later by Source, TimelineNode, and the methods below (here so
+          # every source has one instance variable layout; see
+          # GraphNode::IvarPreset)
+          @position = nil
+          @generation = nil
+          @jump_pending = nil
+          @chase = nil
+          @sounding = nil
+          @timeline_paused = nil
+          @timeline_launch = nil
+          @flam_lead = nil
+          @flam_rate = nil
+          @ring_clip = nil
+          @flam_start = nil
+          @flam_to = nil
+          @flam_queue = nil
+          @flam_window = nil
+          @fills_at = nil
         end
 
         # How far ahead of the timeline this source plays, in whole notes

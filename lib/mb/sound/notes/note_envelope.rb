@@ -36,6 +36,10 @@ module MB
           @frames = 0
           @base_times = {}
           @gm_nodes = {}
+          @start_time = nil
+          @idle_at_start = nil
+          @grid_buf = nil
+          @plan_note_stream = nil
           super(**options)
           gm(gm)
         end

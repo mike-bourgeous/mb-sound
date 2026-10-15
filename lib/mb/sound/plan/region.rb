@@ -77,6 +77,36 @@ module MB
           @carried_planned = 0
           @carried_unfused = 0
           @out_views = {}
+
+          # Set by #install, #compile, #prepare, and LaneGroup (here so every
+          # region has one instance variable layout; see
+          # GraphNode::IvarPreset)
+          @installed = nil
+          @described = nil
+          @boundaries = nil
+          @consumers = nil
+          @input_ops = nil
+          @param_ops = nil
+          @folds = nil
+          @inputs = nil
+          @params = nil
+          @ended = nil
+          @read = nil
+          @want = nil
+          @direct = nil
+          @via_shared = nil
+          @out_class = nil
+          @out = nil
+          @out_alt = nil
+          @out_views_alt = nil
+          @feeders = nil
+          @started = nil
+          @pads = nil
+          @recompile = nil
+          @result = nil
+          @check_stateful = nil
+          @check_before = nil
+          @lane_group = nil
         end
 
         # For internal use by Installation: adds a node to the region.

@@ -600,6 +600,27 @@ module MB
         @quiet_resets = nil
         @quiet_locks = nil
 
+        # Set below or later (here so every Tone has one instance variable
+        # layout; see GraphNode::IvarPreset)
+        @musical_time = nil
+        @range = nil
+        @amplitude = nil
+        @in_or_at = nil
+        @advance = nil
+        @kernel = nil
+        @wavelength = nil
+        @random_advance = nil
+        @gain = nil
+        @offset = nil
+        @started = nil
+        @sync_reset = nil
+        @fade_band = nil
+        @osc_view_buf = nil
+        @osc_view = nil
+        @upstream_inputs = nil
+        @plan_wavetables = nil
+        @plan_fast_shapes = nil
+
         self.or_at(amplitude).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
       end
