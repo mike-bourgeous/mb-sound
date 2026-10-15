@@ -68,8 +68,9 @@ module MB
               options = (deg - leap..deg + leap).select { |d| (lo..hi).cover?(scale.note(d)) }
               options = [deg] if options.empty?
               w = options.map { |d| weights[d % size].to_f * (d == deg ? REPEAT_WEIGHT : 1.0 / (d - deg).abs) }
-              pick = rng.rand * w.sum
-              idx = w.index { |x| (pick -= x) < 0 } || options.length - 1
+              # The same pick as the generative layer's (Generative::Dice.index:
+              # Array#sum's total, the first running sum past u * total)
+              idx = Generative::Dice.index(w, rng.rand) || options.length - 1
               deg = options[idx]
             end
             scale.note(deg)

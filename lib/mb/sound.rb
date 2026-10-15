@@ -33,6 +33,7 @@ require_relative 'sound/fast_control'
 require_relative 'sound/fast_loudness'
 require_relative 'sound/fast_dynamics'
 require_relative 'sound/fast_lofi'
+require_relative 'sound/fast_generative'
 require_relative 'sound/fast_texture'
 require_relative 'sound/fast_ui'
 require_relative 'sound/fast_audio'
@@ -54,6 +55,7 @@ require_relative 'sound/generation_methods'
 require_relative 'sound/midi_methods'
 require_relative 'sound/scripting_methods'
 require_relative 'sound/sequence_methods'
+require_relative 'sound/generative_methods'
 require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
@@ -90,6 +92,7 @@ module MB
     extend MidiMethods
     extend ScriptingMethods
     extend SequenceMethods
+    extend GenerativeMethods
     extend ScheduleMethods
     extend ArrangementMethods
     extend FormMethods
@@ -169,6 +172,7 @@ require_relative 'sound/pitch'
 require_relative 'sound/note'
 require_relative 'sound/scale'
 require_relative 'sound/sequence'
+require_relative 'sound/generative'
 require_relative 'sound/midi/streams'
 require_relative 'sound/notes'
 require_relative 'sound/synth'

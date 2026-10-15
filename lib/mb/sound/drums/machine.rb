@@ -303,7 +303,7 @@ module MB
           if source.is_a?(Sequence::Kit)
             groups = Hash.new { |h, k| h[k] = [] }
             source.each do |row, clip|
-              key = voice_name(row) || voice_name(clip.events.first&.value)
+              key = voice_name(row) || voice_name(clip.values.first)
               raise ArgumentError, "Grid row #{row.inspect} doesn't name a #{@name} voice (voices: #{names.join(', ')})" unless key
               groups[key] << clip if only.nil? || only.include?(key)
             end
@@ -315,7 +315,7 @@ module MB
           map.each { |v, notes| gm[key!(v)] = Array(notes).map { |n| Sequence::Grid.row_value(n) } }
           voices = (only || gm.keys).reject { |v| gm[v].empty? }
           if source.is_a?(Sequence::Clip) && !source.performed?
-            values = source.events.map(&:value)
+            values = source.values
             voices = voices.select { |v| gm.fetch(v).any? { |n| values.include?(n) } }
           end
           stream = MB::Sound::MIDI::Stream.for(source)

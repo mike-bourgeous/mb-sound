@@ -62,7 +62,7 @@ module MB
             },
             'MB::Sound::Sequence::Clip' => {
               reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed],
+              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values],
             },
             'MB::Sound::Sequence::Seq' => {
               reason: 'readers',
@@ -106,6 +106,10 @@ module MB
             'SamplerMethods' => {
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
               resample_to_sample: 'alias of bounce', capture_audio: 'live capture (performance, not graph structure)',
+            },
+            'GenerativeMethods' => {
+              tones: 'a Weights value (prints through its own recipe)', weights: 'a Weights value (prints through its own recipe)',
+              harmony: 'a Harmony value (prints through its own recipe)', dice: 'a Dice value (generator blocks get their own)',
             },
             'SequenceMethods' => {
               bpm: 'transport tempo (session state)', transport: 'the session transport',

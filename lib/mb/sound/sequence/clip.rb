@@ -101,8 +101,13 @@ module MB
         # (see #loop).  +:variations+ are Variations applied per loop cycle
         # (see #variations).  +:performed+ marks velocities as played on a
         # MIDI controller (see #performed?).
-        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false)
+        #
+        # +:values+ lists the values (notes) the clip may play when its
+        # variations play notes its base events don't (a generator clip,
+        # see .generate); drum kits choose their voices from #values.
+        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false, values: nil)
           @events = events.sort_by(&:start).freeze
+          @values = values&.uniq&.freeze
           @performed = !!performed
           max_end = @events.map(&:end_time).max || 0
           @length = (length || max_end).to_r
@@ -119,6 +124,8 @@ module MB
           # that belong to earlier cycles (one more with variations, which
           # may move events within their cycle).
           @lookback = @length > 0 ? (max_end / @length).ceil + (@variations.empty? ? 0 : 1) : 0
+          # Generators say how far their events reach (Generative::Generator#reach)
+          @variations.each { |v| @lookback = MB::M.max(@lookback, v.block.reach_cycles + 1) if v.block.is_a?(Generative::Producer) }
           # And how many later cycles can start early (variations may move
           # events up to a cycle before their own, see Variation).
           @lookahead = @variations.empty? ? 0 : 1
@@ -143,6 +150,13 @@ module MB
           @cycle_cache.shift if @cycle_cache.length >= 8
           list = @variations.reduce(@events) { |evs, v| v.block.call(evs, cycle, self) }
           @cycle_cache[cycle] = list.sort_by(&:start).freeze
+        end
+
+        # The values (note numbers) this clip may play: the +:values+ it was
+        # made with (a generator clip's, see .generate), else the values of
+        # its events.  Drum kits build the voices these play.
+        def values
+          @values || @events.map(&:value).uniq
         end
 
         # Yields each Event.
@@ -191,7 +205,7 @@ module MB
         #
         #     bg :ball, bounce_hits(3.beats).loop(align: :launch).synth { |v| ... }
         def loop(seed: @seed, align: @align)
-          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations, performed: @performed)
+          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations, performed: @performed, values: @values)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
@@ -877,13 +891,20 @@ module MB
 
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
-        def with_events(events, length: @length, variations: @variations)
-          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations, performed: @performed)
+        def with_events(events, length: @length, variations: @variations, values: @values)
+          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations, performed: @performed, values: values)
         end
 
-        # Returns a Clip with each event transformed by the block.
-        def map_clip(length: @length)
-          with_events(@events.map { |e| yield e }, length: length)
+        # Returns a Clip with each event transformed by the block.  The
+        # events a generator makes (variations whose block is a
+        # Generative::Producer, which replace the events rather than change
+        # them) go through the block too, and so do the clip's +values+.
+        def map_clip(length: @length, &map)
+          variations = @variations.map { |v|
+            v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.mapped(map)) : v
+          }
+          values = @values&.map { |x| map.call(Event.new(start: 0r, length: 0r, value: x, velocity: DEFAULT_VELOCITY)).value }
+          with_events(@events.map(&map), length: length, variations: variations, values: values)
         end
 
         private
