@@ -642,6 +642,114 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(seconds).to be_within(0.02).of(0.5)
     end
 
+    # A live session's timeline pauses while nothing plays; a render keeps
+    # time while blocks are still to come (found by fixes-14: this rendered
+    # 0 s)
+    describe 'with nothing playing until a scheduled block' do
+      let(:out) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
+
+      # Records every buffer written (dup: outputs may reuse buffers)
+      def record(out)
+        data = []
+        allow(out).to receive(:write).and_wrap_original { |m, d| data << d[0].dup; m.call(d) }
+        -> { data.reduce(:concatenate) }
+      end
+
+      # Bar 2's frame at 112 BPM in a bars: render with something playing
+      # from bar 1, as renders already did
+      let(:bar2_frame) {
+        ref = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        data = record(ref)
+        MB::Sound.render(ref, bars: 3, bpm: 112) do
+          MB::Sound.bg(:pad, 0.constant, fade: 0)
+          MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant, fade: 0) }
+        end
+        data.call.to_a.index { |v| v != 0 }
+      }
+
+      it 'renders silence until the block starts something on its exact frame, then to the end bar' do
+        expect(bar2_frame).to eq((4 * 60 / 112r * 48000).floor)
+
+        data = record(out)
+        seconds = MB::Sound.render(out, bars: 3, bpm: 112, buffer_size: 128) do
+          MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant, fade: 0) }
+        end
+        expect(seconds).to eq((3 * 4 * 60 / 112r * 48000).ceil / 48000.0)
+
+        d = data.call
+        expect(d.length).to eq(out.frames_written)
+        expect(d.to_a.index { |v| v != 0 }).to eq(bar2_frame)
+        expect(d[bar2_frame..].to_a.uniq).to eq([0.25])
+      end
+
+      it 'adds the master tail after the end bar with tail: true' do
+        stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 0.25)
+        seconds = MB::Sound.render(out, bars: 3, bpm: 120, tail: true) do
+          MB::Sound.master { |mix| mix.delay(0.1, feedback: 1, dry: 1, wet: 1) }
+          MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant, fade: 0) }
+        end
+        expect(seconds).to eq(6.25)
+      end
+
+      it 'keeps time with seconds:' do
+        data = record(out)
+        expect(MB::Sound.render(out, seconds: 3, bpm: 120) { MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant, fade: 0) } }).to eq(3)
+        d = data.call
+        expect(d.to_a.index { |v| v != 0 }).to eq(96000)
+        expect(d.length).to eq(144000)
+      end
+
+      it 'renders until the block starts something and that ends, without bars: or seconds:' do
+        data = record(out)
+        seconds = MB::Sound.render(out, bpm: 120) do
+          MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant.until(0.5), fade: 0) }
+        end
+        expect(seconds).to be_within(0.02).of(2.5) # ended players leave on the next buffer
+        expect(data.call.to_a.index { |v| v != 0 }).to eq(96000)
+      end
+
+      it 'renders silence up to blocks that start nothing, and between sounds' do
+        seconds = MB::Sound.render(out, bpm: 120) do
+          MB::Sound.bg(:a, 0.25.constant.until(0.5), fade: 0)
+          MB::Sound.at_bar(2) { }
+          MB::Sound.at_bar(3) { MB::Sound.bg(:b, 0.25.constant.until(0.5), fade: 0) }
+        end
+        expect(seconds).to be_within(0.02).of(4.5)
+      end
+
+      it 'stops at MAX_RENDER_SECONDS with a warning for blocks later than that, without bars: or seconds:' do
+        stub_const('MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS', 0.5)
+        expect {
+          expect(MB::Sound.render(out, bpm: 120) { MB::Sound.at_bar(2) { MB::Sound.bg(:a, 0.25.constant) } }).to eq(0.5)
+        }.to output(/after 0.5 seconds; pass bars: or seconds:/).to_stderr
+      end
+
+      it 'does not wait for repeating blocks without bars: or seconds:' do
+        ran = 0
+        seconds = MB::Sound.render(out, 0.25.constant.until(0.5), bpm: 120) do
+          MB::Sound.every(1) { ran += 1 }
+        end
+        expect(seconds).to be_within(0.02).of(0.5)
+        expect(ran).to eq(1)
+      end
+
+      it 'waits for repeating blocks before the end bar with bars:' do
+        ran = 0
+        seconds = MB::Sound.render(out, 0.25.constant.until(0.5), bars: 3, bpm: 120) do
+          MB::Sound.every(1) { ran += 1 }
+        end
+        expect(seconds).to eq(4) # bar 3's block; bar 4's is the end
+        expect(ran).to eq(3)
+      end
+
+      it 'does not wait for blocks after the end bar' do
+        seconds = MB::Sound.render(out, 0.25.constant.until(0.5), bars: 3, bpm: 120) do
+          MB::Sound.at_bar(4) { MB::Sound.bg(:a, 0.25.constant) }
+        end
+        expect(seconds).to be_within(0.02).of(0.5)
+      end
+    end
+
     it 'renders the tail of master effects after the last sound ends' do
       seconds = MB::Sound.render(filename, bpm: 120) do
         MB::Sound.bg(0.5.constant.until(0.1))

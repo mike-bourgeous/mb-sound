@@ -325,6 +325,22 @@ module MB
           @mutex.synchronize { @entries.each_value.any? { |e| e.status == :pending && e.time <= @transport.position && (e.epoch.nil? || e.epoch == @session.epoch) } }
         end
 
+        # Returns true if a block is still to come at or after timeline
+        # position +position+ (see Session#schedule_waiting?): a block waiting
+        # to run in the current epoch (any, or only one-shot blocks if
+        # +repeating+ is false; with +before+, only blocks timed before that
+        # position), a block that ran ahead of a time still to come, or a
+        # timed change (e.g. a tempo change) still to apply.
+        def waiting?(position, repeating: true, before: nil)
+          @mutex.synchronize {
+            (@ran_ahead && @ran_ahead > position) || !@timed_changes.empty? ||
+              @entries.each_value.any? { |e|
+                e.status == :pending && (e.epoch.nil? || e.epoch == @session.epoch) &&
+                  (repeating || e.period.nil?) && (before.nil? || e.time < before)
+              }
+          }
+        end
+
         # The scheduler's panic button (see PlaybackMethods#panic and
         # ScheduleMethods#reset_scheduler): cancels every block except a
         # take's replayed lines (+keep+ owners), including blocks handed to
@@ -404,6 +420,7 @@ module MB
         # the timeline jumps.
         def seeked(from)
           @mutex.synchronize {
+            @ran_ahead = nil
             @entries.each_value do |e|
               e.time = from + (e.time - from) % e.period if e.period
             end
@@ -429,6 +446,9 @@ module MB
             end
             list
           }
+
+          ahead = due.map(&:last).max
+          @ran_ahead = ahead if ahead && ahead > from && (@ran_ahead.nil? || ahead > @ran_ahead)
 
           due.sort_by { |e, time| [time, e.id] }.each do |e, time|
             # Blocks for times still ahead must finish in time; blocks whose

@@ -323,6 +323,35 @@ RSpec.describe(MB::Sound::Session) do
       expect(transport.position).to eq(9600r / 96000)
     end
 
+    it 'keeps moving while idle with advance_idle (offline sessions only)' do
+      expect(session.advance_idle?).to eq(false)
+      session.advance_idle = true
+      run(9600)
+      expect(transport.position).to eq(9600r / 96000)
+      expect(session.transport_record[:playing]).to eq(true)
+      session.advance_idle = false
+      run(800)
+      expect(transport.position).to eq(9600r / 96000)
+
+      live = MB::Sound::Session.new(output: output, transport: transport, realtime: true)
+      expect { live.advance_idle = true }.to raise_error(ArgumentError, /offline/)
+    ensure
+      live&.close
+    end
+
+    it 'tells whether something scheduled is still to come' do
+      expect(session.schedule_waiting?).to eq(false)
+      h = session.schedule(1) { }
+      expect(session.schedule_waiting?).to eq(true)
+      expect(session.schedule_waiting?(before: 1)).to eq(false)
+      h.cancel
+      expect(session.schedule_waiting?).to eq(false)
+
+      session.schedule(1, period: 1) { }
+      expect(session.schedule_waiting?).to eq(true)
+      expect(session.schedule_waiting?(repeating: false)).to eq(false)
+    end
+
     it 'moves playing clips when the timeline is seeked' do
       clip = MB::Sound.grid(4, 'x...').loop  # one hit per bar
       session.add(clip.trigger)

@@ -691,7 +691,17 @@ module MB
       # beginning of a fresh timeline, at the current tempo unless +:bpm+ is
       # given.  Rendering stops after +:bars+ (counted on the timeline, so
       # tempo changes during the render are followed) or +:seconds+, or when
-      # every sound has ended.  Returns the number of seconds rendered.
+      # every sound has ended and no scheduled block is still to come.
+      # Returns the number of seconds rendered.
+      #
+      # Unlike a live session, whose timeline pauses while nothing plays, a
+      # render keeps time while it waits for scheduled blocks, rendering
+      # silence until they start something: `render('x.flac', bars: 3) {
+      # at_bar(2) { bg :a, a } }` is a bar of silence, then +a+ from bar 2's
+      # exact frame.  Blocks that count are one-shot blocks (#at_bar,
+      # #after) and, with +:bars+ (before the end bar) or +:seconds+,
+      # repeating ones (#every); without either, a render waiting on a block
+      # stops at MAX_RENDER_SECONDS like sounds that never end.
       #
       # A +:bars+ render always reaches its end bar (plus the tail, below),
       # however long that takes (a song form that loops back renders until
@@ -834,11 +844,23 @@ module MB
           left
         }
 
-        until frames_left.call <= 0 || (session.idle? && !session.schedule_due?)
+        # While nothing plays, the timeline keeps moving (rendering silence)
+        # as long as a scheduled block is still to come: any block before the
+        # end bar, or with seconds:, any block; without either, only one-shot
+        # blocks (a lone `every` would never end), up to the time limit
+        bounded = bars || seconds
+        waiting = -> {
+          session.schedule_due? ||
+            session.schedule_waiting?(repeating: !!bounded, before: end_time&.call)
+        }
+        session.advance_idle = true
+        until frames_left.call <= 0 || (session.idle? && !waiting.call)
           count = MB::M.min(buffer_size, frames_left.call)
           session.process_buffer(count)
           frames += count
         end
+        # Tails ring out on a paused timeline, as before
+        session.advance_idle = false
 
         if frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
@@ -850,8 +872,8 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && max_seconds.nil? && !session.idle?
-          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
+        if bars.nil? && seconds.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
         end
 
         frames.to_f / rate
