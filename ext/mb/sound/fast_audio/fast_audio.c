@@ -309,6 +309,37 @@ static VALUE ruby_jack_stall(VALUE self, VALUE microseconds, VALUE every)
 }
 
 /*
+ * call-seq: MB::Sound::FastAudio.jack_frame_log(true) -> nil
+ *           MB::Sound::FastAudio.jack_frame_log(false) -> [[start, end], ...]
+ *
+ * For specs: true clears the log and starts recording, for each callback of
+ * the shared JACK client (up to 65536), the frame time (jack_last_frame_time)
+ * it read at its start and the one after its units ran; false stops and
+ * returns them in order.  A repeated cycle appears twice and a skipped one
+ * is missing, so two clients' logs tell which server cycles one missed and
+ * the other ran; an end after the start means the server began the next
+ * cycle during the callback, so its port buffers may have been read or
+ * written after another client's next cycle.  Opening the client clears
+ * it; costs one relaxed load per callback when off.
+ */
+static VALUE ruby_jack_frame_log(VALUE self, VALUE on)
+{
+	(void)self;
+	if (RTEST(on)) {
+		mb_jack_frame_log_start();
+		return Qnil;
+	}
+
+	const uint32_t (*frames)[2];
+	size_t count = mb_jack_frame_log_stop(&frames);
+	VALUE list = rb_ary_new_capa((long)count);
+	for (size_t i = 0; i < count; i++) {
+		rb_ary_push(list, rb_assoc_new(UINT2NUM(frames[i][0]), UINT2NUM(frames[i][1])));
+	}
+	return list;
+}
+
+/*
  * call-seq: MB::Sound::FastAudio.jack_close -> nil
  *
  * Closes the shared JACK client; its outputs and inputs stop.
@@ -2960,6 +2991,7 @@ void Init_fast_audio(void)
 	rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
 	rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
 	rb_define_module_function(fast_audio, "jack_stall", ruby_jack_stall, 2);
+	rb_define_module_function(fast_audio, "jack_frame_log", ruby_jack_frame_log, 1);
 	rb_define_module_function(fast_audio, "jack_ports", ruby_jack_ports, 3);
 	rb_define_module_function(fast_audio, "jack_connect", ruby_jack_connect, 2);
 	rb_define_module_function(fast_audio, "jack_disconnect", ruby_jack_disconnect, 2);

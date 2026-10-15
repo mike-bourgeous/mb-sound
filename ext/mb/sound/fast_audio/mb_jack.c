@@ -91,6 +91,17 @@ static int have_prev_frame;
 static _Atomic unsigned stall_us;
 static _Atomic unsigned stall_every;
 static unsigned stall_count; // process thread only
+
+// mb_jack_frame_log (specs): for each callback, the frame time it read
+// and the frame time once its units ran (later if the server started the
+// next cycle meanwhile), so a spec can tell which server cycles this client
+// ran, and in which its port reads and writes may have mixed with the next
+// cycle's.  The process thread fills pairs below MB_JACK_FRAME_LOG_MAX and
+// publishes the count; readers copy only that many.
+static uint32_t frame_log[MB_JACK_FRAME_LOG_MAX][2];
+static _Atomic size_t frame_log_len;
+static _Atomic int frame_log_on;
+
 static pthread_mutex_t change_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Released ports, kept registered for reuse (see mb_jack.h: libjack can't
@@ -324,6 +335,15 @@ static int process(jack_nframes_t nframes, void *arg)
 			list->units[i]->process(list->units[i], nframes);
 		}
 	}
+
+	if (atomic_load_explicit(&frame_log_on, memory_order_relaxed)) {
+		size_t n = atomic_load_explicit(&frame_log_len, memory_order_relaxed);
+		if (n < MB_JACK_FRAME_LOG_MAX) {
+			frame_log[n][0] = frame;
+			frame_log[n][1] = jack.last_frame_time(client);
+			atomic_store_explicit(&frame_log_len, n + 1, memory_order_release);
+		}
+	}
 	atomic_fetch_add(&cycles_done, 1);
 
 	return 0;
@@ -384,6 +404,8 @@ const char *mb_jack_open(const char *name)
 	have_prev_frame = 0; // no process thread yet
 	atomic_store(&stall_us, 0); // a new client starts unstalled
 	stall_count = 0;
+	atomic_store(&frame_log_on, 0); // and unlogged
+	atomic_store(&frame_log_len, 0);
 	if (jack.set_process_callback(c, process, NULL) != 0) {
 		jack.client_close(c);
 		return "Could not set the JACK process callback";
@@ -488,6 +510,20 @@ void mb_jack_stall(unsigned microseconds, unsigned every)
 {
 	atomic_store(&stall_every, every);
 	atomic_store(&stall_us, microseconds);
+}
+
+void mb_jack_frame_log_start(void)
+{
+	atomic_store(&frame_log_on, 0);
+	atomic_store(&frame_log_len, 0);
+	atomic_store(&frame_log_on, 1);
+}
+
+size_t mb_jack_frame_log_stop(const uint32_t (**frames)[2])
+{
+	atomic_store(&frame_log_on, 0);
+	*frames = frame_log;
+	return atomic_load_explicit(&frame_log_len, memory_order_acquire);
 }
 
 size_t mb_jack_cycles_skipped(void)
