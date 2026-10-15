@@ -9,16 +9,21 @@ module MB
         sparse random impulses (random heights, so as triggers they strike
         at random velocities; `bipolar: true` for crackle).  `drift(rate)`
         is a slow random line for detune, cutoffs, and pans (`smooth:`
-        :cubic, :cosine, :linear, :step; `walk:` keeps each step small).
+        :cubic, :cosine, :linear, :step, or any Curve such as
+        `Curve[:back, overshoot: 0.4]`; `walk:` keeps each step small,
+        `hold:` rests on each point, `jitter:` spaces them unevenly).
+        `dust(rate, min_gap: 300.ms)` keeps strikes apart.
         Noise colors: `noise` is white; filter it for pink-ish
         (`noise.lp4(1200)`), dark wind (`.filter(:bandpass, ...)`), or hiss
         (`.filter(:highpass, ...)`).
 
         Struck objects: `trig.ping(f, decay:)` rings one sine;
         `trig.resonate(:bowl, f)` rings a whole object (:bowl, :rin, :gong,
-        :bell, :chime, :bar, :marimba, :vibes, :glass, :plate, :membrane, or
-        your own [[ratio, amp, decay share], ...]); `spread:` makes it
-        stereo, `v.freq` in a synth makes it follow the keys.  Strike with
+        :bell, :chime, :tubular, :bar, :marimba, :vibes, :glass, :plate,
+        :membrane, or your own [[ratio, amp, decay share], ...]; each has a
+        typical pitch if you leave the frequency out); `spread:` makes it
+        stereo, `v.freq` in a synth makes it follow the keys, `glide:`
+        bends a gong or drum down onto its pitch.  Strike with
         dust, triggers, or a quiet noise (a rubbed rim).  Lowpass the strike
         for a softer mallet.  Everything is seeded (`seed 42`).
 
@@ -31,14 +36,32 @@ module MB
       see :recipes, :random, :drums
       example 'a bowl struck now and then' do
         seed 3
-        bg :try, dust(1.5, range: 0.4..1).resonate(:bowl, 196, spread: 0.6).at(-12.db).until(3.bars)
+        bg :try, dust(1.5, range: 0.4..1, min_gap: 500.ms).resonate(:bowl, 196, spread: 0.6).at(-12.db).until(3.bars)
       end
       example 'drifting detune and cutoff' do
-        bg :try, [0, 7, 12].map { |s| 110.hz.transpose(drift(0.3, walk: 0.3).at(-0.12..0.12) + s).saw }.sum.lp4(drift(0.2).at(400..1800)).at(-24.db).until(2.bars)
+        bg :try, [0, 7, 12].map { |s| 110.hz.transpose(drift(0.3, walk: 0.3).at(0.12) + s).saw }.sum.lp4(drift(0.2).at(400..1800)).at(-24.db).until(2.bars)
       end
-      example 'vibes that follow the notes' do
+      example 'a vibraphone phrase from a sequence' do
         n = seq(A3, E4, A4, C5, E5, A5).n4.loop.notes
         bg :try, n.synth(voices: 3) { |v| v.trigger.resonate(:vibes, v.freq) }.at(-14.db).until(2.bars)
+      end
+      example 'a restless creature (walk, holds, jitter, overshoot)' do
+        seed 5
+        wander = drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
+        bg :try, 220.hz.triangle.lp4(1800).pan(wander).at(-22.db).until(2.bars)
+      end
+      example 'a fly buzzing around your head (doppler)' do
+        x = drift(1.5, range: -3..3, walk: 0.6, hold: 30.ms..300.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.4]) # meters left/right
+        y = drift(1, range: 0.3..2.5, walk: 0.5, smooth: :cosine)                                                         # meters ahead
+        r = (x * x + y * y) ** 0.5
+        fly = 210.hz.saw.lp4(2500) * 23.hz.lfo.at(0.6..1) + noise.filter(:bandpass, cutoff: 3000, quality: 2).at(-24.db)
+        # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it
+        bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-20.db).until(2.bars)
+      end
+      example 'a drum head as kick and toms' do
+        kick = grid(8, 'x..x..x.').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)
+        toms = grid(8, '.x..xxxx').loop.trigger.resonate(:membrane, 131, glide: 2, glide_time: 0.25, decay: 0.8)
+        bg :try, (kick.at(-4.db) + toms).at(-11.db).until(2.bars)
       end
     end
 
@@ -60,14 +83,15 @@ module MB
         bg :try, (noise.filter(:bandpass, cutoff: drift(0.4, walk: 0.4).at(250..1400), quality: 3) * drift(0.3, range: 0.15..1)).until(2.bars)
       end
       example 'vinyl crackle' do
-        crackle = dust(40, bipolar: true).filter(:highpass, cutoff: 1500) * 0.3 + dust(1.5, range: 0.3..1).ping(1200, decay: 0.01) * 0.2
-        bg :try, (crackle.at(-6.db) + 220.hz.triangle.at(-24.db)).until(2.bars)
+        specks = dust(14, bipolar: true).filter(:bandpass, cutoff: 1400, quality: 0.7) * 0.6     # sparse, dark dust
+        scratch = dust(100, min_gap: 1.8.seconds, range: 0.6..1).filter(:highpass, cutoff: 300) * 0.5   # once a turn at 33 1/3 rpm
+        bg :try, ((specks + scratch).at(-6.db) + 220.hz.triangle.at(-24.db)).until(2.bars)
       end
       example 'tape wow and flutter' do
-        bg :try, 330.hz.triangle.at(-22.db).delay(drift(0.8, smooth: :cosine).at(0.004..0.007) + 6.hz.lfo.at(-0.0001..0.0001)).until(2.bars)
+        bg :try, 330.hz.triangle.at(-22.db).delay(drift(0.8, smooth: :cosine).at(0.004..0.007) + 6.hz.lfo.at(0.0001)).until(2.bars)
       end
       example 'bells' do
-        n = seq(E5, B4, G5, D5).n2.loop.notes
+        n = seq(E4, B3, G4, D4).n2.loop.notes
         bg :try, n.synth(voices: 4) { |v| v.trigger.resonate(:bell, v.freq) }.at(-8.db).until(2.bars)
       end
       example 'a breathing drone' do

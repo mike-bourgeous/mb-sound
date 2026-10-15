@@ -453,6 +453,61 @@ module MB
         @name
       end
 
+      # Ruby code that rebuilds this curve (`Curve[:back, overshoot: 0.3]`,
+      # `Curve[30.0]` for Curve.db, `Curve[[0.25, 0.1, 0.25, 1.0]]` for a
+      # bezier, `Curve[:bounce].reverse`), or nil for curves that can't be
+      # written that way (Procs, #then, #blend, #steps along another
+      # curve).  Recipes and graph documents print curves with it.
+      def to_ruby
+        Curve.key_ruby(key)
+      end
+
+      # The code for a curve +key+ (see #to_ruby), or nil.
+      def self.key_ruby(key)
+        case key
+        when Array
+          if key.length == 3 && key[0] == :steps && key[2].nil? && key[1].is_a?(Integer)
+            return Curve.named(:steps, cycles: key[1]).key == key ? "Curve[:steps, cycles: #{key[1]}]" : nil
+          end
+
+          op, inner = key
+          return nil unless key.length == 2 && %i[reverse in out in_out out_in].include?(op)
+          text = key_ruby(inner)
+          text && "#{text}.#{op}"
+
+        when String
+          m = key.match(/\A([a-z_0-9]+)(?:\((.*)\))?\z/)
+          return nil unless m
+
+          base = m[1]
+          args = m[2]&.split(', ')
+          if base == 'db' && args&.length == 1
+            text = "Curve[#{args[0]}]"
+            return Curve.db(Float(args[0])).key == key ? text : nil
+          elsif base == 'bezier' && args&.length == 4
+            return Curve.bezier(*args.map { |a| Float(a) }).key == key ? "Curve[[#{args.join(', ')}]]" : nil
+          end
+
+          begin
+            named = Curve.named(base.to_sym)
+          rescue ArgumentError
+            return nil
+          end
+          options = named.instance_variable_get(:@options) || {}
+          if args
+            return nil unless args.length == options.length
+            options = options.keys.zip(args.map { |a| Float(a) }).to_h
+          end
+          curve = Curve.named(base.to_sym, **options)
+          return nil unless curve.key == key
+
+          opts = options.empty? || Curve.named(base.to_sym).key == key ? '' : ", #{options.map { |k, v| "#{k}: #{v}" }.join(', ')}"
+          "Curve[:#{base}#{opts}]"
+        end
+      rescue ArgumentError
+        nil
+      end
+
       def inspect
         "#<#{self.class.name} #{@name} (#{@kind})>"
       end

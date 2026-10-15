@@ -124,8 +124,13 @@ module MB
         #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900)
         #     play 220.hz.square.decimate(0.2.hz.lfo.at(500..6000), jitter: 0.2)
         #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900, mix: 0.4)   # 40% crushed
-        def decimate(rate, jitter: 0, seed: nil, mix: 1)
-          Decimator.new(self, rate: rate, jitter: jitter, seed: seed, mix: mix, sample_rate: sample_rate)
+        #     play 220.hz.triangle.decimate(4000, interpolation: :linear)            # grit, less ringing
+        #
+        # +interpolation+ :linear joins the held samples with straight lines
+        # (a first-order hold, one hold period late) instead of steps:
+        # the same folding with much weaker high images.
+        def decimate(rate, jitter: 0, seed: nil, mix: 1, interpolation: :hold)
+          Decimator.new(self, rate: rate, jitter: jitter, seed: seed, mix: mix, interpolation: interpolation, sample_rate: sample_rate)
         end
         alias crush_rate decimate
         alias srr decimate

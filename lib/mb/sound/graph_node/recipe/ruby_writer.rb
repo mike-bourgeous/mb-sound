@@ -859,6 +859,7 @@ module MB
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
+            when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")
             when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
             when Data

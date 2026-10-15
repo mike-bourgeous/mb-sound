@@ -75,6 +75,12 @@ module MB
       # density), or a length between impulses on average (`1.beat`).  Plays
       # until its rate node ends (forever for a fixed rate).
       #
+      # +min_gap+ (seconds, a Length, or a Duration) keeps impulses at least
+      # that far apart, like a struck object that has to swing back before
+      # it can be hit again; the rate stays the average (each allowed
+      # sample's chance grows to make up for the time shut out), up to one
+      # impulse per gap, where they come like clockwork.
+      #
       # C kernel MB::Sound::FastTexture.dust, exact Ruby mirror
       # Dust.process_ruby.
       #
@@ -94,8 +100,20 @@ module MB
         # Creates a dust source (see the class description).  +range+ (a
         # Range of numbers) overrides the heights' range; +bipolar+ makes
         # the default -1..1 instead of 0..1.
-        def initialize(rate, bipolar: false, range: nil, seed: nil, sample_rate: 48000)
+        def initialize(rate, bipolar: false, range: nil, min_gap: nil, seed: nil, sample_rate: 48000)
           init_rate(rate, 'Dust')
+          @min_gap = min_gap
+          @gap = nil
+          case min_gap
+          when nil
+          when Numeric
+            raise ArgumentError, "Dust min_gap must be a time of 0 or more (got #{min_gap})" unless min_gap.real? && min_gap >= 0 && min_gap.finite?
+            @gap = Length::Source.new(min_gap.to_f) if min_gap > 0
+          when Length::Seconds, Length::Samples, Sequence::Duration
+            @gap = Length::Source.new(min_gap)
+          else
+            raise ArgumentError, "Dust min_gap must be seconds, a Length (e.g. 120.ms), or a Duration (e.g. 1.n16; got #{min_gap.inspect})"
+          end
           range ||= bipolar ? -1.0..1.0 : 0.0..1.0
           unless range.is_a?(Range) && range.begin.is_a?(Numeric) && range.end.is_a?(Numeric)
             raise ArgumentError, "Dust range must be a Range of numbers (got #{range.inspect})"
@@ -111,6 +129,7 @@ module MB
         # Restarts the random sequence from the seed.
         def reset
           @rng = Numo::UInt64[@seed & Tone::MASK64]
+          @since = Numo::DFloat[Float::INFINITY]
           self
         end
 
@@ -119,36 +138,58 @@ module MB
           return nil if r.nil? || (r.is_a?(Numo::NArray) && r.empty?)
           count = r.length if r.is_a?(Numo::NArray)
 
+          gap = @gap ? @gap.samples(count, @sample_rate) : 0
+          return nil if gap.nil?
+
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          MB::Sound::FastTexture.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end)
+          MB::Sound::FastTexture.dust(@buf, r, @rng, @sample_rate, @range.begin, @range.end, gap, @since)
         end
 
         def sources
-          rate_sources
+          s = rate_sources
+          s[:min_gap] = @gap.node if @gap&.node?
+          s
         end
 
         def to_s
-          "Dust #{rate_text}, #{MB::M.sigfigs(@range.begin, 3)}..#{MB::M.sigfigs(@range.end, 3)}"
+          g = @gap ? ", min gap #{@min_gap}" : ''
+          "Dust #{rate_text}, #{MB::M.sigfigs(@range.begin, 3)}..#{MB::M.sigfigs(@range.end, 3)}#{g}"
         end
 
         # The exact Ruby mirror of MB::Sound::FastTexture.dust (same arguments;
         # see ext/mb/sound/fast_texture/fast_texture.c).
-        def self.process_ruby(out, rate, rng, sample_rate, lo, hi)
+        def self.process_ruby(out, rate, rng, sample_rate, lo, hi, gap, since)
           fs = sample_rate.to_f
           raise ArgumentError, 'The sample rate must be positive' unless fs > 0
 
           n = out.length
           rs = Drift.signal_values(rate, n)
+          gs = Drift.signal_values(gap, n)
           seed = [rng[0].to_i]
           lo = lo.to_f
           span = hi.to_f - lo
+          s = since[0]
 
           n.times do |i|
             p = Drift.increment(rs.is_a?(Array) ? rs[i] : rs, fs)
             u = Tone.noise_random(seed)
-            out[i] = u < p ? lo + span * (u / p) : 0.0
+            g = gs.is_a?(Array) ? gs[i] : gs
+            g = 0.0 unless g > 0
+            dead = g > 1.0 ? (g.finite? ? g.ceil.to_f : g) - 1.0 : 0.0
+            y = 0.0
+            s += 1.0
+            if s >= g
+              q = p
+              q = p * dead < 1.0 ? p / (1.0 - p * dead) : 1.0 if dead > 0
+              if u < q
+                y = lo + span * (u / q)
+                s = 0.0
+              end
+            end
+            out[i] = y
           end
 
+          since[0] = s
           rng[0] = seed[0]
           out
         end

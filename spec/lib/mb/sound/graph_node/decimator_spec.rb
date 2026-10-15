@@ -150,4 +150,21 @@ RSpec.describe(MB::Sound::GraphNode::Decimator, :aggregate_failures) do
       expect { 220.hz.ramp.decimate(2500, mix: :x) }.to raise_error(ArgumentError, /mix/)
     end
   end
+
+  describe 'interpolation: :linear' do
+    it 'is the same at any buffer size, prints back, and rejects unknown names' do
+      make = -> { 330.hz.triangle.decimate(0.5.hz.lfo.at(2000..6000), interpolation: :linear, jitter: 0.2, seed: 3) }
+      a = collect(make.(), 9600)
+      b = collect(make.(), 9600, [1, 7, 128, 33])
+      expect(b).to eq(a)
+      hold = collect(330.hz.triangle.decimate(4000), 4800)
+      lin = collect(330.hz.triangle.decimate(4000, interpolation: :foh), 4800)
+      expect(lin).not_to eq(hold)
+      node = 220.hz.ramp.decimate(2500, interpolation: :linear)
+      expect(node.interpolation).to eq(:linear)
+      expect(node.to_ruby).to include('decimate(2500, interpolation: :linear)')
+      expect(node.to_s).to include('linear')
+      expect { 220.hz.ramp.decimate(2500, interpolation: :cubic) }.to raise_error(ArgumentError, /interpolation/)
+    end
+  end
 end
