@@ -183,7 +183,6 @@ module MB
           # its 12 px size (whole multiples).
           def text(x, y, str, color, bold: false)
             fw = Font::WIDTH
-            fh = Font::HEIGHT
             top = (y - 12).round
             x = x.round
             str.to_s.each_char.with_index do |c, i|
