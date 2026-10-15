@@ -851,7 +851,7 @@ module MB
         bounded = bars || seconds
         waiting = -> {
           session.schedule_due? ||
-            session.schedule_waiting?(repeating: !!bounded, before: end_time&.call)
+            session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
         }
         session.advance_idle = true
         until frames_left.call <= 0 || (session.idle? && !waiting.call)

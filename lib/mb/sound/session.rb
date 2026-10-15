@@ -649,7 +649,7 @@ module MB
       # sessions always pause while idle; setting it on one raises.
       def advance_idle=(value)
         raise ArgumentError, 'Only offline (realtime: false) sessions can advance while idle' if value && @realtime
-        @advance_idle = !!value
+        @advance_idle = value ? true : false
       end
 
       # How far ahead of their time scheduled blocks (song form sections,
