@@ -47,8 +47,13 @@ module MB
       end
       example 'a restless creature (walk, holds, jitter, overshoot)' do
         seed 5
-        mood = drift(4, walk: 0.5, hold: 0.2..0.9, jitter: 0.7, smooth: Curve[:back, overshoot: 0.5])
-        bg :try, 660.hz.transpose(mood.at(7)).triangle.lp4(2500).at(-26.db).until(2.bars)
+        wander = drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
+        bg :try, 220.hz.triangle.lp4(1800).pan(wander).at(-22.db).until(2.bars)
+      end
+      example 'a drum head as kick and toms' do
+        kick = grid(8, 'x..x..x.').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)
+        toms = grid(8, '.x..xxxx').loop.trigger.resonate(:membrane, 131, glide: 2, glide_time: 0.25, decay: 0.8)
+        bg :try, (kick.at(-4.db) + toms).at(-11.db).until(2.bars)
       end
     end
 

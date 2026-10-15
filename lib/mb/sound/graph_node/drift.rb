@@ -43,8 +43,9 @@ module MB
       # points unevenly: 0 (default) evenly, 1 at Poisson-like random
       # intervals (exponential lengths), the average rate staying +rate+.
       # Walk, hold, jitter, and an overshooting curve together make a
-      # restless, creature-like line (`drift(2, walk: 0.4, hold: 0.1..0.8,
-      # jitter: 0.6, smooth: Curve[:back, overshoot: 0.4])`).
+      # restless, creature-like line, best heard as a pan (`drift(3, range:
+      # -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth:
+      # Curve[:elastic, overshoot: 0.5])`, the maintainer's picks).
       #
       # Random numbers come from splitmix64 generators seeded from +seed+
       # (or a sub-seed drawn from MB::Sound's root generator when the node

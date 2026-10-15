@@ -82,7 +82,7 @@ module MB
         #     play dust(0.7, range: 0.3..1).resonate(:bowl, 220).at(-6.db)
         #     play grid(8, 'x..x..x.').loop.trigger.resonate(:marimba, 440).at(-6.db)
         #     play noise.at(0.0005).resonate(:glass, spread: 0.6)               # a rubbed rim (660 Hz)
-        #     play grid(4, 'x...').loop.trigger.resonate(:membrane, 55, glide: 7, glide_time: 0.15)   # a kick
+        #     play grid(4, 'x...').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)   # a kick
         #     synth(midi) { |v| v.trigger.resonate(:vibes, v.freq) }
         def resonate(preset = :bowl, freq = nil, decay: nil, beat: nil, spread: nil, normalize: true, glide: nil, glide_time: nil)
           preset, freq = freq, preset unless preset.is_a?(Symbol) || preset.is_a?(Array)

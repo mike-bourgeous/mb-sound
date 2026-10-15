@@ -52,8 +52,9 @@ module MB
       #     play 220.hz.transpose(drift(0.4, walk: 0.3).at(0.15)).saw.lp4(1500).at(-20.db)
       #     play noise.lp4(drift(0.3).at(200..2500), resonance: 0.3).at(-14.db)      # wind
       #     play 330.hz.triangle.pan(drift(3.seconds)).at(-18.db)
-      #     # a restless creature: walk, random holds, uneven spacing, overshoot
-      #     play 440.hz.transpose(drift(3, walk: 0.5, hold: 0.2..0.9, jitter: 0.7, smooth: Curve[:back, overshoot: 0.5]).at(5)).triangle.at(-20.db)
+      #     # a restless creature darting around the stereo field: walk, random
+      #     # holds, uneven spacing, an overshooting curve
+      #     play 220.hz.triangle.lp4(1800).pan(drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])).at(-20.db)
       def drift(rate = 0.2, range: -1.0..1.0, smooth: :cubic, walk: nil, hold: nil, jitter: nil, from: nil, seed: nil)
         MB::Sound::GraphNode::Drift.new(rate, range: range, smooth: smooth, walk: walk, hold: hold, jitter: jitter, from: from, seed: seed)
       end
