@@ -67,6 +67,32 @@ End to end, `vis` on a NullOutput Session (800-sample buffers, 60 per second, 12
 
 A scope frame's 7 ms: about 1.5 ms decimating and rasterizing lines, 1.4 ms canvas conversion (Numo), 0.8 ms cell composition, 1.9 ms ANSI output.  Writing to a real terminal adds the terminal's own time (a 120x45 truecolor frame is 13-29 KB: scope waveform 27 KB, ascii 16 KB).  Static renders for the gallery (5 charts): text 25-115 ms per look, SVG 50-90 ms per theme, PNG ~200 ms per 720x380 image (the pixel renderer is too slow for 60 fps inline-image vis; live vis stays text).
 
+## Live panes: fast_ui kernels and Plot::Live (ui-2 step 1, 2026-10-15)
+
+The terminal UI (research-ui-2 d3e30356: in-process painter, native cell grid, snapshot-driven panes) needs plot panes that hold the GVL briefly and allocate little; the spike measured 1-1.6 ms per Plot frame on the 7950X.  The maintainer's bar: "a two-waveform gnuplot-based plot ... at over 90fps in Konsole. So let's get aggressive"; "If Braille slows us down with multibyte chars we can explore other options too."
+
+**C kernels** (`ext/mb/sound/fast_ui`, `MB::Sound::FastUI`; every one an exact mirror of the Ruby, which stays as the reference: `Plot.native = false` or `MB_SOUND_PLOT=ruby`):
+- `FastUI.decimate` (`Geometry.decimate_ruby`), `.polyline` (`Raster#polyline_ruby`: line_points + dash + set; lines over 4M dots go to Ruby, which subsamples), `.area` (`Text::Surface#area_ruby`), `.project` (`Mark::Base#device_ruby` for scales whose `forward` is Base's (linear) or Log's; `Scale#projection`), `.monotonic` (`Geometry.monotonic_ruby`).  Numo semantics copied: NaN-skipping min/max (numo `f_min`/`f_max`), numo's double to Int32 cast (through `long long` for negatives), C `round`.
+- `FastUI::Grid`: cells as codepoint + fg/bg 0xRRGGBB (-1 none) + attributes; `#compose` (Canvas.cells + Panel#compose without a heatmap layer; canvases get codepoint tables from `Canvas::TABLES`), `#lines`/`#to_text` (SGR in every color mode; `index256` and the 16-color table ported exactly; a reused byte buffer and a 64-entry SGR cache), `#frame(prev, mode, row, col, sync)` (all cells or the cells that differ from `prev`, runs placed with CUP, gaps of up to 4 unchanged cells rewritten, DEC 2026 optional), `#write_frame(io, ...)` (encode + write(2) without the GVL; the buffer is reserved for the worst case first).  `Text::NativeCells < FastUI::Grid` has `Text::Cells`' interface; `Cells` (the Ruby mirror) now stores colors packed as Integers and compares styles by value (identity before: equal colors from different Arrays emitted a redundant reset + SGR; no existing spec changed).
+- `Text::Frame` draws in two steps, `Panel#layout` (title, legend, axes, labels, colorbar, grid lines into a Surface snapshot) and `Panel#paint` (marks + compose), and keeps the layout while `Panel.layout_key` (titles, legend entries, fitted scales' settings, heatmap scale/colormap) is unchanged.  Static cells are all outside the plot area, so drawing them before the marks gives the same text; `Text.render` uses a fresh Frame.
+- `Plot::Live.new(width:, height:, look:, color:, theme:)`: `#redraw(chart)` (text, identical to `Text.render`), `#lines`, `#frame(chart, row:, col:, full:, sync:)` and `#write(io, chart, ...)` (only the cells that changed since the last frame; `#invalidate` after a clear), `#layouts`.
+- Kept as built: for irregular x (log frequency) `decimate_ruby` keeps each group's first and last x even for text rasters (its `ends` variable is reassigned before the check); the C mirrors it.
+
+**Measured** (`bin/plot_benchmark.rb --yjit both`, Mac container, i9-9880H, 300 frames per case, fresh data every frame, truecolor; ms median; before = master-ai 4f1ffe0d `Text.render`, after = `Live#redraw`; full table in the ui-2 report):
+
+| pane | look | before off / on | after off / on | allocations | GC runs per 1000 frames |
+|---|---|---|---|---|---|
+| scope 60x16, 2 ch | scope | 1.86 / 1.45 | 0.21 / 0.16 | 4318 -> 236 | 70 -> 3 |
+| scope 60x16 | blocks | 1.93 / 1.56 | 0.21 / 0.17 | 5317 -> 326 | 43 -> 3 |
+| spectrum 120x30 (2048-point FFT included) | scope | 3.59 / 3.32 | 0.30 / 0.28 | 8400 -> 166 | 37 -> 3 |
+| vis 120x45, 2 ch | scope | 4.96 / 3.59 | 0.35 / 0.35 | 10169 -> 236 | 60 -> 0 |
+| vis 120x45 | blocks | 4.68 / 3.84 | 0.31 / 0.27 | 13293 -> 326 | 50 -> 0 |
+| vis 120x45 | ascii | 2.70 / 2.24 | 0.23 / 0.19 | 7555 -> 236 | 33 -> 0 |
+
+8-15x faster in every look and color mode, YJIT on or off; `MB_SOUND_PLOT=ruby` with `Text.render` measures 0.8-1.0x of master (the packed-color mirror is slightly slower), a fair stand-in for "before" where master isn't at hand (`bin/plot_benchmark_native.sh` uses it).  What is left per frame is mostly Ruby building the chart (preset, marks, scales fit: ~0.05-0.1 ms; the spectrum's FFT 0.08 ms), not drawing.  Budget: a scope plus a spectrum pane at 30 fps cost ~0.45 ms per 33 ms frame (1.4% of a core), each GVL hold one pane's draw (0.15-0.3 ms median, p99 0.4-0.8 ms; `write_frame` encodes and writes without the GVL), next to the spike's 0.26 ms p99 render-thread wait for native panes with `Thread.pass` between them.  A 120x45 two-channel vis at 90 fps: 0.35 ms x 90 = 3% of a core before the terminal.
+
+**Terminal bytes per frame** (truecolor, DEC 2026 included): full redraws scope look 5.8 KB at 60x16, 22 KB at 120x45; changed cells 3.3 KB and 11.3 KB (waveforms move everywhere, so most cells change); blocks 15.5 KB changed of 20 KB at 120x45 (two colors per cell); ascii 2.6 KB of 5.7 KB; color mode none roughly halves it.  Braille is 3 bytes per cell, but the escapes dominate: at 120x45 a scope frame is 4.3 KB without color vs 11.3 KB truecolor.  The terminal's own parse and draw time can only be measured in a real terminal: `bin/plot_benchmark.rb --tty` (ends with a cursor position query the terminal must answer) and `bin/plot_benchmark_native.sh` for the maintainer's iTerm2/Konsole.  Inline images are no option for live panes yet: `to_png` at 480x256 takes ~310 ms.
+
 ## Open questions and later work
 
 - Which looks and themes to keep as defaults (the gallery is for picking): `:scope` and `:paper`/`:studio` for now.

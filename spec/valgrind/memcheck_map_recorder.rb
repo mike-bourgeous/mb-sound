@@ -91,7 +91,7 @@ module MemcheckMapRecorder
         'specs' => specs.sort.to_h,
       }
       File.write(file, JSON.pretty_generate(out) + "\n")
-      warn "MEMCHECK_MAP: wrote #{MemcheckSelection::MAP_PATH} (#{(@seen | @calls.keys).count { |s| list.include?(s) }} spec files recorded, #{specs.length} in the map)"
+      $stderr.puts "MEMCHECK_MAP: wrote #{MemcheckSelection::MAP_PATH} (#{(@seen | @calls.keys).count { |s| list.include?(s) }} spec files recorded, #{specs.length} in the map)"
     end
   end
 

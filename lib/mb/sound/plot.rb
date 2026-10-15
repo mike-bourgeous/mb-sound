@@ -1,4 +1,5 @@
 require 'numo/narray'
+require_relative 'fast_ui'
 
 module MB
   module Sound
@@ -33,6 +34,14 @@ module MB
     # See design/notes/plotting.md.
     module Plot
       class PlotError < RuntimeError; end
+
+      class << self
+        # True (the default) to draw text plots with the C kernels of
+        # MB::Sound::FastUI, false for their exact Ruby mirrors (also
+        # MB_SOUND_PLOT=ruby in the environment).  Both give the same text.
+        attr_accessor :native
+      end
+      self.native = ENV['MB_SOUND_PLOT'] != 'ruby'
     end
   end
 end
@@ -46,6 +55,7 @@ require_relative 'plot/mark'
 require_relative 'plot/chart'
 require_relative 'plot/layout'
 require_relative 'plot/text'
+require_relative 'plot/live'
 require_relative 'plot/svg'
 require_relative 'plot/image'
 require_relative 'plot/ansi_html'

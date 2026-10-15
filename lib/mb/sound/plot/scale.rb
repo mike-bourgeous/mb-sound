@@ -109,6 +109,20 @@ module MB
             true
           end
 
+          # [kind, lo, span, reverse] for FastUI.project when this scale
+          # maps data like Base#forward (kind 0) or Log#forward (kind 1),
+          # else nil.
+          def projection
+            return nil unless @lo
+
+            owner = method(:forward).owner
+            if owner == Base
+              [0, @lo, @hi - @lo, @reverse]
+            elsif owner == Log
+              [1, @llo, @lspan, @reverse]
+            end
+          end
+
           # Extra labeled ticks drawn on a second row (note names for
           # Frequency scales), or an empty Array.
           def secondary_ticks(count = 5)

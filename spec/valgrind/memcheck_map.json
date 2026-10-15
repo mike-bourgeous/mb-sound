@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-14",
+  "generated": "2026-10-15",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -212,6 +212,26 @@
       "fast_texture": [
         "FastTexture.drift",
         "FastTexture.dust"
+      ]
+    },
+    "spec/ext/mb/sound/fast_ui_spec.rb": {
+      "fast_ui": [
+        "FastUI.area",
+        "FastUI.decimate",
+        "FastUI.monotonic",
+        "FastUI.polyline",
+        "FastUI.project",
+        "FastUI::Grid#char",
+        "FastUI::Grid#compose",
+        "FastUI::Grid#copy_from",
+        "FastUI::Grid#frame",
+        "FastUI::Grid#initialize",
+        "FastUI::Grid#lines",
+        "FastUI::Grid#put_text",
+        "FastUI::Grid#set_cell",
+        "FastUI::Grid#to_text",
+        "FastUI::Grid#width",
+        "FastUI::Grid#write_frame"
       ]
     },
     "spec/ext/mb/sound/fast_unison_spec.rb": {
@@ -1342,8 +1362,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
