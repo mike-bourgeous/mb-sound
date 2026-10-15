@@ -1047,6 +1047,8 @@ module MB
         parts = ["#{format('%.3f', seconds)} s"]
         parts << "#{channel_count} ch" unless mono?
         parts << "root #{Sample.note_name(@root)}"
+        parts << "#{@bpm == @bpm.round ? @bpm.round : @bpm.round(2)} BPM" if @bpm
+        parts << "key #{@key}" if @key
         parts << "loop #{@loop_mode}" if @loop_points
         parts << 'reversed' if @reversed
         parts << read_style_name if @interpolation || !@mips.nil?
