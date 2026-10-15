@@ -331,4 +331,43 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       expect { g.compose(dots, 0, 2, 4, 0, 0, 4, 2, Numo::Int32[0], Numo::Int32[-1], plot::Text::Canvas::TABLES[:braille]) }.to raise_error(IndexError)
     end
   end
+
+  describe 'GVLProbe' do
+    let(:probe) { MB::Sound::FastUI::GVLProbe }
+
+    after { probe.stop }
+
+    it 'records GVL waits and holds of watched threads, and who held the GVL for long waits' do
+      waiter = Thread.new { 20.times { sleep 0.002; 2000.times { } } }
+      probe.start([waiter, Thread.current])
+      expect(probe).to be_active
+      # Hold the GVL for a few ms at a time so the waiter waits on wakeups
+      t = MB::U.clock_now
+      while MB::U.clock_now - t < 0.15 && waiter.alive?
+        u = MB::U.clock_now
+        nil while MB::U.clock_now - u < 0.003
+        Thread.pass
+      end
+      waiter.join
+      probe.stop
+      expect(probe).not_to be_active
+
+      waits = probe.waits(0)
+      expect(waits.length).to be_between(1, 21)
+      expect(waits).to all(be >= 0)
+      expect(probe.holds(1)).not_to be_empty
+      blockers = probe.blockers(0)
+      expect(blockers).to all(match([be >= 0.001, be_between(-1, 1)]))
+      expect(blockers.map(&:last)).to include(1) unless blockers.empty?
+    end
+
+    it 'checks its arguments' do
+      expect { probe.start([]) }.to raise_error(ArgumentError, /1 to 4 threads/)
+      expect { probe.start([Thread.current] * 5) }.to raise_error(ArgumentError)
+      expect { probe.start([1]) }.to raise_error(TypeError)
+      probe.start([Thread.current])
+      expect { probe.waits(1) }.to raise_error(IndexError, /No GVLProbe slot 1/)
+      expect(probe.waits(0)).to eq([])
+    end
+  end
 end
