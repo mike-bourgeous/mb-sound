@@ -291,6 +291,28 @@ textures-5 (2026-10-16, Bench notes on round 4):
 A `fly_by`/doppler helper waits for a second use (the maintainer); the
 placement lives in critters.rb's `critter_place`.
 
+textures-6 (2026-10-16, Bench notes on round 5):
+
+- Fly: the maintainer picked 1 Hz of 1/2/3 Hz, "1.3 to 1.6 might be
+  perfect", so the default is 1.5 Hz (`critter_place`, `critters`, `-S`,
+  and the help example).  Same measurement as above, pitch shift
+  p95/max and rate p95: 1.6 Hz 1.1/3.1 st, 12 st/s; 1.5 Hz 1.0/2.8, 11;
+  1.3 Hz 0.9/2.4, 9.
+- Mouse ("Tick density should threshold so there's only brief moments of
+  scratching as the mouse darts"): the ticks start above a speed
+  threshold (`critter_mouse(..., dash: 1.5)` m/s) and reach 40 a second
+  0.7 m/s faster, with no lowpass on the speed, so walking, slowing, and
+  standing still are silent.  Seed 3, 32 s: scratching 27% of the time in
+  17 bursts (median 0.4 s, at most 1.4 s); textures-5 ticked 71% of the
+  time, in bursts up to 5 s.  `dash: 2` scratches 13% of the time (median
+  0.26 s).  `critter_velocity` is 0 for its first 20 ms (the delays still
+  hold zeros; critters started at tens of m/s, and the mouse scratched).
+- Tape: `ambient_tape(..., bits:)` sets the grain's depth directly (wear
+  still sets wow and the lowpass), for the Bench's 12 / 10 / 8.2-bit
+  comparison with the room-then-tape order and TPDF.  Hiss floor in the
+  tail (one harp D4, before the voice gain, 3-4 s after the note): 12
+  bits -82 dBFS, 10 bits -71, 8.2 bits -60.
+
 ## Costs (Linux desktop 7950X, min of 3, 800-sample buffers unless noted)
 
 | node | ns/sample | % of realtime |
@@ -334,7 +356,8 @@ now that the prime is on the note.  textures-4: the restless creature pans
 pink noise (easier to place than the triangle), and the fly's wings follow
 its effort (speed from its own path: pitch, brightness, level).
 textures-5: the creature is band-limited pink (300 Hz-6 kHz, the
-maintainer's pick), the fly's doppler smoothed at 2 Hz.
+maintainer's pick), the fly's doppler smoothed at 2 Hz (1.5 Hz since
+textures-6).
 
 ## Ambient tape (`ambient_tape` in bin/synths/ambient.rb)
 
