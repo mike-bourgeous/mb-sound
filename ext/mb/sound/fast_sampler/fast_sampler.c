@@ -13,7 +13,7 @@
  * SMP_REGION_COLS values per region (see the REGION_* indices), picked by
  * note number and velocity (the first that matches).
  *
- * +inputs+ is [trigger, number, freq, gate, start, shift], signal inputs (a
+ * +inputs+ is [trigger, number, freq, gate, start, shift, choke], signal inputs (a
  * Numeric, nil, or an NArray of out.length values read as float32):
  * - trigger: a note-on at every sample above 0, its value the velocity
  *   (0..1; Notes#trigger), so starts are sample-exact.
@@ -26,9 +26,14 @@
  * - start: the play start as a fraction of the region (read at note-on).
  * - shift: the note's pitch mark in semitones (Notes#pitch_mark: chop
  *   hits' per-note pitch), read at note-on.
+ * - choke: nil, or the voice's chokes (Notes#choke: choke groups, SF2
+ *   exclusive classes): at a nonzero sample without a note-on, the voice
+ *   stops config[6] samples later (fading out linearly over them when
+ *   config[7] is 1, like Drums::ChokeGate; 0 when an envelope fades it);
+ *   a note-on cancels the choke, and a choke while choking changes nothing.
  *
  * +config+ is [a4 Hz, declick samples, split key, interpolation code, sinc
- * kernel, transpose semitones].  Each region's REGION_INTERP column is its
+ * kernel, transpose semitones, choke samples, choke fade (0 or 1)].  Each region's REGION_INTERP column is its
  * own interpolation code (a lofi Sample's drop-sample read), or -1 for
  * config's; the sinc kernel must be given if any region reads with sinc.  With a split key (-1 for none), notes from
  * it up play the region the voice last played below it, chromatically
@@ -41,8 +46,8 @@
  * every sample reads at most two positions (two levels each).
  *
  * +state+ is a DFloat of SMP_STATE_LENGTH values (the current note, the
- * tail, the tail's samples left, and the region last played below the
- * split), +counters+ a DFloat of 128 note-on
+ * tail, the tail's samples left, the region last played below the split,
+ * and the choke's samples left), +counters+ a DFloat of 128 note-on
  * counts per key (sequential round robins), +rng+ a one-value UInt64
  * splitmix64 state (one random draw per note-on, for random round robins).
  * All are updated in place.
@@ -119,7 +124,8 @@ enum {
 
 #define SMP_TAIL_LEFT (2 * SMP_VOICE)
 #define SMP_LAST_REGION (2 * SMP_VOICE + 1)
-#define SMP_STATE_LENGTH (2 * SMP_VOICE + 2)
+#define SMP_CHOKE_LEFT (2 * SMP_VOICE + 2)
+#define SMP_STATE_LENGTH (2 * SMP_VOICE + 3)
 
 struct smp_voice {
 	_Bool active;
@@ -361,11 +367,11 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	Check_Type(specs, T_ARRAY);
 	Check_Type(inputs, T_ARRAY);
 	Check_Type(config, T_ARRAY);
-	if (RARRAY_LEN(inputs) != 6) {
-		rb_raise(rb_eArgError, "Sampler inputs are [trigger, number, freq, gate, start, shift]");
+	if (RARRAY_LEN(inputs) != 7) {
+		rb_raise(rb_eArgError, "Sampler inputs are [trigger, number, freq, gate, start, shift, choke]");
 	}
-	if (RARRAY_LEN(config) != 6) {
-		rb_raise(rb_eArgError, "Sampler config is [a4, declick, split, interpolation, sinc, transpose]");
+	if (RARRAY_LEN(config) != 8) {
+		rb_raise(rb_eArgError, "Sampler config is [a4, declick, split, interpolation, sinc, transpose, choke samples, choke fade]");
 	}
 	if (RARRAY_LEN(specs) < 1) {
 		rb_raise(rb_eArgError, "A sampler needs at least one table");
@@ -429,6 +435,11 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	double a4 = NUM2DBL(rb_ary_entry(config, 0));
 	long declick = NUM2LONG(rb_ary_entry(config, 1));
 	double transpose = NUM2DBL(rb_ary_entry(config, 5));
+	long choke_len = NUM2LONG(rb_ary_entry(config, 6));
+	_Bool choke_fade = NUM2LONG(rb_ary_entry(config, 7)) != 0;
+	if (choke_len < 1) {
+		rb_raise(rb_eArgError, "The sampler's choke length must be at least one sample");
+	}
 
 	double *st = smp_dfloat(state, SMP_STATE_LENGTH, "Sampler state");
 	double *cnt = smp_dfloat(counters, 128, "Sampler counters");
@@ -446,20 +457,24 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	VALUE gate_v = rb_ary_entry(inputs, 3);
 	VALUE start_v = rb_ary_entry(inputs, 4);
 	VALUE shift_v = rb_ary_entry(inputs, 5);
+	VALUE choke_v = rb_ary_entry(inputs, 6);
 	_Bool has_freq = !NIL_P(freq_v);
 	_Bool has_gate = !NIL_P(gate_v);
-	struct mb_signal trig, num, freq, gate, startf, shift;
+	_Bool has_choke = !NIL_P(choke_v);
+	struct mb_signal trig, num, freq, gate, startf, shift, choke;
 	mb_signal_input(&trig_v, length, "Trigger", &trig);
 	mb_signal_input(&num_v, length, "Number", &num);
 	mb_signal_input(&freq_v, length, "Frequency", &freq);
 	mb_signal_input(&gate_v, length, "Gate", &gate);
 	mb_signal_input(&start_v, length, "Start", &startf);
 	mb_signal_input(&shift_v, length, "Shift", &shift);
+	mb_signal_input(&choke_v, length, "Choke", &choke);
 
 	struct smp_voice cur, tail;
 	smp_get(st, &cur);
 	smp_get(st + SMP_VOICE, &tail);
 	double left = st[SMP_TAIL_LEFT];
+	double choke_left = st[SMP_CHOKE_LEFT];
 	c.last_region = (long)st[SMP_LAST_REGION];
 	if (c.last_region < -1 || c.last_region >= c.nregions) {
 		rb_raise(rb_eArgError, "The sampler state's last region is out of range");
@@ -484,6 +499,9 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 			}
 			double vel = t > 1 ? 1.0 : t;
 			smp_note_on(&c, &cur, slot, n, vel, mb_signal_at(&startf, i), mb_signal_at(&shift, i), cnt, rs, a4, transpose);
+			choke_left = 0;
+		} else if (has_choke && choke_left <= 0 && mb_signal_at(&choke, i) != 0 && (cur.active || tail.active)) {
+			choke_left = (double)choke_len;
 		}
 
 		if (has_gate && mb_signal_at(&gate, i) <= 0) {
@@ -508,6 +526,16 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 				tail.active = 0;
 			}
 		}
+		if (choke_left > 0) {
+			if (choke_fade) {
+				v = v * (choke_left / (double)choke_len);
+			}
+			choke_left = choke_left - 1;
+			if (choke_left <= 0) {
+				cur.active = 0;
+				tail.active = 0;
+			}
+		}
 
 		out[i] = v;
 	}
@@ -515,6 +543,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	smp_put(st, &cur);
 	smp_put(st + SMP_VOICE, &tail);
 	st[SMP_TAIL_LEFT] = left;
+	st[SMP_CHOKE_LEFT] = choke_left;
 	st[SMP_LAST_REGION] = (double)c.last_region;
 
 	RB_GC_GUARD(trig_v);
@@ -523,6 +552,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE specs, VALUE regions, VAL
 	RB_GC_GUARD(gate_v);
 	RB_GC_GUARD(start_v);
 	RB_GC_GUARD(shift_v);
+	RB_GC_GUARD(choke_v);
 
 	return buffer;
 }
@@ -536,6 +566,7 @@ void Init_fast_sampler(void)
 	rb_define_module_function(fast_sampler, "play", ruby_play, 8);
 	rb_define_const(fast_sampler, "REGION_COLS", INT2FIX(SMP_REGION_COLS));
 	rb_define_const(fast_sampler, "STATE_LENGTH", INT2FIX(SMP_STATE_LENGTH));
+	rb_define_const(fast_sampler, "CHOKE_LEFT", INT2FIX(SMP_CHOKE_LEFT));
 
 	mb_granular_init(fast_sampler);
 }
