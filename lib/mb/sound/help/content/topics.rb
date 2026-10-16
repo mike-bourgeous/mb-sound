@@ -187,10 +187,9 @@ module MB
         `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
         synth, `sfz(path)` and `sf2(path, preset)` instruments (`help
         :soundfonts`), or `sample.node`.  A synth that runs out of voices
-        steals one: voices without an envelope ring on under the new notes
-        unless played with `steal_fade: true` (`sample.play(v, steal_fade:
-        true)`, `.sampler(brk, voices: 3, steal_fade: true)`), which fades
-        them over 3 ms from the steal (or `steal_fade: 10.ms`).
+        steals one, fading it over 3 ms from the steal (`steal_fade: 10.ms`
+        for longer; `sample.play(v, steal_fade: false)` or `.sampler(brk,
+        voices: 3, steal_fade: false)` lets it ring on under the new notes).
 
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle

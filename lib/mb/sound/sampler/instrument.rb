@@ -229,19 +229,20 @@ module MB
         # lowpassed by the #filter, if any.  A layered instrument (.layered)
         # sums its layers' voices (the same seed for each).
         #
-        # +steal_fade+ (off by default; an A/B, 2026-10-16): true (or a
-        # length) fades a voice out over Envelope::CHOKE_TIME (3 ms; or that
-        # length) from the exact sample its synth lane is choked: when the
-        # synth steals the voice for a new note (the new note takes a spare
-        # lane; see MIDI::Allocator), or at CC 120 (all sound off).  Without
-        # it a voice with no envelope (slices, plain samples, instruments
-        # without SFZ/SF2 envelopes) rings on under the new notes until its
-        # sample ends; voices with an envelope fade through the envelope's
-        # choke either way (then this also stops the voice after the fade,
-        # so a later note on the lane has no declick tail of the old one).
-        # A length also sets how fast choke groups fade the voice.
+        # +steal_fade+ (on by default since 2026-10-16, after the
+        # maintainer's A/B; false turns it off): fades a voice out over
+        # Envelope::CHOKE_TIME (3 ms; or a length given instead of true) from
+        # the exact sample its synth lane is choked: when the synth steals
+        # the voice for a new note (the new note takes a spare lane; see
+        # MIDI::Allocator), or at CC 120 (all sound off).  With false a
+        # voice with no envelope (slices, plain samples, instruments without
+        # SFZ/SF2 envelopes) rings on under the new notes until its sample
+        # ends; voices with an envelope fade through the envelope's choke
+        # either way (the fade also stops the voice afterwards, so a later
+        # note on the lane has no declick tail of the old one).  A length
+        # also sets how fast choke groups fade the voice.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: nil, mips: nil, seed: nil, steal_fade: false)
+                 interpolation: nil, mips: nil, seed: nil, steal_fade: true)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
             return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade)
