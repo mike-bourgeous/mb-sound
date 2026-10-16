@@ -123,26 +123,26 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect(c.at(1)[:as]).to eq(1)
       expect(c.at(5r / 2)[:a]).to eq(1)
       expect(c.at(7)[:as]).to eq(1)
-      l = MB::Sound.harmony(0 => dorian, 1 => f_major, loop: 2)
+      l = MB::Sound.harmony(0 => dorian, 1.bar => f_major, loop: 2.bars)
       # Halfway through the wrap from F major back to D dorian
       expect(l.at(3r / 2).pc).to eq(l.at(3r / 2 + 4).pc)
       expect(l.at(3r / 2).pc).to eq(f_major.blend(dorian, 0.5).pc)
-      s = MB::Sound.harmony(0 => dorian, 1 => f_major, curve: :smoothstep)
-      expect(s.at(1r / 4)[:as]).to be < MB::Sound.harmony(0 => dorian, 1 => f_major).at(1r / 4)[:as]
+      s = MB::Sound.harmony(0 => dorian, 1.bar => f_major, curve: :smoothstep)
+      expect(s.at(1r / 4)[:as]).to be < MB::Sound.harmony(0 => dorian, 1.bar => f_major).at(1r / 4)[:as]
       expect { MB::Sound.harmony(a: dorian) }.to raise_error(ArgumentError, /positions/)
-      expect { MB::Sound.harmony(0 => dorian, 2 => f_major, loop: 1) }.to raise_error(ArgumentError, /loop/)
+      expect { MB::Sound.harmony(0 => dorian, 2.bars => f_major, loop: 1.bar) }.to raise_error(ArgumentError, /loop/)
     end
 
     it 'combines harmonies moment by moment' do
-      key = MB::Sound.harmony(0 => dorian, 2 => f_major, loop: 4)
-      chords = MB::Sound.harmony(0 => [MB::Sound::D3, MB::Sound::F3, MB::Sound::A3], 1 => [MB::Sound::G2, MB::Sound::B2, MB::Sound::D3], loop: 2, curve: :step)
+      key = MB::Sound.harmony(0 => dorian, 2.bars => f_major, loop: 4.bars)
+      chords = MB::Sound.harmony(0 => [MB::Sound::D3, MB::Sound::F3, MB::Sound::A3], 1.bar => [MB::Sound::G2, MB::Sound::B2, MB::Sound::D3], loop: 2.bars, curve: :step)
       both = key.blur(0.1) + chords * 2
       [0r, 1r / 2, 1, 5r / 2, 3, 7r / 2].each do |t|
         expect(both.at(t)).to eq(key.at(t).blur(0.1) + chords.at(t) * 2)
         expect(both.at(t + 4)).to eq(both.at(t))
       end
       expect(both.period).to be_nil # (chords loop every 2, the key every 4)
-      same = key + MB::Sound.harmony(0 => dorian, 1 => f_major, loop: 4)
+      same = key + MB::Sound.harmony(0 => dorian, 1.bar => f_major, loop: 4.bars)
       expect(same.period).to eq(4)
       expect(same.at(9r / 2)).to eq(same.at(1r / 2))
       expect(MB::Sound.harmony(0 => dorian).blur(0.1) + key).to be_a(MB::Sound::Generative::Harmony)
@@ -158,6 +158,117 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect(f.notes).to eq((57..81).to_a)
       looped = MB::Sound.harmony(0 => dorian, 1.bar => f_major, loop: 2.bars, curve: :step)
       expect(looped.to_ruby).to eq('harmony(0 => scale(:dorian, D4).weights, 1.bar => scale(:major, F4).weights, curve: :step, loop: 2.bars)')
+    end
+
+    it 'combines Weights with Harmonies on either side' do
+      key = MB::Sound.harmony(0 => dorian, 2.bars => f_major, loop: 4.bars)
+      chords = MB::Sound.harmony(0 => MB::Sound.chord(:min7, root: :d3), 1.bar => MB::Sound.chord(:'7', root: :g2), loop: 2.bars, curve: :step)
+      w = dorian.blur(0.2)
+      sum = w + chords * 2
+      expect(sum).to be_a(MB::Sound::Generative::Harmony)
+      expect(sum.to_ruby).to eq('scale(:dorian, D4).weights.blur(0.2) + harmony(0 => chord(:min7, root: :d3), 1.bar => chord(:"7", root: :g2), curve: :step, loop: 2.bars) * 2')
+      masked = w * chords
+      less = w - chords
+      [0r, 1r / 2, 1, 3r / 2, 7, 9r / 2].each do |t|
+        expect(sum.at(t)).to eq(chords.at(t) * 2 + w)
+        expect(sum.at(t).pc).to eq((chords * 2 + w).at(t).pc) # commutative, bit for bit
+        expect(masked.at(t).pc).to eq((chords * w).at(t).pc)
+        expect(less.at(t)).to eq(w - chords.at(t))
+        expect((w + key).at(t)).to eq(key.at(t) + w)
+      end
+      expect(sum.period).to eq(2)
+      expect((w + key).period).to eq(4)
+      expect((sum + key).period).to be_nil # (2 and 4)
+      expect((w + chords).blur(0.1).period).to eq(2)
+      expect((w + chords).blur(0.1).at(3r / 2)).to eq((w + chords.at(3r / 2)).blur(0.1))
+      expect(rebuild(sum).at(3r / 2)).to eq(sum.at(3r / 2))
+      expect(rebuild(less).at(1r / 2)).to eq(less.at(1r / 2))
+      expect((2 * chords + w).at(1)).to eq(sum.at(1))
+    end
+
+    it 'requires lengths for keys and loops (0 may start), suggesting .bars' do
+      expect { MB::Sound.harmony(0 => dorian, 12 => f_major) }.to raise_error(ArgumentError, /write 12\.bars/)
+      expect { MB::Sound.harmony(0 => dorian, 1r / 2 => f_major) }.to raise_error(ArgumentError, %r{write \(\(1/2\)\)\.bars|write \(1/2r\)\.bars|write \(\(1/2r\)\)\.bars|\(1/2r\)})
+      expect { MB::Sound.harmony(0 => dorian, 1.5 => f_major) }.to raise_error(ArgumentError, /write \(1\.5\)\.bars/)
+      expect { MB::Sound.harmony(0 => dorian, 1.bar => f_major, loop: 4) }.to raise_error(ArgumentError, /loops are lengths: write 4\.bars/)
+      expect { MB::Sound.harmony(0 => dorian, 2.seconds => f_major) }.to raise_error(ArgumentError, /follow the tempo/)
+      expect { MB::Sound.harmony(0 => dorian, -1 => f_major) }.to raise_error(ArgumentError, /from 0/)
+      expect(MB::Sound.harmony(0.0 => dorian, 3.beats => f_major).keys.map(&:first)).to eq([0r, 3r / 4])
+      expect(MB::Sound.harmony(0r => dorian).at(5)).to eq(dorian)
+    end
+
+    it 'reads plain numbers as bars in live mode, with a warning' do
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      h = nil
+      expect { h = MB::Sound.harmony(0 => dorian, 12 => f_major, loop: 16) }.to output(/write 12\.bars.*read as 12\.bars.*write 16\.bars/m).to_stderr
+      expect(h.keys.map(&:first)).to eq([0r, 12r])
+      expect(h.loop_length).to eq(16)
+    end
+
+    it 'takes named chords as keyframes' do
+      c = MB::Sound.harmony(0 => MB::Sound.chord(:min, root: :d3), 1.bar => MB::Sound.chord(:maj, root: :bb2), loop: 2.bars, curve: :step)
+      expect(c.at(1r / 2)).to eq(MB::Sound.tones(:d, :f, :a))
+      expect(c.at(3r / 2)).to eq(MB::Sound.tones(:as, :d, :f))
+      expect(c.to_ruby).to eq('harmony(0 => chord(:min, root: :d3), 1.bar => chord(:maj, root: :bb2), curve: :step, loop: 2.bars)')
+      expect(rebuild(c).at(3r / 2)).to eq(c.at(3r / 2))
+    end
+  end
+
+  describe MB::Sound::Generative::Chord do
+    it 'makes chord layers from qualities and roots, like tones' do
+      expect(MB::Sound.chord(:min7, root: :d).weights).to eq(MB::Sound.tones(MB::Sound::D3, MB::Sound::F3, MB::Sound::A3, MB::Sound::C4))
+      expect(MB::Sound.chord(:min7, root: :d).weights.to_ruby).to eq('chord(:min7, root: :d).weights')
+      h = dorian.blur(0.15) + MB::Sound.chord(:min7, root: :d).weights * 1.5
+      expect(h).to eq(dorian.blur(0.15) + MB::Sound.tones(:d, :f, :a, :c) * 1.5)
+      expect(h.to_ruby).to eq('scale(:dorian, D4).weights.blur(0.15) + chord(:min7, root: :d).weights * 1.5')
+      expect(rebuild(h)).to eq(h)
+
+      w = MB::Sound.chord(:min7, root: MB::Sound::D3).weights(2, 1, 1.5, 1)
+      expect(w.pc.values_at(2, 5, 9, 0)).to eq([2, 1, 1.5, 1])
+      expect(w.to_ruby).to eq('chord(:min7, root: D3).weights(2, 1, 1.5, 1)')
+      expect(rebuild(w)).to eq(w)
+      expect { MB::Sound.chord(:min, root: :d).weights(-1) }.to raise_error(ArgumentError, /not negative/)
+    end
+
+    it 'knows the common qualities and their aliases' do
+      {
+        maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6], aug: [0, 4, 8], sus2: [0, 2, 7], sus4: [0, 5, 7],
+        '7': [0, 4, 7, 10], dom7: [0, 4, 7, 10], maj7: [0, 4, 7, 11], min7: [0, 3, 7, 10], m7: [0, 3, 7, 10],
+        m7b5: [0, 3, 6, 10], min7b5: [0, 3, 6, 10], dim7: [0, 3, 6, 9], '6': [0, 4, 7, 9], maj6: [0, 4, 7, 9],
+        min6: [0, 3, 7, 9], m6: [0, 3, 7, 9], '9': [0, 4, 7, 10, 14], maj9: [0, 4, 7, 11, 14], min9: [0, 3, 7, 10, 14],
+        add9: [0, 4, 7, 14], power: [0, 7],
+      }.each do |q, offsets|
+        expect(MB::Sound.chord(q, root: MB::Sound::C4).notes.map(&:number)).to eq(offsets.map { |o| 60 + o }), q.inspect
+      end
+      expect(MB::Sound.chord('min7', root: :c).quality).to eq(:min7)
+      expect { MB::Sound.chord(:nope, root: :c) }.to raise_error(ArgumentError, /Unknown chord quality :nope/)
+    end
+
+    it 'takes roots as names, Notes, numbers, and Pitches, with inversions' do
+      expect(MB::Sound.chord(:maj, root: :d).notes.map(&:number)).to eq([MB::Sound::D4, MB::Sound::Fs4, MB::Sound::A4].map(&:number)) # octave 4 like scale
+      expect(MB::Sound.chord(:maj, root: :fs2).notes.first.number).to eq(MB::Sound::Fs2.number)
+      expect(MB::Sound.chord(:maj, root: 50).root).to eq(MB::Sound::D3.number)
+      expect(MB::Sound.chord(:min, root: 146.83.hz).root).to eq(MB::Sound::D3.number) # nearest note
+      expect(MB::Sound.chord(:maj7, root: MB::Sound::F3, inversion: 1).notes.map(&:number)).to eq([MB::Sound::A3, MB::Sound::C4, MB::Sound::E4, MB::Sound::F4].map(&:number))
+      expect(MB::Sound.chord(:maj7, root: MB::Sound::F3, inversion: 3).notes.map(&:number)).to eq([64, 65, 69, 72])
+      inv = MB::Sound.chord(:min, root: :a3, inversion: 2)
+      expect(inv.weights).to eq(MB::Sound.chord(:min, root: :a3).weights)
+      expect(inv.to_ruby).to eq('chord(:min, root: :a3, inversion: 2)')
+      expect(rebuild(inv)).to eq(inv)
+      expect { MB::Sound.chord(:min, root: :a3, inversion: 3) }.to raise_error(ArgumentError, /inversion is an Integer from 0 to 2/)
+      expect { MB::Sound.chord(:min, root: 50.5) }.to raise_error(ArgumentError, /root/)
+      expect { MB::Sound.chord(:min, root: 'x') }.to raise_error(ArgumentError, /Unknown root/)
+    end
+
+    it 'leaves every other chord call to the MIDI transform' do
+      [
+        -> { MB::Sound.chord(0, 7, 15) }, -> { MB::Sound.chord(:min7) }, -> { MB::Sound.chord('maj') },
+        -> { MB::Sound.chord(2, 4, scale: :major, root: :c) }, -> { MB::Sound.chord(-1.oct, velocity: 0.5) },
+        -> { MB::Sound.chord(:fifth, overlap: :stack) },
+      ].each do |call|
+        expect(call.()).to be_a(MB::Sound::MIDI::Transform::Spec)
+      end
+      expect(MB::Sound.seq(MB::Sound::C4).chord(:maj)).to be_a(MB::Sound::MIDI::Stream)
     end
   end
 end

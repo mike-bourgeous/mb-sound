@@ -193,11 +193,17 @@ module MB
           }.transform_values(&:freeze).freeze
 
           # Other names for SHAPES.
-          ALIASES = { major: :maj, minor: :min, m: :min, m7: :min7, '7': :dom7, '9': :dom9, half_dim: :min7b5, m9: :min9, m11: :min11 }.freeze
+          ALIASES = {
+            major: :maj, minor: :min, m: :min, m7: :min7, '7': :dom7, '9': :dom9, half_dim: :min7b5, m9: :min9, m11: :min11,
+            m7b5: :min7b5, '6': :maj6, m6: :min6, M7: :maj7, dom: :dom7,
+          }.freeze
 
           def initialize(parent, steps, scale: nil, root: nil, velocity: 1, **options)
             super(parent, **options)
             if steps.length == 1 && (steps[0].is_a?(Symbol) || steps[0].is_a?(String))
+              if scale || root
+                raise ArgumentError, "A chord name adds its shape above each played note, so it takes no scale: or root: (a chord on a root as a value: MB::Sound.chord(#{steps[0].inspect}, root: :d))"
+              end
               name = steps[0].to_sym
               name = ALIASES.fetch(name, name)
               shape = SHAPES.fetch(name) { raise ArgumentError, "Unknown chord #{steps[0].inspect} (#{SHAPES.keys.join(', ')})" }
