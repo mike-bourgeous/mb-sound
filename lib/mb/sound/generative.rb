@@ -42,6 +42,21 @@ module MB
         end
       end
 
+      # The Field or FieldTimeline MB::Sound#motifs draws from: Fields as
+      # they are (their own range), Harmonies and Weights over +range+
+      # (C3..C5 by default) with an optional bell; a Scale's root weighs
+      # 1.5 (so answers have a home to land on).
+      def self.motif_field(source, range: nil, around: nil, width: nil)
+        case source
+        when Field, FieldTimeline
+          raise ArgumentError, 'A Field has its own range; leave out range: and width: (or pass the Weights or Harmony)' if range || width
+          source
+        when Harmony then source.over(range || DEFAULT_RANGE, around: around, width: width)
+        when Scale then (source.weights + Weights.tones(source.root) * 0.5).over(range || DEFAULT_RANGE, around: around, width: width)
+        else weights(source).over(range || DEFAULT_RANGE, around: around, width: width)
+        end
+      end
+
       # The note numbers +source+ (a Field or FieldTimeline) may play.
       def self.notes_of(source)
         case source
@@ -66,3 +81,4 @@ require_relative 'generative/strikes'
 require_relative 'generative/melody'
 require_relative 'generative/scale_weights'
 require_relative 'generative/clip_generate'
+require_relative 'generative/motifs'

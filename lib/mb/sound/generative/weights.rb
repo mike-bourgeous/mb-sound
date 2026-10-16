@@ -205,8 +205,11 @@ module MB
         # The weights +t+ (0..1, clamped) of the way to +other+ (Weights,
         # or a Scale), each side normalized first, so halfway between two
         # keys favors their common tones (pivot notes) while both keys' own
-        # notes still play: key and chord transitions.
+        # notes still play: key and chord transitions.  With a Harmony, a
+        # Harmony: this blended toward the harmony at each moment (like
+        # #+, #-, and #*).
         def blend(other, t)
+          return Harmony.of_weights(self, :blend, other, t) if other.is_a?(Harmony)
           o = Generative.weights(other)
           tt = t.to_f.clamp(0.0, 1.0)
           a = normalized_pc
