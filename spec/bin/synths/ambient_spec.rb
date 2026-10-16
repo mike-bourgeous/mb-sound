@@ -91,6 +91,39 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(peak_db(harp[0])).to be > -50
   end
 
+  it 'keeps the tape hiss steady under a fading tail, with its own hiss on each channel (TPDF; textures-5)' do
+    t = Numo::DFloat.new(48000 * 6).seq / 48000
+    # 220 Hz falling from 0.1 by 12 dB/s: -94 dBFS by the end, far under the grain
+    x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 220) * 0.1 * 10.0**(-12 * t / 20))
+    tape = MB::Sound.ambient_tape(MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [x])))
+    l, r = render_patch(tape, 6)
+    # The grain alone: above 1 kHz (two highpasses)
+    grain = ->(c) {
+      2.times.reduce(Numo::DFloat.cast(c)) { |y, _| MB::Sound::Filter::Cookbook.new(:highpass, 48000, 1000, quality: 0.7).process(y) }
+    }
+    gl = grain.(l)
+    loud = rms_db(seconds(gl, 0.5, 1.5)) # (the tail at -26..-38 dBFS)
+    quiet = rms_db(seconds(gl, 5, 6))    # (the tail at -86..-98 dBFS)
+    expect(quiet).to be_within(2).of(loud)
+    expect(quiet).to be_within(4).of(-60) # 8.2 bits at the default wear 0.6
+    # (textures-4's half-step dither fell to -88 dBFS here)
+
+    # Independent hiss per channel; the same wow
+    gr = grain.(r)
+    q = ->(c) { seconds(c, 5, 6) }
+    corr = (q.(gl) * q.(gr)).sum / Math.sqrt((q.(gl)**2).sum * (q.(gr)**2).sum)
+    expect(corr.abs).to be < 0.1
+    expect(peak_hz(seconds(l, 0.5, 1.5), 100, 400)).to eq(peak_hz(seconds(r, 0.5, 1.5), 100, 400))
+  end
+
+  it 'records the koto and harp rooms onto the tape: the hiss goes on after the tail (textures-5)' do
+    harp = render_patch(MB::Sound.ambient_harp_voice(patch_notes([MB::Sound::D4.number, 0, 0.5])), 10)
+    late = rms_db(seconds(harp[0], 8, 10))
+    expect(late).to be_within(4).of(rms_db(seconds(harp[0], 7, 8)))
+    expect(late).to be > -80 # (textures-4: the room after the tape, fading to the reverb's own floor)
+    expect(late).to be < -55
+  end
+
   it 'drones on the note: root, fifth, and octave' do
     out = render_patch(MB::Sound.ambient_drone_voice(patch_notes([MB::Sound::D2.number, 0, 6])), 6)
     expect(out.length).to eq(2)
