@@ -50,8 +50,9 @@ module MB
         KINDS = { restore: 3.0, neighbor: 3.0, toggle: 1.5, accent: 1.0 }.freeze
 
         # A motif: per slot (grid step) whether a note starts there, its
-        # contour (scale steps from the anchor), and velocity; +anchor+ is
-        # the motif's offset (scale steps) from the register's center.
+        # contour (scale steps from the anchor, averaging about 0 in the
+        # first form), and velocity; +anchor+ is the motif's offset (scale
+        # steps) from the register's center (+around:+).
         Motif = Struct.new(:on, :contour, :velocity, :anchor)
 
         # The cycle length in whole notes (one phrase).
@@ -178,8 +179,12 @@ module MB
             seen = true
             contour[s] = c
           end
+          # Centered: the motif's notes average out at its anchor
+          used = contour.compact
+          shift = (used.sum / used.length.to_r).round
+          contour.map! { |x| x && x - shift }
           vel = Array.new(@steps) { |s| vel_at(d.rand(:vel, s)) }
-          m = Motif.new(on.freeze, contour.freeze, vel.freeze, d.int(-2..2, :anchor)).freeze
+          m = Motif.new(on.freeze, contour.freeze, vel.freeze, d.int(-1..1, :anchor)).freeze
           @mutex.synchronize { @bases[letter] ||= m }
         end
 
