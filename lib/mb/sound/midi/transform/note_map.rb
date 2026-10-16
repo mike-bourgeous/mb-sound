@@ -54,7 +54,7 @@ module MB
               if @length
                 schedule_off(Event.note_off(out.note, channel: out.channel, time: out.time + length_seconds), id)
               end
-              [out.note, out.channel, id, delay]
+              [out.note, out.channel, id, delay, e.time]
             }
             (@chains[[e.channel, e.note]] ||= []) << chain
           end
@@ -66,9 +66,18 @@ module MB
             @chains.delete(key) if list && list.empty?
             return unless chain && !@length
 
-            chain.each do |note, channel, id, delay|
-              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: e.time + delay), id)
+            chain.each do |note, channel, id, delay, on_time|
+              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: note_off_time(e.time, delay, on_time)), id)
             end
+          end
+
+          # The time (Rational seconds) of an output note-off for a played
+          # note-off at +time+, given its output's +delay+ and the played
+          # note-on's +on_time+: +time+ + +delay+ (the played length) by
+          # default.  Never earlier than +time+ in subclasses (streams
+          # can't look ahead).
+          def note_off_time(time, delay, _on_time)
+            time + delay
           end
 
           def poly_pressure(e)

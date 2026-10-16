@@ -63,6 +63,11 @@ module MB
       class LiveSource
         include Source
 
+        # True: notes come from live input (see Stream#live_input?).
+        def live_input?
+          true
+        end
+
         # The timing modes (see the class comment).
         TIMINGS = [:exact, :asap].freeze
 

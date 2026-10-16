@@ -314,20 +314,31 @@ module MB
 
         # Returns a Seq where every note sounds for +fraction+ of its step (see
         # Clip#legato), keeping unset lengths settable.  Slid notes keep
-        # their overlap.
+        # their overlap.  A length instead of a fraction gives every note
+        # that length (Clip#note_length).
         def legato(fraction)
+          return note_length(fraction) if fraction.is_a?(Duration) || fraction.is_a?(MB::Sound::Length)
           fraction = Clip.check_legato(fraction)
           map_steps { |s| s.to_h.merge(legato: fraction, clip: s.clip&.legato(fraction)) }
         end
 
-        # Returns a Seq with every note's value shifted by +semitones+.
-        def transpose(semitones)
+        # Returns a Seq with every note moved by +step+ (scale degrees of
+        # +:scale+/+:root+, semitones by default, or Intervals; see
+        # Clip#transpose).
+        def transpose(step, scale: nil, root: nil)
+          steps = MIDI::Transform::Steps.new(step, scale: scale, root: root)
+          semitones = steps.scale.chromatic? ? Clip.chromatic_semitones(step, steps) : nil
+          scale_kwargs = scale.nil? && root.nil? ? {} : { scale: scale, root: root }
+
           map_steps { |s|
             if s[:pitch]
               # A pitch-marked step (a sampler chop hit) keeps its key
+              raise ArgumentError, "Pitch-marked hits (sampler chops) move by semitones; #{self} can't move by degrees of #{steps.scale}" unless semitones
               s.to_h.merge(pitch: s[:pitch] + Interval.semitones(semitones).to_f)
+            elsif semitones
+              s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(step, **scale_kwargs))
             else
-              s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(semitones))
+              s.to_h.merge(value: s.value && steps.apply_value(s.value), clip: s.clip&.transpose(step, **scale_kwargs))
             end
           }
         end

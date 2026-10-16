@@ -410,9 +410,9 @@ module MB
         #
         #     e.transpose(12)                          # an octave up
         #     e.transpose(2, scale: Scale[:minor, :a])  # two steps up A minor
-        def transpose(step, scale: nil)
+        def transpose(step, scale: nil, root: nil)
           return self unless note? || type == :poly_pressure || (type == :glide && note)
-          with_note(Transform::Transpose.whole(Transform::Steps.new(step, scale: scale).apply(note)))
+          with_note(Transform::Transpose.whole(Transform::Steps.new(step, scale: scale, root: root).apply(note)))
         end
 
         # Returns this event on 0-based +channel+ (0..15), rebuilding its

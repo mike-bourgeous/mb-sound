@@ -52,15 +52,9 @@ module MB
         #     hook.ghost_chords(1, 4, 5, 1, scale: :minor, root: :a, harmonic: true)  # Am, Dm, E, Am
         #     hook.ghost_chords([A3, C4, E4], [F3, A3, C4], per: 2.bars)   # explicit chords
         def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil)
-          raise ArgumentError, 'ghost_chords needs at least one chord (scale degrees from 1, note Arrays, or nil)' if chords.empty?
-          raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
-          raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
-
+          sc, classes = Clip.ghost_setup(chords, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie)
           span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)
           short = passing.nil? ? nil : Duration.whole_notes(passing)
-          sc = Scale[scale, root]
-          sc = Clip.harmonic_scale(sc) if harmonic
-          classes = chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }
 
           clip = self
           if @loop
@@ -89,6 +83,19 @@ module MB
           end
 
           Clip.new(moved, length: clip.length, loop: @loop, seed: @seed, align: @align, variations: clip.equal?(self) ? @variations : [], performed: @performed)
+        end
+
+        # Validates #ghost_chords' chords and options (shared with
+        # MIDI::Stream#ghost_chords), returning [scale, pitch classes per
+        # chord (nil for no chord)].
+        def self.ghost_setup(chords, scale:, root:, size:, harmonic:, tie:)
+          raise ArgumentError, 'ghost_chords needs at least one chord (scale degrees from 1, note Arrays, or nil)' if chords.empty?
+          raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
+          raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
+
+          sc = Scale[scale, root]
+          sc = Clip.harmonic_scale(sc) if harmonic
+          [sc, chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }]
         end
 
         # The most copies #ghost_chords makes of a looping clip.
