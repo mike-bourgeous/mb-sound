@@ -33,8 +33,9 @@ module MB
       # focus loss, hiding the screen, `ui off`, exit) calls #all_off, so
       # no note is left hanging.
       #
-      # Keys (play mode): note keys (Shift: accent velocity 127; Ctrl, with
-      # the kitty protocol: soft), - and + or Left and Right: octave, Up
+      # Keys (play mode): note keys (Shift: accent velocity 127; Ctrl: soft,
+      # letter keys only in legacy terminals, where Ctrl-C, Ctrl-Z, and
+      # Ctrl-M keep their meanings), - and + or Left and Right: octave, Up
       # and Down: velocity, Home and End: channel, Space: sustain pedal
       # (held where releases are reported, else a toggle), Esc: all notes
       # off, Enter: capture the last phrase into the armed tracks, `:

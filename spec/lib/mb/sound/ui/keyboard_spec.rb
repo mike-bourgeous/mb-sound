@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       press('z', 0.0)
       press('Z', 0.0) # Shift: accent
       press('<', 0.0) # Shift-, on a US layout
-      press('c', 0.0, :ctrl) # soft (kitty only; legacy Ctrl-letters are controls)
+      press('c', 0.0, :ctrl) # soft (legacy Ctrl-letters decode the same)
       expect(out.log.select { |e| e[0] == :on }.map { |e| e[1..3] }).to eq([[72, 104, 1], [72, 127, 1], [84, 127, 1], [76, 40, 1]])
       expect(kb.view.base).to eq(72)
       expect(kb.view.channel).to eq(1)
