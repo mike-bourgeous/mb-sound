@@ -240,7 +240,7 @@ module GraphSweep
       }],
       # SoundFont-style instruments: per-zone envelope and filter values
       # (ZoneValue), panned regions, layers
-      ['sampler zone values (ZoneValue), pans, layers (SubLane)', ->(c) {
+      ['sampler zone values (ZoneValue), pans, layers', ->(c) {
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.05) })
         smp = MB::Sound::Sample[d].looped(1000...2900)
         zm = ->(a, b) { MB::Sound::Sampler::ZoneMap.new([[0..62, 0..127, a], [63..127, 0..127, b]]) }
