@@ -27,6 +27,13 @@ module MB
                        'P' => :f1, 'Q' => :f2, 'R' => :f3, 'S' => :f4, 'M' => :enter }.freeze
           # Kitty keyboard protocol codes for named keys (CSI code u).
           KITTY_KEYS = { 27 => :escape, 13 => :enter, 9 => :tab, 127 => :backspace, 57_399 => '0' }.freeze
+          # Modifier keys themselves (sent with flag 8, "report all keys as
+          # escape codes").
+          KITTY_MODIFIER_KEYS = {
+            57_441 => :left_shift, 57_442 => :left_control, 57_443 => :left_alt, 57_444 => :left_super,
+            57_447 => :right_shift, 57_448 => :right_control, 57_449 => :right_alt, 57_450 => :right_super,
+            57_358 => :caps_lock, 57_360 => :num_lock,
+          }.freeze
 
           attr_accessor :esc_timeout
 
@@ -238,24 +245,35 @@ module MB
               return
             end
 
+            # The kitty protocol's event type follows the modifiers ("1:3")
+            m, ev = nums[1]&.split(':')
+            type = KEY_TYPES[ev.to_i - 1] || :press if ev
+            type ||= :press
+
             case final
             when '~'
               key = TILDE_KEYS[nums[0].to_i]
-              out << Key.new(key: key || :"key#{nums[0]}", mods: mods_of(nums[1]), bytes: bytes)
+              out << Key.new(key: key || :"key#{nums[0]}", mods: mods_of(m), bytes: bytes, type: type)
             when 'u'
-              code, m = nums[0].to_s.split(':').first.to_i, nums[1]&.split(':')&.first
-              key = KITTY_KEYS[code] || (code >= 32 ? code.chr(Encoding::UTF_8) : (code + 0x60).chr)
+              code = nums[0].to_s.split(':').first.to_i
+              key = KITTY_KEYS[code] || KITTY_MODIFIER_KEYS[code] || (code >= 32 ? code.chr(Encoding::UTF_8) : (code + 0x60).chr)
               mods = mods_of(m)
               mods << :ctrl if code < 32 && !KITTY_KEYS.key?(code) && !mods.include?(:ctrl)
-              out << Key.new(key: key, mods: mods.uniq, bytes: bytes)
+              # Shifted letters as legacy terminals send them ('A', no
+              # :shift), so keymaps see one key either way
+              if mods == [:shift] && key.is_a?(String) && key.match?(/\A[a-z]\z/)
+                key = key.upcase
+                mods = []
+              end
+              out << Key.new(key: key, mods: mods.uniq, bytes: bytes, type: type)
             else
               key = CSI_KEYS[final]
               if key
-                mods = mods_of(nums[1])
+                mods = mods_of(m)
                 mods |= [:shift] if final == 'Z'
-                out << Key.new(key: key, mods: mods, bytes: bytes)
+                out << Key.new(key: key, mods: mods, bytes: bytes, type: type)
               elsif final == 'R'
-                out << Key.new(key: :f3, mods: mods_of(nums[1]), bytes: bytes)
+                out << Key.new(key: :f3, mods: mods_of(m), bytes: bytes, type: type)
               else
                 out << Key.new(key: :"csi_#{final}", mods: [], bytes: bytes)
               end

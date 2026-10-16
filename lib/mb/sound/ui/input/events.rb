@@ -8,21 +8,32 @@ module MB
         # Modifier names, in the order of the xterm modifier bits.
         MODS = %i[shift alt ctrl meta].freeze
 
+        # Key event types (the kitty keyboard protocol's 1, 2, 3).
+        KEY_TYPES = %i[press repeat release].freeze
+
         # A key: +key+ is a one-character String for text ('a', 'Z', '中')
         # or a Symbol for named keys (:up, :enter, :escape, :f5, ...), with
         # +mods+ (sorted Symbols from MODS) and the +bytes+ the terminal
         # sent (forwarded unchanged to the REPL).  Keymaps compare #chord
-        # (key and mods), never bytes.
+        # (key and mods), never bytes.  +type+ is :press, or :repeat or
+        # :release where the terminal reports them (the kitty keyboard
+        # protocol's event types, flag 2); legacy terminals send presses
+        # only, autorepeats included.
         #
         #     Key.of(:right, :shift)    Key.of(']', :ctrl)    Key.of('z')
-        Key = Data.define(:key, :mods, :bytes) do
-          def initialize(key:, mods: [], bytes: nil)
-            super(key: key, mods: mods.sort.freeze, bytes: bytes)
+        #     Key.of('z', type: :release)
+        Key = Data.define(:key, :mods, :bytes, :type) do
+          def initialize(key:, mods: [], bytes: nil, type: :press)
+            super(key: key, mods: mods.sort.freeze, bytes: bytes, type: type)
           end
 
-          def self.of(key, *mods, bytes: nil)
-            new(key: key, mods: mods, bytes: bytes)
+          def self.of(key, *mods, bytes: nil, type: :press)
+            new(key: key, mods: mods, bytes: bytes, type: type)
           end
+
+          def press? = type == :press
+          def repeat? = type == :repeat
+          def release? = type == :release
 
           # [key, mods]: what keymaps look up.
           def chord
@@ -35,7 +46,8 @@ module MB
           end
 
           def to_s
-            [*mods, key].join('-')
+            s = [*mods, key].join('-')
+            type == :press ? s : "#{s} (#{type})"
           end
         end
 

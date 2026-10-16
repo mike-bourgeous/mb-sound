@@ -18,6 +18,14 @@ module MB
         #   back to :repl.
         # - :line (the palette and search prompts): keys edit a one-line
         #   input (LineInput); Enter submits, Esc cancels.
+        # - :grab (a pane that takes the keyboard, like the virtual piano):
+        #   every key event, releases and repeats included, goes to the
+        #   host's #grab_key; Ctrl-] goes back to :repl.  Pastes are
+        #   dropped.
+        #
+        # Outside :grab, key releases are dropped and repeats act as presses
+        # (terminals report them only while a grab asks for them, but a
+        # release can arrive just after the grab ends).
         #
         # The host receives #act(Action) for everything else.
         class Router
@@ -77,7 +85,8 @@ module MB
           attr_reader :line
 
           # +host+ responds to #repl_key(Key), #repl_paste(String),
-          # #act(Action), #line_done(kind, text or nil), #mode_changed(mode).
+          # #act(Action), #line_done(kind, text or nil), #mode_changed(mode),
+          # and (for :grab) #grab_key(Key).
           def initialize(host, nav: NAV, nav_esc: nil)
             @host = host
             @nav = nav
@@ -95,7 +104,7 @@ module MB
             self
           end
 
-          # Changes mode (:repl, :nav).
+          # Changes mode (:repl, :nav, :grab).
           def mode=(m)
             return if m == @mode
             @mode = m
@@ -132,6 +141,12 @@ module MB
           end
 
           def key(k, now = Process.clock_gettime(Process::CLOCK_MONOTONIC))
+            if @mode == :grab
+              return @host.grab_key(k) unless k.chord == NAV_KEY.chord
+              return k.press? ? (self.mode = :repl) : nil
+            end
+            return if k.release?
+
             if @held
               # Something followed the Escape in time: both go to the REPL
               esc = @held
@@ -167,6 +182,8 @@ module MB
 
           # Text pasted: to the REPL, or into the prompt.
           def paste(text)
+            return if @mode == :grab
+
             if @mode == :line
               @line.insert(text.delete("\r\n"))
               @host.act(Action.of(:line_changed))

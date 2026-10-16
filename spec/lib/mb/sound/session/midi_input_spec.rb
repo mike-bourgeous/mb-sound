@@ -164,4 +164,46 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
       expect(render(r, 48000, sizes)).to eq(live)
     end
   end
+
+  it 'merges added sources (a virtual keyboard beside the input) into each span in time order' do
+    s = new_session
+    s.add(0.constant, name: :clock, on: :now)
+    input = s.midi_in
+    input.input = keyboard(*notes_at(0.1r))
+    extra = input.add_source(keyboard(ev.parse([0x90, 72, 90], time: 0.05r), ev.parse([0x80, 72, 0], time: 0.2r)))
+    expect(input.sources).to eq([extra])
+    seen = []
+    s.add_tap { seen.concat(input.span.events) if input.span }
+    render(s, 24000, [367, 368])
+    expect(seen.map { |st| [st.frame, st.event.type, st.event.note] }).to eq([
+      [2400, :note_on, 72], [4800, :note_on, 60], [9600, :note_off, 60], [9600, :note_off, 72], # the input's first
+    ])
+    # The MIDI log (what takes replay) has both
+    expect(s.midi_log.map { |row| row[3][1] }).to eq([72, 60, 60, 72])
+
+    input.remove_source(extra)
+    expect(input.sources).to eq([])
+  end
+
+  it 'reads a MIDI::VirtualInput through a LiveSource, keeping the time between messages' do
+    s = new_session
+    s.add(0.constant, name: :clock, on: :now)
+    t = 10.0
+    vin = MB::Sound::MIDI::VirtualInput.new(clock: -> { t })
+    s.midi_in.add_source(MB::Sound::MIDI::LiveSource.new(vin, latency: 0.02))
+    seen = []
+    s.add_tap { seen.concat(s.midi_in.span.events) if s.midi_in.span }
+    # The clock moves with the rendered frames, as a realtime Session's does
+    40.times do |i|
+      vin.note_on(60, 0.5) if i == 2
+      vin.note_off(60) if i == 17 # 0.25 s later
+      render(s, 800, [800])
+      t += 800 / 48000r
+    end
+    on, off = seen
+    expect(on.event.note).to eq(60)
+    expect(on.event.velocity).to be_within(0.01).of(0.5)
+    expect(off.frame - on.frame).to eq(12000)
+    expect(vin.pending).to eq(0)
+  end
 end
