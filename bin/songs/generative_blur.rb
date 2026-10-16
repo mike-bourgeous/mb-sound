@@ -40,19 +40,19 @@
 # "cloud, 3 octaves, 1/2-bar blend").  The earlier defaults (blur 0.15, no
 # bass, chord steps, two octaves, the slow key blends, a sparse cloud) are
 # still there with explicit options:
-#     bin/songs/generative_blur.rb -u 0.15 --no-bass -C 0 blur.flac                              # the old dense line
+#     bin/songs/generative_blur.rb -n 16 -u 0.15 --no-bass -C 0 blur.flac                        # the old dense line
 #     bin/songs/generative_blur.rb -m grains -u 0.15 --no-bass -c sparse -t slow -C 0 -O 2 blur.flac  # the old cloud
 #
 # Usage:
-#     bin/songs/generative_blur.rb                            # dense, blur 0.03, bass, live
+#     bin/songs/generative_blur.rb                            # dense 64ths (about 22 draws a second), blur 0.03, bass, live
 #     bin/songs/generative_blur.rb -u 0 blur.flac             # no blur: only scale and chord notes
 #     bin/songs/generative_blur.rb -u 0.4 blur.flac           # many wrong notes
-#     bin/songs/generative_blur.rb -n 64 blur.flac            # sixty-fourths: about 22 draws a second
-#     bin/songs/generative_blur.rb -n 64 -C 0 blur.flac       # chords stepping instead of blending
-#     bin/songs/generative_blur.rb -n 64 -O 3 -C 0.5 blur.flac   # three octaves (A3..A6), chords blending over half a bar
+#     bin/songs/generative_blur.rb -n 16 blur.flac            # sixteenths instead of sixty-fourths
+#     bin/songs/generative_blur.rb -C 0 blur.flac             # chords stepping instead of blending
+#     bin/songs/generative_blur.rb -O 3 -C 0.5 blur.flac      # three octaves (A3..A6), chords blending over half a bar
 #     bin/songs/generative_blur.rb -m grains blur.flac        # the granular cloud
 #     bin/songs/generative_blur.rb -m grains -u 0.4 -c sparse --no-bass blur.flac  # a thin cloud, many wrong notes, no anchor
-#     bin/songs/generative_blur.rb -m both -n 64 blur.flac    # both together
+#     bin/songs/generative_blur.rb -m both blur.flac          # both together
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/generative_blur.rb'
@@ -154,7 +154,7 @@ module MB::Sound
   # sparse cloud, slow key blends, chord steps, and two octaves for both
   # parts: `generative_blur(blur: 0.15, bass: false, cloud: :sparse,
   # transition: :slow, chord_blend: 0, octaves: 2)` plays that again.
-  def self.generative_blur(mode: :dense, blur: 0.03, seed: 3, division: 16, bass: true, cloud: :dense, transition: nil,
+  def self.generative_blur(mode: :dense, blur: 0.03, seed: 3, division: 64, bass: true, cloud: :dense, transition: nil,
                            chord_blend: nil, octaves: nil)
     bpm 84
     raise ArgumentError, "mode is :dense, :grains, or :both (got #{mode.inspect})" unless [:dense, :grains, :both].include?(mode)
@@ -209,7 +209,7 @@ module MB::Sound
       mode: [:dense, Symbol, '-m', 'dense (a sixteenth-note line), grains (a cloud), or both', [:dense, :grains, :both]],
       blur: [0.03, Float, '-u', 'How far the scale blurs into wrong notes', 0.0..1.0],
       seed: [3, Integer, '-s', 'The seed of the draws', 0..1_000_000],
-      division: [16, Integer, '-n', 'Notes per whole note in the dense line (16, 32, 64)', [8, 16, 32, 64]],
+      division: [64, Integer, '-n', 'Notes per whole note in the dense line (16, 32, 64)', [8, 16, 32, 64]],
       bass: [true, '-B', 'The anchor bassline: one unblurred root (and fifth) a bar, following the chords (--no-bass leaves it out)'],
       cloud: [:dense, Symbol, '-c', 'The granular cloud: dense (about 40 grains a second, long, overlapping) or sparse (about 8)', [:sparse, :dense]],
       transition: [nil, ->(s) { s == 'slow' ? :slow : Float(s).tap { |t| raise ArgumentError, 'must be slow or 0..4' unless (0..4).cover?(t) } }, '-t',
