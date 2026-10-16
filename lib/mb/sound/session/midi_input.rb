@@ -23,6 +23,10 @@ module MB
       #
       # Events that arrive while the timeline is stopped all have the
       # position where it stopped; a replay gives them in one span.
+      #
+      # More sources can play into the same input beside it (#add_source:
+      # the terminal UI's virtual keyboard next to a hardware keyboard);
+      # their events merge into each span in time order.
       class MidiInput
         # An event as it landed: the session +frame+, the timeline +pos+
         # (whole notes; the position of the frame), the Session's +epoch+
@@ -68,6 +72,28 @@ module MB
           @lock = Monitor.new
           @bends = nil
           @detached_frame = 0
+          @extras = {}.compare_by_identity
+        end
+
+        # Adds +stream+ (a MIDI::Stream, or anything MIDI::Stream.for
+        # takes) as another source of this input: its events merge with the
+        # input's in every span, in time order (while a take replays, they
+        # are read and dropped).  Returns the Stream.
+        def add_source(stream)
+          stream = MIDI::Stream.for(stream)
+          @lock.synchronize { @extras[stream] ||= stream.reader }
+          stream
+        end
+
+        # Stops reading +stream+ (see #add_source).  Returns nil.
+        def remove_source(stream)
+          @lock.synchronize { @extras.delete(stream)&.close }
+          nil
+        end
+
+        # The streams added with #add_source.
+        def sources
+          @lock.synchronize { @extras.keys }
         end
 
         # Reads +stream+ (a MIDI::Stream, or anything MIDI::Stream.for
@@ -143,6 +169,7 @@ module MB
         def pump(frame, count, from, per_sample, epoch, rate)
           @lock.synchronize {
             @sample_rate = rate
+            drain_extras(count, rate) if @replay && !@extras.empty?
             events = @replay ? replay_events(frame, count, from, per_sample, epoch) : input_events(frame, count, from, per_sample, epoch, rate)
             @span = Span.new(id: @span_id += 1, frame: frame, count: count, events: events.freeze)
 
@@ -177,11 +204,12 @@ module MB
         # seconds, timed from +from+.
         def detached_events(from, duration)
           @lock.synchronize {
-            next [] if @reader.nil?
-            start = @reader.cursor
-            @reader.next(duration).filter_map { |e|
-              e.at(from + (e.time - start)) if e.is_a?(MIDI::Event)
-            }
+            readers.flat_map { |r|
+              start = r.cursor
+              r.next(duration).filter_map { |e|
+                e.at(from + (e.time - start)) if e.is_a?(MIDI::Event)
+              }
+            }.sort_by.with_index { |e, i| [e.time, i] }
           }
         end
 
@@ -191,16 +219,33 @@ module MB
 
         private
 
-        # Events of the input for one span, stamped.
-        def input_events(frame, count, from, per_sample, epoch, rate)
-          return [] if @reader.nil?
+        # The readers of the input and of the added sources.
+        def readers
+          @extras.empty? ? [@reader].compact : [@reader, *@extras.values].compact
+        end
 
-          start = @reader.cursor
-          @reader.next(Rational(count, rate)).filter_map { |e|
-            next unless e.is_a?(MIDI::Event)
-            off = ((e.time - start) * rate).floor.clamp(0, count - 1)
-            Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
-          }
+        # Events of the input (and added sources) for one span, stamped,
+        # in frame order (the input's first at equal frames).
+        def input_events(frame, count, from, per_sample, epoch, rate)
+          list = readers
+          return [] if list.empty?
+
+          out = []
+          list.each do |reader|
+            start = reader.cursor
+            reader.next(Rational(count, rate)).each { |e|
+              next unless e.is_a?(MIDI::Event)
+              off = ((e.time - start) * rate).floor.clamp(0, count - 1)
+              out << Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
+            }
+          end
+          list.length > 1 ? out.sort_by.with_index { |st, i| [st.frame, i] } : out
+        end
+
+        # Reads the added sources for a span and drops their events (while a
+        # take replays: live sources must not pile up for later).
+        def drain_extras(count, rate)
+          @extras.each_value { |r| r.next(Rational(count, rate)) }
         end
 
         # Recorded events due in this span: the epoch's events before its

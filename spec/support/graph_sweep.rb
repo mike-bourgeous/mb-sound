@@ -233,6 +233,12 @@ module GraphSweep
           st.rev.grains(position: c.mod(0.1, 0.9), density: 500, size: 0.002, read: :drop, window: :expodec, jitter: 0, max_grains: 4, seed: 2)[1] * 0.3 +
           c.clip.synth(voices: 2) { |v, _i| v.grains(smp, density: 400, size: 0.002, seed: 3)[0] * 0.3 }
       }],
+      ['loop players (LoopPlayer)', ->(c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-(i % 750) / 200.0) })
+        smp = MB::Sound::Sample[d, bpm: 960, beats: 1]
+        st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
+        smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3
+      }],
       ['capture tap (CaptureTap)', ->(c) { MB::Sound::GraphNode::CaptureTap.new(c.sig, MB::Sound::Sampler::AudioCapture.new(100_000)) + c.sig }],
 
       # Delays and reverbs

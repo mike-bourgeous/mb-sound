@@ -111,7 +111,10 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
     it 'blends keyframes over clip positions' do
       expect(h.at(0r).pc).to eq(dorian.pc)
       expect(h.at(12).pc).to eq(dorian.pc)
-      expect(h.at(16.bars).pc).to eq(dorian.blend(f_major, 0.5).pc)
+      expect(h.at(16.bars).pc).to eq((dorian.blend(f_major, 0.5) * 7).pc) # the shape of Weights#blend, at the keyframes' total
+      # Between equal keyframes it holds still (it used to drop to sum 1 off the keyframes)
+      h.at(6.bars).pc.zip(dorian.pc).each { |a, b| expect(a).to be_within(1e-12).of(b) }
+      expect(h.at(12 - 1r / 1024).sum).to be_within(1e-12).of(7)
       expect(h.at(20).pc).to eq(f_major.pc)
       expect(h.at(1000).pc).to eq(f_major.pc)
       expect(h.at(16)).to equal(h.at(16)) # cached
@@ -126,7 +129,9 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       l = MB::Sound.harmony(0 => dorian, 1.bar => f_major, loop: 2.bars)
       # Halfway through the wrap from F major back to D dorian
       expect(l.at(3r / 2).pc).to eq(l.at(3r / 2 + 4).pc)
-      expect(l.at(3r / 2).pc).to eq(f_major.blend(dorian, 0.5).pc)
+      expect(l.at(3r / 2).pc).to eq((f_major.blend(dorian, 0.5) * 7).pc)
+      w = MB::Sound.harmony(0 => dorian, 1.bar => MB::Sound.tones(MB::Sound::D3, MB::Sound::F3, MB::Sound::A3))
+      expect(w.at(1r / 4).sum).to be_within(1e-12).of(7 * 0.75 + 3 * 0.25) # the total moves from 7 to 3
       s = MB::Sound.harmony(0 => dorian, 1.bar => f_major, curve: :smoothstep)
       expect(s.at(1r / 4)[:as]).to be < MB::Sound.harmony(0 => dorian, 1.bar => f_major).at(1r / 4)[:as]
       expect { MB::Sound.harmony(a: dorian) }.to raise_error(ArgumentError, /positions/)
@@ -184,6 +189,19 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect(rebuild(sum).at(3r / 2)).to eq(sum.at(3r / 2))
       expect(rebuild(less).at(1r / 2)).to eq(less.at(1r / 2))
       expect((2 * chords + w).at(1)).to eq(sum.at(1))
+    end
+
+    it 'blends Weights toward a Harmony as a Harmony' do
+      key = MB::Sound.harmony(0 => f_major, 2.bars => MB::Sound.chord(:min7, root: :g), loop: 4.bars)
+      b = dorian.blend(key, 0.3)
+      expect(b).to be_a(MB::Sound::Generative::Harmony)
+      expect(b.to_ruby).to eq('scale(:dorian, D4).weights.blend(harmony(0 => scale(:major, F4).weights, 2.bars => chord(:min7, root: :g), loop: 4.bars), 0.3)')
+      [0r, 1r / 2, 1, 3, 5, 13r / 2].each do |t|
+        expect(b.at(t)).to eq(dorian.blend(key.at(t), 0.3))
+      end
+      expect(b.period).to eq(4)
+      expect(rebuild(b).at(3)).to eq(b.at(3))
+      expect(dorian.blend(f_major, 0.3)).to be_a(MB::Sound::Generative::Weights)
     end
 
     it 'requires lengths for keys and loops (0 may start), suggesting .bars' do

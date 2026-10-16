@@ -47,6 +47,18 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
     expect { io.load(path) }.to raise_error(io::LoadError, /sha256|SHA-256|changed/i)
   end
 
+  it 'saves tempo-following loops into bundles' do
+    g = rec.follow + rec.stretch(0.5, mode: :slice).follow(:resample, align: :launch) * 0.5
+    dir = File.dirname(tmp_path('x'))
+    path = io.save(File.join(dir, 'follow'), g, name: 'follow')
+    text = File.read(path)
+    expect(text).to include('.follow')
+    back = io.load(path)
+    ref = render(g)
+    expect(max_diff(ref, render(back))).to be < 1e-6
+    expect(ref.map { |b| b.abs.max }.max).to be > 0.1
+  end
+
   it 'saves grain clouds and spectral stretches into bundles' do
     pad = rec.stretch(2, mode: :spectral)
     g = pad.grains(position: 0.3, density: 60, size: 30.ms, pitch: [0, 12], seed: 4).mixdown +

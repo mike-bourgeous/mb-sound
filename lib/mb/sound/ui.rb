@@ -2,15 +2,30 @@ require 'fileutils'
 
 require_relative 'ui/snapshot'
 require_relative 'ui/poll'
+require_relative 'ui/data_file'
+require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
 require_relative 'ui/pane'
 require_relative 'ui/panes'
+require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
+require_relative 'ui/follow'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
 require_relative 'ui/warm_up'
+require_relative 'ui/screen/vt'
+require_relative 'ui/input/events'
+require_relative 'ui/input/decoder'
+require_relative 'ui/input/router'
+require_relative 'ui/input/repl_host'
+require_relative 'ui/viewports/tree'
+require_relative 'ui/viewports/tiler'
+require_relative 'ui/viewports/loader'
+require_relative 'ui/screen/term'
+require_relative 'ui/keyboard'
+require_relative 'ui/tiles'
 
 module MB
   module Sound
@@ -36,6 +51,13 @@ module MB
         # The band on screen (or last shown), or nil.
         attr_reader :band
 
+        # The tiled screen on screen (or last shown), or nil.
+        attr_reader :tiles
+
+        # The binding the console evaluates in (set before each line by
+        # the hook from .install_pry!): the palette evaluates there.
+        attr_accessor :console_binding
+
         # State glyphs (:unicode or :ascii; see UI::GLYPHS).
         attr_accessor :glyphs
 
@@ -46,6 +68,7 @@ module MB
         attr_accessor :prompt_status_enabled
       end
       self.glyphs = ENV['MB_SOUND_UI_GLYPHS'] == 'ascii' ? :ascii : :unicode
+      Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
       self.default_layout = :band
       self.prompt_status_enabled = true
 
@@ -53,8 +76,15 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
+      end
+
+      # The virtual keyboard (one per process; see UI::Keyboard and the
+      # `keyboard` pane): its notes go to the current Session's MIDI input
+      # through a Keyboard::Link.
+      def self.keyboard
+        @keyboard ||= Keyboard.new(out: Keyboard::Link.new)
       end
 
       # The layouts by name (built-in and defined with `layout`; saved ones
@@ -81,6 +111,63 @@ module MB
         @layout_options ||= {}
       end
 
+      # The tiled layouts by name (those with a `repl` pane; built-in,
+      # defined with `layout`, or saved).
+      def self.tile_layouts
+        @tile_layouts ||= {
+          tiles: Viewports.layout(:tiles, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              repl
+              rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6; pane :scope, height: 8 }
+            }
+          },
+          keys: Viewports.layout(:keys, focus: :keyboard) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows { repl; pane :keyboard, height: 8 }
+              rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6 }
+            }
+          },
+          studio: Viewports.layout(:studio, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(width: 32) { pane :tracks; pane :queue, height: 6 }
+              rows(weight: 3) { repl; pane :scope, height: 8 }
+              tabs :meters, :knobs, :cpu, width: 34
+            }
+          },
+        }
+      end
+
+      # The tiled layout named +name+ (a Viewports::Layout with a repl
+      # pane): defined, built in, or saved.  Raises with suggestions.
+      def self.tiles_layout_named(name)
+        return name if name.is_a?(Viewports::Layout)
+        l = layout_named(name)
+        raise ArgumentError, "Layout #{name.inspect} has no repl pane, so it shows as a band (`ui #{name.inspect}`); a tiled layout needs `repl`" unless l.is_a?(Viewports::Layout)
+        l
+      end
+
+      # Writes layout text +text+ as +name+ in .layouts_dir.  Returns the
+      # path.
+      def self.save_layout_text(name, text)
+        raise ArgumentError, "Layout names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+        dir = layouts_dir
+        FileUtils.mkdir_p(dir)
+        path = File.join(dir, "#{name}.rb")
+        File.write(path, "# mb-sound terminal UI layout: `ui #{name.inspect}` shows it (see help :ui)\n#{text}")
+        @layout_mtimes&.delete(path)
+        path
+      end
+
+      # Records the console's binding before each line (for the palette).
+      # Called by bin/sound.rb.
+      def self.install_pry!
+        return unless defined?(::Pry)
+        ::Pry.config.hooks.add_hook(:before_eval, :mb_sound_ui) { |_code, pry| UI.console_binding = pry.current_binding }
+      end
+
       # Where Band#save writes layouts: $MB_SOUND_UI_DIR, else the user data
       # directory's mb-sound/ui.
       def self.layouts_dir
@@ -97,19 +184,32 @@ module MB
       # The layout named +name+: defined, built in, or saved in
       # .layouts_dir (loaded with LayoutLoader).  Raises with suggestions.
       def self.layout_named(name)
-        return name if name.is_a?(Layout)
+        return name if name.is_a?(Layout) || name.is_a?(Viewports::Layout)
         raise ArgumentError, "Layout names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-        return layouts[name] if layouts.key?(name)
 
         path = File.join(layouts_dir, "#{name}.rb")
+        reload = File.file?(path) && (@layout_mtimes ||= {})[path] != File.mtime(path)
+        return tile_layouts[name] if tile_layouts.key?(name) && !reload
+        return layouts[name] if layouts.key?(name) && !reload
+
         if File.file?(path)
-          layout, opts = LayoutLoader.parse(File.read(path), path)
+          text = File.read(path)
+          tiled, opts = Viewports::Loader.parse(text, path, extra: %i[at color look]) rescue nil
+          @layout_mtimes[path] = File.mtime(path)
+          if tiled&.repl?
+            layouts.delete(name)
+            tile_layouts[name] = tiled
+            layout_options[name] = opts
+            return tiled
+          end
+          layout, opts = LayoutLoader.parse(text, path)
+          tile_layouts.delete(name)
           layouts[name] = layout
           layout_options[name] = opts
           return layout
         end
 
-        known = (layouts.keys + saved_layouts).uniq
+        known = (layouts.keys + tile_layouts.keys + saved_layouts).uniq
         hint = DidYouMean::SpellChecker.new(dictionary: known.map(&:to_s)).correct(name.to_s).first
         raise ArgumentError, "No layout #{name.inspect}#{hint ? " (did you mean :#{hint}?)" : ''} (layouts: #{known.map(&:inspect).join(', ')})"
       end
@@ -124,11 +224,16 @@ module MB
       # Band.new.  Returns the Band.
       def self.show(name = nil, io: $stdout, **opts)
         opts = opts.compact
-        if name.nil? && @band&.active? && opts.empty?
-          return @band
+        if name.nil? && opts.empty?
+          return @tiles if @tiles&.active?
+          return @band if @band&.active?
+          return show_tiles(@tiles.layout) if @tiles&.hidden? # back from Ctrl-Z
         end
 
-        layout = layout_named(name || (@band&.active? ? @band.layout.name : default_layout))
+        layout = layout_named(name || (@tiles&.active? ? @tiles.layout_name : @band&.active? ? @band.layout.name : default_layout))
+        return show_tiles(layout, **opts) if layout.is_a?(Viewports::Layout)
+        @tiles&.stop
+        opts = opts.except(:mouse, :nav_esc)
         opts = (layout_options[layout.name] || {}).merge(opts)
         if @band&.active?
           same = opts.all? { |k, v| k == :at ? @band.position == v : k == :color ? @band.mode == v : k == :look ? @band.look == v : false }
@@ -149,16 +254,97 @@ module MB
         @band
       end
 
-      # Turns the band off.  Returns nil.
+      # Shows the tiled screen with Viewports::Layout +layout+ (or switches
+      # the one on screen to it).  Options as for Tiles.new.
+      def self.show_tiles(layout, at: nil, **opts)
+        if @tiles&.hidden?
+          # Hidden with Ctrl-Z: the same layout comes back as it was left
+          if opts.empty? && (layout.equal?(@tiles.layout) || layout.name == @tiles.layout_name)
+            @band&.stop
+            return @tiles.start
+          end
+          @tiles.stop
+        end
+        if @tiles&.active?
+          @tiles.layout(layout) if opts.empty?
+          return @tiles if opts.empty?
+          @tiles.stop
+        end
+        @band&.stop
+        warm_up
+        @tiles = Tiles.new(layout: layout, **opts)
+        @tiles.start
+        unless @at_exit_tiles
+          at_exit { @tiles&.stop rescue nil }
+          @at_exit_tiles = true
+        end
+        @tiles
+      end
+
+      # Turns the band or the tiled screen off.  Returns nil.
       def self.off
         @band&.stop
+        @tiles&.stop
         nil
+      end
+
+      # The screen on (the tiled screen or the band), or nil.
+      def self.screen
+        return @tiles if @tiles&.active?
+        @band if @band&.active?
+      end
+
+      # Defines (or replaces) a pane kind: the block makes a Pane from a
+      # name and options (`pane :x, kind: :mine, ...` in pane files).
+      #
+      #     UI.pane_kind(:big_clock) { |name, **o| UI::Pane.new(name, height: 1, **o) { |c, s| c.puts [s&.stamp.to_s, :key] } }
+      def self.pane_kind(kind, &block)
+        raise ArgumentError, "Pane kinds are Symbols (got #{kind.inspect})" unless kind.is_a?(Symbol)
+        raise ArgumentError, 'pane_kind needs a block making a Pane' unless block
+        PaneFiles.kinds[kind] = block
+      end
+
+      # Defines (or replaces) pane +p+ (a Pane) by its name; redraws it if
+      # it is on screen.
+      def self.define_pane_object(p)
+        panes[p.name] = p
+        @band.layout = @band.layout if @band&.active? && @band.layout.pane_names.include?(p.name)
+        @tiles&.invalidate
+        p
+      end
+
+      # Reloads data files that changed (pane files, the current theme,
+      # saved layouts): called by the screens' painters about once a second.
+      # Returns {panes:, theme:, layouts:, errors:}.
+      def self.reload_files
+        errors = []
+        panes_defined = PaneFiles.reload(errors)
+        theme = begin
+          Themes.reload_changed
+        rescue DataFile::LoadError, ArgumentError => e
+          errors << e.message
+          false
+        end
+        layouts = []
+        (@layout_mtimes || {}).each do |path, m|
+          next unless File.file?(path) && File.mtime(path) != m
+          name = File.basename(path, '.rb').to_sym
+          begin
+            layout_named(name)
+            layouts << name
+          rescue DataFile::LoadError, LayoutLoader::LoadError, ArgumentError => e
+            @layout_mtimes[path] = File.mtime(path)
+            errors << e.message
+          end
+        end
+        { panes: panes_defined, theme: theme, layouts: layouts, errors: errors }
       end
 
       # Defines (or replaces) a pane; redraws it if it is on screen.
       def self.define_pane(name, **opts, &block)
         p = Pane.new(name, **opts, &block)
         panes[name] = p
+        @tiles&.invalidate
         @band.layout = @band.layout if @band&.active? && @band.layout.pane_names.include?(name)
         p
       end
@@ -166,7 +352,20 @@ module MB
       # Defines (or replaces) a layout; shows it if the band shows a layout
       # of that name.
       def self.define_layout(name, **opts, &block)
+        tiled = begin
+          Viewports.layout(name, **opts.slice(:focus, :zoom, :gap), &block)
+        rescue Viewports::Error, NoMethodError, ArgumentError
+          nil
+        end
+        if tiled&.repl?
+          layouts.delete(name)
+          tile_layouts[name] = tiled
+          @tiles.layout(tiled) if @tiles&.active? && @tiles.layout_name == name
+          return tiled
+        end
+        opts = opts.except(:focus, :zoom, :gap)
         l = Layout.new(name, &block)
+        tile_layouts.delete(name)
         layouts[name] = l
         layout_options[name] = opts unless opts.empty?
         @band.layout = l if @band&.active? && @band.layout.name == name

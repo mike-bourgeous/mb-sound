@@ -25,12 +25,11 @@ module MB
 
         module_function
 
-        # The [r, g, b] for +role+ (a Symbol or an [r, g, b] Array; nil for
-        # the terminal's default color).
+        # The color for +role+ in the current theme (UI::Themes): [r, g, b]
+        # or a palette index (a Symbol role, or an [r, g, b] Array or index
+        # as is; nil for the terminal's default color).
         def rgb(role)
-          return nil if role.nil?
-          return role if role.is_a?(Array)
-          ROLES.fetch(role) { raise ArgumentError, "Unknown UI color role #{role.inspect} (#{ROLES.keys.map(&:inspect).join(', ')})" }
+          Themes.rgb(role)
         end
       end
 
@@ -69,7 +68,8 @@ module MB
           @w = w
           @h = h
           @row = 0
-          @glyphs = GLYPHS.fetch(glyphs)
+          @glyph_set = glyphs
+          @glyphs = Themes.glyphs(glyphs)
         end
 
         # A glyph by name (see GLYPHS).
@@ -93,7 +93,23 @@ module MB
             str = str[-x..] || ''
             x = 0
           end
-          @grid.text(@x + x, @y + y, str, fg: Theme.rgb(role), bold: bold, max: @w - x)
+          @grid.text(@x + x, @y + y, str, fg: Theme.rgb(role), bold: bold || Themes.bold?(role), max: @w - x)
+          x + str.length
+        end
+
+        # Writes +str+ at (+x+, +y+) in +role+'s color with attributes
+        # (+reverse+: the color as the background, +bold+), clipped to the
+        # pane.  Returns the column after it.
+        def run(x, y, str, role = nil, reverse: false, bold: false)
+          str = str.to_s
+          return x + str.length if y < 0 || y >= @h || x >= @w || x + str.length <= 0
+
+          if x < 0
+            str = str[-x..]
+            x = 0
+          end
+          attr = (reverse ? Plot::Text::Cells::REVERSE : 0) | (bold || Themes.bold?(role) ? Plot::Text::Cells::BOLD : 0)
+          @grid.put_run(@x + x, @y + y, str[0, @w - x], Plot::Text::Cells.pack(Theme.rgb(role)), nil, attr)
           x + str.length
         end
 
@@ -163,7 +179,7 @@ module MB
         def sub(x, y, w, h)
           w = [[w, @w - x].min, 0].max
           h = [[h, @h - y].min, 0].max
-          Canvas.new(@grid, @x + x, @y + y, w, h, glyphs: @glyphs.equal?(GLYPHS[:ascii]) ? :ascii : :unicode)
+          Canvas.new(@grid, @x + x, @y + y, w, h, glyphs: @glyph_set)
         end
 
         # Text cut to +n+ characters (with an ellipsis when cut).
@@ -185,6 +201,63 @@ module MB
           zones.each { |upto, role| return role if at <= upto }
           zones.last[1]
         end
+      end
+    end
+  end
+end
+
+module MB
+  module Sound
+    module UI
+      # The built-in themes: :default (ui-3's colors), :paper (for light
+      # terminal backgrounds), :phosphor (green screen), and :mono (the
+      # terminal's own 16 colors, so its palette decides).
+      Themes.define(:default, based_on: :default) do
+        Theme::ROLES.each { |name, rgb| role name, rgb.dup }
+        role :title, Theme::ROLES[:title].dup, bold: true
+        GLYPHS[:unicode].each { |k, v| glyphs(:unicode) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
+        GLYPHS[:ascii].each { |k, v| glyphs(:ascii) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
+        glyphs(:unicode) { rule '│' }
+        glyphs(:ascii) { rule '|' }
+      end
+
+      Themes.define(:paper) do
+        role :text, [40, 40, 40]
+        role :dim, [120, 120, 120]
+        role :title, [0, 75, 135], bold: true
+        role :name, [110, 80, 0]
+        role :key, [0, 95, 175]
+        role :ok, [0, 120, 40]
+        role :warn, [160, 100, 0]
+        role :bad, [190, 0, 0]
+        role :low, [0, 135, 60]
+        role :mid, [175, 135, 0]
+        role :high, [200, 30, 30]
+      end
+
+      Themes.define(:phosphor) do
+        %i[text name key ok queued low].each { |r| role r, [157, 255, 180] }
+        %i[dim].each { |r| role r, [79, 191, 108] }
+        role :title, [200, 255, 210], bold: true
+        %i[warn armed mid].each { |r| role r, [230, 255, 120] }
+        %i[bad rec high].each { |r| role r, [255, 120, 90] }
+      end
+
+      Themes.define(:mono) do
+        role :text, 7
+        role :dim, 8
+        role :title, 12, bold: true
+        role :name, 3
+        role :key, 6
+        role :ok, 2
+        role :warn, 3
+        role :bad, 1
+        role :rec, 9
+        role :armed, 11
+        role :queued, 5
+        role :low, 2
+        role :mid, 3
+        role :high, 1
       end
     end
   end
