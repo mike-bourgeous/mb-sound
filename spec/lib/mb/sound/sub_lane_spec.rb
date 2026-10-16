@@ -58,15 +58,16 @@ RSpec.describe(MB::Sound::GraphNode::SubLane, :aggregate_failures) do
     end
   end
 
-  it 'puts each layer of a layered instrument in a sub-lane of its synth voice' do
+  it 'puts each narrow layer of a layered instrument in a sub-lane of its synth voice' do
     inst = layered
+    expect(inst.layers.map(&:coverage_share).map { |c| c.round(3) }).to eq([1.0, (30 / 88.0).round(3)])
     _, synth = render(-> { riff.synth(voices: 4) { |v| inst.play(v) } }, [800], 800)
     parts = synth.sub_lanes
     expect(parts.length).to eq(synth.lanes.length)
-    expect(parts.map(&:length).uniq).to eq([2])
+    expect(parts.map(&:length).uniq).to eq([1]) # (layer A covers every key: no sub-lane)
     expect(parts.flatten.map(&:reason).compact).to eq([])
     expect(parts.flatten).to all(be_skippable)
-    expect(parts[0].map(&:to_s)).to eq(['Sub-lane layer 1', 'Sub-lane B'])
+    expect(parts[0].map(&:to_s)).to eq(['Sub-lane B'])
   end
 
   it 'sleeps while a layer has no region for the notes, with the same samples as rendering it, at any buffer size' do
@@ -80,10 +81,9 @@ RSpec.describe(MB::Sound::GraphNode::SubLane, :aggregate_failures) do
     counts = [[800], [128], [367, 368], [1, 7, 333, 801, 64]].map { |sizes|
       got, synth = render(make, sizes, total)
       expect_same(ref, got, "sizes #{sizes}")
-      b = synth.sub_lanes.map { |l| l[1] }
+      b = synth.sub_lanes.map { |l| l[0] }
       expect(b.sum(&:skipped_samples)).to be > total / 2, "sizes #{sizes}"
       expect(b.sum(&:wakes)).to be > 0
-      expect(synth.sub_lanes.map { |l| l[0] }.sum(&:skipped_samples)).to be < b.sum(&:skipped_samples) / 4
       synth.sub_lanes.flatten.map { |p| [p.skipped_samples, p.wakes] }
     }
     # (asleep on the same samples at every size)

@@ -78,6 +78,7 @@ module MB
           @coverage = nil
           @choke_map = nil
           @wake_table = nil
+          @coverage_share = nil
           if @modulation
             unknown = @modulation.keys - %i[sources pitch cutoff volume]
             raise ArgumentError, "Unknown modulation keys #{unknown.inspect} (sources, pitch, cutoff, volume)" unless unknown.empty?
@@ -295,8 +296,8 @@ module MB
             outs = @layers.each_with_index.map { |l, li|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
                                          declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke,
-                                         scope: alloc ? {} : nil, choke_time: choke_time)
-              if alloc
+                                         scope: part?(l, alloc) ? {} : nil, choke_time: choke_time)
+              if part?(l, alloc)
                 part = GraphNode::SubLane.new(o, notes: source, wake: l.wake_check(mono: alloc.mono?), name: l.name || "layer #{li + 1}")
                 o = part.outputs.length == 1 ? part.outputs[0] : MB::Sound.channels(*part.outputs)
               end
@@ -348,6 +349,25 @@ module MB
             s = inst.play(v, **options)
             block ? block.call(v, s) : s
           }
+        end
+
+        # Layers covering more than this share of the keyboard (keys 21..108
+        # by velocities 1..127) play without a sub-lane: they would seldom
+        # sleep, and a sub-lane splits the voice's plan regions, which costs
+        # more than it saves at short buffers (GeneralUser GS Full
+        # Orchestra's three wide layers cost ~15% more at 128 samples as
+        # sub-lanes; its 0.16 and 0.11 layers and the piano's 0.05 one
+        # save).
+        SUB_LANE_COVERAGE = 0.5
+
+        # The share of the keyboard (keys 21..108 by velocities 1..127) the
+        # regions cover (see SUB_LANE_COVERAGE).
+        def coverage_share
+          @coverage_share ||= begin
+            t = Array.new(128) { Array.new(128, false) }
+            @regions.each { |r| (r.keys[0]..r.keys[1]).each { |k| (r.vel[0]..r.vel[1]).each { |v| t[k][v] = true } } }
+            (21..108).sum { |k| (1..127).count { |v| t[k][v] } } / (88 * 127.0)
+          end
         end
 
         # A Proc for GraphNode::SubLane's +wake:+ (each layer of a layered
@@ -434,6 +454,12 @@ module MB
         end
 
         private
+
+        # True if layer +l+ plays in a sub-lane of the voice (in a Synth lane,
+        # +alloc+ its allocator; see SUB_LANE_COVERAGE).
+        def part?(l, alloc)
+          !alloc.nil? && l.coverage_share <= SUB_LANE_COVERAGE
+        end
 
         # The modulation sums for the notes of +source+: { pitch:, cutoff:,
         # volume: } nodes (cents, cents, centibels) for the destinations
