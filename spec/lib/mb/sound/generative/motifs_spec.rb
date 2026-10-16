@@ -122,7 +122,7 @@ RSpec.describe('MB::Sound#motifs (phrase memory)', :aggregate_failures) do
     expect { MB::Sound.motifs(dorian, 0) }.to raise_error(ArgumentError, /steps/)
     expect { MB::Sound.motifs(dorian, form: 'aaba') }.to raise_error(ArgumentError, /form/)
     expect { MB::Sound.motifs(dorian, form: [nil]) }.to raise_error(ArgumentError, /form/)
-    expect { MB::Sound.motifs(dorian, form: %i[a b c], answer: { b: :a, c: :b }) }.to raise_error(ArgumentError, /not other answers/)
+    expect { MB::Sound.motifs(dorian, form: %i[a b c], answer: { b: :a, c: :b }) }.to raise_error(ArgumentError, /answer to an answer/)
     expect { MB::Sound.motifs(dorian, form: %i[a b], answer: { b: :b }) }.to raise_error(ArgumentError, /itself/)
     expect { MB::Sound.motifs(dorian, mutate: 2) }.to raise_error(ArgumentError, /mutate/)
     expect { MB::Sound.motifs(dorian, evolve: 0) }.to raise_error(ArgumentError, /evolve/)

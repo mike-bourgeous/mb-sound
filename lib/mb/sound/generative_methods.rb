@@ -100,7 +100,7 @@ module MB
         answer.each do |k, v|
           raise ArgumentError, "motifs' answer: letters are Symbols (got #{k.inspect} => #{v.inspect})" unless k.is_a?(Symbol) && v.is_a?(Symbol)
           raise ArgumentError, "#{k.inspect} can't answer itself" if k == v
-          raise ArgumentError, "#{k.inspect} answers #{v.inspect}, which answers #{answer[v].inspect}: answers answer motifs, not other answers" if answer.key?(v)
+          raise ArgumentError, "#{k.inspect} answers #{v.inspect}, which answers #{answer[v].inspect}: answers answer motifs (an answer to an answer is not supported)" if answer.key?(v)
         end
         { density: density, vary: vary, mutate: mutate }.each do |name, x|
           raise ArgumentError, "motifs' #{name}: is from 0 to 1 (got #{x.inspect})" unless x.is_a?(Numeric) && x.real? && x.between?(0, 1)

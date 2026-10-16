@@ -105,8 +105,8 @@ module MB
           notes = notes_of(m)
           notes = answer_of(notes) if source
           repeat = @form[0...pos].include?(letter)
-          notes = vary(notes, dice) if repeat && @vary > 0 && !source
-          realize(cycle, notes, m.anchor, answer: !source.nil?, call: @calls.include?(letter), dice: dice)
+          notes = vary(notes, dice) if repeat && @vary > 0 && source.nil?
+          realize(cycle, notes, m.anchor, answer: source ? true : false, call: @calls.include?(letter), dice: dice)
         end
 
         # Motif +letter+ in generation +gen+ (see the class comment).
