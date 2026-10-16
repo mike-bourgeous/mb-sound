@@ -28,7 +28,7 @@
 #     bin/songs/generative_demo.rb -u 0.4 gen.flac    # more wrong notes
 #     bin/songs/generative_demo.rb -l melody gen.flac # the G1 lead: melody on the probability scale (a new walk every bar)
 #     bin/songs/generative_demo.rb -l old gen.flac    # the lead from the library's older melody(vary: true) on a plain D dorian scale
-#     (all three leads play in the same register: A3..A5, centered near E4)
+#     (all three leads play in the same register: A3..A5, averaging near E4)
 #     bin/songs/generative_demo.rb -p lead gen.flac   # one part alone (lead, bells, bowls, pad)
 #     bin/songs/generative_demo.rb --help             # all options
 #
@@ -87,9 +87,10 @@ module MB::Sound
     harmony(GENERATIVE_DEMO_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 32.bars)
   end
 
-  # The leads' register: every lead plays in this range, centered near
-  # GENERATIVE_DEMO_CENTER (so A/B comparisons hear the line, not the
-  # octave).
+  # The leads' register: every lead plays in this range with its average
+  # note near E4 (motifs around E4, melody from D4, old from the root D4;
+  # 62-63 over 32 bars at seed 7), so A/B comparisons hear the line, not
+  # the octave.
   GENERATIVE_DEMO_RANGE = (A3..A5).freeze
   GENERATIVE_DEMO_CENTER = E4
 
@@ -103,7 +104,8 @@ module MB::Sound
       motifs(h, 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, vary: 0.2, mutate: 0.25, evolve: 2,
         range: GENERATIVE_DEMO_RANGE, around: GENERATIVE_DEMO_CENTER, seed: seed)
     when :melody, :new
-      melody(h, rhythm: rhythm, range: GENERATIVE_DEMO_RANGE, start: GENERATIVE_DEMO_CENTER, vary: true, seed: seed).loop
+      # (its walk drifts up from the start: D4 puts its average with the others')
+      melody(h, rhythm: rhythm, range: GENERATIVE_DEMO_RANGE, start: D4, vary: true, seed: seed).loop
     when :old
       melody(scale(:dorian, :d), rhythm: rhythm, range: GENERATIVE_DEMO_RANGE, vary: true, seed: seed).loop
     else
