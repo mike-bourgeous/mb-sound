@@ -227,11 +227,22 @@ module MB
         # `source.env(*envelope)` (or `source.env(**envelope)`), then
         # lowpassed by the #filter, if any.  A layered instrument (.layered)
         # sums its layers' voices (the same seed for each).
+        #
+        # +steal_fade+ (off by default; an A/B, 2026-10-16): true (or a
+        # length) fades a voice out over Envelope::CHOKE_TIME (3 ms; or that
+        # length) from the exact sample its synth lane is choked: when the
+        # synth steals the voice for a new note (the new note takes a spare
+        # lane; see MIDI::Allocator), or at CC 120 (all sound off).  Without
+        # it a voice with no envelope (slices, plain samples, instruments
+        # without SFZ/SF2 envelopes) rings on under the new notes until its
+        # sample ends; voices with an envelope fade through the envelope's
+        # choke either way (then this only stops the voice after the fade).
+        # A length also sets how fast choke groups fade the voice.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: nil, mips: nil, seed: nil)
+                 interpolation: nil, mips: nil, seed: nil, steal_fade: false)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
-            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips)
+            return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade)
           end
 
           if source
@@ -250,8 +261,11 @@ module MB
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           choke = source ? chokes_for(source) : nil
+          choke ||= source.choke if steal_fade && source
+          choke_time = steal_fade && steal_fade != true ? Length.seconds(steal_fade).to_f : nil
+          raise ArgumentError, "steal_fade: is true, false, or a length above 0 (got #{steal_fade.inspect})" if choke_time && !(choke_time > 0)
           voice(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke)
+                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke, choke_time: choke_time)
         end
 
         # The voice for #play's resolved inputs; +shared+ keeps modulation
@@ -264,7 +278,9 @@ module MB
         # over the last note's declick tail.
         #
         # +choke+ is the voice's Notes#choke when the instrument has choke
-        # groups (see #chokes_for), else nil.
+        # groups (see #chokes_for) or #play's +steal_fade+ is on, else nil;
+        # +choke_time+ the seconds a choke fades the voice over (nil:
+        # Envelope::CHOKE_TIME).
         #
         # In a Synth lane each layer is a GraphNode::SubLane, which sleeps
         # while it has nothing to play and wakes on the exact sample of a
@@ -272,14 +288,14 @@ module MB
         # (+scope+: a Hash holding the layer's ZoneValue::Index), so a
         # piano's second layer costs nothing on notes outside its keys.
         def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil,
-                  scope: nil)
+                  scope: nil, choke_time: nil)
           if @layers
             n = channel_count
             alloc = source && source.stream.respond_to?(:allocator) ? source.stream.allocator : nil
             outs = @layers.each_with_index.map { |l, li|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
                                          declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke,
-                                         scope: alloc ? {} : nil)
+                                         scope: alloc ? {} : nil, choke_time: choke_time)
               if alloc
                 part = GraphNode::SubLane.new(o, notes: source, wake: l.wake_check(mono: alloc.mono?), name: l.name || "layer #{li + 1}")
                 o = part.outputs.length == 1 ? part.outputs[0] : MB::Sound.channels(*part.outputs)
@@ -300,7 +316,7 @@ module MB
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-              declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?
+              declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?, choke_time: choke_time
             )
           }
           nodes.each { |n| source.register(n) } if source && one_shot?
