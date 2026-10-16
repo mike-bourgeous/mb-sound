@@ -9,7 +9,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     require 'pty'
     vt = MB::Sound::UI::VT.new(30, 110, scrollback: 0)
     lock = Mutex.new
-    env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30' }
+    env = { 'MB_SOUND_HELP_DIR' => tmp_path('help'), 'COLUMNS' => '110', 'LINES' => '30', 'OUTPUT_TYPE' => 'null' }
     r, w, pid = PTY.spawn(env, 'bin/sound.rb')
     w.winsize = [30, 110]
     reader = Thread.new do
