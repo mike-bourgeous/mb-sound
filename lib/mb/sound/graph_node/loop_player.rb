@@ -53,7 +53,11 @@ module MB
         # The loop's length on the timeline (whole notes, a Rational).
         attr_reader :whole_notes
 
-        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000)
+        # Why the stretch is what it is (Sample#follow's choice, e.g.
+        # "spectral: tonal, spectral flatness 0.000"), or nil.
+        attr_reader :stretch_reason
+
+        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000, reason: nil)
           raise ArgumentError, "Give a Sample to follow the tempo (got #{sample.class})" unless sample.is_a?(Sample)
           raise ArgumentError, "mode: is one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
           raise ArgumentError, "align: is one of #{ALIGNS.inspect} (got #{align.inspect})" unless ALIGNS.include?(align)
@@ -66,6 +70,7 @@ module MB
           @channel = Integer(channel)
           @follow_mode = mode
           @stretch_options = stretch.dup.freeze
+          @stretch_reason = mode == :stretch ? reason : nil
           @align = align
           @transport = transport
           @sample_rate = sample_rate.to_f
@@ -124,7 +129,7 @@ module MB
         end
 
         def to_s
-          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode}, #{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats)"
+          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch" : 'resample'}, #{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats#{"; #{@stretch_reason}" if @stretch_reason})"
         end
 
         private

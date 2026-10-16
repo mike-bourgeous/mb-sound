@@ -438,4 +438,49 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       expect(text).to match(/odd 98bpm\.wav +- +- +- +- +name 98 \(no fit to 3\.300 s\)/)
     end
   end
+
+  describe 'follow defaults by material, and soft onsets in slices' do
+    let(:arp) {
+      notes = %i[A3 C4 E4 A4 G4 E4 C4 D4 A3 C4 E4 B4 A4 E4 D4 C4].map { |n| MB::Sound.const_get(n) }
+      MB::Sound.bounce(2.bars, bpm: 100) {
+        MB::Sound.seq(*notes).n8.loop.synth(voices: 4) { |v|
+          v.hz.saw.lp4(v.env(0.002, 0.25, 0.2, 0.2, gm: false) * 2500 + 400, resonance: 0.3) * v.env(0.003, 0.3, 0.5, 0.25, gm: false) * 0.4
+        }
+      }
+    }
+    let(:drums) { MB::Sound.bounce(2.bars, bpm: 100) { MB::Sound.tr909(MB::Sound.grid(16, kick: 'X...x...x..xx...', clap: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.').loop) } }
+
+    after { MB::Sound.bpm(120) }
+
+    it 'cuts slices at soft notes on the grid (the A3 after D4 that #onsets misses)' do
+      eighth = arp.length / 16
+      expect(arp.onsets.map { |o| (o.to_f / eighth).round }).not_to include(8)
+      s = arp.stretch(0.78125, mode: :slice)
+      a = 8 * eighth + arp.onsets(threshold: 4.db).find { |o| (o.to_f / eighth).round == 8 } - 8 * eighth
+      q = (a * 0.78125).round
+      expect(s.data(0)[q...(q + 64)]).to eq(arp.data(0)[a...(a + 64)])
+    end
+
+    it 'calls drums percussive and notes tonal, by name words, else spectral flatness' do
+      expect(drums.material.kind).to eq(:percussive)
+      expect(drums.material.flatness).to be > 0.04
+      expect(arp.material.kind).to eq(:tonal)
+      expect(arp.material.why).to eq('tonal, spectral flatness 0.000')
+      expect(arp.with(name: 'Perc Loop 3').material.then { |m| [m.kind, m.why] }).to eq([:percussive, "name 'perc'"])
+      expect(drums.with(name: 'PadLoop').material.kind).to eq(:tonal)
+    end
+
+    it 'follows with slices for percussive loops and the vocoder for tonal ones, unless told' do
+      expect(drums.follow.stretch_reason).to start_with('slice: percussive, spectral flatness')
+      a = arp.follow
+      expect(a.stretch_reason).to eq('spectral: tonal, spectral flatness 0.000')
+      expect(a.to_s).to include('spectral stretch')
+      MB::Sound.bpm(125)
+      expect(a.sample(800)).to eq(arp.stretch(0.8, mode: :spectral).data(0)[0...800])
+      b = arp.follow(stretch: :slice)
+      expect(b.stretch_reason).to eq('stretch: given')
+      expect(b.sample(800)).to eq(arp.stretch(0.8, mode: :slice).data(0)[0...800])
+      expect(arp.follow(:resample).stretch_reason).to be_nil
+    end
+  end
 end

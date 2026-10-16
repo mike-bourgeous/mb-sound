@@ -713,23 +713,94 @@ module MB
       # with bar 1 (+align+ :timeline) or the launch (:launch), staying on
       # the bar through tempo changes.  +mode+ :stretch keeps the pitch
       # (stretched offline per tempo with +stretch+, a stretch mode or a
-      # Hash of #stretch options: :slice by default, e.g. :spectral for
-      # pads); :resample speeds the sample up and down (pitch follows,
-      # like a varispeed).  Needs a tempo (#bpm: from the file, a name,
+      # Hash of #stretch options; :auto by default: :slice for percussive
+      # loops and :spectral for tonal ones, as #material says);
+      # :resample speeds the sample up and down (pitch follows, like a
+      # varispeed).  Needs a tempo (#bpm: from the file, a name,
       # `Sample[path, bpm: 98]`, or `detect: true`).
       #
       #     brk = Sample['Funk/break_98bpm.wav']
-      #     bg :brk, brk.follow                     # stays in time at the session's tempo
-      #     bg :pad, pad.follow(stretch: :spectral)  # pads keep their pitch through the vocoder
+      #     bg :brk, brk.follow                     # stays in time at the session's tempo (drums: slices)
+      #     bg :pad, pad.follow                     # tonal: the phase vocoder keeps notes whole
+      #     bg :pad, pad.follow(stretch: :slice)    # say which
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
-      def follow(mode = :stretch, stretch: :slice, align: :timeline)
+      def follow(mode = :stretch, stretch: :auto, align: :timeline)
         mode = { true => :stretch, resample: :resample, varispeed: :resample, stretch: :stretch }.fetch(mode) {
           raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
         }
+        reason = nil
+        if stretch == :auto
+          m = mode == :stretch ? material : nil
+          stretch = m&.kind == :tonal ? :spectral : :slice
+          reason = m && "#{stretch}: #{m.why}"
+        else
+          reason = 'stretch: given'
+        end
         opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
-        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align) }
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason) }
         nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
+      end
+
+      # What kind of sound this is, for choosing a stretch (Sample#follow's
+      # default): :percussive (drums: the slice stretch keeps every hit
+      # exact) or :tonal (notes and pads: the phase vocoder keeps notes
+      # whole, where slices can cut a note at a soft onset).  A Material
+      # with +kind+, +flatness+, and +why+ in words.  Name words decide
+      # first (MATERIAL_WORDS; drum, kick, hat, perc, break... or pad,
+      # arp, chord, bass, keys, vocal...), else the spectral flatness of
+      # the region (energy-weighted mean over 2048-sample Hann frames,
+      # 100 Hz-10 kHz): noise-like hats and snares make drum loops flat
+      # (a 909 groove 0.12, an 808 groove 0.15), notes and chords don't
+      # (saw arps, pads, basses under 0.001; a filtered noise pad 0.019);
+      # PERCUSSIVE_FLATNESS (0.04) splits them.  Loops of pitched drums
+      # only (an 808 kick alone measures 0.001) read as tonal: the
+      # spectral stretch keeps their transients too.  Cached per audio.
+      def material
+        words = (@name || '').to_s.gsub(/([a-z])([A-Z])/, '\\1 \\2').downcase.split(/[^a-z]+/)
+        MATERIAL_WORDS.each do |kind, list|
+          w = words.find { |x| list.include?(x) }
+          return Material.new(kind: kind, flatness: nil, why: "name '#{w}'") if w
+        end
+        f = @audio.edit([:flatness, @start, @stop]) { Sample.flatness(mono_mix, sample_rate) }
+        kind = f >= PERCUSSIVE_FLATNESS ? :percussive : :tonal
+        Material.new(kind: kind, flatness: f, why: "#{kind}, spectral flatness #{format('%.3f', f)}")
+      end
+
+      # What #material found.
+      Material = Data.define(:kind, :flatness, :why)
+
+      # Name words for #material (percussive words first).
+      MATERIAL_WORDS = {
+        percussive: %w[drum drums drm beat beats break breaks breakbeat breakbeats perc percs percussion kick kicks snare snares hat hats hihat hihats cymbal ride top tops shaker tamb conga congas bongo bongos],
+        tonal: %w[pad pads arp arps chord chords keys piano rhodes organ synth synths lead leads melody melodic bass basses vocal vocals vox guitar gtr string strings brass horn horns bell bells pluck plucks choir],
+      }.freeze
+
+      # #material's flatness split (see there).
+      PERCUSSIVE_FLATNESS = 0.04
+
+      # The energy-weighted mean spectral flatness of +x+ (see #material).
+      def self.flatness(x, sample_rate = 48000)
+        x = Numo::DFloat.cast(x)
+        n = 2048
+        hop = 1024
+        w = 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(n).seq * (2 * Math::PI / n))
+        lo = (100 * n / sample_rate.to_f).ceil
+        hi = [(10000 * n / sample_rate.to_f).floor, n / 2].min
+        fl = []
+        en = []
+        k = 0
+        while k + n <= x.length
+          p = (Numo::Pocketfft.rfft(x[k...(k + n)] * w).abs**2)[lo..hi] + 1e-20
+          fl << Math.exp(Numo::NMath.log(p).mean) / p.mean
+          en << p.sum
+          k += hop
+        end
+        return 0.0 if en.empty?
+        en = Numo::DFloat.cast(en)
+        fl = Numo::DFloat.cast(fl)
+        keep = en > en.max * 1e-3
+        ((fl[keep] * en[keep]).sum / en[keep].sum).to_f
       end
 
       # A granular cloud of this sample: a stereo Channels bundle of a
@@ -966,11 +1037,11 @@ module MB
         when nil
           m = markers.map(&:position).select(&:positive?)
           return [m, :markers] unless m.empty?
-          o = onsets.select(&:positive?)
+          o = slice_onsets.select(&:positive?)
           return [o, :onsets] unless o.empty? && @bpm
           slice_cuts(:grid)
         when :markers then [markers.map(&:position), :markers]
-        when :onsets, :transients then [onsets, :onsets]
+        when :onsets, :transients then [slice_onsets, :onsets]
         when :grid then slice_cuts(1.n16)
         when Sequence::Duration
           raise ArgumentError, 'A grid of slices needs the sample\'s bpm (Sample[..., bpm: 98])' unless @bpm
@@ -985,6 +1056,29 @@ module MB
         end
       end
       private :slice_cuts
+
+      # The onsets the slice stretch cuts at: #onsets, plus softer ones
+      # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
+      # sample has a #bpm.  A soft note on the grid (a lower note after a
+      # higher one in a saw arp rose 6-9 dB) missed by #onsets left two
+      # notes in one slice, which, sped up, played the first at its old
+      # length and the second late and cut short (the "hesitation" of the
+      # loops-1 Bench, 2026-10-16).
+      def slice_onsets
+        on = onsets
+        return on unless @bpm
+        step = 60.0 / @bpm / 4 * sample_rate
+        reach = position(SOFT_ONSET_REACH)
+        gap = position(0.04)
+        soft = onsets(threshold: SOFT_ONSET).select { |o| (o - (o / step).round * step).abs <= reach }
+        (on + soft).sort.each_with_object([]) { |o, out| out << o if out.empty? || o - out.last >= gap }
+      end
+      private :slice_onsets
+
+      # The slice stretch's softer onset threshold near the grid, and how
+      # near (see #slice_onsets).
+      SOFT_ONSET = 4.db
+      SOFT_ONSET_REACH = 0.015
 
       # The sample with a tempo from tempo detection (Structure.analyze on
       # the loop repeated to at least 8 s), rounded so the loop holds a
