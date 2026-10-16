@@ -13,7 +13,8 @@
 # behind the fly), the second harmonic like a monopole (all around), and
 # wind from the wing vortices trails behind it (Sueur, Tuck & Robert 2005,
 # a tethered blowfly; see design/notes/textures.md for the sources).
-# The mouse scurries in hops (ticks) and squeaks now and then: tonal
+# The mouse dashes and stops, its feet ticking while it moves (and a tick
+# or two as it settles), and squeaks now and then: tonal
 # chirps 3-6 kHz, each 80-300 ms with its own pitch contour (rising,
 # falling, or arched) and a fast vibrato.
 #
@@ -24,6 +25,7 @@
 #     bin/songs/critters.rb --binaural fly.flac     # headphones: per-ear delays and head shadow,
 #                                                   # and the critters can pass behind you
 #     bin/songs/critters.rb -D 1 fly.flac           # real doppler (5x by default, for drama)
+#     bin/songs/critters.rb -S 0 fly.flac           # unsmoothed doppler: every dart warbles (2 Hz by default)
 #     bin/songs/critters.rb -s 7 fly.flac           # another flight (seed; 5 by default)
 #
 # Or in bin/sound.rb:
@@ -59,11 +61,18 @@ module MB::Sound
     [x, y, z]
   end
 
-  # The mouse's path (on the floor, z 0 as in textures round 3, so the
-  # rounds compare): scurries with holds and overshoots.
+  # The mouse's path on the floor (z 0): dashes and stops.  One random
+  # gate (+go+: moving about half the time, in runs of a fraction of a
+  # second to a few seconds) runs both drifts' clocks, so x and y stop
+  # together; its lowpass is the mouse speeding up and slowing down.
+  # (textures-5, 2026-10-16; the maintainer: "Scratches only immediately
+  # during movement?"  Rounds 3 and 4 scurried with elastic overshoots and
+  # never really stopped: under 0.1 m/s 3% of the time, 1.2 m/s median,
+  # and jittered short steps sped up to tens of meters per second.)
   def self.critter_mouse_path(behind: false)
-    x = drift(2.5, range: -2..2, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
-    y = drift(1.2, range: behind ? -2..2 : 0.4..2, walk: 0.5, smooth: :cosine)
+    go = (drift(1.5, smooth: :step, jitter: 0.8).aclip(0, 0.02) * 50).filter(:lowpass, cutoff: 6, quality: 0.5)
+    x = drift(go * 2.2, range: -2..2, walk: 0.4, smooth: :cubic)
+    y = drift(go * 1.6, range: behind ? -2..2 : 0.4..2, walk: 0.4, smooth: :cubic)
     [x, y, 0.constant]
   end
 
@@ -121,26 +130,40 @@ module MB::Sound
   end
 
   # A mouse along +x+, +y+, +z+: scurrying ticks (dust through a bandpass,
-  # as in textures round 3) and a squeak now and then.  Mono.
+  # as in textures round 3) while it moves, and a squeak now and then.
+  # The ticks follow its speed (none standing still, up to 35 a second
+  # and a little louder from about 1 m/s); the speed's 5 Hz lowpass lets
+  # a tick or two settle after it stops.  Mono.
   def self.critter_mouse(x, y, z)
-    steps = dust(25, range: 0.2..1, min_gap: 15.ms).filter(:bandpass, cutoff: 3500, quality: 1.5) * 0.8
+    vx, vy, vz = critter_velocity([x, y, z])
+    moving = ((vx * vx + vy * vy + vz * vz) ** 0.5).aclip(0, 1).filter(:lowpass, cutoff: 5, quality: 0.5)
+    steps = dust(moving * 35, range: 0.2..1, min_gap: 15.ms).filter(:bandpass, cutoff: 3500, quality: 1.5) * (moving * 0.3 + 0.7) * 0.8
     squeaks = critter_squeaks(dust(0.8, range: 0.5..1, min_gap: 600.ms)) * 0.05
     steps + squeaks
   end
 
   # Puts mono +sig+ at +x+, +y+, +z+ (nodes, meters) around you: delayed
   # by the distance (times +doppler+; 1 is real), darker and quieter with
-  # distance, panned by x / r; or with +binaural+, each ear gets its own
+  # distance (+smooth+ Hz smooths the doppler), panned by x / r; or with +binaural+, each ear gets its own
   # delay and head shadow from Brown and Duda's spherical head model
   # (Woodworth's path around the head, a high shelf from 2x to 0.1x past
   # ~1.2 kHz by the ear's angle to the source) plus a gentle dulling above
   # 4 kHz behind you (the pinnae shade sound from behind; a rough cue
   # only).  Returns stereo.
-  def self.critter_place(sig, x, y, z, doppler: 5, binaural: false)
+  def self.critter_place(sig, x, y, z, doppler: 5, smooth: 2, binaural: false)
     # Paths that may pass behind cross the head; binaural keeps them 30 cm
     # off it (in quadrature), so levels stay sane
     r = binaural ? (x * x + y * y + z * z + 0.09) ** 0.5 : (x * x + y * y + z * z) ** 0.5
     late = r * (doppler / CRITTER_SOUND_SPEED)
+    # The doppler follows the path through a +smooth+ Hz lowpass
+    # (critically damped; nil or 0 off), so the darts and overshoots swoop
+    # instead of warbling (textures-5; the maintainer: "Delay changes are a
+    # little too extreme in speed").  Measured on the binaural fly (seed 5,
+    # 32 s, 5x doppler) through the delay: unsmoothed, the pitch hit the
+    # delay's own slew limit (-12 semitones) and changed at up to 144
+    # semitones/s (95th percentile); 2 Hz keeps swoops to 4 semitones at
+    # most, changing at up to 17 semitones/s (95th percentile).
+    late = late.filter(:lowpass, cutoff: smooth, quality: 0.5) if smooth && smooth > 0
     near = 1 / (r + 0.3)
     air = r * -1500 + 9000
 
@@ -163,14 +186,14 @@ module MB::Sound
   end
 
   # Plays the critters (:both, :fly, or :mouse) as players :fly and :mouse.
-  def self.critters(which = :both, doppler: 5, binaural: false)
+  def self.critters(which = :both, doppler: 5, smooth: 2, binaural: false)
     if which == :both || which == :fly
       x, y, z = critter_fly_path(behind: binaural)
-      bg :fly, critter_place(critter_fly(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(8.db), fade: 0
+      bg :fly, critter_place(critter_fly(x, y, z), x, y, z, doppler: doppler, smooth: smooth, binaural: binaural).at(8.db), fade: 0
     end
     if which == :both || which == :mouse
       x, y, z = critter_mouse_path(behind: binaural)
-      bg :mouse, critter_place(critter_mouse(x, y, z), x, y, z, doppler: doppler, binaural: binaural).at(28.db), fade: 0 # dust ticks through a bandpass are quiet
+      bg :mouse, critter_place(critter_mouse(x, y, z), x, y, z, doppler: doppler, smooth: smooth, binaural: binaural).at(28.db), fade: 0 # dust ticks through a bandpass are quiet
     end
   end
 
@@ -180,11 +203,12 @@ module MB::Sound
       critter: [:both, 'which critters (both, fly, mouse)', '-c', Symbol],
       binaural: [false, 'headphones: per-ear delays and head shadow; critters may pass behind you'],
       doppler: [5.0, 'doppler exaggeration (1 is real)', '-D', Float, 0.0001..20],
+      smooth: [2.0, 'doppler smoothing: a lowpass on the delay time in Hz (0 off: every dart warbles)', '-S', Float, 0.0..50],
       seed: [5, 'random seed (each seed is another flight)', '-s', Integer, 0..1_000_000],
     ) { |p|
       MB::Sound.seed(p.seed)
       bpm 60
-      critters(p.critter, doppler: p.doppler, binaural: p.binaural)
+      critters(p.critter, doppler: p.doppler, smooth: p.smooth, binaural: p.binaural)
     }
   end
 end
