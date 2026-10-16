@@ -546,7 +546,9 @@ module MB
         what you played first); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
-        `render` bounces graphs offline.
+        `render` bounces graphs offline.  No MIDI keyboard?  The tiles'
+        virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
+        input, and Enter there captures.
       TEXT
       commands :take, :arm, :disarm, :armed, :rec, :capture, :captures, :rec_audio, :stop_rec_audio, :recordings, :render, :write
       note :arrangement
@@ -637,6 +639,25 @@ module MB
         `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
         layouts are data files in the ui folder, reloaded when they
         change.  `bin/ui_check.rb` reports what your terminal supports.
+
+        The keyboard: in the tiles, NAV then p (or `ui.keys`, or `ui :keys`)
+        turns the computer keyboard into a piano, laid out like
+        jack-keyboard: z s x d c v ... from C3 and q 2 w 3 e ... from C4;
+        - and + (or Left/Right) move octaves, Up/Down the velocity, Shift
+        accents, Space is the sustain pedal, Esc all notes off, Ctrl-]
+        back.  Notes go into the session's MIDI input, so `arm :lead`
+        plays the lead and Enter captures what you just played into it
+        (with nothing armed a default patch plays).  Most terminals send no
+        key-up, so notes are a fixed length there (`ui.keyboard.tap = 0.5`;
+        ` cycles :hold (notes hold while a key repeats), :legato, ...); with
+        the kitty keyboard protocol (kitty, WezTerm with
+        enable_kitty_keyboard, Ghostty, foot, iTerm2 with its setting)
+        notes end on key-up.  Tab is step entry: lower-row notes, 1-7
+        lengths (whole to 64th), 8 dotted, 9 triplet, r rest, t tie, a
+        accent, ` slide, Backspace undo, p plays it, w swaps it (looping)
+        into the armed tracks at their next launch point and keeps editing,
+        Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
+        line and in `ui.keyboard.clip`.
       TEXT
       commands :ui, :off, :pane, :layout
       note :terminal_ui

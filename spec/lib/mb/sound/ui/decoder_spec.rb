@@ -75,4 +75,38 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
     km.off('h')
     expect(km[key.of('h')]).to be_nil
   end
+
+  it 'decodes kitty event types (press, repeat, release), modifier keys, and shifted letters like legacy terminals' do
+    ev = d.feed("\e[122;1:1u\e[122;1:2u\e[122;1:3u\e[97;2u\e[97;2:3u\e[1;1:3D\e[5;1:2~\e[57441;2u")
+    expect(ev.map { |k| [k.key, k.mods, k.type] }).to eq([
+      ['z', [], :press], ['z', [], :repeat], ['z', [], :release], ['A', [], :press], ['A', [], :release],
+      [:left, [], :release], [:page_up, [], :repeat], [:left_shift, [:shift], :press],
+    ])
+    expect(ev[2].release?).to eq(true)
+    expect(d.feed('z').first.type).to eq(:press)
+    expect(ev[1].to_s).to eq('z (repeat)')
+  end
+
+  it 'routes every key event to the host in :grab mode until Ctrl-], dropping releases elsewhere' do
+    host = Class.new {
+      attr_reader :log
+      def initialize = @log = []
+      def grab_key(k) = @log << [:grab, k.key, k.type]
+      def repl_key(k) = @log << [:repl, k.key, k.type]
+      def repl_paste(t) = @log << [:paste, t]
+      def act(a) = @log << [:act, a.name]
+      def line_done(*) = nil
+      def mode_changed(m) = @log << [:mode, m]
+    }.new
+    r = input::Router.new(host)
+    r.mode = :grab
+    r.event(key.of('z'))
+    r.event(key.of('z', type: :release))
+    r.event(input::Paste.new(text: 'x'))
+    r.event(key.of(']', :ctrl))
+    r.event(key.of(']', :ctrl, type: :release))
+    r.event(key.of('q', type: :release))
+    r.event(key.of('q', type: :repeat))
+    expect(host.log).to eq([[:mode, :grab], [:grab, 'z', :press], [:grab, 'z', :release], [:mode, :repl], [:repl, 'q', :repeat]])
+  end
 end

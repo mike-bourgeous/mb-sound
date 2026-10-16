@@ -37,13 +37,26 @@ module MB
 
         # UI commands the palette runs on this screen (`split :v`); every
         # other line is evaluated in the console binding.
-        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats].freeze
+        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys].freeze
 
         # Keys hinted on the status line per mode.
         HINTS = {
           repl: 'Ctrl-] nav',
-          nav: '1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  i back',
+          nav: '1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
+          grab: 'Ctrl-] back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
+          step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
+
+        # NAV keys of mb-sound's own panes (after Router::NAV).
+        NAV_EXTRA = Input::Keymap.new(:tiles) do
+          on 'p', :keys
+        end
+
+        # Kitty keyboard protocol flags pushed while KEYS mode has the
+        # keyboard: 1 (unambiguous keys), 2 (press, repeat, and release
+        # events), 8 (every key as an escape code, which text keys need
+        # for their releases).
+        KEYS_KITTY_FLAGS = 1 | 2 | 8
 
         attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :fps, :mode
 
@@ -53,10 +66,14 @@ module MB
         # Pry) or :thread (a Pry of its own, for specs and tools);
         # +context+ the binding the palette evaluates in; +size+ [rows,
         # cols] for a terminal that won't say; +probe+ false skips the
-        # terminal feature probe; other options as for Band.
+        # terminal feature probe; +keyboard+ the UI::Keyboard for KEYS mode
+        # (UI.keyboard), +keys_kitty+ true/false forces the kitty protocol
+        # in KEYS mode on or off (nil: if the probe found it); other
+        # options as for Band.
         def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :quad,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
-                       mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {})
+                       mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
+                       keyboard: nil, keys_kitty: nil)
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl?
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -94,8 +111,17 @@ module MB
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
           @router = Input::Router.new(self, nav_esc: nav_esc)
+          @router.add_keymap(NAV_EXTRA)
           @decoder = Input::Decoder.new
+          @keyboard = keyboard || UI.keyboard
+          @keys_kitty = keys_kitty
+          @states[:keyboard][:keyboard] = @keyboard
+          @kitty_pushed = false
+          @start_keys = layout.focus == :keyboard
         end
+
+        # The virtual keyboard (UI::Keyboard) KEYS mode plays.
+        attr_reader :keyboard
 
         def active? = @active
 
@@ -130,6 +156,8 @@ module MB
           install_signals
           @full = true
           @term.typed_during_probe.each { |e| handle(e) }
+          hook_keyboard
+          keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
           if thread
             @painter = Thread.new { paint_loop }
             @reader = Thread.new { input_loop }
@@ -142,6 +170,7 @@ module MB
         def stop
           return self unless @active || @hidden
 
+          exit_keys
           @stopping = true
           @active = false
           @hidden = false
@@ -172,6 +201,7 @@ module MB
         def hide
           return self unless @active
 
+          exit_keys
           @lock.synchronize do
             @active = false
             @hidden = true
@@ -431,7 +461,43 @@ module MB
           self
         end
 
+        # KEYS mode: the computer keyboard plays the virtual keyboard (the
+        # `keyboard` pane, put below the REPL if the layout has none) until
+        # Ctrl-] (see UI::Keyboard for the keys).  +on+ false leaves it.
+        # Options set the keyboard: +off+ the note-off mode (:auto,
+        # :release, :hold, :tap, :legato), +step+ true for step entry,
+        # +patch+ the default patch's voice block (nil: none; it plays
+        # while nothing is armed).
+        #
+        #     ui.keys                 # play; arm :lead to hear the lead
+        #     ui.keys off: :tap       # fixed-length notes
+        #     ui.keys step: true      # step entry
+        def keys(on = true, off: nil, step: nil, patch: :keep)
+          return leave_keys.then { self } unless on
+
+          @keyboard.off_mode = off if off
+          @keyboard.entry = step ? :step : :play unless step.nil?
+          @keyboard.out.patch = patch if patch != :keep && @keyboard.out.respond_to?(:patch=)
+          unless @tiler.layout.panes.include?(:keyboard)
+            tile do |t|
+              t.split(@tiler.layout.panes.include?(:repl) ? :repl : t.focus, :rows, :keyboard)
+              h = t.rects[:keyboard]&.h.to_i
+              t.resize(:keyboard, :down, h - 8) if h > 8
+            end
+          end
+          tile { |t| t.focus!(:keyboard) }
+          @router.mode = :grab
+          self
+        end
+
         ### Router host (called on the input thread)
+
+        # A key in KEYS mode (:grab).
+        def grab_key(k)
+          handled = @keyboard.key(k, mono_now)
+          flash("#{k}: not a key here (Ctrl-] back)", :dim) unless handled || k.release?
+          @painter&.wakeup rescue nil
+        end
 
         def repl_key(k)
           if @scroll > 0
@@ -446,8 +512,9 @@ module MB
           @host.paste(text)
         end
 
-        def mode_changed(_m)
+        def mode_changed(m)
           @full = true
+          m == :grab ? enter_keys : leave_keys
         end
 
         def line_done(kind, text)
@@ -464,7 +531,10 @@ module MB
         # Applies an Action (keys, palette, MIDI).
         def act(a)
           case a.name
-          when :mode then @router.mode = a.args[0]
+          when :mode
+            # i or Enter on the keyboard pane go back into it
+            to = a.args[0] == :repl && @tiler.focus == :keyboard && @router.mode == :nav ? :grab : a.args[0]
+            @router.mode = to
           when :focus_index then tile { |t| t.focus_index(a.args[0]) }
           when :focus_next then tile { |t| t.focus_next(1) }
           when :focus_prev then tile { |t| t.focus_next(-1) }
@@ -484,6 +554,7 @@ module MB
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
           when :redraw then @full = true
           when :panic then run_safely { MB::Sound.panic }
+          when :keys then keys
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil
           when :complete then complete_palette
@@ -498,6 +569,81 @@ module MB
         end
 
         private
+
+        def mono_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        # The keyboard's Enter (capture) and step entry's Enter (a clip).
+        def hook_keyboard
+          @keyboard.on_capture = -> { capture_keys }
+          @keyboard.on_finish = ->(clip) { finish_steps(clip) }
+          @keyboard.on_swap = ->(clip) { swap_steps(clip) }
+        end
+
+        # The Session the keyboard plays into.
+        def keys_session
+          @keyboard.out.respond_to?(:target_session) ? @keyboard.out.target_session : Session.existing
+        end
+
+        # Step entry's swap key: the clip into each armed track at its next
+        # launch point (Arrangement#play: a swap if the track plays, else a
+        # launch; journaled and undoable like `bg :lead, clip`).
+        def swap_steps(clip)
+          s = keys_session
+          armed = s&.arrangement&.armed || {}
+          return flash('swap: arm a track first (arm :lead); Enter puts the clip on the console line instead', :warn) if armed.empty?
+          run_safely { Session.with_context(session: s) { armed.keys.map { |name| s.arrangement.play(name, clip) } } }
+        end
+
+        # Enter in KEYS mode: `capture` into the armed tracks.
+        def capture_keys
+          s = keys_session
+          armed = s&.arrangement&.armed || {}
+          return flash('capture: arm a track first (arm :lead), then play and press Enter', :warn) if armed.empty?
+          run_safely { Session.with_context(session: s) { MB::Sound.capture } }
+        end
+
+        # Enter in step entry: the clip goes to UI.keyboard.clips, and its
+        # Ruby into the REPL's line (not run) to name or play.
+        def finish_steps(clip)
+          @router.mode = :repl
+          @host&.paste(clip.to_ruby)
+          flash("clip #{@keyboard.clips.length}: ui.keyboard.clip (and in the REPL line: name it, e.g. riff = ...)", :ok)
+        end
+
+        def enter_keys
+          @keyboard.active = true
+          kitty = @keys_kitty.nil? ? @term&.features&.dig(:kitty) : @keys_kitty
+          if kitty && @term && !@kitty_pushed
+            @term.write("\e[>#{KEYS_KITTY_FLAGS}u\e[?1004h")
+            @kitty_pushed = true
+            @keyboard.releases = true
+          elsif @term
+            @term.write("\e[?1004h")
+          end
+          Thread.new do
+            Thread.current.name = 'MB::Sound::UI keys'
+            @keyboard.out.ensure_monitor if @keyboard.out.respond_to?(:ensure_monitor)
+          rescue StandardError => e
+            flash("keyboard: #{e.class}: #{e.message}", :bad)
+          end
+        end
+
+        # Every way out of KEYS mode: all notes off, the terminal's keys as
+        # before.
+        def leave_keys
+          return self unless @keyboard.active? || @kitty_pushed
+
+          @keyboard.all_off(mono_now)
+          @keyboard.active = false
+          @term&.write(@kitty_pushed ? "\e[<u\e[?1004l" : "\e[?1004l") if @term&.entered?
+          @kitty_pushed = false
+          self
+        end
+
+        # Leaves KEYS mode from outside the router (hiding, stopping).
+        def exit_keys
+          @router.mode == :grab ? (@router.mode = :repl) : leave_keys
+        end
 
         def tile
           @lock.synchronize do
@@ -574,6 +720,8 @@ module MB
             end
           when Input::Focus
             @full = true if e.in
+            # Key releases go to the focused window: notes off on the way out
+            @keyboard.all_off(mono_now) unless e.in
           end
         end
 
@@ -591,7 +739,8 @@ module MB
         def read_input(timeout)
           io = @term.input
           now = @clock.call
-          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(Process.clock_gettime(Process::CLOCK_MONOTONIC)), timeout].compact
+          mono = mono_now
+          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), timeout].compact
           wait = waits.min
           wait = 0.25 if wait.nil? && !timeout.nil?
           ready = io.wait_readable(wait.nil? ? 0.5 : wait)
@@ -608,6 +757,7 @@ module MB
             end
           @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC))
           events.each { |e| handle(e) }
+          (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
           now
         end
@@ -618,8 +768,15 @@ module MB
             return
           end
           if e.is_a?(Input::Key) && @router.mode != :line
+            return if e.release? && @router.mode != :grab
             case e.chord
             when ['c', [:ctrl]]
+              if @router.mode == :grab
+                # Ctrl-C in KEYS mode: everything off, back to the REPL
+                @keyboard.all_off(mono_now)
+                @router.mode = :repl
+                return
+              end
               @scroll = 0
               @host.interrupt
               return
@@ -636,6 +793,8 @@ module MB
         # While hidden, input goes to the REPL's pty as typed (Ctrl-C
         # interrupts; Ctrl-Z shows the tiles again).
         def relay_event(e)
+          return if e.is_a?(Input::Key) && e.release?
+
           case e
           when Input::Key
             case e.chord
@@ -903,8 +1062,10 @@ module MB
             return
           end
           @line_cursor = nil
-          badge = mode == :nav ? ' NAV ' : ' REPL '
-          @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(mode == :nav ? :armed : :key)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
+          step = mode == :grab && @keyboard.entry == :step
+          badge = mode == :nav ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : ' REPL '
+          role = mode == :nav ? :armed : mode == :grab ? (step ? :queued : :rec) : :key
+          @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
           flash = @flash && now < @flash[2] ? @flash : nil
@@ -914,7 +1075,7 @@ module MB
           if flash
             c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
           else
-            c.text(x + 1, 0, c.fit(HINTS[mode] || '', room), :dim)
+            c.text(x + 1, 0, c.fit(HINTS[step ? :step : mode] || '', room), :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
         end

@@ -22,6 +22,8 @@
 #     bin/ui_demo.rb --tiles                # the tiled screen (:tiles) with a REPL pane
 #     bin/ui_demo.rb --tiles --flood 10000  # ... printing 10 000 lines into the REPL while the song plays
 #     bin/ui_demo.rb --tiles -l studio --size 60x200
+#     bin/ui_demo.rb --tiles -l keys        # with the virtual keyboard, in KEYS mode: play along on z..m and q..]
+#                                           # (Ctrl-] back; `arm :lead`-style tracks aren't in this song, so a default patch plays)
 #
 # Expected: the band at the top shows bar:beat moving, the form's section
 # and what comes next, tracks lighting up as scenes change, queued changes

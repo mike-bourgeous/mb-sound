@@ -24,6 +24,7 @@ require_relative 'ui/viewports/tree'
 require_relative 'ui/viewports/tiler'
 require_relative 'ui/viewports/loader'
 require_relative 'ui/screen/term'
+require_relative 'ui/keyboard'
 require_relative 'ui/tiles'
 
 module MB
@@ -75,8 +76,15 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
+      end
+
+      # The virtual keyboard (one per process; see UI::Keyboard and the
+      # `keyboard` pane): its notes go to the current Session's MIDI input
+      # through a Keyboard::Link.
+      def self.keyboard
+        @keyboard ||= Keyboard.new(out: Keyboard::Link.new)
       end
 
       # The layouts by name (built-in and defined with `layout`; saved ones
@@ -112,6 +120,13 @@ module MB
             cols {
               repl
               rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6; pane :scope, height: 8 }
+            }
+          },
+          keys: Viewports.layout(:keys, focus: :keyboard) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows { repl; pane :keyboard, height: 8 }
+              rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6 }
             }
           },
           studio: Viewports.layout(:studio, focus: :repl) {
