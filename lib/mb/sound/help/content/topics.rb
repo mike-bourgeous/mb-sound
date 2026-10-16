@@ -351,15 +351,17 @@ module MB
       about <<~TEXT
         Probability scales and generator clips.  `scale(:dorian, :d).weights`
         is a probability scale: layer it with `+` and `*`
-        (`+ tones(D3, F3, A3) * 2`), `blur(0.2)` it so wrong notes sometimes
-        hit, `blend` it toward another key, change it over time with
-        `harmony(0 => a, 8.bars => b)`, and spread it over notes with
+        (`+ tones(D3, F3, A3) * 2`, or a named chord:
+        `+ chord(:min7, root: :d).weights * 2`), `blur(0.2)` it so wrong
+        notes sometimes hit, `blend` it toward another key, change it over
+        time with `harmony(0 => a, 8.bars => b)` (keys are lengths), and
+        spread it over notes with
         `over(A3..A5, around: E5)`.  `melody`, `strikes`, and
         `generate(1.bar) { |cycle, dice| rows }` make looping clips whose
         every cycle is a pure function of the seed and the cycle
         (counter-based `dice`), so they seek, replay in takes, and save.
       TEXT
-      commands :tones, :weights, :harmony, :generate, :strikes, :dice, :melody
+      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody
       note :generative
       see :sequences, :random
       example 'a melody that blurs and changes key' do

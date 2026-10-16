@@ -4,9 +4,10 @@ module MB
       # Probability scales that change over time: keyframes of Weights at
       # clip positions, blended between (GitHub issue #64's "blending
       # composited scales for chord and key transitions").  Made with
-      # MB::Sound#harmony.  Keys are Durations (`12.bars`, `3.beats`) or
-      # plain numbers of bars from the clip's start (0-based); values are
-      # Weights, Scales (their notes at 1), or Arrays of notes (a chord).
+      # MB::Sound#harmony.  Keys are musical lengths from the clip's start
+      # (`12.bars`, `3.beats`; 0 for the start; other plain numbers raise);
+      # values are Weights, Scales (their notes at 1), Chords
+      # (`chord(:min7, root: :d)`), or Arrays of notes (a chord).
       #
       #     h = harmony(0 => scale(:dorian, :d), 12.bars => scale(:dorian, :d), 20.bars => scale(:major, :f))
       #     h.at(16.bars)          # halfway from D dorian to F major (Weights)
@@ -16,6 +17,10 @@ module MB
       #     chords = harmony(0 => [D3, F3, A3], 1.bar => [As2, D3, F3], 2.bars => [G2, As2, D3], 3.bars => [A2, Cs3, E3],
       #                      loop: 4.bars, curve: :step)
       #     h = scale(:dorian, :d).weights + chords * 2
+      #
+      #     # the same with named chords
+      #     chords = harmony(0 => chord(:min, root: :d3), 1.bar => chord(:maj, root: :bb2), 2.bars => chord(:min, root: :g2),
+      #                      3.bars => chord(:maj, root: :a2), loop: 4.bars, curve: :step)
       #
       # +curve:+ shapes each blend: :linear (default), :step (hold each
       # keyframe until the next), or any MB::Sound::Curve name or Curve.
@@ -36,12 +41,15 @@ module MB
         # The loop length in whole notes, or nil.
         attr_reader :loop_length
 
-        def initialize(keyframes, curve: :linear, loop: nil, ops: [])
+        # +repeat:+ (internal; see .of_weights) is the length after which a
+        # harmony without +loop:+ repeats anyway (the period of a Weights
+        # combined with a looping Harmony).
+        def initialize(keyframes, curve: :linear, loop: nil, ops: [], repeat: nil)
           raise ArgumentError, 'harmony needs keyframes: harmony(0 => scale(:minor, :a), 8.bars => ...)' unless keyframes.is_a?(Hash) && !keyframes.empty?
 
           @keys = keyframes.map { |pos, w| [Harmony.position(pos), Generative.weights(w)] }.sort_by(&:first).freeze
           raise ArgumentError, 'Harmony keyframes need different positions' if @keys.map(&:first).uniq.length != @keys.length
-          @loop_length = loop && Harmony.position(loop)
+          @loop_length = loop && Harmony.position(loop, 'loops')
           raise ArgumentError, "A harmony loop must be longer than its last keyframe (got #{loop.inspect})" if @loop_length && @loop_length <= @keys.last[0]
 
           @curve_name = curve
@@ -56,20 +64,43 @@ module MB
           @moving = @ops.any? { |_, args, _| args.any? { |a| a.is_a?(Harmony) } }
           @normalized = @keys.map { |_, w| w.send(:normalized_pc) }.freeze
           @keyframes = keyframes
-          @options = { curve: curve, loop: loop }
+          @repeat = repeat
+          @options = { curve: curve, loop: loop, repeat: repeat }
           @cache = {}
           @mutex = Mutex.new
         end
 
-        # A clip position in whole notes from a Duration or a number of bars.
-        def self.position(pos)
+        # The Harmony of Weights +w+ combined with Harmony +other+ by
+        # operator +name+ (Weights#+, #-, #*): `w + h` is w + h.at(position)
+        # at each moment, printing back as `w + h`.  (+ and * give the same
+        # Weights as `h + w` and `h * w`: per-class Float sums and products
+        # don't depend on the order.)
+        def self.of_weights(w, name, other)
+          Harmony.new({ 0r => w }, ops: [[name, [other].freeze, {}.freeze].freeze], repeat: other.period).with_recipe(w, name, [other])
+        end
+
+        # A clip position in whole notes from a musical length (a Duration:
+        # 12.bars, 3.beats, 1.n4).  Plain numbers raise (maintainer,
+        # 2026-10-15: "Require lengths"), except 0 for the start; live mode
+        # (MB::Sound.live?) reads them as bars, their meaning in G1, with a
+        # warning.  +what+ names the argument in messages.
+        def self.position(pos, what = 'positions')
           case pos
           when Sequence::Duration then pos.whole_notes
           when Numeric
-            raise ArgumentError, "Harmony positions are lengths or numbers of bars (got #{pos})" unless pos.real? && pos >= 0
+            raise ArgumentError, "Harmony #{what} are lengths from 0 (got #{pos})" unless pos.real? && pos >= 0
+            return 0r if pos.zero?
+
+            bars = pos.is_a?(Float) || pos.is_a?(Rational) && pos.denominator != 1 ? "(#{pos.inspect})" : pos.to_i.to_s
+            message = "Harmony #{what} are lengths: write #{bars}.bars (or beats, 1.n4, ...) instead of #{pos.inspect}"
+            raise ArgumentError, message unless MB::Sound.live?
+
+            warn "\e[33mArgumentError: #{message}\e[0m (live mode: read as #{bars}.bars)"
             Sequence::Duration.rational(pos) * Sequence.transport.bar_length
+          when Length
+            raise ArgumentError, "Harmony #{what} are musical lengths that follow the tempo (12.bars, 3.beats), not #{pos.inspect}"
           else
-            raise ArgumentError, "Harmony positions are lengths (12.bars) or numbers of bars (got #{pos.inspect})"
+            raise ArgumentError, "Harmony #{what} are lengths (12.bars, 3.beats; got #{pos.inspect})"
           end
         end
 
@@ -83,8 +114,7 @@ module MB
         # The Weights at clip +position+ (whole notes, or a Duration).
         def at(position = 0r)
           pos = position.is_a?(Sequence::Duration) ? position.whole_notes : position.to_r
-          return apply_ops(@keys[0][1], pos) if @keys.length == 1 && @moving
-          return @ops.empty? ? @keys[0][1] : held(0) if @keys.length == 1
+          return @ops.empty? ? @keys[0][1] : held(0) if @keys.length == 1 && !@moving
 
           # (Harmonies taking other harmonies cache by the full position
           # unless they all loop together)
@@ -107,7 +137,8 @@ module MB
         def period
           return @period if defined?(@period)
           others = @ops.flat_map { |_, args, _| args.grep(Harmony) }
-          @period = @loop_length && others.all? { |o| o.period == @loop_length } ? @loop_length : nil
+          base = @loop_length || @repeat
+          @period = base && others.all? { |o| o.period == base } ? base : nil
         end
 
         # The blend at each moment, blurred (see Weights#blur).
@@ -152,7 +183,7 @@ module MB
 
         def plain_ruby(value_text)
           parts = @keyframes.map { |k, w| "#{value_text.call(k)} => #{w.is_a?(Value) ? w.to_ruby(&value_text) : value_text.call(w)}" }
-          parts += @options.compact.reject { |k, v| k == :curve && v == :linear }.map { |k, v| "#{k}: #{value_text.call(v)}" }
+          parts += @options.except(:repeat).compact.reject { |k, v| k == :curve && v == :linear }.map { |k, v| "#{k}: #{value_text.call(v)}" }
           "harmony(#{parts.join(', ')})"
         end
 

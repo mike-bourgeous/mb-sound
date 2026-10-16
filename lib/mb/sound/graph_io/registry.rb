@@ -71,6 +71,7 @@ module MB
           'MB::Sound::Curve' => %i[reverse in out in_out out_in],
           # Probability scales (Generative::Value#to_ruby)
           'MB::Sound::Scale' => %i[weights],
+          'MB::Sound::Generative::Chord' => %i[weights],
           'MB::Sound::Generative::Weights' => %i[+ - * / ** blur floor normalize blend over],
           'MB::Sound::Generative::Harmony' => %i[+ - * ** blur over],
           'MB::Sound::Generative::Field' => %i[**],

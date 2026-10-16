@@ -110,8 +110,11 @@ module MB
         end
 
         # Layers added class by class (another Weights), or +other+ added
-        # to every class (a number).
+        # to every class (a number).  With a Harmony, a Harmony: this plus
+        # the harmony at each moment (as `harmony + weights`; likewise
+        # #- and #*).
         def +(other)
+          return Harmony.of_weights(self, :+, other) if other.is_a?(Harmony)
           Weights.check_number(other, :+)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x + other.pc[i] } : @pc.map { |x| x + other.to_f }
           Weights.raw(w).with_recipe(self, :+, [other])
@@ -119,12 +122,14 @@ module MB
 
         # Subtracts class by class (or a number from every class), floored at 0.
         def -(other)
+          return Harmony.of_weights(self, :-, other) if other.is_a?(Harmony)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x - other.pc[i] } : @pc.map { |x| x - other.to_f }
           Weights.raw(w.map { |x| x < 0 ? 0.0 : x }).with_recipe(self, :-, [other])
         end
 
         # Scales by a number, or masks class by class by another Weights.
         def *(other)
+          return Harmony.of_weights(self, :*, other) if other.is_a?(Harmony)
           Weights.check_number(other, :*)
           w = other.is_a?(Weights) ? @pc.each_with_index.map { |x, i| x * other.pc[i] } : @pc.map { |x| x * other.to_f }
           Weights.raw(w).with_recipe(self, :*, [other])

@@ -195,6 +195,15 @@ module MB
 
           @param_values = {}
           @options = {}
+
+          # Set lazily or only in some configurations; nil here keeps one
+          # object shape per class
+          @fast_gains = nil
+          @data_list = nil
+          @value_list = nil
+          @last_gains = nil
+          @spare_output = nil
+
           setup(inputs, settings)
 
           self.class.params.each do |name, spec|
