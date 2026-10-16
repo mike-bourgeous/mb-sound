@@ -22,7 +22,8 @@ module MB
         #
         # Chords are:
         # - scale degrees counted from 1 like Roman numerals (1 = i, 4 = iv,
-        #   7 = VII in A minor), built in +scale+ (a Scale, a name like
+        #   7 = VII in A minor; Scale#chord counts from 0, so ghost chord n
+        #   is Scale#chord(n - 1)), built in +scale+ (a Scale, a name like
         #   :minor, or an Array of offsets, with +root+) from every other
         #   scale note: +size+ 3 for triads, 4 for seventh chords;
         # - Arrays of Notes or note numbers, used as given (`[A3, C4, E4]`);
@@ -51,6 +52,10 @@ module MB
         #     hook.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))      # Am, Dm, G, F
         #     hook.ghost_chords(1, 4, 5, 1, scale: :minor, root: :a, harmonic: true)  # Am, Dm, E, Am
         #     hook.ghost_chords([A3, C4, E4], [F3, A3, C4], per: 2.bars)   # explicit chords
+        #
+        # MIDI::Stream#ghost_chords does the same on a stream, with chords
+        # following the timeline's bars; on a generator clip every cycle
+        # snaps to its place in the progression.
         def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil)
           sc, classes = Clip.ghost_setup(chords, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie)
           span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)

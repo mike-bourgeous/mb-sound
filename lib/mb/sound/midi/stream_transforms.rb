@@ -100,9 +100,15 @@ module MB
         # e.g. :min7, :add9, :power; semitones above the note) or pitch
         # steps (scale degrees of +:scale+, semitones by default, or
         # Intervals; +:scale+ and +:root+ go with steps only).  Added notes
-        # end with the played note; +:velocity+ scales theirs.  (The
-        # top-level `chord(:min7, root: :d)` is a chord value instead, for
-        # probability scales: see SequenceMethods#chord.)
+        # end with the played note; +:velocity+ scales theirs.
+        #
+        # The two chords: this transform adds notes relative to each played
+        # note (steps count from the note, 0 = itself), while the top-level
+        # `chord(:min7, root: :d)` (a quality and +root:+, no +scale:+) is a
+        # chord value (Generative::Chord) for probability scales; every
+        # other top-level `chord(...)` call is this transform, unattached
+        # (see SequenceMethods#chord).  Clip#ghost_chords' degrees count
+        # from 1 like Roman numerals, Scale#chord's from 0.
         #
         #     midi.chord(:min7)
         #     midi.chord(2, 4, scale: :major, root: :c)   # diatonic triads from one finger
