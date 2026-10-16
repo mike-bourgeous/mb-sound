@@ -166,6 +166,33 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     end
   end
 
+  describe 'choke groups' do
+    # Hats: 42 and 46 start group :hat and are cut by it; 49 starts :hat
+    # but isn't cut; 36 is in no group.
+    let(:map) {
+      MB::Sound::Sampler::ChokeMap.new([[42, 42, 0, 127, :hat, :hat], [46, 46, 0, 127, :hat, :hat], [49, 49, 0, 127, :hat, nil]])
+    }
+
+    it 'chokes active lanes on the channel whose notes a note-on cuts, before allocating it' do
+      a = alloc(on(46), off(46), on(36), on(42, ch: 1), on(42), on(49), on(46), voices: 3, spares: 1)
+      a.add_chokes(map)
+      a.add_chokes(MB::Sound::Sampler::ChokeMap.new(map.rows)) # (equal maps count once)
+      expect(a.chokes.length).to eq(1)
+      expect(lanes(a)).to eq([
+        ['on46@0', 'off46@1', 'choke46@4', 'on49@5'], # released lanes too; a choked lane is free after the choke time
+        ['on36@2', 'choke36@6'],                      # (stolen for 46: three voices)
+        ['on42@3'],                                   # channel 1: not cut by channel 0's hats
+        ['on42@4', 'choke42@5', 'on46@6'],            # 49 cuts 42; 46 doesn't cut 49
+      ])
+    end
+
+    it 'leaves mono allocators alone' do
+      a = alloc(on(46), on(42), voices: 1)
+      a.add_chokes(map)
+      expect(lanes(a)).to eq([['on46@0', 'off46@1', 'leg42@1']])
+    end
+  end
+
   describe 'stealing' do
     it 'chokes the oldest released lane and plays the new note on a spare' do
       a = alloc(on(60), on(62), off(60), on(64), voices: 2, spares: 1)

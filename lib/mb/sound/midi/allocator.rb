@@ -67,6 +67,14 @@ module MB
       #   add retriggers, this is Synth's +retrigger: :string+.
       # Mono mode ignores +:retrigger+.
       #
+      # Choke groups (#add_chokes; SF2 exclusive classes and SFZ
+      # group/off_by, registered by Sampler::Instrument#play): a note-on
+      # whose groups include one that cuts an active lane's note (same
+      # channel) chokes that lane (a :choke event at the note-on's time)
+      # before the note is allocated, so the new note usually takes a free
+      # lane and the old one fades over the choke time.  Mono mode ignores
+      # choke groups (its one lane plays the new note anyway).
+      #
       # Idle checks: Lane#idle_check (a Proc returning true when the lane's
       # sound has ended, set by +synth+ from the lane's envelopes) lets a
       # released lane become free.  Without one, a released lane counts as
@@ -421,6 +429,7 @@ module MB
 
           @held = {}
           @seq = 0
+          @chokes = nil
           @node_type_name = "allocator(#{voices} voices)"
         end
 
@@ -432,6 +441,22 @@ module MB
             raise ArgumentError, "Spares must be an Integer from 0 to #{@max_spares} (got #{count.inspect})"
           end
           @spares = count
+        end
+
+        # Adds choke groups (see the class description): +map+ answers
+        # #groups(note, velocity) (the groups a note-on starts) and
+        # #choked_by(note, velocity) (the groups that cut a note), both
+        # Arrays (Sampler::ChokeMap).  A map equal to one already added is
+        # added once.  Returns the allocator.
+        def add_chokes(map)
+          @chokes ||= []
+          @chokes << map unless @chokes.include?(map)
+          self
+        end
+
+        # The choke group maps added (see #add_chokes), maybe empty.
+        def chokes
+          (@chokes || []).dup.freeze
         end
 
         # True in mono mode (see the class description).
@@ -529,6 +554,7 @@ module MB
         def note_on(e)
           key = [e.channel, e.note]
           refresh(e.time)
+          choke_groups(e) if @chokes
 
           if @retrigger == :per_key && (same = same_note_voice(key))
             restrike(same, e)
@@ -681,6 +707,20 @@ module MB
           send_to(voice, Event.choke(voice.note, channel: voice.channel, time: time))
           voice.state = :choking
           voice.choke_end = time + @choke_time
+        end
+
+        # Chokes the active lanes on note-on +e+'s channel whose notes are
+        # cut by a group +e+ starts (see #add_chokes).
+        def choke_groups(e)
+          @chokes.each do |map|
+            groups = map.groups(e.note, e.velocity)
+            next if groups.empty?
+
+            @voice_states.each do |v|
+              next unless v.active? && v.channel == e.channel
+              choke(v, e.time) if map.choked_by(v.note, v.velocity).intersect?(groups)
+            end
+          end
         end
 
         # Ends the note on +voice+ with a note-off so it can take a new note

@@ -19,7 +19,7 @@ module MB
       #     synth(midi) { |v| inst.play(v) * v.env(0.002, 0.2, 0.8, 0.3) }
       class Instrument
         # One region: a Sample with where and how it plays (see #region).
-        Region = Struct.new(:sample, :keys, :vel, :seq, :rand, :root, :keytrack, :veltrack, :tune, :gain, :offset, :pan, keyword_init: true)
+        Region = Struct.new(:sample, :keys, :vel, :seq, :rand, :root, :keytrack, :veltrack, :tune, :gain, :offset, :pan, :group, :off_by, keyword_init: true)
 
         # The regions, in match order.
         attr_reader :regions
@@ -76,6 +76,7 @@ module MB
           @filter = filter.nil? ? nil : { cutoff: setting(filter[:cutoff]), quality: setting(filter[:quality] || 0.7071067811865476) }.freeze
           @modulation = modulation.nil? ? nil : deep_freeze(modulation)
           @coverage = nil
+          @choke_map = nil
           if @modulation
             unknown = @modulation.keys - %i[sources pitch cutoff volume]
             raise ArgumentError, "Unknown modulation keys #{unknown.inspect} (sources, pitch, cutoff, volume)" unless unknown.empty?
@@ -89,6 +90,8 @@ module MB
           @building = false
           @regions.freeze
           raise ArgumentError, 'An instrument needs at least one region' if @regions.empty?
+          rows = @regions.filter_map { |r| [*r.keys, *r.vel, r.group, r.off_by] if r.group || r.off_by }
+          @choke_map = rows.empty? ? nil : ChokeMap.new(rows)
         end
 
         # Adds a region playing +sample+ (while building; see .new):
@@ -108,7 +111,20 @@ module MB
         # - pan: -1 (left) to 1 (right), equal power with 0 dB in the
         #   middle for mono samples, a balance for stereo ones; any pan
         #   makes the instrument stereo
-        def region(sample, keys: 0..127, vel: 0..127, seq: nil, rand: nil, root: nil, keytrack: 1, veltrack: 0, tune: 0, gain: 1.0, offset: 0, pan: 0)
+        # - choke: a choke group (a Symbol or Integer; 0 and nil are none):
+        #   a note-on in the group cuts every other sounding note of the
+        #   group on its MIDI channel (the SF2 exclusive class: an open hat
+        #   cut by the closed and pedal hats), the same as +group:+ and
+        #   +off_by:+ both set to it
+        # - group: the choke group the region's note-ons belong to;
+        #   off_by: the group whose note-ons cut the region's notes (SFZ's
+        #   group= and off_by=)
+        # Chokes take Envelope::CHOKE_TIME (3 ms, as for drum kits) from
+        # the exact note-on sample, in synth voices (#play with a Synth
+        # lane's Notes; the synth's allocator chokes the lanes, see
+        # MIDI::Allocator#add_chokes).
+        def region(sample, keys: 0..127, vel: 0..127, seq: nil, rand: nil, root: nil, keytrack: 1, veltrack: 0, tune: 0, gain: 1.0, offset: 0, pan: 0,
+                   choke: nil, group: nil, off_by: nil)
           raise FrozenError, 'Add regions while building the instrument (in its block)' unless @building
           sample = Sample[sample]
           keys = keys..keys unless keys.is_a?(Range)
@@ -125,10 +141,13 @@ module MB
             raise ArgumentError, "rand: is a Range within 0..1 (got #{rand.inspect})" unless rand.is_a?(Range)
             rand = [(rand.begin || 0).to_f, (rand.end || 1).to_f]
           end
+          group = choke_group(group.nil? ? choke : group, :group)
+          off_by = choke_group(off_by.nil? ? choke : off_by, :off_by)
           @regions << Region.new(
             sample: sample, keys: [lo.clamp(0, 127), hi.clamp(0, 127)], vel: [vlo.clamp(0, 127), vhi.clamp(0, 127)], seq: seq, rand: rand,
             root: root.nil? ? nil : Sample.note_number(root), keytrack: keytrack.to_f, veltrack: veltrack.to_f,
-            tune: Interval.semitones(tune).to_f, gain: gain.to_f, offset: sample.position(offset).to_f, pan: Float(pan).clamp(-1.0, 1.0)
+            tune: Interval.semitones(tune).to_f, gain: gain.to_f, offset: sample.position(offset).to_f, pan: Float(pan).clamp(-1.0, 1.0),
+            group: group, off_by: off_by
           ).freeze
           self
         end
@@ -149,6 +168,10 @@ module MB
         def one_shot?
           samples.all?(&:one_shot?)
         end
+
+        # The choke groups of the regions as a ChokeMap, or nil when no
+        # region has a group or off_by (see #region).
+        attr_reader :choke_map
 
         # True if any sample loops only while its note is held.
         def release_loop?
@@ -225,8 +248,9 @@ module MB
           freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+          choke = source ? chokes_for(source) : nil
           voice(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                        interpolation: interpolation, mips: mips, seed: seed, shared: {})
+                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke)
         end
 
         # The voice for #play's resolved inputs; +shared+ keeps modulation
@@ -237,12 +261,15 @@ module MB
         # notes its regions don't cover (gate and trigger masked by a
         # coverage ZoneValue), so an uncovered note-on doesn't attack again
         # over the last note's declick tail.
-        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false)
+        #
+        # +choke+ is the voice's Notes#choke when the instrument has choke
+        # groups (see #chokes_for), else nil.
+        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil)
           if @layers
             n = channel_count
             outs = @layers.map { |l|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true)
+                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke)
               o.is_a?(GraphNode::Channels) ? o.to_a : [o]
             }
             sums = Array.new(n) { |c| outs.map { |o| o[c % o.length] }.reduce(:+) }
@@ -258,7 +285,7 @@ module MB
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-              declick: declick, interpolation: interpolation, mips: mips, seed: seed
+              declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?
             )
           }
           nodes.each { |n| source.register(n) } if source && one_shot?
@@ -384,6 +411,28 @@ module MB
         # vectorized 2^x; a SemitoneShift was a plan boundary in Ruby).
         def shift_by(hz, mods, dest)
           hz * (2.constant ** (mods[dest] * (1 / 1200.0)))
+        end
+
+        # The choke node for a voice playing the notes of +source+ (a
+        # Notes): with choke groups and a Synth lane's Notes, the lane's
+        # allocator learns the groups (MIDI::Allocator#add_chokes; it sends
+        # the :choke events) and the voice reads Notes#choke; else nil (no
+        # cost for instruments without groups).
+        def chokes_for(source)
+          map = choke_map or return nil
+          stream = source.stream
+          alloc = stream.allocator if stream.respond_to?(:allocator)
+          return nil unless alloc.respond_to?(:add_chokes)
+          alloc.add_chokes(map)
+          source.choke
+        end
+
+        # A choke group value (see #region): nil for nil and 0, else a
+        # Symbol or Integer.
+        def choke_group(g, name)
+          return nil if g.nil? || g == 0
+          raise ArgumentError, "#{name}: is a Symbol or Integer choke group (got #{g.inspect})" unless g.is_a?(Symbol) || g.is_a?(Integer)
+          g
         end
 
         def deep_freeze(v)

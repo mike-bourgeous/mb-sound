@@ -29,6 +29,7 @@ end
 require_relative 'sample'
 require_relative 'sampler/kernel_ruby'
 require_relative 'sampler/zone_map'
+require_relative 'sampler/choke_map'
 require_relative 'sampler/instrument'
 require_relative 'sampler/sfz'
 require_relative 'sampler/sf2'

@@ -1228,6 +1228,12 @@ module MB
               opts[:gain] = r.gain unless r.gain == 1
               opts[:offset] = r.offset unless r.offset == 0
               opts[:pan] = r.pan unless r.pan.to_f == 0
+              if r.group && r.group == r.off_by
+                opts[:choke] = r.group
+              else
+                opts[:group] = r.group if r.group
+                opts[:off_by] = r.off_by if r.off_by
+              end
               list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
               "#{inner}i.region(#{list.join(', ')})"
             }

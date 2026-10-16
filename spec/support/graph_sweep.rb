@@ -225,6 +225,19 @@ module GraphSweep
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) * 0.5 + st.play(v, transpose: 3)[0] * 0.25 } +
           brk.chop(0, [1, 3], brk[2].rev, MB::Sound::Rest).loop.sampler(brk) * 0.5 + smp[0...400].node
       }],
+      # Choke groups (SF2 exclusive classes, SFZ group/off_by): the
+      # allocator's :choke events stop SamplerVoices, fading those without
+      # an envelope
+      ['sampler choke groups (SamplerVoice choke)', ->(c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.09) })
+        smp = MB::Sound::Sample[d].looped(1000...2900)
+        plain = MB::Sound::Sampler::Instrument.new { |i|
+          i.region(smp, keys: 0..62, choke: 1)
+          i.region(smp[0...2000], keys: 63..127, group: 1, off_by: 2, tune: 5)
+        }
+        enveloped = MB::Sound::Sampler::Instrument.new(envelope: [0.001, 0.01, 0.7, 0.05]) { |i| i.region(smp, choke: :all) }
+        c.clip.synth(voices: 3) { |v, _i| plain.play(v) * 0.4 + enveloped.play(v) * 0.4 }
+      }],
       # SoundFont-style instruments: per-zone envelope and filter values
       # (ZoneValue), panned regions, layers
       ['sampler zone values (ZoneValue), pans, layers', ->(c) {

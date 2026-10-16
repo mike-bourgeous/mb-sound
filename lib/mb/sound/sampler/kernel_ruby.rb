@@ -21,8 +21,11 @@ module MB
         # The region last played below the split (-1 for none).
         LAST_REGION = 2 * VOICE + 1
 
+        # The choke's samples left (0 when not choking).
+        CHOKE_LEFT = 2 * VOICE + 2
+
         # The state's length.
-        STATE_LENGTH = 2 * VOICE + 2
+        STATE_LENGTH = 2 * VOICE + 3
 
         # A note: active, region, pos, dir, base, gain, nhz, inloop, released,
         # speed, and its table slot.
@@ -31,16 +34,19 @@ module MB
         module_function
 
         def play(out, specs, regions, state, counters, rng, inputs, config)
-          raise ArgumentError, 'Sampler inputs are [trigger, number, freq, gate, start, shift]' unless inputs.length == 6
-          raise ArgumentError, 'Sampler config is [a4, declick, split, interpolation, sinc, transpose]' unless config.length == 6
+          raise ArgumentError, 'Sampler inputs are [trigger, number, freq, gate, start, shift, choke]' unless inputs.length == 7
+          raise ArgumentError, 'Sampler config is [a4, declick, split, interpolation, sinc, transpose, choke samples, choke fade]' unless config.length == 8
 
           count = out.length
           rows = regions.shape[0]
           regs = Array.new(rows) { |k| regions[k, true].to_a }
-          a4, declick, split, interp, _sinc, transpose = config
+          a4, declick, split, interp, _sinc, transpose, choke_len, choke_fade = config
           a4 = a4.to_f
           declick = Integer(declick)
           transpose = transpose.to_f
+          choke_len = Integer(choke_len)
+          raise ArgumentError, "The sampler's choke length must be at least one sample" if choke_len < 1
+          choke_fade = Integer(choke_fade) != 0
           ctx = { specs: specs, regions: regs, split: Integer(split), interp: interp, last: state[LAST_REGION].to_i }
 
           trig_s, trig_a = Wavetable::KernelRuby.signal(inputs[0], count)
@@ -51,10 +57,13 @@ module MB
           gate_s, gate_a = Wavetable::KernelRuby.signal(inputs[3], count)
           start_s, start_a = Wavetable::KernelRuby.signal(inputs[4], count)
           shift_s, shift_a = Wavetable::KernelRuby.signal(inputs[5], count)
+          has_choke = !inputs[6].nil?
+          choke_s, choke_a = Wavetable::KernelRuby.signal(inputs[6], count)
 
           cur = get(state, 0)
           tail = get(state, VOICE)
           left = state[TAIL_LEFT]
+          choke_left = state[CHOKE_LEFT]
           cur.slot = 0
           tail.slot = 1
           seed = [rng[0].to_i]
@@ -75,6 +84,9 @@ module MB
               end
               vel = t > 1 ? 1.0 : t
               note_on(ctx, cur, slot, n, vel, start_a ? start_a[i] : start_s, shift_a ? shift_a[i] : shift_s, counters, seed, a4, transpose)
+              choke_left = 0.0
+            elsif has_choke && choke_left <= 0 && (choke_a ? choke_a[i] : choke_s) != 0 && (cur.active || tail.active)
+              choke_left = choke_len.to_f
             end
 
             cur.released = true if has_gate && (gate_a ? gate_a[i] : gate_s) <= 0
@@ -93,6 +105,14 @@ module MB
               left = left - 1
               tail.active = false if left <= 0
             end
+            if choke_left > 0
+              v = v * (choke_left / choke_len.to_f) if choke_fade
+              choke_left = choke_left - 1
+              if choke_left <= 0
+                cur.active = false
+                tail.active = false
+              end
+            end
 
             values[i] = v
           end
@@ -100,6 +120,7 @@ module MB
           put(state, 0, cur)
           put(state, VOICE, tail)
           state[TAIL_LEFT] = left
+          state[CHOKE_LEFT] = choke_left
           state[LAST_REGION] = ctx[:last]
           rng[0] = seed[0]
 

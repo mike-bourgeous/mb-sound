@@ -217,10 +217,11 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       )
       f = m.sf2(path)
       inst = nil
-      expect { inst = f.instrument }.to output(/SF2 spec.sf2 000:000 P: not mapped: exclusive class \(choke groups\) \(1 zone\), modulators.*ROM samples/).to_stderr
+      expect { inst = f.instrument }.to output(/SF2 spec.sf2 000:000 P: not mapped: modulators.*ROM samples/).to_stderr
       expect(inst.regions.length).to eq(1)
+      expect(inst.regions[0].group).to eq(1) # exclusive classes are choke groups
       expect(f.skipped).to eq(
-        'exclusive class (choke groups)' => 1, 'modulators (only the default velocity-to-attenuation one is mapped)' => 1,
+        'modulators (only the default velocity-to-attenuation one is mapped)' => 1,
         'zones playing ROM samples (not in the file)' => 1
       )
       expect { f.instrument(name: 'again') }.not_to output.to_stderr # once per preset
@@ -354,6 +355,66 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       ref = play(inst.layers[0], m.seq(m::A3.n4, m::C4.n4), 48000)[0] + play(inst.layers[1], m.seq(m::R.n4, m::C4.n4), 48000)[0]
       got = play(inst, m.seq(m::A3.n4, m::C4.n4), 48000)[0]
       expect((got - ref).abs.max).to be < 1e-6
+    end
+
+    describe 'exclusive classes' do
+      # A kit: an open hat (A#2, a looped sine ringing 2.5 s after its
+      # note-off) in class 1 with silent closed (F#2) and pedal (G#2) hats, a
+      # silent crash (C#3) in class 2, and a silent kick (C2) in no class.
+      let(:kit) {
+        path = font(
+          samples: [{ name: 'tone', data: SF2Writer.sine(441, 4410), pitch: 69, loop: [0, 4400] }, { name: 'zero', data: [0.0] * 1000, loop: [0, 990] }],
+          instruments: [{ name: 'Kit', global: { sample_modes: 1, release_vol_env: 1600 }, zones: [
+            { key_range: [46, 46], sample_id: 0, exclusive_class: 1 },
+            { key_range: [42, 42], sample_id: 1, exclusive_class: 1 },
+            { key_range: [44, 44], sample_id: 1, exclusive_class: 1 },
+            { key_range: [49, 49], sample_id: 1, exclusive_class: 2 },
+            { key_range: [36, 36], sample_id: 1 },
+          ] }],
+          presets: [{ name: 'Standard', bank: 128, zones: [{ instrument: 0 }] }]
+        )
+        m.sf2(path, [128, 0])
+      }
+
+      # A clip of sixteenth-note hits: [start (whole notes), note] pairs.
+      def hits(*rows)
+        m.events(*rows.map { |t, note| [t, 1/16r, note, 1.0] }, length: 1)
+      end
+
+      it 'are choke groups: a closed or pedal hat cuts the open hat over 3 ms from its exact note-on sample' do
+        expect(kit.regions.map(&:group)).to eq([1, 1, 1, 2, nil])
+        expect(kit.regions.map(&:off_by)).to eq([1, 1, 1, 2, nil])
+        expect(kit.choke_map.groups(46, 1.0)).to eq([1])
+        expect(kit.choke_map.choked_by(m::As2, 0.5)).to eq([1])
+        expect(m.sf2(kit.lineage[2][0]).skipped([128, 0])).to eq({})
+
+        alone = play(kit, hits([0, m::As2]), 24000)[0]
+        expect(alone[6000...6144].abs.min).to be > 0 # (no zero crossing lands on a sample here)
+        [m::Fs2, m::Gs2].each do |hat|
+          cut = play(kit, hits([0, m::As2], [1/16r, hat]), 24000)[0] # the hat at 6000 samples
+          expect(cut[0...6000]).to eq(alone[0...6000])
+          expect(cut[6000...6144].abs.min).to be > 0
+          expect((cut[6000...6144].abs - alone[6000...6144].abs).max).to be <= 0
+          expect(cut[6144..].abs.max).to eq(0)
+        end
+
+        # the open hat struck again cuts itself; the new note plays from its note-on
+        two = play(kit, hits([0, m::As2], [1/16r, m::As2]), 24000)[0]
+        expect(two[6144...24000]).to eq(alone[144...18000])
+      end
+
+      it 'leave notes of other classes and of class 0 ringing' do
+        alone = play(kit, hits([0, m::As2]), 24000)[0]
+        expect(play(kit, hits([0, m::As2], [1/16r, m::Cs3], [1/8r, m::C2]), 24000)[0]).to eq(alone)
+      end
+
+      it 'give the same samples at any buffer size' do
+        clip = hits([0, m::As2], [1/16r, m::Fs2], [3/32r, m::As2], [5/32r, m::Gs2], [6/32r, m::As2])
+        ref = play(kit, clip, 24000)[0]
+        expect(ref[18144..].abs.max).to be > 0
+        [77, 128, 333].each { |size| expect(play(kit, clip, 24000, size: size)[0]).to eq(ref), "buffer size #{size}" }
+        expect(play(kit, clip, 9000, size: 7)[0]).to eq(ref[0...9000])
+      end
     end
   end
 
