@@ -3,7 +3,7 @@ RSpec.describe('bin/songs/critters.rb') do
 
   after { MB::Sound.rewind }
 
-  it 'scratches the mouse\'s feet only in brief bursts as it darts (textures-6)' do
+  it 'scratches the mouse\'s feet only in brief bursts as it darts (textures-6, 1 m/s since textures-7)' do
     squeaks_only = -> {
       MB::Sound.with_seed(4) {
         MB::Sound.next_seed # (the ticks' dust draws its seed first)
@@ -11,23 +11,23 @@ RSpec.describe('bin/songs/critters.rb') do
       }
     }
 
-    # Standing still, and walking back and forth at up to 1.26 m/s: no ticks
+    # Standing still, and walking back and forth at up to 0.88 m/s: no ticks
     still = MB::Sound.with_seed(4) { MB::Sound.critter_mouse(0.5.constant, 1.constant, 0.constant) }
     expect(render_patch(still, 3)).to eq(render_patch(squeaks_only.(), 3))
-    walking = MB::Sound.with_seed(4) { MB::Sound.critter_mouse(0.4.hz.lfo.sine.at(0.5), 1.constant, 0.constant) }
+    walking = MB::Sound.with_seed(4) { MB::Sound.critter_mouse(0.4.hz.lfo.sine.at(0.35), 1.constant, 0.constant) }
     expect(render_patch(walking, 3)).to eq(render_patch(squeaks_only.(), 3))
 
     # Darting back and forth at up to 3 m/s: ticks only while faster than
-    # 1.5 m/s (near the sine's zero crossings, 1.25 s apart)
+    # 1 m/s (near the sine's zero crossings, 1.25 s apart)
     darting = MB::Sound.with_seed(4) { MB::Sound.critter_mouse(0.4.hz.lfo.sine.at(1.2), 1.constant, 0.constant) }
     ticks = render_patch(darting, 5)[0] - render_patch(squeaks_only.(), 5)[0]
     expect(rms_db(seconds(ticks, 0, 5))).to be > -60 # (the ticks alone; critters plays the mouse 28 dB up)
     # Silent around the turns (x = +-1.2 at 0.625 s, 1.875 s, ...): the
-    # speed is 3 m/s times the sine of the phase from the turn, under 1.5
-    # within 30 degrees (1/12 cycle, 0.21 s) either side (the bandpass
+    # speed is 3 m/s times the sine of the phase from the turn, under 1
+    # within 19.5 degrees (0.054 cycle, 0.135 s) either side (the bandpass
     # rings a little after the last tick)
     [0.625, 1.875, 3.125, 4.375].each do |turn|
-      expect(rms_db(seconds(ticks, turn - 0.15, turn + 0.18))).to be < -150
+      expect(rms_db(seconds(ticks, turn - 0.1, turn + 0.12))).to be < -150
       expect(rms_db(seconds(ticks, turn - 0.6, turn - 0.3))).to be > -70
     end
   end
