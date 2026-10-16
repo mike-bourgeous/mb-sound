@@ -539,6 +539,14 @@ struct sgr_entry {
 
 #define ATTR_BOLD 1
 #define ATTR_REVERSE 2
+#define ATTR_UNDERLINE 4
+#define ATTR_ITALIC 8
+#define ATTR_DIM 16
+
+// Colors with this bit are palette indexes (0..255) written as SGR
+// indexes (30-37, 90-97, 38;5;n), so the terminal's own palette shows
+// them (Plot::Text::Cells::INDEXED)
+#define COLOR_INDEXED 0x1000000
 
 struct grid {
 	long width, height;
@@ -643,7 +651,7 @@ static uint32_t first_codepoint(VALUE str)
 {
 	StringValue(str);
 	if (RSTRING_LEN(str) == 0) {
-		return ' ';
+		return 0; // the right half of a wide character (written as nothing)
 	}
 	rb_encoding *enc = rb_enc_get(str);
 	int len;
@@ -699,6 +707,44 @@ static VALUE grid_put_text(VALUE self, VALUE x_v, VALUE y_v, VALUE str, VALUE fg
 	return Qnil;
 }
 
+/*
+ * put_run(x, y, str, fg, bg, attr): each character of +str+ from (x, y)
+ * with one style (packed colors or nil), clipped; "\0" (or code point 0)
+ * marks the right half of a wide character.  For terminal panes (UI::VT
+ * rows), which keep backgrounds.
+ */
+static VALUE grid_put_run(VALUE self, VALUE x_v, VALUE y_v, VALUE str, VALUE fg_v, VALUE bg_v, VALUE attr_v)
+{
+	struct grid *g = get_grid(self);
+	long x = NUM2LONG(x_v);
+	long y = NUM2LONG(y_v);
+	int32_t fg = color_arg(fg_v);
+	int32_t bg = color_arg(bg_v);
+	uint8_t attr = (uint8_t)NUM2INT(attr_v);
+	StringValue(str);
+	if (y < 0 || y >= g->height) {
+		return Qnil;
+	}
+	rb_encoding *enc = rb_enc_get(str);
+	const char *p = RSTRING_PTR(str);
+	const char *e = RSTRING_END(str);
+	long cx = x;
+	while (p < e && cx < g->width) {
+		int len;
+		uint32_t cp = (uint32_t)rb_enc_codepoint_len(p, e, &len, enc);
+		p += len;
+		if (cx >= 0) {
+			long i = y * g->width + cx;
+			g->cp[i] = cp;
+			g->fg[i] = fg;
+			g->bg[i] = bg;
+			g->attr[i] = attr;
+		}
+		cx++;
+	}
+	return Qnil;
+}
+
 /* char(x, y): the character at a cell (a String) */
 static VALUE grid_char(VALUE self, VALUE x_v, VALUE y_v)
 {
@@ -708,7 +754,11 @@ static VALUE grid_char(VALUE self, VALUE x_v, VALUE y_v)
 	if (x < 0 || y < 0 || x >= g->width || y >= g->height) {
 		return Qnil;
 	}
-	return rb_enc_uint_chr(g->cp[y * g->width + x], rb_utf8_encoding());
+	uint32_t cp = g->cp[y * g->width + x];
+	if (cp == 0) {
+		return rb_enc_str_new("", 0, rb_utf8_encoding());
+	}
+	return rb_enc_uint_chr(cp, rb_utf8_encoding());
 }
 
 /* copy_from(other): every cell from a grid of the same size */
@@ -994,10 +1044,44 @@ static int nearest16(const int *rgb)
 	return best;
 }
 
+// The [r, g, b] of xterm-256 color +n+ (Plot::Text::ANSI.xterm)
+static void xterm_rgb(int n, int *rgb)
+{
+	static const int levels[6] = { 0, 95, 135, 175, 215, 255 };
+	if (n < 16) {
+		for (int c = 0; c < 3; c++) {
+			rgb[c] = basic16[n][c];
+		}
+	} else if (n < 232) {
+		n -= 16;
+		rgb[0] = levels[n / 36];
+		rgb[1] = levels[(n / 6) % 6];
+		rgb[2] = levels[n % 6];
+	} else {
+		int g = 8 + 10 * (n - 232);
+		rgb[0] = rgb[1] = rgb[2] = g;
+	}
+}
+
 enum { MODE_NONE, MODE_TRUECOLOR, MODE_ANSI256, MODE_ANSI16 };
 
 static int append_color(char *buf, int32_t c, int mode, int bg)
 {
+	if (c & COLOR_INDEXED) {
+		int k = c & 255;
+		if (k >= 16 && mode == MODE_ANSI16) {
+			int rgb[3];
+			xterm_rgb(k, rgb);
+			k = nearest16(rgb);
+		}
+		if (k < 8) {
+			return sprintf(buf, "%d", (bg ? 40 : 30) + k);
+		}
+		if (k < 16) {
+			return sprintf(buf, "%d", (bg ? 100 : 90) + k - 8);
+		}
+		return sprintf(buf, "%d;5;%d", bg ? 48 : 38, k);
+	}
 	int rgb[3] = { (c >> 16) & 255, (c >> 8) & 255, c & 255 };
 	switch (mode) {
 	case MODE_TRUECOLOR:
@@ -1035,20 +1119,22 @@ static inline void ob_cat(struct outbuf *o, const char *s, size_t n)
 // The SGR sequence for a style (Cells#sgr) into +buf+; returns its length
 static int format_sgr(char *buf, int32_t f, int32_t b, int a, int mode)
 {
+	// Attributes in Cells#sgr's order: bold, dim, italic, underline, reverse
+	static const struct { int bit; char code; } attrs[] = {
+		{ ATTR_BOLD, '1' }, { ATTR_DIM, '2' }, { ATTR_ITALIC, '3' }, { ATTR_UNDERLINE, '4' }, { ATTR_REVERSE, '7' },
+	};
 	int n = 0;
 	int first = 1;
 	buf[n++] = '\033';
 	buf[n++] = '[';
-	if (a & ATTR_BOLD) {
-		buf[n++] = '1';
-		first = 0;
-	}
-	if (a & ATTR_REVERSE) {
-		if (!first) {
-			buf[n++] = ';';
+	for (int k = 0; k < 5; k++) {
+		if (a & attrs[k].bit) {
+			if (!first) {
+				buf[n++] = ';';
+			}
+			buf[n++] = attrs[k].code;
+			first = 0;
 		}
-		buf[n++] = '7';
-		first = 0;
 	}
 	if (f >= 0) {
 		if (!first) {
@@ -1091,8 +1177,13 @@ static inline void append_sgr(struct outbuf *o, struct sgr_entry *cache, int32_t
 	ob_cat(o, e->seq, (size_t)e->len);
 }
 
+// Code point 0 is the right half of a wide character: nothing is written
+// for it (the terminal moved past it after the left half)
 static inline void append_cp(struct outbuf *o, uint32_t cp)
 {
+	if (cp == 0) {
+		return;
+	}
 	ob_reserve(o, 4);
 	char *buf = o->p + o->len;
 	if (cp < 0x80) {
@@ -1418,6 +1509,7 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "height", grid_height, 0);
 	rb_define_method(cGrid, "set_cell", grid_set_cell, 6);
 	rb_define_method(cGrid, "put_text", grid_put_text, 6);
+	rb_define_method(cGrid, "put_run", grid_put_run, 6);
 	rb_define_method(cGrid, "char", grid_char, 2);
 	rb_define_method(cGrid, "copy_from", grid_copy_from, 1);
 	rb_define_method(cGrid, "clear", grid_clear, 0);

@@ -177,8 +177,8 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
 
     # The same random edits on Ruby Cells and NativeCells
     def edit_both(a, b, rng, count)
-      colors = [nil, [255, 0, 0], [0, 0, 0], [138, 138, 133], [95, 135, 175], [8, 8, 8], [254, 254, 254], [17, 168, 205]]
-      chars = [' ', 'a', '⠿', '█', '▀', '│', '🬀', 'µ']
+      colors = [nil, [255, 0, 0], [0, 0, 0], [138, 138, 133], [95, 135, 175], [8, 8, 8], [254, 254, 254], [17, 168, 205], 1, 9, 200]
+      chars = [' ', 'a', '⠿', '█', '▀', '│', '🬀', 'µ', '中', '', "\0"]
       count.times do
         x = rng.rand(-2..a.width + 1)
         y = rng.rand(-2..a.height + 1)
@@ -214,6 +214,34 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
         expect(b.char(w - 1, h - 1)).to eq(a.char(w - 1, h - 1))
         expect(b.lines(:truecolor).first.encoding).to eq(Encoding::UTF_8)
       end
+    end
+
+    it 'writes styled runs (put_run) like Cells, with every attribute, palette indexes, and wide-character halves' do
+      rng = Random.new(21)
+      a = cells.new(30, 6)
+      b = native.new(30, 6)
+      pack = MB::Sound::Plot::Text::Cells.method(:pack)
+      colors = [nil, [255, 0, 0], [12, 200, 7], 0, 3, 8, 15, 16, 100, 231, 232, 255].map { |c| pack.(c) }
+      60.times do
+        str = Array.new(rng.rand(0..9)) { ['x', '中', "\0", 'é', ' '].sample(random: rng) }.join
+        x = rng.rand(-3..32)
+        y = rng.rand(-1..6)
+        args = [x, y, str, colors.sample(random: rng), colors.sample(random: rng), rng.rand(32)]
+        a.put_run(*args)
+        b.put_run(*args)
+      end
+      modes.each do |m|
+        expect(b.lines(m)).to eq(a.lines(m)), m.to_s
+        expect(b.frame(nil, m)).to eq(a.frame(nil, m))
+      end
+      expect(a.lines(:none).join).not_to include("\0")
+
+      g = native.new(6, 1)
+      g.put_run(0, 0, "中\0ab", pack.(1), pack.(200), MB::Sound::Plot::Text::Cells::UNDERLINE | MB::Sound::Plot::Text::Cells::DIM)
+      expect(g.lines(:none)).to eq(['中ab  '])
+      expect(g.char(1, 0)).to eq('')
+      expect(g.lines(:truecolor)).to eq(["\e[2;4;31;48;5;200m中ab\e[0m  "])
+      expect(g.lines(:ansi16).first).to start_with("\e[2;4;31;")
     end
 
     it 'maps every color like Plot::Text::ANSI' do

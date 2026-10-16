@@ -154,18 +154,36 @@ module MB
         class Cells
           BOLD = 1
           REVERSE = 2
+          UNDERLINE = 4
+          ITALIC = 8
+          DIM = 16
+
+          # SGR attribute codes by bit, in the order SGR sequences list them.
+          ATTR_CODES = [[BOLD, '1'], [DIM, '2'], [ITALIC, '3'], [UNDERLINE, '4'], [REVERSE, '7']].freeze
+
+          # Packed colors with this bit are palette indexes (0..255), written
+          # as SGR indexes (30-37, 90-97, 38;5;n) so the terminal's own
+          # palette shows them (terminal panes keep a program's colors).
+          INDEXED = 0x1000000
 
           # Color modes by number, for FastUI::Grid#lines and #text.
           MODES = { none: 0, truecolor: 1, ansi256: 2, ansi16: 3 }.freeze
 
-          # 0xRRGGBB for [r, g, b] (nil for nil).
+          # 0xRRGGBB for [r, g, b], INDEXED | n for a palette index n
+          # (0..255), nil for nil.
           def self.pack(rgb)
+            return INDEXED | rgb if rgb.is_a?(Integer)
             rgb && ((rgb[0] << 16) | (rgb[1] << 8) | rgb[2])
           end
 
           # [r, g, b] for 0xRRGGBB.
           def self.unpack(c)
             [(c >> 16) & 255, (c >> 8) & 255, c & 255]
+          end
+
+          # [r, g, b], or an Integer palette index, for a packed color.
+          def self.color_of(c)
+            c & INDEXED != 0 ? c & 255 : unpack(c)
           end
 
           attr_reader :width, :height
@@ -180,12 +198,13 @@ module MB
             @attr = Array.new(n, 0)
           end
 
-          # Sets one cell.
+          # Sets one cell.  +ch+ '' (or "\0") is the right half of a wide
+          # character, written as nothing.
           def set(x, y, ch, fg: nil, bg: nil, bold: false, reverse: false)
             return if x < 0 || y < 0 || x >= @width || y >= @height
 
             i = y * @width + x
-            @ch[i] = ch
+            @ch[i] = ch == "\0" ? '' : ch
             @fg[i] = Cells.pack(fg)
             @bg[i] = Cells.pack(bg)
             @attr[i] = (bold ? BOLD : 0) | (reverse ? REVERSE : 0)
@@ -193,7 +212,7 @@ module MB
 
           # Sets the cell at index +i+ (no bounds checks; for canvases).
           def put(i, ch, fg, bg, attr)
-            @ch[i] = ch
+            @ch[i] = ch == "\0" ? '' : ch
             @fg[i] = Cells.pack(fg)
             @bg[i] = Cells.pack(bg)
             @attr[i] = attr
@@ -207,6 +226,26 @@ module MB
             str.each_char.with_index do |c, k|
               set(x + k, y, c, fg: fg, bold: bold)
             end
+          end
+
+          # Writes +str+ from (+x+, +y+) in one style: packed colors (see
+          # .pack; nil for none) and attribute bits, keeping the background.
+          # "\0" is the right half of a wide character.  Clipped.
+          def put_run(x, y, str, fg, bg, attr)
+            return if y < 0 || y >= @height
+
+            str.each_char.with_index do |c, k|
+              cx = x + k
+              next if cx < 0
+              break if cx >= @width
+
+              i = y * @width + cx
+              @ch[i] = c == "\0" ? '' : c
+              @fg[i] = fg
+              @bg[i] = bg
+              @attr[i] = attr
+            end
+            nil
           end
 
           # The character at (+x+, +y+).
@@ -347,10 +386,9 @@ module MB
           def sgr(style, mode)
             fg, bg, attr = style
             codes = []
-            codes << '1' if attr & BOLD != 0
-            codes << '7' if attr & REVERSE != 0
-            codes << ANSI.color(Cells.unpack(fg), mode, false) if fg
-            codes << ANSI.color(Cells.unpack(bg), mode, true) if bg
+            ATTR_CODES.each { |bit, code| codes << code if attr & bit != 0 }
+            codes << ANSI.color(Cells.color_of(fg), mode, false) if fg
+            codes << ANSI.color(Cells.color_of(bg), mode, true) if bg
             "\e[#{codes.join(';')}m"
           end
         end
@@ -407,9 +445,19 @@ module MB
 
           module_function
 
-          # The SGR parameter for +rgb+ as a foreground (or background with
-          # +bg+) color in +mode+.
+          # The SGR parameter for +rgb+ (or an Integer palette index, written
+          # as an index in every mode, mapped to the nearest of 16 in
+          # :ansi16) as a foreground (or background with +bg+) color in
+          # +mode+.
           def color(rgb, mode, bg)
+            if rgb.is_a?(Integer)
+              k = rgb
+              k = nearest(xterm(k), BASIC) if k >= 16 && mode == :ansi16
+              return ((bg ? 40 : 30) + k).to_s if k < 8
+              return ((bg ? 100 : 90) + k - 8).to_s if k < 16
+              return "#{bg ? 48 : 38};5;#{k}"
+            end
+
             case mode
             when :truecolor
               "#{bg ? 48 : 38};2;#{rgb[0]};#{rgb[1]};#{rgb[2]}"
@@ -420,6 +468,18 @@ module MB
               base = k < 8 ? (bg ? 40 : 30) + k : (bg ? 100 : 90) + k - 8
               base.to_s
             end
+          end
+
+          # The [r, g, b] of xterm-256 color +n+ (BASIC for 0..15).
+          def xterm(n)
+            return BASIC[n] if n < 16
+            if n < 232
+              n -= 16
+              levels = [0, 95, 135, 175, 215, 255]
+              return [levels[n / 36], levels[(n / 6) % 6], levels[n % 6]]
+            end
+            g = 8 + 10 * (n - 232)
+            [g, g, g]
           end
 
           # The nearest xterm 256-color index.

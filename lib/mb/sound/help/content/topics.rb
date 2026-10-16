@@ -556,7 +556,7 @@ module MB
       see :sets, :knobs, :ui
     end
 
-    Help.topic :ui, 'Dashboard band', group: :look do
+    Help.topic :ui, 'Dashboard band and tiled screen', group: :look do
       about <<~TEXT
         `ui` puts a live dashboard band above the prompt (transport, form,
         tracks, queued changes, master meters, a scope); Pry keeps the
@@ -567,6 +567,22 @@ module MB
         layout with `ui.save`.  The prompt shows bar:beat, armed or
         recording tracks, and load; Tab completes track, scene, and knob
         names after the commands that take them (`go :<Tab>`).
+
+        `ui :tiles` (or `ui :studio`, or any layout with `repl` in it)
+        takes the whole screen: panes tiled around the console, which keeps
+        a 10 000-line scrollback of its own.  Ctrl-] is NAV mode: 1-9 or
+        hjkl pick a pane, z zooms, s/v split, x closes, arrows resize
+        (shift: 5), = evens out, u and Ctrl-R undo and redo, [ and ] switch
+        tabs, PgUp/g/G scroll the console, / searches it, y copies (OSC 52),
+        : runs a line of Ruby (`show :knobs`, `go :drop`), and Ctrl-], i,
+        Esc, or Enter go back.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
+        `ui.save :mine` do the same from the prompt; `ui.on C1, :zoom` maps
+        a pad.  Ctrl-Z hides the tiles (the set plays on and the console
+        carries on in the normal screen); Ctrl-Z or `ui` brings them back
+        as they were.  `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
+        `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
+        layouts are data files in the ui folder, reloaded when they
+        change.  `bin/ui_check.rb` reports what your terminal supports.
       TEXT
       commands :ui, :off, :pane, :layout
       note :terminal_ui

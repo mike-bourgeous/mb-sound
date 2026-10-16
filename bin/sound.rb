@@ -65,6 +65,10 @@ MB::Sound::Help.install_pry!
 # Symbol (see MB::Sound::UI::Completion)
 MB::Sound::UI::Completion.install
 
+# The tiled screen's `:` palette evaluates in the console's binding (see
+# MB::Sound::UI::Tiles)
+MB::Sound::UI.install_pry!
+
 # Pry 0.16 reads with Reline's multiline editor, which treats piped input as
 # one paste and evaluates it as a single block (so `printf 'a\nb\n' |
 # bin/sound.rb` stopped at the first error and printed no results).  Read
