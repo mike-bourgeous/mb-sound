@@ -116,6 +116,20 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(peak_hz(seconds(l, 0.5, 1.5), 100, 400)).to eq(peak_hz(seconds(r, 0.5, 1.5), 100, 400))
   end
 
+  it 'sets the tape\'s grain depth directly with bits: (wear still sets the lowpass; textures-6)' do
+    t = Numo::DFloat.new(48000 * 2).seq / 48000
+    x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 220) * 0.003) # (quiet: its leak through the highpasses stays far under 12 bits)
+    floor = ->(**opts) {
+      out = MB::Sound.with_seed(1) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [x]), **opts), 2)[0] }
+      y = 2.times.reduce(Numo::DFloat.cast(out)) { |y, _| MB::Sound::Filter::Cookbook.new(:highpass, 48000, 1000, quality: 0.7).process(y) }
+      rms_db(seconds(y, 0.5, 1.5))
+    }
+    default = floor.()
+    expect(floor.(bits: 10 - 3 * 0.6)).to be_within(0.5).of(default) # (wear 0.6 is 8.2 bits)
+    expect(floor.(bits: 10)).to be_within(1.5).of(default - 1.8 * 6.02)
+    expect(floor.(bits: 12)).to be_within(1.5).of(default - 3.8 * 6.02)
+  end
+
   it 'records the koto and harp rooms onto the tape: the hiss goes on through the tail, then the tape stops (textures-5)' do
     harp = render_patch(MB::Sound.ambient_harp_voice(patch_notes([MB::Sound::D4.number, 0, 0.5])), 10)
     # The room's tail sinks under the grain, which stays (textures-4: the
