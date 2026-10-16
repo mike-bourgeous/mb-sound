@@ -77,7 +77,7 @@ module MB
               names: %i[
                 [] at audio bits bpm channel_count chops data duration fade fade_in fade_out file gain interpolation length level lineage lofi loop_mode
                 loop_points looped mips mono name normalize one_shot onsets origin peak position read_as rev reverse root save seconds size slice slices
-                start stop stretch tags to_a to_instrument transport transpose trim tune with
+                start stop stretch tags to_a to_instrument transport transpose trim tune with beats bars meter key markers meta_source detect_tempo
               ],
             },
             'MB::Sound::Sample::Slices' => {
@@ -106,6 +106,7 @@ module MB
             'SamplerMethods' => {
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
               resample_to_sample: 'alias of bounce', capture_audio: 'live capture (performance, not graph structure)',
+              loops: 'lists loop files (a listing; samples print through their lineage)',
             },
             'GenerativeMethods' => {
               tones: 'a Weights value (prints through its own recipe)', weights: 'a Weights value (prints through its own recipe)',

@@ -220,6 +220,50 @@ module MB
       end
     end
 
+    Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
+      about <<~TEXT
+        Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
+        its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
+        `smpl` (root, loop points), cue points (`sample.markers`), FLAC
+        tags, then tempo and key words in file and folder names ("98bpm",
+        "98 BPM", "Am_120"; a name's tempo counts only when the file is a
+        whole number of its beats).  Loops loop the whole file; one-shots
+        (ACID's flag, words like kick or hit, short files, one hit
+        decaying away) keep no name tempo.  `sample.bpm`, `.beats`,
+        `.bars`, `.key`, `.meta_source` and `.meta[:why]` (where each came
+        from, and why); `Sample[path, detect:
+        true]` (or `.detect_tempo`) finds a missing tempo.  `loops
+        '~/Loops/Funk'` lists a folder (headers and names only, nothing
+        decoded or written), filtered by `bpm: 90..100`, `key: :Am`,
+        `beats: 8`; `list[3].sample` reads one.
+
+        `sample.follow` plays a loop in time with the session: its beats
+        fill the same span at any tempo, lined up with bar 1 (`align:
+        :launch` counts from the launch), restretched when `bpm` changes.
+        `follow` keeps the pitch: drums with the slice stretch, notes and
+        pads with the phase vocoder (`sample.material` decides from name
+        words or how noisy it sounds; `stretch: :slice` or `:spectral`
+        to say); `follow(:resample)` lets the pitch follow
+        the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
+        the hits (markers, else onsets, else the 16th grid) and starts
+        each slice at its stretched time, attacks copied exactly:
+        slowing down leaves REX-style gaps (`fill: :stretch` draws each
+        decay out instead), speeding up truncates with a 4 ms fade.
+      TEXT
+      commands :loops
+      dsl :follow
+      note :loops
+      see :sampler, :granular, :tempo
+      example 'a break that follows the tempo' do
+        brk = bounce(2.bars, bpm: 100) { tr909(grid(16, kick: 'X...x...x..xx...', clap: '....X.......X...', hat: 'x.x.x.x.x.x.x.x.', oh: '..x...x...x...x.')) }
+        bg :try, brk.follow.at(-16.db).until(2.bars)
+      end
+      example 'slice stretch vs varispeed' do
+        brk = bounce(1.bar, bpm: 100) { tr909(grid(16, kick: 'X..x..X...X.....', snare: '....X.......X..x', hat: 'xxxxxxxxxxxxxxxx')) }
+        bg :try, (brk.follow * 0.5 + brk.follow(:resample).pan(0.6) * 0.5).at(-14.db).until(2.bars)
+      end
+    end
+
     Help.topic :granular, 'Grains and spectral stretch', group: :sound do
       about <<~TEXT
         `sample.grains(...)` plays a Sample as a cloud of short windowed
@@ -316,14 +360,24 @@ module MB
         `generate(1.bar) { |cycle, dice| rows }` make looping clips whose
         every cycle is a pure function of the seed and the cycle
         (counter-based `dice`), so they seek, replay in takes, and save.
+        `motifs(h, 8, form: %i[a a b a], answer: { b: :a })` remembers its
+        phrases: motifs come back (through key changes), `b` answers `a`
+        and lands home, repeats vary a little, and every `evolve:` passes
+        the motifs mutate a step here and there; `range:`/`around:` set
+        the register.
       TEXT
-      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody
+      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs
       note :generative
       see :sequences, :random
       example 'a melody that blurs and changes key' do
         h = harmony(0 => scale(:dorian, :d), 1.bar => scale(:major, :f), loop: 2.bars).blur(0.2)
         line = melody(h, 8, range: A3..A5, vary: true).loop
         bg :try, line.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'a tune with phrase memory: a a b a, b answering a' do
+        h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
+        tune = motifs(h, 8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4)
+        bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
