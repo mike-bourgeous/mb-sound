@@ -186,6 +186,19 @@ RSpec.describe('MB::Sound::Generative probability scales', :aggregate_failures) 
       expect((2 * chords + w).at(1)).to eq(sum.at(1))
     end
 
+    it 'blends Weights toward a Harmony as a Harmony' do
+      key = MB::Sound.harmony(0 => f_major, 2.bars => MB::Sound.chord(:min7, root: :g), loop: 4.bars)
+      b = dorian.blend(key, 0.3)
+      expect(b).to be_a(MB::Sound::Generative::Harmony)
+      expect(b.to_ruby).to eq('scale(:dorian, D4).weights.blend(harmony(0 => scale(:major, F4).weights, 2.bars => chord(:min7, root: :g), loop: 4.bars), 0.3)')
+      [0r, 1r / 2, 1, 3, 5, 13r / 2].each do |t|
+        expect(b.at(t)).to eq(dorian.blend(key.at(t), 0.3))
+      end
+      expect(b.period).to eq(4)
+      expect(rebuild(b).at(3)).to eq(b.at(3))
+      expect(dorian.blend(f_major, 0.3)).to be_a(MB::Sound::Generative::Weights)
+    end
+
     it 'requires lengths for keys and loops (0 may start), suggesting .bars' do
       expect { MB::Sound.harmony(0 => dorian, 12 => f_major) }.to raise_error(ArgumentError, /write 12\.bars/)
       expect { MB::Sound.harmony(0 => dorian, 1r / 2 => f_major) }.to raise_error(ArgumentError, %r{write \(\(1/2\)\)\.bars|write \(1/2r\)\.bars|write \(\(1/2r\)\)\.bars|\(1/2r\)})

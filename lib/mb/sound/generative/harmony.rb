@@ -71,12 +71,14 @@ module MB
         end
 
         # The Harmony of Weights +w+ combined with Harmony +other+ by
-        # operator +name+ (Weights#+, #-, #*): `w + h` is w + h.at(position)
+        # operator +name+ (Weights#+, #-, #*, #blend with +rest+ = [t]):
+        # `w + h` is w + h.at(position)
         # at each moment, printing back as `w + h`.  (+ and * give the same
         # Weights as `h + w` and `h * w`: per-class Float sums and products
         # don't depend on the order.)
-        def self.of_weights(w, name, other)
-          Harmony.new({ 0r => w }, ops: [[name, [other].freeze, {}.freeze].freeze], repeat: other.period).with_recipe(w, name, [other])
+        def self.of_weights(w, name, other, *rest)
+          args = [other, *rest].freeze
+          Harmony.new({ 0r => w }, ops: [[name, args, {}.freeze].freeze], repeat: other.period).with_recipe(w, name, args)
         end
 
         # A clip position in whole notes from a musical length (a Duration:
