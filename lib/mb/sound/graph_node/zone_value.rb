@@ -70,6 +70,47 @@ module MB
           end
         end
 
+        # Gives the ZoneValues of +graph+ (a node list) that are read through
+        # +advanced+ nodes (nodes a skipping Synth keeps reading while it
+        # pauses the rest of a lane or sub-lane: Notes nodes such as a
+        # FadeIn reading its delay) an Index of their own whenever their
+        # Index also serves values read only by paused nodes, since an Index
+        # serves its readers in lockstep (before, an idle Synth lane playing
+        # an SF2 preset whose LFO delay changes from zone to zone raised
+        # "readers out of step" once it woke).  Returns the number of values
+        # given a new Index.
+        def self.separate(graph, advanced)
+          through = {}.compare_by_identity
+          advanced.each { |a| a.graph(include_tees: true).each { |n| through[n] = true unless n.equal?(a) } }
+          moved = 0
+          graph.select { |n| n.is_a?(ZoneValue) }.group_by { |z| z.zone_index.__id__ }.each_value do |users|
+            inside = users.select { |u| through[u] }
+            next if inside.empty? || inside.length == users.length
+
+            idx = inside[0].zone_index
+            fresh = Index.new(private_copy(origin(idx.number)), private_copy(origin(idx.velocity)))
+            inside.each { |u| u.zone_index = fresh }
+            moved += inside.length
+          end
+          moved
+        end
+
+        # The node behind Tee branch +b+ (or +b+).
+        def self.origin(b)
+          b.is_a?(Tee::Branch) ? b.owner_tee.sources[:input] : b
+        end
+
+        # A Notes number or velocity node of its own (its own stream reader)
+        # for a node +n+ of those kinds, else +n+: values read through an
+        # advanced node then read nothing the paused nodes share (a branch
+        # of the shared node would advance it, and its other branches would
+        # fall behind).
+        def self.private_copy(n)
+          return n unless n.is_a?(MB::Sound::Notes::Number) || n.is_a?(MB::Sound::Notes::Velocity)
+
+          n.class.new(n.stream, notes: n.notes, sample_rate: n.sample_rate)
+        end
+
         # The table index for note number +n+ and velocity +v+ (0..1), rounded
         # like the kernel's region choice.
         def self.index(n, v)
@@ -79,6 +120,10 @@ module MB
         # The Sampler::ZoneMap read.
         attr_reader :map
 
+        # The Index this value reads (shared by the ZoneValues of a voice or
+        # layer; Synth sub-lanes check that theirs aren't shared outside).
+        attr_reader :zone_index
+
         def initialize(map, number: nil, velocity: nil, index: nil, sample_rate: 48000)
           raise ArgumentError, "A ZoneValue reads a Sampler::ZoneMap (got #{map.inspect})" unless map.is_a?(Sampler::ZoneMap)
           raise ArgumentError, 'Give a ZoneValue number: and velocity:, or an index:' unless index || (number && velocity)
@@ -86,15 +131,24 @@ module MB
           @table = map.table.reshape(128 * 128)
           @values = @table.to_a.freeze
           @constant = nil
-          @index = index || Index.new(number, velocity)
+          @zone_index = index || Index.new(number, velocity)
           @reads = 0
           @sample_rate = sample_rate.to_f
           @buf = nil
           @node_type_name = 'Zone Value'
         end
 
+        # Makes this value read +index+ (a new Index; Synth sub-lanes give
+        # the values inside them an Index of their own, see
+        # SubLane.prepare).  Only before the first sample.
+        def zone_index=(index)
+          raise ArgumentError, 'A ZoneValue reads a ZoneValue::Index' unless index.is_a?(Index)
+          raise 'Change the zone index before sampling' unless @reads == 0
+          @zone_index = index
+        end
+
         def sample(count)
-          r = @index.read(@reads += 1, count)
+          r = @zone_index.read(@reads += 1, count)
           return nil if r.nil?
           const, indices, count = r
 
@@ -118,7 +172,7 @@ module MB
         end
 
         def sources
-          { number: @index.number, velocity: @index.velocity }
+          { number: @zone_index.number, velocity: @zone_index.velocity }
         end
 
         def plan_unsupported_reason

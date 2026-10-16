@@ -198,11 +198,28 @@ module MB
           # dropped yet don't count, so the answer doesn't depend on block
           # sizes).  Used by Synth to wake a skipped lane on the exact
           # sample of its event.
-          def first_pending_time(from, to)
+          #
+          # With a block, only events for which the block returns true count
+          # (Synth's sub-lanes wake on the notes they play; see
+          # GraphNode::SubLane).
+          def first_pending_time(from, to, &filter)
             @allocator.advance(to)
             i = @log.bsearch_index { |e| e.time >= from }
-            log = i && @log[i].time < to ? @log[i].time : nil
-            queued = source.first_pending_time(from, to)
+            log = nil
+            if i
+              if filter
+                while i < @log.length && @log[i].time < to
+                  if filter.call(@log[i])
+                    log = @log[i].time
+                    break
+                  end
+                  i += 1
+                end
+              elsif @log[i].time < to
+                log = @log[i].time
+              end
+            end
+            queued = source.first_pending_time(from, to, &filter)
             log && queued ? [log, queued].min : log || queued
           end
 
@@ -269,9 +286,16 @@ module MB
           # The time of the first event queued for the lane from stream
           # time +from+ up to before +to+, or nil (see
           # Lane#first_pending_time).
-          def first_pending_time(from, to)
+          def first_pending_time(from, to, &filter)
             i = @queue.bsearch_index { |e| e.time >= from }
-            i && @queue[i].time < to ? @queue[i].time : nil
+            return nil if i.nil?
+            return @queue[i].time < to ? @queue[i].time : nil unless filter
+
+            while i < @queue.length && @queue[i].time < to
+              return @queue[i].time if filter.call(@queue[i])
+              i += 1
+            end
+            nil
           end
 
           # Used by Allocator to send an event to this lane (in time order).

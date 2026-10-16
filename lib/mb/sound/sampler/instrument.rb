@@ -77,6 +77,7 @@ module MB
           @modulation = modulation.nil? ? nil : deep_freeze(modulation)
           @coverage = nil
           @choke_map = nil
+          @wake_table = nil
           if @modulation
             unknown = @modulation.keys - %i[sources pitch cutoff volume]
             raise ArgumentError, "Unknown modulation keys #{unknown.inspect} (sources, pitch, cutoff, volume)" unless unknown.empty?
@@ -264,20 +265,34 @@ module MB
         #
         # +choke+ is the voice's Notes#choke when the instrument has choke
         # groups (see #chokes_for), else nil.
-        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil)
+        #
+        # In a Synth lane each layer is a GraphNode::SubLane, which sleeps
+        # while it has nothing to play and wakes on the exact sample of a
+        # note it plays (see #wake_check), with zone values of its own
+        # (+scope+: a Hash holding the layer's ZoneValue::Index), so a
+        # piano's second layer costs nothing on notes outside its keys.
+        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil,
+                  scope: nil)
           if @layers
             n = channel_count
-            outs = @layers.map { |l|
+            alloc = source && source.stream.respond_to?(:allocator) ? source.stream.allocator : nil
+            outs = @layers.each_with_index.map { |l, li|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke)
+                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke,
+                                         scope: alloc ? {} : nil)
+              if alloc
+                part = GraphNode::SubLane.new(o, notes: source, wake: l.wake_check(mono: alloc.mono?), name: l.name || "layer #{li + 1}")
+                o = part.outputs.length == 1 ? part.outputs[0] : MB::Sound.channels(*part.outputs)
+              end
               o.is_a?(GraphNode::Channels) ? o.to_a : [o]
             }
             sums = Array.new(n) { |c| outs.map { |o| o[c % o.length] }.reduce(:+) }
             return n == 1 ? sums[0] : MB::Sound.channels(*sums)
           end
 
-          mask = layer && source ? per_note(coverage, source, shared) : nil
-          mods = @modulation && source ? modulators(source, shared, mask) : nil
+          local = scope || shared
+          mask = layer && source ? per_note(coverage, source, local) : nil
+          mods = @modulation && source ? modulators(source, shared, mask, local) : nil
           if mods && mods[:pitch]
             freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
           end
@@ -292,10 +307,10 @@ module MB
           out = nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
           if source && @envelope
             opts = mask ? { mask: mask } : {}
-            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source, shared), **opts) : source.env(*@envelope, **opts))
+            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source, local), **opts) : source.env(*@envelope, **opts))
           end
           if @filter
-            f = per_note(@filter, source || { number: number, velocity: 1.constant }, shared) # (ZoneMaps read velocity 127 without Notes)
+            f = per_note(@filter, source || { number: number, velocity: 1.constant }, local) # (ZoneMaps read velocity 127 without Notes)
             cutoff = f[:cutoff]
             cutoff = shift_by(cutoff.respond_to?(:sample) ? cutoff : cutoff.constant, mods, :cutoff).aclip(5, 20000) if mods && mods[:cutoff]
             out = out.filter(:lowpass, cutoff: cutoff, quality: f[:quality])
@@ -316,6 +331,39 @@ module MB
           MB::Sound.synth(source, voices: voices) { |v|
             s = inst.play(v, **options)
             block ? block.call(v, s) : s
+          }
+        end
+
+        # A Proc for GraphNode::SubLane's +wake:+ (each layer of a layered
+        # instrument in a Synth lane): true for lane events that may change
+        # what an idle voice of this instrument plays: note-ons with a region
+        # for their key and velocity (velocities one step wider, as the
+        # trigger's float rounding may land a note on a neighbor), every
+        # note-on of a key with sequential round robins (they count every
+        # note of the key) and, with random round robins (one draw per
+        # note-on) or a split key, every note-on; in +mono+ lanes also
+        # note-offs (releasing a note may return the lane to an older held
+        # one).
+        def wake_check(mono: false)
+          every = !@split.nil? || @regions.any?(&:rand)
+          table = @wake_table ||= begin
+            t = Array.new(128) { Array.new(128, false) }
+            @regions.each do |r|
+              lo = r.seq ? 0 : MB::M.max(r.vel[0] - 1, 0)
+              hi = r.seq ? 127 : MB::M.min(r.vel[1] + 1, 127)
+              (r.keys[0]..r.keys[1]).each { |k| (lo..hi).each { |v| t[k][v] = true } }
+            end
+            t.each(&:freeze).freeze
+          end
+          ->(e) {
+            next true if mono && e.note_off?
+            next false unless e.note_on?
+            next true if every
+
+            k = e.note.to_i
+            next true if k < 0 || k > 127
+            v = (e.velocity.to_f * 127.0 + 0.5).floor.clamp(0, 127)
+            table[k][v]
           }
         end
 
@@ -377,13 +425,16 @@ module MB
         # Sums and sources are made once per +shared+ Hash for the same
         # settings (ZoneMaps compare by their zones), so layers share them;
         # +keys+ holds each sum's settings for the caller's own sharing.
-        def modulators(source, shared = {}, mask = nil)
+        # Nodes of the layer's own (masked envelopes and their sums) read
+        # zone values through +local+'s index (see #voice).
+        def modulators(source, shared = {}, mask = nil, local = shared)
           raw = @modulation
           node = ->(name) {
             spec = raw[:sources].fetch(name)
             # (masked envelopes belong to their layer)
-            shared[[:source, spec, spec[:env] && mask ? object_id : nil]] ||= begin
-              s = per_note(spec, source, shared)
+            own = spec[:env] && mask
+            shared[[:source, spec, own ? object_id : nil]] ||= begin
+              s = per_note(spec, source, own ? local : shared)
               if s[:env]
                 source.env(**{ sensitivity: nil, gm: false }.merge(s[:env]), **(mask ? { mask: mask } : {}))
               else
@@ -397,9 +448,10 @@ module MB
             next if list.empty?
             key = list.map { |name, amount| [raw[:sources][name], amount] }
             keys[dest] = key
-            key += [object_id] if mask && list.any? { |name, _| raw[:sources][name][:env] }
+            own = mask && list.any? { |name, _| raw[:sources][name][:env] }
+            key += [object_id] if own
             h[dest] = shared[[:sum, dest, key]] ||= list.map { |name, amount|
-              a = per_note(amount, source, shared)
+              a = per_note(amount, source, own ? local : shared)
               a == 1 ? node.(name) : node.(name) * a
             }.reduce(:+)
           }

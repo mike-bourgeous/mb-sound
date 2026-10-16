@@ -241,6 +241,9 @@ module MB
         @tail_generation = nil
         @sum_pairs = nil
         @sum_pool = nil
+        @parts = nil
+        @piece = nil
+        @piece_serial = 0
 
         @retrigger = retrigger
         retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
@@ -292,7 +295,9 @@ module MB
             lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
             v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
             @notes << v
-            lane_outputs(graph, idx).map(&:get_sampler)
+            outs = lane_outputs(graph, idx).map(&:get_sampler)
+            prepare_skipping(outs, v) if skip_idle
+            outs
           }
         }
         @notes.freeze
@@ -301,6 +306,15 @@ module MB
         @lane_graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
         @in_lanes = {}
         @lane_graphs.each { |g| g.each { |n| @in_lanes[n.__id__] = true } }
+
+        # Skippable parts of the lanes (see GraphNode::SubLane)
+        @parts = @lane_graphs.each_with_index.map { |g, idx|
+          next [].freeze unless skip_idle && Synth.sub_lanes
+
+          parts = g.select { |n| n.is_a?(GraphNode::SubLane) && n.notes.equal?(@notes[idx]) }
+          parts.each { |part| part.attach(self, @allocator.lanes[idx], g, ->(b) { unread_branch?(b) }) }
+          parts.freeze
+        }.freeze
 
         # Fused plans for each lane's graph (see MB::Sound::Plan), leaving
         # out branches nothing reads
@@ -508,7 +522,57 @@ module MB
         node_type_name
       end
 
+      # Whether Synths let sub-lanes sleep (GraphNode::SubLane; true unless
+      # MB_SOUND_SUB_LANES=0).  Read when a Synth is made.
+      def self.sub_lanes
+        @sub_lanes = ENV['MB_SOUND_SUB_LANES'] != '0' if @sub_lanes.nil?
+        @sub_lanes
+      end
+
+      # Turns sub-lane skipping on or off for Synths made from now on.
+      def self.sub_lanes=(enabled)
+        @sub_lanes = !!enabled
+      end
+
+      # The GraphNode::SubLanes of each lane that may sleep (in lane order;
+      # see #setup_idle_skipping).
+      def sub_lanes
+        @parts
+      end
+
+      # Used by GraphNode::SubLane: [lane index, synth sample, count, serial]
+      # of the lane piece being read, or nil outside one.
+      def lane_piece
+        @piece
+      end
+
+      # Used by GraphNode::SubLane: calls the block with the shared
+      # controller buffers showing +count+ samples from +offset+ of the
+      # current lane piece (see Plan::SharedInputs#window).
+      def sub_lane_window(offset, count, &block)
+        shared = @shared_inputs
+        return yield unless shared&.active?
+
+        shared.window(offset, count, &block)
+      end
+
       private
+
+      # Runs the block with #lane_piece saying lane +idx+ is being read for
+      # +count+ samples from synth sample +pos+ (only for lanes with
+      # sub-lanes).
+      def with_piece(idx, pos, count)
+        return yield if @parts[idx].empty?
+
+        @piece_serial += 1
+        old = @piece
+        @piece = [idx, pos, count, @piece_serial].freeze
+        begin
+          yield
+        ensure
+          @piece = old
+        end
+      end
 
       # True if a note at +velocity+ would take each envelope of lane Notes
       # +v+ at least as high as it is now (see +retrigger: :louder+).
@@ -595,7 +659,10 @@ module MB
         # nodes in plan regions.  Otherwise (e.g. unison oscillators outside
         # the regions) the lanes run their regions alone and idle lanes are
         # skipped as before.
-        if Plan.lanes && @plans.any? && graphs.each_index.all? { |idx| !@skippable_base[idx] || lane_planned?(graphs, sets, idx) }
+        # (Sub-lanes sleep inside lanes, which a lane group computing every
+        # member would break)
+        if Plan.lanes && @plans.any? && @parts.all?(&:empty?) &&
+            graphs.each_index.all? { |idx| !@skippable_base[idx] || lane_planned?(graphs, sets, idx) }
           @lane_groups = Plan::LaneGroups.new(@plans)
         end
         update_skippable
@@ -623,6 +690,20 @@ module MB
         @lane_sets = sets
         @boundary_cache = Array.new(@lanes.length)
         @clock_node = @boundary.map { |own, _, _| own.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # Readies lane graph +outs+ (lane Notes +v+) for idle skipping while
+      # building it, before the lane graphs are looked at: sub-lanes'
+      # zone value indices (GraphNode::SubLane.prepare), and zone values
+      # read through the Notes nodes a skipped lane keeps advancing get an
+      # Index of their own (GraphNode::ZoneValue.separate).
+      def prepare_skipping(outs, v)
+        GraphNode::SubLane.prepare(outs, v) if Synth.sub_lanes
+        g = outs.flat_map { |o| o.graph(include_tees: true) }.uniq
+        return unless g.any? { |n| n.is_a?(GraphNode::ZoneValue) }
+
+        own = GraphNode::SubLane.advanced_nodes(g.select { |n| n.is_a?(Notes::Node) && n.notes.equal?(v) })
+        GraphNode::ZoneValue.separate(g, own)
       end
 
       # The nodes skipped lane +idx+ still reads (see #setup_idle_skipping):
@@ -809,6 +890,13 @@ module MB
           end
         end
 
+        parts = @parts[idx]
+        i = 0
+        while i < parts.length
+          parts[i].lane_skipped(count)
+          i += 1
+        end
+
         :skipped
       end
 
@@ -990,13 +1078,20 @@ module MB
         outs = @lanes[idx]
         bufs = ((@lane_bufs ||= [])[idx] ||= [])
         bufs.clear
-        outs.each do |o|
-          buf = o.sample(count)
-          if buf.nil?
-            lane_ended(idx)
-            return nil
+        ended = false
+        with_piece(idx, @skip_position, count) {
+          outs.each do |o|
+            buf = o.sample(count)
+            if buf.nil?
+              ended = true
+              break
+            end
+            bufs << buf
           end
-          bufs << buf
+        }
+        if ended
+          lane_ended(idx)
+          return nil
         end
 
         measure_lane(idx, bufs)
@@ -1042,23 +1137,30 @@ module MB
           got = ((@piece_bufs ||= [])[idx] ||= [])
           got.clear
           window = o != 0 || stop != count
-          outs.each do |out|
-            buf = window ? sample_window(out, o, piece) : out.sample(count)
-            if buf.nil?
-              lane_ended(idx)
-              return nil
+          ended = false
+          with_piece(idx, pos + o, piece) {
+            outs.each do |out|
+              buf = window ? sample_window(out, o, piece) : out.sample(count)
+              if buf.nil?
+                ended = true
+                break
+              end
+              if buf.length < piece
+                # A lane's last buffer may be short (e.g. a resonator ringing
+                # out after the lane's trigger ended stops where it falls
+                # quiet): zeros after it, as for non-skippable lanes; the
+                # lane ends at its next read
+                padded = buf.class.zeros(piece)
+                padded[0...buf.length] = buf
+                buf = padded
+              end
+              raise "Lane #{idx} gave #{buf.length} samples, not #{piece}" if buf.length != piece
+              got << buf
             end
-            if buf.length < piece
-              # A lane's last buffer may be short (e.g. a resonator ringing
-              # out after the lane's trigger ended stops where it falls
-              # quiet): zeros after it, as for non-skippable lanes; the
-              # lane ends at its next read
-              padded = buf.class.zeros(piece)
-              padded[0...buf.length] = buf
-              buf = padded
-            end
-            raise "Lane #{idx} gave #{buf.length} samples, not #{piece}" if buf.length != piece
-            got << buf
+          }
+          if ended
+            lane_ended(idx)
+            return nil
           end
 
           track_lane_cells(idx, got, pos + o)
