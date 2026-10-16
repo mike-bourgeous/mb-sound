@@ -1198,10 +1198,13 @@ module MB
           # block of `i.region` calls (only settings that differ from
           # Instrument#region's defaults).
           def instrument_block_text(inst, indent)
+            return fixme('a layered Sampler::Instrument without a recipe (sf2 presets print as sf2(...))') if inst.layers
+
             kw = {}
             kw[:split] = inst.split if inst.split
             kw[:mips] = inst.mips unless inst.mips == :default
             kw[:envelope] = inst.envelope if inst.envelope
+            kw[:filter] = inst.filter if inst.filter
             kw[:name] = inst.name if inst.name
             args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
             inner = "#{indent}  "
@@ -1217,6 +1220,7 @@ module MB
               opts[:tune] = r.tune unless r.tune == 0
               opts[:gain] = r.gain unless r.gain == 1
               opts[:offset] = r.offset unless r.offset == 0
+              opts[:pan] = r.pan unless r.pan.to_f == 0
               list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
               "#{inner}i.region(#{list.join(', ')})"
             }

@@ -19,7 +19,7 @@ module MB
       #     synth(midi) { |v| inst.play(v) * v.env(0.002, 0.2, 0.8, 0.3) }
       class Instrument
         # One region: a Sample with where and how it plays (see #region).
-        Region = Struct.new(:sample, :keys, :vel, :seq, :rand, :root, :keytrack, :veltrack, :tune, :gain, :offset, keyword_init: true)
+        Region = Struct.new(:sample, :keys, :vel, :seq, :rand, :root, :keytrack, :veltrack, :tune, :gain, :offset, :pan, keyword_init: true)
 
         # The regions, in match order.
         attr_reader :regions
@@ -31,9 +31,18 @@ module MB
         # (Wavetable mips: :default, :octave, ...; sfz instruments :octave).
         attr_reader :mips
 
-        # [attack, decay, sustain, release] for #play to multiply in (from
-        # SFZ ampeg_*), or nil.
+        # The envelope #play multiplies in: [attack, decay, sustain,
+        # release] (from SFZ ampeg_*), a Hash of Notes#env options (SF2
+        # volume envelopes: segments:, release_at:, sensitivity:), or nil.
         attr_reader :envelope
+
+        # A lowpass #play applies after the envelope ({ cutoff: Hz,
+        # quality: }; SF2 initialFilterFc/Q), or nil.
+        attr_reader :filter
+
+        # The Instruments layered (each note plays a region of every layer;
+        # see .layered), or nil.
+        attr_reader :layers
 
         attr_reader :name, :lineage
 
@@ -41,12 +50,20 @@ module MB
         # block (if any) with the instrument to add regions (#region) before
         # it is frozen.  +split+: a key (Note or number) for a split
         # keyboard, or nil; +mips+: the voices' default table level spacing.
-        def initialize(regions = [], split: nil, mips: :default, envelope: nil, name: nil, lineage: nil)
+        def initialize(regions = [], split: nil, mips: :default, envelope: nil, filter: nil, name: nil, lineage: nil, layers: nil)
+          @layers = layers&.dup&.freeze
+          raise ArgumentError, 'Layers are Sampler::Instruments' if @layers && !@layers.all?(Instrument)
+          regions = @layers.flat_map(&:regions) if @layers
           @regions = regions.dup
           @split = split.nil? ? nil : Sample.note_number(split).round
           raise ArgumentError, "The split key must be 0 to 127 (got #{@split})" if @split && !@split.between?(0, 127)
           @mips = mips
-          @envelope = envelope&.map(&:to_f)&.freeze
+          @envelope = case envelope
+                      when nil then nil
+                      when Hash then envelope.dup.freeze
+                      else envelope.map(&:to_f).freeze
+                      end
+          @filter = filter.nil? ? nil : { cutoff: Float(filter[:cutoff]), quality: Float(filter[:quality] || 0.7071067811865476) }.freeze
           @name = name
           @lineage = lineage
           @building = true
@@ -70,7 +87,10 @@ module MB
         #   (velocity)², SFZ's amp_veltrack 100)
         # - tune: semitones added; gain: linear gain; offset: a start
         #   position into the sample (see Sample#position)
-        def region(sample, keys: 0..127, vel: 0..127, seq: nil, rand: nil, root: nil, keytrack: 1, veltrack: 0, tune: 0, gain: 1.0, offset: 0)
+        # - pan: -1 (left) to 1 (right), equal power with 0 dB in the
+        #   middle for mono samples, a balance for stereo ones; any pan
+        #   makes the instrument stereo
+        def region(sample, keys: 0..127, vel: 0..127, seq: nil, rand: nil, root: nil, keytrack: 1, veltrack: 0, tune: 0, gain: 1.0, offset: 0, pan: 0)
           raise FrozenError, 'Add regions while building the instrument (in its block)' unless @building
           sample = Sample[sample]
           keys = keys..keys unless keys.is_a?(Range)
@@ -90,7 +110,7 @@ module MB
           @regions << Region.new(
             sample: sample, keys: [lo.clamp(0, 127), hi.clamp(0, 127)], vel: [vlo.clamp(0, 127), vhi.clamp(0, 127)], seq: seq, rand: rand,
             root: root.nil? ? nil : Sample.note_number(root), keytrack: keytrack.to_f, veltrack: veltrack.to_f,
-            tune: Interval.semitones(tune).to_f, gain: gain.to_f, offset: sample.position(offset).to_f
+            tune: Interval.semitones(tune).to_f, gain: gain.to_f, offset: sample.position(offset).to_f, pan: Float(pan).clamp(-1.0, 1.0)
           ).freeze
           self
         end
@@ -100,9 +120,10 @@ module MB
           @regions.map(&:sample).uniq
         end
 
-        # The most channels of any sample.
+        # The most channels of any sample (2 if any region is panned).
         def channel_count
-          samples.map(&:channel_count).max
+          n = samples.map(&:channel_count).max
+          n < 2 && @regions.any? { |r| r.pan.to_f != 0 } ? 2 : n
         end
 
         # True if every sample is a one-shot (voices stay busy until the
@@ -122,6 +143,8 @@ module MB
         # (Sample#read_as: the lofi presets read drop-sample with no levels),
         # else #mips and :optimal.
         def kernel_tables(c, sample_rate, mips: nil, interpolation: nil)
+          raise ArgumentError, 'A layered instrument plays through its layers (see #play)' if @layers
+          stereo = channel_count == 2
           tables = []
           index = {}
           spec_of = ->(s, m, interp) {
@@ -135,7 +158,7 @@ module MB
             code = Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
             m = mips.nil? ? (s.mips.nil? ? @mips : s.mips) : mips
             row(s, spec_of.(s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
-                veltrack: r.veltrack, tune: r.tune, gain: r.gain, offset: r.offset, interp: code)
+                veltrack: r.veltrack, tune: r.tune, gain: r.gain * (stereo ? Instrument.pan_gain(r.pan.to_f, c, s.channel_count) : 1.0), offset: r.offset, interp: code)
           }
           [tables, Numo::DFloat.cast(rows)]
         end
@@ -158,8 +181,10 @@ module MB
         # Notes' frequency), +gate+, +shift+ (semitones read at each
         # note-on, instead of the Notes' #pitch_mark).
         #
-        # With an #envelope (SFZ), the voice is multiplied by
-        # `source.env(*envelope)`.
+        # With an #envelope (SFZ, SF2), the voice is multiplied by
+        # `source.env(*envelope)` (or `source.env(**envelope)`), then
+        # lowpassed by the #filter, if any.  A layered instrument (.layered)
+        # sums its layers' voices (the same seed for each).
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
                  interpolation: nil, mips: nil, seed: nil)
           if source && !source.is_a?(MB::Sound::Notes)
@@ -182,6 +207,17 @@ module MB
           freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+          if @layers
+            n = channel_count
+            outs = @layers.map { |l|
+              o = l.play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
+                                 interpolation: interpolation, mips: mips, seed: seed)
+              o.is_a?(GraphNode::Channels) ? o.to_a : [o]
+            }
+            sums = Array.new(n) { |c| outs.map { |o| o[c % o.length] }.reduce(:+) }
+            return n == 1 ? sums[0] : MB::Sound.channels(*sums)
+          end
+
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
@@ -190,7 +226,10 @@ module MB
           }
           nodes.each { |n| source.register(n) } if source && one_shot?
           out = nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
-          out = out * source.env(*@envelope) if source && @envelope
+          if source && @envelope
+            out = out * (@envelope.is_a?(Hash) ? source.env(**@envelope) : source.env(*@envelope))
+          end
+          out = out.filter(:lowpass, cutoff: @filter[:cutoff], quality: @filter[:quality]) if @filter
           out
         end
 
@@ -212,6 +251,8 @@ module MB
         # A node playing the instrument's first region once from its start
         # at its own pitch (see Sample#node).
         def node(**options)
+          return @layers[0].node(**options) if @layers
+
           GraphNode::SamplerVoice.new(self, channel: 0, once: true, seed: 0, **options).then { |n|
             next n if channel_count == 1
             MB::Sound.channels(n, *Array.new(channel_count - 1) { |c| GraphNode::SamplerVoice.new(self, channel: c + 1, once: true, seed: 0, **options) })
@@ -221,11 +262,36 @@ module MB
         # This instrument with lineage +lineage+ (how it prints; see
         # GraphNode::Recipe::RubyWriter).
         def with_lineage(lineage)
-          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, name: @name, lineage: lineage)
+          return Instrument.new(layers: @layers, mips: @mips, name: @name, lineage: lineage) if @layers
+          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, filter: @filter, name: @name, lineage: lineage)
+        end
+
+        # An instrument playing +instruments+ together: each note plays the
+        # matching region of every layer (SF2 zones that overlap; a layer's
+        # own envelope and filter apply to its voice).  Each layer costs a
+        # sampler voice per note.
+        def self.layered(*instruments, name: nil, mips: :default, lineage: nil)
+          instruments = instruments.flatten
+          return instruments[0].with_lineage(lineage) if instruments.length == 1 && lineage
+          new(layers: instruments, mips: mips, name: name, lineage: lineage)
+        end
+
+        # The gain of channel +c+ (of 2) for a region panned to +pan+ (-1..1)
+        # playing a sample of +sample_channels+: equal power with 0 dB in the
+        # middle for mono samples (+3 dB at the side it's panned to), a
+        # balance (the far channel turned down) for stereo samples.
+        def self.pan_gain(pan, c, sample_channels)
+          return 1.0 if pan == 0
+          if sample_channels == 1
+            angle = (pan + 1) * Math::PI / 4
+            Math.sqrt(2) * (c == 0 ? Math.cos(angle) : Math.sin(angle))
+          else
+            c == 0 ? 1.0 - [pan, 0.0].max : 1.0 + [pan, 0.0].min
+          end
         end
 
         def to_s
-          "#{@name || 'Instrument'} (#{@regions.length} region#{'s' if @regions.length != 1}#{", split at #{Sample.note_name(@split)}" if @split})"
+          "#{@name || 'Instrument'} (#{@regions.length} region#{'s' if @regions.length != 1}#{", #{@layers.length} layers" if @layers}#{", split at #{Sample.note_name(@split)}" if @split})"
         end
 
         def inspect
