@@ -239,6 +239,7 @@ module MB
             @warned = {}
             @skipped = {}
             @instrument_cache = {}
+            @preset_headers = nil
             @mutex = Mutex.new
             File.open(@file, 'rb') { |f| read_riff(f) }
           end
@@ -600,11 +601,6 @@ module MB
             za = a[:zone]
             zb = b[:zone]
             za.keys[0] <= zb.keys[1] && zb.keys[0] <= za.keys[1] && za.vel[0] <= zb.vel[1] && zb.vel[0] <= za.vel[1]
-          end
-
-          def inside?(q, key, vel)
-            z = q[:zone]
-            key.between?(*z.keys) && vel.between?(*z.vel)
           end
 
           def add_region(inst, part, attenuation)

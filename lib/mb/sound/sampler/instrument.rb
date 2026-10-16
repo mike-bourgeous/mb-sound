@@ -257,15 +257,15 @@ module MB
           nodes.each { |n| source.register(n) } if source && one_shot?
           out = nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
           if source && @envelope
-            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source)) : source.env(*@envelope))
+            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source, shared)) : source.env(*@envelope))
           end
           if @filter
-            f = per_note(@filter, source || { number: number, velocity: 1.constant }) # (ZoneMaps read velocity 127 without Notes)
+            f = per_note(@filter, source || { number: number, velocity: 1.constant }, shared) # (ZoneMaps read velocity 127 without Notes)
             cutoff = f[:cutoff]
             cutoff = shift_by(cutoff.respond_to?(:sample) ? cutoff : cutoff.constant, mods, :cutoff).aclip(5, 20000) if mods && mods[:cutoff]
             out = out.filter(:lowpass, cutoff: cutoff, quality: f[:quality])
           end
-          out = out * (10 ** (mods[:volume] * (-1 / 200.0))) if mods && mods[:volume]
+          out = out * (10.constant ** (mods[:volume] * (-1 / 200.0))) if mods && mods[:volume]
           out
         end
 
@@ -347,7 +347,7 @@ module MB
           node = ->(name) {
             spec = raw[:sources].fetch(name)
             shared[[:source, spec]] ||= begin
-              s = per_note(spec, source)
+              s = per_note(spec, source, shared)
               if s[:env]
                 source.env(**{ sensitivity: nil, gm: false }.merge(s[:env]))
               else
@@ -362,16 +362,18 @@ module MB
             key = list.map { |name, amount| [raw[:sources][name], amount] }
             keys[dest] = key
             h[dest] = shared[[:sum, dest, key]] ||= list.map { |name, amount|
-              a = per_note(amount, source)
+              a = per_note(amount, source, shared)
               a == 1 ? node.(name) : node.(name) * a
             }.reduce(:+)
           }
           out.merge(keys: keys)
         end
 
-        # +hz+ (a node) shifted by +mods+[+dest+] cents.
+        # +hz+ (a node) shifted by +mods+[+dest+] cents: hz × 2^(cents /
+        # 1200), with a Constant base so the plan layer fuses it (its
+        # vectorized 2^x; a SemitoneShift was a plan boundary in Ruby).
         def shift_by(hz, mods, dest)
-          GraphNode::SemitoneShift.new(hz, mods[dest] * 0.01)
+          hz * (2.constant ** (mods[dest] * (1 / 1200.0)))
         end
 
         def deep_freeze(v)
@@ -390,12 +392,16 @@ module MB
         # +value+ with every ZoneMap in it (Hashes and Arrays are searched)
         # made a GraphNode::ZoneValue for the notes of +source+ (a Notes, or
         # a Hash of number: and velocity: nodes).
-        def per_note(value, source)
+        def per_note(value, source, shared)
           case value
           when ZoneMap
-            source.is_a?(Hash) ? value.node(number: source[:number], velocity: source[:velocity]) : value.node(source)
-          when Hash then value.transform_values { |v| per_note(v, source) }
-          when Array then value.map { |v| per_note(v, source) }
+            # one index (number and velocity read once per buffer) for every
+            # zone value of the voice, across layers
+            index = shared[:zone_index] ||= source.is_a?(Hash) ? GraphNode::ZoneValue::Index.new(source[:number], source[:velocity]) :
+                                                                   GraphNode::ZoneValue::Index.new(source.number, source.velocity)
+            value.node(index: index)
+          when Hash then value.transform_values { |v| per_note(v, source, shared) }
+          when Array then value.map { |v| per_note(v, source, shared) }
           else value
           end
         end

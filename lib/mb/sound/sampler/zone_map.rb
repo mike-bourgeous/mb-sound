@@ -61,8 +61,10 @@ module MB
         end
 
         # A GraphNode::ZoneValue of this map for the notes of +source+ (a
-        # Notes) or the +number+ and +velocity+ nodes.
-        def node(source = nil, number: nil, velocity: nil)
+        # Notes) or the +number+ and +velocity+ nodes, or reading a shared
+        # ZoneValue::Index.
+        def node(source = nil, number: nil, velocity: nil, index: nil)
+          return GraphNode::ZoneValue.new(self, index: index) if index
           number ||= source.number
           velocity ||= source.velocity
           GraphNode::ZoneValue.new(self, number: number, velocity: velocity)
