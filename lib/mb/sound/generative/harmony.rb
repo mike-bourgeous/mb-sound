@@ -24,6 +24,12 @@ module MB
       #
       # +curve:+ shapes each blend: :linear (default), :step (hold each
       # keyframe until the next), or any MB::Sound::Curve name or Curve.
+      # Between keyframes the shape blends like Weights#blend (each side
+      # normalized, so halfway favors common tones) and the total moves
+      # from one keyframe's total to the next's, so the blend meets each
+      # keyframe as written and equal keyframes hold still (gen-3; G1
+      # dropped to a total of 1 between keyframes, so `key + chords * 1.5`
+      # was mostly chord tones off the keyframes and the full scale on them).
       # +loop:+ (a length) repeats the keyframes, blending from the last one
       # back to the first across the wrap.  Before the first keyframe, the
       # first holds; after the last (without +loop+), the last holds.
@@ -63,6 +69,7 @@ module MB
           # this one holds still
           @moving = @ops.any? { |_, args, _| args.any? { |a| a.is_a?(Harmony) } }
           @normalized = @keys.map { |_, w| w.send(:normalized_pc) }.freeze
+          @sums = @keys.map { |_, w| w.sum }.freeze
           @keyframes = keyframes
           @repeat = repeat
           @options = { curve: curve, loop: loop, repeat: repeat }
@@ -241,7 +248,12 @@ module MB
           t = @curve.call(t) if @curve
           a = @normalized[a_i]
           b = @normalized[b_i]
-          Weights.raw(a.each_with_index.map { |x, i| x + (b[i] - x) * t }).freeze
+          # Shapes blend normalized (halfway favors common tones); the total
+          # moves from one keyframe's to the next's, so the blend meets each
+          # keyframe as it is (two equal keyframes hold still)
+          sa = @sums[a_i]
+          total = sa + (@sums[b_i] - sa) * t
+          Weights.raw(a.each_with_index.map { |x, i| (x + (b[i] - x) * t) * total }).freeze
         end
       end
 
