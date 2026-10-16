@@ -21,7 +21,8 @@ module MB
       # note-on, fading it out linearly over that time when +choke_fade+ is
       # true (like Drums::ChokeGate; for instruments without an envelope,
       # whose envelope would fade it otherwise), so a choked voice falls
-      # idle on the exact sample.
+      # idle on the exact sample.  +choke_time+ (seconds) changes that time
+      # (Instrument#play's +steal_fade+ length).
       #
       # Playback reads the samples' band-limited levels (sample-mode
       # Wavetable levels, +mips+ apart, +interpolation+ :optimal), so
@@ -48,7 +49,7 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
           @channel = Integer(channel)
@@ -68,6 +69,8 @@ module MB
           @shift = shift.nil? ? 0.0 : input(shift)
           @choke = choke.nil? ? nil : input(choke)
           @choke_fade = !!choke_fade
+          @choke_time = choke_time.nil? ? MB::Sound::Envelope::CHOKE_TIME : Float(choke_time)
+          raise ArgumentError, "The choke time is seconds above 0 (got #{choke_time.inspect})" unless @choke_time > 0
           @transpose = Interval.semitones(transpose).to_f
           @declick = Integer(declick)
           raise ArgumentError, "Declick is a number of samples, 0 or more (got #{declick})" if @declick < 0
@@ -101,6 +104,22 @@ module MB
         # synth keeps one-shot voices until their samples end).
         def idle?
           @state[0] == 0 && @state[Sampler::KernelRuby::VOICE] == 0
+        end
+
+        # True if the sounding note can't stop without a new input event (a
+        # note-on, gate-off, or choke): it loops (forward, ping-pong, or a
+        # release loop before its release), with no declick tail or choke
+        # fading.  Synth sub-lanes skip checking for sleep while it holds.
+        def sustaining?
+          k = Sampler::KernelRuby
+          return false if @state[0] == 0 || @state[k::VOICE] != 0 || @state[k::CHOKE_LEFT] > 0
+
+          r = @state[1].to_i
+          return false unless @regions[r, k::LOOP_END] > @regions[r, k::LOOP_START]
+
+          mode = @regions[r, k::LOOP_MODE].to_i
+          modes = Sampler::LOOP_MODES
+          mode == modes[:forward] || mode == modes[:ping_pong] || (mode == modes[:release] && @state[8] == 0)
         end
 
         # The kernel's inputs for +count+ samples, or nil when an input ended.
@@ -168,7 +187,7 @@ module MB
           interp = @interpolation || :optimal
           code = MB::Sound::Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
           sinc = interp == :sinc || @sinc ? MB::Sound::Wavetable::SINC_KERNEL : nil
-          choke = MB::M.max(1, (MB::Sound::Envelope::CHOKE_TIME * @sample_rate).round)
+          choke = MB::M.max(1, (@choke_time * @sample_rate).round)
           @config = [a4, @declick, @instrument.split || -1, code, sinc, @transpose, choke, @choke_fade ? 1 : 0].freeze
         end
 

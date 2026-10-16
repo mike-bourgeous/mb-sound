@@ -77,6 +77,16 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(s.skipped_lanes).to be_empty
   end
 
+  it 'splits more same-shape regions than run_lanes takes into groups of at most 64' do
+    MB::Sound::Plan.lanes = true
+    MB::Sound.seed(0)
+    s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 70, spares: 0, skip_idle: false) { |v| v.hz.saw.filter(:lowpass, cutoff: 1000) * v.amp_env }
+    20.times { expect(s.sample(128)).not_to be_nil }
+    sizes = s.lane_groups.groups.map { |g| g.members.length }
+    expect(sizes.max).to be <= MB::Sound::Plan::LaneGroup::MAX_LANES
+    expect(sizes.sum).to eq(70)
+  end
+
   it "doesn't group lanes with unfused work of their own (idle lanes keep being skipped)" do
     MB::Sound::Plan.lanes = true
     MB::Sound.seed(0)

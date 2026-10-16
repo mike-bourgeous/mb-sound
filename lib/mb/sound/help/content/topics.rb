@@ -186,7 +186,11 @@ module MB
         C4)` plays the last slice chromatically above C4.  Play with
         `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
         synth, `sfz(path)` and `sf2(path, preset)` instruments (`help
-        :soundfonts`), or `sample.node`.
+        :soundfonts`), or `sample.node`.  A synth that runs out of voices
+        steals one: voices without an envelope ring on under the new notes
+        unless played with `steal_fade: true` (`sample.play(v, steal_fade:
+        true)`, `.sampler(brk, voices: 3, steal_fade: true)`), which fades
+        them over 3 ms from the steal (or `steal_fade: 10.ms`).
 
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle
@@ -239,7 +243,8 @@ module MB
         filters, the modulation envelope and LFOs (to pitch, filter, and
         volume), the mod wheel and aftertouch vibrato (`wheel: false`
         leaves it out), and per-zone settings (each note gets its own
-        zone's envelope and filter; overlapping zones play as layers),
+        zone's envelope and filter; overlapping zones play as layers,
+        each sleeping in synth voices while it has no zone for the note),
         and exclusive classes (a drum kit's closed and pedal hats cut its
         open hat over 3 ms in synth voices; `i.region(s, choke: :hat)`
         does the same in your own instruments, `group:`/`off_by:` like

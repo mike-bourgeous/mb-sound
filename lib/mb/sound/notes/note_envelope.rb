@@ -130,6 +130,19 @@ module MB
           end
         end
 
+        # Moves this envelope's stream time and frame count +count+ samples
+        # on without rendering (the same bookkeeping as rendering an idle
+        # buffer), for a Synth sub-lane that sleeps while the envelope is
+        # idle (see GraphNode::SubLane).  Returns self.
+        def advance(count)
+          count = count.round
+          @start_time = @time
+          @idle_at_start = idle?
+          @time = plan_note_stream.advance(@time, count, @sample_rate)
+          @frames += count
+          self
+        end
+
         # True if the stream's last event was before the start of the next
         # buffer (never for looping and live streams).
         def stream_over?

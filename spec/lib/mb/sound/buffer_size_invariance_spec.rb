@@ -587,4 +587,20 @@ RSpec.describe 'Buffer size invariance' do
       MB::Sound.rewind
     end
   end
+
+  describe 'Synth sub-lanes' do
+    it 'wake sleeping instrument layers on the same samples (narrow SF2-style layers)' do
+      d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.05) })
+      smp = MB::Sound::Sample[d].looped(1000...2900)
+      wide = MB::Sound::Sampler::Instrument.new(envelope: [0.002, 0.05, 0.6, 0.03]) { |i| i.region(smp) }
+      narrow = MB::Sound::Sampler::Instrument.new(envelope: [0.001, 0.02, 0.5, 0.02], filter: { cutoff: 2000 }) { |i| i.region(smp[0...2000].looped(500...1900), keys: 70..80, tune: 12) }
+      inst = MB::Sound::Sampler::Instrument.layered(wide, narrow)
+      clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::B4, MB::Sound::E3, nil, MB::Sound::G4, MB::Sound::A4, nil, MB::Sound::C5).n8.loop
+      node = expect_invariant(-> { clip.synth(voices: 3) { |v| inst.play(v) } }, seconds: 1.5)
+      parts = node.sub_lanes.flatten
+      expect(parts.length).to eq(node.lanes.length)
+      expect(parts.sum(&:skipped_samples)).to be > 48000
+      expect(parts.sum(&:wakes)).to be > 0
+    end
+  end
 end

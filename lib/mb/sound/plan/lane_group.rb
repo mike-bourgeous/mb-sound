@@ -25,6 +25,13 @@ module MB
       #
       # The Ruby engine (Plan.engine :ruby) runs each member's mirror.
       class LaneGroup
+        # The most members FastPlan.run_lanes takes (MB_PLAN_MAX_LANES in
+        # fast_plan.c); larger buckets are split into groups of at most this
+        # many (before synth-sublanes-1, a bucket of more regions raised
+        # "Plan lanes must number 1 to 64": e.g. a 5-layer stereo SF2 preset
+        # in an 8-lane synth gave 80 same-shape regions).
+        MAX_LANES = 64
+
         # The member regions, in lane order.
         attr_reader :members
 
@@ -399,7 +406,7 @@ module MB
           buckets.each_value do |regions|
             next if regions.length < 2
 
-            @groups << LaneGroup.new(regions)
+            regions.each_slice(LaneGroup::MAX_LANES) { |part| @groups << LaneGroup.new(part) if part.length > 1 }
           end
 
           # Regions left alone may differ from others only by gains (x vs
@@ -433,7 +440,7 @@ module MB
               regions.group_by { |r| r.program&.signature }.each do |sig, same|
                 next if sig.nil? || same.length < 2
 
-                @groups << LaneGroup.new(same)
+                same.each_slice(LaneGroup::MAX_LANES) { |part| @groups << LaneGroup.new(part) if part.length > 1 }
               end
             end
           end

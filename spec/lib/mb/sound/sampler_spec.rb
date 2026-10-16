@@ -111,6 +111,36 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(solo[6500]).to be_within(1e-3).of(0.5) # (one voice: the closed hat restrikes it)
     end
 
+    it 'fades voices stolen by their synth with steal_fade (off by default)' do
+      m = MB::Sound
+      inst = described_class.new { |i| i.region(ones) }
+      transport = m::Sequence::Transport.new(bpm: 120)
+      # two voices and a spare: the third note (6000) steals the first lane
+      clip = m.events([0, 1/4r, m::C4, 1.0], [1/32r, 1/4r, m::E4, 1.0], [1/16r, 1/4r, m::G4, 1.0], length: 1)
+      run = ->(size, **opts) { take(m.synth(clip.stream(transport: transport), voices: 2, spares: 1) { |v| inst.play(v, **opts) }, 9000, size) }
+      plain = run.(800)
+      expect(plain[7000]).to be_within(1e-5).of(3) # the stolen voice rings on
+      faded = run.(800, steal_fade: true)
+      # (the stolen voice plays 1.0 there: its fade is the difference)
+      ramp = Numo::SFloat.new(144).seq(144, -1) / 144
+      expect(faded[0...6000]).to eq(plain[0...6000])
+      expect(((plain - faded)[6000...6144] - (1 - ramp)).abs.max).to be < 1e-5
+      expect(((plain - faded)[6144..] - 1).abs.max).to be < 1e-5
+      expect(run.(127, steal_fade: true)).to eq(faded)
+      expect(run.(7, steal_fade: true)).to eq(faded)
+      ten = plain - run.(800, steal_fade: 10.ms)
+      expect(ten[6000 + 240]).to be_within(1e-5).of(0.5)
+      expect(ten[6479]).to be_within(1e-5).of(1 - 1 / 480.0)
+      expect(ten[6480]).to be_within(1e-5).of(1)
+      expect { inst.play(m.seq(m::C4).notes, steal_fade: -1) }.to raise_error(ArgumentError, /steal_fade/)
+
+      # an enveloped instrument already fades through its envelope's choke
+      env = described_class.new(envelope: [0.0005, 0.01, 1, 0.006]) { |i| i.region(ones) }
+      a = take(m.synth(clip.stream(transport: transport), voices: 2, spares: 1) { |v| env.play(v) }, 9000)
+      b = take(m.synth(clip.stream(transport: transport), voices: 2, spares: 1) { |v| env.play(v, steal_fade: true) }, 9000)
+      expect((a - b).abs.max).to eq(0)
+    end
+
     it 'plays chop clips with slice and pitch apart' do
       rec = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.05) })]
       brk = rec.slices(4)
