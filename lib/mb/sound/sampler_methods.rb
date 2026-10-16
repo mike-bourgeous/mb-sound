@@ -103,16 +103,17 @@ module MB
       # the first.  Voices read tables at level spacing +mips+ (:octave by
       # default); +attenuation+ scales the font's initialAttenuation (0.4,
       # FluidSynth's and the EMU hardware's factor, by default; 1.0 for the
-      # specification's own centibels).
+      # specification's own centibels); +wheel+ false leaves out the default
+      # vibrato from the mod wheel and aftertouch (one LFO per voice).
       #
       #     sf2('GM.sf2').presets
       #     piano = sf2('GM.sf2', preset: 0)
       #     synth(midi) { |v| piano.play(v) }
       #     bg :kit, beat.sampler(sf2('GM.sf2', preset: [128, 0]), voices: 8)
-      def sf2(path, selector = nil, preset: selector, name: nil, mips: :octave, attenuation: Sampler::SF2::EMU_ATTENUATION)
+      def sf2(path, selector = nil, preset: selector, name: nil, mips: :octave, attenuation: Sampler::SF2::EMU_ATTENUATION, wheel: true)
         font = Sampler::SF2.open(path)
-        return font if preset.nil? && name.nil? && mips == :octave && attenuation == Sampler::SF2::EMU_ATTENUATION
-        font.instrument(preset, name: name, mips: mips, attenuation: attenuation, path: path)
+        return font if preset.nil? && name.nil? && mips == :octave && attenuation == Sampler::SF2::EMU_ATTENUATION && wheel
+        font.instrument(preset, name: name, mips: mips, attenuation: attenuation, wheel: wheel, path: path)
       end
       alias soundfont sf2
 

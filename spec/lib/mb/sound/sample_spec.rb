@@ -349,6 +349,18 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       expect((back.data - v.data).abs.max).to be < 1e-5
     end
 
+    it 'saves and reads back samples at other rates at their own rate' do
+      path = tmp_path('44k.flac')
+      d = Numo::SFloat.cast(Array.new(4410) { |i| Math.sin(i * 0.05) * 0.5 })
+      v = MB::Sound::Sample.new(d, sample_rate: 44100, loop: 100...4000)
+      v.save(path)
+      back = MB::Sound::Sample[path]
+      expect(back.sample_rate).to eq(44100)
+      expect(back.length).to eq(4410)
+      expect(back.loop_points).to eq(v.loop_points)
+      expect((back.data - d).abs.max).to be < 1e-5
+    end
+
     it 'saves and reads back the read settings' do
       path = tmp_path('drop.flac')
       s.read_as(:drop, mips: :octave).save(path)

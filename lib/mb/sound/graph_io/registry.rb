@@ -89,7 +89,8 @@ module MB
         CLASS_METHODS = {
           'MB::Sound::Wavetable' => %i[[]],
           'MB::Sound::Sample' => %i[[]],
-          'MB::Sound::Sampler::Instrument' => %i[new],
+          'MB::Sound::Sampler::Instrument' => %i[new layered],
+          'MB::Sound::Sampler::ZoneMap' => %i[new],
           'MB::Sound::Wavetable::KeyMap' => %i[zones new],
           'MB::Sound::Sequence::Duration' => %i[new],
           # Tweening curves (Curve#to_ruby: `Curve[:back, overshoot: 0.3]`)

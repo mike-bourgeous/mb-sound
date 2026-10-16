@@ -44,13 +44,23 @@ module MB
         # see .layered), or nil.
         attr_reader :layers
 
+        # Per-voice modulation for SoundFont-style instruments, or nil: a
+        # Hash of +sources:+ ({ name => { env: Notes#env options } (0..1) or
+        # { lfo: Hz, delay: s, depth: d, wheel: w, pressure: p } (a key-synced
+        # triangle, -d..d, plus mod wheel × w and aftertouch × p) }), and
+        # destinations +pitch:+ and +cutoff:+ ([[source name, cents per unit
+        # of the source], ...]) and +volume:+ ([[source name, centibels of
+        # attenuation per unit]]).  Any value may be a ZoneMap.  Cutoff
+        # modulation needs a #filter.
+        attr_reader :modulation
+
         attr_reader :name, :lineage
 
         # Creates an instrument from +regions+ (Regions), then calls the
         # block (if any) with the instrument to add regions (#region) before
         # it is frozen.  +split+: a key (Note or number) for a split
         # keyboard, or nil; +mips+: the voices' default table level spacing.
-        def initialize(regions = [], split: nil, mips: :default, envelope: nil, filter: nil, name: nil, lineage: nil, layers: nil)
+        def initialize(regions = [], split: nil, mips: :default, envelope: nil, filter: nil, modulation: nil, name: nil, lineage: nil, layers: nil)
           @layers = layers&.dup&.freeze
           raise ArgumentError, 'Layers are Sampler::Instruments' if @layers && !@layers.all?(Instrument)
           regions = @layers.flat_map(&:regions) if @layers
@@ -64,6 +74,13 @@ module MB
                       else envelope.map(&:to_f).freeze
                       end
           @filter = filter.nil? ? nil : { cutoff: setting(filter[:cutoff]), quality: setting(filter[:quality] || 0.7071067811865476) }.freeze
+          @modulation = modulation.nil? ? nil : deep_freeze(modulation)
+          if @modulation
+            unknown = @modulation.keys - %i[sources pitch cutoff volume]
+            raise ArgumentError, "Unknown modulation keys #{unknown.inspect} (sources, pitch, cutoff, volume)" unless unknown.empty?
+            missing = %i[pitch cutoff volume].flat_map { |d| Array(@modulation[d]).map(&:first) } - (@modulation[:sources] || {}).keys
+            raise ArgumentError, "Modulation names unknown sources #{missing.uniq.inspect}" unless missing.empty?
+          end
           @name = name
           @lineage = lineage
           @building = true
@@ -218,6 +235,9 @@ module MB
             return n == 1 ? sums[0] : MB::Sound.channels(*sums)
           end
 
+          mods = @modulation && source ? modulators(source) : nil
+          freq = shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch) if mods && mods[:pitch]
+
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
@@ -231,8 +251,11 @@ module MB
           end
           if @filter
             f = per_note(@filter, source || { number: number, velocity: 1.constant }) # (ZoneMaps read velocity 127 without Notes)
-            out = out.filter(:lowpass, cutoff: f[:cutoff], quality: f[:quality])
+            cutoff = f[:cutoff]
+            cutoff = shift_by(cutoff.respond_to?(:sample) ? cutoff : cutoff.constant, mods, :cutoff).aclip(5, 20000) if mods && mods[:cutoff]
+            out = out.filter(:lowpass, cutoff: cutoff, quality: f[:quality])
           end
+          out = out * (10 ** (mods[:volume] * (-1 / 200.0))) if mods && mods[:volume]
           out
         end
 
@@ -266,7 +289,7 @@ module MB
         # GraphNode::Recipe::RubyWriter).
         def with_lineage(lineage)
           return Instrument.new(layers: @layers, mips: @mips, name: @name, lineage: lineage) if @layers
-          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, filter: @filter, name: @name, lineage: lineage)
+          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, filter: @filter, modulation: @modulation, name: @name, lineage: lineage)
         end
 
         # An instrument playing +instruments+ together: each note plays the
@@ -302,6 +325,41 @@ module MB
         end
 
         private
+
+        # The modulation sums for the notes of +source+: { pitch:, cutoff:,
+        # volume: } nodes (cents, cents, centibels) for the destinations
+        # #modulation names (see #modulation).
+        def modulators(source)
+          m = per_note(@modulation, source)
+          made = {}
+          node = ->(name) {
+            made[name] ||= begin
+              spec = m[:sources].fetch(name)
+              if spec[:env]
+                source.env(**{ sensitivity: nil, gm: false }.merge(spec[:env]))
+              else
+                source.lfo(spec[:lfo], depth: spec[:depth] || 1.0, delay: spec[:delay] || 0, wheel: spec[:wheel], pressure: spec[:pressure])
+              end
+            end
+          }
+          %i[pitch cutoff volume].each_with_object({}) { |dest, h|
+            list = Array(m[dest]).reject { |_, amount| amount == 0 }
+            h[dest] = list.map { |name, amount| node.(name) * amount }.reduce(:+) unless list.empty?
+          }
+        end
+
+        # +hz+ (a node) shifted by +mods+[+dest+] cents.
+        def shift_by(hz, mods, dest)
+          GraphNode::SemitoneShift.new(hz, mods[dest] * 0.01)
+        end
+
+        def deep_freeze(v)
+          case v
+          when Hash then v.transform_values { |x| deep_freeze(x) }.freeze
+          when Array then v.map { |x| deep_freeze(x) }.freeze
+          else v
+          end
+        end
 
         # A number, or a ZoneMap (a per-note value; see #per_note).
         def setting(v)

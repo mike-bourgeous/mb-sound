@@ -132,6 +132,11 @@ module MB
           tags = {}
           channels = MB::Sound.read(path, metadata_out: tags)
           info = saved_tags(tags)
+          if (rate = info.delete(:rate)) && rate != 48000
+            # a Sample saved at its own rate (a SoundFont's 44.1 kHz) reads back at it
+            channels = MB::Sound.read(path, sample_rate: rate)
+            info[:sample_rate] = rate
+          end
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
           meta = info.empty? ? loop_metadata(real.to_s, tags, channels) : {}
@@ -261,6 +266,7 @@ module MB
           out[:interpolation] = t[:interpolation].to_sym if t[:interpolation]
           out[:mips] = saved_mips(t[:mips]) if t[:mips]
           out[:scale] = Float(t[:scale]) if t[:scale]
+          out[:rate] = Float(t[:rate]) if t[:rate]
           out
         end
       end
@@ -1174,6 +1180,7 @@ module MB
           markers: @markers&.map { |p, l| l ? "#{p}:#{l.gsub('%', '%25').gsub(';', '%3B')}" : p.to_s }&.join(';'),
         }
         t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
+        t[:rate] = sample_rate if sample_rate != 48000 # (read back at this rate, so positions stay put)
         t.compact.to_h { |k, v| [:"#{TAG_PREFIX}#{k}", v.is_a?(Numeric) || v.is_a?(String) ? v : v.to_s] }
       end
 

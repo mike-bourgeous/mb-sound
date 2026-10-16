@@ -26,6 +26,14 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
     (z.length - 1) * rate.to_f / (z[-1] - z[0])
   end
 
+  # Every output of +graph+ for 1 s.
+  def play_graph(graph)
+    outs = graph.respond_to?(:outputs) ? graph.outputs.to_a : [graph]
+    bufs = outs.map { [] }
+    60.times { outs.each_with_index { |o, i| bufs[i] << o.sample(800).dup } }
+    bufs.map { |b| Numo::SFloat.hstack(b) }
+  end
+
   def font(**options)
     path = tmp_path(options.delete(:file) || 'spec.sf2')
     SF2Writer.write(path, **options)
@@ -209,10 +217,10 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       )
       f = m.sf2(path)
       inst = nil
-      expect { inst = f.instrument }.to output(/SF2 spec.sf2 000:000 P: not mapped: .*vibrato LFO \(1 zone\).*exclusive class.*modulators.*ROM samples/).to_stderr
+      expect { inst = f.instrument }.to output(/SF2 spec.sf2 000:000 P: not mapped: exclusive class \(choke groups\) \(1 zone\), modulators.*ROM samples/).to_stderr
       expect(inst.regions.length).to eq(1)
       expect(f.skipped).to eq(
-        'vibrato LFO' => 1, 'exclusive class (choke groups)' => 1, 'modulators (only the default velocity-to-attenuation one is mapped)' => 1,
+        'exclusive class (choke groups)' => 1, 'modulators (only the default velocity-to-attenuation one is mapped)' => 1,
         'zones playing ROM samples (not in the file)' => 1
       )
       expect { f.instrument(name: 'again') }.not_to output.to_stderr # once per preset
@@ -284,6 +292,38 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       expect(20 * Math.log10(sus / (0.5 * (95 / 127.0)**2))).to be_within(0.3).of(-20 + (10 - 3.01)) # an SVF at its cutoff: Q
     end
 
+    it 'maps the modulation envelope and LFOs to pitch, cutoff, and volume, and the mod wheel to vibrato' do
+      cents = ->(hz) { (1200 * Math.log2(hz / 8.175798915643707)).round }
+      path = font(
+        samples: [{ name: 'a', data: SF2Writer.sine(441, 4410), pitch: 69, loop: [0, 4400] }],
+        instruments: [{ name: 'I', global: { sample_modes: 1 }, zones: [
+          # an octave up while the modulation envelope holds at 1 (no decay: sustain 100%)
+          { key_range: [0, 59], sample_id: 0, mod_env_to_pitch: 1200, attack_mod_env: -12000, mod_env_to_filter_fc: -2400, initial_filter_fc: 13500 },
+          # 0.5 Hz vibrato of ±100 cents, and 4 Hz tremolo of ±6 dB, from the start
+          { key_range: [60, 127], sample_id: 0, vib_lfo_to_pitch: 100, freq_vib_lfo: cents.(0.5), mod_lfo_to_volume: 60, freq_mod_lfo: cents.(4) },
+        ] }],
+        presets: [{ name: 'P', zones: [{ instrument: 0 }] }]
+      )
+      inst = m.sf2(path, 0)
+      mod = inst.modulation
+      expect(mod[:sources].keys).to contain_exactly(:mod_env, :mod_lfo, :vib_lfo)
+      expect(mod[:sources][:vib_lfo][:wheel]).to eq(50)
+      expect(mod[:pitch].map(&:first)).to eq([:mod_env, :vib_lfo])
+      expect(mod[:cutoff][0][1][50, 100]).to eq(-2400)
+      expect(mod[:volume][0][1][70, 100]).to eq(60)
+      expect(inst.filter[:cutoff]).to eq(described_class::OPEN_CUTOFF) # filtered only by the envelope's -2400 cents
+
+      out = play(inst, m.seq(m::A3.n2, m::A4.n1), 3 * 48000)[0]
+      expect(freq(out[2000...40000])).to be_within(0.5).of(441 * 2**(-1 + 1)) # A3, an octave up: 441 Hz
+      expect(m.sf2(path, 0, wheel: false).modulation[:sources][:vib_lfo][:wheel]).to be_nil
+      # the triangle vibrato swings ±1 semitone at 0.5 Hz, peaking 0.5 s after the note-on
+      expect(freq(out[(72000 - 1200)...(72000 + 1200)])).to be_within(1).of(441 * 2**(1 / 12.0))
+      expect(freq(out[(120000 - 1200)...(120000 + 1200)])).to be_within(1).of(441 * 2**(-1 / 12.0))
+      # the tremolo swings ±6 dB (4 Hz)
+      peaks = (0...16).map { |i| out[(48000 + i * 2900)...(48600 + i * 2900)].abs.max }
+      expect(20 * Math.log10(peaks.max / peaks.min)).to be_within(1.5).of(12)
+    end
+
     it 'plays overlapping zones as layers' do
       path = font(
         samples: [{ name: 'a', data: SF2Writer.sine(441, 4410), loop: [0, 4400] }, { name: 'b', data: SF2Writer.sine(882, 4410), loop: [0, 4400] }],
@@ -337,6 +377,36 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       expect(text).to include('sf2("assets/sine.sf2", preset: 0).play(v)')
       back = io.load(saved, inputs: { midi: m.seq(m::A4.n8).notes })
       expect(back.sample(800).abs.max).to be > 0.05
+    end
+
+    it 'prints instruments with per-zone values, pans, modulation, and layers region by region (bundles save the samples)' do
+      dir = File.dirname(tmp_path('x'))
+      path = font(
+        samples: [{ name: 'a', data: SF2Writer.sine(441, 4410), loop: [0, 4400] }, { name: 'b', data: SF2Writer.sine(882, 4410), loop: [0, 4400] }],
+        instruments: [
+          { name: 'A', global: { sample_modes: 1 }, zones: [
+            { key_range: [0, 59], pan: -300, release_vol_env: -1200, initial_filter_fc: 9000, sample_id: 0 },
+            { key_range: [60, 127], vib_lfo_to_pitch: 30, mod_env_to_filter_fc: 1200, initial_filter_fc: 8000, sample_id: 0 },
+          ] },
+          { name: 'B', zones: [{ sample_modes: 1, key_range: [60, 72], sample_id: 1 }] },
+        ],
+        presets: [{ name: 'P', zones: [{ instrument: 0 }, { instrument: 1 }] }]
+      )
+      inst = m.sf2(path, 0).with_lineage(nil)
+      notes = m.seq(m::C3.n8, m::E4.n8).notes
+      graph = m.synth(notes, voices: 2) { |v| inst.play(v, seed: 1) }
+      code = graph.to_ruby(inputs: { midi: notes })
+      expect(code).to include('Sampler::Instrument.layered(Sampler::Instrument.new(')
+      expect(code).to include('Sampler::ZoneMap.new([[0..59, 0..127, ')
+      expect(code).to include('pan: -0.6')
+      expect(code).to include('modulation: { sources: { mod_env: { env: { segments: ')
+
+      saved = io.save(File.join(dir, 'zones'), graph, name: 'zones', bundle: true, inputs: { midi: notes })
+      expect(Dir[File.join(dir, 'zones.mbg', 'assets', '*.flac')].length).to eq(2)
+      ref = play_graph(m.synth(m.seq(m::C3.n8, m::E4.n8).notes, voices: 2) { |v| inst.play(v, seed: 1) })
+      back = play_graph(io.load(saved, inputs: { midi: m.seq(m::C3.n8, m::E4.n8).notes }))
+      expect(ref.zip(back).map { |a, b| (a - b).abs.max }.max).to be < 1e-4 # (FLAC assets at 24 bits)
+      expect(ref[0].abs.max).to be > 0.05
     end
   end
 end

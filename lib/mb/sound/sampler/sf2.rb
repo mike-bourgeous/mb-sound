@@ -79,26 +79,28 @@ module MB
           initial_filter_fc initial_filter_q pan delay_vol_env attack_vol_env hold_vol_env decay_vol_env sustain_vol_env
           release_vol_env keynum_to_vol_env_hold keynum_to_vol_env_decay instrument key_range vel_range initial_attenuation
           coarse_tune fine_tune sample_id sample_modes scale_tuning overriding_root_key
+          mod_lfo_to_pitch vib_lfo_to_pitch mod_env_to_pitch mod_lfo_to_filter_fc mod_env_to_filter_fc mod_lfo_to_volume
+          delay_mod_lfo freq_mod_lfo delay_vib_lfo freq_vib_lfo delay_mod_env attack_mod_env hold_mod_env decay_mod_env
+          sustain_mod_env release_mod_env keynum_to_mod_env_hold keynum_to_mod_env_decay
         ] + INSTRUMENT_ONLY - %i[keynum velocity exclusive_class]).freeze
 
         # What isn't mapped, by the generators that make it matter (listed
-        # in Font#skipped when one of them isn't 0): the LFOs and the
-        # modulation envelope by their depths (their rates and times alone
-        # change nothing).
+        # in Font#skipped when one of them isn't 0).
         UNMAPPED = {
-          'modulation LFO to pitch' => %i[mod_lfo_to_pitch], 'modulation LFO to filter' => %i[mod_lfo_to_filter_fc],
-          'modulation LFO to volume (tremolo)' => %i[mod_lfo_to_volume], 'vibrato LFO' => %i[vib_lfo_to_pitch],
-          'modulation envelope to pitch' => %i[mod_env_to_pitch], 'modulation envelope to filter' => %i[mod_env_to_filter_fc],
           'exclusive class (choke groups)' => %i[exclusive_class], 'fixed key (keynum)' => %i[keynum], 'fixed velocity' => %i[velocity],
         }.freeze
 
-        # Generators ignored without a mention: effects sends, unused
-        # numbers, and the rates and times of what UNMAPPED lists.
-        QUIET = %i[
-          chorus_effects_send reverb_effects_send unused1 unused2 unused3 unused4 unused5 reserved1 reserved2 reserved3 end_oper
-          delay_mod_lfo freq_mod_lfo delay_vib_lfo freq_vib_lfo delay_mod_env attack_mod_env hold_mod_env decay_mod_env
-          sustain_mod_env release_mod_env keynum_to_mod_env_hold keynum_to_mod_env_decay
-        ].freeze
+        # Generators whose key scaling makes per-key values.
+        KEYNUM = %i[keynum_to_vol_env_hold keynum_to_vol_env_decay keynum_to_mod_env_hold keynum_to_mod_env_decay].freeze
+
+        # Cents of vibrato at full mod wheel and at full aftertouch (the
+        # specification's default modulators; sf2(..., wheel: false) leaves
+        # them out).
+        WHEEL_VIBRATO = 50.0
+
+        # Generators ignored without a mention: effects sends and unused
+        # numbers.
+        QUIET = %i[chorus_effects_send reverb_effects_send unused1 unused2 unused3 unused4 unused5 reserved1 reserved2 reserved3 end_oper].freeze
 
         # The cutoff (Hz) of zones whose filter is open (13500 cents) in a
         # layer where other zones filter.
@@ -189,8 +191,8 @@ module MB
           end
 
           # An Instrument for +preset+ of the font at +path+ (see Font#[]).
-          def load(path, preset: nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION)
-            open(path).instrument(preset, name: name, mips: mips, attenuation: attenuation, path: path)
+          def load(path, preset: nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION, wheel: true)
+            open(path).instrument(preset, name: name, mips: mips, attenuation: attenuation, wheel: wheel, path: path)
           end
 
           # Seconds for +timecents+.
@@ -283,17 +285,21 @@ module MB
           # (the preset's by default), reading tables at level spacing +mips+
           # (:octave by default, as for SFZ), initialAttenuation scaled by
           # +attenuation+ (0.4, FluidSynth's and the EMU hardware's factor,
-          # by default; 1.0 for the specification's own centibels).
-          def instrument(selector = nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION, path: @path)
+          # by default; 1.0 for the specification's own centibels), with
+          # vibrato from the mod wheel and aftertouch unless +wheel+ is false
+          # (the specification's default modulators; a triangle LFO per
+          # voice).
+          def instrument(selector = nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION, wheel: true, path: @path)
             p = preset(selector)
             sel = selector.nil? || selector.is_a?(Preset) ? [p.bank, p.program] : selector
             kw = { preset: sel }
             kw[:name] = name if name
             kw[:mips] = mips unless mips == :octave
             kw[:attenuation] = attenuation unless attenuation == EMU_ATTENUATION
+            kw[:wheel] = false unless wheel
             lineage = [:sf2, :sf2, [path], kw].freeze
-            key = [p.index, name, mips, attenuation]
-            inst = @mutex.synchronize { @instrument_cache[key] } || build(p, name: name || p.name, mips: mips, attenuation: attenuation).tap { |i|
+            key = [p.index, name, mips, attenuation, !!wheel]
+            inst = @mutex.synchronize { @instrument_cache[key] } || build(p, name: name || p.name, mips: mips, attenuation: attenuation, wheel: wheel).tap { |i|
               @mutex.synchronize { @instrument_cache[key] ||= i }
             }
             inst.with_lineage(lineage)
@@ -540,7 +546,7 @@ module MB
 
           # --- Building instruments ---------------------------------------
 
-          def build(p, name:, mips:, attenuation:)
+          def build(p, name:, mips:, attenuation:, wheel:)
             zones = zones(p)
             raise ArgumentError, "#{@path}: preset #{p} has no playable zones" if zones.empty?
 
@@ -554,8 +560,8 @@ module MB
             warn_skipped(p)
 
             insts = layers.each_with_index.map { |parts_in_layer, n|
-              envelope, filter = layer_settings(parts_in_layer)
-              Instrument.new(mips: mips, envelope: envelope, filter: filter, name: layers.length == 1 ? name : "#{name} layer #{n + 1}") { |i|
+              envelope, filter, modulation = layer_settings(parts_in_layer, wheel)
+              Instrument.new(mips: mips, envelope: envelope, filter: filter, modulation: modulation, name: layers.length == 1 ? name : "#{name} layer #{n + 1}") { |i|
                 parts_in_layer.each { |q| add_region(i, q, attenuation) }
               }
             }
@@ -621,7 +627,7 @@ module MB
             mode = :no_loop if le - ls < 2
 
             root = g[:overriding_root_key].between?(0, 127) ? g[:overriding_root_key] : (sh.pitch <= 127 ? sh.pitch : 60)
-            s = base.with(start: start, stop: stop, root: root, loop: mode == :no_loop ? nil : [ls.to_f, le.to_f], loop_mode: mode, lineage: nil)
+            s = base.with(start: start, stop: stop, root: root, loop: mode == :no_loop ? nil : [ls.to_f, le.to_f], loop_mode: mode)
 
             pan = g[:pan]
             pan = (pan + part[:right].generators[:pan]) / 2.0 if part[:right]
@@ -654,11 +660,11 @@ module MB
           # for the zones of a layer: values that differ from zone to zone
           # (or from key to key, with keynum-to-envelope scaling) are
           # ZoneMaps, read per note by Instrument#play.
-          def layer_settings(parts)
+          def layer_settings(parts, wheel)
             rows = parts.flat_map { |q|
               z = q[:zone]
               g = z.generators
-              if g[:keynum_to_vol_env_hold] != 0 || g[:keynum_to_vol_env_decay] != 0
+              if KEYNUM.any? { |k| g[k] != 0 }
                 (z.keys[0]..z.keys[1]).map { |k| [[k, k], z.vel, zone_params(g, k)] }
               else
                 [[z.keys, z.vel, zone_params(g, 60)]]
@@ -676,11 +682,43 @@ module MB
             segments << [0, param.(:release), 100]
             envelope = { segments: segments, release_at: segments.length - 1, sensitivity: nil }
 
+            sources = {}
+            pitch = []
+            cutoff = []
+            volume = []
+            used = ->(name) { rows.any? { |_, _, v| v[name] != 0 } }
+            if used.(:mod_env_to_pitch) || used.(:mod_env_to_filter)
+              seg = []
+              mdelay = param.(:mod_delay)
+              mhold = param.(:mod_hold)
+              seg << [0, mdelay, 0] unless mdelay == 0
+              seg << [1, param.(:mod_attack), 0]
+              seg << [1, mhold, 0] unless mhold == 0
+              seg << [param.(:mod_sustain), param.(:mod_decay), 0]
+              seg << [0, param.(:mod_release), 0]
+              sources[:mod_env] = { env: { segments: seg, release_at: seg.length - 1 } }
+              pitch << [:mod_env, param.(:mod_env_to_pitch)] if used.(:mod_env_to_pitch)
+              cutoff << [:mod_env, param.(:mod_env_to_filter)] if used.(:mod_env_to_filter)
+            end
+            if used.(:mod_lfo_to_pitch) || used.(:mod_lfo_to_filter) || used.(:mod_lfo_to_volume)
+              sources[:mod_lfo] = { lfo: param.(:mod_lfo_freq), delay: param.(:mod_lfo_delay) }
+              pitch << [:mod_lfo, param.(:mod_lfo_to_pitch)] if used.(:mod_lfo_to_pitch)
+              cutoff << [:mod_lfo, param.(:mod_lfo_to_filter)] if used.(:mod_lfo_to_filter)
+              volume << [:mod_lfo, param.(:mod_lfo_to_volume)] if used.(:mod_lfo_to_volume)
+            end
+            if used.(:vib_lfo_to_pitch) || wheel
+              vib = { lfo: param.(:vib_lfo_freq), delay: param.(:vib_lfo_delay), depth: param.(:vib_lfo_to_pitch) }
+              vib.merge!(wheel: WHEEL_VIBRATO, pressure: WHEEL_VIBRATO) if wheel
+              sources[:vib_lfo] = vib
+              pitch << [:vib_lfo, 1]
+            end
+
             filter = nil
-            if rows.any? { |_, _, v| v[:cutoff] < OPEN_CUTOFF }
+            if !cutoff.empty? || rows.any? { |_, _, v| v[:cutoff] < OPEN_CUTOFF }
               filter = { cutoff: param.(:cutoff), quality: param.(:quality) }
             end
-            [envelope, filter]
+            modulation = sources.empty? ? nil : { sources: sources, pitch: pitch, cutoff: cutoff, volume: volume }.reject { |_, v| v.empty? }
+            [envelope, filter, modulation]
           end
 
           # A zone's volume envelope and filter settings for +key+ (keynum
@@ -691,6 +729,7 @@ module MB
           def zone_params(g, key)
             t = ->(tc, lo, hi, zero: false) { zero && tc <= -12000 ? 0.0 : SF2.seconds(tc.clamp(lo, hi)).round(6) }
             sus_db = g[:sustain_vol_env].clamp(0, 1000) / 10.0
+            mod_sus = 1 - g[:sustain_mod_env].clamp(0, 1000) / 1000.0
             fc = g[:initial_filter_fc].clamp(1500, 13500)
             {
               delay: t.(g[:delay_vol_env], -12000, 5000, zero: true),
@@ -701,6 +740,22 @@ module MB
               sustain: sus_db >= 100 ? 0.0 : (10.0**(-sus_db / 20.0)).round(9),
               release: t.(g[:release_vol_env], -12000, 8000),
               cutoff: fc >= 13500 ? OPEN_CUTOFF : SF2.hz(fc).round(3),
+              mod_delay: t.(g[:delay_mod_env], -12000, 5000, zero: true),
+              mod_attack: t.(g[:attack_mod_env], -12000, 8000),
+              mod_hold: t.(g[:hold_mod_env] + g[:keynum_to_mod_env_hold] * (60 - key), -12000, 5000, zero: true),
+              mod_decay: (t.(g[:decay_mod_env] + g[:keynum_to_mod_env_decay] * (60 - key), -12000, 8000) * (1 - mod_sus)).round(6),
+              mod_sustain: mod_sus.round(6),
+              mod_release: t.(g[:release_mod_env], -12000, 8000),
+              mod_env_to_pitch: g[:mod_env_to_pitch].clamp(-12000, 12000),
+              mod_env_to_filter: g[:mod_env_to_filter_fc].clamp(-12000, 12000),
+              mod_lfo_freq: SF2.hz(g[:freq_mod_lfo].clamp(-16000, 4500)).round(6),
+              mod_lfo_delay: t.(g[:delay_mod_lfo], -12000, 5000, zero: true),
+              mod_lfo_to_pitch: g[:mod_lfo_to_pitch].clamp(-12000, 12000),
+              mod_lfo_to_filter: g[:mod_lfo_to_filter_fc].clamp(-12000, 12000),
+              mod_lfo_to_volume: g[:mod_lfo_to_volume].clamp(-960, 960),
+              vib_lfo_freq: SF2.hz(g[:freq_vib_lfo].clamp(-16000, 4500)).round(6),
+              vib_lfo_delay: t.(g[:delay_vib_lfo], -12000, 5000, zero: true),
+              vib_lfo_to_pitch: g[:vib_lfo_to_pitch].clamp(-12000, 12000),
               quality: (10.0**((g[:initial_filter_q].clamp(0, 960) / 10.0 - 3.01) / 20.0)).round(6),
             }
           end
