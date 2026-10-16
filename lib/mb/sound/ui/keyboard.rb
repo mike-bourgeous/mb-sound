@@ -109,7 +109,6 @@ module MB
           @tracker = HoldTracker.new
           @step = StepEntry.new(self, tempo: tempo)
           @entry = :play
-          @legato_key = nil
           @view = nil
           self.off_mode = off_mode
         end
