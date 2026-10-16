@@ -1180,14 +1180,14 @@ module MB
             "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
           end
 
-          # An Instrument: from slices (keymap) or an SFZ file; others print
-          # as a FIXME for now.
+          # An Instrument: from slices (keymap), an SFZ file, or a SoundFont
+          # preset; others print as their constructor with a block.
           def instrument_text(i, indent)
             if i.lineage
               parent, name, args, kwargs = i.lineage
-              if parent == :sfz
+              if parent == :sfz || parent == :sf2
                 extra = kwargs.map { |k, v| ", #{key_text(k)} #{value(v, indent)}" }.join
-                return "sfz(#{leaf(args[0], indent)}#{extra})"
+                return "#{parent}(#{leaf(args[0], indent)}#{extra})"
               end
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
             end

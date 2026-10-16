@@ -98,12 +98,13 @@ module MB
 
         # Methods that read files (allowed only with a path relative to the
         # document's directory; see Loader#check_file).
-        FILE_METHODS = Set[:file_input, :midi_file, :sfz].freeze
+        FILE_METHODS = Set[:file_input, :midi_file, :sfz, :sf2].freeze
 
         # FILE_METHODS that get the document's file name rather than its
         # resolved path, after the check, so the files they name in turn
-        # follow the same rules (an SFZ's samples).
-        KEEP_NAME = Set[:sfz].freeze
+        # follow the same rules (an SFZ's samples) and print as written (a
+        # SoundFont's name in a bundle).
+        KEEP_NAME = Set[:sfz, :sf2].freeze
 
         # Top-level names besides the recorded MB::Sound methods (scale:
         # Scale values for transforms such as Clip#ghost_chords).

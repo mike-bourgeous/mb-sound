@@ -225,6 +225,21 @@ module GraphSweep
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) * 0.5 + st.play(v, transpose: 3)[0] * 0.25 } +
           brk.chop(0, [1, 3], brk[2].rev, MB::Sound::Rest).loop.sampler(brk) * 0.5 + smp[0...400].node
       }],
+      # SoundFont-style instruments: per-zone envelope and filter values
+      # (ZoneValue), panned regions, layers
+      ['sampler zone values (ZoneValue), pans, layers', ->(c) {
+        d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.05) })
+        smp = MB::Sound::Sample[d].looped(1000...2900)
+        zm = ->(a, b) { MB::Sound::Sampler::ZoneMap.new([[0..62, 0..127, a], [63..127, 0..127, b]]) }
+        env = { segments: [[1, zm.(0.001, 0.01), 0], [zm.(0.5, 0.2), zm.(0.05, 0.1), 6], [0, 0.02, 100]], release_at: 2, sensitivity: nil }
+        a = MB::Sound::Sampler::Instrument.new(envelope: env, filter: { cutoff: zm.(900, 5000), quality: zm.(0.7, 2) }) { |i|
+          i.region(smp, keys: 0..62, pan: -0.5, veltrack: 1)
+          i.region(smp, keys: 63..127, pan: 0.75, tune: 7)
+        }
+        b = MB::Sound::Sampler::Instrument.new(envelope: { segments: [[1, 0.002], [0, 0.03]], release_at: 1, sensitivity: nil }) { |i| i.region(smp[0...1200], tune: 12) }
+        inst = MB::Sound::Sampler::Instrument.layered(a, b)
+        c.clip.synth(voices: 2) { |v, _i| inst.play(v) }.mixdown * 0.5
+      }],
       ['grains (Grains)', ->(c) {
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-i / 2000.0) })
         smp = MB::Sound::Sample[d]

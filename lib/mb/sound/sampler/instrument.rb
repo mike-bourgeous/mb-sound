@@ -63,7 +63,7 @@ module MB
                       when Hash then envelope.dup.freeze
                       else envelope.map(&:to_f).freeze
                       end
-          @filter = filter.nil? ? nil : { cutoff: Float(filter[:cutoff]), quality: Float(filter[:quality] || 0.7071067811865476) }.freeze
+          @filter = filter.nil? ? nil : { cutoff: setting(filter[:cutoff]), quality: setting(filter[:quality] || 0.7071067811865476) }.freeze
           @name = name
           @lineage = lineage
           @building = true
@@ -227,9 +227,12 @@ module MB
           nodes.each { |n| source.register(n) } if source && one_shot?
           out = nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
           if source && @envelope
-            out = out * (@envelope.is_a?(Hash) ? source.env(**@envelope) : source.env(*@envelope))
+            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source)) : source.env(*@envelope))
           end
-          out = out.filter(:lowpass, cutoff: @filter[:cutoff], quality: @filter[:quality]) if @filter
+          if @filter
+            f = per_note(@filter, source || { number: number, velocity: 1.constant }) # (ZoneMaps read velocity 127 without Notes)
+            out = out.filter(:lowpass, cutoff: f[:cutoff], quality: f[:quality])
+          end
           out
         end
 
@@ -299,6 +302,24 @@ module MB
         end
 
         private
+
+        # A number, or a ZoneMap (a per-note value; see #per_note).
+        def setting(v)
+          v.is_a?(ZoneMap) ? v : Float(v)
+        end
+
+        # +value+ with every ZoneMap in it (Hashes and Arrays are searched)
+        # made a GraphNode::ZoneValue for the notes of +source+ (a Notes, or
+        # a Hash of number: and velocity: nodes).
+        def per_note(value, source)
+          case value
+          when ZoneMap
+            source.is_a?(Hash) ? value.node(number: source[:number], velocity: source[:velocity]) : value.node(source)
+          when Hash then value.transform_values { |v| per_note(v, source) }
+          when Array then value.map { |v| per_note(v, source) }
+          else value
+          end
+        end
 
         def midi_source?(source)
           source.is_a?(Sequence::Clip) || source.is_a?(MIDI::Stream) || source.respond_to?(:to_midi_stream) || source.is_a?(String)

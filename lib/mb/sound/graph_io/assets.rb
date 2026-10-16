@@ -23,9 +23,9 @@ module MB
         # The bundle subdirectory for assets.
         DIR = 'assets'
 
-        # File name extensions of Strings taken for file names (sound and
-        # MIDI files).
-        EXTENSIONS = %w[.flac .wav .wave .aif .aiff .ogg .oga .opus .mp3 .m4a .caf .mid .midi .smf].freeze
+        # File name extensions of Strings taken for file names (sound,
+        # MIDI, and SoundFont files).
+        EXTENSIONS = %w[.flac .wav .wave .aif .aiff .ogg .oga .opus .mp3 .m4a .caf .mid .midi .smf .sf2].freeze
 
         # The source file of a table read with Wavetable.from_file and no
         # options (FileGuard notes it on the table), which a bundle copies
