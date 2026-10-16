@@ -139,6 +139,32 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect(@tiles.copy).to include('row 199')
   end
 
+  it 'hides with Ctrl-Z (the console on the normal screen through the pty), and Ctrl-Z brings back the layout and scrollback' do
+    start
+    @term.type("6 * 7\r")
+    expect(@term.wait_for('=> 42')).to eq(true)
+    nav('v')
+    expect(@term.wait_for('an empty slot')).to eq(true)
+    @term.type('i')
+    @term.write("\x1a")
+    d = MB::U.clock_now + 3
+    sleep 0.02 until !@term.vt.alt? || MB::U.clock_now > d
+    expect(@term.vt.alt?).to eq(false)
+    expect(@tiles.hidden?).to eq(true)
+    expect(@tiles.active?).to eq(false)
+    expect(@tiles.host.active?).to eq(true)
+    expect(@term.wait_for('tiles hidden; the session plays on')).to eq(true)
+    @term.type("10 + 1\r") # typed on the plain screen, evaluated by the same Pry
+    expect(@term.wait_for('=> 11')).to eq(true)
+
+    @term.write("\x1a")
+    expect(@term.wait_for('an empty slot')).to eq(true) # the split survived
+    expect(@term.wait_for('=> 42')).to eq(true) # and the REPL's screen
+    expect(@tiles.hidden?).to eq(false)
+    @term.type("1 + 2\r")
+    expect(@term.wait_for('=> 3')).to eq(true)
+  end
+
   it 'follows the terminal size' do
     start(rows: 24, cols: 80)
     @term.resize(30, 110)

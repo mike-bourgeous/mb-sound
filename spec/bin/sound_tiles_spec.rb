@@ -60,6 +60,22 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     type.('zi')
     expect(wait.(' REPL ')).to eq(true)
 
+    # Ctrl-Z hides the tiles (the session plays on); `ui` brings them back
+    type.("bg :hum, 110.hz.triangle.at(-30.db)\r")
+    expect(wait.(/bg :hum/)).to eq(true), text.call
+    w.write("\x1a")
+    d = MB::U.clock_now + 10
+    sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
+    expect(lock.synchronize { vt.alt? }).to eq(false)
+    expect(wait.('tiles hidden; the session plays on')).to eq(true), text.call
+    type.("players.keys\r")
+    expect(wait.('[:hum]')).to eq(true), text.call # still playing
+    type.("ui\r")
+    expect(wait.(' REPL ')).to eq(true), text.call
+    expect(lock.synchronize { vt.alt? }).to eq(true)
+    expect(wait.('from puts')).to eq(true), text.call # the pane's scrollback came back
+    type.("stop :hum, fade: 0\r")
+
     type.("ui off\r")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d

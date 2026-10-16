@@ -212,6 +212,7 @@ module MB
         if name.nil? && opts.empty?
           return @tiles if @tiles&.active?
           return @band if @band&.active?
+          return show_tiles(@tiles.layout) if @tiles&.hidden? # back from Ctrl-Z
         end
 
         layout = layout_named(name || (@tiles&.active? ? @tiles.layout_name : @band&.active? ? @band.layout.name : default_layout))
@@ -241,6 +242,14 @@ module MB
       # Shows the tiled screen with Viewports::Layout +layout+ (or switches
       # the one on screen to it).  Options as for Tiles.new.
       def self.show_tiles(layout, at: nil, **opts)
+        if @tiles&.hidden?
+          # Hidden with Ctrl-Z: the same layout comes back as it was left
+          if opts.empty? && (layout.equal?(@tiles.layout) || layout.name == @tiles.layout_name)
+            @band&.stop
+            return @tiles.start
+          end
+          @tiles.stop
+        end
         if @tiles&.active?
           @tiles.layout(layout) if opts.empty?
           return @tiles if opts.empty?

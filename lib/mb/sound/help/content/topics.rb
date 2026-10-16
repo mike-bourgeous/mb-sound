@@ -575,7 +575,9 @@ module MB
         : runs a line of Ruby (`show :knobs`, `go :drop`), and Ctrl-], i,
         Esc, or Enter go back.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
         `ui.save :mine` do the same from the prompt; `ui.on C1, :zoom` maps
-        a pad; `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
+        a pad.  Ctrl-Z hides the tiles (the set plays on and the console
+        carries on in the normal screen); Ctrl-Z or `ui` brings them back
+        as they were.  `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
         `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
         layouts are data files in the ui folder, reloaded when they
         change.  `bin/ui_check.rb` reports what your terminal supports.

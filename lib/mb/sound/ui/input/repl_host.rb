@@ -48,6 +48,19 @@ module MB
           # Called (from the reader thread) after output was fed to the VT.
           attr_accessor :on_output
 
+          # An IO that also gets everything the program writes, unchanged
+          # (the real terminal while the tiled screen is hidden: the plain
+          # console through the pty).  While set, the VT still keeps the
+          # scrollback but doesn't answer queries (the terminal does).
+          attr_reader :relay
+
+          def relay=(io)
+            @lock.synchronize do
+              @relay = io
+              @vt.take_replies # (stale answers)
+            end
+          end
+
           # +rows+ x +cols+ the pane's size; +mode+ :adopt or :thread;
           # +target+ the binding or object a :thread Pry starts in; +pry+
           # options for a :thread Pry.
@@ -160,9 +173,10 @@ module MB
           end
 
           # A new pane size: the VT, the pty, and Reline (its WINCH handler,
-          # called through the signal, as a terminal would).
-          def resize(rows, cols)
-            return if rows == @rows && cols == @cols
+          # called through the signal, as a terminal would).  +force+
+          # signals even at the same size (so Reline redraws its line).
+          def resize(rows, cols, force: false)
+            return if rows == @rows && cols == @cols && !force
             @rows = rows
             @cols = cols
             @lock.synchronize { @vt.resize(rows, cols) }
@@ -229,11 +243,17 @@ module MB
               while pos < data.bytesize
                 piece = data.byteslice(pos, CHUNK)
                 pos += CHUNK
-                replies = @lock.synchronize {
+                replies, relay = @lock.synchronize {
                   @vt.feed(piece)
-                  @vt.take_replies
+                  r = @vt.take_replies
+                  [@relay ? '' : r, @relay]
                 }
                 master.write(replies) unless replies.empty?
+                begin
+                  relay&.write(piece)
+                rescue IOError, SystemCallError
+                  nil
+                end
                 Thread.pass if pos < data.bytesize
               end
               @reader_cpu += Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - t

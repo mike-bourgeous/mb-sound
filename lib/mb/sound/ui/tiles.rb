@@ -20,6 +20,8 @@ module MB
       #     #          resize, u undo, / search, : palette, i back)
       #     ui.split :cols              # the same operations from Ruby
       #     ui.save :mine               # the current tree as a layout file
+      #     # Ctrl-Z: hide the tiles (the set plays on; the console carries
+      #     #         on in the normal screen); Ctrl-Z or `ui`: back
       #     ui off
       class Tiles
         include Follow
@@ -109,6 +111,7 @@ module MB
         # specs).  Returns self.
         def start(thread: true)
           return self if @active
+          return show_again if @hidden
 
           @term = Term.new(input: @input.dup, output: @output.dup)
           @term.enter(mouse: @mouse, kitty: @kitty)
@@ -137,27 +140,91 @@ module MB
         # Gives the terminal back (streams, modes, screen) and stops the
         # threads.  Safe to call twice and from at_exit.  Returns self.
         def stop
-          return self unless @active
+          return self unless @active || @hidden
 
           @stopping = true
           @active = false
+          @hidden = false
           [@reader, @painter].each { |t| t&.wakeup rescue nil }
-          @reader&.join(0.5)
-          @reader&.kill
+          @reader&.join(0.5) unless Thread.current.equal?(@reader)
+          @reader&.kill unless Thread.current.equal?(@reader)
           @painter&.join(1)
           @painter = @reader = nil
           restore_signals
           detach
+          @host&.relay = nil
           @host&.stop
           @term&.leave
           [@term&.input, @term&.output].each { |io| io&.close rescue nil }
           self
         end
 
+        # True while hidden with Ctrl-Z (#hide): `ui` (or Ctrl-Z again)
+        # shows it again with the same panes, scrollback, and REPL.
+        def hidden? = @hidden == true
+
+        # Leaves the tiled screen for the plain console without stopping
+        # anything (Ctrl-Z): the session keeps playing, and the REPL's pty
+        # is relayed to the terminal's normal screen (Pry and Reline keep
+        # running there, the line being edited included), while the layout,
+        # its edits, and the scrollback wait.  `ui`, `ui :<this layout>`, or
+        # Ctrl-Z again bring the tiles back.  Returns self.
+        def hide
+          return self unless @active
+
+          @lock.synchronize do
+            @active = false
+            @hidden = true
+          end
+          @painter&.wakeup rescue nil
+          @painter&.join(1) unless Thread.current.equal?(@painter)
+          @painter = nil
+          # (Signal traps stay: Reline's WINCH handler, installed for the
+          # line it reads now, wraps ours, and must see the resize below)
+          detach
+          paste = @host.vt.bracketed_paste?
+          @term.write("\e[?2026l\e[?1006l\e[?1002l\e[?1000l\e[0m\e[?25h\e[?1049l#{paste ? '' : "\e[?2004l"}" \
+                      "\r\n\e[2m(ui: tiles hidden; the session plays on.  Ctrl-Z or `ui` brings them back.)\e[0m\r\n")
+          @host.relay = @term.output
+          # Reline redraws its prompt and line on the terminal, at its size
+          rows, cols = @term.size
+          @host.resize(rows, cols, force: true)
+          self
+        end
+
+        # Back from #hide (Ctrl-Z or `ui`).
+        private def show_again
+          @host.relay = nil
+          @term.write("\e[?1049h\e[0m\e[H\e[2J#{@mouse ? "\e[?1000h\e[?1002h\e[?1006h" : ''}")
+          @lock.synchronize do
+            @hidden = false
+            @active = true
+            @stopping = false
+            @rows, @cols = terminal_size
+            @tiler.resize_screen(@cols, @rows - 1)
+            @relayout = true
+            @full = true
+            @repl_full = true
+            @host.vt.invalidate
+          end
+          install_signals unless @signals
+          # The pane's size, and a redraw of Reline's line in it
+          relayout_now
+          r = repl_rect
+          @host.resize(r.h, r.w, force: true) if r
+          @painter = Thread.new { paint_loop } if @reader
+          @painter&.wakeup rescue nil
+          self
+        end
+
+        def relayout_now
+          @lock.synchronize { relayout }
+        end
+
         # Draws the next frame (the painter calls this at its rate).
         # Returns the bytes written (nil if nothing changed).
         def refresh(now = @clock.call)
-          @lock.synchronize { refresh_unlocked(now) }
+          @lock.synchronize { refresh_unlocked(now) unless @hidden }
         end
 
         # Reads and routes pending input without the reader thread (specs).
@@ -546,6 +613,10 @@ module MB
         end
 
         def handle(e)
+          if @hidden
+            relay_event(e)
+            return
+          end
           if e.is_a?(Input::Key) && @router.mode != :line
             case e.chord
             when ['c', [:ctrl]]
@@ -553,7 +624,7 @@ module MB
               @host.interrupt
               return
             when ['z', [:ctrl]]
-              suspend
+              hide
               return
             end
           end
@@ -562,16 +633,18 @@ module MB
           flash("#{e2.class}: #{e2.message}", :bad)
         end
 
-        # Ctrl-Z: gives the terminal back and stops the process group, as a
-        # terminal's Ctrl-Z would; SIGCONT (fg) takes it again.
-        def suspend
-          @continued = false
-          @term.leave
-          Process.kill(:TSTP, 0)
-          deadline = @clock.call + 0.5
-          sleep 0.01 until @continued || @clock.call > deadline
-          @term.enter(mouse: @mouse, kitty: @kitty)
-          @full = true
+        # While hidden, input goes to the REPL's pty as typed (Ctrl-C
+        # interrupts; Ctrl-Z shows the tiles again).
+        def relay_event(e)
+          case e
+          when Input::Key
+            case e.chord
+            when ['c', [:ctrl]] then @host.interrupt
+            when ['z', [:ctrl]] then show_again
+            else @host.key(e)
+            end
+          when Input::Paste then @host.paste(e.text)
+          end
         end
 
         ### Painter
@@ -580,7 +653,7 @@ module MB
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
           tick = 1.0 / @fps
-          until @stopping
+          until @stopping || @hidden
             t = @clock.call
             begin
               refresh(t)
@@ -904,12 +977,6 @@ module MB
             old.call(sig) if old.respond_to?(:call)
           end
           @old_winch = old
-          old_cont = nil
-          old_cont = Signal.trap('CONT') do |sig|
-            tiles.instance_variable_set(:@continued, true)
-            old_cont.call(sig) if old_cont.respond_to?(:call)
-          end
-          @old_cont = old_cont
           @signals = true
         rescue ArgumentError
           nil
@@ -918,7 +985,6 @@ module MB
         def restore_signals
           return unless @signals
           Signal.trap('WINCH', @old_winch || 'DEFAULT')
-          Signal.trap('CONT', @old_cont || 'DEFAULT')
           @signals = false
         rescue ArgumentError
           nil
