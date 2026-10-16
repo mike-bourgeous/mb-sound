@@ -49,8 +49,8 @@ module MB
         DERIVATIONS = [
           :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
           :d, :dotted, :dd, :double_dotted, :t, :triplet,
-          :legato, :staccato, :transpose, :vel,
-          :reverse, :retrograde, :permute, :shuffle, :rotate,
+          :legato, :staccato, :note_length, :transpose, :vel,
+          :reverse, :retrograde, :permute, :shuffle, :rotate, :shift,
         ].freeze
 
         # Wraps the named transform methods of this class so the clips they
@@ -267,10 +267,11 @@ module MB
         # cross +span+ shortened to end there.
         def truncate(span)
           span = Duration.whole_notes(span)
-          events = @events.select { |e| e.start < span }.map { |e|
-            e.end_time > span ? e.with(length: span - e.start) : e
+          map_cycles(length: span) { |events, _cycle|
+            events.select { |e| e.start < span }.map { |e|
+              e.end_time > span ? e.with(length: span - e.start) : e
+            }
           }
-          with_events(events, length: span)
         end
 
         # Splits every event into repeated hits of length +sub+ (an Integer
@@ -312,15 +313,51 @@ module MB
         # shortens each hit, leaving a gap after every hit.
         #
         # Examples:
+        # With +:rate+ (a Duration, a Length, or whole notes), the hits are
+        # +rate+ apart instead, at most +count+ of them, the last one
+        # lasting to the note's end, like MIDI::Stream#ratchet (which
+        # needs a rate, since a live note's length isn't known when it
+        # starts).
+        #
         #     C4.n4.ratchet(3)           # a quarter note triplet
         #     bass.stretch(4).ratchet(4) # half notes, each struck four times
         #     bass.ratchet(2).legato(0.5)  # every note doubled, each hit staccato
-        def ratchet(count, velocity: nil)
-          raise ArgumentError, "Ratchet count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+        #     pad.ratchet(4, rate: 1.n32)  # four 32nd stabs, then the rest of the note
+        def ratchet(count, rate: nil, velocity: nil)
+          Clip.check_ratchet_count(count)
+          if rate
+            rate = Duration.whole_notes(rate)
+            raise ArgumentError, "Ratchet rate must be a positive length (got #{rate.inspect})" unless rate > 0
+            return subdivide(velocity, count) { |e|
+              n = MB::M.clamp((e.length / rate).ceil, 1, count)
+              Array.new(n) { |i| [rate * i, i == n - 1 ? e.length - rate * i : rate] }
+            }
+          end
+
           subdivide(velocity) { |e|
             hit = e.length / count
             Array.new(count) { |i| [hit * i, hit] }
           }
+        end
+
+        # Validates a #ratchet count (a positive Integer), returning it.
+        def self.check_ratchet_count(count)
+          raise ArgumentError, "Ratchet count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+          count
+        end
+
+        # The velocity of hit +index+ of +count+ (#ratchet, #roll,
+        # MIDI::Stream#ratchet): +base+ (the note's) when +velocity+ is nil,
+        # a number, or a Range ramped from the first hit to the last.
+        def self.ratchet_velocity(base, velocity, index, count)
+          if velocity.is_a?(Range)
+            frac = count > 1 ? index.to_f / (count - 1) : 1.0
+            velocity.begin + (velocity.end - velocity.begin) * frac
+          elsif velocity
+            velocity.to_f
+          else
+            base
+          end
         end
 
         # Returns a clip with all times and lengths multiplied by +factor+.
@@ -354,10 +391,30 @@ module MB
         # Slid notes (Seq::Step#slide, `~C4`) keep their overlap.
         #
         # Example:
+        # Given a length (a Duration like 1.n16, or a Length) instead of a
+        # fraction, every note lasts that long (see #note_length), as with
+        # MIDI::Stream#legato, whose fractions only lengthen (a stream
+        # can't end a note before its note-off arrives).
+        #
         #     seq(C4, E4, G4).n8.legato(0.85)   # a little breathing room
+        #     riff.legato(1.n32)                # every note a 32nd
         def legato(fraction)
+          return note_length(fraction) if fraction.is_a?(Duration) || fraction.is_a?(MB::Sound::Length)
           fraction = Clip.check_legato(fraction)
           map_clip { |e| e.slid ? e : e.with(length: e.length * fraction) }
+        end
+
+        # Returns a clip where every note lasts +length+ (a Duration like
+        # 1.n16, a Length like 50.ms read at the current tempo, an Integer
+        # note division, or Rational whole notes), whatever its step, like
+        # MIDI::Stream#note_length (whose alias #len is a Seq's step length
+        # setter here, Seq#len).  Start times don't change; slid notes keep
+        # their overlap.
+        #
+        #     seq(C4, E4, G4).n4.note_length(1.n16)   # short plucks on quarter notes
+        def note_length(length)
+          length = Duration.whole_notes(length)
+          map_clip { |e| e.slid ? e : e.with(length: length) }
         end
 
         # Short notes: legato(0.5).
@@ -383,16 +440,42 @@ module MB
           order
         end
 
-        # Returns a clip with every event's value shifted by +semitones+.
-        def transpose(semitones)
+        # Returns a clip with every note moved by +step+: scale degrees of
+        # +:scale+ (a Scale, a name like :minor, or an Array of offsets, with
+        # +:root+), an Interval (`7.st`, `-1.oct`: semitones in any scale),
+        # or an Array of them added together, like MIDI::Stream#transpose
+        # (maintainer decision 2, 2026-10-16).  The default scale is
+        # chromatic, so plain numbers are semitones.  Notes between scale
+        # notes keep their distance from the scale note below.
+        #
+        # Pitch-marked hits (sampler chops, see Seq::Step#pitch) keep their
+        # key and move their pitch mark, by semitones only.
+        #
+        #     riff.transpose(12)
+        #     riff.transpose(2, scale: :minor, root: :a)   # up a diatonic third
+        #     riff.transpose(-1.oct)
+        def transpose(step, scale: nil, root: nil)
+          steps = MIDI::Transform::Steps.new(step, scale: scale, root: root)
+          semitones = steps.scale.chromatic? ? Clip.chromatic_semitones(step, steps) : nil
+
           map_clip { |e|
             if e.pitch
               # A pitch-marked note (a sampler chop hit) keeps its key
+              raise ArgumentError, "Pitch-marked hits (sampler chops) move by semitones; #{self} can't move by degrees of #{steps.scale}" unless semitones
               e.with(pitch: e.pitch + Interval.semitones(semitones).to_f)
-            else
+            elsif semitones
               e.with(value: Sequence.transpose_value(e.value, semitones))
+            else
+              e.with(value: steps.apply_value(e.value))
             end
           }
+        end
+
+        # The semitones of a chromatic transpose +step+ (the step itself
+        # for a number or Interval, so results don't change; the sum for an
+        # Array), given its +steps+ (MIDI::Transform::Steps).
+        def self.chromatic_semitones(step, steps)
+          step.is_a?(Array) ? steps.degrees + steps.semitones : step
         end
 
         # Returns a clip that plays this clip backward: each event ends where
@@ -431,6 +514,14 @@ module MB
             })])
           end
 
+          if generated?
+            # A generator's cycles hold different notes: the same seed's
+            # order for each cycle's count (decision 5, 2026-10-16)
+            raise ArgumentError, "A generator clip's cycles vary in length; permute it with seed: instead of an order" if order
+            seed = Integer(seed)
+            return map_cycles { |events, _cycle| Clip.permuted(events, Clip.check_permutation(nil, events.length, seed)) }
+          end
+
           order = Clip.check_permutation(order, @events.length, seed)
           with_events(Clip.permuted(@events, order))
         end
@@ -456,6 +547,8 @@ module MB
         # earlier), wrapping around the clip's length, which stays the same.
         # Events pushed past the end start again from the beginning, so a
         # looping clip plays the same cycle starting at a different point.
+        # Also #shift, the name of MIDI::Stream's version (which only delays,
+        # and has #rotate as its alias).
         #
         #     seq(C4, E4, G4, B4).n4.rotate(1.beat)        # B4, C4, E4, G4
         #     seq(C4, E4, G4, B4).n4.rotate(-1/4r)         # E4, G4, B4, C4
@@ -469,6 +562,7 @@ module MB
 
           map_clip { |e| e.with(start: (e.start + shift) % @length) }
         end
+        alias shift rotate
 
         # Returns a clip with every event's velocity set to +velocity+ (0..1).
         def vel(velocity)
@@ -578,11 +672,7 @@ module MB
         # generator seeded from the clip's seed, the cycle, and the index, so
         # the same cycle always plays the same events.
         def plays?(event, cycle, index)
-          if (cond = event.condition)
-            n, from = cond
-            return false if cycle < from - 1 || (cycle - (from - 1)) % n != 0
-          end
-
+          return false unless Feel.condition_plays?(event.condition, cycle)
           return true if event.probability.nil? || event.probability >= 1
           Random.new((@seed * 1_000_003 + cycle) * 1_000_003 + index).rand < event.probability
         end
@@ -910,6 +1000,26 @@ module MB
           with_events(@events.map(&map), length: length, variations: variations, values: values)
         end
 
+        # True if this clip's events come from a generator (a Variation
+        # whose block is a Generative::Producer), so transforms must work on
+        # each cycle's events rather than the base events.
+        def generated?
+          @variations.any? { |v| v.block.is_a?(Generative::Producer) }
+        end
+
+        # Returns a Clip with +map+ (called with a list of Events and a
+        # cycle number, returning Events) applied to the base events (as
+        # cycle 0) and to every cycle a generator makes, like #map_clip for
+        # transforms that work on whole lists (ratchet, truncate, permute,
+        # ghost chords): every clip transform works per cycle on generator
+        # clips (maintainer decision 5, 2026-10-16).
+        def map_cycles(length: @length, values: @values, &map)
+          variations = @variations.map { |v|
+            v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.cycle_mapped(map)) : v
+          }
+          with_events(map.call(@events, 0), length: length, variations: variations, values: values)
+        end
+
         private
 
         # The glide time for #tween: +time+ as given (a Duration becomes a
@@ -970,24 +1080,18 @@ module MB
         end
 
         # Used by #roll and #ratchet.  The block returns [offset, length]
-        # pairs for the hits of each event.
-        def subdivide(velocity)
-          map_events = @events.flat_map { |e|
-            hits = yield e
-            hits.map.with_index { |(offset, length), idx|
-              v = e.velocity
-              if velocity.is_a?(Range)
-                frac = hits.length > 1 ? idx.to_f / (hits.length - 1) : 1.0
-                v = velocity.begin + (velocity.end - velocity.begin) * frac
-              elsif velocity
-                v = velocity.to_f
-              end
-
-              e.with(start: e.start + offset, length: length, velocity: v)
+        # pairs for the hits of each event.  A +velocity+ Range ramps over
+        # +count+ hits (each event's hit count by default).
+        def subdivide(velocity, count = nil, &hits_of)
+          map_cycles { |events, _cycle|
+            events.flat_map { |e|
+              hits = hits_of.call(e)
+              hits.map.with_index { |(offset, length), idx|
+                v = Clip.ratchet_velocity(e.velocity, velocity, idx, count || hits.length)
+                e.with(start: e.start + offset, length: length, velocity: v)
+              }
             }
           }
-
-          with_events(map_events)
         end
 
         track_derivations(*DERIVATIONS)

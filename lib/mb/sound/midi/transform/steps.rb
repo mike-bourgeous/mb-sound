@@ -44,6 +44,22 @@ module MB
             @semitones == 0 ? n : n + @semitones
           end
 
+          # Returns a clip event value moved by this step (see
+          # Sequence::Clip#transpose): a note number as #apply moves it, or a
+          # Note or Pitch moved to the note #apply gives for its number
+          # (keeping its type, so Notes stay Notes).  Other values (drum
+          # names) raise an error unless the step is zero.
+          def apply_value(value)
+            return value if zero?
+            return apply(value) if value.is_a?(Numeric)
+
+            unless value.respond_to?(:number) && value.respond_to?(:transpose)
+              raise ArgumentError, "Only notes move by pitch steps (got #{value.inspect})"
+            end
+            n = value.number
+            value.transpose(Transpose.whole(apply(n) - n))
+          end
+
           # Returns a Steps of +count+ times this step.
           def *(count)
             Steps.new(0, scale: @scale).tap { |s| s.send(:set, @degrees * count, @semitones * count) }

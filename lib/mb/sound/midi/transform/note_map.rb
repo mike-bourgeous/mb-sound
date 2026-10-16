@@ -20,7 +20,9 @@ module MB
           def initialize(parent, length: nil, **options)
             super(parent, **options)
             @length = length
-            @chains = {} # [channel, played note] => Array of chains, each an Array of [note, channel, id, delay]
+            @chains = {} # [channel, played note] => Array of chains, each an Array of [note, channel, id, delay, played time, planned]
+            # Subclasses that move note-offs recompute length hints
+            @moves_offs = method(:note_off_time).owner != NoteMap
           end
 
           private
@@ -50,11 +52,15 @@ module MB
           def note_on(e)
             chain = map_on(e).map { |out, delay|
               out = out.at(e.time + delay)
+              planned = !@length && planned_length(out)
+              out = out.with_length_hint(output_hint(out, e, delay, planned))
               id = schedule_on(out)
               if @length
                 schedule_off(Event.note_off(out.note, channel: out.channel, time: out.time + length_seconds), id)
+              elsif planned
+                schedule_off(Event.note_off(out.note, channel: out.channel, time: out.time + planned), id)
               end
-              [out.note, out.channel, id, delay]
+              [out.note, out.channel, id, delay, e.time, planned]
             }
             (@chains[[e.channel, e.note]] ||= []) << chain
           end
@@ -66,9 +72,43 @@ module MB
             @chains.delete(key) if list && list.empty?
             return unless chain && !@length
 
-            chain.each do |note, channel, id, delay|
-              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: e.time + delay), id)
+            chain.each do |note, channel, id, delay, on_time, planned|
+              # A planned note-off went out at note-on; an earlier played
+              # note-off still ends the note (the ledger drops it after)
+              time = planned ? e.time + delay : note_off_time(e.time, delay, on_time)
+              schedule_off(Event.note_off(note, e.velocity, channel: channel, time: time), id)
             end
+          end
+
+          # The length (Rational seconds) of an output note whose note-off
+          # is scheduled at its note-on (from its length hint), or nil to end
+          # it from the played note-off.  Override (Stream#legato below 1).
+          def planned_length(_out)
+            nil
+          end
+
+          # The Event#length_hint of an output note-on +out+ for played
+          # note-on +e+ with +delay+: the fixed length, the +planned+ length,
+          # the hint recomputed through #note_off_time for subclasses that
+          # move note-offs, or the hint +out+ carries.
+          def output_hint(out, e, delay, planned)
+            return (@length.is_a?(Sequence::Duration) ? @length : length_seconds) if @length
+            return planned if planned
+
+            hint = out.length_hint
+            return hint unless hint && @moves_offs
+
+            off = e.time + seconds_of(hint)
+            MB::M.max(note_off_time(off, delay, e.time) - out.time, 0r)
+          end
+
+          # The time (Rational seconds) of an output note-off for a played
+          # note-off at +time+, given its output's +delay+ and the played
+          # note-on's +on_time+: +time+ + +delay+ (the played length) by
+          # default.  Never earlier than +time+ in subclasses (streams
+          # can't look ahead).
+          def note_off_time(time, delay, _on_time)
+            time + delay
           end
 
           def poly_pressure(e)

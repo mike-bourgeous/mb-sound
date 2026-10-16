@@ -76,7 +76,7 @@ G2 (gen-3, 2026-10-16, same container, Ruby without YJIT, 2000 cycles each from 
 - Evolving rhythms (`beats`, energy, holds, Euclidean mutation, groove velocity curves, fills): the proposal's G2, not yet scheduled (phrase memory went first, maintainer 2026-10-16).
 - G3: knob steering at decision points (`Knob#value_at`, per-generator `lead:`), e.g. motifs' `vary`/`mutate`/`density` from knobs.
 - G4: long form (`markov`, `lsystem`, `flow { generate ... }`, per-occurrence section lengths).
-- `ghost_chords` on a generator clip reads its base events (cycle 0) only.
+- (Fixed in midi-consol-1, 2026-10-16: `ghost_chords`, `permute` without `vary:`, `ratchet`, `roll`, and `truncate` now work per generated cycle through `Clip#map_cycles`; see sequences.md.)
 
 ## Demo and renders
 

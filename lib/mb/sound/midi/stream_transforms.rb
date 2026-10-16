@@ -16,11 +16,20 @@ module MB
         # Methods that Notes and Clip mirror (see MB::Sound::Notes and
         # Sequence::Clip).  Stream-only helpers (#synth, #notes) aren't
         # listed.
+        #
+        # The feel and clip operations (humanize, quantize, swing, chance,
+        # every, legato, ratchet, ghost_chords, transpose, rotate/shift)
+        # share their option names and cores with the Clip methods of the
+        # same names (midi-consol-1, maintainer decision 1, 2026-10-16:
+        # "shared core, two front ends"; see Sequence::Feel): clips know
+        # their future, so they may move notes earlier and wrap in loops,
+        # while streams only delay.
         TRANSFORMS = [
           :channel, :keys, :transpose, :velocity_curve, :bend_range,
           :echo, :arp, :chord, :strum, :humanize, :quantize, :snap,
           :select, :reject, :velocities, :map_notes, :vel, :rechannel, :to_channel,
-          :note_length, :len, :shift, :through,
+          :note_length, :len, :shift, :rotate, :through,
+          :swing, :chance, :maybe, :every, :legato, :ratchet, :ghost_chords,
         ].freeze
 
         # Transforms that Sequence::Clip mirrors, returning Streams of the
@@ -91,9 +100,15 @@ module MB
         # e.g. :min7, :add9, :power; semitones above the note) or pitch
         # steps (scale degrees of +:scale+, semitones by default, or
         # Intervals; +:scale+ and +:root+ go with steps only).  Added notes
-        # end with the played note; +:velocity+ scales theirs.  (The
-        # top-level `chord(:min7, root: :d)` is a chord value instead, for
-        # probability scales: see SequenceMethods#chord.)
+        # end with the played note; +:velocity+ scales theirs.
+        #
+        # The two chords: this transform adds notes relative to each played
+        # note (steps count from the note, 0 = itself), while the top-level
+        # `chord(:min7, root: :d)` (a quality and +root:+, no +scale:+) is a
+        # chord value (Generative::Chord) for probability scales; every
+        # other top-level `chord(...)` call is this transform, unattached
+        # (see SequenceMethods#chord).  Clip#ghost_chords' degrees count
+        # from 1 like Roman numerals, Scale#chord's from 0.
         #
         #     midi.chord(:min7)
         #     midi.chord(2, 4, scale: :major, root: :c)   # diatonic triads from one finger
@@ -118,22 +133,104 @@ module MB
 
         # Random timing and velocity offsets per note, repeatable from
         # +:seed+ (drawn from MB::Sound's random seed by default).  Notes
-        # only move later, by up to +time+ (user decision 7: live input
-        # can't move earlier); +:velocity+ is the largest change as a
-        # fraction (0.1 = up to 10% softer or louder).  For clips,
-        # Sequence::Clip#humanize moves notes both ways.
-        def humanize(time = 0.01, velocity: 0, seed: nil, **options)
+        # only move later, by up to +time+ (4 ms by default, the same as
+        # Sequence::Clip#humanize, which moves notes both ways; maintainer
+        # decision 7, 2026-10-16; 10 ms before); +:velocity+ is the
+        # largest change as a fraction (0.1 = up to 10% softer or louder).
+        # Live notes have no loop cycles, so there's no +:vary+: every note
+        # draws anew.
+        def humanize(time = Sequence::Feel::HUMANIZE_TIME, velocity: 0, seed: nil, **options)
           Stream.new(Transform::Humanize.new(self, time, velocity: velocity, seed: seed, **options))
         end
 
         # Moves notes later to the next step of the timeline grid (+grid+ an
         # Integer note division, Duration, or Rational whole notes), or
         # +:amount+ (0..1) of the way there.  Notes more than +:window+
-        # before the next step are left alone.  This adds up to one step of
-        # latency (honestly: notes can't move earlier live); for clips,
-        # Sequence::Clip#quantize moves notes to the nearest step.
-        def quantize(grid = 16, amount: 1, window: nil, **options)
-          Stream.new(Transform::Quantize.new(self, grid, amount: amount, window: window, **options))
+        # before the next step are left alone.  With +ends: true+ note-offs
+        # move to the next step too (a fully quantized note lasts at least
+        # a step).  This adds up to one step of latency (honestly: notes
+        # can't move earlier live); for clips, Sequence::Clip#quantize
+        # (same options) moves notes to the nearest step.
+        def quantize(grid = Sequence::Feel::GRID, amount: 1, window: nil, ends: false, **options)
+          Stream.new(Transform::Quantize.new(self, grid, amount: amount, window: window, ends: ends, **options))
+        end
+
+        # Swing on the timeline grid: within each pair of +grid+ steps (an
+        # Integer note division like 16, or a Duration), notes on or after
+        # the second step are delayed so it starts at +amount+ of the pair
+        # (0.5 straight, 0.58 a light shuffle, 2/3r a triplet feel), the
+        # same time warp as Sequence::Clip#swing (note-offs warp too, so
+        # lengths follow).  Streams only delay, so amounts start at 0.5.
+        #
+        #     midi.swing(0.6)
+        #     riff.loop.stream.swing(2/3r, 8)
+        def swing(amount = Sequence::Feel::SWING, grid = Sequence::Feel::GRID, **options)
+          Stream.new(Transform::Swing.new(self, amount, grid, **options))
+        end
+
+        # Plays each note with probability +p+ (0..1), decided per note
+        # from +:seed+ (see #humanize for seeds).  Alias #maybe.  Clips
+        # decide per loop cycle (Sequence::Clip#chance).
+        #
+        #     midi.chance(0.7)
+        def chance(p, seed: nil, **options)
+          Stream.new(Transform::Chance.new(self, p, seed: seed, **options))
+        end
+        alias maybe chance
+
+        # Plays notes only every +n+th bar of the session timeline, from
+        # bar +from+ (counting from 1; bars follow the meter map), like
+        # Sequence::Clip#every, which counts loop cycles (Elektron's trig
+        # conditions: `every(4, from: 4)` plays in bars 4, 8, 12, ...).
+        def every(n, from: 1, **options)
+          Stream.new(Transform::Every.new(self, n, from: from, **options))
+        end
+
+        # Every note lasts +fraction+ of its length (see
+        # Sequence::Clip#legato).  Fractions of 1 or more delay note-offs.
+        # Fractions under 1 shorten notes that carry a length hint
+        # (MIDI::Event#length_hint: notes from clips, arp, echo, ratchet,
+        # len), planning their note-offs at the note-on, so no latency is
+        # added; notes without a hint (live keys, files) pass through
+        # unchanged after one MB::Sound.live_error notice (an error in
+        # scripts and specs).  Given a length (a Duration or Length)
+        # instead, every note lasts that long, as #note_length / #len.
+        #
+        #     midi.legato(1.5)
+        #     riff.loop.stream.legato(0.5)   # staccato from the clip's lengths
+        #     midi.legato(1.n16)     # as len(1.n16)
+        def legato(fraction, **options)
+          return note_length(fraction, **options) if fraction.is_a?(Sequence::Duration) || fraction.is_a?(Length)
+          Stream.new(Transform::Legato.new(self, fraction, **options))
+        end
+
+        # Strikes each note up to +count+ times, +:rate+ apart (a Duration
+        # such as 1.n32, a Length, or seconds), while it is held: the last
+        # hit (or the one sounding when the key comes up) ends with the
+        # note.  +:velocity+ as in Sequence::Clip#ratchet (a number, or a
+        # Range ramped over the hits).  Clips split each note's length when
+        # given no rate; streams need one.
+        #
+        #     midi.ratchet(4, rate: 1.n32)
+        #     midi.ratchet(8, rate: 1.n16.t, velocity: 1.0..0.3)
+        def ratchet(count, rate: nil, velocity: nil, **options)
+          Stream.new(Transform::Ratchet.new(self, count, rate: rate, velocity: velocity, **options))
+        end
+
+        # Moves notes to the nearest tones of a silent chord progression
+        # (see Sequence::Clip#ghost_chords for the chords and options), one
+        # chord per +:per+ (a Duration; one bar of the timeline's meter
+        # map by default), counted from the start of the timeline, so a
+        # timeline-aligned loop gets the same chords as with
+        # Clip#ghost_chords.  Ties follow the played contour; +:passing+
+        # isn't available (a note's length isn't known when it starts).
+        # Live input works too: its chords follow the session timeline's
+        # bars (maintainer, 2026-10-16, lifting the earlier live_error).
+        #
+        #     hook.loop.stream.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))
+        #     midi.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))   # keys snap to the bar's chord
+        def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
+          Stream.new(Transform::GhostChords.new(self, chords, per: per, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie, passing: passing, **options))
         end
 
         # Moves notes into a scale: +scale+ a Scale, name, or Array of
@@ -193,9 +290,12 @@ module MB
         alias len note_length
 
         # Every event +delay+ later (seconds, a Length, or a Duration).
+        # Also #rotate, the name of Sequence::Clip's version, which wraps
+        # its events around the loop (Clip#shift is the same).
         def shift(delay, **options)
           Stream.new(Transform::Shift.new(self, delay, **options))
         end
+        alias rotate shift
 
         # Returns [below, at and above]: two streams splitting the notes at
         # +point+ (a Note or note number); channel-wide events go to both.

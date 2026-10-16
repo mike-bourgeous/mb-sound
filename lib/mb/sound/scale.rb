@@ -293,6 +293,12 @@ module MB
       # The note numbers of a chord built on +degree+ from every +step+th
       # scale note (+size+ notes; thirds by default, so a triad):
       # `Scale[:major].chord(1)` is D minor in C major.
+      #
+      # Degree bases (midi-consol-1, 2026-10-16): Scale methods count
+      # degrees from 0 (the root is degree 0, like note offsets);
+      # Clip#ghost_chords counts chords from 1 like Roman numerals (1 = i,
+      # so ghost chord 2 is this method's degree 1); transpose, echo, arp,
+      # and chord transform steps are relative moves (0 = the same note).
       def chord(degree, size = 3, step: 2)
         Array.new(size) { |i| note(degree + i * step) }
       end

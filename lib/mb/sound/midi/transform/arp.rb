@@ -274,7 +274,7 @@ module MB
               next if note.is_a?(Numeric) && !note.between?(0, 127)
 
               v = step_velocity(velocity)
-              id = schedule_on(Event.note_on(note, v, channel: channel, time: step_time))
+              id = schedule_on(Event.note_on(note, v, channel: channel, time: step_time, length_hint: off_time - step_time))
               schedule_off(Event.note_off(note, channel: channel, time: off_time), id)
             end
 

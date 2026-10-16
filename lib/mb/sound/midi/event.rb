@@ -48,6 +48,14 @@ module MB
       #   later (Drums::Flams).  MIDI 1.0 has no per-note flam: as bytes a
       #   flam-marked note-on is the plain note-on (outside gear hears one
       #   hit), so flams live in clips and Streams, not in .mid files.
+      # - +length_hint+: a note-on's expected length, when its source knows
+      #   it at the note-on (midi-consol-1, 2026-10-16): a
+      #   Sequence::Duration (whole notes, so it follows tempo changes) or
+      #   Rational seconds, else nil.  Set by clip sources, the arpeggiator,
+      #   gated echoes, ratchet, note_length, and legato; other note
+      #   transforms carry it (with_note, at) or recompute it when they
+      #   move note-offs.  Stream#legato below 1 shortens notes by it
+      #   without added latency.  In-process only: never in MIDI bytes.
       #
       # Voice allocation events (made by Allocator for its lanes; they have
       # no MIDI bytes):
@@ -65,7 +73,7 @@ module MB
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato, :pitch, :flam)
+      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato, :pitch, :flam, :length_hint)
         # The pitch bend range in semitones when nothing else sets it.
         DEFAULT_BEND_RANGE = 2
 
@@ -94,13 +102,13 @@ module MB
         # (0xf1 to 0xf6; sysex and realtime messages are handled separately).
         SYSTEM_DATA_BYTES = { 0xf1 => 1, 0xf2 => 2, 0xf3 => 1, 0xf6 => 0 }.freeze
 
-        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false, pitch: nil, flam: nil)
+        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false, pitch: nil, flam: nil, length_hint: nil)
           bytes = bytes.pack('C*') if bytes.is_a?(Array)
           bytes = bytes.b.freeze if bytes && !(bytes.frozen? && bytes.encoding == Encoding::BINARY)
           super(
             type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes,
             time: time.to_r, bend_range: bend_range, legato: !!legato, pitch: pitch&.to_f,
-            flam: flam == true ? true : flam&.to_f
+            flam: flam == true ? true : flam&.to_f, length_hint: length_hint
           )
         end
 
@@ -241,7 +249,7 @@ module MB
         # A note-on event.  +velocity+ is 0..1 and is kept as given (not
         # rounded to a MIDI value); the raw velocity is at least 1, since 0
         # would mean note-off.  See the class description for +:legato+.
-        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false, pitch: nil, flam: nil)
+        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false, pitch: nil, flam: nil, length_hint: nil)
           raw = MB::M.max(raw7(velocity), 1)
           bytes = note_bytes(:note_on, channel, note, raw)
           if bytes && pitch
@@ -250,7 +258,7 @@ module MB
           end
           new(
             type: :note_on, channel: channel, note: note, value: velocity.to_f, velocity: velocity.to_f,
-            raw: raw, bytes: bytes, time: time, legato: legato, pitch: pitch, flam: flam
+            raw: raw, bytes: bytes, time: time, legato: legato, pitch: pitch, flam: flam, length_hint: length_hint
           )
         end
 
@@ -387,6 +395,12 @@ module MB
           with(time: time)
         end
 
+        # Returns a copy of this note-on with +hint+ as its #length_hint (a
+        # Sequence::Duration, Rational seconds, or nil).
+        def with_length_hint(hint)
+          hint.equal?(length_hint) ? self : with(length_hint: hint)
+        end
+
         # Returns a note event with its note number changed to +note+,
         # rebuilding the bytes (nil if +note+ can't be sent as MIDI).
         def with_note(note)
@@ -410,9 +424,9 @@ module MB
         #
         #     e.transpose(12)                          # an octave up
         #     e.transpose(2, scale: Scale[:minor, :a])  # two steps up A minor
-        def transpose(step, scale: nil)
+        def transpose(step, scale: nil, root: nil)
           return self unless note? || type == :poly_pressure || (type == :glide && note)
-          with_note(Transform::Transpose.whole(Transform::Steps.new(step, scale: scale).apply(note)))
+          with_note(Transform::Transpose.whole(Transform::Steps.new(step, scale: scale, root: root).apply(note)))
         end
 
         # Returns this event on 0-based +channel+ (0..15), rebuilding its
