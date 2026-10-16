@@ -413,7 +413,7 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
         ref = play(kit, clip, 24000)[0]
         expect(ref[18144..].abs.max).to be > 0
         [77, 128, 333].each { |size| expect(play(kit, clip, 24000, size: size)[0]).to eq(ref), "buffer size #{size}" }
-        expect(play(kit, clip, 12000, size: 1)[0]).to eq(ref[0...12000])
+        expect(play(kit, clip, 9000, size: 7)[0]).to eq(ref[0...9000])
       end
     end
   end

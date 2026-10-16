@@ -239,9 +239,12 @@ module MB
         filters, the modulation envelope and LFOs (to pitch, filter, and
         volume), the mod wheel and aftertouch vibrato (`wheel: false`
         leaves it out), and per-zone settings (each note gets its own
-        zone's envelope and filter; overlapping zones play as layers).
-        What doesn't (exclusive classes, extra modulators, ROM samples) is
-        listed once per preset when it loads.  Levels follow FluidSynth's
+        zone's envelope and filter; overlapping zones play as layers),
+        and exclusive classes (a drum kit's closed and pedal hats cut its
+        open hat over 3 ms in synth voices; `i.region(s, choke: :hat)`
+        does the same in your own instruments, `group:`/`off_by:` like
+        SFZ).  What doesn't (extra modulators, ROM samples) is listed once
+        per preset when it loads.  Levels follow FluidSynth's
         attenuation scale (`attenuation: 1.0` for the specification's).
         `mips: :default` reads smoother tables (more memory) than the
         `:octave` default.
