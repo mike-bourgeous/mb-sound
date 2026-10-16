@@ -31,6 +31,13 @@
 #     play press_and_chop_record.stretch(2, cycle: 30.ms).node                # half speed, cycles fitted to the hits
 #     play press_and_chop_record.stretch(2, cycle: 30.ms, fit: :fixed).node   # the plain cyclic stretch: stutter and buzz
 #     brk = press_and_chop_break(lofi: :sp1200)   # drop-sample reads (mpc60 reads clean); .read_as(:clean) on the record for the clean read
+#
+# SoundFonts (help :soundfonts) play through the same sampler, e.g. a GM
+# font's piano and drum kit over the chops:
+#     font = sf2('GeneralUser-GS.sf2'); font.presets
+#     bg :keys, seq(A3, C4, E4, G4).n8.loop.synth(voices: 8) { |v| font[0].play(v) }.at(-12.db)
+#     bg :kit, seq(C2, Fs2, D2, Fs2).n8.loop.synth(voices: 8) { |v| font[128, 0].play(v) }.at(-10.db)
+#     bg :pad, seq(A2, F2).n1.loop.sampler(font['Warm Pad'], voices: 2).at(-14.db)   # a preset by name
 require 'bundler/setup'
 require 'mb-sound'
 
