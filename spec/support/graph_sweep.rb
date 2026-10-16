@@ -188,6 +188,7 @@ module GraphSweep
       ['with_buffer (BufferAdapter)', ->(c) { c.sig.with_buffer(37.samples) }],
       ['until and and_then (TimeLimit, NodeSequence, Silence)', ->(c) { c.sig.until(0.002).and_then(c.s.silence(0.001), c.sig(220)) }],
       ['ringdown', ->(c) { c.sig.until(0.003).ringdown }],
+      ['sounding (Sounding)', ->(c) { c.s.noise * c.sig.until(0.003).sounding(hold: 0.001, fade: 0.0005) }],
       ['sample_hold', ->(c) { c.sig.sample_hold(c.trigger) + c.mod(0, 1).sah(range: -1..1) }],
       ['knob (held)', ->(c) { c.sig.filter(:lowpass, cutoff: MB::Sound::GraphNode::Knob.new(:held, 800, range: 50..4000, curve: :exp), quality: 2) }],
       ['knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)', ->(c) {

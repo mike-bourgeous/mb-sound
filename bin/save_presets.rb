@@ -64,7 +64,7 @@ module MB::Sound
   # Effect presets: { name => [script, params, builder] }; the builder gets
   # the input and a Hash of param Constants (named after the params).
   LIBRARY_PRESET_EFFECTS = {
-    ambient_tape: ['bin/synths/ambient.rb', { wear: { value: 0.3, range: 0.0..1.0, description: 'Tape wear 0..1' } },
+    ambient_tape: ['bin/synths/ambient.rb', { wear: { value: 0.6, range: 0.0..1.0, description: 'Tape wear 0..1' } },
                  ->(input, p) { ambient_tape(input, wear: p[:wear]) }],
     ambient_room: ['bin/synths/ambient.rb', { space: { value: 0.5, range: 0.0..1.0, description: 'Room level 0..1' } },
                  ->(input, p) { ambient_room(input, space: p[:space]) }],

@@ -43,7 +43,7 @@ module MB
       clip :stick, seq(D5, T, T).n1
 
       knob :space, 0.5, range: 0..1   # the rooms' level (bowls, rin, gong, koto, harp)
-      knob :wear, 0, range: 0..1      # how old the tape is (koto, harp)
+      knob :wear, 0.6, range: 0..1    # how old the tape is (koto, harp; 0.6 like the presets, textures-5)
       knob :shimmer, -7, range: -12..7 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
       knob :spread, 0.7, range: 0..1   # the gong's shimmer width (0 mono, 1 wide)
 
@@ -56,7 +56,7 @@ module MB
       role :harp, :ambient_harp, params: { space: :space, wear: :wear }, level: -2.db, about: 'a swung Karplus-Strong figure'
       role :stick, :ambient_rainstick, level: -4.db, about: 'a rain stick tipping across'
 
-      scene :emerge, drone: :drone, space: 0.5, wear: 0
+      scene :emerge, drone: :drone, space: 0.5, wear: 0.6
       scene :drift, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b
       scene :bloom, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, gong: :gong, motif: :motif, harp: :harp
       scene :hush, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin

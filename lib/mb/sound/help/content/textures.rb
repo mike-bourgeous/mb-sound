@@ -49,8 +49,9 @@ module MB
       example 'a restless creature (walk, holds, jitter, overshoot)' do
         seed 5
         wander = drift(3, range: -0.75..0.75, walk: 0.5, hold: 30.ms..400.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.5])
-        # pink noise: broadband sound is easier to place than a tone (a room's echoes blur a tone's direction)
-        bg :try, noise(:pink).pan(wander).at(-10.db).until(2.bars)
+        # pink noise, 300 Hz to 6 kHz: broadband sound is easier to place than a tone (a room's echoes blur a
+        # tone's direction), and the band keeps it soft
+        bg :try, noise(:pink).filter(:highpass, cutoff: 300).filter(:lowpass, cutoff: 6000).pan(wander).at(-7.db).until(2.bars)
       end
       example 'a fly buzzing around your head (doppler, effort)' do
         x = drift(1.5, range: -3..3, walk: 0.6, hold: 30.ms..300.ms, jitter: 0.5, smooth: Curve[:elastic, overshoot: 0.4]) # meters left/right
@@ -60,8 +61,10 @@ module MB
         effort = (speed / 5).aclip(0, 1).filter(:lowpass, cutoff: 4)                                                       # 0 cruising .. 1 darting
         # darting, the wings beat a little faster, swing wider (louder), and sound brighter
         fly = 190.hz.transpose(effort).saw.lp4(effort * 4000 + 1800) * (effort * 0.55 + 0.45)
-        # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it
-        bg :try, (fly.delay(r * (5 / 343.0), max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-18.db).until(2.bars)
+        # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it;
+        # a 2 Hz lowpass on the delay time turns the darts into gentle swoops
+        late = (r * (5 / 343.0)).filter(:lowpass, cutoff: 2, quality: 0.5)
+        bg :try, (fly.delay(late, max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-18.db).until(2.bars)
       end
       example 'a drum head as kick and toms' do
         kick = grid(8, 'x..x..x.').loop.trigger.resonate(:membrane, 49, glide: 7, glide_time: 0.12)

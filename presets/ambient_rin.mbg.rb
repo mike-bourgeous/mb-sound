@@ -3,11 +3,11 @@
 graph 3,
   name: "ambient_rin",
   kind: :synth,
-  saved: "2026-10-14T04:43:31Z",
-  mb_sound: "0.12.0.usegit (f974b95c)",
+  saved: "2026-10-16T00:47:17Z",
+  mb_sound: "0.12.0.usegit (5eef6c6c)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :rin from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :rin, wear: 0.0, tune: -7.0, spread: 0.7 }
+  options: { patch: :rin, wear: 0.6, tune: -7.0, spread: 0.7 }
 inputs :midi
 param :space, 0.5, range: 0.0..1.0, description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 

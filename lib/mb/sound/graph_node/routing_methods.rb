@@ -108,6 +108,19 @@ module MB
           MB::Sound::GraphNode::TimeLimit.new(self, length)
         end
 
+        # Returns a gate (GraphNode::Sounding) that is 1 while this node makes
+        # sound (above -90 dB), stays open for +hold+ after it falls silent,
+        # then fades to 0 over +fade+ (seconds or Lengths); it starts closed
+        # and ends after this node ends, once its fade is done, so whatever
+        # it gates ends with the sound.  The same at any buffer size.
+        #
+        # Example (bin/sound.rb): a hiss that runs only while the music does
+        #     tune = 220.hz.triangle.at(-12.db) * adsr(0.01, 0.4, 0, 0.1, hold: 1)
+        #     play tune + noise(:pink).at(-40.db) * tune.sounding(hold: 0.5, fade: 0.3)
+        def sounding(hold: 1, fade: 0.5)
+          MB::Sound::GraphNode::Sounding.new(self, hold: hold, fade: fade)
+        end
+
         # Returns a node that plays this node, then silence forever once it
         # ends, so effects after it can ring out (see Ringdown).  On a
         # multichannel node, each channel gets its own Ringdown.

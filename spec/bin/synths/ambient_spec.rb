@@ -91,6 +91,71 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(peak_db(harp[0])).to be > -50
   end
 
+  it 'keeps the tape hiss steady under a fading tail, with its own hiss on each channel (TPDF; textures-5)' do
+    t = Numo::DFloat.new(48000 * 6).seq / 48000
+    # 220 Hz falling from 0.1 by 12 dB/s: -94 dBFS by the end, far under the grain
+    x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 220) * 0.1 * 10.0**(-12 * t / 20))
+    tape = MB::Sound.ambient_tape(MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [x])))
+    l, r = render_patch(tape, 6)
+    # The grain alone: above 1 kHz (two highpasses)
+    grain = ->(c) {
+      2.times.reduce(Numo::DFloat.cast(c)) { |y, _| MB::Sound::Filter::Cookbook.new(:highpass, 48000, 1000, quality: 0.7).process(y) }
+    }
+    gl = grain.(l)
+    loud = rms_db(seconds(gl, 0.5, 1.5)) # (the tail at -26..-38 dBFS)
+    quiet = rms_db(seconds(gl, 5, 6))    # (the tail at -86..-98 dBFS)
+    expect(quiet).to be_within(2).of(loud)
+    expect(quiet).to be_within(4).of(-60) # 8.2 bits at the default wear 0.6
+    # (textures-4's half-step dither fell to -88 dBFS here)
+
+    # Independent hiss per channel (one transport gate); the same wow
+    gr = grain.(r)
+    q = ->(c) { seconds(c, 5, 6) }
+    corr = (q.(gl) * q.(gr)).sum / Math.sqrt((q.(gl)**2).sum * (q.(gr)**2).sum)
+    expect(corr.abs).to be < 0.1
+    expect(peak_hz(seconds(l, 0.5, 1.5), 100, 400)).to eq(peak_hz(seconds(r, 0.5, 1.5), 100, 400))
+  end
+
+  it 'records the koto and harp rooms onto the tape: the hiss goes on through the tail, then the tape stops (textures-5)' do
+    harp = render_patch(MB::Sound.ambient_harp_voice(patch_notes([MB::Sound::D4.number, 0, 0.5])), 10)
+    # The room's tail sinks under the grain, which stays (textures-4: the
+    # room after the tape, its tail fading to the reverb's own floor)
+    floor = rms_db(seconds(harp[0], 4, 5))
+    expect(rms_db(seconds(harp[0], 5, 6))).to be_within(2).of(floor)
+    expect(floor).to be_between(-65, -55)
+    # A second after the room falls under -90 dB, the hiss fades out
+    expect(rms_db(seconds(harp[0], 8, 10))).to be < -120
+  end
+
+  it 'runs one tape transport for both channels: the hiss stops when both are silent (textures-5)' do
+    x = Numo::SFloat.zeros(48000 * 3)
+    x[0...24000] = 0.1 # the left sounds for 0.5 s
+    y = Numo::SFloat.zeros(48000 * 3)
+    y[48000...72000] = 0.1 # the right from 1 s to 1.5 s
+    l, r = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [y]))), 4) }
+    # The left's hiss goes on while the right sounds (per channel gates would stop it at 1.5 s)
+    expect(rms_db(seconds(l, 1.6, 2.4))).to be_between(-65, -55)
+    expect(rms_db(seconds(l, 2.9, 3))).to be < -120
+    expect(rms_db(seconds(r, 2.9, 3))).to be < -120
+    expect(l.length).to eq(3 * 48000)
+  end
+
+  it 'stops the tape a second after its input falls silent, and ends after its input ends (textures-5)' do
+    x = Numo::SFloat.zeros(48000 * 2)
+    x[0...24000] = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(24000).seq * (2 * Math::PI * 220 / 48000)) * 0.1)
+    out = {}
+    [1, 128, 800].each do |bs|
+      out[bs] = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [x])), 4, buffer: bs)[0] }
+    end
+    expect(out[1]).to eq(out[800])
+    expect(out[128]).to eq(out[800])
+    o = out[800]
+    expect(rms_db(seconds(o, 0.6, 1.4))).to be_between(-65, -55)   # hiss held for a second
+    expect(rms_db(seconds(o, 1.9, o.length / 48000.0))).to be < -120 # stopped
+    # The input ends at 2 s, long after it fell silent: the tape ends at once
+    expect(o.length).to be_between(2 * 48000, 2 * 48000 + 800)
+  end
+
   it 'drones on the note: root, fifth, and octave' do
     out = render_patch(MB::Sound.ambient_drone_voice(patch_notes([MB::Sound::D2.number, 0, 6])), 6)
     expect(out.length).to eq(2)
