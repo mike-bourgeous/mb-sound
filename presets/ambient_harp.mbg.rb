@@ -3,14 +3,14 @@
 graph 3,
   name: "ambient_harp",
   kind: :synth,
-  saved: "2026-10-15T06:44:07Z",
-  mb_sound: "0.12.0.usegit (0085cc6a)",
+  saved: "2026-10-16T00:41:25Z",
+  mb_sound: "0.12.0.usegit (5eef6c6c)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :harp from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :harp, tune: -7.0, spread: 0.7 }
 inputs :midi
 param :space, 0.5, range: 0.0..1.0, description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
-param :wear, 0.0, range: 0.0..1.0, description: "Tape wear 0..1 (koto, harp)"
+param :wear, 0.6, range: 0.0..1.0, description: "Tape wear 0..1 (koto, harp): 10 bits of grain at 0 down to 7 at 1"
 
 voice = synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
   fx = v.velocity.aease(:quad_out, out: 0.0..1.0)
@@ -31,8 +31,11 @@ voice = synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
     s + sig5
   } * v.amp_env([[0, sig2 * sig4, 0, :exp], [1, sig2 * (sig4 + 1), 0, :exp], [0, 0.08]]) * 4
 }
-sig = drift(1.3, range: -0.0007..0.0007, smooth: :smoothstep, from: 0.0, seed: drawn_seed(3969543146641149120))
+sig = (voice * 0.14).pan(0.3)
+sig2 = drift(1.3, range: -0.0007..0.0007, smooth: :smoothstep, from: 0.0, seed: drawn_seed(3969543146641149120))
 fx = wear.aease(->(t) { (8**t - 1) / 7.0 }, out: 0.001953125..0.015625)
 osc = noise(seed: drawn_seed(1895649597198586619)).at(fx * 0.5)
-sig2 = ((voice * 0.14).delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig) + osc).quantize(fx).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6).pan(0.3)
-sig2.and_then(silence(10)) + sig2.reverb(room_size: 0.6, decay: 5, damping: 0.55, predelay: 0.03, dry: 0, wet: 1) * space
+osc2 = noise(seed: drawn_seed(827948490035658087)).at(fx * 0.5)
+osc3 = noise(seed: drawn_seed(3203365596207111891)).at(fx * 0.5)
+osc4 = noise(seed: drawn_seed(2691271404617651954)).at(fx * 0.5)
+((sig.and_then(silence(10)) + sig.reverb(room_size: 0.6, decay: 5, damping: 0.55, predelay: 0.03, dry: 0, wet: 1) * space).delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig2) + channels(osc + osc2, osc3 + osc4)).quantize(fx).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)

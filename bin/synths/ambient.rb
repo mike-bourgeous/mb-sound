@@ -25,10 +25,10 @@
 #             default)
 #             (D2 plays 55 Hz; other notes transpose it)
 #   koto      a plucked FM tone (1:1 body, faint 7:1 tine; more a koto or
-#             a hammered string than an e-piano) through worn tape
-#             (--wear) and a room
-#   harp      Karplus-Strong plucks (bin/synths/pluck.rb), soft, through the
-#             tape and a room
+#             a hammered string than an e-piano) in a room, recorded on
+#             worn tape (--wear, 0.6 by default: 8.2 bits of hiss)
+#   harp      Karplus-Strong plucks (bin/synths/pluck.rb), soft, in a room
+#             on the same tape
 #   drone     two old sine generators per side (root, fifth, octave)
 #             drifting fractions of a hertz, beating
 #   rainstick a rain stick tipped over for each note: clicks swelling and
@@ -115,23 +115,36 @@ module MB::Sound
     sig.and_then(silence(decay * 2)) + wet * space
   end
 
-  # Tape wear (+wear+ 0..1, a number or a node): wow (a slowly wandering
-  # delay), grain, and a lowpass that falls with wear.  The grain is a
-  # quantizer with half a step of dither (textures-4, 2026-10-15; the
-  # maintainer: "go with 10-bit for the tape hiss for now", then "-10 to
-  # -7 bits of noise?"): 10 bits at wear 0 down to 7 at wear 1,
-  # continuous (#ambient_tape_step: the step is 2^(1 - bits) of full
-  # scale, so wear 0.6 is 8.2 bits).  Dithered quantizing leaves only a
-  # hiss-like grain, where the earlier sample-rate crush (decimate(16000 -
-  # wear * 11000, mix: wear * 0.6), textures-1/2) left images of each note
-  # (the rate plus and minus it) that rang as a high metallic tone.  The
-  # lowpass comes after the grain, so the hiss is tape-dark too.  A node
-  # wear (a knob) moves the step every sample through a lookup curve,
-  # quantizing without antialiasing (the dither makes it noise anyway).
-  def self.ambient_tape(sig, wear: 0)
+  # Tape wear (+wear+ 0..1, a number or a node; 0.6 by default since
+  # textures-5): wow (a slowly wandering delay), grain, and a lowpass that
+  # falls with wear.  The grain is a dithered quantizer (textures-4,
+  # 2026-10-15; the maintainer: "go with 10-bit for the tape hiss for
+  # now", then "-10 to -7 bits of noise?"): 10 bits at wear 0 down to 7 at
+  # wear 1, continuous (#ambient_tape_step: the step is 2^(1 - bits) of
+  # full scale, so wear 0.6 is 8.2 bits).  Dithered quantizing leaves only
+  # a hiss-like grain, where the earlier sample-rate crush (decimate(16000
+  # - wear * 11000, mix: wear * 0.6), textures-1/2) left images of each
+  # note (the rate plus and minus it) that rang as a high metallic tone.
+  #
+  # The dither is triangular (TPDF, two uniform noises, a step either way;
+  # textures-5, 2026-10-16): the grain is a steady hiss that doesn't
+  # follow the sound, like a tape's noise floor.  The half-step uniform
+  # dither before it (textures-4) left silence silent, so the grain
+  # faded with each note's tail (the maintainer: "I feel like the noise
+  # goes down as the amplitude goes down"; measured on a 220 Hz tail at
+  # wear 0.6: the grain held at -61 dBFS while the tail was above -55 dBFS
+  # and fell to -88 below it; TPDF stays at -60..-62).  Each channel of a
+  # bundle gets its own hiss (a stereo tape has two tracks), and the wow
+  # is shared (one transport).  The lowpass comes after the grain, so the
+  # hiss is tape-dark too.  A node wear (a knob) moves the step every
+  # sample through a lookup curve, quantizing without antialiasing (the
+  # dither makes it noise anyway).
+  def self.ambient_tape(sig, wear: 0.6)
     wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_drift(1.3, -0.0007, 0.0007))
     step = ambient_tape_step(wear)
-    grain = (wow + noise.at(step * 0.5)).quantize(step)
+    hiss = Array.new(wow.channel_count) { noise.at(step * 0.5) + noise.at(step * 0.5) }
+    hiss = hiss.length == 1 ? hiss[0] : channels(*hiss)
+    grain = (wow + hiss).quantize(step)
     grain.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
   end
 
@@ -264,21 +277,23 @@ module MB::Sound
   # A plucked FM tone for a kankyō motif (written as a soft e-piano; it
   # sounds more like a koto or a hammered string): a sine carrier, a 1:1
   # modulator whose index falls (the body), and a faint 7:1 tine; through
-  # worn tape (+wear+) and a small room (+space+).
-  def self.ambient_koto_voice(midi, wear: 0, space: 0.5, level: 0.11, pan: -0.15)
+  # a small room (+space+), recorded on worn tape (+wear+).
+  def self.ambient_koto_voice(midi, wear: 0.6, space: 0.5, level: 0.11, pan: -0.15)
     keys = synth(midi, voices: 4) { |v|
       body = v.hz.transpose(0).sine.at(0.9) * v.env(0.002, 1.8, 0.15, 1.5, gm: false)
       tine = v.hz.transpose(12 * Math.log2(7)).sine.at(0.25) * v.env(0.001, 0.25, 0, 0.2, gm: false)
       v.hz.pm(body + tine) * v.env(0.004, 3.2, 0.0, 1.6, gm: false) * (v.velocity * 0.5 + 0.5)
     }
-    ambient_room(ambient_tape(keys * level, wear: wear).pan(pan), space: space, decay: 6, room_size: 0.7)
+    ambient_tape(ambient_room((keys * level).pan(pan), space: space, decay: 6, room_size: 0.7), wear: wear)
   end
 
-  # The harp: soft Karplus-Strong plucks (MB::Sound.pluck_voice), through
-  # worn tape (+wear+) and a small room (+space+).
-  def self.ambient_harp_voice(midi, wear: 0, space: 0.5, level: 0.14, pan: 0.3, sustain: 2.5, brightness: 5)
+  # The harp: soft Karplus-Strong plucks (MB::Sound.pluck_voice) in a
+  # small room (+space+), recorded on worn tape (+wear+): the room goes on
+  # the tape (textures-5; the room came after the tape before), so the
+  # tail is worn and hissy like the notes.
+  def self.ambient_harp_voice(midi, wear: 0.6, space: 0.5, level: 0.14, pan: 0.3, sustain: 2.5, brightness: 5)
     harp = synth(midi, voices: 3) { |v| pluck_voice(v, sustain: sustain, brightness: brightness) }
-    ambient_room(ambient_tape(harp * level, wear: wear).pan(pan), space: space, decay: 5, room_size: 0.6)
+    ambient_tape(ambient_room((harp * level).pan(pan), space: space, decay: 5, room_size: 0.6), wear: wear)
   end
 
   # Two old sine generators per side on +root+ (Hz, a number or a node):
@@ -318,7 +333,7 @@ module MB::Sound
 
   # The script's instruments by name (see the header), with the script's
   # parameters as named Constants (so --save makes them preset params).
-  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.0, tune: AMBIENT_GONG_TUNE.to_f, spread: AMBIENT_GONG_SPREAD)
+  def self.ambient_patch(midi, patch = :bowl, space: 0.5, wear: 0.6, tune: AMBIENT_GONG_TUNE.to_f, spread: AMBIENT_GONG_SPREAD)
     case patch
     when :bowl then ambient_bowl_voice(midi, space: space.constant.named('space'))
     when :rin then ambient_rin_voice(midi, space: space.constant.named('space'))
@@ -347,7 +362,7 @@ module MB::Sound
       description: ->(p) { ambient_description(p.patch) },
       patch: [:bowl, Symbol, '-p', 'Instrument to play', [:bowl, :rin, :gong, :koto, :harp, :drone, :rainstick]],
       space: [0.5, Float, '-s', 'Room level 0..1 (bowls, rin, gong, koto, harp)', 0.0..1.0],
-      wear: [0.0, Float, '-w', 'Tape wear 0..1 (koto, harp)', 0.0..1.0],
+      wear: [0.6, Float, '-w', 'Tape wear 0..1 (koto, harp): 10 bits of grain at 0 down to 7 at 1', 0.0..1.0],
       tune: [AMBIENT_GONG_TUNE.to_f, Float, '-t', 'Gong shimmer tuning in semitones (the shimmer partials and their noise band)', -24.0..12.0],
       spread: [AMBIENT_GONG_SPREAD, Float, '-S', 'Gong shimmer stereo width: 0 mono, 1 every other partial hard left and right', 0.0..1.0],
     ) { |midi, p|
