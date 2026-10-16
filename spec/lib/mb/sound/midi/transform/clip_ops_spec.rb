@@ -220,6 +220,42 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
     end
   end
 
+  describe 'generator clips, per cycle (decision 5)' do
+    let(:gen) { s.melody(s.scale(:minor, :a), 8, vary: true, seed: 3).loop }
+
+    def nums(events)
+      events.map { |e| MB::Sound::Sequence::Clip.ghost_number(e.value) }
+    end
+
+    it 'snaps every cycle to its place in the ghost progression' do
+      g = gen.ghost_chords(1, 4, 7, 6, scale: s.scale(:minor, :a), tie: :down)
+      expect(g.length).to eq(gen.length)
+      repeated = nil
+      expect { repeated = gen.repeat(4) }.to output(/finite/).to_stderr
+      unrolled = repeated.ghost_chords(1, 4, 7, 6, scale: s.scale(:minor, :a), tie: :down)
+      expect((0..3).flat_map { |c| nums(g.events_for(c)) }).to eq(nums(unrolled.events))
+      expect(nums(g.events_for(17))).not_to eq(nums(gen.events_for(17))) # not just cycle 0
+    end
+
+    it 'permutes every cycle with the seed' do
+      pm = gen.permute(seed: 5)
+      changed = (0..7).count { |c|
+        expect(nums(pm.events_for(c)).sort).to eq(nums(gen.events_for(c)).sort)
+        expect(pm.events_for(c).map(&:start)).to eq(gen.events_for(c).map(&:start))
+        nums(pm.events_for(c)) != nums(gen.events_for(c))
+      }
+      expect(changed).to be > 4
+      expect { gen.permute([1, 0]) }.to raise_error(ArgumentError, /seed/)
+    end
+
+    it 'ratchets and truncates every cycle' do
+      expect(gen.ratchet(2).events_for(5).length).to eq(gen.events_for(5).length * 2)
+      t = gen.truncate(1/4r)
+      expect(t.events_for(9).map(&:end_time).max).to be <= 1/4r
+      expect(nums(t.events_for(9))).to eq(nums(gen.events_for(9).select { |e| e.start < 1/4r }))
+    end
+  end
+
   describe 'Transform::Spec' do
     it 'chains clip operations and applies them to streams' do
       fx = MB::Sound.echo(1.n8, 1).swing(0.6).chance(1).every(1).legato(1.2).ratchet(2, rate: 1.n32).ghost_chords(1).humanize(0)

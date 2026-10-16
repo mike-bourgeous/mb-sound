@@ -267,10 +267,11 @@ module MB
         # cross +span+ shortened to end there.
         def truncate(span)
           span = Duration.whole_notes(span)
-          events = @events.select { |e| e.start < span }.map { |e|
-            e.end_time > span ? e.with(length: span - e.start) : e
+          map_cycles(length: span) { |events, _cycle|
+            events.select { |e| e.start < span }.map { |e|
+              e.end_time > span ? e.with(length: span - e.start) : e
+            }
           }
-          with_events(events, length: span)
         end
 
         # Splits every event into repeated hits of length +sub+ (an Integer
@@ -511,6 +512,14 @@ module MB
             return with_events(@events, variations: @variations + [Variation.new(name: "permute(seed: #{seed})", block: ->(events, cycle, _clip) {
               Clip.permuted(events, Clip.check_permutation(nil, events.length, Clip.cycle_seed(seed, cycle)))
             })])
+          end
+
+          if generated?
+            # A generator's cycles hold different notes: the same seed's
+            # order for each cycle's count (decision 5, 2026-10-16)
+            raise ArgumentError, "A generator clip's cycles vary in length; permute it with seed: instead of an order" if order
+            seed = Integer(seed)
+            return map_cycles { |events, _cycle| Clip.permuted(events, Clip.check_permutation(nil, events.length, seed)) }
           end
 
           order = Clip.check_permutation(order, @events.length, seed)
@@ -991,6 +1000,26 @@ module MB
           with_events(@events.map(&map), length: length, variations: variations, values: values)
         end
 
+        # True if this clip's events come from a generator (a Variation
+        # whose block is a Generative::Producer), so transforms must work on
+        # each cycle's events rather than the base events.
+        def generated?
+          @variations.any? { |v| v.block.is_a?(Generative::Producer) }
+        end
+
+        # Returns a Clip with +map+ (called with a list of Events and a
+        # cycle number, returning Events) applied to the base events (as
+        # cycle 0) and to every cycle a generator makes, like #map_clip for
+        # transforms that work on whole lists (ratchet, truncate, permute,
+        # ghost chords): every clip transform works per cycle on generator
+        # clips (maintainer decision 5, 2026-10-16).
+        def map_cycles(length: @length, values: @values, &map)
+          variations = @variations.map { |v|
+            v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.cycle_mapped(map)) : v
+          }
+          with_events(map.call(@events, 0), length: length, variations: variations, values: values)
+        end
+
         private
 
         # The glide time for #tween: +time+ as given (a Duration becomes a
@@ -1053,16 +1082,16 @@ module MB
         # Used by #roll and #ratchet.  The block returns [offset, length]
         # pairs for the hits of each event.  A +velocity+ Range ramps over
         # +count+ hits (each event's hit count by default).
-        def subdivide(velocity, count = nil)
-          map_events = @events.flat_map { |e|
-            hits = yield e
-            hits.map.with_index { |(offset, length), idx|
-              v = Clip.ratchet_velocity(e.velocity, velocity, idx, count || hits.length)
-              e.with(start: e.start + offset, length: length, velocity: v)
+        def subdivide(velocity, count = nil, &hits_of)
+          map_cycles { |events, _cycle|
+            events.flat_map { |e|
+              hits = hits_of.call(e)
+              hits.map.with_index { |(offset, length), idx|
+                v = Clip.ratchet_velocity(e.velocity, velocity, idx, count || hits.length)
+                e.with(start: e.start + offset, length: length, velocity: v)
+              }
             }
           }
-
-          with_events(map_events)
         end
 
         track_derivations(*DERIVATIONS)

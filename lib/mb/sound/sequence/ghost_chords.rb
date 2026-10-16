@@ -56,6 +56,8 @@ module MB
           span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)
           short = passing.nil? ? nil : Duration.whole_notes(passing)
 
+          return ghost_generated(classes, sc, span, short, tie) if generated?
+
           clip = self
           if @loop
             total = Clip.rational_lcm(@length, span * chords.length)
@@ -97,6 +99,50 @@ module MB
           sc = Clip.harmonic_scale(sc) if harmonic
           [sc, chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }]
         end
+
+        # #ghost_chords of a generator clip (maintainer decision 5,
+        # 2026-10-16: transforms work per cycle): each cycle's notes snap to
+        # the chords of their place in the progression (cycle start plus
+        # note start), with ties following the contour from the previous
+        # cycle's last note, so the loop keeps its length and generates
+        # forever.  Returns the new clip.
+        def ghost_generated(classes, sc, span, short, tie)
+          original = self
+          values = @values && (@values + @values.flat_map { |v|
+            n = Clip.ghost_number(v)
+            next [] if n.nil?
+            classes.compact.flat_map { |pcs|
+              [true, false].map { |up| Sequence.transpose_value(v, Clip.nearest_tone(n, pcs, sc.period, up) - n) }
+            }
+          }).uniq
+
+          map_cycles(values: values) { |events, cycle|
+            numbers = events.map { |e| Clip.ghost_number(e.value) }
+            # Before the first note: the previous cycle's last note (a
+            # loop's first cycle compares with its own last, as for clips)
+            prev = if cycle > 0
+                     original.events_for(cycle - 1).filter_map { |e| Clip.ghost_number(e.value) }.last
+                   elsif @loop
+                     numbers.compact.last
+                   end
+            offset = @length * cycle
+            events.each_with_index.map { |e, i|
+              n = numbers[i]
+              next e if n.nil?
+              p = prev
+              prev = n
+              next e if short && e.length < short
+
+              pcs = classes[((offset + e.start) / span).floor % classes.length]
+              next e if pcs.nil?
+
+              up = tie == :up || (tie == :contour && p && p < n)
+              target = Clip.nearest_tone(n, pcs, sc.period, up)
+              target == n ? e : e.with(value: Sequence.transpose_value(e.value, target - n))
+            }
+          }
+        end
+        protected :ghost_generated
 
         # The most copies #ghost_chords makes of a looping clip.
         MAX_GHOST_REPEATS = 64
