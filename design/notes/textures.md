@@ -366,8 +366,10 @@ on the sample where it closes, the way delays ring out.  Each value
 depends only on the samples since the last loud one (vectorized: a
 cumulative count of loud samples indexes their positions; when `hold`
 is at least a buffer, everything from a buffer's first loud sample is
-1), so it is the same at any buffer size.  ambient_tape multiplies each
-channel's dither by its channel's gate (`stop: 1` s, fade 0.3 s), so the
+1), so it is the same at any buffer size.  ambient_tape multiplies every
+channel's dither by one gate (`stop: 1` s, fade 0.3 s; `Channels#sounding`
+is one gate for a bundle, open while any channel sounds and ending when
+all have ended: one tape transport, the maintainer's "One gate for both"), so the
 hiss runs through the room's tail and stops a second after the room
 falls below -90 dB (about 4.5 s after a harp note, 7 s after a koto
 note), and the tape ends with its input: a koto render of
