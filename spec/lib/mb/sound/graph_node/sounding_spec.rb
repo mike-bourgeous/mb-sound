@@ -45,6 +45,28 @@ RSpec.describe(MB::Sound::GraphNode::Sounding) do
     expect(g.length).to eq(9600)
   end
 
+  it 'gives one gate for a bundle: open while any channel sounds, ending once every channel has ended' do
+    l = Numo::SFloat.zeros(9600)
+    l[100] = 1
+    r = Numo::SFloat.zeros(4800) # (ends first, silent)
+    r[2000] = -1
+    bundle = MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [l]), MB::Sound::ArrayInput.new(data: [r]))
+    g = bundle.sounding(hold: 10.ms, fade: 0.ms)
+    expect(g).to be_a(MB::Sound::GraphNode::Sounding)
+    expect(g.channel_count).to eq(1)
+    out = []
+    while (b = g.sample(800))
+      out << b.dup
+    end
+    out = Numo::SFloat.zeros(0).concatenate(*out)
+    expect(out[0...100].to_a.uniq).to eq([0])
+    expect(out[100..580].to_a.uniq).to eq([1])
+    expect(out[581...2000].to_a.uniq).to eq([0])
+    expect(out[2000..2480].to_a.uniq).to eq([1]) # (the right channel's hit opens it again)
+    expect(out[2481]).to eq(0)
+    expect(out.length).to eq(9600) # the left channel ends last
+  end
+
   it 'refuses negative or musical lengths' do
     src = 0.constant
     expect { src.sounding(hold: -1) }.to raise_error(ArgumentError, /hold/)

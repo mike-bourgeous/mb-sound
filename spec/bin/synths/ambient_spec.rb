@@ -108,7 +108,7 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(quiet).to be_within(4).of(-60) # 8.2 bits at the default wear 0.6
     # (textures-4's half-step dither fell to -88 dBFS here)
 
-    # Independent hiss per channel; the same wow
+    # Independent hiss per channel (one transport gate); the same wow
     gr = grain.(r)
     q = ->(c) { seconds(c, 5, 6) }
     corr = (q.(gl) * q.(gr)).sum / Math.sqrt((q.(gl)**2).sum * (q.(gr)**2).sum)
@@ -125,6 +125,19 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(floor).to be_between(-65, -55)
     # A second after the room falls under -90 dB, the hiss fades out
     expect(rms_db(seconds(harp[0], 8, 10))).to be < -120
+  end
+
+  it 'runs one tape transport for both channels: the hiss stops when both are silent (textures-5)' do
+    x = Numo::SFloat.zeros(48000 * 3)
+    x[0...24000] = 0.1 # the left sounds for 0.5 s
+    y = Numo::SFloat.zeros(48000 * 3)
+    y[48000...72000] = 0.1 # the right from 1 s to 1.5 s
+    l, r = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [y]))), 4) }
+    # The left's hiss goes on while the right sounds (per channel gates would stop it at 1.5 s)
+    expect(rms_db(seconds(l, 1.6, 2.4))).to be_between(-65, -55)
+    expect(rms_db(seconds(l, 2.9, 3))).to be < -120
+    expect(rms_db(seconds(r, 2.9, 3))).to be < -120
+    expect(l.length).to eq(3 * 48000)
   end
 
   it 'stops the tape a second after its input falls silent, and ends after its input ends (textures-5)' do

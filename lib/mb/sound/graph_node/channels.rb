@@ -193,6 +193,14 @@ module MB
           Reverb.reverb(preset, input: self, output_channels: output_channels, **kwargs)
         end
 
+        # One gate for every channel (see GraphNode::Sounding), not one per
+        # channel: open while any channel sounds, held +hold+ and faded over
+        # +fade+ after they all fall silent, ending once every channel has
+        # ended.  E.g. one transport for a stereo tape's hiss.
+        def sounding(hold: 1, fade: 0.5)
+          Sounding.new(self, hold: hold, fade: fade)
+        end
+
         # Measures every channel together with one live loudness meter (see
         # LoudnessMeter), returned as a bundle of the channels passed
         # through.

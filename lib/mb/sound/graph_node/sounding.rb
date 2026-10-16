@@ -14,6 +14,10 @@ module MB
       # since the source's last loud sample, so the gate (and where it ends)
       # is the same at any buffer size.
       #
+      # The source may be a Channels bundle (Channels#sounding): one gate for
+      # all of them, open while any channel sounds and ending once every
+      # channel has ended (one tape transport for a stereo tape).
+      #
       # Made by GraphNode#sounding.  Use it to stop things that should run
       # only while there is sound, like a tape's hiss (bin/synths/ambient.rb
       # #ambient_tape) or a noise floor under a recording.
@@ -21,7 +25,7 @@ module MB
         include GraphNode
         include SampleRateHelper
 
-        # The source node.
+        # The source node (or Channels bundle).
         attr_reader :source
 
         # How long the gate stays open after the source falls silent, and
@@ -36,8 +40,10 @@ module MB
             end
           end
 
-          @source = source.get_sampler
-          @sample_rate = @source.sample_rate.to_f
+          @source = source
+          @inputs = (source.is_a?(Channels) ? source.to_a : [source]).map(&:get_sampler)
+          @live = Array.new(@inputs.length, true)
+          @sample_rate = @inputs[0].sample_rate.to_f
           @hold_length = hold
           @fade_length = fade
           @hold_time = MB::Sound::Length::Source.new(hold)
@@ -56,11 +62,17 @@ module MB
         def sample(count)
           return nil if @done
 
-          data = @ended ? nil : @source.sample(count)
-          n = data.nil? ? 0 : data.length
-          if n < count
-            # The source ended (nil or a short last read): the gate plays on
-            # as if it were silent, ending once closed (one short read)
+          reads = @inputs.each_with_index.map { |src, j|
+            next nil unless @live[j]
+
+            d = src.sample(count)
+            @live[j] = false if d.nil? || d.length < count # (ended: silent from here)
+            d
+          }.compact
+          n = reads.map(&:length).max || 0
+          if @live.none?
+            # Every source ended (nil or a short last read): the gate plays
+            # on as if they were silent, ending once closed (one short read)
             @ended = true
             if n == 0 && @quiet >= @hold + @fade
               @done = true
@@ -68,7 +80,14 @@ module MB
             end
           end
 
-          loud = n > 0 ? (data.abs > MB::Sound::RingOut::THRESHOLD).where : nil
+          loud = nil
+          if reads.length == 1
+            loud = (reads[0].abs > MB::Sound::RingOut::THRESHOLD).where
+          elsif n > 0
+            mask = Numo::Bit.zeros(count)
+            reads.each { |d| mask[0...d.length] = mask[0...d.length] | (d.abs > MB::Sound::RingOut::THRESHOLD) }
+            loud = mask.where
+          end
           return sample_loud(count, loud) if !@ended && loud && !loud.empty? && @hold >= count
 
           @seq = Numo::DFloat.new(count).seq if @seq.nil? || @seq.length != count
@@ -112,7 +131,9 @@ module MB
         alias at_rate sample_rate=
 
         def sources
-          { input: @source }
+          return { input: @inputs[0] } if @inputs.length == 1
+
+          @inputs.each_with_index.to_h { |s, j| [:"input_#{j}", s] }
         end
 
         def to_s
