@@ -237,7 +237,8 @@ module MB
         # it a voice with no envelope (slices, plain samples, instruments
         # without SFZ/SF2 envelopes) rings on under the new notes until its
         # sample ends; voices with an envelope fade through the envelope's
-        # choke either way (then this only stops the voice after the fade).
+        # choke either way (then this also stops the voice after the fade,
+        # so a later note on the lane has no declick tail of the old one).
         # A length also sets how fast choke groups fade the voice.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
                  interpolation: nil, mips: nil, seed: nil, steal_fade: false)
