@@ -25,6 +25,7 @@
 #     bin/songs/generative_blur.rb -u 0.4 blur.flac           # many wrong notes
 #     bin/songs/generative_blur.rb -m grains -u 0.4 blur.flac # the granular cloud
 #     bin/songs/generative_blur.rb -m both blur.flac          # both together
+#     bin/songs/generative_blur.rb -n 64 -u 0.15 blur.flac    # sixty-fourths: about 22 draws a second
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/generative_blur.rb'
@@ -62,13 +63,15 @@ module MB::Sound
 
   # Starts the piece on the current session (live, or in a render block).
   # +mode+ :dense, :grains, or :both; +blur+ 0..1; +seed+ the draws.
-  def self.generative_blur(mode: :dense, blur: 0.15, seed: 3)
+  # +division+ the dense line's notes per whole note (16: sixteenths, 64:
+  # sixty-fourths, about 22 notes a second at 84 BPM).
+  def self.generative_blur(mode: :dense, blur: 0.15, seed: 3, division: 16)
     bpm 84
     field = generative_blur_field(blur)
 
     if mode == :dense || mode == :both
-      line = strikes(field, every: 1.n16, chance: 1, gap: 1, sharpen: 1, velocity: 0.45..0.8, seed: seed)
-      pluck = line.synth(voices: 6) { |v| v.hz.triangle * v.env(0.002, 0.25, 0, 0.1) * (v.velocity * 0.6 + 0.4) }
+      line = strikes(field, every: Rational(1, division).whole, chance: 1, gap: 1, sharpen: 1, velocity: 0.45..0.8, seed: seed)
+      pluck = line.synth(voices: division > 16 ? division / 2 : 6) { |v| v.hz.triangle * v.env(0.002, 0.25, 0, 0.1) * (v.velocity * 0.6 + 0.4) }
       bg :dense, ambient_room(pluck.lp4(3500), space: 0.35, decay: 3, room_size: 0.5).pan(-0.1), fade: 0
     end
 
@@ -89,6 +92,7 @@ module MB::Sound
       mode: [:dense, Symbol, '-m', 'dense (a sixteenth-note line), grains (a cloud), or both', [:dense, :grains, :both]],
       blur: [0.15, Float, '-u', 'How far the scale blurs into wrong notes', 0.0..1.0],
       seed: [3, Integer, '-s', 'The seed of the draws', 0..1_000_000],
-    ) { |p| generative_blur(mode: p.mode, blur: p.blur, seed: p.seed) }
+      division: [16, Integer, '-n', 'Notes per whole note in the dense line (16, 32, 64)', [8, 16, 32, 64]],
+    ) { |p| generative_blur(mode: p.mode, blur: p.blur, seed: p.seed, division: p.division) }
   end
 end

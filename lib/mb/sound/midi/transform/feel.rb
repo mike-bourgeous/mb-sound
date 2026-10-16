@@ -24,14 +24,15 @@ module MB
         end
 
         # Random timing (later only) and velocity offsets per note (see
-        # Stream#humanize).
+        # Stream#humanize; the draws are Sequence::Feel's, shared with
+        # Clip#humanize).
         class Humanize < NoteMap
           include Seeded
 
-          def initialize(parent, time = 0.01, velocity: 0, seed: nil, **options)
+          def initialize(parent, time = Sequence::Feel::HUMANIZE_TIME, velocity: 0, seed: nil, **options)
             super(parent, **options)
             raise ArgumentError, "Humanize time must not be negative (got #{time.inspect})" if seconds_of(time) < 0
-            raise ArgumentError, "Humanize velocity must be from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.between?(0, 1)
+            Sequence::Feel.check_fraction('Humanize velocity', velocity)
             @time = time
             @velocity = velocity.to_f
             setup_seed(seed)
@@ -45,10 +46,9 @@ module MB
           end
 
           def map_on(e)
-            rng = next_random
-            delay = Sequence::Duration.rational(rng.rand * seconds_of(@time))
-            v = rng.rand * 2 - 1
-            e = e.with_velocity(MB::M.clamp(e.velocity * (1 + v * @velocity), 1 / 127.0, 1.0)) if @velocity > 0
+            offset, velocity = Sequence::Feel.humanize_draw(next_random, e.velocity, @velocity, both_ways: false)
+            delay = Sequence::Duration.rational(offset * seconds_of(@time))
+            e = e.with_velocity(velocity) if @velocity > 0
             [[e, delay]]
           end
 
@@ -59,16 +59,18 @@ module MB
         end
 
         # Delays notes to the next step of a timeline grid (see
-        # Stream#quantize).
+        # Stream#quantize; the steps are Sequence::Feel's, shared with
+        # Clip#quantize).
         class Quantize < NoteMap
-          def initialize(parent, grid = 16, amount: 1, window: nil, **options)
+          def initialize(parent, grid = Sequence::Feel::GRID, amount: 1, window: nil, ends: false, **options)
             super(parent, **options)
             @grid = Sequence::Duration.whole_notes(grid)
-            raise ArgumentError, "Quantize amount must be from 0 to 1 (got #{amount.inspect})" unless amount.is_a?(Numeric) && amount.between?(0, 1)
+            Sequence::Feel.check_fraction('Quantize amount', amount)
             @amount = Sequence::Duration.rational(amount)
             @window = window && Sequence::Duration.whole_notes(window)
+            @ends = !!ends
             @grid_label = grid.is_a?(Integer) ? "n#{grid}" : grid.to_s
-            @node_type_name = "quantize(#{@grid_label}#{", amount: #{amount}" if amount != 1})"
+            @node_type_name = "quantize(#{@grid_label}#{", amount: #{amount}" if amount != 1}#{', ends: true' if @ends})"
           end
 
           private
@@ -78,16 +80,113 @@ module MB
           end
 
           def map_on(e)
-            wn = timeline_at(e.time)
-            target = (wn / @grid).ceil * @grid
-            return [[e, 0r]] if @window && target - wn > @window
+            target = Sequence::Feel.quantize_step(timeline_at(e.time), @grid, direction: :next, window: @window)
+            return [[e, 0r]] if target.nil?
 
             delay = (stream_time_at(target) - e.time) * @amount
             [[e, MB::M.max(delay, 0r)]]
           end
 
+          # With +ends: true+, note-offs move to the next step too (+amount+
+          # of the way), keeping a whole note at least one step long when
+          # fully quantized (like Clip#quantize's ends).
+          def note_off_time(time, delay, on_time)
+            return super unless @ends
+
+            target = Sequence::Feel.quantize_step(timeline_at(time), @grid, direction: :next)
+            off = time + (stream_time_at(target) - time) * @amount
+            start = on_time + delay
+            off = MB::M.max(off, start + @grid / transport.whole_notes_per_second) if @amount == 1
+            MB::M.max(off, time)
+          end
+
           def map_note(event)
             event
+          end
+        end
+
+        # Delays offbeat notes by the timeline grid (see Stream#swing; the
+        # time warp is Sequence::Feel's, shared with Clip#swing).  Note-offs
+        # go through the same warp, so lengths follow as in clips.
+        class Swing < NoteMap
+          def initialize(parent, amount = Sequence::Feel::SWING, grid = Sequence::Feel::GRID, **options)
+            super(parent, **options)
+            @amount = Sequence::Feel.check_swing(amount, delay_only: true)
+            @grid = Sequence::Duration.whole_notes(grid)
+            @grid_label = grid.is_a?(Integer) ? "n#{grid}" : grid.to_s
+            @node_type_name = "swing(#{amount}#{", #{@grid_label}" if @grid != 1/16r})"
+          end
+
+          private
+
+          def tail_seconds
+            @grid * 2 / transport.whole_notes_per_second
+          end
+
+          def map_on(e)
+            [[e, MB::M.max(swung(e.time) - e.time, 0r)]]
+          end
+
+          def note_off_time(time, _delay, _on_time)
+            MB::M.max(swung(time), time)
+          end
+
+          # The stream time of stream time +time+ through the swing warp of
+          # its timeline position.
+          def swung(time)
+            stream_time_at(Sequence::Feel.swing_warp(timeline_at(time), @amount, @grid))
+          end
+
+          def map_note(event)
+            event
+          end
+        end
+
+        # Plays each note with a probability (see Stream#chance), decided
+        # per note from the seed and a counter, like Clip#chance decides
+        # per cycle and note.
+        class Chance < NoteMap
+          include Seeded
+
+          def initialize(parent, probability, seed: nil, **options)
+            super(parent, **options)
+            @probability = Sequence::Clip.check_probability(probability)
+            setup_seed(seed)
+            @node_type_name = "chance(#{probability})"
+          end
+
+          private
+
+          def map_on(e)
+            next_random.rand < @probability ? [[e, 0r]] : []
+          end
+
+          # Chased notes don't draw (so they can't change later decisions).
+          def map_note(event)
+            event
+          end
+        end
+
+        # Plays notes only in every +n+th bar of the timeline (see
+        # Stream#every; the condition is Sequence::Feel's, shared with
+        # Clip#every, which counts loop cycles).
+        class Every < NoteMap
+          def initialize(parent, n, from: 1, **options)
+            super(parent, **options)
+            @condition = Sequence::Clip.check_condition(n, from)
+            @node_type_name = "every(#{n}#{", from: #{from}" if from != 1})"
+          end
+
+          private
+
+          # The 0-based bar of the timeline at stream +time+ (bars follow
+          # the transport's meter map).
+          def bar_index(time)
+            transport.bar_at(timeline_at(time)).floor - 1
+          end
+
+          def map_on(e)
+            Sequence::Feel.condition_plays?(@condition, bar_index(e.time)) ? [[e, 0r]] : []
           end
         end
 

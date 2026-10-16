@@ -8,8 +8,9 @@ module MB
       # know their future), unlike live stream transforms, which only delay
       # (user decision 7: humanize and quantize are mainly for clips).
       class Clip
-        # The default largest timing offset of #humanize (+/-4 ms).
-        HUMANIZE_TIME = MB::Sound::Length::Seconds.new(0.004)
+        # The default largest timing offset of #humanize (+/-4 ms; the
+        # same default as MIDI::Stream#humanize, which only delays).
+        HUMANIZE_TIME = Feel::HUMANIZE_TIME
 
         # Returns a clip with each note moved by a random amount up to
         # +time+ earlier or later (a Length like 4.ms, a Duration like
@@ -44,7 +45,7 @@ module MB
         def humanize(time = HUMANIZE_TIME, velocity: 0, seed: @seed, vary: nil)
           vary = @loop if vary.nil?
           amount = Duration.whole_notes(time)
-          raise ArgumentError, "Humanize velocity must be from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.between?(0, 1)
+          Feel.check_fraction('Humanize velocity', velocity)
           seed = Integer(seed)
           if @loop
             name = "humanize(#{Duration.format(amount)}, seed: #{seed}#{vary ? '' : ', vary: false'})"
@@ -64,34 +65,41 @@ module MB
         def self.humanized(events, amount, velocity, seed, cycle)
           rng = Random.new(seed)
           events.map { |e|
-            shift = Duration.rational((rng.rand * 2 - 1) * amount.to_f)
-            v = rng.rand * 2 - 1
-            start = e.start + shift
+            offset, vel = Feel.humanize_draw(rng, e.velocity, velocity, both_ways: true)
+            start = e.start + Duration.rational(offset * amount.to_f)
             start = cycle ? MB::M.clamp(start, -cycle + Rational(1, 2**40), 2 * cycle - Rational(1, 2**40)) : MB::M.max(start, 0r)
             changes = { start: start }
-            changes[:velocity] = MB::M.clamp(e.velocity * (1 + v * velocity), 1 / 127.0, 1.0) if velocity > 0 && e.velocity
+            changes[:velocity] = vel if velocity > 0 && e.velocity
             e.with(**changes)
           }
         end
 
         # Returns a clip with notes moved to the nearest step of +grid+ (an
         # Integer note division like 16, a Duration, or Rational whole
-        # notes), or +:amount+ (0..1) of the way there.  Lengths stay, unless
-        # +:ends+ is true (note ends move to the grid too, at least one step
-        # after the start).  Notes of a looping clip wrap around its length.
+        # notes), or +:amount+ (0..1) of the way there.  Notes more than
+        # +:window+ (a length; nil for any distance) from their step stay
+        # where they are.  Lengths stay, unless +:ends+ is true (note ends
+        # move to the grid too, at least one step after the start).  Notes
+        # of a looping clip wrap around its length.  MIDI::Stream#quantize
+        # takes the same options, moving live notes to the next step.
         #
         #     played.quantize(16)
         #     played.quantize(1.n8.t, amount: 0.6)
-        def quantize(grid = 16, amount: 1, ends: false)
+        #     played.quantize(16, window: 1.n64)   # only notes already close
+        def quantize(grid = Feel::GRID, amount: 1, ends: false, window: nil)
           grid = Duration.whole_notes(grid)
-          raise ArgumentError, "Quantize amount must be from 0 to 1 (got #{amount.inspect})" unless amount.is_a?(Numeric) && amount.between?(0, 1)
+          Feel.check_fraction('Quantize amount', amount)
           amount = Duration.rational(amount)
+          window = window && Duration.whole_notes(window)
 
           map_clip { |e|
-            start = e.start + ((e.start / grid).round * grid - e.start) * amount
+            target = Feel.quantize_step(e.start, grid, window: window)
+            next e if target.nil?
+
+            start = e.start + (target - e.start) * amount
             length = e.length
             if ends
-              stop = e.end_time + ((e.end_time / grid).round * grid - e.end_time) * amount
+              stop = e.end_time + (Feel.quantize_step(e.end_time, grid) - e.end_time) * amount
               length = MB::M.max(stop - start, amount == 1 ? grid : 0r)
               length = e.length if length <= 0
             end
@@ -107,18 +115,15 @@ module MB
         # between are stretched to match, so note starts and ends move
         # smoothly, and lengths follow.
         #
+        # MIDI::Stream#swing delays live offbeats the same way (amounts
+        # from 0.5).
+        #
         #     beat.swing(0.6)          # 16th swing
         #     bass.swing(2/3r, 8)      # triplet 8th feel
-        def swing(amount = 0.58, grid = 16)
-          raise ArgumentError, "Swing must be between 0 and 1 (got #{amount.inspect})" unless amount.is_a?(Numeric) && amount > 0 && amount < 1
+        def swing(amount = Feel::SWING, grid = Feel::GRID)
+          amount = Feel.check_swing(amount)
           grid = Duration.whole_notes(grid)
-          amount = Duration.rational(amount)
-          pair = grid * 2
-          warp = ->(t) {
-            base = (t / pair).floor * pair
-            p = (t - base) / grid # 0..2 within the pair
-            base + (p <= 1 ? p * amount * 2 : amount * 2 + (p - 1) * (2 - amount * 2)) * grid
-          }
+          warp = ->(t) { Feel.swing_warp(t, amount, grid) }
 
           map_clip { |e|
             start = warp.(e.start)

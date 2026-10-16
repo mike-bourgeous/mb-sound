@@ -22,7 +22,8 @@ module MB
         #
         # Chords are:
         # - scale degrees counted from 1 like Roman numerals (1 = i, 4 = iv,
-        #   7 = VII in A minor), built in +scale+ (a Scale, a name like
+        #   7 = VII in A minor; Scale#chord counts from 0, so ghost chord n
+        #   is Scale#chord(n - 1)), built in +scale+ (a Scale, a name like
         #   :minor, or an Array of offsets, with +root+) from every other
         #   scale note: +size+ 3 for triads, 4 for seventh chords;
         # - Arrays of Notes or note numbers, used as given (`[A3, C4, E4]`);
@@ -51,16 +52,16 @@ module MB
         #     hook.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))      # Am, Dm, G, F
         #     hook.ghost_chords(1, 4, 5, 1, scale: :minor, root: :a, harmonic: true)  # Am, Dm, E, Am
         #     hook.ghost_chords([A3, C4, E4], [F3, A3, C4], per: 2.bars)   # explicit chords
+        #
+        # MIDI::Stream#ghost_chords does the same on a stream, with chords
+        # following the timeline's bars; on a generator clip every cycle
+        # snaps to its place in the progression.
         def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil)
-          raise ArgumentError, 'ghost_chords needs at least one chord (scale degrees from 1, note Arrays, or nil)' if chords.empty?
-          raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
-          raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
-
+          sc, classes = Clip.ghost_setup(chords, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie)
           span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)
           short = passing.nil? ? nil : Duration.whole_notes(passing)
-          sc = Scale[scale, root]
-          sc = Clip.harmonic_scale(sc) if harmonic
-          classes = chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }
+
+          return ghost_generated(classes, sc, span, short, tie) if generated?
 
           clip = self
           if @loop
@@ -90,6 +91,63 @@ module MB
 
           Clip.new(moved, length: clip.length, loop: @loop, seed: @seed, align: @align, variations: clip.equal?(self) ? @variations : [], performed: @performed)
         end
+
+        # Validates #ghost_chords' chords and options (shared with
+        # MIDI::Stream#ghost_chords), returning [scale, pitch classes per
+        # chord (nil for no chord)].
+        def self.ghost_setup(chords, scale:, root:, size:, harmonic:, tie:)
+          raise ArgumentError, 'ghost_chords needs at least one chord (scale degrees from 1, note Arrays, or nil)' if chords.empty?
+          raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
+          raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
+
+          sc = Scale[scale, root]
+          sc = Clip.harmonic_scale(sc) if harmonic
+          [sc, chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }]
+        end
+
+        # #ghost_chords of a generator clip (maintainer decision 5,
+        # 2026-10-16: transforms work per cycle): each cycle's notes snap to
+        # the chords of their place in the progression (cycle start plus
+        # note start), with ties following the contour from the previous
+        # cycle's last note, so the loop keeps its length and generates
+        # forever.  Returns the new clip.
+        def ghost_generated(classes, sc, span, short, tie)
+          original = self
+          values = @values && (@values + @values.flat_map { |v|
+            n = Clip.ghost_number(v)
+            next [] if n.nil?
+            classes.compact.flat_map { |pcs|
+              [true, false].map { |up| Sequence.transpose_value(v, Clip.nearest_tone(n, pcs, sc.period, up) - n) }
+            }
+          }).uniq
+
+          map_cycles(values: values) { |events, cycle|
+            numbers = events.map { |e| Clip.ghost_number(e.value) }
+            # Before the first note: the previous cycle's last note (a
+            # loop's first cycle compares with its own last, as for clips)
+            prev = if cycle > 0
+                     original.events_for(cycle - 1).filter_map { |e| Clip.ghost_number(e.value) }.last
+                   elsif @loop
+                     numbers.compact.last
+                   end
+            offset = @length * cycle
+            events.each_with_index.map { |e, i|
+              n = numbers[i]
+              next e if n.nil?
+              p = prev
+              prev = n
+              next e if short && e.length < short
+
+              pcs = classes[((offset + e.start) / span).floor % classes.length]
+              next e if pcs.nil?
+
+              up = tie == :up || (tie == :contour && p && p < n)
+              target = Clip.nearest_tone(n, pcs, sc.period, up)
+              target == n ? e : e.with(value: Sequence.transpose_value(e.value, target - n))
+            }
+          }
+        end
+        protected :ghost_generated
 
         # The most copies #ghost_chords makes of a looping clip.
         MAX_GHOST_REPEATS = 64
