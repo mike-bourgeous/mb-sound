@@ -224,19 +224,29 @@ module MB
           freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+          voice(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
+                        interpolation: interpolation, mips: mips, seed: seed, shared: {})
+        end
+
+        # The voice for #play's resolved inputs; +shared+ keeps modulation
+        # nodes that layers with the same settings share (one vibrato LFO
+        # per note, not one per layer).
+        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:)
           if @layers
             n = channel_count
             outs = @layers.map { |l|
-              o = l.play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                                 interpolation: interpolation, mips: mips, seed: seed)
+              o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
+                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared)
               o.is_a?(GraphNode::Channels) ? o.to_a : [o]
             }
             sums = Array.new(n) { |c| outs.map { |o| o[c % o.length] }.reduce(:+) }
             return n == 1 ? sums[0] : MB::Sound.channels(*sums)
           end
 
-          mods = @modulation && source ? modulators(source) : nil
-          freq = shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch) if mods && mods[:pitch]
+          mods = @modulation && source ? modulators(source, shared) : nil
+          if mods && mods[:pitch]
+            freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
+          end
 
           nodes = Array.new(channel_count) { |c|
             GraphNode::SamplerVoice.new(
@@ -329,23 +339,34 @@ module MB
         # The modulation sums for the notes of +source+: { pitch:, cutoff:,
         # volume: } nodes (cents, cents, centibels) for the destinations
         # #modulation names (see #modulation).
-        def modulators(source)
-          m = per_note(@modulation, source)
-          made = {}
+        # Sums and sources are made once per +shared+ Hash for the same
+        # settings (ZoneMaps compare by their zones), so layers share them;
+        # +keys+ holds each sum's settings for the caller's own sharing.
+        def modulators(source, shared = {})
+          raw = @modulation
           node = ->(name) {
-            made[name] ||= begin
-              spec = m[:sources].fetch(name)
-              if spec[:env]
-                source.env(**{ sensitivity: nil, gm: false }.merge(spec[:env]))
+            spec = raw[:sources].fetch(name)
+            shared[[:source, spec]] ||= begin
+              s = per_note(spec, source)
+              if s[:env]
+                source.env(**{ sensitivity: nil, gm: false }.merge(s[:env]))
               else
-                source.lfo(spec[:lfo], depth: spec[:depth] || 1.0, delay: spec[:delay] || 0, wheel: spec[:wheel], pressure: spec[:pressure])
+                source.lfo(s[:lfo], depth: s[:depth] || 1.0, delay: s[:delay] || 0, wheel: s[:wheel], pressure: s[:pressure])
               end
             end
           }
-          %i[pitch cutoff volume].each_with_object({}) { |dest, h|
-            list = Array(m[dest]).reject { |_, amount| amount == 0 }
-            h[dest] = list.map { |name, amount| node.(name) * amount }.reduce(:+) unless list.empty?
+          keys = {}
+          out = %i[pitch cutoff volume].each_with_object({}) { |dest, h|
+            list = Array(raw[dest]).reject { |_, amount| amount == 0 }
+            next if list.empty?
+            key = list.map { |name, amount| [raw[:sources][name], amount] }
+            keys[dest] = key
+            h[dest] = shared[[:sum, dest, key]] ||= list.map { |name, amount|
+              a = per_note(amount, source)
+              a == 1 ? node.(name) : node.(name) * a
+            }.reduce(:+)
           }
+          out.merge(keys: keys)
         end
 
         # +hz+ (a node) shifted by +mods+[+dest+] cents.
