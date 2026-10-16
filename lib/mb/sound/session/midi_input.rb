@@ -340,11 +340,6 @@ module MB
             @node_type_name = 'MIDI Input'
           end
 
-          # True: notes come from live input (see MIDI::Stream#live_input?).
-          def live_input?
-            true
-          end
-
           # Live input has no content position (see LiveSource).
           def seek(_time)
             self

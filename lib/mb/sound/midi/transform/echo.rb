@@ -124,8 +124,10 @@ module MB
           end
 
           def add_note(event, index, d, chain)
-            id = schedule_on(event)
             gated = @gate && index > 0
+            # Ungated echoes keep the played note's hint (with_note copies it)
+            event = event.with_length_hint(gate_seconds(d)) if gated
+            id = schedule_on(event)
             schedule_off(Event.note_off(event.note, channel: event.channel, time: event.time + gate_seconds(d)), id) if gated
             chain << [event.note, event.channel, id, index, gated]
           end

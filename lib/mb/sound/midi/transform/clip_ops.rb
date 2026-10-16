@@ -8,23 +8,52 @@ module MB
         # Like every stream transform they only delay, since a stream
         # doesn't know a note's length (or the next note) at its note-on.
 
-        # Longer notes: each note-off comes +fraction+ (1 or more) of the
-        # played length after its note-on (see Stream#legato).
+        # Notes +fraction+ of their length (see Stream#legato).  Longer
+        # notes (1 or more) delay each note-off.  Shorter ones need the
+        # note's length at its note-on: notes with a length hint
+        # (Event#length_hint: from clips, arps, echoes, ratchets, ...) get
+        # their note-off planned then, with no added latency (an earlier
+        # played note-off still ends them); notes without one pass through
+        # unchanged after one MB::Sound.live_error notice (an error in
+        # scripts; maintainer, 2026-10-16: "length hints, else pass +
+        # live_error").
         class Legato < NoteMap
           def initialize(parent, fraction, **options)
             super(parent, **options)
             @fraction = Sequence::Clip.check_legato(fraction)
-            if @fraction < 1
-              raise ArgumentError, "A stream's legato only lengthens notes (1 or more; got #{fraction}): its notes' lengths aren't known until they end, so shorten clips with Clip#legato, or give every note a fixed length with legato(1.n16) or len"
-            end
+            @noticed = false
             @node_type_name = "legato(#{fraction})"
           end
 
           private
 
           def note_off_time(time, delay, on_time)
+            return super if @fraction < 1
+
             start = on_time + delay
             MB::M.max(start + (time - on_time) * @fraction, time)
+          end
+
+          def planned_length(out)
+            return nil if @fraction >= 1
+
+            hint = out.length_hint
+            if hint.nil?
+              unless @noticed
+                @noticed = true
+                MB::Sound.live_error(ArgumentError.new("legato(#{@fraction.to_f}) on a stream shortens only notes with a length hint (from clips, arp, echo, ratchet, len); notes from live keys or files pass through unchanged"))
+              end
+              return nil
+            end
+
+            seconds_of(hint) * @fraction
+          end
+
+          # Hints scale (Durations stay Durations, so they follow the tempo).
+          def output_hint(out, e, delay, planned)
+            hint = out.length_hint
+            return super unless hint
+            hint.is_a?(Sequence::Duration) ? Sequence::Duration.new(hint.whole_notes * @fraction) : hint * @fraction
           end
         end
 
@@ -53,8 +82,14 @@ module MB
 
           def note_on(e)
             step = seconds_of(@rate)
-            chain = map_on(e).map { |out, delay|
-              out = out.at(e.time + delay)
+            whole = e.length_hint && seconds_of(e.length_hint)
+            last = @count - 1
+            chain = map_on(e).each_with_index.map { |(out, delay), i|
+              # Every hit but the last lasts a step; the last, the rest of
+              # the note if its length is known
+              hint = i < last ? step : nil
+              hint = hint ? MB::M.min(hint, whole - delay) : whole - delay if whole && whole > delay
+              out = out.at(e.time + delay).with_length_hint(hint)
               [out.note, out.channel, schedule_on(out), delay, e.time]
             }
             # Every hit but the last ends where the next starts; the last

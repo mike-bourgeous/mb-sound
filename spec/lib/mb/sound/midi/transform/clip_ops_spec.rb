@@ -103,8 +103,96 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
       expect(read_all(run_stream.legato(1.n32, transport: transport))).to eq(read_all(run_stream.len(1.n32, transport: transport)))
     end
 
-    it "can't shorten notes" do
-      expect { run_stream.legato(0.5) }.to raise_error(ArgumentError, /only lengthens/)
+    it 'shortens notes without a length hint only with a live_error (an error in specs and scripts)' do
+      expect { read_all(run_stream.legato(0.5)) }.to raise_error(ArgumentError, /length hint/)
+    end
+
+    it 'passes notes without a hint through unchanged in live mode, with one notice' do
+      MB::Sound.live = true
+      out = nil
+      expect { out = read_all(run_stream.legato(0.5)) }.to output(/length hint/).to_stderr
+      expect(out).to eq(read_all(run_stream))
+    ensure
+      MB::Sound.live = false
+    end
+  end
+
+  describe 'length hints and Stream#legato below 1' do
+    # A note-on at +on+ with a length hint (seconds, or a Duration), and
+    # its note-off at +off+.
+    def hinted(note, on, off, hint = off - on)
+      [ev.note_on(note, 0.5, time: on).with_length_hint(hint), ev.note_off(note, time: off)]
+    end
+
+    def offs(out)
+      out.select { |e| e[0] == :note_off }.map { |e| [e[1], e[2]] }
+    end
+
+    it 'puts Duration hints on clip notes, seconds on arp, gated echo, and ratchet notes; chords and echoes copy them' do
+      clip_ons = read_events(riff.stream(transport: transport)).select(&:note_on?)
+      expect(clip_ons.map(&:length_hint)).to all(eq(1.n8))
+      expect(clip_ons.map(&:length_hint)).to all(be_a(MB::Sound::Sequence::Duration))
+
+      arp = read_events(list_stream(*hinted(60, 0r, 1r)).arp(:up, 8, gate: 0.5, transport: transport)).select(&:note_on?)
+      expect(arp.map(&:length_hint).uniq).to eq([1/8r])
+
+      echo = read_events(list_stream(*hinted(60, 0r, 1/10r)).echo(0.25, 2, gate: 0.5)).select(&:note_on?)
+      expect(echo.map(&:length_hint)).to eq([1/10r, 1/8r, 1/8r])
+      echo = read_events(list_stream(*hinted(60, 0r, 1/10r)).echo(0.25, 1)).select(&:note_on?)
+      expect(echo.map(&:length_hint)).to eq([1/10r, 1/10r])
+
+      chord = read_events(list_stream(*hinted(60, 0r, 1/10r)).chord(:maj)).select(&:note_on?)
+      expect(chord.map(&:length_hint)).to eq([1/10r] * 3)
+
+      rat = read_events(list_stream(*hinted(60, 0r, 1r)).ratchet(3, rate: 1/4r)).select(&:note_on?)
+      expect(rat.map(&:length_hint)).to eq([1/4r, 1/4r, 1/2r])
+    end
+
+    it 'shortens clip notes with no added latency, like Clip#legato' do
+      expect(rows(riff.bake(MB::Sound::MIDI::Transform::Spec.new.legato(0.5)))).to eq(rows(riff.legato(0.5)))
+      out = read_all(riff.stream(transport: transport).legato(0.25), chunk: 1/100r)
+      expect_balanced(out)
+      expect(offs(out).first).to eq([60, 1/16r]) # an 8th is 1/4 s at 120 BPM
+    end
+
+    it 'keeps a re-struck note, dropping the old planned note-off' do
+      st = list_stream(*hinted(60, 0r, 1r), *hinted(60, 3/10r, 13/10r))
+      out = read_all(st.legato(0.5), chunk: 1/20r)
+      expect(out.map { |e| e.first(3) }).to eq([[:note_on, 60, 0r], [:note_off, 60, 3/10r], [:note_on, 60, 3/10r], [:note_off, 60, 4/5r]])
+    end
+
+    it 'sends a played note-off earlier than the planned one' do
+      st = list_stream(ev.note_on(60, 0.5, time: 0r).with_length_hint(1r), ev.note_off(60, time: 1/5r))
+      out = read_all(st.legato(0.5), chunk: 1/20r)
+      expect_balanced(out)
+      expect(offs(out)).to eq([[60, 1/5r]])
+    end
+
+    it 'sends planned note-offs after the stream ends' do
+      st = list_stream(ev.note_on(60, 0.5, time: 0r).with_length_hint(1r))
+      out = read_all(st.legato(0.5))
+      expect(offs(out)).to eq([[60, 1/2r]])
+    end
+
+    it 'reads Duration hints at the current tempo' do
+      st = -> { list_stream(ev.note_on(60, 0.5, time: 0r).with_length_hint(1.n4), ev.note_off(60, time: 4r)) }
+      t = MB::Sound::Sequence::Transport.new(bpm: 120)
+      a = st.().legato(0.5, transport: t)
+      t.bpm = 60
+      expect(offs(read_all(a))).to eq([[60, 1/2r]]) # a quarter is 1 s at 60 BPM
+    end
+
+    it 'follows quantize(ends:) and humanize before it' do
+      st = list_stream(*hinted(60, 1/100r, 1/10r))
+      out = read_all(st.quantize(16, ends: true, transport: transport).legato(0.5))
+      # quantized to [1/8, 1/4) s, so half is 1/16 s
+      expect(out.map { |e| e.first(3) }).to eq([[:note_on, 60, 1/8r], [:note_off, 60, 3/16r]])
+
+      st = list_stream(*hinted(60, 0r, 1/10r))
+      out = read_all(st.humanize(0.02, seed: 4).legato(0.5))
+      on, off = out.map { |e| e[2] }
+      expect(on).to be > 0
+      expect(off - on).to eq(1/20r)
     end
   end
 
@@ -140,12 +228,18 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
       expect(ons(out).map { |e| e[1] }).to eq([s::C4.number] * 4 + [s::A3.number] * 4)
     end
 
-    it 'goes through live_error on live input, and has no passing notes' do
-      live = MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(MB::Sound::MIDI::VirtualInput.new))
-      expect(live.live_input?).to eq(true)
-      expect(live.transpose(2).live_input?).to eq(true)
-      expect(run_stream.live_input?).to eq(false)
-      expect { live.ghost_chords(1, 4) }.to raise_error(ArgumentError, /bar position/)
+    it 'works on live input, following the timeline bars, and has no passing notes' do
+      vin = MB::Sound::MIDI::VirtualInput.new(clock: -> { 0r })
+      live = MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(vin, timing: :asap))
+      g = live.ghost_chords(1, 4, scale: s.scale(:minor, :a), tie: :up, transport: transport)
+      r = g.reader
+      vin.note_on(s::B3.number)
+      first = r.next(1r).select(&:note_on?)
+      r.next(1r) # into bar 2 (a bar is 2 s at 120 BPM)
+      vin.note_on(s::B3.number)
+      second = r.next(1/10r).select(&:note_on?)
+      expect(first.map(&:note)).to eq([s::C4.number])
+      expect(second.map(&:note)).to eq([s::A3.number])
       expect { run_stream.ghost_chords(1, passing: 1.n16) }.to raise_error(ArgumentError, /passing/)
     end
   end

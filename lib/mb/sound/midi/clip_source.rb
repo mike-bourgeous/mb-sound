@@ -385,11 +385,14 @@ module MB
           end
           start = @flam_lead && @flam_start
 
-          out = @clip.edges(wn_from, wn_to, early: early, fills: fills).filter_map { |time, type, event, _cycle|
+          out = @clip.edges(wn_from, wn_to, early: early, fills: fills).filter_map { |time, type, event, cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
               next if start && event.flam && time >= start
-              Event.note_on(event.value, event.velocity, channel: @channel, time: t, pitch: event.pitch, flam: event.flam)
+              # The note's length from here (its note-on may have moved to
+              # a read start), in whole notes so it follows the tempo
+              hint = Sequence::Duration.new(MB::M.max(cycle * @clip.length + event.start + event.length - time, 0r))
+              Event.note_on(event.value, event.velocity, channel: @channel, time: t, pitch: event.pitch, flam: event.flam, length_hint: hint)
             else
               Event.note_off(event.value, channel: @channel, time: t)
             end

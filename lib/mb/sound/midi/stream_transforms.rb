@@ -186,13 +186,18 @@ module MB
           Stream.new(Transform::Every.new(self, n, from: from, **options))
         end
 
-        # Longer notes: every note lasts +fraction+ (1 or more) of its
-        # played length (see Sequence::Clip#legato).  A stream can't end a
-        # note before its note-off arrives, so fractions under 1 raise an
-        # error.  Given a length (a Duration or Length) instead, every note
-        # lasts that long, as #note_length / #len.
+        # Every note lasts +fraction+ of its length (see
+        # Sequence::Clip#legato).  Fractions of 1 or more delay note-offs.
+        # Fractions under 1 shorten notes that carry a length hint
+        # (MIDI::Event#length_hint: notes from clips, arp, echo, ratchet,
+        # len), planning their note-offs at the note-on, so no latency is
+        # added; notes without a hint (live keys, files) pass through
+        # unchanged after one MB::Sound.live_error notice (an error in
+        # scripts and specs).  Given a length (a Duration or Length)
+        # instead, every note lasts that long, as #note_length / #len.
         #
         #     midi.legato(1.5)
+        #     riff.loop.stream.legato(0.5)   # staccato from the clip's lengths
         #     midi.legato(1.n16)     # as len(1.n16)
         def legato(fraction, **options)
           return note_length(fraction, **options) if fraction.is_a?(Sequence::Duration) || fraction.is_a?(Length)
@@ -219,26 +224,13 @@ module MB
         # timeline-aligned loop gets the same chords as with
         # Clip#ghost_chords.  Ties follow the played contour; +:passing+
         # isn't available (a note's length isn't known when it starts).
-        # Live input goes through MB::Sound.live_error (maintainer decision
-        # 3, 2026-10-16: until live input has its bar position), so in live
-        # mode it warns and returns the stream unchanged.
+        # Live input works too: its chords follow the session timeline's
+        # bars (maintainer, 2026-10-16, lifting the earlier live_error).
         #
         #     hook.loop.stream.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))
+        #     midi.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))   # keys snap to the bar's chord
         def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
-          if live_input?
-            return self if MB::Sound.live_error(ArgumentError.new('ghost_chords on live MIDI input waits for live input to know its bar position; use it on clips (or clip streams)')).nil?
-          end
           Stream.new(Transform::GhostChords.new(self, chords, per: per, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie, passing: passing, **options))
-        end
-
-        # True if this stream's notes come from live MIDI input (a
-        # LiveSource at the root of its transforms).
-        def live_input?
-          case @source
-          when Transform::Merge then @source.inputs.any?(&:live_input?)
-          when Transform then @source.parent.is_a?(Stream) && @source.parent.live_input?
-          else @source.respond_to?(:live_input?) && @source.live_input?
-          end
         end
 
         # Moves notes into a scale: +scale+ a Scale, name, or Array of
