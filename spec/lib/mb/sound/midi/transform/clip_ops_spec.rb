@@ -264,5 +264,13 @@ RSpec.describe('MIDI clip operations on streams', :midi_transforms, :aggregate_f
       expect_balanced(out)
       expect(ons(out)).not_to be_empty
     end
+
+    it 'round-trips clip operations through recipes and graph documents' do
+      c = s.seq(s::C4, s::E4).n8.loop.transpose(2, scale: s.scale(:minor, :a)).shift(1.n16).ratchet(2, rate: 1.n32).legato(1.n32)
+      expect(c.to_ruby).to eq('seq(C4, E4).n8.loop.transpose(2, scale: scale(:minor, A4)).shift(1.n16).ratchet(2, rate: 1.n32).legato(1.n32)')
+      text = "graph 3\nseq(C4, E4).n8.loop.bake(echo(1.n8, 1).swing(0.6).ratchet(2, rate: 1.n32).ghost_chords(1, 4)).synth { |v| v.hz.saw }\n"
+      g = MB::Sound::GraphIO.load(text)
+      expect(g.to_ruby).to include('bake(echo(1.n8, 1).swing(0.6).ratchet(2, rate: 1.n32).ghost_chords(1, 4))')
+    end
   end
 end
