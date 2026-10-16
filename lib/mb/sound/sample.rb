@@ -92,8 +92,17 @@ module MB
         # Files saved by #save keep their settings (tags); +options+
         # override them.  In graph documents file names are relative to the
         # document (GraphIO::FileGuard).
-        def from_file(path, **options)
+        #
+        # Loop files bring their metadata (see #bpm, #beats, #markers, and
+        # Sample::LoopInfo): ACID chunks (tempo, beats, meter, root,
+        # one-shot), `smpl` (root, loop), cue points (markers), FLAC tags,
+        # then tempo and key words in the file and folder names.  With
+        # +detect+ true a sample whose tempo is still unknown gets one from
+        # tempo detection (#detect_tempo).
+        def from_file(path, detect: false, **options)
           path = path.to_s
+          return from_file(path, **options).then { |s| s.bpm ? s : s.detect_tempo } if detect
+
           key = cache_key(path, options)
           cached = key && @cache&.[](key)
           if cached
@@ -125,8 +134,88 @@ module MB
           info = saved_tags(tags)
           scale = info.delete(:scale)
           channels = channels.map { |c| c * scale } if scale
-          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **info.merge(options))
+          meta = info.empty? ? loop_metadata(real.to_s, tags, channels) : {}
+          new(channels, name: File.basename(path), file: options.empty? ? File.expand_path(real.to_s) : nil, **meta.merge(info).merge(options))
         end
+
+        # Sample options from a file's loop metadata (Sample::LoopInfo),
+        # positions scaled from the file's rate to 48 kHz (the rate
+        # MB::Sound.read gives) and kept inside the decoded +channels+.
+        # Loops (ACID loops always over the whole file, whatever `smpl`
+        # says; files LoopInfo calls loops) loop :forward over the whole
+        # file unless a `smpl` loop applies; one-shots keep no name tempo.
+        # Files LoopInfo couldn't call (or called loops only from a
+        # fitting name tempo) are one-shots when they decay after one hit
+        # (.decays?).
+        def loop_metadata(path, tags, channels, sample_rate: 48000)
+          length = channels[0]&.length
+          e = LoopInfo.read(path, seconds: length && length.to_f / sample_rate)
+          src = e.sources.dup
+          why = e.why.dup
+          unless e.bpm && e.key
+            f = { bpm: e.bpm, key: e.key }
+            s2 = {}
+            LoopInfo.from_tags(tags, f, s2)
+            e = e.with(bpm: f[:bpm], key: f[:key])
+            src.merge!(s2)
+          end
+          if length && [nil, :tempo].include?(src[:one_shot]) && decays?(channels)
+            src[:one_shot] = :decay
+            why[:one_shot] = 'one hit decaying to silence'
+            e = e.with(one_shot: true)
+            if src[:bpm] == :name
+              why[:bpm] = "#{why[:bpm]}; dropped: a one-shot"
+              e = e.with(bpm: nil, beats: nil)
+              src.delete(:bpm)
+              src.delete(:beats)
+            end
+          end
+
+          k = e.sample_rate && e.sample_rate > 0 ? sample_rate.to_f / e.sample_rate : 1.0
+          scale = ->(pts) { pts.map { |a, b, mode| x = (a * k).round.clamp(0, length - 1); [x.to_f, (b * k).round.clamp(x + 1, length).to_f, mode] } }
+          out = { meta_source: src.freeze }
+          out[:meta] = { why: why.freeze, smpl_loops: (length ? scale.(e.smpl_loops) : []).freeze }.freeze
+          out[:bpm] = e.bpm if e.bpm
+          out[:beats] = e.beats if e.beats
+          out[:meter] = e.meter if e.meter
+          out[:key] = e.key if e.key
+          out[:root] = e.root if e.root
+          if e.loop && length
+            a, b, mode = scale.([e.loop])[0]
+            out[:loop] = [a, b]
+            out[:loop_mode] = mode
+          elsif e.one_shot == false && length
+            out[:loop] = [0.0, length.to_f]
+            out[:loop_mode] = :forward
+          end
+          if length && !e.markers.empty?
+            out[:markers] = e.markers.map { |pos, label| [(pos * k).round.clamp(0, length - 1), label] }.uniq(&:first)
+          end
+          out
+        rescue SystemCallError, IOError, ArgumentError
+          {}
+        end
+
+        # The tail of a one-shot: true if +channels+ hold one hit at the
+        # start (at most one onset, within 10 ms of the start) whose last
+        # tenth is DECAY_DB quieter than its loudest 10 ms.
+        def decays?(channels)
+          mix = Numo::DFloat.cast(channels.sum) / channels.length
+          n = mix.length
+          return false if n < 4800
+          win = 480
+          frames = n / win
+          rms = Numo::NMath.sqrt((mix[0...(frames * win)].reshape(frames, win)**2).mean(axis: 1))
+          peak = rms.max
+          return false unless peak > 0
+          tail = Math.sqrt((mix[(n - n / 10)..]**2).mean)
+          return false unless tail <= peak * 10**(DECAY_DB / 20.0)
+          on = Onsets.detect(Sample.new([mix]))
+          on.length <= 1 && (on.empty? || on[0] < 480)
+        end
+
+        # How much quieter (dB) a one-shot's last tenth is than its peak.
+        DECAY_DB = -30
 
         # A Sample of a sample-mode Wavetable's sound, root, and loop.
         def from_wavetable(table, **options)
@@ -165,6 +254,10 @@ module MB
           out[:tune] = Float(t[:tune]) if t[:tune]
           out[:level] = Float(t[:level]) if t[:level]
           out[:bpm] = Float(t[:bpm]) if t[:bpm]
+          out[:beats] = t[:beats].to_s =~ /\A\d+\z/ ? Integer(t[:beats].to_s) : Float(t[:beats]) if t[:beats]
+          out[:meter] = t[:meter].to_s.split('/').map { |x| Integer(x) } if t[:meter]
+          out[:key] = t[:key].to_sym if t[:key]
+          out[:markers] = Sample.parse_markers(t[:markers]) if t[:markers] && !t[:markers].to_s.empty?
           out[:interpolation] = t[:interpolation].to_sym if t[:interpolation]
           out[:mips] = saved_mips(t[:mips]) if t[:mips]
           out[:scale] = Float(t[:scale]) if t[:scale]
@@ -209,6 +302,82 @@ module MB
       # A name for listings.
       attr_reader :name
 
+      # The loop's length in beats (an Integer from ACID chunks or tags, or
+      # from #bpm and the length when that is within 2% of a whole number;
+      # else a Float), or nil without a tempo.
+      def beats
+        return @beats if @beats && full_region?
+        return nil unless @bpm
+        b = seconds * @bpm / 60.0
+        (b - b.round).abs <= LoopInfo::BEAT_TOLERANCE * b && b.round > 0 ? b.round : b
+      end
+
+      # True if the region is the whole audio (#beats from a file's
+      # chunks describe the whole file).
+      def full_region?
+        @start == 0 && @stop == @audio.length
+      end
+
+      # The loop's length in bars of #meter (4/4 unless the file says), or
+      # nil without #beats.
+      def bars
+        b = beats
+        return nil unless b
+        r = b.to_r / meter[0]
+        r.denominator == 1 ? r.to_i : r.to_f
+      end
+
+      # The meter as [beats per bar, beat note] ([4, 4] unless the file
+      # says otherwise).
+      def meter
+        @meter || [4, 4].freeze
+      end
+
+      # The musical key from the file name or tags (a Symbol like :Am,
+      # :"F#", :Eb), or nil.
+      attr_reader :key
+
+      # Where loop metadata came from: { bpm: :acid | :tags | :name |
+      # :detected, beats: ..., key: :name, markers: :cue, ... } (empty for
+      # samples not read from loop files).
+      def meta_source
+        @meta_source || {}
+      end
+
+      # More loop-file metadata: { why: { bpm: "name 98 (fits 8 beats)",
+      # one_shot: "name 'kick'" } (the reasons in words), smpl_loops:
+      # [[start, stop, mode], ...] (every `smpl` loop in source samples,
+      # also for ACID loops, which ignore them) } (empty when not from a
+      # loop file).
+      def meta
+        @meta || {}
+      end
+
+      # A position in a sample (Sample#markers): source samples from the
+      # region start in play order, and a label (or nil).
+      Marker = Data.define(:position, :label) do
+        def to_s = label ? "#{position} #{label.inspect}" : position.to_s
+      end
+
+      # The markers inside the region (cue points of WAV files, Markers
+      # given to #with), as Markers with positions from the region start in
+      # play order.
+      def markers
+        return [].freeze unless @markers
+        @markers.filter_map { |pos, label|
+          next unless pos >= @start && pos < @stop
+          Marker.new(position: @reversed ? @stop - 1 - pos : pos - @start, label: label)
+        }.sort_by(&:position).freeze
+      end
+
+      # Markers from their saved text ("pos:label;pos;...").
+      def self.parse_markers(text)
+        text.to_s.split(';').filter_map { |m|
+          pos, label = m.split(':', 2)
+          pos =~ /\A\d+\z/ ? [Integer(pos), label&.then { |l| l.gsub('%3B', ';').gsub('%25', '%') }] : nil
+        }
+      end
+
       # How voices read this sample unless told otherwise (see #read_as):
       # an interpolation (Wavetable::INTERPOLATIONS; :none is the classic
       # drop-sample read) and a level spacing (Wavetable mips; false for no
@@ -234,7 +403,8 @@ module MB
       # +loop_mode+ one of LOOP_MODES (:forward with a loop, else
       # :one_shot).
       def initialize(data, root: 60, loop: nil, loop_mode: nil, start: nil, stop: nil, reverse: false, fade_in: 0, fade_out: 0, tune: 0, level: 1.0,
-                     bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil)
+                     bpm: nil, name: nil, interpolation: nil, mips: nil, sample_rate: 48000, audio: nil, lineage: nil, file: nil,
+                     beats: nil, meter: nil, key: nil, markers: nil, meta_source: nil, meta: nil)
         @audio = audio || Audio.new(Sample.channels_of(data), sample_rate)
         @start = Integer(start || 0)
         @stop = Integer(stop || @audio.length)
@@ -244,6 +414,15 @@ module MB
 
         @root = Sample.note_number(root)
         @bpm = bpm&.to_f
+        raise ArgumentError, "bpm: must be a positive number (got #{bpm.inspect})" if @bpm && !(@bpm > 0 && @bpm.finite?)
+        @beats = beats.nil? ? nil : (beats.is_a?(Integer) ? beats : beats.to_f)
+        raise ArgumentError, "beats: must be positive (got #{beats.inspect})" if @beats && !(@beats > 0)
+        @meter = meter.nil? ? nil : meter.map { |m| Integer(m) }.freeze
+        raise ArgumentError, "meter: is [beats per bar, beat note] (got #{meter.inspect})" if @meter && !(@meter.length == 2 && @meter.all?(&:positive?))
+        @key = key&.to_sym
+        @markers = markers.nil? ? nil : Sample.marker_list(markers)
+        @meta_source = meta_source
+        @meta = meta
         @loop_points = loop.nil? ? nil : Sample.loop_points(loop, self)
         @loop_mode = (loop_mode || (@loop_points ? :forward : :one_shot)).to_sym
         raise ArgumentError, "Unknown loop mode #{@loop_mode.inspect} (#{LOOP_MODES.join(', ')})" unless LOOP_MODES.include?(@loop_mode)
@@ -287,6 +466,19 @@ module MB
         else
           raise ArgumentError, "Cannot make a sample from #{data.class} (give a file name, NArray, Array, or Wavetable)"
         end
+      end
+
+      # Absolute markers [[position, label], ...] from +markers+ (pairs,
+      # positions, or Markers), frozen and sorted.
+      def self.marker_list(markers)
+        markers.map { |m|
+          case m
+          when Marker then [m.position, m.label]
+          when Array then [m[0], m[1]&.to_s]
+          when Numeric then [m, nil]
+          else raise ArgumentError, "Markers are positions or [position, label] pairs (got #{m.inspect})"
+          end
+        }.map { |p, l| [Integer(p.round), l&.freeze].freeze }.sort_by(&:first).freeze
       end
 
       # The note number of +root+ (a Note, Pitch, or number).
@@ -387,6 +579,7 @@ module MB
           root: @root, loop: @loop_points, loop_mode: mode, start: @start, stop: @stop,
           reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name,
           interpolation: @interpolation, mips: @mips, audio: @audio, lineage: @lineage,
+          beats: @beats, meter: @meter, key: @key, markers: @markers, meta_source: @meta_source, meta: @meta,
         }
         Sample.new(nil, **kw.merge(changes))
       end
@@ -506,10 +699,109 @@ module MB
 
       # A graph node playing the sample once from its start (then ending),
       # e.g. `play kick.node` or `kick.node.reverb(:room)`.  Alias #to_node.
-      def node(**options)
+      # With +follow+ (true, :stretch, or :resample) a loop following the
+      # session tempo instead (see #follow).
+      def node(follow: nil, **options)
+        return follow(follow == true ? :stretch : follow, **options) if follow
         to_instrument(keytrack: 0).node(**options)
       end
       alias to_node node
+
+      # The sample as a loop that follows the session tempo (a
+      # GraphNode::LoopPlayer per channel; a Channels bundle for stereo):
+      # its #beats fill the same span of the timeline at any tempo, lined up
+      # with bar 1 (+align+ :timeline) or the launch (:launch), staying on
+      # the bar through tempo changes.  +mode+ :stretch keeps the pitch
+      # (stretched offline per tempo with +stretch+, a stretch mode or a
+      # Hash of #stretch options; :auto by default: :slice for percussive
+      # loops and :spectral for tonal ones, as #material says);
+      # :resample speeds the sample up and down (pitch follows, like a
+      # varispeed).  Needs a tempo (#bpm: from the file, a name,
+      # `Sample[path, bpm: 98]`, or `detect: true`).
+      #
+      #     brk = Sample['Funk/break_98bpm.wav']
+      #     bg :brk, brk.follow                     # stays in time at the session's tempo (drums: slices)
+      #     bg :pad, pad.follow                     # tonal: the phase vocoder keeps notes whole
+      #     bg :pad, pad.follow(stretch: :slice)    # say which
+      #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
+      #     bpm 128                                  # every follower restretches
+      def follow(mode = :stretch, stretch: :auto, align: :timeline)
+        mode = { true => :stretch, resample: :resample, varispeed: :resample, stretch: :stretch }.fetch(mode) {
+          raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
+        }
+        reason = nil
+        if stretch == :auto
+          m = mode == :stretch ? material : nil
+          stretch = m&.kind == :tonal ? :spectral : :slice
+          reason = m && "#{stretch}: #{m.why}"
+        else
+          reason = 'stretch: given'
+        end
+        opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason) }
+        nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
+      end
+
+      # What kind of sound this is, for choosing a stretch (Sample#follow's
+      # default): :percussive (drums: the slice stretch keeps every hit
+      # exact) or :tonal (notes and pads: the phase vocoder keeps notes
+      # whole, where slices can cut a note at a soft onset).  A Material
+      # with +kind+, +flatness+, and +why+ in words.  Name words decide
+      # first (MATERIAL_WORDS; drum, kick, hat, perc, break... or pad,
+      # arp, chord, bass, keys, vocal...), else the spectral flatness of
+      # the region (energy-weighted mean over 2048-sample Hann frames,
+      # 100 Hz-10 kHz): noise-like hats and snares make drum loops flat
+      # (a 909 groove 0.12, an 808 groove 0.15), notes and chords don't
+      # (saw arps, pads, basses under 0.001; a filtered noise pad 0.019);
+      # PERCUSSIVE_FLATNESS (0.04) splits them.  Loops of pitched drums
+      # only (an 808 kick alone measures 0.001) read as tonal: the
+      # spectral stretch keeps their transients too.  Cached per audio.
+      def material
+        words = (@name || '').to_s.gsub(/([a-z])([A-Z])/, '\\1 \\2').downcase.split(/[^a-z]+/)
+        MATERIAL_WORDS.each do |kind, list|
+          w = words.find { |x| list.include?(x) }
+          return Material.new(kind: kind, flatness: nil, why: "name '#{w}'") if w
+        end
+        f = @audio.edit([:flatness, @start, @stop]) { Sample.flatness(mono_mix, sample_rate) }
+        kind = f >= PERCUSSIVE_FLATNESS ? :percussive : :tonal
+        Material.new(kind: kind, flatness: f, why: "#{kind}, spectral flatness #{format('%.3f', f)}")
+      end
+
+      # What #material found.
+      Material = Data.define(:kind, :flatness, :why)
+
+      # Name words for #material (percussive words first).
+      MATERIAL_WORDS = {
+        percussive: %w[drum drums drm beat beats break breaks breakbeat breakbeats perc percs percussion kick kicks snare snares hat hats hihat hihats cymbal ride top tops shaker tamb conga congas bongo bongos],
+        tonal: %w[pad pads arp arps chord chords keys piano rhodes organ synth synths lead leads melody melodic bass basses vocal vocals vox guitar gtr string strings brass horn horns bell bells pluck plucks choir],
+      }.freeze
+
+      # #material's flatness split (see there).
+      PERCUSSIVE_FLATNESS = 0.04
+
+      # The energy-weighted mean spectral flatness of +x+ (see #material).
+      def self.flatness(x, sample_rate = 48000)
+        x = Numo::DFloat.cast(x)
+        n = 2048
+        hop = 1024
+        w = 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(n).seq * (2 * Math::PI / n))
+        lo = (100 * n / sample_rate.to_f).ceil
+        hi = [(10000 * n / sample_rate.to_f).floor, n / 2].min
+        fl = []
+        en = []
+        k = 0
+        while k + n <= x.length
+          p = (Numo::Pocketfft.rfft(x[k...(k + n)] * w).abs**2)[lo..hi] + 1e-20
+          fl << Math.exp(Numo::NMath.log(p).mean) / p.mean
+          en << p.sum
+          k += hop
+        end
+        return 0.0 if en.empty?
+        en = Numo::DFloat.cast(en)
+        fl = Numo::DFloat.cast(fl)
+        keep = en > en.max * 1e-3
+        ((fl[keep] * en[keep]).sum / en[keep].sum).to_f
+      end
 
       # A granular cloud of this sample: a stereo Channels bundle of a
       # GraphNode::Grains (see design/notes/granular.md).  Every option is a
@@ -679,7 +971,16 @@ module MB
       #     pad.stretch(8, mode: :spectral, randomize: 1)     # Paulstretch-like phases in the vocoder's 4096-sample window
       #     bowl.stretch(100, mode: :paul, window: 0.5.seconds)  # an endless wash
       #     voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false)   # like Nasca Paul's original (voices)
-      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann)
+      def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
+                  slices: nil, fade: nil, fill: nil)
+        if SLICE_MODES.include?(mode.to_sym)
+          unless fit == :auto && window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
+            raise ArgumentError, 'mode: :slice takes slices:, fade:, fill:, and (for fill: :stretch) cycle: and crossfade:'
+          end
+          return slice_stretch(ratio, slices, fade, fill || :gap, cycle, crossfade)
+        end
+        raise ArgumentError, 'slices:, fade:, and fill: are for mode: :slice' unless slices.nil? && fade.nil? && fill.nil?
+
         mode = Spectral.mode_name(mode)
         return spectral_stretch(ratio, mode, window, overlap, transients, seed, randomize, link, shape) unless mode == :cyclic
         unless window.nil? && overlap == Spectral::OVERLAP && transients.nil? && seed == 0 && randomize.nil? && link == true && shape == :hann
@@ -691,7 +992,7 @@ module MB
         x = position(crossfade).round
         kw = { cycle: cycle, crossfade: crossfade, fit: fit }.reject { |k, v| k == :cycle ? v == 25.ms : (k == :fit ? v == :auto : v == CROSSFADE) }
         guide = nil
-        edit(:stretch, [ratio], kw, read: stretch_read(ratio)) { |d|
+        edit(:stretch, [ratio], kw, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |d|
           guide ||= fit == :auto ? mono_mix : nil
           Lofi.stretch(d, ratio.to_f, c, x, fit: fit, guide: guide, sample_rate: sample_rate)
         }
@@ -699,6 +1000,106 @@ module MB
 
       # The cyclic stretch's default crossfade between cycles.
       CROSSFADE = 3.ms
+
+      # Names of the slice stretch's mode (see #stretch).
+      SLICE_MODES = %i[slice slices beat beats rex].freeze
+
+      # The slice stretch (see #stretch and SliceStretch).
+      def slice_stretch(ratio, slices, fade, fill, cycle, crossfade)
+        raise ArgumentError, "Stretch ratios are positive (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
+        raise ArgumentError, "fill: is one of #{SliceStretch::FILLS.inspect} (got #{fill.inspect})" unless SliceStretch::FILLS.include?(fill)
+        cuts, = slice_cuts(slices)
+        f = position(fade.nil? ? SliceStretch::FADE : fade).round
+        kw = { mode: :slice }
+        kw[:slices] = slices unless slices.nil?
+        kw[:fade] = fade unless fade.nil?
+        kw[:fill] = fill unless fill == :gap
+        kw[:cycle] = cycle unless cycle == 25.ms
+        kw[:crossfade] = crossfade unless crossfade == CROSSFADE
+        att = position(SliceStretch::ATTACK).round
+        c = position(cycle).round
+        x = position(crossfade).round
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
+          chans = chans.map(&:reverse) if @reversed
+          out = SliceStretch.stretch(chans, ratio.to_f, cuts, fade: f, fill: fill, attack: att, cycle: c, crossfade: x, sample_rate: sample_rate)
+          @reversed ? out.map(&:reverse) : out
+        }
+      end
+      private :slice_stretch
+
+      # The slice points (play order, from the region start) for the
+      # slice stretch, and where they came from: +slices+ :markers,
+      # :onsets, :grid (sixteenths at #bpm), a Duration (a grid of it at
+      # #bpm), an Integer (equal slices), an Array of positions, or a
+      # Sample::Slices; nil picks markers, else onsets, else the grid.
+      def slice_cuts(slices)
+        case slices
+        when nil
+          m = markers.map(&:position).select(&:positive?)
+          return [m, :markers] unless m.empty?
+          o = slice_onsets.select(&:positive?)
+          return [o, :onsets] unless o.empty? && @bpm
+          slice_cuts(:grid)
+        when :markers then [markers.map(&:position), :markers]
+        when :onsets, :transients then [slice_onsets, :onsets]
+        when :grid then slice_cuts(1.n16)
+        when Sequence::Duration
+          raise ArgumentError, 'A grid of slices needs the sample\'s bpm (Sample[..., bpm: 98])' unless @bpm
+          step = position(slices).to_f
+          [Array.new((length / step).ceil) { |i| (i * step).round }, :grid]
+        when Integer
+          raise ArgumentError, "Slice counts are positive (got #{slices})" unless slices > 0
+          [Array.new(slices) { |i| (i * length / slices.to_r).round }, :grid]
+        when Array then [slices.map { |x| position(x).round }, :markers]
+        when Slices then [slices.starts, :markers]
+        else raise ArgumentError, "slices: is :markers, :onsets, :grid, a Duration, a count, positions, or Slices (got #{slices.inspect})"
+        end
+      end
+      private :slice_cuts
+
+      # The onsets the slice stretch cuts at: #onsets, plus softer ones
+      # (SOFT_ONSET rises) within SOFT_ONSET_REACH of a sixteenth when the
+      # sample has a #bpm.  A soft note on the grid (a lower note after a
+      # higher one in a saw arp rose 6-9 dB) missed by #onsets left two
+      # notes in one slice, which, sped up, played the first at its old
+      # length and the second late and cut short (the "hesitation" of the
+      # loops-1 Bench, 2026-10-16).
+      def slice_onsets
+        on = onsets
+        return on unless @bpm
+        step = 60.0 / @bpm / 4 * sample_rate
+        reach = position(SOFT_ONSET_REACH)
+        gap = position(0.04)
+        soft = onsets(threshold: SOFT_ONSET).select { |o| (o - (o / step).round * step).abs <= reach }
+        (on + soft).sort.each_with_object([]) { |o, out| out << o if out.empty? || o - out.last >= gap }
+      end
+      private :slice_onsets
+
+      # The slice stretch's softer onset threshold near the grid, and how
+      # near (see #slice_onsets).
+      SOFT_ONSET = 4.db
+      SOFT_ONSET_REACH = 0.015
+
+      # The sample with a tempo from tempo detection (Structure.analyze on
+      # the loop repeated to at least 8 s), rounded so the loop holds a
+      # whole number of beats when it nearly does; cached per audio.
+      # +options+ go to Structure.analyze (e.g. min_bpm:, max_bpm:).
+      # `Sample[path, detect: true]` calls it for files without a tempo.
+      #
+      #     Sample['break.wav'].detect_tempo.bpm   # => 98.0
+      def detect_tempo(**options)
+        bpm = @audio.edit([:detect_tempo, @start, @stop, @reversed, options]) {
+          mix = mono_mix
+          mix = mix.reverse if @reversed
+          reps = (8.0 * sample_rate / length).ceil.clamp(1, 64)
+          tiled = Numo::DFloat.zeros(length * reps)
+          reps.times { |i| tiled[(i * length)...((i + 1) * length)] = mix }
+          Structure.analyze([tiled], sample_rate: sample_rate, **options).tempo.to_f
+        }
+        b = seconds * bpm / 60.0
+        bpm = b.round * 60.0 / seconds if b.round > 0 && (b - b.round).abs <= 0.05 * b
+        with(bpm: bpm, meta_source: meta_source.merge(bpm: :detected, beats: :detected).freeze)
+      end
 
       # Stretch results longer than this (seconds) read with :octave level
       # spacing unless the sample says otherwise (about 8x the audio for
@@ -736,7 +1137,7 @@ module MB
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
         onsets = transients ? (@reversed ? reverse : self).onsets : nil
-        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio)) { |chans|
+        edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
@@ -769,6 +1170,8 @@ module MB
         t = {
           root: @root, start: @start, stop: @stop, loop_mode: @loop_mode, reverse: @reversed, fade_in: @fade_in, fade_out: @fade_out,
           tune: @tune, level: @level, bpm: @bpm, interpolation: @interpolation, mips: @mips.nil? ? nil : @mips.to_s,
+          beats: @beats, meter: @meter&.join('/'), key: @key,
+          markers: @markers&.map { |p, l| l ? "#{p}:#{l.gsub('%', '%25').gsub(';', '%3B')}" : p.to_s }&.join(';'),
         }
         t.merge!(loop_start: @loop_points[0], loop_end: @loop_points[1]) if @loop_points
         t.compact.to_h { |k, v| [:"#{TAG_PREFIX}#{k}", v.is_a?(Numeric) || v.is_a?(String) ? v : v.to_s] }
@@ -790,6 +1193,8 @@ module MB
         parts = ["#{format('%.3f', seconds)} s"]
         parts << "#{channel_count} ch" unless mono?
         parts << "root #{Sample.note_name(@root)}"
+        parts << "#{@bpm == @bpm.round ? @bpm.round : @bpm.round(2)} BPM" if @bpm
+        parts << "key #{@key}" if @key
         parts << "loop #{@loop_mode}" if @loop_points
         parts << 'reversed' if @reversed
         parts << read_style_name if @interpolation || !@mips.nil?
@@ -820,12 +1225,13 @@ module MB
       # block (called with each channel's SFloat, returning the new
       # channel), with the loop and settings kept (loop points scaled with
       # the length) and read as +read+ says (see #read_as).
-      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, &block)
-        key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips, method, args, kwargs]
-        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, &block) }
+      def edit(method, args, kwargs = {}, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm, &block)
+        key = [@start, @stop, @root, @loop_points, @loop_mode, @reversed, @fade_in, @fade_out, @tune, @level, @bpm, @interpolation, @mips,
+               @beats, @meter, @key, @markers, method, args, kwargs]
+        @audio.edit(key) { edit_uncached(method, args, kwargs, channels: channels, whole: whole, read: read, bpm: bpm, &block) }
       end
 
-      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips })
+      def edit_uncached(method, args, kwargs, channels: nil, whole: false, read: { interpolation: @interpolation, mips: @mips }, bpm: @bpm)
         src = Array.new(channel_count) { |c| @audio.channels[c][@start...@stop].dup }
         out = channels || (whole ? yield(src).map { |d| Numo::SFloat.cast(d) } : src.map { |d| Numo::SFloat.cast(yield(d)) })
         len = out[0].length
@@ -836,10 +1242,13 @@ module MB
           b = ((@loop_points[1] - @start) * k).ceil.clamp(a + 1, len)
           loop = [a.to_f, b.to_f] if a >= 0 && a < len
         end
+        k = len.to_f / length
+        markers = @markers&.filter_map { |pos, label| [((pos - @start) * k).round, label] if pos >= @start && pos < @stop }
         Sample.new(
           out, root: @root, loop: loop, loop_mode: loop ? @loop_mode : (@loop_points ? :one_shot : @loop_mode), reverse: @reversed,
-          fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: @bpm, name: @name, sample_rate: sample_rate,
-          interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze
+          fade_in: @fade_in, fade_out: @fade_out, tune: @tune, level: @level, bpm: bpm, name: @name, sample_rate: sample_rate,
+          interpolation: read[:interpolation], mips: read[:mips], lineage: [self, method, args, kwargs].freeze,
+          beats: full_region? ? @beats : nil, meter: @meter, key: @key, markers: markers, meta_source: @meta_source, meta: @meta
         )
       end
 
@@ -881,3 +1290,6 @@ require_relative 'sample/slices'
 require_relative 'sample/onsets'
 require_relative 'sample/lofi'
 require_relative 'sample/spectral'
+require_relative 'sample/riff'
+require_relative 'sample/loop_info'
+require_relative 'sample/slice_stretch'

@@ -43,6 +43,20 @@ module MB
       end
       alias resample_to_sample bounce
 
+      # Lists the loop files in +dir+ (recursively) with their tempo,
+      # beats, and key from ACID chunks, tags, and file and folder names,
+      # without decoding any audio (Sample::LoopInfo); filters by +bpm+ (a
+      # number within 1%, or a Range), +key+ (:Am, or an Array), and
+      # +beats+.  Reads only: never writes to the files.  Returns a
+      # Sample::LoopInfo::List: `list[3].sample` reads one as a Sample.
+      #
+      #     loops '~/Loops/Funk'
+      #     l = loops('~/Loops', bpm: 90..100, key: [:Am, :C])
+      #     bg :brk, l[0].sample.follow
+      def loops(dir = '.', bpm: nil, key: nil, beats: nil, recursive: true)
+        Sample::LoopInfo.list(dir, bpm: bpm, key: key, beats: beats, recursive: recursive)
+      end
+
       # Records live audio into a Sample from a launch point (now by
       # default; `on: :bar`, `at: bar(9)`) for +length+ (a Duration, Length,
       # or bars): the master bus (+from+ :master), or any node (+from+ a
