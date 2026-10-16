@@ -155,19 +155,18 @@ Open item (A) of sf2-1: a layer with no region for the note should sleep and wak
 - Layer envelopes (masked by coverage) read the voice's shared gate/trigger/velocity/choke nodes instead of an EnvelopeInputs of their own (same samples), and layers in sub-lanes read zone values through a per-layer `ZoneValue::Index`, so a sleeping layer only reads Tee branches (its trigger, number, pitch, pitch mark, GM time controllers, number/velocity for its index: about 2.6 us per 128-sample buffer per voice, plus its wake check 1.5 us and clock 0.5 us).
 - Found on the way (master-ai bugs): Full Orchestra in a 6-voice synth raised "ZoneValue::Index ... readers out of step" once an idle lane was skipped (its LFO's FadeIn read its delay ZoneValue while the Index's other values paused; `ZoneValue.separate`); plan lane groups over 64 members raised in `FastPlan.run_lanes` (`plan_layer.md`).
 
-CPU (i9-9880H container, YJIT, alternating runs against a master-ai f4cd275c worktree, 3 rounds each; ns per sample per voice with every voice holding a note, re-struck each bar; script in the synth-sublanes-1 report):
+CPU (i9-9880H container, YJIT, alternating runs against a master-ai f4cd275c worktree, 3 rounds each; ns per sample per voice, every voice holding a note re-struck each bar; branch 09f58ab6):
 
-| case (GeneralUser GS) | 128 master-ai -> branch | 800 master-ai -> branch |
+| case (GeneralUser GS) | 128: master-ai -> branch | 800: master-ai -> branch |
 |---|---|---|
-| GM piano, 8 notes below key 61 | 1262-1344 -> 1076-1158 (-15%) | 458-479 -> 382-408 (-16%) |
-| GM piano, 8 notes 62-83 (layer 2 has keys 61, 88-90 only) | 1306-1627 -> 1064-1217 | 447-465 -> 379-395 |
-| Full Orchestra, 8 notes 36-59 | 3151-3171 -> 2589-2630 (-18%) | 1146-1187 -> 916-987 (-19%) |
-| Full Orchestra, 8 notes 62-83 | 3182-3436 -> 2479-2561 | 1151-1233 -> 908-976 |
-| worst: piano, 4 voices on keys 61/88/89/90 (layer 2 awake in every voice) | 1412-1419 -> 1835-1882 (+31%) | 568-595 -> 614-634 (+7%) |
-| worst: Full Orchestra, keys 36-48 at velocity 1.0 (both narrow layers awake) | 3301-3372 -> 3545-3802 (+10%) | 1357-1471 -> 1406-1471 (+3%) |
-| a two-hand piano riff, 8 voices (whole synth, ns per sample) | 10799-10983 -> 9607-9717 (one 11637) | 3564-3565 (one 4302) -> 3023-3245 |
+| GM piano, 8 notes below key 61 | 1306-1338 -> 1080-1114 (-17%) | 453-475 -> 394-403 (-14%) |
+| GM piano, 8 notes 62-83 (layer 2 has keys 61, 88-90 only) | 1275-1338 -> 1075-1092 | 452-463 -> 379-403 |
+| Full Orchestra, 8 notes 36-59 | 3017-3041 -> 2457-2569 (-17%) | 1112-1136 (one 1422) -> 920-939 (-17%) |
+| Full Orchestra, 8 notes 62-83 | 3027-3159 -> 2450-2554 | 1143-1186 -> 959-967 |
+| **worst**: piano, 4 voices on keys 61/88/89/90 (layer 2 awake in every voice) | 1400-1431 -> 1571-1599 (**+12%**) | 577-589 -> 607-645 (**+7%**) |
+| **worst**: Full Orchestra, keys 36-48 at velocity 1.0 (both narrow layers awake) | 3302-3379 -> 3579-3629 (+8%) | 1373-1377 (one 1661) -> 1408-1444 (+3%) |
 
-Full Orchestra's riff doesn't run on master-ai (the zone index crash above).  The worst case is a narrow layer awake in every voice: its sub-lane boundary splits the voice's plan regions (two more per stereo layer), ~50 us per 128-sample buffer per voice, of which the sub-lane's own bookkeeping is ~8 us (its clock, the silence check, the piece logic).  A sleeping layer costs ~4.6 us per 128-sample buffer per voice.  With every layer in a sub-lane (before `SUB_LANE_COVERAGE`), Full Orchestra was 3165-3285 -> 3715-4027 at 128 (its three wide layers seldom sleep).
+Not at parity in the worst case (coordinator 2026-10-16: the worst case is what counts; open question).  What an awake sub-lane costs: its output is a plan boundary, so the layer's filter chain is a region of its own instead of part of the voice's mix region (~15 us per 128-sample buffer per voice for a stereo layer), plus the sub-lane's bookkeeping (~5 us).  Fixed on the way: the first version split every buffer crossing a grid point while a looping sample played a stretch of exact zeros (a sleep candidate), which took the voice's Tees out of lockstep: +31% at 128 (`SamplerVoice#sustaining?` now skips those splits).  Measured and dropped: a sub-lane around the sampler voices only (no region split; worst +2-10%, typical gains 0-5%), and around voices and envelope with the filter outside (its region still split; worst +30%).  A plan rebuild per state change is out (5.5 ms per lane).  Parity would need the plan layer to skip a sleeping layer's ops inside a fused region (a C and feed change), or cheaper region boundaries.  A sleeping layer costs ~4.6 us per 128-sample buffer per voice (Tee branch reads, wake check, clock).
 
 ## Steal fade (synth-sublanes-1, 2026-10-16; an A/B, off by default)
 

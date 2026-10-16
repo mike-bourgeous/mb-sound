@@ -240,7 +240,7 @@ module GraphSweep
       }],
       # SoundFont-style instruments: per-zone envelope and filter values
       # (ZoneValue), panned regions, layers
-      ['sampler zone values (ZoneValue), pans, layers', ->(c) {
+      ['sampler zone values (ZoneValue), pans, layers (SubLane)', ->(c) {
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.05) })
         smp = MB::Sound::Sample[d].looped(1000...2900)
         zm = ->(a, b) { MB::Sound::Sampler::ZoneMap.new([[0..62, 0..127, a], [63..127, 0..127, b]]) }
@@ -249,7 +249,8 @@ module GraphSweep
           i.region(smp, keys: 0..62, pan: -0.5, veltrack: 1)
           i.region(smp, keys: 63..127, pan: 0.75, tune: 7)
         }
-        b = MB::Sound::Sampler::Instrument.new(envelope: { segments: [[1, 0.002], [0, 0.03]], release_at: 1, sensitivity: nil }) { |i| i.region(smp[0...1200], tune: 12) }
+        # (b covers keys 40..70 only: a narrow layer, a Synth sub-lane)
+        b = MB::Sound::Sampler::Instrument.new(envelope: { segments: [[1, 0.002], [0, 0.03]], release_at: 1, sensitivity: nil }) { |i| i.region(smp[0...1200], tune: 12, keys: 40..70) }
         inst = MB::Sound::Sampler::Instrument.layered(a, b)
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) }.mixdown * 0.5
       }],
