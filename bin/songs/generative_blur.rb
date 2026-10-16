@@ -37,6 +37,8 @@
 #     bin/songs/generative_blur.rb -m grains -u 0.4 blur.flac # the granular cloud
 #     bin/songs/generative_blur.rb -m both blur.flac          # both together
 #     bin/songs/generative_blur.rb -n 64 -u 0.15 blur.flac    # sixty-fourths: about 22 draws a second
+#     bin/songs/generative_blur.rb -n 64 -u 0.03 -B -C 0.5 blur.flac   # light blur, chords blending over half a bar
+#     bin/songs/generative_blur.rb -n 64 -u 0.03 -B -O 3 blur.flac     # three octaves (A3..A6)
 #     bin/songs/generative_blur.rb -m dense -n 64 -u 0.15 --bass blur.flac           # 64ths over the bassline
 #     bin/songs/generative_blur.rb -m grains -c dense -t 1 -u 0.15 --bass blur.flac  # a thick cloud, 1-bar key changes, bassline
 #     bin/songs/generative_blur.rb -m both -n 64 -c dense -t 1 -u 0.15 --bass blur.flac
@@ -75,7 +77,11 @@ module MB::Sound
   # 7-10 and back over bars 11-16; with a number of bars, F major lands on
   # bar 9 (the B flat chord) and D dorian comes back on bar 13 (the G7),
   # each change blended over the +transition+ bars before it (0: a step).
-  def self.generative_blur_field(blur, transition: nil)
+  # +chord_blend+ nil or 0 steps from chord to chord; a number of bars
+  # (up to 2) blends each chord into the next over that span before it.
+  # +octaves+ 2 (A3..A5, a bell around E4) or 3 (A3..A6, around B4, a
+  # wider bell).
+  def self.generative_blur_field(blur, transition: nil, chord_blend: nil, octaves: 2)
     dorian = scale(:dorian, :d)
     major = scale(:major, :f)
     key =
@@ -87,8 +93,17 @@ module MB::Sound
         t = transition.rationalize
         harmony(0 => dorian, (8 - t).bars => dorian, 8.bars => major, (12 - t).bars => major, 12.bars => dorian, loop: 16.bars)
       end
-    chords = harmony(GENERATIVE_BLUR_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 16.bars)
-    ((blur > 0 ? key.blur(blur) : key) + chords * 1.5).over(A3..A5, around: E4, width: 7)
+    chords =
+      if chord_blend.nil? || chord_blend == 0
+        harmony(GENERATIVE_BLUR_CHORDS.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 16.bars)
+      else
+        b = chord_blend.rationalize
+        raise ArgumentError, "chord_blend must be 0..2 bars (got #{chord_blend})" unless b > 0 && b <= 2
+        keys = GENERATIVE_BLUR_CHORDS.each_with_index.flat_map { |c, i| b < 2 ? [[(2 * i).bars, c], [(2 * i + 2 - b).bars, c]] : [[(2 * i).bars, c]] }
+        harmony(keys.to_h, loop: 16.bars)
+      end
+    range, around, width = octaves == 3 ? [A3..A6, B4, 10.5] : [A3..A5, E4, 7]
+    ((blur > 0 ? key.blur(blur) : key) + chords * 1.5).over(range, around: around, width: width)
   end
 
   # The anchor bassline: one note a bar, the root of the chord of the
@@ -106,10 +121,13 @@ module MB::Sound
   # anchor bassline (#generative_blur_bass_clip).  +cloud+ :sparse (about 8
   # grains a second) or :dense (about 40 a second, longer, overlapping,
   # spread wider).  +transition+ the bars over which the key changes (nil:
-  # the original slow blends; see #generative_blur_field).
-  def self.generative_blur(mode: :dense, blur: 0.15, seed: 3, division: 16, bass: false, cloud: :sparse, transition: nil)
+  # the original slow blends; see #generative_blur_field).  +chord_blend+
+  # the bars over which each chord blends into the next (nil: steps).
+  # +octaves+ 2 or 3 (the field's range; see #generative_blur_field).
+  def self.generative_blur(mode: :dense, blur: 0.15, seed: 3, division: 16, bass: false, cloud: :sparse, transition: nil,
+                           chord_blend: nil, octaves: 2)
     bpm 84
-    field = generative_blur_field(blur, transition: transition)
+    field = generative_blur_field(blur, transition: transition, chord_blend: chord_blend, octaves: octaves)
 
     if mode == :dense || mode == :both
       line = strikes(field, every: Rational(1, division).whole, chance: 1, gap: 1, sharpen: 1, velocity: 0.45..0.8, seed: seed)
@@ -157,8 +175,11 @@ module MB::Sound
       bass: [false, '-B', 'Add the anchor bassline: one unblurred root (and fifth) a bar, following the chords'],
       cloud: [:sparse, Symbol, '-c', 'The granular cloud: sparse (about 8 grains a second) or dense (about 40, longer, overlapping)', [:sparse, :dense]],
       transition: [nil, Float, '-t', 'Bars over which the key changes (F major on bar 9, D dorian on bar 13; 0 a step; default: the slow 4- and 6-bar blends)', 0.0..4.0],
+      chord_blend: [nil, Float, '-C', 'Bars over which each chord blends into the next (default: steps)', 0.0..2.0],
+      octaves: [2, Integer, '-O', 'The line\'s range: 2 (A3..A5) or 3 octaves (A3..A6)', [2, 3]],
     ) { |p|
-      generative_blur(mode: p.mode, blur: p.blur, seed: p.seed, division: p.division, bass: p.bass, cloud: p.cloud, transition: p.transition)
+      generative_blur(mode: p.mode, blur: p.blur, seed: p.seed, division: p.division, bass: p.bass, cloud: p.cloud, transition: p.transition,
+        chord_blend: p.chord_blend, octaves: p.octaves)
     }
   end
 end
