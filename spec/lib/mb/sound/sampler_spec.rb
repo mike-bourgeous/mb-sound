@@ -73,6 +73,44 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(n.sample(800)).to be_nil
     end
 
+    it 'chokes notes by group and off_by in synth voices, fading voices without an envelope like ChokeGate' do
+      m = MB::Sound
+      half = m::Sample[Numo::SFloat.new(9600).fill(0.5)]
+      inst = described_class.new { |i|
+        i.region(ones, keys: m::As2, group: :open, off_by: :closed) # cut by the closed hat, not by itself
+        i.region(half, keys: m::Fs2, choke: :closed)                # cuts the open hat and itself
+        i.region(half, keys: m::C2, choke: 0)                        # no group
+      }
+      expect(inst.regions.map { |r| [r.group, r.off_by] }).to eq([[:open, :closed], [:closed, :closed], [nil, nil]])
+      expect { described_class.new { |i| i.region(ones, choke: 'hats') } }.to raise_error(ArgumentError, /choke group/)
+      expect(described_class.new { |i| i.region(ones) }.choke_map).to be_nil
+
+      transport = m::Sequence::Transport.new(bpm: 120)
+      run = ->(*rows) {
+        clip = m.events(*rows.map { |t, note| [t, 1/32r, note, 1.0] }, length: 1)
+        take(m.synth(clip.stream(transport: transport), voices: 4) { |v| inst.play(v) }, 12000, 128)
+      }
+      open = run.([0, m::As2])
+      closed = run.([0, m::Fs2])
+      # the closed hat at 6000 samples cuts the open hat over 144 samples
+      cut = run.([0, m::As2], [1/16r, m::Fs2])
+      ramp = Numo::SFloat.new(144).seq(144, -1) / 144
+      expect(cut[0...6000]).to eq(open[0...6000])
+      expect((cut[6000...6144] - open[6000...6144] * ramp - closed[0...144]).abs.max).to be < 1e-6
+      expect((cut[6144..] - closed[144...6000]).abs.max).to eq(0)
+      # the open hat doesn't cut the closed one, nor itself; the closed hat cuts itself
+      both = run.([0, m::Fs2], [1/16r, m::As2])
+      expect((both[6000..] - closed[6000..] - open[0...6000]).abs.max).to be < 1e-6
+      expect((run.([0, m::As2], [1/16r, m::As2])[6000..] - open[6000..] - open[0...6000]).abs.max).to be < 1e-6
+      expect(run.([0, m::Fs2], [1/16r, m::Fs2])[6144..]).to eq(closed[144...6000])
+      expect((run.([0, m::As2], [1/16r, m::C2])[6000..] - open[6000..] - run.([0, m::C2])[0...6000]).abs.max).to be < 1e-6
+
+      # without a synth lane (no allocator), nothing chokes
+      notes = m.events([0, 1/32r, m::As2, 1.0], [1/16r, 1/32r, m::Fs2, 1.0], length: 1).notes
+      solo = take(inst.play(notes, seed: 1), 7000)
+      expect(solo[6500]).to be_within(1e-3).of(0.5) # (one voice: the closed hat restrikes it)
+    end
+
     it 'plays chop clips with slice and pitch apart' do
       rec = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.05) })]
       brk = rec.slices(4)
@@ -136,7 +174,7 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
         <global> ampeg_attack=0.01 ampeg_release=0.3 ampeg_sustain=80 volume=-6
         <group> lokey=c4 hikey=d#4 pitch_keycenter=c4
         <region> sample=soft.wav hivel=63 loop_mode=loop_continuous loop_start=100 loop_end=900
-        <group> key=$KEY seq_length=2 amp_veltrack=0 pan=-20 fil_type=lpf_2p
+        <group> key=$KEY seq_length=2 amp_veltrack=0 pan=-20 fil_type=lpf_2p group=2 off_by=1
         <region> sample=hard a.wav seq_position=1 lovel=64
         <region> sample=hard b.wav seq_position=2 lovel=64 tune=50 /* block
         comment */
@@ -158,6 +196,7 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(b.veltrack).to eq(0)
       expect(a.veltrack).to eq(1)
       expect(c.sample.name).to eq('hard b.wav')
+      expect([a.group, a.off_by, b.group, b.off_by]).to eq([nil, nil, 2, 1]) # (0 is none)
       expect(inst.envelope).to eq([0.01, 0.0, 0.8, 0.3])
       expect(inst.mips).to eq(:octave)
       expect { expect(MB::Sound.sfz(File.join(dir, 'kit.sfz'), mips: :default).mips).to eq(:default) }.to output(/ignoring/).to_stderr

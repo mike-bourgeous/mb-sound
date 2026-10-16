@@ -14,7 +14,9 @@ module MB
       # offset, end, loop_mode (no_loop, one_shot, loop_continuous,
       # loop_sustain), loop_start/loop_end (also loopstart/loopend),
       # loop_type (forward, alternate), direction (reverse), seq_length,
-      # seq_position, lorand, hirand, amp_veltrack (%), and ampeg_attack,
+      # seq_position, lorand, hirand, amp_veltrack (%), group and off_by
+      # (choke groups: Instrument#region's group: and off_by:; 0 is none,
+      # and off_mode is always fast, Envelope::CHOKE_TIME), and ampeg_attack,
       # ampeg_decay, ampeg_sustain (%), ampeg_release from the first region
       # that has them (one envelope per instrument).  #define $NAME values
       # are substituted.  Other opcodes are counted and listed once in a
@@ -28,12 +30,12 @@ module MB
         OPCODES = %w[
           sample key lokey hikey pitch_keycenter lovel hivel pitch_keytrack tune transpose volume amplitude offset end
           loop_mode loopmode loop_start loop_end loopstart loopend loop_type direction seq_length seq_position lorand hirand amp_veltrack
-          ampeg_attack ampeg_decay ampeg_sustain ampeg_release trigger default_path note_offset octave_offset
+          ampeg_attack ampeg_decay ampeg_sustain ampeg_release trigger default_path note_offset octave_offset group off_by
         ].freeze
 
         # Opcodes that may be ignored without a warning (mixing, panning,
         # metadata).
-        QUIET = %w[pan width position group off_by polyphony note_polyphony label_cc set_cc label_key].freeze
+        QUIET = %w[pan width position polyphony note_polyphony label_cc set_cc label_key].freeze
 
         LOOP_MODES = {
           'no_loop' => :no_loop, 'one_shot' => :one_shot, 'loop_continuous' => :forward, 'loop_sustain' => :release,
@@ -126,7 +128,8 @@ module MB
               i.region(
                 s, keys: lo..hi, vel: Integer(r['lovel'] || 0)..Integer(r['hivel'] || 127), seq: seq, rand: rand, root: root,
                 keytrack: Float(r['pitch_keytrack'] || 100) / 100.0, veltrack: Float(r['amp_veltrack'] || 100) / 100.0,
-                tune: Float(r['tune'] || 0) / 100.0 + Float(r['transpose'] || 0), gain: gain
+                tune: Float(r['tune'] || 0) / 100.0 + Float(r['transpose'] || 0), gain: gain,
+                group: Integer(r['group'] || 0), off_by: Integer(r['off_by'] || 0)
               )
             end
           }

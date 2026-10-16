@@ -25,15 +25,16 @@ module MB
       # (0 no loop, 1 continuous, 3 loop until release), initialAttenuation
       # (times #attenuation's EMU factor), pan, linked stereo pairs (one
       # stereo sample), and the default velocity-to-attenuation modulator
-      # (veltrack 1: level (velocity)²) map to regions; the volume envelope
+      # (veltrack 1: level (velocity)²), and exclusive classes (region
+      # +choke:+ groups: a GM kit's closed and pedal hats cut its open hat)
+      # map to regions; the volume envelope
       # (delay, attack, hold, decay, sustain, release in timecents and
       # centibels) and initialFilterFc/Q (a lowpass) map to the instrument's
       # envelope and filter, from the zone at C4 of each layer.  Zones that
       # overlap play together as layers (Instrument.layered).  Everything
-      # else (LFOs, the modulation envelope, keynum-to-envelope scaling,
-      # exclusive classes, modulators in the file, zones whose envelope or
-      # filter differs from their layer's) is listed once per preset in a
-      # warning (Font#skipped); chorus and reverb sends are ignored quietly.
+      # else (fixed keys and velocities, modulators in the file) is listed
+      # once per preset in a warning (Font#skipped); chorus and reverb sends
+      # are ignored quietly.
       #
       # In a graph document the file must be inside the document's directory
       # (GraphIO::FileGuard); bundles copy it as an asset.
@@ -82,12 +83,12 @@ module MB
           mod_lfo_to_pitch vib_lfo_to_pitch mod_env_to_pitch mod_lfo_to_filter_fc mod_env_to_filter_fc mod_lfo_to_volume
           delay_mod_lfo freq_mod_lfo delay_vib_lfo freq_vib_lfo delay_mod_env attack_mod_env hold_mod_env decay_mod_env
           sustain_mod_env release_mod_env keynum_to_mod_env_hold keynum_to_mod_env_decay
-        ] + INSTRUMENT_ONLY - %i[keynum velocity exclusive_class]).freeze
+        ] + INSTRUMENT_ONLY - %i[keynum velocity]).freeze
 
         # What isn't mapped, by the generators that make it matter (listed
         # in Font#skipped when one of them isn't 0).
         UNMAPPED = {
-          'exclusive class (choke groups)' => %i[exclusive_class], 'fixed key (keynum)' => %i[keynum], 'fixed velocity' => %i[velocity],
+          'fixed key (keynum)' => %i[keynum], 'fixed velocity' => %i[velocity],
         }.freeze
 
         # Generators whose key scaling makes per-key values.
@@ -629,9 +630,14 @@ module MB
             pan = (pan + part[:right].generators[:pan]) / 2.0 if part[:right]
             pan = 0 if part[:right] && g[:pan] <= -450 && part[:right].generators[:pan] >= 450
             cb = g[:initial_attenuation].clamp(0, 1440) * attenuation
+            # exclusiveClass (an instrument generator, 0 none): a choke group
+            # within the preset (section 8.1.2: other notes of the class end
+            # as fast as possible)
+            exclusive = g[:exclusive_class] & 0xffff
             inst.region(
               s, keys: z.keys[0]..z.keys[1], vel: z.vel[0]..z.vel[1], root: root, keytrack: g[:scale_tuning] / 100.0, veltrack: 1,
-              tune: g[:coarse_tune] + (g[:fine_tune] + sh.correction) / 100.0, gain: 10.0**(-cb / 200.0), pan: pan.clamp(-500, 500) / 500.0
+              tune: g[:coarse_tune] + (g[:fine_tune] + sh.correction) / 100.0, gain: 10.0**(-cb / 200.0), pan: pan.clamp(-500, 500) / 500.0,
+              choke: exclusive == 0 ? nil : exclusive
             )
           end
 

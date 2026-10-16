@@ -92,6 +92,26 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
     expect(reads).to contain_exactly([:none, false], [:none, false])
   end
 
+  it 'saves choke groups of instruments built region by region' do
+    m = MB::Sound
+    hat = m::Sample[Numo::SFloat.cast(Numo::DFloat.new(9600).seq.map { |i| Math.sin(i * 0.1) * 0.5 })]
+    inst = m::Sampler::Instrument.new { |i|
+      i.region(hat, keys: m::As2, group: :open, off_by: :closed)
+      i.region(hat, keys: m::Fs2, tune: 7, choke: 3)
+    }
+    clip = m.events([0, 1/32r, m::As2, 1.0], [1/16r, 1/32r, m::Fs2, 1.0], [1/8r, 1/32r, m::Fs2, 1.0], length: 1).loop
+    g = clip.synth(voices: 4) { |v| inst.play(v, seed: 1) }
+    dir = File.dirname(tmp_path('x'))
+    path = io.save(File.join(dir, 'chokes'), g, name: 'chokes', bundle: true)
+    text = File.read(path)
+    expect(text).to include('group: :open, off_by: :closed')
+    expect(text).to include('choke: 3')
+    back = io.load(path)
+    ref = render(g, buffers: 12)
+    expect(max_diff(ref, render(back, buffers: 12))).to be < 1e-4 # (FLAC assets at 24 bits)
+    expect(ref[7..].map { |b| b.abs.max }.max).to be > 0.1
+  end
+
   it 'reads SFZ instruments named by documents, inside the document directory only' do
     dir = File.dirname(tmp_path('x'))
     FileUtils.mkdir_p(File.join(dir, 'kit'))
