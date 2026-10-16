@@ -95,6 +95,18 @@ module MB
           moved
         end
 
+        # Lets go of the Tee branches of the Indexes in +old+ that no
+        # ZoneValue of +zones+ reads any more (after values got Indexes of
+        # their own): a branch nobody reads keeps its Tee copying every
+        # buffer.
+        def self.release(old, zones)
+          old.each do |idx|
+            next if zones.any? { |z| z.zone_index.equal?(idx) }
+
+            [idx.number, idx.velocity].each { |b| b.destroy if b.is_a?(Tee::Branch) }
+          end
+        end
+
         # The node behind Tee branch +b+ (or +b+).
         def self.origin(b)
           b.is_a?(Tee::Branch) ? b.owner_tee.sources[:input] : b

@@ -106,6 +106,22 @@ module MB
           @state[0] == 0 && @state[Sampler::KernelRuby::VOICE] == 0
         end
 
+        # True if the sounding note can't stop without a new input event (a
+        # note-on, gate-off, or choke): it loops (forward, ping-pong, or a
+        # release loop before its release), with no declick tail or choke
+        # fading.  Synth sub-lanes skip checking for sleep while it holds.
+        def sustaining?
+          k = Sampler::KernelRuby
+          return false if @state[0] == 0 || @state[k::VOICE] != 0 || @state[k::CHOKE_LEFT] > 0
+
+          r = @state[1].to_i
+          return false unless @regions[r, k::LOOP_END] > @regions[r, k::LOOP_START]
+
+          mode = @regions[r, k::LOOP_MODE].to_i
+          modes = Sampler::LOOP_MODES
+          mode == modes[:forward] || mode == modes[:ping_pong] || (mode == modes[:release] && @state[8] == 0)
+        end
+
         # The kernel's inputs for +count+ samples, or nil when an input ended.
         def sample(count)
           if @once

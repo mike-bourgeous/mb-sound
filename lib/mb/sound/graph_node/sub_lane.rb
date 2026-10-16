@@ -114,19 +114,36 @@ module MB
           return if parts.empty?
 
           zones = graph.select { |n| n.is_a?(ZoneValue) }
+          in_graph = {}.compare_by_identity
+          graph.each { |n| in_graph[n] = true }
+          before = zones.map(&:zone_index).uniq
           parts.each do |part|
-            excl = part.send(:exclusive, graph, ->(_) { false })
+            # (branches outside this lane's graph count as unread here: at
+            # worst a value gets an Index it didn't need)
+            excl = part.send(:exclusive, graph, ->(b) { !in_graph[b] })
             local = {}.compare_by_identity
+            mine = {}.compare_by_identity
+            GraphNode.graph(part, include_tees: true).each { |n| mine[n] = true }
             zones.each do |z|
-              next unless excl[z]
               idx = z.zone_index
-              next if zones.all? { |u| !u.zone_index.equal?(idx) || excl[u] }
+              fresh = -> { ZoneValue::Index.new(ZoneValue.origin(idx.number), ZoneValue.origin(idx.velocity)) }
+              if excl[z]
+                next if zones.all? { |u| !u.zone_index.equal?(idx) || excl[u] }
 
-              z.zone_index = local[idx] ||= ZoneValue::Index.new(ZoneValue.origin(idx.number), ZoneValue.origin(idx.velocity))
+                z.zone_index = local[idx] ||= fresh.call
+              elsif mine[z]
+                # Read through a Tee that the sub-lane also reads, a value
+                # may be sampled at the sub-lane's piece counts while its
+                # Index's other values read whole buffers: one of its own
+                next if zones.none? { |u| !u.equal?(z) && u.zone_index.equal?(idx) }
+
+                z.zone_index = fresh.call
+              end
             end
             nodes = graph.select { |n| excl[n] }
             ZoneValue.separate(nodes, advanced_nodes(nodes))
           end
+          ZoneValue.release(before, zones)
         end
 
         # The nodes among +nodes+ that a sleeping sub-lane (or skipped lane)
@@ -183,6 +200,7 @@ module MB
           @skipped_samples = 0
           @wakes = 0
           @env_lag = 0
+          @clock_lag = 0
         end
 
         def sources
@@ -248,6 +266,7 @@ module MB
         def lane_skipped(count)
           return unless skippable?
 
+          flush_clock
           advance_clock(count)
           @env_lag += count
         end
@@ -382,7 +401,7 @@ module MB
               wake = wake_offset(o, count)
               stop = wake || count
               if stop > o
-                skip_span(a, stop - o)
+                skip_span(a, o, stop - o, o != 0 || stop != count)
                 if o == 0 && wake.nil?
                   whole = :zeros
                 else
@@ -399,7 +418,7 @@ module MB
             end
             catch_up(a)
 
-            stop = sleep_candidate(pos, o, count)
+            stop = sleep_candidate(a, pos, o, count)
             n = stop - o
             window = o != 0 || stop != count
             got = sample_inputs(o, n, window)
@@ -408,8 +427,11 @@ module MB
               @out.fill(nil)
               return
             end
-            advance_clock(n)
+            # (awake, the clock catches up once per grid cell: see
+            # #flush_clock)
+            @clock_lag += n
             track_cells(a, got, pos + o)
+            flush_clock if @asleep || @clock_lag >= Synth::SKIP_GRID
 
             if window
               pieces = true
@@ -434,7 +456,19 @@ module MB
         # skip in its Synth after all).
         def render_awake(count)
           @inputs.each_with_index { |n, c| @out[c] = n.sample(count) }
-          advance_clock(count) if @reader
+          @clock_lag += count
+          flush_clock if @clock_lag >= Synth::SKIP_GRID
+        end
+
+        # Moves the clock over the samples rendered awake since it last
+        # moved (reading it every buffer cost ~1.3 us per buffer; a reader
+        # behind by up to a grid cell only holds that much of the lane's
+        # event log).
+        def flush_clock
+          return if @clock_lag == 0
+
+          advance_clock(@clock_lag)
+          @clock_lag = 0
         end
 
         # The inputs' buffers for +n+ samples from offset +o+ of the lane's
@@ -456,13 +490,20 @@ module MB
           got
         end
 
-        # Keeps nodes outside in step for +count+ samples while asleep.
-        def skip_span(a, count)
+        # Keeps nodes outside in step for +count+ samples from offset +o+ of
+        # the lane's piece while asleep (with the shared controller buffers
+        # windowed there if +window+: what these branches read may be a plan
+        # region gathering them).
+        def skip_span(a, o, count, window)
           shared = @synth.shared_inputs
           shared = nil unless shared&.active?
-          a[:branches].each do |b|
-            next if shared && shared.shared_tee?(b.owner_tee)
-            b.sample(count)
+          branches = a[:branches]
+          unless branches.empty?
+            if window
+              @synth.sub_lane_window(o, count) { read_branches(branches, shared, count) }
+            else
+              read_branches(branches, shared, count)
+            end
           end
           a[:advance].each do |n|
             next if shared&.shared_node?(n)
@@ -473,6 +514,15 @@ module MB
           @env_lag += count
           advance_clock(count)
           @skipped_samples += count
+        end
+
+        # Reads (and drops) +count+ samples of each of +branches+, except
+        # those Plan::SharedInputs hands out.
+        def read_branches(branches, shared, count)
+          branches.each do |b|
+            next if shared && (b.is_a?(Tee::Branch) ? shared.shared_tee?(b.owner_tee) : shared.shared_node?(b))
+            b.sample(count)
+          end
         end
 
         # Moves the paused Notes envelopes' bookkeeping over the samples
@@ -504,14 +554,24 @@ module MB
         end
 
         # Like Synth#sleep_candidate: the next grid point if the sub-lane may
-        # fall asleep there (its cell so far was silent), else +count+.
-        def sleep_candidate(pos, o, count)
+        # fall asleep there (its cell so far was silent), else +count+.  A
+        # sampler voice holding a looping note can't fall idle without a
+        # lane event, so without one in the rest of the block there's no
+        # split (a piano layer looping a silent stretch of its sample would
+        # otherwise split every buffer crossing a grid point, which takes its
+        # Tees out of lockstep).
+        def sleep_candidate(a, pos, o, count)
           grid = Synth::SKIP_GRID
           g = ((pos + o) / grid + 1) * grid - pos
           return count if g > count
 
           g += grid if @cell_loud
           return count if g > count
+
+          if a[:idle].any? { |n| n.respond_to?(:sustaining?) && n.sustaining? }
+            from = @clock_lag == 0 ? @reader.cursor : @lane.advance(@reader.cursor, @clock_lag, @rate)
+            return count if @lane.first_pending_time(from, @lane.advance(from, count - o, @rate)).nil?
+          end
 
           g
         end
@@ -523,6 +583,9 @@ module MB
         def track_cells(a, bufs, start)
           grid = Synth::SKIP_GRID
           len = bufs[0].length
+          # (the usual awake case: already loud, no grid point reached)
+          return if @cell_loud && start + len < (start / grid + 1) * grid
+
           i = 0
           while i < len
             g = (start + i) / grid * grid + grid

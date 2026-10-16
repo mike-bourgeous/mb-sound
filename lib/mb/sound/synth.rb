@@ -243,6 +243,7 @@ module MB
         @sum_pool = nil
         @parts = nil
         @piece = nil
+        @piece_array = nil
         @piece_serial = 0
 
         @retrigger = retrigger
@@ -565,12 +566,16 @@ module MB
         return yield if @parts[idx].empty?
 
         @piece_serial += 1
-        old = @piece
-        @piece = [idx, pos, count, @piece_serial].freeze
+        piece = (@piece_array ||= [])
+        piece[0] = idx
+        piece[1] = pos
+        piece[2] = count
+        piece[3] = @piece_serial
+        @piece = piece
         begin
           yield
         ensure
-          @piece = old
+          @piece = nil
         end
       end
 
@@ -703,7 +708,10 @@ module MB
         return unless g.any? { |n| n.is_a?(GraphNode::ZoneValue) }
 
         own = GraphNode::SubLane.advanced_nodes(g.select { |n| n.is_a?(Notes::Node) && n.notes.equal?(v) })
+        zones = g.select { |n| n.is_a?(GraphNode::ZoneValue) }
+        before = zones.map(&:zone_index).uniq
         GraphNode::ZoneValue.separate(g, own)
+        GraphNode::ZoneValue.release(before, zones)
       end
 
       # The nodes skipped lane +idx+ still reads (see #setup_idle_skipping):
