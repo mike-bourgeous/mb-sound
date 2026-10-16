@@ -44,7 +44,7 @@ module MB
           repl: 'Ctrl-] nav',
           nav: '1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
           grab: 'Ctrl-] back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
-          step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  Enter done  Tab play',
+          step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
 
         # NAV keys of mb-sound's own panes (after Router::NAV).
@@ -576,11 +576,27 @@ module MB
         def hook_keyboard
           @keyboard.on_capture = -> { capture_keys }
           @keyboard.on_finish = ->(clip) { finish_steps(clip) }
+          @keyboard.on_swap = ->(clip) { swap_steps(clip) }
+        end
+
+        # The Session the keyboard plays into.
+        def keys_session
+          @keyboard.out.respond_to?(:target_session) ? @keyboard.out.target_session : Session.existing
+        end
+
+        # Step entry's swap key: the clip into each armed track at its next
+        # launch point (Arrangement#play: a swap if the track plays, else a
+        # launch; journaled and undoable like `bg :lead, clip`).
+        def swap_steps(clip)
+          s = keys_session
+          armed = s&.arrangement&.armed || {}
+          return flash('swap: arm a track first (arm :lead); Enter puts the clip on the console line instead', :warn) if armed.empty?
+          run_safely { Session.with_context(session: s) { armed.keys.map { |name| s.arrangement.play(name, clip) } } }
         end
 
         # Enter in KEYS mode: `capture` into the armed tracks.
         def capture_keys
-          s = @keyboard.out.respond_to?(:target_session) ? @keyboard.out.target_session : Session.existing
+          s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('capture: arm a track first (arm :lead), then play and press Enter', :warn) if armed.empty?
           run_safely { Session.with_context(session: s) { MB::Sound.capture } }

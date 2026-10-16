@@ -14,7 +14,10 @@ module MB
         #     notes within CHORD seconds (or, with key releases, while a
         #     note key is held) join the last step as a chord
         #     Backspace undo a step, Delete clear, p play it, Enter done,
-        #     Tab back to playing; - + and arrows as in play mode
+        #     w swap it (looping) into the armed tracks at their next
+        #     launch points (also Shift-Enter where the terminal sends it
+        #     apart from Enter: the kitty protocol), Tab back to playing;
+        #     - + and arrows as in play mode
         #
         # The clip is real Ruby built through the DSL (`seq(C4, Rest,
         # E4.n4.acc, C4.n4 & E4.n4).n8`), so #clip prints itself back with
@@ -89,7 +92,7 @@ module MB
             case ch
             when :backspace then undo
             when :delete then clear
-            when :enter then finish
+            when :enter then k.mods == [:shift] ? swap : finish
             when :tab then @keyboard.entry = :play
             else return nil
             end
@@ -170,6 +173,7 @@ module MB
             when 'a' then mark(:accent)
             when '`', '~' then mark(:slide)
             when 'p' then preview(now)
+            when 'w' then swap
             else
               # Upper-row note keys and other letters do nothing here
               @keyboard.say('step entry: the lower row (z..m , . /) enters notes; 1-7 lengths, r rest, t tie')
@@ -206,6 +210,14 @@ module MB
             last = @steps.last
             return @keyboard.say('no note to mark yet') unless last&.kind == :note
             @steps = @steps[0...-1] + [last.with(name => !last.public_send(name))]
+          end
+
+          # Swaps the clip so far (looping) into the armed tracks at their
+          # next launch points, keeping the steps for more edits.
+          def swap
+            c = clip
+            return @keyboard.say('no steps yet: play notes on the lower row') unless c
+            @keyboard.swap_in(c.loop)
           end
 
           def finish

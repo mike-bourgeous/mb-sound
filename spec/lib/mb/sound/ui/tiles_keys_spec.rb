@@ -64,8 +64,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for(' KEYS ')).to eq(true)
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     expect(@tiles.tiler.rects[:keyboard].h).to eq(8)
-    expect(@keyboard.resolved_mode).to eq(:hold)
-    expect(@term.text).to include('(no key-up)')
+    expect(@keyboard.resolved_mode).to eq(:tap)
+    expect(@term.text).to include('tap (no key-up)')
+    @keyboard.off_mode = :hold # (notes that last until an exit)
 
     @term.type('zc')
     expect(wait_until { out.sounding.sort == [48, 52] }).to eq(true)
@@ -140,5 +141,15 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(wait_until(timeout: 6) { @session.arrangement.captures.key?(:lead_1) }).to eq(true), @term.text
     clip = @session.arrangement.captures[:lead_1]
     expect(clip.events.map(&:value)).to eq([48, 52, 55])
+
+    # Step entry's w swaps the clip so far into the armed track (a journaled change)
+    lead_changes = -> { @session.journal.changes.count { |e| e.subject == :lead } }
+    before = lead_changes.call
+    @tiles.keys(step: true)
+    expect(@term.wait_for(' STEP ')).to eq(true)
+    @term.type('v', delay: 0.15)
+    @term.type('w', delay: 0.15)
+    expect(wait_until { lead_changes.call > before }).to eq(true), @term.text
+    expect(@keyboard.clip.to_ruby).to eq('seq(F3).n8.loop')
   end
 end

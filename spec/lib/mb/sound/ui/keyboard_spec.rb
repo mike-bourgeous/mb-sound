@@ -91,7 +91,16 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
   end
 
   describe 'without key releases (legacy terminals)' do
+    it 'plays fixed-length notes by default (maintainer, 2026-10-16)' do
+      expect(kb.off_mode).to eq(:auto)
+      expect(kb.resolved_mode).to eq(:tap)
+      press('z', 0.0)
+      kb.tick(0.25)
+      expect(out.log).to eq([[:on, 48, 96, 0, 0.0], [:off, 48, 0, 0.25]])
+    end
+
     it 'holds a key while it autorepeats and ends it 2.5 intervals after the last repeat' do
+      kb.off_mode = :hold
       expect(kb.resolved_mode).to eq(:hold)
       hold('z', 1.0, 2.0)
       last = 1.0 + 0.5 + 0.035 * 14 # the last repeat before 2.0
@@ -103,6 +112,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     end
 
     it 'ends a tap after the repeat delay and a little more, and strikes again when tapped quickly' do
+      kb.off_mode = :hold
       press('z', 0.0)
       press('z', 0.2) # faster than any autorepeat delay: a new strike
       kb.tick(0.81)
@@ -111,6 +121,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     end
 
     it 'learns the repeat delay and interval' do
+      kb.off_mode = :hold
       hold('z', 0.0, 1.5, delay: 0.3, interval: 0.03)
       kb.tick(5)
       tracker = kb.instance_variable_get(:@tracker)
@@ -119,6 +130,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     end
 
     it 'holds a chord as long as its last key repeats (the OS repeats only that one)' do
+      kb.off_mode = :hold
       press('z', 0.0)
       press('c', 0.02)
       hold('b', 0.04, 2.0)
@@ -227,6 +239,19 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       expect(finished.to_ruby).to eq('seq(C3, D3).n2')
       expect(kb.clip).to equal(finished)
       expect(kb.step.clip).to be_nil
+    end
+
+    it 'swaps the clip so far, looping, with w or Shift-Enter, keeping the steps' do
+      swapped = []
+      kb.on_swap = ->(c) { swapped << c }
+      type(%w[z x])
+      press('w', 10)
+      press(:enter, 11, :shift)
+      expect(swapped.map(&:to_ruby)).to eq(['seq(C3, D3).n8.loop'] * 2)
+      expect(swapped.first.looping?).to eq(true)
+      expect(kb.view.step.count).to eq(2)
+      expect(kb.step.clip).not_to be_nil
+      expect(kb.clips.length).to eq(2)
     end
 
     it 'leaves the upper row quiet and goes back to playing with Tab' do

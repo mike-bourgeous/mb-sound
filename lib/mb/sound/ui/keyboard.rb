@@ -29,7 +29,9 @@ module MB
       # - :legato: each note holds until the next key (one note at a time).
       #
       # #off_mode :auto (default) is :release where the terminal reports
-      # releases, else :hold.  Every way out of the mode (Ctrl-], Esc,
+      # releases, else :tap (maintainer, 2026-10-16: fixed-length notes
+      # rather than notes guessed from autorepeats; :hold stays a choice).
+      # Every way out of the mode (Ctrl-], Esc,
       # focus loss, hiding the screen, `ui off`, exit) calls #all_off, so
       # no note is left hanging.
       #
@@ -85,8 +87,10 @@ module MB
         attr_accessor :out
 
         # Called with no arguments for Enter in play mode (capture); with
-        # the finished Clip at the end of step entry.
-        attr_accessor :on_capture, :on_finish
+        # the finished Clip at the end of step entry (Enter); with the
+        # Clip so far for step entry's swap key (w, or Shift-Enter where
+        # the terminal tells it from Enter).
+        attr_accessor :on_capture, :on_finish, :on_swap
 
         # +clock+ gives monotonic seconds.
         def initialize(out: nil, base: 48, velocity: 96, channel: 0, off_mode: :auto, tap: 0.25, clock: nil, tempo: nil)
@@ -106,6 +110,7 @@ module MB
           @message = nil
           @on_capture = nil
           @on_finish = nil
+          @on_swap = nil
           @tracker = HoldTracker.new
           @step = StepEntry.new(self, tempo: tempo)
           @entry = :play
@@ -160,7 +165,7 @@ module MB
 
         # The note-off mode in effect (:auto resolved).
         def resolved_mode
-          @off_mode == :auto ? (@releases ? :release : :hold) : @off_mode
+          @off_mode == :auto ? (@releases ? :release : :tap) : @off_mode
         end
 
         # Seconds each note sounds in :tap mode.
@@ -274,6 +279,14 @@ module MB
           @on_finish&.call(clip)
         end
 
+        # Called by StepEntry to swap +clip+ into the armed tracks (see
+        # #on_swap).
+        def swap_in(clip)
+          @clips << clip unless @clips.last.equal?(clip)
+          return say('swap: nothing to swap into here') unless @on_swap
+          @on_swap.call(clip)
+        end
+
         # Sets the message shown in the pane.
         def say(text)
           @message = text
@@ -285,7 +298,7 @@ module MB
           case resolved_mode
           when :release then 'key-up ends notes'
           when :hold then "no key-up here: notes hold while keys repeat (taps ~#{format('%.1f', @tracker.delay + HoldTracker::FIRST_SLACK)} s)"
-          when :tap then "every note #{format('%.2f', @tap)} s"
+          when :tap then "no key-up here: every note #{format('%.2f', @tap)} s (` for :hold)"
           when :legato then 'each note holds until the next'
           end
         end
