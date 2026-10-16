@@ -268,6 +268,26 @@ elevation model, so front/back stays ambiguous without head movement, as
 with any spherical head.  Costs (whole script renders, Ruby graph): fly
 ~6% of realtime, mouse ~6%, binaural fly ~9%.
 
+textures-5 (2026-10-16, Bench notes on round 4):
+
+- Fly ("Delay changes are a little too extreme in speed"): the distance
+  delay goes through a critically damped lowpass (`critter_place(...,
+  smooth: 2)`, Hz; `-S`, 0 off).  Unsmoothed, jittered elastic darts
+  moved the delay faster than `#delay`'s own 0.5 s/s slew limit (a -12
+  semitone dive).  Measured on the binaural fly (seed 5, 32 s, 5x) with a
+  1 kHz quadrature tone through the real delay, pitch shift p95/max and
+  its rate p95: none 4.1/12.1 st, 144 st/s; 3 Hz 1.6/6.2, 29; 2 Hz
+  1.2/4.0, 17; 1 Hz 0.8/1.6, 6.  The help example does the same.
+- Mouse ("Scratches only immediately during movement?"): the round 3/4
+  path never stopped (under 0.1 m/s 3% of the time, median 1.2 m/s,
+  tens of m/s on jittered elastic steps) and the ticks were a steady
+  `dust(25)`.  Now one random step gate (`drift(1.5, smooth: :step,
+  jitter: 0.8)` above 0, lowpassed at 6 Hz) runs both drifts' clocks
+  (a rate node of 0 freezes a drift mid-step), so x and y stop together
+  (seed 3: still 24% of the time, median 0.9 m/s, at most 3 m/s); the
+  tick rate follows the speed (35/s from 1 m/s, none when still; a 5 Hz
+  lowpass on the speed lets a tick or two settle).
+
 A `fly_by`/doppler helper waits for a second use (the maintainer); the
 placement lives in critters.rb's `critter_place`.
 
@@ -313,6 +333,28 @@ source, to within float rounding); the vinyl crackle is sparser, darker dust
 now that the prime is on the note.  textures-4: the restless creature pans
 pink noise (easier to place than the triangle), and the fly's wings follow
 its effort (speed from its own path: pitch, brightness, level).
+textures-5: the creature is band-limited pink (300 Hz-6 kHz, the
+maintainer's pick), the fly's doppler smoothed at 2 Hz.
+
+## Ambient tape (`ambient_tape` in bin/synths/ambient.rb)
+
+Wow, a dithered quantizer (10 bits at wear 0 to 7 at wear 1; 8.2 at
+0.6, the default since textures-5, the maintainer's pick for harp and
+koto), and a lowpass falling with wear.  textures-4's dither was half a
+step of uniform noise, which left silence silent: the grain faded with
+each tail (the maintainer heard it: "I feel like the noise goes down as
+the amplitude goes down").  Measured on a 220 Hz tail falling 9 dB/s at
+wear 0.6, the 1-4 kHz grain held -61 dBFS while the tail was above -55
+dBFS and fell to -88 below.  textures-5 uses TPDF dither (two uniform
+noises, a step either way; the error's power no longer depends on the
+signal): a steady -60..-62 dBFS floor, a hiss per channel of a bundle.
+The koto and harp now record their room onto the tape
+(`ambient_tape(ambient_room(...))`; the room came after the tape), so
+the reverb tail is worn and hissy too.  Side effect seen while
+comparing: wow ahead of the room made the koto's room tail 6-7 dB
+louder than without it (a delay without wow didn't; likely the pitch
+wobble spreading a steady tone across more of the reverb's modes, not
+verified).
 
 ## Not built (ideas)
 
