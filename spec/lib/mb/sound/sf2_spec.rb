@@ -342,6 +342,18 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       two = play(inst.layers[1], m.seq(m::C4.n4), 24000)[0]
       expect((out - one - two).abs.max).to be < 1e-6
       expect(two.abs.max).to be_within(0.01).of(10**(-24 / 200.0) * one.abs.max)
+
+      # a note layer B doesn't cover (A3) leaves B's envelope idle; a covered
+      # note after it (C4) plays B again from the exact note-on
+      notes = m.seq(m::A3.n4, m::C4.n4).notes
+      voice = inst.play(notes, seed: 1)
+      envs = notes.instance_variable_get(:@envelopes)
+      expect(envs.length).to eq(2)
+      voice.sample(800)
+      expect(envs.map(&:idle?)).to eq([false, true]) # (A's envelope, B's)
+      ref = play(inst.layers[0], m.seq(m::A3.n4, m::C4.n4), 48000)[0] + play(inst.layers[1], m.seq(m::R.n4, m::C4.n4), 48000)[0]
+      got = play(inst, m.seq(m::A3.n4, m::C4.n4), 48000)[0]
+      expect((got - ref).abs.max).to be < 1e-6
     end
   end
 

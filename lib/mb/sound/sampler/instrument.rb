@@ -75,6 +75,7 @@ module MB
                       end
           @filter = filter.nil? ? nil : { cutoff: setting(filter[:cutoff]), quality: setting(filter[:quality] || 0.7071067811865476) }.freeze
           @modulation = modulation.nil? ? nil : deep_freeze(modulation)
+          @coverage = nil
           if @modulation
             unknown = @modulation.keys - %i[sources pitch cutoff volume]
             raise ArgumentError, "Unknown modulation keys #{unknown.inspect} (sources, pitch, cutoff, volume)" unless unknown.empty?
@@ -231,19 +232,25 @@ module MB
         # The voice for #play's resolved inputs; +shared+ keeps modulation
         # nodes that layers with the same settings share (one vibrato LFO
         # per note, not one per layer).
-        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:)
+        #
+        # A +layer+'s envelopes (the volume and modulation envelopes) ignore
+        # notes its regions don't cover (gate and trigger masked by a
+        # coverage ZoneValue), so an uncovered note-on doesn't attack again
+        # over the last note's declick tail.
+        def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false)
           if @layers
             n = channel_count
             outs = @layers.map { |l|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
-                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared)
+                                         declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true)
               o.is_a?(GraphNode::Channels) ? o.to_a : [o]
             }
             sums = Array.new(n) { |c| outs.map { |o| o[c % o.length] }.reduce(:+) }
             return n == 1 ? sums[0] : MB::Sound.channels(*sums)
           end
 
-          mods = @modulation && source ? modulators(source, shared) : nil
+          mask = layer && source ? per_note(coverage, source, shared) : nil
+          mods = @modulation && source ? modulators(source, shared, mask) : nil
           if mods && mods[:pitch]
             freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
           end
@@ -257,7 +264,8 @@ module MB
           nodes.each { |n| source.register(n) } if source && one_shot?
           out = nodes.length == 1 ? nodes[0] : MB::Sound.channels(*nodes)
           if source && @envelope
-            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source, shared)) : source.env(*@envelope))
+            opts = mask ? { mask: mask } : {}
+            out = out * (@envelope.is_a?(Hash) ? source.env(**per_note(@envelope, source, shared), **opts) : source.env(*@envelope, **opts))
           end
           if @filter
             f = per_note(@filter, source || { number: number, velocity: 1.constant }, shared) # (ZoneMaps read velocity 127 without Notes)
@@ -342,14 +350,15 @@ module MB
         # Sums and sources are made once per +shared+ Hash for the same
         # settings (ZoneMaps compare by their zones), so layers share them;
         # +keys+ holds each sum's settings for the caller's own sharing.
-        def modulators(source, shared = {})
+        def modulators(source, shared = {}, mask = nil)
           raw = @modulation
           node = ->(name) {
             spec = raw[:sources].fetch(name)
-            shared[[:source, spec]] ||= begin
+            # (masked envelopes belong to their layer)
+            shared[[:source, spec, spec[:env] && mask ? object_id : nil]] ||= begin
               s = per_note(spec, source, shared)
               if s[:env]
-                source.env(**{ sensitivity: nil, gm: false }.merge(s[:env]))
+                source.env(**{ sensitivity: nil, gm: false }.merge(s[:env]), **(mask ? { mask: mask } : {}))
               else
                 source.lfo(s[:lfo], depth: s[:depth] || 1.0, delay: s[:delay] || 0, wheel: s[:wheel], pressure: s[:pressure])
               end
@@ -361,6 +370,7 @@ module MB
             next if list.empty?
             key = list.map { |name, amount| [raw[:sources][name], amount] }
             keys[dest] = key
+            key += [object_id] if mask && list.any? { |name, _| raw[:sources][name][:env] }
             h[dest] = shared[[:sum, dest, key]] ||= list.map { |name, amount|
               a = per_note(amount, source, shared)
               a == 1 ? node.(name) : node.(name) * a
@@ -382,6 +392,11 @@ module MB
           when Array then v.map { |x| deep_freeze(x) }.freeze
           else v
           end
+        end
+
+        # A ZoneMap of 1 where a region plays and 0 elsewhere (see #voice).
+        def coverage
+          @coverage ||= ZoneMap.new(@regions.map { |r| [r.keys, r.vel, 1.0] }, default: 0.0)
         end
 
         # A number, or a ZoneMap (a per-note value; see #per_note).

@@ -520,7 +520,9 @@ module MB
       # #velocity, and #choke, registered for #idle?.  +lift: true+ also
       # wires #lift (release velocity scales the release time; off by
       # default), or pass a node.  GM2 time scaling (NoteEnvelope#gm) is on
-      # unless +gm: false+ or `.gm(false)`.
+      # unless +gm: false+ or `.gm(false)`.  +mask:+ (a node) multiplies the
+      # gate and trigger: 0 where the envelope should ignore notes (a
+      # SoundFont layer's envelope for notes its zones don't cover).
       #
       #     play v.hz.saw * v.amp_env(0.01, 0.3, 0.6, 0.5)
       #     v.filt_env(0, 0.4, 0.3, 0.3, depth: 3).gm(false)
@@ -1144,7 +1146,7 @@ module MB
 
       # Makes and registers a NoteEnvelope from an Envelope preset (see
       # #env).
-      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, gate: true, **options)
+      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, gate: true, mask: nil, **options)
         lift = case lift
                when true then self.lift
                when false, nil then nil
@@ -1153,6 +1155,10 @@ module MB
 
         inputs = gate ? envelope_inputs : { trigger: trigger, velocity: velocity, choke: choke }
         inputs = inputs.merge(lift: lift).compact
+        if mask
+          inputs[:gate] = inputs[:gate] * mask if inputs[:gate]
+          inputs[:trigger] = inputs[:trigger] * mask
+        end
         register(NoteEnvelope.preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
