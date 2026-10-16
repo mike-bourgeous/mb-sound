@@ -148,9 +148,13 @@ module MB::Sound
   # transport: open while any channel sounds), and the tape ends that fade
   # after its input ends, so renders end on their own instead of hissing to
   # the runner's 10 s cap.
-  def self.ambient_tape(sig, wear: 0.6, stop: 1)
+  #
+  # +bits+ (a number) sets the grain's depth directly, overriding wear's
+  # (wear still sets the lowpass); textures-6, to compare 12 and 10 bits
+  # with the room-then-tape order and TPDF dither.
+  def self.ambient_tape(sig, wear: 0.6, stop: 1, bits: nil)
     wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_drift(1.3, -0.0007, 0.0007))
-    step = ambient_tape_step(wear)
+    step = bits ? 2.0**(1 - bits) : ambient_tape_step(wear)
     running = sig.sounding(hold: stop, fade: 0.3)
     hiss = Array.new(wow.channel_count) { (noise.at(step * 0.5) + noise.at(step * 0.5)) * running }
     hiss = hiss.length == 1 ? hiss[0] : channels(*hiss)

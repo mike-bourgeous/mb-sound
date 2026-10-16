@@ -62,8 +62,8 @@ module MB
         # darting, the wings beat a little faster, swing wider (louder), and sound brighter
         fly = 190.hz.transpose(effort).saw.lp4(effort * 4000 + 1800) * (effort * 0.55 + 0.45)
         # sound arrives r / 343 seconds late (5x, for drama): nearing raises the pitch, leaving lowers it;
-        # a 2 Hz lowpass on the delay time turns the darts into gentle swoops
-        late = (r * (5 / 343.0)).filter(:lowpass, cutoff: 2, quality: 0.5)
+        # a 1.5 Hz lowpass on the delay time turns the darts into gentle swoops (higher cutoffs warble)
+        late = (r * (5 / 343.0)).filter(:lowpass, cutoff: 1.5, quality: 0.5)
         bg :try, (fly.delay(late, max_delay: 0.2).lp4(r * -1500 + 9000).pan(x / r) * (1 / (r + 0.3))).at(-18.db).until(2.bars)
       end
       example 'a drum head as kick and toms' do
