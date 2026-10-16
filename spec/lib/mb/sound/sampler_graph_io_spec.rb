@@ -47,6 +47,21 @@ RSpec.describe('Sampler graph documents', :aggregate_failures) do
     expect { io.load(path) }.to raise_error(io::LoadError, /sha256|SHA-256|changed/i)
   end
 
+  it 'leaves the default steal_fade out of documents and keeps steal_fade: false' do
+    brk = rec.slices(4)
+    dir = File.dirname(tmp_path('x'))
+    # quarter-bar slices every sixteenth on 2 voices: every hit from the third steals a voice
+    graphs = [{}, { steal_fade: false }].map { |o| brk.chop(0, 1, 2, 3).n16.loop.sampler(brk, voices: 2, **o) }
+    texts = graphs.each_with_index.map { |g, i| File.read(io.save(File.join(dir, "steal#{i}"), g, name: "steal#{i}")) }
+    expect(texts[0]).not_to include('steal_fade')
+    expect(texts[1]).to include('.sampler(Sample["assets/bounce.flac"].slices(4), voices: 2, steal_fade: false, seed: drawn_seed(')
+    refs = graphs.map { |g| render(g, buffers: 16) }
+    expect(max_diff(*refs)).to be > 0.1 # the stolen voices ring on without the fade
+    graphs.each_index do |i|
+      expect(max_diff(refs[i], render(io.load(File.join(dir, "steal#{i}.mbg", "steal#{i}.mbg.rb")), buffers: 16))).to be < 1e-6
+    end
+  end
+
   it 'saves tempo-following loops into bundles' do
     g = rec.follow + rec.stretch(0.5, mode: :slice).follow(:resample, align: :launch) * 0.5
     dir = File.dirname(tmp_path('x'))
