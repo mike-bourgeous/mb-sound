@@ -94,6 +94,29 @@ module MB
         Sampler::SFZ.load(path, name: name, mips: mips)
       end
 
+      # A SoundFont 2 instrument (Sampler::Instrument) from +path+ (see
+      # Sampler::SF2): +preset+ a GM program number in bank 0 (0 is the
+      # piano), [bank, program] ([128, 0] the GM drum kit), or a name
+      # ('Strings'; exact, else the one name containing it).  Without a
+      # preset, the SF2::Font: `font.presets` lists them, `font[0]`,
+      # `font['Pad']`, `font[128, 0]` choose one, and `font.play(v)` plays
+      # the first.  Voices read tables at level spacing +mips+ (:octave by
+      # default); +attenuation+ scales the font's initialAttenuation (0.4,
+      # FluidSynth's and the EMU hardware's factor, by default; 1.0 for the
+      # specification's own centibels); +wheel+ false leaves out the default
+      # vibrato from the mod wheel and aftertouch (one LFO per voice).
+      #
+      #     sf2('GM.sf2').presets
+      #     piano = sf2('GM.sf2', preset: 0)
+      #     synth(midi) { |v| piano.play(v) }
+      #     bg :kit, beat.sampler(sf2('GM.sf2', preset: [128, 0]), voices: 8)
+      def sf2(path, selector = nil, preset: selector, name: nil, mips: :octave, attenuation: Sampler::SF2::EMU_ATTENUATION, wheel: true)
+        font = Sampler::SF2.open(path)
+        return font if preset.nil? && name.nil? && mips == :octave && attenuation == Sampler::SF2::EMU_ATTENUATION && wheel
+        font.instrument(preset, name: name, mips: mips, attenuation: attenuation, wheel: wheel, path: path)
+      end
+      alias soundfont sf2
+
       # A chop pattern for +slices+ (see Sample::Slices#chop).
       #
       #     amen = chop(brk, :k, T, :h, :g, [:s, 2], brk[:s].rev)
@@ -112,6 +135,7 @@ module MB
                when Sampler::Instrument then instrument
                when Sample::Slices then instrument.instrument
                when Sample then instrument.to_instrument
+               when Sampler::SF2::Font then instrument.instrument
                else raise ArgumentError, "Give sampler an Instrument, Sample, or Slices (got #{instrument.inspect})"
                end
         inst.sampler(source, voices: voices, **options, &block)

@@ -856,6 +856,7 @@ module MB
             when MB::Sound::Sample then sample_text(v, indent)
             when MB::Sound::Sample::Slices then slices_text(v, indent)
             when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
+            when MB::Sound::Sampler::ZoneMap then zone_map_text(v, indent)
             when MB::Sound::Scale then scale_text(v)
             when MB::Sound::Generative::Value then v.to_ruby { |x| value(x, indent) }
             when MB::Sound::Generative::Dice then "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
@@ -1180,14 +1181,14 @@ module MB
             "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
           end
 
-          # An Instrument: from slices (keymap) or an SFZ file; others print
-          # as a FIXME for now.
+          # An Instrument: from slices (keymap), an SFZ file, or a SoundFont
+          # preset; others print as their constructor with a block.
           def instrument_text(i, indent)
             if i.lineage
               parent, name, args, kwargs = i.lineage
-              if parent == :sfz
+              if parent == :sfz || parent == :sf2
                 extra = kwargs.map { |k, v| ", #{key_text(k)} #{value(v, indent)}" }.join
-                return "sfz(#{leaf(args[0], indent)}#{extra})"
+                return "#{parent}(#{leaf(args[0], indent)}#{extra})"
               end
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
             end
@@ -1198,10 +1199,19 @@ module MB
           # block of `i.region` calls (only settings that differ from
           # Instrument#region's defaults).
           def instrument_block_text(inst, indent)
+            if inst.layers
+              args = inst.layers.map { |l| instrument_text(l, indent) }
+              args << "mips: #{value(inst.mips, indent)}" unless inst.mips == :default
+              args << "name: #{value(inst.name, indent)}" if inst.name
+              return "Sampler::Instrument.layered(#{args.join(', ')})"
+            end
+
             kw = {}
             kw[:split] = inst.split if inst.split
             kw[:mips] = inst.mips unless inst.mips == :default
             kw[:envelope] = inst.envelope if inst.envelope
+            kw[:filter] = inst.filter if inst.filter
+            kw[:modulation] = inst.modulation if inst.modulation
             kw[:name] = inst.name if inst.name
             args = kw.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }
             inner = "#{indent}  "
@@ -1217,11 +1227,20 @@ module MB
               opts[:tune] = r.tune unless r.tune == 0
               opts[:gain] = r.gain unless r.gain == 1
               opts[:offset] = r.offset unless r.offset == 0
+              opts[:pan] = r.pan unless r.pan.to_f == 0
               list = [value(r.sample, inner)] + opts.map { |k, v| "#{key_text(k)} #{value(v, inner)}" }
               "#{inner}i.region(#{list.join(', ')})"
             }
             head = args.empty? ? 'Sampler::Instrument.new' : "Sampler::Instrument.new(#{args.join(', ')})"
             "#{head} { |i|\n#{lines.join("\n")}\n#{indent}}"
+          end
+
+          # A Sampler::ZoneMap as its constructor: [keys, velocities, value]
+          # rows (and the default when it isn't the first row's value).
+          def zone_map_text(map, indent)
+            rows = map.zones.map { |k0, k1, v0, v1, x| "[#{k0}..#{k1}, #{v0}..#{v1}, #{value(x, indent)}]" }
+            extra = map.default == map.zones[0][4] ? '' : ", default: #{value(map.default, indent)}"
+            "Sampler::ZoneMap.new([#{rows.join(', ')}]#{extra})"
           end
 
           # (Samples, Slices, and Instruments print as postfix chains, so

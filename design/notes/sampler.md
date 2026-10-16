@@ -87,3 +87,47 @@ From the maintainer's Bench verdicts on sampler-2:
 `Sample#grains` (GraphNode::Grains, `FastSampler.grains` in `fast_sampler/granular.c`) and `Sample#stretch(mode: :spectral | :paul)` are in `granular.md`.  `stretch` keeps `mode: :cyclic` (with `fit: :auto`) as the default; `Sample#edit` takes `whole: true` for edits that need every channel at once.
 
 Round 3 (granular-2, 2026-10-15): the cyclic stretch crossfades 3 ms by default and fits whole local periods followed from cycle to cycle (the clicks and bass pitch jumps of the granular-1 Bench); details in `granular.md`.
+
+## SoundFont 2 (sf2-1, 2026-10-16)
+
+Maintainer, 2026-10-16: "Start sf2 import" (SFZ import existed; an SF2 exporter is planned in the on-hold export-1 brief, so the mapping below is meant to be its mirror).
+
+API: `font = sf2('GM.sf2')` is a `Sampler::SF2::Font` (`font.presets` lists `bank:program name`, `font[0]`, `font['Pad']`, `font[128, 0]`, `font.play(v)` plays the first preset); `sf2(path, 0)` / `sf2(path, preset: [128, 0] | 'Strings', name:, mips: :octave, attenuation: 0.4, wheel: true)` is the `Sampler::Instrument` (alias `soundfont`).  Instruments print as `sf2(path, preset: ...)`; documents read fonts relative to themselves (`Registry::FILE_METHODS`, `KEEP_NAME`), and bundles copy `.sf2` files as assets (`Assets::EXTENSIONS`).
+
+Reading (`lib/mb/sound/sampler/sf2.rb`, pure Ruby): the RIFF `sfbk` form's INFO texts and the `pdta` hydra when opened (GeneralUser GS 2.0.3, 30 MB, 287 presets: 0.03 s); `smpl` (and `sm24`, one byte per sample, else ignored) only for the samples a chosen preset plays, with `pread`.  Fonts are cached by file (WeakRef) and so are their samples and built instruments, so presets sharing samples share playback tables.  Robust to missing terminal records (EOP/EOI/EOS detected by name or shape, so a file without them keeps its last record), truncated files and odd chunk sizes (lengths clamped to the file), ROM and SF3 (compressed) samples (skipped and listed).  Samples keep their own rate (the kernel resamples); `Sample#save` now tags rates other than 48 kHz and `Sample[]` reads such files back at that rate, so bundle assets keep their positions.
+
+Zones (`Font#zones`): the instrument's global zone (a first zone without sampleID) under each local zone, preset generators (global, then local) added to the instrument's, except key and velocity ranges (intersected) and the instrument-only generators (offsets, sampleModes, exclusiveClass, overridingRootKey, keynum, velocity: ignored at the preset level), as the specification says (sections 8.5, 9.4).
+
+| SoundFont | Sampler |
+|---|---|
+| keyRange, velRange | region keys:, vel: |
+| overridingRootKey, else the sample's original pitch (255: C4) | root: |
+| coarseTune + fineTune + the sample's pitch correction | tune: (semitones) |
+| scaleTuning | keytrack: (/ 100) |
+| start/end/loop offsets (fine and coarse) | the Sample's start/stop and loop points |
+| sampleModes 0, 1, 3 | :no_loop, :forward, :release |
+| linked stereo pairs (same ranges) | one stereo Sample (pan ignored for hard L/R pairs) |
+| pan | region pan: (equal power, 0 dB centre; any pan makes the instrument stereo) |
+| initialAttenuation | gain 10^(-cB × 0.4 / 200) (`attenuation:`; 1.0 for spec centibels) |
+| default velocity → attenuation (960 cB concave) | veltrack 1 ((velocity)², exactly that curve) |
+| volume envelope: delay, attack (linear), hold, decay (straight in dB; sustain reached after its share of a 100 dB fall), sustain (cB), release (a 100 dB fall), keynum → hold/decay | the instrument's envelope (Notes#env segments, no velocity sensitivity) |
+| initialFilterFc / initialFilterQ | a lowpass (Q as FluidSynth: 10^((Q/10 − 3.01)/20)); open at 13500 cents |
+| modulation envelope (linear DAHDSR, keynum scaling) → pitch, filter | `modulation:` env source → pitch / cutoff cents |
+| modulation LFO (delay, frequency) → pitch, filter, volume | key-synced triangle `lfo` source (delay fades in) |
+| vibrato LFO → pitch; default mod wheel and channel pressure → vibrato (50 cents each) | `lfo` source with `wheel:`/`pressure:` (`wheel: false` leaves the LFO out unless a zone sets vibrato) |
+| zones that overlap | `Instrument.layered`: zones go greedily into layers of non-overlapping key × velocity rectangles; one sampler voice per layer per note |
+| exclusiveClass, keynum, velocity (fixed), modulators in the file, chorus/reverb sends | not mapped: listed once per preset (`Font#skipped`; sends quiet) |
+
+Per-zone settings: values that differ from zone to zone (or key to key, with keynum scaling) are `Sampler::ZoneMap`s (first zone holding the key and velocity; prints as `Sampler::ZoneMap.new([[keys, vels, value], ...])`), and `Instrument#play` makes a `GraphNode::ZoneValue` of each for the voice, reading the Notes' number and velocity rounded like the kernel's region choice, so each note gets its own zone's envelope, filter, and modulation with one voice per layer.  ZoneValue looks the value up once when the number and velocity hold for the buffer (first/last plus `ptp`: 1.2 µs per 128 samples, `minmax` was 3.2).  Uniform values stay plain numbers, so the envelope kernel keeps its constant runs.  Layers share modulation sources and sums with the same settings (one vibrato LFO per note).
+
+`Instrument` grew for this, generically: region `pan:`, envelope Hashes (Notes#env options), `filter:`, `modulation:` (named env/LFO sources summed into pitch and cutoff cents and volume centibels), and `Instrument.layered`; the RubyWriter prints all of them region by region, so an SF2 instrument without its recipe still round trips through a bundle (spec: within 1e-4 with 24-bit assets).
+
+Cost (one held note per voice through a Synth, i9-9880H container; ns per sample and % of realtime; the 0.14-0.28% figures above are the SamplerVoice kernel alone on the 7950X, while these include the Synth lane, Notes, and envelope): 800-sample buffers: a plain mono sampler voice with an ADSR 221 (1.1%), an SFZ-equivalent stereo voice (the piano's layer-1 regions, one constant ADSR) ~330-390, GM piano 718 (3.4%), strings 677 (3.3%), the worst preset in GeneralUser GS (Full Orchestra, 5 layers) 1603 (7.7%); 128-sample buffers: 1008, -, 2852, 2661, 6262.  The piano's 718 splits into its second layer (keys 61-90, but it runs for every note: ~250), per-zone values (~100: they make the envelope and filter read node parameters instead of constants), modulation (~110: the modulation envelope on the cutoff and the wheel/aftertouch vibrato; `wheel: false` saves ~65), and the stereo sampler voices and envelope of an SFZ-equivalent voice.  Two cheap fixes went in after the first measurement: the modulation sums use `2.constant ** (cents / 1200)` (the plan layer's vectorized 2^x; the SemitoneShift and `10 ** x` ProcNode were plan boundaries in Ruby) and one `ZoneValue::Index` per voice reads the note number and velocity once per buffer for all its ZoneValues (before: each ZoneValue read its own Tee branches).  Before those (and before sharing modulation across layers): piano 1829, Full Orchestra 5449 at 800.  A layer whose zones don't cover the note still runs (the piano's second layer covers keys 61-90: on C4 it costs ~200 of 770 ns per sample at 800); its envelopes ignore such notes (`Notes#env(mask:)` with a coverage ZoneValue), so an uncovered note-on doesn't attack again over the last note's 64-sample declick tail.
+
+Open items (sf2-1):
+- **Skippable sub-lanes (A, its own branch, coordinator 2026-10-16):** skip a layer that has no region for the current note the way Synth skips idle lanes: asleep from an 800-sample SKIP_GRID point once its envelopes are idle and its output stayed under -120 dB for a cell, woken on the exact sample of a covered note-on.  It belongs in Synth (a lane holding skippable sub-graphs, with their own boundary lists, idle checks, and wake offsets), because waking mid-buffer means rendering part of a buffer, which Synth#sample_skippable_lane does by windowing Plan::SharedInputs (`shared.window(offset, count)`), and skipping must leave shared controller branches to SharedInputs as Synth#skip_span does; a gate node inside the lane graph sees neither.  Measured saving: ~26% of a piano voice on notes outside 61-90; more for presets with many narrow layers (Full Orchestra, 5 layers).
+- Exclusive classes (hi-hat chokes) aren't mapped: the GM kits' open hat rings under the next closed hats.
+- Modulators in the file (other than the default ones) aren't read.
+- Bundles copy the whole `.sf2` (30 MB for a GM font) as one asset; extracting only the preset's samples would need the SF2 writer of export-1.
+
+Specs: `spec/support/sf2_writer.rb` (a tiny test writer: samples, instruments, presets as Hashes, 16/24-bit, optional terminals, dummy modulators) and `spec/lib/mb/sound/sf2_spec.rb`; the graph sweep plays a ZoneValue/pan/modulation/layered instrument.  Listening: GeneralUser GS 2.0.3 (S. Christian Collins; free license: use, modify, and redistribute in music and software; https://github.com/mrbumpy409/GeneralUser-GS), kept only in `tmp/sf2/` (gitignored).

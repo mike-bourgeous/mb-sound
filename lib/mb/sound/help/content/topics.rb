@@ -185,7 +185,8 @@ module MB
         every hit and a keyboard plays the same slices.  `brk.keymap(split:
         C4)` plays the last slice chromatically above C4.  Play with
         `clip.sampler(brk)` (one truncating voice), `sample.play(v)` in a
-        synth, `sfz(path)` instruments, or `sample.node`.
+        synth, `sfz(path)` and `sf2(path, preset)` instruments (`help
+        :soundfonts`), or `sample.node`.
 
         Converters: `.lofi(:mpc60)` is the cleanest (40 kHz, filtered: grit
         that sits in a mix), `:s950` darker (31.25 kHz, the jungle
@@ -218,6 +219,35 @@ module MB
         bass = 55.hz.ramp.lp4(700, resonance: 0.3).bounce(1.beat, root: A1).looped(0.1..0.4, mode: :ping_pong)
         bg :try, seq(A1, C2, E1, G1).n4.loop.sampler(bass).at(-12.db).until(2.bars)
       end
+    end
+
+    Help.topic :soundfonts, 'SoundFonts (.sf2)', group: :sound do
+      about <<~TEXT
+        `font = sf2('GM.sf2')` opens a SoundFont 2 file; `font.presets`
+        lists its presets (bank:program name).  Choose one with
+        `sf2('GM.sf2', 0)` (a GM program in bank 0: 0 is the piano),
+        `sf2(path, preset: 'Strings')` (a name, or the one name containing
+        it), `sf2(path, preset: [128, 0])` (bank 128: GM drum kits), or
+        `font[48]`, `font['Pad']`, `font[128, 0]`.  Each is a sampler
+        Instrument: `synth(midi) { |v| piano.play(v) }`,
+        `beat.sampler(kit, voices: 8)`, or a track's patch.  Only the
+        chosen preset's samples are read (a 30 MB GM font opens in a few
+        hundredths of a second).
+
+        What carries over: key and velocity zones, root keys and tuning,
+        loops, stereo pairs, pans, attenuation, the volume envelope,
+        filters, the modulation envelope and LFOs (to pitch, filter, and
+        volume), the mod wheel and aftertouch vibrato (`wheel: false`
+        leaves it out), and per-zone settings (each note gets its own
+        zone's envelope and filter; overlapping zones play as layers).
+        What doesn't (exclusive classes, extra modulators, ROM samples) is
+        listed once per preset when it loads.  Levels follow FluidSynth's
+        attenuation scale (`attenuation: 1.0` for the specification's).
+        `mips: :default` reads smoother tables (more memory) than the
+        `:octave` default.
+      TEXT
+      commands :sf2, :soundfont
+      see :sampler, :sequences
     end
 
     Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
