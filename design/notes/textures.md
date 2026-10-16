@@ -313,6 +313,34 @@ textures-6 (2026-10-16, Bench notes on round 5):
   tail (one harp D4, before the voice gain, 3-4 s after the note): 12
   bits -82 dBFS, 10 bits -71, 8.2 bits -60.
 
+textures-7 (2026-10-16, Bench notes on round 6; the last round):
+
+- Fly: 1.5 Hz doppler smoothing kept (the maintainer: "d 1.5 hz (new
+  default)").
+- Mouse ("A slightly lower threshold still would be best, maybe 1m/s,
+  and we can end there"): `critter_mouse(..., dash: 1.0)`.  Speed over
+  the threshold on the default path (seed 3, 32 s, 20 ms differences;
+  measured on the speed alone, so 1.5 reads 21% here, not the 27% above):
+  1 m/s 33% of the time in 21 bursts (median 0.42 s, at most 2 s);
+  1.5 m/s 21% in 16 (median 0.4 s, at most 0.8 s).
+- Tape (harp, koto, tape, and tails all picked 12 bits): "12 bit default
+  baseline, 10 bit at 0.6, keep 1.0 as is; wear doesn't introduce new
+  noise I suppose, only generational copying would, so this is more
+  impressionistic than realistic".  Wear now maps to the grain's depth
+  through 12 bits at 0, 10 at 0.6 (the default), and 7 at 1: bits =
+  12 - 5/6 wear - 25/6 wear^2, the one quadratic through the three points
+  (slope -0.83 bits per unit wear at 0, -9.2 at 1: it falls all the way,
+  gently at first).  The step is 2^(1 - bits) = 2^(-11 + (5 w + 25 w^2) /
+  6); a node wear goes through `aease(->(t) { (2**((5 * t + 25 * t * t)
+  / 6.0) - 1) / 31.0 }, out: 2**-11..2**-6)` (literals and its own
+  parameter only, so presets load it without trust; within 2e-7 of the
+  number path, the float32 lookup).  `bits:` still overrides.  Hiss
+  floor in a harp D4's tail (one note, default voice level, 5-6 s): wear 0
+  -79 dBFS, 0.6 -70 (was -60 at 8.2 bits), 1 -58 (the lowpass falls with
+  wear too, so wear 0 sits 3 dB over a 12-bit grain at wear 0.6's
+  lowpass).  It is an impression of an old tape, not a model of
+  generational copying.
+
 ## Costs (Linux desktop 7950X, min of 3, 800-sample buffers unless noted)
 
 | node | ns/sample | % of realtime |
@@ -361,9 +389,10 @@ textures-6).
 
 ## Ambient tape (`ambient_tape` in bin/synths/ambient.rb)
 
-Wow, a dithered quantizer (10 bits at wear 0 to 7 at wear 1; 8.2 at
-0.6, the default since textures-5, the maintainer's pick for harp and
-koto), and a lowpass falling with wear.  textures-4's dither was half a
+Wow, a dithered quantizer (12 bits at wear 0, 10 at 0.6, 7 at 1 since
+textures-7, above; textures-4 to 6 went 10 to 7 bits, 8.2 at 0.6; 0.6 is
+the default since textures-5, the maintainer's pick for harp and koto),
+and a lowpass falling with wear.  textures-4's dither was half a
 step of uniform noise, which left silence silent: the grain faded with
 each tail (the maintainer heard it: "I feel like the noise goes down as
 the amplitude goes down").  Measured on a 220 Hz tail falling 9 dB/s at

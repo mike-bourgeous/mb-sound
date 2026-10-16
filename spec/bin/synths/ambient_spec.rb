@@ -105,7 +105,7 @@ RSpec.describe('bin/synths/ambient.rb') do
     loud = rms_db(seconds(gl, 0.5, 1.5)) # (the tail at -26..-38 dBFS)
     quiet = rms_db(seconds(gl, 5, 6))    # (the tail at -86..-98 dBFS)
     expect(quiet).to be_within(2).of(loud)
-    expect(quiet).to be_within(4).of(-60) # 8.2 bits at the default wear 0.6
+    expect(quiet).to be_within(4).of(-71) # 10 bits at the default wear 0.6 (textures-7; 8.2 bits, -60, before)
     # (textures-4's half-step dither fell to -88 dBFS here)
 
     # Independent hiss per channel (one transport gate); the same wow
@@ -125,9 +125,25 @@ RSpec.describe('bin/synths/ambient.rb') do
       rms_db(seconds(y, 0.5, 1.5))
     }
     default = floor.()
-    expect(floor.(bits: 10 - 3 * 0.6)).to be_within(0.5).of(default) # (wear 0.6 is 8.2 bits)
-    expect(floor.(bits: 10)).to be_within(1.5).of(default - 1.8 * 6.02)
-    expect(floor.(bits: 12)).to be_within(1.5).of(default - 3.8 * 6.02)
+    expect(floor.(bits: 10)).to be_within(0.5).of(default) # (wear 0.6 is 10 bits since textures-7)
+    expect(floor.(bits: 12)).to be_within(1.5).of(default - 2 * 6.02)
+    expect(floor.(bits: 8)).to be_within(1.5).of(default + 2 * 6.02)
+  end
+
+  it 'maps tape wear to 12 bits of grain at 0, 10 at 0.6, and 7 at 1, numbers and nodes alike (textures-7)' do
+    step = ->(w) { MB::Sound.ambient_tape_step(w) }
+    expect(step.(0)).to eq(2.0**-11)
+    expect(step.(0.6)).to be_within(1e-15).of(2.0**-9)
+    expect(step.(1)).to eq(2.0**-6)
+    expect(step.(-1)).to eq(2.0**-11)
+    expect(step.(2)).to eq(2.0**-6)
+
+    wears = Numo::DFloat.new(4800).seq / 4799
+    numbers = wears.map { |w| step.(w.to_f) }
+    expect((numbers[1..-1] - numbers[0..-2]).min).to be > 0 # (rising all the way)
+
+    nodes = render_patch(step.(MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(wears)])), 0.1)[0][0...4800]
+    expect((Numo::DFloat.cast(nodes) - numbers).abs.max / numbers.min).to be < 1e-5
   end
 
   it 'records the koto and harp rooms onto the tape: the hiss goes on through the tail, then the tape stops (textures-5)' do
@@ -136,7 +152,7 @@ RSpec.describe('bin/synths/ambient.rb') do
     # room after the tape, its tail fading to the reverb's own floor)
     floor = rms_db(seconds(harp[0], 4, 5))
     expect(rms_db(seconds(harp[0], 5, 6))).to be_within(2).of(floor)
-    expect(floor).to be_between(-65, -55)
+    expect(floor).to be_between(-76, -66) # (10 bits at wear 0.6 since textures-7; -55..-65 at 8.2 bits)
     # A second after the room falls under -90 dB, the hiss fades out
     expect(rms_db(seconds(harp[0], 8, 10))).to be < -120
   end
@@ -148,7 +164,7 @@ RSpec.describe('bin/synths/ambient.rb') do
     y[48000...72000] = 0.1 # the right from 1 s to 1.5 s
     l, r = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound.stereo(MB::Sound::ArrayInput.new(data: [x]), MB::Sound::ArrayInput.new(data: [y]))), 4) }
     # The left's hiss goes on while the right sounds (per channel gates would stop it at 1.5 s)
-    expect(rms_db(seconds(l, 1.6, 2.4))).to be_between(-65, -55)
+    expect(rms_db(seconds(l, 1.6, 2.4))).to be_between(-76, -66) # (10 bits)
     expect(rms_db(seconds(l, 2.9, 3))).to be < -120
     expect(rms_db(seconds(r, 2.9, 3))).to be < -120
     expect(l.length).to eq(3 * 48000)
@@ -164,7 +180,7 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(out[1]).to eq(out[800])
     expect(out[128]).to eq(out[800])
     o = out[800]
-    expect(rms_db(seconds(o, 0.6, 1.4))).to be_between(-65, -55)   # hiss held for a second
+    expect(rms_db(seconds(o, 0.6, 1.4))).to be_between(-76, -66)   # hiss held for a second (10 bits)
     expect(rms_db(seconds(o, 1.9, o.length / 48000.0))).to be < -120 # stopped
     # The input ends at 2 s, long after it fell silent: the tape ends at once
     expect(o.length).to be_between(2 * 48000, 2 * 48000 + 800)

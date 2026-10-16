@@ -139,12 +139,14 @@ module MB::Sound
   # second (a little louder) 0.7 m/s faster; none while it walks slowly or
   # stands still (textures-6, 2026-10-16; the maintainer: "Tick density
   # should threshold so there's only brief moments of scratching as the
-  # mouse darts").  On the default path (seed 3, 32 s) a 1.5 m/s
-  # threshold scratches 27% of the time, in 17 bursts (median 0.4 s, at
-  # most 1.4 s); textures-5's ticks followed any motion (71% of the time,
-  # bursts up to 5 s); 2 m/s scratches 13% of the time (median 0.26 s).
-  # Mono.
-  def self.critter_mouse(x, y, z, dash: 1.5)
+  # mouse darts").  The threshold is 1 m/s since textures-7 (the
+  # maintainer, after 1.5: "A slightly lower threshold still would be
+  # best, maybe 1m/s").  On the default path (seed 3, 32 s) the speed is
+  # over 1 m/s 33% of the time, in 21 bursts (median 0.42 s, at most 2 s);
+  # over 1.5 m/s 21%, in 16 bursts (median 0.4 s, at most 0.8 s);
+  # textures-5's ticks followed any motion (71% of the time, bursts up to
+  # 5 s).  Mono.
+  def self.critter_mouse(x, y, z, dash: 1.0)
     vx, vy, vz = critter_velocity([x, y, z])
     speed = (vx * vx + vy * vy + vz * vz) ** 0.5
     darting = ((speed - dash) / 0.7).aclip(0, 1)

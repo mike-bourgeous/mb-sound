@@ -16,6 +16,9 @@ RSpec.describe('bin/audio_check.rb') do
   end
 
   it 'plays a click track and reports the queue, latency, and underruns' do
+    # A real-time process: under load (parallel suites) the adaptive queue
+    # may grow after a dropout, which DeviceOutput reports as a warning.
+    expect_script_warnings(/Audio dropout: raising the output queue/)
     text = run('-s', '1.2', '--latency', '0.05')
     expect(text).to include(
       'Opened: #<MB::Sound::DeviceOutput null "NULL Playback Device" 2ch 48000Hz default>',

@@ -26,7 +26,7 @@
 #             (D2 plays 55 Hz; other notes transpose it)
 #   koto      a plucked FM tone (1:1 body, faint 7:1 tine; more a koto or
 #             a hammered string than an e-piano) in a room, recorded on
-#             worn tape (--wear, 0.6 by default: 8.2 bits of hiss)
+#             worn tape (--wear, 0.6 by default: 10 bits of hiss)
 #   harp      Karplus-Strong plucks (bin/synths/pluck.rb), soft, in a room
 #             on the same tape
 #   drone     two old sine generators per side (root, fifth, octave)
@@ -119,9 +119,11 @@ module MB::Sound
   # textures-5): wow (a slowly wandering delay), grain, and a lowpass that
   # falls with wear.  The grain is a dithered quantizer (textures-4,
   # 2026-10-15; the maintainer: "go with 10-bit for the tape hiss for
-  # now", then "-10 to -7 bits of noise?"): 10 bits at wear 0 down to 7 at
-  # wear 1, continuous (#ambient_tape_step: the step is 2^(1 - bits) of
-  # full scale, so wear 0.6 is 8.2 bits).  Dithered quantizing leaves only
+  # now", then "-10 to -7 bits of noise?"): 12 bits at wear 0, 10 at the
+  # default 0.6, 7 at wear 1 (textures-7, the maintainer: "12 bit default
+  # baseline, 10 bit at 0.6, keep 1.0 as is"; #ambient_tape_step).  Wear
+  # alone wouldn't add noise (generational copying would), so the grain is
+  # impressionistic, not a model of a real tape.  Dithered quantizing leaves only
   # a hiss-like grain, where the earlier sample-rate crush (decimate(16000
   # - wear * 11000, mix: wear * 0.6), textures-1/2) left images of each
   # note (the rate plus and minus it) that rang as a high metallic tone.
@@ -163,14 +165,18 @@ module MB::Sound
   end
 
   # The tape's quantizer step for +wear+ (a number or a node): 2^(1 -
-  # bits), bits from 10 down to 7 as wear goes 0 to 1, so the step grows
-  # 8x (a node through an exponential lookup curve; the curve's Proc uses
-  # only literals and its own parameter, so graph documents load it
-  # without trust).
+  # bits), with bits the quadratic 12 - 5/6 wear - 25/6 wear^2 through 12
+  # bits at wear 0, 10 at 0.6, and 7 at 1 (textures-7; falling everywhere
+  # on 0..1, gently at first), so the step grows 32x (a node through a
+  # lookup curve; the curve's Proc uses only literals and its own
+  # parameter, so graph documents load it without trust).
   def self.ambient_tape_step(wear)
-    return 2.0**-9 * 8**wear.clamp(0, 1) if wear.is_a?(Numeric)
+    if wear.is_a?(Numeric)
+      w = wear.clamp(0, 1)
+      return 2.0**((5 * w + 25 * w * w) / 6.0 - 11)
+    end
 
-    wear.aease(->(t) { (8**t - 1) / 7.0 }, out: 2.0**-9..2.0**-6)
+    wear.aease(->(t) { (2**((5 * t + 25 * t * t) / 6.0) - 1) / 31.0 }, out: 2.0**-11..2.0**-6)
   end
 
   # Singing bowls struck at each note-on (velocity is the force), panned
@@ -376,7 +382,7 @@ module MB::Sound
       description: ->(p) { ambient_description(p.patch) },
       patch: [:bowl, Symbol, '-p', 'Instrument to play', [:bowl, :rin, :gong, :koto, :harp, :drone, :rainstick]],
       space: [0.5, Float, '-s', 'Room level 0..1 (bowls, rin, gong, koto, harp)', 0.0..1.0],
-      wear: [0.6, Float, '-w', 'Tape wear 0..1 (koto, harp): 10 bits of grain at 0 down to 7 at 1', 0.0..1.0],
+      wear: [0.6, Float, '-w', 'Tape wear 0..1 (koto, harp): 12 bits of grain at 0, 10 at 0.6, 7 at 1', 0.0..1.0],
       tune: [AMBIENT_GONG_TUNE.to_f, Float, '-t', 'Gong shimmer tuning in semitones (the shimmer partials and their noise band)', -24.0..12.0],
       spread: [AMBIENT_GONG_SPREAD, Float, '-S', 'Gong shimmer stereo width: 0 mono, 1 every other partial hard left and right', 0.0..1.0],
     ) { |midi, p|
