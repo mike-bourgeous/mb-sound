@@ -63,6 +63,63 @@ module MB
         Sequence::Clip.generate(length, values: values, seed: seed, name: name, align: align, reach: reach, &block)
       end
 
+      # A melody with phrase memory (Generative::Motifs): one motif per
+      # letter of +form+ (Symbols; nil for a silent phrase), each a rhythm
+      # on +steps+ steps of +step+ (+density+ of them start notes, strong
+      # steps more often) and a contour along the scale notes of +source+
+      # (Weights, a Harmony, a Scale, a Chord, a Field, or Harmony#over),
+      # realized where each note starts, so motifs come back through chord
+      # and key changes.  One phrase per cycle: the clip loops every phrase
+      # and plays the form's letters in turn.
+      #
+      # +answer:+ letters answering others (call and response: the call's
+      # rhythm, its contour mirrored in the second half, landing home);
+      # +vary:+ how much repeats within a pass change (0..1); +mutate:+ the
+      # chance per step and generation that a motif changes there, every
+      # +evolve:+ passes of the form (changes stay within one step of the
+      # first motif, so the tune grows but keeps its face); +leap:+ the
+      # largest contour move in scale steps.  +range:+ (C3..C5 by default)
+      # bounds the notes, +around:+ (the middle by default) is where the
+      # motifs sit, +width:+ an optional bell (semitones) favoring notes
+      # near +around:+ for blurred wrong notes and the field's register.
+      #
+      #     h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
+      #     lead = motifs(h, 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4, seed: 3)
+      #     bg :lead, ambient_koto_voice(lead)
+      #     motifs(key.blur(0.1) + chords * 1.5, 16, step: 1.n16, form: [:a, :b, :a, nil], evolve: 1)
+      def motifs(source, steps = 8, step: 1.n8, form: %i[a a b a], answer: { b: :a }, density: 0.5, vary: 0.2, mutate: 0.15,
+                 evolve: 2, leap: 3, range: nil, around: nil, width: nil, velocity: 0.55..0.85, legato: 0.9, seed: nil, align: :timeline)
+        raise ArgumentError, "motifs' steps is an Integer from 1 to 256 (got #{steps.inspect})" unless steps.is_a?(Integer) && steps.between?(1, 256)
+        step = Generative.length_of(step, :step)
+        unless form.is_a?(Array) && !form.empty? && form.length <= 64 && form.all? { |l| l.nil? || l.is_a?(Symbol) } && form.any?
+          raise ArgumentError, "motifs' form is an Array of 1 to 64 letters (Symbols, nil for a silent phrase), like %i[a a b a] (got #{form.inspect})"
+        end
+        letters = form.compact.uniq
+        raise ArgumentError, "motifs' answer: is a Hash of letter => the letter it answers, like { b: :a } (got #{answer.inspect})" unless answer.is_a?(Hash)
+        answer = answer.select { |k, _| letters.include?(k) }
+        answer.each do |k, v|
+          raise ArgumentError, "motifs' answer: letters are Symbols (got #{k.inspect} => #{v.inspect})" unless k.is_a?(Symbol) && v.is_a?(Symbol)
+          raise ArgumentError, "#{k.inspect} can't answer itself" if k == v
+          raise ArgumentError, "#{k.inspect} answers #{v.inspect}, which answers #{answer[v].inspect}: answers answer motifs, not other answers" if answer.key?(v)
+        end
+        { density: density, vary: vary, mutate: mutate }.each do |name, x|
+          raise ArgumentError, "motifs' #{name}: is from 0 to 1 (got #{x.inspect})" unless x.is_a?(Numeric) && x.real? && x.between?(0, 1)
+        end
+        raise ArgumentError, "motifs' evolve: is a whole number of passes from 1 (got #{evolve.inspect})" unless evolve.is_a?(Integer) && evolve >= 1
+        raise ArgumentError, "motifs' leap: is 1, 2, or 3 scale steps (got #{leap.inspect})" unless leap.is_a?(Integer) && leap.between?(1, 3)
+        raise ArgumentError, "motifs' legato: is from 0.05 to 1 (got #{legato.inspect})" unless legato.is_a?(Numeric) && legato.real? && legato.between?(0.05, 1)
+        raise ArgumentError, "motifs' velocity: is from 0 to 1, or a Range (got #{velocity.inspect})" unless velocity.is_a?(Range) || (velocity.is_a?(Numeric) && velocity.between?(0, 1))
+
+        field = Generative.motif_field(source, range: range, around: around, width: width)
+        notes = Generative.notes_of(field)
+        raise ArgumentError, "motifs' field has no notes" if notes.empty?
+        center = around ? Scale.root_number(around) : (notes.first + notes.last) / 2r
+        seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+        m = Generative::Motifs.new(field, steps: steps, step: step, form: form.dup.freeze, answer: answer.freeze, density: density, vary: vary,
+          mutate: mutate, evolve: evolve, leap: leap, around: center, velocity: velocity, legato: legato.rationalize(1r / 1024), seed: seed)
+        Sequence::Clip.generate(m.length, values: notes, seed: seed, name: "motifs(seed: #{seed})", align: align) { |cycle, dice| m.events(cycle, dice) }
+      end
+
       # Sparse generated hits (Generative::Strikes): on each step of
       # +every+, a strike with probability +chance+ (a number, or a lambda
       # of the cycle), none within +gap+ steps after another candidate, its

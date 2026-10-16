@@ -316,14 +316,24 @@ module MB
         `generate(1.bar) { |cycle, dice| rows }` make looping clips whose
         every cycle is a pure function of the seed and the cycle
         (counter-based `dice`), so they seek, replay in takes, and save.
+        `motifs(h, 8, form: %i[a a b a], answer: { b: :a })` remembers its
+        phrases: motifs come back (through key changes), `b` answers `a`
+        and lands home, repeats vary a little, and every `evolve:` passes
+        the motifs mutate a step here and there; `range:`/`around:` set
+        the register.
       TEXT
-      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody
+      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs
       note :generative
       see :sequences, :random
       example 'a melody that blurs and changes key' do
         h = harmony(0 => scale(:dorian, :d), 1.bar => scale(:major, :f), loop: 2.bars).blur(0.2)
         line = melody(h, 8, range: A3..A5, vary: true).loop
         bg :try, line.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'a tune with phrase memory: a a b a, b answering a' do
+        h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
+        tune = motifs(h, 8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4)
+        bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)

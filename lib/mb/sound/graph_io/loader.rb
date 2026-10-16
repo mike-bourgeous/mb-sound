@@ -1133,7 +1133,7 @@ module MB
             count(node, name, args[0], :copies) if args[0].is_a?(Numeric)
           when :bursts
             count(node, name, args[0], :copies) if receiver.is_a?(MB::Sound::Drums::Hit)
-          when :melody
+          when :melody, :motifs
             count(node, name, args[1], :steps) if receiver.equal?(MB::Sound)
           when :repeat, :loop, :ratchet, :roll, :every, :euclid, :grid, :*
             if receiver.is_a?(MB::Sound::Sequence::Clip) || receiver.is_a?(MB::Sound::Sequence::Seq) || name != :*
