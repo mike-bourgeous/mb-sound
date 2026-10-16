@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-15",
+  "generated": "2026-10-16",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -243,6 +243,7 @@
         "FastUI::Grid#frame",
         "FastUI::Grid#initialize",
         "FastUI::Grid#lines",
+        "FastUI::Grid#put_run",
         "FastUI::Grid#put_text",
         "FastUI::Grid#set_cell",
         "FastUI::Grid#to_text",
@@ -562,6 +563,7 @@
         "FastArithmetic.mix"
       ],
       "fast_sound": [
+        "FastSound.biquad_narray",
         "FastSound.oscillate",
         "FastSound.phasor"
       ],
@@ -1389,6 +1391,8 @@
     },
     "spec/lib/mb/sound/sampler_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.copy",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -1411,6 +1415,7 @@
         "FastSampler.play"
       ],
       "fast_sound": [
+        "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
       "fast_synth": [
@@ -1465,8 +1470,6 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
