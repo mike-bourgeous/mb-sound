@@ -143,7 +143,9 @@ module MB
       def attach_session_midi(session, input)
         attach_live_midi(session, input)
       rescue => e
-        warn "No live MIDI input (#{e.class}: #{e.message})"
+        # (Quiet when another source plays into the input, e.g. the
+        # terminal UI's virtual keyboard)
+        warn "No live MIDI input (#{e.class}: #{e.message})" if session.midi_in(input).sources.empty?
       end
 
       # Attaches the MIDI inputs #rec and #capture read: +input+ if given,

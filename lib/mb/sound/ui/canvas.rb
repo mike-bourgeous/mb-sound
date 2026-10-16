@@ -97,6 +97,22 @@ module MB
           x + str.length
         end
 
+        # Writes +str+ at (+x+, +y+) in +role+'s color with attributes
+        # (+reverse+: the color as the background, +bold+), clipped to the
+        # pane.  Returns the column after it.
+        def run(x, y, str, role = nil, reverse: false, bold: false)
+          str = str.to_s
+          return x + str.length if y < 0 || y >= @h || x >= @w || x + str.length <= 0
+
+          if x < 0
+            str = str[-x..]
+            x = 0
+          end
+          attr = (reverse ? Plot::Text::Cells::REVERSE : 0) | (bold || Themes.bold?(role) ? Plot::Text::Cells::BOLD : 0)
+          @grid.put_run(@x + x, @y + y, str[0, @w - x], Plot::Text::Cells.pack(Theme.rgb(role)), nil, attr)
+          x + str.length
+        end
+
         # Writes segments on row +y+ from column +x+: Strings, or [String,
         # role] pairs.  Returns the column after them.
         def line(y, *segments, x: 0)
