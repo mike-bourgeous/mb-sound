@@ -116,12 +116,31 @@ RSpec.describe('bin/synths/ambient.rb') do
     expect(peak_hz(seconds(l, 0.5, 1.5), 100, 400)).to eq(peak_hz(seconds(r, 0.5, 1.5), 100, 400))
   end
 
-  it 'records the koto and harp rooms onto the tape: the hiss goes on after the tail (textures-5)' do
+  it 'records the koto and harp rooms onto the tape: the hiss goes on through the tail, then the tape stops (textures-5)' do
     harp = render_patch(MB::Sound.ambient_harp_voice(patch_notes([MB::Sound::D4.number, 0, 0.5])), 10)
-    late = rms_db(seconds(harp[0], 8, 10))
-    expect(late).to be_within(4).of(rms_db(seconds(harp[0], 7, 8)))
-    expect(late).to be > -80 # (textures-4: the room after the tape, fading to the reverb's own floor)
-    expect(late).to be < -55
+    # The room's tail sinks under the grain, which stays (textures-4: the
+    # room after the tape, its tail fading to the reverb's own floor)
+    floor = rms_db(seconds(harp[0], 4, 5))
+    expect(rms_db(seconds(harp[0], 5, 6))).to be_within(2).of(floor)
+    expect(floor).to be_between(-65, -55)
+    # A second after the room falls under -90 dB, the hiss fades out
+    expect(rms_db(seconds(harp[0], 8, 10))).to be < -120
+  end
+
+  it 'stops the tape a second after its input falls silent, and ends after its input ends (textures-5)' do
+    x = Numo::SFloat.zeros(48000 * 2)
+    x[0...24000] = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(24000).seq * (2 * Math::PI * 220 / 48000)) * 0.1)
+    out = {}
+    [1, 128, 800].each do |bs|
+      out[bs] = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [x])), 4, buffer: bs)[0] }
+    end
+    expect(out[1]).to eq(out[800])
+    expect(out[128]).to eq(out[800])
+    o = out[800]
+    expect(rms_db(seconds(o, 0.6, 1.4))).to be_between(-65, -55)   # hiss held for a second
+    expect(rms_db(seconds(o, 1.9, o.length / 48000.0))).to be < -120 # stopped
+    # The input ends at 2 s, long after it fell silent: the tape ends at once
+    expect(o.length).to be_between(2 * 48000, 2 * 48000 + 800)
   end
 
   it 'drones on the note: root, fifth, and octave' do

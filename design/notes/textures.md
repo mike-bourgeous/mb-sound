@@ -356,6 +356,27 @@ louder than without it (a delay without wow didn't; likely the pitch
 wobble spreading a steady tone across more of the reverb's modes, not
 verified).
 
+Round 2 (the maintainer's answers, 2026-10-16): the tape stops with the
+sound and ends with its source.  `GraphNode#sounding(hold:, fade:)`
+(`GraphNode::Sounding`) is a gate: 1 while its source is above
+`RingOut::THRESHOLD` (-90 dB) and for `hold` after its last loud sample,
+then a linear fade to 0; it starts closed, and when the source ends (nil
+or a short last read) it plays on as if the source were silent and ends
+on the sample where it closes, the way delays ring out.  Each value
+depends only on the samples since the last loud one (vectorized: a
+cumulative count of loud samples indexes their positions; when `hold`
+is at least a buffer, everything from a buffer's first loud sample is
+1), so it is the same at any buffer size.  ambient_tape multiplies each
+channel's dither by its channel's gate (`stop: 1` s, fade 0.3 s), so the
+hiss runs through the room's tail and stops a second after the room
+falls below -90 dB (about 4.5 s after a harp note, 7 s after a koto
+note), and the tape ends with its input: a koto render of
+c2_sustain.mid ends on its own at 9.7 s (the 10 s runner cap took 12.4
+s with steady hiss).  Cost (Ruby, per channel, incl. a constant or sine
+source): 0.09-0.12% of realtime at 800-sample buffers, 0.29-0.40% at
+128; a `hold` shorter than a buffer takes the general path (~0.85% at
+128).  The ambient genre's `:wear` knob and `:emerge` scene are 0.6 too.
+
 ## Not built (ideas)
 
 - Plan ops for Dust/Drift/ModalResonator (plan boundaries now).

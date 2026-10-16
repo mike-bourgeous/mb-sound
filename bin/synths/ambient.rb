@@ -139,10 +139,19 @@ module MB::Sound
   # hiss is tape-dark too.  A node wear (a knob) moves the step every
   # sample through a lookup curve, quantizing without antialiasing (the
   # dither makes it noise anyway).
-  def self.ambient_tape(sig, wear: 0.6)
+  #
+  # The tape stops with the sound (textures-5 round 2; the maintainer:
+  # the hiss should stop with the tail, and the tape end when its source
+  # ends): the hiss runs while the input sounds (above -90 dB), for
+  # +stop+ seconds after it falls silent, then fades out over 0.3 s
+  # (GraphNode#sounding, per channel), and the tape ends that fade after
+  # its input ends, so renders end on their own instead of hissing to
+  # the runner's 10 s cap.
+  def self.ambient_tape(sig, wear: 0.6, stop: 1)
     wow = sig.delay(0.37.hz.lfo.sine.at(0.006..0.009) + ambient_drift(1.3, -0.0007, 0.0007))
     step = ambient_tape_step(wear)
-    hiss = Array.new(wow.channel_count) { noise.at(step * 0.5) + noise.at(step * 0.5) }
+    running = sig.sounding(hold: stop, fade: 0.3)
+    hiss = Array.new(wow.channel_count) { |c| (noise.at(step * 0.5) + noise.at(step * 0.5)) * (wow.channel_count == 1 ? running : running[c]) }
     hiss = hiss.length == 1 ? hiss[0] : channels(*hiss)
     grain = (wow + hiss).quantize(step)
     grain.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
