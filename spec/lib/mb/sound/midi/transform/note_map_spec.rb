@@ -87,8 +87,16 @@ RSpec.describe(MB::Sound::MIDI::Transform::NoteMap, :midi_transforms) do
       expect_balanced(read_all(s.chord(:fifth, overlap: :stack)), stack: true)
     end
 
-    it 'raises for unknown chords' do
+    it 'raises for unknown chords, and for a scale or root with a chord name' do
       expect { note_stream.chord(:nope) }.to raise_error(ArgumentError, /Unknown chord/)
+      expect { note_stream.chord(:min7, root: :d) }.to raise_error(ArgumentError, /takes no scale: or root:.*MB::Sound.chord\(:min7, root: :d\)/)
+      expect { note_stream.chord(:min7, scale: :major) }.to raise_error(ArgumentError, /takes no scale: or root:/)
+    end
+
+    it 'knows the added aliases' do
+      { m7b5: [63, 66, 70], '6': [64, 67, 69], m6: [63, 67, 69], M7: [64, 67, 71], dom: [64, 67, 70] }.each do |name, added|
+        expect(ons(read_all(note_stream.chord(name))).map { |e| e[1] }).to eq([60] + added), name.inspect
+      end
     end
   end
 

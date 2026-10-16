@@ -6,7 +6,9 @@ module MB
     # from probability scales too.
     module GenerativeMethods
       # A chord layer: the pitch classes of +notes+ (Notes, note numbers,
-      # or names) as Generative::Weights at +weight+ each.
+      # or names) as Generative::Weights at +weight+ each.  Named chords
+      # make the same layers: `chord(:min7, root: :d).weights` (see
+      # SequenceMethods#chord and Generative::Chord).
       #
       #     scale(:dorian, :d).weights.blur(0.1) + tones(D3, F3, A3, C4) * 1.2
       #     tones(*scale(:minor, :a).chord(0))   # the A minor triad
@@ -23,12 +25,14 @@ module MB
       end
 
       # Probability scales that change over time (Generative::Harmony):
-      # keyframes at clip positions (Durations, or numbers of bars from 0)
-      # of Weights, Scales, or Arrays of notes, blended between (+curve:+
-      # :linear, :step, or a Curve name), optionally looping.
+      # keyframes at clip positions (lengths such as 12.bars or 3.beats; 0
+      # for the start; other plain numbers raise) of Weights, Scales,
+      # Chords, or Arrays of notes, blended between (+curve:+ :linear,
+      # :step, or a Curve name), optionally looping (+loop:+ a length).
       #
       #     harmony(0 => scale(:dorian, :d), 12.bars => scale(:dorian, :d), 20.bars => scale(:major, :f))
       #     harmony(0 => [D3, F3, A3], 1.bar => [As2, D3, F3], loop: 2.bars, curve: :step)
+      #     harmony(0 => chord(:min7, root: :d), 1.bar => chord(:dom7, root: :g), loop: 2.bars, curve: :step)
       def harmony(keyframes = nil, curve: :linear, loop: nil, **positions)
         # harmony(0 => a, 12.bars => b) passes the keyframes as keywords
         # (non-Symbol keys); harmony({ ... }) as a Hash

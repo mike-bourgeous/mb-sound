@@ -90,8 +90,10 @@ module MB
         # Adds notes to each played note: a chord name (Transform::Chord::SHAPES,
         # e.g. :min7, :add9, :power; semitones above the note) or pitch
         # steps (scale degrees of +:scale+, semitones by default, or
-        # Intervals).  Added notes end with the played note; +:velocity+
-        # scales theirs.
+        # Intervals; +:scale+ and +:root+ go with steps only).  Added notes
+        # end with the played note; +:velocity+ scales theirs.  (The
+        # top-level `chord(:min7, root: :d)` is a chord value instead, for
+        # probability scales: see SequenceMethods#chord.)
         #
         #     midi.chord(:min7)
         #     midi.chord(2, 4, scale: :major, root: :c)   # diatonic triads from one finger

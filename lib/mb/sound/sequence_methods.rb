@@ -194,8 +194,22 @@ module MB
         MIDI::Transform::Spec.new.strum(*args, **kwargs)
       end
 
-      # An unattached chord transform (see #echo and MIDI::Stream#chord).
+      # An unattached chord transform (see #echo and MIDI::Stream#chord),
+      # or, given a chord name and +root:+, a chord value
+      # (Generative::Chord) whose #weights is a probability scale layer:
+      #
+      #     riff.bake(chord(0, 7, 15))                       # the transform (pitch steps)
+      #     midi.through(chord(:min7))                       # the transform (a chord name)
+      #     key.blur(0.15) + chord(:min7, root: :d).weights * 1.5   # a chord layer
+      #     chord(:maj7, root: F3, inversion: 1).notes       # => [A3, C4, E4, F4]
+      #
+      # (The transform takes +root:+ only with scale steps, so a chord name
+      # with +root:+ is always the value.)
       def chord(*args, **kwargs)
+        if Generative::Chord.value_call?(args, kwargs)
+          return Generative::Chord.new(args[0], **kwargs).with_recipe(nil, :chord, args, kwargs)
+        end
+
         MIDI::Transform::Spec.new.chord(*args, **kwargs)
       end
 

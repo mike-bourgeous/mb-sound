@@ -7,14 +7,14 @@ module MB
     # so they seek, replay in takes, and render the same at any buffer size.
     # Console methods are in GenerativeMethods.
     module Generative
-      # Weights from +x+: Weights, a Scale (its notes at 1), or an Array of
-      # notes (a chord layer).
+      # Weights from +x+: Weights, a Scale (its notes at 1), a Chord (its
+      # tones at 1), or an Array of notes (a chord layer).
       def self.weights(x)
         case x
         when Weights then x
-        when Scale then x.weights
+        when Scale, Chord then x.weights
         when Array then Weights.tones(*x)
-        else raise ArgumentError, "Expected Weights, a Scale, or an Array of notes (got #{x.inspect})"
+        else raise ArgumentError, "Expected Weights, a Scale, a Chord, or an Array of notes (got #{x.inspect})"
         end
       end
 
@@ -56,6 +56,7 @@ end
 require_relative 'generative/dice'
 require_relative 'generative/value'
 require_relative 'generative/weights'
+require_relative 'generative/chord'
 require_relative 'generative/field'
 require_relative 'generative/harmony'
 require_relative 'generative/producer'
