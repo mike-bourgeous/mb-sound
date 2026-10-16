@@ -107,7 +107,7 @@ RSpec.describe('script runner scripts', :smoke) do
   # Synth script => extra arguments; each plays a short MIDI file
   synths = {
     'bin/synths/acid.rb' => [],
-    'bin/synths/ambient.rb' => ['-p', 'koto', '-w', '0.5'], # (bowls and the gong ring past the 10 s check)
+    'bin/synths/ambient.rb' => ['-p', 'rainstick'], # (bowls and the gong ring past the 10 s check; the koto and harp's tape hiss never goes quiet, so they always take the 10 s tail)
     'bin/synths/dnb.rb' => ['-p', 'neuro', '-G', '0.5'],
     'bin/synths/drums_808.rb' => ['-c', '6'],
     'bin/synths/drums_909.rb' => ['-k', '0.8', '-d', '2'], # (a long kick: the kit ends when its voices go quiet)
