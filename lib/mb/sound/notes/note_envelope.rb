@@ -138,7 +138,7 @@ module MB
           count = count.round
           @start_time = @time
           @idle_at_start = idle?
-          @time = @notes.note_stream.advance(@time, count, @sample_rate)
+          @time = plan_note_stream.advance(@time, count, @sample_rate)
           @frames += count
           self
         end

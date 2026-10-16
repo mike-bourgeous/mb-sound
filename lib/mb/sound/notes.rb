@@ -1153,7 +1153,10 @@ module MB
                else lift
                end
 
-        inputs = gate ? envelope_inputs : { trigger: trigger, velocity: velocity, choke: choke }
+        # (masked envelopes, the layers of Sampler::Instrument, read the
+        # shared nodes: a sleeping Synth sub-lane then only reads their
+        # branches instead of advancing inputs of its own)
+        inputs = !gate ? { trigger: trigger, velocity: velocity, choke: choke } : mask ? { gate: self.gate, trigger: trigger, velocity: velocity, choke: choke } : envelope_inputs
         inputs = inputs.merge(lift: lift).compact
         if mask
           inputs[:gate] = inputs[:gate] * mask if inputs[:gate]

@@ -71,8 +71,28 @@ module MB
             { sub_lane: @owner }
           end
 
+          # The plan layer sees through to this channel's input (the
+          # SubLane isn't a node it walks), so the sub-lane's graph is
+          # planned in regions of its own.
+          def plan_sources
+            { input: @owner.inputs[@index] }
+          end
+
+          # Outside a Synth lane (or with Synth.sub_lanes off) the output is
+          # its input to the plan layer, so plans fuse across it as if the
+          # sub-lane weren't there; a sub-lane that may sleep is a boundary.
+          include Plan::Describable
+
+          def plan_inputs
+            [@owner.inputs[@index]]
+          end
+
+          def plan_describe(p)
+            p[@owner.inputs[@index]]
+          end
+
           def plan_unsupported_reason
-            'synth sub-lanes are a plan boundary'
+            @owner.skippable? ? 'synth sub-lanes are a plan boundary' : nil
           end
 
           def to_s
@@ -124,6 +144,9 @@ module MB
         # The output nodes, one per input channel.
         attr_reader :outputs
 
+        # The input nodes (samplers), one per channel.
+        attr_reader :inputs
+
         # Why the sub-lane can't skip in its Synth (a String), or nil.
         attr_reader :reason
 
@@ -159,6 +182,7 @@ module MB
           @zeros = nil
           @skipped_samples = 0
           @wakes = 0
+          @env_lag = 0
         end
 
         def sources
@@ -225,12 +249,7 @@ module MB
           return unless skippable?
 
           advance_clock(count)
-          envs = analysis[:envelopes]
-          i = 0
-          while i < envs.length
-            envs[i].advance(count)
-            i += 1
-          end
+          @env_lag += count
         end
 
         # Used by Output#sample: renders every channel once per piece of the
@@ -350,7 +369,10 @@ module MB
         # class description).
         def render(pos, count)
           a = analysis
-          return render_awake(count) unless @reason.nil?
+          unless @reason.nil?
+            catch_up(a)
+            return render_awake(count)
+          end
 
           o = 0
           whole = nil
@@ -375,6 +397,7 @@ module MB
               @cell_loud = false
               @wakes += 1
             end
+            catch_up(a)
 
             stop = sleep_candidate(pos, o, count)
             n = stop - o
@@ -445,14 +468,20 @@ module MB
             next if shared&.shared_node?(n)
             n.advance(count)
           end
-          envs = a[:envelopes]
-          i = 0
-          while i < envs.length
-            envs[i].advance(count)
-            i += 1
-          end
+          # (idle envelopes catch up at the wake: their stream time only
+          # answers questions about sounding envelopes; see #catch_up)
+          @env_lag += count
           advance_clock(count)
           @skipped_samples += count
+        end
+
+        # Moves the paused Notes envelopes' bookkeeping over the samples
+        # skipped since they last rendered (Notes::NoteEnvelope#advance).
+        def catch_up(a)
+          return if @env_lag == 0
+
+          a[:envelopes].each { |e| e.advance(@env_lag) }
+          @env_lag = 0
         end
 
         # Moves the sub-lane's own reader of the lane +count+ samples on.
