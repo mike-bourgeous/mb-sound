@@ -48,6 +48,12 @@ module MB
           self[name] || raise(KeyError, "No rack named #{name.inspect}#{MB::Sound::Rack.suggest(name, names)}#{" (racks: #{names.join(', ')})" unless names.empty?}")
         end
 
+        # The output type the latest application of rack +name+ returned,
+        # or nil.
+        def output_of(name)
+          @mutex.synchronize { @entries[name]&.out }
+        end
+
         # The rack names.
         def names
           @mutex.synchronize { @entries.keys }
@@ -75,12 +81,42 @@ module MB
           entries.to_h { |e|
             r = e.rack
             out = r.out || e.out
-            used = e.uses.zero? ? 'not used yet' : "#{e.uses} use#{'s' if e.uses != 1}"
-            where = players_using(e)
-            used += " (in #{where.map(&:inspect).join(', ')})" unless where.empty?
+            used = uses_text(e)
             macros = e.macros.empty? ? '' : "macros #{e.macros.map { |n, spec| Racks.macro_text(n, spec) }.join(', ')}, "
             [r.name, "#{r.kind(out)} #{r.signature(out)}, #{macros}#{used}"]
           }
+        end
+
+        # "2 uses (in :bass, :keys)" for rack +name+ (nil if there is no
+        # such rack).
+        def uses(name)
+          e = @mutex.synchronize { @entries[name]&.dup }
+          e && uses_text(e)
+        end
+
+        # Frozen RackInfo values for the named racks, for rack panes and
+        # other threads (no render lock; the rack's latency comes from a
+        # stand-in build the first time, then is remembered): { name =>
+        # [RackInfo, ...] }, one per instance with macros in the Session
+        # (path :"bass/dub", or :dub while one instance uses them), else
+        # one for the rack (path nil).
+        def rack_info
+          entries = @mutex.synchronize { @entries.values.map(&:dup) }
+          entries.to_h { |e|
+            r = e.rack
+            instances = macro_instances(r.name)
+            specs = e.macros.empty? ? (r.macro_specs rescue {}) : e.macros
+            infos = if instances.empty?
+                      [r.info(specs: specs, out: e.out)]
+                    else
+                      instances.map { |key, knobs|
+                        names = knobs.values.map(&:name)
+                        path = names.first.to_s.split('/')[0..-2].join('/').to_sym
+                        r.info(path: path, macros: names, specs: specs, out: e.out)
+                      }
+                    end
+            [r.name, infos.freeze]
+          }.freeze
         end
 
         # "space 0.3 (0..1)", "cut 800 Hz (100..8000 exp)" for macro +name+
@@ -169,6 +205,13 @@ module MB
         end
 
         private
+
+        def uses_text(e)
+          used = e.uses.zero? ? 'not used yet' : "#{e.uses} use#{'s' if e.uses != 1}"
+          where = players_using(e)
+          used += " (in #{where.map(&:inspect).join(', ')})" unless where.empty?
+          used
+        end
 
         # A per-instance macro name: :"bass/dub/space" (the second instance
         # in one player :"bass/dub.2/space"; without a player, by order:

@@ -9,6 +9,7 @@ require_relative 'help/try'
 require_relative 'help/sheet'
 require_relative 'help/now'
 require_relative 'help/graph_page'
+require_relative 'help/rack_page'
 require_relative 'help/lessons'
 require_relative 'help/coverage'
 require_relative 'help/welcome'
@@ -65,6 +66,7 @@ module MB
         when Method, UnboundMethod
           MethodPage.new(index.find_all(subject.name), index)
         when GraphNode, GraphNode::Channels then GraphPage.new(subject, index)
+        when Rack then RackPage.new(subject, index)
         else
           if subject.respond_to?(:to_ruby)
             GraphPage.new(subject, index)

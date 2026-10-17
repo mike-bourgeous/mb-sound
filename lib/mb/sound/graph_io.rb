@@ -42,8 +42,13 @@ module MB
       # gains everywhere else (dB is written -12.db); older documents load
       # with their old meaning (bare levels at 0 and below and every bare
       # gain or point in dB, warning once; see
-      # GraphNode::DynamicsMethods.from_old_document).
-      FORMAT = 3
+      # GraphNode::DynamicsMethods.from_old_document).  Format 4
+      # (2026-10-17, racks R2) types the inputs (`inputs sig: :audio, side:
+      # :audio`; `inputs :midi` still loads, as notes, other names as
+      # audio), adds `outputs :audio`, and rack documents (`graph 4, kind:
+      # :effect, rack: :arack`, whose knob lines are the rack's macros);
+      # graphs using named racks carry their definitions.
+      FORMAT = 4
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'
@@ -96,6 +101,7 @@ module MB
       end
 
       @procs = {}
+      @rack_documents = ObjectSpace::WeakMap.new
 
       class << self
         # Named procs for runtime blocks outside the safe subset (see
@@ -157,6 +163,12 @@ module MB
         # files the graph reads (bundles; see .save); without it they raise
         # DumpError (tables) or keep their paths (file names).
         def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+          if graph.is_a?(Rack)
+            unless inputs.empty? && params.empty? && options.empty? && kind.nil?
+              raise ArgumentError, 'rack documents take their inputs from the rack\'s ports (no inputs, params, options, or kind)'
+            end
+            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets).to_s
+          end
           if graph.is_a?(Arrangement)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'set documents take no inputs, params, options, or kind'
@@ -321,6 +333,46 @@ module MB
           ''
         end
 
+        # The `inputs` header line for +types+ ({ name => type, or [type,
+        # default text] for an optional port }).
+        def inputs_line(types)
+          "inputs #{types.map { |n, t|
+            key = n.to_s.match?(/\A[a-z_][a-zA-Z0-9_]*\z/) ? "#{n}:" : "#{n.to_s.inspect}:"
+            t.is_a?(Array) ? "#{key} [#{t[0].inspect}, #{t[1] || 'nil'}]" : "#{key} #{t.inspect}"
+          }.join(', ')}"
+        end
+
+        # The port type of free input +obj+ of a graph.
+        def input_type(obj)
+          case obj
+          when MIDI::Stream, MB::Sound::Notes, Sequence::Clip, MIDI::Source then :notes
+          when GraphNode::Constant, GraphNode::Knob, GraphNode::Knob::Reader then :control
+          else
+            t = GraphNode::Traversable.port_type_of(obj) rescue nil
+            t == :notes ? :notes : :audio
+          end
+        end
+
+        # `graph N, ...` with the metadata +parts+ (texts), on several lines
+        # when long.
+        def graph_line(parts)
+          line = "graph #{FORMAT}, #{parts.join(', ')}"
+          return line if line.length <= 120
+
+          "graph #{FORMAT},\n  #{parts.join(",\n  ")}"
+        end
+
+        # The Document of rack +rack+ if it was loaded from a rack
+        # document, else nil.
+        def rack_document(rack)
+          @rack_documents[rack]
+        end
+
+        # Remembers +doc+ as rack +rack+'s Document (Loader).
+        def remember_rack_document(rack, doc)
+          @rack_documents[rack] = doc
+        end
+
         # mb-sound's version, with the git commit when the library is a
         # checkout.
         def library_version
@@ -424,6 +476,11 @@ module MB
       #
       # +seeds: :fresh+ draws new random seeds instead of the saved ones
       # (see GraphIO.load; seeds the code gave stay).
+      #
+      # A rack document (`save :dub, rack(:dub)`) gives the Rack, defined in
+      # the Session under its name (`preset :dub` then `bass.then(&rack(:dub))`),
+      # or with its main input given, the rack applied to it (`preset :dub,
+      # sig: mic, side: :drums`).
       def preset(name, trust: nil, session: nil, seeds: :saved, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
@@ -438,6 +495,24 @@ module MB
           puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
           return doc
         end
+        if doc.rack?
+          # A rack document: the Rack (defined in the Session under the
+          # document's name), or applied when its inputs are given
+          session = Session.existing if session.nil?
+          target = session || Session.current
+          rack = GraphIO.load(path, trust: trust, seeds: seeds)
+          Session.with_context(session: target) { target.racks.define(rack) } if rack.name
+          return rack if inputs_and_params.empty?
+
+          main = rack.input.name
+          raise ArgumentError, "preset #{name} needs its main input #{main}: (#{rack.input.type}) to apply it, or nothing for the Rack" unless inputs_and_params.key?(main)
+          graph = Session.with_context(session: target) { rack.call(inputs_and_params[main], **inputs_and_params.except(main)) }
+          if session && (graph.is_a?(GraphNode) || graph.is_a?(GraphNode::Channels))
+            attach_knob_midi(session, session.adopt_knobs(graph))
+          end
+          return graph
+        end
+
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
         graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds)
@@ -470,8 +545,10 @@ module MB
           names.each do |n|
             doc = GraphIO.parse(File.join(dir, "#{n}#{GraphIO::EXTENSION}")) rescue nil
             extra = []
-            extra << "inputs: #{doc.inputs.join(', ')}" if doc && !doc.inputs.empty?
-            extra << "params: #{doc.param_values.map { |k, v| "#{k} #{v}" }.join(', ')}" if doc && !doc.params.empty?
+            extra << "rack #{doc.kind}" if doc&.rack?
+            extra << "inputs: #{doc.inputs.map { |i| doc.input_types[i] ? "#{i} (#{doc.input_types[i]})" : i }.join(', ')}" if doc && !doc.inputs.empty?
+            extra << "macros: #{doc.params.keys.join(', ')}" if doc&.rack? && !doc.params.empty?
+            extra << "params: #{doc.param_values.map { |k, v| "#{k} #{v}" }.join(', ')}" if doc && !doc.params.empty? && !doc.rack?
             puts "  #{n}#{"  (#{extra.join('; ')})" unless extra.empty?}"
           end
         end
@@ -513,3 +590,4 @@ require_relative 'graph_io/trusted_code'
 require_relative 'graph_io/file_guard'
 require_relative 'graph_io/assets'
 require_relative 'graph_io/set_writer'
+require_relative 'graph_io/rack_writer'

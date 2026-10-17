@@ -85,6 +85,33 @@ module MB
         end
       end
 
+      # What a rack pane (and `help rack(:x)`) shows of a rack or one of
+      # its instances: a deep-frozen value, safe to hand to painter threads
+      # (Session::Racks#rack_info, Rack#info).
+      #
+      # - name: the rack's name (Symbol) or nil
+      # - path: the instance path (:"bass/dub", :dub) or nil for a rack
+      #   not playing
+      # - kind: :note_fx, :instrument, :effect, :listener, :modulator
+      # - signature: "audio(sig) + audio(side) -> audio"
+      # - ports: frozen Array of frozen Hashes { name:, type:, role:
+      #   (:main or :side), required: }, the main input first
+      # - latency: samples the rack delays its main input by (the longest
+      #   path through nodes reporting #latency: dynamics lookahead,
+      #   limiters), or nil if unknown
+      # - macros: frozen Array of the instance's Session knob names (a
+      #   rack not playing: its macro names)
+      # - macro_specs: frozen { macro name => Knob::Spec }
+      # - slots: frozen Array (slots come in phase R3)
+      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :macros, :macro_specs, :slots) do
+        def to_s
+          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{macros.empty? ? '' : ", macros #{macros.join(', ')}"}"
+        end
+      end
+
+      # Latencies of racks by Rack (identity; see #latency).
+      LATENCIES = ObjectSpace::WeakMap.new
+
       # One application of a rack (Rack#call) while its block builds: the
       # macros made so far by name.  Rack.application is the innermost one
       # on this thread.
@@ -432,6 +459,31 @@ module MB
         MB::Sound.recall(:"#{@name}/#{snap}", **opts)
       end
 
+      # The samples this rack delays its main input by, from a stand-in
+      # build (see RackInfo#latency); remembered per Rack value.
+      def latency
+        return LATENCIES[self] if LATENCIES.key?(self)
+        value = begin
+          result, = build_on_stand_ins
+          Rack.latency_of(result)
+        rescue StandardError
+          nil
+        end
+        LATENCIES[self] = value
+      end
+
+      # A frozen RackInfo for this rack (+path+ and +macros+ for one
+      # instance; see Session::Racks#rack_info).
+      def info(path: nil, macros: nil, specs: nil, out: nil)
+        specs ||= (macro_specs rescue {})
+        ports = [{ name: @input.name, type: @input.type, role: :main, required: true }.freeze]
+        @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
+        RackInfo.new(
+          name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
+          macros: (macros || specs.keys).map(&:to_sym).freeze, macro_specs: specs.dup.freeze, slots: [].freeze
+        )
+      end
+
       # The Session knobs of this rack's macros (names), every instance's.
       def macros
         return [] unless @name
@@ -475,6 +527,35 @@ module MB
         text
       end
 
+      # The default values of optional ports as source text ({ depth:
+      # "0.5" }), read from the block's source with Prism (blocks loaded
+      # from rack documents keep theirs); nil text where the source isn't
+      # found.
+      def port_defaults
+        optional = @ports.values.reject(&:required).map(&:name)
+        return {} if optional.empty? || @block.nil?
+        return @block.graph_io_defaults.slice(*optional) if @block.respond_to?(:graph_io_defaults)
+
+        found = {}
+        src = GraphNode::Recipe.block_source(@block, @constructor)
+        if src
+          require 'prism'
+          walk = ->(n) {
+            return if n.nil? || !found.empty?
+            if n.is_a?(Prism::BlockParametersNode) || n.is_a?(Prism::ParametersNode)
+              list = n.is_a?(Prism::BlockParametersNode) ? n.parameters : n
+              list&.keywords&.each { |k| found[k.name] = k.value.slice if k.respond_to?(:value) }
+              return
+            end
+            n.compact_child_nodes.each { |c| walk.(c) }
+          }
+          walk.(Prism.parse("rack #{src}").value) # (a bare `{ |sig| }` would parse as a Hash)
+        end
+        optional.to_h { |k| [k, found[k]] }
+      rescue StandardError
+        optional.to_h { |k| [k, nil] }
+      end
+
       # Block parameter names, in order: the main input's, then the extra
       # ports' (for printing an application's block).
       def param_names
@@ -482,10 +563,11 @@ module MB
       end
 
       # The block's parameter list as text: "sig, side:, depth: 0.5" (an
-      # optional port prints without its default value; its default is
-      # in the source).
+      # optional port's default from the block's source, see
+      # #port_defaults; nil when it isn't found).
       def param_list
-        [@input.name.to_s, *@ports.values.map { |p| "#{p.name}:#{' nil' unless p.required}" }].join(', ')
+        defaults = port_defaults
+        [@input.name.to_s, *@ports.values.map { |p| "#{p.name}:#{" #{defaults[p.name] || 'nil'}" unless p.required}" }].join(', ')
       end
 
       # True for racks made with #>> or #<<.
@@ -529,6 +611,30 @@ module MB
           s&.racks&.used(rack, result, app)
         end
 
+        # The samples +result+ (a rack instance: a node or bundle) delays
+        # its input by: the longest path through nodes reporting #latency
+        # (an Integer of samples; for a node's outputs, its owner's).
+        # Notes and other values give nil.
+        def latency_of(result)
+          roots = case result
+                  when GraphNode::Channels then result.to_a
+                  when GraphNode, GraphNode::MultiOutput then [result]
+                  else return nil
+                  end
+          memo = {}.compare_by_identity
+          visiting = {}.compare_by_identity
+          walk = nil
+          walk = ->(n) {
+            return memo[n] if memo.key?(n)
+            return 0 if visiting[n]
+            visiting[n] = true
+            own = node_latency(n)
+            srcs = (n.respond_to?(:sources) ? n.sources.values : []).flatten.select { |x| x.respond_to?(:sources) }
+            memo[n] = own + (srcs.map { |x| walk.(x) }.max || 0)
+          }
+          roots.map { |r| walk.(r) }.max || 0
+        end
+
         # Runs the block with +app+ as the innermost rack application on
         # this thread (see #application; macros made inside belong to it).
         def applying(app)
@@ -551,13 +657,21 @@ module MB
         # empty note stream (as Notes) for notes.
         def stand_in(type)
           case type
-          when :audio then GraphNode::Constant.new(0)
-          when :control then GraphNode::Constant.new(0)
+          when :audio, :control then GraphNode::Constant.new(0, sample_rate: 48000)
           when :notes then MB::Sound::Notes.new(MIDI::Stream.new(MIDI::ClipSource.new(Sequence::Clip.new([], length: 1))))
           end
         end
 
         private
+
+        def node_latency(n)
+          l = n.latency if n.respond_to?(:latency) && n.method(:latency).arity == 0
+          owner = n.respond_to?(:owner) ? n.owner : n.instance_variable_get(:@owner) # (outputs of multi-output nodes)
+          l = owner.latency if l.nil? && owner.respond_to?(:latency) && owner.method(:latency).arity == 0
+          l.is_a?(Numeric) ? l : 0
+        rescue StandardError
+          0
+        end
 
         def sample?(t)
           t == :audio || t == :control

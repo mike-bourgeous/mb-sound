@@ -216,6 +216,39 @@ RSpec.describe('rack macros') do
     end
   end
 
+  describe 'rack info' do
+    let(:dub) { s.arack(:dub, side: :audio) { |sig, side:| sig.compress(lookahead: 5.ms).delay(0.1, wet: s.macro(:space, 0.3)) + side } }
+
+    it 'gives frozen RackInfo per instance with ports, latency, and macro knobs' do
+      info = session.racks.tap { dub }.rack_info[:dub]
+      expect(info.length).to eq(1)
+      expect(info[0].path).to be_nil
+      expect(info[0].latency).to eq(240)
+      expect(info[0].ports.map { |p| [p[:name], p[:type], p[:role]] }).to eq([[:sig, :audio, :main], [:side, :audio, :side]])
+      expect(info[0].macros).to eq([:space])
+
+      s.bg(:bass, 1.constant.then(&dub.with(side: 0.constant)))
+      s.bg(:keys, 1.constant.then(&dub.with(side: 0.constant)))
+      all = session.racks.rack_info
+      expect(Ractor.shareable?(all)).to eq(true)
+      expect(all[:dub].map(&:path)).to eq([:"bass/dub", :"keys/dub"])
+      expect(all[:dub].map(&:macros)).to eq([[:"bass/dub/space"], [:"keys/dub/space"]])
+      expect(all[:dub][0].signature).to eq('audio(sig) + audio(side) -> audio')
+    end
+
+    it 'explains a rack with help rack(:x)' do
+      require 'mb/sound/help'
+      dub
+      s.bg(:bass, 1.constant.then(&dub.with(side: 0.constant)))
+      text = MB::U.remove_ansi(MB::Sound::Help.page_for(s.rack(:dub)).to_s)
+      expect(text).to include('rack :dub').and include('effect, audio(sig) + audio(side) -> audio')
+      expect(text).to match(/side\s+audio\s+port/)
+      expect(text).to match(/space 0\.3 \(0\.\.1\)\s+:"dub\/space"/)
+      expect(text).to include('latency 240 samples (5.0 ms at 48 kHz)')
+      expect(text).to include('uses 1 use (in :bass)')
+    end
+  end
+
   describe 'printing' do
     it 'prints macros inside the rack block and round-trips through graph documents' do
       r = s.arack { |sig|

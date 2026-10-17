@@ -63,8 +63,15 @@ module MB
           # +assets+ (a GraphIO::Assets, for bundles) names files for tables
           # that aren't library tables and for Strings naming sound or MIDI
           # files.
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
+          #
+          # +define_racks+ (graph documents) prints a definition of each
+          # named rack the graph applies before the graph
+          # (`arack(:dub, side: :audio) { |sig, side:| ... }`, from its first
+          # application's recorded body), so the document loads where the
+          # rack isn't defined.
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil, define_racks: false)
             @root = root
+            @define_racks = define_racks
             @assets = assets
             @given_inputs = inputs
             @seeds = seeds
@@ -131,6 +138,7 @@ module MB
             @output_owner = {}.compare_by_identity
             @given_inputs.each_value { |obj| register_outputs(obj) }
             @knobs_used = Set.new
+            @rack_defs = {}
             @used.merge(@knobs.keys)
             @used.merge(@knob_nodes.values)
           end
@@ -150,6 +158,7 @@ module MB
             final = Recipe.graph_object?(@root) ? expr(@root, top: true) : value(@root)
             @parts = [finish_lines(lines.join("\n").split("\n")), finish_lines(final.split("\n"))]
             lines << final
+            lines = @rack_defs.values + lines unless @rack_defs.empty?
             body = finish_lines(lines.join("\n").split("\n"))
 
             header = []
@@ -663,6 +672,7 @@ module MB
           def rack_text(rack, c, indent)
             text =
               if rack.name
+                define_rack(rack, c, indent) if @define_racks
                 "rack(#{rack.name.inspect})"
               else
                 args = []
@@ -679,6 +689,25 @@ module MB
             return text if rack.bound.empty?
 
             "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})"
+          end
+
+          # Remembers the definition of named rack +rack+ (applied by call
+          # +c+) for the lines before the graph (see #initialize), once per
+          # name; racks used inside it come first.
+          def define_rack(rack, c, indent)
+            return if @rack_defs.key?(rack.name)
+            return unless c.block_kind == :build && c.invocations && !c.invocations.empty?
+
+            @rack_defs[rack.name] = nil # (a rack applying itself)
+            args = [rack.name.inspect]
+            args << "in: #{rack.input.type.inspect}" if rack.constructor == :rack
+            args << "out: #{rack.out.inspect}" if rack.out && !%i[irack instrument_rack lrack amrack listener_rack].include?(rack.constructor)
+            rack.ports.each_value { |p| args << "#{key_text(p.name)} #{p.type.inspect}" }
+            saved = [@names.dup, @used.dup]
+            body = rack_block_text(c, rack, '')
+            @names, @used = saved
+            @rack_defs.delete(rack.name)
+            @rack_defs[rack.name] = "#{rack.constructor}(#{args.join(', ')})#{body}"
           end
 
           # The block of a rack application, from its one invocation.
