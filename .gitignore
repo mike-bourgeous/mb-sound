@@ -6,6 +6,8 @@
 /pkg/
 /spec/reports/
 /tmp/
+# Agent briefs, persona sheets, audits, page sources (workbench/README.md); its own repo later
+/workbench/
 .*.swp
 .*.swo
 /*.flac
