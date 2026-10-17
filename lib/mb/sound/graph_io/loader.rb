@@ -589,7 +589,6 @@ module MB
           arity = rest ? -(count + 1) : count
           params = names.map { |n| [:opt, n] }
           params << [:rest, rest] if rest
-          kws.each { |k, default| params << [default ? :key : :keyreq, k] }
           pr.define_singleton_method(:arity) { arity }
           pr.define_singleton_method(:parameters) { |**| params }
           pr.define_singleton_method(:graph_io_source) { source }
