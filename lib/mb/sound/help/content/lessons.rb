@@ -114,7 +114,8 @@ module MB
         say <<~TEXT
           `clip.sampler(slices)` plays it on one voice, each hit cutting the
           last (with a 1 ms declick).  Three semitones up puts the 138.75 BPM
-          record on a 165 BPM grid.
+          record on a 165 BPM grid.  A chop remembers its slices, so
+          `play @l_amen` or `bg :x, @l_amen` plays them too.
         TEXT
         type { bg :l_breaks, @l_amen.transpose(3).sampler(@l_brk).at(-14.db) }
         check('a player :l_breaks') { players.key?(:l_breaks) }
