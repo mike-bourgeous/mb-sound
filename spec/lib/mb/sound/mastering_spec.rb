@@ -58,7 +58,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
       vinyl = described_class.preset(:vinyl)
       expect(vinyl.limiter).to eq(false)
-      expect(vinyl.ceiling.db_value).to eq(-3)
+      expect(vinyl.ceiling.db_value).to eq(-1)
       expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
     end
 
@@ -258,8 +258,8 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       a = tmp_path('vinyl.flac')
       render_song(a, master: :vinyl, &song)
       r = MB::Sound.loudness(a)
-      expect(r.true_peak).to be <= -3 + 0.05
-      expect(described_class::Targeting.last.held).to eq(r.integrated < -13 - 0.05)
+      expect(r.true_peak).to be <= -1 + 0.05
+      expect(described_class::Targeting.last.held).to eq(r.integrated < -14 - 0.05)
     end
 
     it 'refuses a block that plays graphs built outside it' do

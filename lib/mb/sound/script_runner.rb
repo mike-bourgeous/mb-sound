@@ -390,7 +390,7 @@ module MB
             window[:bars] = @options[:bars] || bars
           end
           window[:master] = mastering_option if @options.key?(:master)
-          window[:loudness] = @options[:lufs] if @options.key?(:lufs)
+          window[:loudness] = @options[:lufs] if @options.key?(:lufs) && !(@options[:ride] && @options[:master])
           seconds = MB::Sound.render(@options[:output], **window, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
           puts "Stems in #{@options[:stems]}" if @options[:stems]
@@ -401,9 +401,7 @@ module MB
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           Session.current.exact_lanes = true if @options[:take]
-          if @options.key?(:master)
-            Session.current.mastering_override = @options.key?(:lufs) && mastering_option ? Mastering.preset(mastering_option, lufs: @options[:lufs]) : mastering_option
-          end
+          Session.current.mastering_override = mastering_option if @options.key?(:master)
           arrange_song(&block)
           start = @options[:from] ? seek_live(@options[:from]) : 0r
           if @options[:bars]
@@ -421,12 +419,18 @@ module MB
 
       private
 
-      # The --master preset (a Symbol) or false for none.
+      # The --master preset (a Mastering::Preset, with --ride and, when
+      # riding, --lufs) or false for none.
       def mastering_option
         m = @options[:master]
         return false if m == :none
         raise ArgumentError, "Unknown mastering preset #{m.inspect} for --master (#{Mastering.names.join(', ')}, or none)" unless Mastering.preset?(m)
-        m
+        options = {}
+        if @options[:ride]
+          options[:ride] = true
+          options[:lufs] = @options[:lufs] if @options.key?(:lufs)
+        end
+        Mastering.preset(m, **options)
       end
 
       # Arranges a song with +block+ on the current session, at the --bpm
@@ -640,6 +644,7 @@ module MB
               "Master through a mastering preset (#{Mastering.names.join(', ')}; after the song's own master effects, replacing " \
               'its preset if it has one; none drops presets); renders reach its loudness target'
             ) { |v| @options[:master] = v.to_sym }
+            o.on('--ride', 'With --master: ride the gain toward the target live (a slow rider; renders then run once instead of measuring)') { @options[:ride] = true }
             o.on('--lufs LUFS', 'Loudness target for a render (LUFS, or a name like spotify): the mastering preset\'s, else normalizes the file') { |v|
               @options[:lufs] = v.match?(/\A[-+]?\d/) ? Float(v) : v.to_sym
             }

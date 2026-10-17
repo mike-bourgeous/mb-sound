@@ -134,12 +134,12 @@ module MB
         },
         vinyl: {
           title: 'Vinyl: mono lows, tamed highs, no brickwall',
-          defaults: { lufs: -13.0, ceiling: -3.db, mono: 150, glue: true, de_ess: 5500 },
+          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 5500 },
           notes: 'For a cutting engineer: mono below 150 Hz and a 25 Hz highpass (lateral bass is fine, vertical bass ' \
                  'throws the stylus), gentle glue, and a split-band de-esser above 5.5 kHz, since the RIAA pre-emphasis ' \
                  'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
-                 'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -3 dBTP by ' \
-                 'trim alone (renders lower the trim instead of limiting).',
+                 'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
+                 'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).',
           source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
                   'advice (mono lows, controlled sibilance, headroom), from memory',
         },
