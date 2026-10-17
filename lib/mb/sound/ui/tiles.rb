@@ -26,6 +26,7 @@ module MB
       class Tiles
         include Follow
         include FrameRate
+        include Listable
 
         # Seconds between size checks (besides SIGWINCH).
         SIZE_CHECK = 0.5
@@ -38,7 +39,7 @@ module MB
 
         # UI commands the palette runs on this screen (`split :v`); every
         # other line is evaluated in the console binding.
-        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys].freeze
+        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys look message].freeze
 
         # Keys hinted on the status line per mode.
         HINTS = {
@@ -88,6 +89,10 @@ module MB
 
         attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :mode
 
+        # The size decision (UI::Density) and pane chrome (UI::Chrome::Plan)
+        # of the current layout.
+        attr_reader :density, :chrome
+
         # +layout+ a Viewports::Layout with a repl pane; +input+/+output+
         # the terminal (dup'd, so they keep reaching it after :adopt
         # reopens the process's streams); +repl+ :adopt (the console's
@@ -98,10 +103,12 @@ module MB
         # (UI.keyboard), +keys_kitty+ true/false forces the kitty protocol
         # in KEYS mode on or off (nil: if the probe found it); other
         # options as for Band.
-        def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :quad,
+        def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :auto,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil, play_keys: nil, on_action: nil, window_prefix: true)
+          # (Every instance variable set up front, in one order: one object shape)
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -149,12 +156,15 @@ module MB
           @midi_seen = nil
           @overlay = nil
           @messages_restore = nil
+          @message_close = nil
           @show_fps = false
           @pane_cpu = Hash.new { |h, k| h[k] = [] }
-          @gaps = nil
-          @title_rules = nil
+          @chrome = nil
+          @density = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
+          # Panes' declared minimum heights (UI::Pane#min_height)
+          @tiler.mins = ->(name, axis) { axis == :rows ? @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil) : nil }
           @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, window_prefix: window_prefix,
                                       repl_keys: play_keys || (repl == :none ? nil : Keys.repl_keymap))
           @router.add_keymap(NAV_EXTRA)
@@ -318,6 +328,24 @@ module MB
           @lock.synchronize { relayout }
         end
 
+        # The panes on screen, for #list (UI::Listable).
+        def listed_panes
+          order = @tiler.numbered
+          @tiler.placed.filter_map do |p|
+            next unless p.name
+            pane = @panes[p.name]
+            kind = p.name == :repl ? :repl : pane ? pane.class.name.split('::').last.downcase.to_sym : :empty
+            n = order.index(p.name)
+            rate = p.opts[:rate].is_a?(Numeric) ? p.opts[:rate] : pane&.rate
+            PaneOnScreen.new(number: n && n + 1, name: p.name, kind: kind, title: pane&.title, rect: p.rect, focused: p.name == @tiler.focus,
+                             zoomed: @tiler.layout.zoom == p.name, rate: rate,
+                             look: pane&.bytes? ? (@states[p.name][:look] || p.opts[:look] || @look) : nil, title_at: @chrome&.frames&.dig(p.name)&.at)
+          end
+        end
+
+        def listing_mode = @hidden ? :hidden : :tiles
+        def listing_layout = @layout_name
+
         # Draws the next frame (the painter calls this at its rate).
         # Returns the bytes written (nil if nothing changed).
         def refresh(now = @clock.call)
@@ -349,6 +377,7 @@ module MB
             repl_reader_cpu_ms: ((@host&.reader_cpu || 0) * 1000).round(1),
             fps: fps,
             target_fps: @target_fps,
+            pacing: @pacer.breakdown,
             pane_cpu_ms: @pane_cpu.to_h { |name, q| [name, UI.percentiles(q.map { |c| c * 1000 })] },
             slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
@@ -416,7 +445,51 @@ module MB
           end
         end
 
+        # The look of plot pane +pane+ (default: the focused pane; a scope or
+        # spectrum): +name+ a Plot look (:scope Braille, :quad, :blocks,
+        # :mosaic, :spark, :ascii, or :auto), or nil for the next one in
+        # Panes::Scope::LOOK_CYCLE.  Kept in the layout's pane options, so
+        # `ui.save` saves it.  Returns the look.
+        #
+        #     ui.look            # the focused scope's next look
+        #     ui.look :quad, pane: :spectrum
+        def look(name = nil, pane: nil)
+          pane ||= @tiler.focus
+          raise ArgumentError, "#{pane.inspect} isn't a plot pane (scope, spectrum): its look is fixed" unless @panes[pane]&.bytes?
+          if name.nil?
+            cycle = Panes::Scope::LOOK_CYCLE
+            now = @states[pane][:look] || @tiler.layout.options_of(pane)[:look]
+            name = cycle[((cycle.index(now) || -1) + 1) % cycle.length]
+          end
+          unless name == :auto || Plot::Text::LOOKS.key?(name)
+            raise ArgumentError, "Unknown look #{name.inspect} (:auto, #{Plot::Text::LOOKS.keys.map(&:inspect).join(', ')})"
+          end
+          tile { |t| t.set_option(pane, :look, name) }
+          flash("#{pane}: look #{name.inspect}", :ok)
+          name
+        end
+
+        # Shows message +n+ (1: the newest; see the messages pane's
+        # numbers) in full in a temporary pane below the messages (or
+        # wherever a temporary pane goes), wrapped, with its count and age;
+        # `ui.message false` closes it.  Returns self.
+        def message(n = 1)
+          if n == false || n.nil?
+            @message_close&.call
+            @message_close = nil
+            return self
+          end
+          raise ArgumentError, "Messages are numbered from 1, the newest (got #{n.inspect})" unless n.is_a?(Integer) && n > 0
+          @panes[:message].index = n if @panes[:message].respond_to?(:index=)
+          @message_close ||= plot_pane(:message, height: 10)
+          @full = true
+          self
+        end
+
+        # Undoes the last layout change (split, close, resize, ...; 100 steps).
         def undo = tile(&:undo)
+
+        # Redoes a layout change undone with #undo.
         def redo = tile(&:redo)
 
         # The next (+dir+ 1) or previous tab.
@@ -577,20 +650,26 @@ module MB
           self
         end
 
-        # Puts pane +kind+ (:scope, :spectrum) on the screen for a plot (see
-        # PlaybackMethods#visualize): nothing if the layout shows it, else a
-        # slot of +height+ rows below the REPL (the focus stays).  Returns a
-        # Proc that closes the slot again (nil if nothing changed).
+        # Puts pane +kind+ (:scope, :spectrum, :messages) on the screen for
+        # a while (a plot from PlaybackMethods#visualize, the messages
+        # pane): nothing if the layout shows it, else a slot of +height+
+        # rows taken from the largest flexible pane that isn't the REPL or
+        # the keyboard (UI::Viewports::Tiler#open_temporary; the focus
+        # stays).  Returns a Proc that closes the slot again, putting the
+        # split tree back exactly as it was if nothing else changed it
+        # (ux-1 r3 item 30), or nil if nothing changed.
         def plot_pane(kind, height: 10)
-          return nil if @tiler.layout.panes.include?(kind)
-          tile do |t|
-            was = t.focus
-            t.split(t.layout.panes.include?(:repl) ? :repl : was, :rows, kind)
-            fit_height(t, kind, height)
-            t.focus!(was)
-          end
-          -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
+          temp = nil
+          tile { |t| temp = t.open_temporary(kind, height, keep: TEMPORARY_KEEP, fallback: :repl) }
+          return nil unless temp
+          -> { tile { |t| t.close_temporary(temp) } }
         end
+
+        # The REPL pane's smallest height.
+        REPL_MIN_ROWS = 4
+
+        # Panes temporary panes never take their rows from.
+        TEMPORARY_KEEP = %i[repl keyboard].freeze
 
         # What is wrong with the mode state, as a list (empty when every
         # invariant holds): KEYS mode's keyboard, kitty flags, and notes
@@ -1144,7 +1223,13 @@ module MB
         def complete_palette
           l = @router.line or return
           word = l.text[0, l.cursor][/[a-z_][a-zA-Z0-9_]*\z/] or return
-          names = (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
+          names =
+            if l.text[0, l.cursor - word.length].end_with?(':')
+              # A Symbol: pane names (the catalog) and layouts (`show :sc` Tab)
+              UI.pane_catalog.names.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
+            else
+              (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
+            end
           found = names.select { |n| n.start_with?(word) }.sort
           if found.length == 1
             l.insert(found[0][word.length..])
@@ -1245,21 +1330,7 @@ module MB
         ### Painter
 
         def paint_loop
-          Thread.current.name = 'MB::Sound::UI'
-          Thread.current.priority = -1
-          until @stopping || @hidden
-            t = @clock.call
-            begin
-              refresh(t)
-            rescue => e
-              warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
-              @painter_warned = true
-            end
-            left = 1.0 / @target_fps - (@clock.call - t)
-            sleep(left) if left > 0
-          end
-        rescue => e
-          warn "UI painter stopped: #{e.class}: #{e.message}"
+          paced_loop(-> { @stopping || @hidden })
         end
 
         def thread_cpu
@@ -1305,6 +1376,8 @@ module MB
 
         # Placements, grids, and the separators for the current tree.
         def relayout(*)
+          @density = Density.decide(:tiles, @rows, @cols)
+          @tiler.header_rule = @density.header_rule
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
@@ -1314,9 +1387,9 @@ module MB
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
-          @gaps = gap_cells
-          @title_rules = title_rules(@gaps)
-          @placed.each { |pl| @states[pl.name][:title_in_rule] = @title_rules.key?(pl.name) if pl.name }
+          @chrome = chrome_plan
+          # (Chrome draws every pane's title: panes draw their bodies only)
+          @placed.each { |pl| @states[pl.name][:title_in_rule] = true if pl.name }
           @canvases = {}
           @drawn_at = {}
           @relayout = false
@@ -1342,6 +1415,7 @@ module MB
           auto_messages
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
+          heard_snap = heard(snap, now) # (meters and scopes: what reaches the speakers now)
           # Taken at the start: a redraw asked for while this frame paints
           # (another thread: a mode change, a closed overlay) stays asked
           # for, instead of being cleared when the frame ends
@@ -1349,7 +1423,7 @@ module MB
           @full = false
           if full
             @grid.clear
-            draw_gaps
+            Chrome.paint(@grid, @chrome, glyphs: @glyphs, nav: @router.mode == :nav)
           end
 
           drawn = 0
@@ -1372,14 +1446,14 @@ module MB
             next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
             t0 = thread_cpu
             begin
-              r = p.rect
+              r = @chrome.frames[p.name]&.inner || p.rect
               if pane.bytes?
-                b = pane.frame_bytes(snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
+                b = pane.frame_bytes(pane.needs.empty? ? snap : heard_snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
                 bytes << b if b
               else
                 canvas = (@canvases[p.name] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
-                pane.draw(canvas, snap, @states[p.name])
+                pane.draw(canvas, pane.needs.empty? ? snap : heard_snap, @states[p.name])
               end
               @failures.delete(p.name)
             rescue => e
@@ -1392,7 +1466,7 @@ module MB
             drawn += 1
             Thread.pass
           end
-          draw_badges if %i[nav overlay].include?(@router.mode)
+          Chrome.paint_overlays(@grid, @chrome) if %i[nav overlay].include?(@router.mode)
           draw_overlay if @overlay
           note_long_output
           draw_status(now, snap)
@@ -1466,68 +1540,24 @@ module MB
           end
         end
 
-        # Box-drawing glyphs for a rule cell by the rule cells around it
-        # (bits: 1 up, 2 down, 4 left, 8 right).
-        JOINS = {
-          unicode: { 1 => '│', 2 => '│', 3 => '│', 4 => '─', 8 => '─', 12 => '─', 15 => '┼', 11 => '├', 7 => '┤',
-                     14 => '┬', 13 => '┴', 10 => '┌', 6 => '┐', 9 => '└', 5 => '┘', 0 => '│' },
-          ascii: Hash.new { |_, k| [1, 2, 3, 0].include?(k) ? '|' : [4, 8, 12].include?(k) ? '-' : '+' },
-        }.freeze
-
-        # The cells no pane covers (the rules), as rows of booleans.
-        def gap_cells
-          h = @rows - 1
-          covered = Array.new(h) { Array.new(@cols, false) }
-          @placed.each do |p|
+        # The chrome of the current placements (UI::Chrome): rules between
+        # panes, each pane's title (in the rule above it, else on a title
+        # row when the pane has room) and number, the focused pane marked.
+        # Panes right under a tab strip take their title from the strip.
+        def chrome_plan
+          order = @tiler.numbered
+          strips = @placed.select(&:tabs).map(&:rect)
+          items = @placed.map do |p|
             r = p.rect
-            r.h.times { |dy| covered[r.y + dy]&.fill(true, r.x, r.w) }
-          end
-          covered.map { |row| row.map(&:!) }
-        end
-
-        # Panes whose title goes into the rule above them (a rule row
-        # across their whole width): they draw their body from their first
-        # row.  Set by #relayout.
-        def title_rules(gaps)
-          @placed.each_with_object({}) do |p, h|
-            next if p.name.nil? || p.tabs || p.name == :repl
-            r = p.rect
-            pane = @panes[p.name]
-            next unless pane&.title && !pane.bytes? && r.y > 0
-            h[p.name] = r if (r.x...(r.x + r.w)).all? { |x| gaps[r.y - 1][x] }
-          end
-        end
-
-        # The rules between panes: vertical in the columns between panes
-        # side by side, horizontal in the rows between stacked panes,
-        # joined with box-drawing glyphs (|-+ for :ascii glyphs), the
-        # focused pane's edges in the key color, and pane titles set into
-        # the rule above them.
-        def draw_gaps
-          gaps = @gaps || gap_cells
-          h = gaps.length
-          focus = @placed.find { |p| p.name == @tiler.focus }&.rect
-          set = Themes.glyphs(@glyphs)
-          joins = JOINS[@glyphs == :ascii ? :ascii : :unicode]
-          dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
-          key = Plot::Text::Cells.pack(Theme.rgb(:key))
-          h.times do |y|
-            @cols.times do |x|
-              next unless gaps[y][x]
-              bits = (y > 0 && gaps[y - 1][x] ? 1 : 0) | (y < h - 1 && gaps[y + 1][x] ? 2 : 0) |
-                     (x > 0 && gaps[y][x - 1] ? 4 : 0) | (x < @cols - 1 && gaps[y][x + 1] ? 8 : 0)
-              glyph = joins[bits]
-              glyph = set[:rule] || glyph if [0, 1, 2, 3].include?(bits)
-              glyph = set[:hrule] || glyph if [4, 8, 12].include?(bits)
-              near = focus && y >= focus.y - 1 && y <= focus.y + focus.h && x >= focus.x - 1 && x <= focus.x + focus.w
-              @grid.put_run(x, y, glyph, near ? key : dim, nil, 0)
+            if p.tabs
+              next Chrome::Item.new(name: :"tabs@#{r.x},#{r.y}", rect: r)
             end
+            under_tabs = strips.any? { |t| t.y == r.y - 1 && t.x == r.x }
+            title = under_tabs || p.name == :repl ? nil : @panes[p.name]&.title || (@panes[p.name] ? p.name.to_s : nil)
+            n = order.index(p.name)
+            Chrome::Item.new(name: p.name, rect: r, title: title, number: n && n + 1, focused: p.name == @tiler.focus)
           end
-          (@title_rules || {}).each do |name, r|
-            title = " #{@panes[name].title.to_s.upcase} "
-            next if title.length + 2 > r.w
-            @grid.put_run(r.x + 1, r.y - 1, title, Plot::Text::Cells.pack(Theme.rgb(:title)), nil, Plot::Text::Cells::BOLD)
-          end
+          Chrome.plan(items, w: @cols, h: @rows - 1, rules: true)
         end
 
         # The key overlay (#key_help): groups in columns in a box centered
@@ -1584,17 +1614,6 @@ module MB
             end
             x += widths[i] + 3
             break if x >= box_w - 2
-          end
-        end
-
-        # Pane numbers in NAV mode, in each pane's top right corner.
-        def draw_badges
-          @tiler.numbered.each_with_index do |name, i|
-            r = @placed.find { |p| p.name == name }&.rect or next
-            badge = " #{i + 1} #{name == @tiler.focus ? name : ''} ".squeeze(' ')
-            badge = " #{i + 1} " if badge.length > r.w
-            role = name == @tiler.focus ? :key : :queued
-            @grid.put_run(r.x + [r.w - badge.length, 0].max, r.y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           end
         end
 
@@ -1676,7 +1695,7 @@ module MB
             end
             str = str.delete("\n\r")
           end
-          @term.write(str)
+          timed_write { @term.write(str) }
         rescue IOError, SystemCallError
           @stopping = true
         end

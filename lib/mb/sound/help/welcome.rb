@@ -1,26 +1,49 @@
 module MB
   module Sound
     module Help
-      # The console's welcome screen (bin/sound.rb): a few lines on where
-      # help is, then one random runnable tip (maintainer, 2026-10-13: "A
-      # few more lines but yes").  Until there is a level check, a line
-      # offers one.
-      def self.welcome(random: Random.new)
+      # The welcome screen's commands, grouped (ux-1 r3 item 1; maintainer:
+      # "too condensed without visual affordances"): one command per line,
+      # descriptions aligned and dim, through the same formatter as the
+      # sheet's footer (Doc#commands).
+      WELCOME = [
+        ['Learn', [
+          ['lesson', 'guided lessons'],
+          ['help.tip', 'a random example to play'],
+        ]],
+        ['Play', [
+          ['bg :a, 220.hz.triangle.at(-20.db)', 'a sound in the background'],
+          ['stop :a', 'stops it'],
+          ['now', "what's playing and what you can do"],
+        ]],
+        ['Help', [
+          ['help', 'the one-screen sheet'],
+          ['help :knobs', 'a topic (help.topics lists them)'],
+          ['help /reverb/', 'search names, topics, and docs'],
+        ]],
+      ].freeze
+
+      # The console's welcome screen (bin/sound.rb): the commands to start
+      # with (WELCOME), a footer set apart (the monitor trim or the level
+      # check, Ruby and Pry links), then one random runnable tip
+      # (maintainer, 2026-10-13: "A few more lines but yes").  Plain under
+      # NO_COLOR or when +io+ isn't a terminal.
+      def self.welcome(random: Random.new, io: $stdout)
         t = Text
-        lines = []
-        lines << "#{t.c(:title, 'Welcome to mb-sound,')} the interactive sound environment!"
-        lines << "  #{t.code('help')} the one-screen sheet  #{t.code('help :knobs')} a topic  #{t.code('help /reverb/')} search  #{t.code('help.topics')}"
-        lines << "  #{t.code('now')} what's playing  #{t.code('lesson')} guided lessons  #{t.code('bg :a, 220.hz.triangle.at(-20.db)')}, #{t.code('stop :a')}"
+        doc = Doc.new
+        doc.lines(["#{t.c(:title, 'Welcome to mb-sound,')} the interactive sound environment!"])
+        doc.commands(WELCOME)
+        foot = []
         if Level.saved?
           trim = 20 * Math.log10([Session.monitor_gain, 1e-9].max)
-          lines << "  #{t.c(:dim, format('monitor trim %+.0f dB (help.level)', trim))}" if trim.abs >= 0.05
+          foot << t.c(:dim, format('monitor trim %+.0f dB (help.level)', trim)) if trim.abs >= 0.05
         else
-          lines << "  #{t.code('help.level')} #{t.c(:dim, 'sets a comfortable listening level (a monitor trim; renders unchanged)')}"
+          foot << "#{t.code('help.level')} #{t.c(:dim, 'sets a comfortable listening level (a monitor trim; renders unchanged)')}"
         end
-        lines << t.c(:dim, "  New to Ruby? https://www.ruby-lang.org/en/documentation/quickstart/  Pry's help: pry-help")
-        lines << ''
-        lines << Desk.new(index).tip(random: random).to_s
-        lines.join("\n")
+        foot << t.c(:dim, 'New to Ruby? https://www.ruby-lang.org/en/documentation/quickstart/')
+        foot << t.c(:dim, "Pry's own help: pry-help")
+        doc.lines(foot)
+        doc.lines([Desk.new(index).tip(random: random).to_s])
+        Help.for_output(doc.to_s, io)
       end
 
       # Runs the level check before the console's first prompt, the first
