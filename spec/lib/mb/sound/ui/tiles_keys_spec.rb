@@ -206,6 +206,24 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
   end
 
+  it 'switches between the REPL and KEYS with F2 (legacy and kitty bytes), and `keys` enters KEYS (ux-1 item 15)' do
+    start(keys_kitty: true)
+    @term.write("\eOQ") # F2 (legacy)
+    expect(wait_until { @tiles.router.mode == :grab }).to eq(true)
+    expect(@tiles.tiler.layout.panes).to include(:keyboard)
+    @term.write("\e[12~") # F2 (tilde form) back
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(@tiles.tiler.focus).to eq(:repl)
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+    expect(MB::Sound.keys).to equal(@tiles)
+    expect(@tiles.router.mode).to eq(:grab)
+    @term.write("\e[1;1:1Q\e[1;1:3Q") # F2 press and release in the kitty protocol
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(@tiles.mode_problems).to eq([])
+  ensure
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+  end
+
   it 'builds a clip in step entry and puts its Ruby on the REPL line' do
     start(context: MB::Sound.module_eval('binding'))
     @tiles.keys(step: true)

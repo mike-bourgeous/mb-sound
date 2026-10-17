@@ -23,6 +23,21 @@ module MB
           UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc)
         end
 
+        # The virtual keyboard: KEYS mode in the tiled screen (the computer
+        # keyboard plays notes into the session; Ctrl-] or F2 back), opening
+        # `ui :keys` if no tiled screen is up (or bringing hidden tiles
+        # back).  Options as for UI::Tiles#keys: +off:+ the note-off mode,
+        # +step:+ true for step entry, +patch:+ the default patch.  F2
+        # also switches between the REPL and KEYS.
+        #
+        #     keys                 # play
+        #     keys step: true      # step entry
+        def keys(off: nil, step: nil, patch: :keep)
+          t = UI.tiles
+          t = UI.show(:keys) unless t&.active? || t&.hidden?
+          t.keys(off: off, step: step, patch: patch)
+        end
+
         # :off, so `ui off` reads as it sounds.
         def off
           :off

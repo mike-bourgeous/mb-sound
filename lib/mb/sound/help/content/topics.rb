@@ -767,7 +767,7 @@ module MB
         layouts are data files in the ui folder, reloaded when they
         change.  `bin/ui_check.rb` reports what your terminal supports.
 
-        The keyboard: in the tiles, NAV then p (or `ui.keys`, or `ui :keys`)
+        The keyboard: `keys` (or F2 in the tiles, NAV then p, `ui :keys`)
         turns the computer keyboard into a piano, laid out like
         jack-keyboard: z s x d c v ... from C3 and q 2 w 3 e ... from C4;
         - and + (or Left/Right) move octaves, Up/Down the velocity, Shift
@@ -786,7 +786,7 @@ module MB
         Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
         line and in `ui.keyboard.clip`.
       TEXT
-      commands :ui, :off, :pane, :layout
+      commands :ui, :off, :pane, :layout, :keys
       note :terminal_ui
       see :now, :plots
     end

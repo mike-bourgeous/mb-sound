@@ -42,9 +42,9 @@ module MB
 
         # Keys hinted on the status line per mode.
         HINTS = {
-          repl: 'Ctrl-] nav',
+          repl: 'Ctrl-] nav  F2 keys',
           nav: '? keys  1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
-          grab: 'Ctrl-] back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
+          grab: 'Ctrl-]/F2 back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
           step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
 
@@ -74,7 +74,7 @@ module MB
               [':', 'run a line of Ruby (show :knobs, go :drop)'], ['Ctrl-L', 'redraw'],
             ]],
             ['Modes', [
-              ['p', 'play the keyboard (KEYS)'], ['m', 'messages (warnings) pane, again: away'], ['f', 'frame rate on the status line'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
+              ['p F2', 'play the keyboard (KEYS; F2 also from the REPL)'], ['m', 'messages (warnings) pane, again: away'], ['f', 'frame rate on the status line'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
               ['Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'], ['?', 'this help'],
             ]],
           ],
@@ -83,7 +83,7 @@ module MB
               ['z s x d c v ...', 'notes from C3 (lower row)'], ['q 2 w 3 e r ...', 'notes from C4 (upper row)'],
               ['- + Left Right', 'octave down, up'], ['Up Down', 'velocity'], ['Shift / Ctrl', 'accent / soft'],
               ['Space', 'sustain'], ['Esc', 'all notes off'], ['Enter', 'capture into the armed tracks'],
-              ['`', 'note-off mode'], ['Tab', 'step entry'], ['Ctrl-] Ctrl-C', 'back to the REPL'],
+              ['`', 'note-off mode'], ['Tab', 'step entry'], ['Ctrl-] Ctrl-C F2', 'back to the REPL'],
             ]],
           ],
           step: [
@@ -988,6 +988,11 @@ module MB
               return
             when ['z', [:ctrl]]
               hide
+              return
+            when [:f2, []]
+              # F2: between the REPL and KEYS
+              return if e.release?
+              @router.mode == :grab ? (@router.mode = :repl) : keys
               return
             end
           end
