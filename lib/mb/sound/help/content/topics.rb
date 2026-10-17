@@ -732,7 +732,7 @@ module MB
         images: waveforms, spectra, spectrograms, histograms, and chart
         builders; `vis` plots the live mix.
       TEXT
-      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :table, :chart, :figure, :vis
+      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
       example 'one cycle of a pulse', sound: false do
         plot 100.hz.pulse, samples: 480
