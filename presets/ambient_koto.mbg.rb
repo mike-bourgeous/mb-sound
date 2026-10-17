@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "ambient_koto",
   kind: :synth,
-  saved: "2026-10-16T14:11:20Z",
-  mb_sound: "0.12.0.usegit (f4cd275c)",
+  saved: "2026-10-17T05:42:47Z",
+  mb_sound: "0.12.0.usegit (504ed966)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :koto from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :koto, tune: -7.0, spread: 0.7 }
@@ -27,4 +27,4 @@ osc = noise(seed: drawn_seed(1895649597198586619)).at(fx * 0.5)
 osc2 = noise(seed: drawn_seed(827948490035658087)).at(fx * 0.5)
 osc3 = noise(seed: drawn_seed(3203365596207111891)).at(fx * 0.5)
 osc4 = noise(seed: drawn_seed(2691271404617651954)).at(fx * 0.5)
-(sig2.delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig3) + channels((osc + osc2) * sig4, (osc3 + osc4) * sig4)).quantize(fx).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
+(sig2.delay(0.37.hz.lfo.sine.at(0.006..0.009) + sig3) + channels((osc + osc2) * sig4, (osc3 + osc4) * sig4)).ring(:first).quantize(fx).filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)

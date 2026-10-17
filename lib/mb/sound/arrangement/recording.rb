@@ -291,7 +291,7 @@ module MB
         def start_monitor(tr, input)
           live = Session::MidiInput::LiveClip.new(@session.midi_in(input))
           graph = begin
-                    GraphNode::Mixer.with_ring(@session.ring || :first) { tr.patch.call(live) }
+                    GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(live) }
                   rescue => e
                     warn "Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}); recording still works"
                     return nil

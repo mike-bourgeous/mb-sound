@@ -18,19 +18,20 @@ module MB
           Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
         end
 
-        # Makes a sum ring until every input has ended (+mode+ :all) instead
-        # of ending with the first (:first, the default): a gong's long tail
-        # plus a short click, a dry part plus its reverb, a texture plus a
-        # one-shot.  Applies to this sum and the sums directly inside it
+        # Sets how a sum ends: with its last input (+mode+ :all or true, the
+        # default for every sum since omnibus8: a gong's long tail plus a
+        # short click, a dry part plus its reverb) or with its first (:first
+        # or false: a drone plus a hit ending with the hit, the old
+        # default).  Applies to this sum and the sums directly inside it
         # (`a + b + c` is two Mixers), not to other nodes; anything else goes
         # through MB::Sound.live_error.  Returns this node.  For every sum a
         # song builds, see Mixer.with_ring, Session#ring, and render(ring:
-        # :all).
+        # :first).
         #
-        #     (pings + noise * n.env(0.001, 0.08)).ring        # the pings' tail isn't cut when the noise burst ends
-        #     (dry + dry.reverb(:hall, mix: 1)).ring(:all)
+        #     (drone + hit).ring(:first)        # ends when the hit ends
+        #     (pings + noise * n.env(0.001, 0.08)).ring   # (the default) rings past the noise burst
         def ring(mode = :all)
-          Mixer.check_ring(mode)
+          mode = Mixer.ring_value(mode)
           unless is_a?(Mixer)
             return MB::Sound.live_error(ArgumentError.new("ring(#{mode.inspect}) applies to sums (a + b), not #{self}"))
           end

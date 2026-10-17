@@ -128,8 +128,9 @@ module MB
 
     Help.topic :effects, 'Effects', group: :sound do
       about <<~TEXT
-        A sum ends with its first input: `(gong + click).ring` (or
-        `render(..., ring: :all)` for a whole song) rings until the last.
+        Sums ring until their last input ends (a gong past its click, a
+        dry part plus its reverb); `(drone + hit).ring(:first)` (or
+        `render(..., ring: :first)`) ends with the first.
         Delays (sinc-interpolated, tempo-synced lengths), feedback loops that
         run one sample at a time in C, the FDN reverb with presets, the
         Juno chorus, and antialiased shapers.
@@ -755,7 +756,7 @@ module MB
         BS.1770 loudness of files and graphs, live meters, and normalized
         renders.  `render 'mix.flac', bars: 64, report: :tracks { song }`
         (scripts: `--report`) prints LUFS, short-term max, true peak, and
-        crest per track and the mix, and each section pass's loudness.
+        PLR per track and the mix, and each section pass's loudness.
       TEXT
       commands :loudness, :render
       dsl :loudness_meter

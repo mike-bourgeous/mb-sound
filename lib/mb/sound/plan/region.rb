@@ -107,6 +107,7 @@ module MB
           @check_stateful = nil
           @check_before = nil
           @lane_group = nil
+          @ringing = nil
         end
 
         # For internal use by Installation: adds a node to the region.
@@ -160,6 +161,10 @@ module MB
           @consumers = {}
           output = b.describe(@root)
           @described[@root] = output
+          # Sums that ring past an input's end (GraphNode::Mixer without
+          # stop_early): a block where a required input ends or gives a
+          # short buffer runs unfused, and the sum rebuilds without it
+          @ringing = @described.each_key.any? { |n| n.is_a?(GraphNode::Mixer) && !n.stop_early? }
           # The output is computed into the output buffer, so a boundary
           # input or param passed through is copied there
           output = b.copy(output) if output.op.is_a?(Op::Input) || output.op.is_a?(Op::Param)
@@ -555,6 +560,10 @@ module MB
             i += 1
           end
 
+          # In a region with a sum that rings, an input's end may end only
+          # part of the sum: the block runs unfused, where the sum pads the
+          # ended input and drops it (see GraphNode::Mixer#sample_ended)
+          return :short if ended && @ringing
           return :ended if ended
 
           if mismatch
@@ -569,7 +578,7 @@ module MB
           # states the unfused graph gives them (fixes-13: with envelopes
           # ending inside a block, a planned tone ran only up to the end,
           # and check mode found its phase different)
-          return :short if short
+          return :short if short || (@ringing && min < count)
 
           params = @params
           pops = @param_ops

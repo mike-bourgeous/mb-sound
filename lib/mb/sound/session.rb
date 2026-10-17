@@ -766,15 +766,15 @@ module MB
       attr_accessor :exact_lanes
 
       # How sums built for this Session end (GraphNode::Mixer.ring_mode):
-      # nil or :first (the default; a sum ends with its first input to end)
-      # or :all (sums ring until every input has ended), for graphs built
-      # in its context from now on: a render block (render(ring: :all)),
-      # scheduled blocks, and track patches.  GraphNode#ring sets one sum.
+      # nil or :all (the default; sums ring until every input has ended)
+      # or :first (or false; a sum ends with its first input to end), for
+      # graphs built in its context from now on: a render block
+      # (render(ring: :first)), scheduled blocks, and track patches.
+      # GraphNode#ring sets one sum.
       attr_reader :ring
 
       def ring=(mode)
-        GraphNode::Mixer.check_ring(mode) unless mode.nil?
-        @ring = mode
+        @ring = mode.nil? ? nil : GraphNode::Mixer.ring_value(mode)
       end
 
       # Stops calling a block given to #add_tap.

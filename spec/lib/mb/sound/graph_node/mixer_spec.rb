@@ -186,7 +186,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     it 'returns nil when any input returns nil, if stop_early is true' do
       t1 = 0.hz.asquare.at(1).until(1).at_rate(50)
       t2 = 0.hz.asquare.at(0.5).until(2).at_rate(50)
-      ss = MB::Sound::GraphNode::Mixer.new([t1, t2], sample_rate: 50)
+      ss = MB::Sound::GraphNode::Mixer.new([t1, t2], stop_early: true, sample_rate: 50)
 
       result = ss.sample(50)
       expect(result).to eq(Numo::SFloat.zeros(50).fill(1.5))
@@ -194,7 +194,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       expect(ss.sample(50)).to eq(nil)
     end
 
-    it 'returns nil only when all inputs return nil, if stop_early is false' do
+    it 'returns nil only when all inputs return nil, if stop_early is false (the default: sums ring)' do
       t1 = 0.hz.asquare.at(1).until(1).at_rate(50)
       t2 = 0.hz.asquare.at(0.5).until(2).at_rate(50)
       ss = MB::Sound::GraphNode::Mixer.new([t1, t2], stop_early: false, sample_rate: 50)

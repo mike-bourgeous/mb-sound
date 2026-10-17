@@ -763,16 +763,15 @@ module MB
       #
       # +report: :tracks+ prints a mix report when the render is done (see
       # MixReport; MixReport.last keeps it): integrated loudness, short-term
-      # maximum, true peak, and crest factor of every track (its stem, also
+      # maximum, true peak, and PLR (true peak minus integrated loudness) of every track (its stem, also
       # without +:stems+) and of the mix, and with a song form the
       # integrated loudness of each track and the mix per section pass.
       # Measured before +:loudness+ normalization.
       #
-      # +ring: :all+ makes every sum built for the render (in the block,
-      # scheduled blocks, and track patches; `a + b`) ring until all of its
-      # inputs have ended instead of ending with the first (a gong plus a
-      # short click, a dry part plus its reverb); see GraphNode#ring for one
-      # sum.  Sums that ring are plan boundaries (more CPU).
+      # +ring: :first+ makes every sum built for the render (in the block,
+      # scheduled blocks, and track patches; `a + b`) end with its first
+      # input to end, the old default; sums ring until every input ends
+      # otherwise (see GraphNode#ring for one sum).
       #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs

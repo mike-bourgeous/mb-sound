@@ -1,6 +1,7 @@
-# Sums that ring until every input ends (GraphNode#ring, Mixer.with_ring,
-# Session#ring, render(ring: :all); panel Kaede #4: a gong cut when the
-# click under it ended).
+# Sums ring until every input ends (the default since omnibus8; panel Kaede
+# #4: a gong cut when the click under it ended), or end with their first
+# (GraphNode#ring(:first), Mixer.with_ring(:first), Session#ring,
+# render(ring: :first)).
 RSpec.describe('ring: :all') do
   after { MB::Sound.rewind }
 
@@ -18,12 +19,14 @@ RSpec.describe('ring: :all') do
     out.reduce(:concatenate)
   end
 
-  it 'ends a sum with its first input by default, and with its last after #ring' do
+  it 'rings a sum until its last input ends by default, and ends with its first after ring(:first)' do
     alone = run(gong.())
-    expect(run(gong.() + click.()).length).to be < alone.length / 5
-    rung = run((gong.() + click.()).ring)
+    rung = run(gong.() + click.())
     expect(rung.length).to eq(alone.length)
     expect(rung[48000..]).to eq(alone[48000..]) # the click is over: the gong alone, exactly
+    expect(run((gong.() + click.()).ring).length).to eq(alone.length)
+    expect(run((gong.() + click.()).ring(:first)).length).to be < alone.length / 5
+    expect(run((gong.() + click.()).ring(false)).length).to be < alone.length / 5
   end
 
   it 'covers the sums directly inside (a + b + c), and ring(:first) puts them back' do
@@ -43,25 +46,36 @@ RSpec.describe('ring: :all') do
     end
   end
 
-  it 'applies to sums made in Mixer.with_ring blocks' do
-    s = MB::Sound::GraphNode::Mixer.with_ring(:all) { click.() + gong.() }
-    expect(s).not_to be_stop_early
-    expect(MB::Sound::GraphNode::Mixer.ring_mode).to eq(:first)
-    expect(run(s).length).to eq(run(gong.()).length)
+  it 'ends sums made in Mixer.with_ring(:first) blocks with their first input' do
+    s = MB::Sound::GraphNode::Mixer.with_ring(:first) { click.() + gong.() }
+    expect(s).to be_stop_early
+    expect(MB::Sound::GraphNode::Mixer.ring_mode).to eq(:all)
+    expect(run(s).length).to eq(run(click.()).length)
+    expect(MB::Sound::GraphNode::Mixer.with_ring(true) { click.() + gong.() }).not_to be_stop_early
+  end
+
+  it 'gives the same samples planned (fused, an ended input dropped) and unplanned' do
+    short_gong = -> { 110.hz.sine * MB::Sound.env([[1, 0.001], [0, 0.08, 30]]) }
+    short_click = -> { 2000.hz.sine * MB::Sound.env([[1, 0.001], [0, 0.01, 30]]) }
+    r = plan_compare(fallbacks: true, check: :raise, sizes: [7, 128, 800, 367, 800, 800, 800, 800, 800]) {
+      (short_gong.() + short_click.() * 0.5 + 220.hz.triangle * short_click.()).lp4(3000)
+    }
+    expect(r.outputs[:unfused].compact.sum(&:length)).to be > 0.08 * 48000
   end
 
   it 'refuses other modes and other nodes' do
     expect { (gong.() + click.()).ring(:last) }.to raise_error(ArgumentError, /ring is :all .* or :first/)
+    expect { MB::Sound::GraphNode::Mixer.with_ring(:most) {} }.to raise_error(ArgumentError, /ring is :all/)
     expect { 110.hz.sine.ring }.to raise_error(ArgumentError, /applies to sums \(a \+ b\)/)
     expect { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), realtime: false).tap { |s| s.ring = :most } }
       .to raise_error(ArgumentError, /ring is :all/)
   end
 
   it 'prints itself back' do
-    expect((gong.() + click.()).ring.to_ruby).to end_with('.ring')
+    expect((gong.() + click.()).ring(:first).to_ruby).to end_with('.ring(:first)')
   end
 
-  describe 'render(ring: :all)' do
+  describe 'render(ring:)' do
     def song
       MB::Sound.bpm 120
       MB::Sound.bg(:a, gong.() + click.(), fade: 0)
@@ -79,9 +93,9 @@ RSpec.describe('ring: :all') do
       MB::Sound.read(path)[0]
     end
 
-    it 'lets the sums in the block, scheduled blocks, and track patches ring' do
-      plain = render
-      rung = render(ring: :all)
+    it 'lets the sums in the block, scheduled blocks, and track patches ring (or end with ring: :first)' do
+      plain = render(ring: :first)
+      rung = render
       bar = 96000
       # Bar 1: the gong rings past its click; so does bar 2's, and the patch's at bar 3
       [0, bar, 2 * bar].each do |start|
@@ -92,11 +106,14 @@ RSpec.describe('ring: :all') do
     end
 
     it 'is the same at other buffer sizes' do
-      ref = render(ring: :all)
-      out = render(ring: :all, buffer_size: 367)
+      ref = render
+      out = render(buffer_size: 367)
       n = [out.length, ref.length].min
       expect(n).to be > 3 * 96000
-      expect(out[0...n]).to eq(ref[0...n])
+      # Within the plan layer's :fast sines (the block where an input ends
+      # runs unfused, with libm's sine, at a place that depends on the
+      # buffer size)
+      expect((out[0...n] - ref[0...n]).abs.max).to be < 1e-6
     end
   end
 end
