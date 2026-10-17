@@ -84,6 +84,13 @@ module MB
         def pretty_print(q) = q.text(inspect)
       end
 
+      # True if the current thread runs the REPL's commands (warnings it
+      # raises print in the REPL; see Tiles#repl_thread?).
+      def self.repl_thread?
+        s = screen
+        s.respond_to?(:repl_thread?) && s.repl_thread?
+      end
+
       # The `ui` facade (one per process).
       def self.facade
         @facade ||= Facade.new

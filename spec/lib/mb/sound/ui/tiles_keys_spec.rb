@@ -185,6 +185,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
       ctrl_z: "\x1a", note: "\e[122;1:1u", note_legacy: 'x', z: 'z', esc: "\e", digit: -> { rng.rand(1..7).to_s },
       ruby_keys: -> { @tiles.keys; nil }, ruby_off: -> { @tiles.keys(false); nil },
+      # (round 3: window prefix, overlay, palette, F2, a pane shown over the REPL's slot)
+      ctrl_w: "\x17", ctrl_w_l: "\x17l", ctrl_w_p: "\x17p", question: '?', colon: ':', f2: "\eOQ",
+      show_on_repl: -> { @tiles.show(:knobs, at: :repl) if @tiles.tiler.layout.panes.include?(:repl); nil },
     }
     path = []
     40.times do
@@ -193,14 +196,16 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
       @term.settle(quiet: 0.05)
-      expect(@tiles.mode_problems).to eq([]), path.join(' ')
+      expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
     # Back to the REPL from wherever the walk ended
     @term.write("\x1a") if @tiles.hidden?
     @tiles.keys(false)
     @tiles.router.mode = :repl
     expect(wait_until { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
-    @term.write("\x05\x15") # Ctrl-E Ctrl-U: whatever the walk typed on the line goes
+    @term.write("\x03") # Ctrl-C: whatever the walk typed (maybe several lines: ? and : are Ruby) goes
+    @term.settle(quiet: 0.1)
+    @term.write("\x05\x15") # Ctrl-E Ctrl-U
     @term.settle(quiet: 0.1)
     @term.type("6 * 7\r")
     expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"

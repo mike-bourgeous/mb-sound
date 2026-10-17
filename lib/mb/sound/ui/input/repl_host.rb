@@ -162,6 +162,21 @@ module MB
             write(@vt.bracketed_paste? ? "\e[200~#{text}\e[201~" : text)
           end
 
+          # Prints +text+ in the pane as program output above the prompt:
+          # the line being edited is cleared, the text written, and the
+          # program asked to redraw its prompt and line below it (a resize,
+          # as a terminal would).
+          def print_above(text)
+            return unless @slave
+            body = text.to_s.gsub(/\r?\n/, "\r\n")
+            body += "\r\n" unless body.end_with?("\r\n")
+            @slave.write("\r\e[J#{body}")
+            @slave.flush
+            resize(@rows, @cols, force: true)
+          rescue IOError, SystemCallError
+            nil
+          end
+
           # Ctrl-C: SIGINT in :adopt mode (Reline's handler while reading, an
           # Interrupt in the main thread while evaluating, as on a
           # terminal); an Interrupt raised in the Pry thread in :thread mode.

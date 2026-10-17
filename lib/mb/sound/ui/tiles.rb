@@ -59,6 +59,15 @@ module MB
         # (Keys.table lists the REPL keys in effect).
         KEY_HELP = Keys.table(live: false).freeze
 
+        # +text+ as one line for a cell row: control characters become
+        # spaces, and a multi-line text keeps its first line and " ...".
+        def self.one_line(text)
+          t = text.to_s
+          first, rest = t.split("\n", 2)
+          first = first.to_s.gsub(/\e\[[0-9;?]*[A-Za-z]/, '').gsub(/[\x00-\x1f\x7f]/, ' ')
+          rest.to_s.strip.empty? ? first : "#{first} ..."
+        end
+
         # The key table for +modes+ as text lines (for help :ui).
         def self.key_table(*modes)
           table = Keys.table
@@ -97,6 +106,13 @@ module MB
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
           @layout_name = layout.name
+          # (every instance variable from the start, nil until used: one
+          # object shape; the warning guard fails specs on shape variations)
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = nil
+          @match = @search = @flash = @painter_warned = @reloaded_at = @size_checked_at = @resized = nil
+          @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
+          @line_cursor = @old_winch = @signals = nil
+          @attached = @poll = @polled_at = @poll_warned = @last = nil
           @input = input
           @output = output
           @session = session
@@ -118,6 +134,10 @@ module MB
           @pry_opts = pry
           @feed = Feed.new
           @lock = Monitor.new
+          # Input handling and mode changes from Ruby (ui.keys) take turns:
+          # the Router's state changes one event at a time, and
+          # #mode_problems sees whole transitions
+          @input_lock = Monitor.new
           @active = false
           @frames = []
           @slowest = []
@@ -143,6 +163,8 @@ module MB
           @focus_last = nil
           @enter_mark = nil
           @winch = nil
+          @stray_warned = false
+          @messages_seen = UI.messages.seq
           @decoder = Input::Decoder.new
           @keyboard = keyboard || UI.keyboard
           @keys_kitty = keys_kitty
@@ -541,6 +563,10 @@ module MB
         #     ui.keys off: :tap       # fixed-length notes
         #     ui.keys step: true      # step entry
         def keys(on = true, off: nil, step: nil, patch: :keep)
+          @input_lock.synchronize { keys_unlocked(on, off: off, step: step, patch: patch) }
+        end
+
+        private def keys_unlocked(on, off:, step:, patch:)
           return exit_keys.then { self } unless on
 
           start if @hidden # (from the hidden console: the tiles come back first)
@@ -573,6 +599,10 @@ module MB
         # #mode_changed, which keeps these; a spec drives random key
         # sequences against them.
         def mode_problems
+          @input_lock.synchronize { mode_problems_unlocked }
+        end
+
+        private def mode_problems_unlocked
           grab = @router.mode == :grab
           out = []
           out << "keyboard #{@keyboard.active? ? 'active' : 'inactive'} in #{@router.mode} mode" if grab != @keyboard.active?
@@ -598,6 +628,10 @@ module MB
         # NAV's keys and the focused pane's.  Esc, ?, or Ctrl-] close it;
         # any other key closes it and does what it does in NAV.
         def key_help(on = @router.state != :overlay)
+          @input_lock.synchronize { key_help_unlocked(on) }
+        end
+
+        private def key_help_unlocked(on)
           if on
             @router.mode = :nav unless %i[nav overlay].include?(@router.mode)
             @router.mode = :overlay
@@ -902,6 +936,11 @@ module MB
           @lock.synchronize do
             was = @tiler.focus
             yield @tiler
+            # Keys go where the focus is: in REPL mode the REPL keeps it, in
+            # KEYS the keyboard (a split or `show` from the console doesn't
+            # take it; NAV moves it)
+            pin = { repl: (:repl if @host), grab: :keyboard }[@router.mode]
+            @tiler.focus!(pin) if pin && @tiler.focus != pin && @tiler.layout.panes.include?(pin)
             @focus_last = was if @tiler.focus != was && @tiler.layout.panes.include?(was)
             @relayout = true
           end
@@ -911,14 +950,18 @@ module MB
           self
         end
 
+        # Shows +text+ on the status line for FLASH seconds: one line, no
+        # control characters (a newline in a cell would scroll the whole
+        # screen: item 22), "..." where it was longer.
         def flash(text, role = :text)
-          @flash = [text.to_s, role, @clock.call + FLASH]
+          @flash = [Tiles.one_line(text), role, @clock.call + FLASH]
         end
 
         # A window-prefix action (Ctrl-W then a key): done as in NAV, then
         # keys go where the focus is (the REPL: REPL mode; any other pane:
         # NAV, where its own keys work, and i/Enter on the keyboard plays).
         def window(a)
+          @router.mode = :nav unless @router.mode == :grab # (the focus may move)
           act(Input::Action.of(a.args[0], *a.args.drop(1)))
           return unless @active
           @router.mode = @tiler.focus == :repl && @host ? :repl : :nav unless @router.mode == :grab
@@ -989,7 +1032,6 @@ module MB
           n = repl_lines - @enter_mark
           return unless n > h
           @enter_mark = nil
-          @winch = nil
           flash("#{n} lines of output: #{scroll_key_name} scrolls back to its start", :key)
         end
 
@@ -999,6 +1041,29 @@ module MB
           b = @router.repl_keys.entries.find { |e| e.action == :scroll && e.args == [:page_up] }
           b ? Input::Keymap.chord_name(b.chord) : 'Ctrl-] PgUp'
         end
+
+        # A new warning or error opens the messages pane below the REPL
+        # (item 25: a count on the status line was easy to miss), with a
+        # flash; NAV m takes it away again (the layout as it was).
+        def auto_messages
+          seq = UI.messages.seq
+          return if seq == @messages_seen
+          @messages_seen = seq
+          e = UI.messages.recent(1).first
+          return unless e && e.severity != :note && !@tiler.layout.panes.include?(:messages)
+          messages(true)
+          flash("#{e.severity}: #{e.text}  (NAV m: away)", e.severity == :error ? :bad : :warn)
+        end
+
+        # True if +thread+ is the one running the REPL's commands (the
+        # console's main thread when adopted, the Pry thread otherwise),
+        # or one the palette runs a command on.
+        def repl_thread?(thread = Thread.current)
+          return false unless @host
+          return true if thread[:mb_sound_ui_repl]
+          @host.mode == :adopt ? thread.equal?(Thread.main) : thread.equal?(@host.thread)
+        end
+        public :repl_thread?
 
         # Lines the REPL's VT holds (scrollback and screen).
         def repl_lines
@@ -1031,7 +1096,43 @@ module MB
               public_send(call.name, *a, **k)
             end
           else
-            run_safely { b.eval(code, '(palette)', 1) }
+            # Console Ruby: what it prints and its value go into the REPL
+            # pane, as if typed there (item 22: help pages printed over the
+            # screen), and a short result on the status line
+            out = StringIO.new
+            r = nil
+            err = nil
+            begin
+              with_output_to(out) { r = b.eval(code, '(palette)', 1) }
+            rescue StandardError, ScriptError => e
+              err = e
+            end
+            text = out.string
+            text += err ? "#{err.class}: #{err.message}\n" : "=> #{r.inspect}\n"
+            print_to_repl(":#{code}\n#{text}")
+            err ? flash("#{err.class}: #{err.message}", :bad) : flash("=> #{r.inspect}", :ok)
+            r
+          end
+        end
+
+        # Runs the block with $stdout and $stderr going to +io+.
+        def with_output_to(io)
+          out, err = $stdout, $stderr
+          $stdout = $stderr = io
+          Thread.current[:mb_sound_ui_repl] = true # (its warnings print with its output)
+          yield
+        ensure
+          Thread.current[:mb_sound_ui_repl] = nil
+          $stdout, $stderr = out, err
+        end
+
+        # Shows +text+ in the REPL pane above the prompt (the REPL redraws
+        # its line below it), or in the messages without a console.
+        def print_to_repl(text)
+          if @host
+            @host.print_above(text)
+          else
+            text.each_line { |l| UI.messages.add(l, severity: :note) }
           end
         end
 
@@ -1101,7 +1202,7 @@ module MB
             else
               []
             end
-          @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC))
+          @input_lock.synchronize { @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
           events.each { |e| handle(e) }
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
@@ -1109,6 +1210,10 @@ module MB
         end
 
         def handle(e)
+          @input_lock.synchronize { handle_unlocked(e) }
+        end
+
+        def handle_unlocked(e)
           if @hidden
             relay_event(e)
             return
@@ -1234,6 +1339,7 @@ module MB
           poll_midi
           check_size(now)
           reload_files(now)
+          auto_messages
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
           # Taken at the start: a redraw asked for while this frame paints
@@ -1558,7 +1664,18 @@ module MB
           c.puts ["#{p.name} failed: ", :bad], [e.message, :dim]
         end
 
+        # The one way frames reach the terminal (pattern A: one owner).
+        # Frames place every cell with cursor moves, so a bare newline or
+        # carriage return is a bug that would scroll the screen: it is
+        # dropped and warned about (specs fail on the warning).
         def write(str)
+          if str.match?(/[\n\r]/)
+            unless @stray_warned
+              @stray_warned = true
+              warn 'UI frame with a raw newline (a cell got a control character); dropped from the frame'
+            end
+            str = str.delete("\n\r")
+          end
           @term.write(str)
         rescue IOError, SystemCallError
           @stopping = true
