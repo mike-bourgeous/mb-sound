@@ -144,6 +144,33 @@ module MB
       end
     end
 
+    Help.topic :blend, 'Mixing an effect in (wet and dry)', group: :sound do
+      about <<~TEXT
+        To hear an effect beside the sound it changes, add them: `sig * 0.6 +
+        sig.resonate(:plate) * 0.4` keeps 60% of the dry sound and adds 40% of
+        the effect (using `sig` twice is fine: the graph branches it).  The
+        two numbers are the dry and wet levels; make them sum to about 1 to
+        keep the level, or turn one with a knob (`knob(:wet)`) or a node
+        (an LFO, an envelope).
+
+        Some effects mix themselves: `reverb(mix: 0.3)`, `chorus(mix:)`,
+        `delay(dry:, wet:)`, and the dynamics' `mix:` (parallel
+        compression).  For one effect shared by several tracks, send them to
+        a bus (`bus(:verb) { |s| s.reverb(:hall, mix: 1) }`, then
+        `track(:keys, send: { verb: -12.db })` or `feed :keys, :verb,
+        -6.db`): the bus is all wet, and each send sets how much goes in.
+      TEXT
+      commands :bus, :feed, :knob
+      dsl :resonate, :reverb, :chorus, :delay
+      see :effects, :buses, :knobs
+      example 'drums into a swept resonator, mixed in' do
+        beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
+        wet = beat.resonate(:plate, 0.25.hz.lfo.at(110..440), decay: 1.5).at(-22.db) # rings far louder than its strikes
+        bg :try, (beat * 0.6 + wet * 0.4).at(-11.db)
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(wet: :blend, dry: :blend, mix: :blend, wetdry: :blend, dry_wet: :blend)
+
     Help.topic :stereo, 'Stereo and channels', group: :sound do
       about <<~TEXT
         Bundles (`stereo(l, r)`) broadcast DSL calls per channel; per-channel

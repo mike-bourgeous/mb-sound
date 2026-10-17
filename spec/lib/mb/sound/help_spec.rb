@@ -650,6 +650,45 @@ RSpec.describe MB::Sound::Help do
     end
   end
 
+  describe 'help and lesson as console commands (ux-1 item 28)' do
+    def text(x) = MB::U.remove_ansi(x.to_s)
+    let(:b) { g = 110.hz.saw.lp4(800); binding.tap { g } }
+
+    it 'reads what follows help as words, Ruby literals, or names in the console' do
+      expect(text(MB::Sound::Help.page_for_text(''))).to include('one-screen sheet')
+      expect(text(MB::Sound::Help.page_for_text('flow'))).to include('help :flow')
+      expect(text(MB::Sound::Help.page_for_text(':turn'))).to include('turn(')
+      expect(text(MB::Sound::Help.page_for_text('turn'))).to include('turn(')
+      expect(text(MB::Sound::Help.page_for_text('/reson/'))).to include('help /reson/')
+      expect(text(MB::Sound::Help.page_for_text('g', b))).to include('lp4')
+      expect(text(MB::Sound::Help.page_for_text('perform'))).to include('On the sheet')
+      expect(text(MB::Sound::Help.page_for_text('the knobs'))).to include('help :knobs')
+      expect(text(MB::Sound::Help.page_for_text('xyzzy plugh'))).to include('0 matches')
+      # Item 29: mixing an effect in, by any of its names
+      ['mix an effect in', 'wet', 'dry', ':wet', 'how do i mix in reverb'].each do |q|
+        expect(text(MB::Sound::Help.page_for_text(q))).to include('help :blend'), q
+      end
+      expect(text(MB::Sound.help(:dry))).to include('beat * 0.6 + wet * 0.4')
+    end
+
+    it 'runs as Pry commands, leaving help(...) and lesson.next to Ruby' do
+      require 'pry'
+      commands = Pry::CommandSet.new.import(Pry::Commands)
+      commands.rename_command('pry-help', 'help')
+      MB::Sound::Help.install_commands(commands)
+      expect(commands.find_command('help mix an effect in')).not_to be_nil
+      expect(commands.find_command('help(:knobs).try')).to be_nil
+      expect(commands.find_command('help.topics')).to be_nil
+      expect(commands.find_command('lesson set')).not_to be_nil
+      expect(commands.find_command('lesson.next')).to be_nil
+      out = StringIO.new
+      pry = Pry.new(output: out, commands: commands, target: b)
+      pry.eval('help flow')
+      expect(out.string).to include('help :flow')
+      expect(out.string).not_to include("\e[")
+    end
+  end
+
   describe 'Pry setup' do
     it "moves Pry's help to pry-help and prints pages as text" do
       require 'pry'
@@ -661,7 +700,9 @@ RSpec.describe MB::Sound::Help do
       allow(config).to receive(:hooks).and_return(hooks)
       MB::Sound::Help.install_pry!
       expect(commands.valid_command?('pry-help')).to eq(true)
-      expect(commands.valid_command?('help')).to eq(false)
+      expect(commands.valid_command?('help')).to eq(true) # mb-sound's, taking free text (ux-1 item 28)
+      expect(commands['help'].description).to start_with('mb-sound help')
+      expect(commands.valid_command?('lesson')).to eq(true)
       out = StringIO.new
       config.print.call(out, MB::Sound.help.topics, nil)
       expect(out.string).not_to start_with('=>')
