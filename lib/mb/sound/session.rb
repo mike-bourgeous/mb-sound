@@ -21,6 +21,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/monitor_trim'
 require_relative 'session/buses'
+require_relative 'session/racks'
 require_relative 'session/ui_feed'
 
 module MB
@@ -313,6 +314,7 @@ module MB
         init_monitor(monitor.nil? ? realtime : monitor)
         init_buses
         @names = Names.new
+        @racks = Racks.new(self)
         @arrangement = nil
 
         # Set later, in varying orders (here so every Session has one
@@ -327,6 +329,9 @@ module MB
         @at_exit_registered = nil
         @span_players = nil
         @span_graphs = nil
+        # The span being rendered, for taps that stamp what they see (see
+        # Session.span; MIDI::Stream#spy)
+        @span = Span.new(self, 0, 0r, 0r, false, 48000)
         @player_frame = nil
         @asleep_ids = nil
         @asleep_graphs = nil
@@ -337,6 +342,9 @@ module MB
 
       # The Session's top-level names (see Names).
       attr_reader :names
+
+      # Named racks (see Session::Racks and MB::Sound::RackMethods).
+      attr_reader :racks
 
       # The marker table (see Markers), created when first needed.
       def markers
@@ -854,6 +862,13 @@ module MB
       def render_span(count, per_sample)
         from = @transport.position
         to = from + count * per_sample
+        old_span = Thread.current[:mb_sound_span]
+        @span.frame = @frame
+        @span.pos = from
+        @span.per_sample = per_sample
+        @span.moving = @advance_idle || !idle?
+        @span.sample_rate = sample_rate
+        Thread.current[:mb_sound_span] = @span
 
         # If the timeline was seeked, move every running graph's clips there,
         # and move repeating schedules to their next time
@@ -917,8 +932,26 @@ module MB
         mix
       ensure
         @knob_frame = nil
+        Thread.current[:mb_sound_span] = old_span
       end
       private :render_span
+
+      # The span a Session is rendering on this thread (frame and timeline
+      # position of its first sample, whole notes per sample, whether the
+      # timeline moves, and the sample rate), or nil outside a render.
+      # Taps use it to stamp what they see with the Session clock
+      # (MIDI::Stream#spy; Span#stamp).  Read it, don't keep it: it changes
+      # every span.
+      Span = Struct.new(:session, :frame, :pos, :per_sample, :moving, :sample_rate) do
+        # A Stamp for the sample +offset+ frames into the span.
+        def stamp(offset = 0)
+          Stamp.at(moving ? pos + offset * per_sample : pos, session.transport, frame: frame + offset)
+        end
+      end
+
+      def self.span
+        Thread.current[:mb_sound_span]
+      end
 
       # Stops the background and scheduler threads and closes the output.
       def close

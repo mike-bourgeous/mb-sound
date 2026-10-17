@@ -40,6 +40,11 @@ module MB
           @node_type_name = "#{antialias ? '' : 'a'}#{mode}"
         end
 
+        # Settings for the transfer curve preview (Plot::Panels).
+        def preview_data
+          { mode: @mode, p1: @p1, p2: @p2, label: @node_type_name }
+        end
+
         def sources
           { input: @source }
         end

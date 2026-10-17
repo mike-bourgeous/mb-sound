@@ -1,0 +1,536 @@
+require 'did_you_mean'
+require 'set'
+
+module MB
+  module Sound
+    # A rack: a reusable piece of graph with typed ports, named or
+    # anonymous (the racks project, phase R1; design/notes/racks.md).  A
+    # Rack is a frozen value that behaves like a Proc: apply it to a real
+    # source with Ruby's own verbs, and each application builds a fresh
+    # subgraph from the block.
+    #
+    #     wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
+    #     midi.then(&wobble).synth { |v| v.hz.saw * v.amp_env }
+    #     wobble.(clip)                      # Proc-style
+    #     clip.stream.through(wobble)        # Stream#through
+    #
+    #     arack :dub, side: :audio do |sig, side:|
+    #       sig.duck(side).delay(3.n16, feedback: 0.4, wet: 0.3)
+    #     end
+    #     bass.then(&rack(:dub).with(side: :drums))   # a bus name as a port value
+    #
+    #     dreamy = wobble >> mrack { it.humanize(1.n64) }   # Proc#>> order
+    #
+    # Ports have three types (Traversable::PORT_TYPES): :notes (streams,
+    # clips, Notes), :audio (nodes and bundles), and :control (nodes read as
+    # values, numbers, knob names).  The main input's type is fixed by the
+    # constructor (MB::Sound::RackMethods: mrack, irack, arack, lrack,
+    # modrack, or rack(in:)); the output's type comes from what the block
+    # returns, checked against +out:+ when given.  The main input and the
+    # output give the rack's #kind (:note_fx, :instrument, :effect,
+    # :listener, :modulator); extra ports never change it.
+    #
+    # Extra ports are declared in the constructor call (`keys: :notes`) and
+    # taken as block keywords (`|sig, keys:|`); a mismatch raises when the
+    # rack is defined, with did_you_mean.  A keyword with a default makes
+    # its port optional (`|sig, depth: 0.5|`).  #with binds ports, returning
+    # a new Rack; an unbound required port raises when applied (through
+    # MB::Sound.live_error: live, the input passes through unchanged).
+    #
+    # The block gets the bound values themselves, coerced to the port's
+    # type (a number on a control port becomes a constant, a Symbol on an
+    # audio port reads that bus or track, on a control port that knob), so
+    # no node sits at a port and plans fuse across rack edges.  A method a
+    # port value doesn't have raises NoMethodError with a hint about the
+    # port's type ("a notes port: streams carry notes; .synth makes audio")
+    # as well as Ruby's did_you_mean suggestions.
+    class Rack
+      # The console constructors (MB::Sound::RackMethods), aliases included.
+      CONSTRUCTORS = Set[
+        :rack, :mrack, :note_rack, :irack, :instrument_rack, :arack, :audio_rack, :lrack, :amrack, :listener_rack,
+        :modrack, :mod_rack,
+      ].freeze
+
+      # Kinds by [main input type, output type] (output nil: unknown yet).
+      KINDS = {
+        [:notes, :notes] => :note_fx, [:notes, :audio] => :instrument, [:notes, :control] => :instrument,
+        [:audio, :audio] => :effect, [:audio, :notes] => :listener, [:audio, :control] => :listener,
+        [:control, :audio] => :modulator, [:control, :control] => :modulator, [:control, :notes] => :modulator,
+      }.freeze
+
+      # The kind of a rack whose output isn't known before it is applied.
+      DEFAULT_KINDS = { notes: :note_fx, audio: :effect, control: :modulator }.freeze
+
+      # Parameter names that in: :auto reads as port types.
+      AUTO_TYPES = {
+        notes: %i[stream streams events notes midi keys clip seq],
+        audio: %i[sig signal audio input inp mix side sidechain voice carrier],
+        control: %i[ctl control mod amount depth cv value],
+      }.freeze
+
+      # Default name of the main input when the block's parameter has none
+      # (`it`), by type: how racks print their blocks.
+      MAIN_NAMES = { notes: :stream, audio: :sig, control: :ctl }.freeze
+
+      # A typed port: its name, type (:notes, :audio, :control), whether
+      # it's required, and the main input or an extra port.  Port.for(type)
+      # gives the class for a type; each coerces values given to it and
+      # explains wrong-type method calls on its values.
+      class Port
+        attr_reader :name, :required
+
+        def initialize(name, required: true, main: false)
+          @name = name
+          @required = required
+          @main = main
+          freeze
+        end
+
+        # The Port class for +type+.
+        def self.for(type)
+          { notes: Notes, audio: Audio, control: Control }.fetch(type) {
+            raise ArgumentError, "Port types are :notes, :audio, or :control (got #{type.inspect})#{Rack.suggest(type, [:notes, :audio, :control])}"
+          }
+        end
+
+        def main?
+          @main
+        end
+
+        def type
+          self.class::TYPE
+        end
+
+        # "audio(sig)", "notes(keys)".
+        def to_s
+          "#{type}(#{@name})"
+        end
+
+        def inspect
+          "#<#{self.class.name.delete_prefix('MB::Sound::')} #{@name}#{' (optional)' unless @required}>"
+        end
+
+        # A hint for a NoMethodError of method +name+ on a value of this
+        # port, or nil.
+        def hint(_name)
+          nil
+        end
+
+        # Raises TypeError for +value+ (got the wrong type).
+        def mismatch(rack, value, want)
+          got = GraphNode::Traversable.port_type_of(value)
+          extra = Port.for(got).new(:x).cross_hint(type) if value.respond_to?(:sample) || got == :notes
+          raise TypeError, "#{rack.label} port #{@name}: wants #{want}, got #{value.class.name || value.class} (#{got})#{"; #{extra}" if extra}"
+        end
+
+        # How to get from this type to +want+ (for errors).
+        def cross_hint(want)
+          nil
+        end
+
+        # Notes ports: Streams, Notes, Clips (as clip.notes, so every
+        # stream transform and voice signal is there), Sources.
+        class Notes < Port
+          TYPE = :notes
+
+          def coerce(value, rack)
+            case value
+            when MIDI::Stream, MB::Sound::Notes then value
+            when Sequence::Clip then value.notes
+            when MIDI::Source then MIDI::Stream.new(value)
+            else mismatch(rack, value, 'notes (a Stream, Clip, or Notes)')
+            end
+          end
+
+          def hint(name)
+            "#{@name} is a notes port: streams carry notes; .synth makes audio, .notes gives one voice's signals"
+          end
+
+          def cross_hint(want)
+            want == :audio ? 'notes become audio through .synth (or a kit: tr808(stream))' : nil
+          end
+        end
+
+        # Audio ports: graph nodes and bundles; Symbols read a bus or
+        # track (bus(:name)).
+        class Audio < Port
+          TYPE = :audio
+
+          def coerce(value, rack)
+            case value
+            when GraphNode, GraphNode::Channels, GraphNode::MultiOutput then value
+            when Symbol then MB::Sound::Session.current.bus_tap(value)
+            when Array
+              value.all? { |v| v.is_a?(GraphNode) } ? GraphNode::Channels.new(value) : mismatch(rack, value, 'audio (a graph node, bundle, or bus name)')
+            else mismatch(rack, value, 'audio (a graph node, bundle, or bus name)')
+            end
+          end
+
+          def hint(name)
+            note = MIDI::Stream.method_defined?(name) ? "; #{name} is a note transform (it needs a notes port)" : ''
+            "#{@name} is an audio port: audio carries samples#{note}"
+          end
+        end
+
+        # Control ports: nodes read as values, numbers (constants), and
+        # knob names.
+        class Control < Port
+          TYPE = :control
+
+          def coerce(value, rack)
+            case value
+            when GraphNode then value
+            when Numeric then value.constant
+            when Symbol then MB::Sound.knob(value)
+            else mismatch(rack, value, 'control (a number, graph node, or knob name)')
+            end
+          end
+
+          def hint(name)
+            note = MIDI::Stream.method_defined?(name) ? "; #{name} is a note transform (it needs a notes port)" : ''
+            "#{@name} is a control port: controls are values read every sample#{note}"
+          end
+        end
+      end
+
+      # The rack's name (a Symbol), or nil for an anonymous rack.
+      attr_reader :name
+
+      # The main input Port.
+      attr_reader :input
+
+      # The extra ports: { name => Port }.
+      attr_reader :ports
+
+      # The declared output type (:notes, :audio, :control), or nil.
+      attr_reader :out
+
+      # The ports bound with #with: { name => value }.
+      attr_reader :bound
+
+      # The block that builds an instance.
+      attr_reader :block
+
+      # The constructor that made the rack (:mrack, :arack, :rack, ...),
+      # for printing.
+      attr_reader :constructor
+
+      # For composed racks (#>>, #<<): the parts in the order they apply.
+      attr_reader :parts
+
+      # Creates a rack.  See MB::Sound::RackMethods#rack for the arguments.
+      # +constructor+ is the method name that prints it back.
+      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false)
+        main_type = binding.local_variable_get(:in)
+        raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
+
+        @name = name
+        @constructor = constructor
+        @parts = parts&.freeze
+        @listener = listener
+        @bound = bound.dup.freeze
+
+        if parts
+          @block = nil
+          @input = parts.first.input
+          @ports = {}.freeze
+          @out = parts.last.out
+          freeze
+          return
+        end
+
+        raise ArgumentError, 'A rack needs a block that builds its graph from its input (mrack { it.arp(:up) })' unless block
+
+        @block = block
+        params = block.parameters
+        positional = params.select { |t, _| t == :req || t == :opt }
+        keywords = params.select { |t, _| t == :key || t == :keyreq }.to_h { |t, n| [n, t] }
+        keyrest = params.any? { |t, _| t == :keyrest }
+        if positional.empty? && !params.any? { |t, _| t == :rest }
+          raise ArgumentError, 'A rack block takes its main input as its first parameter (mrack { |stream| ... } or mrack { it... })'
+        end
+        main_param = positional.first&.[](1)
+
+        if main_type == :auto
+          main_type, ports = infer(main_param, keywords, ports, quiet: quiet)
+        end
+        raise ArgumentError, "in: must be :notes, :audio, :control, or :auto (got #{main_type.inspect})#{Rack.suggest(main_type, [:notes, :audio, :control, :auto])}" unless DEFAULT_KINDS.key?(main_type)
+        unless out.nil? || DEFAULT_KINDS.key?(out)
+          raise ArgumentError, "out: must be :notes, :audio, or :control (got #{out.inspect})#{Rack.suggest(out, [:notes, :audio, :control])}"
+        end
+
+        @input = Port.for(main_type).new(main_param || MAIN_NAMES[main_type], main: true)
+        @out = out
+
+        # Extra ports: declared in the call and taken as block keywords
+        ports.each_key do |p|
+          next if keywords.key?(p) || keyrest
+          raise ArgumentError, "#{label}: port #{p.inspect} isn't a keyword of the block (|#{[main_param || 'it', *keywords.keys.map { "#{_1}:" }].join(', ')}|)#{Rack.suggest(p, keywords.keys)}"
+        end
+        keywords.each_key do |k|
+          next if ports.key?(k)
+          raise ArgumentError, "#{label}: block keyword #{k}: isn't a declared port (declare it: #{constructor}(#{name ? "#{name.inspect}, " : ''}#{k}: :notes) { ... })#{Rack.suggest(k, ports.keys)}"
+        end
+        @ports = ports.to_h { |p, type|
+          [p, Port.for(type).new(p, required: keywords[p] != :key)]
+        }.freeze
+
+        @bound.each_key { |k| check_port_name(k) }
+        freeze
+      end
+
+      # :note_fx, :instrument, :effect, :listener, or :modulator, from the
+      # main input and the declared output (or +out+, e.g. the type an
+      # application returned).
+      def kind(out = @out)
+        return :listener if @listener
+        KINDS[[@input.type, out]] || DEFAULT_KINDS[@input.type]
+      end
+
+      # A label for messages: "rack :dub" or "anonymous arack".
+      def label
+        @name ? "rack #{@name.inspect}" : "anonymous #{@constructor}"
+      end
+
+      # "audio(sig) + notes(keys) -> audio" ("?" for an output not known
+      # until applied; +out+ overrides).
+      def signature(out = @out)
+        ins = [@input.to_s, *@ports.values.map { |p| p.required ? p.to_s : "#{p}?" }]
+        "#{ins.join(' + ')} -> #{out || (@listener ? 'notes|control' : '?')}"
+      end
+
+      def to_s
+        "#{@name ? "#{@name} " : ''}#{kind} #{signature}"
+      end
+
+      def inspect
+        "#<Rack #{self}>"
+      end
+
+      # A new Rack with +ports+ bound to values (Proc#curry-like): values
+      # are anything the port's type takes (nodes, streams, numbers, bus,
+      # track, or knob names), coerced when the rack is applied.
+      #
+      #     voice.then(&rack(:harmonizer).with(keys: midi))
+      def with(**ports)
+        ports.each_key { |k| check_port_name(k) }
+        if @parts
+          raise ArgumentError, "#{label} is composed (>>); bind ports on its parts before composing"
+        end
+        Rack.new(@name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: @bound.merge(ports),
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true)
+      end
+
+      # Builds an instance on +input+ (a source of the main input's type),
+      # with extra +ports+ (merged over #with's).  Each call builds a fresh
+      # subgraph.  Returns the block's result (a Stream, a Notes when the
+      # input was a Notes, a node, or a bundle).
+      def call(input, **ports)
+        return @parts.reduce(input) { |x, part| part.call(x) } if @parts
+
+        values = @bound.merge(ports)
+        values.each_key { |k| check_port_name(k) }
+        missing = @ports.select { |k, p| p.required && !values.key?(k) }.keys
+        unless missing.empty?
+          err = ArgumentError.new("#{label} needs port#{'s' if missing.length > 1} #{missing.map { |k| "#{k}: (#{@ports[k].type})" }.join(', ')}; bind with .with(#{missing.first}: ...) or pass it to the call")
+          MB::Sound.live_error(err)
+          return input
+        end
+
+        main = @input.coerce(input, self)
+        kw = @ports.keys.select { |k| values.key?(k) }.to_h { |k| [k, @ports[k].coerce(values[k], self)] }
+        values_by_port = { @input => main }.merge(kw.to_h { |k, v| [@ports[k], v] })
+
+        applied = ports.empty? ? self : with(**ports)
+        result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
+          explain_errors(values_by_port) {
+            r = kw.empty? ? blk.call(main) : blk.call(main, **kw)
+            # A note rack on a Notes gives a Notes (console midi stays mono-capable)
+            r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
+            r
+          }
+        }
+
+        check_output(result)
+        Rack.registry_use(self, result) if @name
+        result
+      end
+      alias [] call
+
+      # A Proc applying the rack, for Kernel#then and other Proc users
+      # (`midi.then(&rack)`).
+      def to_proc
+        rack = self
+        proc { |input, **ports| rack.call(input, **ports) }
+      end
+
+      # Composition with Proc semantics: `a >> b` applies a, then b.  +other+
+      # may be a Rack or anything callable (a Proc, a Transform::Spec).
+      def >>(other)
+        Rack.compose(self, other)
+      end
+
+      # `a << b` applies b, then a (Proc#<<).
+      def <<(other)
+        Rack.compose(other, self)
+      end
+
+      # The rack as Ruby: its constructor call and block source (composed
+      # racks as `a >> b`).
+      def to_ruby
+        return @parts.map { |p| p.is_a?(Rack) ? p.to_ruby : GraphNode::Recipe.block_source(p, nil).to_s }.join(' >> ') if @parts
+
+        args = []
+        args << @name.inspect if @name
+        args << "in: #{@input.type.inspect}" if @constructor == :rack
+        args << "out: #{@out.inspect}" if @out && !%i[irack instrument_rack].include?(@constructor)
+        @ports.each_value { |p| args << "#{p.name}: #{p.type.inspect}" }
+        src = GraphNode::Recipe.block_source(@block, @constructor) || '{ |*| nil # FIXME(graph-io): the rack block\'s source wasn\'t found }'
+        text = "#{@constructor}#{"(#{args.join(', ')})" unless args.empty?} #{src}"
+        unless @bound.empty?
+          text = "(#{text})" if text.include?(' do')
+          text += ".with(#{@bound.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})"
+        end
+        text
+      end
+
+      # Block parameter names, in order: the main input's, then the extra
+      # ports' (for printing an application's block).
+      def param_names
+        [@input.name, *@ports.keys]
+      end
+
+      # The block's parameter list as text: "sig, side:, depth: 0.5" (an
+      # optional port prints without its default value; its default is
+      # in the source).
+      def param_list
+        [@input.name.to_s, *@ports.values.map { |p| "#{p.name}:#{' nil' unless p.required}" }].join(', ')
+      end
+
+      # True for racks made with #>> or #<<.
+      def composed?
+        !@parts.nil?
+      end
+
+      # Racks are values: equal when made the same way.
+      def ==(other)
+        other.is_a?(Rack) && other.name == @name && other.block.equal?(@block) && other.bound == @bound && other.parts == @parts
+      end
+      alias eql? ==
+
+      def hash
+        [@name, @block, @bound, @parts].hash
+      end
+
+      class << self
+        # A composed rack: +a+ then +b+ (Racks, or callables wrapped as
+        # anonymous racks of the neighbor's type).
+        def compose(a, b)
+          a = wrap(a, b)
+          b = wrap(b, a)
+          if a.out && b.input.type != a.out && !(sample?(a.out) && sample?(b.input.type))
+            raise TypeError, "#{a.label} outputs #{a.out} but #{b.label} takes #{b.input.type}"
+          end
+          parts = (a.composed? ? a.parts : [a]) + (b.composed? ? b.parts : [b])
+          Rack.new(nil, in: parts.first.input.type, parts: parts)
+        end
+
+        # " (did you mean? x)" for +name+ among +names+, or ''.
+        def suggest(name, names)
+          return '' unless name.is_a?(Symbol) || name.is_a?(String)
+          found = DidYouMean::SpellChecker.new(dictionary: names.map(&:to_s)).correct(name.to_s)
+          found.empty? ? '' : " (did you mean? #{found.join(', ')})"
+        end
+
+        # Records a use of named rack +rack+ (see Session::Racks).
+        def registry_use(rack, result)
+          s = MB::Sound::Session.existing
+          s&.racks&.used(rack, result)
+        end
+
+        private
+
+        def sample?(t)
+          t == :audio || t == :control
+        end
+
+        def wrap(x, other)
+          return x if x.is_a?(Rack)
+          raise ArgumentError, "Racks compose with racks and callables (got #{x.class})" unless x.respond_to?(:call) || x.respond_to?(:apply)
+
+          type = other.is_a?(Rack) ? (other.out || other.input.type) : :notes
+          fn = x.respond_to?(:apply) ? ->(s) { x.apply(MIDI::Stream.for(s)) } : x
+          Rack.new(nil, in: type, block: ->(input) { fn.call(input) }, constructor: :rack)
+        end
+      end
+
+      private
+
+      def check_port_name(k)
+        return if @ports.key?(k)
+        raise ArgumentError, "#{label} has no port #{k.inspect}#{@ports.empty? ? ' (it has no extra ports)' : " (ports: #{@ports.keys.join(', ')})"}#{Rack.suggest(k, @ports.keys)}"
+      end
+
+      # Checks the block's result against +out:+ (notes vs samples; audio
+      # and control are both sample streams).
+      def check_output(result)
+        got = Rack.output_type(result)
+        want = @out
+        want = :sample if @listener
+        return if want.nil?
+        ok = case want
+             when :notes then got == :notes
+             when :sample then got == :notes || got == :audio || got == :control
+             else got == :audio || got == :control
+             end
+        return if ok
+
+        MB::Sound.live_error(TypeError.new("#{label} should output #{@out} but its block returned #{result.class.name || result.class} (#{got || 'not a graph value'})"))
+      end
+
+      # The block raised NoMethodError on a port's value: re-raise with a
+      # hint about the port's type (did_you_mean still suggests names).
+      def explain_errors(values_by_port)
+        yield
+      rescue NoMethodError => e
+        port = values_by_port.find { |_, v| e.receiver.equal?(v) }&.first
+        hint = port&.hint(e.name)
+        raise unless hint
+
+        err = NoMethodError.new("#{e.message} (in #{label}: #{hint})", e.name, e.args, receiver: e.receiver)
+        err.set_backtrace(e.backtrace)
+        raise err
+      end
+
+      def infer(main_param, keywords, declared, quiet:)
+        unless main_param && main_param != :_1
+          raise ArgumentError, "in: :auto reads the block's parameter names, and `it`/_1 blocks have none: name the parameter (|sig|) or give in: :audio"
+        end
+
+        type_of = ->(n) {
+          AUTO_TYPES.find { |_, names| names.include?(n) }&.first or
+            raise ArgumentError, "in: :auto can't tell the type of #{n} (#{AUTO_TYPES.map { |t, names| "#{names.join('/')} are #{t}" }.join('; ')}); declare it (#{n}: :audio)#{Rack.suggest(n, AUTO_TYPES.values.flatten)}"
+        }
+        main = type_of.(main_param)
+        ports = declared.dup
+        keywords.each_key { |k| ports[k] ||= type_of.(k) }
+        unless quiet
+          kw = ports.map { |k, t| "#{k}: #{t}" }
+          puts "# #{@name ? "rack #{@name.inspect}" : 'rack'} inferred #{main}(#{[main_param, *kw].join(', ')}) -> #{@out || '?'}"
+        end
+        [main, ports]
+      end
+
+      public
+
+      # The port type of a rack's result (nil if it isn't a graph value).
+      def self.output_type(result)
+        case result
+        when MIDI::Stream, MB::Sound::Notes, Sequence::Clip then :notes
+        when GraphNode::Channels then :audio
+        when GraphNode, GraphNode::MultiOutput then GraphNode::Traversable.port_type_of(result)
+        end
+      end
+    end
+  end
+end

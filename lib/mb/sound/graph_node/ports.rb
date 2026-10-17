@@ -23,8 +23,8 @@ module MB
       # used only for sync) still advances.
       #
       # Introspection for UIs: `node.ports` (the ports in use), and
-      # `node.class.port_specs` / `node.port_info` (every declared port with
-      # its description).
+      # `node.class.port_specs` / `node.port_info[:out]` (every declared
+      # port with its description, after the main output).
       #
       # Example (bin/sound.rb):
       #     plot 110.hz.phasor.wraps, samples: 2000
@@ -100,9 +100,16 @@ module MB
           @ports || {}
         end
 
-        # Every declared port's name and description.
+        # Typed ports (see Traversable#port_info), with every declared side
+        # output after the main output in +:out+: its name, type (side
+        # outputs are :control signals: pulses, increments), description,
+        # and whether it's in use.
         def port_info
-          self.class.port_specs.map { |name, description| { name: name, description: description, in_use: ports.include?(name) } }
+          info = super
+          side = self.class.port_specs.map { |name, description|
+            { name: name, type: :control, description: description, in_use: ports.include?(name) }
+          }
+          { in: info[:in], out: info[:out] + side }
         end
 
         # For Port#sample: returns +count+ samples of port +name+ for the

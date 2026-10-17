@@ -29,11 +29,22 @@ module MB
         # before a node executes, or :post to receive a copy of the data the node
         # returns.
         #
+        # With +snapshot: true+ (for taps that hand buffers to another
+        # thread, e.g. a UI painter), a :post spy gets a frozen copy of each
+        # buffer it may keep: `buf.dup.freeze`, the same NArray class the
+        # node returns (Numo::SFloat for most nodes; complex nodes give
+        # SComplex/DComplex), one buffer long, shared by every snapshot spy
+        # of the node for that buffer; nil when the node ends.  It carries
+        # no frame number (spy from inside a Session render and read
+        # Session.span for the frame; Session taps with frames are phase V).  Spies on nodes fused into a plan
+        # get their buffers from Plan::Op::Tap the same way.  Spies run on
+        # the render thread: queue snapshots there, draw elsewhere.
+        #
         # See #clear_spies.
         #
         # TODO: accomplish this without monkey patching, and maybe use a module
         # interface rather than a proc (for better rubyprof traces)
-        def spy(handle: nil, interval: false, phase: :post, &block)
+        def spy(handle: nil, interval: false, phase: :post, snapshot: false, &block)
           @handled_spies ||= nil
 
           if @handled_spies.nil?
@@ -53,7 +64,7 @@ module MB
           end
 
           @handled_spies[handle] ||= []
-          @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false]
+          @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false, snapshot]
 
           # A spied node inside a plan gets a tap (see Plan::Op::Tap)
           Plan.changed(self)
@@ -65,19 +76,25 @@ module MB
         private def call_spies(data, phase)
           now = Time.now
           now_nil = data.nil?
+          frozen = nil
 
           @handled_spies.each do |origin, spies|
             info = origin ? " from #{origin}" : ''
 
             spies.each_with_index do |spy_info, idx|
-              s, interval, spy_phase, last_time, was_nil = spy_info
+              s, interval, spy_phase, last_time, was_nil, snapshot = spy_info
               next unless spy_phase == phase
 
               begin
                 if !interval || (now - last_time) >= interval || was_nil != now_nil
-                  s.call(data)
-                  spy_info[-2] = now
-                  spy_info[-1] = now_nil
+                  if snapshot && phase == :post && data.respond_to?(:dup)
+                    frozen ||= data.dup.freeze
+                    s.call(frozen)
+                  else
+                    s.call(data)
+                  end
+                  spy_info[3] = now
+                  spy_info[4] = now_nil
                 end
               rescue => e
                 warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"

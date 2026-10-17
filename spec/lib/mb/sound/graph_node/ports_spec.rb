@@ -94,10 +94,11 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
 
   describe 'introspection' do
     it 'lists declared ports with descriptions' do
-      info = 100.hz.phasor.port_info
-      expect(info.map { |i| i[:name] }).to eq([:wraps, :increment])
-      expect(info.map { |i| i[:description] }).to all(be_a(String))
-      expect(100.hz.ramp.port_info.map { |i| i[:name] }).to eq([:wraps, :increment])
+      info = 100.hz.phasor.port_info[:out]
+      expect(info.map { |i| i[:name] }).to eq([:out, :wraps, :increment])
+      expect(info.drop(1).map { |i| i[:description] }).to all(be_a(String))
+      expect(info.drop(1).map { |i| i[:type] }).to all(eq(:control))
+      expect(100.hz.ramp.port_info[:out].map { |i| i[:name] }).to eq([:out, :wraps, :increment])
     end
 
     it 'lists ports in use' do
