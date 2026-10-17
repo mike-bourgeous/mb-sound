@@ -40,6 +40,19 @@ module MB
           @node_type_name = "#{antialias ? '' : 'a'}#{mode}"
         end
 
+        # The transfer curve (the plain shaper, input -2..2 across; see
+        # GraphNode::Traversable#plot_preview and Plot.preview).
+        def plot_preview(chart, points: 201)
+          cp = MB::Sound::Shaper.params(@mode, @p1, @p2)
+          x = Numo::DFloat.linspace(-2, 2, points)
+          y = Numo::DFloat.cast(x.to_a.map { |v| MB::Sound::Shaper.f(cp, v) })
+          chart.x :linear, -2..2
+          chart.y :linear, -2..2
+          chart.line x, x: x, label: 'input'
+          chart.line y, x: x, label: @node_type_name
+          chart
+        end
+
         def sources
           { input: @source }
         end

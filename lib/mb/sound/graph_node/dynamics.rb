@@ -359,7 +359,7 @@ module MB
 
         # #params, kept (the kernel and the plan executor read @params).
         def plan_params
-          @params ||= params
+          @params ||= kernel_params
         end
 
         # The detector state, lookahead delay, and flush position (check
@@ -375,7 +375,7 @@ module MB
         end
 
         # Settings as the kernel reads them.
-        def params
+        def kernel_params
           Numo::DFloat[
             @detector == :rms ? 1 : 0, @min_gain, @max_gain, @makeup,
             @hold_up ? 1 : 0, @link ? 1 : 0, @lookahead, @mix
@@ -394,7 +394,7 @@ module MB
           end
 
           times = @times.values.map { |s| fit(s.samples(n, @sample_rate) || 0, n) }
-          @params ||= params
+          @params ||= kernel_params
           MB::Sound::FastDynamics.compand(outs, data, sides, @transfer.table, @params, times, @state, @delay)
         end
 

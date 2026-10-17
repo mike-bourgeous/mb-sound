@@ -209,6 +209,28 @@ module MB
         end
 
         # See GraphNode#sources.
+        # The filter's magnitude response at its current settings, in dB
+        # over a log frequency axis (see GraphNode::Traversable#plot_preview;
+        # Plot.preview).  Nil for filters without a #response.
+        def plot_preview(chart, points: 256)
+          return nil unless @base_filter.respond_to?(:response)
+
+          # Constant inputs (cutoff: 800) as the filter will play them
+          filter = @base_filter
+          set = params.select { |k, v| v.is_a?(Numeric) && filter.respond_to?(:"#{k}=") }
+          unless set.empty?
+            filter = filter.dup
+            set.each { |k, v| filter.public_send(:"#{k}=", v) }
+          end
+
+          f, db = Plot::Presets.response_db(filter, @sample_rate, points)
+          top = [(db.max / 6.0).ceil * 6, 6].max
+          chart.x :frequency, f[0]..f[-1]
+          chart.y Plot::Scale::DB.new([top - 66, -60].max..top)
+          chart.line db, x: f, label: filter.to_s
+          chart
+        end
+
         def sources
           if @base_filter.respond_to?(:sources)
             {

@@ -251,6 +251,11 @@ module MB
           @param_values.transform_values { |v| v.respond_to?(:original_source) ? v.original_source : v }
         end
 
+        # #params with the declared ranges (see Traversable#param_info).
+        def param_info
+          params.to_h { |name, v| [name, Traversable.describe_param(v, self.class.params.dig(name, :range))] }
+        end
+
         # The current gain matrix (Arrays of rows; per-sample NArrays for
         # node parameters, from the last buffer).
         def gains

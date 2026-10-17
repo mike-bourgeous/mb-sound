@@ -109,6 +109,58 @@ module MB
           end
         end
 
+        # The node's parameters by name: its :param inputs (see #port_info),
+        # as numbers for constants and as the nodes given otherwise (a knob
+        # reader, an LFO).  Nodes with a parameter API of their own
+        # override it (ChannelMixer).  See #param_info for ranges and units.
+        def params
+          sources.each_with_object({}) do |(name, src), h|
+            next unless port_role(name) == :param && !Traversable.owner_edge?(self, src)
+            h[name] = src.is_a?(Constant) ? src.constant : src
+          end
+        end
+
+        # #params with what is known about each: { name => { value:, type:,
+        # unit:, range:, label:, detail: } } (nil where unknown).  Knob
+        # readers give their knob's value, range, and name; nodes their
+        # port type and description.
+        def param_info
+          sources.each_with_object({}) do |(name, src), h|
+            next unless port_role(name) == :param && !Traversable.owner_edge?(self, src)
+            h[name] = Traversable.describe_param(src, param_range(name))
+          end
+        end
+
+        # The range of parameter +name+, if the node knows it (nil by
+        # default).
+        def param_range(name)
+          nil
+        end
+
+        # Draws a picture of the node at rest that only the node can compute
+        # (a filter's response, a shaper's transfer curve) onto +chart+ (a
+        # Plot::ChartBuilder), returning the chart, or nil if the node has
+        # none (the default).  Safe to call from any thread: it reads the
+        # node's settings, never samples it.  See Plot.preview.
+        def plot_preview(chart)
+          nil
+        end
+
+        # One #param_info entry for value +v+.
+        def self.describe_param(v, range = nil)
+          case v
+          when Numeric
+            { value: v, type: :control, unit: nil, range: range, label: nil, detail: nil }
+          when Constant
+            { value: v.constant, type: :control, unit: v.unit, range: range || v.range, label: nil, detail: nil }
+          when Knob::Reader, Knob
+            k = v.is_a?(Knob::Reader) ? v.knob : v
+            { value: k.value, type: :control, unit: k.spec.unit, range: range || k.spec.range, label: k.name, detail: k.to_s }
+          else
+            { value: v, type: port_type_of(v), unit: nil, range: range, label: v.respond_to?(:graph_node_name) ? v.graph_node_name : nil, detail: v.to_s }
+          end
+        end
+
         # True if +src+ is the multi-output node that +node+ is an output of.
         def self.owner_edge?(node, src)
           return false if src.equal?(node) || src.is_a?(Numeric) || !src.respond_to?(:outputs)

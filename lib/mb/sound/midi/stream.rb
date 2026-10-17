@@ -183,6 +183,36 @@ module MB
           @log = []
           @readers = ObjectSpace::WeakMap.new
           @bends = source.is_a?(Transform) ? nil : BendTracker.new(Interval.semitones(bend_range))
+          # Set by #spy
+          @spies = nil
+          @spy_frame = nil
+          @spy_from = nil
+          @spy_session = nil
+        end
+
+        # Calls the block with each event this stream reads from its
+        # source, once per event however many readers it has, and a
+        # Session::Stamp of the frame and timeline position it lands on
+        # when a Session is rendering (nil otherwise; the event's +time+ is
+        # its stream time).  Events are frozen values, safe to keep (queue
+        # them for a painter; never draw here: this runs on the render
+        # thread).  Pass +:handle+ to remove the spy later with
+        # #clear_spies.  Returns self.
+        #
+        #     notes = []
+        #     midi.stream.spy { |e, at| notes << [e, at] if e.type == :note_on }
+        def spy(handle: nil, &block)
+          raise ArgumentError, 'Pass a block to receive events' unless block
+          ((@spies ||= {})[handle] ||= []) << block
+          self
+        end
+
+        # Removes the spies added with +handle+ (or all of them).
+        def clear_spies(handle: nil)
+          return self unless @spies
+          handle ? @spies.delete(handle) : @spies.clear
+          @spies = nil if @spies.empty?
+          self
         end
 
         # Returns a new Reader starting at +:at+ seconds, or by default where
@@ -411,6 +441,34 @@ module MB
           events = events.map { |e| @bends.process(e) } if @bends
 
           @log.concat(events)
+          call_spies(events, from) if @spies
+        end
+
+        # Gives +events+ (read from stream time +from+) to the spies (see
+        # #spy), stamped on the Session frame they land on: the span's first
+        # frame plus their offset from the stream time read first in that
+        # span (readers read whole spans at a time).
+        def call_spies(events, from)
+          span = MB::Sound::Session.span
+          if span
+            if @spy_frame != span.frame || !span.session.equal?(@spy_session)
+              @spy_frame = span.frame
+              @spy_session = span.session
+              @spy_from = from
+            end
+            rate = span.sample_rate
+          end
+
+          events.each do |e|
+            stamp = span && span.stamp([((e.time - @spy_from) * rate).floor, 0].max)
+            @spies.each_value do |list|
+              list.each do |s|
+                s.call(e, stamp)
+              rescue => err
+                warn "Stream spy #{s} raised #{MB::U.highlight(err)}"
+              end
+            end
+          end
         end
 
         def sorted?(events)
