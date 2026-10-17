@@ -262,6 +262,20 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(described_class::Targeting.last.held).to eq(r.integrated < -14 - 0.05)
     end
 
+    it 'stays exact with a block before the preset that reads a moving knob' do
+      a = tmp_path('knob.flac')
+      MB::Sound.seed(5)
+      expect {
+        MB::Sound.render(a, bars: 2, overwrite: true) {
+          MB::Sound.knob :air, 20, range: 20..2000, curve: :exp
+          MB::Sound.master(:club) { |mix| mix.filter(:highpass, cutoff: MB::Sound.knob(:air)) }
+          MB::Sound.bg :a, MB::Sound::GraphNode::Channels.new([110.hz.ramp.at(0.3), 82.5.hz.saw.at(0.3)])
+          MB::Sound.at_bar(2) { MB::Sound.turn :air, 1500, over: 1 }
+        }
+      }.to output(/mastering :club: pass/).to_stdout
+      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-8.5)
+    end
+
     it 'measures a render window from its first frame' do
       a = tmp_path('window.flac')
       MB::Sound.seed(5)
