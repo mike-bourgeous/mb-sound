@@ -307,7 +307,15 @@ module MB
         end
 
         # Closes the focused pane (or +name+).
-        def close(name = nil) = tile { |t| t.close(name || t.focus) }
+        # The REPL stays (without it the console has nowhere to draw; zoom
+        # another pane over it instead).
+        def close(name = nil)
+          tile do |t|
+            name ||= t.focus
+            raise Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
+            t.close(name)
+          end
+        end
 
         # Toggles zooming the focused pane (or +name+).
         def zoom(name = nil) = tile { |t| t.zoom(name || t.focus) }
@@ -475,6 +483,7 @@ module MB
         def keys(on = true, off: nil, step: nil, patch: :keep)
           return exit_keys.then { self } unless on
 
+          start if @hidden # (from the hidden console: the tiles come back first)
           @keyboard.off_mode = off if off
           @keyboard.entry = step ? :step : :play unless step.nil?
           @keyboard.out.patch = patch if patch != :keep && @keyboard.out.respond_to?(:patch=)
@@ -504,6 +513,24 @@ module MB
             t.focus!(was)
           end
           -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
+        end
+
+        # What is wrong with the mode state, as a list (empty when every
+        # invariant holds): KEYS mode's keyboard, kitty flags, and notes
+        # follow the router's mode exactly, and nothing plays the keyboard
+        # while hidden.  Every way into and out of KEYS goes through
+        # #mode_changed, which keeps these; a spec drives random key
+        # sequences against them.
+        def mode_problems
+          grab = @router.mode == :grab
+          out = []
+          out << "keyboard #{@keyboard.active? ? 'active' : 'inactive'} in #{@router.mode} mode" if grab != @keyboard.active?
+          out << "kitty flags pushed in #{@router.mode} mode" if @kitty_pushed && !grab
+          out << 'KEYS mode while hidden' if grab && @hidden
+          out << "notes #{@keyboard.held.inspect} held in #{@router.mode} mode" if !grab && !@keyboard.held.empty?
+          out << 'no REPL pane' unless @tiler.layout.panes.include?(:repl)
+          out << "REPL mode with #{@tiler.layout.zoom.inspect} zoomed over the REPL" if @router.mode == :repl && @tiler.layout.zoom && @tiler.layout.zoom != :repl
+          out
         end
 
         ### Router host (called on the input thread)
@@ -538,6 +565,10 @@ module MB
           # trip (Ctrl-] i or Enter) comes back to the REPL, not into the
           # keyboard (where Up and Down change the velocity)
           tile { |t| t.focus!(:repl) } if was && m == :repl && @tiler.layout.panes.include?(:repl)
+          # Typing goes to the REPL, so it must be on screen: a zoom on
+          # another pane ends (zoom the REPL itself to keep a big one)
+          z = @tiler.layout.zoom
+          tile { |t| t.zoom(z) } if m == :repl && z && z != :repl
         end
 
         def line_done(kind, text)
@@ -576,7 +607,7 @@ module MB
           when :copy then copy
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
           when :redraw then @full = true
-          when :panic then run_safely { MB::Sound.panic }
+          when :panic then run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil

@@ -177,6 +177,35 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(pushes.call).to eq(false)
   end
 
+  it 'keeps the mode invariants through random key sequences, and the REPL works after any of them' do
+    rng = Random.new(RSpec.configuration.seed)
+    start(:keys, keys_kitty: true)
+    @keyboard.off_mode = :hold
+    steps = {
+      nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
+      ctrl_z: "\x1a", note: "\e[122;1:1u", note_legacy: 'x', z: 'z', esc: "\e", digit: -> { rng.rand(1..7).to_s },
+      ruby_keys: -> { @tiles.keys; nil }, ruby_off: -> { @tiles.keys(false); nil },
+    }
+    path = []
+    40.times do
+      name, key = steps.to_a.sample(random: rng)
+      path << name
+      key = key.call if key.respond_to?(:call)
+      @term.write(key) if key
+      @term.settle(quiet: 0.05)
+      expect(@tiles.mode_problems).to eq([]), path.join(' ')
+    end
+    # Back to the REPL from wherever the walk ended
+    @term.write("\x1a") if @tiles.hidden?
+    @tiles.keys(false)
+    @tiles.router.mode = :repl
+    expect(wait_until { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
+    @term.write("\x05\x15") # Ctrl-E Ctrl-U: whatever the walk typed on the line goes
+    @term.settle(quiet: 0.1)
+    @term.type("6 * 7\r")
+    expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
+  end
+
   it 'builds a clip in step entry and puts its Ruby on the REPL line' do
     start(context: MB::Sound.module_eval('binding'))
     @tiles.keys(step: true)

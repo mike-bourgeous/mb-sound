@@ -155,6 +155,19 @@ ui.keyboard.base = 60     # z is C4 (octaves; also - and +)
 
 **Open**: the band (ui-3) can show the pane but has no input of its own (Reline owns stdin), so KEYS mode is tiles-only; a plain-console `keys` prompt is possible later.  Non-US layouts: legacy Shift detection maps a US layout's shifted punctuation; kitty's base keys are layout-independent for the letter rows only.  Program/bank keys, per-row octaves (ZynAddSubFX), and showing a hardware keyboard's notes on the strip are not built.
 
+## Patterns and lessons (ux-1, 2026-10-17)
+
+The maintainer's request: for each bug, a mechanism that rules out its whole class, not only a regression test.
+
+| lesson (bug) | mechanism | class ruled out | status |
+|---|---|---|---|
+| A pane body kept from an old placement drew at the old place after a relayout (bug 1) | Per-placement state is derived from the canvas it belongs to (`Pane#draw` remakes the body when the canvas changes); `tiles_property_spec.rb`: random splits, shows, closes, resizes, zooms, undo/redo, layout switches, and terminal resizes, then every cell pane must equal what a fresh screen with the same tree and size draws | any state surviving a relayout that changes what a pane shows | adopted (the property spec fails on the old Pane#draw for every seed tried) |
+| Leaving KEYS left the keyboard focused, so NAV i went back into KEYS (bug 2) | Every mode change goes through `Tiles#mode_changed`; `Tiles#mode_problems` states the invariants (keyboard active, kitty flags, held notes follow the mode; nothing in KEYS while hidden; the REPL pane exists and is visible in REPL mode); a spec drives 40 random keys and Ruby calls (Ctrl-], p, i, Enter, digits, Ctrl-C both encodings, Ctrl-Z, notes, z, Esc, `ui.keys`, `ui.keys(false)`) checking them after each, then that the REPL still evaluates | mode/focus/terminal-state drift on any path into or out of a mode | adopted; it found three more: `ui.keys` from the hidden console entered KEYS while hidden, NAV x closed the REPL pane, and REPL mode with another pane zoomed over the REPL |
+| KEYS Enter's capture and step entry's swap were missing from takes (coordinator, from ui-noise-1) | One command bus: UI actions run console commands through `UI.run_line(code, session)` (a take line when the console's take records that session); `command_bus_spec.rb` (Prism) fails when UI code calls a performance-changing method on a Session, Arrangement, or MB::Sound, with a reasoned ALLOWED list | UI changes that skip the journal, undo, or takes | adopted |
+| `play`/`vis` drew over the band (bug 3) | The UI routes plots (`visualize` asks `UI.screen` and puts a scope/spectrum pane in) | plots over the screen | routed; a guard that fails on raw cursor-addressed writes to the real stdout from non-UI code while a screen is up (a spec-time `$stdout` wrapper) is proposed, not built |
+| The keyboard's patch duplicated play's | `UI::Keyboard::Link::PATCH = Playable::PATCH` | patches drifting apart | adopted (a registry of default patches if a third appears) |
+| Enter split a recalled multi-line command (item 7) | `UI::EnterSubmits`: completeness of the whole buffer decides, not the cursor's line | editing-position-dependent submits | adopted; Ctrl-J stays Enter because type-ahead arrives as "\n" through ICRNL (the tiles' bin spec caught the first version) |
+
 ## Open and later
 
 - Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere.
