@@ -29,6 +29,7 @@ require_relative 'ui/viewports/loader'
 require_relative 'ui/screen/term'
 require_relative 'ui/keyboard'
 require_relative 'ui/tiles'
+require_relative 'ui/switch'
 
 module MB
   module Sound
@@ -314,6 +315,10 @@ module MB
 
         layout = layout_named(name || (@tiles&.active? ? @tiles.layout_name : @band&.active? ? @band.layout.name : default_layout))
         return show_tiles(layout, **opts) if layout.is_a?(Viewports::Layout)
+        # (out of the tiles: their REPL lines printed again, by the console
+        # itself when asked from the palette; see Switch)
+        return Switch.defer_to_console(Switch.console_line(name || layout.name, opts)) if Switch.defer?
+        todo = Switch.leave_tiles(:band)
         @tiles&.stop
         opts = opts.except(:mouse, :nav_esc)
         opts = (layout_options[layout.name] || {}).merge(opts)
@@ -329,6 +334,7 @@ module MB
         warm_up # once, before the first band (YJIT compiles the painter)
         @band = Band.new(layout: layout, io: io, **opts)
         @band.start
+        Switch.finish(todo)
         unless @at_exit
           at_exit { @band&.stop rescue nil }
           @at_exit = true
@@ -365,9 +371,12 @@ module MB
 
       # Turns the band or the tiled screen off.  Returns nil.
       def self.off
+        return Switch.defer_to_console(Switch.console_line(:off)) && nil if Switch.defer?
         was = screen || @tiles&.hidden?
         @band&.stop
+        todo = Switch.leave_tiles(:off)
         @tiles&.stop
+        Switch.finish(todo)
         # What was hidden from the terminal while the screen owned it
         if was && (text = messages.summary)
           $stdout.puts "\e[33m#{text}\e[0m"
