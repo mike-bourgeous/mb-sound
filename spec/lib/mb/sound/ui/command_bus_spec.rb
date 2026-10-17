@@ -6,7 +6,7 @@ require 'prism'
 # swap called Arrangement methods on UI threads and were missing from
 # takes).  This guard fails when UI code calls a performance-changing
 # method on a Session, an Arrangement, or MB::Sound directly.
-RSpec.describe('UI command bus guard') do
+module CommandBusGuard
   # Methods that change a performance.
   MUTATORS = %i[
     add remove change go play swap capture rec record arm disarm turn move mute unmute solo unsolo stop bg
@@ -22,6 +22,10 @@ RSpec.describe('UI command bus guard') do
     'lib/mb/sound/ui/keyboard/link.rb:add' => "the keyboard's default patch, a live monitor for playing with nothing armed (not part of the performance; takes replay the MIDI it played through the MIDI log)",
     'lib/mb/sound/ui/keyboard/link.rb:remove' => 'rings out that monitor once a track is armed',
   }.freeze
+end
+
+RSpec.describe('UI command bus guard') do
+  include CommandBusGuard
 
   it 'finds no direct performance changes in UI code outside ALLOWED' do
     root = File.expand_path('../../../../..', __dir__)
@@ -34,9 +38,9 @@ RSpec.describe('UI command bus guard') do
         n = stack.pop
         next unless n
         reader = n.is_a?(Prism::CallNode) && n.name == :master && n.arguments.nil? && n.block.nil? # (a snapshot's master levels)
-        if n.is_a?(Prism::CallNode) && n.receiver && MUTATORS.include?(n.name) && !reader && n.receiver.slice.match?(PERFORMANCE)
+        if n.is_a?(Prism::CallNode) && n.receiver && CommandBusGuard::MUTATORS.include?(n.name) && !reader && n.receiver.slice.match?(CommandBusGuard::PERFORMANCE)
           key = "#{rel}:#{n.name}"
-          found << "#{key} (line #{n.location.start_line}: #{n.slice.lines.first.strip})" unless ALLOWED.key?(key)
+          found << "#{key} (line #{n.location.start_line}: #{n.slice.lines.first.strip})" unless CommandBusGuard::ALLOWED.key?(key)
         end
         stack.concat(n.compact_child_nodes)
       end
