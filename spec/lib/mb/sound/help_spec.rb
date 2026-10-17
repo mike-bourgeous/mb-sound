@@ -202,6 +202,31 @@ RSpec.describe MB::Sound::Help do
       end
     end
 
+    it 'lesson.back stays on a step that already passes until lesson.next (it used to move on at once)' do
+      session = new_session
+      lesson = MB::Sound::Help::LESSONS[:set]
+      MB::Sound::Session.with_context(session: session) do
+        runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+        first = runner.step
+        MB::Sound.instance_exec(&first.code)
+        expect(runner.after_line).to include('✓')
+        expect(runner.index).to eq(1)
+
+        runner.back
+        expect(runner.step).to equal(first)
+        expect(first.passed?).to eq(true)
+        expect(runner.after_line).to be_nil # the line that went back doesn't undo it
+        expect(runner.index).to eq(0)
+        expect(MB::U.remove_ansi(runner.to_s)).to include('already done')
+
+        runner.next
+        expect(runner.index).to eq(1)
+      end
+    ensure
+      MB::Sound::Help::Progress.save(:set, 0)
+      session&.close
+    end
+
     it 'record: files the lesson makes go to the help directory, never the take directory' do
       takes = tmp_path('takes')
       session = new_session

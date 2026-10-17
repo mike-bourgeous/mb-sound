@@ -131,6 +131,7 @@ module MB
         def initialize(lesson, index = nil)
           @lesson = lesson
           @index = (index || Progress.load[lesson.name] || 0).clamp(0, lesson.steps.length)
+          @revisit = nil
           step&.begin!
         end
 
@@ -148,6 +149,10 @@ module MB
         # passes; returns the text to print (or nil).
         def after_line
           return nil if done? || step.check.nil?
+          # A step gone back to (lesson.back) whose check already passes
+          # waits for lesson.next or lesson.run instead of moving on at
+          # once (the line that went back would otherwise undo it)
+          return nil if @revisit == @index
           return nil unless (step.passed? rescue false)
 
           msg = c(:ok, "✓ #{step.check_text || step.title}")
@@ -164,6 +169,7 @@ module MB
           @index = [@index - 1, 0].max
           Progress.save(@lesson.name, @index)
           step&.begin!
+          @revisit = @index
           self
         end
 
@@ -174,6 +180,7 @@ module MB
           return self if done? || step.code.nil?
           puts step.source.lines.map { |l| code(l.chomp) }.join("\n")
           MB::Sound.instance_exec(&step.code)
+          @revisit = nil
           msg = after_line
           puts msg.lines.first if msg
           self
@@ -200,7 +207,11 @@ module MB
             out << s.source.lines.map { |l| "    #{code(l.chomp)}" }.join("\n")
           end
           out << ''
-          out << c(:dim, "  waiting for: #{s.check_text}") if s.check_text
+          if @revisit == @index && (s.passed? rescue false)
+            out << c(:ok, "  ✓ already done; lesson.next moves on, lesson.run does it again")
+          elsif s.check_text
+            out << c(:dim, "  waiting for: #{s.check_text}")
+          end
           out << c(:dim, '  lesson.run types it for you; lesson.hint, lesson.next, lesson.back, lesson.quit')
           out.join("\n")
         end
@@ -208,6 +219,7 @@ module MB
         private
 
         def advance
+          @revisit = nil
           @index += 1
           Progress.save(@lesson.name, @index)
           step&.begin!
