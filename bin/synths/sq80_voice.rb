@@ -88,7 +88,7 @@ module MB::Sound
   # document): +what+ is the patch (a Symbol) or a phrase.
   def self.sq80_voice_description(what)
     what = "SQ-80 voice :#{what}: #{SQ80.patch(what).description}" if what.is_a?(Symbol)
-    "#{what} From bin/synths/sq80_voice.rb (the voice since 2026-10-07; patches in sq80-lib-1, 2026-10-17)."
+    "#{what} (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)"
   end
 
   if main_script?(__FILE__)

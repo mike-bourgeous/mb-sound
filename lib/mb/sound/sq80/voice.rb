@@ -79,6 +79,13 @@ module MB
 
         module_function
 
+        # Returns settings Hash +base+ with +changes+ merged in, nested
+        # Hashes (osc1, env4, ...) key by key (a patch's settings changed by
+        # the caller's).
+        def merge(base, changes)
+          base.merge(changes) { |_k, a, b| a.is_a?(Hash) && b.is_a?(Hash) ? a.merge(b) : b }
+        end
+
         # Returns DEFAULTS with +settings+ merged in (nested Hashes merged
         # key by key), checking the names (ArgumentError with suggestions).
         def settings(**settings)

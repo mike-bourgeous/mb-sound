@@ -35,8 +35,7 @@ module MB
                else SQ80.patch(patch).settings
                end
 
-        merged = base.merge(settings) { |k, a, b| a.is_a?(Hash) && b.is_a?(Hash) ? a.merge(b) : b }
-        SQ80::Voice.build(source, seed: seed, **merged)
+        SQ80::Voice.build(source, seed: seed, **SQ80::Voice.merge(base, settings))
       end
 
       # Lists the SQ-80 voice patches (name and description) and returns

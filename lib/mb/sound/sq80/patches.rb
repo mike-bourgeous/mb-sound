@@ -36,7 +36,7 @@ module MB
             env2: { t1: 30, t2: 40, l2: 44, l3: 36, t1v: 0 },
             env4: { t1: 30, t2: 40, l2: 60, l3: 54, t4: 40 },
             lfo1: { depth: 0.08 },
-            level: 1.6,
+            level: 1.41,
           }
         ),
         Patch.new(
@@ -46,7 +46,7 @@ module MB
             cutoff: 260, reso: 0.65, chop: 3.0, flutter: 0,
             env2: { l2: 20, l3: 10 },
             env4: { l3: 58, t4: 20 },
-            level: 1.6,
+            level: 1.17,
           }
         ),
         Patch.new(
@@ -57,7 +57,7 @@ module MB
             osc1: { level: 0.7 }, osc2: { semitones: -0.08, level: 0.3 }, osc3: { level: 0 },
             lfo1: { depth: 0.12, delay: 0.25 },
             env4: { t1: 6, l2: 58, l3: 52, t4: 24 },
-            level: 1.6,
+            level: 2.01,
           }
         ),
         Patch.new(
@@ -70,7 +70,7 @@ module MB
             filter: { env2: 3.5, velocity: 1.0 },
             env4: { t1: 0, l2: 58, l3: 50, t4: 12 },
             lfo1: { depth: 0 },
-            level: 1.6,
+            level: 4.94,
           }
         ),
         Patch.new(
@@ -81,7 +81,7 @@ module MB
             osc1: { level: 0.15 }, osc2: { semitones: 12, level: 0.45 },
             env1: { t2: 20, t3: 30 },
             env4: { t1: 0, l2: 40, t2: 34, l3: 0, t3: 44, t4: 36 },
-            level: 1.6,
+            level: 2.39,
           }
         ),
       ].to_h { |p| [p.name, p] }.freeze

@@ -6,7 +6,8 @@
 # preset an effect method from one of those scripts saved with GraphIO.save.
 # The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
 # ambient.rb, funk.rb, named for their genres) were the first, then
-# bin/synths/electric_pianos.rb; each document's description says where it
+# bin/synths/electric_pianos.rb, then the SQ-80 voice's patches
+# (bin/synths/sq80_voice.rb, sq80-lib-1); each document's description says where it
 # came from (the scripts' <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
 # again after a library change shows what changed in `git diff presets/`.
@@ -59,7 +60,16 @@ module MB::Sound
     tine_piano: ['bin/synths/electric_pianos.rb', :tine, '--pickup', '0.5', '--amp', '1'],
     tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4'],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
-  }.freeze
+  }.merge(
+    # The SQ-80 voice's patches (sq80-lib-1, 2026-10-17), with each patch's
+    # cutoff, reso, chop, and flutter given so they save as params (zero
+    # chop or flutter is off, baked in)
+    SQ80.patch_names.to_h { |n|
+      s = SQ80.patch(n).full_settings
+      args = %i[cutoff reso chop flutter].reject { |k| s[k] == 0 }.flat_map { |k| ["--#{k}", s[k].to_f.to_s] }
+      [:"sq80_#{n}", ['bin/synths/sq80_voice.rb', n, *args]]
+    }
+  ).freeze
 
   # Effect presets: { name => [script, params, builder] }; the builder gets
   # the input and a Hash of param Constants (named after the params).

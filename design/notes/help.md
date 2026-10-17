@@ -22,7 +22,7 @@ Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the resear
 | `help/help_methods.rb` | the console commands |
 | `help/doc_index.rb` | console commands (the `*Methods` modules MB::Sound extends), the recorded DSL surface, Numeric mixins, Pry commands; doc comments via `method_source` |
 | `help/topic.rb` | `Topic` and its builder (`about`, `commands`, `dsl`, `note`, `see`, `example`) |
-| `help/pages.rb` | `Desk` (what `help` returns), `Tip`, `LevelPage`, `TopicList`, `TopicPage`, `MethodPage`, `SearchPage` |
+| `help/pages.rb` | `Desk` (what `help` returns), `Tip`, `LevelPage`, `TopicList`, `TopicPage`, `MethodPage`, `SearchPage` (sq80-lib-1, 2026-10-17: lists matching topics (name, title, about) before methods, so `help /sq80/` finds `help :sq80`; topic text keeps code spans unbroken when wrapping) |
 | `help/sheet.rb` | the one-screen sheet; lines are never-run blocks shown with Prism |
 | `help/try.rb` | `Try.run` |
 | `help/level.rb` | the listening level and the level check (sets the monitor trim, `session/monitor_trim.rb`) |

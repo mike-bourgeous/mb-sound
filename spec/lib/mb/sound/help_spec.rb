@@ -457,6 +457,17 @@ RSpec.describe MB::Sound::Help do
       expect(t).to include('matches').and include('lp4')
     end
 
+    it 'lists matching topics first in a search (help /sq80/)' do
+      t = text(MB::Sound.help(/sq80/))
+      expect(t).to include('topics').and include(':sq80').and include('SQ-80 voice and patches')
+      expect(t).to include('sq80_patches').and include('sq80_env')
+      expect(t.index(':sq80 ')).to be < t.index('sq80_patches')
+    end
+
+    it 'keeps code spans whole when wrapping topic text' do
+      expect(text(MB::Sound.help(:sq80))).not_to include('`')
+    end
+
     it 'falls back to a search for unknown names' do
       expect(text(MB::Sound.help(:xyzzy_nothing))).to include('0 matches')
     end
