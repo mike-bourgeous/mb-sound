@@ -102,13 +102,14 @@ module MB
         # band, with no UI].  Every key the tiles read from the REPL has a
         # row (a spec checks), so none is dropped silently in another mode.
         ELSEWHERE = [
-          ['Ctrl-]', 'the tiled screen with the band\'s panes, in NAV', 'the tiled screen (ui :tiles), in NAV'],
-          ['F2', 'KEYS: the tiled :keys screen', 'KEYS: the tiled :keys screen'],
-          ['Ctrl-W', 'Reline: delete the word before the cursor', 'Reline: delete the word before the cursor'],
-          ['Alt-PgUp Alt-PgDn', 'the terminal\'s own scrollback (Shift-PgUp in most terminals)', 'the terminal\'s scrollback'],
-          ['Ctrl-BkSp Ctrl-Del Ctrl-S-Del', 'Reline: delete word back, next word, to the end', 'the same'],
+          ['Ctrl-]', 'the band\'s tiled screen, in NAV', 'the tiled screen, in NAV'],
+          ['F2', 'KEYS (the tiled :keys screen)', 'KEYS (the tiled :keys screen)'],
+          ['Ctrl-W', 'Reline: delete a word', 'Reline: delete a word'],
+          ['Alt-PgUp Alt-PgDn', 'the terminal\'s own (scrollback: Shift-PgUp)', 'the terminal\'s own'],
+          ['Ctrl-BkSp Ctrl-Del', 'delete the word before, after', 'delete the word before, after'],
+          ['Ctrl-S-Del', 'delete to the end of the line', 'delete to the end of the line'],
           ['Ctrl-C', 'interrupt', 'interrupt'],
-          ['Ctrl-Z', 'nothing to hide (the band stays; ui off)', 'Reline: ignored'],
+          ['Ctrl-Z', 'nothing (the band stays; ui off)', 'nothing (Reline ignores it)'],
         ].freeze
 
         class << self
@@ -182,7 +183,7 @@ module MB
           def table(live: true)
             %i[repl nav window grab step].to_h { |m|
               [m, m == :repl && !live ? merge(REPL_DEFAULTS.help_groups, REPL_DOCS.help_groups) : groups(m)]
-            }.merge(elsewhere: [['Outside the tiles', ELSEWHERE.map { |k, band, off| [k, "band: #{band}; no UI: #{off}"] }]])
+            }.merge(elsewhere: [['Outside the tiles', ELSEWHERE.map { |k, band, off| [k, band == off ? "band, no UI: #{band}" : "band: #{band}; no UI: #{off}"] }]])
           end
 
           private
