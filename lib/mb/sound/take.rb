@@ -34,7 +34,7 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui].freeze
 
       class << self
         # The console's take, created when first needed.
@@ -277,6 +277,7 @@ module MB
       # true+, else to the user data directory (see .data_dir).  Returns
       # the path.
       def save(path = nil, repo: false)
+        path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
         path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb")
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, to_ruby)

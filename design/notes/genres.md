@@ -44,7 +44,7 @@ Genre.define(:my_dnb, 'Mine') { like :dnb; tempo 168 }   # register a new one (l
 - Re-declaring a role, kit, clip, scene, or knob replaces it (so `genre(:dnb) { ... }` overrides parts); the form is replaced whole; `without roles: [...], scenes: [...]` removes parts (removed roles leave the scenes too); `master nil` clears the chain.
 - `to_ruby` prints the builder: kits and clips through their graph-io recipes (`grid(16, kick: "X...").loop(align: :launch).fill(:roll, ...)`), the form through `Form#to_ruby`, levels as `-1.db`.  `Template#==` compares the printed code (like `Form`).
 - Registered templates are built lazily (the first `genre(:x)`): building clips and forms needs `MB::Sound` loaded and a Session for form knob options, which templates don't use (section knob values live in scenes, which a template's knobs exist for).
-- Scenes name kits and clips by Symbol; `Template#scene(name)` resolves them (a role-named key whose value isn't a kit or clip name is passed on: `:on`, `:off`, `nil`, `:keep`), and knob keys pass through (`cut: [2500, { from: 250, over: 8 }]`).  `Template#check` validates: every scene track is a role, every kit/clip name exists, every form section has a scene, knob keys are knobs, the tempo is in its range.
+- Scenes name kits and clips by Symbol; `Template#scene(name)` resolves them (a role-named key whose value isn't a kit or clip name is passed on: `:on`, `:off`, `nil`, `:keep`), and knob keys pass through (`cut: [2500, { from: 250, over: 8 }]`).  The builder validates when it builds the template (`Builder#__check__`, raising ArgumentError with suggestions): every scene track is a role, every kit/clip name exists, every form section has a scene, knob keys are knobs, the tempo is in its range.
 
 ## Mono low end (round 2)
 
@@ -74,9 +74,10 @@ Round 2 measured (renders in /app/tmp/listening/genre-1/r2/, side below the freq
 
 ## Later
 
-- Buses (buses-1): `duck:` becomes bus routing; mix roles (`:drums` bus, a room send for ambient) can be template data.
-- `drums-2`: `tr909` for `:house`/`:techno`.
-- A sampler (the panel's A): jungle's break role becomes a slice player; tempo-per-clip (D) for the record.
+- Buses exist since buses-1 (98a0c78d), but templates don't use them yet: `duck:` still keys on the pulse kit's ghost kick and could become bus routing (`duck(:drums, only: :kick)`); mix roles (a `:drums` bus, a room send for ambient) can be template data.
+- Done: `tr909` drums for `:house`/`:techno` (drums-2, a7090b95); jungle's break role is the sliced-break sampler preset `jungle_breaks` (6207c07a, 2026-10-13).  Still for the record: tempo-per-clip (the panel's D).
+- Mastering is deferred (maintainer, 2026-10-14: "We can defer any further mastering work"): the mastering questions (dnb target, a house master variant, techno loudness) wait in the db-master-1 addendum until the maintainer says go.
+- Clipping taste (maintainer, 2026-10-13, drums-2): "generally don't want too much clipping (more audible than pumping)"; ask again if listening tests don't settle a softclip choice.
 - Template-driven generation (picks between variations per section, `ghost_chords` over the key's progression), and section-level knob values once forms take them without a Session.
 - A second persona panel uses these templates as starting points (`research/persona-panel-round2.md`).
 

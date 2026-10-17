@@ -138,7 +138,10 @@ module MB
           w = width
           out = []
           out << "#{c(:title, @topic.title)}  #{c(:dim, "help :#{@topic.name}")}"
-          out << wrap(doc_plain(@topic.about), width: w).then { |s| doc(s) }
+          # Code spans wrap as one word (spaces in them held as NBSPs), so
+          # doc can color them after wrapping
+          held = doc_plain(@topic.about).gsub(/`[^`\n]+`/) { |code| code.tr(' ', "\u00A0") }
+          out << wrap(held, width: w).then { |s| doc(s).tr("\u00A0", ' ') }
           out << ''
           names = @topic.commands.map { |n| [n, :console] } + @topic.dsl.map { |n| [n, :dsl] }
           rows = names.map { |n, kind|
@@ -255,11 +258,23 @@ module MB
           }.uniq { |e| [e.owner, e.name] }
         end
 
+        # Topics whose name, title, or about text matches.
+        def topics
+          TOPICS.values.select { |t|
+            t.name.to_s.match?(@pattern) || t.title.match?(@pattern) || t.about.match?(@pattern)
+          }
+        end
+
         def to_s
           h = hits
+          ts = topics
           by_name = h.select { |e| e.name.to_s.match?(@pattern) }
           by_doc = h - by_name
-          out = ["#{c(:title, "help #{@pattern.inspect}")}  #{c(:dim, "#{h.length} matches")}"]
+          out = ["#{c(:title, "help #{@pattern.inspect}")}  #{c(:dim, "#{h.length + ts.length} matches")}"]
+          unless ts.empty?
+            out << c(:head, 'topics')
+            ts.each { |t| out << "  #{pad(c(:key, ":#{t.name}"), 26)} #{t.title[0, width - 30]}" }
+          end
           [['names', by_name], ['mentioned in docs', by_doc]].each do |label, list|
             next if list.empty?
             out << c(:head, label)

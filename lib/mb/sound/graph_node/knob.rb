@@ -180,6 +180,11 @@ module MB
             @knob.sample_rate
           end
 
+          # Port type of the output (see GraphNode::Traversable#port_type).
+          def port_type
+            :control
+          end
+
           def sources
             { knob: @knob }
           end
@@ -371,6 +376,11 @@ module MB
         # Reads the knob directly (as one consumer).
         def sample(count)
           (@self_reader ||= Reader.new(self)).sample(count)
+        end
+
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :control
         end
 
         def sources

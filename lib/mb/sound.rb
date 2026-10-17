@@ -43,6 +43,7 @@ require_relative 'sound/fast_recipe'
 require_relative 'sound/version'
 require_relative 'sound/tuning'
 require_relative 'sound/internal'
+require_relative 'sound/playable'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot'
 require_relative 'sound/plot_methods'
@@ -61,6 +62,8 @@ require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
 require_relative 'sound/bus_methods'
+require_relative 'sound/rack'
+require_relative 'sound/rack_methods'
 require_relative 'sound/record_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
@@ -69,6 +72,7 @@ require_relative 'sound/mod_methods'
 require_relative 'sound/random_methods'
 require_relative 'sound/live_methods'
 require_relative 'sound/drum_methods'
+require_relative 'sound/sq80_methods'
 require_relative 'sound/structure_methods'
 require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
@@ -98,6 +102,7 @@ module MB
     extend FormMethods
     extend KnobMethods
     extend BusMethods
+    extend RackMethods
     extend RecordMethods
     extend MultichannelMethods
     extend TuningMethods
@@ -107,6 +112,7 @@ module MB
     extend RandomMethods
     extend LiveMethods
     extend DrumMethods
+    extend SQ80Methods
     extend StructureMethods
     extend GenreMethods
     extend SamplerMethods
@@ -205,6 +211,11 @@ require_relative 'sound/multi_writer'
 require_relative 'sound/process_reader'
 
 require_relative 'sound/io_logger'
+
+# Clips and grids keep the instrument they play on through every transform
+# (see Sequence::PlayedBy); after everything that adds clip methods, before
+# the recipe recorders wrap them
+[MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq, MB::Sound::Sequence::Kit].each { |c| MB::Sound::Sequence::PlayedBy.carry!(c) }
 
 # Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
 # every DSL method exists

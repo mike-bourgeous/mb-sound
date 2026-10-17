@@ -17,8 +17,13 @@ module MB
       about <<~TEXT
         Everything plays through one background Session that mixes every
         player on a shared timeline; `play` is the foreground version
-        (Ctrl-C to stop).  Commands return journal entries that say where
-        they land.  Sounds end through envelopes, clips, `until`, or `stop`.
+        (waits until the sound ends; Ctrl-C to stop).  Commands return
+        journal entries that say where they land.  Sounds end through
+        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        take graphs and more: files, audio arrays, Samples (once), Slices
+        (one by one), clips (on their instrument, e.g. a chop's slices, or
+        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
@@ -30,6 +35,15 @@ module MB
       example 'a pattern on the next bar' do
         bass = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
         bg :try, bass.tone.ramp.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
+      end
+      example 'play a clip on the default patch' do
+        play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
+      end
+      example 'play two seconds of a drum file as a Sample', bars: 1 do
+        play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
+      end
+      example 'play a grid on a TR-808' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
       end
     end
 
@@ -189,6 +203,42 @@ module MB
           voice(:snare) { |h| h.fm(240, ratio: 2.3, index: 1, decay: 0.12, index_decay: 0.03) * 0.5 + h.noise(decay: 0.15, highpass: 2000) * 0.4 }
           tr909 :closed_hat
         }.at(-14.db)
+      end
+    end
+
+    Help.topic :sq80, 'SQ-80 voice and patches', group: :sound do
+      about <<~TEXT
+        `sq80` is an Ensoniq SQ-80-flavored synth built from the library's
+        pieces (original wave tables, nothing from the SQ-80's ROM): OSC1
+        a formant wave whose vowel stays put across the keyboard, OSC2 a
+        SYNTH 3-style table, OSC3 a PRIME-style table an octave down
+        blipped by ENV1, into a driven four-pole (lp4); SQ-80 panel units
+        on the envelopes (`sq80_env`: times 0..63, levels -63..+63), a
+        delayed vibrato, and two oddities: chop (octaves; a looping
+        32nd-note filter envelope) and flutter (octaves; each key's poly
+        pressure sets its own sample-and-hold filter flutter).  It takes
+        any MIDI source (none: live `midi`), a patch, and settings, as in
+        `sq80(clip, :chop)` or `sq80(:glass, cutoff: 900)`.  Patches:
+        :classic (the defaults), :flutter_pad, :chop, :vox_lead,
+        :prime_bass, :glass (`sq80_patches` lists them).  Settings:
+        voices, cutoff (Hz), reso (0..1), drive_mode (:feedback or
+        :input), drive, chop, flutter, second_release, osc1..osc3 (wave,
+        semitones, level, vibrato, env1), env1, env2, env4 (sq80_env panel
+        values), lfo1 (rate in Hz, depth in semitones, delay, wheel,
+        pressure), filter (env2, key, velocity, aftertouch, in octaves),
+        level; Hash settings change only the keys given
+        (`env4: { t4: 50 }`).  Each patch is a preset too
+        (`preset :sq80_glass, midi: midi`), and the shell plays them with
+        bin/synths/sq80_voice.rb -p glass.
+      TEXT
+      commands :sq80, :sq80_patches, :sq80_env
+      note :sq80, :envelopes
+      see :midi, :presets, :envelopes
+      example 'the chop patch on a chord' do
+        bg :try, sq80(seq(A3, F3).n2 & seq(C4, A3).n2 & seq(E4, C4).n2, :chop).at(-16.db)
+      end
+      example 'a vowel lead, darker, with a longer release' do
+        bg :try, sq80(seq(A4, C5, E5.n4, D5, C5, B4.n4).n8, :vox_lead, cutoff: 900, env4: { t4: 40 }).at(-16.db)
       end
     end
 
@@ -597,6 +647,32 @@ module MB
       end
     end
 
+    Help.topic :racks, 'Racks: reusable graphs with typed ports', group: :perform do
+      about <<~TEXT
+        A rack is a piece of graph you can reuse, like a Proc: `mrack` takes
+        notes, `irack` notes and makes audio, `arack` audio, `lrack` audio
+        and makes notes or control, `modrack` control (`rack(in:)` is the
+        general form).  Apply it with `then`, `.()`, or `through`; each use
+        builds a fresh copy.  Extra ports are keywords (`arack :dub, side:
+        :audio do |sig, side:|`), bound with `with` (bus, track, and knob
+        names work as values).  `>>` chains racks; note streams merge with
+        `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
+      TEXT
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
+      note :racks
+      see :buses, :midi, :presets
+      example 'a note rack: an anonymous value' do
+        wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
+        bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'an effect rack with a sidechain port' do
+        arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }
+        track(:try_kick) { |k| tr808(k).at(-14.db) }
+        bg :try_kick, grid(16, kick: 'x...x...x...x...').loop
+        bg :try, 55.hz.saw.at(-24.db).lp4(700).then(&rack(:try_pump).with(side: :try_kick)).until(1.bar)
+      end
+    end
+
     Help.topic :midi, 'MIDI', group: :perform do
       about <<~TEXT
         `midi` is a Notes on live input; `synth` allocates voices from any
@@ -641,7 +717,8 @@ module MB
         lists them): drum & bass, jungle, ambient, and funk instruments,
         like `preset :dnb_reese, midi: midi` or `preset :ambient_tape, input: mic`,
         and electric pianos: `:tine_piano` clean, `:tine_crunch` with its amp
-        pushed (`amp: 1..8`), `:reed_piano`.
+        pushed (`amp: 1..8`), `:reed_piano`, and the SQ-80 voice's patches
+        (`:sq80_glass` and friends; see `help :sq80`).
       TEXT
       commands :ruby, :save, :preset, :presets, :set, :named_proc
       note :graph_io

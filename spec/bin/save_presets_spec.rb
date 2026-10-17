@@ -7,7 +7,7 @@ require File.expand_path('../../bin/save_presets.rb', __dir__)
 
 RSpec.describe('bin/save_presets.rb') do
   before(:all) do
-    %w[dnb jungle ambient funk electric_pianos].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
+    %w[dnb jungle ambient funk electric_pianos sq80_voice].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
   end
 
   after { MB::Sound.rewind }
@@ -33,7 +33,11 @@ RSpec.describe('bin/save_presets.rb') do
       expect(doc.inputs).to eq([:midi])
       expect(doc.kind).to eq(:synth)
       expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch))
-      expect(doc.description).to include("from #{script}", 'persona panel experiment')
+      if script.end_with?('sq80_voice.rb')
+        expect(doc.description).to include("from #{script}", 'sq80-lib-1')
+      else
+        expect(doc.description).to include("from #{script}", 'persona panel experiment')
+      end
 
       # Drum kits play GM drum notes (kick, hat, snare, shaker, ride, conga)
       midi = -> {

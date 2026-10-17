@@ -131,6 +131,11 @@ module MB
           !@replay.nil?
         end
 
+        # True while a take's events (see #replay) are still to play.
+        def replay_pending?
+          @lock.synchronize { !@replay.nil? && @replay_index < @replay.length }
+        end
+
         # True if the input was closed (live input closed with
         # MidiMethods#close_midi).
         def closed?

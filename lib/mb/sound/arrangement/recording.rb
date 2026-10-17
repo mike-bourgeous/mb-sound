@@ -275,6 +275,18 @@ module MB
           clip.public_send(method, arg, **(options || {}))
         end
 
+        # Rebuilds armed track +tr+'s monitor from its patch if the monitor
+        # plays (called when #track redefines an armed track, so the
+        # performer hears the patch that `capture` and `rec` will play;
+        # ui-noise-1, 2026-10-17: the old monitor kept playing the first
+        # patch, and a capture then played a very different one).
+        def refresh_monitor(tr)
+          return unless tr.patch?
+          known, input = @mutex.synchronize { a = (@armed ||= {}); [a.key?(tr.name), a[tr.name]] }
+          return unless known && @session.playing_after_queue?(Recording.monitor_name(tr.name))
+          start_monitor(tr, input)
+        end
+
         # Starts the player that monitors armed track +tr+ (see #arm).
         def start_monitor(tr, input)
           live = Session::MidiInput::LiveClip.new(@session.midi_in(input))

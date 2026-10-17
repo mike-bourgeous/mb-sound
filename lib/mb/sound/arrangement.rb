@@ -227,6 +227,7 @@ module MB
           tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
+        refresh_monitor(tr)
         name
       end
 

@@ -41,3 +41,7 @@ Ruby gives each class at most 8 branches in its object-shape tree (the order ins
 - Classes set their own lazy variables to nil in their constructors (before anything that might set them, or after everything that does).  nil reads like an unset variable; only `defined?(@x)` differs (BufferHelper's check now tests nil).  Notes plan snapshots skip the mixin variables like the ones they already skipped.
 - Spec guard: the warning guard fails the example that triggers a `:performance` warning (`MB_SOUND_WARNINGS_PERFORMANCE=report` only lists them), with a hint pointing here; Ruby emits each once per process, so the failing example may only be the first to trigger it.  `spec/lib/mb/sound/graph_node/ivar_preset_spec.rb` checks the mechanism.
 - Finding the culprit: compare `obj.instance_variables` orders of live instances of the class (a scratch after-each hook walking `ObjectSpace` found the 32 classes' divergence points).
+
+## Universal wet/dry (decided, not built)
+
+Maintainer, 2026-10-13 (api-1 Q2): a universal `sig.mix(x) { |s| fx }` wet/dry for nodes and subgraphs (and `delay(mix:)`), "Yes, iff the overhead for existing nodes and single nodes is minimal".  Per-effect `mix:` options meanwhile (`decimate(mix:)`, dynamics, reverb, chorus) are to be consolidated with it when it exists (oscillators.md, decimate).  2026-10-17: the maintainer hit the gap with `.resonate` (no `mix:`); a `sig.blend(amount) { |s| fx }` helper and one help topic for wet/dry/mix/blend are on the ux-1 list.

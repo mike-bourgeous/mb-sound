@@ -378,6 +378,24 @@ RSpec.describe(MB::Sound::Take) do
     expect(frames).to be_between(96000, 97600)
   end
 
+  it 'keeps the timeline moving while recorded MIDI is still to play, then pauses when idle' do
+    # Live, something the take doesn't hold (the keyboard's default patch)
+    # kept the timeline moving while notes were played into an idle Set
+    r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 3r) { |rp|
+      rp.midi [[0, 1r, [0x90, 60, 100]], [0, 2r, [0x80, 60, 64]]]
+    }
+    played = nil
+    allow(MB::Sound::Session).to receive(:new).and_wrap_original { |m, *a, **k|
+      m.call(*a, **k).tap { |s| played = -> { s.midi_in.history(0r, 3r).map { |pos, e| [pos, e.note] } } }
+    }
+    frames = 0
+    expect {
+      frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
+    }.not_to output.to_stderr
+    expect(played.call).to eq([[1r, 60], [2r, 60]])
+    expect(frames).to be_between(192000, 193600)
+  end
+
   it 'stops a replay that never reaches its end after its length plus EXTRA_SECONDS, or MAX_SECONDS' do
     stub_const('MB::Sound::Take::Replay::EXTRA_SECONDS', 0.5)
     stub_const('MB::Sound::Take::Replay::MAX_SECONDS', 0.25)
@@ -416,6 +434,16 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.to_ruby).to include('# skipped (foreground): players')
   end
 
+  it 'keeps ui commands out of replays (a replay would open the terminal UI)' do
+    t = MB::Sound::Take.new(session: session)
+    ['ui :keys', 'ui.keys', 'ui off', 'uix = 1'].each do |code|
+      t.begin_line(code)
+      t.end_line
+    end
+    expect(t.lines.map(&:skipped)).to eq([true, true, true, false])
+    expect(t.to_ruby).to include('# skipped (foreground): ui :keys').and include('# skipped (foreground): ui.keys')
+  end
+
   it 'saves to the user data directory by default, or a set home' do
     allow(described_class).to receive(:data_dir).and_return(tmp_path('takes'))
     path = nil
@@ -424,6 +452,18 @@ RSpec.describe(MB::Sound::Take) do
 
     take.home = tmp_path('sets')
     expect { path = take.save }.to output(/sets\/take_/).to_stdout
+  end
+
+  it 'expands ~ in a given path to the home directory (it used to make a folder named ~)' do
+    home = tmp_path('home')
+    old = ENV['HOME']
+    ENV['HOME'] = home
+    path = nil
+    expect { path = take.save('~/sets/mine.rb') }.to output(/Saved the take to .*home\/sets\/mine\.rb/).to_stdout
+    expect(path).to eq(File.join(home, 'sets', 'mine.rb'))
+    expect(File.exist?(path)).to eq(true)
+  ensure
+    ENV['HOME'] = old
   end
 
   it 'gives the user data directory per platform' do

@@ -209,6 +209,28 @@ module MB
         end
 
         # See GraphNode#sources.
+        # Settings for the response preview (Plot::Panels): the filter's
+        # structure (:svf or :cookbook; nil for others), type, sample rate,
+        # and cutoff, quality, and gain, with constant inputs applied
+        # (cutoff: 800 as the filter will play it).
+        def preview_data
+          f = @base_filter
+          structure = f.is_a?(Filter::SVF) ? :svf : (f.is_a?(Filter::Cookbook) ? :cookbook : nil)
+          return nil unless structure
+
+          # Constant and knob inputs at their current values
+          set = param_info.transform_values(&:value).select { |_, v| v.is_a?(Numeric) }
+          cutoff = (set[:cutoff] || f.cutoff).to_f
+          quality = (set[:quality] || f.quality)&.to_f
+          {
+            structure: structure, filter_type: f.filter_type, sample_rate: @sample_rate.to_f,
+            cutoff: cutoff, quality: quality,
+            gain: structure == :svf ? (set[:gain] || f.gain)&.to_f : nil,
+            db_gain: structure == :cookbook ? f.db_gain&.to_f : nil,
+            label: "#{f.filter_type} #{cutoff.round(1)} Hz#{" Q #{quality.round(3)}" if quality}",
+          }
+        end
+
         def sources
           if @base_filter.respond_to?(:sources)
             {

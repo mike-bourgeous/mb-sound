@@ -28,6 +28,11 @@ module MB
         include GraphNode::Nameable
         include GraphNode::Traversable
 
+        # Sources make events (see GraphNode::Traversable#port_type).
+        def port_type
+          :notes
+        end
+
         # The note to chase where the content last jumped (see
         # Source#chase): the #generation of the jump, the stream +time+ of
         # the jump, a note-on +event+ for the note, and whether the note

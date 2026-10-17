@@ -1051,6 +1051,14 @@ module MB
         Notes.new(@stream.merge(*others), sustain: sustain?, sample_rate: @sample_rate)
       end
 
+      # This instance's notes merged with +other+ (see #merge and
+      # MIDI::Stream#+).
+      #
+      #     midi + riff.stream
+      def +(other)
+        merge(other)
+      end
+
       # A polyphonic MB::Sound::Synth playing this instance's stream (see
       # Synth.new for the options and the block), for console and script
       # code that has a mono Notes (`midi`) and wants voices.

@@ -194,7 +194,17 @@ module MB
           from = Sample.note_number(from).round
           list = chop_list
           values = steps.map { |s| chop_step(s, list, from, Integer(spread)) }
-          MB::Sound.seq(*values).len(per)
+          MB::Sound.seq(*values).len(per).played_by(chop_instrument(from, spread))
+        end
+
+        # What plays a chop from +from+, +spread+ keys apart (see
+        # Sequence::PlayedBy): these slices for the default keymap, else
+        # that keymap, or nil if it doesn't fit on the keyboard.
+        def chop_instrument(from, spread)
+          return self if from == 36 && spread == 1
+          keymap(from: from, spread: spread)
+        rescue ArgumentError
+          nil
         end
 
         # The chop regions' bounds: every slice, then every named run that

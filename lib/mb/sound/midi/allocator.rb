@@ -301,6 +301,11 @@ module MB
             false
           end
 
+          # Port type of the output (see GraphNode::Traversable#port_type).
+          def port_type
+            :notes
+          end
+
           def sources
             { allocator: @allocator }
           end
@@ -549,6 +554,11 @@ module MB
 
         def music_end
           @stream.music_end
+        end
+
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :notes
         end
 
         def sources
