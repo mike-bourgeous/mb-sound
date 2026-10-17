@@ -98,11 +98,13 @@ module MB
       class Kit
         include Enumerable
         include Named
+        include PlayedBy
 
         # The row clips, keyed by name.
         attr_reader :rows
 
         def initialize(rows)
+          @instrument = nil # (see PlayedBy)
           @rows = rows.freeze
         end
 
