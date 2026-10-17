@@ -148,6 +148,8 @@ module MB
         module WarningHook
           def warn(msg, category: nil, **kw)
             if UI.screen
+              # (the REPL's own command: in its output, as in a console)
+              return super if UI.repl_thread?
               UI.messages.add(msg, severity: Messages.severity_of(msg, category))
               return nil if UI.owns_terminal?
             end
