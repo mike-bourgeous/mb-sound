@@ -188,6 +188,11 @@ module MB
           @buf.not_inplace!
         end
 
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :control
+        end
+
         def sources
           { value: @constant }
         end

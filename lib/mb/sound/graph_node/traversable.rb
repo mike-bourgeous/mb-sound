@@ -17,10 +17,120 @@ module MB
         end
 
         # The node's named inputs, for introspection (e.g. a future UI): the
-        # same as #sources.  Side outputs are listed by GraphNode::Ports#ports
-        # and #port_info on nodes that have them.
+        # same as #sources.  Typed ports (with roles and types) are in
+        # #port_info; side outputs in GraphNode::Ports#ports.
         def inputs
           sources
+        end
+
+        # The three port types (racks, design/notes/racks.md): samples
+        # (:audio), values read as parameters (:control), and events at
+        # exact times (:notes; MIDI streams, sources, clips).
+        PORT_TYPES = [:audio, :control, :notes].freeze
+
+        # Input names that are a node's main signal (role :main): its
+        # input(s), channels, and voices.  Other names are parameters
+        # (:param), except sidechains (:side); an output's edge from the
+        # node that owns it (a Synth's Output, a Tee's Branch) is :main
+        # whatever its name.
+        MAIN_INPUT = /\A(input|in|sig|signal|source|stream|body|channel|voice|owner|inputs|allocator|parent|sources)(_\d+)*\z/
+
+        # Side inputs (role :side).
+        SIDE_INPUT = /\A(side|sidechain)(_\d+)*\z/
+
+        # The type of what this object outputs: :audio for graph nodes,
+        # :notes for MIDI streams, sources, and transforms, :control for
+        # constants, knobs, and note-derived values (see PORT_TYPES).  An
+        # audio node read as a parameter is a :control edge (#port_info).
+        def port_type
+          :audio
+        end
+
+        # The role of input +name+ (a key of #sources): :main, :side, or
+        # :param (overridden by nodes whose inputs are named otherwise).
+        def port_role(name)
+          n = name.to_s
+          return :side if n.match?(SIDE_INPUT)
+          return :main if n.match?(MAIN_INPUT)
+          :param
+        end
+
+        # True if input +name+ is being read (overridden by nodes that skip
+        # inputs, e.g. while muted).
+        def port_active?(name)
+          true
+        end
+
+        # Typed ports for inspection (the racks project's protocol;
+        # design/notes/racks.md):
+        #
+        #     {
+        #       in: [{ name:, type: :audio/:control/:notes, role: :main/:side/:param/:feedback, source:, active: }, ...],
+        #       out: [{ name:, type: }, ...],
+        #     }
+        #
+        # Built from #sources (parameters are :control edges, whatever
+        # feeds them), #feedback_sources (role :feedback), and the
+        # outputs; nodes with side outputs add them (GraphNode::Ports).
+        # #sources and #inputs keep their return values.
+        def port_info
+          { in: input_port_info, out: output_port_info }
+        end
+
+        # The :in part of #port_info.
+        def input_port_info
+          list = sources.map { |name, src|
+            role = Traversable.owner_edge?(self, src) ? :main : port_role(name)
+            Traversable.port_entry(self, name, src, role)
+          }
+          list + feedback_sources.map { |name, src| Traversable.port_entry(self, name, src, :feedback) }
+        end
+
+        # The :out part of #port_info: one entry per output (:out for a
+        # single output, :out_1, :out_2, ... for several).
+        def output_port_info
+          outs = respond_to?(:outputs) ? Array(outputs.to_a) : [self]
+          return [{ name: :out, type: port_type }] if outs.length <= 1
+
+          outs.each_with_index.map { |o, idx|
+            { name: :"out_#{idx + 1}", type: o.equal?(self) ? port_type : Traversable.port_type_of(o) }
+          }
+        end
+
+        # The output port type of any graph value: Traversable objects say
+        # (#port_type); numbers are :control; Clips, Notes, and Seqs are
+        # :notes; anything else :audio.
+        def self.port_type_of(obj)
+          case obj
+          when Traversable then obj.port_type
+          when Numeric then :control
+          when MB::Sound::Notes, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq then :notes
+          else :audio
+          end
+        end
+
+        # True if +src+ is the multi-output node that +node+ is an output of.
+        def self.owner_edge?(node, src)
+          return false if src.equal?(node) || src.is_a?(Numeric) || !src.respond_to?(:outputs)
+          outs = src.outputs
+          outs.respond_to?(:any?) && outs.any? { |o| o.equal?(node) }
+        rescue NotImplementedError
+          false
+        end
+
+        # One :in entry of #port_info for +node+'s input +name+ fed by
+        # +src+ with +role+.
+        def self.port_entry(node, name, src, role)
+          src_type = port_type_of(src)
+          type =
+            if src_type == :notes
+              :notes
+            elsif role == :param || role == :feedback && src_type == :control
+              :control
+            else
+              src_type
+            end
+          { name: name, type: type, role: role, source: src, active: node.port_active?(name) }
         end
 
         # Returns a Hash with backward-pointing sources.  Keys are source names,

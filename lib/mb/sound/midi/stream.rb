@@ -313,6 +313,11 @@ module MB
         # A transform's input stream, skipping the transform itself (it
         # shows as this stream's name), except for transforms that follow
         # the timeline (Transform::Timeline), which a Session must find.
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :notes
+        end
+
         def sources
           return { source: @source } unless @source.is_a?(Transform)
           @source.is_a?(Sequence::TimelineNode) ? { transform: @source } : @source.sources

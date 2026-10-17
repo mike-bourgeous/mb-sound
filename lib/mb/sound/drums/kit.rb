@@ -99,6 +99,11 @@ module MB
           @samplers.dup
         end
 
+        # Every voice is a main input (see GraphNode::Traversable#port_role).
+        def port_role(name)
+          :main
+        end
+
         def to_s
           "#{@machine} kit (#{@voices.keys.join(', ')})"
         end
