@@ -114,7 +114,7 @@ module MB
       DEFINITIONS = {
         club: {
           title: 'Club: loud, low crest, mono lows',
-          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: true },
+          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false },
           notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), a soft ' \
                  'clipper rounding peaks above -0.9 dBFS (softclip(0.9, 1.4)), then a true-peak limiter at -0.5 dBTP ' \
                  '(80 ms release); -8.5 LUFS integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13): ' \
@@ -142,9 +142,9 @@ module MB
         },
         vinyl: {
           title: 'Vinyl: mono lows, tamed highs, no brickwall',
-          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 5500 },
+          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 7000 },
           notes: 'For a cutting engineer: mono below 150 Hz and a 25 Hz highpass (lateral bass is fine, vertical bass ' \
-                 'throws the stylus), gentle glue, and a split-band de-esser above 5.5 kHz, since the RIAA pre-emphasis ' \
+                 'throws the stylus), gentle glue, and a split-band de-esser above 7 kHz (3:1, only on the loudest sibilance), since the RIAA pre-emphasis ' \
                  'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
                  'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
                  'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).',
@@ -350,7 +350,10 @@ module MB
           steps << [:trim, [], {}]
           steps << glue_step(target, over: 5, ratio: 1.5, attack: 0.03, release: 0.3) if o[:glue]
           if o[:de_ess]
-            steps << [:de_ess, [o[:de_ess]], { threshold: (target.lufs - 8).db, ratio: 4, knee: 6, attack: 0.001, release: 0.06 }]
+            # (mastering-2: 7 kHz, 4 dB under the target, 3:1, 40 ms; the
+            # first 5.5 kHz / -8 dB / 4:1 / 60 ms took 2.4 dB off the
+            # treble's share of Memory Card, this 0.4 dB)
+            steps << [:de_ess, [o[:de_ess]], { threshold: (target.lufs - 4).db, ratio: 3, knee: 6, attack: 0.001, release: 0.04 }]
           end
           steps
         end

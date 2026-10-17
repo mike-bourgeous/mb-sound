@@ -53,14 +53,13 @@ module MB
       scene :riser, riser: :bar, others: :keep
 
       loudness(-10..-8)
-      true_peak(-1.db)
+      true_peak(-0.5.db)
       mono_below 120 # club systems
-      master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      # (for the 909's peaky kick: more drive into a softclip, then the
-      # limiter; drums-2 round 2, short form -8.9 LUFS)
-      master :at, 9.db
-      master :softclip, 0.45, 0.95
-      master :limit, ceiling: -1.db
+      # (the club mastering preset with its gentle clipper, the house feel:
+      # mastering-2, 2026-10-17, maintainer on the Bench: "The two limiter
+      # setup isn't much different so both are good to have"; before, a
+      # harder softclip(0.45, 0.95) into a -1 dBTP limiter)
+      master :club, clip: true
       master_gain 0.db
 
       tip 'A stub: tempo, form, and grids from general knowledge; a later panel should research and refine it.'

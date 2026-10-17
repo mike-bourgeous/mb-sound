@@ -52,17 +52,13 @@ module MB
       scene :outro, drums: :intro, bass: :bass
 
       loudness(-9..-7)
-      true_peak(-1.db)
+      true_peak(-0.5.db)
       mono_below 120 # club systems
-      master :compress, threshold: -14.db, ratio: 2, attack: 0.01, release: 0.12
-      # (limiting only, no clipper, driven so the limiter does light work:
-      # short form -11.4 LUFS, about 1 dB of gain reduction on average,
-      # 3.5 dB at the 95th percentile; under the -9..-7 target, which needs
-      # a clipper or heavy limiting with the 909's peaky kick.  drums-3,
-      # 2026-10-13, maintainer: "Mix needs rebalancing and lowering, and
-      # switching back to limiting")
-      master :at, 7.db
-      master :limit, ceiling: -1.db, release: 0.06 # (60 ms)
+      # (the club mastering preset with its two limiters, no clipper:
+      # mastering-2, 2026-10-17, maintainer on the Bench: "The IMD on some
+      # of the stabs is noticeable in the clipping variant"; the
+      # limiter-only master before it sat at -11.4 LUFS, 2.4 LU under)
+      master :club
       master_gain 0.db
 
       tip 'A stub: tempo, form, and grids from general knowledge; a later panel should research and refine it.'

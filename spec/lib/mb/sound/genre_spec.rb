@@ -137,7 +137,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(mix.report(result)).to eq(['loudness -9.2 LUFS (target -10..-8: on target)', 'true peak -0.30 dBTP (ceiling -0.5: over)'])
       expect(mix.report(result.class.new(-12.0, -1.0)).first).to include('quiet')
       expect(mix.report(result.class.new(-7.0, -1.0)).first).to include('loud')
-      expect(mix.summary).to include('-10..-8 LUFS', 'mono below 120 Hz', 'master dnb_master')
+      expect(mix.summary).to include('-10..-8 LUFS', 'mono below 120 Hz', 'master filter -> club')
     end
 
     it 'reports the side below 120 Hz (or mono_below) against the mid' do
@@ -230,10 +230,10 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(10 * Math.log10(level.(t) / level.(plain))).to be < -3
     end
 
-    it 'tames the techno stab, with the heavy drive as an option, and masters techno with a limiter only' do
+    it 'tames the techno stab, with the heavy drive as an option, and masters techno with the club preset (two limiters)' do
       t = genre[:techno]
       expect(t.roles[:stab].patch).to eq(:stab)
-      expect(t.mix.master.map(&:first)).to eq([:compress, :at, :limit])
+      expect(t.mix.master).to eq([[:club, [], {}]])
 
       clip = MB::Sound.seq(MB::Sound::F3).n2
       # Clipping a stab lowpassed at 300 Hz makes harmonics above 1 kHz:

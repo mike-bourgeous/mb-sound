@@ -271,6 +271,13 @@ module MB
           MAX_STEPS.times do
             break if !f1.finite? || (f1 - target.lufs).abs <= TOLERANCE
             slope = (f1 - f0) / (x1 - x0)
+            # The limiters are saturated (more trim no longer adds
+            # loudness): keep the smaller trim and report the miss
+            if x1 > x0 && slope.finite? && slope < 0.05
+              x1, f1 = x0, f0 if f0.finite? && f1 <= f0 + 0.05
+              tp = nil
+              break
+            end
             slope = 1.0 if !slope.finite? || slope < 0.05
             x2 = (x1 + (target.lufs - f1) / slope).clamp(x0 - RANGE, x0 + RANGE)
             x0, f0 = x1, f1

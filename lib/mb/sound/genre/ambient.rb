@@ -65,8 +65,7 @@ module MB
 
       loudness(-19..-16)
       true_peak(-1.db)
-      master :at, 4.db
-      master :limit, ceiling: -1.db
+      master :quiet # (mastering-2, 2026-10-17: the maintainer's Bench pick)
       master_gain 0.db
 
       tip 'No verse and chorus: an arch or a tide (emerge, bloom, a still point, return, dissolve).  Most pieces run 6-60 minutes; a scene can hold for minutes.'

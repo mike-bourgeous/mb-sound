@@ -43,7 +43,8 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(club.target.lufs).to eq(-8.5)
       expect(club.ceiling.db_value).to eq(-0.5)
       expect(club.limiter).to eq(true)
-      expect(club.steps.map(&:first)).to eq(%i[mono_below trim compress softclip limit])
+      expect(club.steps.map(&:first)).to eq(%i[mono_below trim compress limit limit])
+      expect(described_class.preset(:club, clip: true).steps.map(&:first)).to eq(%i[mono_below trim compress softclip limit])
       expect(club).to be_frozen
       expect(club.steps).to be_frozen
 
@@ -268,12 +269,12 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect {
         MB::Sound.render(a, bars: 2, overwrite: true) {
           MB::Sound.knob :air, 20, range: 20..2000, curve: :exp
-          MB::Sound.master(:club) { |mix| mix.filter(:highpass, cutoff: MB::Sound.knob(:air)) }
+          MB::Sound.master(:club, lufs: -12) { |mix| mix.filter(:highpass, cutoff: MB::Sound.knob(:air)) }
           MB::Sound.bg :a, MB::Sound::GraphNode::Channels.new([110.hz.ramp.at(0.3), 82.5.hz.saw.at(0.3)])
           MB::Sound.at_bar(2) { MB::Sound.turn :air, 1500, over: 1 }
         }
       }.to output(/mastering :club: pass/).to_stdout
-      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-8.5)
+      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-12)
     end
 
     it 'masters a block that sets no master effects through render(master:)' do

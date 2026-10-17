@@ -93,7 +93,7 @@ module MB::Sound
       v.hz.wavetable(drums, scan: 0.3).sync(ratio: 1 + v.env(0.001, 0.5, 0.2, 0.2) * 3) * v.env(0.005, 0.3, 0.5, 0.2)
     }.filter(:lowpass, cutoff: 5000, quality: 0.7).delay(3.n16, feedback: -9.db, dry: 1, wet: -10.db) * 0.2
 
-    master { |mix| mix.softclip(0.6, 0.98) }
+    master :streaming # (mastering-2: the maintainer's Bench pick, 2026-10-17; the render reaches -14 LUFS)
 
     bg :pad, pad, fade: 1
     at_bar(3) { bg :keys, keys, fade: 0 }

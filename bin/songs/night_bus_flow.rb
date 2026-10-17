@@ -274,7 +274,8 @@ module MB::Sound
     knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'   # a master highpass (the breakdown's "cut")
     knob :morph, 0                                           # a crossfader between snapshots
 
-    master { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.8).softclip(0.5, 0.97) }
+    # (mastering-2: streaming at Apple Music's -16 LUFS, the maintainer's Bench pick)
+    master(:streaming, lufs: :apple_music) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.8).softclip(0.5, 0.97) }
 
     track(:drums, nudge: drum_nudge) { |kit|
       tr808(
