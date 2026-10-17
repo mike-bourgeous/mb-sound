@@ -4,7 +4,7 @@ RSpec.describe(MB::Sound::ExitClose) do
   # Builds a Synth played by a realtime Session, returning WeakRefs to
   # both.
   def weak_synth_in_session(close:)
-    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000), realtime: true, buffer_size: 800)
+    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, sleep: :virtual), realtime: true, buffer_size: 800)
     synth = MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop, voices: 2) { |v| v.hz.sine.at(0.2) * v.amp_env }
     session.add(synth, name: :leak)
     expect(described_class.registered?(session)).to eq(true)
@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::ExitClose) do
   end
 
   it 'forgets a Session when it closes' do
-    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000), realtime: true)
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, sleep: :virtual), realtime: true)
     s.ensure_running
     expect(described_class.registered?(s)).to eq(true)
     s.close

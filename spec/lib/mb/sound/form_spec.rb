@@ -227,7 +227,7 @@ RSpec.describe(MB::Sound::Form) do
       expect(within { MB::Sound.markers }).to eq({ intro: '1:1 (section)', verse: '3:1 (section)' })
     end
 
-    it 'chooses weighted gotos and picks repeatably from the seed' do
+    it 'chooses weighted gotos and picks repeatably from the seed', render_budget: { seconds: 500, reason: 'twelve seeds, each rendered twice, of a looping form (offline mono, 384 s)' } do
       setup_scenes(:a, :b, :c)
       histories = (1..12).map { |seed|
         h = 2.times.map {
@@ -494,7 +494,7 @@ RSpec.describe(MB::Sound::Form) do
       expect(results[367][1]).to eq(history)
     end
 
-    it 'carries on from weighted gotos with next: (or nil), and reserves the label :next' do
+    it 'carries on from weighted gotos with next: (or nil), and reserves the label :next', render_budget: { seconds: 120, reason: 'eight seeds of a looping form (offline mono, ~64 s)' } do
       setup_scenes(:a, :b)
       f = described_class.build { label :top; a 1; goto top: 1, nil => 3; b 1 }
       expect(f.order[2].target).to eq({ top: 1, next: 3 })

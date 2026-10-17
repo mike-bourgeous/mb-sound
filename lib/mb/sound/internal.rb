@@ -189,6 +189,22 @@ module MB
           @pg = nil
         end
       end
+
+      # Waits +seconds+ of audio for code that waits on a Session (foreground
+      # #play, #wait, take replays): wall-clock sleep, or on an output that
+      # keeps a virtual clock (NullOutput sleep: :virtual) lets that much
+      # audio through and waits until it was written (see
+      # NullOutput#consume), so specs of these waits run as fast as the
+      # render and see the same frames every time.
+      def wait_audio(session, seconds)
+        out = session&.instance_variable_get(:@output)
+        if out.respond_to?(:virtual?) && out.virtual? && !out.closed?
+          out.consume(seconds)
+        else
+          sleep seconds
+        end
+        nil
+      end
     end
   end
 end

@@ -8,8 +8,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#play' do
-    # A NullOutput that renders as fast as it can and keeps what it writes,
-    # except silent buffers (the idle Session renders about 16000 a second)
+    # A NullOutput on a virtual clock (play's waiting consumes what the
+    # render thread writes) that keeps what it writes, except silent buffers
     let(:out) {
       Class.new(MB::Sound::NullOutput) {
         def written = @written ||= []
@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
           super
         end
         def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |d| d[c] })
-      }.new(channels: 2, sleep: false)
+      }.new(channels: 2, sleep: :virtual)
     }
 
     before(:each) { MB::Sound.use_output(out) }
@@ -112,7 +112,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       thread.raise(Interrupt)
       expect(thread.value).to eq(nil)
       deadline = MB::U.clock_now + 5
-      sleep 0.01 while MB::Sound.players.key?(:play) && MB::U.clock_now < deadline
+      MB::Sound::Internal.wait_audio(MB::Sound::Session.current, 0.01) while MB::Sound.players.key?(:play) && MB::U.clock_now < deadline # (the stop's fade)
       expect(MB::Sound.players).not_to have_key(:play)
       expect(MB::Sound.stopped).to have_key(:play) # resume :play brings it back
     end
@@ -120,7 +120,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'plots the mix while it plays, then stops plotting' do
       allow(MB::Sound).to receive(:visualize).and_wrap_original { |m, stop:, **kw|
         expect(kw[:header]).to match(/Playing/)
-        sleep 0.01 until stop.call
+        MB::Sound::Internal.wait_audio(MB::Sound::Session.current, 0.01) until stop.call # (the real one plots by wall clock)
         { frames: 0, fps: 0 }
       }
       expect { MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true) }.to output(/Playing/).to_stderr
@@ -421,7 +421,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#wait' do
-    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
+    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), buffer_size: 800, realtime: true) }
 
     after do
       session.close
@@ -444,7 +444,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.wait).to eq(true)
       end
       expect(session).to be_idle
-      expect(frames).to be >= 48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)
+      expect(frames).to be >= (48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)).round # (exact on the virtual clock)
     end
 
     it 'stops waiting for a tail that never ends after the tail limit' do
