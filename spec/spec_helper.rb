@@ -113,6 +113,14 @@ RSpec.configure do |config|
   # sleeping for the sound's length.
   config.before(:each) do
     MB::Sound.close_outputs
+    # A play or bg in an earlier example leaves the default Session's render
+    # thread running (as in the console), so later examples would share a
+    # running Session: its MidiInput is pumped by that thread instead of
+    # read by the graph (midi_methods_spec's JACK example read nothing after
+    # channels_spec's play), and the thread renders at real time in the
+    # background for the rest of the run.  Each example starts without one.
+    default = MB::Sound::Session.existing
+    default.close if default&.running?
     MB::Sound::Tuning.default.reset
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN
     MB::Sound::Session.default.master_gain_post = false
