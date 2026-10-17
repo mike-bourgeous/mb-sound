@@ -51,8 +51,8 @@ module MB
         DECLICK_SECONDS = 0.005
 
         # Bars to fade in new graphs when Session#add isn't given a +:fade+
-        # (nil for no fade).  Graphs replacing a named graph switch over
-        # without a fade unless Session#add is given one.
+        # (nil for no fade).  Graphs replacing a named graph crossfade over
+        # DECLICK_SECONDS unless Session#add is given a fade.
         attr_reader :fade_in
 
         # Bars to fade out graphs when Session#remove isn't given a +:fade+

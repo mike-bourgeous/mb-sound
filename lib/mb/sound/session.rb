@@ -397,12 +397,13 @@ module MB
       # +:name+ if given, or else the lowest unused Integer.
       #
       # If a graph is already playing under +:name+, it keeps playing until
-      # the new graph starts, then stops on that exact sample, or crossfades
-      # over +:fade+ bars if given.
+      # the new graph starts, then crossfades into it over +:fade+ bars, by
+      # default a 5 ms declick (Fades::DECLICK_SECONDS) starting on that
+      # exact sample; +fade: 0+ cuts on the exact sample.
       #
       # +:fade+ also fades the new graph in over that many bars.  If not
-      # given, new graphs fade in over #fade_in bars, and replacements switch
-      # without a fade.  Pass 0 or false for no fade.
+      # given, new graphs fade in over #fade_in bars, and replacements
+      # crossfade over the declick time.  Pass 0 or false for no fade.
       #
       # +:on+, +:in+, and +:at+ set when the graph starts on the timeline
       # (see LaunchPoint): +on:+ aligns to :now, :beat (next quarter note),
@@ -1042,7 +1043,10 @@ module MB
           @stopped.delete(name)
 
           replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
-          fade = @fade_in unless explicit_fade || replacing
+          # A replacement crossfades over the declick time (5 ms, exact
+          # frames, like undo's restores; ux-r3 item 5: a hard cut between
+          # two unrelated graphs clicked), unless given a fade (0: cut)
+          fade = replacing ? declick_bars : @fade_in unless explicit_fade
 
           # Hand over from the graph being replaced at the new start time
           @players.each_value do |p|

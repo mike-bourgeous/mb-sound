@@ -97,8 +97,8 @@ module MB
       #
       # New sounds fade in over half a bar by default; pass +:fade+ to choose
       # the number of bars, or 0 for no fade.  Replacing a named sound
-      # switches over without a fade unless +:fade+ is given, in which case
-      # it crossfades.  Change the defaults with Session.default.fade_in= and
+      # crossfades over 5 ms on exact frames (a declick), or over +:fade+
+      # bars if given (0 cuts on the exact sample).  Change the defaults with Session.default.fade_in= and
       # fade_out= (in bars).
       #
       # Accepts anything #play does (see Playable.graph): a GraphNode, an

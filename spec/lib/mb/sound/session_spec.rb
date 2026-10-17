@@ -189,15 +189,27 @@ RSpec.describe(MB::Sound::Session) do
       expect(session.add(0.constant)).to eq(1)
     end
 
-    it 'replaces a named graph exactly at the new start time' do
+    it 'replaces a named graph with a 5 ms crossfade from the exact new start time' do
       session.add(1.constant, name: :pad)
       run(4000)
       expect(session.add(2.constant, name: :pad)).to eq(:pad)
       data = run(96000)
       switch = 96000 - 4000
       expect(data[switch - 1]).to eq(1)
-      expect(data[switch]).to eq(2)
+      expect(data[switch]).to eq(1)
+      expect(data[switch + 120]).to be_within(1e-6).of(1.5)
+      expect(data[switch + 240]).to eq(2)
       expect(session.players.keys).to eq([:pad])
+    end
+
+    it 'replaces a named graph exactly at the new start time with fade: 0' do
+      session.add(1.constant, name: :pad)
+      run(4000)
+      session.add(2.constant, name: :pad, fade: 0)
+      data = run(96000)
+      switch = 96000 - 4000
+      expect(data[switch - 1]).to eq(1)
+      expect(data[switch]).to eq(2)
     end
   end
 
@@ -272,13 +284,14 @@ RSpec.describe(MB::Sound::Session) do
         expect(session).to be_idle
       end
 
-      it 'switches replacements without a fade unless one is given' do
+      it 'crossfades replacements over the declick time unless a fade is given' do
         session.add(1.constant, name: :pad)
         run(4000)
         session.add(2.constant, name: :pad)
         data = run(96000)
         expect(data[96000 - 4000 - 1]).to eq(1)
-        expect(data[96000 - 4000]).to eq(2)
+        expect(data[96000 - 4000 + 240]).to eq(2)
+        expect(data[(96000 - 4000)...(96000 - 4000 + 240)].to_a).to all(be_between(1, 2))
       end
 
       it 'can be changed or turned off' do
