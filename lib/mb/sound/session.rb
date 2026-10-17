@@ -326,7 +326,6 @@ module MB
         @markers = nil
         @epoch = nil
         @replay_epoch = nil
-        @at_exit_registered = nil
         @span_players = nil
         @span_graphs = nil
         # The span being rendered, for taps that stamp what they see (see
@@ -966,6 +965,7 @@ module MB
       def close
         return if @closed
         @closed = true
+        ExitClose.unregister(self)
         @thread&.join(5)
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
@@ -1483,11 +1483,10 @@ module MB
         end
         @thread.name = 'MB::Sound::Session'
 
-        # Stop the thread and close the output cleanly at exit
-        unless @at_exit_registered
-          at_exit { close rescue nil }
-          @at_exit_registered = true
-        end
+        # Stop the thread and close the output cleanly at exit (held
+        # weakly: an at_exit block would keep this Session and every graph
+        # it played alive until exit)
+        ExitClose.register(self)
       end
 
       # The bar number (counting from 1) of a timeline position.
