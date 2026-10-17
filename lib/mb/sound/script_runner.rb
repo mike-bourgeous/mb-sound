@@ -609,7 +609,7 @@ module MB
               'without writing it, so the file is the song\'s own samples (--bars counts from there)'
             ) { |v| @options[:from] = window_target(v) }
             o.on('--to WHERE', 'End where a section, label, or marker (a name) or a bar number starts (with --from, or from the start)') { |v| @options[:to] = window_target(v) }
-            o.on('--report', 'With a render: print a mix report (LUFS, short-term max, true peak, crest per track and the mix, and per section)') { @options[:report] = true }
+            o.on('--report', 'With a render: print a mix report (LUFS, short-term max, true peak, PLR per track and the mix, and per section)') { @options[:report] = true }
             o.on('--seek', 'With --from in a render: seek there (faster, fresh state: no tails from before) instead of playing up to it') { @options[:seek] = true }
             o.on(
               '--take [FILE]',

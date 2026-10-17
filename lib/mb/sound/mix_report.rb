@@ -5,10 +5,10 @@ module MB
     # enters the master chain, times the master gain, with its share of any
     # buses; see Session::Stems) and for the mix (after the master chain),
     # the integrated loudness (LUFS), short-term maximum (LUFS), true peak
-    # (dBTP), and crest factor (sample peak over RMS, dB, over the spans
-    # the track's player rendered: a track dropped by a scene and asleep
-    # doesn't count its silence), measured with
-    # Loudness::Analyzer; and, when a song form played, the integrated
+    # (dBTP), and peak-to-loudness ratio (PLR, LU: the true peak minus the
+    # integrated loudness, EBU R 128 s2's measure of short-scale dynamics;
+    # the integrated loudness is BS.1770-gated, so silence and quiet
+    # stretches don't count), measured with Loudness::Analyzer; and, when a song form played, the integrated
     # loudness of each track and the mix in every section pass (from the
     # frame where the pass starts, as launches land), with the mix's sample
     # peak.
@@ -17,9 +17,10 @@ module MB
     #     MB::Sound::MixReport.last.tracks[:bass].integrated
     class MixReport
       # One row: +name+ (a track's stem name, or :mix), +integrated+ and
-      # +short_term_max+ (LUFS), +true_peak+ (dBTP), +crest+ (dB, sample
-      # peak over RMS), and +seconds+ measured.
-      Row = Data.define(:name, :integrated, :short_term_max, :true_peak, :crest, :seconds)
+      # +short_term_max+ (LUFS), +true_peak+ (dBTP), +plr+ (LU, the true
+      # peak minus the integrated loudness; nil for silence), and +seconds+
+      # measured.
+      Row = Data.define(:name, :integrated, :short_term_max, :true_peak, :plr, :seconds)
 
       # One section pass: +label+ (the section's name, with the pass number
       # after the first), +start+ (seconds from the start of the report),
@@ -53,10 +54,10 @@ module MB
         lines = []
         rows = @tracks.values + [@mix]
         width = [rows.map { |r| r.name.to_s.length }.max, 5].max
-        lines << format("%-#{width}s  %9s  %9s  %8s  %6s", 'Track', 'LUFS', 'ST max', 'dBTP', 'Crest')
+        lines << format("%-#{width}s  %9s  %9s  %8s  %6s", 'Track', 'LUFS', 'ST max', 'dBTP', 'PLR')
         rows.each do |r|
           lines << '' if r.equal?(@mix)
-          lines << format("%-#{width}s  %9s  %9s  %8s  %6s", r.name, num(r.integrated), num(r.short_term_max), num(r.true_peak), num(r.crest))
+          lines << format("%-#{width}s  %9s  %9s  %8s  %6s", r.name, num(r.integrated), num(r.short_term_max), num(r.true_peak), num(r.plr))
         end
 
         unless @sections.empty?
@@ -250,28 +251,18 @@ module MB
           @name = name
           @rate = rate
           @analyzer = Loudness::Analyzer.new(channels: channels, sample_rate: rate)
-          @sum_squares = 0.0
           @samples = 0
-          @channels = channels
-          @peak = 0.0
         end
 
         def add(data)
           @analyzer.process(data)
-          data.each do |d|
-            dd = Numo::DFloat.cast(d)
-            @sum_squares += (dd * dd).sum
-            p = dd.abs.max.to_f
-            @peak = p if p > @peak
-          end
           @samples += data[0].length
         end
 
         def row
           r = @analyzer.result
-          rms = @samples > 0 ? Math.sqrt(@sum_squares / (@samples * @channels)) : 0.0
-          crest = rms > 0 && @peak > 0 ? 20 * Math.log10(@peak / rms) : nil
-          Row.new(name: @name, integrated: r.integrated, short_term_max: r.short_term_max, true_peak: r.true_peak, crest: crest, seconds: @samples / @rate)
+          plr = r.integrated.finite? && r.true_peak&.finite? ? r.true_peak - r.integrated : nil
+          Row.new(name: @name, integrated: r.integrated, short_term_max: r.short_term_max, true_peak: r.true_peak, plr: plr, seconds: @samples / @rate)
         end
       end
     end

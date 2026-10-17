@@ -22,7 +22,7 @@ RSpec.describe(MB::Sound::MixReport) do
     @mix = tmp_path('mix.wav')
     expect {
       MB::Sound.render(@mix, overwrite: true, bars: 6, report: :tracks, stems: @dir, stem_format: 'wav', **opts) { song }
-    }.to output(/Track +LUFS +ST max +dBTP +Crest/).to_stdout
+    }.to output(/Track +LUFS +ST max +dBTP +PLR/).to_stdout
     MB::Sound.rewind
     described_class.last
   end
@@ -41,13 +41,10 @@ RSpec.describe(MB::Sound::MixReport) do
     expect(r.mix.integrated).to be_within(0.02).of(ref.integrated)
     expect(r.mix.true_peak).to be_within(0.02).of(ref.true_peak)
 
-    # Crest over the time the track played (the lead, in every scene, from
-    # the start; the stem file is padded with silence to the render's
-    # length)
-    data = MB::Sound.read(File.join(@dir, 'lead.wav')).map { |c| c[0...(r.tracks[:lead].seconds * 48000).round] }
-    peak = data.map { |c| c.abs.max }.max
-    rms = Math.sqrt(data.sum { |c| (Numo::DFloat.cast(c)**2).sum } / (data.length * data[0].length))
-    expect(r.tracks[:lead].crest).to be_within(0.02).of(20 * Math.log10(peak / rms))
+    # PLR: the true peak minus the (gated) integrated loudness
+    expect(r.tracks[:lead].plr).to be_within(0.02).of(r.tracks[:lead].true_peak - r.tracks[:lead].integrated)
+    ref = MB::Sound.loudness(File.join(@dir, 'lead.wav'))
+    expect(r.tracks[:lead].plr).to be_within(0.03).of(ref.true_peak - ref.integrated)
   end
 
   it 'measures each section pass from the frame it starts on' do
@@ -80,7 +77,7 @@ RSpec.describe(MB::Sound::MixReport) do
   it 'prints a table and a Hash' do
     r = render
     text = r.to_s
-    expect(text.lines.first).to match(/\ATrack\s+LUFS\s+ST max\s+dBTP\s+Crest/)
+    expect(text.lines.first).to match(/\ATrack\s+LUFS\s+ST max\s+dBTP\s+PLR/)
     expect(text).to match(/^mix\s+-\d+\.\d/)
     expect(text).to match(/^Section\s+Start\s+Mix\s+Peak\s+lead\s+bass/)
     h = r.to_h
