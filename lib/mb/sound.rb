@@ -15,6 +15,7 @@ require_relative 'sound/phase'
 require_relative 'sound/curve'
 require_relative 'sound/decibels'
 require_relative 'sound/numeric_sound_mixins'
+require_relative 'sound/source_mismatch'
 
 # Load C extensions
 require_relative 'fast_sound'
@@ -190,6 +191,7 @@ require_relative 'sound/session'
 require_relative 'sound/take'
 require_relative 'sound/arrangement/arm_state'
 require_relative 'sound/arrangement/recording'
+require_relative 'sound/arrangement/patch_check'
 require_relative 'sound/arrangement'
 require_relative 'sound/form'
 

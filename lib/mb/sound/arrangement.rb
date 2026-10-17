@@ -22,6 +22,7 @@ module MB
     # which tracks still align to their quantization).
     class Arrangement
       include Recording
+      include PatchCheck
 
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
@@ -218,6 +219,8 @@ module MB
         check_offset(:lead_max, lead_max)
         raise ArgumentError, "lead_max: caps an attack lead (lead: :attack or 0.5.attack; got lead: #{lead.inspect})" if lead_max && !lead.is_a?(Length::Attack)
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
+        # Built once now, so a broken patch fails here (see PatchCheck)
+        check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip }) or return nil
         return nil unless @session.names.claim(name, :track)
         @session.route(name, to: to || :keep, send: send) if to || send
 
@@ -279,6 +282,17 @@ module MB
           end
           next if kind.nil? || kind == :track
           MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track or knob")) or return nil
+        end
+
+        # Each track's patch built with the scene's clip for it (see
+        # PatchCheck), once per patch and clip
+        values.each do |k, v|
+          tr = @mutex.synchronize { @tracks[k] }
+          next unless tr&.patch? && v.respond_to?(:events)
+          seen = @mutex.synchronize { ((@patch_checked ||= {}.compare_by_identity)[tr.patch] ||= {}.compare_by_identity) }
+          next if seen[v]
+          check_patch(k, tr.patch, v, what: "scene #{name.inspect}, track #{k.inspect}") or return nil
+          @mutex.synchronize { seen[v] = true }
         end
 
         @mutex.synchronize {

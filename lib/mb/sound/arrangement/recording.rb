@@ -411,7 +411,10 @@ module MB
           graph = begin
                     GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(live) }
                   rescue => e
-                    warn "Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}); recording still works"
+                    # (not a PatchError: a patch may play clips but not live
+                    # MIDI, e.g. ghost_chords; the track still arms, silent)
+                    where = patch_line(tr.patch, e)
+                    notice_patch_problem("Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}#{where ? " at #{where}" : ''}); recording still works")
                     return nil
                   end
           @session.add(graph, name: Recording.monitor_name(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")
