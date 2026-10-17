@@ -137,6 +137,10 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it "keeps ux-1's screen commands out of replays (keys, fg, jobs, debug_dump)" do
+    %w[keys fg jobs debug_dump].each { |c| expect(take.send(:foreground?, "#{c} ")).to eq(true), c }
+  end
+
   it "records the UI's capture and swap (KEYS Enter, step entry's w) as take lines that replay bit for bit" do
     ev = MB::Sound::MIDI::Event
     played = [[60, 1.1r, 1.35r], [64, 1.6r, 1.9r], [67, 2.3r, 2.8r]]
