@@ -63,6 +63,14 @@ RSpec.describe('ring: :all') do
     expect(r.outputs[:unfused].compact.sum(&:length)).to be > 0.08 * 48000
   end
 
+  it 'ends a planned product of a ringing sum when every summand has ended (no 0 * x fold of the ended sum)' do
+    short_gong = -> { 110.hz.sine * MB::Sound.env([[1, 0.001], [0, 0.08, 30]]) }
+    short_click = -> { 2000.hz.sine * MB::Sound.env([[1, 0.001], [0, 0.01, 30]]) }
+    r = plan_compare(fallbacks: true, sizes: [800] * 40) { (short_gong.() + short_click.()) * 3 }
+    expect(r.outputs[:unfused].last).to be_nil
+    expect(r.outputs[:c].last).to be_nil
+  end
+
   it 'refuses other modes and other nodes' do
     expect { (gong.() + click.()).ring(:last) }.to raise_error(ArgumentError, /ring is :all .* or :first/)
     expect { MB::Sound::GraphNode::Mixer.with_ring(:most) {} }.to raise_error(ArgumentError, /ring is :all/)
