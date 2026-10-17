@@ -26,6 +26,7 @@ module MB
       class Tiles
         include Follow
         include FrameRate
+        include Listable
 
         # Seconds between size checks (besides SIGWINCH).
         SIZE_CHECK = 0.5
@@ -38,7 +39,7 @@ module MB
 
         # UI commands the palette runs on this screen (`split :v`); every
         # other line is evaluated in the console binding.
-        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys look].freeze
+        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys look message].freeze
 
         # Keys hinted on the status line per mode.
         HINTS = {
@@ -171,6 +172,7 @@ module MB
           @midi_seen = nil
           @overlay = nil
           @messages_restore = nil
+          @message_close = nil
           @show_fps = false
           @pane_cpu = Hash.new { |h, k| h[k] = [] }
           @chrome = nil
@@ -334,6 +336,24 @@ module MB
           @lock.synchronize { relayout }
         end
 
+        # The panes on screen, for #list (UI::Listable).
+        def listed_panes
+          order = @tiler.numbered
+          @tiler.placed.filter_map do |p|
+            next unless p.name
+            pane = @panes[p.name]
+            kind = p.name == :repl ? :repl : pane ? pane.class.name.split('::').last.downcase.to_sym : :empty
+            n = order.index(p.name)
+            rate = p.opts[:rate].is_a?(Numeric) ? p.opts[:rate] : pane&.rate
+            PaneOnScreen.new(number: n && n + 1, name: p.name, kind: kind, title: pane&.title, rect: p.rect, focused: p.name == @tiler.focus,
+                             zoomed: @tiler.layout.zoom == p.name, rate: rate,
+                             look: pane&.bytes? ? (@states[p.name][:look] || p.opts[:look] || @look) : nil, title_at: @chrome&.frames&.dig(p.name)&.at)
+          end
+        end
+
+        def listing_mode = @hidden ? :hidden : :tiles
+        def listing_layout = @layout_name
+
         # Draws the next frame (the painter calls this at its rate).
         # Returns the bytes written (nil if nothing changed).
         def refresh(now = @clock.call)
@@ -445,6 +465,23 @@ module MB
           tile { |t| t.set_option(pane, :look, name) }
           flash("#{pane}: look #{name.inspect}", :ok)
           name
+        end
+
+        # Shows message +n+ (1: the newest; see the messages pane's
+        # numbers) in full in a temporary pane below the messages (or
+        # wherever a temporary pane goes), wrapped, with its count and age;
+        # `ui.message false` closes it.  Returns self.
+        def message(n = 1)
+          if n == false || n.nil?
+            @message_close&.call
+            @message_close = nil
+            return self
+          end
+          raise ArgumentError, "Messages are numbered from 1, the newest (got #{n.inspect})" unless n.is_a?(Integer) && n > 0
+          @panes[:message].index = n if @panes[:message].respond_to?(:index=)
+          @message_close ||= plot_pane(:message, height: 10)
+          @full = true
+          self
         end
 
         def undo = tile(&:undo)

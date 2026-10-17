@@ -83,8 +83,10 @@ module MB
           self
         end
 
-        # Writes +str+ at (+x+, +y+) in +role+'s color, clipped to the pane.
-        # Returns the column after it.
+        # Writes +str+ at (+x+, +y+) in +role+'s color, clipped to the pane:
+        # text cut at the right edge ends in an ellipsis (never a silent
+        # chop; ux-1 r3 item 38), unless only blanks were cut.  Returns the
+        # column after it.
         def text(x, y, str, role = nil, bold: false)
           str = str.to_s
           return x + str.length if y < 0 || y >= @h || x >= @w
@@ -93,8 +95,69 @@ module MB
             str = str[-x..] || ''
             x = 0
           end
-          @grid.text(@x + x, @y + y, str, fg: Theme.rgb(role), bold: bold || Themes.bold?(role), max: @w - x)
+          @grid.text(@x + x, @y + y, Canvas.clip(str, @w - x), fg: Theme.rgb(role), bold: bold || Themes.bold?(role), max: @w - x)
           x + str.length
+        end
+
+        # +str+ cut to +room+ columns: with a final ellipsis when anything
+        # but blanks was cut.
+        def self.clip(str, room)
+          return str if str.length <= room || room <= 0
+          return str[0, room] if str[room..].strip.empty?
+          "#{str[0, room - 1]}…"
+        end
+
+        # Continuation mark for a word broken across lines by .wrap.
+        BREAK = '\\'
+
+        # +text+ as lines of at most +width+ columns: words wrapped at
+        # spaces (newlines kept), words longer than a line broken with a
+        # BREAK at the end of each piece; lines after the first get +indent+
+        # spaces (a hanging indent), counted in +width+.  The same rule as
+        # the help pages' wrapping (MB::U.wrap), plus long words.
+        def self.wrap(text, width, indent: 0)
+          width = [width, indent + 2].max
+          out = []
+          lead = -> { out.empty? ? 0 : indent }
+          text.to_s.split("\n", -1).each do |para|
+            line = nil
+            para.split(/ +/).each do |word|
+              limit = width - lead.()
+              cand = line ? "#{line} #{word}" : word
+              if cand.length <= limit
+                line = cand
+                next
+              end
+              if line
+                out << (' ' * lead.()) + line
+                line = nil
+                limit = width - indent
+              end
+              while word.length > limit
+                out << (' ' * lead.()) + word[0, limit - 1] + BREAK
+                word = word[(limit - 1)..]
+                limit = width - indent
+              end
+              line = word
+            end
+            out << (' ' * lead.()) + (line || '')
+          end
+          out
+        end
+
+        # Writes +text+ wrapped (see .wrap) from row +y+ (default: #row),
+        # at most +rows+ lines (the last ending in an ellipsis when more
+        # were cut).  Returns the rows written, and moves #row past them.
+        def wrap(text, y: @row, x: 0, indent: 0, role: nil, rows: @h - y)
+          lines = Canvas.wrap(text, @w - x, indent: indent)
+          if lines.length > rows && rows > 0
+            lines = lines.first(rows)
+            last = lines[-1].chomp(BREAK)
+            lines[-1] = last.length >= @w - x ? "#{last[0, @w - x - 1]}…" : "#{last}…"
+          end
+          lines.each_with_index { |l, i| text(x, y + i, l, role) }
+          @row = y + lines.length
+          lines.length
         end
 
         # Writes +str+ at (+x+, +y+) in +role+'s color with attributes
@@ -109,7 +172,7 @@ module MB
             x = 0
           end
           attr = (reverse ? Plot::Text::Cells::REVERSE : 0) | (bold || Themes.bold?(role) ? Plot::Text::Cells::BOLD : 0)
-          @grid.put_run(@x + x, @y + y, str[0, @w - x], Plot::Text::Cells.pack(Theme.rgb(role)), bg && Plot::Text::Cells.pack(Theme.rgb(bg)), attr)
+          @grid.put_run(@x + x, @y + y, Canvas.clip(str, @w - x), Plot::Text::Cells.pack(Theme.rgb(role)), bg && Plot::Text::Cells.pack(Theme.rgb(bg)), attr)
           x + str.length
         end
 

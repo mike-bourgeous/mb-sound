@@ -6,6 +6,7 @@ require_relative 'ui/data_file'
 require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
 require_relative 'ui/density'
+require_relative 'ui/listing'
 require_relative 'ui/pane'
 require_relative 'ui/panes'
 require_relative 'ui/pane_files'
@@ -83,7 +84,7 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
       end
 

@@ -1,6 +1,6 @@
-▶ 17:3   128 bpm 4/4  load  31% ▃  xrun drop 1 ████▌    5/8  → break 21:1
+▶ 17:3   128 bpm 4/4  load  31% ▃  xru… drop 1 ████▌    5/8  → break 21:1
 TRACKS             QUEUED          MASTER             SCOPE
 ● drums  beat_a    17:3   knob :c… L ████████▋   -8.1
 ● bass   bass_a    18:1   mute :p… R ████████▋   -8.4
-● lead   rec →21:1                 S -14.2 LUFS  TP -
+● lead   rec →21:1                 S -14.2 LUFS  TP …
 ● pad    stopping…                 RMS -18.0 -18.2

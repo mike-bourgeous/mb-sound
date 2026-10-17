@@ -1,4 +1,4 @@
-▶ 17:3   128 bpm 4/4  load  31% ▃  xrun drop 1 ████▌    5/8  → break 21:1
+▶ 17:3   128 bpm 4/4  load  31% ▃  xru… drop 1 ████▌    5/8  → break 21:1
 TRACKS                      QUEUED                   KNOBS
 ● drums  beat_a             17:3   knob :cut         cut   █████████▍    2400 Hz
 ● bass   bass_a             18:1   mute :pad         drive █████▏            0.3

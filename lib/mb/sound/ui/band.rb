@@ -19,6 +19,7 @@ module MB
       class Band
         include FrameRate
         include Follow
+        include Listable
 
         # Seconds between reissuing the scroll region with a full redraw.
         REASSERT = 2.0
@@ -317,6 +318,19 @@ module MB
           File.write(path, "# mb-sound terminal UI layout: `ui #{name.inspect}` shows it (see help :ui)\n#{text}")
           path
         end
+
+        # The panes on screen, for #list.
+        def listed_panes
+          @placed.map do |p|
+            f = @chrome.frames[p.pane.name]
+            PaneOnScreen.new(number: nil, name: p.pane.name, kind: p.pane.class.name.split('::').last.downcase.to_sym, title: p.pane.title,
+                             rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: p.pane.rate,
+                             look: p.pane.bytes? ? (p.state[:look] || @look) : nil, title_at: f&.at)
+          end
+        end
+
+        def listing_mode = :band
+        def listing_layout = @layout.name
 
         def inspect
           "#<UI::Band #{@layout.name.inspect} #{@height} rows at the #{@position} of #{@rows}x#{@cols}, #{@placed.length} panes, #{@mode}#{@active ? '' : ' (off)'}>"

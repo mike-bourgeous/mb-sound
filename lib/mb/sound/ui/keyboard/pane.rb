@@ -13,7 +13,7 @@ module MB
           WHITE = [0, 2, 4, 5, 7, 9, 11].freeze
 
           def initialize(keyboard = nil)
-            super(:keyboard, rate: 30, height: 8, width: 44, min_height: 6)
+            super(:keyboard, rate: 30, height: 8, width: 44, min_height: 6, description: 'the virtual keyboard: a piano of the computer keys, held notes, octave, velocity, step entry')
             @keyboard = keyboard
           end
 
@@ -33,10 +33,7 @@ module MB
           # (+state+[:keyboard] is the screen's keyboard, if not UI.keyboard)
           # +text+ in lines of at most +w+ characters, broken after spaces
           # where possible.
-          def self.wrap(text, w)
-            w = [w, 1].max
-            text.scan(/.{1,#{w}}(?:\s+|\z)|.{1,#{w}}/).map(&:rstrip)
-          end
+          def self.wrap(text, w) = Canvas.wrap(text, w)
 
           # White keys in the playable span.
           def self.span_whites = @span_whites ||= (0...UI::Keyboard::SPAN).count { |k| WHITE.include?(k % 12) }
