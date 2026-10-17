@@ -70,7 +70,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.inspect).to include('go :verse')
   end
 
-  it 'replays bit for bit at the same and at other buffer sizes' do
+  it 'replays bit for bit at the same and at other buffer sizes', render_budget: { seconds: 120, reason: 'one performance rendered and replayed at several buffer sizes (offline, ~80 s)' } do
     live, t = perform(tones: false)
     expect(live.abs.max).to be > 0.1
 
@@ -235,7 +235,7 @@ RSpec.describe(MB::Sound::Take) do
     expect((replay(r, [367, 368])[0...live.length] - live).abs.max).to be < 1e-6
   end
 
-  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit' do
+  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit', render_budget: { seconds: 120, reason: 'a song form recorded and replayed (offline, ~75 s)' } do
     lines = {
       0 => [
         'k = grid(16, kick: "x...x...x...x...").fill(snare: grid(16, "....x.x.xxxxxxxx", value: 38)).loop',
