@@ -217,6 +217,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     @term.write("\r") # capture
     expect(wait_until(timeout: 6) { @session.arrangement.captures.key?(:lead_1) }).to eq(true), @term.text
     clip = @session.arrangement.captures[:lead_1]
+    expect(@term.wait_for(/capture: what you played loops into :lead at \d+:\d/)).to eq(true), @term.text
     expect(clip.events.map(&:value)).to eq([48, 52, 55])
 
     # Step entry's w swaps the clip so far into the armed track (a journaled change)
@@ -228,5 +229,6 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     @term.type('w', delay: 0.15)
     expect(wait_until { lead_changes.call > before }).to eq(true), @term.text
     expect(@keyboard.clip.to_ruby).to eq('seq(F3).n8.loop')
+    expect(@term.wait_for('swap: seq(F3).n8.loop loops into :lead')).to eq(true), @term.text
   end
 end

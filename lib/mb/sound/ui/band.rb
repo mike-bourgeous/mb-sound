@@ -259,6 +259,19 @@ module MB
           @full = true
         end
 
+        # Puts pane +kind+ (:scope, :spectrum) on the band for a plot (see
+        # PlaybackMethods#visualize): nothing if the layout has it, else a
+        # row of it under the layout.  Returns a Proc that takes the row
+        # out again (nil if nothing changed).
+        def plot_pane(kind, height: 8)
+          return nil if @layout.pane_names.include?(kind)
+          old = @layout
+          l = Layout.new(old.name) { cols { pane kind, height: height } }
+          l.root.children.unshift(*old.root.children)
+          self.layout = l
+          -> { self.layout = old if @layout.equal?(l) }
+        end
+
         # Saves the layout as Ruby (see LayoutLoader) to UI.layouts_dir, as
         # +name+ (default: the layout's name), with the band's position.
         # Returns the path.

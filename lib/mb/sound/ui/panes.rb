@@ -279,6 +279,32 @@ module MB
             }
           end
         end
+
+        # The master mix's spectrum (log frequency with note names, -90..0
+        # dBFS; a Hann-windowed FFT of the scope samples, channels mixed),
+        # through Plot::Live like the scope.  `vis spectrum: true` shows it
+        # while a UI is up.
+        class Spectrum < Scope
+          # dBFS at the bottom of the pane.
+          FLOOR = -90.0
+
+          def initialize(name = :spectrum, look: nil)
+            super
+            @rate = 15
+          end
+
+          private
+
+          def chart(data, rate)
+            mix = data.length == 1 ? data[0] : data.reduce { |a, b| a + b } * (1.0 / data.length)
+            f, db = Plot::Presets.spectrum_db(mix, rate, FLOOR)
+            Plot.chart(legend: false) { |c|
+              c.x :frequency, 20.0..(rate / 2.0), notes: true
+              c.y Plot::Scale::DB.new(FLOOR..0.0)
+              c.line db, x: f
+            }
+          end
+        end
       end
     end
   end

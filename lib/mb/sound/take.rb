@@ -42,6 +42,12 @@ module MB
           @current ||= new
         end
 
+        # The console's take if one was started (nil in scripts and specs
+        # that never asked for one).
+        def active
+          @current
+        end
+
         # Replaces the console's take with a fresh one.
         def restart
           @current = new

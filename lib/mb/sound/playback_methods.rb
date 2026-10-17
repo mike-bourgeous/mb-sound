@@ -20,6 +20,12 @@ module MB
         # not to an output given by the caller
         trim = output.nil? ? Session.monitor_gain : 1.0
 
+        # With the terminal UI up, plots go to its scope pane, never over
+        # its screen (see #visualize); the screen isn't cleared either
+        ui_up = UI.screen
+        clear = false if ui_up
+        plot = false if ui_up && (plot.nil? || plot == true)
+
         clear_esc = clear ? "\e[H\e[J" : ''
         header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n")
         # Oscillators play forever, so graphs usually play until interrupted
@@ -591,6 +597,11 @@ module MB
         }
         latest = nil
 
+        # With the terminal UI up, its scope (or spectrum) pane shows the mix
+        if (screen = UI.screen)
+          return visualize_in_ui(screen, spectrum: spectrum, stop: stop)
+        end
+
         header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
         $stdout.write header
         plot_output = PlotOutput.new(
@@ -792,6 +803,28 @@ module MB
       private
 
       # The frame count and rate returned by #visualize.
+      # #visualize while the terminal UI is up: the screen's scope pane
+      # (:spectrum with +spectrum+) shows the mix, put in if the layout has
+      # none (UI::Tiles#plot_pane, UI::Band#plot_pane), so nothing draws
+      # over the screen.  With +stop+ (a playback waiting to end), waits
+      # for it (or Ctrl-C), then takes a pane it put in out again; without
+      # (the console's `vis`), returns at once, leaving the pane.
+      def visualize_in_ui(screen, spectrum:, stop:)
+        kind = spectrum ? :spectrum : :scope
+        restore = screen.plot_pane(kind)
+        if stop.nil?
+          restore = nil
+          puts "\e[2mvis: the #{kind} pane shows the mix#{screen.is_a?(UI::Tiles) ? " (ui.close :#{kind} takes it out)" : ''}\e[0m"
+          return { pane: kind }
+        end
+        sleep 0.05 until stop.call
+        { pane: kind }
+      rescue Interrupt
+        { pane: kind }
+      ensure
+        restore&.call
+      end
+
       def visualize_result(start, frames)
         elapsed = MB::U.clock_now - start if start
         { frames: frames || 0, fps: elapsed && elapsed > 0 ? ((frames || 0) / elapsed).round(1) : 0 }

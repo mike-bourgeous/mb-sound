@@ -76,7 +76,7 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -159,6 +159,18 @@ module MB
         File.write(path, "# mb-sound terminal UI layout: `ui #{name.inspect}` shows it (see help :ui)\n#{text}")
         @layout_mtimes&.delete(path)
         path
+      end
+
+      # Runs console +code+ for a UI action (KEYS mode's Enter capture,
+      # step entry's swap) in +session+'s context, as a line of the
+      # console's take when that take records +session+, so a replay of
+      # the take repeats it where it landed.  Returns the result.
+      def self.run_line(code, session)
+        take = Take.active
+        b = Take.console_binding
+        Session.with_context(session: session) do
+          take&.session_ok?(session) ? take.line(code, b) : b.eval(code, '(ui)', 1)
+        end
       end
 
       # Records the console's binding before each line (for the palette).

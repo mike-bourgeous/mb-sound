@@ -473,7 +473,7 @@ module MB
         #     ui.keys off: :tap       # fixed-length notes
         #     ui.keys step: true      # step entry
         def keys(on = true, off: nil, step: nil, patch: :keep)
-          return leave_keys.then { self } unless on
+          return exit_keys.then { self } unless on
 
           @keyboard.off_mode = off if off
           @keyboard.entry = step ? :step : :play unless step.nil?
@@ -488,6 +488,22 @@ module MB
           tile { |t| t.focus!(:keyboard) }
           @router.mode = :grab
           self
+        end
+
+        # Puts pane +kind+ (:scope, :spectrum) on the screen for a plot (see
+        # PlaybackMethods#visualize): nothing if the layout shows it, else a
+        # slot of +height+ rows below the REPL (the focus stays).  Returns a
+        # Proc that closes the slot again (nil if nothing changed).
+        def plot_pane(kind, height: 10)
+          return nil if @tiler.layout.panes.include?(kind)
+          tile do |t|
+            was = t.focus
+            t.split(t.layout.panes.include?(:repl) ? :repl : was, :rows, kind)
+            h = t.rects[kind]&.h.to_i
+            t.resize(kind, :down, h - height) if h > height
+            t.focus!(was)
+          end
+          -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
         end
 
         ### Router host (called on the input thread)
@@ -598,7 +614,9 @@ module MB
           s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('swap: arm a track first (arm :lead); Enter puts the clip on the console line instead', :warn) if armed.empty?
-          run_safely { Session.with_context(session: s) { armed.keys.map { |name| s.arrangement.play(name, clip) } } }
+          ruby = clip.to_ruby
+          landed = armed.keys.map { |name| [name, run_quietly { UI.run_line("bg #{name.inspect}, #{ruby}", s) }] }
+          flash_changes('swap', landed, "#{ruby} ")
         end
 
         # Enter in KEYS mode: `capture` into the armed tracks.
@@ -606,7 +624,27 @@ module MB
           s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('capture: arm a track first (arm :lead), then play and press Enter', :warn) if armed.empty?
-          run_safely { Session.with_context(session: s) { MB::Sound.capture } }
+          entry = run_quietly { UI.run_line('capture', s) }
+          flash_changes('capture', armed.keys.map { |name| [name, entry] }, 'what you played ')
+        end
+
+        # Runs a UI action's change; an error is flashed (nil).
+        def run_quietly
+          yield
+        rescue StandardError, ScriptError => e
+          flash("#{e.class}: #{e.message}", :bad)
+          nil
+        end
+
+        # Says what KEYS mode's Enter or step entry's w did, so an
+        # accidental capture is obvious: "capture: what you played loops
+        # into :lead at 5:1 (undo takes it back)".  +landed+ is [track,
+        # journal entry] pairs (nil entries failed and flashed already).
+        def flash_changes(what, landed, thing)
+          ok = landed.reject { |_, e| e.nil? }
+          return if ok.empty?
+          where = ok.map { |name, e| "#{name.inspect}#{e.respond_to?(:lands) && e.lands ? " at #{e.lands}" : ''}" }.uniq.join(', ')
+          flash("#{what}: #{thing}loops into #{where} (undo takes it back)", :ok)
         end
 
         # Enter in step entry: the clip goes to UI.keyboard.clips, and its
