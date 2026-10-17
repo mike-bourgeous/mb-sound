@@ -263,6 +263,31 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(MB::Sound::Session.with_context(session: s) { MB::Sound.tracks[:lead] }).not_to include('armed')
     end
 
+    it 'rebuilds the monitor when an armed track is redefined, so it plays the patch a capture will' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 0.75r], [62, 2.5r, 2.75r])
+      setup_lead(s)
+      redefine = 'track(:lead, q: 1) { |c| c.number * c.gate * 2 }'
+      d = perform(s, { 0 => ['arm :lead'], 40 => [redefine] }, 96000 * 2)
+      expect(d[24000]).to eq(60)
+      expect(d[120000]).to eq(124)
+      expect(s.players.keys).to eq([:'lead/live'])
+    end
+
+    it 'starts no monitor when redefining a track armed without one, or a disarmed track' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.005r, 0.01r])
+      setup_lead(s)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:solo, q: 1) { |c| c.number * c.gate }
+        MB::Sound.arm(:lead, monitor: false)
+        MB::Sound.track(:lead, q: 1) { |c| c.number * c.gate * 2 }
+        MB::Sound.track(:solo, q: 1) { |c| c.number * c.gate * 2 }
+      end
+      s.process_buffer(800)
+      expect(s.players.keys).to be_empty
+    end
+
     it 'plays live input through MB::Sound.synth patches (the voices in bin/synths/ take any MIDI source)' do
       s = new_session
       s.midi_in.input = keyboard([60, 0.5r, 0.75r])
