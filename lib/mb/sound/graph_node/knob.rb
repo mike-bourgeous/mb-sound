@@ -53,8 +53,10 @@ module MB
         # +takeover+ (:pickup or :jump), and +smooth+ (seconds over which a
         # turn without +over:+ glides, a declick; 0 for exact jumps).
         class Spec < Data.define(:name, :default, :range, :curve, :unit, :cc, :takeover, :smooth)
-          def initialize(name:, default: nil, range: 0.0..1.0, curve: :linear, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS)
+          def initialize(name:, default: nil, range: nil, curve: :linear, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS)
             raise ArgumentError, "Knob names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+            range_given = !range.nil?
+            range ||= 0.0..1.0
             raise ArgumentError, "Range must be a Range of numbers (got #{range.inspect})" unless range.is_a?(Range) && range.begin.is_a?(Numeric) && range.end.is_a?(Numeric)
             lo = range.begin.to_f
             hi = range.end.to_f
@@ -66,6 +68,13 @@ module MB
 
             default = lo if default.nil?
             raise ArgumentError, "Default must be a number (got #{default.inspect})" unless default.is_a?(Numeric) && default.real?
+            if !range_given && !default.to_f.between?(lo, hi)
+              # (ux-1 item 30: `knob(:drive, 10)` was silently 1)
+              MB::Sound.live_error(ArgumentError.new(
+                "Knob #{name.inspect} starts at #{Knob.number(default)}, outside the default range 0..1, so it would be limited to " \
+                "#{Knob.number(default.to_f.clamp(lo, hi))}; give it a range: knob #{name.inspect}, #{Knob.number(default)}, range: #{Spec.suggest_range(default)}"
+              ))
+            end
             default = default.to_f.clamp(lo, hi)
             smooth = MB::Sound::Length.seconds(smooth).to_f
             raise ArgumentError, "smooth: must be 0 or more seconds (got #{smooth})" unless smooth >= 0
@@ -90,6 +99,16 @@ module MB
             else
               pos * (hi - lo) + lo
             end
+          end
+
+          # A range holding +value+ (for the hint when a default or a turn
+          # is out of range): 0 to a round number above it, or from a
+          # round number below it to 0.
+          def self.suggest_range(value)
+            v = value.to_f
+            mag = 10**Math.log10([v.abs, 1e-9].max).ceil
+            mag *= 10 if mag <= v.abs
+            v >= 0 ? "0..#{Knob.number(mag)}" : "#{Knob.number(-mag)}..0"
           end
 
           # +value+ limited to the range.

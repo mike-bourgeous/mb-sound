@@ -163,6 +163,7 @@ module MB
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
           raise ArgumentError, "from: must be a number (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real?)
+          warn_clamp(k, value) if value.is_a?(Numeric)
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
           knob_change(k, time, turn_data(value, over, curve).merge(from ? { from: from } : {})) { |kn, frame, t|
@@ -322,6 +323,27 @@ module MB
           else
             raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got #{value.inspect})" unless value.respond_to?(:sample) && value.respond_to?(:get_sampler)
           end
+        end
+
+        # Warns once per knob when a turn goes past its range (the value
+        # is limited to it; ux-1 item 30: `turn :drive, 100` on a 0..1
+        # knob "doesn't apply any amplification", silently).
+        def warn_clamp(k, value)
+          r = k.range
+          return if value.between?(r.begin, r.end)
+          @clamp_warned ||= {}
+          return if @clamp_warned[k.name]
+          @clamp_warned[k.name] = true
+          n = GraphNode::Knob.method(:number)
+          warn "turn #{k.name.inspect}, #{n.(value)}: limited to #{n.(value.to_f.clamp(r.begin, r.end))} (knob #{k.name.inspect} goes #{n.(r.begin)}..#{n.(r.end)}; " \
+               "knob #{k.name.inspect}, #{n.(k.spec.default)}, range: #{widened(r, value)} widens it)"
+        end
+
+        # +range+ widened to hold +value+, to a round number.
+        def widened(range, value)
+          n = GraphNode::Knob.method(:number)
+          round = ->(v) { m = 10**Math.log10([v.abs, 1e-9].max).floor; (v.to_f / m).ceil * m }
+          value > range.end ? "#{n.(range.begin)}..#{n.(round.(value))}" : "#{n.(-round.(-value))}..#{n.(range.end)}"
         end
 
         # Journal data for a turn.

@@ -52,7 +52,8 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect { described_class::Spec.new(name: :x, range: 0..1, curve: :exp) }.to raise_error(ArgumentError, /include 0/)
       expect { described_class::Spec.new(name: :x, curve: :wobbly) }.to raise_error(ArgumentError, /curve/)
       expect { described_class::Spec.new(name: :x, takeover: :grab) }.to raise_error(ArgumentError, /Takeover/)
-      expect(described_class::Spec.new(name: :x, default: 5).default).to eq(1.0) # limited to the range
+      expect { described_class::Spec.new(name: :x, default: 5) }.to raise_error(ArgumentError, /outside the default range 0\.\.1.*range: 0\.\.10/) # (ux-1 item 30)
+      expect(described_class::Spec.new(name: :x, default: 5, range: 0..1).default).to eq(1.0) # limited to a range given
       expect(described_class::Spec.new(name: :x, smooth: 10.ms).smooth).to be_within(1e-12).of(0.01)
     end
 
