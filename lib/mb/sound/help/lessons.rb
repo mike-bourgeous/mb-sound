@@ -8,7 +8,14 @@ module MB
       # something, shows code to type, and checks the Session afterwards
       # (a Pry after_eval hook runs the check after every line, so typing the
       # code, or anything else that does the job, moves the lesson on).
-      # Progress is saved, so `lesson :set` resumes where it stopped.
+      #
+      # A lesson builds state in the Session (tracks, clips, knobs) that a
+      # new console doesn't have (ux-r3 item 34), so a run (LessonRunner:
+      # lesson, step, Session) lives only in this console: `lesson :set`
+      # resumes this console's run, or starts at step 1.  Completion is kept
+      # apart (History, in Help.data_dir), shown as a check mark in the
+      # list; `lesson :set, from: 4` replays steps 1-3's code first so the
+      # state exists.
       class Lesson
         # One step.  +start+ (optional) runs when the step begins and its
         # result goes to +check+, so a check can look for something new
@@ -88,14 +95,44 @@ module MB
 
       LESSONS = {}
 
+      # The lessons whose steps type a call to one of +names+, as [lesson
+      # name, step number (from 1), steps] (the first such step of each),
+      # for method pages' "Learn it in" (ux-1 item 26).
+      def self.lessons_using(names)
+        names = names.map(&:to_sym)
+        LESSONS.each_value.filter_map do |l|
+          i = l.steps.index { |st| st.code && (Lesson.call_names(st.source) & names).any? }
+          [l.name, i + 1, l.steps.length] if i
+        end
+      end
+
+      class Lesson
+        # Method names called in +source+ (Prism).
+        def self.call_names(source)
+          @call_names ||= {}
+          @call_names[source] ||= begin
+            names = []
+            walk = ->(n) {
+              next if n.nil?
+              names << n.name if n.is_a?(Prism::CallNode)
+              n.compact_child_nodes.each { |c| walk.(c) }
+            }
+            walk.(Prism.parse(source.to_s).value)
+            names.uniq.freeze
+          end
+        end
+      end
+
       def self.lesson(name, title, minutes: 5, &block)
         l = Lesson.new(name, title, minutes)
         Lesson::Builder.new(l).instance_eval(&block)
         LESSONS[name] = l
       end
 
-      # Saved progress: lesson name => next step index.
-      module Progress
+      # Lessons finished, kept across consoles (Help.data_dir/progress.json):
+      # name => { "completed" => time }.  Files from before ux-r3 held name
+      # => next step index; an index past the last step counts as finished.
+      module History
         module_function
 
         def dir = Help.data_dir
@@ -108,35 +145,115 @@ module MB
           {}
         end
 
-        def save(name, step)
-          data = load.merge(name => step)
+        # True if +lesson+ (a Lesson) was finished in any console.
+        def completed?(lesson)
+          v = load[lesson.name]
+          v.is_a?(Hash) ? !v['completed'].nil? : v.is_a?(Integer) && v >= lesson.steps.length
+        end
+
+        # Records that lesson +name+ was finished.
+        def complete(name)
+          data = load.merge(name.to_sym => { 'completed' => Time.now.utc.iso8601 })
           FileUtils.mkdir_p(dir)
           File.write(path, JSON.pretty_generate(data))
         end
       end
 
-      # The lesson being taken: `lesson` shows the step, `lesson.next`,
-      # `lesson.back`, `lesson.hint`, `lesson.run` (types the code for you),
-      # `lesson.quit`.
+      # A lesson being taken in this console: `lesson` shows the step,
+      # `lesson.next`, `lesson.back`, `lesson.hint`, `lesson.run` (types the
+      # code for you), `lesson.quit`.
+      #
+      # A run is an explicit state machine (STATES, EVENTS, TABLE): it is
+      # :running (lesson shows it, lines are checked), :left (`lesson.quit`;
+      # `lesson :x` resumes it in this console), or :done (past its last
+      # step; History records it).  Runs belong to the Session they started
+      # in: in another Session (or a new console) the lesson starts over.
       class LessonRunner
         include Page
         include Text
 
+        # Run states.
+        STATES = %i[running left done].freeze
+
+        # Run events (:advance moves to the next step, :finish past the
+        # last one).
+        EVENTS = %i[advance finish back restart quit resume].freeze
+
+        # Every (state, event) pair's next state.
+        TABLE = {
+          running: { advance: :running, finish: :done, back: :running, restart: :running, quit: :left, resume: :running },
+          left: { advance: :left, finish: :left, back: :left, restart: :running, quit: :left, resume: :running },
+          done: { advance: :done, finish: :done, back: :running, restart: :running, quit: :done, resume: :done },
+        }.transform_values(&:freeze).freeze
+
         class << self
+          # The run `lesson` shows and console lines check, or nil.
           attr_accessor :active
+
+          # This console's runs: lesson name => LessonRunner.
+          def runs
+            @runs ||= {}
+          end
+
+          # The state +state+ goes to on +event+.
+          def next_state(state, event)
+            TABLE.fetch(state) { raise ArgumentError, "Unknown lesson state #{state.inspect}" }
+              .fetch(event) { raise ArgumentError, "Unknown lesson event #{event.inspect}" }
+          end
+
+          # The run of +lesson+ to show for `lesson :name` (+from+: a step
+          # number to start at, replaying the steps before it; +restart+:
+          # step 1): this console's run in the current Session if it isn't
+          # done, else a new one.
+          def for(lesson, from: nil, restart: false)
+            session = Session.current
+            old = runs[lesson.name]
+            if from.nil? && !restart && old && old.state != :done && old.session.equal?(session)
+              old.fire(:resume)
+              return old
+            end
+
+            run = new(lesson, 0)
+            runs[lesson.name] = run
+            run.replay_to(from - 1) if from && from > 1
+            run
+          end
         end
 
-        attr_reader :lesson, :index
+        attr_reader :lesson, :index, :state, :session
 
         def initialize(lesson, index = nil)
           @lesson = lesson
-          @index = (index || Progress.load[lesson.name] || 0).clamp(0, lesson.steps.length)
+          @index = (index || 0).clamp(0, lesson.steps.length)
           @revisit = nil
+          @session = Session.current
+          @state = done? ? :done : :running
           step&.begin!
+        end
+
+        # Applies +event+ (see TABLE).  Returns self.
+        def fire(event)
+          @state = LessonRunner.next_state(@state, event)
+          History.complete(@lesson.name) if @state == :done && event == :finish
+          self
         end
 
         def step = @lesson.steps[@index]
         def done? = @index >= @lesson.steps.length
+
+        # Runs the code of the steps before step index +n+ (0-based), so a
+        # run started part way (`lesson :set, from: 4`) has the state they
+        # build, printing each step's title.  Returns self.
+        def replay_to(n)
+          n = n.clamp(0, @lesson.steps.length)
+          while @index < n
+            s = step
+            puts c(:dim, "replaying step #{@index + 1}: #{s.title}")
+            MB::Sound.instance_exec(&s.code) if s.code
+            advance
+          end
+          self
+        end
 
         # Where files the lesson's code makes without a path go while the
         # lesson runs (e.g. `rec_audio` alone; see
@@ -148,7 +265,7 @@ module MB
         # Called after each console line: moves on when the step's check
         # passes; returns the text to print (or nil).
         def after_line
-          return nil if done? || step.check.nil?
+          return nil if done? || step.check.nil? || @state != :running
           # A step gone back to (lesson.back) whose check already passes
           # waits for lesson.next or lesson.run instead of moving on at
           # once (the line that went back would otherwise undo it)
@@ -157,7 +274,7 @@ module MB
 
           msg = c(:ok, "✓ #{step.check_text || step.title}")
           advance
-          "#{msg}\n\n#{self}"
+          "\n#{msg}\n#{self}"
         end
 
         def next
@@ -167,7 +284,7 @@ module MB
 
         def back
           @index = [@index - 1, 0].max
-          Progress.save(@lesson.name, @index)
+          fire(:back)
           step&.begin!
           @revisit = @index
           self
@@ -187,33 +304,38 @@ module MB
         end
 
         def quit
+          fire(:quit)
           LessonRunner.active = nil
-          puts c(:dim, "left #{@lesson.name} at step #{@index + 1} (lesson #{@lesson.name.inspect} resumes it)")
+          puts c(:dim, "left #{@lesson.name} at step #{@index + 1} (lesson #{@lesson.name.inspect} resumes it in this console)")
           LessonList.new
         end
 
+        # The step as a page: a blank line above and below (lesson
+        # messages print between console lines; ux-1 item 27), a dim
+        # "lesson :set · step 2/5" line, the step's title and text, the
+        # code to type, and the check in color.
         def to_s
           n = @lesson.steps.length
+          d = Doc.new
           if done?
-            return "#{c(:title, @lesson.title)} #{c(:ok, 'done!')}  #{c(:dim, "#{n} steps; `lesson` lists the others")}"
+            d.lines(["#{c(:dim, "lesson #{@lesson.name.inspect} · done")}  #{c(:title, @lesson.title)} #{c(:ok, 'done!')}  #{c(:dim, "#{n} steps; `lesson` lists the others")}"])
+            return "\n#{d}\n"
           end
           s = step
-          out = []
-          out << "#{c(:title, @lesson.title)}  #{progress_bar(@index, n)} #{c(:dim, "step #{@index + 1}/#{n}")}"
-          out << c(:head, s.title)
-          out << wrap(s.text.to_s, indent: 2).then { |t| doc(t) } if s.text
-          if s.source
-            out << ''
-            out << s.source.lines.map { |l| "    #{code(l.chomp)}" }.join("\n")
-          end
-          out << ''
-          if @revisit == @index && (s.passed? rescue false)
-            out << c(:ok, "  ✓ already done; lesson.next moves on, lesson.run does it again")
-          elsif s.check_text
-            out << c(:dim, "  waiting for: #{s.check_text}")
-          end
-          out << c(:dim, '  lesson.run types it for you; lesson.hint, lesson.next, lesson.back, lesson.quit')
-          out.join("\n")
+          d.lines([
+            "#{c(:dim, "lesson #{@lesson.name.inspect} · step #{@index + 1}/#{n}")}  #{progress_bar(@index, n)}",
+            "#{c(:title, @lesson.title)}: #{c(:head, s.title)}",
+          ])
+          d.para(s.text.to_s, indent: 2) if s.text
+          d.code_block(s.source) if s.source
+          check =
+            if @revisit == @index && (s.passed? rescue false)
+              c(:ok, '  ✓ already done; lesson.next moves on, lesson.run does it again')
+            elsif s.check_text
+              "  #{c(:warn, '…')} #{c(:bar, "waiting for: #{s.check_text}")}"
+            end
+          d.lines([check, c(:dim, '  lesson.run types it for you; lesson.hint, lesson.next, lesson.back, lesson.quit')].compact)
+          "\n#{d}\n"
         end
 
         private
@@ -221,7 +343,7 @@ module MB
         def advance
           @revisit = nil
           @index += 1
-          Progress.save(@lesson.name, @index)
+          fire(done? ? :finish : :advance)
           step&.begin!
         end
 
@@ -234,11 +356,16 @@ module MB
         include Text
 
         def to_s
-          prog = Progress.load
-          out = [c(:title, 'lessons') + c(:dim, '  lesson :name starts or resumes one')]
+          out = [c(:title, 'lessons') + c(:dim, '  lesson :name starts one (or resumes it in this console); from: 3 starts at step 3')]
           LESSONS.each_value do |l|
-            done = prog[l.name].to_i
-            state = done >= l.steps.length ? c(:ok, 'done') : (done > 0 ? "step #{done + 1}/#{l.steps.length}" : "#{l.steps.length} steps")
+            run = LessonRunner.runs[l.name]
+            run = nil unless run&.session.equal?(Session.existing)
+            before = History.completed?(l) ? c(:ok, ' ✓ done before') : ''
+            state =
+              if run&.state == :done then c(:ok, 'done')
+              elsif run then "step #{run.index + 1}/#{l.steps.length}#{run.state == :left ? ' (left)' : ''}#{before}"
+              else "#{l.steps.length} steps#{before}"
+              end
             out << "  #{pad(c(:key, l.name.inspect), 12)} #{pad(l.title, 34)} #{c(:dim, "~#{l.minutes} min")}  #{state}"
             out << "  #{' ' * 12} #{c(:dim, l.about[0, width - 16])}" unless l.about.empty?
           end

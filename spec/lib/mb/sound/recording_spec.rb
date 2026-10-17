@@ -214,6 +214,39 @@ RSpec.describe(MB::Sound::RecordMethods) do
   end
 
   describe 'capture' do
+    it 'captures into every armed track whose patch builds, then reports the others with their line (ux-1 round 2)' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.1r, 0.3r])
+      broken_line = __LINE__ + 4
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.bg(:clock, 0.constant, on: :now) # (the timeline moves)
+        MB::Sound.track(:lead, q: 1) { |c| c.number * c.gate }
+        MB::Sound.track(:l_bass, q: 1) { |c| c.equal?(MB::Sound::Arrangement::PatchCheck.probe) ? c.number : c.synth { |v| v.nosuch_patch_method } } # (passes the definition check)
+        MB::Sound.arm(:lead, monitor: false)
+        MB::Sound.arm(:l_bass, monitor: false)
+      end
+      50.times { s.process_buffer }
+      err = nil
+      MB::Sound::Session.with_context(session: s) do
+        expect { MB::Sound.capture }.to raise_error(MB::Sound::Arrangement::Recording::CaptureFailed) { |e| err = e }
+      end
+      expect(err.message).to match(/\Acapture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/recording_spec\.rb:#{broken_line}\) \(:lead captured\)\z/)
+      expect(err.entries.map(&:subject)).to eq([:lead])
+      150.times { s.process_buffer }
+      expect(s.arrangement.captures.keys).to eq([:lead_1])
+
+      # Live: a warning, and the captures that went through come back
+      live = MB::Sound.live?
+      MB::Sound.live = true
+      r = nil
+      MB::Sound::Session.with_context(session: s) do
+        expect { r = MB::Sound.capture(:lead, :l_bass, length: 1) }.to output(/capture into :l_bass failed.*\(live mode: ignored\)/).to_stderr
+      end
+      expect(r.subject).to eq(:lead)
+    ensure
+      MB::Sound.live = live unless live.nil?
+    end
+
     it 'captures the last phrase into the track at its next launch point, playing on in phase' do
       s = new_session
       # A phrase in bars 3 and 4 (4..8 s); the note in bar 1 is more than a bar before it
@@ -261,6 +294,31 @@ RSpec.describe(MB::Sound::RecordMethods) do
       expect(d[120000]).to eq(0)
       expect(s.arrangement.armed).to be_empty
       expect(MB::Sound::Session.with_context(session: s) { MB::Sound.tracks[:lead] }).not_to include('armed')
+    end
+
+    it 'rebuilds the monitor when an armed track is redefined, so it plays the patch a capture will' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.5r, 0.75r], [62, 2.5r, 2.75r])
+      setup_lead(s)
+      redefine = 'track(:lead, q: 1) { |c| c.number * c.gate * 2 }'
+      d = perform(s, { 0 => ['arm :lead'], 40 => [redefine] }, 96000 * 2)
+      expect(d[24000]).to eq(60)
+      expect(d[120000]).to eq(124)
+      expect(s.players.keys).to eq([:'lead/live'])
+    end
+
+    it 'starts no monitor when redefining a track armed without one, or a disarmed track' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.005r, 0.01r])
+      setup_lead(s)
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:solo, q: 1) { |c| c.number * c.gate }
+        MB::Sound.arm(:lead, monitor: false)
+        MB::Sound.track(:lead, q: 1) { |c| c.number * c.gate * 2 }
+        MB::Sound.track(:solo, q: 1) { |c| c.number * c.gate * 2 }
+      end
+      s.process_buffer(800)
+      expect(s.players.keys).to be_empty
     end
 
     it 'plays live input through MB::Sound.synth patches (the voices in bin/synths/ take any MIDI source)' do

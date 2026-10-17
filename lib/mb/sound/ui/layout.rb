@@ -19,6 +19,8 @@ module MB
       # +height:+ fixes a pane's (or a row's) rows, +width:+ a pane's
       # columns; other panes share the width by +weight:+ (default: the
       # pane's natural width).  Columns are separated by one blank column.
+      # +only: :big+ shows a pane (or a row) only when the terminal is big
+      # enough for a scaled-up band (UI::Density decides).
       class Layout
         # One node of the layout tree: +kind+ :rows, :cols, or :pane;
         # +name+ for panes; +opts+ (:height, :width, :weight).
@@ -42,7 +44,7 @@ module MB
         # Builds layout trees (the block of UI.layout): only #pane, #rows,
         # and #cols, so a typo raises NoMethodError with suggestions.
         class Builder
-          OPTIONS = %i[height width weight].freeze
+          OPTIONS = %i[height width weight only].freeze
 
           def initialize(node)
             @node = node
@@ -83,6 +85,10 @@ module MB
             bad = opts.keys - OPTIONS
             raise ArgumentError, "Unknown layout option#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')} (#{OPTIONS.map(&:inspect).join(', ')})" unless bad.empty?
             opts.each do |k, v|
+              if k == :only
+                raise ArgumentError, "Layout only: is one of #{Density::LEVELS.map(&:inspect).join(', ')} (got #{v.inspect})" unless Density::LEVELS.include?(v)
+                next
+              end
               raise ArgumentError, "Layout #{k}: is a positive Integer (got #{v.inspect})" unless v.is_a?(Integer) && v > 0
             end
           end
@@ -105,22 +111,45 @@ module MB
           walk(@root).map(&:name)
         end
 
+        # The layout as shown at Density +level+ (:compact, :normal, :big):
+        # without the panes and rows whose `only:` needs a bigger level.
+        # Returns self when nothing is left out.
+        def at_level(level)
+          return self unless walk_all(@root).any? { |n| n.opts[:only] }
+          copy = dup
+          copy.instance_variable_set(:@root, filter(@root, level) || Node.new(:rows, nil, [], {}))
+          copy
+        end
+
         # The rows the layout takes (with +panes+, a Hash from name to Pane
         # for natural heights).
         def height(panes = UI.panes)
           natural_height(@root, panes)
         end
 
+        # The natural heights of the layout's top-level rows.
+        def row_heights(panes = UI.panes)
+          @root.children.map { |c| natural_height(c, panes) }
+        end
+
         # Places the panes in +width+ columns: an Array of Placed (Panes
-        # from +panes+; unknown names raise with suggestions).
-        def place(width, panes = UI.panes)
+        # from +panes+; unknown names raise with suggestions).  +height+
+        # (more than the natural height) grows the top-level rows taller
+        # than one row in proportion to their natural heights (a scaled-up
+        # band); +row_gap+ rows go between top-level rows (a band in boxes
+        # draws rules there); +x+ and +y+ offset everything.
+        def place(width, panes = UI.panes, height: nil, row_gap: 0, x: 0, y: 0)
           walk(@root).each do |n|
             next if panes.key?(n.name)
             hint = DidYouMean::SpellChecker.new(dictionary: panes.keys.map(&:to_s)).correct(n.name.to_s).first
             raise ArgumentError, "No pane #{n.name.inspect} in layout #{@name.inspect}#{hint ? " (did you mean :#{hint}?)" : ''} (panes: #{panes.keys.map(&:inspect).join(', ')})"
           end
           out = []
-          place_node(@root, 0, 0, width, natural_height(@root, panes), panes, out)
+          heights = grown_heights(panes, height && height - row_gap * [@root.children.length - 1, 0].max)
+          @root.children.each_with_index do |c, i|
+            place_node(c, x, y, width, heights[i], panes, out)
+            y += heights[i] + row_gap
+          end
           out
         end
 
@@ -135,6 +164,32 @@ module MB
         end
 
         private
+
+        # Heights of the top-level rows: natural, with the rows past
+        # +total+ shared by the growable rows (taller than one row, no
+        # fixed height) in proportion to their natural heights.
+        def grown_heights(panes, total)
+          nat = row_heights(panes)
+          extra = total ? total - nat.sum : 0
+          return nat if extra <= 0
+          grow = nat.each_index.select { |i| nat[i] > 1 && !@root.children[i].opts[:height] }
+          return nat if grow.empty?
+          sum = grow.sum { |i| nat[i] }.to_f
+          add = grow.to_h { |i| [i, (extra * nat[i] / sum).floor] }
+          add[grow.last] += extra - add.values.sum
+          nat.each_with_index.map { |h, i| h + add.fetch(i, 0) }
+        end
+
+        def walk_all(node)
+          [node, *(node.children || []).flat_map { |c| walk_all(c) }]
+        end
+
+        def filter(node, level)
+          return nil if node.opts[:only] && Density::LEVELS.index(level) < Density::LEVELS.index(node.opts[:only])
+          return node if node.kind == :pane
+          kids = node.children.filter_map { |c| filter(c, level) }
+          kids.empty? ? nil : Node.new(node.kind, node.name, kids, node.opts)
+        end
 
         def walk(node)
           node.kind == :pane ? [node] : node.children.flat_map { |c| walk(c) }

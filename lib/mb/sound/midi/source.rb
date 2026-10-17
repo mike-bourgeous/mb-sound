@@ -28,6 +28,11 @@ module MB
         include GraphNode::Nameable
         include GraphNode::Traversable
 
+        # Sources make events (see GraphNode::Traversable#port_type).
+        def port_type
+          :notes
+        end
+
         # The note to chase where the content last jumped (see
         # Source#chase): the #generation of the jump, the stream +time+ of
         # the jump, a note-on +event+ for the note, and whether the note
@@ -54,6 +59,17 @@ module MB
         # content jumped.
         def generation
           @generation ||= 0
+        end
+
+        # True if this source is fed from a real-time input (a keyboard,
+        # the terminal UI's virtual keyboard, a Session's MIDI input, or a
+        # take replaying one), where a note-on for a key that is already
+        # held means a note-off went missing, so synths and Notes restrike
+        # the key instead of counting overlapping notes (see
+        # Allocator's +:same_key+).  False for files, clips, and the
+        # sources made from them.
+        def realtime_input?
+          false
         end
 
         # Returns the Events with stream times in [+from+, +to+), in time

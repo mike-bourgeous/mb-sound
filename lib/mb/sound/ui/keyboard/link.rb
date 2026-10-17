@@ -18,8 +18,9 @@ module MB
           # The default patch's player.
           MONITOR = :'keyboard/live'
 
-          # The default patch: a soft filtered saw.
-          PATCH = ->(v) { v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1800), quality: 0.9) * v.amp_env(0.004, 0.4, 0.6, 0.3) * 0.5 }
+          # The default patch: play's soft filtered saw (one patch for
+          # notes without a sound of their own; see Playable::PATCH).
+          PATCH = Playable::PATCH
 
           attr_reader :input, :session, :virtual
 

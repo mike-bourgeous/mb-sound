@@ -115,18 +115,77 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       kb.off_mode = :hold
       press('z', 0.0)
       press('z', 0.2) # faster than any autorepeat delay: a new strike
-      kb.tick(0.81)
-      kb.tick(0.83)
-      expect(out.log).to eq([[:on, 48, 96, 0, 0.0], [:off, 48, 0, 0.2], [:on, 48, 96, 0, 0.2], [:off, 48, 0, 0.82]])
+      kb.tick(0.86)
+      kb.tick(0.88)
+      expect(out.log).to eq([[:on, 48, 96, 0, 0.0], [:off, 48, 0, 0.2], [:on, 48, 96, 0, 0.2], [:off, 48, 0, 0.87]])
     end
 
-    it 'learns the repeat delay and interval' do
+    it 'learns the repeat delay and interval, even a delay outside the first window (retriggering at most once)' do
       kb.off_mode = :hold
       hold('z', 0.0, 1.5, delay: 0.3, interval: 0.03)
       kb.tick(5)
       tracker = kb.instance_variable_get(:@tracker)
-      expect(tracker.delay).to be_within(0.001).of(0.4) # halfway from 0.5 after one hold
+      expect(tracker.delay).to be_within(1e-9).of(0.3) # from the strike that the repeats after it showed was the delay
       expect(tracker.interval).to be_within(0.002).of(0.03)
+      expect(out.log.count { |e| e[0] == :on }).to eq(2)
+      out.log.clear
+      hold('z', 10.0, 11.5, delay: 0.3, interval: 0.03)
+      kb.tick(20)
+      expect(out.log.count { |e| e[0] == :on }).to eq(1) # learned: one note
+    end
+
+    # Konsole 23.08 on KDE (ux-1 round 3 item 9): held keys retriggered in
+    # every mode.  Each OS timing (KDE's default, X11's, GNOME's, a vim
+    # user's short delay, macOS) in each mode: one note per hold once the
+    # delay is known (at most one extra on the very first hold), and
+    # quick taps still strike.
+    {
+      kde: [0.6, 0.04], x11: [0.66, 0.04], gnome: [0.5, 0.033], short: [0.25, 0.033], mac: [0.375, 0.03], slow_rate: [0.6, 0.07],
+    }.each do |name, (delay, interval)|
+      %i[tap hold legato].each do |mode|
+        it "never retriggers a held key in :#{mode} with #{name} repeat timing (#{(delay * 1000).round} ms, #{(1 / interval).round}/s)" do
+          kb.off_mode = mode
+          ons = ->(t0, t1) { out.log.count { |e| e[0] == :on && e[4] >= t0 && e[4] < t1 } }
+          hold('z', 0.0, 2.0, delay: delay, interval: interval)
+          kb.tick(4.0)
+          expect(ons.(0, 3)).to be <= 2
+          # (batched reads: two repeats at the same instant)
+          press('z', 10.0)
+          r = 10.0 + delay
+          while r < 12.0
+            press('z', r)
+            press('z', r + 1e-5) if (r * 100).round.even?
+            kb.tick(r)
+            r += interval
+          end
+          kb.tick(14.0)
+          expect(ons.(10, 13)).to eq(1)
+          # Quick taps of one key (6 per second) are notes
+          6.times { |i| press('z', 20.0 + i / 6.0); kb.tick(20.0 + i / 6.0 + 0.1) }
+          kb.tick(30)
+          expect(ons.(20, 22)).to eq(6)
+        end
+      end
+    end
+
+    it 'walks every per-key (state, event) pair of the hold tracker' do
+      tr = MB::Sound::UI::Keyboard::HoldTracker
+      expect(tr::TRANSITIONS.keys.map(&:first).uniq.sort).to eq(tr::STATES.sort)
+      t = tr.new
+      expect(t.press(:a, 0.0)).to eq(:new)
+      expect(t.state(:a, 0.0)).to eq(:pressed)
+      expect(t.press(:a, 0.05)).to eq(:repeat) # short gap
+      expect(t.state(:a, 0.05)).to eq(:repeating)
+      expect(t.press(:a, 0.09)).to eq(:repeat)
+      expect(t.press(:a, 0.25)).to eq(:new) # its record ran out: a new press
+      expect(t.press(:a, 0.25 + tr::DELAY)).to eq(:repeat) # about the delay
+      expect(t.learned?).to eq(true)
+      expect(t.press(:b, 5.0)).to eq(:new)
+      expect(t.press(:b, 5.2)).to eq(:strike)
+      expect(t.press(:b, 5.2, repeat: true)).to eq(:repeat) # reported (kitty)
+      expect(t.press(:b, 5.3)).to eq(:strike) # a gap that isn't a repeat ends the repeating
+      expect(t.state(:c, 0)).to eq(:idle)
+      expect(t.press(:c, 6.0, repeat: true)).to eq(:repeat)
     end
 
     it 'holds a chord as long as its last key repeats (the OS repeats only that one)' do
@@ -276,10 +335,20 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
       expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  release')
-      expect(lines[1]).to eq("#{' ' * 14}q2w3e r5t6y7u i9o0p [=] \\")
-      expect(lines[3]).to start_with('C3D E F G A B C4D E F G A B C5D E F G A')
-      expect(lines[4]).to eq('zsxdc vgbhnjm ,l.;/')
-      expect(lines[5]).to eq('played C3 E4')
+      # Scaled (3 columns per white key at 60 wide, 5 rows): letters in the
+      # keys, black keys' on their lowest row, C names above the white ones
+      expect(lines[3]).to eq(' s  d     g  h  j     l2 ;3    5  6  7     9  0     =')
+      expect(lines[4]).to eq('C3                   C4                   C5')
+      expect(lines[5]).to eq('z  x  c  v  b  n  m  ,q .w /e r  t  y  u  i  o  p  [  ]  \\')
+      expect(lines[6]).to eq('played C3 E4')
+      # Held keys fill from the bottom by velocity (96 of 127: 4 of 5 rows)
+      armed = "38;2;#{MB::Sound::UI::Themes.rgb(:armed).join(';')}"
+      colored = grid.lines(:truecolor).map { |l| l.include?(armed) }
+      expect(colored[1..5]).to eq([false, true, true, true, true])
+      # A narrow pane falls back to the compact strip
+      small = MB::Sound::Plot::Text::Cells.new(36, 8)
+      pane.draw(MB::Sound::UI::Canvas.new(small, 0, 0, 36, 8), nil, {})
+      expect(small.to_text(:none).lines.map(&:rstrip)[4]).to eq('zsxdc vgbhnjm ,l.;/')
 
       kb.entry = :step
       %w[z x].each_with_index { |k, i| press(k, 1.0 + i); press(k, 1.0 + i, type: :release) }
@@ -287,6 +356,53 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       lines = grid.to_text(:none).lines.map(&:rstrip)
       expect(lines[5]).to eq('len n8  steps 2  0.25 whole notes')
       expect(lines[6]).to eq('seq(C3, D3).n8')
+    end
+
+    it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do
+      kb.releases = true
+      %w[z c b].each { |k| press(k, 0.0) } # C3 E3 G3
+      grid = MB::Sound::Plot::Text::Cells.new(100, 36)
+      c = MB::Sound::UI::Canvas.new(grid, 0, 0, 100, 36)
+      pane = MB::Sound::UI::Panes::Keyboard.new(kb)
+      state = {}
+      snap = ui_fake_snapshot
+      pane.draw(c, snap, state)
+      lines = grid.to_text(:none).lines.map(&:rstrip)
+      parts = MB::Sound::UI::Sections.allocate(pane.sections(false), 36)
+      expect(parts.keys).to eq(%i[header piano chord played roll armed])
+      expect(parts[:piano]).to eq(14)
+      expect(lines.join("\n")).to include('held C3 E3 G3  C', 'last 4 s', 'armed lead', 'Enter: capture what you played into :lead')
+      roll = lines.index { |l| l.start_with?('last 4 s') }
+      expect(lines[roll + 1, 3].map { |l| l[0, 3] }).to eq(%w[G3 E3 C3])
+      # At its usual 8 rows only the header, piano, and played lines
+      expect(MB::Sound::UI::Sections.allocate(pane.sections(false), 8)).to eq(header: 1, piano: 5, played: 2)
+    end
+  end
+
+  describe MB::Sound::UI::Sections do
+
+    it 'gives sections their preferred rows in priority order, then grows them, never past the height' do
+      sec = MB::Sound::UI::Sections::Section
+      secs = [sec.new(name: :a, min: 1, priority: 0), sec.new(name: :b, min: 2, pref: 3, max: 6, priority: 1), sec.new(name: :c, min: 4, pref: 4, max: 9, priority: 2)]
+      expect(described_class.allocate(secs, 3)).to eq(a: 1, b: 2)
+      expect(described_class.allocate(secs, 8)).to eq(a: 1, b: 3, c: 4)
+      expect(described_class.allocate(secs, 30)).to eq(a: 1, b: 6, c: 9)
+      100.times do |h|
+        got = described_class.allocate(secs, h)
+        expect(got.values.sum).to be <= h
+        got.each { |n, r| s = secs.find { |x| x.name == n }; expect(r).to be_between(s.min, s.max) }
+      end
+    end
+  end
+
+  describe MB::Sound::UI::ChordName do
+    it 'names chords from held notes, inversions with their bass' do
+      expect(described_class.of([60, 64, 67])).to eq('C')
+      expect(described_class.of([57, 60, 64, 67])).to eq('Am7')
+      expect(described_class.of([64, 67, 72])).to eq('C/E')
+      expect(described_class.of([55, 62])).to eq('G5')
+      expect(described_class.of([60])).to eq('C')
+      expect(described_class.of([60, 61])).to be_nil
     end
   end
 end

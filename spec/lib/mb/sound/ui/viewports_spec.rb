@@ -33,7 +33,7 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect(r[:transport]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 0, 120, 1))
       expect(r[:tracks]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 1, 28, 39))
       # 120 - 28 - 2 gaps = 90 shared 2:1
-      expect(r[:repl]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 1, 60, 31))
+      expect(r[:repl]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 1, 60, 30)) # a rule row below it
       expect(r[:journal]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 32, 60, 8))
       expect(r[:scope]).to eq(MB::Sound::UI::Viewports::Rect.new(90, 2, 30, 38))
       expect(r).not_to have_key(:meters)
@@ -41,6 +41,13 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect(strip.tabs).to eq(%i[meters scope spectrum])
       expect(strip.active).to eq(1)
       expect_tiling(studio, 120, 40)
+    end
+
+    it 'shows every built-in pane in the :wall layout at 200x60 (ux-1 item 13)' do
+      rects = MB::Sound::UI.tile_layouts[:wall].rects(200, 59)
+      expect(rects.keys).to include(:repl, *(MB::Sound::UI.panes.keys - MB::Sound::UI::ON_DEMAND_PANES.keys - MB::Sound::UI::SESSION_PANES))
+      rects.each_value { |r| expect(r.w * r.h).to be > 0 }
+      expect(rects[:repl].w).to be >= 90
     end
 
     it 'shares by largest remainder, ties to the earlier child' do

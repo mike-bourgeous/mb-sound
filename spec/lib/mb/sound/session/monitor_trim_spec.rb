@@ -17,7 +17,8 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
         written << data.map(&:dup)
         super
       end
-      def channel(c) = written.map { |b| b[c] }.reduce(:concatenate)
+      # (one concatenate: pairwise ones over thousands of buffers were quadratic)
+      def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |b| b[c] })
     }
   }
 
@@ -113,15 +114,15 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     expect(MB::Sound::Take::FOREGROUND).to include('monitor_gain', 'monitor')
   end
 
-  it 'reaches foreground play only on the live output' do
+  it 'reaches foreground play (which plays through the live Session)' do
     MB::Sound::Session.monitor_gain = 6.db
-    given = out_class.new(channels: 2, sleep: false, buffer_size: 800)
-    MB::Sound.play(100.hz.sine.at(-20.db).until(0.1), output: given, plot: false, quiet: true)
-    expect(peak(given.channel(0))).to be_within(0.05).of(-20 + MB::Sound.master_gain.to_db)
-
-    live = out_class.new(channels: 2, sleep: false, buffer_size: 800)
-    allow(MB::Sound).to receive(:output).and_return(live)
+    live = out_class.new(channels: 2, buffer_size: 800, sleep: :virtual) # a virtual clock: unpaced, the render thread wrote (and this kept) GBs while play waited
+    MB::Sound.use_output(live)
     MB::Sound.play(100.hz.sine.at(-20.db).until(0.1), plot: false, quiet: true)
     expect(peak(live.channel(0))).to be_within(0.05).of(-14 + MB::Sound.master_gain.to_db)
+  ensure
+    MB::Sound::Session.default.close
+    MB::Sound.use_output(nil)
+    MB::Sound.rewind
   end
 end

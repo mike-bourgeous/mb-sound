@@ -4,196 +4,369 @@ module MB
   module Sound
     module UI
       module Input
-        # Routes input events by mode, so one stream of Actions comes from
-        # keys, the palette, and MIDI alike.
+        # Routes input events by state, so one stream of Actions comes from
+        # keys, the palette, and MIDI alike.  The Router is an explicit
+        # state machine: its states (STATES), the classes of event it tells
+        # apart (EVENTS), and what each (state, event) pair does (TABLE,
+        # every pair declared; #table prints it) are data, so the `?`
+        # overlay and help can show them and specs can walk every pair.
         #
-        # - :repl: every key goes to the REPL (the host's #repl_key), except
-        #   the NAV key (Ctrl-], always) and, when #nav_esc is set, a lone
-        #   Escape: held for #nav_esc seconds, it enters :nav if nothing
-        #   follows, else goes to the REPL with what followed (Alt-keys,
-        #   vi mode).  Pastes go to the REPL whole.
-        # - :nav: keys go through NAV (numbers pick panes, z zooms, s/v
-        #   split, arrows resize, u and Ctrl-R undo and redo, : the palette,
-        #   / search), then the extra keymaps; Ctrl-], i, Enter, or Esc go
-        #   back to :repl.
+        # States:
+        # - :repl: keys go to the REPL (the host's #repl_key), except the
+        #   NAV key (Ctrl-], always), the REPL keymap (#repl_keys: direct
+        #   bindings like Alt-PgUp, `ui.bind`), and prefix chords (Ctrl-W
+        #   then a window key; with #nav_esc, a lone held Escape).
+        # - :play (instead of :repl on a screen without a console, a
+        #   script's --ui screen): keys go to the host's #play_key.
+        # - :nav: keys go through the focused pane's keymap (#pane_keymap),
+        #   then NAV, then the extra keymaps; Ctrl-] goes back to where NAV
+        #   was entered from (:repl, :grab, :line, :play).
         # - :line (the palette and search prompts): keys edit a one-line
         #   input (LineInput); Enter submits, Esc cancels.
         # - :grab (a pane that takes the keyboard, like the virtual piano):
         #   every key event, releases and repeats included, goes to the
-        #   host's #grab_key; Ctrl-] goes back to :repl.  Pastes are
-        #   dropped.
+        #   host's #grab_key, except Ctrl-], F2, Ctrl-C, Ctrl-Z.
+        # - :overlay (the `?` key help over NAV): Esc, ?, and Ctrl-] close
+        #   it; any other key closes it and acts as in the state below.
+        # - :pending: a prefix key waits for the next key (Prefix: Ctrl-W
+        #   for window keys, a held Escape for NAV); #origin is the state it
+        #   came from, which #mode reports.
         #
-        # Outside :grab, key releases are dropped and repeats act as presses
+        # Outside :grab, key releases are ignored and repeats act as presses
         # (terminals report them only while a grab asks for them, but a
         # release can arrive just after the grab ends).
         #
-        # The host receives #act(Action) for everything else.
+        # The host receives #act(Action) for everything else, among them
+        # :interrupt (Ctrl-C), :hide (Ctrl-Z), :keys (F2), :window (a
+        # window-prefix action), :refused (a key a state can't take, with
+        # why: shown, never silently dropped), :unbound (a NAV key that
+        # isn't one), and :event (mouse, focus, replies).
         class Router
           # The NAV key: Ctrl-] (0x1D), distinct in every terminal (ssh,
           # tmux) and unused by Reline.
           NAV_KEY = Key.of(']', :ctrl)
 
+          # Keys every state treats alike (see TABLE).
+          KEYS_KEY = Key.of(:f2)
+          INTERRUPT_KEY = Key.of('c', :ctrl)
+          SUSPEND_KEY = Key.of('z', :ctrl)
+
           NAV = Keymap.new :nav do
-            on '1'..'9', :focus_index
-            on :tab, :focus_next
-            on [:tab, :shift], :focus_prev
-            on 'h', :focus_dir, :left
-            on 'j', :focus_dir, :down
-            on 'k', :focus_dir, :up
-            on 'l', :focus_dir, :right
-            on 'z', :zoom
-            on 's', :split, :rows
-            on 'v', :split, :cols
-            on 'x', :close
-            on '=', :equalize
-            on 'u', :undo
-            on ['r', :ctrl], :redo
-            on ']', :tab, 1
-            on '[', :tab, -1
+            group 'Panes'
+            on '1'..'9', :focus_index, help: 'pick a pane by its number'
+            on :tab, :focus_next, help: 'next, previous, by direction'
+            on [:tab, :shift], :focus_prev, help: 'next, previous, by direction'
+            on 'h', :focus_dir, :left, help: 'next, previous, by direction'
+            on 'j', :focus_dir, :down, help: 'next, previous, by direction'
+            on 'k', :focus_dir, :up, help: 'next, previous, by direction'
+            on 'l', :focus_dir, :right, help: 'next, previous, by direction'
+            on 'z', :zoom, help: 'zoom (again: back)'
+            on 's', :split, :rows, help: 'split below, beside'
+            on 'v', :split, :cols, help: 'split below, beside'
+            on 'x', :close, help: 'close (the REPL stays)'
+            on '=', :equalize, help: 'even out sizes'
             %i[left right up down].each do |dir|
-              on dir, :resize, dir, 1
-              on [dir, :shift], :resize, dir, 5
+              on dir, :resize, dir, 1, help: 'resize by 1 (Shift: 5)', label: 'arrows'
+              on [dir, :shift], :resize, dir, 5, help: 'resize by 1 (Shift: 5)', label: 'arrows'
             end
-            on :page_up, :scroll, :page_up
-            on :page_down, :scroll, :page_down
-            on ['b', :ctrl], :scroll, :page_up
-            on ['f', :ctrl], :scroll, :page_down
-            on 'g', :scroll, :top
-            on 'G', :scroll, :bottom
-            on '/', :search
-            on 'n', :search_next, 1
-            on 'N', :search_next, -1
-            on 'y', :copy
-            on ':', :palette
-            on 'i', :mode, :repl
-            on :escape, :mode, :repl
-            on :enter, :mode, :repl
-            on ['l', :ctrl], :redraw
+            on '[', :tab, -1, help: 'previous, next tab'
+            on ']', :tab, 1, help: 'previous, next tab'
+            on 'u', :undo, help: 'undo, redo'
+            on ['r', :ctrl], :redo, help: 'undo, redo'
+            group 'Console'
+            on :page_up, :scroll, :page_up, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
+            on :page_down, :scroll, :page_down, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
+            on ['b', :ctrl], :scroll, :page_up, help: 'scroll the REPL (also Ctrl-B Ctrl-F)', label: ''
+            on ['f', :ctrl], :scroll, :page_down, help: 'scroll the REPL (also Ctrl-B Ctrl-F)', label: ''
+            on 'g', :scroll, :top, help: 'oldest line, live'
+            on 'G', :scroll, :bottom, help: 'oldest line, live'
+            on '/', :search, help: 'search back, next, previous'
+            on 'n', :search_next, 1, help: 'search back, next, previous'
+            on 'N', :search_next, -1, help: 'search back, next, previous'
+            on 'y', :copy, help: 'copy the match or the view (OSC 52)'
+            on ':', :palette, help: 'run a line of Ruby (show :knobs, go :drop)'
+            on ['l', :ctrl], :redraw, help: 'redraw'
+            group 'Modes'
+            on 'i', :mode, :repl, help: 'back to the REPL'
+            on :escape, :mode, :repl, help: 'back to the REPL'
+            on :enter, :mode, :repl, help: 'back to the REPL'
           end
 
-          # Keys that act in every mode (none by default; e.g.
+          # Window keys after the Ctrl-W prefix (vim's window commands).
+          WINDOW = Keymap.new :window do
+            group 'Ctrl-W then'
+            %w[h j k l].zip(%i[left down up right]).each do |key, dir|
+              on key, :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)'
+              on [key, :ctrl], :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)', label: ''
+              on dir, :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)', label: ''
+            end
+            on 'w', :focus_next, help: 'next pane, previous (W), last focused (p)'
+            on ['w', :ctrl], :focus_next, help: 'next pane, previous (W), last focused (p)', label: 'Ctrl-W'
+            on 'W', :focus_prev, help: 'next pane, previous (W), last focused (p)'
+            on 'p', :focus_last, help: 'next pane, previous (W), last focused (p)'
+            on 's', :split, :rows, help: 'split below, beside'
+            on 'v', :split, :cols, help: 'split below, beside'
+            on 'o', :zoom, help: 'zoom (again: back)'
+            on 'c', :close, help: 'close the pane'
+            on '=', :equalize, help: 'even out sizes'
+          end
+
+          # Keys that act in every state but :grab (none by default; e.g.
           # `Router::GLOBAL.on ['\\', :ctrl], :panic`).
           GLOBAL = Keymap.new :global
 
-          attr_reader :mode
+          # A key that waits for the next one: +key+ starts it, +keymap+
+          # maps the next key (nil: none), +timeout+ seconds (nil: waits
+          # forever) after which +on_timeout+ (an Action) happens, and
+          # +pass_through+: a key the keymap doesn't bind goes to the REPL
+          # after the prefix key (so Ctrl-W x deletes a word and types x).
+          Prefix = Data.define(:name, :key, :keymap, :timeout, :on_timeout, :pass_through)
+
+          # The states (see the class comment).
+          STATES = %i[repl play nav line grab overlay pending].freeze
+
+          # What the Router tells apart in an event (#classify).
+          EVENTS = %i[nav_key keys_key interrupt suspend prefix global key release paste tick other].freeze
+
+          # What each (state, event) pair does: [handler, what it does].
+          # Every pair is declared (a spec checks), so no key falls through
+          # unhandled; :ignore and :refuse say why.
+          TABLE = {
+            # repl
+            [:repl, :nav_key] => [:enter_nav, 'to NAV (Ctrl-] again comes back)'],
+            [:repl, :keys_key] => [:act_keys, 'to KEYS (the keyboard pane)'],
+            [:repl, :interrupt] => [:act_interrupt, 'interrupt the REPL (SIGINT)'],
+            [:repl, :suspend] => [:act_hide, 'hide the tiles (Ctrl-Z or `ui` brings them back)'],
+            [:repl, :prefix] => [:start_prefix, 'wait for the next key (Ctrl-W: a window key; held Esc: NAV)'],
+            [:repl, :global] => [:act_global, 'the global binding'],
+            [:repl, :key] => [:repl_key, 'a REPL keymap binding (Alt-PgUp, ui.bind), else to the REPL'],
+            [:repl, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:repl, :paste] => [:repl_paste, 'to the REPL whole'],
+            [:repl, :tick] => [:ignore, 'nothing waits'],
+            [:repl, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # play (a screen without a console)
+            [:play, :nav_key] => [:enter_nav, 'to NAV (Ctrl-] again comes back)'],
+            [:play, :keys_key] => [:act_keys, 'to KEYS'],
+            [:play, :interrupt] => [:act_interrupt, 'interrupt (the script decides)'],
+            [:play, :suspend] => [:act_hide, 'hide (only with a console; else refused)'],
+            [:play, :prefix] => [:start_prefix, 'wait for the next key'],
+            [:play, :global] => [:act_global, 'the global binding'],
+            [:play, :key] => [:play_key, "the screen's own keys (repeats too)"],
+            [:play, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:play, :paste] => [:refuse, 'refused: nowhere to paste without a console'],
+            [:play, :tick] => [:ignore, 'nothing waits'],
+            [:play, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # nav
+            [:nav, :nav_key] => [:leave_nav, 'back to where NAV came from'],
+            [:nav, :keys_key] => [:act_keys, 'to KEYS'],
+            [:nav, :interrupt] => [:act_interrupt, 'interrupt the REPL'],
+            [:nav, :suspend] => [:act_hide, 'hide the tiles'],
+            [:nav, :prefix] => [:start_prefix, 'wait for a window key (Ctrl-W)'],
+            [:nav, :global] => [:act_global, 'the global binding'],
+            [:nav, :key] => [:nav_key, "the focused pane's keys, then NAV's (unbound: says so)"],
+            [:nav, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:nav, :paste] => [:repl_paste, 'to the REPL whole'],
+            [:nav, :tick] => [:ignore, 'nothing waits'],
+            [:nav, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # line (palette, search)
+            [:line, :nav_key] => [:enter_nav, 'to NAV, the line kept (Ctrl-] again restores it)'],
+            [:line, :keys_key] => [:line_then_keys, 'cancel the line, to KEYS'],
+            [:line, :interrupt] => [:line_cancel, 'cancel the line'],
+            [:line, :suspend] => [:act_hide, 'hide the tiles (the line kept)'],
+            [:line, :prefix] => [:refuse, 'no prefixes in a line'],
+            [:line, :global] => [:act_global, 'the global binding'],
+            [:line, :key] => [:line_key, 'edit the line (Enter runs, Esc cancels)'],
+            [:line, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:line, :paste] => [:line_paste, 'into the line (newlines dropped)'],
+            [:line, :tick] => [:ignore, 'nothing waits'],
+            [:line, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # grab (KEYS)
+            [:grab, :nav_key] => [:enter_nav, 'to NAV, notes off (Ctrl-] again: back to KEYS)'],
+            [:grab, :keys_key] => [:to_base, 'back to the REPL, notes off'],
+            [:grab, :interrupt] => [:to_base, 'all notes off, back to the REPL'],
+            [:grab, :suspend] => [:act_hide, 'hide the tiles, notes off'],
+            [:grab, :prefix] => [:refuse, 'no prefixes in a grab (the grab takes every key)'],
+            [:grab, :global] => [:grab_key, 'to the grab (it takes every key)'],
+            [:grab, :key] => [:grab_key, 'to the grab (presses and repeats)'],
+            [:grab, :release] => [:grab_key, 'to the grab (releases end notes)'],
+            [:grab, :paste] => [:refuse, 'refused: the keyboard plays keys, not text'],
+            [:grab, :tick] => [:ignore, 'nothing waits (the grab keeps its own time)'],
+            [:grab, :other] => [:act_event, 'mouse, focus (focus out: notes off), replies'],
+            # overlay (the ? key help)
+            [:overlay, :nav_key] => [:overlay_to_nav, 'close it, in NAV'],
+            [:overlay, :keys_key] => [:overlay_then, 'close it, then F2 as below it'],
+            [:overlay, :interrupt] => [:overlay_then, 'close it, then Ctrl-C as below it'],
+            [:overlay, :suspend] => [:overlay_then, 'close it, then hide'],
+            [:overlay, :prefix] => [:overlay_then, 'close it, then the prefix as below it'],
+            [:overlay, :global] => [:overlay_then, 'close it, then the global binding'],
+            [:overlay, :key] => [:overlay_key, 'Esc or ? close it; other keys close it and act as below it'],
+            [:overlay, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:overlay, :paste] => [:overlay_then, 'close it, then paste as below it'],
+            [:overlay, :tick] => [:ignore, 'nothing waits'],
+            [:overlay, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # pending (a prefix waits)
+            [:pending, :nav_key] => [:prefix_then, 'drop the prefix, then Ctrl-] as before it'],
+            [:pending, :keys_key] => [:prefix_then, 'drop the prefix, then F2 as before it'],
+            [:pending, :interrupt] => [:prefix_then, 'drop the prefix, then Ctrl-C as before it'],
+            [:pending, :suspend] => [:prefix_then, 'drop the prefix, then hide'],
+            [:pending, :prefix] => [:prefix_key, 'the prefix keymap, else pass-through (Ctrl-W Ctrl-W: next pane)'],
+            [:pending, :global] => [:prefix_key, 'the prefix keymap, else pass-through'],
+            [:pending, :key] => [:prefix_key, 'the prefix keymap; else to the REPL after the prefix key (pass-through) or refused'],
+            [:pending, :release] => [:ignore, 'ignored (the prefix key let go)'],
+            [:pending, :paste] => [:prefix_then, 'the prefix key to the REPL (pass-through), then the paste'],
+            [:pending, :tick] => [:prefix_tick, 'after the timeout: the timeout action (held Esc: NAV)'],
+            [:pending, :other] => [:act_event, 'mouse, focus, replies (the prefix keeps waiting)'],
+          }.freeze
+
+          # The table as text lines ("repl  Ctrl-] (nav_key)  to NAV ..."),
+          # for help and the overlay.
+          def self.table(states = STATES)
+            states.flat_map do |s|
+              ["#{s}:", *EVENTS.map { |e| format('  %-10s %s', e, TABLE.fetch([s, e])[1]) }]
+            end
+          end
+
+          # The state (see STATES).
+          attr_reader :state
 
           # Seconds a lone Escape waits before entering NAV (nil: Escape
           # always goes to the REPL; 0.25-0.4 is a comfortable range).
           attr_accessor :nav_esc
 
-          # The palette or search prompt while in :line mode.
+          # True (default) when Ctrl-W is the window prefix in :repl and
+          # :nav (vim's Ctrl-W h/j/k/l, w, p); false leaves Ctrl-W to the
+          # REPL (Reline's delete word).
+          attr_accessor :window_prefix
+
+          # The palette or search prompt while in :line (or in :nav entered
+          # from :line, kept for coming back).
           attr_reader :line
+
+          # The prefix waiting in :pending (a Prefix), its origin state, and
+          # the time it started.
+          attr_reader :prefix, :origin, :since
+
+          # Where NAV goes back to (Ctrl-] in NAV).
+          attr_reader :nav_return
+
+          # Direct bindings in :repl (and :play), consulted before keys go
+          # to the REPL (Alt-PgUp scrolls, `ui.bind`).
+          attr_reader :repl_keys
 
           # +host+ responds to #repl_key(Key), #repl_paste(String),
           # #act(Action), #line_done(kind, text or nil), #mode_changed(mode),
-          # and (for :grab) #grab_key(Key).
-          def initialize(host, nav: NAV, nav_esc: nil)
+          # #grab_key(Key) (for :grab), #play_key(Key) (without a console),
+          # and optionally #pane_keymap (the focused pane's Keymap, or nil).
+          # +console+ false: no REPL (the base state is :play).
+          def initialize(host, nav: NAV, nav_esc: nil, console: true, window_prefix: true, repl_keys: nil)
             @host = host
             @nav = nav
             @nav_esc = nav_esc
-            @mode = :repl
-            @held = nil
+            @window_prefix = window_prefix
+            @console = console
+            @base = console ? :repl : :play
+            @state = @base
+            @nav_return = @base
+            @overlay_return = :nav
+            @line = nil
+            @line_return = @base
+            @prefix = nil
+            @origin = nil
+            @since = nil
             @extra = []
+            @first = []
+            @repl_keys = repl_keys || Keymap.new(:repl)
             @midi = {}
             @last_cc = {}
           end
 
-          # Adds a keymap consulted in :nav after NAV (pane keymaps).
-          def add_keymap(map)
-            @extra << map unless @extra.include?(map)
+          # The mode the host draws: the state, or a waiting prefix's origin.
+          def mode = @state == :pending ? @origin : @state
+
+          # True without a console (a script's screen).
+          def console? = @console
+
+          # Adds a keymap consulted in :nav after NAV (+first+: before NAV,
+          # after the focused pane's; users' bindings).
+          def add_keymap(map, first: false)
+            list = first ? @first : @extra
+            list << map unless list.include?(map)
             self
           end
 
-          # Changes mode (:repl, :nav, :grab).
+          # Changes the state (:repl, :nav, :grab, :overlay, :line with
+          # #open_line; :repl means the base state on a screen without a
+          # console).  Entering :nav remembers where from (Ctrl-] goes back).
           def mode=(m)
-            return if m == @mode
-            @mode = m
-            @line = nil unless m == :line
-            @host.mode_changed(m)
+            m = @base if m == :repl || m == :play
+            raise ArgumentError, "Router states to set are #{(STATES - %i[pending play]).map(&:inspect).join(', ')} (got #{m.inspect})" unless STATES.include?(m) && m != :pending
+            drop_prefix if @state == :pending
+            return if m == @state
+            go(m)
           end
 
           # Opens a one-line prompt (+kind+ :palette or :search).
           def open_line(kind, prompt, history: [])
+            drop_prefix if @state == :pending
             @line = LineInput.new(kind, prompt, history)
-            @return_mode = @mode == :line ? @return_mode : @mode
-            self.mode = :line
+            from = @state == :overlay ? @overlay_return : @state
+            @line_return = from == :line ? @line_return : from
+            go(:line, force: true)
           end
 
-          # Seconds until #tick has something to do (a held Escape), or nil.
+          # The prefixes active in +state+ (a held Esc in :repl with
+          # #nav_esc, Ctrl-W in :repl, :play, and :nav with #window_prefix).
+          def prefixes(state = @state)
+            out = []
+            out << esc_prefix if state == :repl && @nav_esc
+            out << WINDOW_PREFIX if @window_prefix && %i[repl play nav].include?(state)
+            out
+          end
+
+          # The Ctrl-W window prefix (pass-through to the REPL).
+          WINDOW_PREFIX = Prefix.new(name: :window, key: Key.of('w', :ctrl), keymap: WINDOW, timeout: nil, on_timeout: nil, pass_through: true)
+
+          # Seconds until #tick has something to do (a prefix with a
+          # timeout), or nil.
           def wait(now)
-            @held && [@held_at + @nav_esc - now, 0].max
+            return nil unless @state == :pending && @prefix.timeout
+            [@since + @prefix.timeout - now, 0].max
           end
 
-          # Acts on a held Escape whose time ran out.
+          # Acts on a prefix whose time ran out.
           def tick(now)
-            return unless @held && now - @held_at >= @nav_esc
-            @held = nil
-            self.mode = :nav
+            dispatch(:tick, nil, now)
+          end
+
+          # The event class of +e+ in the current state (see EVENTS).
+          def classify(e, state = @state)
+            case e
+            when Paste then :paste
+            when Key
+              return :release if e.release?
+              chord = e.chord
+              return :nav_key if chord == NAV_KEY.chord
+              return :keys_key if chord == KEYS_KEY.chord
+              return :interrupt if chord == INTERRUPT_KEY.chord
+              return :suspend if chord == SUSPEND_KEY.chord
+              return :prefix if state == :pending ? prefix_chord?(e) : prefixes(state).any? { |p| p.key.chord == chord }
+              return :global if GLOBAL.bound?(e)
+              :key
+            when nil then :tick
+            else :other
+            end
           end
 
           # Routes one event (Key, Paste, Mouse, Focus, Reply) at time +now+.
           def event(e, now = Process.clock_gettime(Process::CLOCK_MONOTONIC))
-            case e
-            when Paste then paste(e.text)
-            when Key then key(e, now)
-            else @host.act(Action.of(:event, e))
-            end
+            dispatch(classify(e), e, now)
           end
 
-          def key(k, now = Process.clock_gettime(Process::CLOCK_MONOTONIC))
-            if @mode == :grab
-              return @host.grab_key(k) unless k.chord == NAV_KEY.chord
-              return k.press? ? (self.mode = :repl) : nil
-            end
-            return if k.release?
+          alias key event
 
-            if @held
-              # Something followed the Escape in time: both go to the REPL
-              esc = @held
-              @held = nil
-              @host.repl_key(esc)
-              return @host.repl_key(k) unless k.chord == NAV_KEY.chord
-            end
-
-            if k.chord == NAV_KEY.chord
-              return (self.mode = @mode == :nav ? :repl : :nav) unless @mode == :line
-              return line_cancel
-            end
-            if (a = GLOBAL[k])
-              return @host.act(a)
-            end
-
-            case @mode
-            when :repl
-              if k.key == :escape && k.mods.empty? && @nav_esc
-                @held = k
-                @held_at = now
-                return
-              end
-              @host.repl_key(k)
-            when :nav
-              a = @nav[k] || @extra.lazy.map { |m| m[k] }.find(&:itself)
-              return @host.act(a) if a
-              @host.act(Action.of(:unbound, k))
-            when :line
-              line_key(k)
-            end
-          end
-
-          # Text pasted: to the REPL, or into the prompt.
+          # Text pasted (as a Paste event).
           def paste(text)
-            return if @mode == :grab
-
-            if @mode == :line
-              @line.insert(text.delete("\r\n"))
-              @host.act(Action.of(:line_changed))
-            else
-              if @held
-                @host.repl_key(@held)
-                @held = nil
-              end
-              @host.repl_paste(text)
-            end
+            event(Paste.new(text: text))
           end
 
           # MIDI bindings: `map_midi(:note, 36, :zoom)`,
@@ -233,9 +406,187 @@ module MB
             a
           end
 
+          def inspect
+            "#<UI::Input::Router #{@state}#{@state == :pending ? " #{@prefix.name} from #{@origin}" : ''}>"
+          end
+
           private
 
-          def line_key(k)
+          # Runs the TABLE entry for (state, +event+).
+          def dispatch(event, e, now)
+            handler, = TABLE.fetch([@state, event])
+            send(handler, e, now, event)
+          end
+
+          # Moves to +to+, telling the host when the mode it draws changes.
+          def go(to, force: false)
+            from = mode
+            if to == :nav
+              src = @state == :overlay ? @overlay_return : @state
+              @nav_return = src == :line ? :line : base_of(src) unless src == :nav
+            end
+            @overlay_return = @state == :pending ? @origin : @state if to == :overlay && @state != :overlay
+            unless to == :line || (to == :nav && @nav_return == :line) || (to == :overlay && @overlay_return == :nav && @nav_return == :line)
+              drop_line
+            end
+            @state = to
+            @host.mode_changed(to) if force || to != from
+          end
+
+          # The state +s+ falls back to (the base for anything not grab).
+          def base_of(s) = s == :grab ? :grab : s == :line ? @line_return : %i[nav overlay pending].include?(s) ? @base : s
+
+          def drop_line
+            return unless @line
+            kind = @line.kind
+            @line = nil
+            @host.line_done(kind, nil)
+          end
+
+          def drop_prefix
+            return unless @state == :pending
+            @state = @origin
+            @prefix = @origin = @since = nil
+          end
+
+          def esc_prefix
+            Prefix.new(name: :esc_nav, key: Key.of(:escape), keymap: nil, timeout: @nav_esc, on_timeout: Action.of(:mode, :nav), pass_through: true)
+          end
+
+          def prefix_chord?(e)
+            @prefix.keymap&.bound?(e) || false
+          end
+
+          ### Handlers (e, now, event)
+
+          def ignore(*) = nil
+
+          def refuse(e, _now, event)
+            why = TABLE.fetch([@state, event])[1]
+            @host.act(Action.of(:refused, e.is_a?(Key) ? e.to_s : event.to_s, why))
+          end
+
+          def act_event(e, *) = @host.act(Action.of(:event, e))
+          def act_keys(*) = @host.act(Action.of(:keys))
+          def act_interrupt(*) = @host.act(Action.of(:interrupt))
+          def act_hide(*) = @host.act(Action.of(:hide))
+          def act_global(e, *) = @host.act(GLOBAL[e])
+
+          def enter_nav(*) = go(:nav)
+
+          def leave_nav(*)
+            to = @nav_return
+            to = @base if to == :line && @line.nil?
+            go(to)
+          end
+
+          def to_base(*) = go(@base)
+
+          def repl_key(e, *)
+            if (a = @repl_keys[e])
+              return @host.act(a)
+            end
+            @host.repl_key(e)
+          end
+
+          def play_key(e, *)
+            if (a = @repl_keys[e])
+              return @host.act(a)
+            end
+            @host.play_key(e)
+          end
+
+          def repl_paste(e, *) = @host.repl_paste(e.text)
+          def grab_key(e, *) = @host.grab_key(e)
+
+          def nav_key(e, *)
+            pane = @host.respond_to?(:pane_keymap) ? @host.pane_keymap : nil
+            if (pa = pane&.[](e))
+              return @host.act(Action.of(:pane_key, pa))
+            end
+            a = @first.lazy.map { |m| m[e] }.find(&:itself) || @nav[e] || @extra.lazy.map { |m| m[e] }.find(&:itself)
+            return @host.act(a) if a
+            @host.act(Action.of(:unbound, e))
+          end
+
+          def start_prefix(e, now, _event)
+            p = prefixes.find { |x| x.key.chord == e.chord }
+            @origin = @state
+            @prefix = p
+            @since = now
+            @state = :pending
+            @host.act(Action.of(:prefix, p.name)) if p.keymap
+          end
+
+          # A key after the prefix: its keymap's action, else pass-through
+          # (the prefix key and this key to the REPL) or refused.
+          def prefix_key(e, now, _event)
+            p = @prefix
+            origin = @origin
+            if (a = p.keymap&.[](e))
+              drop_prefix
+              @host.act(p.name == :window ? Action.of(:window, a.name, *a.args) : a)
+              return
+            end
+            drop_prefix
+            if p.pass_through && origin == :repl
+              @host.repl_key(p.key.bytes ? p.key : with_bytes(p.key))
+              # (the key after it doesn't start the same prefix again: Esc Esc goes to the REPL as two keys)
+              return @host.repl_key(e) if e.chord == p.key.chord
+              return dispatch(classify(e), e, now)
+            end
+            @host.act(Action.of(:unbound, Key.of(e.key, *e.mods, bytes: e.bytes, type: e.type), "#{Keymap.chord_name(p.key.chord)} then"))
+          end
+
+          # Leaves the prefix, then handles the event as the origin state
+          # would (a pass-through prefix sends its key to the REPL first for
+          # a paste).
+          def prefix_then(e, now, event)
+            p = @prefix
+            origin = @origin
+            drop_prefix
+            @host.repl_key(with_bytes(p.key)) if event == :paste && p.pass_through && origin == :repl
+            dispatch(classify(e), e, now)
+          end
+
+          def prefix_tick(_e, now, _event)
+            return unless @prefix.timeout && now - @since >= @prefix.timeout
+            a = @prefix.on_timeout
+            drop_prefix
+            if a && a.name == :mode
+              go(a.args[0] == :nav ? :nav : a.args[0])
+            elsif a
+              @host.act(a)
+            end
+          end
+
+          def overlay_to_nav(*)
+            go(:nav)
+          end
+
+          def overlay_key(e, now, event)
+            if e.key == :escape || e.key == '?'
+              return go(@overlay_return)
+            end
+            overlay_then(e, now, event)
+          end
+
+          def overlay_then(e, now, _event)
+            go(@overlay_return)
+            dispatch(classify(e), e, now)
+          end
+
+          def line_paste(e, *)
+            @line.insert(e.text.delete("\r\n"))
+            @host.act(Action.of(:line_changed))
+          end
+
+          def line_then_keys(*)
+            line_cancel
+            @host.act(Action.of(:keys))
+          end
+
+          def line_key(k, *)
             l = @line
             case k.key
             when :enter
@@ -243,11 +594,12 @@ module MB
               text = l.text
               l.remember
               @line = nil
-              self.mode = @return_mode || :repl
+              go(@line_return)
               @host.line_done(kind, text)
               return
             when :escape then return line_cancel
-            when :backspace then k.mods.include?(:alt) ? l.delete_word : l.backspace
+            when :backspace then k.mods.include?(:alt) || k.mods.include?(:ctrl) ? l.delete_word : l.backspace
+            when :delete then k.mods.include?(:ctrl) ? (k.mods.include?(:shift) ? l.kill_forward : l.delete_word_forward) : l.delete
             when :left then l.move(-1)
             when :right then l.move(1)
             when :home then l.move(-l.cursor)
@@ -263,19 +615,24 @@ module MB
                 when 'a' then l.move(-l.cursor)
                 when 'e' then l.move(l.text.length)
                 when 'u' then l.kill_back
-                when 'w' then l.delete_word
-                when 'c' then return line_cancel
+                when 'k' then l.kill_forward
+                when 'w', 'h' then l.delete_word
                 end
               end
             end
             @host.act(Action.of(:line_changed))
           end
 
-          def line_cancel
+          def line_cancel(*)
             kind = @line&.kind
             @line = nil
-            self.mode = @return_mode || :repl
+            go(@line_return)
             @host.line_done(kind, nil)
+          end
+
+          # +key+ with legacy bytes (a prefix Key made from a chord).
+          def with_bytes(key)
+            key.bytes ? key : Key.of(key.key, *key.mods, bytes: Input.legacy_bytes(key))
           end
         end
 
@@ -303,6 +660,10 @@ module MB
             @cursor -= 1
           end
 
+          def delete
+            @text.slice!(@cursor) if @cursor < @text.length
+          end
+
           def delete_word
             start = @text[0, @cursor].rstrip.rindex(/[\s.(:,]/)
             start = start ? start + 1 : 0
@@ -310,9 +671,19 @@ module MB
             @cursor = start
           end
 
+          def delete_word_forward
+            rest = @text[@cursor..]
+            n = rest[/\A[\s.(:,]*[^\s.(:,]*/].length
+            @text.slice!(@cursor, n)
+          end
+
           def kill_back
             @text.slice!(0, @cursor)
             @cursor = 0
+          end
+
+          def kill_forward
+            @text.slice!(@cursor..)
           end
 
           def move(n)

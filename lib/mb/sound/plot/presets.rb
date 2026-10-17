@@ -66,6 +66,23 @@ module MB
           }
         end
 
+        # [frequencies, dB] of +filter+'s response (Filter#response) at
+        # +points+ log-spaced frequencies from 20 Hz to Nyquist.
+        def response_db(filter, sample_rate, points = 256, floor: -120.0)
+          nyquist = sample_rate / 2.0
+          f = Numo::DFloat.logspace(Math.log10(20.0), Math.log10(nyquist * 0.999), points)
+          mag = Numo::DFloat.cast(filter.response(f * (2 * Math::PI / sample_rate)).abs)
+          db = 20 * Numo::NMath.log10(mag.clip(10**(floor / 20.0), nil))
+          [f, db]
+        end
+
+        # A chart of +node+'s picture at rest (GraphNode::Traversable#plot_preview:
+        # a filter's response, a shaper's curve), or nil if it has none.
+        def preview(node, title: nil)
+          b = ChartBuilder.new(title: title || node.to_s, x: nil, y: nil, legend: :auto, grid: true)
+          node.respond_to?(:plot_preview) && node.plot_preview(b) ? b.build : nil
+        end
+
         # [frequencies, dB] of +d+ (bins from 1).
         def spectrum_db(d, sample_rate, floor)
           n = d.length
@@ -154,6 +171,9 @@ module MB
 
         # See Presets.spectrum.
         def spectrum(data, **kwargs) = Presets.spectrum(data, **kwargs)
+
+        # See Presets.preview.
+        def preview(node, **kwargs) = Presets.preview(node, **kwargs)
 
         # See Presets.spectrogram.
         def spectrogram(data, **kwargs) = Presets.spectrogram(data, **kwargs)

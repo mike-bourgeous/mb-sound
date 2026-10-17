@@ -36,13 +36,16 @@ module MB
         Help::Now.new
       end
 
-      # Lessons: with a name, starts or resumes one (+restart: true+ from
-      # its first step); without, the lesson being taken (the list once it
-      # is done).  A
+      # Lessons: with a name, starts one at step 1, or resumes the run this
+      # console started in this Session (+restart: true+ starts over; +from:
+      # 4+ starts at step 4, running steps 1-3's code first so their state
+      # exists); without, the lesson being taken (the list once it is
+      # done).  Finished lessons are remembered across consoles (a check
+      # mark in the list), runs aren't: a new console starts at step 1.  A
       # lesson moves on when its step's check passes after a console line;
       # `lesson.run` types the step for you, `lesson.next`, `lesson.back`,
       # `lesson.hint`, `lesson.quit`.
-      def lesson(name = nil, restart: false)
+      def lesson(name = nil, restart: false, from: nil)
         if name
           l = Help::LESSONS.fetch(name.to_sym) {
             raise ArgumentError, "No lesson #{name.inspect} (#{Help::LESSONS.keys.map(&:inspect).join(', ')})"
@@ -50,7 +53,10 @@ module MB
           if (why = l.busy)
             return MB::Sound.live_error(RuntimeError.new(why))
           end
-          Help::LessonRunner.active = Help::LessonRunner.new(l, restart ? 0 : nil)
+          if from && !(from.is_a?(Integer) && from.between?(1, l.steps.length))
+            raise ArgumentError, "from: is a step number of lesson #{name.inspect} (1..#{l.steps.length})"
+          end
+          Help::LessonRunner.active = Help::LessonRunner.for(l, from: from, restart: restart)
         else
           runner = Help::LessonRunner.active
           Help::LessonRunner.active = runner = nil if runner&.done?

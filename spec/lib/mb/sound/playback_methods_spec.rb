@@ -8,48 +8,187 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#play' do
-    it 'can play a sound file' do
-      expect(Kernel).to receive(:sleep).at_least(10).times
-      expect_any_instance_of(MB::Sound::NullOutput).to receive(:write).at_least(10).times.and_call_original
-      expect($stderr).to receive(:puts).with(/Playing/)
+    # A NullOutput on a virtual clock (play's waiting consumes what the
+    # render thread writes) that keeps what it writes, except silent buffers
+    let(:out) {
+      Class.new(MB::Sound::NullOutput) {
+        def written = @written ||= []
+        def write(data)
+          written << data.map(&:dup) if data.any? { |c| c.abs.max > 0 }
+          super
+        end
+        def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |d| d[c] })
+      }.new(channels: 2, sleep: :virtual)
+    }
 
-      MB::Sound.play('sounds/synth0.flac', plot: false)
+    before(:each) { MB::Sound.use_output(out) }
+
+    after(:each) do
+      MB::Sound::Session.default.close
+      MB::Sound.use_output(nil)
+      MB::Sound.rewind
     end
 
-    pending 'can play a Tone'
-    pending 'can play a Numo::NArray'
-    pending 'can play an array of graph nodes for separate channels'
-    pending 'can play an array of other types of sounds for separate channels'
+    # Plays +sound+ quietly without plotting; returns the seconds it took.
+    def play_quietly(sound, **options)
+      t = MB::U.clock_now
+      expect(MB::Sound.play(sound, plot: false, quiet: true, **options)).to eq(nil)
+      expect(MB::Sound.players).not_to have_key(:play)
+      MB::U.clock_now - t
+    end
+
+    let(:arp) { MB::Sound::Sample['spec/test_data/arp_a7.flac'] }
+
+    {
+      'a graph that ends' => -> { 440.hz.sine.until(0.05) },
+      'a channel bundle' => -> { MB::Sound.stereo(220.hz.sine, 330.hz.sine).until(0.05) },
+      'a Numo::NArray' => -> { Numo::SFloat.zeros(2400) },
+      'an Array of numbers' => -> { [0.25] * 2400 },
+      'an Array of channels' => -> { [Numo::SFloat.ones(100) * 0.5, Numo::SFloat.zeros(100)] },
+      'a sound file' => -> { 'spec/test_data/arp_a7.flac' },
+      'a MIDI file' => -> { 'spec/test_data/c_major.mid' },
+      'a Sample' => -> { arp },
+      'Slices' => -> { arp.slices(4) },
+      'an Instrument' => -> { arp.to_instrument },
+      'a keymap of slices' => -> { arp.slices(4).keymap },
+      'a Clip' => -> { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n16 },
+      'a chop clip' => -> { arp.slices(4).chop(0, 1, 2, 3) },
+      'a grid' => -> { MB::Sound.grid(16, kick: 'x...', hat: '..x.') },
+      'a kit design' => -> { MB::Sound.kit { voice(:zap) { |h| h.fm(800, index: 3, decay: 0.05) } } },
+      'a Wavetable' => -> { MB::Sound::Wavetable[Numo::SFloat.linspace(-1, 1, 64)] },
+      'an Envelope' => -> { MB::Sound.adsr(0.001, 0.01, 0.5, 0.01, hold: 0.02) },
+    }.each do |what, sound|
+      it "plays #{what} until it ends" do
+        play_quietly(instance_exec(&sound))
+        expect(out.channel(0).abs.max).to be > 0.001 unless what.include?('NArray')
+      end
+    end
+
+    it 'keeps a stereo Sample in stereo' do
+      play_quietly(arp)
+      l, r = out.channel(0), out.channel(1)
+      expect((l - r).abs.max).to be > 0.01
+    end
+
+    it 'plays a sample once, then returns' do
+      expect(play_quietly(arp)).to be < 10
+      expect(out.channel(0).length).to be >= arp.length
+    end
 
     it 'applies the master bus gain like the session does' do
-      written = []
-      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
-      allow(out).to receive(:write) { |data| written << data.map(&:dup) }
+      play_quietly(1.constant.until(0.01))
+      expect(out.channel(0).max).to be_within(1e-6).of(-10.db)
 
-      MB::Sound.play(1.constant.until(0.01), output: out, quiet: true)
-      expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(-10.db)
-
-      written.clear
+      out.written.clear
       MB::Sound.master_gain(1)
-      MB::Sound.play(1.constant.until(0.01), output: out, quiet: true)
-      expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(1)
+      play_quietly(1.constant.until(0.01))
+      expect(out.channel(0).max).to be_within(1e-6).of(1)
     end
 
-    it 'tells how to stop node graphs, which may play forever' do
-      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
-      expect { MB::Sound.play(1.constant.until(0.01), output: out, plot: false, clear: false) }.to output(/Ctrl-C/).to_stderr
-      expect { MB::Sound.play(Numo::SFloat.zeros(10), output: out, plot: false, clear: false) }.not_to output(/Ctrl-C/).to_stderr
+    it 'scales by gain:' do
+      MB::Sound.master_gain(1)
+      play_quietly(1.constant.until(0.01), gain: 0.5)
+      expect(out.channel(0).max).to be_within(1e-6).of(0.5)
     end
 
-    it 'reuses the cached output by default' do
-      outputs = []
-      allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
+    it 'plays through the master chain' do
+      MB::Sound.master_gain(1)
+      MB::Sound.master(on: :now) { |mix| mix * 0.25 }
+      play_quietly(1.constant.until(0.01))
+      expect(out.channel(0).max).to be_within(1e-6).of(0.25)
+    end
 
-      MB::Sound.play(440.hz.sine.until(0.05), quiet: true)
-      MB::Sound.play(440.hz.sine.until(0.05), quiet: true)
+    it 'tells how to stop graphs that may play forever, and how a clip was played' do
+      expect { MB::Sound.play(1.constant.until(0.01), plot: false) }.to output(/Playing.*Ctrl-C/m).to_stderr
+      expect { MB::Sound.play(Numo::SFloat.zeros(10), plot: false) }.not_to output(/Ctrl-C/).to_stderr
+      expect { MB::Sound.play(MB::Sound.seq(MB::Sound::C4).n32, plot: false) }.to output(/soft saw/).to_stderr
+    end
 
-      expect(outputs[0]).to equal(outputs[1])
-      expect(outputs[0]).not_to be_closed
+    it 'stops on Ctrl-C' do
+      thread = Thread.new { MB::Sound.play(440.hz.sine, plot: false, quiet: true) }
+      deadline = MB::U.clock_now + 5
+      sleep 0.01 until MB::Sound.players.key?(:play) || MB::U.clock_now > deadline
+      expect(MB::Sound.players).to have_key(:play)
+      thread.raise(Interrupt)
+      expect(thread.value).to eq(nil)
+      deadline = MB::U.clock_now + 5
+      MB::Sound::Internal.wait_audio(MB::Sound::Session.current, 0.01) while MB::Sound.players.key?(:play) && MB::U.clock_now < deadline # (the stop's fade)
+      expect(MB::Sound.players).not_to have_key(:play)
+      expect(MB::Sound.stopped).to have_key(:play) # resume :play brings it back
+    end
+
+    it 'plots the mix while it plays, then stops plotting' do
+      allow(MB::Sound).to receive(:visualize).and_wrap_original { |m, stop:, **kw|
+        expect(kw[:header]).to match(/Playing/)
+        MB::Sound::Internal.wait_audio(MB::Sound::Session.current, 0.01) until stop.call # (the real one plots by wall clock)
+        { frames: 0, fps: 0 }
+      }
+      expect { MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true) }.to output(/Playing/).to_stderr
+      expect(MB::Sound).to have_received(:visualize)
+    end
+
+    it 'plots into the terminal UI\'s scope pane while one is up, writing nothing over its screen (ux-1 bug 3)' do
+      restored = 0
+      screen = double('screen')
+      allow(screen).to receive(:plot_pane) { |kind| expect(kind).to eq(:spectrum); -> { restored += 1 } }
+      allow(MB::Sound::UI).to receive(:screen).and_return(screen)
+      expect {
+        expect { MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true, spectrum: true) }.to output(/Playing/).to_stderr
+      }.not_to output.to_stdout
+      expect(screen).to have_received(:plot_pane).once
+      expect(restored).to eq(1) # the slot it put in comes out again
+    end
+
+    it 'gives a friendly error for things it cannot play' do
+      expect { MB::Sound.play(Object.new) }.to raise_error(MB::Sound::Playable::Unplayable, /Can't play Object.*help :play/)
+      expect { MB::Sound.play(nil) }.to raise_error(ArgumentError, /Nothing to play/)
+      expect { MB::Sound.play('no/such/file.flac') }.to raise_error(ArgumentError, /No file/)
+      expect { MB::Sound.play(:no_such_preset_here) }.to raise_error(ArgumentError, /No preset or genre/)
+      expect { MB::Sound.play(MB::Sound.genre(:dnb).form) }.to raise_error(ArgumentError, /play_form/)
+    end
+
+    it 'names the ways an unplayable thing offers' do
+      thing = Class.new { def synth = nil }.new
+      expect { MB::Sound.play(thing) }.to raise_error(ArgumentError, /x\.synth \{/)
+    end
+
+    it 'warns instead of raising in live mode' do
+      MB::Sound.live = true
+      expect { expect(MB::Sound.play(Object.new)).to eq(nil) }.to output(/Can't play Object.*live mode: ignored/).to_stderr
+    ensure
+      MB::Sound.live = false
+    end
+
+    it 'plays anything with #to_playable' do
+      thing = Class.new { def to_playable = MB::Sound.seq(MB::Sound::A4).n32 }.new
+      play_quietly(thing)
+      expect(out.channel(0).abs.max).to be > 0.001
+    end
+
+    it 'starts like bg (without waiting) inside a render block' do
+      seconds = MB::Sound.render(MB::Sound::NullOutput.new(channels: 2, sleep: false)) {
+        expect(MB::Sound.play(440.hz.sine.until(0.25), plot: false, quiet: true)).to be_a(MB::Sound::Session::Journal::Entry)
+      }
+      expect(seconds).to be_within(0.02).of(0.25)
+    end
+
+    it 'plays a synth preset by name with a demo phrase' do
+      skip 'no dnb_pluck preset' unless MB::Sound::GraphIO.find_preset(:dnb_pluck)
+      expect { MB::Sound.play(:dnb_pluck, plot: false) }.to output(/demo phrase/).to_stderr
+      expect(out.channel(0).abs.max).to be > 0.001
+    end
+
+    it 'plays a genre template briefly, then returns' do
+      bpm, bar_length = MB::Sound.transport.bpm, MB::Sound.transport.bar_length
+      template = MB::Sound.genre(:dnb)
+      allow(MB::Sound).to receive(:play_form) { MB::Sound.bg(:try_genre, 220.hz.sine.until(0.05)) } # (setup runs as usual)
+      expect(template.seconds.to_f).to be > 90 # so play shortens it
+      expect { MB::Sound.play(template, plot: false) }.to output(/genre :dnb.*s of \d+/).to_stderr
+      expect(MB::Sound.players).to be_empty
+    ensure
+      # Template#setup sets the shared transport's tempo and meter
+      MB::Sound.transport.bpm = bpm
+      MB::Sound.transport.bar_length = bar_length
     end
   end
 
@@ -294,7 +433,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#wait' do
-    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
+    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), buffer_size: 800, realtime: true) }
 
     after do
       session.close
@@ -317,7 +456,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.wait).to eq(true)
       end
       expect(session).to be_idle
-      expect(frames).to be >= 48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)
+      expect(frames).to be >= (48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)).round # (exact on the virtual clock)
     end
 
     it 'stops waiting for a tail that never ends after the tail limit' do

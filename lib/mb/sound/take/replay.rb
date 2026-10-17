@@ -25,7 +25,7 @@ module MB
       # between buffer sizes by about 1e-12 (naive shapes like aramp can
       # move an edge by a sample).
       class Replay
-        Line = Struct.new(:issued, :lands, :code, :epoch, keyword_init: true)
+        Line = Struct.new(:issued, :lands, :code, :epoch, :choices, keyword_init: true)
 
         # The last Replay created (for loading a saved take from code).
         class << self
@@ -51,8 +51,11 @@ module MB
         # +:master_gain_post+ is where the master gain applied (see
         # Session#master_gain_post?); takes saved before it existed (before
         # 2026-10-13) don't give it, and played it after the master chain.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, rng: rng }
+        # +:replace_declick+ likewise (see Session#replace_declick): takes
+        # saved before 2026-10-17 don't give it, and switched replacements
+        # with a hard cut, so they replay exactly.
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
@@ -66,10 +69,12 @@ module MB
         # landed at +lands+ (each a position, or [position, time] for a
         # change made for a time already past, e.g. a lead: track's
         # launch), after +epoch+ seeks had landed (the line runs in that
-        # pass over the timeline; see Session#epoch).
-        def line(issued, lands, code, epoch: 0)
+        # pass over the timeline; see Session#epoch).  +choices+ are the
+        # answers the line got live ([kind, key, choice]; see
+        # Take.note_choice), given again instead of asking.
+        def line(issued, lands, code, epoch: 0, choices: [])
           lands = lands.map { |t| t.is_a?(Array) ? t.map(&:to_r) : t.to_r }
-          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch)
+          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch, choices: choices)
           self
         end
 
@@ -97,6 +102,7 @@ module MB
           session.master_gain_post = !!@start[:master_gain_post]
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
+          session.replace_declick = @start[:replace_declick]
           MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding
@@ -128,10 +134,10 @@ module MB
         # +:max_seconds+ (the live take's length plus EXTRA_SECONDS, or
         # MAX_SECONDS for takes without a recorded length), so a replay that
         # never reaches its end can't run forever.
-        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, &tap)
+        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, overwrite: true, &tap)
           raise ArgumentError, 'Pass finish: (whole notes) for a take without an end' if finish.nil?
 
-          output = MB::Sound.file_output(output, channels: channels, overwrite: true) if output.is_a?(String)
+          output = MB::Sound.file_output(output, channels: channels, overwrite: overwrite) if output.is_a?(String)
           transport = Sequence::Transport.new(bpm: @start[:bpm], bar_length: @start[:bar_length])
           session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_sizes.first, realtime: false, raise_errors: false)
           session.exact_lanes = true # the same lanes at any buffer size (Synth#exact_lanes?)
@@ -149,6 +155,12 @@ module MB
               warn "Stopped replaying the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, finish)}; at #{stamp(session, transport.position)}); pass max_seconds: to render longer"
               break
             end
+
+            # Recorded MIDI still to come means the live timeline was moving
+            # (something not in the take, like the keyboard's default patch,
+            # kept it going), so it keeps moving here until the last row
+            # plays, then pauses when idle as it would live
+            session.advance_idle = midi_pending?(session)
 
             before = transport.position
             n = [sizes.next, max_frames - frames].min
@@ -197,7 +209,7 @@ module MB
               warn "Stopped playing the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, @ends || 0)}); pass max_seconds: to play longer"
               break
             end
-            sleep 0.1
+            Internal.wait_audio(session, 0.1)
           end
           MB::Sound.outro
           MB::Sound.wait
@@ -215,14 +227,18 @@ module MB
 
           out = nil
           sizes = [800]
-          OptionParser.new do |o|
-            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-b buffer_sizes]"
+          force = false
+          rest = OptionParser.new do |o|
+            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-f] [-b buffer_sizes]"
             o.on('-o', '--output FILE', 'Render to a file instead of playing') { |f| out = f }
+            o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { force = true }
             o.on('-b', '--buffer-sizes LIST', Array, 'Buffer sizes to cycle through (e.g. 367,368)') { |l| sizes = l.map { |x| Integer(x) } }
           end.parse!(argv)
+          # An audio file name alone renders to it, as in song scripts
+          out ||= rest.find { |a| a.match?(ScriptRunner::AUDIO_EXTENSIONS) }
 
           if out
-            frames = render(out, buffer_sizes: sizes)
+            frames = render(out, buffer_sizes: sizes, overwrite: force ? true : :prompt)
             puts "Rendered #{frames} frames to #{out}"
           else
             play
@@ -235,6 +251,11 @@ module MB
         # The default +:max_seconds+ (see #render).
         def default_max_seconds
           @seconds ? @seconds + EXTRA_SECONDS : MAX_SECONDS
+        end
+
+        # True if any MIDI input of +session+ has recorded rows left to play.
+        def midi_pending?(session)
+          @midi.each_key.any? { |name| session.midi_in(name).replay_pending? }
         end
 
         # A timeline position for messages: bar:beat and whole notes.
@@ -257,7 +278,13 @@ module MB
         def run_line(session, binding, line, index)
           Session.with_context(session: session, time: line.issued, source: :replay) do
             Session.with_perform(session: session, forced: line.lands.dup, now: line.issued, source: :replay) do
-              binding.eval(line.code, "take line #{index + 1}")
+              old = Thread.current[:mb_sound_replay_choices]
+              Thread.current[:mb_sound_replay_choices] = line.choices
+              begin
+                binding.eval(line.code, "take line #{index + 1}")
+              ensure
+                Thread.current[:mb_sound_replay_choices] = old
+              end
             end
           end
         rescue => e

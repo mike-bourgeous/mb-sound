@@ -321,7 +321,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
 
       text = File.read(path)
       expect(text).to include('from: "bin/effects/tape_delay.rb"')
-      expect(text).to include('inputs :input')
+      expect(text).to include('inputs input: :audio')
       expect(text).to include('param :drive, 2.0, description: "Input gain into the tape"')
       expect(text).to match(/options: \{ pitch: false, delay: 0\.1, /)
       expect(text).to include('(input2 * drive).delay(0.1, feedback: 0.75')
@@ -570,7 +570,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect { MB::Sound.save(:quarter, graph) }.to output(/\(replaced\)/).to_stdout
 
       names = nil
-      expect { names = MB::Sound.presets }.to output(/quarter  \(inputs: input; params: mix 0\.25\)/).to_stdout
+      expect { names = MB::Sound.presets }.to output(/quarter  \(inputs: input \(audio\); params: mix 0\.25\)/).to_stdout
       expect(names).to include(:quarter)
       expect(names - [:quarter]).to eq(io.presets[io.library_presets_dir]) # and mb-sound's own
 

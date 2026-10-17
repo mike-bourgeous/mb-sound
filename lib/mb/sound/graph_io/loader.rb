@@ -21,10 +21,21 @@ module MB
           # before MB::Sound.
           attr_writer :implicit_self
 
+          # Names bound per application of a rack document (its ports and
+          # macros), read where the body names them; nil elsewhere.
+          attr_accessor :bindings
+
           def initialize(parent = nil)
             @parent = parent
             @vars = {}
             @implicit_self = nil
+            @bindings = nil
+          end
+
+          # The scope binding +name+ (see #bindings), or nil.
+          def binding_scope(name)
+            return self if @bindings&.key?(name)
+            @parent&.binding_scope(name)
           end
 
           # The innermost implicit self (see #implicit_self=), or nil.
@@ -124,9 +135,14 @@ module MB
         # +params+ overrides its param defaults; +trust+ :code allows
         # runtime blocks outside the safe subset (TrustedCode); +limits+
         # overrides GraphIO::LIMITS.
-        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
+        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved, racks: nil)
           @text = text
           @session = session
+          unless racks.nil? || Rack::Conflict::CHOICES.include?(racks)
+            raise ArgumentError, "racks: must be :session, :saved, or :rename (got #{racks.inspect})"
+          end
+          @racks_choice = racks
+          @rack_aliases = {}
           raise ArgumentError, "seeds: must be :saved or :fresh (got #{seeds.inspect})" unless %i[saved fresh].include?(seeds)
           @fresh_seeds = seeds == :fresh
           # Whether the document marks drawn seeds (format 2 and later; see
@@ -136,6 +152,9 @@ module MB
           # (documents before format 3; see GraphIO::FORMAT)
           @old_db = false
           @old_db_warned = false
+          # Whether sums end with their first input (documents before
+          # format 4; see GraphIO::FORMAT)
+          @old_ring = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -158,6 +177,7 @@ module MB
           body = stmts[index..] || []
           return load_set(body) if set?
           raise error(tree, 'the document has no graph (only a header)') if body.empty?
+          return load_rack(body) if @document.rack?
 
           bind_inputs
           bind_params
@@ -165,7 +185,9 @@ module MB
           fresh_limits!
           scope = Scope.new
           result = nil
-          body.each { |s| result = eval_node(s, scope) }
+          GraphNode::Mixer.with_ring(@old_ring ? :first : GraphNode::Mixer.ring_mode) {
+            body.each { |s| result = eval_node(s, scope) }
+          }
           unless GraphNode::Recipe.graph_object?(result) || result.is_a?(MB::Sound::Synth) || graph_array?(result)
             raise error(body.last, "the document's last line must be a graph (got #{describe(result)})")
           end
@@ -174,6 +196,129 @@ module MB
           result.instance_variable_set(:@graph_io_document, @document) unless result.frozen?
           @loaded = true
           result
+        end
+
+        # Loads a rack document (`graph 4, ..., rack: :arack`; see
+        # RackWriter): returns its Rack, whose block walks the body for each
+        # application with the ports bound to the values given and the
+        # knob lines made as the rack's macros (RackMethods#macro, so they
+        # are named and shared like any rack's).  With the inputs given,
+        # returns the Rack applied to them.  The Rack is named after the
+        # document (registered in a Session only by `preset` or a graph's
+        # definition).
+        def load_rack(body)
+          types = @document.input_types
+          raise LoadError.new("#{@label}: a rack document needs typed inputs (inputs sig: :audio)", path: @path) if types.empty?
+          unless @document.params.values.all? { |p| p[:knob] }
+            raise LoadError.new("#{@label}: rack documents keep settings in knob lines (macros), not param lines", path: @path)
+          end
+          constructor = @document.meta[:rack]
+          unless constructor.is_a?(Symbol) && Rack::CONSTRUCTORS.include?(constructor)
+            raise LoadError.new("#{@label}: rack: must name a rack constructor (#{Rack::CONSTRUCTORS.to_a.join(', ')}), not #{constructor.inspect}", path: @path)
+          end
+
+          main_name, main_type = types.first
+          ports = types.drop(1).to_h
+          defaults = @document.input_defaults
+          macros = @document.params.select { |_, p| p[:knob] }
+          out = @document.outputs.first
+          listener = %i[lrack amrack listener_rack].include?(constructor)
+          out = nil if listener
+          out = :audio if %i[irack instrument_rack].include?(constructor)
+
+          @inputs = {}
+          @knobs = {}
+          @knob_nodes = {}
+          loader = self
+          last = nil
+          pr = proc do |main, **kw|
+            loader.fresh_limits! if loader.loaded?
+            unknown = kw.keys - ports.keys
+            raise ArgumentError, "unknown keyword#{'s' if unknown.length > 1}: #{unknown.map(&:inspect).join(', ')}" unless unknown.empty?
+            scope = Scope.new
+            b = { main_name => main }
+            ports.each_key do |k|
+              if kw.key?(k)
+                b[k] = kw[k]
+              elsif defaults.key?(k)
+                b[k] = defaults[k]
+              else
+                raise ArgumentError, "missing keyword: :#{k}"
+              end
+            end
+            macros.each do |n, spec|
+              opts = spec.slice(*Document::KNOB_KEYS, *Document::MACRO_KEYS).except(:description)
+              b[n] = MB::Sound.macro(n, spec[:value], description: spec[:description], **opts)
+            end
+            scope.bindings = b
+            last = scope
+            loader.walk_statements(body, scope)
+          end
+          params = [[:opt, main_name]]
+          ports.each_key { |k| params << [defaults.key?(k) ? :key : :keyreq, k] }
+          pr.define_singleton_method(:arity) { 1 }
+          pr.define_singleton_method(:parameters) { |**| params }
+          pr.define_singleton_method(:lambda?) { false }
+          default_text = defaults.transform_values { |v| v.nil? ? 'nil' : v.inspect }
+          pr.define_singleton_method(:graph_io_defaults) { default_text }
+          pr.define_singleton_method(:graph_io_locals) { last ? last.vars.dup : {} }
+
+          name = @document.name&.to_sym
+          rack = Rack.new(name, in: main_type, out: out, constructor: constructor, block: pr, ports: ports.to_h { |k, t| [k, t] }, listener: listener, quiet: true)
+          @document.rack = rack
+          GraphIO.remember_rack_document(rack, @document)
+          @loaded = true
+          return rack if @given_inputs.empty?
+
+          missing = [main_name, *ports.keys.reject { |k| defaults.key?(k) }] - @given_inputs.keys
+          unless missing.empty?
+            raise LoadError.new("#{@label}: missing input#{'s' if missing.length > 1} #{missing.join(', ')} (give #{missing.map { |m| "#{m}: ..." }.join(', ')}, or none for the Rack)", path: @path)
+          end
+          extra = @given_inputs.keys - types.keys
+          raise LoadError.new("#{@label}: no input#{'s' if extra.length > 1} #{extra.join(', ')} (the rack's inputs: #{types.keys.join(', ')})#{GraphIO.suggest(extra[0], types.keys)}", path: @path) unless extra.empty?
+          rack.call(@given_inputs[main_name], **@given_inputs.except(main_name))
+        end
+
+        # Walks the top-level statements +body+ in +scope+ (a rack
+        # document's application).  Returns the last value.
+        def walk_statements(body, scope)
+          result = nil
+          body.each { |st| result = eval_node(st, scope) }
+          result
+        end
+
+        # A named rack constructor in the document (a graph's embedded
+        # definition, see RubyWriter.rack_definition): defines the rack, or
+        # settles a conflict with the session's rack of that name
+        # (GraphIO.place_rack); a rack loaded under a new name (:rename)
+        # is what this document's rack(:dub) means from then on.
+        def define_named_rack(node, receiver, ctor, args, kwargs, block)
+          name = args[0]
+          saved = receiver.public_send(ctor, *args[1..], **kwargs, &block).renamed(name)
+          rack = GraphIO.place_rack(@session || Session.current, saved, racks: @racks_choice, source: @label.to_s) { |msg| error(node, msg) }
+          @rack_aliases[name] = rack.name unless rack.name == name
+          rack
+        end
+
+        # rack(:name) in a document: the Session's rack, else a rack
+        # document among the presets of that name (loaded and defined in
+        # the Session), else a LoadError.
+        def rack_reference(node, scope)
+          name = node.arguments.arguments[0].unescaped.to_sym
+          name = @rack_aliases.fetch(name, name)
+          session = @session || Session.current
+          found = session.racks[name]
+          return found if found
+
+          path = name.to_s.match?(/\A[\w.-]+\z/) ? GraphIO.find_preset(name) : nil
+          doc = path && (GraphIO.parse(path) rescue nil)
+          unless doc&.rack?
+            names = session.racks.names
+            raise error(node, "rack #{name.inspect} isn't defined here, and no rack document of that name is among the presets#{GraphIO.suggest(name, names)}")
+          end
+          rack = GraphIO.load(path)
+          Session.with_context(session: session) { session.racks.define(rack) }
+          rack
         end
 
         # Set commands of `kind: :set` documents (see #load_set), called
@@ -255,6 +400,12 @@ module MB
 
         # Walks a build block's body in +scope+ (called by the procs that
         # #build_proc makes).
+        # The value of a build block keyword's default (a rack's optional
+        # port, `|sig, depth: 0.5|`), in the block's scope.
+        def keyword_default(node, scope)
+          eval_node(node, scope)
+        end
+
         def walk_block(body, scope)
           eval_statements(body, scope)
         end
@@ -346,11 +497,26 @@ module MB
               @document.format = version
               @seed_marks = version >= 2
               @old_db = version < 3
+              @old_ring = version < 4
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }
               raise error(node, "inputs takes Symbols (inputs :midi), not #{bad.map(&:inspect).join(', ')}") unless bad.empty?
-              @document.inputs.concat(args)
+              # Untyped names (before format 4): midi is notes, others audio
+              args.each { |a| @document.input_types[a] = a == :midi ? :notes : :audio }
+              kwargs.each do |k, t|
+                type, default = t.is_a?(Array) ? t : [t]
+                unless Rack::DEFAULT_KINDS.key?(type) && (!t.is_a?(Array) || t.length == 2)
+                  raise error(node, "input #{k}: needs a port type (:notes, :audio, :control; [:control, 0.5] for an optional port), not #{t.inspect}")
+                end
+                @document.input_types[k] = type
+                @document.input_defaults[k] = default if t.is_a?(Array)
+              end
+              @document.inputs.concat(args + kwargs.keys)
+            when :outputs
+              bad = args.reject { |a| Rack::DEFAULT_KINDS.key?(a) }
+              raise error(node, "outputs takes port types (:notes, :audio, :control), not #{bad.map(&:inspect).join(', ')}") unless bad.empty? && kwargs.empty? && !args.empty?
+              @document.outputs.concat(args)
             when :param
               name, value = args
               raise error(node, 'param needs a name and a value (param :drive, 1.0)') unless name.is_a?(Symbol) && args.length == 2
@@ -363,11 +529,12 @@ module MB
               name, value = args
               raise error(node, 'knob needs a name and a value (knob :cut, 800, range: 100..8000, curve: :exp)') unless name.is_a?(Symbol) && args.length == 2
               raise error(node, "knob #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
-              unknown = kwargs.keys - Document::KNOB_KEYS
-              raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{Document::KNOB_KEYS.join(', ')})") unless unknown.empty?
+              keys = Document::KNOB_KEYS + (@document.rack? ? Document::MACRO_KEYS : [])
+              unknown = kwargs.keys - keys
+              raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{keys.join(', ')}#{'; share: and follow: are for rack documents\' macros' if (unknown & Document::MACRO_KEYS).any?})") unless unknown.empty?
               raise error(node, "#{name} is declared twice") if @document.params.key?(name)
               begin
-                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description))
+                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description, *Document::MACRO_KEYS))
               rescue ArgumentError => e
                 raise error(node, "knob #{name}: #{e.message}")
               end
@@ -793,10 +960,14 @@ module MB
 
           if node.receiver.nil?
             if node.variable_call?
+              if (bs = scope.binding_scope(name))
+                return bs.bindings[name]
+              end
               return @inputs[name] if @inputs&.key?(name)
               return knob(name) if @knobs&.key?(name)
             end
             return complex(node, scope) if name == :Complex
+            return rack_reference(node, scope) if name == :rack && node.block.nil? && node.arguments&.arguments&.length == 1 && node.arguments.arguments[0].is_a?(Prism::SymbolNode)
             return named_proc(node, scope) if name == :named_proc
             return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
@@ -834,6 +1005,9 @@ module MB
 
           args, kwargs = call_args(node, scope)
           block = call_block(node, scope)
+          if receiver.equal?(MB::Sound) && Rack::CONSTRUCTORS.include?(name) && args[0].is_a?(Symbol) && block
+            return define_named_rack(node, receiver, name, args, kwargs, block)
+          end
           check_limits(node, receiver, name, args, kwargs)
           check_file(node, name, args) if Registry::FILE_METHODS.include?(name)
           drawn = kwargs[:seed].is_a?(DrawnSeed) ? kwargs.delete(:seed) : nil
@@ -913,7 +1087,9 @@ module MB
           if b.is_a?(Prism::BlockArgumentNode)
             raise error(b, 'a block argument needs a value (&named_proc(:name))') unless b.expression
             pr = eval_node(b.expression, scope)
-            raise error(b, "a block argument must be a proc (got #{describe(pr)})") unless pr.is_a?(Proc)
+            # A rack applied with then(&rack) (MB::Sound::Rack#to_proc)
+            pr = pr.to_proc if pr.is_a?(MB::Sound::Rack)
+            raise error(b, "a block argument must be a proc or a rack (got #{describe(pr)})") unless pr.is_a?(Proc)
             return pr
           end
 
@@ -926,23 +1102,25 @@ module MB
 
         # Block parameter names (required, optional without defaults
         # aren't allowed, a rest parameter is).
-        def block_params(b)
+        def block_params(b, keywords: false)
           params = b.parameters
-          return [[], nil] if params.nil?
+          return [[], nil, []] if params.nil?
           if params.is_a?(Prism::NumberedParametersNode) || params.is_a?(Prism::ItParametersNode)
             raise error(b, 'implicit block parameters (_1, it) aren\'t allowed; name them')
           end
           list = params.is_a?(Prism::BlockParametersNode) ? params.parameters : params
-          return [[], nil] if list.nil?
-          unless list.optionals.empty? && list.posts.empty? && list.keywords.empty? && list.keyword_rest.nil? && list.block.nil?
-            raise error(b, 'block parameters may only be plain names (|v, i|) and a *rest')
+          return [[], nil, []] if list.nil?
+          unless list.optionals.empty? && list.posts.empty? && (keywords || list.keywords.empty?) && list.keyword_rest.nil? && list.block.nil?
+            raise error(b, "block parameters may only be plain names (|v, i|)#{', keywords (|sig, side:|),' if keywords} and a *rest")
           end
           names = list.requireds.map { |r|
             raise error(r, 'destructuring block parameters aren\'t allowed') unless r.is_a?(Prism::RequiredParameterNode)
             r.name
           }
           rest = list.rest&.name
-          [names, rest]
+          # Keywords of build blocks (a rack's ports): [name, default node or nil]
+          kws = list.keywords.map { |k| [k.name, k.respond_to?(:value) ? k.value : nil] }
+          [names, rest, kws]
         end
 
         # A build block: a proc that walks the block's body for each call,
@@ -950,11 +1128,11 @@ module MB
         # parameters, and lambda? like the literal block, and gives the
         # recorder its locals (GraphNode::Recipe.trace_locals).
         def build_proc(b, outer)
-          names, rest = block_params(b)
+          names, rest, kws = block_params(b, keywords: true)
           loader = self
           count = names.length
           last = nil
-          pr = proc do |*args|
+          pr = proc do |*args, **kw|
             args = args[0] if count > 1 && args.length == 1 && args[0].is_a?(Array)
             # A set's patches build again long after the load: each build
             # gets the limits afresh
@@ -965,18 +1143,30 @@ module MB
             scope.implicit_self = self unless self.equal?(loader)
             names.each_with_index { |n, i| scope.vars[n] = args[i] }
             scope.vars[rest] = args[count..] || [] if rest
+            kws.each do |k, default|
+              if kw.key?(k)
+                scope.vars[k] = kw[k]
+              elsif default
+                scope.vars[k] = loader.keyword_default(default, scope)
+              else
+                raise ArgumentError, "missing keyword: :#{k}"
+              end
+            end
+            unknown = kw.keys - kws.map(&:first)
+            raise ArgumentError, "unknown keyword#{'s' if unknown.length > 1}: #{unknown.map(&:inspect).join(', ')}" unless unknown.empty?
             last = scope
             loader.walk_block(b.body, scope)
           end
           params = names.map { |n| [:opt, n] }
           params << [:rest, rest] if rest
+          kws.each { |k, default| params << [default ? :key : :keyreq, k] }
           arity = rest ? -(count + 1) : count
           pr.define_singleton_method(:arity) { arity }
           pr.define_singleton_method(:parameters) { |**| params }
           pr.define_singleton_method(:lambda?) { false }
           source = b.slice
           pr.define_singleton_method(:graph_io_source) { source }
-          pr.define_singleton_method(:graph_io_locals) { last ? last.vars.reject { |k, _| names.include?(k) || k == rest } : {} }
+          pr.define_singleton_method(:graph_io_locals) { last ? last.vars.reject { |k, _| names.include?(k) || k == rest || kws.any? { |kk, _| kk == k } } : {} }
           pr
         end
 

@@ -43,7 +43,7 @@ module MB
         # Transport: play state, bar:beat, tempo, meter, render load, and
         # output underruns.
         class Transport < Pane
-          def initialize = super(:transport, rate: 30, height: 1, width: 44)
+          def initialize = super(:transport, rate: 30, height: 1, width: 44, description: 'play state, bar:beat, tempo, meter, render load, underruns')
 
           def draw_body(c, s, state)
             unless s
@@ -76,7 +76,7 @@ module MB
         # Form: the section playing, how far through it, and what comes
         # next; the current scene without a form.
         class Form < Pane
-          def initialize = super(:form, rate: 8, height: 1, width: 44)
+          def initialize = super(:form, rate: 8, height: 1, width: 44, description: 'the form\'s section, how far through, and what comes next (or the scene)')
 
           def draw_body(c, s, state)
             return unless s
@@ -102,7 +102,7 @@ module MB
 
         # Tracks and other players: state, clip, armed and recording.
         class Tracks < Pane
-          def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks')
+          def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2, description: 'tracks and players: state, clip, armed, recording')
 
           STATE_ROLES = {
             playing: :ok, starting: :queued, stopping: :warn, fading: :warn, ringing: :warn,
@@ -145,7 +145,7 @@ module MB
 
         # Queued changes, soonest first, with where each lands.
         class Queue < Pane
-          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued')
+          def initialize = super(:queue, rate: 4, height: 6, width: 26, title: 'queued', description: 'queued changes, soonest first, with where each lands')
 
           def draw_body(c, s, state)
             return unless s
@@ -164,7 +164,7 @@ module MB
 
         # Knobs: a meter at each knob's position in its range, and its value.
         class Knobs < Pane
-          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs')
+          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs', description: 'session knobs: a meter of each one\'s position and its value')
 
           def draw_body(c, s, state)
             return unless s
@@ -191,7 +191,7 @@ module MB
           # Seconds a peak is held.
           HOLD = 1.5
 
-          def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master')
+          def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master', min_height: 4, description: 'master meters: peak with hold, RMS, short-term LUFS, true peak')
 
           def draw_body(c, s, state)
             m = s&.master
@@ -218,10 +218,75 @@ module MB
           end
         end
 
+        # Warnings and live errors while the UI is up (UI.messages), newest
+        # at the bottom, each wrapped to the pane's width with a hanging
+        # indent beside its gutter (its number for `ui.message n`, and its
+        # repeat count), errors in the bad color (ux-1 r3 item 38: long
+        # warnings kept their important tail off screen).  Entries that
+        # don't fit go off the top.
+        class Messages < Pane
+          ROLES = { error: :bad, warn: :warn, note: :dim }.freeze
+
+          def initialize = super(:messages, rate: 4, height: 6, width: 40, title: 'messages', min_height: 2, description: 'warnings and live errors while a screen is up, wrapped, numbered (ui.message n)')
+
+          def draw_body(c, _s, _state)
+            list = UI.messages.recent(c.h)
+            if list.empty?
+              c.puts ['no warnings', :dim]
+              return
+            end
+            gutters = list.each_with_index.map { |e, i| "#{i + 1}#{e.count > 1 ? " ×#{e.count}" : ''} " }
+            gw = [gutters.map(&:length).max, c.w / 3].min
+            # Newest first until the pane is full, then drawn oldest first
+            blocks = []
+            used = 0
+            list.each_with_index do |e, i|
+              lines = Canvas.wrap(e.text, c.w - gw)
+              lines = lines.last(c.h - used) if used + lines.length > c.h && blocks.empty? # (the newest alone overflows: its tail)
+              break if used + lines.length > c.h
+              blocks << [gutters[i], lines, ROLES.fetch(e.severity, :warn)]
+              used += lines.length
+            end
+            y = c.h - used
+            blocks.reverse_each do |gutter, lines, role|
+              c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
+              lines.each_with_index { |l, k| c.text(gw, y + k, l, role) }
+              y += lines.length
+            end
+          end
+        end
+
+        # One message in full (`ui.message n`: the newest is 1): wrapped to
+        # the pane, with its count and age, the rest cut with an ellipsis
+        # and a note of the lines left.
+        class MessageDetail < Pane
+          # Which message (1: the newest).
+          attr_accessor :index
+
+          def initialize
+            super(:message, rate: 2, height: 10, width: 60, title: 'message', min_height: 3, description: 'one message in full (ui.message n opens it)')
+            @index = 1
+          end
+
+          def draw_body(c, _s, _state)
+            e = UI.messages.recent(@index)[@index - 1]
+            unless e
+              c.puts ["no message #{@index}", :dim]
+              return
+            end
+            age = Process.clock_gettime(Process::CLOCK_MONOTONIC) - e.last
+            c.puts ["##{@index} ", :key], [e.severity.to_s, MESSAGE_ROLES.fetch(e.severity, :warn)],
+                   [e.count > 1 ? "  ×#{e.count}" : '', :dim], ["  #{age.round}s ago", :dim]
+            c.wrap(e.text, y: 1, role: :text)
+          end
+
+          MESSAGE_ROLES = Messages::ROLES
+        end
+
         # CPU per part: render load, then each player, bus, and master
         # chain by its share of the audio time.
         class CPU < Pane
-          def initialize = super(:cpu, rate: 4, height: 6, width: 24, title: 'cpu')
+          def initialize = super(:cpu, rate: 4, height: 6, width: 24, title: 'cpu', description: 'CPU per part: render load, each player, bus, and master chain')
 
           def draw_body(c, s, state)
             return unless s
@@ -242,12 +307,31 @@ module MB
           end
         end
 
-        # A scope of the master mix through Plot::Live (look :quad by
-        # default; UI.start(look:) or ScopePane.new(look:) to change it).
-        # Writes its own terminal bytes: only the cells that changed.
+        # A scope of the master mix through Plot::Live (look :auto by
+        # default: Braille for short or wide panes, see .auto_look;
+        # `ui look: :quad`, a layout's `pane :scope, look: :blocks`, or
+        # `ui.look` on the focused pane to change it).  Writes its own
+        # terminal bytes: only the cells that changed.
         class Scope < Pane
+          # The looks `ui.look` cycles through, Braille first.
+          LOOK_CYCLE = %i[scope quad blocks mosaic spark ascii].freeze
+
+          # Rows up to which :auto picks Braille whatever the width.
+          AUTO_BRAILLE_ROWS = 16
+
+          # The look :auto means for a +w+ x +h+ pane: :scope (Braille, the
+          # finest trace) for short or wide panes, :quad for tall narrow ones
+          # (ux-1 r3 item 4; measured 2026-10-17: the same painter CPU as
+          # :quad within noise, about 2x the bytes per scope frame, 1.9 kB
+          # per written frame of :tiles at 120x40, ~56 kB/s at 30 frames/s,
+          # far under a terminal's throughput).
+          def self.auto_look(w, h)
+            h <= AUTO_BRAILLE_ROWS || w >= 3 * h ? :scope : :quad
+          end
+
           def initialize(name = :scope, look: nil)
-            super(name, rate: 30, height: 6, width: 40, needs: [:scope])
+            super(name, rate: 30, height: 6, width: 40, needs: [:scope], title: name.to_s, min_height: 3,
+                        description: name == :spectrum ? 'the master mix\'s spectrum, log frequency with note names (look: Braille by default)' : 'a scope of the master mix (look: Braille by default; ui.look cycles)')
             @look = look
           end
 
@@ -259,10 +343,12 @@ module MB
           # in color +mode+ (nil if there is nothing to draw).
           def frame_bytes(s, state, row:, col:, w:, h:, mode:, look:, full: false)
             live = state[:live]
-            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != (@look || look)
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: @look || look, color: mode)
+            lk = @look || look || :auto
+            lk = Scope.auto_look(w, h) if lk == :auto
+            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, color: mode)
               state[:mode] = mode
-              state[:look] = @look || look
+              state[:look] = lk
             end
             data = s&.scope
             data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?
@@ -276,6 +362,32 @@ module MB
               c.x :time, sample_rate: rate
               c.y Plot::Scale::Linear.new(-1.0..1.0)
               data.each { |d| c.line d }
+            }
+          end
+        end
+
+        # The master mix's spectrum (log frequency with note names, -90..0
+        # dBFS; a Hann-windowed FFT of the scope samples, channels mixed),
+        # through Plot::Live like the scope.  `vis spectrum: true` shows it
+        # while a UI is up.
+        class Spectrum < Scope
+          # dBFS at the bottom of the pane.
+          FLOOR = -90.0
+
+          def initialize(name = :spectrum, look: nil)
+            super
+            @rate = 15
+          end
+
+          private
+
+          def chart(data, rate)
+            mix = data.length == 1 ? data[0] : data.reduce { |a, b| a + b } * (1.0 / data.length)
+            f, db = Plot::Presets.spectrum_db(mix, rate, FLOOR)
+            Plot.chart(legend: false) { |c|
+              c.x :frequency, 20.0..(rate / 2.0), notes: true
+              c.y Plot::Scale::DB.new(FLOOR..0.0)
+              c.line db, x: f
             }
           end
         end

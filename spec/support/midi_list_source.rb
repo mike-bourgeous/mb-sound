@@ -6,10 +6,17 @@ class MIDIListSource
   # The number of #read_events calls.
   attr_reader :reads
 
-  def initialize(*events)
+  # +realtime: true+ makes it stand in for live input (see
+  # MB::Sound::MIDI::Source#realtime_input?).
+  def initialize(*events, realtime: false)
+    @realtime = realtime
     @events = events.flatten.each_with_index.sort_by { |e, idx| [e.time, idx] }.map(&:first)
     @offset = 0r
     @reads = 0
+  end
+
+  def realtime_input?
+    @realtime
   end
 
   def ended?

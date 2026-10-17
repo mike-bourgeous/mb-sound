@@ -1,14 +1,14 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "funk_choir",
   kind: :synth,
-  saved: "2026-10-14T03:18:24Z",
-  mb_sound: "0.12.0.usegit (796a1077)",
+  saved: "2026-10-17T17:18:28Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :choir from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :choir }
-inputs :midi
+inputs midi: :notes
 param :dub, 0.0, range: 0.0..1.0, description: "Choir looper footswitch: 1 records into the loop"
 param :keep, 0.82, range: 0.0..0.99, description: "Choir looper feedback per pass 0..1"
 

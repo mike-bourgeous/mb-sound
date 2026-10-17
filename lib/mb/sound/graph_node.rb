@@ -23,6 +23,7 @@ require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
 require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
+require_relative 'graph_node/blend_methods'
 
 module MB
   module Sound
@@ -83,6 +84,7 @@ module MB
       include ChorusMethods
       include DynamicsMethods
       include SamplingMethods
+      include BlendMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -258,6 +260,30 @@ module MB
         s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
         s = climb_tee_tree(s) unless include_tees
         s
+      end
+
+      # The largest sum of +weight+ (a block given each node, returning a
+      # number) along any path from +node+ up through its sources, edges
+      # taken as .graph takes them (through Tees and from a multi-output
+      # node's outputs to the node), so walks that need path sums (rack
+      # latency) can't miss nodes behind a Tee (racks-r2: a walk that kept
+      # only nodes answering #sample stopped at Tees).  Edges back to a
+      # node on the current path (feedback) are skipped.  With +visited+
+      # (a compare_by_identity Hash), records every node reached.
+      def self.longest_path(node, visited: nil, &weight)
+        memo = {}.compare_by_identity
+        open = {}.compare_by_identity
+        walk = nil
+        walk = ->(n) {
+          return memo[n] if memo.key?(n)
+          return 0 if open[n]
+          open[n] = true
+          visited[n] = true if visited
+          best = graph_source_list(n, true).map { |src| walk.(src) }.max || 0
+          open.delete(n)
+          memo[n] = weight.call(n) + best
+        }
+        walk.(graph_key(node, true))
       end
 
       # The sources of +s+ as .graph keys, one per edge.

@@ -96,6 +96,21 @@ RSpec.describe(ParallelSpecs) do
     expect(output).to include("  y.rb:1: warning: old [deprecated] (in bin/y.rb)\n    from outside examples")
   end
 
+  it 'lists examples that grew RSS over RSS_GROWTH_MB, largest first' do
+    write_json(0, [example('spec/a_spec.rb', 0.5)])
+    File.write(File.join(out_dir, '0.rss.json'), JSON.generate([
+      { 'example' => './spec/a_spec.rb:3', 'description' => 'small', 'grew_mb' => 150, 'rss_mb' => 900 },
+      { 'example' => './spec/a_spec.rb:9', 'description' => 'hog', 'grew_mb' => 3500, 'rss_mb' => 4200 },
+      { 'example' => './spec/a_spec.rb:7', 'description' => 'big', 'grew_mb' => 250, 'rss_mb' => 1000 },
+    ]))
+
+    ok, output = report([['spec/a_spec.rb']], [status])
+    expect(ok).to eq(true)
+    expect(output).to include("Examples growing RSS over 200 MB")
+    expect(output).to match(/\+3500 MB \(to 4200\) spec\/a_spec.rb:9 hog\n.*\+250 MB \(to 1000\) spec\/a_spec.rb:7 big\n/)
+    expect(output).not_to include('small')
+  end
+
   it 'makes rake spec:parallel exit nonzero when a process crashes' do
     rakefile = File.read(File.expand_path('../Rakefile', __dir__))
     expect(rakefile).to match(/ok = ParallelSpecs\.run\(.*\n\s*abort .* unless ok/)

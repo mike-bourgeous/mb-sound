@@ -76,16 +76,25 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
   describe '#overlay' do
     let(:output) {
-      MB::Sound.overlay({
-        'a_b' => { 'line_1' => [[0, 0], [1, 1]], 'line 2' => [Numo::DFloat[0, 1], Numo::DFloat[1, 0]] },
-        'c' => { 'flat' => [[0, 0.5], [1, 0.5]] },
-      })
+      MB::Sound.overlay(
+        MB::Sound.overlay_chart(title: 'a_b', line_1: [[0, 0], [1, 1]], 'line 2': [Numo::DFloat[0, 1, 2], Numo::DFloat[1, 0, 1]]),
+        MB::Sound.overlay_chart(title: 'c', flat: [[0, 0.5], [1, 0.5]])
+      )
     }
 
     it 'plots several curves per pane with legends, keeping underscores in titles' do
       check_size(lines)
       expect(text).to include('a_b', 'line_1', 'line 2', 'flat')
       expect(lines.count { |l| l.match?(/\+[-+]{20,}/) }).to eq(2)
+    end
+
+    it 'takes curves as arguments (labels and title inferred) or by name (ux-1 item 31)' do
+      chart = MB::Sound.overlay_chart(Numo::DFloat[0, 1, 0.5], [3, 2, 1])
+      expect(chart.title).to eq('1 vs 2')
+      named = MB::Sound.overlay_chart(saw: 110.hz.ramp, square: 110.hz.square, samples: 100)
+      expect(named.title).to eq('saw vs square')
+      expect(MB::Sound.overlay_chart(Numo::DFloat[-1, 1]).title).to eq('1')
+      expect { MB::Sound.overlay_chart }.to raise_error(ArgumentError, /overlay a, b/)
     end
   end
 
@@ -282,46 +291,49 @@ RSpec.describe(MB::Sound::PlotMethods) do
   end
 
   describe '#table' do
+    # The printed table's lines (plain: specs print to a pipe; ux-1's Table).
+    def table_lines(*args, **opts)
+      out = StringIO.new
+      old = $stdout
+      $stdout = out
+      MB::Sound.table(*args, **opts)
+      out.string.lines.map(&:rstrip)
+    ensure
+      $stdout = old
+    end
+
     it 'can display an evaluated method call' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(23).times
-      MB::Sound.table(CMath.method(:acos))
+      lines = table_lines(CMath.method(:acos))
+      expect(lines.length).to eq(23) # header, rule, 21 steps
+      expect(lines[0]).to match(/#\s+│\s+0: acos/)
+      expect(lines[1]).to match(/\A─+┼─+\z/)
     end
 
     it 'can display a proc' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/15151/).exactly(21).times
-      MB::Sound.table(->(x){15151})
+      lines = table_lines(->(x){15151})
+      expect(lines.drop(2).count { |l| l.end_with?('15151') }).to eq(21)
     end
 
     it 'can display an NArray' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/50/)
-      expect(MB::Util).to receive(:puts).with(/40/)
-      expect(MB::Util).to receive(:puts).with(/30/)
-      expect(MB::Util).to receive(:puts).with(/20/)
-      expect(MB::Util).to receive(:puts).with(/10/)
-      MB::Sound.table(Numo::Int32[50, 40, 30, 20, 10], steps: 5)
+      lines = table_lines(Numo::Int32[50, 40, 30, 20, 10], steps: 5)
+      expect(lines.drop(2).map { |l| l.split('│').last.strip }).to eq(%w[50 40 30 20 10])
     end
 
     it 'can display complex numbers' do
-      expect(MB::Util).to receive(:puts).with(/#.*0/)
-      expect(MB::Util).to receive(:puts).with(/-\+-/)
-      expect(MB::Util).to receive(:puts).with(/5.*1.*-.*1.*i/)
-      expect(MB::Util).to receive(:puts).with(/6.*1.*-.*1.*i/)
-      MB::Sound.table([1-1i], range: 5..6, steps: 2)
+      lines = table_lines([1-1i], range: 5..6, steps: 2)
+      expect(lines[2]).to match(/5.*│ 1(\.0)?-1(\.0)?i/)
+      expect(lines[3]).to match(/6.*│ 1(\.0)?-1(\.0)?i/)
     end
 
     it 'can use a custom range and steps' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/-2.5.*20/)
-      expect(MB::Util).to receive(:puts).with(/-1.5.*30/)
-      MB::Sound.table([20, 30], range: -3..-2, steps: [-2.5, -1.5])
+      lines = table_lines([20, 30], range: -3..-2, steps: [-2.5, -1.5])
+      expect(lines[2]).to match(/-2\.5 │ +20/)
+      expect(lines[3]).to match(/-1\.5 │ +30/)
     end
 
     it 'can display multiple columns' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/.+\|.+\|.+/).exactly(21).times
-      MB::Sound.table([CMath.method(:acos), CMath.method(:asin)])
+      lines = table_lines([CMath.method(:acos), CMath.method(:asin)])
+      expect(lines.drop(2).count { |l| l.count('│') == 2 }).to eq(21)
     end
   end
 end

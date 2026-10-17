@@ -64,9 +64,46 @@ RSpec.describe(MemcheckSelection) do
     end
 
     it 'counts first-parent merges that changed ext/' do
-      # 2d merges into master-ai, at least two of which changed ext/
-      old = MemcheckSelection.git('rev-list', '--first-parent', '--merges', '-n', '20', 'HEAD').lines.last.strip
-      expect(MemcheckSelection.ext_merges_since("#{old}^1")).to be >= 2
+      # A throwaway repository, so the count doesn't depend on how many of
+      # master-ai's recent merges happened to touch ext/ (only one of the
+      # last 20 did on 2026-10-17, which failed the old history-based check).
+      repo = File.dirname(tmp_path('repo/x'))
+      FileUtils.mkdir_p(repo)
+      sh = ->(*args) {
+        out, err, status = Open3.capture3(*args, chdir: repo)
+        raise "#{args.join(' ')}: #{err}" unless status.success?
+        out
+      }
+      commit = ->(path, text, message) {
+        FileUtils.mkdir_p(File.join(repo, File.dirname(path)))
+        File.write(File.join(repo, path), text)
+        sh.('git', 'add', path)
+        sh.('git', 'commit', '-q', '-m', message)
+      }
+      merge = ->(branch) { sh.('git', 'merge', '-q', '--no-ff', '-m', "Merge #{branch}", branch) }
+
+      sh.('git', 'init', '-q', '-b', 'main')
+      sh.('git', 'config', 'user.email', 'spec@example.com')
+      sh.('git', 'config', 'user.name', 'spec')
+      commit.('ext/a.c', "1\n", 'base')
+
+      # The stamped commit arrives on a side branch that changes ext/; its
+      # own merge doesn't count
+      sh.('git', 'checkout', '-q', '-b', 'stamped')
+      commit.('ext/a.c', "2\n", 'stamped work')
+      stamped = sh.('git', 'rev-parse', 'HEAD').strip
+      sh.('git', 'checkout', '-q', 'main')
+      merge.('stamped')
+
+      { 'ext_one' => 'ext/b.c', 'lib_only' => 'lib/x.rb', 'ext_two' => 'ext/c.c' }.each do |branch, path|
+        sh.('git', 'checkout', '-q', '-b', branch)
+        commit.(path, "#{branch}\n", branch)
+        sh.('git', 'checkout', '-q', 'main')
+        merge.(branch)
+      end
+
+      stub_const('MemcheckSelection::ROOT', repo)
+      expect(MemcheckSelection.ext_merges_since(stamped)).to eq(2)
     end
   end
 

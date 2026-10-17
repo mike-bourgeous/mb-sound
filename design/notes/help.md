@@ -41,9 +41,9 @@ Topic names are singleton methods of the Desk (`help.knobs`), so a typo is a NoM
 `help(:knobs).try(n)` prints the example's source (Prism, from the block), runs the block in MB::Sound as if typed, and schedules a stop (0.25-bar fade) for the players it started after its bars.  Examples name their players `try`, `try2`, and their tracks/knobs/scenes `try_*`, so a try never replaces your players.  Constants (`A1`) resolve lexically in `module MB::Sound`, where the content files are written.
 
 Round 2 (maintainer, 2026-10-13: "Didn't realize master gain was pre-effect; makes sense then to set a monitor gain"): the saved level is a **monitor trim** (`Session::MonitorTrim`, `lib/mb/sound/session/monitor_trim.rb`; console `monitor_gain`, alias `monitor`), not a gain on examples.  Round 1's `Try::Context` (which scaled what examples played) is gone.
-- One process-wide linear gain (`Session.monitor_gain`, 0 to +27 dB), applied in `Session#process_buffer` to the buffer written to the output only: after the master chain (and any limiter in it) and the master gain.  The returned mix, taps (vis), `rec_audio` files, stems, and renders never see it; `render` uses non-realtime Sessions, which don't monitor (`Session.new(monitor:)`, default = `realtime`).  Foreground `play` multiplies it in only when it opens the live output itself (not for an `output:` the caller gives).
+- One process-wide linear gain (`Session.monitor_gain`, 0 to +27 dB), applied in `Session#process_buffer` to the buffer written to the output only: after the master chain (and any limiter in it) and the master gain.  The returned mix, taps (vis), `rec_audio` files, stems, and renders never see it; `render` uses non-realtime Sessions, which don't monitor (`Session.new(monitor:)`, default = `realtime`).  Foreground `play` plays through the background Session (play-1, 2026-10-17), so it gets the trim like everything live.
 - So every live sound (try, lessons, hand-typed code) plays at the listening level, and nothing saved changes.  `monitor_gain` lines are in `Take::FOREGROUND` (replays skip them).
-- Peaks the trim pushes over full scale are clipped to -1..1 on the way out, with a warning at most every 10 s (`Monitor trim +27.0 dB clipped a peak 7.0 dB over full scale ...`) and a per-Session count (`monitor_clips`); foreground `play` clips and warns the same way.
+- Peaks the trim pushes over full scale are clipped to -1..1 on the way out, with a warning at most every 10 s (`Monitor trim +27.0 dB clipped a peak 7.0 dB over full scale ...`) and a per-Session count (`monitor_clips`).
 - Cost: 0.09 us per 800-sample stereo buffer at 0 dB (a comparison), 8.7 us with a trim, 10.0 us when it also clips (0.06% of the buffer's 16.7 ms; measured 2026-10-13).
 - Note: in the code, `master_gain` is applied after the master chain too (`process_buffer`), so it is post-limiter as well; the difference is that it reaches renders, recordings, and stems.
 
@@ -63,6 +63,10 @@ A lesson (`Help.lesson :name, title, minutes:`) is steps with `say` (prose), `ty
 
 Lessons in phase 1: `:set` (6 steps), `:knobs` (5), `:flow` (4), `:record` (5: arm, `rec 2`, `capture :l_keys, 1`, `rec_audio`, wrap up).  Their names start with `l_`.
 
+Lesson runs (ux-r3 item 34, 2026-10-17): progress saved across consoles made `lesson :set` in a new console say done (or resume at step N) without the tracks, clips, and knobs its steps had built.  Now a run (`LessonRunner`: lesson, step, Session) lives only in this console: STATES running/left/done, EVENTS advance/finish/back/restart/quit/resume, `TABLE` over every pair; `lesson :x` resumes this console's run in the current Session unless it is done, else starts at step 1; `restart: true` starts over; `from: 4` runs steps 1-3's code first ("replaying step 1: ...").  `Help::History` (progress.json) records only finished lessons (`name => { "completed" => time }`; older files' `name => next step` counts as finished past the last step), shown as "✓ done before" in the list.
+
+`demo` (ux-r3 item 26): topic `help :demo` (group :arrange), and the sheet's first group reads `now; demo`.
+
 ## The guard spec (`spec/lib/mb/sound/help_spec.rb`, ~10 s)
 
 - Every topic name is a real method; every console command a topic lists is a console command; every method a sheet line calls exists (placeholders `g b l r bass2 beat` and section names allowed).
@@ -73,9 +77,21 @@ Lessons in phase 1: `:set` (6 steps), `:knobs` (5), `:flow` (4), `:record` (5: a
 
 Specs set `MB_SOUND_HELP_DIR` to a temp dir (and stub `Take.data_dir`/`#home` for `rec_audio`), so nothing is written to the user data dir, and restore the process-wide monitor trim after each example.  `spec/lib/mb/sound/session/monitor_trim_spec.rb`: the trim reaches only the output (not the returned mix, taps, or recordings), applies after a limiter (-6 dBFS ceiling + 3 dB trim = -3 dBFS out), clips with one warning, leaves renders bit-identical, and reaches foreground play only on the live output.
 
+## Formatting, sections, and the console commands (ux-1, 2026-10-17)
+
+The maintainer's notes: "`help :ui` (just as an example) is a solid wall of text"; the sheet's footer "is just a blur of words"; lessons were "super invisible at the bottom"; section pages need "way more detail"; "could it be a Pry command instead of pure Ruby so it doesn't have to take valid Ruby syntax?"; "help :wet and help :dry didn't tell me how to mix .resonate in".
+
+- `Help::Doc` (`help/doc.rb`) is the one page formatter: title (bold, a dim hint), headings, paragraphs with doc markup (code spans never break across lines), rows of label and description (even groups of at most 8; `wrap: true` continues long descriptions), code blocks, dim notes; a blank line between blocks; 100 columns at most (`Text.width`).  Paragraphs that wrap past 6 lines split at the sentence nearest their middle.  Topic `about` text keeps its paragraphs; topics may add generated sections (`section { |doc| ... }`: help :ui's layouts and keys).  `Help.for_output` prints plain under NO_COLOR or to a pipe (Pry's page printer uses it).  The guard: no topic, section, method (every name a topic lists), list, search, or lesson-list page has more than 9 consecutive non-code lines without a blank.
+- The sheet: a "Learn: lesson :set, ..." line under the title, `help :x` in each group's heading, and a "More help" footer, one command per line (`Sheet::FOOTER`).
+- Sections: `help :start`, `:sound`, `:time`, `:arrange`, `:perform`, `:keep`, `:look` (and `help.perform`) are `SectionPage`s: `Help::SECTIONS` (hand-written intros in `content/sheet.rb`), the group's sheet lines, each topic (first sentence, main commands, first example), lessons and demo scripts that use it, sheet commands no topic of it lists.
+- Method pages end with "Learn it in: lesson :knobs (step 3 of 5)" (`Help.lessons_using`: the method names each step's code calls, by Prism).
+- Lesson steps print framed by blank lines with a dim "lesson :set · step 1/6" line and the check in color.
+- `help` and `lesson` are Pry commands too (`Help.install_commands`): `help flow`, `help mix an effect in`, `help :turn`, `help g` (literals and names defined in the console are evaluated, never calls), words matched against topic names, aliases (`TOPIC_ALIASES`: `:wet`, `:dry`, `:mix` lead to `:blend`), titles, and text, else a search; `lesson set`, `lesson :set, restart: true`.  `help(:x).try`, `help.topics`, `lesson.next` stay Ruby.
+- Topic `:blend` ("Mixing an effect in (wet and dry)"): `sig.blend(mix) { |s| fx }` first (round 2, maintainer 2026-10-17), the arithmetic form, effects with their own mix, buses for shared effects.
+
 ## Takes
 
-`help`, `now`, `lesson`, and `monitor_gain`/`monitor` lines are in `Take::FOREGROUND`, so replays skip them (including the sound a `try` or `lesson.run` made).
+`help`, `now`, `lesson`, `monitor_gain`/`monitor`, and ux-1's `keys`, `fg`, `jobs`, `debug_dump` lines are in `Take::FOREGROUND`, so replays skip them (including the sound a `try` or `lesson.run` made).
 
 ## Later
 

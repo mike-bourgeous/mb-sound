@@ -1,3 +1,5 @@
+require 'weakref'
+
 # The region finder, hooks, rebuilds, fallbacks, introspection, and check
 # mode of the plan layer.
 RSpec.describe(MB::Sound::Plan::Installation) do
@@ -299,17 +301,21 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       # their graphs, so every planned Synth (with ~80 MB of Tee buffers
       # for a 6-lane synth) stayed alive forever (the plan specs reached
       # 3 GB under Valgrind).
+      #
+      # Counts only this example's Synths (WeakRefs): a process-wide count
+      # also counted Synths other examples left reachable (see ExitClose;
+      # exit_close_spec.rb checks closed Sessions).
       make = lambda do
         s = MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop, voices: 2) { |v| v.hz.sine.at(0.2) * v.amp_env }
         s.sample(128)
-        expect(s.plans.compact).not_to be_empty
-        nil
+        expect(s.plans.compact.empty?).to eq(false) # (a be_empty matcher kept the last plans alive)
+        WeakRef.new(s)
       end
-      10.times { make.call }
+      refs = 10.times.map { make.call }
       GC.start(full_mark: true, immediate_sweep: true)
       GC.start
       # A few may stay on the machine stack (conservative scanning)
-      expect(ObjectSpace.each_object(MB::Sound::Synth).count).to be <= 3
+      expect(refs.count(&:weakref_alive?)).to be <= 3
 
       # Plans still follow changes on a graph that is alive
       g = (src.new(seed: 1) * 2 + src.new(seed: 2) * 3) * 0.5

@@ -52,8 +52,8 @@ module MB
           'MB::Sound::Length::Quantity' => ARITHMETIC.to_a,
           'MB::Sound::Interval' => ARITHMETIC.to_a,
           'MB::Sound::Phase' => ARITHMETIC.to_a,
-          # lfo.samples, 0.25.cycles of a node, input.outputs[i]
-          'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs],
+          # lfo.samples, 0.25.cycles of a node, input.outputs[i] (and
+          # then: see the racks below)
           'MB::Sound::GraphNode::MultiOutput' => %i[outputs [] left right],
           # Unattached MIDI transform chains: echo(...).strum(...)
           'MB::Sound::MIDI::Transform::Spec' => MB::Sound::MIDI::Stream::TRANSFORMS.to_a,
@@ -75,6 +75,17 @@ module MB
           'MB::Sound::Generative::Weights' => %i[+ - * / ** blur floor normalize blend over],
           'MB::Sound::Generative::Harmony' => %i[+ - * ** blur over],
           'MB::Sound::Generative::Field' => %i[**],
+          # Racks applied to sources (`sig.then(&arack { |s| ... })`;
+          # Loader#call_block takes a Rack as the block argument), bound,
+          # and composed
+          'MB::Sound::GraphNode' => %i[samples seconds cycles cyc radians rad outputs then],
+          'MB::Sound::GraphNode::Channels' => %i[then],
+          'MB::Sound::Notes' => %i[then],
+          'MB::Sound::Sequence::Clip' => %i[then],
+          'MB::Sound::MIDI::Stream' => %i[then],
+          'MB::Sound::Rack' => %i[with >> << using],
+          # A rack's macros with modulation around them (racks R2)
+          'MB::Sound::GraphNode::Knob' => %i[mod],
         }.freeze
 
         # Methods of bundles that hand out channels; the iterating ones
@@ -109,7 +120,7 @@ module MB
 
         # Top-level names besides the recorded MB::Sound methods (scale:
         # Scale values for transforms such as Clip#ghost_chords).
-        TOP_EXTRA = Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony].freeze
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :macro] | MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.

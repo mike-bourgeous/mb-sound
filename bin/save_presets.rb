@@ -7,8 +7,10 @@
 # The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
 # ambient.rb, funk.rb, named for their genres) were the first, then
 # bin/synths/electric_pianos.rb, then the SQ-80 voice's patches
-# (bin/synths/sq80_voice.rb, sq80-lib-1); each document's description says where it
-# came from (the scripts' <script>_description).
+# (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
+# named racks from bin/songs/rack_demo.rb, saved with their macros); each
+# document's description says where it came from (the scripts'
+# <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
 # again after a library change shows what changed in `git diff presets/`.
 #
@@ -90,12 +92,34 @@ module MB::Sound
                     ->(input, p) { funk_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
   }.freeze
 
+  # Rack presets (rack documents, racks R2): { name => [script, method,
+  # description] }; the script's method defines the named rack under the
+  # preset's name and returns it.
+  LIBRARY_PRESET_RACKS = {
+    dub_echo: ['bin/songs/rack_demo.rb', :rack_demo_dub,
+               'Rack :dub_echo from bin/songs/rack_demo.rb (racks-r2, 2026-10-17): dub echoes of the input, ' \
+               'macro :space (echo level and feedback) and :tone (the echoes\' lowpass, swinging slowly around the knob)'],
+  }.freeze
+
+  # Set presets (`demo`, ux-r3 item 26): { name => [script, setup method,
+  # form method, form options, description] }; the script's setup builds
+  # the set (tracks, scenes, knobs, master) in a sandbox Session and its
+  # form method the flow, then the Arrangement is saved as a set document.
+  # (tunnel_vision.rb isn't here yet: set documents don't hold buses and
+  # sends, so its hall and echo would be lost.)
+  LIBRARY_PRESET_SETS = {
+    night_bus: ['bin/songs/night_bus_flow.rb', :last_stop, :last_stop_form, {},
+                'Set :night_bus from bin/songs/night_bus_flow.rb ("Night Bus: Last Stop", tech house at 126 BPM in A minor): ' \
+                'drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; ' \
+                'its flow (play_form doc.form).  `demo` loads it.'],
+  }.freeze
+
   # The MIDI file script patches are saved from.
   LIBRARY_PRESET_MIDI = 'spec/test_data/c_major.mid'
 
   # Every library preset name.
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -121,6 +145,35 @@ module MB::Sound
             File.join(dir, "#{name}#{GraphIO::EXTENSION}"), graph,
             inputs: { input: input }, params: params, from: script, kind: :effect, meta: { description: description }
           )
+        end
+      end
+    elsif (rk = LIBRARY_PRESET_RACKS[name])
+      script, method, description = rk
+      require File.join(root, script)
+      MB::Sound.with_seed(0) do
+        rack = Session.with_context(session: Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false))) {
+          MB::Sound.public_send(method, name)
+        }
+        Dir.chdir(root) do
+          GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), rack, from: script, meta: { description: description })
+        end
+      end
+    elsif (st = LIBRARY_PRESET_SETS[name])
+      script, setup, form, form_options, description = st
+      require File.join(root, script)
+      MB::Sound.with_seed(0) do
+        # (its own transport: the set sets the tempo and meter)
+        box = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false), transport: Sequence::Transport.new(bpm: 120))
+        begin
+          Dir.chdir(root) do
+            Session.with_context(session: box) do
+              MB::Sound.public_send(setup)
+              MB::Sound.public_send(form, **form_options)
+            end
+            GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), box.arrangement, from: script, meta: { description: description })
+          end
+        ensure
+          box.close
         end
       end
     else
@@ -152,7 +205,10 @@ module MB::Sound
       names = names.empty? ? library_preset_names : names.map(&:to_sym)
       if p.list
         names.each do |n|
-          src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } || "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
+          src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
+                LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
+                LIBRARY_PRESET_SETS[n]&.then { |s, m, *| "#{s} #{m} (set)" } ||
+                "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
           puts "#{n.to_s.ljust(16)} #{src}"
         end
       elsif p.check

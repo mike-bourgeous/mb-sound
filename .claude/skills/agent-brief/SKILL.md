@@ -5,7 +5,7 @@ description: Template for briefing a background agent on mb-sound work (feature 
 
 # Briefing a background agent
 
-A background agent starts with no conversation context.  Its prompt must stand alone.  Include, in order:
+A background agent starts with no conversation context.  Its prompt must stand alone.  Longer briefs go in `/app/workbench/briefs/<topic>.md` (gitignored, the long-lived home for briefs; `tmp/briefs` is a symlink to it) and the prompt points there.  Include, in order:
 
 1. **Read first:** `/app/CLAUDE.md` (authoritative; it imports `.claude/collaboration.md`), the `design/notes/<topic>.md` files for the subsystems it touches, plus any proposal, research branch, or note the work builds on (give exact paths, branches and commits).
 2. **Where to work:** a new worktree `.claude/worktrees/<topic>` on a new branch `<topic>` off `master-ai` (give the current tip), then `bundle exec rake -f Rakefile compile` (`clean compile` if ext/ changed since the last build).  Name any other branch an agent is working on and the files to avoid.  Background agents share the session's scratchpad directory: tell each to keep its temporary files (suite logs, renders in progress) in its own subdirectory named after its branch (2026-10-16: two agents both wrote `suite.log` there, and one read the other's failure as its own).

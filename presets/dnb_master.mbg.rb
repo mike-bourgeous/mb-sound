@@ -1,13 +1,13 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "dnb_master",
   kind: :effect,
-  saved: "2026-10-14T03:18:39Z",
-  mb_sound: "0.12.0.usegit (796a1077)",
+  saved: "2026-10-17T17:19:19Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/dnb.rb",
   description: "Effect :dnb_master from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm)."
-inputs :input
+inputs input: :audio
 param :air, 20.0, range: 20.0..400.0, description: "Highpass in Hz"
 param :drive, 11.0, range: 0.0..24.0, description: "Gain in dB into the clipper and limiter"
 

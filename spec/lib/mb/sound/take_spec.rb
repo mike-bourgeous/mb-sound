@@ -70,7 +70,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.inspect).to include('go :verse')
   end
 
-  it 'replays bit for bit at the same and at other buffer sizes' do
+  it 'replays bit for bit at the same and at other buffer sizes', render_budget: { seconds: 120, reason: 'one performance rendered and replayed at several buffer sizes (offline, ~80 s)' } do
     live, t = perform(tones: false)
     expect(live.abs.max).to be > 0.1
 
@@ -135,6 +135,44 @@ RSpec.describe(MB::Sound::Take) do
       diff = (data[0...live.length] - live).abs.max
       expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
     end
+  end
+
+  it "keeps ux-1's screen commands out of replays (keys, fg, jobs, debug_dump)" do
+    %w[keys fg jobs debug_dump].each { |c| expect(take.send(:foreground?, "#{c} ")).to eq(true), c }
+  end
+
+  it "records the UI's capture and swap (KEYS Enter, step entry's w) as take lines that replay bit for bit" do
+    ev = MB::Sound::MIDI::Event
+    played = [[60, 1.1r, 1.35r], [64, 1.6r, 1.9r], [67, 2.3r, 2.8r]]
+    events = played.flat_map { |n, on, off| [ev.parse([0x90, n, 90], time: on), ev.parse([0x80, n, 64], time: off)] }
+    session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    before = MB::Sound::Take.active
+    MB::Sound::Take.instance_variable_set(:@current, t)
+    480.times do |i|
+      if i == 0
+        ['track(:lead, q: 1) { |c| c.number * c.gate * 0.01 }', 'track(:bass, q: 1) { |c| c.number * c.gate * 0.001 }', 'arm :lead'].each do |code|
+          MB::Sound::Session.with_context(session: session) { t.line(code, b) }
+        end
+      end
+      MB::Sound::UI.run_line('capture', session) if i == 200 # from a UI thread's Enter
+      MB::Sound::UI.run_line('bg :bass, seq(C3, E3).n8.loop', session) if i == 300 # step entry's w
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.3
+    expect(session.arrangement.captures.keys).to eq([:lead_1])
+    expect(t.lines.map(&:code)).to include('capture', 'bg :bass, seq(C3, E3).n8.loop')
+    expect(t.lines.find { |l| l.code == 'capture' }.lands).not_to be_empty
+
+    MB::Sound.seed(5)
+    data = replay(t.replay, [800])
+    expect((data[0...live.length] - live).abs.max).to eq(0)
+  ensure
+    MB::Sound::Take.instance_variable_set(:@current, before)
   end
 
   it 'replays knob turns, ramps, snapshots, crossfades, and undo bit for bit' do
@@ -235,7 +273,7 @@ RSpec.describe(MB::Sound::Take) do
     expect((replay(r, [367, 368])[0...live.length] - live).abs.max).to be < 1e-6
   end
 
-  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit' do
+  it 'replays a song form performance (labels, weighted goto, pick, loop!, a re-decided commit, goto a label, seek, skip, undo, a meter change) bit for bit', render_budget: { seconds: 120, reason: 'a song form recorded and replayed (offline, ~75 s)' } do
     lines = {
       0 => [
         'k = grid(16, kick: "x...x...x...x...").fill(snare: grid(16, "....x.x.xxxxxxxx", value: 38)).loop',
@@ -366,6 +404,27 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays takes saved before replace_declick with hard-cut replacements, and newer ones with the declick crossfade' do
+    render = ->(**opts) {
+      r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 1, fade_in: nil, fade_out: nil, rng: nil, ends: 2r, **opts) { |rp|
+        rp.line(0r, [0r], 'bg :x, 1.constant, on: :now')
+        rp.line(0r, [1r], 'bg :x, 2.constant')
+      }
+      out = []
+      r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, tail: 0) { |mix| out << mix[0].dup }
+      out.reduce(:concatenate)
+    }
+    old = render.()
+    expect(old[95999]).to eq(1)
+    expect(old[96000]).to eq(2)
+    new = render.(replace_declick: true)
+    expect(new[96000]).to eq(1)
+    expect(new[96000 + 240]).to eq(2)
+    s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1)
+    expect(MB::Sound::Take.new(session: s).send(:start_state)[:replace_declick]).to eq(true)
+    s.close
+  end
+
   it 'warns when a replay goes quiet with take lines left to run' do
     r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 6r) { |rp|
       rp.line(0r, [0r], 'bg :x, 0.1.constant.until(1.bar)')
@@ -376,6 +435,24 @@ RSpec.describe(MB::Sound::Take) do
       frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
     }.to output(/went quiet at 2:1.*1 take line left to run.*ends at 7:1/).to_stderr
     expect(frames).to be_between(96000, 97600)
+  end
+
+  it 'keeps the timeline moving while recorded MIDI is still to play, then pauses when idle' do
+    # Live, something the take doesn't hold (the keyboard's default patch)
+    # kept the timeline moving while notes were played into an idle Set
+    r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 3r) { |rp|
+      rp.midi [[0, 1r, [0x90, 60, 100]], [0, 2r, [0x80, 60, 64]]]
+    }
+    played = nil
+    allow(MB::Sound::Session).to receive(:new).and_wrap_original { |m, *a, **k|
+      m.call(*a, **k).tap { |s| played = -> { s.midi_in.history(0r, 3r).map { |pos, e| [pos, e.note] } } }
+    }
+    frames = 0
+    expect {
+      frames = r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
+    }.not_to output.to_stderr
+    expect(played.call).to eq([[1r, 60], [2r, 60]])
+    expect(frames).to be_between(192000, 193600)
   end
 
   it 'stops a replay that never reaches its end after its length plus EXTRA_SECONDS, or MAX_SECONDS' do
@@ -414,6 +491,16 @@ RSpec.describe(MB::Sound::Take) do
     end
     expect(t.lines.map(&:skipped)).to eq([false, true, true])
     expect(t.to_ruby).to include('# skipped (foreground): players')
+  end
+
+  it 'keeps ui commands out of replays (a replay would open the terminal UI)' do
+    t = MB::Sound::Take.new(session: session)
+    ['ui :keys', 'ui.keys', 'ui off', 'uix = 1'].each do |code|
+      t.begin_line(code)
+      t.end_line
+    end
+    expect(t.lines.map(&:skipped)).to eq([true, true, true, false])
+    expect(t.to_ruby).to include('# skipped (foreground): ui :keys').and include('# skipped (foreground): ui.keys')
   end
 
   it 'saves to the user data directory by default, or a set home' do

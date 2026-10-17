@@ -22,6 +22,7 @@ module MB
     # which tracks still align to their quantization).
     class Arrangement
       include Recording
+      include PatchCheck
 
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
@@ -79,6 +80,9 @@ module MB
         @mutex = Mutex.new
         @sections = {}
         @playback = nil
+        @arms = {} # (Recording: name => Arm)
+        @patch_checked = nil # (PatchCheck: patch => clips checked)
+        @demo_document = nil
       end
 
       # Sections declared outside a form with #section (a Hash from name to
@@ -155,6 +159,10 @@ module MB
         @quant = q
       end
 
+      # The set document `demo` loaded into this Session (see
+      # DemoMethods), or nil.
+      attr_accessor :demo_document
+
       # The tracks (a Hash from name to Track).
       def tracks
         @mutex.synchronize { @tracks.dup }
@@ -218,6 +226,8 @@ module MB
         check_offset(:lead_max, lead_max)
         raise ArgumentError, "lead_max: caps an attack lead (lead: :attack or 0.5.attack; got lead: #{lead.inspect})" if lead_max && !lead.is_a?(Length::Attack)
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
+        # Built once now, so a broken patch fails here (see PatchCheck)
+        check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip }) or return nil
         return nil unless @session.names.claim(name, :track)
         @session.route(name, to: to || :keep, send: send) if to || send
 
@@ -227,6 +237,7 @@ module MB
           tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
+        refresh_monitor(tr)
         name
       end
 
@@ -278,6 +289,17 @@ module MB
           end
           next if kind.nil? || kind == :track
           MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track or knob")) or return nil
+        end
+
+        # Each track's patch built with the scene's clip for it (see
+        # PatchCheck), once per patch and clip
+        values.each do |k, v|
+          tr = @mutex.synchronize { @tracks[k] }
+          next unless tr&.patch? && v.respond_to?(:events)
+          seen = @mutex.synchronize { ((@patch_checked ||= {}.compare_by_identity)[tr.patch] ||= {}.compare_by_identity) }
+          next if seen[v]
+          check_patch(k, tr.patch, v, what: "scene #{name.inspect}, track #{k.inspect}") or return nil
+          @mutex.synchronize { seen[v] = true }
         end
 
         @mutex.synchronize {
@@ -363,7 +385,8 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
-          state += ', armed' if armed?(tr.name)
+          arm = arms[tr.name]
+          state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped
@@ -385,7 +408,7 @@ module MB
 
       # The Set state for undo (see Session#note_undo_extra).
       def undo_state
-        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, armed: (@armed || {}).dup } }
+        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, arms: (@arms || {}).dup } }
       end
 
       # Puts the Set state back (called by Session undo and redo).
@@ -393,7 +416,7 @@ module MB
         @mutex.synchronize {
           state[:clips].each { |n, c| @tracks[n].clip = c if @tracks[n] }
           @current_scene = state[:scene]
-          @armed = state[:armed].dup if state[:armed]
+          @arms = state[:arms].dup if state[:arms]
         }
       end
 
@@ -687,7 +710,7 @@ module MB
           @session.resume(tr.name, start_time: time, fade: 0)
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
-          graph = tr.patch.call(clip)
+          graph = GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) }
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)

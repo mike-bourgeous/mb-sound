@@ -312,6 +312,15 @@ module MB
           Stream.new(Transform::Merge.new([self, *others]))
         end
 
+        # Merges +other+ (a Stream, Clip, or Notes) into this stream, like
+        # #merge: note streams layer with + as signals do (`&` stays free
+        # for another meaning; Clip#& layers clips).
+        #
+        #     (bass.stream + lead.stream).synth { |v| ... }
+        def +(other)
+          merge(other)
+        end
+
         # Returns this stream through +fx+: an unattached chain of
         # transforms (Transform::Spec, from MB::Sound#echo, #arp, ...) or a
         # Proc taking and returning a Stream.

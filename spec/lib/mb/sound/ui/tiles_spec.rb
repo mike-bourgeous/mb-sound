@@ -176,6 +176,119 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_same_screen
   end
 
+  # Every LUFS line on the screen lies inside the meters pane (a pane body
+  # kept from an old layout drew at its old place: ux-1 bug 1).
+  def expect_meters_only_in_place
+    @term.settle
+    r = @tiles.tiler.rects[:meters]
+    [@tiles.to_text, @term.text].each do |text|
+      rows = text.lines.each_index.select { |y| text.lines[y].include?('LUFS') }
+      expect(rows.length).to eq(1), text
+      expect(rows[0]).to be_between(r.y, r.y + r.h - 1)
+      expect(text.lines[rows[0]].index('LUFS')).to be_between(r.x, r.x + r.w - 1)
+    end
+  end
+
+  it 'repaints every pane in its new place after a resize, a layout switch, and a terminal resize' do
+    start(source: -> { ui_fake_snapshot })
+    expect(@term.wait_for('LUFS')).to eq(true)
+    expect_meters_only_in_place
+
+    # Grow the transport row: everything below moves down
+    @tiles.resize(:down, 3, name: :transport)
+    expect_meters_only_in_place
+
+    @tiles.layout(:studio) # meters is the first tab of the right column
+    expect_meters_only_in_place
+    @tiles.layout(:tiles)
+    expect_meters_only_in_place
+
+    @term.resize(36, 120)
+    expect_meters_only_in_place
+    @tiles.undo
+    expect_meters_only_in_place
+  end
+
+  it 'draws rules between stacked panes, joined, with the lower pane\'s title set into the rule (ux-1 item 9)' do
+    %i[unicode ascii].each do |glyphs|
+      @tiles&.stop
+      @term&.close
+      start(:studio, rows: 34, cols: 120, glyphs: glyphs, source: -> { ui_fake_snapshot })
+      expect(@term.wait_for('QUEUED')).to eq(true)
+      @term.settle
+      lines = @term.lines
+      q = @tiles.tiler.rects[:queue]
+      h, j = glyphs == :ascii ? ['-', '+'] : ['─', '┤']
+      n = @tiles.tiler.numbered.index(:queue) + 1
+      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w - 4, h) + " #{n} #{h}" + j), lines[q.y - 1] # (the pane's number at the right, ux-1 r3 item 37)
+      expect(lines[q.y]).to include('17:3   knob :cut') # the body starts on the pane's first row
+      expect(@tiles.to_text.scan('QUEUED').length).to eq(1)
+      r = @tiles.tiler.rects[:repl]
+      expect(lines[r.y + r.h][r.x - 1]).to eq(glyphs == :ascii ? '+' : '├') # the REPL's rule meets the column rule
+    end
+  end
+
+  it 'shows the keys with ? in NAV (the focused keyboard\'s too); Esc closes them, a listed key closes them and acts (ux-1 items 10, r3 20)' do
+    start(:keys, rows: 40, cols: 140)
+    expect(@term.wait_for(' KEYS ')).to eq(true)
+    @term.write("\x1d") # KEYS -> NAV (the keyboard stays focused)
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    expect(@tiles.tiler.focus).to eq(:keyboard)
+    @term.type('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    @term.settle(quiet: 0.1)
+    expect(@term.text).to include('Panes', 'Console', 'Modes', 'pick a pane by its number', 'Keyboard', 'capture into the armed tracks', 'Ctrl-W then')
+    @term.write("\e") # Esc closes only
+    expect(@term.wait_for(/\A(?!.*Esc closes;)/m)).to eq(true)
+    expect(@tiles.key_help?).to eq(false)
+    expect(@tiles.router.mode).to eq(:nav)
+    @term.type('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    @term.type('z') # closes the overlay and zooms, as NAV z would
+    expect(wait_until { @tiles.tiler.layout.zoom == :keyboard }).to eq(true)
+    expect(@tiles.key_help?).to eq(false)
+    @term.type('z')
+    expect(wait_until { @tiles.tiler.layout.zoom.nil? }).to eq(true)
+    # Focus elsewhere: only NAV's keys
+    @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
+    @term.type('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    expect(@term.text).not_to include('capture into the armed tracks')
+    @term.write("\x1d") # Ctrl-] closes it, in NAV
+    expect(wait_until { !@tiles.key_help? }).to eq(true)
+    expect(@tiles.router.mode).to eq(:nav)
+    expect(@tiles.mode_problems).to eq([])
+    expect(MB::Sound::UI::Tiles.key_table(:nav).join("\n")).to include("Panes:\n  1-9")
+  end
+
+  it 'measures the frames it writes (fps), apart from the target, and shows them with NAV f (ux-1 item 12)' do
+    start(fps: 20, source: -> { ui_fake_snapshot(t: MB::U.clock_now, seq: (MB::U.clock_now * 100).to_i, scope_phase: MB::U.clock_now) })
+    expect(@tiles.target_fps).to eq(20)
+    sleep 2.1
+    expect(@tiles.fps).to be_between(10, 21) # what was written, at most the target
+    @tiles.target_fps = 30
+    expect { @tiles.target_fps = 0 }.to raise_error(ArgumentError, /1 to 240/)
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.type('f')
+    # Refreshes against the target, frames written, and where a frame's time goes (ux-1 r3 item 23)
+    expect(@term.wait_for(%r{\d+/30 Hz · \d+ written · paint \d+\.\d write \d+\.\d wait \d+\.\d\+\d+\.\d ms})).to eq(true), @term.lines.last
+    expect(@tiles.stats[:pacing]).to include(:refreshes, :written, :paint_ms, :write_ms, :oversleep_ms, :skipped)
+    stats = @tiles.stats
+    expect(stats[:pane_cpu_ms].keys).to include(:meters, :scope)
+    expect(stats[:target_fps]).to eq(30)
+  end
+
+  it 'tips ui :wall on a big terminal, and not on a small one (ux-1 round 2)' do
+    start(rows: 60, cols: 200)
+    expect(@term.wait_for('ui :wall shows every pane')).to eq(true), @term.lines.last
+    @tiles.stop
+    @term.close
+    start(rows: 30, cols: 100)
+    @term.settle
+    expect(@term.text).not_to include('ui :wall')
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')

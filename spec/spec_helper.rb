@@ -56,11 +56,14 @@ require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
 require_relative 'support/midi_list_source'
 require_relative 'support/midi_transform_helpers'
+require_relative 'support/render_window_song'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'
+require_relative 'support/render_budget'
+require_relative 'support/rss_report'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)
 require_relative 'valgrind/memcheck_map_recorder' if ENV['MEMCHECK_MAP'] == '1'
@@ -110,7 +113,24 @@ RSpec.configure do |config|
   # sleeping for the sound's length.
   config.before(:each) do
     MB::Sound.close_outputs
+    # A play or bg in an earlier example leaves the default Session's render
+    # thread running (as in the console), so later examples would share a
+    # running Session: its MidiInput is pumped by that thread instead of
+    # read by the graph (midi_methods_spec's JACK example read nothing after
+    # channels_spec's play), and the thread renders at real time in the
+    # background for the rest of the run.  Each example starts without one.
+    default = MB::Sound::Session.existing
+    default.close if default&.running?
     MB::Sound::Tuning.default.reset
+    # The default transport starts every example at 0, 120 BPM, 4/4: a
+    # Session made without its own transport moves it, and an example that
+    # forgot `MB::Sound.rewind` (or loaded a set's `bpm 126`) shifted every
+    # later example in its process (ux-r3-session, 2026-10-17: a drum
+    # machine a sample late, a spy's stamps 14 buffers late).
+    t = MB::Sound::Sequence.transport
+    t.seek(0) unless t.position.zero?
+    t.bpm = 120 unless t.bpm == 120
+    t.meter(1, at: 0) unless t.meters.length == 1 && t.bar_length(0) == 1
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN
     MB::Sound::Session.default.master_gain_post = false
     MB::Sound.seed(MB::Sound::Internal.default_seed) # random phases etc. don't depend on example order

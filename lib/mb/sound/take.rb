@@ -29,17 +29,27 @@ module MB
       # +issued+, and the timeline positions (+lands+) where each change it
       # made landed, in the order they were made, and the +epoch+ (how many
       # seeks had landed since the take started; see Session#epoch).
-      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, keyword_init: true)
+      #
+      # +choices+ are answers given while the line ran that a replay can't
+      # ask again ([kind, key, choice] rows; see .note_choice), e.g. how a
+      # rack conflict of a loaded document was settled.
+      Line = Struct.new(:id, :code, :issued, :lands, :skipped, :epoch, :choices, keyword_init: true)
 
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
 
       class << self
         # The console's take, created when first needed.
         def current
           @current ||= new
+        end
+
+        # The console's take if one was started (nil in scripts and specs
+        # that never asked for one).
+        def active
+          @current
         end
 
         # Replaces the console's take with a fresh one.
@@ -56,6 +66,22 @@ module MB
         # The id of the console line being evaluated on this thread, or nil.
         def current_line_id
           Thread.current[:mb_sound_take_line]&.last&.id
+        end
+
+        # Records +choice+ for question +kind+ about +key+ (e.g. :rack,
+        # :dub, :rename) in the console line being evaluated on this thread,
+        # so its replay gets the same answer without asking (see
+        # .replay_choice).
+        def note_choice(kind, key, choice)
+          _take, line = Thread.current[:mb_sound_take_line]
+          line.choices << [kind, key, choice] if line
+        end
+
+        # The choice a replaying take line recorded for +kind+ and +key+, or
+        # nil (not replaying, or not recorded).
+        def replay_choice(kind, key)
+          Thread.current[:mb_sound_replay_choices]&.reverse_each { |k, n, c| return c if k == kind && n == key }
+          nil
         end
 
         # Records where a change landed in the console line being evaluated
@@ -122,7 +148,7 @@ module MB
       def begin_line(code)
         line = @mutex.synchronize {
           @next_id += 1
-          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch)
+          Line.new(id: @next_id, code: code.to_s, issued: session.clock, lands: [], skipped: foreground?(code), epoch: session.epoch - @start_epoch, choices: [])
         }
         @mutex.synchronize { @lines << line }
         Thread.current[:mb_sound_take_line] = [self, line]
@@ -230,7 +256,7 @@ module MB
         out << "# Each line runs again at the time it was typed, with every change it\n"
         out << "# made landing exactly where it landed live.\n"
         out << "#\n"
-        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it\n"
+        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it (-f overwrites)\n"
         out << "#     ruby #{'this_file.rb'}                  # plays it\n"
         out << "#     ruby #{'this_file.rb'} -o t.flac -b 367,368   # alternating buffer sizes\n"
         out << "ENV['BUNDLE_GEMFILE'] ||= #{File.expand_path('../../../Gemfile', __dir__).inspect}\n"
@@ -255,7 +281,7 @@ module MB
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
             next
           end
-          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}\n"
+          out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}#{l.choices.to_a.empty? ? '' : ", choices: #{l.choices.inspect}"}\n"
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
         end
@@ -268,7 +294,7 @@ module MB
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
         Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
-          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i) }
+          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i, choices: l.choices.to_a.dup) }
         end
       end
 
@@ -327,6 +353,7 @@ module MB
           master_gain_post: s.master_gain_post?,
           fade_in: s.fade_in,
           fade_out: s.fade_out,
+          replace_declick: s.replace_declick,
           rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),
           time: Time.now.strftime('%Y-%m-%d %H:%M:%S'),
         }

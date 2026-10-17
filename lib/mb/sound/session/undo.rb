@@ -76,13 +76,13 @@ module MB
         # and where it lands), or nil if there is nothing to undo.
         def undo(count = 1, at: nil, on: nil, in: nil, start_time: nil)
           point = LaunchPoint.of(binding) or return nil
-          shift_steps(@undo_stack, @redo_stack, 'undo', count, point, start_time)
+          shift_steps(@undo_stack, @redo_stack, 'undo', count, point, start_time).tap { @arrangement&.sync_arms }
         end
 
         # Redoes the last undone step (or the last +count+).  See #undo.
         def redo(count = 1, at: nil, on: nil, in: nil, start_time: nil)
           point = LaunchPoint.of(binding) or return nil
-          shift_steps(@redo_stack, @undo_stack, 'redo', count, point, start_time)
+          shift_steps(@redo_stack, @undo_stack, 'redo', count, point, start_time).tap { @arrangement&.sync_arms }
         end
 
         # Runs the block as one undoable command labeled +label+: every
@@ -103,6 +103,7 @@ module MB
           end
 
           push_step(label, group[:changes], group[:extras]) unless group[:changes].empty? && group[:extras].empty?
+          @arrangement&.sync_arms # (arm states follow the monitors' players; see Arrangement::Arm)
           [value, group[:changes]]
         end
 

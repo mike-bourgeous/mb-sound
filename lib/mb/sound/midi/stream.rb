@@ -183,6 +183,49 @@ module MB
           @log = []
           @readers = ObjectSpace::WeakMap.new
           @bends = source.is_a?(Transform) ? nil : BendTracker.new(Interval.semitones(bend_range))
+          # Set while reading (here so every stream has one instance
+          # variable layout; see GraphNode::IvarPreset)
+          @last_from = @last_to = @last_events = nil
+          @advance_from = @advance_to = @advance_count = @advance_rate = @advance_step = nil
+          @graph_node_name = nil
+          # Set by #spy
+          @spies = nil
+          @spy_frame = nil
+          @spy_from = nil
+          @spy_session = nil
+        end
+
+        # Calls the block with each event this stream reads from its
+        # source, once per event however many readers it has, as
+        # +|event, stamp|+:
+        # - +event+: the MIDI::Event as the stream's readers get it (a
+        #   frozen Data: type, channel, note, value, velocity, raw, bytes (a
+        #   frozen String), time (Rational stream seconds), bend_range,
+        #   legato, pitch, flam, length_hint (a Duration or nil)); the same
+        #   object the readers share, safe to keep.
+        # - +stamp+: a Session::Stamp (frozen Data: frame (Integer), pos
+        #   (Rational whole notes), bar_length, meter_pos, meter_bar; #bar,
+        #   #beat, #to_s "bar:beat") of the exact frame and timeline
+        #   position the event lands on while a Session renders, nil outside
+        #   one.
+        # Spies run on the render thread: queue what they get for a painter,
+        # never draw there.  Pass +:handle+ to remove the spy later with
+        # #clear_spies.  Returns self.
+        #
+        #     notes = []
+        #     midi.stream.spy { |e, at| notes << [e, at] if e.type == :note_on }
+        def spy(handle: nil, &block)
+          raise ArgumentError, 'Pass a block to receive events' unless block
+          ((@spies ||= {})[handle] ||= []) << block
+          self
+        end
+
+        # Removes the spies added with +handle+ (or all of them).
+        def clear_spies(handle: nil)
+          return self unless @spies
+          handle ? @spies.delete(handle) : @spies.clear
+          @spies = nil if @spies.empty?
+          self
         end
 
         # Returns a new Reader starting at +:at+ seconds, or by default where
@@ -290,6 +333,18 @@ module MB
           Stream.new(Transform::Sustain.new(self, soft: soft))
         end
 
+        # Returns a stream where a note-on for a key already held on its
+        # channel first ends the held note (a note-off at the same time),
+        # and the note-off that would have ended the older note is dropped,
+        # so the output never has overlapping notes on one key.  This is
+        # +same_key: :restrike+ for readers without an Allocator (Notes on
+        # real-time input; see Allocator and Source#realtime_input?): a
+        # keyboard that dropped a note-off is fixed by pressing the key
+        # again.  All notes off (CC 123-127) forgets the channel's notes.
+        def restrike
+          Stream.new(Transform::Restrike.new(self))
+        end
+
         # Returns a stream with note-on velocities (0..1) passed through a
         # curve: an exponent (1 is linear, 2 softer, 0.5 louder), a Range
         # (0..1 mapped linearly onto it, e.g. 0.4..0.9 to compress), or a
@@ -313,6 +368,17 @@ module MB
         # A transform's input stream, skipping the transform itself (it
         # shows as this stream's name), except for transforms that follow
         # the timeline (Transform::Timeline), which a Session must find.
+        # True if the stream is fed from a real-time input (see
+        # Source#realtime_input?).
+        def realtime_input?
+          @source.respond_to?(:realtime_input?) && @source.realtime_input?
+        end
+
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :notes
+        end
+
         def sources
           return { source: @source } unless @source.is_a?(Transform)
           @source.is_a?(Sequence::TimelineNode) ? { transform: @source } : @source.sources
@@ -406,6 +472,34 @@ module MB
           events = events.map { |e| @bends.process(e) } if @bends
 
           @log.concat(events)
+          call_spies(events, from) if @spies
+        end
+
+        # Gives +events+ (read from stream time +from+) to the spies (see
+        # #spy), stamped on the Session frame they land on: the span's first
+        # frame plus their offset from the stream time read first in that
+        # span (readers read whole spans at a time).
+        def call_spies(events, from)
+          span = MB::Sound::Session.span
+          if span
+            if @spy_frame != span.frame || !span.session.equal?(@spy_session)
+              @spy_frame = span.frame
+              @spy_session = span.session
+              @spy_from = from
+            end
+            rate = span.sample_rate
+          end
+
+          events.each do |e|
+            stamp = span && span.stamp([((e.time - @spy_from) * rate).floor, 0].max)
+            @spies.each_value do |list|
+              list.each do |s|
+                s.call(e, stamp)
+              rescue => err
+                warn "Stream spy #{s} raised #{MB::U.highlight(err)}"
+              end
+            end
+          end
         end
 
         def sorted?(events)

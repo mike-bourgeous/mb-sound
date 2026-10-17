@@ -10,9 +10,14 @@ module MB
       # GraphIO.document_of(graph) returns the Document of a loaded graph,
       # and GraphIO.dump reuses it when the graph is saved again.
       class Document
-        # Header calls, in order: graph first, then inputs, params, knobs,
-        # and a bundle's assets.
-        HEADER = %i[graph inputs param knob asset].freeze
+        # Header calls, in order: graph first, then inputs (typed since
+        # format 4: `inputs sig: :audio, side: :audio`), outputs (format 4,
+        # optional: `outputs :audio`), params, knobs, and a bundle's assets.
+        HEADER = %i[graph inputs outputs param knob asset].freeze
+
+        # The rack kinds (MB::Sound::Rack#kind) a rack document's `kind:`
+        # takes.
+        RACK_KINDS = %i[note_fx instrument effect listener modulator].freeze
 
         # Options of a param (MIDI::ControlSpec-shaped: range, description,
         # cc number, curve; unit is informational).
@@ -22,10 +27,23 @@ module MB
         # command takes them, plus a description).
         KNOB_KEYS = %i[range curve unit cc takeover smooth description].freeze
 
+        # Options only a rack document's knob lines (its macros) take (see
+        # MB::Sound::RackMethods#macro).
+        MACRO_KEYS = %i[share follow].freeze
+
         # Metadata keys GraphIO.dump writes (others are kept as given).
         META_KEYS = %i[name kind saved mb_sound from options].freeze
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
+
+        # Port types of the inputs ({ sig: :audio, side: :audio }; format 4
+        # writes them, older documents' `inputs :midi` are :notes, others
+        # :audio), the defaults of optional ports ({ depth: 0.5 }), and the
+        # output types (`outputs :audio`; empty when not written).
+        attr_accessor :input_types, :input_defaults, :outputs
+
+        # A rack document's Rack, once loaded (see #rack?).
+        attr_accessor :rack
 
         # A bundle's assets: SHA-256 sums by file name (`asset
         # "assets/pad.flac", sha256: "..."`), checked when the files are read.
@@ -50,6 +68,10 @@ module MB
           @params = {}
           @knob_nodes = {}
           @input_objects = {}
+          @input_types = {}
+          @input_defaults = {}
+          @outputs = []
+          @rack = nil
           @comment_inputs = nil
           @assets = {}
           @verified = {}
@@ -92,6 +114,13 @@ module MB
         # :effect, :synth, :graph, ... (informational).
         def kind
           @meta[:kind]
+        end
+
+        # True for a rack document (`graph 4, ..., rack: :arack`): loading it
+        # gives a Rack (applied when its inputs are given), and its knob
+        # lines are the rack's macros.
+        def rack?
+          !@meta[:rack].nil?
         end
 
         # What the graph is and where it came from (the header's
@@ -168,7 +197,7 @@ module MB
           knob_nodes = (@doc&.knob_nodes || {}).each_with_object({}.compare_by_identity) { |(n, nodes), h| nodes.each { |node| h[node] = n.to_s } }
           graph_knobs, knob_problems = self.graph_knobs
           graph_knobs.each { |name, k| knob_nodes[k] = name.to_s }
-          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: :marked, knobs: knobs, knob_nodes: knob_nodes, assets: @assets)
+          writer = GraphNode::Recipe::RubyWriter.new(@graph, inputs: @inputs, seeds: :marked, knobs: knobs, knob_nodes: knob_nodes, assets: @assets, define_racks: true)
           body = writer.to_s
           writer.problems.concat(knob_problems)
           graph_knobs.each_key do |name|
@@ -194,8 +223,8 @@ module MB
           header << '# mb-sound graph document: a Ruby subset that MB::Sound.preset and'
           header << '# MB::Sound::GraphIO.load read without running it (no eval).'
           header << graph_line(writer, options)
-          input_names = writer.inputs.keys
-          header << "inputs #{input_names.map { |n| ":#{n}" }.join(', ')}" unless input_names.empty?
+          known = @doc&.input_types || {}
+          header << GraphIO.inputs_line(writer.inputs.to_h { |n, o| [n, known[n.to_sym] || GraphIO.input_type(o)] }) unless writer.inputs.empty?
           knob_params.each { |k, spec| header << param_line(writer, k, spec) }
           graph_knobs.each do |name, k|
             next unless used.include?(name.to_s)
@@ -219,6 +248,8 @@ module MB
             root.graph.each do |n|
               k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
               next unless k.is_a?(GraphNode::Knob)
+              # A rack's macros print inside its block (macro(:space, ...))
+              next if k.macro
 
               if (other = found[k.name]) && !other.equal?(k)
                 problems << "two different knobs are named #{k.name.inspect}"
@@ -286,10 +317,7 @@ module MB
           fields.merge!(@meta.reject { |k, _| fields.key?(k) })
           fields[:options] = options unless options.empty?
           parts = fields.map { |k, v| "#{k}: #{writer.literal(v)}" }
-          line = "graph #{GraphIO::FORMAT}, #{parts.join(', ')}"
-          return line if line.length <= 120
-
-          "graph #{GraphIO::FORMAT},\n  #{parts.join(",\n  ")}"
+          GraphIO.graph_line(parts)
         end
 
         def param_line(writer, name, spec)

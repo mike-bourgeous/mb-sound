@@ -20,6 +20,9 @@ module ParallelSpecs
   # are listed as slow after every run.
   SLOW_FILE = 8.0
   SLOW_EXAMPLE = 2.0
+  # Examples growing RSS by more than this are listed (spec/support/rss_report.rb
+  # records them; keep the two in step)
+  RSS_GROWTH_MB = 200
 
   module_function
 
@@ -61,7 +64,7 @@ module ParallelSpecs
     pids = groups.each_with_index.map do |(group, _), i|
       log = File.join(OUT_DIR, "#{i}.log")
       json = File.join(OUT_DIR, "#{i}.json")
-      env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json") }
+      env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json"), 'MB_SOUND_RSS_REPORT' => File.join(OUT_DIR, "#{i}.rss.json") }
       Process.spawn(env, 'bundle', 'exec', 'rspec', '--format', 'progress', '--format', 'json', '--out', json, *extra_args, *group,
                     out: log, err: [:child, :out], chdir: ROOT)
     end
@@ -106,6 +109,8 @@ module ParallelSpecs
       slow_examples.first(15).each { |e| puts format('  %6.2f s %s:%d %s', e['run_time'], e['file_path'].delete_prefix('./'), e['line_number'], e['full_description'][0, 90]) }
     end
 
+    report_rss(groups.length, out_dir)
+
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
     report_warnings(groups.length, out_dir)
     crashed.each { |i| report_crash(i, groups[i], statuses[i], out_dir) }
@@ -113,6 +118,25 @@ module ParallelSpecs
     bad.each { |s, i| puts "spec:parallel: process #{i} exited with #{s.exitstatus} (see #{display_path(File.join(out_dir, "#{i}.log"))})" }
     $stdout.flush # before rake's abort message on stderr
     bad.empty? && crashed.empty?
+  end
+
+  # Lists the examples that grew their process's resident memory by more
+  # than RssReport::THRESHOLD_MB (written by spec/support/rss_report.rb to
+  # N.rss.json).  Returns how many.
+  def report_rss(count, out_dir)
+    records = (0...count).flat_map do |i|
+      JSON.parse(File.read(File.join(out_dir, "#{i}.rss.json")))
+    rescue Errno::ENOENT, JSON::ParserError
+      []
+    end
+    records = records.select { |r| r['grew_mb'] > RSS_GROWTH_MB }
+    return 0 if records.empty?
+
+    puts "Examples growing RSS over #{RSS_GROWTH_MB} MB (spec/support/rss_report.rb):"
+    records.sort_by { |r| -r['grew_mb'] }.first(15).each do |r|
+      puts format('  %+6d MB (to %d) %s %s', r['grew_mb'], r['rss_mb'], r['example'].delete_prefix('./'), r['description'].to_s[0, 70])
+    end
+    records.length
   end
 
   # Lists the warnings that failed examples or processes (written by

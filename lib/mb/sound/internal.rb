@@ -12,6 +12,21 @@ module MB
     module Internal
       module_function
 
+      # Where +error+ came from in the user's code ("(pry):3",
+      # "songs/x.rb:12"): its first backtrace frame outside mb-sound's lib/
+      # and installed gems, or nil (a failing patch's line, for messages
+      # that name it: the UI's capture and swap, Arrangement#capture).
+      def error_origin(error)
+        lib = File.expand_path('..', __dir__)
+        loc = (error.backtrace_locations || []).find do |l|
+          path = l.absolute_path || l.path.to_s
+          !path.start_with?(lib) && !path.include?('/gems/') && !path.start_with?('<internal')
+        end
+        return nil unless loc
+        path = (loc.absolute_path || loc.path).to_s.delete_prefix("#{Dir.pwd}/")
+        "#{path}:#{loc.lineno}"
+      end
+
       # Returns true if the given Array looks like a (possibly nested)
       # numeric array, false if it's not an array or contains non-numeric
       # data.  Only checks the first element of an array.
@@ -188,6 +203,22 @@ module MB
           @pg&.close
           @pg = nil
         end
+      end
+
+      # Waits +seconds+ of audio for code that waits on a Session (foreground
+      # #play, #wait, take replays): wall-clock sleep, or on an output that
+      # keeps a virtual clock (NullOutput sleep: :virtual) lets that much
+      # audio through and waits until it was written (see
+      # NullOutput#consume), so specs of these waits run as fast as the
+      # render and see the same frames every time.
+      def wait_audio(session, seconds)
+        out = session&.instance_variable_get(:@output)
+        if out.respond_to?(:virtual?) && out.virtual? && !out.closed?
+          out.consume(seconds)
+        else
+          sleep seconds
+        end
+        nil
       end
     end
   end

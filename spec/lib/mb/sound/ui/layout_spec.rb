@@ -36,11 +36,13 @@ RSpec.describe(MB::Sound::UI::Layout, :aggregate_failures) do
           pane :tracks
           pane :queue
           pane :knobs
+          pane :messages, only: :big
         end
         cols do
           pane :meters
           pane :cpu
           pane :scope
+          pane :spectrum, only: :big
         end
       end
     RUBY

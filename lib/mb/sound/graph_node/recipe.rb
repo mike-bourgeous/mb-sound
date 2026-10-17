@@ -87,7 +87,15 @@ module MB
         BUILD_BLOCKS = Set[
           :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
           :fill, # Kit#fill { grid(...) }
+          :blend, # sig.blend(0.3) { |s| fx }
           :sampler, # clip.sampler(brk) { |v, s| ... }, Instrument#sampler, MB::Sound.sampler
+          # Rack constructors (MB::Sound::RackMethods): their blocks build
+          # each application's graph.  The constructors aren't recorded
+          # (a Rack is a value that prints itself, Rack#to_ruby); an
+          # application is (`src.then(&rack)`, see Rack#call), with this
+          # block as its build block, and documents load them as build blocks
+          :rack, :mrack, :note_rack, :irack, :instrument_rack, :arack, :audio_rack, :lrack, :amrack, :listener_rack,
+          :modrack, :mod_rack,
         ].freeze
 
         # Recorded names that only raise the depth (the call itself isn't
@@ -180,6 +188,37 @@ module MB
             record_of(obj)&.config || []
           end
 
+          # Runs the block without recording the calls it makes (as if a
+          # recorded call were running), e.g. a pending unison built from
+          # its recorded stand-in (see Unison::Spec#built).
+          def quietly
+            st = state
+            st.depth += 1
+            begin
+              yield
+            ensure
+              st.depth -= 1
+            end
+          end
+
+          # True while calls are recorded (MB_SOUND_RECIPES isn't 0).
+          def enabled?
+            @enabled
+          end
+
+          # Gives +to+ the recipe of +from+ (an object standing in for it,
+          # e.g. a blockless unison and the unison built for it later), so
+          # graphs reading +to+ print it as +from+ was made.
+          def share_record(from, to)
+            rec = record_of(from)
+            return if rec.nil? || to.frozen? || record_of(to)
+
+            copy = Record.new(to, rec.call)
+            copy.config = rec.config&.dup
+            copy.scoped = rec.scoped&.dup
+            to.instance_variable_set(:@graph_recipe, copy)
+          end
+
           # True for objects that recipes are about.
           def graph_object?(obj)
             obj.is_a?(GraphNode) || obj.is_a?(Channels) || obj.is_a?(MB::Sound::Notes) ||
@@ -192,8 +231,10 @@ module MB
           end
 
           # Runs a recorded method (see the module description).  Yields the
-          # block to pass on (wrapped for build blocks).
-          def call(receiver, name, args, kwargs, block)
+          # block to pass on (wrapped for build blocks).  +kind+ overrides
+          # BUILD_BLOCKS for the block (:build for a Rack application, whose
+          # block is the rack's; see Rack#call).
+          def call(receiver, name, args, kwargs, block, kind: nil)
             st = state
             return yield(block) if st.depth > 0 || !@enabled
             take_frame(st.scopes.last)
@@ -218,7 +259,7 @@ module MB
               seeds = [drawn]
             end
 
-            kind = block && (BUILD_BLOCKS.include?(name) ? :build : :runtime)
+            kind = block && (kind || (BUILD_BLOCKS.include?(name) ? :build : :runtime))
             call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, seeds, lane(st))
             pass = kind == :build ? wrap_block(block, call) : block
 
@@ -337,8 +378,10 @@ module MB
           # Wraps a build block so each call of it runs at depth 0 and records
           # an Invocation on +call+.
           def wrap_block(block, call)
-            wrapped = proc do |*bargs|
-              inv = Invocation.new(bargs, nil, {}, false, nil, call)
+            wrapped = proc do |*bargs, **kw|
+              # Keyword arguments (a rack's extra ports) follow the
+              # positional ones in the invocation's args
+              inv = Invocation.new(kw.empty? ? bargs : bargs + kw.values, nil, {}, false, nil, call)
               (call.invocations ||= []) << inv
               st = Recipe.state
               saved = [st.depth, st.current]
@@ -347,7 +390,7 @@ module MB
               st.scopes.push(inv)
               begin
                 inv.result = Recipe.trace_locals(block, inv) {
-                  block.call(*bargs)
+                  kw.empty? ? block.call(*bargs) : block.call(*bargs, **kw)
                 }
               ensure
                 st.scopes.pop

@@ -189,15 +189,27 @@ RSpec.describe(MB::Sound::Session) do
       expect(session.add(0.constant)).to eq(1)
     end
 
-    it 'replaces a named graph exactly at the new start time' do
+    it 'replaces a named graph with a 5 ms crossfade from the exact new start time' do
       session.add(1.constant, name: :pad)
       run(4000)
       expect(session.add(2.constant, name: :pad)).to eq(:pad)
       data = run(96000)
       switch = 96000 - 4000
       expect(data[switch - 1]).to eq(1)
-      expect(data[switch]).to eq(2)
+      expect(data[switch]).to eq(1)
+      expect(data[switch + 120]).to be_within(1e-6).of(1.5)
+      expect(data[switch + 240]).to eq(2)
       expect(session.players.keys).to eq([:pad])
+    end
+
+    it 'replaces a named graph exactly at the new start time with fade: 0' do
+      session.add(1.constant, name: :pad)
+      run(4000)
+      session.add(2.constant, name: :pad, fade: 0)
+      data = run(96000)
+      switch = 96000 - 4000
+      expect(data[switch - 1]).to eq(1)
+      expect(data[switch]).to eq(2)
     end
   end
 
@@ -272,13 +284,14 @@ RSpec.describe(MB::Sound::Session) do
         expect(session).to be_idle
       end
 
-      it 'switches replacements without a fade unless one is given' do
+      it 'crossfades replacements over the declick time unless a fade is given' do
         session.add(1.constant, name: :pad)
         run(4000)
         session.add(2.constant, name: :pad)
         data = run(96000)
         expect(data[96000 - 4000 - 1]).to eq(1)
-        expect(data[96000 - 4000]).to eq(2)
+        expect(data[96000 - 4000 + 240]).to eq(2)
+        expect(data[(96000 - 4000)...(96000 - 4000 + 240)].to_a).to all(be_between(1, 2))
       end
 
       it 'can be changed or turned off' do
@@ -628,5 +641,26 @@ RSpec.describe(MB::Sound::Session) do
     session.add(4.constant, at: :now)
     mix = session.process_buffer
     expect([mix[0][0], mix[1][0]]).to eq([5, 6])
+  end
+
+  it 'pauses a realtime render thread (silence written, frames held) and refuses to pause a render' do
+    out = MB::Sound::NullOutput.new(channels: 2, buffer_size: 256)
+    s = MB::Sound::Session.new(output: out, realtime: true, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    s.add(0.5.constant, name: :c, at: :now)
+    deadline = MB::U.clock_now + 2
+    sleep 0.01 until s.frame > 0 || MB::U.clock_now > deadline
+    s.paused = true
+    expect(s.paused?).to eq(true)
+    sleep 0.05
+    held = s.frame
+    sleep 0.1
+    expect(s.frame).to eq(held)
+    s.paused = false
+    deadline = MB::U.clock_now + 2
+    sleep 0.01 until s.frame > held || MB::U.clock_now > deadline
+    expect(s.frame).to be > held
+    expect { MB::Sound::Session.new(output: out, realtime: false).paused = true }.to raise_error(ArgumentError, /realtime/)
+  ensure
+    s&.close
   end
 end

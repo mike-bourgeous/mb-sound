@@ -6,6 +6,8 @@
 /pkg/
 /spec/reports/
 /tmp/
+# Agent briefs, persona sheets, audits, page sources (workbench/README.md); its own repo later
+/workbench/
 .*.swp
 .*.swo
 /*.flac
@@ -30,3 +32,7 @@
 .gh-user
 
 .DS_Store
+
+# Golden screen captures that differ (spec/support/golden.rb)
+spec/lib/mb/sound/ui/golden/*.actual.txt
+spec/lib/mb/sound/ui/golden/*.diff.html

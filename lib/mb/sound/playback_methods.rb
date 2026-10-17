@@ -1,121 +1,86 @@
+require_relative 'render_window'
+require_relative 'mix_report'
+
 module MB
   module Sound
     # Command-line interface methods for playing sounds.  MB::Sound extends
     # itself with this module.
     module PlaybackMethods
-      # Plays a sound file if a String is given, a generated tone if a Tone is
-      # given, or an audio buffer if an audio buffer is given.  If an audio
-      # buffer or tone is given, the sample rate should be specified (defaults to
-      # 48k).  The sample rate is ignored for an audio filename.
+      # Plays +sound+ in the foreground: it starts right away in the
+      # background Session (mixed with anything playing there, through the
+      # master chain, the master gain, and the monitor trim) and the prompt
+      # waits until it ends; Ctrl-C stops it (and returns to the prompt).
+      # While it plays, the mix is plotted (see #visualize) unless +plot+
+      # is false, +quiet+ is true, or PLOT=0; +graphical+ and +spectrum+ as
+      # for #visualize.  Returns nil.
       #
-      # If +spectrum+ is true, then each chunk of audio plotted is shown in the
-      # frequency domain instead of the time domain.
+      # Anything playable plays (see Playable.graph), each in a useful way:
+      # - graphs and bundles (oscillators play until Ctrl-C), Pitches and
+      #   Notes as sines, an Envelope as the level of a soft triangle
+      # - sound files, Numo arrays (48 kHz), Arrays (one channel each)
+      # - a Sample once (stereo kept); Slices one by one with gaps
+      # - an Instrument, an SFZ or SF2 file or font: a demo phrase
+      # - a Clip, Notes, a MIDI file or Stream on a soft saw (loops play
+      #   until Ctrl-C); a grid on a TR-808; a kit design's voices once
+      # - a Wavetable as one note; a preset's Symbol (synth presets play a
+      #   demo phrase); a genre template (`genre(:dnb)`, or `play :dnb`):
+      #   about a minute of its form (set up in the background Session)
+      # Anything else prints what it is and how to play it (an error in
+      # scripts; see LiveMethods#live_error).
       #
-      # If the PLOT environment variable is set to '0', then plotting defaults
-      # to false.  Otherwise, plotting defaults to true.
+      # +gain+ scales the sound; +fade+ (bars, or a Length) fades it in;
+      # +:on+, +:in+, or +:at+ start it at a launch point instead of now
+      # (see #bg).  The player is named :play (see #players; `resume :play`
+      # after Ctrl-C).  Inside a scheduled block or a #render block, play
+      # starts the sound like #bg (under a number) and doesn't wait.
       #
-      # +:clear+ - Whether to clear the screen before beginning playback.
-      def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false)
-        # The monitor trim (see #monitor_gain) applies to the live output,
-        # not to an output given by the caller
-        trim = output.nil? ? Session.monitor_gain : 1.0
+      # Example (bin/sound.rb):
+      #     play 220.hz.triangle.at(-20.db)               # until Ctrl-C
+      #     play Sample['sounds/drums.flac']              # once, then back to the prompt
+      #     play seq(C4, E4, G4, C5).n8                   # a clip on the default patch
+      #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-808
+      #     play sf2('GeneralUser.sf2')                   # a demo phrase
+      def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        foreground = Session.context.nil? && Session.current.realtime?
 
-        clear_esc = clear ? "\e[H\e[J" : ''
-        header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n")
-        # Oscillators play forever, so graphs usually play until interrupted
-        header += "\e[33mPress Ctrl-C to stop\e[0m\n" if graph_playback?(file_tone_data)
-        header += "\n"
+        if sound.is_a?(Genre::Template) || (sound.is_a?(Symbol) && Genre.names.include?(sound) && !GraphIO.find_preset(sound))
+          return play_genre(sound.is_a?(Symbol) ? Genre[sound] : sound, foreground: foreground, quiet: quiet, plot: plot, graphical: graphical, spectrum: spectrum)
+        end
+
+        begin
+          playable = Playable.graph(sound, sample_rate: Session.current.sample_rate)
+        rescue Playable::Unplayable => e
+          return MB::Sound.live_error(e)
+        end
+
+        unless gain.nil? || gain == 1
+          playable = playable.with(nodes: playable.nodes.map { |n| n * gain })
+        end
+
+        point = LaunchPoint.on(:now) unless point.given?
+        return bg(playable, at: point, fade: fade || 0) unless foreground
+
+        header = "\e[36mPlaying\e[0m #{playable.description}"
+        header = MB::U.wrap(header.lines.map(&:strip).join(' ') + "\n")
+        header += "\e[2m#{playable.note}\e[0m\n" if playable.note
+        header += "\e[33mPress Ctrl-C to stop\e[0m\n" unless playable.ends
         $stderr.puts header unless quiet
 
-        plot = false if quiet && plot.nil?
-        plot = false if ENV['PLOT'] == '0' && plot.nil?
-        plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
-        plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
-
-        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read)) ||
-            file_tone_data.is_a?(MB::Sound::GraphNode::MultiOutput)
-          file_tone_data = [file_tone_data]
-        end
-
-        # Expand multi-output nodes (e.g. stereo bundles) into their channels
-        if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all? { |d| d.is_a?(GraphNode) || d.is_a?(GraphNode::MultiOutput) }
-          file_tone_data = file_tone_data.flat_map(&:outputs)
-        end
-
-        case file_tone_data
-        when String
-          return play_file(file_tone_data, gain: gain * trim, plot: plot, device: device, output: output)
-
-        when IOInput, InputBufferWrapper
-          return play_input(file_tone_data, gain: gain * trim, plot: plot, device: device, output: output)
-
-        when Array
-          if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
-            bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
-
-            output ||= MB::Sound.output(
-              sample_rate: sample_rate,
-              channels: MB::M.max(2, file_tone_data.length),
-              plot: plot,
-              device: device,
-              buffer_size: bufsize
-            )
-
-            # The output may run at another rate than asked for
-            nodes = file_tone_data.map { |d|
-              if d.sample_rate != output.sample_rate
-                d.resample(output.sample_rate)
-              else
-                d
-              end
-            }
-
-            input = nodes.as_input(output.channels)
-
-            gain = master_gain * trim
-            loop do
-              buf = input.read(output.buffer_size)
-              break if buf.nil? || buf.empty? || buf.any? { |d| d.nil? || d.empty? }
-
-              output.write(Session.monitor_clip(buf.map { |c| c * gain }, trim).first)
-            end
-
-          else
-            data = Internal.any_sound_to_array(file_tone_data).map { |c| c * (master_gain * trim) }
-            data = Session.monitor_clip(data, trim).first
-            data = data * 2 if data.length < 2
-            channels = data.length
-
-            output ||= MB::Sound.output(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
-            buffer_size = output.buffer_size
-
-            # TODO: if this code needs to be modified much in the future, come up
-            # with a shared way of chunking data that can work for all play,
-            # write, and plot methods.  Maybe convert everything to signal nodes?
-            #
-            # TODO: maybe use ArrayInput
-            (0...data[0].length).step(buffer_size).each do |offset|
-              output.write(data.map { |c|
-                MB::M.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
-              })
-            end
-          end
-
-        else
-          raise "Unsupported type #{file_tone_data.class.name} for playback"
-
-        end
-
-        $stderr.puts "\n\n" unless quiet
+        session = Session.current
+        bg(:play, playable, at: point, fade: fade || 0) or return nil
+        playing = -> { !session.closed? && session.playing_after_queue?(:play) }
+        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or stop(:play, fade: STOP_FADE)
+        nil
       end
 
-      # True if +data+ given to #play is a node graph (which may never end,
-      # since oscillators play forever) rather than a file or audio buffer.
-      private def graph_playback?(data)
-        data = [data] unless data.is_a?(Array)
-        !data.empty? && data.all? { |d| d.is_a?(GraphNode) || d.is_a?(GraphNode::MultiOutput) } &&
-          !data.any? { |d| d.respond_to?(:read) }
-      end
+      # The fade when Ctrl-C stops a sound #play is playing (bars, about 10
+      # ms at 120 BPM: a declick).
+      STOP_FADE = 0.005
+
+      # The longest a genre template plays in #play (seconds; longer forms
+      # play Template#short of it).
+      GENRE_PREVIEW_SECONDS = 60
 
       # The longest #render will run when neither +:bars+ nor +:seconds+ is
       # given and the sounds never end (+:max_seconds+ overrides it).
@@ -132,12 +97,13 @@ module MB
       #
       # New sounds fade in over half a bar by default; pass +:fade+ to choose
       # the number of bars, or 0 for no fade.  Replacing a named sound
-      # switches over without a fade unless +:fade+ is given, in which case
-      # it crossfades.  Change the defaults with Session.default.fade_in= and
+      # crossfades over 5 ms on exact frames (a declick), or over +:fade+
+      # bars if given (0 cuts on the exact sample).  Change the defaults with Session.default.fade_in= and
       # fade_out= (in bars).
       #
-      # Accepts a GraphNode, an Array of GraphNodes (one per channel), or a
-      # sound filename.  Everything played with #bg is mixed in one shared
+      # Accepts anything #play does (see Playable.graph): a GraphNode, an
+      # Array of GraphNodes (one per channel), a sound filename, a Sample,
+      # a Clip, an Instrument, ...  Everything played with #bg is mixed in one shared
       # Session, locked to one timeline, so sequences stay in sync.  If
       # something is already playing, the new sound starts on the next bar;
       # pass +:on+ to align it elsewhere (:now, :beat, :bar, :clip, a number
@@ -183,15 +149,20 @@ module MB
           end
         end
 
-        # Graph documents' knobs join the session (Session#add does this
-        # too); those with a controller get live MIDI input
-        if sound.is_a?(GraphNode) || sound.is_a?(GraphNode::MultiOutput) || (sound.is_a?(Array) && sound.all? { |s| s.is_a?(GraphNode) || s.is_a?(GraphNode::MultiOutput) })
-          s = Session.current
-          attach_knob_midi(s, s.adopt_knobs(sound))
+        # Converted once here, so knobs and the player share one graph
+        begin
+          playable = Playable.graph(sound, sample_rate: Session.current.sample_rate)
+        rescue Playable::Unplayable => e
+          return MB::Sound.live_error(e)
         end
 
+        # Graph documents' knobs join the session (Session#add does this
+        # too); those with a controller get live MIDI input
+        s = Session.current
+        attach_knob_midi(s, s.adopt_knobs(playable.nodes, player: name))
+
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
-          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
+          session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)
         }
       end
 
@@ -261,13 +232,15 @@ module MB
       # mutes, ...) are cancelled, and the scheduler is reset (see
       # ScheduleMethods#reset_scheduler: the song form stops, every
       # scheduled block is cancelled, and a stuck or dead scheduler thread
-      # is replaced).  It always prints one line saying what it stopped and
-      # cancelled.
+      # is replaced).  Every armed track is disarmed (an armed track may be
+      # the broken one making noise; `arm` it again to play it).  It always
+      # prints one line saying what it stopped, cancelled, and disarmed.
       #
       # Returns the journal entries of the stops and of the cancelled
       # changes (one entry, or an Array; see #stop).
       def panic
         cancelled = []
+        disarmed = []
         message = nil
         stops = session_command([], label: 'panic', kind: :stop, all: true) { |session, time|
           report = session.reset_scheduler
@@ -276,12 +249,18 @@ module MB
           waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
           cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
 
-          session.remove(fade: 0, time: time).tap { session.reset_master(time: time); session.reset_buses(time: time) }
+          session.remove(fade: 0, time: time).tap {
+            session.reset_master(time: time)
+            session.reset_buses(time: time)
+            # Panic disarms every track (maintainer, 2026-10-17: an armed
+            # track may be the broken one making noise; see Arrangement::Arm)
+            disarmed = session.arrangement.panic_disarm
+          }
         }
         return stops if Session.context&.[](:batch)
 
         stopped = Array(stops).grep(Session::Journal::Entry)
-        warn "panic: #{panic_summary(stopped.length, cancelled.length, message)}"
+        warn "panic: #{panic_summary(stopped.length, cancelled.length, message, disarmed)}"
 
         entries = [*stopped, *cancelled]
         entries.length == 1 ? entries.first : entries
@@ -289,8 +268,9 @@ module MB
 
       # The one line #panic prints: players stopped, changes cancelled, and
       # what resetting the scheduler did (+scheduler+, or nil).
-      private def panic_summary(stopped, cancelled, scheduler)
+      private def panic_summary(stopped, cancelled, scheduler, disarmed = [])
         parts = ["stopped #{stopped} player#{'s' unless stopped == 1}"]
+        parts << "disarmed #{disarmed.map(&:inspect).join(', ')}" unless disarmed.empty?
         parts << "cancelled #{cancelled} queued change#{'s' unless cancelled == 1}" if cancelled > 0
         parts << scheduler if scheduler
         parts.join('; ')
@@ -567,12 +547,20 @@ module MB
       # ends when it returns true (e.g. when a script's #wait has returned,
       # so `--plot` doesn't keep a finished script running).
       #
+      # +:header+ replaces the title line above the plot (#play shows what
+      # it plays there).
+      #
       # Returns a Hash with the number of frames drawn and the frame rate.
-      def visualize(graphical: false, spectrum: false, stop: nil)
+      def visualize(graphical: false, spectrum: false, stop: nil, header: nil)
         session = Session.default
         unless session.running?
           warn 'Nothing is playing in the background; start something with bg first'
           return nil
+        end
+
+        # With the terminal UI up, its scope (or spectrum) pane shows the mix
+        if (screen = UI.screen)
+          return visualize_in_ui(screen, spectrum: spectrum, stop: stop)
         end
 
         # Each buffer is shown when it reaches the speakers: the tap runs
@@ -591,7 +579,7 @@ module MB
         }
         latest = nil
 
-        header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
+        header = "\e[H\e[J#{header || "\e[36mVisualizing the background mix\e[0m\n"}\n"
         $stdout.write header
         plot_output = PlotOutput.new(
           session.output,
@@ -672,7 +660,7 @@ module MB
         until quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
           return false if deadline && MB::U.clock_now > deadline
           return true unless session.running?
-          sleep 0.05
+          Internal.wait_audio(session, 0.05)
         end
 
         true
@@ -769,6 +757,36 @@ module MB
       # master chain; +:bus_stems+ (true) also writes each bus's output as
       # "<bus>.<ext>".  +:loudness+ normalizes only the mix file.
       #
+      # Render windows: +:from+ starts the file where a section, label, or
+      # marker of the song (a Symbol: `from: :drop`) or a bar (a number
+      # from 1, through the meter map) starts, and +:bars+ then counts from
+      # there; +:to+ (instead of +:bars+/+:seconds+) ends it where another
+      # one starts (`from: :drop, to: :breakdown`; also without +:from+).
+      # By default the song plays from its start up to +:from+ without
+      # being written (a pre-roll in whole buffers, the same buffers as a
+      # render from the start), so the file is exactly the song's own
+      # samples from the frame where +:from+ lands (tails from before, held
+      # notes, the form's picks and seeds, take-like exactness at any
+      # buffer size the whole render has); stems start there too.
+      # +preroll: false+ seeks there instead (Session#seek, as `seek :drop`
+      # in the console): faster for a section late in a long song, with
+      # fresh state (no tails from before).  See RenderWindow.
+      #
+      #     render 'drop.flac', from: :drop, bars: 8 { my_song }
+      #     render 'drop.flac', from: :drop, to: :breakdown, preroll: false { my_song }
+      #
+      # +report: :tracks+ prints a mix report when the render is done (see
+      # MixReport; MixReport.last keeps it): integrated loudness, short-term
+      # maximum, true peak, and PLR (true peak minus integrated loudness) of every track (its stem, also
+      # without +:stems+) and of the mix, and with a song form the
+      # integrated loudness of each track and the mix per section pass.
+      # Measured before +:loudness+ normalization.
+      #
+      # +ring: :first+ makes every sum built for the render (in the block,
+      # scheduled blocks, and track patches; `a + b`) end with its first
+      # input to end, the old default; sums ring until every input ends
+      # otherwise (see GraphNode#ring for one sum).
+      #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
       # CPU at buffer sizes other than 800).
@@ -792,32 +810,65 @@ module MB
       private
 
       # The frame count and rate returned by #visualize.
+      # #visualize while the terminal UI is up: the screen's scope pane
+      # (:spectrum with +spectrum+) shows the mix, put in if the layout has
+      # none (UI::Tiles#plot_pane, UI::Band#plot_pane), so nothing draws
+      # over the screen.  With +stop+ (a playback waiting to end), waits
+      # for it (or Ctrl-C), then takes a pane it put in out again; without
+      # (the console's `vis`), returns at once, leaving the pane.
+      def visualize_in_ui(screen, spectrum:, stop:)
+        kind = spectrum ? :spectrum : :scope
+        restore = screen.plot_pane(kind)
+        if stop.nil?
+          restore = nil
+          puts "\e[2mvis: the #{kind} pane shows the mix#{screen.is_a?(UI::Tiles) ? " (ui.close :#{kind} takes it out)" : ''}\e[0m"
+          return { pane: kind }
+        end
+        sleep 0.05 until stop.call
+        { pane: kind }
+      rescue Interrupt
+        { pane: kind }
+      ensure
+        restore&.call
+      end
+
       def visualize_result(start, frames)
         elapsed = MB::U.clock_now - start if start
         { frames: frames || 0, fps: elapsed && elapsed > 0 ? ((frames || 0) / elapsed).round(1) : 0 }
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
+        raise ArgumentError, 'Pass to: or bars:/seconds:, not both' if to && (bars || seconds)
+        raise ArgumentError, "preroll: is true or false (got #{preroll.inspect})" unless preroll == true || preroll == false
 
         current = Sequence.current_transport
         transport = Sequence::Transport.new(bpm: bpm || current.bpm, bar_length: current.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
+        # A pre-roll plays the song up to +from+ without writing it
+        output = RenderWindow::Gate.new(output) if from
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         session.exact_lanes = exact_lanes
+        session.ring = ring
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
+        end
+        if report
+          raise ArgumentError, "report: is :tracks (got #{report.inspect})" unless report == :tracks || report == true
+          meter = MixReport::Meter.new(session, writer: session.stems)
+          session.stems = meter
+          session.add_tap { |mix| meter.mix_tap(mix, session.frame - mix[0].length) }
         end
 
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
         seconds = Length.seconds(seconds, sample_rate: rate, transport: transport) if seconds
         # The end bar's position through the meter map (read every buffer,
-        # so meter changes made while rendering count)
+        # so meter changes made while rendering count); see below for from:
         end_time = bars && -> { transport.bar_position(bars.to_r + 1) }
         # A bars: render has no time limit of its own (it ends at its end
         # bar plus the tail); the others stop at seconds: or
@@ -836,13 +887,40 @@ module MB
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
+        # A render window (see RenderWindow): play up to +from+ without
+        # writing it (or seek there), then count bars: from there, or end
+        # where +to+ starts
+        if from || to
+          RenderWindow.check_target(session, from, 'from:') if from
+          RenderWindow.check_target(session, to, 'to:') if to
+        end
+        skip = 0
+        if from
+          # Stems start at the window too (nothing before it is written)
+          session.stems&.origin = Float::INFINITY
+          if preroll
+            limit = ((max_seconds || MAX_RENDER_SECONDS) * rate).round
+            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit)
+            from_pos = RenderWindow.position(session, from, 0)
+          else
+            from_pos = RenderWindow.seek(session, from)
+          end
+          output.open!(skip)
+          session.stems&.origin = session.frame + skip
+          end_time = bars && -> { transport.bar_position(transport.bar_at(from_pos) + bars.to_r) }
+        end
+        if to
+          after = (from_pos || 0) + Rational(1, 10**9)
+          end_time = -> { RenderWindow.position(session, to, after) }
+        end
+
         # Frames left to render: up to the end bar at the current tempo (so
         # tempo changes during the render count), or up to the time limit
         frames = 0
         frames_left = -> {
-          left = max_frames - frames
-          if end_time
-            to_go = end_time.call - transport.position
+          left = max_frames - frames + skip
+          if (end_pos = end_time&.call)
+            to_go = end_pos - transport.position
             left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
           end
           left
@@ -852,7 +930,7 @@ module MB
         # as long as a scheduled block is still to come: any block before the
         # end bar, or with seconds:, any block; without either, only one-shot
         # blocks (a lone `every` would never end), up to the time limit
-        bounded = bars || seconds
+        bounded = bars || seconds || to
         waiting = -> {
           session.schedule_due? ||
             session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
@@ -861,14 +939,15 @@ module MB
         until frames_left.call <= 0 || (session.idle? && !waiting.call)
           count = MB::M.min(buffer_size, frames_left.call)
           session.process_buffer(count)
-          frames += count
+          frames += count - skip
+          skip = 0
         end
         # Tails ring out on a paused timeline, as before
         session.advance_idle = false
 
         if frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
-        elsif tail && (bars || seconds)
+        elsif tail && (bars || seconds || to)
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
@@ -876,8 +955,14 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+        if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+        end
+
+        if meter
+          meter.finish(session.frame)
+          MixReport.last = meter.report
+          puts MixReport.last
         end
 
         frames.to_f / rate
@@ -953,75 +1038,59 @@ module MB
         name.is_a?(Session::Journal::Entry) ? name.subject : name
       end
 
-      # Plays the given filename using the default audio output returned by
-      # MB::Sound.output.  The +:channels+ parameter may be used to force mono
-      # playback (mono sound is converted to stereo by default), or to ask ffmpeg
-      # to upmix or downmix audio to a different number of channels.
-      def play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil, output:)
-        input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
-        play_input(input, gain: gain, plot: plot, device: device, output: output)
+      # The plot option of #play: false if +quiet+ or PLOT=0 (unless given),
+      # else +plot+ (true by default).
+      def plot_option(plot, quiet)
+        return plot unless plot.nil?
+        !(quiet || ENV['PLOT'] == '0')
       end
 
-      # Plays the given audio input object (e.g. MB::Sound::FFMPEGInput) to
-      # either a given output, or the system default output.
-      def play_input(input, channels: nil, gain:, plot:, device:, output:)
-        gain *= master_gain
-        output ||= MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
-
-        buffer_size = output.buffer_size
-
-        # TODO: Move all playback loops to a processing helper method when those are added
-        loop do
-          data = input.read(buffer_size)
-          break if data.nil? || data.empty? || data[0].empty?
-
-          # Apply gain and pad the final input chunk to the output buffer size
-          data = data.map { |d|
-            MB::M.zpad(d.inplace * gain, buffer_size).not_inplace!
-          }
-
-          # Ensure the output is at least stereo (Pulseaudio plays nothing for
-          # mono output on my system)
-          data = data * output.channels if data.length == 1 && output.channels > 1
-
-          output.write(data)
-        end
-
-      ensure
-        input&.close
-      end
-
-      # Returns a String with info to display when playing the given
-      # +file_tone_data+.
-      # The description of a graph for #playback_info: its last node's #to_s,
-      # looking through wrapper nodes (TimeLimit, Ringdown; anything with
-      # #wrapped_description) and Tee branches to the node they wrap, with
-      # the wrapper's label after its name (e.g. "lp4/id=12 until 2 bars --
-      # lp4(800.0 Hz, r=0.0)").
-      def graph_description(node)
-        node = node.owner_tee.original_source while node.is_a?(GraphNode::Tee::Branch) && node.owner_tee.original_source
-        return node.to_s unless node.respond_to?(:wrapped_description)
-
-        inner, label = node.wrapped_description
-        head, sep, rest = graph_description(inner).partition(' -- ')
-        "#{head} #{label}#{sep}#{rest}"
-      end
-
-      def playback_info(file_tone_data)
-        case file_tone_data
-        when Array
-          file_tone_data.map { |ftd| playback_info(ftd) }
-
-        when GraphNode
-          filename = file_tone_data.graph.detect { |n| n.respond_to?(:filename) }&.filename
-          filename || graph_description(file_tone_data)
-
-        when String
-          "\e[1m#{file_tone_data}\e[22m: #{MB::U.highlight(FFMPEGInput.parse_info(file_tone_data).dig(:format, :tags))}"
-
+      # Waits while +playing+ returns true, plotting the mix if +plot+ (see
+      # #visualize).  Returns true if the sound ended, false if Ctrl-C
+      # interrupted it.
+      def wait_for_player(playing, plot:, graphical:, spectrum:, header:)
+        if plot
+          visualize(graphical: graphical, spectrum: spectrum, stop: -> { !playing.call }, header: header)
         else
-          MB::U.highlight(file_tone_data)
+          session = Session.current
+          Internal.wait_audio(session, 0.01) while playing.call
         end
+        !playing.call
+      rescue Interrupt
+        false
+      end
+
+      # #play for a genre template: about a minute of its form
+      # (Template#short of GENRE_PREVIEW_SECONDS), set up and played in the
+      # current Session (see Genre::Template#play).  In the foreground,
+      # waits until the form and its tails end; Ctrl-C stops everything (see
+      # #panic).
+      def play_genre(template, foreground:, quiet:, plot:, graphical:, spectrum:)
+        t = template.seconds.to_f > GENRE_PREVIEW_SECONDS * 1.5 ? template.short(GENRE_PREVIEW_SECONDS) : template
+        unless quiet || !foreground
+          header = "\e[36mPlaying\e[0m genre #{t.name.inspect}: #{t.title} (#{t.seconds.to_f.round} s#{" of #{template.seconds.to_f.round}; `genre(#{t.name.inspect}).play` for all" unless t.equal?(template)})\n" \
+            "\e[2mtracks, scenes, knobs, and master effects stay set up afterwards (`tracks`, `go :scene`)\e[0m\n" \
+            "\e[33mPress Ctrl-C to stop\e[0m\n"
+          $stderr.puts header
+        end
+        playback = t.play
+        return playback unless foreground
+
+        session = Session.current
+        started = false
+        playing = -> {
+          next false if session.closed?
+          busy = !session.idle? || session.schedule_waiting?(repeating: false) || session.schedule_due?
+          started ||= busy
+          !started || busy
+        }
+        wait_for_player(playing, plot: plot_option(plot, quiet), graphical: graphical, spectrum: spectrum, header: header) or panic
+        nil
+      end
+
+      # A description of +sound+ (see Playable.describe), for Session::Master.
+      def playback_info(sound)
+        Playable.describe(sound)
       end
     end
   end

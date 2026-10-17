@@ -60,17 +60,20 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     type.('zi')
     expect(wait.(' REPL ')).to eq(true)
 
-    # Ctrl-Z hides the tiles (the session plays on); `ui` brings them back
+    # Ctrl-Z hides the tiles (the session plays on); `fg` brings them back
     type.("bg :hum, 110.hz.triangle.at(-30.db)\r")
     expect(wait.(/bg :hum/)).to eq(true), text.call
     w.write("\x1a")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
-    expect(lock.synchronize { vt.alt? }).to eq(false)
+    expect(lock.synchronize { vt.alt? }).to eq(false), text.call
     expect(wait.('tiles hidden; the session plays on')).to eq(true), text.call
     type.("players.keys\r")
     expect(wait.('[:hum]')).to eq(true), text.call # still playing
-    type.("ui\r")
+    type.("jobs\r")
+    expect(wait.('[ui]+ hidden   ui :tiles')).to eq(true), text.call
+    expect(text.call).to include('[bg]  playing   :hum')
+    type.("fg\r") # as a shell's fg
     expect(wait.(' REPL ')).to eq(true), text.call
     expect(lock.synchronize { vt.alt? }).to eq(true)
     expect(wait.('from puts')).to eq(true), text.call # the pane's scrollback came back
@@ -79,7 +82,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     type.("ui off\r")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
-    expect(lock.synchronize { vt.alt? }).to eq(false)
+    expect(lock.synchronize { vt.alt? }).to eq(false), text.call
     type.("1 + 2\r")
     expect(wait.('=> 3')).to eq(true), text.call
 

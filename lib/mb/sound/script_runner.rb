@@ -1,5 +1,8 @@
 require 'optparse'
 
+require_relative 'script_runner/live_keys'
+require_relative 'script_runner/scrub'
+
 module MB
   module Sound
     # Runs standalone scripts in bin/ (effects, synths, and songs; see
@@ -15,6 +18,7 @@ module MB
     #     -g, --graphviz           open a visualization of the node graph
     #     -P, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters (or MIDI controls)
+    #     --ui [LAYOUT]            play live in a terminal screen (see #live_ui)
     #
     # General scripts (kind :script; utilities, plots, file processors) have
     # only -h/--help: their positional arguments go to the block.
@@ -22,7 +26,9 @@ module MB
     # Effects add -i/--input FILE, -c/--input-channels N, --repeat [COUNT],
     # and -m/--midi SOURCE (MIDI controls for Values#midi_cc from a port or a
     # MIDI file); synths add -i/--input MIDI (a file or port, whose MIDI the
-    # block gets as a MB::Sound::Notes); songs add -b/--bars N and --bpm BPM.
+    # block gets as a MB::Sound::Notes); songs add -b/--bars N, --bpm BPM,
+    # --from/--to/--seek (render windows), and --take [FILE] (the run
+    # recorded as a take; see #run_song).
     # Live MIDI switches the sound card to the :low latency profile unless
     # one was chosen (see PlaybackMethods#live_midi_latency).
     #
@@ -53,6 +59,67 @@ module MB
     #     wave: [:sine, 'LFO waveform', MB::Sound::Tone::WAVE_TYPES],
     #     preset: [nil, 'Reverb preset', Symbol],
     class ScriptRunner
+      @songs = {}
+
+      class << self
+        # Remembers a song script's parameter declarations and block (see
+        # ScriptingMethods#song_script), so a take replay can run the song
+        # again (see .replay_song).
+        def register_song(file, params, block)
+          @songs[File.expand_path(file)] = [params, block].freeze
+        end
+
+        # The script file being loaded for a take replay (see
+        # .replay_song), or nil: ScriptingMethods#main_script? is true for
+        # it, and its song_script only registers its block.
+        def song_replay_file
+          Thread.current[:mb_sound_song_replay]
+        end
+
+        # Runs the song of script +path+ (relative to mb-sound's root, or
+        # absolute) on the current session with parameter values +params+
+        # (the rest at their defaults) and the --bpm override +bpm+: the
+        # line of a take recorded with --take (see #run_song), so a replay
+        # plays the song the way the run did.  Loads the script (as if it
+        # were run, without running it) unless it has already registered
+        # its song.  Returns the block's result.
+        def replay_song(path, params = {}, bpm: nil)
+          file = script_path(path)
+          entry = @songs[file] || begin
+            old = Thread.current[:mb_sound_song_replay]
+            Thread.current[:mb_sound_song_replay] = file
+            load file
+            @songs[file] or raise ArgumentError, "#{path} calls no song_script"
+          ensure
+            Thread.current[:mb_sound_song_replay] = old
+          end
+
+          decls, block = entry
+          runner = new(:song, decls, argv: [], script: file)
+          values = Values.new(runner.instance_variable_get(:@params).to_h.merge(params.transform_keys(&:to_sym)))
+          MB::Sound.transport.override_bpm(bpm) if bpm
+          block.call(values)
+        end
+
+        # The path a take line names script +file+ by: relative to
+        # mb-sound's root when inside it (so takes keep working when the
+        # checkout moves), else absolute.
+        def take_path(file)
+          full = File.expand_path(file)
+          full.start_with?("#{ROOT}/") ? full.delete_prefix("#{ROOT}/") : full
+        end
+
+        private
+
+        def script_path(path)
+          return File.expand_path(path) if File.absolute_path?(path)
+          [File.expand_path(path, ROOT), File.expand_path(path)].find { |f| File.exist?(f) } || File.expand_path(path, ROOT)
+        end
+      end
+
+      # mb-sound's root directory (scripts in take lines are relative to it).
+      ROOT = File.expand_path('../../..', __dir__)
+
       # Audio file extensions recognized in positional arguments.
       AUDIO_EXTENSIONS = /\.(flac|wav|mp3|ogg|mp4|m4a|opus|aiff?)\z/i
 
@@ -214,6 +281,9 @@ module MB
         @arg_count = args
         @profile = profile
         @description = description
+        @declared_specs = params
+        @section_back_at = nil # (song screens' Up key; see #ui_section_back)
+        @section_back_depth = 0
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
         apply_latency_profile
@@ -303,18 +373,47 @@ module MB
       def run_song(bars: nil, &block)
         print_params
         open_song_graphviz(&block) if @options[:graphviz]
+        raise ArgumentError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
+        raise ArgumentError, '--seek goes with --from' if @options[:seek] && !@options[:from]
+
+        raise ArgumentError, '--take records a whole run (not with --from or --to)' if @options[:take] && (@options[:from] || @options[:to])
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
+          window = {}
+          window[:exact_lanes] = true if @options[:take] # as the replay will (see Take::Replay)
+          window[:report] = :tracks if @options[:report]
+          window[:from] = @options[:from] if @options[:from]
+          window[:preroll] = false if @options[:seek]
+          if @options[:to]
+            window[:to] = @options[:to]
+          elsif @options[:from] && !@options[:bars] && bars
+            # The song's own length still ends it (where bar bars + 1 starts)
+            window[:to] = bars.to_r + 1
+          else
+            window[:bars] = @options[:bars] || bars
+          end
+          seconds = MB::Sound.render(@options[:output], **window, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
           puts "Stems in #{@options[:stems]}" if @options[:stems]
+          save_take
         else
           raise ArgumentError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems]
+          raise ArgumentError, '--report needs a render (-o FILE or an output file name)' if @options[:report]
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
+          Session.current.exact_lanes = true if @options[:take]
           arrange_song(&block)
-          stop_after_bars(@options[:bars]) if @options[:bars]
-          live
+          start = @options[:from] ? seek_live(@options[:from]) : 0r
+          if @options[:bars]
+            stop_after_bars(@options[:bars], from: start)
+          elsif @options[:to]
+            stop_at(@options[:to], start)
+          end
+          begin
+            live
+          ensure
+            save_take
+          end
         end
       end
 
@@ -323,8 +422,45 @@ module MB
       # Arranges a song with +block+ on the current session, at the --bpm
       # tempo if given.
       def arrange_song(&block)
+        return record_song_take(&block) if @options[:take]
+
         MB::Sound.transport.override_bpm(@options[:bpm]) if @options[:bpm]
         block.call(@params)
+      end
+
+      # --take: starts a Take on the current session and arranges the song
+      # through one take line that runs it again by name (see
+      # .replay_song), with the parameters given and the --bpm override,
+      # so the saved replay plays the run's song exactly (with the MIDI
+      # the session's inputs read, as console takes do).
+      def record_song_take(&block)
+        ScriptRunner.register_song(@script, @declared_specs, block)
+        session = Session.current
+        @take = Take.new(session: session)
+        given = @params.to_h.reject { |k, v| @declared.find { |d| d.name == k }&.default == v }
+        args = [ScriptRunner.take_path(@script).inspect]
+        args << ruby_literal(given) unless given.empty?
+        args << "bpm: #{ruby_literal(@options[:bpm])}" if @options[:bpm]
+        code = "ScriptRunner.replay_song(#{args.join(', ')})"
+        Session.with_context(session: session) { @take.line(code, Take.console_binding) }
+      end
+
+      # Saves the --take take (see #record_song_take), if any.
+      def save_take
+        return unless @take
+        @take.save(@options[:take].is_a?(String) ? @options[:take] : nil)
+      end
+
+      # Ruby source for a parameter value in a take line.
+      def ruby_literal(v)
+        case v
+        when Hash then "{ #{v.map { |k, x| "#{k}: #{ruby_literal(x)}" }.join(', ')} }"
+        when Array then "[#{v.map { |x| ruby_literal(x) }.join(', ')}]"
+        when Rational then v.denominator == 1 ? "#{v.numerator}r" : "#{v.numerator}/#{v.denominator}r"
+        when Float, Integer, Symbol, String, true, false, nil then v.inspect
+        when Range then "(#{ruby_literal(v.begin)}#{v.exclude_end? ? '...' : '..'}#{ruby_literal(v.end)})"
+        else raise ArgumentError, "--take can't write parameter value #{v.inspect} into a take line"
+        end
       end
 
       # Returns the effect's MIDI as a Notes (see Values#midi and #midi_cc),
@@ -364,7 +500,15 @@ module MB
         return file_notes(input) if input && File.file?(input)
         return Notes.new(MIDI::Stream.live(connect: input)) if @options[:output]
 
-        live_notes(input)
+        begin
+          live_notes(input)
+        rescue StandardError => e
+          raise unless @options[:ui]
+          # --ui without a MIDI device: the screen's keyboard plays the
+          # synth (its notes go to the session's default MIDI input)
+          puts "\e[38;5;243mNo live MIDI (#{e.message.lines.first&.strip}); the screen's keyboard plays\e[0m" unless @options[:quiet]
+          Notes.new(Session.current.midi_in.stream, sustain: true)
+        end
       end
 
       # A Notes playing the MIDI file +path+ (raises unless it is .mid or
@@ -383,12 +527,49 @@ module MB
       # Stops the song at the end of bar +bars+ on the current session's
       # timeline (like a render with --bars): cancels anything still
       # scheduled and stops every player, letting master effects ring out.
-      def stop_after_bars(bars)
+      def stop_after_bars(bars, from: 0r)
         session = Session.current
-        session.schedule(bars * session.transport.bar_length, description: "end of --bars #{bars}", owner: :script) do
+        t = session.transport
+        stop_song_at(t.bar_position(t.bar_at(from) + bars.to_r), "end of --bars #{bars}")
+      end
+
+      # Stops the song where --to +target+ starts (a bar number now, or a
+      # section, label, or marker once the song gets there), after +from+.
+      def stop_at(target, from)
+        session = Session.current
+        if target.is_a?(Symbol)
+          session.markers.on(target) { |_m, pos| stop_song_at(pos, "--to #{target}") if pos > from }
+        else
+          stop_song_at(session.transport.bar_position(target), "--to bar #{target}")
+        end
+      end
+
+      def stop_song_at(pos, description)
+        session = Session.current
+        session.schedule(pos, description: description, owner: :script) do
           session.reset_scheduler
           MB::Sound.stop(:all, fade: 0)
         end
+      end
+
+      # Live --from: seeks the song there (as `seek` in the console: fresh
+      # state, the form plays on from there) and waits for the seek to
+      # land.  Returns the timeline position it landed on.
+      def seek_live(target)
+        session = Session.current
+        RenderWindow.check_target(session, target, '--from')
+        seq = MB::Sound.seek(target).seq
+        session.ensure_running
+        sleep 0.005 while (entry = session.journal[seq]).queued?
+        raise ArgumentError, "--from #{target.inspect}: the seek #{entry.status}" unless entry.landed?
+        entry.lands.pos
+      end
+
+      # A --from/--to value: a bar number, or a section, label, or marker
+      # name.
+      def window_target(v)
+        num = Float(v, exception: false)
+        num ? num.rationalize(Rational(1, 1_000_000)) : v.to_sym
       end
 
       # Sets AUDIO_PROFILE for sound card outputs opened later (see
@@ -414,6 +595,7 @@ module MB
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
+            o.on('--ui [LAYOUT]', 'Play live in a terminal screen (songs: :show, synths/effects: :play with the keyboard; q quits)') { |v| @options[:ui] = v ? v.delete_prefix(':').to_sym : :default }
             o.on('-q', '--quiet', "Don't print the parameters or MIDI controls") { @options[:quiet] = true }
             profiles = MB::Sound::DeviceOutput::PROFILES.keys
             o.on(
@@ -436,6 +618,19 @@ module MB
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
+            o.on(
+              '--from WHERE',
+              'Start at a section, label, or marker of the song (a name) or a bar number; renders play the song up to there ' \
+              'without writing it, so the file is the song\'s own samples (--bars counts from there)'
+            ) { |v| @options[:from] = window_target(v) }
+            o.on('--to WHERE', 'End where a section, label, or marker (a name) or a bar number starts (with --from, or from the start)') { |v| @options[:to] = window_target(v) }
+            o.on('--report', 'With a render: print a mix report (LUFS, short-term max, true peak, PLR per track and the mix, and per section)') { @options[:report] = true }
+            o.on('--seek', 'With --from in a render: seek there (faster, fresh state: no tails from before) instead of playing up to it') { @options[:seek] = true }
+            o.on(
+              '--take [FILE]',
+              'Record the run as a take and save its replay script to FILE (default: the takes directory; replay with ' \
+              '`ruby FILE -o out.flac`)'
+            ) { |v| @options[:take] = v || true }
             o.on('--stems DIR', 'With a render: also write each track to DIR/<track>.<ext> (its part of the mix before the master chain)') { |v| @options[:stems] = v }
             o.on('--stem-gain DB', Float, 'Gain in dB for --stems (headroom for parts peaking over full scale before a master limiter)') { |v| @options[:stem_gain] = v }
           end
@@ -767,7 +962,11 @@ module MB
       # returns (visualize only returned on Ctrl-C before, so --plot scripts
       # never exited); Ctrl-C during the plot still stops only the plot.
       def live
+        return live_ui(@options[:ui]) if @options[:ui]
+
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]
+        # Esc: all notes off (twice: all sound off), q quits, l recent MIDI
+        keys = LiveKeys.new(Session.current).start if %i[synth effect].include?(@kind) && !@options[:plot]
         if @options[:plot]
           waiter = Thread.new { MB::Sound.wait }
           waiter.report_on_exception = false
@@ -779,7 +978,118 @@ module MB
       rescue Interrupt
         puts
       ensure
+        keys&.stop
         waiter&.kill
+      end
+
+      # Plays live in a terminal screen without a console (ux-1 item 18,
+      # `--ui [LAYOUT]`): UI::Tiles with repl: :none on +name+ (:default is
+      # UI.show_layouts' :show for songs, :play for synths and effects,
+      # which starts in KEYS mode with the keyboard playing the script's
+      # MIDI input).  Keys come from UI::Keys::SONG_SCREEN and SYNTH_SCREEN
+      # (also the hints and the `?` overlay), acting here: on
+      # song screens q or Esc quits, Space pauses (the whole Session waits;
+      # see Session#paused=), Left/Right step a bar (Scrub),
+      # Up/Down or [ ] a section, PageUp/PageDown a scene; on synth and
+      # effect screens Esc is all notes off; everywhere Ctrl-C quits,
+      # Ctrl-] is NAV (zoom a pane, ...), F2 the keyboard.  When the song ends the screen
+      # stays with its final meters until q.  What the script prints while
+      # the screen is up goes to its messages pane.
+      # The actions of UI::Keys::SONG_SCREEN and SYNTH_SCREEN that #live_ui
+      # acts on (a spec checks the key tables bind no others).
+      SCREEN_ACTIONS = %i[quit panic pause bar_back bar_forward section_prev section_next scene_prev scene_next].freeze
+
+      def live_ui(name)
+        name = @kind == :song ? :show : :play if name == :default
+        layout = UI.show_layouts[name] || UI.layout_named(name)
+        raise ArgumentError, "--ui #{name}: a band layout; use a tiled one (#{UI.show_layouts.keys.map(&:inspect).join(', ')}, ...)" unless layout.is_a?(UI::Viewports::Layout)
+
+        session = Session.current
+        waiter = Thread.new { MB::Sound.wait }
+        waiter.report_on_exception = false
+        quit = false
+        tiles = nil
+        panic = LiveKeys.new(session, out: UI::Messages::Writer.new(UI.messages, $stdout))
+        scrub = Scrub.new(session.transport, seek: ->(bar) { MB::Sound.seek(bar) })
+        on_key = ->(k) { quit = true if k == :interrupt }
+        # The screen's keys come from UI::Keys::SONG_SCREEN or SYNTH_SCREEN
+        # (also the hints and the `?` overlay); their actions land here
+        on_action = ->(a) {
+          case a.name
+          when :quit then quit = true
+          when :panic
+            tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
+          when :pause
+            session.paused = !session.paused?
+            tiles.note = session.paused? ? 'paused: Space plays on, q quits' : nil
+          when :bar_back then ui_section(tiles) { tiles.say("bar #{scrub.press(:left)}", :dim) }
+          when :bar_forward then ui_section(tiles) { tiles.say("bar #{scrub.press(:right)}", :dim) }
+          when :section_prev then ui_section(tiles) { ui_section_back(tiles, session) }
+          when :section_next then ui_section(tiles) { MB::Sound.skip }
+          when :scene_prev then ui_section(tiles) { ui_scene(tiles, session, -1) }
+          when :scene_next then ui_section(tiles) { ui_scene(tiles, session, 1) }
+          end
+        }
+        play_keys = @kind == :song ? UI::Keys::SONG_SCREEN : UI::Keys::SYNTH_SCREEN
+        UI.warm_up
+        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, play_keys: play_keys, on_action: on_action, probe: $stdin.tty?)
+        UI.instance_variable_set(:@tiles, tiles) # UI.screen: warnings and plots go to it
+        out = $stdout
+        $stdout = UI::Messages::Writer.new(UI.messages, out)
+        tiles.start
+        tiles.keys(patch: nil) if @kind != :song && layout.panes.include?(:keyboard) && !@options[:input]
+        ended = false
+        until quit
+          if !ended && !waiter.alive?
+            ended = true
+            tiles.note = 'ended: q quits'
+          end
+          sleep 0.05
+        end
+      rescue Interrupt
+        nil
+      ensure
+        session&.paused = false if session&.realtime?
+        $stdout = out if out
+        UI.off
+        waiter&.kill
+      end
+
+      # Up or [ on a song screen: back to the start of the section playing,
+      # or, within Scrub::GRACE of the last press (or right at its start),
+      # to the section before it (from the form's history).
+      def ui_section_back(tiles, session)
+        pb = session.arrangement.playback
+        return tiles.say('no form playing', :warn) unless pb && !pb.ended? && pb.section
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        chained = @section_back_at && now - @section_back_at <= Scrub::GRACE
+        at_start = pb.pass_start && session.transport.position - pb.pass_start.to_r < 1/4r
+        @section_back_at = now
+        @section_back_depth = chained ? @section_back_depth.to_i + 1 : (at_start ? 1 : 0)
+        hist = pb.history
+        name = @section_back_depth.zero? ? pb.section : hist[-1 - @section_back_depth] || hist.first
+        MB::Sound.seek(name)
+        tiles.say("section #{name}", :dim)
+      end
+
+      # PageUp/PageDown on a song screen: launches the scene +dir+ (-1 or 1)
+      # away from the current one (in definition order) at its launch point.
+      def ui_scene(tiles, session, dir)
+        arr = session.arrangement
+        names = arr.scenes.keys
+        return tiles.say('no scenes', :warn) if names.empty?
+        i = names.index(arr.current_scene)
+        name = names[i ? (i + dir).clamp(0, names.length - 1) : (dir > 0 ? 0 : names.length - 1)]
+        MB::Sound.go(name)
+        tiles.say("scene #{name}", :dim)
+      end
+
+      # Runs a section command for the script's screen, flashing errors
+      # (no form, ...).
+      def ui_section(tiles)
+        yield
+      rescue StandardError => e
+        tiles.say("#{e.class}: #{e.message}", :warn)
       end
 
       # Returns the nodes in +graph+ whose sources can end while the graph

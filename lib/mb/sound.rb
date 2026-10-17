@@ -15,6 +15,7 @@ require_relative 'sound/phase'
 require_relative 'sound/curve'
 require_relative 'sound/decibels'
 require_relative 'sound/numeric_sound_mixins'
+require_relative 'sound/source_mismatch'
 
 # Load C extensions
 require_relative 'fast_sound'
@@ -43,6 +44,8 @@ require_relative 'sound/fast_recipe'
 require_relative 'sound/version'
 require_relative 'sound/tuning'
 require_relative 'sound/internal'
+require_relative 'sound/exit_close'
+require_relative 'sound/playable'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot'
 require_relative 'sound/plot_methods'
@@ -61,6 +64,8 @@ require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
 require_relative 'sound/bus_methods'
+require_relative 'sound/rack'
+require_relative 'sound/rack_methods'
 require_relative 'sound/record_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
@@ -99,6 +104,7 @@ module MB
     extend FormMethods
     extend KnobMethods
     extend BusMethods
+    extend RackMethods
     extend RecordMethods
     extend MultichannelMethods
     extend TuningMethods
@@ -183,7 +189,9 @@ require_relative 'sound/sampler'
 require_relative 'sound/granular'
 require_relative 'sound/session'
 require_relative 'sound/take'
+require_relative 'sound/arrangement/arm_state'
 require_relative 'sound/arrangement/recording'
+require_relative 'sound/arrangement/patch_check'
 require_relative 'sound/arrangement'
 require_relative 'sound/form'
 
@@ -208,12 +216,20 @@ require_relative 'sound/process_reader'
 
 require_relative 'sound/io_logger'
 
+# Clips and grids keep the instrument they play on through every transform
+# (see Sequence::PlayedBy); after everything that adds clip methods, before
+# the recipe recorders wrap them
+[MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq, MB::Sound::Sequence::Kit].each { |c| MB::Sound::Sequence::PlayedBy.carry!(c) }
+
 # Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
 # every DSL method exists
 require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
 require_relative 'sound/graph_io'
+require_relative 'sound/demo_methods'
 require_relative 'sound/genre'
 
 # The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console
 require_relative 'sound/ui'
+require_relative 'sound/debug_methods'
+require_relative 'sound/table'

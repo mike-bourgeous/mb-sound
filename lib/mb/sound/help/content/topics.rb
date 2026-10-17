@@ -17,8 +17,13 @@ module MB
       about <<~TEXT
         Everything plays through one background Session that mixes every
         player on a shared timeline; `play` is the foreground version
-        (Ctrl-C to stop).  Commands return journal entries that say where
-        they land.  Sounds end through envelopes, clips, `until`, or `stop`.
+        (waits until the sound ends; Ctrl-C to stop).  Commands return
+        journal entries that say where they land.  Sounds end through
+        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        take graphs and more: files, audio arrays, Samples (once), Slices
+        (one by one), clips (on their instrument, e.g. a chop's slices, or
+        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
@@ -30,6 +35,15 @@ module MB
       example 'a pattern on the next bar' do
         bass = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
         bg :try, bass.tone.ramp.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
+      end
+      example 'play a clip on the default patch' do
+        play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
+      end
+      example 'play two seconds of a drum file as a Sample', bars: 1 do
+        play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
+      end
+      example 'play a grid on a TR-808' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
       end
     end
 
@@ -65,6 +79,25 @@ module MB
       end
     end
 
+    Help.topic :unison, 'Unison and supersaws', group: :sound do
+      about <<~TEXT
+        Three spellings, the same sound bit for bit:
+        `110.hz.unison(5, spread: 0.5) { |p| p.ramp }` (the block form, any
+        oscillator per copy), `110.hz.unison(5, spread: 0.5).ramp` (shape
+        methods on a blockless unison; used as a signal it is saws), and
+        `110.hz.ramp.unison(5, spread: 0.5)` (a tone made again on every
+        copy).  In synth voices: `v.hz.saw.unison(5) * v.amp_env`.
+        `detune:`, `spread:` (0..1, stereo above 0), `mix:` (side copies),
+        `swarm` for gliding copies.
+      TEXT
+      dsl :unison, :swarm
+      note :oscillators
+      see :tones
+      example 'three spellings, one supersaw' do
+        bg :try, 110.hz.saw.unison(5, detune: 0.2, spread: 0.5).lp4(1200).at(-24.db).until(2.bars)
+      end
+    end
+
     Help.topic :envelopes, 'Envelopes and curves', group: :sound do
       about <<~TEXT
         Envelopes land exactly on their targets at whole samples; curves
@@ -95,11 +128,14 @@ module MB
 
     Help.topic :effects, 'Effects', group: :sound do
       about <<~TEXT
+        Sums ring until their last input ends (a gong past its click, a
+        dry part plus its reverb); `(drone + hit).ring(:first)` (or
+        `render(..., ring: :first)`) ends with the first.
         Delays (sinc-interpolated, tempo-synced lengths), feedback loops that
         run one sample at a time in C, the FDN reverb with presets, the
         Juno chorus, and antialiased shapers.
       TEXT
-      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample
+      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
@@ -129,6 +165,38 @@ module MB
         bg :try, 110.hz.saw.at(-16.db).lp4(900).duck(kick.at(-12.db)) + kick.at(-12.db)
       end
     end
+
+    Help.topic :blend, 'Mixing an effect in (wet and dry)', group: :sound do
+      about <<~TEXT
+        `sig.blend(0.3) { |s| s.resonate(:plate) }` mixes the effect the
+        block makes from `sig` with `sig` itself: 0 is all dry, 1 all wet,
+        the same law as the effects' own `mix:` (dry * (1 - mix) + wet *
+        mix).  The mix can be a number, a knob's name (`blend(:wet)`, turned
+        with `turn :wet, 0.8`), or any node (an LFO, an envelope).
+        `curve: :power` keeps the loudness of effects that don't correlate
+        with the dry sound (reverb tails); effects with lookahead
+        (compressors, limiters) get their dry path delayed to match.  A
+        stereo bundle goes to the block whole.
+
+        The same by hand: `sig * 0.7 + sig.resonate(:plate) * 0.3` (using
+        `sig` twice is fine: the graph branches it).  Some effects mix
+        themselves: `reverb(mix: 0.3)`, `chorus(mix:)`, `delay(dry:, wet:)`,
+        and the dynamics' `mix:` (parallel compression).  For one effect
+        shared by several tracks, send them to a bus (`bus(:verb) { |s|
+        s.reverb(:hall, mix: 1) }`, then `track(:keys, send: { verb: -12.db
+        })` or `feed :keys, :verb, -6.db`): the bus is all wet, and each
+        send sets how much goes in.
+      TEXT
+      commands :bus, :feed, :knob
+      dsl :blend, :resonate, :reverb, :chorus, :delay
+      see :effects, :buses, :knobs
+      example 'drums into a swept resonator, mixed in' do
+        beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
+        # (the resonator rings far louder than its strikes)
+        bg :try, beat.blend(0.4) { |s| s.resonate(:plate, 0.25.hz.lfo.at(110..440), decay: 1.5).at(-22.db) }.at(-11.db)
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(wet: :blend, dry: :blend, mix: :blend, wetdry: :blend, dry_wet: :blend)
 
     Help.topic :stereo, 'Stereo and channels', group: :sound do
       about <<~TEXT
@@ -411,7 +479,7 @@ module MB
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
-      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :synth, :tone, :amp_env, :swap
+      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
       note :sequences
       see :tempo, :sets
       example 'a looping arpeggio' do
@@ -538,6 +606,28 @@ module MB
       end
     end
 
+    Help.topic :demo, 'A demo set to explore', group: :arrange do
+      about <<~TEXT
+        `demo` loads a whole set into the session, paused at bar 1: Night
+        Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
+        tracks, 12 scenes, 5 knobs, a master chain, and its song form.
+        Nothing plays until you do something: `go :groove` launches a
+        scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
+        demo.form` plays the whole song (steer it with `loop!`, `onward`,
+        `finish`), and `tracks`, `scenes`, `knobs`, `ui :tiles` show what
+        is there.  With something already playing, `demo` asks first
+        (`demo :night_bus, replace: true` stops it).  `demos` lists the
+        sets.  The set is a set document in mb-sound's presets/ (saved by
+        bin/save_presets.rb), so `save :mine, set` keeps your changes.
+      TEXT
+      commands :demo, :demos
+      note :arrangement
+      see :sets, :flow, :knobs, :presets
+      example 'the demo sets', sound: false do
+        demos.keys
+      end
+    end
+
     Help.topic :genres, 'Genre templates', group: :arrange do
       about <<~TEXT
         `genre :dnb` is a template of a genre: tempo, form, drum grids and
@@ -612,11 +702,52 @@ module MB
       end
     end
 
+    Help.topic :racks, 'Racks: reusable graphs with typed ports', group: :perform do
+      about <<~TEXT
+        A rack is a piece of graph you can reuse, like a Proc: `mrack` takes
+        notes, `irack` notes and makes audio, `arack` audio, `lrack` audio
+        and makes notes or control, `modrack` control (`rack(in:)` is the
+        general form).  Apply it with `then`, `.()`, or `through`; each use
+        builds a fresh copy.  Extra ports are keywords (`arack :dub, side:
+        :audio do |sig, side:|`), bound with `with` (bus, track, and knob
+        names work as values).  `>>` chains racks; note streams merge with
+        `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
+        `macro :space, 0.3` inside a rack block is a knob scoped to the rack
+        (`turn :"dub/space", 0.6`; per player, `:"bass/dub/space"`, when the
+        rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
+        `:space`, `follow: :space` maps it onto the macro's range, and
+        `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
+        and `recall :"dub/wide", only: [:space]` keep variations.  `help
+        rack(:dub)` shows ports, macros, and latency.  `save :dub,
+        rack(:dub)` writes a rack document: `preset :dub` gives the rack
+        back, `preset :dub, sig: mic` plays it on an input (try the library
+        rack `preset :dub_echo`); a saved rack that differs from the
+        session's asks, or takes `racks: :session`, `:saved`, or `:rename`.
+      TEXT
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack, :macro
+      note :racks
+      see :buses, :midi, :presets
+      example 'a note rack: an anonymous value' do
+        wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
+        bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'an effect rack with a sidechain port' do
+        arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }
+        track(:try_kick) { |k| tr808(k).at(-14.db) }
+        bg :try_kick, grid(16, kick: 'x...x...x...x...').loop
+        bg :try, 55.hz.saw.at(-24.db).lp4(700).then(&rack(:try_pump).with(side: :try_kick)).until(1.bar)
+      end
+    end
+
     Help.topic :midi, 'MIDI', group: :perform do
       about <<~TEXT
         `midi` is a Notes on live input; `synth` allocates voices from any
         MIDI source; transforms (echo, arp, chord, strum, ...) work on
         Streams, Notes, and Clips; mod_sum and friends route modulation.
+        Stuck note on live input (a keyboard dropped a note-off)?  Press
+        the key again and let go: live input restrikes held keys
+        (`same_key: :restrike`; files and clips count overlaps,
+        `same_key: :count`).
       TEXT
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
@@ -632,7 +763,10 @@ module MB
         what you played first); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
-        `render` bounces graphs offline.  No MIDI keyboard?  The tiles'
+        `render` bounces graphs offline (`render 'drop.flac', from: :drop,
+        bars: 8 { song }` renders one section, exactly as in the whole
+        song; scripts take `--from drop --to breakdown`, and `--take
+        take.rb` saves a run as a replay script).  No MIDI keyboard?  The tiles'
         virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
         input, and Enter there captures.
       TEXT
@@ -665,7 +799,7 @@ module MB
         images: waveforms, spectra, spectrograms, histograms, and chart
         builders; `vis` plots the live mix.
       TEXT
-      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :table, :chart, :figure, :vis
+      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
       example 'one cycle of a pulse', sound: false do
         plot 100.hz.pulse, samples: 480
@@ -683,7 +817,12 @@ module MB
     end
 
     Help.topic :loudness, 'Loudness', group: :look do
-      about 'BS.1770 loudness of files and graphs, live meters, and normalized renders.'
+      about <<~TEXT
+        BS.1770 loudness of files and graphs, live meters, and normalized
+        renders.  `render 'mix.flac', bars: 64, report: :tracks { song }`
+        (scripts: `--report`) prints LUFS, short-term max, true peak, and
+        PLR per track and the mix, and each section pass's loudness.
+      TEXT
       commands :loudness, :render
       dsl :loudness_meter
       note :method_modules, :dynamics
@@ -693,60 +832,74 @@ module MB
       about <<~TEXT
         `now` shows what plays, knobs, scenes, the flow, and queued changes
         with the commands that apply; `help node` explains a graph;
-        `lesson` teaches the newer layers step by step.
+        `lesson` teaches the newer layers step by step.  When something
+        goes wrong live, `debug_dump` writes the state (players, changes,
+        graphs as Ruby, the screen, the take, recent MIDI, threads) to a
+        folder to read or send along.
       TEXT
-      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby
+      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump
       see :sets, :knobs, :ui
     end
 
     Help.topic :ui, 'Dashboard band and tiled screen', group: :look do
       about <<~TEXT
-        `ui` puts a live dashboard band above the prompt (transport, form,
-        tracks, queued changes, master meters, a scope); Pry keeps the
-        rest of the screen.  `ui :deck` adds knobs and CPU per part, `ui
-        :mini` is one line, `ui off` hides it.  Write your own panes with
-        `pane :name do |c, s| ... end` (s is a snapshot of the session,
-        c the pane's canvas), arrange them with `layout`, and keep a
-        layout with `ui.save`.  The prompt shows bar:beat, armed or
-        recording tracks, and load; Tab completes track, scene, and knob
-        names after the commands that take them (`go :<Tab>`).
+        `ui` puts a live dashboard band under the prompt (transport, form,
+        tracks, queued changes, master meters, a scope); Pry keeps the rest
+        of the screen, and scrolled lines stay in the terminal's scrollback.
+        `ui :deck` adds knobs and CPU, `ui :mini` is one line, `ui off`
+        hides it.
 
-        `ui :tiles` (or `ui :studio`, or any layout with `repl` in it)
-        takes the whole screen: panes tiled around the console, which keeps
-        a 10 000-line scrollback of its own.  Ctrl-] is NAV mode: 1-9 or
-        hjkl pick a pane, z zooms, s/v split, x closes, arrows resize
-        (shift: 5), = evens out, u and Ctrl-R undo and redo, [ and ] switch
-        tabs, PgUp/g/G scroll the console, / searches it, y copies (OSC 52),
-        : runs a line of Ruby (`show :knobs`, `go :drop`), and Ctrl-], i,
-        Esc, or Enter go back.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
-        `ui.save :mine` do the same from the prompt; `ui.on C1, :zoom` maps
-        a pad.  Ctrl-Z hides the tiles (the set plays on and the console
-        carries on in the normal screen); Ctrl-Z or `ui` brings them back
-        as they were.  `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
-        `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
-        layouts are data files in the ui folder, reloaded when they
-        change.  `bin/ui_check.rb` reports what your terminal supports.
+        `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
+        panes tiled around the console, which keeps a 10 000-line scrollback
+        of its own.  Ctrl-] is NAV mode (`?` there lists its keys), F2 or
+        `keys` the keyboard, Ctrl-Z hides the tiles while the set plays on
+        (`fg` brings them back, `jobs` lists what runs).
 
-        The keyboard: in the tiles, NAV then p (or `ui.keys`, or `ui :keys`)
-        turns the computer keyboard into a piano, laid out like
-        jack-keyboard: z s x d c v ... from C3 and q 2 w 3 e ... from C4;
-        - and + (or Left/Right) move octaves, Up/Down the velocity, Shift
-        accents, Space is the sustain pedal, Esc all notes off, Ctrl-]
-        back.  Notes go into the session's MIDI input, so `arm :lead`
-        plays the lead and Enter captures what you just played into it
-        (with nothing armed a default patch plays).  Most terminals send no
-        key-up, so notes are a fixed length there (`ui.keyboard.tap = 0.5`;
-        ` cycles :hold (notes hold while a key repeats), :legato, ...); with
-        the kitty keyboard protocol (kitty, WezTerm with
-        enable_kitty_keyboard, Ghostty, foot, iTerm2 with its setting)
-        notes end on key-up.  Tab is step entry: lower-row notes, 1-7
-        lengths (whole to 64th), 8 dotted, 9 triplet, r rest, t tie, a
-        accent, ` slide, Backspace undo, p plays it, w swaps it (looping)
-        into the armed tracks at their next launch point and keeps editing,
-        Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
-        line and in `ui.keyboard.clip`.
+        Warnings go to a messages pane while a screen is up (NAV m shows
+        it; `ui off` sums them up).  NAV f shows the frame rate
+        (`ui.fps` is what was drawn, `ui.target_fps` the painter's rate).
+
+        Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
+        session, c the pane's canvas); arrange them with `layout`, keep a
+        layout with `ui.save`.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
+        `ui.save :mine` change the tiles from the prompt; `ui.on C1, :zoom`
+        maps a pad; `ui.theme :mono`.  Themes, pane files, and layouts are
+        data files in the ui folder, reloaded when they change;
+        `bin/ui_check.rb` reports what your terminal supports.
+
+        The keyboard plays notes into the session's MIDI input, so
+        `arm :lead` plays the lead and Enter captures what you just played
+        into it (with nothing armed a default patch plays).  Most terminals
+        send no key-up, so notes are a fixed length there
+        (`ui.keyboard.tap = 0.5`); with the kitty keyboard protocol (kitty,
+        WezTerm, Ghostty, foot, iTerm2 with its setting) they end on
+        key-up.  Tab is step entry: Enter puts the clip's Ruby
+        (`seq(C3, E3, G3.n4).n8`) on the console line.
       TEXT
-      commands :ui, :off, :pane, :layout
+      section do |d|
+        rows = UI.layout_table.map do |name, kind, desc, size, panes, current|
+          label = "#{current ? '* ' : ''}#{kind == :script ? '--ui' : 'ui'} #{name.inspect}"
+          what = "#{desc}#{size ? " (#{size})" : ''}. #{kind == :band ? 'Band' : kind == :script ? 'Script screen' : 'Tiles'}: #{panes.join(' ')}"
+          [label, what]
+        end
+        d.heading('Layouts  (* on screen now)').rows(rows, max_label: 18, wrap: true)
+      end
+      section do |d|
+        # (The pane catalog, ui.panes: ux-1 r3 item 40)
+        d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
+        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.heading('Sizes  (one decision per terminal size: UI::Density)')
+        d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
+      end
+      section do |d|
+        UI::Tiles::KEY_HELP.each do |mode, groups|
+          groups.each do |group, keys|
+            d.heading("#{group} keys  #{Help::Text.c(:dim, { nav: '(NAV: Ctrl-])', grab: '(KEYS: F2, keys)', step: '(step entry: Tab in KEYS)' }[mode])}")
+            d.rows(keys, max_label: 20)
+          end
+        end
+      end
+      commands :ui, :off, :pane, :layout, :keys, :fg, :jobs
       note :terminal_ui
       see :now, :plots
     end

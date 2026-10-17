@@ -43,6 +43,24 @@ module MB
           @poll_warned = true
         end
 
+        # Snapshots kept to find what is heard now.
+        HEARD = 32
+
+        # The snapshot whose audio is reaching the speakers now (ux-1 r3
+        # item 32b): +snap+ (the newest) when the output has no latency,
+        # else the newest kept snapshot whose time plus the output's latency
+        # has passed, so meters and scopes match what is heard instead of
+        # running 10-50 ms early (`vis` compensates the same way).
+        def heard(snap, now)
+          return snap if snap.nil? || snap.latency.to_f <= 0
+          ring = (@heard ||= [])
+          ring << snap unless ring.last.equal?(snap)
+          ring.shift while ring.length > HEARD
+          wall = MB::U.clock_now
+          ring.reverse_each { |x| return x if x.heard_at <= wall }
+          ring.first
+        end
+
         # The latest snapshot (nil without a Session; a still transport
         # before its first buffer).
         def snapshot

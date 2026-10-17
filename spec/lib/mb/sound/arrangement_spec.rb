@@ -308,6 +308,7 @@ RSpec.describe(MB::Sound::Arrangement) do
       set.track(:c) { |c| built << c; MB::Sound.synth(c, voices: 1) { |v| v.hz.saw.rnd * v.amp_env } }
       set.scene(:three, c: a1)
       set.scene(:four, c: b1, a: a1)
+      built.clear # (track and scene checked the patch; see Arrangement::PatchCheck)
 
       MB::Sound.seed(42)
       expected = MB::Sound.with_seed(42) { MB::Sound.next_seed }

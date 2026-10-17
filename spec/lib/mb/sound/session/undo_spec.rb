@@ -52,7 +52,7 @@ RSpec.describe(MB::Sound::Session::Undo) do
   it 'cancels a change that has not landed yet, and redo queues it again' do
     within { MB::Sound.bg(:x, 1.constant) }
     run(800)
-    within { MB::Sound.bg(:x, 2.constant) } # next bar
+    within { MB::Sound.bg(:x, 2.constant, fade: 0) } # next bar
     expect(session.queued(:x).length).to eq(1)
 
     step = within { MB::Sound.undo }

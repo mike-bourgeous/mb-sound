@@ -75,9 +75,6 @@ module MB
         safe: { buffer_size: 800, period: nil, latency: 0.085 }.freeze,
       }.freeze
 
-      @open_outputs = Set.new
-      @exit_hook = false
-
       class << self
         # The backends to try, in order, for +:backends+ (an Array of Symbols
         # or a comma-separated String), the AUDIO_BACKEND environment
@@ -145,17 +142,9 @@ module MB
         end
         
         # Called by outputs as they open and close, so open outputs are
-        # closed at exit before Ruby tears down.
+        # closed at exit before Ruby tears down (see ExitClose).
         def track(output, open)
-          if open
-            @open_outputs << output
-            unless @exit_hook
-              @exit_hook = true
-              at_exit { @open_outputs.to_a.each(&:close) }
-            end
-          else
-            @open_outputs.delete(output)
-          end
+          open ? ExitClose.register(output) : ExitClose.unregister(output)
         end
       end
 

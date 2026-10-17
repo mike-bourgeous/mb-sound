@@ -15,9 +15,17 @@ module MB
       class Pane
         attr_reader :name, :rate, :height, :width, :needs, :title
 
+        # One line saying what the pane shows (`ui.panes`, help :ui, help
+        # search).
+        attr_reader :description
+
+        # The fewest rows the pane can show (the tiled screen's placement
+        # never goes below it while the terminal has room; nil: 1).
+        attr_reader :min_height
+
         # +title+: a short heading on the pane's first row (nil for none;
-        # one-row panes usually have none).
-        def initialize(name, rate: 10, height: 3, width: 24, needs: [], title: nil, &block)
+        # one-row panes usually have none).  +min_height+: see #min_height.
+        def initialize(name, rate: 10, height: 3, width: 24, needs: [], title: nil, min_height: nil, description: nil, &block)
           raise ArgumentError, "Pane names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
           raise ArgumentError, "Pane rates are positive numbers of redraws per second (got #{rate.inspect})" unless rate.is_a?(Numeric) && rate > 0
           raise ArgumentError, "Pane heights are positive Integers (got #{height.inspect})" unless height.is_a?(Integer) && height > 0
@@ -28,6 +36,9 @@ module MB
           @width = width
           @needs = Array(needs).freeze
           @title = title
+          @min_height = min_height
+          @description = description
+          raise ArgumentError, "Pane min_height is a positive Integer (got #{min_height.inspect})" unless min_height.nil? || (min_height.is_a?(Integer) && min_height > 0)
           @block = block
         end
 
@@ -36,9 +47,18 @@ module MB
         # +state+ is a Hash kept for this placement of the pane.
         def draw(c, s, state)
           c.clear
-          if @title
+          # (A screen that sets its title into the rule above the pane sets
+          # state[:title_in_rule]: the body starts on the first row)
+          if @title && !state[:title_in_rule]
             c.text(0, 0, (@title_text ||= @title.to_s.upcase.freeze), :title)
-            body = (state[:body] ||= c.sub(0, 1, c.w, c.h - 1))
+            # The body follows the canvas: a relayout (resize, another
+            # layout, a split) gives the pane a new canvas, and a body kept
+            # from the old one would keep drawing where the pane used to be
+            unless state[:body_of].equal?(c)
+              state[:body] = c.sub(0, 1, c.w, c.h - 1)
+              state[:body_of] = c
+            end
+            body = state[:body]
             body.row = 0
             c = body
           end
@@ -53,7 +73,7 @@ module MB
         def draw_body(c, s, state); end
 
         # Options #configured takes.
-        CONFIG = %i[rate height width title].freeze
+        CONFIG = %i[rate height width title min_height description].freeze
 
         # A copy named +name+ with other +rate+, +height+, +width+, or
         # +title+ (pane files and layouts configure kinds this way).
@@ -66,6 +86,8 @@ module MB
           copy.instance_variable_set(:@rate, opts[:rate]) if opts.key?(:rate)
           copy.instance_variable_set(:@height, opts[:height]) if opts.key?(:height)
           copy.instance_variable_set(:@width, opts[:width]) if opts.key?(:width)
+          copy.instance_variable_set(:@min_height, opts[:min_height]) if opts.key?(:min_height)
+          copy.instance_variable_set(:@description, opts[:description]) if opts.key?(:description)
           if opts.key?(:title)
             copy.instance_variable_set(:@title, opts[:title])
             copy.instance_variable_set(:@title_text, nil)

@@ -70,6 +70,11 @@ module MB
       #     MB::Sound.song_script(bars: 8) { |p| my_song }
       def song_script(bars: nil, profile: nil, **params, &block)
         raise ArgumentError, 'Pass a block that arranges the song' unless block
+        file = caller_locations(1, 1)[0]&.absolute_path || $0
+        ScriptRunner.register_song(file, params, block)
+        # Loaded by a take replay (ScriptRunner.replay_song): only register
+        return nil if ScriptRunner.song_replay_file == File.expand_path(file)
+
         runner(:song, params, profile: profile).run_song(bars: bars, &block)
       end
 
@@ -81,7 +86,7 @@ module MB
       # Example:
       #     song_script(bars: 8) { my_song } if main_script?(__FILE__)
       def main_script?(file)
-        File.expand_path($0) == File.expand_path(file)
+        File.expand_path($0) == File.expand_path(file) || ScriptRunner.song_replay_file == File.expand_path(file)
       end
 
       # Runs a general script (a utility, plot, file processor, benchmark,

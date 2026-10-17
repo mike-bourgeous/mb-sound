@@ -136,7 +136,7 @@ module MB
             v = voice_name(r)
             [r, v ? (gm_notes(v).first || 0) : nil]
           }.compact
-          MB::Sound.grid(division, map: map, **rows)
+          MB::Sound.grid(division, map: map, **rows).played_by(self)
         end
 
         # The voice names.
@@ -205,7 +205,7 @@ module MB
           early = Drums.flams?(source) && spacings.all? { |f| f == flam } ? flam : nil
           sources = voice_sources(source, only: only, map: map, early_flam: early)
           if sources.empty?
-            raise ArgumentError, "Nothing in #{source} plays a #{@name} voice (voices: #{names.join(', ')})"
+            raise SourceMismatch, "Nothing in #{source} plays a #{@name} voice (voices: #{names.join(', ')})"
           end
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
