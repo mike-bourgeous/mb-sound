@@ -1,4 +1,5 @@
 require_relative 'render_window'
+require_relative 'mix_report'
 
 module MB
   module Sound
@@ -789,6 +790,13 @@ module MB
       #     render 'drop.flac', from: :drop, bars: 8 { my_song }
       #     render 'drop.flac', from: :drop, to: :breakdown, preroll: false { my_song }
       #
+      # +report: :tracks+ prints a mix report when the render is done (see
+      # MixReport; MixReport.last keeps it): integrated loudness, short-term
+      # maximum, true peak, and crest factor of every track (its stem, also
+      # without +:stems+) and of the mix, and with a song form the
+      # integrated loudness of each track and the mix per section pass.
+      # Measured before +:loudness+ normalization.
+      #
       # +ring: :all+ makes every sum built for the render (in the block,
       # scheduled blocks, and track patches; `a + b`) ring until all of its
       # inputs have ended instead of ending with the first (a gong plus a
@@ -824,7 +832,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -842,6 +850,12 @@ module MB
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
+        end
+        if report
+          raise ArgumentError, "report: is :tracks (got #{report.inspect})" unless report == :tracks || report == true
+          meter = MixReport::Meter.new(session, writer: session.stems)
+          session.stems = meter
+          session.add_tap { |mix| meter.mix_tap(mix, session.frame - mix[0].length) }
         end
 
         rate = output.sample_rate
@@ -937,6 +951,12 @@ module MB
 
         if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+        end
+
+        if meter
+          meter.finish(session.frame)
+          MixReport.last = meter.report
+          puts MixReport.last
         end
 
         frames.to_f / rate

@@ -375,6 +375,7 @@ module MB
         if @options[:output]
           window = {}
           window[:exact_lanes] = true if @options[:take] # as the replay will (see Take::Replay)
+          window[:report] = :tracks if @options[:report]
           window[:from] = @options[:from] if @options[:from]
           window[:preroll] = false if @options[:seek]
           if @options[:to]
@@ -391,6 +392,7 @@ module MB
           save_take
         else
           raise ArgumentError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems]
+          raise ArgumentError, '--report needs a render (-o FILE or an output file name)' if @options[:report]
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           Session.current.exact_lanes = true if @options[:take]
@@ -607,6 +609,7 @@ module MB
               'without writing it, so the file is the song\'s own samples (--bars counts from there)'
             ) { |v| @options[:from] = window_target(v) }
             o.on('--to WHERE', 'End where a section, label, or marker (a name) or a bar number starts (with --from, or from the start)') { |v| @options[:to] = window_target(v) }
+            o.on('--report', 'With a render: print a mix report (LUFS, short-term max, true peak, crest per track and the mix, and per section)') { @options[:report] = true }
             o.on('--seek', 'With --from in a render: seek there (faster, fresh state: no tails from before) instead of playing up to it') { @options[:seek] = true }
             o.on(
               '--take [FILE]',

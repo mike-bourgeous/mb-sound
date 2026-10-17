@@ -674,7 +674,12 @@ module MB
     end
 
     Help.topic :loudness, 'Loudness', group: :look do
-      about 'BS.1770 loudness of files and graphs, live meters, and normalized renders.'
+      about <<~TEXT
+        BS.1770 loudness of files and graphs, live meters, and normalized
+        renders.  `render 'mix.flac', bars: 64, report: :tracks { song }`
+        (scripts: `--report`) prints LUFS, short-term max, true peak, and
+        crest per track and the mix, and each section pass's loudness.
+      TEXT
       commands :loudness, :render
       dsl :loudness_meter
       note :method_modules, :dynamics
