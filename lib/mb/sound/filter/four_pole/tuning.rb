@@ -7,9 +7,10 @@ module MB
         # playability and consistency"): the cutoff means the same thing at
         # every resonance and for every output tap.
         #
-        # - Without resonance a lowpass is 3 dB down at the cutoff (lp4,
-        #   lp2, the diode ladder), a highpass 3 dB down from its top (hp2,
-        #   hp4), and a bandpass peaks at the cutoff (bp2, bp4).
+        # - Without resonance a lowpass is 6 dB down at the cutoff (lp4,
+        #   lp2, the diode ladder), a highpass 6 dB down from its top (hp2,
+        #   hp4), and a bandpass peaks at the cutoff (bp2, bp4).  (-6 dB
+        #   won the Bench A/B against -3 dB, maintainer 2026-10-17.)
         # - Once the resonant peak stands PEAK_DB (6 dB) over the passband
         #   (on the :db curve from resonance 0.29 for lp4, 0.20 lp2, 0.48 hp2,
         #   0.63 hp4, 0.41 the diode ladder; always for bp2 and bp4) it is at
@@ -17,9 +18,6 @@ module MB
         #   and self-oscillation is at the cutoff.
         # - In between, the cutoff moves from the edge onto the peak as the
         #   peak grows (TuningAnalysis.target has the exact definition).
-        #
-        # +tuning: :edge6+ (an experiment, 2026-10-17) is the same with the
-        # -6 dB point at the cutoff without resonance (tables *_6).
         #
         # The hardware tuning (+tuning: :hardware+, the behavior until
         # 2026-10-17) puts the frequency where the filter would oscillate at
@@ -34,18 +32,9 @@ module MB
         # from TuningAnalysis; within 0.5 cent of the target), 1 from the
         # oscillation edge up.
         module Tuning
-          # The tuned modes in the kernels' order (tuning number 1..7).
+          # The tuned modes in the kernels' order (tuning number 1..7), also
+          # the tables' keys.
           MODES = [:lp4, :lp2, :bp2, :bp4, :hp2, :hp4, :diode].freeze
-
-# Each table's key, in the kernels' order (tuning number 1..14):
-          # the :edge tables, then the :edge6 tables (MODES with _6).
-          TABLE_KEYS = (MODES + MODES.map { |m| :"#{m}_6" }).freeze
-
-          # Tunings with tables, and the level of their edge without
-          # resonance (dB re the passband): :edge (-3 dB, the default) and
-          # :edge6 (-6 dB; an experiment, maintainer 2026-10-17: "Filters
-          # could try -6dB point at 0 rez").
-          EDGE_LEVELS = { edge: 10 * Math.log10(0.5), edge6: 20 * Math.log10(0.5) }.freeze
 
           # Table segments over x = 0..1 (a power of two: x × SEGMENTS is
           # exact).
@@ -59,17 +48,10 @@ module MB
           # tuning).
           def self.number(mode, tuning)
             return 0 if tuning == :hardware
-            MODES.index(mode) + 1 + (tuning == :edge6 ? MODES.length : 0)
+            MODES.index(mode) + 1
           end
 
-          # [mode, edge level in dB] for a TABLE_KEYS entry.
-          def self.table_mode(key)
-            name = key.to_s
-            return [name.delete_suffix('_6').to_sym, EDGE_LEVELS[:edge6]] if name.end_with?('_6')
-            [key, EDGE_LEVELS[:edge]]
-          end
-
-          # The cutoff scale m for kernel tuning +number+ (1..14; 0 gives 1)
+          # The cutoff scale m for kernel tuning +number+ (1..7; 0 gives 1)
           # at +x+ (loop gain over the oscillation edge's): the exact mirror
           # of fp_tuning_scale in mb_four_pole.h.
           def self.scale(number, x)
@@ -99,7 +81,7 @@ end
 tables = File.join(__dir__, 'tuning_tables.rb')
 if File.exist?(tables)
   require_relative 'tuning_tables'
-  MB::Sound::Filter::FourPole::Tuning::TABLE_LIST = MB::Sound::Filter::FourPole::Tuning::TABLE_KEYS.map { |m|
+  MB::Sound::Filter::FourPole::Tuning::TABLE_LIST = MB::Sound::Filter::FourPole::Tuning::MODES.map { |m|
     MB::Sound::Filter::FourPole::Tuning::TABLES.fetch(m, nil) # (nil until make_tuning.rb writes it)
   }.freeze
 end

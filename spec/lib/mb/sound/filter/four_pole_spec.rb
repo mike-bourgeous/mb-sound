@@ -23,9 +23,9 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     let(:resonances) { Numo::SFloat.new(4801).seq.map { |i| 1.3 * Math.sin(i * 0.0021)**2 - 0.1 } }
 
     FP::MODES.each do |mode, mix|
-      [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1], [1.5, 2]].each do |drive, tuned|
+      [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1]].each do |drive, tuned|
         # (the edge tuning's table for this tap; the diode's mix gets lp4's)
-        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, tuned == 2 ? :edge6 : :edge)
+        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, :edge)
         it "give identical samples for #{mode} with modulated parameters#{drive > 0 ? ' and drive' : ''}, tuning #{tuning}" do
           s1 = [0.0] * 4
           s2 = [0.0] * 4
@@ -73,11 +73,11 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     it 'use the same tuning scales' do
       xs = Numo::DFloat.linspace(-0.1, 1.1, 1201).to_a + [0.5 / 64, 1 - 1e-12, 1e-300]
-      (0..14).each do |t|
+      (0..7).each do |t|
         xs.each { |x| expect(MB::Sound::FastFilter.tuning_scale(t, x)).to eq(FP::Tuning.scale(t, x)) }
       end
       expect(FP::Tuning.scale(0, 0.3)).to eq(1)
-      expect(FP::Tuning.scale(1, 0)).to be_within(1e-12).of(1 / Math.sqrt(2**0.25 - 1)) # -3 dB at the cutoff
+      expect(FP::Tuning.scale(1, 0)).to be_within(1e-12).of(1 / Math.sqrt(2**0.5 - 1)) # -6 dB at the cutoff
       expect(FP::Tuning.scale(1, 1)).to eq(1)
       expect(FP::Tuning.scale(1, 1.2)).to eq(1)
     end
@@ -102,11 +102,13 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, -1) }.to raise_error(ArgumentError, /tuning/)
       expect { FP.process_ruby(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
-      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 14) }.to raise_error(ArgumentError, /tuning/)
-      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 15) }.to raise_error(ArgumentError, /tuning/)
-      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 8) }.not_to raise_error
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 8) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 6) }.not_to raise_error
+      expect { FP.process_ruby(*args, 0, 0, 0, 8) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 1) }.to raise_error(ArgumentError, /tuning/)
       expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 8) }.to raise_error(ArgumentError, /tuning/)
-      expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 14) }.not_to raise_error
+      expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 7) }.not_to raise_error
+      expect { FP.diode_process_ruby(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 8) }.to raise_error(ArgumentError, /tuning/)
       expect { FP.process_ruby(*args, 4) }.to raise_error(ArgumentError, /curve/)
       expect { FP.process_ruby(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
     end
@@ -174,11 +176,12 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
   end
 
   describe 'response' do
-    it 'is -3 dB at the cutoff with no resonance, 0 dB at DC, and 24 dB/octave above' do
+    it 'is -6 dB at the cutoff with no resonance, 0 dB at DC, and 24 dB/octave above' do
       f = FP.new(cutoff: 1000, resonance: 0)
       db = measured_db(f)
       expect(db.(1)).to be_within(0.01).of(0)
-      expect(db.(1000)).to be_within(0.05).of(-3.01)
+      expect(db.(1000)).to be_within(0.05).of(-6.02)
+      expect(db.(676)).to be_within(0.05).of(-3.01)
 
       db100 = measured_db(FP.new(cutoff: 100))
       expect(db100.(1600) - db100.(3200)).to be_within(0.5).of(24)
@@ -205,7 +208,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     it 'keeps the cutoff frequency at high cutoffs (prewarped)' do
       f = FP.new(cutoff: 15000, resonance: 0)
-      expect(measured_db(f).(15000)).to be_within(0.05).of(-3.01)
+      expect(measured_db(f).(15000)).to be_within(0.05).of(-6.02)
       f = FP.new(cutoff: 15000, resonance: 0, tuning: :hardware)
       expect(measured_db(f).(15000)).to be_within(0.05).of(-12.04)
     end
@@ -229,13 +232,13 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(measured_db(FP.new(cutoff: 1000, resonance: 1, compensation: 0)).(1)).to be_within(0.1).of(20 * Math.log10(1 / 4.9))
     end
 
-    it 'gives unity passbands for the other modes without resonance, 3 dB down (or the bandpasses peaking) at the cutoff' do
-      expect(measured_db(FP.new(cutoff: 1000, mode: :lp2)).(1000)).to be_within(0.05).of(-3.01)
+    it 'gives unity passbands for the other modes without resonance, 6 dB down (or the bandpasses peaking) at the cutoff' do
+      expect(measured_db(FP.new(cutoff: 1000, mode: :lp2)).(1000)).to be_within(0.05).of(-6.02)
       expect(measured_db(FP.new(cutoff: 1000, mode: :bp2)).(1000)).to be_within(0.05).of(0)
       expect(measured_db(FP.new(cutoff: 1000, mode: :bp4)).(1000)).to be_within(0.05).of(0)
       expect(measured_db(FP.new(cutoff: 1000, mode: :hp2)).(20000)).to be_within(0.1).of(0)
-      expect(measured_db(FP.new(cutoff: 1000, mode: :hp2)).(1000)).to be_within(0.05).of(-3.01)
-      expect(measured_db(FP.new(cutoff: 1000, mode: :hp4)).(1000)).to be_within(0.05).of(-3.01)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :hp2)).(1000)).to be_within(0.05).of(-6.02)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :hp4)).(1000)).to be_within(0.05).of(-6.02)
       expect(measured_db(FP.new(cutoff: 1000, mode: :hp4, resonance: 0.9)).(20000)).to be_within(0.3).of(0)
 
       # The hardware tuning: the stages' frequency at the cutoff
@@ -534,7 +537,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       imp = Numo::SFloat.zeros(65536)
       imp[0] = 1
       mag = Numo::Pocketfft.rfft(Numo::DFloat.cast(f.process(imp))).abs
-      expect(20 * Math.log10(mag[(1000 * 65536 / 96000.0).round])).to be_within(0.1).of(-3.01)
+      expect(20 * Math.log10(mag[(1000 * 65536 / 96000.0).round])).to be_within(0.1).of(-6.02)
     end
   end
 

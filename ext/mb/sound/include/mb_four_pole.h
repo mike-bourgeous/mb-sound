@@ -273,7 +273,7 @@ static inline double dl_loop_gain(double r, int curve, double k_max)
 // x, the loop gain over the oscillation edge's (lp4 k / 4, the diode ladder
 // k / DL_EDGE_K): the factor by which the filter's frequency is raised
 // above the hardware mapping (where the cutoff is the frequency the filter
-// would oscillate at), so that without resonance a lowpass is 3 dB down at
+// would oscillate at), so that without resonance a lowpass is 6 dB down at
 // the cutoff, and its resonant peak is at the cutoff once it stands 6 dB
 // over the passband (see FourPole::Tuning in Ruby, the exact mirror, and
 // TuningAnalysis for the definition).  A cubic Hermite interpolation of the
@@ -302,24 +302,18 @@ static inline double fp_tuning_scale(int tuning, double x)
 	return y0 + f * (d0 + f * (c2 + f * c3));
 }
 
-// The diode ladder's edge tuning number (fp_tuning_scale); also the number
-// of tuned modes: tunings 1..7 are the edge tuning (-3 dB without
-// resonance), 8..14 the -6 dB edge tuning (:edge6, an experiment), each in
-// the order lp4, lp2, bp2, bp4, hp2, hp4, diode.
+// The diode ladder's edge tuning number (fp_tuning_scale; the last of the
+// tuned modes lp4, lp2, bp2, bp4, hp2, hp4, diode).
 #define FP_TUNING_DIODE 7
 
-// Whether +tuning+ fits a four-pole (+diode+ false: 0 or a tap's table) or
-// the diode ladder (0 or a diode table).
+// Whether +tuning+ fits a four-pole (+diode+ false: 0 or a tap's table,
+// 1..6) or the diode ladder (0 or FP_TUNING_DIODE).
 static inline _Bool fp_tuning_valid(int tuning, _Bool diode)
 {
 	if (tuning == 0) {
 		return 1;
 	}
-	if (tuning < 0 || tuning > FP_TUNING_COUNT) {
-		return 0;
-	}
-	_Bool diode_table = (tuning - 1) % FP_TUNING_DIODE + 1 == FP_TUNING_DIODE;
-	return diode ? diode_table : !diode_table;
+	return diode ? tuning == FP_TUNING_DIODE : tuning > 0 && tuning < FP_TUNING_DIODE;
 }
 
 // A four-pole or diode ladder's settings (the kernels' arguments other

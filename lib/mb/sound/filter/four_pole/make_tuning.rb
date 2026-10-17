@@ -27,11 +27,10 @@ module MB
           # Step for the numeric derivatives (in x).
           H = 1e-5
 
-          # One table (a Tuning::TABLE_KEYS entry: a mode, or mode_6 for
-          # :edge6): [m, dm/dx / SEGMENTS] at x = i / SEGMENTS.
-          def self.table(key, segments = Tuning::SEGMENTS)
-            mode, level = Tuning.table_mode(key)
-            sc = ->(x) { TA.scale(mode, x, level) }
+          # One mode's table (a Tuning::MODES entry): [m, dm/dx / SEGMENTS]
+          # at x = i / SEGMENTS.
+          def self.table(mode, segments = Tuning::SEGMENTS)
+            sc = ->(x) { TA.scale(mode, x) }
             (0..segments).flat_map do |i|
               x = i.to_f / segments
               v = i == segments ? 1.0 : sc.(x)
@@ -48,7 +47,7 @@ module MB
           end
 
           def self.tables
-            Tuning::TABLE_KEYS.to_h { |key| [key, table(key)] }
+            Tuning::MODES.to_h { |mode| [mode, table(mode)] }
           end
 
           def self.number(v)

@@ -236,13 +236,13 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(t.mix.master.map(&:first)).to eq([:compress, :at, :limit])
 
       clip = MB::Sound.seq(MB::Sound::F3).n2
-      # Clipping a stab lowpassed at 130 Hz (-3 dB there with lp4's edge
-      # tuning; the hardware tuning's 300 Hz had the same -3 dB point) makes
-      # harmonics above 1 kHz: the heavy drive (the Reese's) has 6 dB more
-      # there than the default
+      # Clipping a stab lowpassed at 240 Hz (its -3 dB point at the patch's
+      # resonance 0.25 is 326 Hz with lp4's edge tuning, like the hardware
+      # tuning's 300 Hz) makes harmonics above 1 kHz: the heavy drive (the
+      # Reese's) has 6 dB more there than the default (8.5)
       high_share = ->(drive) {
         MB::Sound.seed(5)
-        node = MB::Sound::Genre::Patches.stab(clip, cutoff: 130, drive: drive)
+        node = MB::Sound::Genre::Patches.stab(clip, cutoff: 240, drive: drive)
         x = Numo::DFloat.cast(Numo::SFloat.hstack(Array.new(24) { node.outputs.map { |o| o.sample(800).dup }[0] })[4800..])
         f = Numo::Pocketfft.rfft(x).abs**2
         10 * Math.log10(f[(1000 * x.length / 48000.0).round..].sum / f.sum)

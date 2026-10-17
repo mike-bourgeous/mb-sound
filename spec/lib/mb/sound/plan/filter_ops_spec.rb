@@ -129,8 +129,8 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
       r = plan_compare(check: :raise) {
         s = src.new(seed: 13) * 1
         res = src.new(seed: 14, scale: 0.5, offset: 0.5)
-        s.lp4(800, resonance: res, tuning: :hardware) + s.lp4(800, resonance: res, tuning: :edge6, mode: :hp2) +
-          s.diode(900, resonance: res, tuning: :edge6) + s.diode(900, resonance: res, tuning: :edge, drive: 1.5)
+        s.lp4(800, resonance: res, tuning: :hardware) + s.lp4(800, resonance: res, mode: :hp2) +
+          s.diode(900, resonance: res, tuning: :hardware) + s.diode(900, resonance: res, tuning: :edge, drive: 1.5)
       }
       expect(op_names(r).count(:FourPole)).to eq(4)
     end

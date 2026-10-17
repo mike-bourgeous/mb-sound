@@ -152,16 +152,14 @@ module MB
         #
         # The cutoff means the same at every resonance (+tuning: :edge+, the
         # default since 2026-10-17; Filter::FourPole::Tuning): without
-        # resonance the filter is 3 dB down there, and once the resonant
+        # resonance the filter is 6 dB down there, and once the resonant
         # peak stands 6 dB over the passband (resonance 0.29 up) the peak is
         # at the cutoff, so resonance sweeps keep their pitch and
         # self-oscillation is at the cutoff.  +tuning: :hardware+ is the
         # analog mapping (the stages' frequency at the cutoff: -12 dB there
         # without resonance, the peak below it until high resonance), the
         # behavior before 2026-10-17.  Every +mode:+ is tuned alike (hp2 and
-        # hp4 3 dB down from the top, bp2 and bp4 peaking at the cutoff).
-        # +tuning: :edge6+ (an experiment) puts the -6 dB point at the cutoff
-        # without resonance instead.
+        # hp4 6 dB down from the top, bp2 and bp4 peaking at the cutoff).
         #
         # Like the SQ-80 it never self-oscillates by default: full resonance
         # rings strongly and keeps most of the bass (about -6 dB, from the
@@ -188,7 +186,7 @@ module MB
         # its values, e.g. 0.5 -> 0.33, 0.75 -> 0.51, 0.9 -> 0.68).
         # +quality:+ (a number or node, e.g. Notes#quality) instead of
         # +resonance:+ gives the gain at the cutoff of a 2-pole filter of
-        # that Q, as Filter::SVF has it (0.707 or less: no resonance; see
+        # that Q, as Filter::SVF has it (0.5 or less: no resonance; see
         # Filter::FourPole.quality_to_resonance).  In synth voices,
         # Notes#reso follows CC 71 (resonance) like Notes#quality.
         #
@@ -233,10 +231,10 @@ module MB
         # same distance from oscillation), self-oscillation, compensation,
         # and drive (+drive_mode:+ :input or :feedback).  The coupled stages
         # spread their poles: a gentler, longer slope (without resonance
-        # about 4, 6, 9, and 13 dB/octave over the first four octaves above
-        # the cutoff, against lp4's 7, 15, 21, 24) and a peak that narrows
+        # about 6, 8, 11, and 16 dB/octave over the first four octaves above
+        # the cutoff, against lp4's 11, 18, 22, 24) and a peak that narrows
         # and squelches as the resonance rises.  Its cutoff means what lp4's
-        # does (+tuning: :edge+: -3 dB there without resonance, the peak on
+        # does (+tuning: :edge+: -6 dB there without resonance, the peak on
         # it from resonance 0.41 up).  +normalize: true+ (default) matches
         # its bass and saturation to lp4's (the same DC gain at every
         # resonance, self-oscillation at lp4's level); with

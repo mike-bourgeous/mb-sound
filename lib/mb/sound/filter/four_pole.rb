@@ -14,7 +14,7 @@ module MB
       #
       # Behavior (measured; see the specs):
       # - 24 dB/octave.  +tuning: :edge+ (default since 2026-10-17; see
-      #   Tuning): -3 dB at the cutoff without resonance, and the resonant
+      #   Tuning): -6 dB at the cutoff without resonance, and the resonant
       #   peak at the cutoff once it stands 6 dB over the passband
       #   (resonance 0.29 up on the :db curve), for every +mode+.
       #   +tuning: :hardware+: the stages' frequency is the cutoff, so -12 dB
@@ -77,7 +77,7 @@ module MB
       #   has the same onset and rise, and compensation and drive work
       #   alike (:input or :feedback).
       # - With the edge tuning the diode ladder's cutoff means what lp4's
-      #   does (its own response: -3 dB without resonance, the peak on the
+      #   does (its own response: -6 dB without resonance, the peak on the
       #   cutoff from resonance 0.41 up), and +normalize: true+ matches its
       #   bass (.diode_compensation) and saturation (.diode_headroom) to
       #   lp4's.  With the hardware tuning:
@@ -186,12 +186,10 @@ module MB
         DRIVE_MODES = { input: 0, stages: 1, feedback: 2 }.freeze
 
         # Cutoff tunings (see FourPole::Tuning): :edge (default) keeps the
-        # cutoff at the -3 dB edge without resonance and on the resonant
+        # cutoff at the -6 dB edge without resonance and on the resonant
         # peak with it; :hardware is the frequency the filter would
         # oscillate at (the behavior until 2026-10-17).
-        # :edge6 is an experiment (2026-10-17): the -6 dB point at the cutoff
-        # without resonance, the same peak placement from a 6 dB peak up.
-        TUNINGS = [:edge, :edge6, :hardware].freeze
+        TUNINGS = [:edge, :hardware].freeze
 
         # Clipper shapes for +drive_mode: :feedback+.
         CLIPS = { soft: 0, hard: 1 }.freeze
@@ -225,7 +223,7 @@ module MB
           raise ArgumentError, "Unknown clip #{clip.inspect} (use :soft or :hard)" unless CLIPS.include?(clip)
           raise ArgumentError, 'clip: only applies to drive_mode: :feedback' if clip != :soft && drive_mode != :feedback
           raise ArgumentError, 'The diode ladder takes drive_mode: :input or :feedback' if mode == :diode && drive_mode == :stages
-          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge, :edge6, or :hardware)" unless TUNINGS.include?(tuning)
+          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge or :hardware)" unless TUNINGS.include?(tuning)
 
           @mode = mode
           @normalize = !!normalize
@@ -405,7 +403,7 @@ module MB
           raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
-          raise ArgumentError, 'Four-pole tuning must be 0 (hardware), 1..6 (edge, by output tap), or 8..13 (edge6)' unless (0..13).include?(tuning) && tuning != 7
+          raise ArgumentError, 'Four-pole tuning must be 0 (hardware) or 1..6 (edge, by output tap)' unless (0..6).include?(tuning)
           raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
           raise ArgumentError, 'Four-pole mix must have five elements' unless mix.is_a?(Array) && mix.length == 5
 
@@ -562,7 +560,7 @@ module MB
           raise ArgumentError, 'Diode ladder drive mode must be 0 (input) or 2 (feedback)' unless [0, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
           raise ArgumentError, 'Normalize must be 0 (off) or 1 (on)' unless [0, 1].include?(normalize)
-          raise ArgumentError, 'Diode ladder tuning must be 0 (hardware), 7 (edge), or 14 (edge6)' unless [0, 7, 14].include?(tuning)
+          raise ArgumentError, 'Diode ladder tuning must be 0 (hardware) or 7 (edge)' unless [0, Tuning.number(:diode, :edge)].include?(tuning)
           raise ArgumentError, 'Diode ladder state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
 
           s0, s1, s2, s3 = state.first(4).map { |v| v = v.to_f; v.finite? ? v : 0.0 }
@@ -840,13 +838,14 @@ module MB
         # the :db curve or (same loop gain) the :linear curve.  +q+ may be a
         # number or an NArray.
         #
-        # With +tuning: :edge+ (default) the cutoff is the filter's -3 dB
+        # With +tuning: :edge+ (default) the cutoff is the filter's -6 dB
         # edge without resonance and its peak with it (see Tuning), so q
-        # 0.707 or less gives 0 (no resonance, like a Butterworth 2-pole),
-        # and from about q 2 up the peak stands q over DC at the cutoff
-        # (lp4: q 1 gives 0.19, 2 gives 0.29, 4 gives 0.44, 10 gives 0.63,
-        # 70 or more gives 1); +diode: true+ uses the diode ladder's own
-        # response (normalized or not).  Computed from a table of the
+        # 0.5 or less gives 0 (no resonance; the gain at the cutoff is 1/2
+        # there), and from about q 2 up the peak stands q over DC at the
+        # cutoff (lp4: q 0.707 gives 0.18, 1 gives 0.21, 2 gives 0.29, 4
+        # gives 0.44, 10 gives 0.63, 70 or more gives 1; the diode ladder:
+        # 0.31, 0.34, 0.41, 0.54, 0.69, 1 from 73); +diode: true+ uses the
+        # diode ladder's own response (normalized or not).  Computed from a table of the
         # analog response (.edge_quality_table).
         #
         # With +tuning: :hardware+: log(4 q) / log(196) (q 0.25 or less
@@ -854,8 +853,8 @@ module MB
         # gives 1); +diode: true+ maps to the unnormalized diode ladder's
         # curves (log(18.39 q) / log(757.12) on the :db curve).
         def self.quality_to_resonance(q, curve: :db, diode: false, tuning: :edge)
-          return edge_quality_to_resonance(q, curve, diode, tuning) if tuning == :edge || tuning == :edge6
-          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge, :edge6, or :hardware)" unless tuning == :hardware
+          return edge_quality_to_resonance(q, curve, diode) if tuning == :edge
+          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge or :hardware)" unless tuning == :hardware
 
           # Gain ratio at the cutoff from r = 0 to 1 and the gain at r = 0
           log_ratio = Math.log(diode ? 40 + 39 * DIODE_EDGE_K : 196)
@@ -878,25 +877,25 @@ module MB
 
         # The edge tuning's quality table for lp4 (+diode+ false) or the
         # diode ladder: [log q at the first point, log q step, resonances on
-        # the :db curve (an Array of EDGE_QUALITY_POINTS)] for q from 1 /
-        # sqrt(2) (resonance 0) to the gain at the cutoff at full
+        # the :db curve (an Array of EDGE_QUALITY_POINTS)] for q from 1/2
+        # (resonance 0) to the gain at the cutoff at full
         # resonance, from the analog response with the edge tuning (the
         # gain at the cutoff relative to DC; kept rising where it is flat,
         # below resonance 0.1).  Memoized.
-        def self.edge_quality_table(diode, tuning = :edge)
+        def self.edge_quality_table(diode)
           @edge_quality_tables ||= {}
-          @edge_quality_tables[[!!diode, tuning]] ||= begin
+          @edge_quality_tables[!!diode] ||= begin
             steps = 4000
             gains = (0..steps).map do |i|
               r = i.to_f / steps
               if diode
                 k = diode_loop_gain(r, 1, MAX_K)
-                w = 1.0 / (Tuning.scale(Tuning.number(:diode, tuning), k * DIODE_INV_EDGE_K) * DIODE_INV_W180)
+                w = 1.0 / (Tuning.scale(Tuning.number(:diode, :edge), k * DIODE_INV_EDGE_K) * DIODE_INV_W180)
                 s = Complex(0, w)
                 d = (((s + 7) * s + 15) * s + 10) * s + 1
               else
                 k = lp4_loop_gain(r, 1, MAX_K)
-                s = Complex(0, 1.0 / Tuning.scale(Tuning.number(:lp4, tuning), k * 0.25))
+                s = Complex(0, 1.0 / Tuning.scale(Tuning.number(:lp4, :edge), k * 0.25))
                 d = (1 + s)**4
               end
               Math.log(((1 + k) / (d + k)).abs)
@@ -904,7 +903,7 @@ module MB
             # (strictly rising, for the search)
             gains.each_index { |i| gains[i] = [gains[i], gains[i - 1] + 1e-12].max if i > 0 }
 
-            lo = gains[0] # (1 / sqrt(2) for :edge, 1 / 2 for :edge6)
+            lo = gains[0] # (1 / 2: -6 dB at the cutoff without resonance)
             hi = gains.last
             step = (hi - lo) / (EDGE_QUALITY_POINTS - 1)
             rs = (0...EDGE_QUALITY_POINTS).map do |j|
@@ -919,8 +918,8 @@ module MB
 
         # .quality_to_resonance for the edge tuning (linear interpolation in
         # .edge_quality_table).
-        def self.edge_quality_to_resonance(q, curve, diode, tuning = :edge)
-          lo, step, rs = edge_quality_table(diode, tuning)
+        def self.edge_quality_to_resonance(q, curve, diode)
+          lo, step, rs = edge_quality_table(diode)
           last = rs.length - 1
           to_linear = ->(v) { diode ? diode_resonance_curve(v) : resonance_curve(v) }
 
