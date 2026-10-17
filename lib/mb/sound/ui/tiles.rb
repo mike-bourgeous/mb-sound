@@ -128,8 +128,8 @@ module MB
         def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :quad,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
-                       keyboard: nil, keys_kitty: nil)
-          raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl?
+                       keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil)
+          raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
           @layout_name = layout.name
@@ -179,6 +179,9 @@ module MB
           @states[:keyboard][:keyboard] = @keyboard
           @kitty_pushed = false
           @start_keys = layout.focus == :keyboard
+          @on_key = on_key
+          @hints = hints
+          @note = nil
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -208,10 +211,12 @@ module MB
           @rows, @cols = terminal_size
           @tiler.resize_screen(@cols, @rows - 1)
           relayout
-          r = repl_rect || Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
-          @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
-                                      target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
-          @host.start
+          unless @repl_mode == :none
+            r = repl_rect || Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
+            @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
+                                        target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
+            @host.start
+          end
           @active = true
           @stopping = false
           install_signals
@@ -252,7 +257,7 @@ module MB
         # True when the screen's REPL is the console's (adopted): stderr
         # goes to its pane, so UI::Messages keeps warnings for the
         # messages pane instead.
-        def owns_terminal? = @active && @repl_mode == :adopt
+        def owns_terminal? = @active && (@repl_mode == :adopt || @repl_mode == :none)
 
         # True while hidden with Ctrl-Z (#hide): `ui` (or Ctrl-Z again)
         # shows it again with the same panes, scrollback, and REPL.
@@ -265,7 +270,7 @@ module MB
         # its edits, and the scrollback wait.  `ui`, `ui :<this layout>`, or
         # Ctrl-Z again bring the tiles back.  Returns self.
         def hide
-          return self unless @active
+          return self unless @active && @host # (a screen without a console has nothing to hide to)
 
           exit_keys
           @lock.synchronize do
@@ -486,6 +491,7 @@ module MB
         # Searches the REPL's scrollback for +pattern+ (backward), scrolling
         # to the match.  Returns [line, from, to] or nil.
         def search(pattern, dir = 1)
+          return flash('no console to search here', :warn) && nil unless @host
           @search = pattern
           vt = @host.vt
           from = @match ? @match[0] : nil
@@ -508,6 +514,7 @@ module MB
         # Copies the search match's line (or the REPL pane's visible text)
         # to the system clipboard with OSC 52.  Returns the text.
         def copy
+          return flash('no console to copy from here', :warn) && nil unless @host
           vt = @host.vt
           text = @host.synchronize do
             if @match
@@ -595,8 +602,10 @@ module MB
           out << "kitty flags pushed in #{@router.mode} mode" if @kitty_pushed && !grab
           out << 'KEYS mode while hidden' if grab && @hidden
           out << "notes #{@keyboard.held.inspect} held in #{@router.mode} mode" if !grab && !@keyboard.held.empty?
-          out << 'no REPL pane' unless @tiler.layout.panes.include?(:repl)
-          out << "REPL mode with #{@tiler.layout.zoom.inspect} zoomed over the REPL" if @router.mode == :repl && @tiler.layout.zoom && @tiler.layout.zoom != :repl
+          if @host
+            out << 'no REPL pane' unless @tiler.layout.panes.include?(:repl)
+            out << "REPL mode with #{@tiler.layout.zoom.inspect} zoomed over the REPL" if @router.mode == :repl && @tiler.layout.zoom && @tiler.layout.zoom != :repl
+          end
           out
         end
 
@@ -639,6 +648,17 @@ module MB
           self
         end
 
+        # Shows +text+ on the status line for a few seconds (+role+ its
+        # color: :ok, :warn, :bad, ...).
+        def say(text, role = :text)
+          flash(text, role)
+          self
+        end
+
+        # A note that stays on the status line instead of the hints (nil:
+        # none), e.g. "song ended: q quits" for a script's screen.
+        attr_accessor :note
+
         # True while the key overlay shows.
         def key_help? = !@overlay.nil?
 
@@ -652,6 +672,7 @@ module MB
         end
 
         def repl_key(k)
+          return @on_key&.call(k) unless @host
           if @scroll > 0
             @scroll = 0
             @match = nil
@@ -661,7 +682,7 @@ module MB
         end
 
         def repl_paste(text)
-          @host.paste(text)
+          @host&.paste(text)
         end
 
         def mode_changed(m)
@@ -677,7 +698,7 @@ module MB
           # Typing goes to the REPL, so it must be on screen: a zoom on
           # another pane ends (zoom the REPL itself to keep a big one)
           z = @tiler.layout.zoom
-          tile { |t| t.zoom(z) } if m == :repl && z && z != :repl
+          tile { |t| t.zoom(z) } if m == :repl && z && z != :repl && @host
         end
 
         def line_done(kind, text)
@@ -994,10 +1015,10 @@ module MB
                 return
               end
               @scroll = 0
-              @host.interrupt
+              @host ? @host.interrupt : @on_key&.call(:interrupt)
               return
             when ['z', [:ctrl]]
-              hide
+              hide if @host
               return
             when [:f2, []]
               # F2: between the REPL and KEYS
@@ -1394,7 +1415,7 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = mode == :nav ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : ' REPL '
+          badge = mode == :nav ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : @host ? ' REPL ' : ' PLAY '
           role = mode == :nav ? :armed : mode == :grab ? (step ? :queued : :rec) : :key
           @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
@@ -1413,7 +1434,8 @@ module MB
           if flash
             c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
           else
-            c.text(x + 1, 0, c.fit(HINTS[step ? :step : mode] || '', room), :dim)
+            hint = mode == :repl && !@host ? (@note || @hints || '') : (HINTS[step ? :step : mode] || '')
+            c.text(x + 1, 0, c.fit(hint, room), @note && mode == :repl && !@host ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at

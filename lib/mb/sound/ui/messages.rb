@@ -94,6 +94,47 @@ module MB
           [head, *list.map { |e| "  #{e.count > 1 ? "×#{e.count} " : ''}#{e.text}" }].join("\n")
         end
 
+        # Takes the place of $stdout while a screen without a console is up
+        # (a script's --ui): lines printed go to the messages as :note.
+        class Writer
+          def initialize(messages, real)
+            @messages = messages
+            @real = real
+            @partial = +''
+          end
+
+          def write(*parts)
+            text = parts.join
+            @partial << text
+            while (i = @partial.index("\n"))
+              line = @partial.slice!(0..i)
+              @messages.add(line, severity: :note)
+            end
+            text.bytesize
+          end
+
+          def <<(text)
+            write(text)
+            self
+          end
+
+          def puts(*lines)
+            lines = [''] if lines.empty?
+            lines.flatten.each { |l| write("#{l.to_s.chomp}\n") }
+            nil
+          end
+
+          def print(*parts) = write(*parts) && nil
+          def printf(*args) = write(format(*args)) && nil
+          def flush = self
+          def sync = true
+          def sync=(_v); end
+          def tty? = false
+          def isatty = false
+          def fileno = @real.fileno
+          def winsize = @real.winsize
+        end
+
         # The severity of a warning: :error for live errors, :note for
         # :deprecated and :performance categories, else :warn.
         def self.severity_of(msg, category = nil)

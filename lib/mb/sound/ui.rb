@@ -153,6 +153,30 @@ module MB
         }
       end
 
+      # Tiled layouts without a console, for scripts' screens (song_script
+      # --ui, synth_script --ui; see ScriptRunner and Tiles' repl: :none).
+      def self.show_layouts
+        @show_layouts ||= {
+          # A song: where it is, the tracks, a big scope and spectrum, meters, knobs
+          show: Viewports.layout(:show) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(width: 36) { pane :tracks; pane :queue, height: 6; pane :knobs, height: 8 }
+              rows(weight: 3) { pane :scope; pane :spectrum, height: 12 }
+              rows(width: 34) { pane :meters, height: 7; pane :cpu; pane :messages, height: 6 }
+            }
+          },
+          # A synth or effect: the keyboard, scope, spectrum, meters
+          play: Viewports.layout(:play, focus: :keyboard) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(weight: 3) { pane :scope; pane :spectrum, height: 10; pane :keyboard, height: 10 }
+              rows(width: 34) { pane :meters, height: 7; pane :knobs; pane :cpu, height: 7; pane :messages, height: 6 }
+            }
+          },
+        }
+      end
+
       # The tiled layout named +name+ (a Viewports::Layout with a repl
       # pane): defined, built in, or saved.  Raises with suggestions.
       def self.tiles_layout_named(name)
