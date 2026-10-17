@@ -75,6 +75,29 @@ RSpec.describe('bin/save_presets.rb') do
     end
   end
 
+  MB::Sound::LIBRARY_PRESET_RACKS.each do |name, (script, method, _description)|
+    it "loads the #{name} rack document and plays it like #{File.basename(script)}'s rack" do
+      require File.expand_path("../../#{script}", __dir__)
+      file = MB::Sound.library_preset_file(io.library_presets_dir, name)
+      doc = io.parse(file)
+      expect(doc).to be_rack
+      expect(doc.description).to start_with("Rack :#{name} from #{script}")
+
+      session = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false))
+      begin
+        MB::Sound::Session.with_context(session: session) do
+          source = -> { 110.hz.saw.at(0.3) * MB::Sound.adsr(0.01, 0.2, 0, 0.1) }
+          direct = source.().then(&MB::Sound.public_send(method, :"#{name}_direct"))
+          rack = io.load(file)
+          expect(rack).to be_a(MB::Sound::Rack)
+          expect(render_buffers(source.().then(&rack), 40)).to eq(render_buffers(direct, 40))
+        end
+      ensure
+        session.close
+      end
+    end
+  end
+
   it 'loads presets by name with `preset`, taking params' do
     g = MB::Sound.preset(:dnb_reese, midi: MB::Sound::Notes.new(midi_file), cutoff: 600)
     expect(io.document_of(g)[:cutoff]).to eq(600)

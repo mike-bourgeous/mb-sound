@@ -627,7 +627,11 @@ module MB
         rack plays in several); `share: true` joins the session knob
         `:space`, `follow: :space` maps it onto the macro's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
-        and `recall :"dub/wide", only: [:space]` keep variations.
+        and `recall :"dub/wide", only: [:space]` keep variations.  `help
+        rack(:dub)` shows ports, macros, and latency.  `save :dub,
+        rack(:dub)` writes a rack document: `preset :dub` gives the rack
+        back, `preset :dub, sig: mic` plays it on an input (try the library
+        rack `preset :dub_echo`).
       TEXT
       commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack, :macro
       note :racks

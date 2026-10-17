@@ -1,6 +1,6 @@
 # Racks, typed ports, and the inspection protocol
 
-Branch racks-r1 (2026-10-17): phase R1 of the racks proposal (research spike `research-racks`, `research/racks/PROPOSAL.md` + `README.md` + `survey/`; the maintainer approved the design 2026-10-17: "Racks look good; go ahead").  The proposal's section 0 holds the twelve decisions; section 7 the build order (R2 macros and documents, R3 slots and live swaps, R4 MIDI parity, R5-R8 crossings and pitch shifting, V visualization).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+Branch racks-r1 (2026-10-17): phase R1 of the racks proposal; branch racks-r2 (2026-10-17): phase R2, macros and rack documents (sections "Macros" and "Rack documents" below) (research spike `research-racks`, `research/racks/PROPOSAL.md` + `README.md` + `survey/`; the maintainer approved the design 2026-10-17: "Racks look good; go ahead").  The proposal's section 0 holds the twelve decisions; section 7 the build order (R2 macros and documents, R3 slots and live swaps, R4 MIDI parity, R5-R8 crossings and pitch shifting, V visualization).  CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
 
 ## API
 
@@ -53,7 +53,7 @@ Full-word aliases: `note_rack`, `audio_rack`, `instrument_rack`, `listener_rack`
 
 - A rack's constructor isn't recorded (a Rack prints itself: `Rack#to_ruby` gives its constructor call and block source).  An application is: `Rack#call` records a Call `src.then` with the rack as its argument and the rack's block as a build block (`Recipe.call(..., kind: :build)`; build block wrappers now pass keyword arguments, recorded after the positional ones).  `RubyWriter#rack_text` prints it as `src.then(&rack(:dub))` for named racks and `src.then(&arack { |sig| ... })` for anonymous ones, the block printed from the application's recorded body with parameters named after the ports (so `it` blocks print with names), bound ports as `.with(side: ...)`.
 - The constructor names are in `Recipe::BUILD_BLOCKS` (so the graph document loader builds their blocks as document code) and in `GraphIO::Registry::TOP_EXTRA`; the registry allows `then` on graph values, Notes, Clips, and Streams, and `with`/`>>`/`<<` on racks; `Loader#call_block` takes a Rack as a block argument (`to_proc`); build blocks in documents may take keywords (required, or with defaults evaluated in the block's scope).
-- Anonymous racks round-trip through `GraphIO.dump`/`load` bit for bit (spec: an effect, a sidechain-port rack bound with `with`, an optional port, an instrument rack on a clip).  A graph using a named rack prints `rack(:name)`, which loads only where that rack is defined; rack documents themselves (`save :dub, rack(:dub)`, format 4) are R2.
+- Anonymous racks round-trip through `GraphIO.dump`/`load` bit for bit (spec: an effect, a sidechain-port rack bound with `with`, an optional port, an instrument rack on a clip).  A graph using a named rack prints `rack(:name)`; since R2 graph documents also carry the rack's definition, and rack documents save racks themselves (below).
 
 ## Note streams merge with `+`
 
@@ -91,10 +91,57 @@ Full-word aliases: `note_rack`, `audio_rack`, `instrument_rack`, `listener_rack`
 - Rack pane data: a frozen `RackInfo` per instance through UI::Poll (name, ports from `port_info`, latency, macros, slots); pane actions only through public commands.
 - `Mark::Notes` and every panel draw through Plot's cell layer; changes to `Plot::Live`, `UI::Feed`, or `UI::Snapshot` go to the UI branch owner as a struct/API or a patch.
 
+## Macros (R2)
+
+```ruby
+arack :dub do |sig|
+  space = macro :space, 0.35, description: 'Echo level and feedback'
+  tone = macro :tone, 2400, range: 600..8000, curve: :exp, unit: 'Hz'
+  sig + sig.delay(3.n16, feedback: space * 0.7, wet: space, dry: 0).filter(:lowpass, cutoff: tone.mod(0.13.hz.lfo, depth: 0.15))
+end
+turn :"dub/space", 0.7, over: 2.bars
+rack(:dub).snap :wide; recall :"dub/wide", over: 1.bar, only: [:space]
+```
+
+- `macro(name, default, range:, curve:, unit:, cc:, takeover:, smooth:, share:, follow:, description:)` (`RackMethods#macro`) works only inside a rack block: it makes a `GraphNode::Knob` carrying a `Rack::MacroInfo` (rack, macro name, the `Rack::Application` of this `Rack#call`, share, follow, description).  `Rack#call` runs the block inside a thread-local Application (`Rack.applying`/`Rack.application`), so macros know their instance.  Asking again by name (`macro(:space)`) or with the same definition returns the same knob (printed racks repeat `macro(...)` at each use); a different definition raises.
+- Being knobs, macros get `turn`/`over:`/`learn`/`cc:`/snapshots/takes/undo/plan params (`p.param`)/ACID XML unchanged.  `Knob#mod(source, depth:)` (any knob) is baseline plus modulation in the knob's scale (octaves for exp knobs; depth in fractions of the range), limited to the range, built from graph arithmetic and `aclip`, so plans fuse it; recorded and allowed in documents.
+- Names (maintainer decision 8): macros are standalone knobs until a graph using them is adopted (`Session::Knobs#adopt_knobs(sound, player:)`; `bg` and `Session#add` pass the player name).  `Session::Racks#macro_names` keys each instance `[player, ordinal]` (ordinal among applications of that rack in one graph): `:"dub/space"` while one key uses the rack; from the second key on, every instance is per player (`:"bass/dub/space"`, `:"bass/dub.2/space"`; without a player `:"dub.1/space"`), and the first key's knobs are renamed (`Knobs#rename_knob`: value, readers, and snapshot entries kept; live mode prints the rename).  The same player playing the rack again joins its own knobs (keeping the value; the rack's current range and curve).  Anonymous racks' macros belong to the player (`:"bass/space"`, without a player `:"rack/space"`).  Keys are never pruned: once a rack played in two players its macros stay per instance.
+- `share: true` makes the macro knob `:space` itself, joined to (or becoming) the Session knob through the usual adopt rules (another range or curve: `live_error`).  `follow: :space` starts `Knob#follow` of that Session knob when the macro joins, mapped position to position (`Spec#positions`, clipped to 0..1) into the macro's range and curve; a missing knob is a `live_error`.  Turning the macro ends the follow, like any knob.
+- Snapshots: `rack(:dub).snap :wide` is `snap :"dub/wide", knobs: <the rack's macro knobs, every instance>` (`Session#snap(knobs:)`, `KnobMethods#snap(knobs:)`); `recall` takes `only:`/`except:` with knob names or macro names (`:space` matches any knob whose last path part is `space`; a name in `only:` matching nothing raises); `Rack#recall`, `Rack#macros`.
+- Printing: a macro knob prints as `macro(:space, 0.35, ...)` (its held value) wherever it is used (`RubyWriter#macro_text`, `RubyWriter.knob_args`), never as a document knob line, so graphs with anonymous racks round-trip bit for bit.
+
+## Rack documents and format 4 (R2)
+
+- `save :dub_echo, rack(:dub)` / `GraphIO.dump(rack)` (`GraphIO::RackWriter`) builds the rack once on stand-ins for its ports (`Rack#build_on_stand_ins`: a zero Constant for audio and control ports, an empty-clip Notes for notes ports; the block's calls are recorded as top-level calls, not as an application) and prints:
+
+  ```ruby
+  graph 4, name: "dub_echo", kind: :effect, rack: :arack, saved: ..., description: ...
+  inputs sig: :audio                  # main port first; optional ports [type, default]
+  outputs :audio
+  knob :space, 0.35, description: "Echo level and feedback 0..1"   # the macros (share:/follow: allowed here only)
+  knob :tone, 2400.0, range: 600.0..8000.0, curve: :exp, unit: "Hz", description: "Echo lowpass"
+
+  sig + sig.delay(3.n16, feedback: space * 0.7, wet: space, dry: 0).filter(:lowpass, cutoff: tone.mod(0.13.hz.lfo, depth: 0.15))
+  ```
+  Optional ports' defaults come from the block's source (`Rack#port_defaults`, Prism; R1 printed them as nil).  Composed racks aren't saved (DumpError).
+- `GraphIO.load` of a rack document (`Loader#load_rack`) returns a Rack named after the document, whose block walks the body per application with the ports and the knob lines' macros (made with `macro`, so named and shared like any rack's) bound through `Scope#bindings`; given inputs, the Rack applied to them.  It re-saves to the same text and applies bit-identically to the original.  The Document is remembered per Rack (`GraphIO.rack_document`).
+- `preset :dub_echo` returns the Rack, defined in the Session under its name; `preset :dub_echo, sig: mic, side: :drums` the applied instance (its macros join the session).  `presets` lists racks with typed inputs and macros.
+- Graph documents carry the definitions of the named racks they apply (`RubyWriter` option `define_racks:`, used by `GraphIO::Writer` and `RackWriter`; printed from the first application's recorded body, nested racks first, before the graph): `arack(:dub, side: :audio) { |sig, side:| ... }`.  Loading defines the rack where the session has none and keeps the session's definition where it has one (`Loader#same_rack`; as `rack(:name)` reads the session's, so live edits apply).  A bare `rack(:name)` with no definition in the document resolves to the session's rack, else a rack document of that name among the presets (`Loader#rack_reference`, defined in the session), else a LoadError.  Bundles hold the definition the same way (no separate rack files).
+- Format 4 for every document: typed inputs (`inputs midi: :notes`; old `inputs :midi`/`:input` load unchanged as notes/audio, `Document#input_types`), optional `outputs`.  The library presets were saved again (only the graph and inputs lines changed).
+
+## Inspection data (R2)
+
+- `Rack::RackInfo` (deep-frozen Data, Ractor-shareable): `name, path, kind, signature, ports` (frozen `{ name:, type:, role: :main/:side, required: }`), `latency` (samples: the longest path through nodes reporting `#latency`, e.g. dynamics lookahead and limiters, from a stand-in build, remembered per Rack in `Rack::LATENCIES`), `macros` (the instance's knob names), `macro_specs`, `slots` (empty until R3).  `Rack#info`, `Session::Racks#rack_info` (`{ name => [RackInfo per instance with macros] }`, no render lock), `#uses`, `#output_of`.
+- `help rack(:dub)` (`Help::RackPage`): kind and signature, ports, macros with ranges and their knobs, latency, uses, source.  `racks` lists macros (`macros space 0.35 (0..1), tone 2400 Hz (600..8000 exp)`).
+
+## Not in R2
+
+Macro instance pruning (keys stay once used), `rack(:dub).turn`-style shortcuts, separate rack files in bundles, plan-transparent port wrappers (maintainer: ports bind values directly; a later follow-up may add wrappers).
+
 ## Not in R1
 
-Macros (`macro`, R2), rack documents and format 4 (R2), slots and swaps of racks (R3), zones, Hash matchers, `within`/`sometimes`, MIDI feedback (R4), crossings (R5-R8: `follow`, `onsets`, `pitch_track`, `pitch_shift`), owner groups, the Plot panel registry, `view`/`lanes`, and UI panes (V; panes belong to the UI work).
+Slots and swaps of racks (R3), zones, Hash matchers, `within`/`sometimes`, MIDI feedback (R4), crossings (R5-R8: `follow`, `onsets`, `pitch_track`, `pitch_shift`), owner groups, the Plot panel registry, `view`/`lanes`, and UI panes (V; panes belong to the UI work).
 
 ## Demo
 
-`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--print` prints the racks and the graph's Ruby.
+`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (macros `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: `/app/tmp/listening/racks-r2/` (bench id racks-r2-2026-10-17).
