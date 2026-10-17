@@ -19,6 +19,7 @@ module MB
       class Band
         include FrameRate
         include Follow
+        include Listable
 
         # Seconds between reissuing the scroll region with a full redraw.
         REASSERT = 2.0
@@ -44,6 +45,10 @@ module MB
 
         attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed
 
+        # The size decision (UI::Density), the layout as shown at its level
+        # (`only: :big` panes in or out), and the pane chrome (UI::Chrome).
+        attr_reader :density, :shown_layout, :chrome
+
         # The painter thread (nil while off or painting only on #refresh).
         attr_reader :thread
 
@@ -57,11 +62,14 @@ module MB
         # seconds (for specs); +native+ false draws into the Ruby mirror
         # grid (Plot::Text::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
-        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+          # (Every instance variable set up front, in one order: one object shape)
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = @starter = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
           @layout = layout
+          @winch = nil
           @io = io
           @session = session
           @position = at
@@ -112,6 +120,7 @@ module MB
           return self if @active
 
           @active = true
+          @starter = Thread.current
           setup_terminal
           install_winch
           RelineGuard.install
@@ -150,13 +159,14 @@ module MB
           poll(now)
           check_size(now)
           snap = snapshot
+          heard_snap = heard(snap, now) # (meters and scopes: what reaches the speakers now)
           c = thread_cpu
           (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
 
           # Warnings kept off the terminal show in a strip of messages
           if (seen = UI.messages.seq) != @messages_seen
             @messages_seen = seen
-            plot_pane(:messages, height: 3) if owns_terminal? && !@layout.pane_names.include?(:messages)
+            plot_pane(:messages, height: 4) if owns_terminal? && !@shown_layout.pane_names.include?(:messages)
           end
 
           reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
@@ -171,18 +181,22 @@ module MB
           top = band_top
           drawn = 0
           bytes = +''
+          paint_chrome if full
           @placed.each do |p|
             next unless full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
 
             c = thread_cpu
+            r = p.state[:inner]
             begin
-              if p.pane.bytes?
-                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: full)
+              if r.h <= 0
+                nil
+              elsif p.pane.bytes?
+                b = p.pane.frame_bytes(p.pane.needs.empty? ? snap : heard_snap, p.state, row: top + r.y, col: 1 + r.x, w: r.w, h: r.h, mode: @mode, look: @look, full: full)
                 bytes << b if b
               else
-                canvas = (p.state[:canvas] ||= Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs))
+                canvas = (p.state[:canvas] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
-                p.pane.draw(canvas, snap, p.state)
+                p.pane.draw(canvas, p.pane.needs.empty? ? snap : heard_snap, p.state)
               end
               @failures.delete(p.pane.name)
             rescue => e
@@ -241,6 +255,7 @@ module MB
             yields: @yields,
             fps: fps,
             target_fps: @target_fps,
+            pacing: @pacer.breakdown,
             slowest: @slowest.map { |at, cpu, parts|
               { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: (parts || {}).transform_values { |v| MB::M.sigfigs(v * 1000, 3) } }
             },
@@ -264,13 +279,31 @@ module MB
           old_height = @height
           @layout = layout
           relayout(@rows, @cols)
-          if @active && old_height != @height
-            # Clear the old band and set the new region
-            clear = (1..@rows).select { |r| top? ? r <= [old_height, @height].max : r > @rows - [old_height, @height].max }.map { |r| "\e[#{r};1H\e[2K" }.join
-            write("\e7\e[r#{clear}\e8")
-            setup_terminal(scroll: @height > old_height ? @height - old_height : 0)
-          end
+          resize_band(old_height) if @active && old_height != @height
           @full = true
+        end
+
+        # Moves the band's edge from +old+ rows to its current height
+        # without asking the terminal where the cursor is (ux-1 r3 item 2: a
+        # painter-thread cursor query raced Reline reading stdin, and the
+        # rows the band grew into were cleared before the console's lines
+        # were scrolled out of the way, erasing the end of a multi-line
+        # command): the console's lines scroll with the edge, the band's
+        # rows are cleared, and the cursor comes back to its line (saved,
+        # restored, moved up by the rows scrolled).  One write.
+        def resize_band(old)
+          grow = @height - old
+          a, b = region
+          out = +"\e7"
+          if grow > 0
+            out << (top? ? "\e[#{old + 1};#{@rows}r" : "\e[r") << "\e[#{@rows};1H#{"\n" * grow}"
+          end
+          rows = top? ? (1..[old, @height].max) : ((@rows - [old, @height].max + 1)..@rows)
+          out << rows.map { |r| "\e[#{r};1H\e[2K" }.join
+          out << "\e[#{a};#{b}r\e8"
+          out << "\e[#{grow}A" if grow > 0
+          write(out)
+          @reasserted_at = @clock.call
         end
 
         # True when the band draws on the process's terminal (so stderr
@@ -286,7 +319,7 @@ module MB
         # row of it under the layout.  Returns a Proc that takes the row
         # out again (nil if nothing changed).
         def plot_pane(kind, height: 8)
-          return nil if @layout.pane_names.include?(kind)
+          return nil if @shown_layout.pane_names.include?(kind)
           old = @layout
           l = Layout.new(old.name) { cols { pane kind, height: height } }
           l.root.children.unshift(*old.root.children)
@@ -306,6 +339,19 @@ module MB
           File.write(path, "# mb-sound terminal UI layout: `ui #{name.inspect}` shows it (see help :ui)\n#{text}")
           path
         end
+
+        # The panes on screen, for #list.
+        def listed_panes
+          @placed.map do |p|
+            f = @chrome.frames[p.pane.name]
+            PaneOnScreen.new(number: nil, name: p.pane.name, kind: p.pane.class.name.split('::').last.downcase.to_sym, title: p.pane.title,
+                             rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: p.pane.rate,
+                             look: p.pane.bytes? ? (p.state[:look] || @look) : nil, title_at: f&.at)
+          end
+        end
+
+        def listing_mode = :band
+        def listing_layout = @layout.name
 
         def inspect
           "#<UI::Band #{@layout.name.inspect} #{@height} rows at the #{@position} of #{@rows}x#{@cols}, #{@placed.length} panes, #{@mode}#{@active ? '' : ' (off)'}>"
@@ -335,26 +381,14 @@ module MB
         end
 
         def paint_loop
-          Thread.current.name = 'MB::Sound::UI'
-          Thread.current.priority = -1
-          until @stopping
-            t = @clock.call
-            begin
-              refresh(t)
-            rescue => e
-              warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
-              @painter_warned = true
-            end
-            left = 1.0 / @target_fps - (@clock.call - t)
-            sleep(left) if left > 0
-          end
-        rescue => e
-          warn "UI painter stopped: #{e.class}: #{e.message}"
+          paced_loop(-> { @stopping })
         end
 
         def write(str)
-          @io.write(str)
-          @io.flush if @io.respond_to?(:flush)
+          timed_write do
+            @io.write(str)
+            @io.flush if @io.respond_to?(:flush)
+          end
         rescue IOError, SystemCallError => e
           warn "UI band: can't write to the terminal (#{e.class}: #{e.message}); stopping" unless @stopping
           @stopping = true
@@ -366,7 +400,8 @@ module MB
           @failures[p.pane.name] = msg
           return if p.pane.bytes?
 
-          c = Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs).clear
+          r = p.state[:inner]
+          c = Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs).clear
           c.puts ["#{p.pane.name} failed: ", :bad], [e.message, :dim]
         end
 
@@ -382,13 +417,47 @@ module MB
         def relayout(rows, cols)
           @rows = rows
           @cols = cols
-          @height = @layout.height(@panes)
-          @placed = @layout.place(cols, @panes)
+          @density = Density.decide(:band, rows, cols)
+          @shown_layout = @layout.at_level(@density.level)
+          natural = @shown_layout.height(@panes)
+          groups = @shown_layout.root.children.length
+          # Boxes (a big terminal) only for bands with panes taller than a row
+          @boxed = @density.boxes && natural > groups
+          if @boxed
+            inner = natural + groups - 1
+            inner = [inner, @density.max_band_rows - 2].max if @density.max_band_rows
+            @height = inner + 2
+            @placed = @shown_layout.place(cols - 2, @panes, height: inner, row_gap: 1, x: 1, y: 1)
+            @rule_row = nil
+          else
+            @height = natural + (@density.rule ? 1 : 0)
+            body_y = @density.rule && !top? ? 1 : 0
+            @placed = @shown_layout.place(cols, @panes, y: body_y)
+            @rule_row = @density.rule ? (top? ? @height - 1 : 0) : nil
+          end
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
           @grid = klass.new(cols, @height)
           @shown = klass.new(cols, @height)
+          @chrome = chrome_plan
+          @placed.each do |p|
+            p.state[:inner] = @chrome.frames[p.pane.name]&.inner || Viewports::Rect.new(p.x, p.y, p.w, p.h)
+            p.state[:title_in_rule] = true # (the chrome draws titles)
+          end
+          paint_chrome
           @feed.needs = @placed.flat_map { |p| p.pane.needs }
           @full = true
+        end
+
+        # The chrome of the placed panes (UI::Chrome): titles on their own
+        # rows, and with boxes, the frame and rules with titles set in.
+        def chrome_plan
+          items = @placed.map { |p| Chrome::Item.new(name: p.pane.name, rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), title: p.pane.title) }
+          Chrome.plan(items, w: @cols, h: @height, rules: @boxed, inside: true)
+        end
+
+        def paint_chrome
+          Chrome.paint(@grid, @chrome, glyphs: @glyphs, focus_edges: false)
+          Chrome.hrule(@grid, @rule_row, @cols, glyphs: @glyphs) if @rule_row
         end
 
         def check_size(now)
@@ -398,7 +467,11 @@ module MB
           rows, cols = terminal_size
           return if rows == @rows && cols == @cols
 
+          old = @height
           relayout(rows, cols)
+          # (A size that changes the band's height, e.g. its rule from
+          # Density::RULE_MIN_ROWS rows, moves the edge as layout= does)
+          resize_band(old) if @active && old != @height
           @reasserted_at = nil
         end
 
@@ -416,8 +489,12 @@ module MB
           @reasserted_at = @clock.call
         end
 
-        # The cursor's row (1-based) from the terminal, or nil.
+        # The cursor's row (1-based) from the terminal, or nil.  Only the
+        # thread that started the band asks (the console's, between lines):
+        # a cursor report asked for from the painter would race Reline's
+        # reads of stdin (ux-1 r3 item 2).
         def cursor_row
+          return nil unless Thread.current.equal?(@starter)
           return nil unless @io.respond_to?(:tty?) && @io.tty? && $stdin.tty?
           IO.console&.cursor&.first&.+(1)
         rescue StandardError
@@ -428,10 +505,11 @@ module MB
           return unless @io.respond_to?(:tty?) && @io.tty?
           band = self
           old = nil
-          old = Signal.trap('WINCH') do |sig|
+          @winch = proc do |sig|
             band.resized!
             old.call(sig) if old.respond_to?(:call)
           end
+          old = Signals.chain('WINCH', @winch)
           @old_winch = old
           @winch_installed = true
         rescue ArgumentError
@@ -440,7 +518,7 @@ module MB
 
         def restore_winch
           return unless @winch_installed
-          Signal.trap('WINCH', @old_winch || 'DEFAULT')
+          Signals.unchain('WINCH', @winch, @old_winch)
           @winch_installed = false
         rescue ArgumentError
           nil

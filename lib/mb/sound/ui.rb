@@ -5,13 +5,21 @@ require_relative 'ui/poll'
 require_relative 'ui/data_file'
 require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
+require_relative 'ui/sections'
+require_relative 'ui/density'
+require_relative 'ui/listing'
 require_relative 'ui/pane'
+require_relative 'ui/pane_keys'
 require_relative 'ui/panes'
+require_relative 'ui/tree_text'
+require_relative 'ui/session_panes'
 require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
 require_relative 'ui/follow'
+require_relative 'ui/pacer'
 require_relative 'ui/frame_rate'
+require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
@@ -26,9 +34,16 @@ require_relative 'ui/input/repl_host'
 require_relative 'ui/viewports/tree'
 require_relative 'ui/viewports/tiler'
 require_relative 'ui/viewports/loader'
+require_relative 'ui/chrome'
 require_relative 'ui/screen/term'
+require_relative 'ui/input/reline_keys'
 require_relative 'ui/keyboard'
+require_relative 'ui/keys'
+require_relative 'ui/console_keys'
+require_relative 'ui/facade'
 require_relative 'ui/tiles'
+require_relative 'ui/switch'
+require_relative 'ui/help_index'
 
 module MB
   module Sound
@@ -80,7 +95,8 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Keyboard.new,
+          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::Midi.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -97,12 +113,14 @@ module MB
         @layouts ||= {
           band: Layout.new(:band) {
             cols { pane :transport; pane :form }
-            cols { pane :tracks; pane :queue; pane :meters; pane :scope }
+            cols { pane :tracks; pane :queue; pane :meters; pane :scope; pane :spectrum, only: :big }
           },
+          # (On a big terminal, UI::Density boxes it, grows it to a third of
+          # the rows, and adds the `only: :big` panes)
           deck: Layout.new(:deck) {
             cols { pane :transport; pane :form }
-            cols { pane :tracks; pane :queue; pane :knobs }
-            cols { pane :meters; pane :cpu; pane :scope }
+            cols { pane :tracks; pane :queue; pane :knobs; pane :messages, only: :big }
+            cols { pane :meters; pane :cpu; pane :scope; pane :spectrum, only: :big }
           },
           mini: Layout.new(:mini) {
             cols { pane :transport; pane :form }
@@ -114,10 +132,11 @@ module MB
       # (help :ui lists them).
       LAYOUT_NOTES = {
         band: ['the default band: transport, form, tracks, queue, meters, scope', '7 rows'],
-        deck: ['a taller band with knobs and CPU per part', '13 rows'],
+        deck: ['a taller band with knobs and CPU per part (bigger, boxed, with spectrum and messages from 160x50)', '13 rows'],
         mini: ['one line: transport and form', '1 row'],
         tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
-        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu', '120x40 and up'],
+        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu, buses', '120x40 and up'],
+        session: ['the set: launch lane, tracks, landed changes, clips, buses and sends, MIDI, around the console', '160x45 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
         wall: ['every pane at once, for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
@@ -176,7 +195,18 @@ module MB
             cols {
               rows(width: 32) { pane :tracks; pane :queue, height: 6 }
               rows(weight: 3) { repl; pane :scope, height: 8 }
-              tabs :meters, :knobs, :cpu, width: 34
+              tabs :meters, :knobs, :cpu, :buses, width: 34
+            }
+          },
+          # The set at a glance (ux-1 r3 item 32): where it is and what comes,
+          # what landed, the clips, buses and sends, MIDI, around the console
+          session: Viewports.layout(:session, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            pane :lane, height: 4
+            cols {
+              rows(width: 40) { pane :tracks; pane :queue, height: 6; pane :log, height: 8 }
+              rows(weight: 3) { repl; pane :clips, height: 8 }
+              rows(width: 40) { pane :meters, height: 6; pane :buses; pane :midi, height: 8 }
             }
           },
         }
@@ -246,6 +276,7 @@ module MB
       # Records the console's binding before each line (for the palette).
       # Called by bin/sound.rb.
       def self.install_pry!
+        ConsoleKeys.install # (Ctrl-], F2, and the IDE editing keys in the plain console and the band)
         return unless defined?(::Pry)
         ::Pry.config.hooks.add_hook(:before_eval, :mb_sound_ui) { |_code, pry| UI.console_binding = pry.current_binding }
       end
@@ -314,6 +345,10 @@ module MB
 
         layout = layout_named(name || (@tiles&.active? ? @tiles.layout_name : @band&.active? ? @band.layout.name : default_layout))
         return show_tiles(layout, **opts) if layout.is_a?(Viewports::Layout)
+        # (out of the tiles: their REPL lines printed again, by the console
+        # itself when asked from the palette; see Switch)
+        return Switch.defer_to_console(Switch.console_line(name || layout.name, opts)) if Switch.defer?
+        todo = Switch.leave_tiles(:band)
         @tiles&.stop
         opts = opts.except(:mouse, :nav_esc)
         opts = (layout_options[layout.name] || {}).merge(opts)
@@ -329,6 +364,7 @@ module MB
         warm_up # once, before the first band (YJIT compiles the painter)
         @band = Band.new(layout: layout, io: io, **opts)
         @band.start
+        Switch.finish(todo)
         unless @at_exit
           at_exit { @band&.stop rescue nil }
           @at_exit = true
@@ -365,9 +401,12 @@ module MB
 
       # Turns the band or the tiled screen off.  Returns nil.
       def self.off
+        return Switch.defer_to_console(Switch.console_line(:off)) && nil if Switch.defer?
         was = screen || @tiles&.hidden?
         @band&.stop
+        todo = Switch.leave_tiles(:off)
         @tiles&.stop
+        Switch.finish(todo)
         # What was hidden from the terminal while the screen owned it
         if was && (text = messages.summary)
           $stdout.puts "\e[33m#{text}\e[0m"

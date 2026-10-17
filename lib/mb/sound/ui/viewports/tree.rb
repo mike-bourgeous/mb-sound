@@ -208,20 +208,22 @@ module MB
           # True when the layout has a REPL pane (shown in :tiles mode).
           def repl? = panes.include?(:repl)
 
-          # The placements in a +w+ x +h+ screen: an Array of Placed.
-          def place(w, h)
+          # The placements in a +w+ x +h+ screen: an Array of Placed
+          # (+header_rule+: a rule under one-row panes too; see
+          # Viewports.place).
+          def place(w, h, header_rule: false, mins: nil)
             out = []
             if zoom
               leaf = Viewports.find_leaf(root, zoom)
               out << Placed.new(name: zoom, rect: Rect.new(0, 0, w, h), opts: leaf.opts)
             else
-              Viewports.place(root, Rect.new(0, 0, w, h), gap, out)
+              Viewports.place(root, Rect.new(0, 0, w, h), gap, out, header_rule: header_rule, mins: mins)
             end
             out
           end
 
           # {name => Rect} of the visible panes.
-          def rects(w, h) = place(w, h).select(&:name).to_h { |p| [p.name, p.rect] }
+          def rects(w, h, header_rule: false, mins: nil) = place(w, h, header_rule: header_rule, mins: mins).select(&:name).to_h { |p| [p.name, p.rect] }
 
           # The options of pane +name+ ({} if it has none).
           def options_of(name) = Viewports.find_leaf(root, name)&.opts || {}
@@ -290,9 +292,13 @@ module MB
 
         # Sizes of +children+ along a +total+: fixed sizes first, then
         # weights by largest remainder (ties to the earlier child), then
-        # +min+ (taken from the largest flexible siblings).  Sums to +total+
-        # when any child is flexible.
-        def shares(children, total)
+        # minimums (+mins+, one per child; default each child's +min+, else
+        # 1): a child under its minimum takes cells from the largest
+        # siblings above theirs, fixed ones included, so a declared minimum
+        # holds whenever the total allows it.  Sums to +total+ when any
+        # child is flexible.
+        def shares(children, total, mins = nil)
+          mins ||= children.map { |c| c.min || 1 }
           fixed = children.map(&:size)
           left = [total - fixed.compact.sum, 0].max
           flex = children.each_index.reject { |i| fixed[i] }
@@ -313,27 +319,43 @@ module MB
             flex.each { |i| sizes[i] = exact[i].floor }
             rest = left - flex.sum { |i| sizes[i] }
             flex.sort_by { |i| [-(exact[i] - exact[i].floor), i] }.first(rest).each { |i| sizes[i] += 1 }
-            flex.each do |i|
-              need = (children[i].min || 0) - sizes[i]
-              next if need <= 0
+          end
+          children.each_index do |i|
+            need = mins[i] - sizes[i]
+            next if need <= 0
 
-              flex.reject { |d| d == i }.sort_by { |d| -sizes[d] }.each do |d|
-                give = [need, sizes[d] - (children[d].min || 1)].min
-                next if give <= 0
+            children.each_index.reject { |d| d == i }.sort_by { |d| [-(sizes[d] - mins[d]), d] }.each do |d|
+              give = [need, sizes[d] - mins[d]].min
+              next if give <= 0
 
-                sizes[d] -= give
-                sizes[i] += give
-                need -= give
-                break if need <= 0
-              end
+              sizes[d] -= give
+              sizes[i] += give
+              need -= give
+              break if need <= 0
             end
           end
           sizes
         end
 
+        # The smallest size of +node+ along +axis+ (:rows or :cols): its own
+        # +min+, else what +mins+ (a Proc of a pane name and an axis) says
+        # for a pane, else 1; splits add their children's (and the gaps)
+        # along their axis and take the largest across it.
+        def min_of(node, axis, mins, gap = 1)
+          case node
+          in Pane then node.min || mins&.call(node.name, axis) || 1
+          in Tabs then (axis == :rows ? 1 : 0) + node.children.map { |c| min_of(c, axis, mins, gap) }.max
+          in Split
+            kids = node.children.map { |c| min_of(c, axis, mins, gap) }
+            node.axis == axis ? kids.sum + gap * (kids.length - 1) : kids.max
+          end
+        end
+
         # Places +node+ in +rect+, appending Placed to +out+ (+slots+, if
-        # given, maps each node to its rectangle, by identity).
-        def place(node, rect, gap, out, slots = nil)
+        # given, maps each node to its rectangle, by identity).  Stacked
+        # children get +gap+ rows between them except under one-row
+        # children (headers keep their height), unless +header_rule+.
+        def place(node, rect, gap, out, slots = nil, header_rule: false, mins: nil)
           return if rect.w <= 0 || rect.h <= 0
 
           slots[node] = rect if slots
@@ -343,19 +365,21 @@ module MB
             out << Placed.new(name: node.name, rect: rect, opts: node.opts)
           in Tabs
             out << Placed.new(name: nil, rect: Rect.new(rect.x, rect.y, rect.w, 1), tabs: node.children.map { |c| c.panes.first }, active: node.active)
-            place(node.children[node.active], Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1), gap, out, slots)
+            place(node.children[node.active], Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1), gap, out, slots, header_rule: header_rule, mins: mins)
           in Split
             across = node.axis == :cols
             # One column between panes side by side, one row between
             # stacked panes (a rule drawn by the screen; its title goes
             # into it), except under one-row panes (headers keep their
             # height)
-            gaps = node.children.each_cons(2).map { |a, _| across || a.size != 1 ? gap : 0 }
+            gaps = node.children.each_cons(2).map { |a, _| across || header_rule || a.size != 1 ? gap : 0 }
             total = (across ? rect.w : rect.h) - gaps.sum
             pos = across ? rect.x : rect.y
-            shares(node.children, total).each_with_index do |s, i|
+            axis = across ? :cols : :rows
+            least = node.children.map { |c| mins ? min_of(c, axis, mins, gap) : c.min || 1 }
+            shares(node.children, total, least).each_with_index do |s, i|
               r = across ? Rect.new(pos, rect.y, s, rect.h) : Rect.new(rect.x, pos, rect.w, s)
-              place(node.children[i], r, gap, out, slots)
+              place(node.children[i], r, gap, out, slots, header_rule: header_rule, mins: mins)
               pos += s + gaps[i].to_i
             end
           end

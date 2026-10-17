@@ -219,7 +219,8 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
       lines = @term.lines
       q = @tiles.tiler.rects[:queue]
       h, j = glyphs == :ascii ? ['-', '+'] : ['─', '┤']
-      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w, h) + j), lines[q.y - 1]
+      n = @tiles.tiler.numbered.index(:queue) + 1
+      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w - 4, h) + " #{n} #{h}" + j), lines[q.y - 1] # (the pane's number at the right, ux-1 r3 item 37)
       expect(lines[q.y]).to include('17:3   knob :cut') # the body starts on the pane's first row
       expect(@tiles.to_text.scan('QUEUED').length).to eq(1)
       r = @tiles.tiler.rects[:repl]
@@ -227,28 +228,36 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     end
   end
 
-  it 'shows the keys with ? in NAV (the focused keyboard\'s too), and any key closes them (ux-1 item 10)' do
+  it 'shows the keys with ? in NAV (the focused keyboard\'s too); Esc closes them, a listed key closes them and acts (ux-1 items 10, r3 20)' do
     start(:keys, rows: 40, cols: 140)
     expect(@term.wait_for(' KEYS ')).to eq(true)
-    @term.write("\x1d") # KEYS -> REPL
-    expect(@term.wait_for(' REPL ')).to eq(true)
-    @term.write("\x1d") # -> NAV
+    @term.write("\x1d") # KEYS -> NAV (the keyboard stays focused)
     expect(@term.wait_for(' NAV ')).to eq(true)
-    @term.type((@tiles.tiler.numbered.index(:keyboard) + 1).to_s)
-    @term.settle(quiet: 0.1)
+    expect(@tiles.tiler.focus).to eq(:keyboard)
     @term.type('?')
-    expect(@term.wait_for('keys (any key closes)')).to eq(true)
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
     @term.settle(quiet: 0.1)
-    expect(@term.text).to include('Panes', 'Console', 'Modes', 'pick a pane by its number', 'Keyboard', 'capture into the armed tracks')
-    @term.type('z') # closes the overlay only (no zoom)
-    expect(@term.wait_for(/\A(?!.*any key closes)/m)).to eq(true)
+    expect(@term.text).to include('Panes', 'Console', 'Modes', 'pick a pane by its number', 'Keyboard', 'capture into the armed tracks', 'Ctrl-W then')
+    @term.write("\e") # Esc closes only
+    expect(@term.wait_for(/\A(?!.*Esc closes;)/m)).to eq(true)
     expect(@tiles.key_help?).to eq(false)
-    expect(@tiles.tiler.layout.zoom).to be_nil
+    expect(@tiles.router.mode).to eq(:nav)
+    @term.type('?')
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
+    @term.type('z') # closes the overlay and zooms, as NAV z would
+    expect(wait_until { @tiles.tiler.layout.zoom == :keyboard }).to eq(true)
+    expect(@tiles.key_help?).to eq(false)
+    @term.type('z')
+    expect(wait_until { @tiles.tiler.layout.zoom.nil? }).to eq(true)
     # Focus elsewhere: only NAV's keys
     @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
     @term.type('?')
-    expect(@term.wait_for('keys (any key closes)')).to eq(true)
+    expect(@term.wait_for('keys (Esc closes')).to eq(true)
     expect(@term.text).not_to include('capture into the armed tracks')
+    @term.write("\x1d") # Ctrl-] closes it, in NAV
+    expect(wait_until { !@tiles.key_help? }).to eq(true)
+    expect(@tiles.router.mode).to eq(:nav)
+    expect(@tiles.mode_problems).to eq([])
     expect(MB::Sound::UI::Tiles.key_table(:nav).join("\n")).to include("Panes:\n  1-9")
   end
 
@@ -262,7 +271,9 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     @term.write("\x1d")
     expect(@term.wait_for(' NAV ')).to eq(true)
     @term.type('f')
-    expect(@term.wait_for(/\d+ fps · \d+\.\d ms · \d+ kB\/s/)).to eq(true), @term.lines.last
+    # Refreshes against the target, frames written, and where a frame's time goes (ux-1 r3 item 23)
+    expect(@term.wait_for(%r{\d+/30 Hz · \d+ written · paint \d+\.\d write \d+\.\d wait \d+\.\d\+\d+\.\d ms})).to eq(true), @term.lines.last
+    expect(@tiles.stats[:pacing]).to include(:refreshes, :written, :paint_ms, :write_ms, :oversleep_ms, :skipped)
     stats = @tiles.stats
     expect(stats[:pane_cpu_ms].keys).to include(:meters, :scope)
     expect(stats[:target_fps]).to eq(30)

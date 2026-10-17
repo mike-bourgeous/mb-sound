@@ -7,7 +7,7 @@ module MB
       line('in the background') { bg :bass, g }
       line('4-bar fade; fade: 0 cuts') { stop :bass }
       line('all out / right now') { outro; panic }
-      line('what plays') { now }
+      line('what plays; a set to explore') { now; demo }
       line('master level') { master_gain(-6.db) }
     end
 

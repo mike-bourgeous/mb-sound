@@ -12,8 +12,10 @@ RSpec.describe(MB::Sound::DebugMethods) do
       expect(File.read(File.join(dir, 'players.txt'))).to include(':tri')
       expect(File.read(File.join(dir, 'graphs', 'tri.rb'))).to include('220.hz.triangle')
       expect(File.read(File.join(dir, 'threads.txt'))).to include('debug_methods')
+      expect(File.read(File.join(dir, 'ui.txt'))).to match(/\Aui (off|hidden|band|tiles).* on \d+x\d+/) # (ui.list first, ux-1 r3 item 28)
     end
   ensure
     session&.close
+    MB::Sound.rewind # (a Session on the shared transport: inspection_spec's stamps failed after this ran first)
   end
 end

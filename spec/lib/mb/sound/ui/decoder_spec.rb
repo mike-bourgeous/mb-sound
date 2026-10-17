@@ -71,7 +71,7 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
     expect(km[key.of('3')]).to eq(input::Action.of(:focus_index, 3))
     expect(km[key.of(:right, :shift, bytes: "\e[1;2C")]).to eq(input::Action.of(:resize, :right, 5))
     expect(km[key.of(:right)]).to be_nil
-    expect(km.bindings).to include('shift-right' => :resize, 'h' => :nop)
+    expect(km.bindings).to include('S-Right' => :resize, 'h' => :nop)
     km.off('h')
     expect(km[key.of('h')]).to be_nil
   end
@@ -87,7 +87,7 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
     expect(ev[1].to_s).to eq('z (repeat)')
   end
 
-  it 'routes every key event to the host in :grab mode until Ctrl-], dropping releases elsewhere' do
+  it 'routes every key event to the host in :grab mode until Ctrl-] (to NAV), refusing pastes and ignoring releases elsewhere' do
     host = Class.new {
       attr_reader :log
       def initialize = @log = []
@@ -107,6 +107,10 @@ RSpec.describe(MB::Sound::UI::Input::Decoder, :aggregate_failures) do
     r.event(key.of(']', :ctrl, type: :release))
     r.event(key.of('q', type: :release))
     r.event(key.of('q', type: :repeat))
-    expect(host.log).to eq([[:mode, :grab], [:grab, 'z', :press], [:grab, 'z', :release], [:mode, :repl], [:repl, 'q', :repeat]])
+    r.event(key.of(']', :ctrl)) # NAV -> back to the grab
+    r.event(key.of(:f2)) # F2 in the grab: back to the REPL
+    r.event(key.of('q', type: :repeat))
+    expect(host.log).to eq([[:mode, :grab], [:grab, 'z', :press], [:grab, 'z', :release], [:act, :refused], [:mode, :nav],
+                            [:act, :unbound], [:mode, :grab], [:mode, :repl], [:repl, 'q', :repeat]])
   end
 end

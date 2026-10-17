@@ -5,11 +5,39 @@ module MB
       # changes, the form, knob ranges), gathered a few times a second on
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
-      Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs) do
+      Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi) do
+        # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
+        # +routes+ (player => { to:, send: { bus => level } }), +landed+
+        # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo)
+        def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
+                       landed: [].freeze, clips: [].freeze, midi: nil)
+          super
+        end
+
         def self.empty
           @empty ||= new(tracks: [].freeze, scenes: [].freeze, scene: nil, queued: [].freeze, recording: [].freeze, armed: [].freeze, form: nil, knob_specs: {}.freeze)
         end
       end
+
+      # A bus (Session#bus_info): +name+, where it goes (+to+), its chain's
+      # +description+, +asleep+, +muted+.
+      BusInfo = Data.define(:name, :to, :description, :asleep, :muted)
+
+      # A change that landed (the journal): +seq+, +kind+, +subject+, where
+      # it landed (+lands+, bar:beat text; +pos+ whole notes), and +at+ (the
+      # clock when the poll heard it land; nil for changes from before the
+      # UI started).
+      LandedInfo = Data.define(:seq, :kind, :subject, :lands, :pos, :at)
+
+      # A clip the set uses: +name+, +kind+ (seq, clip, kit, grid), +bars+
+      # (its length), +pattern+ (a one-line picture of its onsets), +used+
+      # (where: track names and scene names).
+      ClipInfo = Data.define(:name, :kind, :bars, :pattern, :used)
+
+      # Recent MIDI (Session#midi_log, read without the render lock):
+      # +events+ ([stamp text, source name, kind, text], newest last), +ccs+
+      # ({ number => last value 0..127 }), +mapped+ ([knob name, cc number]).
+      MidiInfo = Data.define(:events, :ccs, :mapped)
 
       # A track: +name+, +q+ (its launch quantization, as text), +clip+ (the
       # clip's name, or "graph"), +armed+.
@@ -58,19 +86,21 @@ module MB
       # snapshot's buffers), +parts+ (PartLoads), +master+ (MasterLevels,
       # or nil without a meter pane), +scope+ (frozen Numo::SFloats, one per
       # channel, the latest samples; nil without a scope pane),
-      # +underruns+ (the output's count, or nil), +knobs+ (KnobValues).
+      # +underruns+ (the output's count, or nil), +knobs+ (KnobValues),
+      # +latency+ (seconds from this buffer's write to the speakers: the
+      # output's queue and the card's buffer; 0 without a sound card).
       # +slow+ is the latest Slow.
       Snapshot = Data.define(
         :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing,
         :sample_rate, :buffer_size, :load, :load_max, :parts, :master, :scope,
-        :underruns, :knobs, :slow
+        :underruns, :knobs, :slow, :latency
       ) do
         # Defaults for every field (a stopped transport at bar 1).
         def self.defaults
           {
             seq: 0, time: 0.0, frame: 0, pos: 0r, bar: 1, beat: 1r, bpm: 120, bar_length: 1r, playing: false,
             sample_rate: 48000, buffer_size: 800, load: nil, load_max: nil, parts: [].freeze, master: nil, scope: nil,
-            underruns: nil, knobs: [].freeze, slow: Slow.empty,
+            underruns: nil, knobs: [].freeze, slow: Slow.empty, latency: 0.0,
           }
         end
 
@@ -96,6 +126,15 @@ module MB
         def recording = slow.recording
         def armed = slow.armed
         def form = slow.form
+        def buses = slow.buses
+        def routes = slow.routes
+        def landed = slow.landed
+        def clips = slow.clips
+        def midi = slow.midi
+
+        # When what this snapshot shows is heard: its time plus the
+        # output's latency (ux-1 r3 item 32b).
+        def heard_at = time + latency.to_f
       end
 
       # Master meters on the render thread (see MasterLevels): sample peaks
@@ -345,7 +384,8 @@ module MB
             scope: @needs.include?(:scope) && @scope ? @scope.to_a : nil,
             underruns: underruns,
             knobs: @knob_refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
-            slow: @slow
+            slow: @slow,
+            latency: out.respond_to?(:latency) ? out.latency.to_f : 0.0
           )
         end
 

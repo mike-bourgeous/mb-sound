@@ -10,17 +10,21 @@ module MB
         # with #layout or saved with `ui.save`), `ui off` (or `ui :off`,
         # `ui false`).  +at:+ :bottom (default; scrolled lines reach the
         # terminal's scrollback) or :top, +color:+ :ansi256 (default),
-        # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:quad
-        # default, :scope for Braille).  Returns the band (`ui.save`,
-        # `ui.stats`).
+        # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:auto
+        # default: :scope Braille for short or wide panes, else :quad).
+        # Returns the band (`ui.save`, `ui.stats`).
         #
         # A layout with a `repl` pane takes the whole screen instead (`ui
         # :tiles`, `ui :studio`): panes tiled around the console, NAV mode
         # on Ctrl-] (see UI::Tiles; `help :ui`).  +mouse:+ true turns on
         # mouse reports there, +nav_esc:+ seconds lets a lone Esc enter NAV.
+        #
+        # Returns the `ui` facade (UI::Facade): the same commands whatever
+        # is on screen (`ui.keys` from the band opens the tiles; `ui.screen`
+        # is the Band or Tiles itself).
         def ui(layout = nil, at: nil, color: nil, look: nil, mouse: nil, nav_esc: nil)
           return UI.off if layout == :off || layout == false
-          UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc)
+          UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc) && UI.facade
         end
 
         # The virtual keyboard: KEYS mode in the tiled screen (the computer

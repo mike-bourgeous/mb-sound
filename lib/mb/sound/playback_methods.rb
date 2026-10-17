@@ -97,8 +97,8 @@ module MB
       #
       # New sounds fade in over half a bar by default; pass +:fade+ to choose
       # the number of bars, or 0 for no fade.  Replacing a named sound
-      # switches over without a fade unless +:fade+ is given, in which case
-      # it crossfades.  Change the defaults with Session.default.fade_in= and
+      # crossfades over 5 ms on exact frames (a declick), or over +:fade+
+      # bars if given (0 cuts on the exact sample).  Change the defaults with Session.default.fade_in= and
       # fade_out= (in bars).
       #
       # Accepts anything #play does (see Playable.graph): a GraphNode, an
@@ -232,13 +232,15 @@ module MB
       # mutes, ...) are cancelled, and the scheduler is reset (see
       # ScheduleMethods#reset_scheduler: the song form stops, every
       # scheduled block is cancelled, and a stuck or dead scheduler thread
-      # is replaced).  It always prints one line saying what it stopped and
-      # cancelled.
+      # is replaced).  Every armed track is disarmed (an armed track may be
+      # the broken one making noise; `arm` it again to play it).  It always
+      # prints one line saying what it stopped, cancelled, and disarmed.
       #
       # Returns the journal entries of the stops and of the cancelled
       # changes (one entry, or an Array; see #stop).
       def panic
         cancelled = []
+        disarmed = []
         message = nil
         stops = session_command([], label: 'panic', kind: :stop, all: true) { |session, time|
           report = session.reset_scheduler
@@ -247,12 +249,18 @@ module MB
           waiting = session.queued.reject { |e| time && e.lands&.pos && e.lands.pos < time }
           cancelled = session.cancel_changes(*waiting.map(&:seq)) unless waiting.empty?
 
-          session.remove(fade: 0, time: time).tap { session.reset_master(time: time); session.reset_buses(time: time) }
+          session.remove(fade: 0, time: time).tap {
+            session.reset_master(time: time)
+            session.reset_buses(time: time)
+            # Panic disarms every track (maintainer, 2026-10-17: an armed
+            # track may be the broken one making noise; see Arrangement::Arm)
+            disarmed = session.arrangement.panic_disarm
+          }
         }
         return stops if Session.context&.[](:batch)
 
         stopped = Array(stops).grep(Session::Journal::Entry)
-        warn "panic: #{panic_summary(stopped.length, cancelled.length, message)}"
+        warn "panic: #{panic_summary(stopped.length, cancelled.length, message, disarmed)}"
 
         entries = [*stopped, *cancelled]
         entries.length == 1 ? entries.first : entries
@@ -260,8 +268,9 @@ module MB
 
       # The one line #panic prints: players stopped, changes cancelled, and
       # what resetting the scheduler did (+scheduler+, or nil).
-      private def panic_summary(stopped, cancelled, scheduler)
+      private def panic_summary(stopped, cancelled, scheduler, disarmed = [])
         parts = ["stopped #{stopped} player#{'s' unless stopped == 1}"]
+        parts << "disarmed #{disarmed.map(&:inspect).join(', ')}" unless disarmed.empty?
         parts << "cancelled #{cancelled} queued change#{'s' unless cancelled == 1}" if cancelled > 0
         parts << scheduler if scheduler
         parts.join('; ')

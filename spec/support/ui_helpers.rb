@@ -162,6 +162,14 @@ module UIHelpers
     def cc(*, **) = nil
   end
 
+  # Waits up to +timeout+ seconds for the block to be truthy; returns its
+  # last value.
+  def wait_until(timeout: 5)
+    deadline = MB::U.clock_now + timeout
+    sleep 0.01 until yield || MB::U.clock_now > deadline
+    yield
+  end
+
   # A Tiles screen on a FakeTerminal with a Pry of its own (prompt "t> "),
   # started with threads, its keyboard playing into NullKeyboardOut unless
   # +keyboard:+ is given.  Returns [tiles, terminal].

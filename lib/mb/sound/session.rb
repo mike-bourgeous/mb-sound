@@ -286,6 +286,7 @@ module MB
         self.master_gain_post = master_gain_post
         self.fade_in = fade_in
         self.fade_out = fade_out
+        @replace_declick = nil
         @output = output
         @channels = channels
         @buffer_size = buffer_size
@@ -371,6 +372,10 @@ module MB
             next unless c.subject == name
             playing = true if START_KINDS.include?(c.kind) && c.kind != :restore
             playing = false if c.kind == :stop
+            # An undo's :restore puts back a player (its +starts+ are the
+            # restored graph's timeline nodes) or none (nil +starts+), so
+            # e.g. undoing `arm` counts its monitor as stopping
+            playing = !c.starts.nil? if c.kind == :restore
           end
           playing
         }
@@ -397,12 +402,13 @@ module MB
       # +:name+ if given, or else the lowest unused Integer.
       #
       # If a graph is already playing under +:name+, it keeps playing until
-      # the new graph starts, then stops on that exact sample, or crossfades
-      # over +:fade+ bars if given.
+      # the new graph starts, then crossfades into it over +:fade+ bars, by
+      # default a 5 ms declick (Fades::DECLICK_SECONDS) starting on that
+      # exact sample; +fade: 0+ cuts on the exact sample.
       #
       # +:fade+ also fades the new graph in over that many bars.  If not
-      # given, new graphs fade in over #fade_in bars, and replacements switch
-      # without a fade.  Pass 0 or false for no fade.
+      # given, new graphs fade in over #fade_in bars, and replacements
+      # crossfade over the declick time.  Pass 0 or false for no fade.
       #
       # +:on+, +:in+, and +:at+ set when the graph starts on the timeline
       # (see LaunchPoint): +on:+ aligns to :now, :beat (next quarter note),
@@ -523,9 +529,16 @@ module MB
         point = LaunchPoint.of(binding) or return nil
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
 
+        # A disarmed track's monitor stays stopped (see Arrangement::Arm:
+        # it plays exactly while its track is armed); `arm` starts it
+        if name && disarmed_monitor?(name)
+          track = Arrangement::Recording.monitored_track(name)
+          return MB::Sound.live_error(ArgumentError.new("#{name.inspect} is track #{track.inspect}'s live monitor, which plays while the track is armed (arm #{track.inspect})"))
+        end
+
         @render_lock.synchronize {
           p = @mutex.synchronize {
-            name ||= @stopped.keys.last
+            name ||= @stopped.keys.reject { |n| disarmed_monitor?(n) }.last
             p = @stopped[name] || ringing_player(name)
             next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
             p
@@ -542,6 +555,13 @@ module MB
             start_thread
           end
         }
+      end
+
+      # True if +name+ is the live monitor of a track that isn't armed (see
+      # Arrangement::Recording.monitor_name).
+      private def disarmed_monitor?(name)
+        track = Arrangement::Recording.monitored_track(name)
+        !track.nil? && !(@arrangement&.armed?(track))
       end
 
       # Returns a Hash from name to description of stopped graphs that can be
@@ -1029,7 +1049,10 @@ module MB
           @stopped.delete(name)
 
           replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
-          fade = @fade_in unless explicit_fade || replacing
+          # A replacement crossfades over the declick time (5 ms, exact
+          # frames, like undo's restores; ux-r3 item 5: a hard cut between
+          # two unrelated graphs clicked), unless given a fade (0: cut)
+          fade = replacing ? (replace_declick ? declick_bars : nil) : @fade_in unless explicit_fade
 
           # Hand over from the graph being replaced at the new start time
           @players.each_value do |p|

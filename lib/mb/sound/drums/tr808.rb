@@ -224,7 +224,7 @@ module MB
           settings[:cowbell] = TR808.more_cowbell(settings[:cowbell] || {}, more_cowbell) if more_cowbell
 
           sources = voice_sources(source, only: only, map: map, early_flam: Drums.flams?(source) ? Machine::DEFAULT_FLAM : nil)
-          raise ArgumentError, "Nothing in #{source} plays a TR-808 voice" if sources.empty?
+          raise SourceMismatch, "Nothing in #{source} plays a TR-808 voice" if sources.empty?
 
           # Shared metal bank for voices with the same (numeric) tune
           banks = {}

@@ -8,7 +8,8 @@ module MB
       # Writes the console's state to tmp/debug/<time>/ in mb-sound's folder
       # (or +dir+): now.txt (`now`), players.txt, changes.txt (the
       # journal), graphs/<player>.rb (each player's graph as Ruby, or why
-      # not), ui.txt (the screen's stats, messages, and text), take.rb (the
+      # not), ui.txt (`ui.list`: mode, layout, terminal size, panes; the
+      # screen's stats, messages, and text), take.rb (the
       # take's replay script) and midi.txt (the last 500 MIDI events),
       # threads.txt (every thread's backtrace).  Each part that fails says
       # why in its file and the rest still write.  Returns the folder.
@@ -38,8 +39,9 @@ module MB
         end
         part.('ui.txt') do
           s = UI.screen || UI.tiles
-          next 'no UI' unless s
-          [s.inspect, '', 'stats:', s.stats.pretty_inspect, 'messages:', UI.messages.recent(50).map { |e| "#{e.severity} ×#{e.count} #{e.text}" },
+          # (ui.list first: mode, layout, terminal size, each pane's place)
+          next "#{UI.list}\n\nno UI" unless s
+          [UI.list.to_s, '', s.inspect, '', 'stats:', s.stats.pretty_inspect, 'messages:', UI.messages.recent(50).map { |e| "#{e.severity} ×#{e.count} #{e.text}" },
            '', 'screen:', (s.respond_to?(:to_text) ? s.to_text : '')].flatten.join("\n")
         end
         part.('take.rb') { Take.active ? Take.active.to_ruby : 'no take (bin/sound.rb keeps one)' }

@@ -122,6 +122,15 @@ RSpec.configure do |config|
     default = MB::Sound::Session.existing
     default.close if default&.running?
     MB::Sound::Tuning.default.reset
+    # The default transport starts every example at 0, 120 BPM, 4/4: a
+    # Session made without its own transport moves it, and an example that
+    # forgot `MB::Sound.rewind` (or loaded a set's `bpm 126`) shifted every
+    # later example in its process (ux-r3-session, 2026-10-17: a drum
+    # machine a sample late, a spy's stamps 14 buffers late).
+    t = MB::Sound::Sequence.transport
+    t.seek(0) unless t.position.zero?
+    t.bpm = 120 unless t.bpm == 120
+    t.meter(1, at: 0) unless t.meters.length == 1 && t.bar_length(0) == 1
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN
     MB::Sound::Session.default.master_gain_post = false
     MB::Sound.seed(MB::Sound::Internal.default_seed) # random phases etc. don't depend on example order

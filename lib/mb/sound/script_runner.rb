@@ -1,6 +1,7 @@
 require 'optparse'
 
 require_relative 'script_runner/live_keys'
+require_relative 'script_runner/scrub'
 
 module MB
   module Sound
@@ -285,6 +286,8 @@ module MB
         @profile = profile
         @description = description
         @declared_specs = params
+        @section_back_at = nil # (song screens' Up key; see #ui_section_back)
+        @section_back_depth = 0
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
         apply_latency_profile
@@ -1020,12 +1023,19 @@ module MB
       # `--ui [LAYOUT]`): UI::Tiles with repl: :none on +name+ (:default is
       # UI.show_layouts' :show for songs, :play for synths and effects,
       # which starts in KEYS mode with the keyboard playing the script's
-      # MIDI input).  Keys: q quits (Ctrl-C too), Space pauses (the whole
-      # Session waits; see Session#paused=), Right skips to the next
-      # section, Left goes back to the start of this one, Ctrl-] is NAV
-      # (zoom a pane, ...), F2 the keyboard.  When the song ends the screen
+      # MIDI input).  Keys come from UI::Keys::SONG_SCREEN and SYNTH_SCREEN
+      # (also the hints and the `?` overlay), acting here: on
+      # song screens q or Esc quits, Space pauses (the whole Session waits;
+      # see Session#paused=), Left/Right step a bar (Scrub),
+      # Up/Down or [ ] a section, PageUp/PageDown a scene; on synth and
+      # effect screens Esc is all notes off; everywhere Ctrl-C quits,
+      # Ctrl-] is NAV (zoom a pane, ...), F2 the keyboard.  When the song ends the screen
       # stays with its final meters until q.  What the script prints while
       # the screen is up goes to its messages pane.
+      # The actions of UI::Keys::SONG_SCREEN and SYNTH_SCREEN that #live_ui
+      # acts on (a spec checks the key tables bind no others).
+      SCREEN_ACTIONS = %i[quit panic pause bar_back bar_forward section_prev section_next scene_prev scene_next].freeze
+
       def live_ui(name)
         name = @kind == :song ? :show : :play if name == :default
         layout = UI.show_layouts[name] || UI.layout_named(name)
@@ -1037,26 +1047,29 @@ module MB
         quit = false
         tiles = nil
         panic = LiveKeys.new(session, out: UI::Messages::Writer.new(UI.messages, $stdout))
-        on_key = ->(k) {
-          next quit = true if k == :interrupt
-          case k.chord
-          when [:escape, []]
+        scrub = Scrub.new(session.transport, seek: ->(bar) { MB::Sound.seek(bar) })
+        on_key = ->(k) { quit = true if k == :interrupt }
+        # The screen's keys come from UI::Keys::SONG_SCREEN or SYNTH_SCREEN
+        # (also the hints and the `?` overlay); their actions land here
+        on_action = ->(a) {
+          case a.name
+          when :quit then quit = true
+          when :panic
             tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
-          when ['q', []], ['Q', []] then quit = true
-          when [' ', []]
+          when :pause
             session.paused = !session.paused?
             tiles.note = session.paused? ? 'paused: Space plays on, q quits' : nil
-          when [:right, []] then ui_section(tiles) { MB::Sound.skip }
-          when [:left, []]
-            ui_section(tiles) do
-              section = session.arrangement.playback&.section
-              section ? MB::Sound.seek(section) : tiles.say('no section to go back to', :warn)
-            end
+          when :bar_back then ui_section(tiles) { tiles.say("bar #{scrub.press(:left)}", :dim) }
+          when :bar_forward then ui_section(tiles) { tiles.say("bar #{scrub.press(:right)}", :dim) }
+          when :section_prev then ui_section(tiles) { ui_section_back(tiles, session) }
+          when :section_next then ui_section(tiles) { MB::Sound.skip }
+          when :scene_prev then ui_section(tiles) { ui_scene(tiles, session, -1) }
+          when :scene_next then ui_section(tiles) { ui_scene(tiles, session, 1) }
           end
         }
-        hints = 'q quit  Space pause  Left/Right section  Esc notes off  Ctrl-] nav  F2 keys'
+        play_keys = @kind == :song ? UI::Keys::SONG_SCREEN : UI::Keys::SYNTH_SCREEN
         UI.warm_up
-        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, hints: hints, probe: $stdin.tty?)
+        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, play_keys: play_keys, on_action: on_action, probe: $stdin.tty?)
         UI.instance_variable_set(:@tiles, tiles) # UI.screen: warnings and plots go to it
         out = $stdout
         $stdout = UI::Messages::Writer.new(UI.messages, out)
@@ -1077,6 +1090,35 @@ module MB
         $stdout = out if out
         UI.off
         waiter&.kill
+      end
+
+      # Up or [ on a song screen: back to the start of the section playing,
+      # or, within Scrub::GRACE of the last press (or right at its start),
+      # to the section before it (from the form's history).
+      def ui_section_back(tiles, session)
+        pb = session.arrangement.playback
+        return tiles.say('no form playing', :warn) unless pb && !pb.ended? && pb.section
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        chained = @section_back_at && now - @section_back_at <= Scrub::GRACE
+        at_start = pb.pass_start && session.transport.position - pb.pass_start.to_r < 1/4r
+        @section_back_at = now
+        @section_back_depth = chained ? @section_back_depth.to_i + 1 : (at_start ? 1 : 0)
+        hist = pb.history
+        name = @section_back_depth.zero? ? pb.section : hist[-1 - @section_back_depth] || hist.first
+        MB::Sound.seek(name)
+        tiles.say("section #{name}", :dim)
+      end
+
+      # PageUp/PageDown on a song screen: launches the scene +dir+ (-1 or 1)
+      # away from the current one (in definition order) at its launch point.
+      def ui_scene(tiles, session, dir)
+        arr = session.arrangement
+        names = arr.scenes.keys
+        return tiles.say('no scenes', :warn) if names.empty?
+        i = names.index(arr.current_scene)
+        name = names[i ? (i + dir).clamp(0, names.length - 1) : (dir > 0 ? 0 : names.length - 1)]
+        MB::Sound.go(name)
+        tiles.say("scene #{name}", :dim)
       end
 
       # Runs a section command for the script's screen, flashing errors

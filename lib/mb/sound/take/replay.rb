@@ -51,8 +51,11 @@ module MB
         # +:master_gain_post+ is where the master gain applied (see
         # Session#master_gain_post?); takes saved before it existed (before
         # 2026-10-13) don't give it, and played it after the master chain.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, rng: rng }
+        # +:replace_declick+ likewise (see Session#replace_declick): takes
+        # saved before 2026-10-17 don't give it, and switched replacements
+        # with a hard cut, so they replay exactly.
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
@@ -99,6 +102,7 @@ module MB
           session.master_gain_post = !!@start[:master_gain_post]
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
+          session.replace_declick = @start[:replace_declick]
           MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding

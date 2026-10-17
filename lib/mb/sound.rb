@@ -15,6 +15,7 @@ require_relative 'sound/phase'
 require_relative 'sound/curve'
 require_relative 'sound/decibels'
 require_relative 'sound/numeric_sound_mixins'
+require_relative 'sound/source_mismatch'
 
 # Load C extensions
 require_relative 'fast_sound'
@@ -188,7 +189,9 @@ require_relative 'sound/sampler'
 require_relative 'sound/granular'
 require_relative 'sound/session'
 require_relative 'sound/take'
+require_relative 'sound/arrangement/arm_state'
 require_relative 'sound/arrangement/recording'
+require_relative 'sound/arrangement/patch_check'
 require_relative 'sound/arrangement'
 require_relative 'sound/form'
 
@@ -226,6 +229,7 @@ require_relative 'sound/io_logger'
 require_relative 'sound/graph_node/recipe'
 MB::Sound::GraphNode::Recipe.install!
 require_relative 'sound/graph_io'
+require_relative 'sound/demo_methods'
 require_relative 'sound/genre'
 
 # The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console

@@ -353,6 +353,7 @@ module MB
           master_gain_post: s.master_gain_post?,
           fade_in: s.fade_in,
           fade_out: s.fade_out,
+          replace_declick: s.replace_declick,
           rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),
           time: Time.now.strftime('%Y-%m-%d %H:%M:%S'),
         }

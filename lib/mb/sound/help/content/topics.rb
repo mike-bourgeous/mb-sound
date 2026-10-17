@@ -606,6 +606,28 @@ module MB
       end
     end
 
+    Help.topic :demo, 'A demo set to explore', group: :arrange do
+      about <<~TEXT
+        `demo` loads a whole set into the session, paused at bar 1: Night
+        Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
+        tracks, 12 scenes, 5 knobs, a master chain, and its song form.
+        Nothing plays until you do something: `go :groove` launches a
+        scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
+        demo.form` plays the whole song (steer it with `loop!`, `onward`,
+        `finish`), and `tracks`, `scenes`, `knobs`, `ui :tiles` show what
+        is there.  With something already playing, `demo` asks first
+        (`demo :night_bus, replace: true` stops it).  `demos` lists the
+        sets.  The set is a set document in mb-sound's presets/ (saved by
+        bin/save_presets.rb), so `save :mine, set` keeps your changes.
+      TEXT
+      commands :demo, :demos
+      note :arrangement
+      see :sets, :flow, :knobs, :presets
+      example 'the demo sets', sound: false do
+        demos.keys
+      end
+    end
+
     Help.topic :genres, 'Genre templates', group: :arrange do
       about <<~TEXT
         `genre :dnb` is a template of a genre: tempo, form, drum grids and
@@ -883,6 +905,13 @@ module MB
           [label, what]
         end
         d.heading('Layouts  (* on screen now)').rows(rows, max_label: 18, wrap: true)
+      end
+      section do |d|
+        # (The pane catalog, ui.panes: ux-1 r3 item 40)
+        d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
+        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.heading('Sizes  (one decision per terminal size: UI::Density)')
+        d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end
       section do |d|
         UI::Tiles::KEY_HELP.each do |mode, groups|
