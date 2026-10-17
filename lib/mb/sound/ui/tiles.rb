@@ -514,7 +514,14 @@ module MB
 
         def mode_changed(m)
           @full = true
-          m == :grab ? enter_keys : leave_keys
+          return enter_keys if m == :grab
+
+          was = @keyboard.active?
+          leave_keys
+          # Out of KEYS, the focus goes back to the REPL, so a NAV round
+          # trip (Ctrl-] i or Enter) comes back to the REPL, not into the
+          # keyboard (where Up and Down change the velocity)
+          tile { |t| t.focus!(:repl) } if was && m == :repl && @tiler.layout.panes.include?(:repl)
         end
 
         def line_done(kind, text)

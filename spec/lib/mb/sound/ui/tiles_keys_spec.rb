@@ -100,6 +100,83 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(out.sounding).to be_empty
   end
 
+  # Up at the REPL prompt recalls +line+ (then clears the prompt again).
+  def expect_history(line)
+    @term.write("\e[A")
+    expect(@term.wait_for(/t> #{Regexp.escape(line)}/)).to eq(true), @term.text
+    @term.write("\x15") # Ctrl-U: an empty line again
+    @term.settle(quiet: 0.1)
+  end
+
+  # Ctrl-] and back with +key+ (i or Enter): the REPL, not KEYS.
+  def nav_round_trip(key)
+    @term.write("\x1d")
+    expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+    @term.write(key)
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true), "#{@tiles.router.mode} #{@tiles.tiler.focus}"
+  end
+
+  it 'recalls REPL history after every way into and out of KEYS mode, kitty sequences or not (ux-1 bug 2)' do
+    start(:keys, keys_kitty: true)
+    expect(@term.wait_for(' KEYS ')).to eq(true)
+    pushes = -> { @tiles.instance_variable_get(:@kitty_pushed) }
+    leave_ways = {
+      ctrl_bracket: -> { @term.write("\e[93;5u") },
+      ctrl_c: -> { @term.write("\e[99;5u") },
+      ctrl_z_and_back: -> {
+        @term.write("\e[122;5u")
+        expect(wait_until { @tiles.hidden? }).to eq(true)
+        @term.write("\x1a")
+        expect(wait_until { @tiles.active? }).to eq(true)
+      },
+    }
+    enter_ways = {
+      nav_p: -> { @term.write("\x1d"); expect(wait_until { @tiles.router.mode == :nav }).to eq(true); @term.write('p') },
+      pane_number: -> {
+        @term.write("\x1d")
+        expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+        @term.write((@tiles.tiler.numbered.index(:keyboard) + 1).to_s)
+        expect(wait_until { @tiles.tiler.focus == :keyboard }).to eq(true)
+        @term.write("\r")
+      },
+      ruby: -> { @tiles.keys },
+    }
+
+    # Leave the start's KEYS mode and put a line in the history
+    leave_ways[:ctrl_bracket].call
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    @term.type("40 + 2\r")
+    expect(@term.wait_for('=> 42')).to eq(true)
+
+    n = 0
+    enter_ways.each do |how_in, enter|
+      leave_ways.each do |how_out, leave|
+        enter.call
+        expect(wait_until { @tiles.router.mode == :grab && pushes.call }).to eq(true), "#{how_in}: #{@tiles.router.mode}"
+        # Kitty presses, repeats, and releases of arrows and notes (velocity in KEYS)
+        @term.write("\e[1;1:1A\e[1;1:2A\e[1;1:3A\e[122;1:1u\e[122;1:3u")
+        leave.call
+        expect(wait_until { @tiles.router.mode == :repl && !pushes.call }).to eq(true), "#{how_in}/#{how_out}: #{@tiles.router.mode}"
+        expect(@tiles.tiler.focus).to eq(:repl)
+        expect(out.sounding).to be_empty
+        nav_round_trip(n.even? ? 'i' : "\r")
+        n += 1
+        expect_history('40 + 2')
+        # What a terminal that kept the kitty flags would send still recalls
+        @term.write("\e[1;1:1A")
+        expect(@term.wait_for(/t> 40 \+ 2/)).to eq(true), "#{how_in}/#{how_out}: #{@term.text}"
+        @term.write("\x15")
+        @term.settle(quiet: 0.1)
+      end
+    end
+
+    # ui off pops the flags too
+    @tiles.keys
+    expect(wait_until { pushes.call }).to eq(true)
+    @tiles.stop
+    expect(pushes.call).to eq(false)
+  end
+
   it 'builds a clip in step entry and puts its Ruby on the REPL line' do
     start(context: MB::Sound.module_eval('binding'))
     @tiles.keys(step: true)
