@@ -263,7 +263,9 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     @term.write("\x1d")
     expect(@term.wait_for(' NAV ')).to eq(true)
     @term.type('f')
-    expect(@term.wait_for(/\d+ fps · \d+\.\d ms · \d+ kB\/s/)).to eq(true), @term.lines.last
+    # Refreshes against the target, frames written, and where a frame's time goes (ux-1 r3 item 23)
+    expect(@term.wait_for(%r{\d+/30 Hz · \d+ written · paint \d+\.\d write \d+\.\d wait \d+\.\d\+\d+\.\d ms})).to eq(true), @term.lines.last
+    expect(@tiles.stats[:pacing]).to include(:refreshes, :written, :paint_ms, :write_ms, :oversleep_ms, :skipped)
     stats = @tiles.stats
     expect(stats[:pane_cpu_ms].keys).to include(:meters, :scope)
     expect(stats[:target_fps]).to eq(30)

@@ -29,17 +29,29 @@ module MB
         def target_fps=(rate)
           raise ArgumentError, "target_fps is a rate from 1 to 240 (got #{rate.inspect})" unless rate.is_a?(Numeric) && rate >= 1 && rate <= 240
           @target_fps = rate
+          @pacer.fps = rate
         end
 
-        # fps, the painter's CPU per frame (p50 ms), and kB/s written, as a
-        # Hash and as text ("42 fps · 0.3 ms · 18 kB/s").
+        # The painter's pacing (UI::Pacer): deadlines, and each frame's
+        # paint, write, and wait times.
+        attr_reader :pacer
+
+        # fps (frames written), the painter's CPU per frame (p50 ms), kB/s
+        # written, and the pacing breakdown (UI::Pacer#breakdown: refreshes
+        # against the target, paint, write, and wait times), as a Hash and
+        # as text ("60/60 Hz · 30 written · paint 0.4 write 0.1 wait
+        # 15.9+0.1 ms · 18 kB/s").  Written frames top out near the fastest
+        # visible pane's rate (meters and scopes: 30/s): nothing changes
+        # between its draws.
         def frame_rate
           now = @clock.call
           rows = @written_lock.synchronize { @written.select { |t, _| t > now - WINDOW } }
           kbs = rows.sum { |_, b| b } / WINDOW / 1000.0
           cpu = UI.percentiles(@frames.last(120).map { |f| f[0] * 1000 })[:p50] || 0
           f = (rows.length / WINDOW).round
-          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), text: "#{f} fps · #{format('%.1f', cpu)} ms · #{kbs.round} kB/s" }
+          pace = @pacer.breakdown(window: WINDOW)
+          text = pace[:refreshes] > 0 ? "#{@pacer.readout(window: WINDOW)} · #{kbs.round} kB/s" : "#{f} fps · #{format('%.1f', cpu)} ms · #{kbs.round} kB/s"
+          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, text: text }
         end
 
         private
@@ -48,6 +60,31 @@ module MB
           @target_fps = target
           @written = []
           @written_lock = Mutex.new
+          @pacer = Pacer.new(target, clock: @clock)
+        end
+
+        # The painter thread's loop: frames on the Pacer's deadlines until
+        # +stop+ (a Proc) is true, a failing refresh warned once.
+        def paced_loop(stop)
+          Thread.current.name = 'MB::Sound::UI'
+          Thread.current.priority = -1
+          @pacer.run(stop) do |now|
+            refresh(now)
+          rescue => e
+            warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
+            @painter_warned = true
+            nil
+          end
+        rescue => e
+          warn "UI painter stopped: #{e.class}: #{e.message}"
+        end
+
+        # Times a terminal write for the Pacer's breakdown.
+        def timed_write
+          t = @clock.call
+          yield
+        ensure
+          @pacer.note_write(@clock.call - t)
         end
 
         # Notes a frame of +bytes+ written at +now+.

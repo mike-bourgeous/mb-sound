@@ -62,6 +62,8 @@ module MB
         # grid (Plot::Text::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+          # (Every instance variable set up front, in one order: one object shape)
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -249,6 +251,7 @@ module MB
             yields: @yields,
             fps: fps,
             target_fps: @target_fps,
+            pacing: @pacer.breakdown,
             slowest: @slowest.map { |at, cpu, parts|
               { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: (parts || {}).transform_values { |v| MB::M.sigfigs(v * 1000, 3) } }
             },
@@ -343,26 +346,14 @@ module MB
         end
 
         def paint_loop
-          Thread.current.name = 'MB::Sound::UI'
-          Thread.current.priority = -1
-          until @stopping
-            t = @clock.call
-            begin
-              refresh(t)
-            rescue => e
-              warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
-              @painter_warned = true
-            end
-            left = 1.0 / @target_fps - (@clock.call - t)
-            sleep(left) if left > 0
-          end
-        rescue => e
-          warn "UI painter stopped: #{e.class}: #{e.message}"
+          paced_loop(-> { @stopping })
         end
 
         def write(str)
-          @io.write(str)
-          @io.flush if @io.respond_to?(:flush)
+          timed_write do
+            @io.write(str)
+            @io.flush if @io.respond_to?(:flush)
+          end
         rescue IOError, SystemCallError => e
           warn "UI band: can't write to the terminal (#{e.class}: #{e.message}); stopping" unless @stopping
           @stopping = true

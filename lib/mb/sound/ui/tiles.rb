@@ -133,6 +133,8 @@ module MB
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil)
+          # (Every instance variable set up front, in one order: one object shape)
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -363,6 +365,7 @@ module MB
             repl_reader_cpu_ms: ((@host&.reader_cpu || 0) * 1000).round(1),
             fps: fps,
             target_fps: @target_fps,
+            pacing: @pacer.breakdown,
             pane_cpu_ms: @pane_cpu.to_h { |name, q| [name, UI.percentiles(q.map { |c| c * 1000 })] },
             slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
@@ -1074,21 +1077,7 @@ module MB
         ### Painter
 
         def paint_loop
-          Thread.current.name = 'MB::Sound::UI'
-          Thread.current.priority = -1
-          until @stopping || @hidden
-            t = @clock.call
-            begin
-              refresh(t)
-            rescue => e
-              warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
-              @painter_warned = true
-            end
-            left = 1.0 / @target_fps - (@clock.call - t)
-            sleep(left) if left > 0
-          end
-        rescue => e
-          warn "UI painter stopped: #{e.class}: #{e.message}"
+          paced_loop(-> { @stopping || @hidden })
         end
 
         def thread_cpu
@@ -1435,7 +1424,7 @@ module MB
         end
 
         def write(str)
-          @term.write(str)
+          timed_write { @term.write(str) }
         rescue IOError, SystemCallError
           @stopping = true
         end
