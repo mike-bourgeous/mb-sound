@@ -303,9 +303,22 @@ module MB
       def run_song(bars: nil, &block)
         print_params
         open_song_graphviz(&block) if @options[:graphviz]
+        raise ArgumentError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
+        raise ArgumentError, '--seek goes with --from' if @options[:seek] && !@options[:from]
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
+          window = {}
+          window[:from] = @options[:from] if @options[:from]
+          window[:preroll] = false if @options[:seek]
+          if @options[:to]
+            window[:to] = @options[:to]
+          elsif @options[:from] && !@options[:bars] && bars
+            # The song's own length still ends it (where bar bars + 1 starts)
+            window[:to] = bars.to_r + 1
+          else
+            window[:bars] = @options[:bars] || bars
+          end
+          seconds = MB::Sound.render(@options[:output], **window, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
           puts "Stems in #{@options[:stems]}" if @options[:stems]
         else
@@ -313,7 +326,12 @@ module MB
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           arrange_song(&block)
-          stop_after_bars(@options[:bars]) if @options[:bars]
+          start = @options[:from] ? seek_live(@options[:from]) : 0r
+          if @options[:bars]
+            stop_after_bars(@options[:bars], from: start)
+          elsif @options[:to]
+            stop_at(@options[:to], start)
+          end
           live
         end
       end
@@ -383,12 +401,49 @@ module MB
       # Stops the song at the end of bar +bars+ on the current session's
       # timeline (like a render with --bars): cancels anything still
       # scheduled and stops every player, letting master effects ring out.
-      def stop_after_bars(bars)
+      def stop_after_bars(bars, from: 0r)
         session = Session.current
-        session.schedule(bars * session.transport.bar_length, description: "end of --bars #{bars}", owner: :script) do
+        t = session.transport
+        stop_song_at(t.bar_position(t.bar_at(from) + bars.to_r), "end of --bars #{bars}")
+      end
+
+      # Stops the song where --to +target+ starts (a bar number now, or a
+      # section, label, or marker once the song gets there), after +from+.
+      def stop_at(target, from)
+        session = Session.current
+        if target.is_a?(Symbol)
+          session.markers.on(target) { |_m, pos| stop_song_at(pos, "--to #{target}") if pos > from }
+        else
+          stop_song_at(session.transport.bar_position(target), "--to bar #{target}")
+        end
+      end
+
+      def stop_song_at(pos, description)
+        session = Session.current
+        session.schedule(pos, description: description, owner: :script) do
           session.reset_scheduler
           MB::Sound.stop(:all, fade: 0)
         end
+      end
+
+      # Live --from: seeks the song there (as `seek` in the console: fresh
+      # state, the form plays on from there) and waits for the seek to
+      # land.  Returns the timeline position it landed on.
+      def seek_live(target)
+        session = Session.current
+        RenderWindow.check_target(session, target, '--from')
+        seq = MB::Sound.seek(target).seq
+        session.ensure_running
+        sleep 0.005 while (entry = session.journal[seq]).queued?
+        raise ArgumentError, "--from #{target.inspect}: the seek #{entry.status}" unless entry.landed?
+        entry.lands.pos
+      end
+
+      # A --from/--to value: a bar number, or a section, label, or marker
+      # name.
+      def window_target(v)
+        num = Float(v, exception: false)
+        num ? num.rationalize(Rational(1, 1_000_000)) : v.to_sym
       end
 
       # Sets AUDIO_PROFILE for sound card outputs opened later (see
@@ -436,6 +491,13 @@ module MB
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
+            o.on(
+              '--from WHERE',
+              'Start at a section, label, or marker of the song (a name) or a bar number; renders play the song up to there ' \
+              'without writing it, so the file is the song\'s own samples (--bars counts from there)'
+            ) { |v| @options[:from] = window_target(v) }
+            o.on('--to WHERE', 'End where a section, label, or marker (a name) or a bar number starts (with --from, or from the start)') { |v| @options[:to] = window_target(v) }
+            o.on('--seek', 'With --from in a render: seek there (faster, fresh state: no tails from before) instead of playing up to it') { @options[:seek] = true }
             o.on('--stems DIR', 'With a render: also write each track to DIR/<track>.<ext> (its part of the mix before the master chain)') { |v| @options[:stems] = v }
             o.on('--stem-gain DB', Float, 'Gain in dB for --stems (headroom for parts peaking over full scale before a master limiter)') { |v| @options[:stem_gain] = v }
           end

@@ -600,7 +600,9 @@ module MB
         what you played first); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
-        `render` bounces graphs offline.  No MIDI keyboard?  The tiles'
+        `render` bounces graphs offline (`render 'drop.flac', from: :drop,
+        bars: 8 { song }` renders one section, exactly as in the whole
+        song; scripts take `--from drop --to breakdown`).  No MIDI keyboard?  The tiles'
         virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
         input, and Enter there captures.
       TEXT
