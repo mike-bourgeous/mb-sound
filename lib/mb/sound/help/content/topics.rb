@@ -602,7 +602,8 @@ module MB
         `disarm` stops.  `rec_audio` records the master bus to a file;
         `render` bounces graphs offline (`render 'drop.flac', from: :drop,
         bars: 8 { song }` renders one section, exactly as in the whole
-        song; scripts take `--from drop --to breakdown`).  No MIDI keyboard?  The tiles'
+        song; scripts take `--from drop --to breakdown`, and `--take
+        take.rb` saves a run as a replay script).  No MIDI keyboard?  The tiles'
         virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
         input, and Enter there captures.
       TEXT

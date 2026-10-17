@@ -128,10 +128,10 @@ module MB
         # +:max_seconds+ (the live take's length plus EXTRA_SECONDS, or
         # MAX_SECONDS for takes without a recorded length), so a replay that
         # never reaches its end can't run forever.
-        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, &tap)
+        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, overwrite: true, &tap)
           raise ArgumentError, 'Pass finish: (whole notes) for a take without an end' if finish.nil?
 
-          output = MB::Sound.file_output(output, channels: channels, overwrite: true) if output.is_a?(String)
+          output = MB::Sound.file_output(output, channels: channels, overwrite: overwrite) if output.is_a?(String)
           transport = Sequence::Transport.new(bpm: @start[:bpm], bar_length: @start[:bar_length])
           session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_sizes.first, realtime: false, raise_errors: false)
           session.exact_lanes = true # the same lanes at any buffer size (Synth#exact_lanes?)
@@ -215,14 +215,18 @@ module MB
 
           out = nil
           sizes = [800]
-          OptionParser.new do |o|
-            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-b buffer_sizes]"
+          force = false
+          rest = OptionParser.new do |o|
+            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-f] [-b buffer_sizes]"
             o.on('-o', '--output FILE', 'Render to a file instead of playing') { |f| out = f }
+            o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { force = true }
             o.on('-b', '--buffer-sizes LIST', Array, 'Buffer sizes to cycle through (e.g. 367,368)') { |l| sizes = l.map { |x| Integer(x) } }
           end.parse!(argv)
+          # An audio file name alone renders to it, as in song scripts
+          out ||= rest.find { |a| a.match?(ScriptRunner::AUDIO_EXTENSIONS) }
 
           if out
-            frames = render(out, buffer_sizes: sizes)
+            frames = render(out, buffer_sizes: sizes, overwrite: force ? true : :prompt)
             puts "Rendered #{frames} frames to #{out}"
           else
             play
