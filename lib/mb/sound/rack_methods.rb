@@ -97,9 +97,74 @@ module MB
       alias mod_rack modrack
 
       # The named racks: name => "effect audio(sig) + audio(side) -> audio,
-      # 2 uses (in :bass)".
+      # macros space 0.3 (0..1), 2 uses (in :bass)".
       def racks
         Session.current.racks.info
+      end
+
+      # Inside a rack's block, a knob scoped to the rack (a macro; racks R2,
+      # proposal 2.6): the same GraphNode::Knob as the console's #knob, so
+      # turn, over:, learn, snap/recall, takes, plans, and ACID XML work
+      # unchanged.  Takes #knob's options (+range:+, +curve:+, +unit:+,
+      # +cc:+, +takeover:+, +smooth:+).
+      #
+      # Names: macro :space in rack :dub is the Session knob :"dub/space"
+      # once a graph using it plays; when the rack plays in several
+      # players each instance gets its own, :"bass/dub/space" and
+      # :"keys/dub/space" (an anonymous rack's macros are always the
+      # player's: :"bass/space").  Opt-in sharing:
+      #
+      # - +share: true+ joins the Session knob :space instead (made if
+      #   there is none; a knob of that name with another range or curve
+      #   goes through MB::Sound.live_error, as graph documents' knobs do).
+      # - +follow: :space+ makes the macro follow Session knob :space
+      #   through its own range and curve (the knob's position in its range
+      #   becomes the macro's position in its own) until the macro is
+      #   turned.
+      #
+      # Asking for a macro again by name in the same application returns
+      # the same knob (`macro(:space)` needs no default then).  Returns the
+      # Knob (a graph node; `.mod(lfo, depth:)` adds modulation around it).
+      #
+      #     arack :dub do |sig|
+      #       space = macro :space, 0.3
+      #       sig.delay(3.n16, feedback: space * 0.6, wet: space)
+      #     end
+      #     turn :"dub/space", 0.7, over: 2.bars
+      def macro(name, default = nil, share: false, follow: nil, description: nil, **spec)
+        raise ArgumentError, "Macro names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+        app = Rack.application
+        unless app
+          raise ArgumentError, "macro #{name.inspect} belongs inside a rack's block (arack(:dub) { |sig| ... macro(#{name.inspect}, 0.5) ... }); outside a rack, knob #{name.inspect}, ... makes a session knob"
+        end
+
+        existing = app.macros[name]
+        return existing if existing && default.nil? && spec.empty? && !share && follow.nil?
+        if existing
+          # The same definition again (how printed racks repeat a macro
+          # used twice) reads the same knob
+          same = begin
+            GraphNode::Knob::Spec.new(name: existing.name, default: default, **spec) == existing.spec &&
+              existing.macro.share == share && existing.macro.follow == follow
+          rescue ArgumentError
+            false
+          end
+          return existing if same
+          raise ArgumentError, "#{app.rack.label} defines macro #{name.inspect} twice, differently; use macro(#{name.inspect}) to read it again"
+        end
+        raise ArgumentError, "#{app.rack.label} has no macro #{name.inspect} yet; give it a default (macro #{name.inspect}, 0.5, range: 0..1)" if default.nil?
+        raise ArgumentError, "macro #{name.inspect}: share: and follow: don't go together (share joins knob #{name.inspect}; follow maps another knob onto the macro)" if share && follow
+        raise ArgumentError, "macro #{name.inspect}: follow: names a Session knob (got #{follow.inspect})" unless follow.nil? || follow.is_a?(Symbol)
+        unless share == true || share == false
+          raise ArgumentError, "macro #{name.inspect}: share: is true or false (got #{share.inspect})"
+        end
+
+        rack = app.rack
+        full = share ? name : (rack.name ? :"#{rack.name}/#{name}" : name)
+        info = Rack::MacroInfo.new(rack: rack, macro: name, application: app, share: share, follow: follow, description: description)
+        start = share || follow ? nil : app.start[name] # (a saved instance's value; see Rack#using)
+        k = GraphNode::Knob.new(full, default, macro: info, initial: start, **spec)
+        app.macros[name] = k
       end
 
       private

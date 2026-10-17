@@ -260,6 +260,30 @@ module MB
         s
       end
 
+      # The largest sum of +weight+ (a block given each node, returning a
+      # number) along any path from +node+ up through its sources, edges
+      # taken as .graph takes them (through Tees and from a multi-output
+      # node's outputs to the node), so walks that need path sums (rack
+      # latency) can't miss nodes behind a Tee (racks-r2: a walk that kept
+      # only nodes answering #sample stopped at Tees).  Edges back to a
+      # node on the current path (feedback) are skipped.  With +visited+
+      # (a compare_by_identity Hash), records every node reached.
+      def self.longest_path(node, visited: nil, &weight)
+        memo = {}.compare_by_identity
+        open = {}.compare_by_identity
+        walk = nil
+        walk = ->(n) {
+          return memo[n] if memo.key?(n)
+          return 0 if open[n]
+          open[n] = true
+          visited[n] = true if visited
+          best = graph_source_list(n, true).map { |src| walk.(src) }.max || 0
+          open.delete(n)
+          memo[n] = weight.call(n) + best
+        }
+        walk.(graph_key(node, true))
+      end
+
       # The sources of +s+ as .graph keys, one per edge.
       def self.graph_source_list(s, include_tees)
         return [] unless s.respond_to?(:sources)

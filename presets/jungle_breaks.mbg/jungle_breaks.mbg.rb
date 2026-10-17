@@ -3,12 +3,12 @@
 graph 4,
   name: "jungle_breaks",
   kind: :synth,
-  saved: "2026-10-17T05:42:29Z",
-  mb_sound: "0.12.0.usegit (504ed966)",
+  saved: "2026-10-17T17:16:34Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :breaks from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :breaks, echo: 0.3 }
-inputs :midi
+inputs midi: :notes
 param :cutoff, 16000.0, range: 200.0..16000.0, description: "Breaks lowpass in Hz"
 asset "assets/jungle_record.flac", sha256: "c12085b491e7bc732add4dd49016650b5e93affdf8b7ef5af4f4b5f64829bb96"
 

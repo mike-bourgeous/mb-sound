@@ -102,14 +102,35 @@ module MB
         # console attaches live input to it; see KnobMethods).  Knobs of
         # this or another Session are left alone.  Returns the Session knobs
         # the graph now reads (a Hash from name to Knob).
-        def adopt_knobs(sound)
+        #
+        # Rack macros (RackMethods#macro) are named here, for player
+        # +player+ (see Racks#macro_names): :"dub/space" for a rack in one
+        # player, per instance (:"bass/dub/space") once it plays in
+        # several, renaming the first instance's knobs.  A macro instance
+        # joining its own earlier knob (the same player playing the rack
+        # again) takes the macro's new range and curve.  Macros with
+        # +follow:+ start following their Session knob when they join.
+        def adopt_knobs(sound, player: nil)
           nodes = to_nodes(sound)
           found = nodes.flat_map { |n| [n, *n.graph] }
           readers = found.grep(GraphNode::Knob::Reader)
           own = {}.compare_by_identity
           (readers.map(&:knob) + found.grep(GraphNode::Knob)).each { |k| own[k] = true }
 
+          macros = own.keys.select { |k| k.macro && !k.session && !k.macro.share }
+          macro_keys = {}.compare_by_identity
+          unless macros.empty?
+            prune_macros
+            names, renames = racks.macro_names(macros, player)
+            renames.each { |k, name| rename_knob(k, name) }
+            names.each { |k, (name, rack, key)|
+              k.respec(name: name)
+              macro_keys[k] = [rack, key]
+            }
+          end
+
           joined = {}
+          fresh = []
           own.each_key do |k|
             if k.session
               joined[k.name] = k if k.session.equal?(self)
@@ -117,6 +138,14 @@ module MB
             end
 
             existing = @knob_lock.synchronize { @knobs[k.name] }
+            if existing && existing.macro && k.macro && macro_keys.key?(k) && !k.macro.share
+              # The same instance again (a player replaying the rack): the
+              # rack's current range and curve
+              if existing.range != k.range || existing.spec.curve != k.spec.curve
+                existing.respec(range: k.range, curve: k.spec.curve)
+                existing.set(existing.target || existing.value, frame: @frame, smooth: 0) unless existing.mode == :follow
+              end
+            end
             if existing
               if existing.range != k.range || existing.spec.curve != k.spec.curve
                 MB::Sound.live_error(ArgumentError.new(
@@ -139,11 +168,78 @@ module MB
                 @knob_lock.synchronize { @knobs[k.name] = k }
               }
               joined[k.name] = k
+              fresh << k
+            end
+            if (rk = macro_keys[k]) && joined[k.name]
+              group = racks.macro_joined(rk[0], rk[1], k.macro.macro, joined[k.name])
+              @names.claim(group, :macro_group) if group
             end
           end
 
+          fresh.each { |k| follow_macro(k) if k.macro&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
           joined
+        end
+
+        # Drops the macro knobs of players that are gone (see
+        # Racks#prune_macro_instances): forgotten players' instances leave
+        # the session's knobs and names, so listings and group turns don't
+        # go stale.  Called when graphs join (#adopt_knobs) and when players
+        # are forgotten.
+        def prune_macros
+          gone, groups = racks.prune_macro_instances { |player| player_around?(player) }
+          gone.each do |k|
+            removed = @knob_lock.synchronize { @knobs.delete(k.name) if @knobs[k.name].equal?(k) }
+            @names.release(k.name) if removed
+          end
+          groups.each { |g| @names.release(g) if @names.kind(g) == :macro_group }
+        end
+
+        # True if player +name+ is playing, stopped for #resume, waiting to
+        # start in the change queue, or an arrangement track.
+        def player_around?(name)
+          @mutex.synchronize { @players.values.any? { |p| p.name == name && p.current? } || @stopped.key?(name) } ||
+            @changes.dup.any? { |c| c.subject == name && c.starts } ||
+            !!@arrangement&.tracks&.key?(name)
+        end
+
+        # Renames Session knob +k+ to +name+ (a rack's macros becoming per
+        # instance; see #adopt_knobs), keeping its value, readers, and
+        # snapshot values.
+        def rename_knob(k, name)
+          old = k.name
+          return if old == name
+          raise ArgumentError, "Knob #{name.inspect} exists already" if @knob_lock.synchronize { @knobs.key?(name) }
+          return unless @names.claim(name, :knob)
+
+          @knob_lock.synchronize {
+            @knobs.delete(old)
+            @knobs[name] = k
+            @snapshots.transform_values! { |snap| snap.key?(old) ? snap.to_h { |n, v| [n == old ? name : n, v] }.freeze : snap }
+          }
+          @names.release(old)
+          k.respec(name: name)
+          puts "Knob #{old.inspect} is #{name.inspect} now (rack #{k.macro.rack_name.inspect} plays in more than one place)" if MB::Sound.live?
+        end
+
+        # Makes macro knob +k+ follow the Session knob its +follow:+ names,
+        # through the macro's own range and curve (the knob's position in
+        # its range is the macro's position in its own).  A missing knob
+        # goes through MB::Sound.live_error (live: the macro holds its
+        # value).
+        def follow_macro(k)
+          src_name = k.macro.follow
+          src = @knob_lock.synchronize { @knobs[src_name] }
+          unless src
+            MB::Sound.live_error(ArgumentError.new(
+              "Macro #{k.name.inspect} follows knob #{src_name.inspect}, which the session doesn't have#{knob_suggestion(src_name)}; define it first (knob #{src_name.inspect}, 0.5)"
+            ))
+            return
+          end
+          from = src.spec
+          to = k.spec
+          map = ->(x) { to.value(from.positions(x).clip(0.0, 1.0)) }
+          k.follow(src, frame: @frame, map: map, label: "knob(#{src_name.inspect}) through #{to.range.begin}..#{to.range.end}")
         end
 
         # Moves knob +name+ at the launch point (+on:+, +in:+, +at:+; see
@@ -155,7 +251,15 @@ module MB
         # +from:+ a value), or following a graph node
         # (+value+ or +follow:+ a node or another knob's name) until it is
         # turned again.  Returns the Change (see Changes#change).
+        #
+        # A rack's macro group name (:"dub/space" once the rack plays in
+        # several players; see Racks#macro_group?) turns every instance's
+        # knob, returning the Changes.
         def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil)
+          if name.is_a?(Symbol) && (members = racks.group_members(name))
+            offset = binding.local_variable_get(:in)
+            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time) }
+          end
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
           value = follow unless follow.nil?
@@ -173,14 +277,17 @@ module MB
         # Remembers every knob's value (or where it is heading, while it
         # ramps) as snapshot +name+, when the launch point arrives (now by
         # default).  Returns the Change.
-        def snap(name, at: nil, on: nil, in: nil, start_time: nil)
+        def snap(name, at: nil, on: nil, in: nil, start_time: nil, knobs: nil)
           point = LaunchPoint.of(binding) or return nil
           raise ArgumentError, "Snapshot names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+          only = knobs&.map { |n| knob!(n).name }
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          change(:snap, name, time, data: {}) { |_t|
+          change(:snap, name, time, data: only ? { knobs: only } : {}) { |_t|
             frame = @landing_frame || @frame
-            values = knobs.transform_values { |k| st = k.state_at(frame); st[0] == :follow ? k.value : st[1] }
+            list = self.knobs
+            list = list.slice(*only) if only
+            values = list.transform_values { |k| st = k.state_at(frame); st[0] == :follow ? k.value : st[1] }
             @knob_lock.synchronize { @snapshots[name] = values.freeze }
           }
         end
@@ -191,10 +298,13 @@ module MB
         end
 
         # Turns every knob in snapshot +name+ back to its value there (see
-        # #turn for the options).  Returns the Changes.
-        def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, smooth: nil, start_time: nil)
+        # #turn for the options).  +only:+ and +except:+ (knob names, or a
+        # rack's macro names: :space matches :"dub/space") limit the recall
+        # to some knobs (a partial recall).  Returns the Changes.
+        def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, smooth: nil, start_time: nil, only: nil, except: nil)
           point = LaunchPoint.of(binding) or return nil
-          names = snapshot_knob_names(name)
+          names = filter_knob_names(snapshot_knob_names(name), only, except)
+          names &= knobs.keys # (macros of forgotten players are gone)
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
 
           names.map { |n|
@@ -369,6 +479,26 @@ module MB
 
           known = snapshots.keys
           raise ArgumentError, "No snapshot #{name.inspect}#{known.empty? ? '' : " (snapshots: #{known.map(&:inspect).join(', ')})#{Form.suggest(name, known)}"}"
+        end
+
+        # +names+ (knob names) limited by +only+ and +except+ (Arrays of
+        # knob names or macro names; a macro name matches the last part of
+        # a rack knob's path).
+        def filter_knob_names(names, only, except)
+          match = ->(n, list) {
+            Array(list).any? { |x|
+              x = x.to_sym
+              n == x || (n.to_s.include?('/') && n.to_s.split('/').last == x.to_s)
+            }
+          }
+          if only
+            picked = names.select { |n| match.(n, only) }
+            missing = Array(only).reject { |x| names.any? { |n| match.(n, [x]) } }
+            raise ArgumentError, "only: #{missing.map(&:inspect).join(', ')} #{missing.length > 1 ? 'aren\'t' : 'isn\'t'} in the snapshot (#{names.map(&:inspect).join(', ')})" unless missing.empty?
+            names = picked
+          end
+          names = names.reject { |n| match.(n, except) } if except
+          names
         end
 
         # Knob +k+'s value in snapshot +name+ when it lands, or nil.

@@ -72,6 +72,97 @@ module MB
       # (`it`), by type: how racks print their blocks.
       MAIN_NAMES = { notes: :stream, audio: :sig, control: :ctl }.freeze
 
+      # What a macro knob (MB::Sound::RackMethods#macro) knows about where
+      # it came from: the Rack, the macro's own name (:space), the
+      # Application that made it (one per Rack#call; instances are told
+      # apart by it), +share+ (joins the Session knob of its own name), and
+      # +follow+ (the Session knob it follows through its own range), and
+      # its description.
+      MacroInfo = Data.define(:rack, :macro, :application, :share, :follow, :description) do
+        # The rack's name, or nil for an anonymous rack.
+        def rack_name
+          rack&.name
+        end
+      end
+
+      # What a rack pane (and `help rack(:x)`) shows of a rack or one of
+      # its instances: a deep-frozen value, safe to hand to painter threads
+      # (Session::Racks#rack_info, Rack#info).
+      #
+      # - name: the rack's name (Symbol) or nil
+      # - path: the instance path (:"bass/dub", :dub) or nil for a rack
+      #   not playing
+      # - kind: :note_fx, :instrument, :effect, :listener, :modulator
+      # - signature: "audio(sig) + audio(side) -> audio"
+      # - ports: frozen Array of frozen Hashes { name:, type:, role:
+      #   (:main or :side), required: }, the main input first
+      # - latency: samples the rack delays its main input by (the longest
+      #   path through nodes reporting #latency: dynamics lookahead,
+      #   limiters), or nil if unknown
+      # - macros: frozen Array of the instance's Session knob names (a
+      #   rack not playing: its macro names)
+      # - macro_specs: frozen { macro name => Knob::Spec }
+      # - slots: frozen Array (slots come in phase R3)
+      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :macros, :macro_specs, :slots) do
+        def to_s
+          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{macros.empty? ? '' : ", macros #{macros.join(', ')}"}"
+        end
+      end
+
+      # A named rack in a document whose definition differs from the
+      # session's rack of that name (see GraphIO.place_rack): the value a
+      # chooser gets (the console prompt, #ask, or later a UI picker).
+      # +options+ are the choices: :session (keep the session's rack),
+      # :saved (replace it with the document's, for every later
+      # application), :rename (load the document's as +rename_to+ for this
+      # document only).
+      Conflict = Data.define(:name, :session_rack, :saved_rack, :source, :rename_to) do
+        def options
+          Conflict::CHOICES
+        end
+
+        def to_s
+          "rack #{name.inspect} in #{source.to_s.empty? ? 'the document' : source} differs from the session's"
+        end
+
+        # Asks on the console (one line): s, v, or r (Enter keeps the
+        # session's).  Returns the choice, or nil without an answer.
+        def ask(input: $stdin, output: $stdout)
+          output.print "#{self}: keep the session's [s], replace it with the saved copy [v], or load the saved copy as #{rename_to.inspect} [r]? "
+          output.flush
+          case input.gets&.strip&.downcase
+          when nil then nil
+          when '', 's', 'session' then :session
+          when 'v', 'saved' then :saved
+          when 'r', 'rename' then :rename
+          end
+        end
+      end
+      Conflict::CHOICES = %i[session saved rename].freeze
+
+      # Latencies of racks by Rack (identity; see #latency).
+      LATENCIES = ObjectSpace::WeakMap.new
+
+      # One application of a rack (Rack#call) while its block builds: the
+      # macros made so far by name.  Rack.application is the innermost one
+      # on this thread.
+      class Application
+        attr_reader :rack, :macros
+
+        # Macro start values by name (see Rack#using).
+        attr_reader :start
+
+        def initialize(rack, start: {})
+          @rack = rack
+          @macros = {}
+          @start = start
+        end
+
+        def inspect
+          "#<Rack::Application #{@rack.label} macros: #{@macros.keys.join(', ')}>"
+        end
+      end
+
       # A typed port: its name, type (:notes, :audio, :control), whether
       # it's required, and the main input or an extra port.  Port.for(type)
       # gives the class for a type; each coerces values given to it and
@@ -220,11 +311,18 @@ module MB
 
       # Creates a rack.  See MB::Sound::RackMethods#rack for the arguments.
       # +constructor+ is the method name that prints it back.
-      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false)
+      #
+      # +settings+ are an application's (see #using): +seed+ (the seed its
+      # block builds under), +drawn+ (true if the application drew it),
+      # +macros+ (macro start values by name), and +application+ (the
+      # Application of the call that applied the rack, for printing its
+      # macros' current values).
+      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {})
         main_type = binding.local_variable_get(:in)
         raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
 
         @name = name
+        @settings = settings.dup.freeze
         @constructor = constructor
         @parts = parts&.freeze
         @listener = listener
@@ -317,9 +415,33 @@ module MB
         if @parts
           raise ArgumentError, "#{label} is composed (>>); bind ports on its parts before composing"
         end
-        Rack.new(@name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: @bound.merge(ports),
-          listener: @listener, ports: @ports.transform_values(&:type), quiet: true)
+        copy(bound: @bound.merge(ports))
       end
+
+      # A new Rack whose applications build with these settings (racks R2
+      # round 3; how graph documents save each instance so it reloads
+      # exactly): +seed:+ the random seed the block builds under (without
+      # it each application draws one from the root generator), and macro
+      # start values by macro name (`space: 0.7`; macros not given start
+      # at their defaults).
+      #
+      #     bass.then(&rack(:dub).using(seed: 1234, space: 0.7))
+      def using(seed: nil, **macros)
+        raise ArgumentError, "#{label} is composed (>>); set its parts" if @parts
+        raise ArgumentError, "seed: must be an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
+        bad = macros.reject { |_, v| v.is_a?(Numeric) && v.real? }
+        raise ArgumentError, "macro values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
+        clash = macros.keys & [@input.name, *@ports.keys]
+        raise ArgumentError, "#{clash.join(', ')} #{clash.length > 1 ? 'are ports' : 'is a port'}; bind ports with .with" unless clash.empty?
+        # A seed a graph document marked as drawn (`seed: drawn_seed(N)`,
+        # given back by its loader through Recipe.given_drawn_seed) stays a
+        # drawn seed, so the graph saves it the same way again
+        drawn = !seed.nil? && GraphNode::Recipe.state.drawn == seed
+        copy(settings: { seed: seed || @settings[:seed], drawn: drawn || (seed.nil? && @settings[:drawn]) || nil, macros: (@settings[:macros] || {}).merge(macros) }.compact)
+      end
+
+      # The settings of an applied rack (see #initialize and #using).
+      attr_reader :settings
 
       # Builds an instance on +input+ (a source of the main input's type),
       # with extra +ports+ (merged over #with's).  Each call builds a fresh
@@ -341,10 +463,17 @@ module MB
         kw = @ports.keys.select { |k| values.key?(k) }.to_h { |k| [k, @ports[k].coerce(values[k], self)] }
         values_by_port = { @input => main }.merge(kw.to_h { |k, v| [@ports[k], v] })
 
-        applied = ports.empty? ? self : with(**ports)
+        # Every application builds under its own seed (given with #using,
+        # else drawn, bypassing the recorder: it isn't a seed of `then`),
+        # so a graph document can save it and reload the instance exactly
+        seed = @settings[:seed]
+        drawn = seed.nil? || !!@settings[:drawn]
+        seed = MB::Sound::Internal.root_rng.rand(1 << 62) if seed.nil?
+        app = Application.new(self, start: @settings[:macros] || {})
+        applied = (ports.empty? ? self : with(**ports)).send(:copy, settings: @settings.merge(seed: seed, drawn: drawn, application: app))
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
-            r = kw.empty? ? blk.call(main) : blk.call(main, **kw)
+            r = Rack.applying(app) { MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) } }
             # A note rack on a Notes gives a Notes (console midi stays mono-capable)
             r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
             r
@@ -352,10 +481,98 @@ module MB
         }
 
         check_output(result)
-        Rack.registry_use(self, result) if @name
+        Rack.registry_use(self, result, app) if @name
         result
       end
       alias [] call
+
+      # A copy of this rack named +name+ (a Symbol, or nil for anonymous;
+      # not registered anywhere): how a document's rack loads under a new
+      # name (`racks: :rename`).
+      def renamed(name)
+        raise ArgumentError, "#{label} is composed; rename its parts" if @parts
+        copy(name: name)
+      end
+
+      # Builds the block on stand-ins for every port, without recording
+      # the application (its calls are recorded as top-level calls, so
+      # the instance prints as the block's body): for rack documents
+      # (GraphIO::Writer) and help.  Returns [result, stand-ins by port
+      # name ({ sig: node, side: node }), the Application (its macros)].
+      def build_on_stand_ins
+        raise ArgumentError, "#{label} is composed; save or inspect its parts" if @parts
+
+        stand = { @input.name => Rack.stand_in(@input.type) }
+        @ports.each_value { |p| stand[p.name] = Rack.stand_in(p.type) }
+        kw = @ports.keys.to_h { |k| [k, stand[k]] }
+        app = Application.new(self)
+        # (seed 0, restored after, so inspecting or saving a rack never moves
+        # the random seeds graphs draw)
+        result = MB::Sound.with_seed(0) {
+          Rack.applying(app) { kw.empty? ? @block.call(stand[@input.name]) : @block.call(stand[@input.name], **kw) }
+        }
+        [result, stand, app]
+      end
+
+      # The macros of the rack (MacroInfo-backed Knob Specs by macro name),
+      # from a stand-in build (see #build_on_stand_ins): what `help
+      # rack(:x)` and rack documents list.
+      def macro_specs
+        _, _, app = build_on_stand_ins
+        app.macros.transform_values(&:spec)
+      end
+
+      # Remembers the values of this rack's macros (every instance's, in
+      # the current Session) as snapshot :"name/+snap+" (a named rack's
+      # variation; see KnobMethods#snap).  Returns the journal entry.
+      #
+      #     rack(:dub).snap :wide
+      #     recall :"dub/wide", over: 1.bar, only: [:space]
+      def snap(snap, **opts)
+        raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
+        names = Session.current.racks.macro_knob_names(@name)
+        raise ArgumentError, "#{label} has no macros in the session yet (apply it in a graph that plays)" if names.empty?
+        MB::Sound.snap(:"#{@name}/#{snap}", knobs: names, **opts)
+      end
+
+      # Recalls this rack's snapshot +snap+ (see #snap and
+      # KnobMethods#recall for the options, including +only:+ and
+      # +except:+).
+      def recall(snap, **opts)
+        raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
+        MB::Sound.recall(:"#{@name}/#{snap}", **opts)
+      end
+
+      # The samples this rack delays its main input by, from a stand-in
+      # build (see RackInfo#latency); remembered per Rack value.
+      def latency
+        return LATENCIES[self] if LATENCIES.key?(self)
+        value = begin
+          result, = build_on_stand_ins
+          Rack.latency_of(result)
+        rescue StandardError
+          nil
+        end
+        LATENCIES[self] = value
+      end
+
+      # A frozen RackInfo for this rack (+path+ and +macros+ for one
+      # instance; see Session::Racks#rack_info).
+      def info(path: nil, macros: nil, specs: nil, out: nil)
+        specs ||= (macro_specs rescue {})
+        ports = [{ name: @input.name, type: @input.type, role: :main, required: true }.freeze]
+        @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
+        RackInfo.new(
+          name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
+          macros: (macros || specs.keys).map(&:to_sym).freeze, macro_specs: specs.dup.freeze, slots: [].freeze
+        )
+      end
+
+      # The Session knobs of this rack's macros (names), every instance's.
+      def macros
+        return [] unless @name
+        Session.current.racks.macro_knob_names(@name)
+      end
 
       # A Proc applying the rack, for Kernel#then and other Proc users
       # (`midi.then(&rack)`).
@@ -394,6 +611,35 @@ module MB
         text
       end
 
+      # The default values of optional ports as source text ({ depth:
+      # "0.5" }), read from the block's source with Prism (blocks loaded
+      # from rack documents keep theirs); nil text where the source isn't
+      # found.
+      def port_defaults
+        optional = @ports.values.reject(&:required).map(&:name)
+        return {} if optional.empty? || @block.nil?
+        return @block.graph_io_defaults.slice(*optional) if @block.respond_to?(:graph_io_defaults)
+
+        found = {}
+        src = GraphNode::Recipe.block_source(@block, @constructor)
+        if src
+          require 'prism'
+          walk = ->(n) {
+            return if n.nil? || !found.empty?
+            if n.is_a?(Prism::BlockParametersNode) || n.is_a?(Prism::ParametersNode)
+              list = n.is_a?(Prism::BlockParametersNode) ? n.parameters : n
+              list&.keywords&.each { |k| found[k.name] = k.value.slice if k.respond_to?(:value) }
+              return
+            end
+            n.compact_child_nodes.each { |c| walk.(c) }
+          }
+          walk.(Prism.parse("rack #{src}").value) # (a bare `{ |sig| }` would parse as a Hash)
+        end
+        optional.to_h { |k| [k, found[k]] }
+      rescue StandardError
+        optional.to_h { |k| [k, nil] }
+      end
+
       # Block parameter names, in order: the main input's, then the extra
       # ports' (for printing an application's block).
       def param_names
@@ -401,10 +647,11 @@ module MB
       end
 
       # The block's parameter list as text: "sig, side:, depth: 0.5" (an
-      # optional port prints without its default value; its default is
-      # in the source).
+      # optional port's default from the block's source, see
+      # #port_defaults; nil when it isn't found).
       def param_list
-        [@input.name.to_s, *@ports.values.map { |p| "#{p.name}:#{' nil' unless p.required}" }].join(', ')
+        defaults = port_defaults
+        [@input.name.to_s, *@ports.values.map { |p| "#{p.name}:#{" #{defaults[p.name] || 'nil'}" unless p.required}" }].join(', ')
       end
 
       # True for racks made with #>> or #<<.
@@ -421,6 +668,16 @@ module MB
       def hash
         [@name, @block, @bound, @parts].hash
       end
+
+      private
+
+      # A copy of this rack with +changes+ (name:, bound:, settings:).
+      def copy(name: @name, bound: @bound, settings: @settings)
+        Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: bound,
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings)
+      end
+
+      public
 
       class << self
         # A composed rack: +a+ then +b+ (Racks, or callables wrapped as
@@ -443,12 +700,66 @@ module MB
         end
 
         # Records a use of named rack +rack+ (see Session::Racks).
-        def registry_use(rack, result)
+        def registry_use(rack, result, app = nil)
           s = MB::Sound::Session.existing
-          s&.racks&.used(rack, result)
+          s&.racks&.used(rack, result, app)
+        end
+
+        # The samples +result+ (a rack instance: a node or bundle) delays
+        # its input by: the longest path through nodes reporting #latency
+        # (an Integer of samples; for a node's outputs, its owner's).
+        # Notes and other values give nil.
+        def latency_of(result)
+          roots = case result
+                  when GraphNode::Channels then result.to_a
+                  when GraphNode, GraphNode::MultiOutput then [result]
+                  else return nil
+                  end
+          roots.map { |r| GraphNode.longest_path(r) { |n| node_latency(n) } }.max || 0
+        end
+
+        # Runs the block with +app+ as the innermost rack application on
+        # this thread (see #application; macros made inside belong to it).
+        def applying(app)
+          stack = (Thread.current[:mb_sound_rack_applications] ||= [])
+          stack.push(app)
+          begin
+            yield
+          ensure
+            stack.pop
+          end
+        end
+
+        # The innermost rack Application building on this thread, or nil.
+        def application
+          Thread.current[:mb_sound_rack_applications]&.last
+        end
+
+        # A stand-in value for a port of +type+ (see
+        # Rack#build_on_stand_ins): a silent node for audio and control, an
+        # empty note stream (as Notes) for notes.
+        def stand_in(type)
+          case type
+          when :audio, :control then GraphNode::Constant.new(0, sample_rate: 48000)
+          when :notes then MB::Sound::Notes.new(MIDI::Stream.new(MIDI::ClipSource.new(Sequence::Clip.new([], length: 1))))
+          end
         end
 
         private
+
+        def node_latency(n)
+          l = n.latency if n.respond_to?(:latency) && n.method(:latency).arity == 0
+          if l.nil?
+            # Outputs of a multi-output node whose sources don't include it
+            # (dynamics outputs) carry its latency
+            owner = n.respond_to?(:owner) ? n.owner : n.instance_variable_get(:@owner)
+            srcs = n.respond_to?(:sources) ? n.sources.values : []
+            l = owner.latency if owner.respond_to?(:latency) && owner.method(:latency).arity == 0 && srcs.none? { |x| x.equal?(owner) }
+          end
+          l.is_a?(Numeric) ? l : 0
+        rescue StandardError
+          0
+        end
 
         def sample?(t)
           t == :audio || t == :control

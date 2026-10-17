@@ -25,7 +25,7 @@ module MB
       # between buffer sizes by about 1e-12 (naive shapes like aramp can
       # move an edge by a sample).
       class Replay
-        Line = Struct.new(:issued, :lands, :code, :epoch, keyword_init: true)
+        Line = Struct.new(:issued, :lands, :code, :epoch, :choices, keyword_init: true)
 
         # The last Replay created (for loading a saved take from code).
         class << self
@@ -66,10 +66,12 @@ module MB
         # landed at +lands+ (each a position, or [position, time] for a
         # change made for a time already past, e.g. a lead: track's
         # launch), after +epoch+ seeks had landed (the line runs in that
-        # pass over the timeline; see Session#epoch).
-        def line(issued, lands, code, epoch: 0)
+        # pass over the timeline; see Session#epoch).  +choices+ are the
+        # answers the line got live ([kind, key, choice]; see
+        # Take.note_choice), given again instead of asking.
+        def line(issued, lands, code, epoch: 0, choices: [])
           lands = lands.map { |t| t.is_a?(Array) ? t.map(&:to_r) : t.to_r }
-          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch)
+          @lines << Line.new(issued: issued.to_r, lands: lands, code: code, epoch: epoch, choices: choices)
           self
         end
 
@@ -272,7 +274,13 @@ module MB
         def run_line(session, binding, line, index)
           Session.with_context(session: session, time: line.issued, source: :replay) do
             Session.with_perform(session: session, forced: line.lands.dup, now: line.issued, source: :replay) do
-              binding.eval(line.code, "take line #{index + 1}")
+              old = Thread.current[:mb_sound_replay_choices]
+              Thread.current[:mb_sound_replay_choices] = line.choices
+              begin
+                binding.eval(line.code, "take line #{index + 1}")
+              ensure
+                Thread.current[:mb_sound_replay_choices] = old
+              end
             end
           end
         rescue => e

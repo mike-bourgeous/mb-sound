@@ -658,8 +658,19 @@ module MB
         :audio do |sig, side:|`), bound with `with` (bus, track, and knob
         names work as values).  `>>` chains racks; note streams merge with
         `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
+        `macro :space, 0.3` inside a rack block is a knob scoped to the rack
+        (`turn :"dub/space", 0.6`; per player, `:"bass/dub/space"`, when the
+        rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
+        `:space`, `follow: :space` maps it onto the macro's range, and
+        `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
+        and `recall :"dub/wide", only: [:space]` keep variations.  `help
+        rack(:dub)` shows ports, macros, and latency.  `save :dub,
+        rack(:dub)` writes a rack document: `preset :dub` gives the rack
+        back, `preset :dub, sig: mic` plays it on an input (try the library
+        rack `preset :dub_echo`); a saved rack that differs from the
+        session's asks, or takes `racks: :session`, `:saved`, or `:rename`.
       TEXT
-      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack, :macro
       note :racks
       see :buses, :midi, :presets
       example 'a note rack: an anonymous value' do

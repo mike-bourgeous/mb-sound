@@ -81,6 +81,14 @@ module MB
             curve == :exp ? Math.log(value.to_f / lo) / Math.log(hi / lo) : (value.to_f - lo) / (hi - lo)
           end
 
+          # The 0..1 positions of a Numo::DFloat of +values+ (see
+          # #position).
+          def positions(values)
+            lo = range.begin
+            hi = range.end
+            curve == :exp ? Numo::NMath.log(values / lo) / Math.log(hi / lo) : (values - lo) / (hi - lo)
+          end
+
           # The value at position +pos+ (a Float or a Numo::DFloat).
           def value(pos)
             lo = range.begin
@@ -297,15 +305,29 @@ module MB
         # or nil.
         attr_reader :cc
 
+        # For a rack's macro (MB::Sound::RackMethods#macro), its
+        # Rack::MacroInfo (the rack, the macro's own name, the application
+        # that made it, share:, follow:); nil for other knobs.
+        attr_reader :macro
+
+        # The Session knob this standalone knob's readers were moved to
+        # when it joined one of the same name (see #redirect), or nil.
+        attr_reader :joined
+
         # Creates a knob named +name+ starting at +default+ (see Spec for
         # the options).  +session+ is the Session that advances it (see
         # Session::Knobs; Session#knob makes knobs), and +frame+ the first
         # frame it renders (the Session's frame counter).
-        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, **spec)
+        #
+        # +initial+ starts the knob at another value than its Spec's
+        # default (a rack instance's saved macro value; see Rack#using).
+        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, macro: nil, initial: nil, **spec)
           @spec = Spec.new(name: name, default: default, **spec)
+          @macro = macro
+          @joined = nil
           @session = session
           @sample_rate = sample_rate.to_f
-          @value = @spec.default
+          @value = initial.nil? ? @spec.default : @spec.clamp(initial)
           @segment = Hold.new(frame, @value)
           @pending = []
           @next_frame = frame
@@ -335,6 +357,32 @@ module MB
           @spec.name
         end
 
+        # Baseline plus modulation (racks R2, proposal 2.6): a node whose
+        # value is this knob's moved by +source+ (a node, usually -1..1, such
+        # as an LFO) times +depth+ in fractions of the knob's range, in the
+        # knob's own scale (octaves for +curve: :exp+ knobs), limited to the
+        # range.  Turning the knob moves the center of the modulation
+        # instead of fighting it.
+        #
+        #     cut = macro(:cut, 800, range: 100..8000, curve: :exp)
+        #     sig.lp4(cut.mod(0.2.hz.lfo, depth: 0.2))   # +-20% of the range around the knob
+        def mod(source, depth: 0.25)
+          raise ArgumentError, "mod needs a graph node to modulate by (got #{source.inspect})" unless source.respond_to?(:sample)
+          raise ArgumentError, "depth: must be a number (got #{depth.inspect})" unless depth.is_a?(Numeric) && depth.real?
+
+          Recipe.call(self, :mod, [source], { depth: depth }, nil) { |_|
+            lo = range.begin
+            hi = range.end
+            base = get_sampler
+            moved = if @spec.curve == :exp
+                      base * (2.0 ** (source * (depth.to_f * Math.log2(hi / lo))))
+                    else
+                      base + source * (depth.to_f * (hi - lo))
+                    end
+            moved.aclip(lo, hi)
+          }
+        end
+
         # Joins +session+ (Session::Knobs#adopt_knobs): a standalone knob,
         # e.g. one from a graph document loaded outside the Session, counts
         # the Session's frames from +frame+ on, keeping its value and any
@@ -359,6 +407,7 @@ module MB
         # Reads +knob+ instead where this knob is read directly (#sample),
         # after its readers were rebound to it (see Reader#rebind).
         def redirect(knob)
+          @joined = knob
           (@self_reader ||= Reader.new(self)).rebind(knob)
           self
         end

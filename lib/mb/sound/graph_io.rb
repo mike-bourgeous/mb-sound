@@ -43,11 +43,15 @@ module MB
       # with their old meaning (bare levels at 0 and below and every bare
       # gain or point in dB, warning once; see
       # GraphNode::DynamicsMethods.from_old_document).  Format 4
-      # (2026-10-17, omnibus8) marks the default change of sums, which ring
-      # until every input ends (GraphNode#ring); graphs of older documents
-      # are built with sums ending with their first input, as they were
-      # saved (GraphNode::Mixer.with_ring(:first); set documents' track
-      # patches, built when they launch, ring).
+      # (2026-10-17) marks two changes made together: sums ring until every
+      # input ends (omnibus8, GraphNode#ring; graphs of older documents are
+      # built with sums ending with their first input, as they were saved,
+      # GraphNode::Mixer.with_ring(:first); set documents' track patches,
+      # built when they launch, ring), and typed inputs (racks R2: `inputs
+      # sig: :audio, side: :audio`; `inputs :midi` still loads, as notes,
+      # other names as audio), `outputs :audio`, and rack documents (`graph
+      # 4, kind: :effect, rack: :arack`, whose knob lines are the rack's
+      # macros); graphs using named racks carry their definitions.
       FORMAT = 4
 
       # The file extension of graph documents.
@@ -101,6 +105,8 @@ module MB
       end
 
       @procs = {}
+      @rack_documents = ObjectSpace::WeakMap.new
+      @rack_conflict_handler = ->(conflict) { $stdin.tty? ? conflict.ask : nil }
 
       class << self
         # Named procs for runtime blocks outside the safe subset (see
@@ -130,9 +136,17 @@ module MB
         # without a header don't mark drawn seeds, so :fresh leaves out
         # every `seed:` they give.  The default, :saved, plays the same
         # every time.
-        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
+        #
+        # +racks:+ settles a named rack whose definition in the document
+        # differs from the session's rack of that name: :session keeps the
+        # session's, :saved replaces it with the document's (undoable),
+        # :rename loads the document's as :dub_2 (the next free name) for
+        # this document only.  Without it, a conflict asks
+        # .rack_conflict_handler in live mode and raises elsewhere (see
+        # MB::Sound.live_error).
+        def load(source, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved, racks: nil)
           text, path = read_source(source)
-          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session, seeds: seeds)
+          loader = Loader.new(text, path: path, inputs: inputs, params: params, trust: trust, limits: limits, base_dir: base_dir, session: session, seeds: seeds, racks: racks)
           graph = loader.load
           loader.document.input_objects = inputs.transform_keys(&:to_sym).slice(*loader.document.inputs)
           graph
@@ -162,6 +176,12 @@ module MB
         # files the graph reads (bundles; see .save); without it they raise
         # DumpError (tables) or keep their paths (file names).
         def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+          if graph.is_a?(Rack)
+            unless inputs.empty? && params.empty? && options.empty? && kind.nil?
+              raise ArgumentError, 'rack documents take their inputs from the rack\'s ports (no inputs, params, options, or kind)'
+            end
+            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets).to_s
+          end
           if graph.is_a?(Arrangement)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'set documents take no inputs, params, options, or kind'
@@ -326,6 +346,106 @@ module MB
           ''
         end
 
+        # The `inputs` header line for +types+ ({ name => type, or [type,
+        # default text] for an optional port }).
+        def inputs_line(types)
+          "inputs #{types.map { |n, t|
+            key = n.to_s.match?(/\A[a-z_][a-zA-Z0-9_]*\z/) ? "#{n}:" : "#{n.to_s.inspect}:"
+            t.is_a?(Array) ? "#{key} [#{t[0].inspect}, #{t[1] || 'nil'}]" : "#{key} #{t.inspect}"
+          }.join(', ')}"
+        end
+
+        # The port type of free input +obj+ of a graph.
+        def input_type(obj)
+          case obj
+          when MIDI::Stream, MB::Sound::Notes, Sequence::Clip, MIDI::Source then :notes
+          when GraphNode::Constant, GraphNode::Knob, GraphNode::Knob::Reader then :control
+          else
+            t = GraphNode::Traversable.port_type_of(obj) rescue nil
+            t == :notes ? :notes : :audio
+          end
+        end
+
+        # `graph N, ...` with the metadata +parts+ (texts), on several lines
+        # when long.
+        def graph_line(parts)
+          line = "graph #{FORMAT}, #{parts.join(', ')}"
+          return line if line.length <= 120
+
+          "graph #{FORMAT},\n  #{parts.join(",\n  ")}"
+        end
+
+        # Defines named rack +saved+ (a rack from a document) in +session+:
+        # where the session has no rack of its name, defines it; where the
+        # session's prints the same definition, returns the session's; else
+        # a conflict (Rack::Conflict) settled by +racks+ (:session keeps
+        # the session's rack, :saved replaces it with +saved+ (one undo
+        # step; later applications everywhere use it), :rename defines
+        # +saved+ under the next free name, :dub_2, ...), else the choice a
+        # replaying take recorded, else .rack_conflict_handler in live mode,
+        # else MB::Sound.live_error (raising the error the block makes from
+        # a message; live without an answer, :session).  The choice is
+        # recorded in the console's take.  Returns the rack to use.
+        def place_rack(session, saved, racks: nil, source: nil)
+          name = saved.name
+          existing = session.racks[name]
+          if existing.nil?
+            Session.with_context(session: session) { session.racks.define(saved) }
+            return saved
+          end
+          return existing if existing.equal?(saved) || same_rack_definition?(existing, saved)
+
+          conflict = Rack::Conflict.new(name: name, session_rack: existing, saved_rack: saved, source: source.to_s, rename_to: session.racks.free_name(name))
+          choice = racks || Take.replay_choice(:rack, name)
+          choice = rack_conflict_handler&.call(conflict) if choice.nil? && MB::Sound.live?
+          if choice.nil?
+            msg = "#{conflict}; load with racks: :session (keep the session's), :saved (replace it), or :rename (load it as #{conflict.rename_to.inspect})"
+            MB::Sound.live_error(block_given? ? yield(msg) : ArgumentError.new(msg))
+            choice = :session
+          end
+          raise ArgumentError, "racks: must be :session, :saved, or :rename (got #{choice.inspect})" unless Rack::Conflict::CHOICES.include?(choice)
+          Take.note_choice(:rack, name, choice)
+
+          case choice
+          when :saved
+            session.racks.replace(name, saved, label: "rack #{name.inspect} from #{File.basename(source.to_s)}")
+            saved
+          when :rename
+            r = saved.renamed(conflict.rename_to)
+            Session.with_context(session: session) { session.racks.define(r) }
+            puts "Rack #{name.inspect} from #{source} differs from the session's; loaded as #{r.name.inspect}"
+            r
+          else
+            existing
+          end
+        end
+
+        # True if racks +a+ and +b+ print the same definition (see
+        # RubyWriter.rack_definition).
+        def same_rack_definition?(a, b)
+          GraphNode::Recipe::RubyWriter.rack_definition(a)[0] == GraphNode::Recipe::RubyWriter.rack_definition(b)[0]
+        rescue StandardError
+          false
+        end
+
+        # What settles a rack conflict in live mode (see .load's racks:): a
+        # callable given a Rack::Conflict, returning :session, :saved,
+        # :rename, or nil (no answer: MB::Sound.live_error, then :session).
+        # The default asks on the console (Rack::Conflict#ask) when input
+        # is a terminal; a UI picker can replace it.
+        attr_accessor :rack_conflict_handler
+
+        # The Document of rack +rack+ if it was loaded from a rack
+        # document, else nil.
+        def rack_document(rack)
+          @rack_documents[rack]
+        end
+
+        # Remembers +doc+ as rack +rack+'s Document (Loader).
+        def remember_rack_document(rack, doc)
+          @rack_documents[rack] = doc
+        end
+
         # mb-sound's version, with the git commit when the library is a
         # checkout.
         def library_version
@@ -429,7 +549,16 @@ module MB
       #
       # +seeds: :fresh+ draws new random seeds instead of the saved ones
       # (see GraphIO.load; seeds the code gave stay).
-      def preset(name, trust: nil, session: nil, seeds: :saved, **inputs_and_params)
+      #
+      # A rack document (`save :dub, rack(:dub)`) gives the Rack, defined in
+      # the Session under its name (`preset :dub` then `bass.then(&rack(:dub))`),
+      # or with its main input given, the rack applied to it (`preset :dub,
+      # sig: mic, side: :drums`).
+      #
+      # +racks:+ (:session, :saved, :rename) settles named racks whose saved
+      # definitions differ from the session's (see GraphIO.load); live, the
+      # console asks instead.
+      def preset(name, trust: nil, session: nil, seeds: :saved, racks: nil, **inputs_and_params)
         path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
         unless path
           names = GraphIO.presets.values.flatten
@@ -439,13 +568,31 @@ module MB
         doc = GraphIO.parse(path)
         if doc.kind == :set
           raise ArgumentError, "a set takes no inputs (got #{inputs_and_params.keys.join(', ')})" unless inputs_and_params.empty?
-          doc = GraphIO.load(path, trust: trust, session: session || Session.current, seeds: seeds)
+          doc = GraphIO.load(path, trust: trust, session: session || Session.current, seeds: seeds, racks: racks)
           puts "Loaded set #{doc.name}: tracks #{doc.session.arrangement.tracks.keys.join(', ')}; scenes #{doc.session.arrangement.scenes.keys.join(', ')}#{'; play_form doc.form plays its flow' if doc.form}"
           return doc
         end
+        if doc.rack?
+          # A rack document: the Rack (defined in the Session under the
+          # document's name), or applied when its inputs are given
+          session = Session.existing if session.nil?
+          target = session || Session.current
+          rack = GraphIO.load(path, trust: trust, seeds: seeds, racks: racks)
+          rack = GraphIO.place_rack(target, rack, racks: racks, source: path) if rack.name
+          return rack if inputs_and_params.empty?
+
+          main = rack.input.name
+          raise ArgumentError, "preset #{name} needs its main input #{main}: (#{rack.input.type}) to apply it, or nothing for the Rack" unless inputs_and_params.key?(main)
+          graph = Session.with_context(session: target) { rack.call(inputs_and_params[main], **inputs_and_params.except(main)) }
+          if session && (graph.is_a?(GraphNode) || graph.is_a?(GraphNode::Channels))
+            attach_knob_midi(session, session.adopt_knobs(graph))
+          end
+          return graph
+        end
+
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
-        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds)
+        graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds, racks: racks)
 
         session = Session.existing if session.nil?
         if session
@@ -475,8 +622,10 @@ module MB
           names.each do |n|
             doc = GraphIO.parse(File.join(dir, "#{n}#{GraphIO::EXTENSION}")) rescue nil
             extra = []
-            extra << "inputs: #{doc.inputs.join(', ')}" if doc && !doc.inputs.empty?
-            extra << "params: #{doc.param_values.map { |k, v| "#{k} #{v}" }.join(', ')}" if doc && !doc.params.empty?
+            extra << "rack #{doc.kind}" if doc&.rack?
+            extra << "inputs: #{doc.inputs.map { |i| doc.input_types[i] ? "#{i} (#{doc.input_types[i]})" : i }.join(', ')}" if doc && !doc.inputs.empty?
+            extra << "macros: #{doc.params.keys.join(', ')}" if doc&.rack? && !doc.params.empty?
+            extra << "params: #{doc.param_values.map { |k, v| "#{k} #{v}" }.join(', ')}" if doc && !doc.params.empty? && !doc.rack?
             puts "  #{n}#{"  (#{extra.join('; ')})" unless extra.empty?}"
           end
         end
@@ -518,3 +667,4 @@ require_relative 'graph_io/trusted_code'
 require_relative 'graph_io/file_guard'
 require_relative 'graph_io/assets'
 require_relative 'graph_io/set_writer'
+require_relative 'graph_io/rack_writer'

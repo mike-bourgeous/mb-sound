@@ -3,12 +3,12 @@
 graph 4,
   name: "funk_bass",
   kind: :synth,
-  saved: "2026-10-17T05:42:58Z",
-  mb_sound: "0.12.0.usegit (504ed966)",
+  saved: "2026-10-17T17:18:04Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :bass from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :bass, dub: 0.0, keep: 0.82 }
-inputs :midi
+inputs midi: :notes
 
 synth(midi, voices: 2) { |v|
   f = v.hz

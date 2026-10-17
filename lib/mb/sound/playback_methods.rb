@@ -159,7 +159,7 @@ module MB
         # Graph documents' knobs join the session (Session#add does this
         # too); those with a controller get live MIDI input
         s = Session.current
-        attach_knob_midi(s, s.adopt_knobs(playable.nodes))
+        attach_knob_midi(s, s.adopt_knobs(playable.nodes, player: name))
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send)

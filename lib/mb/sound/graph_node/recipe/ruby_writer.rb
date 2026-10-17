@@ -63,8 +63,17 @@ module MB
           # +assets+ (a GraphIO::Assets, for bundles) names files for tables
           # that aren't library tables and for Strings naming sound or MIDI
           # files.
-          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil)
+          #
+          # +define_racks+ (graph documents) prints a definition of each
+          # named rack the graph applies before the graph
+          # (`arack(:dub, side: :audio) { |sig, side:| ... }`, see
+          # .rack_definition), so the document loads where the rack isn't
+          # defined.  +rack_defs+ (a Hash) collects them for an outer writer
+          # instead (they aren't printed here).
+          def initialize(root, inputs: {}, seeds: false, knobs: {}, knob_nodes: {}, assets: nil, define_racks: false, rack_defs: nil)
             @root = root
+            @define_racks = define_racks
+            @shared_rack_defs = rack_defs
             @assets = assets
             @given_inputs = inputs
             @seeds = seeds
@@ -131,6 +140,7 @@ module MB
             @output_owner = {}.compare_by_identity
             @given_inputs.each_value { |obj| register_outputs(obj) }
             @knobs_used = Set.new
+            @rack_defs = @shared_rack_defs || {}
             @used.merge(@knobs.keys)
             @used.merge(@knob_nodes.values)
           end
@@ -150,6 +160,7 @@ module MB
             final = Recipe.graph_object?(@root) ? expr(@root, top: true) : value(@root)
             @parts = [finish_lines(lines.join("\n").split("\n")), finish_lines(final.split("\n"))]
             lines << final
+            lines = @rack_defs.values.compact + lines unless @rack_defs.empty? || @shared_rack_defs
             body = finish_lines(lines.join("\n").split("\n"))
 
             header = []
@@ -531,10 +542,57 @@ module MB
             "#{text}[#{tap.outputs.index(o)}]"
           end
 
-          # knob(:name) for a Knob or Knob::Reader.
+          # knob(:name) for a Knob or Knob::Reader; a rack's macro as the
+          # macro call that makes it (inside its rack's block, each
+          # macro(:name, ...) of one application returns the same knob).
           def knob_text(o)
-            "knob(#{(o.is_a?(Knob::Reader) ? o.knob : o).name.to_sym.inspect})"
+            k = o.is_a?(Knob::Reader) ? o.knob : o
+            return macro_text(k) if k.macro
+            "knob(#{k.name.to_sym.inspect})"
           end
+
+          public
+
+          # macro(:space, 0.3, range: ...) for macro knob +k+, with the value
+          # it holds (a moving macro: where it is) and its options.
+          def macro_text(k)
+            "macro(#{Recipe::RubyWriter.knob_args(k, method(:knob_literal)).join(', ')})"
+          end
+
+          # A knob setting as text: numbers as Knob.number prints them (800,
+          # 0.3), ranges of numbers alike (100..8000), others as literals.
+          def knob_literal(v)
+            case v
+            when Float, Integer then Knob.number(v)
+            when Range
+              v.begin.is_a?(Numeric) && v.end.is_a?(Numeric) ? "#{Knob.number(v.begin)}#{v.exclude_end? ? '...' : '..'}#{Knob.number(v.end)}" : leaf(v, '')
+            else leaf(v, '')
+            end
+          end
+
+          # The arguments that make knob +k+ again (name or a macro's own
+          # name, held value, options as the console's knob takes them,
+          # share:/follow:/description: of a macro), as text, each value
+          # printed by +literal+.
+          def self.knob_args(k, literal, name: nil)
+            spec = k.spec
+            value = k.moving? || k.target.nil? ? k.value : k.target
+            parts = [(name || (k.macro ? k.macro.macro : k.name)).to_sym.inspect, literal.(value)]
+            parts << "range: #{literal.(spec.range)}" unless spec.range == (0.0..1.0)
+            parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
+            parts << "unit: #{literal.(spec.unit)}" if spec.unit
+            parts << "cc: #{k.cc}" if k.cc
+            parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
+            parts << "smooth: #{literal.(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
+            if (m = k.macro)
+              parts << 'share: true' if m.share
+              parts << "follow: #{m.follow.inspect}" if m.follow
+              parts << "description: #{literal.(m.description)}" if m.description
+            end
+            parts
+          end
+
+          private
 
           def channels_printable?(o)
             o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) || x.is_a?(BusTap::Channel) }
@@ -616,6 +674,7 @@ module MB
           def rack_text(rack, c, indent)
             text =
               if rack.name
+                define_rack(rack, c, indent) if @define_racks
                 "rack(#{rack.name.inspect})"
               else
                 args = []
@@ -629,10 +688,70 @@ module MB
                        end
                 "#{rack.constructor}#{"(#{args.join(', ')})" unless args.empty?}#{body}"
               end
-            return text if rack.bound.empty?
-
-            "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})"
+            text = "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})" unless rack.bound.empty?
+            using = rack.name ? using_args(rack, c) : []
+            using.empty? ? text : "#{text}.using(#{using.join(', ')})"
           end
+
+          # The settings an application of named rack +rack+ (call +c+)
+          # needs to rebuild exactly (see Rack#using): the seed its block
+          # built under (a drawn one as drawn_seed(N) in documents, left
+          # out without seeds and in synth lanes, whose seeds derive from
+          # the lane's), and its macros' current values where they differ
+          # from the definition's defaults (shared and following macros
+          # belong to their session knobs).
+          def using_args(rack, c)
+            st = rack.settings
+            args = []
+            if (seed = st[:seed]) && (!st[:drawn] || (@seeds && c.lane.nil?))
+              args << "seed: #{st[:drawn] && @seeds == :marked ? "drawn_seed(#{seed})" : seed}"
+            end
+            (st[:application]&.macros || {}).each do |name, k|
+              next if k.macro.share || k.macro.follow
+              cur = k.joined || k
+              v = cur.moving? || cur.target.nil? ? cur.value : cur.target
+              args << "#{key_text(name)} #{knob_literal(v)}" unless v == k.spec.default
+            end
+            args
+          end
+
+          # Remembers the definition of named rack +rack+ for the lines
+          # before the graph (see #initialize), once per name; racks used
+          # inside it come first.
+          def define_rack(rack, _c, _indent)
+            return if @rack_defs.key?(rack.name)
+
+            @rack_defs[rack.name] = nil # (a rack applying itself)
+            text, problems = RubyWriter.rack_definition(rack, rack_defs: @rack_defs, assets: @assets)
+            @problems.concat(problems)
+            @rack_defs.delete(rack.name)
+            @rack_defs[rack.name] = text
+          end
+
+          public
+
+          # The definition of named rack +rack+ as Ruby, and the problems
+          # found printing it: its constructor call with the block printed
+          # from a build on stand-ins for its ports (Rack#build_on_stand_ins;
+          # every port a parameter, macros as macro(...) at their defaults,
+          # seeds left out so each application draws its own).  Racks used
+          # inside go into +rack_defs+.  The same rack always prints the
+          # same text, which is how documents compare a saved definition
+          # with a session's (GraphIO::Loader).
+          def self.rack_definition(rack, rack_defs: {}, assets: nil)
+            result, stand, _app = rack.build_on_stand_ins
+            w = new(result, inputs: stand.transform_keys(&:to_s), seeds: false, define_racks: true, rack_defs: rack_defs, assets: assets)
+            lines = w.to_s.lines(chomp: true)
+            lines.shift while lines.first&.match?(/\A# (inputs:|FIXME\(graph-io\)|WARNING\(graph-io\))/)
+            args = [rack.name.inspect]
+            args << "in: #{rack.input.type.inspect}" if rack.constructor == :rack
+            args << "out: #{rack.out.inspect}" if rack.out && !%i[irack instrument_rack lrack amrack listener_rack].include?(rack.constructor)
+            rack.ports.each_value { |p| args << "#{w.key_text(p.name)} #{p.type.inspect}" }
+            text = "#{rack.constructor}(#{args.join(', ')}) { |#{rack.param_list}|\n#{lines.map { |l| "  #{l}" }.join("\n")}\n}"
+            [text, w.problems.uniq]
+          end
+
+          private
 
           # The block of a rack application, from its one invocation.
           def rack_block_text(c, rack, indent)

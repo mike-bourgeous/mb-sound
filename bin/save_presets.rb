@@ -7,8 +7,10 @@
 # The persona panel's patches (2026-10-13; bin/synths/dnb.rb, jungle.rb,
 # ambient.rb, funk.rb, named for their genres) were the first, then
 # bin/synths/electric_pianos.rb, then the SQ-80 voice's patches
-# (bin/synths/sq80_voice.rb, sq80-lib-1); each document's description says where it
-# came from (the scripts' <script>_description).
+# (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
+# named racks from bin/songs/rack_demo.rb, saved with their macros); each
+# document's description says where it came from (the scripts'
+# <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
 # again after a library change shows what changed in `git diff presets/`.
 #
@@ -90,12 +92,21 @@ module MB::Sound
                     ->(input, p) { funk_dub_loop(input, dub: p[:dub], keep: p[:keep]) }],
   }.freeze
 
+  # Rack presets (rack documents, racks R2): { name => [script, method,
+  # description] }; the script's method defines the named rack under the
+  # preset's name and returns it.
+  LIBRARY_PRESET_RACKS = {
+    dub_echo: ['bin/songs/rack_demo.rb', :rack_demo_dub,
+               'Rack :dub_echo from bin/songs/rack_demo.rb (racks-r2, 2026-10-17): dub echoes of the input, ' \
+               'macro :space (echo level and feedback) and :tone (the echoes\' lowpass, swinging slowly around the knob)'],
+  }.freeze
+
   # The MIDI file script patches are saved from.
   LIBRARY_PRESET_MIDI = 'spec/test_data/c_major.mid'
 
   # Every library preset name.
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -121,6 +132,17 @@ module MB::Sound
             File.join(dir, "#{name}#{GraphIO::EXTENSION}"), graph,
             inputs: { input: input }, params: params, from: script, kind: :effect, meta: { description: description }
           )
+        end
+      end
+    elsif (rk = LIBRARY_PRESET_RACKS[name])
+      script, method, description = rk
+      require File.join(root, script)
+      MB::Sound.with_seed(0) do
+        rack = Session.with_context(session: Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false))) {
+          MB::Sound.public_send(method, name)
+        }
+        Dir.chdir(root) do
+          GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), rack, from: script, meta: { description: description })
         end
       end
     else
@@ -152,7 +174,9 @@ module MB::Sound
       names = names.empty? ? library_preset_names : names.map(&:to_sym)
       if p.list
         names.each do |n|
-          src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } || "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
+          src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
+                LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
+                "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
           puts "#{n.to_s.ljust(16)} #{src}"
         end
       elsif p.check

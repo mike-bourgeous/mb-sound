@@ -3,12 +3,12 @@
 graph 4,
   name: "dnb_pluck",
   kind: :synth,
-  saved: "2026-10-17T05:42:23Z",
-  mb_sound: "0.12.0.usegit (504ed966)",
+  saved: "2026-10-17T17:16:16Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :pluck from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
   options: { patch: :pluck, cutoff: 2400.0, grit: 0.25 }
-inputs :midi
+inputs midi: :notes
 param :echo, 0.4, range: 0.0..1.0, description: "Pluck delay send (echo level) 0..1"
 
 synth(midi, voices: 2) { |v|
