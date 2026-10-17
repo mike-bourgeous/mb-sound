@@ -173,7 +173,8 @@ module MB
             mode += ' (no key-up)' unless v.releases
             c.line(0, ' ', [kb.note_name(v.base), :key], ['-', :dim], [kb.note_name(v.base + UI::Keyboard::SPAN - 1), :key],
                    ['  vel ', :dim], [v.velocity.to_s, :key], ['  ch ', :dim], [(v.channel + 1).to_s, :key],
-                   ['  ', nil], [mode, v.releases ? :ok : :warn], (v.sustain ? ['  sustain', :armed] : ''), x: x)
+                   ['  ', nil], [mode, v.releases ? :ok : :warn], (v.sustain ? ['  sustain', :armed] : ''),
+                   (v.scale ? ['  ', nil] : ''), (v.scale ? [v.scale, :queued] : ''), x: x)
           end
 
           # Key letters over (or under) their keys.

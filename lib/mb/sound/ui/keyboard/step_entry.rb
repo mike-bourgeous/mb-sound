@@ -184,7 +184,7 @@ module MB
           end
 
           def note(semis, accent, now)
-            n = @keyboard.base + semis
+            n = @keyboard.note_for(semis)
             return if n > 127
 
             last = @steps.last
