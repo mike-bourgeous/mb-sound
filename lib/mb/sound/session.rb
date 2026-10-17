@@ -966,6 +966,7 @@ module MB
         return if @closed
         @closed = true
         ExitClose.unregister(self)
+        @output.release_writer if @output.respond_to?(:release_writer) # (a virtual clock's; NullOutput)
         @thread&.join(5)
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }

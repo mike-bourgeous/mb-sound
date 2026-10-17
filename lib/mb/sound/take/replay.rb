@@ -203,7 +203,7 @@ module MB
               warn "Stopped playing the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, @ends || 0)}); pass max_seconds: to play longer"
               break
             end
-            sleep 0.1
+            Internal.wait_audio(session, 0.1)
           end
           MB::Sound.outro
           MB::Sound.wait

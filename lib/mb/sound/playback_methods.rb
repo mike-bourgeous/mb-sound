@@ -643,7 +643,7 @@ module MB
         until quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
           return false if deadline && MB::U.clock_now > deadline
           return true unless session.running?
-          sleep 0.05
+          Internal.wait_audio(session, 0.05)
         end
 
         true
@@ -938,7 +938,8 @@ module MB
         if plot
           visualize(graphical: graphical, spectrum: spectrum, stop: -> { !playing.call }, header: header)
         else
-          sleep 0.01 while playing.call
+          session = Session.current
+          Internal.wait_audio(session, 0.01) while playing.call
         end
         !playing.call
       rescue Interrupt

@@ -115,7 +115,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
 
   it 'reaches foreground play (which plays through the live Session)' do
     MB::Sound::Session.monitor_gain = 6.db
-    live = out_class.new(channels: 2, buffer_size: 800) # paced like a sound card: unpaced, the render thread wrote (and this kept) GBs while play waited
+    live = out_class.new(channels: 2, buffer_size: 800, sleep: :virtual) # a virtual clock: unpaced, the render thread wrote (and this kept) GBs while play waited
     MB::Sound.use_output(live)
     MB::Sound.play(100.hz.sine.at(-20.db).until(0.1), plot: false, quiet: true)
     expect(peak(live.channel(0))).to be_within(0.05).of(-14 + MB::Sound.master_gain.to_db)
