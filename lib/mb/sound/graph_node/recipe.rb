@@ -87,6 +87,7 @@ module MB
         BUILD_BLOCKS = Set[
           :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
           :fill, # Kit#fill { grid(...) }
+          :blend, # sig.blend(0.3) { |s| fx }
           :sampler, # clip.sampler(brk) { |v, s| ... }, Instrument#sampler, MB::Sound.sampler
           # Rack constructors (MB::Sound::RackMethods): their blocks build
           # each application's graph.  The constructors aren't recorded

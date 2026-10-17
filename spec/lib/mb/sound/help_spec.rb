@@ -668,7 +668,7 @@ RSpec.describe MB::Sound::Help do
       ['mix an effect in', 'wet', 'dry', ':wet', 'how do i mix in reverb'].each do |q|
         expect(text(MB::Sound::Help.page_for_text(q))).to include('help :blend'), q
       end
-      expect(text(MB::Sound.help(:dry))).to include('beat * 0.6 + wet * 0.4')
+      expect(text(MB::Sound.help(:dry))).to include('beat.blend(0.4) { |s|')
     end
 
     it 'runs as Pry commands, leaving help(...) and lesson.next to Ruby' do

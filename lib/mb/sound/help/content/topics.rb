@@ -146,27 +146,32 @@ module MB
 
     Help.topic :blend, 'Mixing an effect in (wet and dry)', group: :sound do
       about <<~TEXT
-        To hear an effect beside the sound it changes, add them: `sig * 0.6 +
-        sig.resonate(:plate) * 0.4` keeps 60% of the dry sound and adds 40% of
-        the effect (using `sig` twice is fine: the graph branches it).  The
-        two numbers are the dry and wet levels; make them sum to about 1 to
-        keep the level, or turn one with a knob (`knob(:wet)`) or a node
-        (an LFO, an envelope).
+        `sig.blend(0.3) { |s| s.resonate(:plate) }` mixes the effect the
+        block makes from `sig` with `sig` itself: 0 is all dry, 1 all wet,
+        the same law as the effects' own `mix:` (dry * (1 - mix) + wet *
+        mix).  The mix can be a number, a knob's name (`blend(:wet)`, turned
+        with `turn :wet, 0.8`), or any node (an LFO, an envelope).
+        `curve: :power` keeps the loudness of effects that don't correlate
+        with the dry sound (reverb tails); effects with lookahead
+        (compressors, limiters) get their dry path delayed to match.  A
+        stereo bundle goes to the block whole.
 
-        Some effects mix themselves: `reverb(mix: 0.3)`, `chorus(mix:)`,
-        `delay(dry:, wet:)`, and the dynamics' `mix:` (parallel
-        compression).  For one effect shared by several tracks, send them to
-        a bus (`bus(:verb) { |s| s.reverb(:hall, mix: 1) }`, then
-        `track(:keys, send: { verb: -12.db })` or `feed :keys, :verb,
-        -6.db`): the bus is all wet, and each send sets how much goes in.
+        The same by hand: `sig * 0.7 + sig.resonate(:plate) * 0.3` (using
+        `sig` twice is fine: the graph branches it).  Some effects mix
+        themselves: `reverb(mix: 0.3)`, `chorus(mix:)`, `delay(dry:, wet:)`,
+        and the dynamics' `mix:` (parallel compression).  For one effect
+        shared by several tracks, send them to a bus (`bus(:verb) { |s|
+        s.reverb(:hall, mix: 1) }`, then `track(:keys, send: { verb: -12.db
+        })` or `feed :keys, :verb, -6.db`): the bus is all wet, and each
+        send sets how much goes in.
       TEXT
       commands :bus, :feed, :knob
-      dsl :resonate, :reverb, :chorus, :delay
+      dsl :blend, :resonate, :reverb, :chorus, :delay
       see :effects, :buses, :knobs
       example 'drums into a swept resonator, mixed in' do
         beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
-        wet = beat.resonate(:plate, 0.25.hz.lfo.at(110..440), decay: 1.5).at(-22.db) # rings far louder than its strikes
-        bg :try, (beat * 0.6 + wet * 0.4).at(-11.db)
+        # (the resonator rings far louder than its strikes)
+        bg :try, beat.blend(0.4) { |s| s.resonate(:plate, 0.25.hz.lfo.at(110..440), decay: 1.5).at(-22.db) }.at(-11.db)
       end
     end
     Help::TOPIC_ALIASES.merge!(wet: :blend, dry: :blend, mix: :blend, wetdry: :blend, dry_wet: :blend)

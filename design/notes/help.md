@@ -83,7 +83,7 @@ The maintainer's notes: "`help :ui` (just as an example) is a solid wall of text
 - Method pages end with "Learn it in: lesson :knobs (step 3 of 5)" (`Help.lessons_using`: the method names each step's code calls, by Prism).
 - Lesson steps print framed by blank lines with a dim "lesson :set · step 1/6" line and the check in color.
 - `help` and `lesson` are Pry commands too (`Help.install_commands`): `help flow`, `help mix an effect in`, `help :turn`, `help g` (literals and names defined in the console are evaluated, never calls), words matched against topic names, aliases (`TOPIC_ALIASES`: `:wet`, `:dry`, `:mix` lead to `:blend`), titles, and text, else a search; `lesson set`, `lesson :set, restart: true`.  `help(:x).try`, `help.topics`, `lesson.next` stay Ruby.
-- Topic `:blend` ("Mixing an effect in (wet and dry)"): the arithmetic form, effects with their own mix, buses for shared effects; a `sig.blend` helper is a question for the effects round.
+- Topic `:blend` ("Mixing an effect in (wet and dry)"): `sig.blend(mix) { |s| fx }` first (round 2, maintainer 2026-10-17), the arithmetic form, effects with their own mix, buses for shared effects.
 
 ## Takes
 
