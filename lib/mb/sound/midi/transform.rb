@@ -81,6 +81,15 @@ module MB
           @parent.realtime_input?
         end
 
+        # MIDI controllers this transform's own moving parameters read (see
+        # MIDI::Param and Stream#param_control_specs).
+        def param_control_specs
+          instance_variables.flat_map { |iv|
+            v = instance_variable_get(iv)
+            v.is_a?(Param::Base) ? v.control_specs : []
+          }
+        end
+
         def to_s
           node_type_name
         end

@@ -495,6 +495,7 @@ module MB
         specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
         specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
         specs << MIDI::ControlSpec.poly_pressure if @nodes.any? { |k, ref| (k == :poly_pressure || (k.is_a?(Array) && k[0] == :poly_pressure)) && live(ref) }
+        specs += @stream.param_control_specs if @stream.respond_to?(:param_control_specs)
         specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 

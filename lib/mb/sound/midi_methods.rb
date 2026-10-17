@@ -128,6 +128,22 @@ module MB
         end
       end
 
+      # A MIDI controller as a moving parameter for MIDI transforms
+      # (MIDI::Param::CC): the last value of controller +number+ seen on the
+      # transform's own input stream (a keyboard's knobs steer its own
+      # notes), else on the Session's MIDI input (a clip's transforms
+      # steered from a controller), else +default+ (a raw value 0..127),
+      # mapped onto +range+ with +curve+ (:linear, :exponential, :switch).
+      # Read once per decision (each note-on, arp step, bar).  Combines with
+      # numbers, knobs, and other params (`0.5 + cc(1) * 0.2`).
+      #
+      #     midi.swing(cc(1, 0.5..0.7))
+      #     riff.loop.stream.chance(cc(2))
+      #     midi.humanize(cc(3, 0..0.03), velocity: cc(4, 0..0.3))
+      def cc(number, range = 0.0..1.0, curve: :linear, default: nil, channel: nil, name: nil)
+        MIDI::Param::CC.new(number, range, curve: curve, default: default, channel: channel, name: name)
+      end
+
       private
 
       # Returns +session+'s MIDI input named +connect+ (see

@@ -31,24 +31,34 @@ module MB
 
           def initialize(parent, time = Sequence::Feel::HUMANIZE_TIME, velocity: 0, seed: nil, **options)
             super(parent, **options)
-            raise ArgumentError, "Humanize time must not be negative (got #{time.inspect})" if seconds_of(time) < 0
-            Sequence::Feel.check_fraction('Humanize velocity', velocity)
-            @time = time
-            @velocity = velocity.to_f
+            @time = Param.wrap(time, 'Humanize time')
+            @velocity = Param.wrap(velocity, 'Humanize velocity')
+            unless Param.param?(@time)
+              raise ArgumentError, "Humanize time must not be negative (got #{time.inspect})" if seconds_of(time) < 0
+            end
+            if Param.param?(@velocity)
+              shown = true
+            else
+              Sequence::Feel.check_fraction('Humanize velocity', velocity)
+              @velocity = velocity.to_f
+              shown = @velocity > 0
+            end
             setup_seed(seed)
-            @node_type_name = "humanize(#{time}#{", velocity: #{velocity}" if @velocity > 0})"
+            @node_type_name = "humanize(#{Param.label(time)}#{", velocity: #{Param.label(velocity)}" if shown})"
           end
 
           private
 
           def tail_seconds
-            seconds_of(@time)
+            Param.param?(@time) ? seconds_of(Param.largest(@time, 0.05)) : seconds_of(@time)
           end
 
           def map_on(e)
-            offset, velocity = Sequence::Feel.humanize_draw(next_random, e.velocity, @velocity, both_ways: false)
-            delay = Sequence::Duration.rational(offset * seconds_of(@time))
-            e = e.with_velocity(velocity) if @velocity > 0
+            amount = @velocity.is_a?(Float) ? @velocity : MB::M.clamp(param_at(@velocity, e.time).to_f, 0.0, 1.0)
+            time = Param.param?(@time) ? MB::M.max(seconds_of(param_at(@time, e.time)), 0r) : seconds_of(@time)
+            offset, velocity = Sequence::Feel.humanize_draw(next_random, e.velocity, amount, both_ways: false)
+            delay = Sequence::Duration.rational(offset * time)
+            e = e.with_velocity(velocity) if amount > 0
             [[e, delay]]
           end
 
@@ -65,12 +75,15 @@ module MB
           def initialize(parent, grid = Sequence::Feel::GRID, amount: 1, window: nil, ends: false, **options)
             super(parent, **options)
             @grid = Sequence::Duration.whole_notes(grid)
-            Sequence::Feel.check_fraction('Quantize amount', amount)
-            @amount = Sequence::Duration.rational(amount)
+            @amount = Param.wrap(amount, 'Quantize amount')
+            unless Param.param?(@amount)
+              Sequence::Feel.check_fraction('Quantize amount', amount)
+              @amount = Sequence::Duration.rational(amount)
+            end
             @window = window && Sequence::Duration.whole_notes(window)
             @ends = !!ends
             @grid_label = grid.is_a?(Integer) ? "n#{grid}" : grid.to_s
-            @node_type_name = "quantize(#{@grid_label}#{", amount: #{amount}" if amount != 1}#{', ends: true' if @ends})"
+            @node_type_name = "quantize(#{@grid_label}#{", amount: #{Param.label(amount)}" if amount != 1}#{', ends: true' if @ends})"
           end
 
           private
@@ -83,7 +96,7 @@ module MB
             target = Sequence::Feel.quantize_step(timeline_at(e.time), @grid, direction: :next, window: @window)
             return [[e, 0r]] if target.nil?
 
-            delay = (stream_time_at(target) - e.time) * @amount
+            delay = (stream_time_at(target) - e.time) * amount_at(e.time)
             [[e, MB::M.max(delay, 0r)]]
           end
 
@@ -93,15 +106,23 @@ module MB
           def note_off_time(time, delay, on_time)
             return super unless @ends
 
+            amount = amount_at(on_time)
             target = Sequence::Feel.quantize_step(timeline_at(time), @grid, direction: :next)
-            off = time + (stream_time_at(target) - time) * @amount
+            off = time + (stream_time_at(target) - time) * amount
             start = on_time + delay
-            off = MB::M.max(off, start + @grid / transport.whole_notes_per_second) if @amount == 1
+            off = MB::M.max(off, start + @grid / transport.whole_notes_per_second) if amount == 1
             MB::M.max(off, time)
           end
 
           def map_note(event)
             event
+          end
+
+          # The amount (0..1, a Rational) at stream time +time+ (a param's
+          # value there, limited to 0..1).
+          def amount_at(time)
+            return @amount unless Param.param?(@amount)
+            Sequence::Duration.rational(MB::M.clamp(param_at(@amount, time).to_f, 0.0, 1.0))
           end
         end
 
@@ -111,10 +132,11 @@ module MB
         class Swing < NoteMap
           def initialize(parent, amount = Sequence::Feel::SWING, grid = Sequence::Feel::GRID, **options)
             super(parent, **options)
-            @amount = Sequence::Feel.check_swing(amount, delay_only: true)
+            @amount = Param.wrap(amount, 'Swing amount')
+            @amount = Sequence::Feel.check_swing(amount, delay_only: true) unless Param.param?(@amount)
             @grid = Sequence::Duration.whole_notes(grid)
             @grid_label = grid.is_a?(Integer) ? "n#{grid}" : grid.to_s
-            @node_type_name = "swing(#{amount}#{", #{@grid_label}" if @grid != 1/16r})"
+            @node_type_name = "swing(#{Param.label(amount)}#{", #{@grid_label}" if @grid != 1/16r})"
           end
 
           private
@@ -124,17 +146,25 @@ module MB
           end
 
           def map_on(e)
-            [[e, MB::M.max(swung(e.time) - e.time, 0r)]]
+            [[e, MB::M.max(swung(e.time, swing_at(e.time)) - e.time, 0r)]]
           end
 
-          def note_off_time(time, _delay, _on_time)
-            MB::M.max(swung(time), time)
+          def note_off_time(time, _delay, on_time)
+            MB::M.max(swung(time, swing_at(on_time)), time)
           end
 
-          # The stream time of stream time +time+ through the swing warp of
-          # its timeline position.
-          def swung(time)
-            stream_time_at(Sequence::Feel.swing_warp(timeline_at(time), @amount, @grid))
+          # The stream time of stream time +time+ through the swing warp
+          # (by +amount+) of its timeline position.
+          def swung(time, amount = @amount)
+            stream_time_at(Sequence::Feel.swing_warp(timeline_at(time), amount, @grid))
+          end
+
+          # The swing amount at stream time +time+: a param's value read
+          # there (at the played note-on; its note-off warps by the same
+          # amount), limited to 0.5 (straight) up to just under 1.
+          def swing_at(time)
+            return @amount unless Param.param?(@amount)
+            Sequence::Duration.rational(MB::M.clamp(param_at(@amount, time).to_f, 0.5, 0.99))
           end
 
           def map_note(event)
@@ -150,15 +180,17 @@ module MB
 
           def initialize(parent, probability, seed: nil, **options)
             super(parent, **options)
-            @probability = Sequence::Clip.check_probability(probability)
+            @probability = Param.wrap(probability, 'Chance')
+            @probability = Sequence::Clip.check_probability(probability) unless Param.param?(@probability)
             setup_seed(seed)
-            @node_type_name = "chance(#{probability})"
+            @node_type_name = "chance(#{Param.label(probability)})"
           end
 
           private
 
           def map_on(e)
-            next_random.rand < @probability ? [[e, 0r]] : []
+            p = Param.param?(@probability) ? MB::M.clamp(param_at(@probability, e.time).to_f, 0.0, 1.0) : @probability
+            next_random.rand < p ? [[e, 0r]] : []
           end
 
           # Chased notes don't draw (so they can't change later decisions).
@@ -173,8 +205,10 @@ module MB
         class Every < NoteMap
           def initialize(parent, n, from: 1, **options)
             super(parent, **options)
-            @condition = Sequence::Clip.check_condition(n, from)
-            @node_type_name = "every(#{n}#{", from: #{from}" if from != 1})"
+            @n = Param.wrap(n, 'every')
+            @from = from
+            @condition = Param.param?(@n) ? nil : Sequence::Clip.check_condition(n, from)
+            @node_type_name = "every(#{Param.label(n)}#{", from: #{from}" if from != 1})"
           end
 
           private
@@ -186,7 +220,17 @@ module MB
           end
 
           def map_on(e)
-            Sequence::Feel.condition_plays?(@condition, bar_index(e.time)) ? [[e, 0r]] : []
+            Sequence::Feel.condition_plays?(condition_at(e.time), bar_index(e.time)) ? [[e, 0r]] : []
+          end
+
+          # The condition for the bar holding stream time +time+: a param's
+          # n is read at the bar's start (a whole number of at least 1).
+          def condition_at(time)
+            return @condition if @condition
+
+            bar_start = transport.bar_position(transport.bar_at(timeline_at(time)).floor)
+            n = Param.value_at(@n, bar_start, transport: transport, stream: @reading).to_f.round
+            Sequence::Clip.check_condition(MB::M.max(n, 1), @from)
           end
         end
 

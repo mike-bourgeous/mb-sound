@@ -67,8 +67,9 @@ module MB
             raise ArgumentError, "Arp swing must be from 0 to 1 (exclusive; got #{swing.inspect})" unless swing.is_a?(Numeric) && swing > 0 && swing < 1
 
             @mode = mode
-            @rate = Sequence::Duration.whole_notes(rate)
-            @rate_label = rate.is_a?(Integer) ? "n#{rate}" : rate.to_s
+            @rate_param = Param.param?(rate) ? Param.wrap(rate, 'Arp rate') : nil
+            @rate = @rate_param ? 1/16r : Sequence::Duration.whole_notes(rate) # (a param: read at each step)
+            @rate_label = rate.is_a?(Integer) ? "n#{rate}" : Param.label(rate)
             @scale = Scale[scale, root]
             @octave_step = Steps.new(step, scale: @scale)
             @octaves = octaves
@@ -115,6 +116,27 @@ module MB
             @rate * (@gate + 1) / transport.whole_notes_per_second
           end
 
+          # The step length (whole notes) at timeline position +wn+: the
+          # rate given, or a rate param's value read there (each step reads
+          # it once, at its own position; see MIDI::Param).
+          def rate_at(wn)
+            return @rate unless @rate_param
+            @rate = Arp.rate_of(Param.value_at(@rate_param, wn, transport: transport, stream: @reading))
+          end
+
+          # A rate param's value as whole notes: Integers and Floats of 1 or
+          # more are note divisions (16 = a 16th; Floats rounded), Durations
+          # and smaller numbers whole notes.
+          def self.rate_of(v)
+            case v
+            when Sequence::Duration then v.whole_notes
+            when Integer then Rational(1, MB::M.max(v, 1))
+            when Float then v >= 1 ? Rational(1, v.round) : Sequence::Duration.rational(MB::M.max(v, 1 / 128.0))
+            when Rational then v >= 1 ? Rational(1, v.round) : v
+            else Sequence::Duration.whole_notes(v)
+            end
+          end
+
           def process(events, from, to)
             idx = 0
             loop do
@@ -129,7 +151,7 @@ module MB
                 # They may have stopped or restarted the clock
                 if next_step(from) == step
                   play_step(*step)
-                  @next_step = step[0] == @immediate ? hybrid_next(step[0]) : step[0] + @rate
+                  @next_step = step[0] == @immediate ? hybrid_next(step[0]) : step[0] + rate_at(step[0])
                   @immediate = nil if step[0] == @immediate
                 end
               else
@@ -160,10 +182,11 @@ module MB
             return @next_step if @next_step
 
             now = timeline_at(from)
+            rate = rate_at(now)
             @next_step = if @start == :key && @origin
-                           @origin + ((now - @origin) / @rate).ceil * @rate
+                           @origin + ((now - @origin) / rate).ceil * rate
                          else
-                           (now / @rate).ceil * @rate
+                           (now / rate).ceil * rate
                          end
           end
 
@@ -182,6 +205,7 @@ module MB
                 @latched.clear
                 @index = 0
                 now = timeline_at(e.time)
+                rate_at(now) if @rate_param
                 if @start == :key
                   @origin = now
                   @next_step = now
@@ -211,6 +235,7 @@ module MB
               # consumed with the notes
 
             else
+              @reading.observe(e) if e.type == :cc
               schedule(e)
             end
           end
@@ -264,7 +289,7 @@ module MB
                      end
 
             offset = @offsets && @offsets[@index % @offsets.length]
-            following = step_wn == @immediate ? hybrid_next(step_wn) : step_wn + @rate
+            following = step_wn == @immediate ? hybrid_next(step_wn) : step_wn + (@rate_param ? rate_at(step_wn) : @rate)
             length = (stream_time_at(swung(following)) - step_time)
             length = @rate / transport.whole_notes_per_second if length <= 0
             off_time = step_time + length * @gate

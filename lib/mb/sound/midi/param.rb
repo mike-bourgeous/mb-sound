@@ -67,6 +67,30 @@ module MB
           end
         end
 
+        # +x+ for transform names (#to_s): params and plain values as Ruby,
+        # graph nodes as the expression that built them.
+        def self.label(x)
+          return x.to_s unless x.is_a?(GraphNode) || x.is_a?(GraphNode::Knob::Reader) || x.is_a?(Graph)
+          node = x.is_a?(Graph) ? x.node : x
+          text = (node.to_ruby rescue nil)
+          text && !text.include?("\n") ? text : node.to_s
+        end
+
+        # The largest value +x+ may take, as far as it says (a controller's
+        # or knob's range), else +fallback+: for tails (how long a
+        # transform may delay notes).
+        def self.largest(x, fallback)
+          case x
+          when CC then [x.spec.range.begin.abs, x.spec.range.end.abs].max
+          when Graph
+            n = Graph.unwrap(x.node)
+            n = n.knob if n.is_a?(GraphNode::Knob::Reader)
+            n.is_a?(GraphNode::Knob) ? [n.range.begin.abs, n.range.end.abs].max : fallback
+          when Numeric then x
+          else fallback
+          end
+        end
+
         # The Session whose MIDI input a #cc falls back to: the one
         # rendering on this thread, else the current one (without creating
         # one).
@@ -277,7 +301,7 @@ module MB
           end
 
           def to_ruby(&value_text)
-            value_text ? value_text.call(@node) : @node.to_s
+            value_text ? value_text.call(@node) : Param.label(@node)
           end
 
           # +node+ through Tee branches to the node behind them.
@@ -308,7 +332,8 @@ module MB
                 f = unwrap(n.frequency)
                 ok = f.is_a?(Sequence::TempoNode) && f.mode == :hz && n.phase_mod.nil? && SHAPES.include?(n.wave_type)
                 next if ok
-                raise NotAParam, "#{what} reads params at decision points: a tempo LFO like 2.bars.lfo (plain shapes, #at, with_phase) works; #{n} doesn't"
+                raise NotAParam, "#{what} reads params at decision points: a tempo LFO like 2.bars.lfo (plain shapes, #at, with_phase) works, " \
+                  "a #{n.wave_type} Tone at #{Param.label(n.frequency)} doesn't (a transform has no sample clock; to steer it from audio, have a knob follow it: turn :x, follow: node)"
               else
                 raise NotAParam, "#{what} reads params at decision points (knob(:x), cc(1), 2.bars.lfo, a clip, numbers, and sums or products of them), " \
                   "not audio-rate nodes like #{n.class.name.split('::').last}; to steer it from audio, have a knob follow it: turn :x, follow: node"

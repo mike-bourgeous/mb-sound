@@ -75,6 +75,8 @@ module MB
           'MB::Sound::Generative::Weights' => %i[+ - * / ** blur floor normalize blend over],
           'MB::Sound::Generative::Harmony' => %i[+ - * ** blur over],
           'MB::Sound::Generative::Field' => %i[**],
+          # Moving parameters of MIDI transforms (MIDI::Param#to_ruby)
+          'MB::Sound::MIDI::Param::Base' => ARITHMETIC.to_a,
           # Racks applied to sources (`sig.then(&arack { |s| ... })`;
           # Loader#call_block takes a Rack as the block argument), bound,
           # and composed
@@ -120,7 +122,7 @@ module MB
 
         # Top-level names besides the recorded MB::Sound methods (scale:
         # Scale values for transforms such as Clip#ghost_chords).
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :macro] | MB::Sound::Rack::CONSTRUCTORS).freeze
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :macro, :cc] | MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.
