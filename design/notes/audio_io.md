@@ -35,3 +35,5 @@ A realtime Session on an unpaced `NullOutput` (`sleep: false`) renders as fast a
 - `rake spec:parallel` reports examples whose RSS grew over 200 MB (`spec/support/rss_report.rb`, one `N.rss.json` per worker), next to the slow examples.
 
 Lessons, as mechanisms: a spec's waiting must be tied to the audio it waits for (virtual clock, not wall clock) -> runaway render threads, wall-clock flakes; unbounded work becomes a failure, not a slow run (render budget) -> spinning Sessions, accidental minutes-long renders; memory growth gets a number per example (RSS report) -> leaks and buffer-keeping outputs found by the example that caused them rather than by whichever worker ran out.
+
+A running default Session is process-wide state too: `play`/`bg` leave its render thread running (as the console wants), and a later example then shared it (midi_methods_spec's JACK example read nothing after channels_spec's `play`: a running realtime Session pumps its `MidiInput` from the render thread, so a graph sampled from the spec thread at its own positions never saw the note).  spec_helper closes it before each example when its thread is running, next to `close_outputs`.
