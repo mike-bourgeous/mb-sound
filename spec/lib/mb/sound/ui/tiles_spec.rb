@@ -176,6 +176,39 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_same_screen
   end
 
+  # Every LUFS line on the screen lies inside the meters pane (a pane body
+  # kept from an old layout drew at its old place: ux-1 bug 1).
+  def expect_meters_only_in_place
+    @term.settle
+    r = @tiles.tiler.rects[:meters]
+    [@tiles.to_text, @term.text].each do |text|
+      rows = text.lines.each_index.select { |y| text.lines[y].include?('LUFS') }
+      expect(rows.length).to eq(1), text
+      expect(rows[0]).to be_between(r.y, r.y + r.h - 1)
+      expect(text.lines[rows[0]].index('LUFS')).to be_between(r.x, r.x + r.w - 1)
+    end
+  end
+
+  it 'repaints every pane in its new place after a resize, a layout switch, and a terminal resize' do
+    start(source: -> { ui_fake_snapshot })
+    expect(@term.wait_for('LUFS')).to eq(true)
+    expect_meters_only_in_place
+
+    # Grow the transport row: everything below moves down
+    @tiles.resize(:down, 3, name: :transport)
+    expect_meters_only_in_place
+
+    @tiles.layout(:studio) # meters is the first tab of the right column
+    expect_meters_only_in_place
+    @tiles.layout(:tiles)
+    expect_meters_only_in_place
+
+    @term.resize(36, 120)
+    expect_meters_only_in_place
+    @tiles.undo
+    expect_meters_only_in_place
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')

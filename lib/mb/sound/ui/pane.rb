@@ -38,7 +38,14 @@ module MB
           c.clear
           if @title
             c.text(0, 0, (@title_text ||= @title.to_s.upcase.freeze), :title)
-            body = (state[:body] ||= c.sub(0, 1, c.w, c.h - 1))
+            # The body follows the canvas: a relayout (resize, another
+            # layout, a split) gives the pane a new canvas, and a body kept
+            # from the old one would keep drawing where the pane used to be
+            unless state[:body_of].equal?(c)
+              state[:body] = c.sub(0, 1, c.w, c.h - 1)
+              state[:body_of] = c
+            end
+            body = state[:body]
             body.row = 0
             c = body
           end
