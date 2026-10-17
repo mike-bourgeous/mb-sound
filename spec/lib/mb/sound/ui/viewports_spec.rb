@@ -43,6 +43,13 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect_tiling(studio, 120, 40)
     end
 
+    it 'shows every built-in pane in the :wall layout at 200x60 (ux-1 item 13)' do
+      rects = MB::Sound::UI.tile_layouts[:wall].rects(200, 59)
+      expect(rects.keys).to include(:repl, *MB::Sound::UI.panes.keys)
+      rects.each_value { |r| expect(r.w * r.h).to be > 0 }
+      expect(rects[:repl].w).to be >= 90
+    end
+
     it 'shares by largest remainder, ties to the earlier child' do
       kids = [MB::Sound::UI::Viewports::Pane.new(name: :a), MB::Sound::UI::Viewports::Pane.new(name: :b), MB::Sound::UI::Viewports::Pane.new(name: :c)]
       expect(MB::Sound::UI::Viewports.shares(kids, 10)).to eq([4, 3, 3])

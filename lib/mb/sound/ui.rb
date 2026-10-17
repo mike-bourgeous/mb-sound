@@ -11,6 +11,7 @@ require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
 require_relative 'ui/follow'
+require_relative 'ui/frame_rate'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
@@ -130,6 +131,15 @@ module MB
             cols {
               rows { repl; pane :keyboard, height: 8 }
               rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6 }
+            }
+          },
+          # For big terminals (about 200x60 and up): every pane at once
+          wall: Viewports.layout(:wall, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(width: 40) { pane :tracks; pane :queue, height: 8; pane :knobs, height: 10; pane :cpu, height: 10 }
+              rows(weight: 3) { repl; pane :keyboard, height: 8 }
+              rows(width: 60) { pane :meters, height: 6; pane :scope, height: 14; pane :spectrum, height: 14; pane :messages }
             }
           },
           studio: Viewports.layout(:studio, focus: :repl) {

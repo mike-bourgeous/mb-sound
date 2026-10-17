@@ -252,6 +252,22 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect(MB::Sound::UI::Tiles.key_table(:nav).join("\n")).to include("Panes:\n  1-9")
   end
 
+  it 'measures the frames it writes (fps), apart from the target, and shows them with NAV f (ux-1 item 12)' do
+    start(fps: 20, source: -> { ui_fake_snapshot(t: MB::U.clock_now, seq: (MB::U.clock_now * 100).to_i, scope_phase: MB::U.clock_now) })
+    expect(@tiles.target_fps).to eq(20)
+    sleep 2.1
+    expect(@tiles.fps).to be_between(10, 21) # what was written, at most the target
+    @tiles.target_fps = 30
+    expect { @tiles.target_fps = 0 }.to raise_error(ArgumentError, /1 to 240/)
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.type('f')
+    expect(@term.wait_for(/\d+ fps · \d+\.\d ms · \d+ kB\/s/)).to eq(true), @term.lines.last
+    stats = @tiles.stats
+    expect(stats[:pane_cpu_ms].keys).to include(:meters, :scope)
+    expect(stats[:target_fps]).to eq(30)
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')

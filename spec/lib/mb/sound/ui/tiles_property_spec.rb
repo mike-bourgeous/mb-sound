@@ -44,13 +44,13 @@ RSpec.describe('UI::Tiles relayout property', :aggregate_failures) do
       -> { @a.zoom(@a.tiler.layout.panes.sample(random: rng)) },
       -> { @a.undo },
       -> { @a.redo },
-      -> { @a.layout(%i[tiles studio keys].sample(random: rng)) },
+      -> { @a.layout(%i[tiles studio keys wall].sample(random: rng)) },
       -> { @ta.resize(rng.rand(24..40), rng.rand(90..140)) },
     ]
     # (One live REPL per process: Reline is global, so the edited screen
     # stops before the fresh one starts)
     3.times do |round|
-      @a, @ta = ui_tiles(%i[tiles studio keys].sample(random: rng), source: -> { snap })
+      @a, @ta = ui_tiles(%i[tiles studio keys wall].sample(random: rng), source: -> { snap })
       expect(@ta.wait_for(/ (REPL|KEYS) /)).to eq(true)
       8.times do
         ops.sample(random: rng).call

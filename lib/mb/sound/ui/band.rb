@@ -17,6 +17,7 @@ module MB
       # and the band redrawn anyway, in case something reset the terminal
       # (`reset`, a pager, Ctrl-L).
       class Band
+        include FrameRate
         include Follow
 
         # Seconds between reissuing the scroll region with a full redraw.
@@ -41,7 +42,7 @@ module MB
         # Slowest refreshes kept for #stats.
         SLOWEST = 5
 
-        attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed, :fps
+        attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed
 
         # The painter thread (nil while off or painting only on #refresh).
         attr_reader :thread
@@ -71,7 +72,7 @@ module MB
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
           @native = native
-          @fps = fps
+          init_frame_rate(fps)
           @panes = panes
           @source = source
           @feed = Feed.new
@@ -205,6 +206,7 @@ module MB
           if !cells.empty? || !bytes.empty? || reassert
             out = "\e[?2026h\e7#{region_cmd}#{cells}#{bytes}\e8\e[?2026l"
             write(out)
+            note_written(now, out.bytesize)
           end
 
           cpu = thread_cpu - cpu0
@@ -237,6 +239,8 @@ module MB
             bytes: { mean: written.empty? ? 0 : written.sum / written.length, max: written.max || 0 },
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             yields: @yields,
+            fps: fps,
+            target_fps: @target_fps,
             slowest: @slowest.map { |at, cpu, parts|
               { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: (parts || {}).transform_values { |v| MB::M.sigfigs(v * 1000, 3) } }
             },
@@ -333,7 +337,6 @@ module MB
         def paint_loop
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
-          tick = 1.0 / @fps
           until @stopping
             t = @clock.call
             begin
@@ -342,7 +345,7 @@ module MB
               warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
               @painter_warned = true
             end
-            left = tick - (@clock.call - t)
+            left = 1.0 / @target_fps - (@clock.call - t)
             sleep(left) if left > 0
           end
         rescue => e

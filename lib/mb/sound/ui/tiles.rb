@@ -25,6 +25,7 @@ module MB
       #     ui off
       class Tiles
         include Follow
+        include FrameRate
 
         # Seconds between size checks (besides SIGWINCH).
         SIZE_CHECK = 0.5
@@ -52,6 +53,7 @@ module MB
           on 'p', :keys
           on '?', :key_help
           on 'm', :messages
+          on 'f', :show_fps
         end
 
         # The keys by mode, in groups ([group, [[keys, what], ...]]): the
@@ -72,7 +74,7 @@ module MB
               [':', 'run a line of Ruby (show :knobs, go :drop)'], ['Ctrl-L', 'redraw'],
             ]],
             ['Modes', [
-              ['p', 'play the keyboard (KEYS)'], ['m', 'messages (warnings) pane, again: away'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
+              ['p', 'play the keyboard (KEYS)'], ['m', 'messages (warnings) pane, again: away'], ['f', 'frame rate on the status line'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
               ['Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'], ['?', 'this help'],
             ]],
           ],
@@ -111,7 +113,7 @@ module MB
         # for their releases).
         KEYS_KITTY_FLAGS = 1 | 2 | 8
 
-        attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :fps, :mode
+        attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :mode
 
         # +layout+ a Viewports::Layout with a repl pane; +input+/+output+
         # the terminal (dup'd, so they keep reaching it after :adopt
@@ -141,7 +143,7 @@ module MB
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
           @native = native
-          @fps = fps
+          init_frame_rate(fps)
           @panes = panes
           @source = source
           @mouse = mouse
@@ -163,6 +165,8 @@ module MB
           @midi_seen = nil
           @overlay = nil
           @messages_restore = nil
+          @show_fps = false
+          @pane_cpu = Hash.new { |h, k| h[k] = [] }
           @gaps = nil
           @title_rules = nil
           @rows, @cols = @fixed_size || [24, 80]
@@ -342,6 +346,9 @@ module MB
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             repl_bytes: @host&.bytes_read.to_i,
             repl_reader_cpu_ms: ((@host&.reader_cpu || 0) * 1000).round(1),
+            fps: fps,
+            target_fps: @target_fps,
+            pane_cpu_ms: @pane_cpu.to_h { |name, q| [name, UI.percentiles(q.map { |c| c * 1000 })] },
             slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
         end
@@ -624,6 +631,14 @@ module MB
           self
         end
 
+        # Shows the measured frame rate on the status line ("42 fps · 0.3
+        # ms · 18 kB/s": frames written per second, the painter's CPU per
+        # frame, bytes per second; see FrameRate), or hides it.
+        def show_fps(on = true)
+          @show_fps = on
+          self
+        end
+
         # True while the key overlay shows.
         def key_help? = !@overlay.nil?
 
@@ -705,6 +720,7 @@ module MB
           when :keys then keys
           when :key_help then key_help
           when :messages then messages
+          when :show_fps then show_fps(!@show_fps)
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil
           when :complete then complete_palette
@@ -1001,7 +1017,6 @@ module MB
         def paint_loop
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
-          tick = 1.0 / @fps
           until @stopping || @hidden
             t = @clock.call
             begin
@@ -1010,7 +1025,7 @@ module MB
               warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
               @painter_warned = true
             end
-            left = tick - (@clock.call - t)
+            left = 1.0 / @target_fps - (@clock.call - t)
             sleep(left) if left > 0
           end
         rescue => e
@@ -1124,6 +1139,7 @@ module MB
             end
             rate = p.opts[:rate].is_a?(Numeric) && p.opts[:rate] > 0 ? p.opts[:rate] : pane.rate
             next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
+            t0 = thread_cpu
             begin
               r = p.rect
               if pane.bytes?
@@ -1139,6 +1155,9 @@ module MB
               pane_failed(p, e)
             end
             @drawn_at[p.name] = now
+            d = thread_cpu - t0
+            (q = @pane_cpu[p.name]) << d
+            q.shift if q.length > 200
             drawn += 1
             Thread.pass
           end
@@ -1155,6 +1174,7 @@ module MB
           if !cells.empty? || !bytes.empty? || cursor != @last_cursor || full
             out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{bytes}#{cursor}\e[?2026l"
             write(out)
+            note_written(now, out.bytesize)
             @last_cursor = cursor
           end
           cpu = thread_cpu - cpu0
@@ -1364,6 +1384,7 @@ module MB
           @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          right = "#{frame_rate[:text]}  #{right}" if @show_fps
           unread = UI.messages.unread
           if unread > 0 && !@tiler.layout.panes.include?(:messages)
             badge_w = " ! #{unread} (m) "
