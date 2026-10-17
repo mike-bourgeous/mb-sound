@@ -143,11 +143,13 @@ module MB
         words = text.downcase.scan(/[a-z0-9_!?]+/)
         if words.length == 1
           w = words[0].to_sym
-          return page_for(w) if TOPICS.key?(w) || TOPIC_ALIASES.key?(w) || GROUPS.key?(w) || !index.find_all(w).empty?
+          return page_for(w) if TOPICS.key?(w) || TOPIC_ALIASES.key?(w) || GROUPS.key?(w) || !index.find_all(w).empty? || !UI::HelpIndex.named(w).empty?
         end
         best = words_topic(words)
         return topic_page(best) if best
-        SearchPage.new(Regexp.union(words.reject { |x| STOP_WORDS.include?(x) }.map { |x| /#{Regexp.escape(x)}/i }), index)
+        kept = words.reject { |x| STOP_WORDS.include?(x) }
+        kept = words if kept.empty? # (`help on`: a UI method named like a stop word)
+        SearchPage.new(Regexp.union(kept.map { |x| /#{Regexp.escape(x)}/i }), index)
       end
 
       # Words `help` ignores when matching text.

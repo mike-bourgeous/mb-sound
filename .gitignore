@@ -32,3 +32,7 @@
 .gh-user
 
 .DS_Store
+
+# Golden screen captures that differ (spec/support/golden.rb)
+spec/lib/mb/sound/ui/golden/*.actual.txt
+spec/lib/mb/sound/ui/golden/*.diff.html

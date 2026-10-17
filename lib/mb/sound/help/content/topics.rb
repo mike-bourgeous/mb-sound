@@ -863,6 +863,13 @@ module MB
         d.heading('Layouts  (* on screen now)').rows(rows, max_label: 18, wrap: true)
       end
       section do |d|
+        # (The pane catalog, ui.panes: ux-1 r3 item 40)
+        d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
+        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.heading('Sizes  (one decision per terminal size: UI::Density)')
+        d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
+      end
+      section do |d|
         UI::Tiles::KEY_HELP.each do |mode, groups|
           groups.each do |group, keys|
             d.heading("#{group} keys  #{Help::Text.c(:dim, { nav: '(NAV: Ctrl-])', grab: '(KEYS: F2, keys)', step: '(step entry: Tab in KEYS)' }[mode])}")

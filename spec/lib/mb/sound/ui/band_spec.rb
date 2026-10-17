@@ -9,12 +9,15 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
   # bytes not included: Band#to_text is the cell grid).
   BAND_TEXT = <<~TEXT
     ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                  drop 1 ████▌    5/8  → break 21:1
-    TRACKS                      QUEUED                   MASTER
+    TRACKS                      QUEUED                   MASTER                      SCOPE
     ● drums  beat_a             17:3   knob :cut         L ████████████████▍    -8.1
     ● bass   bass_a             18:1   mute :pad         R ████████████████▍    -8.4
     ● lead   rec →21:1                                   S -14.2 LUFS  TP -0.6
     ● pad    stopping chords                             RMS -18.0 -18.2
   TEXT
+
+  # The band's rule toward the console (ux-1 r3 item 3; 25 rows and up).
+  BAND_RULE = '─' * 120
 
   def rstripped(text) = text.lines.map(&:rstrip).join("\n").sub(/\n+\z/, '')
 
@@ -22,8 +25,8 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band, = ui_fake_band(:band)
     band.start(thread: false)
     band.refresh(0.0)
-    expect(band.height).to eq(7)
-    expect(rstripped(band.to_text)).to eq(rstripped(BAND_TEXT))
+    expect(band.height).to eq(8)
+    expect(rstripped(band.to_text)).to eq(rstripped(BAND_TEXT + "\n" + BAND_RULE))
   end
 
   it 'draws the deck with knobs and CPU per part' do
@@ -31,6 +34,7 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band.start(thread: false)
     band.refresh(0.0)
     lines = band.to_text.lines.map(&:rstrip)
+    expect(lines.pop).to eq(BAND_RULE) # (the rule toward the console)
     expect(lines[1]).to match(/\ATRACKS +QUEUED +KNOBS\z/)
     expect(lines[2]).to match(/cut +█+▉? +2400 Hz\z/)
     expect(lines[3]).to match(/drive +█+ +0\.3\z/)
@@ -62,10 +66,10 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band, io = ui_fake_band(:band, size: [30, 120])
     band.start(thread: false)
     setup = io.string.dup
-    expect(setup).to eq("\e[30;1H#{"\n" * 7}\e[8;30r\e[23;1H")
+    expect(setup).to eq("\e[30;1H#{"\n" * 8}\e[9;30r\e[22;1H")
 
     out = band.refresh(0.0)
-    expect(out).to start_with("\e[?2026h\e7\e[8;30r\e[0m\e[1;1H")
+    expect(out).to start_with("\e[?2026h\e7\e[9;30r\e[0m\e[1;1H")
     expect(out).to end_with("\e8\e[?2026l")
     expect(io.string).to eq(setup + out)
 
@@ -74,23 +78,24 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
 
     # The scroll region is reissued (with a full redraw) every REASSERT seconds
     again = band.refresh(described_class::REASSERT + 0.1)
-    expect(again).to start_with("\e[?2026h\e7\e[8;30r")
+    expect(again).to start_with("\e[?2026h\e7\e[9;30r")
     expect(again.bytesize).to be > 1000
 
     band.stop
-    expect(io.string).to end_with("\e7\e[r#{(1..7).map { |r| "\e[#{r};1H\e[2K" }.join}\e8")
+    expect(io.string).to end_with("\e7\e[r#{(1..8).map { |r| "\e[#{r};1H\e[2K" }.join}\e8")
   end
 
   it 'leaves the top rows to Pry with the band at the bottom' do
     band, io = ui_fake_band(:band, size: [30, 120], at: :bottom)
     band.start(thread: false)
-    expect(band.region).to eq([1, 23])
-    expect(band.band_top).to eq(24)
+    expect(band.region).to eq([1, 22])
+    expect(band.band_top).to eq(23)
     out = band.refresh(0.0)
-    expect(out).to start_with("\e[?2026h\e7\e[1;23r\e[0m\e[24;1H")
+    expect(out).to start_with("\e[?2026h\e7\e[1;22r\e[0m\e[23;1H")
     screen = MB::Sound::UI::Screen.new(30, 120)
     screen << io.string
-    expect(rstripped(screen.lines.last(7).map { |l| l[0, 80] }.join("\n"))).to eq(rstripped(BAND_TEXT.lines.map { |l| l.chomp[0, 80] }.join("\n")))
+    # The rule first, between the console and the band (ux-1 r3 item 3)
+    expect(rstripped(screen.lines.last(8).map { |l| l[0, 80] }.join("\n"))).to eq(rstripped(([BAND_RULE] + BAND_TEXT.lines).map { |l| l.chomp[0, 80] }.join("\n")))
   end
 
   it 'rebuilds the full frame from diffed frames (replayed through UI::Screen)' do
@@ -165,7 +170,7 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band.resized!
     out = band.refresh(0.1)
     expect([band.rows, band.cols]).to eq([40, 100])
-    expect(out).to start_with("\e[?2026h\e7\e[8;40r")
+    expect(out).to start_with("\e[?2026h\e7\e[9;40r")
     screen = MB::Sound::UI::Screen.new(40, 100)
     screen << out
     expect(screen.lines[0]).to start_with('▶ 17:3')
@@ -183,5 +188,38 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band.start(thread: false)
     band.refresh(0.0)
     expect(band.to_text).to include('no session yet')
+  end
+
+  it 'grows and shrinks at the bottom without asking the terminal for its cursor, the console\'s lines scrolled up (ux-1 r3 item 2)' do
+    band, io = ui_fake_band(:band, size: [30, 120], at: :bottom)
+    band.start(thread: false)
+    band.refresh(0.0)
+    screen = MB::Sound::UI::Screen.new(30, 120)
+    # The console's lines just above the band, the cursor on the last
+    screen << io.string << "\e[1;1H" << (1..22).map { |i| "line #{i}" }.join("\r\n")
+    io.truncate(0)
+    io.rewind
+    close = nil
+    Thread.new { close = band.plot_pane(:messages, height: 4) }.join # (from another thread, as the painter does)
+    expect(io.string).not_to include("\e[6n")
+    screen << io.string
+    lines = screen.lines.map(&:rstrip)
+    expect(band.height).to eq(12)
+    expect(lines[17]).to eq('line 22') # (scrolled up by the 4 rows the band grew)
+    expect(lines[14]).to eq('line 19')
+    expect([screen.row, screen.col]).to eq([17, 7]) # (back after line 22)
+    expect(lines[18..].join).not_to include('line')
+
+    # Shrinking back leaves the console's lines and the cursor where they are
+    io.truncate(0)
+    io.rewind
+    Thread.new { close.call }.join
+    expect(io.string).not_to include("\e[6n")
+    screen << io.string
+    lines = screen.lines.map(&:rstrip)
+    expect(band.height).to eq(8)
+    expect(lines[17]).to eq('line 22')
+    expect([screen.row, screen.col]).to eq([17, 7])
+    expect(lines[18..21].join.strip).to eq('')
   end
 end
