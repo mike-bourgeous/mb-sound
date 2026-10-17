@@ -149,11 +149,12 @@ module MB
             nil
           end
 
-          # Sends a key (its bytes; legacy bytes for keys decoded from the
-          # kitty protocol).
+          # Sends a key (its bytes; legacy bytes for keys in the kitty
+          # protocol's forms: CSI u, event types, an explicit "no
+          # modifiers" 1, which line editors don't read).
           def key(k)
             b = k.bytes
-            write(b.nil? || b.match?(/\A\e\[[\d;:]*u\z/n) ? Input.legacy_bytes(k) : b)
+            write(b.nil? || Input.kitty_bytes?(b) ? Input.legacy_bytes(k) : b)
           end
 
           # Pastes +text+ (bracketed when the program turned that on).
@@ -265,9 +266,26 @@ module MB
           end
         end
 
+        # True for key bytes only the kitty keyboard protocol sends: CSI u,
+        # an event type after the modifiers ("1;1:2A"), or a modifier field
+        # of 1 (none) on a cursor or tilde key ("\e[1;1A").
+        def self.kitty_bytes?(b)
+          b.match?(/\A\e\[[\d;:]*u\z/n) || b.match?(/\A\e\[[\d;]*:[\d;:]*[A-Z~]\z/n) || b.match?(/\A\e\[\d+;1[A-Z~]\z/n)
+        end
+
         # Legacy terminal bytes for a Key without its own (kitty-protocol
-        # keys forwarded to a program that reads legacy input).
+        # keys forwarded to a program that reads legacy input).  Cursor and
+        # editing keys keep Shift, Alt, and Ctrl as xterm sends them
+        # ("\e[1;5D" for Ctrl-Left).
         def self.legacy_bytes(k)
+          mod = 1 + (k.mods.include?(:shift) ? 1 : 0) + (k.mods.include?(:alt) ? 2 : 0) + (k.mods.include?(:ctrl) ? 4 : 0)
+          if mod > 1
+            letter = { up: 'A', down: 'B', right: 'C', left: 'D', home: 'H', end: 'F' }[k.key]
+            return "\e[1;#{mod}#{letter}" if letter
+            tilde = { delete: 3, page_up: 5, page_down: 6 }[k.key]
+            return "\e[#{tilde};#{mod}~" if tilde
+          end
+
           base =
             case k.key
             when :enter then "\r"

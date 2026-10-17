@@ -25,6 +25,7 @@ module MB
       #     ui off
       class Tiles
         include Follow
+        include FrameRate
 
         # Seconds between size checks (besides SIGWINCH).
         SIZE_CHECK = 0.5
@@ -41,15 +42,69 @@ module MB
 
         # Keys hinted on the status line per mode.
         HINTS = {
-          repl: 'Ctrl-] nav',
-          nav: '1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
-          grab: 'Ctrl-] back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
+          repl: 'Ctrl-] nav  F2 keys',
+          nav: '? keys  1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
+          grab: 'Ctrl-]/F2 back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
           step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
 
         # NAV keys of mb-sound's own panes (after Router::NAV).
         NAV_EXTRA = Input::Keymap.new(:tiles) do
           on 'p', :keys
+          on '?', :key_help
+          on 'm', :messages
+          on 'f', :show_fps
+        end
+
+        # The keys by mode, in groups ([group, [[keys, what], ...]]): the
+        # `?` overlay in NAV mode shows the :nav groups and the focused
+        # pane's (the keyboard's :grab or :step), and `help :ui` prints
+        # them (Tiles.key_table).
+        KEY_HELP = {
+          nav: [
+            ['Panes', [
+              ['1-9', 'pick a pane by its number'], ['Tab S-Tab h j k l', 'next, previous, by direction'],
+              ['z', 'zoom (again: back)'], ['s v', 'split below, beside'], ['x', 'close (the REPL stays)'],
+              ['=', 'even out sizes'], ['arrows', 'resize by 1 (Shift: 5)'], ['[ ]', 'previous, next tab'],
+              ['u Ctrl-R', 'undo, redo'],
+            ]],
+            ['Console', [
+              ['PgUp PgDn', 'scroll the REPL (also Ctrl-B Ctrl-F)'], ['g G', 'oldest line, live'],
+              ['/ n N', 'search back, next, previous'], ['y', 'copy the match or the view (OSC 52)'],
+              [':', 'run a line of Ruby (show :knobs, go :drop)'], ['Ctrl-L', 'redraw'],
+            ]],
+            ['Modes', [
+              ['p F2', 'play the keyboard (KEYS; F2 also from the REPL)'], ['m', 'messages (warnings) pane, again: away'], ['f', 'frame rate on the status line'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
+              ['Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'], ['?', 'this help'],
+            ]],
+          ],
+          grab: [
+            ['Keyboard', [
+              ['z s x d c v ...', 'notes from C3 (lower row)'], ['q 2 w 3 e r ...', 'notes from C4 (upper row)'],
+              ['- + Left Right', 'octave down, up'], ['Up Down', 'velocity'], ['Shift / Ctrl', 'accent / soft'],
+              ['Space', 'sustain'], ['Esc', 'all notes off'], ['Enter', 'capture into the armed tracks'],
+              ['`', 'note-off mode'], ['Tab', 'step entry'], ['Ctrl-] Ctrl-C F2', 'back to the REPL'],
+            ]],
+          ],
+          step: [
+            ['Step entry', [
+              ['z x c v ...', 'a note (several at once: a chord)'], ['1-7', 'whole .. 64th'], ['8 9', 'dotted, triplet'],
+              ['r t', 'rest, tie'], ['a `', 'accent, slide the last step'], ['BkSp Del', 'undo a step, clear'],
+              ['p', 'play the clip'], ['w', 'swap it into the armed tracks'], ['Enter', 'done: its Ruby on the REPL line'],
+              ['Tab', 'back to playing'],
+            ]],
+          ],
+        }.freeze
+
+        # The key table for +modes+ as text lines (for help :ui).
+        def self.key_table(*modes)
+          modes = KEY_HELP.keys if modes.empty?
+          modes.flat_map do |m|
+            KEY_HELP.fetch(m).flat_map do |group, keys|
+              w = keys.map { |k, _| k.length }.max
+              ["#{group}:", *keys.map { |k, what| "  #{k.ljust(w)}  #{what}" }, '']
+            end
+          end
         end
 
         # Kitty keyboard protocol flags pushed while KEYS mode has the
@@ -58,7 +113,7 @@ module MB
         # for their releases).
         KEYS_KITTY_FLAGS = 1 | 2 | 8
 
-        attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :fps, :mode
+        attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :mode
 
         # +layout+ a Viewports::Layout with a repl pane; +input+/+output+
         # the terminal (dup'd, so they keep reaching it after :adopt
@@ -73,8 +128,8 @@ module MB
         def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :quad,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
-                       keyboard: nil, keys_kitty: nil)
-          raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl?
+                       keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil)
+          raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
           @layout_name = layout.name
@@ -88,7 +143,7 @@ module MB
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
           @native = native
-          @fps = fps
+          init_frame_rate(fps)
           @panes = panes
           @source = source
           @mouse = mouse
@@ -108,6 +163,12 @@ module MB
           @palette_history = []
           @search_history = []
           @midi_seen = nil
+          @overlay = nil
+          @messages_restore = nil
+          @show_fps = false
+          @pane_cpu = Hash.new { |h, k| h[k] = [] }
+          @gaps = nil
+          @title_rules = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
           @router = Input::Router.new(self, nav_esc: nav_esc)
@@ -118,6 +179,9 @@ module MB
           @states[:keyboard][:keyboard] = @keyboard
           @kitty_pushed = false
           @start_keys = layout.focus == :keyboard
+          @on_key = on_key
+          @hints = hints
+          @note = nil
         end
 
         # The virtual keyboard (UI::Keyboard) KEYS mode plays.
@@ -147,10 +211,12 @@ module MB
           @rows, @cols = terminal_size
           @tiler.resize_screen(@cols, @rows - 1)
           relayout
-          r = repl_rect || Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
-          @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
-                                      target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
-          @host.start
+          unless @repl_mode == :none
+            r = repl_rect || Viewports::Rect.new(0, 0, [@cols, 20].min, [@rows - 1, 5].max)
+            @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
+                                        target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
+            @host.start
+          end
           @active = true
           @stopping = false
           install_signals
@@ -158,6 +224,10 @@ module MB
           @term.typed_during_probe.each { |e| handle(e) }
           hook_keyboard
           keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
+          # :wall stays opt-in (maintainer, 2026-10-17); big terminals get a tip
+          if @host && @layout_name != :wall && @rows >= 60 && @cols >= 200
+            flash('a big terminal: ui :wall shows every pane at once', :dim)
+          end
           if thread
             @painter = Thread.new { paint_loop }
             @reader = Thread.new { input_loop }
@@ -188,6 +258,11 @@ module MB
           self
         end
 
+        # True when the screen's REPL is the console's (adopted): stderr
+        # goes to its pane, so UI::Messages keeps warnings for the
+        # messages pane instead.
+        def owns_terminal? = @active && (@repl_mode == :adopt || @repl_mode == :none)
+
         # True while hidden with Ctrl-Z (#hide): `ui` (or Ctrl-Z again)
         # shows it again with the same panes, scrollback, and REPL.
         def hidden? = @hidden == true
@@ -199,7 +274,7 @@ module MB
         # its edits, and the scrollback wait.  `ui`, `ui :<this layout>`, or
         # Ctrl-Z again bring the tiles back.  Returns self.
         def hide
-          return self unless @active
+          return self unless @active && @host # (a screen without a console has nothing to hide to)
 
           exit_keys
           @lock.synchronize do
@@ -214,7 +289,7 @@ module MB
           detach
           paste = @host.vt.bracketed_paste?
           @term.write("\e[?2026l\e[?1006l\e[?1002l\e[?1000l\e[0m\e[?25h\e[?1049l#{paste ? '' : "\e[?2004l"}" \
-                      "\r\n\e[2m(ui: tiles hidden; the session plays on.  Ctrl-Z or `ui` brings them back.)\e[0m\r\n")
+                      "\r\n\e[2m(ui: tiles hidden; the session plays on.  fg, Ctrl-Z, or `ui` brings them back; jobs lists what runs.)\e[0m\r\n")
           @host.relay = @term.output
           # Reline redraws its prompt and line on the terminal, at its size
           rows, cols = @term.size
@@ -280,6 +355,9 @@ module MB
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             repl_bytes: @host&.bytes_read.to_i,
             repl_reader_cpu_ms: ((@host&.reader_cpu || 0) * 1000).round(1),
+            fps: fps,
+            target_fps: @target_fps,
+            pane_cpu_ms: @pane_cpu.to_h { |name, q| [name, UI.percentiles(q.map { |c| c * 1000 })] },
             slowest: @slowest.map { |at, cpu| { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: {} } },
           }
         end
@@ -307,7 +385,15 @@ module MB
         end
 
         # Closes the focused pane (or +name+).
-        def close(name = nil) = tile { |t| t.close(name || t.focus) }
+        # The REPL stays (without it the console has nowhere to draw; zoom
+        # another pane over it instead).
+        def close(name = nil)
+          tile do |t|
+            name ||= t.focus
+            raise Viewports::Error, 'The REPL pane stays (z zooms another pane over it)' if name == :repl
+            t.close(name)
+          end
+        end
 
         # Toggles zooming the focused pane (or +name+).
         def zoom(name = nil) = tile { |t| t.zoom(name || t.focus) }
@@ -409,6 +495,7 @@ module MB
         # Searches the REPL's scrollback for +pattern+ (backward), scrolling
         # to the match.  Returns [line, from, to] or nil.
         def search(pattern, dir = 1)
+          return flash('no console to search here', :warn) && nil unless @host
           @search = pattern
           vt = @host.vt
           from = @match ? @match[0] : nil
@@ -431,6 +518,7 @@ module MB
         # Copies the search match's line (or the REPL pane's visible text)
         # to the system clipboard with OSC 52.  Returns the text.
         def copy
+          return flash('no console to copy from here', :warn) && nil unless @host
           vt = @host.vt
           text = @host.synchronize do
             if @match
@@ -473,22 +561,110 @@ module MB
         #     ui.keys off: :tap       # fixed-length notes
         #     ui.keys step: true      # step entry
         def keys(on = true, off: nil, step: nil, patch: :keep)
-          return leave_keys.then { self } unless on
+          return exit_keys.then { self } unless on
 
+          start if @hidden # (from the hidden console: the tiles come back first)
           @keyboard.off_mode = off if off
           @keyboard.entry = step ? :step : :play unless step.nil?
           @keyboard.out.patch = patch if patch != :keep && @keyboard.out.respond_to?(:patch=)
           unless @tiler.layout.panes.include?(:keyboard)
             tile do |t|
               t.split(@tiler.layout.panes.include?(:repl) ? :repl : t.focus, :rows, :keyboard)
-              h = t.rects[:keyboard]&.h.to_i
-              t.resize(:keyboard, :down, h - 8) if h > 8
+              fit_height(t, :keyboard, 8)
             end
           end
           tile { |t| t.focus!(:keyboard) }
           @router.mode = :grab
           self
         end
+
+        # Puts pane +kind+ (:scope, :spectrum) on the screen for a plot (see
+        # PlaybackMethods#visualize): nothing if the layout shows it, else a
+        # slot of +height+ rows below the REPL (the focus stays).  Returns a
+        # Proc that closes the slot again (nil if nothing changed).
+        def plot_pane(kind, height: 10)
+          return nil if @tiler.layout.panes.include?(kind)
+          tile do |t|
+            was = t.focus
+            t.split(t.layout.panes.include?(:repl) ? :repl : was, :rows, kind)
+            fit_height(t, kind, height)
+            t.focus!(was)
+          end
+          -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
+        end
+
+        # What is wrong with the mode state, as a list (empty when every
+        # invariant holds): KEYS mode's keyboard, kitty flags, and notes
+        # follow the router's mode exactly, and nothing plays the keyboard
+        # while hidden.  Every way into and out of KEYS goes through
+        # #mode_changed, which keeps these; a spec drives random key
+        # sequences against them.
+        def mode_problems
+          grab = @router.mode == :grab
+          out = []
+          out << "keyboard #{@keyboard.active? ? 'active' : 'inactive'} in #{@router.mode} mode" if grab != @keyboard.active?
+          out << "kitty flags pushed in #{@router.mode} mode" if @kitty_pushed && !grab
+          out << 'KEYS mode while hidden' if grab && @hidden
+          out << "notes #{@keyboard.held.inspect} held in #{@router.mode} mode" if !grab && !@keyboard.held.empty?
+          if @host
+            out << 'no REPL pane' unless @tiler.layout.panes.include?(:repl)
+            out << "REPL mode with #{@tiler.layout.zoom.inspect} zoomed over the REPL" if @router.mode == :repl && @tiler.layout.zoom && @tiler.layout.zoom != :repl
+          end
+          out
+        end
+
+        # Shows (or hides) the key overlay: NAV's keys, and the focused
+        # pane's (the keyboard's).  Any key closes it.
+        def key_help(on = @overlay.nil?)
+          @lock.synchronize do
+            @overlay =
+              if on
+                groups = KEY_HELP[:nav].dup
+                groups += KEY_HELP[@keyboard.entry == :step ? :step : :grab] if @tiler.focus == :keyboard
+                groups
+              end
+            @full = true
+          end
+          self
+        end
+
+        # Shows the messages pane (warnings and live errors while the UI is
+        # up; see UI::Messages) in a slot below the REPL, or takes it away
+        # again (+on+ false).  Marks the messages read.
+        def messages(on = !@tiler.layout.panes.include?(:messages))
+          UI.messages.mark_read
+          if on
+            @messages_restore ||= plot_pane(:messages, height: 8)
+          elsif @messages_restore
+            @messages_restore.call
+            @messages_restore = nil
+          else
+            close(:messages) if @tiler.layout.panes.include?(:messages)
+          end
+          self
+        end
+
+        # Shows the measured frame rate on the status line ("42 fps · 0.3
+        # ms · 18 kB/s": frames written per second, the painter's CPU per
+        # frame, bytes per second; see FrameRate), or hides it.
+        def show_fps(on = true)
+          @show_fps = on
+          self
+        end
+
+        # Shows +text+ on the status line for a few seconds (+role+ its
+        # color: :ok, :warn, :bad, ...).
+        def say(text, role = :text)
+          flash(text, role)
+          self
+        end
+
+        # A note that stays on the status line instead of the hints (nil:
+        # none), e.g. "song ended: q quits" for a script's screen.
+        attr_accessor :note
+
+        # True while the key overlay shows.
+        def key_help? = !@overlay.nil?
 
         ### Router host (called on the input thread)
 
@@ -500,6 +676,7 @@ module MB
         end
 
         def repl_key(k)
+          return @on_key&.call(k) unless @host
           if @scroll > 0
             @scroll = 0
             @match = nil
@@ -509,12 +686,23 @@ module MB
         end
 
         def repl_paste(text)
-          @host.paste(text)
+          @host&.paste(text)
         end
 
         def mode_changed(m)
           @full = true
-          m == :grab ? enter_keys : leave_keys
+          return enter_keys if m == :grab
+
+          was = @keyboard.active?
+          leave_keys
+          # Out of KEYS, the focus goes back to the REPL, so a NAV round
+          # trip (Ctrl-] i or Enter) comes back to the REPL, not into the
+          # keyboard (where Up and Down change the velocity)
+          tile { |t| t.focus!(:repl) } if was && m == :repl && @tiler.layout.panes.include?(:repl)
+          # Typing goes to the REPL, so it must be on screen: a zoom on
+          # another pane ends (zoom the REPL itself to keep a big one)
+          z = @tiler.layout.zoom
+          tile { |t| t.zoom(z) } if m == :repl && z && z != :repl && @host
         end
 
         def line_done(kind, text)
@@ -553,8 +741,11 @@ module MB
           when :copy then copy
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
           when :redraw then @full = true
-          when :panic then run_safely { MB::Sound.panic }
+          when :panic then run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
+          when :key_help then key_help
+          when :messages then messages
+          when :show_fps then show_fps(!@show_fps)
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil
           when :complete then complete_palette
@@ -571,6 +762,17 @@ module MB
         private
 
         def mono_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        # Makes pane +name+ (just split off below another) +height+ rows by
+        # moving its top edge, the rows going to or coming from the pane
+        # above (weights round, so it may take a second step).
+        def fit_height(t, name, height)
+          2.times do
+            h = t.rects[name]&.h.to_i
+            break if h == height || h == 0
+            t.resize(name, :up, height - h)
+          end
+        end
 
         # The keyboard's Enter (capture) and step entry's Enter (a clip).
         def hook_keyboard
@@ -591,15 +793,54 @@ module MB
           s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('swap: arm a track first (arm :lead); Enter puts the clip on the console line instead', :warn) if armed.empty?
-          run_safely { Session.with_context(session: s) { armed.keys.map { |name| s.arrangement.play(name, clip) } } }
+          ruby = clip.to_ruby
+          landed = armed.keys.map { |name| [name, run_for_track('swap', name) { UI.run_line("bg #{name.inspect}, #{ruby}", s) }] }
+          flash_changes('swap', landed, "#{ruby} ")
         end
 
-        # Enter in KEYS mode: `capture` into the armed tracks.
+        # Enter in KEYS mode: `capture` into each armed track (one line
+        # each, so a track whose patch fails leaves the others captured).
         def capture_keys
           s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('capture: arm a track first (arm :lead), then play and press Enter', :warn) if armed.empty?
-          run_safely { Session.with_context(session: s) { MB::Sound.capture } }
+          landed = armed.keys.map { |name| [name, run_for_track('capture', name) { UI.run_line("capture #{name.inspect}", s) }] }
+          flash_changes('capture', landed, 'what you played ')
+        end
+
+        # Runs a UI action's change for track +name+.  An error (a patch
+        # that doesn't build, ...) goes to the messages pane naming the
+        # track and where in the patch it happened; returns :failed.
+        def run_for_track(what, name)
+          r = yield
+          # (live, a failure is a warning, which the messages pane got, and
+          # nothing to show for it)
+          r.respond_to?(:lands) ? r : :failed
+        rescue StandardError, ScriptError => e
+          if e.is_a?(Arrangement::Recording::CaptureFailed)
+            UI.messages.add(e.message, severity: :error) # (it names the track and line itself)
+          else
+            where = UI.error_origin(e)
+            UI.messages.add("#{what} into #{name.inspect} failed: #{e.class}: #{e.message}#{where ? " (at #{where})" : ''}", severity: :error)
+          end
+          :failed
+        end
+
+        # Says what KEYS mode's Enter or step entry's w did, so an
+        # accidental capture is obvious: "capture: what you played loops
+        # into :lead at 5:1 (undo takes it back)", and which tracks failed
+        # ("; :bass failed (m: messages)").  +landed+ is [track, journal
+        # entry, nil, or :failed] pairs.
+        def flash_changes(what, landed, thing)
+          failed = landed.select { |_, e| e == :failed }.map(&:first)
+          ok = landed.reject { |_, e| e.nil? || e == :failed }
+          fail_text = failed.empty? ? '' : "#{failed.map(&:inspect).join(', ')} failed (m: messages)"
+          if ok.empty?
+            flash("#{what}: #{fail_text.empty? ? 'nothing changed' : fail_text}", :bad)
+            return
+          end
+          where = ok.map { |name, e| "#{name.inspect}#{e.respond_to?(:lands) && e.lands ? " at #{e.lands}" : ''}" }.uniq.join(', ')
+          flash("#{what}: #{thing}loops into #{where} (undo takes it back)#{fail_text.empty? ? '' : "; #{fail_text}"}", failed.empty? ? :ok : :warn)
         end
 
         # Enter in step entry: the clip goes to UI.keyboard.clips, and its
@@ -767,6 +1008,13 @@ module MB
             relay_event(e)
             return
           end
+          if @overlay && e.is_a?(Input::Key) && !e.release?
+            # Any key closes the key overlay (and does nothing else); under
+            # the screen lock, so a frame being painted can't drop the
+            # full redraw that takes it off
+            key_help(false)
+            return
+          end
           if e.is_a?(Input::Key) && @router.mode != :line
             return if e.release? && @router.mode != :grab
             case e.chord
@@ -778,10 +1026,15 @@ module MB
                 return
               end
               @scroll = 0
-              @host.interrupt
+              @host ? @host.interrupt : @on_key&.call(:interrupt)
               return
             when ['z', [:ctrl]]
-              hide
+              hide if @host
+              return
+            when [:f2, []]
+              # F2: between the REPL and KEYS
+              return if e.release?
+              @router.mode == :grab ? (@router.mode = :repl) : keys
               return
             end
           end
@@ -811,7 +1064,6 @@ module MB
         def paint_loop
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
-          tick = 1.0 / @fps
           until @stopping || @hidden
             t = @clock.call
             begin
@@ -820,7 +1072,7 @@ module MB
               warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
               @painter_warned = true
             end
-            left = tick - (@clock.call - t)
+            left = 1.0 / @target_fps - (@clock.call - t)
             sleep(left) if left > 0
           end
         rescue => e
@@ -879,6 +1131,9 @@ module MB
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
+          @gaps = gap_cells
+          @title_rules = title_rules(@gaps)
+          @placed.each { |pl| @states[pl.name][:title_in_rule] = @title_rules.key?(pl.name) if pl.name }
           @canvases = {}
           @drawn_at = {}
           @relayout = false
@@ -903,7 +1158,11 @@ module MB
           reload_files(now)
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
+          # Taken at the start: a redraw asked for while this frame paints
+          # (another thread: a mode change, a closed overlay) stays asked
+          # for, instead of being cleared when the frame ends
           full = @full
+          @full = false
           if full
             @grid.clear
             draw_gaps
@@ -927,6 +1186,7 @@ module MB
             end
             rate = p.opts[:rate].is_a?(Numeric) && p.opts[:rate] > 0 ? p.opts[:rate] : pane.rate
             next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
+            t0 = thread_cpu
             begin
               r = p.rect
               if pane.bytes?
@@ -942,22 +1202,26 @@ module MB
               pane_failed(p, e)
             end
             @drawn_at[p.name] = now
+            d = thread_cpu - t0
+            (q = @pane_cpu[p.name]) << d
+            q.shift if q.length > 200
             drawn += 1
             Thread.pass
           end
           draw_badges if @router.mode == :nav
+          draw_overlay if @overlay
           draw_status(now, snap)
 
           cells = @grid.frame(full ? nil : @shown, @mode, row: 1, col: 1, sync: false)
           cells = '' if cells == "\e[0m" || cells.empty?
           bytes = '' if bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
-          @full = false
           cursor = cursor_bytes
           out = nil
           if !cells.empty? || !bytes.empty? || cursor != @last_cursor || full
             out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{bytes}#{cursor}\e[?2026l"
             write(out)
+            note_written(now, out.bytesize)
             @last_cursor = cursor
           end
           cpu = thread_cpu - cpu0
@@ -1017,25 +1281,124 @@ module MB
           end
         end
 
-        # Vertical rules in the columns no pane covers (the gaps), the
-        # focused pane's in the key color.
-        def draw_gaps
+        # Box-drawing glyphs for a rule cell by the rule cells around it
+        # (bits: 1 up, 2 down, 4 left, 8 right).
+        JOINS = {
+          unicode: { 1 => '│', 2 => '│', 3 => '│', 4 => '─', 8 => '─', 12 => '─', 15 => '┼', 11 => '├', 7 => '┤',
+                     14 => '┬', 13 => '┴', 10 => '┌', 6 => '┐', 9 => '└', 5 => '┘', 0 => '│' },
+          ascii: Hash.new { |_, k| [1, 2, 3, 0].include?(k) ? '|' : [4, 8, 12].include?(k) ? '-' : '+' },
+        }.freeze
+
+        # The cells no pane covers (the rules), as rows of booleans.
+        def gap_cells
           h = @rows - 1
           covered = Array.new(h) { Array.new(@cols, false) }
           @placed.each do |p|
             r = p.rect
             r.h.times { |dy| covered[r.y + dy]&.fill(true, r.x, r.w) }
           end
+          covered.map { |row| row.map(&:!) }
+        end
+
+        # Panes whose title goes into the rule above them (a rule row
+        # across their whole width): they draw their body from their first
+        # row.  Set by #relayout.
+        def title_rules(gaps)
+          @placed.each_with_object({}) do |p, h|
+            next if p.name.nil? || p.tabs || p.name == :repl
+            r = p.rect
+            pane = @panes[p.name]
+            next unless pane&.title && !pane.bytes? && r.y > 0
+            h[p.name] = r if (r.x...(r.x + r.w)).all? { |x| gaps[r.y - 1][x] }
+          end
+        end
+
+        # The rules between panes: vertical in the columns between panes
+        # side by side, horizontal in the rows between stacked panes,
+        # joined with box-drawing glyphs (|-+ for :ascii glyphs), the
+        # focused pane's edges in the key color, and pane titles set into
+        # the rule above them.
+        def draw_gaps
+          gaps = @gaps || gap_cells
+          h = gaps.length
           focus = @placed.find { |p| p.name == @tiler.focus }&.rect
-          glyph = Themes.glyphs(@glyphs)[:rule] || '|'
+          set = Themes.glyphs(@glyphs)
+          joins = JOINS[@glyphs == :ascii ? :ascii : :unicode]
           dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
           key = Plot::Text::Cells.pack(Theme.rgb(:key))
           h.times do |y|
             @cols.times do |x|
-              next if covered[y][x]
-              near = focus && y >= focus.y && y < focus.y + focus.h && (x == focus.x - 1 || x == focus.x + focus.w)
+              next unless gaps[y][x]
+              bits = (y > 0 && gaps[y - 1][x] ? 1 : 0) | (y < h - 1 && gaps[y + 1][x] ? 2 : 0) |
+                     (x > 0 && gaps[y][x - 1] ? 4 : 0) | (x < @cols - 1 && gaps[y][x + 1] ? 8 : 0)
+              glyph = joins[bits]
+              glyph = set[:rule] || glyph if [0, 1, 2, 3].include?(bits)
+              glyph = set[:hrule] || glyph if [4, 8, 12].include?(bits)
+              near = focus && y >= focus.y - 1 && y <= focus.y + focus.h && x >= focus.x - 1 && x <= focus.x + focus.w
               @grid.put_run(x, y, glyph, near ? key : dim, nil, 0)
             end
+          end
+          (@title_rules || {}).each do |name, r|
+            title = " #{@panes[name].title.to_s.upcase} "
+            next if title.length + 2 > r.w
+            @grid.put_run(r.x + 1, r.y - 1, title, Plot::Text::Cells.pack(Theme.rgb(:title)), nil, Plot::Text::Cells::BOLD)
+          end
+        end
+
+        # The key overlay (#key_help): groups in columns in a box centered
+        # on the screen, over the panes.
+        def draw_overlay
+          cols = @overlay.map do |group, keys|
+            kw = keys.map { |k, _| k.length }.max
+            lines = [[group, nil]] + keys.map { |k, what| [k.ljust(kw), what] }
+            [lines, lines.map { |a, b| b ? a.length + 2 + b.length : a.length }.max]
+          end
+          # Columns as wide as fit; groups fill each column downward
+          avail_w = @cols - 4
+          avail_h = @rows - 4
+          columns = [[]]
+          height = 0
+          cols.each do |lines, w|
+            if height > 0 && height + lines.length + 1 > avail_h
+              columns << []
+              height = 0
+            end
+            columns.last << [lines, w]
+            height += lines.length + 1
+          end
+          widths = columns.map { |c| c.map(&:last).max }
+          box_w = [widths.sum + 3 * (widths.length - 1) + 4, avail_w + 2].min
+          box_h = [columns.map { |c| c.sum { |l, _| l.length + 1 } - 1 }.max + 4, avail_h + 2].min
+          x0 = [(@cols - box_w) / 2, 0].max
+          y0 = [(@rows - 1 - box_h) / 2, 0].max
+          c = Canvas.new(@grid, x0, y0, box_w, box_h, glyphs: @glyphs).clear
+          rule = @glyphs == :ascii ? ['+', '-', '|'] : ['┼', '─', '│']
+          border = Plot::Text::Cells.pack(Theme.rgb(:key))
+          @grid.put_run(x0, y0, (@glyphs == :ascii ? '+' : '┌') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┐'), border, nil, 0)
+          @grid.put_run(x0, y0 + box_h - 1, (@glyphs == :ascii ? '+' : '└') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┘'), border, nil, 0)
+          (1...(box_h - 1)).each do |dy|
+            @grid.put_run(x0, y0 + dy, rule[2], border, nil, 0)
+            @grid.put_run(x0 + box_w - 1, y0 + dy, rule[2], border, nil, 0)
+          end
+          title = ' keys (any key closes) '
+          c.text([(box_w - title.length) / 2, 1].max, 0, c.fit(title, box_w - 2), :title)
+          x = 2
+          columns.each_with_index do |column, i|
+            y = 2
+            column.each do |lines, _|
+              lines.each do |a, b|
+                break if y >= box_h - 1
+                if b.nil?
+                  c.text(x, y, c.fit(a, box_w - x - 2), :title)
+                else
+                  c.line(y, [a, :key], '  ', [c.fit(b, [box_w - x - a.length - 4, 0].max), :dim], x: x)
+                end
+                y += 1
+              end
+              y += 1
+            end
+            x += widths[i] + 3
+            break if x >= box_w - 2
           end
         end
 
@@ -1063,11 +1426,18 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = mode == :nav ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : ' REPL '
+          badge = mode == :nav ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : @host ? ' REPL ' : ' PLAY '
           role = mode == :nav ? :armed : mode == :grab ? (step ? :queued : :rec) : :key
           @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          right = "#{frame_rate[:text]}  #{right}" if @show_fps
+          unread = UI.messages.unread
+          if unread > 0 && !@tiler.layout.panes.include?(:messages)
+            badge_w = " ! #{unread} (m) "
+            right = badge_w + right
+            warn_at = @cols - right.length
+          end
           flash = @flash && now < @flash[2] ? @flash : nil
           @flash = nil if @flash && !flash
           x = c.line(0, [@tiler.focus.to_s, :name], (@tiler.layout.zoom ? [' (zoomed)', :warn] : ' '), x: x)
@@ -1075,9 +1445,11 @@ module MB
           if flash
             c.text(x + 1, 0, c.fit(flash[0], room), flash[1])
           else
-            c.text(x + 1, 0, c.fit(HINTS[step ? :step : mode] || '', room), :dim)
+            hint = mode == :repl && !@host ? (@note || @hints || '') : (HINTS[step ? :step : mode] || '')
+            c.text(x + 1, 0, c.fit(hint, room), @note && mode == :repl && !@host ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
+          c.text(warn_at, 0, badge_w, :warn) if warn_at
         end
 
         # Where the terminal's cursor goes: the REPL's cursor in its pane,

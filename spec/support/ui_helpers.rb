@@ -153,10 +153,21 @@ module UIHelpers
     end
   end
 
+  # A keyboard output that plays nothing (UI.keyboard's Link would start
+  # the default Session, realtime, whose shared transport then keeps
+  # moving under later examples).
+  class NullKeyboardOut
+    def note_on(*, **) = nil
+    def note_off(*, **) = nil
+    def cc(*, **) = nil
+  end
+
   # A Tiles screen on a FakeTerminal with a Pry of its own (prompt "t> "),
-  # started with threads.  Returns [tiles, terminal].
+  # started with threads, its keyboard playing into NullKeyboardOut unless
+  # +keyboard:+ is given.  Returns [tiles, terminal].
   def ui_tiles(layout = :tiles, rows: 30, cols: 100, **opts)
     require 'pry'
+    opts[:keyboard] ||= MB::Sound::UI::Keyboard.new(out: NullKeyboardOut.new)
     term = FakeTerminal.new(rows, cols)
     prompt = Pry::Prompt.new('ui-spec', 'ui spec', [proc { 't> ' }, proc { 't* ' }])
     tiles = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: term.slave, output: term.slave, repl: :thread,

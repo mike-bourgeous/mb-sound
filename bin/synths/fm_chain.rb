@@ -100,7 +100,7 @@ class FMChain
 
   def print
     MB::U.headline("Oscillators (#{@oscs_used} in use, index #{@mod_index.round(1)} Hz)")
-    MB::U.table(
+    MB::Sound::Table.new(
       @oscillators.map { |o|
         [
           o.__id__,
@@ -110,9 +110,8 @@ class FMChain
           o.frequency.gains,
         ]
       },
-      header: [:id, :wave_type, :frequency, :modulator, :mod_gain],
-      variable_width: true
-    )
+      header: %w[id wave_type frequency modulator mod_gain]
+    ).print
   end
 
   def sample(count)

@@ -21,18 +21,19 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       expect(band).to be_a(MB::Sound::UI::Band)
       expect(band).to be_active
       expect(band.layout.name).to eq(:band)
+      expect(band.position).to eq(:bottom) # the default (scrolled lines reach the terminal's scrollback)
       expect(MB::Sound.ui).to equal(band) # `ui` again returns the band on screen
 
       expect(MB::Sound.ui(:deck)).to equal(band)
       expect(band.layout.name).to eq(:deck)
 
-      bottom = MB::Sound.ui(:mini, at: :bottom)
-      expect(bottom).not_to equal(band)
+      top = MB::Sound.ui(:mini, at: :top)
+      expect(top).not_to equal(band)
       expect(band).not_to be_active
-      expect(bottom.position).to eq(:bottom)
+      expect(top.position).to eq(:top)
 
       expect(MB::Sound.ui(MB::Sound.off)).to be_nil
-      expect(bottom).not_to be_active
+      expect(top).not_to be_active
       expect($stdout.string).to include("\e[?2026h\e7").and end_with("\e8")
     end
 
@@ -60,13 +61,22 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       MB::Sound.rewind
     end
 
-    it 'shows bar:beat and load (nothing before a session renders)' do
+    it 'shows recording and armed tracks and the scene, never the position or load (ux-1 item 5)' do
       MB::Sound::Session.with_context(session: session) do
         expect(ui.prompt_status).to be_nil
         session.add(220.hz.sine, name: :s)
         130.times { session.process_buffer }
-        expect(ui.prompt_status(color: false)).to match(/\A2:1 \d+%\z/)
-        expect(ui.prompt_status).to start_with("\1\e[33m\0022:1\1\e[0m\2")
+        expect(ui.prompt_status).to be_nil # playing, but nothing a command set
+
+        arr = session.arrangement
+        arr.track(:lead) { |c| c.tone.ramp * c.amp_env }
+        arr.scene(:drop, s: :keep)
+        arr.go(:drop, at: :now) rescue nil
+        session.process_buffer
+        allow(arr).to receive(:armed).and_return({ lead: true })
+        allow(arr).to receive(:current_scene).and_return(:drop)
+        expect(ui.prompt_status(color: false)).to eq('arm:lead drop')
+        expect(ui.prompt_status).to eq("\1\e[33m\2arm:lead\1\e[0m\2 \1\e[36m\2drop\1\e[0m\2")
       end
     end
   end

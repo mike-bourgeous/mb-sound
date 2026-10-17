@@ -14,7 +14,7 @@ module MB
           def source = Text.block_body(block)
         end
 
-        attr_reader :name, :title, :group, :about, :commands, :dsl, :notes, :examples, :see
+        attr_reader :name, :title, :group, :about, :commands, :dsl, :notes, :examples, :see, :sections
 
         def initialize(name, title, group)
           @name, @title, @group = name, title, group
@@ -24,6 +24,7 @@ module MB
           @notes = []
           @examples = []
           @see = []
+          @sections = []
         end
 
         # Every method name the topic lists (console commands and DSL).
@@ -34,8 +35,9 @@ module MB
         class Builder
           def initialize(topic) = @topic = topic
 
-          # One or two sentences on what the topic is for.
-          def about(text) = @topic.about.replace(text.gsub(/\s+/, ' ').strip)
+          # What the topic is for, in paragraphs.
+          # (blank lines separate paragraphs, which the page keeps)
+          def about(text) = @topic.about.replace(text.split(/\n\s*\n/).map { |p| p.gsub(/\s+/, ' ').strip }.join("\n\n"))
 
           # Console commands (MB::Sound methods) in the order to show them.
           def commands(*names) = @topic.commands.concat(names.flatten)
@@ -45,6 +47,11 @@ module MB
 
           # Design notes (design/notes/<name>.md) to read for details.
           def note(*names) = @topic.notes.concat(names)
+
+          # A generated section of the page: the block gets the page's
+          # Help::Doc after the commands (tables built from the code, like
+          # help :ui's layouts and keys).
+          def section(&block) = @topic.sections << block
 
           # Related topics.
           def see(*names) = @topic.see.concat(names)
@@ -67,6 +74,9 @@ module MB
 
       # The topics, keyed by name, in definition order.
       TOPICS = {}
+
+      # Other names that lead to a topic (`help :wet` is the blend topic).
+      TOPIC_ALIASES = {}
 
       # The workflow groups of the sheet and the topic list, in order.
       GROUPS = {

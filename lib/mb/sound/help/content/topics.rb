@@ -166,6 +166,38 @@ module MB
       end
     end
 
+    Help.topic :blend, 'Mixing an effect in (wet and dry)', group: :sound do
+      about <<~TEXT
+        `sig.blend(0.3) { |s| s.resonate(:plate) }` mixes the effect the
+        block makes from `sig` with `sig` itself: 0 is all dry, 1 all wet,
+        the same law as the effects' own `mix:` (dry * (1 - mix) + wet *
+        mix).  The mix can be a number, a knob's name (`blend(:wet)`, turned
+        with `turn :wet, 0.8`), or any node (an LFO, an envelope).
+        `curve: :power` keeps the loudness of effects that don't correlate
+        with the dry sound (reverb tails); effects with lookahead
+        (compressors, limiters) get their dry path delayed to match.  A
+        stereo bundle goes to the block whole.
+
+        The same by hand: `sig * 0.7 + sig.resonate(:plate) * 0.3` (using
+        `sig` twice is fine: the graph branches it).  Some effects mix
+        themselves: `reverb(mix: 0.3)`, `chorus(mix:)`, `delay(dry:, wet:)`,
+        and the dynamics' `mix:` (parallel compression).  For one effect
+        shared by several tracks, send them to a bus (`bus(:verb) { |s|
+        s.reverb(:hall, mix: 1) }`, then `track(:keys, send: { verb: -12.db
+        })` or `feed :keys, :verb, -6.db`): the bus is all wet, and each
+        send sets how much goes in.
+      TEXT
+      commands :bus, :feed, :knob
+      dsl :blend, :resonate, :reverb, :chorus, :delay
+      see :effects, :buses, :knobs
+      example 'drums into a swept resonator, mixed in' do
+        beat = tr808(grid(16, kick: 'x...x...x...x...', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.').loop)
+        # (the resonator rings far louder than its strikes)
+        bg :try, beat.blend(0.4) { |s| s.resonate(:plate, 0.25.hz.lfo.at(110..440), decay: 1.5).at(-22.db) }.at(-11.db)
+      end
+    end
+    Help::TOPIC_ALIASES.merge!(wet: :blend, dry: :blend, mix: :blend, wetdry: :blend, dry_wet: :blend)
+
     Help.topic :stereo, 'Stereo and channels', group: :sound do
       about <<~TEXT
         Bundles (`stereo(l, r)`) broadcast DSL calls per channel; per-channel
@@ -745,7 +777,7 @@ module MB
         images: waveforms, spectra, spectrograms, histograms, and chart
         builders; `vis` plots the live mix.
       TEXT
-      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :table, :chart, :figure, :vis
+      commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
       example 'one cycle of a pulse', sound: false do
         plot 100.hz.pulse, samples: 480
@@ -778,60 +810,67 @@ module MB
       about <<~TEXT
         `now` shows what plays, knobs, scenes, the flow, and queued changes
         with the commands that apply; `help node` explains a graph;
-        `lesson` teaches the newer layers step by step.
+        `lesson` teaches the newer layers step by step.  When something
+        goes wrong live, `debug_dump` writes the state (players, changes,
+        graphs as Ruby, the screen, the take, recent MIDI, threads) to a
+        folder to read or send along.
       TEXT
-      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby
+      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump
       see :sets, :knobs, :ui
     end
 
     Help.topic :ui, 'Dashboard band and tiled screen', group: :look do
       about <<~TEXT
-        `ui` puts a live dashboard band above the prompt (transport, form,
-        tracks, queued changes, master meters, a scope); Pry keeps the
-        rest of the screen.  `ui :deck` adds knobs and CPU per part, `ui
-        :mini` is one line, `ui off` hides it.  Write your own panes with
-        `pane :name do |c, s| ... end` (s is a snapshot of the session,
-        c the pane's canvas), arrange them with `layout`, and keep a
-        layout with `ui.save`.  The prompt shows bar:beat, armed or
-        recording tracks, and load; Tab completes track, scene, and knob
-        names after the commands that take them (`go :<Tab>`).
+        `ui` puts a live dashboard band under the prompt (transport, form,
+        tracks, queued changes, master meters, a scope); Pry keeps the rest
+        of the screen, and scrolled lines stay in the terminal's scrollback.
+        `ui :deck` adds knobs and CPU, `ui :mini` is one line, `ui off`
+        hides it.
 
-        `ui :tiles` (or `ui :studio`, or any layout with `repl` in it)
-        takes the whole screen: panes tiled around the console, which keeps
-        a 10 000-line scrollback of its own.  Ctrl-] is NAV mode: 1-9 or
-        hjkl pick a pane, z zooms, s/v split, x closes, arrows resize
-        (shift: 5), = evens out, u and Ctrl-R undo and redo, [ and ] switch
-        tabs, PgUp/g/G scroll the console, / searches it, y copies (OSC 52),
-        : runs a line of Ruby (`show :knobs`, `go :drop`), and Ctrl-], i,
-        Esc, or Enter go back.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
-        `ui.save :mine` do the same from the prompt; `ui.on C1, :zoom` maps
-        a pad.  Ctrl-Z hides the tiles (the set plays on and the console
-        carries on in the normal screen); Ctrl-Z or `ui` brings them back
-        as they were.  `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
-        `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
-        layouts are data files in the ui folder, reloaded when they
-        change.  `bin/ui_check.rb` reports what your terminal supports.
+        `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
+        panes tiled around the console, which keeps a 10 000-line scrollback
+        of its own.  Ctrl-] is NAV mode (`?` there lists its keys), F2 or
+        `keys` the keyboard, Ctrl-Z hides the tiles while the set plays on
+        (`fg` brings them back, `jobs` lists what runs).
 
-        The keyboard: in the tiles, NAV then p (or `ui.keys`, or `ui :keys`)
-        turns the computer keyboard into a piano, laid out like
-        jack-keyboard: z s x d c v ... from C3 and q 2 w 3 e ... from C4;
-        - and + (or Left/Right) move octaves, Up/Down the velocity, Shift
-        accents, Space is the sustain pedal, Esc all notes off, Ctrl-]
-        back.  Notes go into the session's MIDI input, so `arm :lead`
-        plays the lead and Enter captures what you just played into it
-        (with nothing armed a default patch plays).  Most terminals send no
-        key-up, so notes are a fixed length there (`ui.keyboard.tap = 0.5`;
-        ` cycles :hold (notes hold while a key repeats), :legato, ...); with
-        the kitty keyboard protocol (kitty, WezTerm with
-        enable_kitty_keyboard, Ghostty, foot, iTerm2 with its setting)
-        notes end on key-up.  Tab is step entry: lower-row notes, 1-7
-        lengths (whole to 64th), 8 dotted, 9 triplet, r rest, t tie, a
-        accent, ` slide, Backspace undo, p plays it, w swaps it (looping)
-        into the armed tracks at their next launch point and keeps editing,
-        Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
-        line and in `ui.keyboard.clip`.
+        Warnings go to a messages pane while a screen is up (NAV m shows
+        it; `ui off` sums them up).  NAV f shows the frame rate
+        (`ui.fps` is what was drawn, `ui.target_fps` the painter's rate).
+
+        Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
+        session, c the pane's canvas); arrange them with `layout`, keep a
+        layout with `ui.save`.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
+        `ui.save :mine` change the tiles from the prompt; `ui.on C1, :zoom`
+        maps a pad; `ui.theme :mono`.  Themes, pane files, and layouts are
+        data files in the ui folder, reloaded when they change;
+        `bin/ui_check.rb` reports what your terminal supports.
+
+        The keyboard plays notes into the session's MIDI input, so
+        `arm :lead` plays the lead and Enter captures what you just played
+        into it (with nothing armed a default patch plays).  Most terminals
+        send no key-up, so notes are a fixed length there
+        (`ui.keyboard.tap = 0.5`); with the kitty keyboard protocol (kitty,
+        WezTerm, Ghostty, foot, iTerm2 with its setting) they end on
+        key-up.  Tab is step entry: Enter puts the clip's Ruby
+        (`seq(C3, E3, G3.n4).n8`) on the console line.
       TEXT
-      commands :ui, :off, :pane, :layout
+      section do |d|
+        rows = UI.layout_table.map do |name, kind, desc, size, panes, current|
+          label = "#{current ? '* ' : ''}#{kind == :script ? '--ui' : 'ui'} #{name.inspect}"
+          what = "#{desc}#{size ? " (#{size})" : ''}. #{kind == :band ? 'Band' : kind == :script ? 'Script screen' : 'Tiles'}: #{panes.join(' ')}"
+          [label, what]
+        end
+        d.heading('Layouts  (* on screen now)').rows(rows, max_label: 18, wrap: true)
+      end
+      section do |d|
+        UI::Tiles::KEY_HELP.each do |mode, groups|
+          groups.each do |group, keys|
+            d.heading("#{group} keys  #{Help::Text.c(:dim, { nav: '(NAV: Ctrl-])', grab: '(KEYS: F2, keys)', step: '(step entry: Tab in KEYS)' }[mode])}")
+            d.rows(keys, max_label: 20)
+          end
+        end
+      end
+      commands :ui, :off, :pane, :layout, :keys, :fg, :jobs
       note :terminal_ui
       see :now, :plots
     end

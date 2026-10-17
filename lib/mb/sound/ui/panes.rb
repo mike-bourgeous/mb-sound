@@ -218,6 +218,26 @@ module MB
           end
         end
 
+        # Warnings and live errors while the UI is up (UI.messages), newest
+        # first, with repeat counts; errors in the bad color.
+        class Messages < Pane
+          ROLES = { error: :bad, warn: :warn, note: :dim }.freeze
+
+          def initialize = super(:messages, rate: 4, height: 6, width: 40, title: 'messages')
+
+          def draw_body(c, _s, _state)
+            list = UI.messages.recent(c.h)
+            if list.empty?
+              c.puts ['no warnings', :dim]
+              return
+            end
+            list.each_with_index do |e, y|
+              x = e.count > 1 ? c.line(y, ["×#{e.count} ", :dim]) : 0
+              c.text(x, y, c.fit(e.text, c.w - x), ROLES.fetch(e.severity, :warn))
+            end
+          end
+        end
+
         # CPU per part: render load, then each player, bus, and master
         # chain by its share of the audio time.
         class CPU < Pane
@@ -276,6 +296,32 @@ module MB
               c.x :time, sample_rate: rate
               c.y Plot::Scale::Linear.new(-1.0..1.0)
               data.each { |d| c.line d }
+            }
+          end
+        end
+
+        # The master mix's spectrum (log frequency with note names, -90..0
+        # dBFS; a Hann-windowed FFT of the scope samples, channels mixed),
+        # through Plot::Live like the scope.  `vis spectrum: true` shows it
+        # while a UI is up.
+        class Spectrum < Scope
+          # dBFS at the bottom of the pane.
+          FLOOR = -90.0
+
+          def initialize(name = :spectrum, look: nil)
+            super
+            @rate = 15
+          end
+
+          private
+
+          def chart(data, rate)
+            mix = data.length == 1 ? data[0] : data.reduce { |a, b| a + b } * (1.0 / data.length)
+            f, db = Plot::Presets.spectrum_db(mix, rate, FLOOR)
+            Plot.chart(legend: false) { |c|
+              c.x :frequency, 20.0..(rate / 2.0), notes: true
+              c.y Plot::Scale::DB.new(FLOOR..0.0)
+              c.line db, x: f
             }
           end
         end

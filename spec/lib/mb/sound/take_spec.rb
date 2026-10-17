@@ -137,6 +137,44 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it "keeps ux-1's screen commands out of replays (keys, fg, jobs, debug_dump)" do
+    %w[keys fg jobs debug_dump].each { |c| expect(take.send(:foreground?, "#{c} ")).to eq(true), c }
+  end
+
+  it "records the UI's capture and swap (KEYS Enter, step entry's w) as take lines that replay bit for bit" do
+    ev = MB::Sound::MIDI::Event
+    played = [[60, 1.1r, 1.35r], [64, 1.6r, 1.9r], [67, 2.3r, 2.8r]]
+    events = played.flat_map { |n, on, off| [ev.parse([0x90, n, 90], time: on), ev.parse([0x80, n, 64], time: off)] }
+    session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    before = MB::Sound::Take.active
+    MB::Sound::Take.instance_variable_set(:@current, t)
+    480.times do |i|
+      if i == 0
+        ['track(:lead, q: 1) { |c| c.number * c.gate * 0.01 }', 'track(:bass, q: 1) { |c| c.number * c.gate * 0.001 }', 'arm :lead'].each do |code|
+          MB::Sound::Session.with_context(session: session) { t.line(code, b) }
+        end
+      end
+      MB::Sound::UI.run_line('capture', session) if i == 200 # from a UI thread's Enter
+      MB::Sound::UI.run_line('bg :bass, seq(C3, E3).n8.loop', session) if i == 300 # step entry's w
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.3
+    expect(session.arrangement.captures.keys).to eq([:lead_1])
+    expect(t.lines.map(&:code)).to include('capture', 'bg :bass, seq(C3, E3).n8.loop')
+    expect(t.lines.find { |l| l.code == 'capture' }.lands).not_to be_empty
+
+    MB::Sound.seed(5)
+    data = replay(t.replay, [800])
+    expect((data[0...live.length] - live).abs.max).to eq(0)
+  ensure
+    MB::Sound::Take.instance_variable_set(:@current, before)
+  end
+
   it 'replays knob turns, ramps, snapshots, crossfades, and undo bit for bit' do
     lines = {
       0 => [

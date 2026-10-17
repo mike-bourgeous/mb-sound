@@ -23,6 +23,7 @@ require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
 require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
+require_relative 'graph_node/blend_methods'
 
 module MB
   module Sound
@@ -83,6 +84,7 @@ module MB
       include ChorusMethods
       include DynamicsMethods
       include SamplingMethods
+      include BlendMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.

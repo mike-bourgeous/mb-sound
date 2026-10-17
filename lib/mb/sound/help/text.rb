@@ -17,7 +17,9 @@ module MB
 
         def code(text) = MB::U.syntax(text.to_s).chomp
 
-        def width = [[MB::U.width, 60].max, 110].min
+        # Columns pages use: the terminal's, from 60 to 100 (longer lines
+        # read badly).
+        def width = [[MB::U.width, 60].max, 100].min
 
         def wrap(text, indent: 0, width: self.width)
           MB::U.wrap(text.to_s.gsub(/\s+/, ' ').strip, width: width - indent).lines.map { |l| (' ' * indent) + l.rstrip }.join("\n")

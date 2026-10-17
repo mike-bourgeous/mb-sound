@@ -69,6 +69,13 @@ MB::Sound::UI::Completion.install
 # MB::Sound::UI::Tiles)
 MB::Sound::UI.install_pry!
 
+# Continuation lines of Reline's multiline editor get a dim prompt naming the
+# open constructs, and Enter runs a complete command wherever the cursor is
+# (Alt-Enter for a new line; see MB::Sound::UI::Prompt and
+# MB::Sound::UI::EnterSubmits)
+MB::Sound::UI::Prompt.install!
+MB::Sound::UI::EnterSubmits.install!
+
 # Pry 0.16 reads with Reline's multiline editor, which treats piped input as
 # one paste and evaluates it as a single block (so `printf 'a\nb\n' |
 # bin/sound.rb` stopped at the first error and printed no results).  Read
@@ -91,16 +98,12 @@ end
 Pry.start(
   MB::Sound,
   prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
-    # With a Session running, the prompt starts with its status: bar:beat,
-    # recording and armed tracks, render load (MB::Sound::UI.prompt_status;
-    # MB::Sound::UI.prompt_status_enabled = false turns it off)
-    _pry_a = -> (obj, nest, pry) {
-      status = MB::Sound::UI.prompt_status
-      "\1\e[36m\2#{File.basename($0)}\1\e[0m\2 #{status ? "#{status} " : ''}\1\e[32m\2#{obj}\1\e[0;2m\2(#{nest}) > \1\e[0m\2"
-    },
-    -> (obj, nest, pry) {
-      ' ' * _pry_a.call(obj, nest, pry).gsub(/(\x01|\x02|\e\[[0-9;]*[A-Za-z])/, '').length
-    }
+    # Pry's line counter, then the state only commands change: recording and
+    # armed tracks, the form's section or scene (MB::Sound::UI::Prompt and
+    # UI.prompt_status; MB::Sound::UI.prompt_status_enabled = false turns the
+    # state off); continuation lines get a dim prompt naming what is open
+    -> (obj, nest, pry) { MB::Sound::UI::Prompt.main(obj, nest, pry) },
+    -> (obj, nest, pry) { MB::Sound::UI::Prompt.continuation(pry.eval_string) },
   ]),
   exception_handler: ->(output, exception, _pry) {
     output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))

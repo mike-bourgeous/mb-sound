@@ -188,7 +188,8 @@ module MB
         end
 
         # A named layout: a root (always a :rows Split), the focused pane,
-        # the zoomed pane, and the gap between columns.  Equal layouts are
+        # the zoomed pane, and the gap between panes (0 or 1: a column between
+        # panes side by side, a row between stacked ones).  Equal layouts are
         # == (Data all the way down).
         Layout = Data.define(:name, :root, :focus, :zoom, :gap) do
           def initialize(name:, root:, focus: nil, zoom: nil, gap: 1)
@@ -345,13 +346,17 @@ module MB
             place(node.children[node.active], Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1), gap, out, slots)
           in Split
             across = node.axis == :cols
-            g = across ? gap : 0
-            total = (across ? rect.w : rect.h) - g * (node.children.length - 1)
+            # One column between panes side by side, one row between
+            # stacked panes (a rule drawn by the screen; its title goes
+            # into it), except under one-row panes (headers keep their
+            # height)
+            gaps = node.children.each_cons(2).map { |a, _| across || a.size != 1 ? gap : 0 }
+            total = (across ? rect.w : rect.h) - gaps.sum
             pos = across ? rect.x : rect.y
             shares(node.children, total).each_with_index do |s, i|
               r = across ? Rect.new(pos, rect.y, s, rect.h) : Rect.new(rect.x, pos, rect.w, s)
               place(node.children[i], r, gap, out, slots)
-              pos += s + g
+              pos += s + gaps[i].to_i
             end
           end
         end

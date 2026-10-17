@@ -10,7 +10,11 @@ Background: research-ui-2 d3e30356 (never merged): `research/terminal-ui-2/READM
 ui                      # the default band: transport, form, tracks, queued, master meters, scope (7 rows)
 ui :deck                # 13 rows: adds knobs and CPU per part
 ui :mini                # one line: transport and form
-ui :band, at: :bottom   # under the scrolling text (also color: :truecolor, look: :scope for Braille)
+ui :band, at: :top      # above the scrolling text (default :bottom since ux-1; also color: :truecolor, look: :scope for Braille)
+ui :wall                # every pane (200x60 and up); ui :tiles, :studio, :keys
+keys                    # the keyboard (F2 in the tiles); fg after Ctrl-Z; jobs
+ui.fps; ui.target_fps = 30; ui.frame_rate   # measured vs the painter's rate (NAV f shows it)
+UI.messages.recent      # warnings while a screen was up (NAV m: the messages pane)
 ui off                  # (`off` is :off; also ui :off, ui false)
 ui.stats                # painter CPU per refresh, bytes per frame, the slowest refreshes
 
@@ -25,7 +29,7 @@ ui :mine
 ui.save                 # ~/.local/share/mb-sound/ui/mine.rb (Mac: Application Support), loaded by `ui :mine` later
 ```
 
-The prompt shows the session's status when one has rendered: `sound.rb 17:3 rec:lead arm:pad 31% MB::Sound(0) >` (bar:beat, recording and armed tracks, render load; `UI.prompt_status_enabled = false` turns it off).  Tab completes track, scene, knob, bus, layout, and pane names after the commands that take them (`go :<Tab>`, `turn :c<Tab>`, `ui :<Tab>`), and lists session names first for any other Symbol.  `now` suggests `ui`; `help :ui` is the topic.
+The prompt shows Pry's line counter and only state that commands change (ux-1, maintainer 2026-10-17: a prompt is drawn once, so a playback position read as a line number): recording and armed tracks and the form's section or scene, `sound.rb [12] ●rec:lead arm:pad drop MB::Sound(0) >` (`UI::Prompt.main`, `UI.prompt_status`; `UI.prompt_status_enabled = false` turns the state off).  Lines inside unclosed constructs get a dim prompt as wide as the main one naming what is open (`do ( … >`; `UI::Prompt.continuation`, from Ripper tokens, set as Reline's `prompt_proc`).  Enter runs a complete buffer wherever the cursor is (`UI::EnterSubmits`, prepended to `Reline::LineEditor`); an incomplete buffer gets a new line, and Alt-Enter always does (not Ctrl-J: type-ahead reaches Reline as "\n" through the tty's ICRNL).  Tab completes track, scene, knob, bus, layout, and pane names after the commands that take them (`go :<Tab>`, `turn :c<Tab>`, `ui :<Tab>`), and lists session names first for any other Symbol.  `now` suggests `ui`; `help :ui` is the topic.
 
 ## How it works
 
@@ -155,9 +159,39 @@ ui.keyboard.base = 60     # z is C4 (octaves; also - and +)
 
 **Open**: the band (ui-3) can show the pane but has no input of its own (Reline owns stdin), so KEYS mode is tiles-only; a plain-console `keys` prompt is possible later.  Non-US layouts: legacy Shift detection maps a US layout's shifted punctuation; kitty's base keys are layout-independent for the letter rows only.  Program/bank keys, per-row octaves (ZynAddSubFX), and showing a hardware keyboard's notes on the strip are not built.
 
+## The usability sweep (ux-1, 2026-10-17)
+
+The maintainer's notes from testing natively in Konsole, item by item (brief: /app/tmp/briefs/ux-1.md).
+
+- **Bugs**: pane bodies follow their canvas (stale panes after any relayout); leaving KEYS focuses the REPL (NAV i went back into KEYS, where Up/Down are velocity) and kitty-only key bytes reach Reline as legacy; `vis` and play's plot go to a scope/spectrum slot (`Tiles#plot_pane`, `Band#plot_pane`, `PlaybackMethods#visualize_in_ui`) instead of drawing over the screen; KEYS Enter's capture and step entry's swap run console lines through `UI.run_line` (journaled, undoable, take lines), one per armed track, a broken patch named in the messages pane with its line (`UI.error_origin`).
+- **Prompt and line editing**: see "Using it" above (`UI::Prompt`, `UI::EnterSubmits`).
+- **Tiles**: the band at the bottom by default; rules between stacked panes (box-drawing joins, `hrule` glyph, titles set into the rule, the focused pane's border in the key color); `?` in NAV shows the keys (`Tiles::KEY_HELP`, also on help :ui); warnings and live errors go to `UI.messages` while a screen is up (`:messages` pane, "! n (m)" on the status line, NAV m, a band strip, a summary on `ui off`; kept off the terminal when the screen owns it); `ui.fps` is measured (frames written per second), `ui.target_fps` the painter's rate, NAV f a readout, `ui.stats[:pane_cpu_ms]`; `ui :wall` for big terminals; the keyboard pane scales to a piano (2-5 columns per white key, velocity fill, neighbor octaves dimmed); `keys` and F2; `fg` and `jobs` after Ctrl-Z.
+- **Scripts**: `--ui [LAYOUT]` plays songs (`:show`) and synths/effects (`:play`, KEYS mode) in a console-less screen (`Tiles` with `repl: :none`, `on_key:`; `Session#paused=` for Space); live synth/effect scripts take Esc (all notes off, twice all sound off), q, l, `MIDI_LOG=1`, `MIDI_STUCK=s` (`ScriptRunner::LiveKeys`).
+- `debug_dump` writes the console's state to tmp/debug/<time>/.
+
+- **Plots and tables**: `overlay a, b` / `overlay saw: a, square: b` (labels and titles inferred; `overlay_chart` for figures; the Hash-of-Hashes form is gone), and one themed table, `MB::Sound::Table`, for `table`, processing matrices, and the scripts (no `MB::U.table` left).
+
+Round 2 (maintainer's answers, 2026-10-17): `sig.blend` (graph_nodes.md), the console's `capture` per armed track (arrangement.md); `:wall` stays opt-in, and a tiled screen starting on a 200x60+ terminal flashes a tip for it; Alt-Enter is the newline key; Space in `--ui` is a full pause.
+
+Not done here: a guard against raw terminal writes while a screen is up (proposed).
+
+## Patterns and lessons (ux-1, 2026-10-17)
+
+The maintainer's request: for each bug, a mechanism that rules out its whole class, not only a regression test.
+
+| lesson (bug) | mechanism | class ruled out | status |
+|---|---|---|---|
+| A pane body kept from an old placement drew at the old place after a relayout (bug 1) | Per-placement state is derived from the canvas it belongs to (`Pane#draw` remakes the body when the canvas changes); `tiles_property_spec.rb`: random splits, shows, closes, resizes, zooms, undo/redo, layout switches, and terminal resizes, then every cell pane must equal what a fresh screen with the same tree and size draws | any state surviving a relayout that changes what a pane shows | adopted (the property spec fails on the old Pane#draw for every seed tried) |
+| Leaving KEYS left the keyboard focused, so NAV i went back into KEYS (bug 2) | Every mode change goes through `Tiles#mode_changed`; `Tiles#mode_problems` states the invariants (keyboard active, kitty flags, held notes follow the mode; nothing in KEYS while hidden; the REPL pane exists and is visible in REPL mode); a spec drives 40 random keys and Ruby calls (Ctrl-], p, i, Enter, digits, Ctrl-C both encodings, Ctrl-Z, notes, z, Esc, `ui.keys`, `ui.keys(false)`) checking them after each, then that the REPL still evaluates | mode/focus/terminal-state drift on any path into or out of a mode | adopted; it found three more: `ui.keys` from the hidden console entered KEYS while hidden, NAV x closed the REPL pane, and REPL mode with another pane zoomed over the REPL |
+| KEYS Enter's capture and step entry's swap were missing from takes (coordinator, from ui-noise-1) | One command bus: UI actions run console commands through `UI.run_line(code, session)` (a take line when the console's take records that session); `command_bus_spec.rb` (Prism) fails when UI code calls a performance-changing method on a Session, Arrangement, or MB::Sound, with a reasoned ALLOWED list | UI changes that skip the journal, undo, or takes | adopted |
+| `play`/`vis` drew over the band (bug 3) | The UI routes plots (`visualize` asks `UI.screen` and puts a scope/spectrum pane in) | plots over the screen | routed; a guard that fails on raw cursor-addressed writes to the real stdout from non-UI code while a screen is up (a spec-time `$stdout` wrapper) is proposed, not built |
+| A closed `?` overlay sometimes stayed on screen (item 10): another thread asked for a full redraw while a frame painted, and the frame's end cleared the request | The painters take the redraw request at the start of a frame (`full = @full; @full = false`), so a request made during a frame survives to the next | lost redraws from any thread (mode changes, overlays, layouts, themes) | adopted (tiles and band) |
+| The keyboard's patch duplicated play's | `UI::Keyboard::Link::PATCH = Playable::PATCH` | patches drifting apart | adopted (a registry of default patches if a third appears) |
+| Enter split a recalled multi-line command (item 7) | `UI::EnterSubmits`: completeness of the whole buffer decides, not the cursor's line | editing-position-dependent submits | adopted; Ctrl-J stays Enter because type-ahead arrives as "\n" through ICRNL (the tiles' bin spec caught the first version) |
+
 ## Open and later
 
-- Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere.
+- Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere, so it is the default since ux-1 (maintainer, 2026-10-17: "so that scrolled lines go into the terminal's scrollback buffer").
 - Ambiguous-width glyphs (▶ ● ◉ ○) are wide when a terminal treats ambiguous characters as wide: `UI.glyphs = :ascii` or `MB_SOUND_UI_GLYPHS=ascii`.
 - Remaining GVL coupling: GC pauses triggered on the painter (allocation-light panes help: the scope's chart is rebuilt per frame), the first full frame, the poll.  A process painter (option 3 in ARCHITECTURE.md) removes all of it; the snapshot contract keeps that a transport change.
 - Pager output (`less`) and the band both write to the terminal; the 2 s reassertion repairs the band afterwards.

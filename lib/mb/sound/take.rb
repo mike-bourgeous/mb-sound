@@ -38,12 +38,18 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
 
       class << self
         # The console's take, created when first needed.
         def current
           @current ||= new
+        end
+
+        # The console's take if one was started (nil in scripts and specs
+        # that never asked for one).
+        def active
+          @current
         end
 
         # Replaces the console's take with a fresh one.

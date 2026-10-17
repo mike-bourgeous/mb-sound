@@ -214,6 +214,39 @@ RSpec.describe(MB::Sound::RecordMethods) do
   end
 
   describe 'capture' do
+    it 'captures into every armed track whose patch builds, then reports the others with their line (ux-1 round 2)' do
+      s = new_session
+      s.midi_in.input = keyboard([60, 0.1r, 0.3r])
+      broken_line = __LINE__ + 4
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.bg(:clock, 0.constant, on: :now) # (the timeline moves)
+        MB::Sound.track(:lead, q: 1) { |c| c.number * c.gate }
+        MB::Sound.track(:l_bass, q: 1) { |c| c.synth { |v| v.nosuch_patch_method } }
+        MB::Sound.arm(:lead, monitor: false)
+        MB::Sound.arm(:l_bass, monitor: false)
+      end
+      50.times { s.process_buffer }
+      err = nil
+      MB::Sound::Session.with_context(session: s) do
+        expect { MB::Sound.capture }.to raise_error(MB::Sound::Arrangement::Recording::CaptureFailed) { |e| err = e }
+      end
+      expect(err.message).to match(/\Acapture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/recording_spec\.rb:#{broken_line}\) \(:lead captured\)\z/)
+      expect(err.entries.map(&:subject)).to eq([:lead])
+      150.times { s.process_buffer }
+      expect(s.arrangement.captures.keys).to eq([:lead_1])
+
+      # Live: a warning, and the captures that went through come back
+      live = MB::Sound.live?
+      MB::Sound.live = true
+      r = nil
+      MB::Sound::Session.with_context(session: s) do
+        expect { r = MB::Sound.capture(:lead, :l_bass, length: 1) }.to output(/capture into :l_bass failed.*\(live mode: ignored\)/).to_stderr
+      end
+      expect(r.subject).to eq(:lead)
+    ensure
+      MB::Sound.live = live unless live.nil?
+    end
+
     it 'captures the last phrase into the track at its next launch point, playing on in phase' do
       s = new_session
       # A phrase in bars 3 and 4 (4..8 s); the note in bar 1 is more than a bar before it

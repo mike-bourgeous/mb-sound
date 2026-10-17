@@ -1,5 +1,7 @@
 require 'optparse'
 
+require_relative 'script_runner/live_keys'
+
 module MB
   module Sound
     # Runs standalone scripts in bin/ (effects, synths, and songs; see
@@ -15,6 +17,7 @@ module MB
     #     -g, --graphviz           open a visualization of the node graph
     #     -P, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters (or MIDI controls)
+    #     --ui [LAYOUT]            play live in a terminal screen (see #live_ui)
     #
     # General scripts (kind :script; utilities, plots, file processors) have
     # only -h/--help: their positional arguments go to the block.
@@ -494,7 +497,15 @@ module MB
         return file_notes(input) if input && File.file?(input)
         return Notes.new(MIDI::Stream.live(connect: input)) if @options[:output]
 
-        live_notes(input)
+        begin
+          live_notes(input)
+        rescue StandardError => e
+          raise unless @options[:ui]
+          # --ui without a MIDI device: the screen's keyboard plays the
+          # synth (its notes go to the session's default MIDI input)
+          puts "\e[38;5;243mNo live MIDI (#{e.message.lines.first&.strip}); the screen's keyboard plays\e[0m" unless @options[:quiet]
+          Notes.new(Session.current.midi_in.stream, sustain: true)
+        end
       end
 
       # A Notes playing the MIDI file +path+ (raises unless it is .mid or
@@ -581,6 +592,7 @@ module MB
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
+            o.on('--ui [LAYOUT]', 'Play live in a terminal screen (songs: :show, synths/effects: :play with the keyboard; q quits)') { |v| @options[:ui] = v ? v.delete_prefix(':').to_sym : :default }
             o.on('-q', '--quiet', "Don't print the parameters or MIDI controls") { @options[:quiet] = true }
             profiles = MB::Sound::DeviceOutput::PROFILES.keys
             o.on(
@@ -947,7 +959,11 @@ module MB
       # returns (visualize only returned on Ctrl-C before, so --plot scripts
       # never exited); Ctrl-C during the plot still stops only the plot.
       def live
+        return live_ui(@options[:ui]) if @options[:ui]
+
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]
+        # Esc: all notes off (twice: all sound off), q quits, l recent MIDI
+        keys = LiveKeys.new(Session.current).start if %i[synth effect].include?(@kind) && !@options[:plot]
         if @options[:plot]
           waiter = Thread.new { MB::Sound.wait }
           waiter.report_on_exception = false
@@ -959,7 +975,79 @@ module MB
       rescue Interrupt
         puts
       ensure
+        keys&.stop
         waiter&.kill
+      end
+
+      # Plays live in a terminal screen without a console (ux-1 item 18,
+      # `--ui [LAYOUT]`): UI::Tiles with repl: :none on +name+ (:default is
+      # UI.show_layouts' :show for songs, :play for synths and effects,
+      # which starts in KEYS mode with the keyboard playing the script's
+      # MIDI input).  Keys: q quits (Ctrl-C too), Space pauses (the whole
+      # Session waits; see Session#paused=), Right skips to the next
+      # section, Left goes back to the start of this one, Ctrl-] is NAV
+      # (zoom a pane, ...), F2 the keyboard.  When the song ends the screen
+      # stays with its final meters until q.  What the script prints while
+      # the screen is up goes to its messages pane.
+      def live_ui(name)
+        name = @kind == :song ? :show : :play if name == :default
+        layout = UI.show_layouts[name] || UI.layout_named(name)
+        raise ArgumentError, "--ui #{name}: a band layout; use a tiled one (#{UI.show_layouts.keys.map(&:inspect).join(', ')}, ...)" unless layout.is_a?(UI::Viewports::Layout)
+
+        session = Session.current
+        waiter = Thread.new { MB::Sound.wait }
+        waiter.report_on_exception = false
+        quit = false
+        tiles = nil
+        panic = LiveKeys.new(session, out: UI::Messages::Writer.new(UI.messages, $stdout))
+        on_key = ->(k) {
+          next quit = true if k == :interrupt
+          case k.chord
+          when [:escape, []]
+            tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
+          when ['q', []], ['Q', []] then quit = true
+          when [' ', []]
+            session.paused = !session.paused?
+            tiles.note = session.paused? ? 'paused: Space plays on, q quits' : nil
+          when [:right, []] then ui_section(tiles) { MB::Sound.skip }
+          when [:left, []]
+            ui_section(tiles) do
+              section = session.arrangement.playback&.section
+              section ? MB::Sound.seek(section) : tiles.say('no section to go back to', :warn)
+            end
+          end
+        }
+        hints = 'q quit  Space pause  Left/Right section  Esc notes off  Ctrl-] nav  F2 keys'
+        UI.warm_up
+        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, hints: hints, probe: $stdin.tty?)
+        UI.instance_variable_set(:@tiles, tiles) # UI.screen: warnings and plots go to it
+        out = $stdout
+        $stdout = UI::Messages::Writer.new(UI.messages, out)
+        tiles.start
+        tiles.keys(patch: nil) if @kind != :song && layout.panes.include?(:keyboard) && !@options[:input]
+        ended = false
+        until quit
+          if !ended && !waiter.alive?
+            ended = true
+            tiles.note = 'ended: q quits'
+          end
+          sleep 0.05
+        end
+      rescue Interrupt
+        nil
+      ensure
+        session&.paused = false if session&.realtime?
+        $stdout = out if out
+        UI.off
+        waiter&.kill
+      end
+
+      # Runs a section command for the script's screen, flashing errors
+      # (no form, ...).
+      def ui_section(tiles)
+        yield
+      rescue StandardError => e
+        tiles.say("#{e.class}: #{e.message}", :warn)
       end
 
       # Returns the nodes in +graph+ whose sources can end while the graph

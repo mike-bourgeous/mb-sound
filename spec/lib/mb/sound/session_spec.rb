@@ -629,4 +629,25 @@ RSpec.describe(MB::Sound::Session) do
     mix = session.process_buffer
     expect([mix[0][0], mix[1][0]]).to eq([5, 6])
   end
+
+  it 'pauses a realtime render thread (silence written, frames held) and refuses to pause a render' do
+    out = MB::Sound::NullOutput.new(channels: 2, buffer_size: 256)
+    s = MB::Sound::Session.new(output: out, realtime: true, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    s.add(0.5.constant, name: :c, at: :now)
+    deadline = MB::U.clock_now + 2
+    sleep 0.01 until s.frame > 0 || MB::U.clock_now > deadline
+    s.paused = true
+    expect(s.paused?).to eq(true)
+    sleep 0.05
+    held = s.frame
+    sleep 0.1
+    expect(s.frame).to eq(held)
+    s.paused = false
+    deadline = MB::U.clock_now + 2
+    sleep 0.01 until s.frame > held || MB::U.clock_now > deadline
+    expect(s.frame).to be > held
+    expect { MB::Sound::Session.new(output: out, realtime: false).paused = true }.to raise_error(ArgumentError, /realtime/)
+  ensure
+    s&.close
+  end
 end

@@ -100,6 +100,166 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(out.sounding).to be_empty
   end
 
+  # Up at the REPL prompt recalls +line+ (then clears the prompt again).
+  def expect_history(line)
+    @term.write("\e[A")
+    expect(@term.wait_for(/t> #{Regexp.escape(line)}/)).to eq(true), @term.text
+    @term.write("\x15") # Ctrl-U: an empty line again
+    @term.settle(quiet: 0.1)
+  end
+
+  # Ctrl-] and back with +key+ (i or Enter): the REPL, not KEYS.
+  def nav_round_trip(key)
+    @term.write("\x1d")
+    expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+    @term.write(key)
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true), "#{@tiles.router.mode} #{@tiles.tiler.focus}"
+  end
+
+  it 'recalls REPL history after every way into and out of KEYS mode, kitty sequences or not (ux-1 bug 2)' do
+    start(:keys, keys_kitty: true)
+    expect(@term.wait_for(' KEYS ')).to eq(true)
+    pushes = -> { @tiles.instance_variable_get(:@kitty_pushed) }
+    leave_ways = {
+      ctrl_bracket: -> { @term.write("\e[93;5u") },
+      ctrl_c: -> { @term.write("\e[99;5u") },
+      ctrl_z_and_back: -> {
+        @term.write("\e[122;5u")
+        expect(wait_until { @tiles.hidden? }).to eq(true)
+        @term.write("\x1a")
+        expect(wait_until { @tiles.active? }).to eq(true)
+      },
+    }
+    enter_ways = {
+      nav_p: -> { @term.write("\x1d"); expect(wait_until { @tiles.router.mode == :nav }).to eq(true); @term.write('p') },
+      pane_number: -> {
+        @term.write("\x1d")
+        expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+        @term.write((@tiles.tiler.numbered.index(:keyboard) + 1).to_s)
+        expect(wait_until { @tiles.tiler.focus == :keyboard }).to eq(true)
+        @term.write("\r")
+      },
+      ruby: -> { @tiles.keys },
+    }
+
+    # Leave the start's KEYS mode and put a line in the history
+    leave_ways[:ctrl_bracket].call
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    @term.type("40 + 2\r")
+    expect(@term.wait_for('=> 42')).to eq(true)
+
+    n = 0
+    enter_ways.each do |how_in, enter|
+      leave_ways.each do |how_out, leave|
+        enter.call
+        expect(wait_until { @tiles.router.mode == :grab && pushes.call }).to eq(true), "#{how_in}: #{@tiles.router.mode}"
+        # Kitty presses, repeats, and releases of arrows and notes (velocity in KEYS)
+        @term.write("\e[1;1:1A\e[1;1:2A\e[1;1:3A\e[122;1:1u\e[122;1:3u")
+        leave.call
+        expect(wait_until { @tiles.router.mode == :repl && !pushes.call }).to eq(true), "#{how_in}/#{how_out}: #{@tiles.router.mode}"
+        expect(@tiles.tiler.focus).to eq(:repl)
+        expect(out.sounding).to be_empty
+        nav_round_trip(n.even? ? 'i' : "\r")
+        n += 1
+        expect_history('40 + 2')
+        # What a terminal that kept the kitty flags would send still recalls
+        @term.write("\e[1;1:1A")
+        expect(@term.wait_for(/t> 40 \+ 2/)).to eq(true), "#{how_in}/#{how_out}: #{@term.text}"
+        @term.write("\x15")
+        @term.settle(quiet: 0.1)
+      end
+    end
+
+    # ui off pops the flags too
+    @tiles.keys
+    expect(wait_until { pushes.call }).to eq(true)
+    @tiles.stop
+    expect(pushes.call).to eq(false)
+  end
+
+  it 'keeps the mode invariants through random key sequences, and the REPL works after any of them' do
+    rng = Random.new(RSpec.configuration.seed)
+    start(:keys, keys_kitty: true)
+    @keyboard.off_mode = :hold
+    steps = {
+      nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
+      ctrl_z: "\x1a", note: "\e[122;1:1u", note_legacy: 'x', z: 'z', esc: "\e", digit: -> { rng.rand(1..7).to_s },
+      ruby_keys: -> { @tiles.keys; nil }, ruby_off: -> { @tiles.keys(false); nil },
+    }
+    path = []
+    40.times do
+      name, key = steps.to_a.sample(random: rng)
+      path << name
+      key = key.call if key.respond_to?(:call)
+      @term.write(key) if key
+      @term.settle(quiet: 0.05)
+      expect(@tiles.mode_problems).to eq([]), path.join(' ')
+    end
+    # Back to the REPL from wherever the walk ended
+    @term.write("\x1a") if @tiles.hidden?
+    @tiles.keys(false)
+    @tiles.router.mode = :repl
+    expect(wait_until { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
+    @term.write("\x05\x15") # Ctrl-E Ctrl-U: whatever the walk typed on the line goes
+    @term.settle(quiet: 0.1)
+    @term.type("6 * 7\r")
+    expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
+  end
+
+  it 'switches between the REPL and KEYS with F2 (legacy and kitty bytes), and `keys` enters KEYS (ux-1 item 15)' do
+    start(keys_kitty: true)
+    @term.write("\eOQ") # F2 (legacy)
+    expect(wait_until { @tiles.router.mode == :grab }).to eq(true)
+    expect(@tiles.tiler.layout.panes).to include(:keyboard)
+    @term.write("\e[12~") # F2 (tilde form) back
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(@tiles.tiler.focus).to eq(:repl)
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+    expect(MB::Sound.keys).to equal(@tiles)
+    expect(@tiles.router.mode).to eq(:grab)
+    @term.write("\e[1;1:1Q\e[1;1:3Q") # F2 press and release in the kitty protocol
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(@tiles.mode_problems).to eq([])
+  ensure
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+  end
+
+  it "captures into every armed track that builds, naming a broken patch's track and line in the messages (ux-1 item 17)" do
+    ev = MB::Sound::MIDI::Event
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false,
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    events = [ev.parse([0x90, 60, 90], time: 0.1r), ev.parse([0x80, 60, 64], time: 0.3r)]
+    @session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    live = MB::Sound.live?
+    MB::Sound.live = true
+    broken_line = __LINE__ + 2
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:l_bass, q: 1) { |c| c.synth { |v| v.nosuch_patch_method } }
+      MB::Sound.track(:lead, q: 1) { |c| c.synth { |v| v.hz.ramp * v.amp_env } }
+      expect { MB::Sound.arm(:l_bass) }.to output(/l_bass can't monitor/).to_stderr
+      MB::Sound.arm(:lead)
+    end
+    50.times { @session.process_buffer }
+    session = @session
+    out = Object.new
+    out.define_singleton_method(:target_session) { session }
+    %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
+    start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles) # (UI.screen: the live warning goes to the messages)
+    # (and to stderr too: this screen isn't the console's terminal)
+    expect { @tiles.send(:capture_keys) }.to output(/capture into :l_bass failed/).to_stderr
+    150.times { @session.process_buffer } # to the launch point
+    expect(@session.arrangement.captures.keys).to eq([:lead_1])
+    msg = MB::Sound::UI.messages.recent(1)[0]
+    expect(msg.severity).to eq(:error)
+    expect(msg.text).to match(/capture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/ui\/tiles_keys_spec\.rb:#{broken_line}\)/)
+    expect(@tiles.instance_variable_get(:@flash)[0]).to match(/\Acapture: what you played loops into :lead at \d+:\d.*; :l_bass failed \(m: messages\)\z/)
+  ensure
+    MB::Sound.live = live unless live.nil?
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
+    MB::Sound::UI.messages.clear
+  end
+
   it 'builds a clip in step entry and puts its Ruby on the REPL line' do
     start(context: MB::Sound.module_eval('binding'))
     @tiles.keys(step: true)
@@ -140,6 +300,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     @term.write("\r") # capture
     expect(wait_until(timeout: 6) { @session.arrangement.captures.key?(:lead_1) }).to eq(true), @term.text
     clip = @session.arrangement.captures[:lead_1]
+    expect(@term.wait_for(/capture: what you played loops into :lead at \d+:\d/)).to eq(true), @term.text
     expect(clip.events.map(&:value)).to eq([48, 52, 55])
 
     # Step entry's w swaps the clip so far into the armed track (a journaled change)
@@ -151,5 +312,6 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     @term.type('w', delay: 0.15)
     expect(wait_until { lead_changes.call > before }).to eq(true), @term.text
     expect(@keyboard.clip.to_ruby).to eq('seq(F3).n8.loop')
+    expect(@term.wait_for('swap: seq(F3).n8.loop loops into :lead')).to eq(true), @term.text
   end
 end

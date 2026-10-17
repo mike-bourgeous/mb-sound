@@ -63,31 +63,33 @@ module MB
               pad(flat[i] || '', colw)
             }.join('  ').rstrip
           }
-          head = "#{c(:title, 'mb-sound')} #{c(:dim, '- the one-screen sheet')}"
-          foot = pack([
-            "#{code('help :knobs')} topic", "#{code('help :turn')} method", "#{code('help /reson/')} search",
-            "#{code('help node')} explain a graph", "#{code('help.topics')}", "#{code('now')} what's playing",
-            "#{code('lesson')} lessons", "#{code('help.tip')}", "#{code('help.level')} example level",
-            c(:dim, "Pry's own help: pry-help"),
-          ], w)
-          ([head] + lines + [''] + foot).join("\n")
+          head = "#{c(:title, 'mb-sound')} #{c(:dim, '- the one-screen sheet; help :start etc. open a section')}"
+          learn = "#{c(:head, 'Learn:')} #{c(:key, 'lesson')} #{LESSONS.keys.map { |l| c(:key, l.inspect) }.join(c(:dim, ', '))}  #{c(:dim, '(guided)')}"
+          foot = Doc.new(width: w).heading('More help').rows(FOOTER.map { |cmd, what| [code(cmd), what] }).to_s
+          ([head, learn, ''] + lines + [foot]).join("\n")
         end
+
+        # The sheet's footer: one command per line (ux-1 item 23; the
+        # maintainer: "just a blur of words").
+        FOOTER = [
+          ['help :knobs', 'a topic (help.topics lists them)'],
+          ['help :perform', 'a section of this sheet, in detail'],
+          ['help :turn', 'a command or node method'],
+          ['help /reson/', 'search names, topics, and docs'],
+          ['help node', 'explain a graph'],
+          ['now', "what's playing and what you can do"],
+          ['lesson', 'guided lessons'],
+          ['help.tip', 'a random example to play'],
+          ['help.level', 'a comfortable listening level'],
+          ['pry-help', "Pry's own help"],
+        ].freeze
 
         private
 
-        # Joins +items+ with two spaces into lines no wider than +w+.
-        def pack(items, w)
-          items.each_with_object([+'']) { |item, lines|
-            if !lines.last.empty? && visible_length(lines.last) + 2 + visible_length(item) > w
-              lines << item.dup
-            else
-              lines.last << (lines.last.empty? ? '' : '  ') << item
-            end
-          }
-        end
-
         def panel(title, lines, colw)
-          rows = ["#{c(:head, title)} #{c(:dim, '─' * [colw - visible_length(title) - 1, 0].max)}"]
+          group = GROUPS.key(title)
+          hint = " help :#{group} "
+          rows = ["#{c(:head, title)}#{c(:dim, hint)}#{c(:dim, '─' * [colw - visible_length(title) - hint.length, 0].max)}"]
           lines.each do |l|
             src = l.source.gsub(/\s*\n\s*/, '; ')
             text = code(src)

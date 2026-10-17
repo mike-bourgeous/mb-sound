@@ -8,7 +8,8 @@ module MB
         # the screen): `ui` (the default layout, or the band on screen),
         # `ui :deck` (a layout by name: :band, :deck, :mini, or one made
         # with #layout or saved with `ui.save`), `ui off` (or `ui :off`,
-        # `ui false`).  +at:+ :top or :bottom, +color:+ :ansi256 (default),
+        # `ui false`).  +at:+ :bottom (default; scrolled lines reach the
+        # terminal's scrollback) or :top, +color:+ :ansi256 (default),
         # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:quad
         # default, :scope for Braille).  Returns the band (`ui.save`,
         # `ui.stats`).
@@ -20,6 +21,51 @@ module MB
         def ui(layout = nil, at: nil, color: nil, look: nil, mouse: nil, nav_esc: nil)
           return UI.off if layout == :off || layout == false
           UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc)
+        end
+
+        # The virtual keyboard: KEYS mode in the tiled screen (the computer
+        # keyboard plays notes into the session; Ctrl-] or F2 back), opening
+        # `ui :keys` if no tiled screen is up (or bringing hidden tiles
+        # back).  Options as for UI::Tiles#keys: +off:+ the note-off mode,
+        # +step:+ true for step entry, +patch:+ the default patch.  F2
+        # also switches between the REPL and KEYS.
+        #
+        #     keys                 # play
+        #     keys step: true      # step entry
+        def keys(off: nil, step: nil, patch: :keep)
+          t = UI.tiles
+          t = UI.show(:keys) unless t&.active? || t&.hidden?
+          t.keys(off: off, step: step, patch: patch)
+        end
+
+        # Brings back the tiled screen hidden with Ctrl-Z, as `fg` does for a
+        # shell's stopped job (the same as `ui`).  Returns the screen, or nil
+        # (with a hint) if nothing is hidden.
+        def fg
+          t = UI.tiles
+          return UI.show if t&.hidden?
+          return UI.screen if UI.screen
+          puts "\e[2mfg: no hidden UI (Ctrl-Z in the tiles hides them; `ui :tiles` shows them)\e[0m"
+          nil
+        end
+
+        # What runs in the background, as a shell's `jobs` lists: a hidden
+        # (or shown) terminal UI and the session's players.  Returns the
+        # lines (also printed).
+        def jobs
+          lines = []
+          t = UI.tiles
+          if t&.hidden?
+            lines << "[ui]+ hidden   ui #{t.layout_name.inspect}   (fg or Ctrl-Z brings it back)"
+          elsif (s = UI.screen)
+            lines << "[ui]  on screen   ui #{(s.is_a?(UI::Tiles) ? s.layout_name : s.layout.name).inspect}"
+          end
+          session = Session.existing
+          players = session ? session.players.keys : []
+          lines << "[bg]  playing   #{players.map(&:inspect).join(', ')}" unless players.empty?
+          lines << 'nothing in the background' if lines.empty?
+          puts lines
+          lines
         end
 
         # :off, so `ui off` reads as it sounds.

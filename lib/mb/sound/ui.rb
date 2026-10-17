@@ -11,9 +11,12 @@ require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
 require_relative 'ui/follow'
+require_relative 'ui/frame_rate'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
+require_relative 'ui/prompt'
+require_relative 'ui/messages'
 require_relative 'ui/warm_up'
 require_relative 'ui/screen/vt'
 require_relative 'ui/input/events'
@@ -71,12 +74,13 @@ module MB
       Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
       self.default_layout = :band
       self.prompt_status_enabled = true
+      install_messages! # (only acts while a screen is up; see UI::Messages)
 
       # The panes by name (built-in and defined with `pane`).
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -106,6 +110,35 @@ module MB
         }
       end
 
+      # What each built-in layout is for, and the terminal size it wants
+      # (help :ui lists them).
+      LAYOUT_NOTES = {
+        band: ['the default band: transport, form, tracks, queue, meters, scope', '7 rows'],
+        deck: ['a taller band with knobs and CPU per part', '13 rows'],
+        mini: ['one line: transport and form', '1 row'],
+        tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
+        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu', '120x40 and up'],
+        keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
+        wall: ['every pane at once, for big terminals', '200x60 and up'],
+        show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
+        play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
+      }.freeze
+
+      # Every layout `ui` can show, as [name, kind (:band, :tiles, :script),
+      # description, size hint, pane names, current?] rows: built-in,
+      # defined with `layout`, and saved in .layouts_dir.
+      def self.layout_table
+        current = screen && (screen.is_a?(Tiles) ? screen.layout_name : screen.layout.name)
+        names = (layouts.keys + tile_layouts.keys + show_layouts.keys + saved_layouts).uniq
+        names.filter_map do |name|
+          l = show_layouts[name] || (layout_named(name) rescue nil) or next
+          kind = show_layouts.key?(name) ? :script : l.is_a?(Viewports::Layout) ? :tiles : :band
+          panes = l.is_a?(Viewports::Layout) ? l.panes : l.pane_names
+          desc, size = LAYOUT_NOTES[name] || [saved_layouts.include?(name) ? "saved in #{layouts_dir}" : 'defined with layout', nil]
+          [name, kind, desc, size, panes, name == current]
+        end
+      end
+
       # Options saved with layouts (e.g. at: :bottom), by name.
       def self.layout_options
         @layout_options ||= {}
@@ -129,12 +162,45 @@ module MB
               rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6 }
             }
           },
+          # For big terminals (about 200x60 and up): every pane at once
+          wall: Viewports.layout(:wall, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(width: 40) { pane :tracks; pane :queue, height: 8; pane :knobs, height: 10; pane :cpu, height: 10 }
+              rows(weight: 3) { repl; pane :keyboard, height: 8 }
+              rows(width: 60) { pane :meters, height: 6; pane :scope, height: 14; pane :spectrum, height: 14; pane :messages }
+            }
+          },
           studio: Viewports.layout(:studio, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {
               rows(width: 32) { pane :tracks; pane :queue, height: 6 }
               rows(weight: 3) { repl; pane :scope, height: 8 }
               tabs :meters, :knobs, :cpu, width: 34
+            }
+          },
+        }
+      end
+
+      # Tiled layouts without a console, for scripts' screens (song_script
+      # --ui, synth_script --ui; see ScriptRunner and Tiles' repl: :none).
+      def self.show_layouts
+        @show_layouts ||= {
+          # A song: where it is, the tracks, a big scope and spectrum, meters, knobs
+          show: Viewports.layout(:show) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(width: 36) { pane :tracks; pane :queue, height: 6; pane :knobs, height: 8 }
+              rows(weight: 3) { pane :scope; pane :spectrum, height: 12 }
+              rows(width: 34) { pane :meters, height: 7; pane :cpu; pane :messages, height: 6 }
+            }
+          },
+          # A synth or effect: the keyboard, scope, spectrum, meters
+          play: Viewports.layout(:play, focus: :keyboard) {
+            cols(height: 1) { pane :transport; pane :form }
+            cols {
+              rows(weight: 3) { pane :scope; pane :spectrum, height: 10; pane :keyboard, height: 10 }
+              rows(width: 34) { pane :meters, height: 7; pane :knobs; pane :cpu, height: 7; pane :messages, height: 6 }
             }
           },
         }
@@ -160,6 +226,22 @@ module MB
         @layout_mtimes&.delete(path)
         path
       end
+
+      # Runs console +code+ for a UI action (KEYS mode's Enter capture,
+      # step entry's swap) in +session+'s context, as a line of the
+      # console's take when that take records +session+, so a replay of
+      # the take repeats it where it landed.  Returns the result.
+      def self.run_line(code, session)
+        take = Take.active
+        b = Take.console_binding
+        Session.with_context(session: session) do
+          take&.session_ok?(session) ? take.line(code, b) : b.eval(code, '(ui)', 1)
+        end
+      end
+
+      # Where +error+ came from in the user's code (see
+      # Internal.error_origin).
+      def self.error_origin(error) = Internal.error_origin(error)
 
       # Records the console's binding before each line (for the palette).
       # Called by bin/sound.rb.
@@ -283,8 +365,14 @@ module MB
 
       # Turns the band or the tiled screen off.  Returns nil.
       def self.off
+        was = screen || @tiles&.hidden?
         @band&.stop
         @tiles&.stop
+        # What was hidden from the terminal while the screen owned it
+        if was && (text = messages.summary)
+          $stdout.puts "\e[33m#{text}\e[0m"
+          messages.clear
+        end
         nil
       end
 
@@ -372,28 +460,29 @@ module MB
         l
       end
 
-      # A short status for the console prompt: bar:beat, armed and
-      # recording tracks, and render load, e.g. "17:3 rec:lead 31%"; nil
-      # without a Session that has rendered.  With +color+, colors are wrapped in
-      # \1 and \2 for Reline's prompt width.  Reads nothing that takes the
-      # render lock.
+      # A short status for the console prompt: what only commands change
+      # (the prompt is drawn once per line, so a playback position or load
+      # would be stale at once; the band, the tiles' status line, and `now`
+      # show those): recording and armed tracks and the form's section (or
+      # the scene), e.g. "●rec:lead arm:pad drop"; nil when there is none.
+      # With +color+, colors are wrapped in \1 and \2 for Reline's prompt
+      # width.  Reads nothing that takes the render lock.
       def self.prompt_status(color: true)
         return nil unless prompt_status_enabled
         s = Session.existing
-        rec = s&.transport_record
-        return nil if s.nil? || rec.nil? || s.frame.to_i == 0
+        return nil if s.nil?
 
         c = ->(code, text) { color ? "\1\e[#{code}m\2#{text}\1\e[0m\2" : text }
-        stamp = Session::Stamp.at(rec[:pos], s.transport)
-        out = [c.(rec[:playing] ? '33' : '2', "#{stamp.bar}:#{stamp.beat.floor}")]
+        out = []
         armed = s.arrangement.armed.keys
         pos = s.transport.position
         recording = s.journal.changes.select { |e| e.kind == :rec && e.status == :landed && e.data[:ends]&.pos.to_r > pos }.map(&:subject)
-        out << c.('31', "rec:#{recording.join(',')}") unless recording.empty?
+        out << c.('31', "#{glyphs == :ascii ? '*' : '●'}rec:#{recording.join(',')}") unless recording.empty?
         out << c.('33', "arm:#{(armed - recording).join(',')}") unless (armed - recording).empty?
-        load = s.render_load
-        out << c.(load < 0.5 ? '2' : load < 0.8 ? '33' : '31', "#{(load * 100).round}%") if load
-        out.join(' ')
+        pb = s.arrangement.playback
+        where = pb && !pb.ended? && pb.section ? pb.section : s.arrangement.current_scene
+        out << c.('36', where.to_s) if where
+        out.empty? ? nil : out.join(' ')
       rescue StandardError
         nil
       end

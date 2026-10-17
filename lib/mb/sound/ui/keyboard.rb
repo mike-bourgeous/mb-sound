@@ -79,7 +79,8 @@ module MB
         Played = Data.define(:note, :velocity)
 
         # What the pane draws (frozen; see #view).
-        View = Data.define(:entry, :off_mode, :releases, :base, :velocity, :channel, :sustain, :held, :played, :step, :message, :active)
+        # (+velocities+: held notes' raw velocities by note)
+        View = Data.define(:entry, :off_mode, :releases, :base, :velocity, :channel, :sustain, :held, :velocities, :played, :step, :message, :active)
 
         attr_reader :base, :velocity, :channel, :off_mode, :tap, :step
 
@@ -258,7 +259,8 @@ module MB
           @lock.synchronize do
             @view ||= View.new(
               entry: @entry, off_mode: resolved_mode, releases: @releases, base: @base, velocity: @velocity, channel: @channel,
-              sustain: @sustain, held: @held.values.map { |h| h[:note] }.sort.freeze, played: @played.dup.freeze,
+              sustain: @sustain, held: @held.values.map { |h| h[:note] }.sort.freeze,
+              velocities: @held.values.to_h { |h| [h[:note], h[:vel] || @velocity] }.freeze, played: @played.dup.freeze,
               step: @entry == :step ? @step.view : nil, message: @message, active: @active
             )
           end
@@ -445,7 +447,7 @@ module MB
 
         def note_on(key, note, vel, now)
           @out&.note_on(note, vel / 127.0, channel: @channel, time: now)
-          @held[key] = { note: note, at: now, off_at: nil }
+          @held[key] = { note: note, at: now, off_at: nil, vel: vel }
           @played << Played.new(note: note, velocity: vel) unless key.is_a?(Symbol)
           @played.shift while @played.length > 24
         end

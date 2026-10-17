@@ -178,21 +178,21 @@ MB::Sound.script(
 
   # Each shape in its own pane: in the terminal one after another, in a
   # window all together
-  panes = results.map { |name, desc, d, theory|
+  charts = results.map { |name, desc, d, theory|
     lim = [d.abs.max * 1.02, 1.05].max
     centers, dens = MB::Sound.density(d, bins: p.bins, range: -lim..lim)
-    curves = { 'estimate' => [centers, dens] }
+    curves = { estimate: [centers, dens] }
     if theory
       xs = Numo::DFloat.linspace(-lim, lim, p.bins * 4 + 1)
       ys = Numo::DFloat.cast(xs.to_a.map { |x| theory[1].call(x) }).clip(0, dens.max * 1.5)
-      curves[theory[0]] = [xs, ys]
+      curves[theory[0].to_sym] = [xs, ys]
     end
-    ["#{name}: #{desc}", curves]
+    MB::Sound.overlay_chart(title: "#{name}: #{desc}", styles: ['steps'], **curves)
   }
 
   if p.graphical
-    MB::Sound.overlay(panes.to_h, graphical: true)
+    MB::Sound.overlay(*charts, graphical: true)
   else
-    panes.each { |title, curves| MB::Sound.overlay({ title => curves }) }
+    charts.each { |c| MB::Sound.overlay(c) }
   end
 }

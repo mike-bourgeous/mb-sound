@@ -17,6 +17,7 @@ module MB
       # and the band redrawn anyway, in case something reset the terminal
       # (`reset`, a pager, Ctrl-L).
       class Band
+        include FrameRate
         include Follow
 
         # Seconds between reissuing the scroll region with a full redraw.
@@ -41,20 +42,22 @@ module MB
         # Slowest refreshes kept for #stats.
         SLOWEST = 5
 
-        attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed, :fps
+        attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed
 
         # The painter thread (nil while off or painting only on #refresh).
         attr_reader :thread
 
         # +layout+ a Layout; +io+ the terminal; +session+ a Session (nil to
-        # follow Session.existing); +at+ :top or :bottom; +color+ a
+        # follow Session.existing); +at+ :bottom (default, maintainer
+        # 2026-10-17: lines scrolled out reach the terminal's scrollback) or
+        # :top; +color+ a
         # Plot::Text color mode (:ansi256 by default: the fewest bytes per
         # frame for color); +look+ the scope panes' Plot look; +size+
         # [rows, cols] for a non-terminal +io+; +clock+ a Proc returning
         # seconds (for specs); +native+ false draws into the Ruby mirror
         # grid (Plot::Text::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
-        def initialize(layout:, io: $stdout, session: nil, at: :top, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -62,13 +65,14 @@ module MB
           @io = io
           @session = session
           @position = at
+          @messages_seen = UI.messages.seq
           @mode = color
           @look = look
           @glyphs = glyphs
           @fixed_size = size
           @clock = clock || -> { MB::U.clock_now }
           @native = native
-          @fps = fps
+          init_frame_rate(fps)
           @panes = panes
           @source = source
           @feed = Feed.new
@@ -149,23 +153,31 @@ module MB
           c = thread_cpu
           (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
 
-          reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
-          if reassert
-            @full = true
-            @reasserted_at = now
+          # Warnings kept off the terminal show in a strip of messages
+          if (seen = UI.messages.seq) != @messages_seen
+            @messages_seen = seen
+            plot_pane(:messages, height: 3) if owns_terminal? && !@layout.pane_names.include?(:messages)
           end
+
+          reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
+          @reasserted_at = now if reassert
           return nil if @rows < @height + MIN_PROMPT_ROWS
+
+          # Taken at the start: a redraw asked for while this frame paints
+          # (another thread: a new layout) stays asked for
+          full = reassert
+          @full = false
 
           top = band_top
           drawn = 0
           bytes = +''
           @placed.each do |p|
-            next unless @full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
+            next unless full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
 
             c = thread_cpu
             begin
               if p.pane.bytes?
-                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: @full)
+                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: full)
                 bytes << b if b
               else
                 canvas = (p.state[:canvas] ||= Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs))
@@ -184,17 +196,17 @@ module MB
             Thread.pass # the render thread waits at most one pane's draw for the GVL
           end
 
-          cells = @grid.frame(@full ? nil : @shown, @mode, row: top, col: 1, sync: false)
+          cells = @grid.frame(full ? nil : @shown, @mode, row: top, col: 1, sync: false)
           cells = '' if cells == EMPTY_FRAMES[@mode]
           bytes = '' if bytes.empty? || bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
           region_cmd = reassert ? "\e[#{region[0]};#{region[1]}r" : ''
-          @full = false
 
           out = nil
           if !cells.empty? || !bytes.empty? || reassert
             out = "\e[?2026h\e7#{region_cmd}#{cells}#{bytes}\e8\e[?2026l"
             write(out)
+            note_written(now, out.bytesize)
           end
 
           cpu = thread_cpu - cpu0
@@ -227,6 +239,8 @@ module MB
             bytes: { mean: written.empty? ? 0 : written.sum / written.length, max: written.max || 0 },
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             yields: @yields,
+            fps: fps,
+            target_fps: @target_fps,
             slowest: @slowest.map { |at, cpu, parts|
               { at: MB::M.sigfigs(at, 4), cpu_ms: MB::M.sigfigs(cpu * 1000, 3), parts: (parts || {}).transform_values { |v| MB::M.sigfigs(v * 1000, 3) } }
             },
@@ -257,6 +271,27 @@ module MB
             setup_terminal(scroll: @height > old_height ? @height - old_height : 0)
           end
           @full = true
+        end
+
+        # True when the band draws on the process's terminal (so stderr
+        # would land in it: UI::Messages keeps warnings off it).
+        def owns_terminal?
+          @active && @io.respond_to?(:tty?) && @io.tty? && $stderr.tty?
+        rescue IOError
+          false
+        end
+
+        # Puts pane +kind+ (:scope, :spectrum) on the band for a plot (see
+        # PlaybackMethods#visualize): nothing if the layout has it, else a
+        # row of it under the layout.  Returns a Proc that takes the row
+        # out again (nil if nothing changed).
+        def plot_pane(kind, height: 8)
+          return nil if @layout.pane_names.include?(kind)
+          old = @layout
+          l = Layout.new(old.name) { cols { pane kind, height: height } }
+          l.root.children.unshift(*old.root.children)
+          self.layout = l
+          -> { self.layout = old if @layout.equal?(l) }
         end
 
         # Saves the layout as Ruby (see LayoutLoader) to UI.layouts_dir, as
@@ -302,7 +337,6 @@ module MB
         def paint_loop
           Thread.current.name = 'MB::Sound::UI'
           Thread.current.priority = -1
-          tick = 1.0 / @fps
           until @stopping
             t = @clock.call
             begin
@@ -311,7 +345,7 @@ module MB
               warn "UI painter: #{e.class}: #{e.message}" unless @painter_warned
               @painter_warned = true
             end
-            left = tick - (@clock.call - t)
+            left = 1.0 / @target_fps - (@clock.call - t)
             sleep(left) if left > 0
           end
         rescue => e

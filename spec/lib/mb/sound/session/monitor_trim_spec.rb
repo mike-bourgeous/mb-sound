@@ -17,7 +17,8 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
         written << data.map(&:dup)
         super
       end
-      def channel(c) = written.map { |b| b[c] }.reduce(:concatenate)
+      # (one concatenate: pairwise ones over thousands of buffers were quadratic)
+      def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |b| b[c] })
     }
   }
 

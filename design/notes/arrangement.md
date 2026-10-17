@@ -270,3 +270,8 @@ disarm                     # every armed track
 ## Phase 4 demo
 
 `bin/songs/night_bus_capture.rb` ("Night Bus: Capture", 21 bars + ring-out): the Night Bus tracks plus a pluck `:keys` track; `NightBusHands` (a MIDI Source of seeded loose notes and a CC 74 sweep) stands in for a keyboard on the session's input.  `arm :keys` at bar 3, the riff of bars 5-6 captured at bar 7 (`quantize: [16, amount: 0.8]`; `-Q 0` as played), `rec 4` at bar 9 swapping in at bar 13, `learn :cut` and the sweep there; `--no-loop` plays the hands only.  Integrated LUFS: jam -21.9, as played -22.0, hands only -23.4; keys about 6 dB under the mix.  Renders and bench set: `/app/tmp/listening/arrange-4/`.
+
+## capture per armed track (ux-1 round 2, 2026-10-17)
+
+`capture` (no names: every armed track) captures into each track on its own: a track whose patch fails to build (or that has nothing to capture) doesn't stop the others.  The failures come after, as one `Arrangement::Recording::CaptureFailed` through `live_error` (raised in scripts and specs, a warning live, so the messages pane shows it while a UI is up), naming each track and the line in the user's code (`Internal.error_origin`: the first backtrace frame outside mb-sound's lib/ and gems), with the tracks that were captured: "capture into :l_bass failed: NoMethodError: ... (at (pry):3) (:lead captured)".  `#failed` and `#entries` carry the details.  KEYS mode's Enter runs `capture :name` per armed track (take lines) and shows the same.
+

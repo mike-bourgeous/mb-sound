@@ -549,6 +549,11 @@ module MB
           return nil
         end
 
+        # With the terminal UI up, its scope (or spectrum) pane shows the mix
+        if (screen = UI.screen)
+          return visualize_in_ui(screen, spectrum: spectrum, stop: stop)
+        end
+
         # Each buffer is shown when it reaches the speakers: the tap runs
         # right after a buffer is written, so it plays after the output's
         # current latency (DeviceOutput#latency; outputs without one are
@@ -796,6 +801,28 @@ module MB
       private
 
       # The frame count and rate returned by #visualize.
+      # #visualize while the terminal UI is up: the screen's scope pane
+      # (:spectrum with +spectrum+) shows the mix, put in if the layout has
+      # none (UI::Tiles#plot_pane, UI::Band#plot_pane), so nothing draws
+      # over the screen.  With +stop+ (a playback waiting to end), waits
+      # for it (or Ctrl-C), then takes a pane it put in out again; without
+      # (the console's `vis`), returns at once, leaving the pane.
+      def visualize_in_ui(screen, spectrum:, stop:)
+        kind = spectrum ? :spectrum : :scope
+        restore = screen.plot_pane(kind)
+        if stop.nil?
+          restore = nil
+          puts "\e[2mvis: the #{kind} pane shows the mix#{screen.is_a?(UI::Tiles) ? " (ui.close :#{kind} takes it out)" : ''}\e[0m"
+          return { pane: kind }
+        end
+        sleep 0.05 until stop.call
+        { pane: kind }
+      rescue Interrupt
+        { pane: kind }
+      ensure
+        restore&.call
+      end
+
       def visualize_result(start, frames)
         elapsed = MB::U.clock_now - start if start
         { frames: frames || 0, fps: elapsed && elapsed > 0 ? ((frames || 0) / elapsed).round(1) : 0 }

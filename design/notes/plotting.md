@@ -99,3 +99,8 @@ The terminal UI (research-ui-2 d3e30356: in-process painter, native cell grid, s
 - Inline images and sextant glyphs are untested in the maintainer's iTerm2 and Konsole.
 
 - Faster pixel rendering (for inline-image vis), interactive SVG crosshairs, a bitmap font with Braille for terminal screenshots (the gallery dev check synthesized glyphs).
+
+## overlay and tables (ux-1, 2026-10-17)
+
+Maintainer: "`overlay` is a pain to build hash of title to hash to etc".  `overlay a, b, c` (labels from named graphs or tones, else 1, 2, ...) and `overlay saw: a, square: b` draw one chart, titled with the labels joined by "vs" unless `title:`; curves are NArrays or number Arrays (x = 0, 1, ...), [xs, ys], [x, y] pairs, or graphs and tones (`samples:`).  `overlay_chart` returns the chart; `overlay chart1, chart2` puts charts side by side (hist's density plots, bin/plot_noise.rb).  Tables print through `MB::Sound::Table` (lib/mb/sound/table.rb): theme colors, numbers aligned on the decimal point, box rules (ASCII with `UI.glyphs :ascii`), plain without a terminal or with NO_COLOR.
+

@@ -292,6 +292,7 @@ module MB
         @realtime = realtime
         @advance_idle = false
         @raise_errors = raise_errors
+        @paused = false
 
         @players = {}
         @stopped = {}
@@ -729,6 +730,12 @@ module MB
         }
       end
 
+      # Each current player's graph by name (for debug_dump; takes the
+      # render lock).
+      def debug_graphs
+        @render_lock.synchronize { @mutex.synchronize { @players.values.select(&:current?).to_h { |p| [p.name, p.input] } } }
+      end
+
       # Changes the description #players shows for the player named +name+
       # (e.g. after a recording swapped a new clip into it).
       def describe_player(name, description)
@@ -795,6 +802,19 @@ module MB
       # #process_buffer.
       def realtime?
         @realtime
+      end
+
+      # True while a realtime Session is paused (see #paused=).
+      def paused? = @paused
+
+      # Pauses (true) or resumes (false) a realtime Session's render
+      # thread: while paused it writes silence to the output and renders
+      # nothing, so the timeline, the players, and scheduled blocks wait
+      # where they are (a script's screen pauses a song with Space; see
+      # ScriptRunner's --ui).  Renders (#process_buffer) don't pause.
+      def paused=(on)
+        raise ArgumentError, 'Only a realtime Session pauses (renders call process_buffer)' if on && !@realtime
+        @paused = !!on
       end
 
       # Returns true if the background rendering thread is running (see
@@ -1493,7 +1513,12 @@ module MB
           FastAudio.boost_thread_priority
 
           until @closed
-            process_buffer
+            if @paused
+              n = buffer_size
+              output.write(Array.new(output.channels) { Numo::SFloat.zeros(n) })
+            else
+              process_buffer
+            end
           end
         rescue => e
           warn "Background session stopped with an error: #{e.class}: #{e.message}"
