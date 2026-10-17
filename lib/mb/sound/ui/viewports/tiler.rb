@@ -16,6 +16,11 @@ module MB
 
           attr_reader :layout, :w, :h
 
+          # True puts a rule under one-row panes too (the screen decides by
+          # its size; see Viewports.place).  Not an undo step: it belongs to
+          # the screen, not the tree.
+          attr_accessor :header_rule
+
           def initialize(layout, w, h)
             @layout = layout
             @w = w
@@ -23,6 +28,7 @@ module MB
             @undo = []
             @redo = []
             @counter = 0
+            @header_rule = false
           end
 
           # A new screen size (placement follows; the tree is unchanged).
@@ -37,8 +43,8 @@ module MB
             record(layout)
           end
 
-          def rects = @layout.rects(@w, @h)
-          def placed = @layout.place(@w, @h)
+          def rects = @layout.rects(@w, @h, header_rule: @header_rule)
+          def placed = @layout.place(@w, @h, header_rule: @header_rule)
 
           # The focused pane (the layout's focus, else the first pane).
           def focus = @layout.focus || @layout.panes.first
@@ -262,7 +268,7 @@ module MB
           # (zoom ignored).
           def cells_of(parent)
             slots = {}.compare_by_identity
-            Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots)
+            Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots, header_rule: @header_rule)
             parent.children.map { |c| (r = slots[c]) ? (parent.axis == :cols ? r.w : r.h) : 1 }
           end
 

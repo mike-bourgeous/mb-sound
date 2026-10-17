@@ -208,20 +208,22 @@ module MB
           # True when the layout has a REPL pane (shown in :tiles mode).
           def repl? = panes.include?(:repl)
 
-          # The placements in a +w+ x +h+ screen: an Array of Placed.
-          def place(w, h)
+          # The placements in a +w+ x +h+ screen: an Array of Placed
+          # (+header_rule+: a rule under one-row panes too; see
+          # Viewports.place).
+          def place(w, h, header_rule: false)
             out = []
             if zoom
               leaf = Viewports.find_leaf(root, zoom)
               out << Placed.new(name: zoom, rect: Rect.new(0, 0, w, h), opts: leaf.opts)
             else
-              Viewports.place(root, Rect.new(0, 0, w, h), gap, out)
+              Viewports.place(root, Rect.new(0, 0, w, h), gap, out, header_rule: header_rule)
             end
             out
           end
 
           # {name => Rect} of the visible panes.
-          def rects(w, h) = place(w, h).select(&:name).to_h { |p| [p.name, p.rect] }
+          def rects(w, h, header_rule: false) = place(w, h, header_rule: header_rule).select(&:name).to_h { |p| [p.name, p.rect] }
 
           # The options of pane +name+ ({} if it has none).
           def options_of(name) = Viewports.find_leaf(root, name)&.opts || {}
@@ -332,8 +334,10 @@ module MB
         end
 
         # Places +node+ in +rect+, appending Placed to +out+ (+slots+, if
-        # given, maps each node to its rectangle, by identity).
-        def place(node, rect, gap, out, slots = nil)
+        # given, maps each node to its rectangle, by identity).  Stacked
+        # children get +gap+ rows between them except under one-row
+        # children (headers keep their height), unless +header_rule+.
+        def place(node, rect, gap, out, slots = nil, header_rule: false)
           return if rect.w <= 0 || rect.h <= 0
 
           slots[node] = rect if slots
@@ -343,19 +347,19 @@ module MB
             out << Placed.new(name: node.name, rect: rect, opts: node.opts)
           in Tabs
             out << Placed.new(name: nil, rect: Rect.new(rect.x, rect.y, rect.w, 1), tabs: node.children.map { |c| c.panes.first }, active: node.active)
-            place(node.children[node.active], Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1), gap, out, slots)
+            place(node.children[node.active], Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1), gap, out, slots, header_rule: header_rule)
           in Split
             across = node.axis == :cols
             # One column between panes side by side, one row between
             # stacked panes (a rule drawn by the screen; its title goes
             # into it), except under one-row panes (headers keep their
             # height)
-            gaps = node.children.each_cons(2).map { |a, _| across || a.size != 1 ? gap : 0 }
+            gaps = node.children.each_cons(2).map { |a, _| across || header_rule || a.size != 1 ? gap : 0 }
             total = (across ? rect.w : rect.h) - gaps.sum
             pos = across ? rect.x : rect.y
             shares(node.children, total).each_with_index do |s, i|
               r = across ? Rect.new(pos, rect.y, s, rect.h) : Rect.new(rect.x, pos, rect.w, s)
-              place(node.children[i], r, gap, out, slots)
+              place(node.children[i], r, gap, out, slots, header_rule: header_rule)
               pos += s + gaps[i].to_i
             end
           end

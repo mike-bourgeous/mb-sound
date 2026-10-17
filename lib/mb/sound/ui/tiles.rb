@@ -115,6 +115,10 @@ module MB
 
         attr_reader :layout_name, :tiler, :host, :router, :term, :rows, :cols, :feed, :mode
 
+        # The size decision (UI::Density) and pane chrome (UI::Chrome::Plan)
+        # of the current layout.
+        attr_reader :density, :chrome
+
         # +layout+ a Viewports::Layout with a repl pane; +input+/+output+
         # the terminal (dup'd, so they keep reaching it after :adopt
         # reopens the process's streams); +repl+ :adopt (the console's
@@ -167,8 +171,8 @@ module MB
           @messages_restore = nil
           @show_fps = false
           @pane_cpu = Hash.new { |h, k| h[k] = [] }
-          @gaps = nil
-          @title_rules = nil
+          @chrome = nil
+          @density = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
           @router = Input::Router.new(self, nav_esc: nav_esc)
@@ -1122,6 +1126,8 @@ module MB
 
         # Placements, grids, and the separators for the current tree.
         def relayout(*)
+          @density = Density.decide(:tiles, @rows, @cols)
+          @tiler.header_rule = @density.header_rule
           @placed = @tiler.placed
           @placed_layout = @tiler.layout
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
@@ -1131,9 +1137,9 @@ module MB
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
-          @gaps = gap_cells
-          @title_rules = title_rules(@gaps)
-          @placed.each { |pl| @states[pl.name][:title_in_rule] = @title_rules.key?(pl.name) if pl.name }
+          @chrome = chrome_plan
+          # (Chrome draws every pane's title: panes draw their bodies only)
+          @placed.each { |pl| @states[pl.name][:title_in_rule] = true if pl.name }
           @canvases = {}
           @drawn_at = {}
           @relayout = false
@@ -1165,7 +1171,7 @@ module MB
           @full = false
           if full
             @grid.clear
-            draw_gaps
+            Chrome.paint(@grid, @chrome, glyphs: @glyphs, nav: @router.mode == :nav)
           end
 
           drawn = 0
@@ -1188,7 +1194,7 @@ module MB
             next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
             t0 = thread_cpu
             begin
-              r = p.rect
+              r = @chrome.frames[p.name]&.inner || p.rect
               if pane.bytes?
                 b = pane.frame_bytes(snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
                 bytes << b if b
@@ -1208,7 +1214,7 @@ module MB
             drawn += 1
             Thread.pass
           end
-          draw_badges if @router.mode == :nav
+          Chrome.paint_overlays(@grid, @chrome) if @router.mode == :nav
           draw_overlay if @overlay
           draw_status(now, snap)
 
@@ -1281,68 +1287,24 @@ module MB
           end
         end
 
-        # Box-drawing glyphs for a rule cell by the rule cells around it
-        # (bits: 1 up, 2 down, 4 left, 8 right).
-        JOINS = {
-          unicode: { 1 => '│', 2 => '│', 3 => '│', 4 => '─', 8 => '─', 12 => '─', 15 => '┼', 11 => '├', 7 => '┤',
-                     14 => '┬', 13 => '┴', 10 => '┌', 6 => '┐', 9 => '└', 5 => '┘', 0 => '│' },
-          ascii: Hash.new { |_, k| [1, 2, 3, 0].include?(k) ? '|' : [4, 8, 12].include?(k) ? '-' : '+' },
-        }.freeze
-
-        # The cells no pane covers (the rules), as rows of booleans.
-        def gap_cells
-          h = @rows - 1
-          covered = Array.new(h) { Array.new(@cols, false) }
-          @placed.each do |p|
+        # The chrome of the current placements (UI::Chrome): rules between
+        # panes, each pane's title (in the rule above it, else on a title
+        # row when the pane has room) and number, the focused pane marked.
+        # Panes right under a tab strip take their title from the strip.
+        def chrome_plan
+          order = @tiler.numbered
+          strips = @placed.select(&:tabs).map(&:rect)
+          items = @placed.map do |p|
             r = p.rect
-            r.h.times { |dy| covered[r.y + dy]&.fill(true, r.x, r.w) }
-          end
-          covered.map { |row| row.map(&:!) }
-        end
-
-        # Panes whose title goes into the rule above them (a rule row
-        # across their whole width): they draw their body from their first
-        # row.  Set by #relayout.
-        def title_rules(gaps)
-          @placed.each_with_object({}) do |p, h|
-            next if p.name.nil? || p.tabs || p.name == :repl
-            r = p.rect
-            pane = @panes[p.name]
-            next unless pane&.title && !pane.bytes? && r.y > 0
-            h[p.name] = r if (r.x...(r.x + r.w)).all? { |x| gaps[r.y - 1][x] }
-          end
-        end
-
-        # The rules between panes: vertical in the columns between panes
-        # side by side, horizontal in the rows between stacked panes,
-        # joined with box-drawing glyphs (|-+ for :ascii glyphs), the
-        # focused pane's edges in the key color, and pane titles set into
-        # the rule above them.
-        def draw_gaps
-          gaps = @gaps || gap_cells
-          h = gaps.length
-          focus = @placed.find { |p| p.name == @tiler.focus }&.rect
-          set = Themes.glyphs(@glyphs)
-          joins = JOINS[@glyphs == :ascii ? :ascii : :unicode]
-          dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
-          key = Plot::Text::Cells.pack(Theme.rgb(:key))
-          h.times do |y|
-            @cols.times do |x|
-              next unless gaps[y][x]
-              bits = (y > 0 && gaps[y - 1][x] ? 1 : 0) | (y < h - 1 && gaps[y + 1][x] ? 2 : 0) |
-                     (x > 0 && gaps[y][x - 1] ? 4 : 0) | (x < @cols - 1 && gaps[y][x + 1] ? 8 : 0)
-              glyph = joins[bits]
-              glyph = set[:rule] || glyph if [0, 1, 2, 3].include?(bits)
-              glyph = set[:hrule] || glyph if [4, 8, 12].include?(bits)
-              near = focus && y >= focus.y - 1 && y <= focus.y + focus.h && x >= focus.x - 1 && x <= focus.x + focus.w
-              @grid.put_run(x, y, glyph, near ? key : dim, nil, 0)
+            if p.tabs
+              next Chrome::Item.new(name: :"tabs@#{r.x},#{r.y}", rect: r)
             end
+            under_tabs = strips.any? { |t| t.y == r.y - 1 && t.x == r.x }
+            title = under_tabs || p.name == :repl ? nil : @panes[p.name]&.title || (@panes[p.name] ? p.name.to_s : nil)
+            n = order.index(p.name)
+            Chrome::Item.new(name: p.name, rect: r, title: title, number: n && n + 1, focused: p.name == @tiler.focus)
           end
-          (@title_rules || {}).each do |name, r|
-            title = " #{@panes[name].title.to_s.upcase} "
-            next if title.length + 2 > r.w
-            @grid.put_run(r.x + 1, r.y - 1, title, Plot::Text::Cells.pack(Theme.rgb(:title)), nil, Plot::Text::Cells::BOLD)
-          end
+          Chrome.plan(items, w: @cols, h: @rows - 1, rules: true)
         end
 
         # The key overlay (#key_help): groups in columns in a box centered
@@ -1399,17 +1361,6 @@ module MB
             end
             x += widths[i] + 3
             break if x >= box_w - 2
-          end
-        end
-
-        # Pane numbers in NAV mode, in each pane's top right corner.
-        def draw_badges
-          @tiler.numbered.each_with_index do |name, i|
-            r = @placed.find { |p| p.name == name }&.rect or next
-            badge = " #{i + 1} #{name == @tiler.focus ? name : ''} ".squeeze(' ')
-            badge = " #{i + 1} " if badge.length > r.w
-            role = name == @tiler.focus ? :key : :queued
-            @grid.put_run(r.x + [r.w - badge.length, 0].max, r.y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           end
         end
 

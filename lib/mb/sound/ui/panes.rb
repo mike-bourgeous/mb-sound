@@ -267,7 +267,7 @@ module MB
         # Writes its own terminal bytes: only the cells that changed.
         class Scope < Pane
           def initialize(name = :scope, look: nil)
-            super(name, rate: 30, height: 6, width: 40, needs: [:scope])
+            super(name, rate: 30, height: 6, width: 40, needs: [:scope], title: name.to_s)
             @look = look
           end
 

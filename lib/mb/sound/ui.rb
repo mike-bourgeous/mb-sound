@@ -5,6 +5,7 @@ require_relative 'ui/poll'
 require_relative 'ui/data_file'
 require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
+require_relative 'ui/density'
 require_relative 'ui/pane'
 require_relative 'ui/panes'
 require_relative 'ui/pane_files'
@@ -26,6 +27,7 @@ require_relative 'ui/input/repl_host'
 require_relative 'ui/viewports/tree'
 require_relative 'ui/viewports/tiler'
 require_relative 'ui/viewports/loader'
+require_relative 'ui/chrome'
 require_relative 'ui/screen/term'
 require_relative 'ui/keyboard'
 require_relative 'ui/tiles'
@@ -97,12 +99,14 @@ module MB
         @layouts ||= {
           band: Layout.new(:band) {
             cols { pane :transport; pane :form }
-            cols { pane :tracks; pane :queue; pane :meters; pane :scope }
+            cols { pane :tracks; pane :queue; pane :meters; pane :scope; pane :spectrum, only: :big }
           },
+          # (On a big terminal, UI::Density boxes it, grows it to a third of
+          # the rows, and adds the `only: :big` panes)
           deck: Layout.new(:deck) {
             cols { pane :transport; pane :form }
-            cols { pane :tracks; pane :queue; pane :knobs }
-            cols { pane :meters; pane :cpu; pane :scope }
+            cols { pane :tracks; pane :queue; pane :knobs; pane :messages, only: :big }
+            cols { pane :meters; pane :cpu; pane :scope; pane :spectrum, only: :big }
           },
           mini: Layout.new(:mini) {
             cols { pane :transport; pane :form }
@@ -114,7 +118,7 @@ module MB
       # (help :ui lists them).
       LAYOUT_NOTES = {
         band: ['the default band: transport, form, tracks, queue, meters, scope', '7 rows'],
-        deck: ['a taller band with knobs and CPU per part', '13 rows'],
+        deck: ['a taller band with knobs and CPU per part (bigger, boxed, with spectrum and messages from 160x50)', '13 rows'],
         mini: ['one line: transport and form', '1 row'],
         tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
         studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu', '120x40 and up'],

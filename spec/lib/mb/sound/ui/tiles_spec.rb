@@ -219,7 +219,8 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
       lines = @term.lines
       q = @tiles.tiler.rects[:queue]
       h, j = glyphs == :ascii ? ['-', '+'] : ['─', '┤']
-      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w, h) + j), lines[q.y - 1]
+      n = @tiles.tiler.numbered.index(:queue) + 1
+      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w - 4, h) + " #{n} #{h}" + j), lines[q.y - 1] # (the pane's number at the right, ux-1 r3 item 37)
       expect(lines[q.y]).to include('17:3   knob :cut') # the body starts on the pane's first row
       expect(@tiles.to_text.scan('QUEUED').length).to eq(1)
       r = @tiles.tiler.rects[:repl]

@@ -44,6 +44,10 @@ module MB
 
         attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed
 
+        # The size decision (UI::Density), the layout as shown at its level
+        # (`only: :big` panes in or out), and the pane chrome (UI::Chrome).
+        attr_reader :density, :shown_layout, :chrome
+
         # The painter thread (nil while off or painting only on #refresh).
         attr_reader :thread
 
@@ -156,7 +160,7 @@ module MB
           # Warnings kept off the terminal show in a strip of messages
           if (seen = UI.messages.seq) != @messages_seen
             @messages_seen = seen
-            plot_pane(:messages, height: 3) if owns_terminal? && !@layout.pane_names.include?(:messages)
+            plot_pane(:messages, height: 4) if owns_terminal? && !@shown_layout.pane_names.include?(:messages)
           end
 
           reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
@@ -171,16 +175,20 @@ module MB
           top = band_top
           drawn = 0
           bytes = +''
+          paint_chrome if full
           @placed.each do |p|
             next unless full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
 
             c = thread_cpu
+            r = p.state[:inner]
             begin
-              if p.pane.bytes?
-                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: full)
+              if r.h <= 0
+                nil
+              elsif p.pane.bytes?
+                b = p.pane.frame_bytes(snap, p.state, row: top + r.y, col: 1 + r.x, w: r.w, h: r.h, mode: @mode, look: @look, full: full)
                 bytes << b if b
               else
-                canvas = (p.state[:canvas] ||= Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs))
+                canvas = (p.state[:canvas] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
                 p.pane.draw(canvas, snap, p.state)
               end
@@ -286,7 +294,7 @@ module MB
         # row of it under the layout.  Returns a Proc that takes the row
         # out again (nil if nothing changed).
         def plot_pane(kind, height: 8)
-          return nil if @layout.pane_names.include?(kind)
+          return nil if @shown_layout.pane_names.include?(kind)
           old = @layout
           l = Layout.new(old.name) { cols { pane kind, height: height } }
           l.root.children.unshift(*old.root.children)
@@ -366,7 +374,8 @@ module MB
           @failures[p.pane.name] = msg
           return if p.pane.bytes?
 
-          c = Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs).clear
+          r = p.state[:inner]
+          c = Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs).clear
           c.puts ["#{p.pane.name} failed: ", :bad], [e.message, :dim]
         end
 
@@ -382,13 +391,47 @@ module MB
         def relayout(rows, cols)
           @rows = rows
           @cols = cols
-          @height = @layout.height(@panes)
-          @placed = @layout.place(cols, @panes)
+          @density = Density.decide(:band, rows, cols)
+          @shown_layout = @layout.at_level(@density.level)
+          natural = @shown_layout.height(@panes)
+          groups = @shown_layout.root.children.length
+          # Boxes (a big terminal) only for bands with panes taller than a row
+          @boxed = @density.boxes && natural > groups
+          if @boxed
+            inner = natural + groups - 1
+            inner = [inner, @density.max_band_rows - 2].max if @density.max_band_rows
+            @height = inner + 2
+            @placed = @shown_layout.place(cols - 2, @panes, height: inner, row_gap: 1, x: 1, y: 1)
+            @rule_row = nil
+          else
+            @height = natural + (@density.rule ? 1 : 0)
+            body_y = @density.rule && !top? ? 1 : 0
+            @placed = @shown_layout.place(cols, @panes, y: body_y)
+            @rule_row = @density.rule ? (top? ? @height - 1 : 0) : nil
+          end
           klass = @native ? Plot::Text::NativeCells : Plot::Text::Cells
           @grid = klass.new(cols, @height)
           @shown = klass.new(cols, @height)
+          @chrome = chrome_plan
+          @placed.each do |p|
+            p.state[:inner] = @chrome.frames[p.pane.name]&.inner || Viewports::Rect.new(p.x, p.y, p.w, p.h)
+            p.state[:title_in_rule] = true # (the chrome draws titles)
+          end
+          paint_chrome
           @feed.needs = @placed.flat_map { |p| p.pane.needs }
           @full = true
+        end
+
+        # The chrome of the placed panes (UI::Chrome): titles on their own
+        # rows, and with boxes, the frame and rules with titles set in.
+        def chrome_plan
+          items = @placed.map { |p| Chrome::Item.new(name: p.pane.name, rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), title: p.pane.title) }
+          Chrome.plan(items, w: @cols, h: @height, rules: @boxed, inside: true)
+        end
+
+        def paint_chrome
+          Chrome.paint(@grid, @chrome, glyphs: @glyphs, focus_edges: false)
+          Chrome.hrule(@grid, @rule_row, @cols, glyphs: @glyphs) if @rule_row
         end
 
         def check_size(now)
