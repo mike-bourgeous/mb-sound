@@ -134,6 +134,10 @@ module MB
         song: %w[-o -f -g -P -q -h -b],
       }.freeze
 
+      # Long options of song scripts, which parameters can't be named
+      # (acid_song's old `master:` parameter shadowed --master).
+      COMMON_SONG_LONG_OPTIONS = %w[bars bpm from to report master lufs ride seek take stems stem_gain].freeze
+
       # Raised for invalid command-line arguments.  #help has the option
       # list, which ScriptingMethods prints before exiting.
       class UsageError < ArgumentError
@@ -741,6 +745,9 @@ module MB
 
         if param.short && COMMON_SHORT_OPTIONS[@kind].include?(param.short)
           raise ArgumentError, "Parameter #{name} can't use #{param.short}, a common option for #{@kind} scripts"
+        end
+        if @kind == :song && COMMON_SONG_LONG_OPTIONS.include?(name.to_s)
+          raise ArgumentError, "Parameter #{name} can't be named like --#{name.to_s.tr('_', '-')}, a common option for song scripts"
         end
 
         param

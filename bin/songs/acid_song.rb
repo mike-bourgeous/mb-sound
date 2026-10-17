@@ -72,7 +72,7 @@ module MB::Sound
   # variant on the Listening Bench): drums +10 dB, -7.5 dB into the
   # limiter (-13.3 LUFS, -1.0 dBTP).  `-d 9 -M -7` is patches-4's mix.
   ACID_SONG_DRUMS = 10.0
-  ACID_SONG_MASTER = -7.5
+  ACID_SONG_LIMIT_DRIVE = -7.5
 
   # Starts the song on the current session (live, or inside a render
   # block); +filter+ is :diode or :lp4.  +drive+ is the filter's drive and
@@ -80,10 +80,10 @@ module MB::Sound
   # 1.5 and 3.0 there), pushed here so the acid distorts (maintainer
   # 2026-10-13: "Acid should be pushed into its distortion a fair amount
   # anyway; try cranking the acid up"); +level+ is its level in the mix.
-  # +drums+ is the drums' gain in dB, +master+ the gain in dB into the
+  # +drums+ is the drums' gain in dB, +limit_drive+ the gain in dB into the
   # mastering limiter (-1 dBTP true peak), which replaces the session's
   # master gain.
-  def self.acid_song(filter: :diode, drive: ACID_SONG_DRIVE, gain: ACID_SONG_GAIN, level: ACID_SONG_LEVEL, drums: ACID_SONG_DRUMS, master: ACID_SONG_MASTER)
+  def self.acid_song(filter: :diode, drive: ACID_SONG_DRIVE, gain: ACID_SONG_GAIN, level: ACID_SONG_LEVEL, drums: ACID_SONG_DRUMS, limit_drive: ACID_SONG_LIMIT_DRIVE)
     bpm 128
 
     main = acid(A1, !A1, ~A2, A1, R, C2, !A1, T, ~D2, E2, A1.up, R, !G1, ~A1, A2, R).loop
@@ -105,7 +105,7 @@ module MB::Sound
 
     # (the gain inside the chain: master_gain comes after the limiter)
     master_gain(0.db)
-    master { |mix| (mix * master.db).limit(ceiling: -1.db, true_peak: true) }
+    master { |mix| (mix * limit_drive.db).limit(ceiling: -1.db, true_peak: true) }
 
     bg :acid, acid * level, fade: 0
     bg :drums, (kick + hats + clap) * drums.db, fade: 0
@@ -125,7 +125,7 @@ module MB::Sound
       gain: [ACID_SONG_GAIN, Float, '-G', 'Acid makeup gain into its soft clipper (acid.rb: 3)', 0.1..30.0],
       level: [ACID_SONG_LEVEL, Float, '-l', 'Acid level in the mix', 0.0..2.0],
       drums: [ACID_SONG_DRUMS, Float, '-d', 'Drums gain in dB (0 before 2026-10-13, then 5, then 9)', -20.0..20.0],
-      master: [ACID_SONG_MASTER, Float, '-M', 'Gain in dB into the mastering limiter', -30.0..20.0],
-    ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level, drums: p.drums, master: p.master) }
+      limit_drive: [ACID_SONG_LIMIT_DRIVE, Float, '-M', 'Gain in dB into the mastering limiter (--master picks a mastering preset)', -30.0..20.0],
+    ) { |p| acid_song(filter: p.filter, drive: p.drive, gain: p.gain, level: p.level, drums: p.drums, limit_drive: p.limit_drive) }
   end
 end
