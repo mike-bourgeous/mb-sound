@@ -156,11 +156,20 @@ module MB
           @mutex.synchronize {
             chain = @master_chains&.last
             next 'bypass' if chain.nil?
-            next chain.description if chain.started
+            next "#{chain.description}#{rider_info(chain)}" if chain.started
             next "#{chain.description} (starting)" if chain.start <= @transport.position
             "#{chain.description} (starts at bar #{bar_of(chain.start)})"
           }
         end
+
+        # " (ride +3.2 dB)" for a chain with a loudness rider (see
+        # GraphNode::Rider), else ''.
+        def rider_info(chain)
+          return '' unless chain.preset&.ride
+          rider = chain.chain_graph.graph.find { |n| n.is_a?(GraphNode::Rider::Output) }&.owner_rider
+          rider ? format(' (ride %+.1f dB)', rider.gain) : ''
+        end
+        private :rider_info
 
         # The block given to the latest #master call (whether its chain
         # started or still waits), or nil for bypass (graph documents save it; see

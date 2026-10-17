@@ -64,12 +64,12 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
     it 'takes options that change the chain' do
       p = described_class.preset(:club, lufs: -9, ceiling: -1.db, clip: false, mono: false)
-      expect(p.steps.map(&:first)).to eq(%i[trim compress limit])
+      expect(p.steps.map(&:first)).to eq(%i[trim compress limit limit])
       expect(p.steps.last[2][:ceiling].db_value).to eq(-1)
       expect(p.target.lufs).to eq(-9)
       expect(described_class.preset(:club, drive: 6.db).targeted?).to eq(false)
       expect(described_class.preset(:club, ride: true).ride).to eq(described_class::RIDE_DEFAULTS)
-      expect(described_class.preset(p, glue: false).steps.map(&:first)).to eq(%i[trim limit])
+      expect(described_class.preset(p, glue: false).steps.map(&:first)).to eq(%i[trim limit limit])
     end
 
     it 'prints itself back as the call that makes it' do
@@ -184,6 +184,29 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(s.master_preset).to be_nil
     end
 
+    it 'shows the rider gain in master_info' do
+      s = session
+      s.add([110.hz.ramp.at(0.1), 110.hz.ramp.at(0.1)])
+      s.master(:club, ride: true)
+      60.times { s.process_buffer }
+      expect(s.master_info).to match(/\Amaster: :club, ride: true \(ride \+\d+\.\d dB\)\z/)
+    end
+
+    it 'is a genre template master step' do
+      t = MB::Sound.genre(:techno) {
+        master nil
+        master :club, lufs: -8, clip: false
+      }
+      expect(t.to_ruby).to include('master :club, lufs: -8, clip: false')
+      s = session
+      within(s) { t.setup }
+      s.process_buffer
+      expect(s.master_info).to start_with('master: ')
+      chain = s.instance_variable_get(:@master_chains).last
+      expect(chain.mastering.map(&:name)).to eq([:club])
+      expect(chain.mastering[0].options).to eq(mono: 120, lufs: -8, clip: false)
+    end
+
     it 'refuses options without a preset' do
       expect { MB::Sound.master(lufs: -8) }.to raise_error(ArgumentError, /go with a mastering preset/)
     end
@@ -221,13 +244,13 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
     it 'takes a loudness override, keeps stems, and renders once with loudness: false' do
       a = tmp_path('a.flac')
-      render_song(a, loudness: -11, stems: tmp_path('stems_a'), &song)
-      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-11)
+      render_song(a, loudness: -13, stems: tmp_path('stems_a'), &song)
+      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-13)
 
       b = tmp_path('b.flac')
       MB::Sound.seed(5)
       expect { MB::Sound.render(b, bars: 2, loudness: false, stems: tmp_path('stems_b'), &song) }.not_to output(/mastering/).to_stdout
-      expect(MB::Sound.loudness(b).integrated).not_to be_within(0.5).of(-11)
+      expect(MB::Sound.loudness(b).integrated).not_to be_within(0.5).of(-13)
       expect(MB::Sound.read(File.join(tmp_path('stems_a'), 'keys.flac'))).to eq(MB::Sound.read(File.join(tmp_path('stems_b'), 'keys.flac')))
     end
 

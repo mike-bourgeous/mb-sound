@@ -296,7 +296,15 @@ module MB
           steps = mono_steps(o)
           steps << [:trim, [], {}]
           steps << glue_step(target, over: 3, ratio: 2, attack: 0.01, release: 0.15) if o[:glue]
-          steps << [:softclip, [0.8, 1.0], {}] if o[:clip]
+          # Peaks: a soft clipper that starts 0.9 dB under full scale and
+          # rounds peaks up to +2.9 dBFS (the limiter takes the rest), or
+          # with clip: false a fast first limiter 2 dB over the ceiling
+          # (release 20 ms: catches transients) before the final one
+          if o[:clip]
+            steps << [:softclip, [0.9, 1.4], {}]
+          else
+            steps << [:limit, [], { ceiling: (ceiling.db_value + 2).db, lookahead: 0.001, release: 0.02 }]
+          end
           steps << [:limit, [], { ceiling: ceiling, release: 0.08 }]
         end
 

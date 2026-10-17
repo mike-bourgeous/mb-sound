@@ -44,6 +44,11 @@ module MB
             @owner.sample_internal(count, @index)
           end
 
+          # The Rider this output belongs to.
+          def owner_rider
+            @owner
+          end
+
           def sample_rate
             @owner.sample_rate
           end
