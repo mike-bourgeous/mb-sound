@@ -64,6 +64,40 @@ module MB
           doc 'Ctrl-]', 'NAV (Ctrl-] again: back)'
         end
 
+        # Script screens' keys (bin/ scripts' --ui; items 42, 43): the
+        # Router's :play state consults them first (Tiles.new(play_keys:)),
+        # each binding an action the script handles (Tiles' on_action:).
+        # Repeats act like presses (a held Left keeps stepping, kitty
+        # repeat events too); releases are ignored.  One rule per screen
+        # kind for Esc: song screens quit, synth and effect screens send
+        # all notes off (twice: all sound off).
+        SONG_SCREEN = Keymap.new(:song_screen) do
+          group 'Song'
+          on ['q', 'Q', :escape], :quit, help: 'quit (also Ctrl-C)', label: 'q Esc'
+          on ' ', :pause, help: 'pause, play on'
+          on :left, :bar_back, help: 'back, forward a bar (first press: to this bar\'s start; held: keeps going)', label: 'Left Right'
+          on :right, :bar_forward, help: 'back, forward a bar (first press: to this bar\'s start; held: keeps going)', label: 'Left Right'
+          on ['[', :up], :section_prev, help: 'previous, next section', label: '[ ] Up Down'
+          on [']', :down], :section_next, help: 'previous, next section', label: '[ ] Up Down'
+          on :page_up, :scene_prev, help: 'previous, next scene', label: 'PgUp PgDn'
+          on :page_down, :scene_next, help: 'previous, next scene', label: 'PgUp PgDn'
+          doc 'Ctrl-] F2', 'NAV (zoom a pane, ...), the keyboard'
+        end
+
+        SYNTH_SCREEN = Keymap.new(:synth_screen) do
+          group 'Synth'
+          on ['q', 'Q'], :quit, help: 'quit (also Ctrl-C)', label: 'q'
+          on :escape, :panic, help: 'all notes off (again: all sound off)'
+          on ' ', :pause, help: 'pause, play on'
+          doc 'Ctrl-] F2', 'NAV (zoom a pane, ...), the keyboard'
+        end
+
+        # A screen's status-line hints from its keymap ("q Esc quit  Space
+        # pause ..."): the first words of each help line.
+        def self.hints(map)
+          map.help_groups.flat_map { |_, lines| lines.map { |k, what| "#{k} #{what.split(/[(;]/).first.strip}" } }.join('  ')
+        end
+
         # What the UI keys do where the tiled screen isn't up: [key, in the
         # band, with no UI].  Every key the tiles read from the REPL has a
         # row (a spec checks), so none is dropped silently in another mode.

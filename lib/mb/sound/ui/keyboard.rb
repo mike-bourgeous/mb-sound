@@ -85,6 +85,9 @@ module MB
           on :enter, :capture, help: 'capture into the armed tracks'
           on '`', :cycle_off_mode, help: 'note-off mode'
           on :tab, :step_entry, help: 'step entry'
+          # (scale lock: PgUp/PgDn cycle the scale and root; the methods come with scale lock)
+          on :page_up, :cycle_scale, help: 'scale lock: next scale, next root', label: 'PgUp PgDn'
+          on :page_down, :cycle_root, help: 'scale lock: next scale, next root', label: 'PgUp PgDn'
           doc 'Ctrl-]', 'NAV (notes off; Ctrl-] again: back to KEYS)'
           doc 'F2 Ctrl-C', 'back to the REPL'
         end
@@ -392,6 +395,9 @@ module MB
             self.off_mode = OFF_MODES[(i + 1) % OFF_MODES.length]
             say("note-off: #{@off_mode}#{@off_mode == :auto ? " (#{resolved_mode})" : ''}")
           when :step_entry then self.entry = :step
+          when :cycle_scale, :cycle_root
+            return false unless respond_to?(a.name, true) # (until scale lock is built)
+            send(a.name)
           end
           true
         end

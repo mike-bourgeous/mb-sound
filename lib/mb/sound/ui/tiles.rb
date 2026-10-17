@@ -172,7 +172,7 @@ module MB
           @kitty_pushed = false
           @start_keys = layout.focus == :keyboard
           @on_key = on_key
-          @hints = hints
+          @hints = hints || (play_keys && Keys.hints(play_keys))
           @note = nil
         end
 
