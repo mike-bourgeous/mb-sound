@@ -548,7 +548,7 @@ module MB
           }
         }
 
-        MB::U.table(results, header: ['#'] + data.keys)
+        Table.new(results, header: ['#'] + data.keys).print
       end
 
       private

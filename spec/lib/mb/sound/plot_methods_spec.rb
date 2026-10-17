@@ -282,46 +282,49 @@ RSpec.describe(MB::Sound::PlotMethods) do
   end
 
   describe '#table' do
+    # The printed table's lines (plain: specs print to a pipe; ux-1's Table).
+    def table_lines(*args, **opts)
+      out = StringIO.new
+      old = $stdout
+      $stdout = out
+      MB::Sound.table(*args, **opts)
+      out.string.lines.map(&:rstrip)
+    ensure
+      $stdout = old
+    end
+
     it 'can display an evaluated method call' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(23).times
-      MB::Sound.table(CMath.method(:acos))
+      lines = table_lines(CMath.method(:acos))
+      expect(lines.length).to eq(23) # header, rule, 21 steps
+      expect(lines[0]).to match(/#\s+│\s+0: acos/)
+      expect(lines[1]).to match(/\A─+┼─+\z/)
     end
 
     it 'can display a proc' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/15151/).exactly(21).times
-      MB::Sound.table(->(x){15151})
+      lines = table_lines(->(x){15151})
+      expect(lines.drop(2).count { |l| l.end_with?('15151') }).to eq(21)
     end
 
     it 'can display an NArray' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/50/)
-      expect(MB::Util).to receive(:puts).with(/40/)
-      expect(MB::Util).to receive(:puts).with(/30/)
-      expect(MB::Util).to receive(:puts).with(/20/)
-      expect(MB::Util).to receive(:puts).with(/10/)
-      MB::Sound.table(Numo::Int32[50, 40, 30, 20, 10], steps: 5)
+      lines = table_lines(Numo::Int32[50, 40, 30, 20, 10], steps: 5)
+      expect(lines.drop(2).map { |l| l.split('│').last.strip }).to eq(%w[50 40 30 20 10])
     end
 
     it 'can display complex numbers' do
-      expect(MB::Util).to receive(:puts).with(/#.*0/)
-      expect(MB::Util).to receive(:puts).with(/-\+-/)
-      expect(MB::Util).to receive(:puts).with(/5.*1.*-.*1.*i/)
-      expect(MB::Util).to receive(:puts).with(/6.*1.*-.*1.*i/)
-      MB::Sound.table([1-1i], range: 5..6, steps: 2)
+      lines = table_lines([1-1i], range: 5..6, steps: 2)
+      expect(lines[2]).to match(/5.*│ 1(\.0)?-1(\.0)?i/)
+      expect(lines[3]).to match(/6.*│ 1(\.0)?-1(\.0)?i/)
     end
 
     it 'can use a custom range and steps' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/-2.5.*20/)
-      expect(MB::Util).to receive(:puts).with(/-1.5.*30/)
-      MB::Sound.table([20, 30], range: -3..-2, steps: [-2.5, -1.5])
+      lines = table_lines([20, 30], range: -3..-2, steps: [-2.5, -1.5])
+      expect(lines[2]).to match(/-2\.5 │ +20/)
+      expect(lines[3]).to match(/-1\.5 │ +30/)
     end
 
     it 'can display multiple columns' do
-      expect(MB::Util).to receive(:puts).with(/[|+]/).exactly(2).times
-      expect(MB::Util).to receive(:puts).with(/.+\|.+\|.+/).exactly(21).times
-      MB::Sound.table([CMath.method(:acos), CMath.method(:asin)])
+      lines = table_lines([CMath.method(:acos), CMath.method(:asin)])
+      expect(lines.drop(2).count { |l| l.count('│') == 2 }).to eq(21)
     end
   end
 end

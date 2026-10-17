@@ -23,11 +23,11 @@ MB::Sound.script(args: 0..1) { |(input)|
   begin
     loop do
       STDOUT.write("\e[J\e[H") # clear below the current output first, then move to home
-      MB::U.table(
+      MB::Sound::Table.new(
         note_chart.each_slice(12).map.with_index { |r, idx| [idx - 1] + r },
         header: ['###', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
         separate_rows: true
-      )
+      ).print
       puts
 
       # TODO: Somehow show realtime messages without clearing the other received messages

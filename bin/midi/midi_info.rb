@@ -40,5 +40,5 @@ MB::Sound.script(args: 1) { |(filename)|
 
   MB::U.headline("#{File.basename(f.filename)}: \e[1m#{title}\e[0m")
   puts
-  MB::U.table(track_info, variable_width: true)
+  MB::Sound::Table.new(track_info).print
 }

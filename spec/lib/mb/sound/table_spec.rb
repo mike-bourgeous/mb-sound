@@ -16,7 +16,7 @@ RSpec.describe(MB::Sound::Table, :aggregate_failures) do
   it 'reads a Hash as columns, prints rules between rows, nil as "nil", and ASCII glyphs' do
     allow(MB::Sound::UI).to receive(:glyphs).and_return(:ascii)
     t = described_class.new({ x: [1, 2], y: [nil, 4] }, separate_rows: true, show_nil: true, title: 'T')
-    expect(plain(t).lines.map(&:rstrip)).to eq(['T', 'x | y', '--+----', '1 | nil', '--+----', '2 |   4'])
+    expect(plain(t).lines.map(&:rstrip)).to eq(['T', 'x | y', '--+----', '1 | nil', '--+----', '2 | 4'])
   end
 
   it 'colors from the UI theme only for terminals without NO_COLOR, and drops escapes given in cells' do
@@ -28,6 +28,6 @@ RSpec.describe(MB::Sound::Table, :aggregate_failures) do
   end
 
   it 'is what the console table prints' do
-    expect { MB::Sound.table({ 'sin' => ->(x) { Math.sin(x) } }, range: 0..1, steps: 3) }.to output(/#\s+│ sin\n.*\n\s*0\s+│ 0\n\s*0\.5 │ 0\.479426\n\s*1\s+│ 0\.841471/).to_stdout
+    expect { MB::Sound.table({ 'sin' => ->(x) { Math.sin(x) } }, range: 0..1, steps: 3) }.to output("  # │      sin\n────┼─────────\n0.0 │ 0.0\n0.5 │ 0.479426\n1.0 │ 0.841471\n").to_stdout
   end
 end

@@ -47,16 +47,7 @@ MB::Sound.script(
 
     puts "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{MB::Sound::ProcessingMatrix::MATRIX_PATH}\e[0m):\n\n"
 
-    MB::U.table(
-      matrices,
-      header: [
-        "\e[1;33mName\e[0m",
-        "\e[1;32mIn\e[0m",
-        "\e[1;34mOut\e[0m",
-        "\e[1;36mDescription\e[0m"
-      ],
-      variable_width: true
-    )
+    MB::Sound::Table.new(matrices, header: %w[Name In Out Description]).print
 
     puts
 

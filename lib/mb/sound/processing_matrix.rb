@@ -288,14 +288,14 @@ module MB
         @matrix.to_a
       end
 
-      # Prints the matrix coefficients as a table with input and output names.
+      # Prints the matrix coefficients as a table (MB::Sound::Table) with
+      # input and output names; with +print+ false, returns its lines.
       def table(print: true)
-        MB::U.table(
-          to_a.map.with_index { |row, idx| ["\e[1m#{outputs[idx].to_s.rjust(12)}\e[0m", *row] },
-          header: ["\u2193 Out \\ In \u2192", *inputs],
-          print: print,
-          variable_width: true
+        t = Table.new(
+          to_a.map.with_index { |row, idx| [outputs[idx].to_s, *row] },
+          header: ["\u2193 Out \\ In \u2192", *inputs]
         )
+        print ? t.print : t.lines
       end
     end
   end

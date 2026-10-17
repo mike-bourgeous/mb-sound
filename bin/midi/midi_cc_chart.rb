@@ -23,11 +23,11 @@ MB::Sound.script(args: 0..1) { |(input)|
   begin
     loop do
       STDOUT.write("\e[J\e[H") # clear below the current output first, then move to home
-      MB::U.table(
+      MB::Sound::Table.new(
         cc_chart.each_slice(10).map.with_index { |r, idx| [idx * 10] + r },
         header: ['CCs'] + (0..9).to_a,
         separate_rows: true
-      )
+      ).print
       puts
 
       # TODO: Somehow show realtime messages without clearing the other received messages
