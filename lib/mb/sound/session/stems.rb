@@ -59,12 +59,24 @@ module MB
             @outputs = {}
             @cursors = {}
             @paths = {}
+            @origin = 0
             FileUtils.mkdir_p(dir)
           end
+
+          # The session frame where stems start (0 by default; a render
+          # window's first frame, see RenderWindow): earlier parts are
+          # dropped.  Set before the first #add after it.
+          attr_accessor :origin
 
           # Adds +data+ (one Numo array per channel) for the stem +name+,
           # starting at session frame +frame+.
           def add(name, data, frame)
+            if frame < @origin
+              skip = @origin - frame
+              return if skip >= data[0].length
+              data = data.map { |d| d[skip..] }
+              frame = @origin
+            end
             out = output_for(name)
             pad(name, frame)
             data = data.map { |d| d * @gain } if @gain != 1
@@ -97,7 +109,7 @@ module MB
             @outputs[name] ||= begin
               path = File.join(@dir, "#{name}.#{@format}")
               @paths[name] = path
-              @cursors[name] = 0
+              @cursors[name] = @origin
               MB::Sound.file_output(path, channels: @channels, sample_rate: @sample_rate, overwrite: @overwrite)
             end
           end

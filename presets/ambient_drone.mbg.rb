@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "ambient_drone",
   kind: :synth,
-  saved: "2026-10-16T00:47:26Z",
-  mb_sound: "0.12.0.usegit (5eef6c6c)",
+  saved: "2026-10-17T05:42:51Z",
+  mb_sound: "0.12.0.usegit (504ed966)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :drone from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :drone, space: 0.5, wear: 0.6, tune: -7.0, spread: 0.7 }

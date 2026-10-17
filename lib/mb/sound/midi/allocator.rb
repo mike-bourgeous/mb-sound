@@ -106,9 +106,28 @@ module MB
       #
       # Event routing:
       # - Notes route by (channel, note), so MPE fits later.  Overlapping
-      #   notes on the same key are counted: each note-on gets its own
-      #   allocation and note-offs end them oldest first.  Note-offs for
-      #   choked notes are dropped.
+      #   notes on the same key follow +:same_key+:
+      #   - :count (the default for files, clips, and transforms) - each
+      #     note-on gets its own allocation and note-offs end them oldest
+      #     first.  Note-offs for choked notes are dropped.
+      #   - :restrike (the default for real-time input; see
+      #     Source#realtime_input?) - a note-on for a key whose lane is
+      #     sounding (held, not released) on that channel restarts that
+      #     same lane: the lane gets note-offs for the notes it held, then
+      #     the note-on, at the note-on's time, and the next note-off for
+      #     the key releases it; older duplicates are forgotten (also those
+      #     of choked or stolen notes, when the key starts on a new lane).  So a
+      #     keyboard that dropped a note-off (jack-keyboard losing focus
+      #     while a key is held) never leaves a note hanging: pressing the
+      #     key again and letting go ends it, as on most synths.  This
+      #     comes before +:retrigger+ and the steal chain, after choke
+      #     groups.  Notes held only by a sustain pedal are already
+      #     released here (Stream#sustain sends the held note-off just
+      #     before the re-press), so they get a new lane like any note.
+      #     In mono mode, a re-pressed key leaves the note stack (older
+      #     entries for the key are dropped) and is pushed again; if it was
+      #     sounding, it restarts (a note-off and a plain note-on, not
+      #     legato: no glide, envelopes retrigger).
       # - Poly pressure goes to the lanes holding its key.
       # - Channel-wide events (CCs, bend, channel pressure, program, sysex,
       #   system) go to every lane.
@@ -138,6 +157,9 @@ module MB
 
         # Mono mode note priorities (see the class description).
         PRIORITIES = [:last, :low, :high].freeze
+
+        # Overlapping same-key note modes (see the class description).
+        SAME_KEY_MODES = [:count, :restrike].freeze
 
         # Same-note retrigger modes (see the class description).
         RETRIGGER_MODES = [:reuse, :louder, :new_voice, :quietest, :per_key].freeze
@@ -273,6 +295,12 @@ module MB
             @allocator.ended? && @queue.empty?
           end
 
+          # False: the allocator has already settled overlapping notes on a
+          # key (see Allocator's +:same_key+), so a lane never carries two.
+          def realtime_input?
+            false
+          end
+
           # Port type of the output (see GraphNode::Traversable#port_type).
           def port_type
             :notes
@@ -388,6 +416,10 @@ module MB
         # The same-note retrigger mode (:reuse, :louder, or :new_voice).
         attr_reader :retrigger
 
+        # The overlapping same-key note mode (:count or :restrike; see the
+        # class description).
+        attr_reader :same_key
+
         # The input stream time where lanes start.
         attr_reader :position
 
@@ -398,11 +430,12 @@ module MB
         # MIDIFile, or filename).  See the class description for
         # +:voices+, +:spares+, +:steal+ (a policy or Array of policies),
         # +:protect+, +:mono+ (true by default for one voice), and
-        # +:priority+, +:glide_mode+, and +:retrigger+.  +:choke_time+ is the
-        # seconds after a :choke event when a lane counts as free.
+        # +:priority+, +:glide_mode+, +:retrigger+, and +:same_key+ (nil: :restrike
+        # for real-time input, else :count).  +:choke_time+ is the seconds
+        # after a :choke event when a lane counts as free.
         def initialize(
           stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, mono: nil, priority: :last,
-          glide_mode: :last, retrigger: :reuse, choke_time: Envelope::CHOKE_TIME
+          glide_mode: :last, retrigger: :reuse, same_key: nil, choke_time: Envelope::CHOKE_TIME
         )
           unless voices.is_a?(Integer) && voices >= 1
             raise ArgumentError, "Voices must be a positive Integer (got #{voices.inspect})"
@@ -447,6 +480,11 @@ module MB
           @choke_time = choke_time.to_r.rationalize(Rational(1, 10**12))
 
           @stream = Stream.for(stream)
+          same_key ||= @stream.realtime_input? ? :restrike : :count
+          unless SAME_KEY_MODES.include?(same_key)
+            raise ArgumentError, "Unknown same_key mode #{same_key.inspect} (use #{SAME_KEY_MODES})"
+          end
+          @same_key = same_key
           @input = @stream.reader
           @position = @input.cursor
           @read_to = @position
@@ -590,6 +628,18 @@ module MB
           refresh(e.time)
           choke_groups(e) if @chokes
 
+          if @same_key == :restrike
+            held = @voice_states.find { |v| v.state == :sounding && v.key == key }
+            if held
+              restrike_held(held, key, e)
+              return
+            end
+
+            # No lane holds the key, so older note-ons of it (choked
+            # notes whose note-offs never came) are forgotten
+            @held.delete(key)
+          end
+
           if @retrigger == :per_key && (same = same_note_voice(key))
             restrike(same, e)
             return
@@ -710,6 +760,20 @@ module MB
           add_slot(voice, e)
           send_to(voice, e)
           glide_others(voice, e)
+        end
+
+        # For +same_key: :restrike+: ends the notes lane +voice+ holds on
+        # +key+ (note-offs at note-on +e+'s time) and restarts it with +e+,
+        # forgetting every older note-on of the key (see the class
+        # description).
+        def restrike_held(voice, key, e)
+          count = voice.slots.length
+          detach(voice)
+          @held.delete(key)
+          count.times do
+            send_to(voice, Event.note_off(voice.note, channel: voice.channel, time: e.time))
+          end
+          restrike(voice, e)
         end
 
         # With glide mode :last, tells every free or released lane other
@@ -868,6 +932,7 @@ module MB
         # Mono mode note-on: pushes the note on the stack, and plays it if
         # it takes over (legato if another note was sounding).
         def mono_on(e)
+          mono_restrike(e) if @same_key == :restrike
           @stack << e
           target = mono_target
           prev = @playing
@@ -880,6 +945,23 @@ module MB
           else
             mono_play(voice, target, e.time, legato: false)
           end
+        end
+
+        # For +same_key: :restrike+ in mono mode: drops the note stack's
+        # entries for note-on +e+'s key, ending the sounding note if it is
+        # one of them (so #mono_on plays +e+ as a fresh, non-legato note).
+        def mono_restrike(e)
+          old = @stack.select { |x| x.channel == e.channel && x.note == e.note }
+          return if old.empty?
+
+          @stack.reject! { |x| old.any? { |o| o.equal?(x) } }
+          return unless old.any? { |o| o.equal?(@playing) }
+
+          voice = @voice_states[0]
+          send_to(voice, Event.note_off(@playing.note, channel: @playing.channel, time: e.time))
+          @playing = nil
+          voice.state = :released
+          voice.off_seq = next_seq
         end
 
         # Mono mode note-off: removes the oldest matching note from the

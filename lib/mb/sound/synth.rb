@@ -65,6 +65,15 @@ module MB
     # Envelope's +retrigger: :add+); :ring can still stack up to +voices+
     # lanes of one note, since a strike takes a free voice first.
     #
+    # Overlapping notes on one key (+:same_key+, see MIDI::Allocator):
+    # :count (files, clips, transforms) gives each note-on its own lane
+    # until its note-off; :restrike (the default for real-time input, see
+    # MIDI::Source#realtime_input?: live keyboards, the UI's virtual
+    # keyboard, a Session's MIDI input and take replays of it) restarts the
+    # lane holding the key, so a keyboard that dropped a note-off (e.g.
+    # jack-keyboard losing focus with a key down) is fixed by pressing the
+    # key again, as on most synths.
+    #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
     # tones that call #rnd get different, repeatable phases.  +:seed+
@@ -187,6 +196,12 @@ module MB
       # The same-note retrigger mode (see the class description).
       attr_reader :retrigger
 
+      # The overlapping same-key note mode (:count or :restrike; see the
+      # class description and MIDI::Allocator).
+      def same_key
+        @allocator.same_key
+      end
+
       # The [index, count] of the synth lane whose voice block is running on
       # this thread, or nil outside voice blocks (see MidiMethods#per_voice).
       def self.current_lane
@@ -205,7 +220,7 @@ module MB
       # See the class description.
       def initialize(
         source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
-        priority: :last, glide_mode: :last, retrigger: :reuse, controls: [], bend_range: nil, sustain: true,
+        priority: :last, glide_mode: :last, retrigger: :reuse, same_key: nil, controls: [], bend_range: nil, sustain: true,
         seed: nil, tail: TAIL_SECONDS, skip_idle: true, exact_lanes: false, sample_rate: 48000, &block
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
@@ -270,7 +285,8 @@ module MB
 
         @allocator = MIDI::Allocator.new(
           stream, voices: voices, spares: spares, steal: steal, protect: protect, mono: mono,
-          priority: priority, glide_mode: glide_mode, retrigger: ALLOCATOR_RETRIGGER.fetch(retrigger, retrigger)
+          priority: priority, glide_mode: glide_mode, retrigger: ALLOCATOR_RETRIGGER.fetch(retrigger, retrigger),
+          same_key: same_key
         )
 
         @notes = []

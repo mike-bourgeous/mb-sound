@@ -53,6 +53,11 @@ module MB
             ends.include?(nil) ? nil : ends.max
           end
 
+          # True if any input is fed from a real-time input.
+          def realtime_input?
+            @inputs.any?(&:realtime_input?)
+          end
+
           def sources
             @inputs.each_with_index.to_h { |s, i| [:"input_#{i + 1}", s] }
           end

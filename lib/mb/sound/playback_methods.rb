@@ -1,3 +1,6 @@
+require_relative 'render_window'
+require_relative 'mix_report'
+
 module MB
   module Sound
     # Command-line interface methods for playing sounds.  MB::Sound extends
@@ -740,6 +743,36 @@ module MB
       # master chain; +:bus_stems+ (true) also writes each bus's output as
       # "<bus>.<ext>".  +:loudness+ normalizes only the mix file.
       #
+      # Render windows: +:from+ starts the file where a section, label, or
+      # marker of the song (a Symbol: `from: :drop`) or a bar (a number
+      # from 1, through the meter map) starts, and +:bars+ then counts from
+      # there; +:to+ (instead of +:bars+/+:seconds+) ends it where another
+      # one starts (`from: :drop, to: :breakdown`; also without +:from+).
+      # By default the song plays from its start up to +:from+ without
+      # being written (a pre-roll in whole buffers, the same buffers as a
+      # render from the start), so the file is exactly the song's own
+      # samples from the frame where +:from+ lands (tails from before, held
+      # notes, the form's picks and seeds, take-like exactness at any
+      # buffer size the whole render has); stems start there too.
+      # +preroll: false+ seeks there instead (Session#seek, as `seek :drop`
+      # in the console): faster for a section late in a long song, with
+      # fresh state (no tails from before).  See RenderWindow.
+      #
+      #     render 'drop.flac', from: :drop, bars: 8 { my_song }
+      #     render 'drop.flac', from: :drop, to: :breakdown, preroll: false { my_song }
+      #
+      # +report: :tracks+ prints a mix report when the render is done (see
+      # MixReport; MixReport.last keeps it): integrated loudness, short-term
+      # maximum, true peak, and PLR (true peak minus integrated loudness) of every track (its stem, also
+      # without +:stems+) and of the mix, and with a song form the
+      # integrated loudness of each track and the mix per section pass.
+      # Measured before +:loudness+ normalization.
+      #
+      # +ring: :first+ makes every sum built for the render (in the block,
+      # scheduled blocks, and track patches; `a + b`) end with its first
+      # input to end, the old default; sums ring until every input ends
+      # otherwise (see GraphNode#ring for one sum).
+      #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
       # CPU at buffer sizes other than 800).
@@ -769,26 +802,37 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
+        raise ArgumentError, 'Pass to: or bars:/seconds:, not both' if to && (bars || seconds)
+        raise ArgumentError, "preroll: is true or false (got #{preroll.inspect})" unless preroll == true || preroll == false
 
         current = Sequence.current_transport
         transport = Sequence::Transport.new(bpm: bpm || current.bpm, bar_length: current.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
+        # A pre-roll plays the song up to +from+ without writing it
+        output = RenderWindow::Gate.new(output) if from
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         session.exact_lanes = exact_lanes
+        session.ring = ring
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
+        end
+        if report
+          raise ArgumentError, "report: is :tracks (got #{report.inspect})" unless report == :tracks || report == true
+          meter = MixReport::Meter.new(session, writer: session.stems)
+          session.stems = meter
+          session.add_tap { |mix| meter.mix_tap(mix, session.frame - mix[0].length) }
         end
 
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
         seconds = Length.seconds(seconds, sample_rate: rate, transport: transport) if seconds
         # The end bar's position through the meter map (read every buffer,
-        # so meter changes made while rendering count)
+        # so meter changes made while rendering count); see below for from:
         end_time = bars && -> { transport.bar_position(bars.to_r + 1) }
         # A bars: render has no time limit of its own (it ends at its end
         # bar plus the tail); the others stop at seconds: or
@@ -807,13 +851,40 @@ module MB
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
+        # A render window (see RenderWindow): play up to +from+ without
+        # writing it (or seek there), then count bars: from there, or end
+        # where +to+ starts
+        if from || to
+          RenderWindow.check_target(session, from, 'from:') if from
+          RenderWindow.check_target(session, to, 'to:') if to
+        end
+        skip = 0
+        if from
+          # Stems start at the window too (nothing before it is written)
+          session.stems&.origin = Float::INFINITY
+          if preroll
+            limit = ((max_seconds || MAX_RENDER_SECONDS) * rate).round
+            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit)
+            from_pos = RenderWindow.position(session, from, 0)
+          else
+            from_pos = RenderWindow.seek(session, from)
+          end
+          output.open!(skip)
+          session.stems&.origin = session.frame + skip
+          end_time = bars && -> { transport.bar_position(transport.bar_at(from_pos) + bars.to_r) }
+        end
+        if to
+          after = (from_pos || 0) + Rational(1, 10**9)
+          end_time = -> { RenderWindow.position(session, to, after) }
+        end
+
         # Frames left to render: up to the end bar at the current tempo (so
         # tempo changes during the render count), or up to the time limit
         frames = 0
         frames_left = -> {
-          left = max_frames - frames
-          if end_time
-            to_go = end_time.call - transport.position
+          left = max_frames - frames + skip
+          if (end_pos = end_time&.call)
+            to_go = end_pos - transport.position
             left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
           end
           left
@@ -823,7 +894,7 @@ module MB
         # as long as a scheduled block is still to come: any block before the
         # end bar, or with seconds:, any block; without either, only one-shot
         # blocks (a lone `every` would never end), up to the time limit
-        bounded = bars || seconds
+        bounded = bars || seconds || to
         waiting = -> {
           session.schedule_due? ||
             session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
@@ -832,14 +903,15 @@ module MB
         until frames_left.call <= 0 || (session.idle? && !waiting.call)
           count = MB::M.min(buffer_size, frames_left.call)
           session.process_buffer(count)
-          frames += count
+          frames += count - skip
+          skip = 0
         end
         # Tails ring out on a paused timeline, as before
         session.advance_idle = false
 
         if frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
-        elsif tail && (bars || seconds)
+        elsif tail && (bars || seconds || to)
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
@@ -847,8 +919,14 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+        if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+        end
+
+        if meter
+          meter.finish(session.frame)
+          MixReport.last = meter.report
+          puts MixReport.last
         end
 
         frames.to_f / rate

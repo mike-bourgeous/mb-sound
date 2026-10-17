@@ -160,7 +160,8 @@ module MB::Sound
     running = sig.sounding(hold: stop, fade: 0.3)
     hiss = Array.new(wow.channel_count) { (noise.at(step * 0.5) + noise.at(step * 0.5)) * running }
     hiss = hiss.length == 1 ? hiss[0] : channels(*hiss)
-    grain = (wow + hiss).quantize(step)
+    # The tape ends with its signal (the hiss's gate holds a little longer)
+    grain = (wow + hiss).ring(:first).quantize(step)
     grain.filter(:lowpass, cutoff: 9000 - wear * 7800, quality: 0.6)
   end
 

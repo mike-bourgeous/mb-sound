@@ -29,14 +29,9 @@ RUN mkdir -p /claude && curl -fsSL https://claude.ai/install.sh | bash
 # GitHub
 ENV GH_CONFIG_DIR=/app/.gh-user
 RUN mkdir -p /app/.gh-user && \
-	wget https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_amd64.deb && \
-	dpkg -i gh_2.96.0_linux_amd64.deb && \
-	rm gh_2.96.0_linux_amd64.deb
-
-# ngrok
-RUN wget https://bin.ngrok.com/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz && \
-	tar -xvzf ngrok-v3-stable-linux-amd64.tgz -C /usr/local/bin && \
-	rm ngrok-v3-stable-linux-amd64.tgz
+	wget https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_amd64.deb && \
+	dpkg -i gh_2.102.0_linux_amd64.deb && \
+	rm gh_2.102.0_linux_amd64.deb
 
 # Git identity for commits made in the container (dock.sh passes the host's
 # `git config user.name`/`user.email`; empty means none, as before).  Last so

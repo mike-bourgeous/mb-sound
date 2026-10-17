@@ -98,7 +98,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     it 'makes saws without a block, and accepts a Pitch from the block' do
       tones = []
       allow(MB::Sound::Unison).to receive(:apply_phase).and_wrap_original { |m, t, ph| tones << t; m.call(t, ph) }
-      110.hz.unison(2)
+      110.hz.unison(2).sample(1) # (built when first used)
       expect(tones.map(&:wave_type)).to eq([:ramp, :ramp])
 
       expect(rms(render(110.hz.unison(2, detune: 0, phase: 0, normalize: :peak) { |p| p }))).to be_within(1e-3).of(Math.sqrt(0.5))
