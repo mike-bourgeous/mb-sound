@@ -22,7 +22,9 @@ module MB
     # trigger fires at every note-on, and the note number follows the newest
     # held note, returning to the previous one when it is released.  Notes
     # are counted per (channel, note), so overlapping notes on one key (on,
-    # on, off, off) stay held until the last note-off.  After content jumps
+    # on, off, off) stay held until the last note-off, except on real-time
+    # input, where a re-pressed held key restrikes (+same_key: :restrike+;
+    # see #initialize).  After content jumps
     # (seeks, timeline jumps, clip swaps), held values jump to the note at
     # the new position (see MIDI::Source#chase).
     #
@@ -256,10 +258,20 @@ module MB
       # description).  Note nodes read it through the sustain, sostenuto,
       # and soft pedals (MIDI::Stream#sustain) unless +sustain: false+, as
       # MB::Sound::Synth does; Synth lanes (already pedaled) and clip
-      # outputs (clips have no pedals) pass false.
-      def initialize(source, sustain: true, sample_rate: 48000)
+      # outputs (clips have no pedals) pass false.  +:same_key+ is :count
+      # (overlapping notes on one key stay held until their last note-off)
+      # or :restrike (note nodes read MIDI::Stream#restrike first: a
+      # re-pressed held key ends the held note, so a dropped note-off is
+      # fixed by pressing the key again); nil (the default) picks :restrike
+      # for real-time input (MIDI::Source#realtime_input?), else :count.
+      def initialize(source, sustain: true, same_key: nil, sample_rate: 48000)
         @stream = MIDI::Stream.for(source)
         @sustain = !!sustain
+        same_key ||= @stream.realtime_input? ? :restrike : :count
+        unless MIDI::Allocator::SAME_KEY_MODES.include?(same_key)
+          raise ArgumentError, "Unknown same_key mode #{same_key.inspect} (use #{MIDI::Allocator::SAME_KEY_MODES})"
+        end
+        @restrike = same_key == :restrike
         @note_stream = nil
         @control_stream = Notes.control_stream(@stream)
         @sample_rate = sample_rate.to_f
@@ -302,12 +314,14 @@ module MB
       # holding the input's events back (late readers of a stream start at
       # its slowest reader).
       def note_stream
-        return @stream unless @sustain
+        return @stream unless @sustain || @restrike
 
         s = live(@note_stream)
         return s if s
 
-        s = @stream.sustain
+        s = @stream
+        s = s.restrike if @restrike
+        s = s.sustain if @sustain
         @note_stream = WeakRef.new(s)
         s
       end
@@ -1043,7 +1057,7 @@ module MB
       #
       #     play midi.synth(voices: 6) { |v| v.hz.saw * v.amp_env }
       def synth(**options, &block)
-        Synth.new(@stream, **options, &block)
+        Synth.new(@stream, same_key: @restrike ? :restrike : :count, **options, &block)
       end
 
       private

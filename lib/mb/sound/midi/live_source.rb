@@ -170,6 +170,11 @@ module MB
           @closed
         end
 
+        # Live input (see Source#realtime_input?).
+        def realtime_input?
+          true
+        end
+
         def to_s
           port = @input.respond_to?(:port) ? " #{@input.port}" : ''
           "#{node_type_name}#{port}"

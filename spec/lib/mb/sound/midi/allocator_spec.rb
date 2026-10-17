@@ -668,6 +668,123 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     end
   end
 
+  describe 'same_key' do
+    def live_alloc(*events, **opts)
+      s = MB::Sound::MIDI::Stream.new(MIDIListSource.new(timeline(*events), realtime: true))
+      MB::Sound::MIDI::Allocator.new(s, glide_mode: nil, **opts)
+    end
+
+    it 'defaults to :count for lists and files, :restrike for real-time input' do
+      expect(alloc(on(60)).same_key).to eq(:count)
+      expect(live_alloc(on(60)).same_key).to eq(:restrike)
+      expect(MB::Sound::MIDI::Allocator.new(stream.sustain).same_key).to eq(:count)
+      live = MB::Sound::MIDI::Stream.new(MIDIListSource.new([], realtime: true))
+      expect(MB::Sound::MIDI::Allocator.new(live.sustain.transpose(2)).same_key).to eq(:restrike)
+      expect(MB::Sound::MIDI::Allocator.new(stream.merge(live)).same_key).to eq(:restrike)
+    end
+
+    it 'rejects unknown modes' do
+      expect { alloc(on(60), same_key: :stack) }.to raise_error(ArgumentError, /same_key/)
+    end
+
+    it 'can be chosen either way' do
+      expect(alloc(on(60), same_key: :restrike).same_key).to eq(:restrike)
+      expect(live_alloc(on(60), same_key: :count).same_key).to eq(:count)
+    end
+
+    [1, 4].each do |voices|
+      MB::Sound::MIDI::Allocator::RETRIGGER_MODES.each do |mode|
+        it "releases a re-pressed key at its next note-off (#{voices} voices, retrigger #{mode})" do
+          a = live_alloc(on(60), on(60), off(60), voices: voices, spares: 1, retrigger: mode)
+          l = lanes(a)
+          if voices == 1
+            expect(l).to eq([['on60@0', 'off60@1', 'on60@1', 'off60@2']])
+          else
+            expect(l).to eq([['on60@0', 'off60@1', 'on60@1', 'off60@2'], [], [], [], []])
+          end
+          expect(a.active_count).to eq(1)
+          expect(a.lanes[0].state).to eq(:released)
+        end
+      end
+    end
+
+    it 'keeps counting with :count (the old behavior)' do
+      a = live_alloc(on(60), on(60), off(60), voices: 4, spares: 0, same_key: :count)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2'], ['on60@1'], [], []])
+      expect(a.lanes[1].state).to eq(:sounding)
+    end
+
+    it 'drops every older duplicate, so the next note-off ends the key' do
+      a = live_alloc(on(60), on(64), on(60), on(60), off(60), off(60), off(64), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'off60@2', 'on60@2', 'off60@3', 'on60@3', 'off60@4'],
+        ['on64@1', 'off64@6'],
+        [], [],
+      ])
+    end
+
+    it 'forgets the missing note-off of a stolen note when its key starts again' do
+      # The first 60 is stolen (choked) by 62 and its note-off never comes; a
+      # second 60 then gets a lane, and its own note-off ends it
+      a = live_alloc(on(60), on(62), off(62), on(60), off(60), voices: 1, spares: 1, mono: false)
+      expect(lanes(a)).to eq([['on60@0', 'choke60@1', 'on60@3', 'off60@4'], ['on62@1', 'off62@2', 'choke62@3']])
+      expect(a.lanes.map(&:state)).not_to include(:sounding)
+    end
+
+    it 'gives a re-pressed released (ringing) key a lane as usual' do
+      a = live_alloc(on(60), off(60), on(60), off(60), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3'], [], []])
+    end
+
+    it 'restrikes per channel' do
+      a = live_alloc(on(60, ch: 0), on(60, ch: 1), off(60, ch: 1), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([['on60@0'], ['on60@1', 'off60@2'], [], []])
+    end
+
+    it 'routes poly pressure to the restruck lane only' do
+      a = live_alloc(on(60), on(60), ev.poly_pressure(60, 0.5), voices: 4, spares: 0)
+      expect(lanes(a)[0]).to eq(['on60@0', 'off60@1', 'on60@1', 'poly_pressure@2'])
+    end
+
+    it 'with a sustain pedal, a re-pressed pedal-held key takes a new lane (the held note is released)' do
+      s = MB::Sound::MIDI::Stream.new(
+        MIDIListSource.new(timeline(ev.cc(64, 1), on(60), off(60), on(60), off(60), ev.cc(64, 0)), realtime: true)
+      ).sustain
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 4, spares: 0, glide_mode: nil)
+      l = lanes(a).map { |x| x.reject { |e| e.start_with?('cc') } }
+      expect(l).to eq([['on60@1', 'off60@3'], ['on60@3', 'off60@5'], [], []])
+    end
+
+    it 'with a sustain pedal and a dropped note-off, the next release under the pedal ends at pedal up' do
+      s = MB::Sound::MIDI::Stream.new(
+        MIDIListSource.new(timeline(on(60), ev.cc(64, 1), on(60), off(60), ev.cc(64, 0)), realtime: true)
+      ).sustain
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 4, spares: 0, glide_mode: nil)
+      l = lanes(a).map { |x| x.reject { |e| e.start_with?('cc') } }
+      expect(l).to eq([['on60@0', 'off60@2', 'on60@2', 'off60@4'], [], [], []])
+    end
+
+    describe 'mono mode' do
+      it 'restarts a re-pressed sounding key (not legato)' do
+        a = live_alloc(on(60), on(60), off(60), off(60), voices: 1)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on60@1', 'off60@2']])
+        expect(a.lanes[0].state).to eq(:released)
+      end
+
+      it 'drops a re-pressed key from under the held note, keeping legato to it' do
+        a = live_alloc(on(60), on(64), on(60), off(60), off(64), voices: 1)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1', 'leg64@1', 'off64@2', 'leg60@2', 'off60@3', 'leg64@3', 'off64@4']])
+        expect(a.lanes[0].state).to eq(:released)
+      end
+
+      it 'keeps glide events sensible (:last mode glides to the restruck note)' do
+        s = MB::Sound::MIDI::Stream.new(MIDIListSource.new(timeline(on(60), on(60), off(60)), realtime: true))
+        a = MB::Sound::MIDI::Allocator.new(s, voices: 1)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on60@1', 'off60@2']])
+      end
+    end
+  end
+
   describe 'invariants' do
     # Random balanced note events on two channels, with some overlapping
     # notes on the same key.
@@ -699,6 +816,26 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
 
           expect(a.lanes.map(&:state) - [:free, :released, :choking]).to eq([])
           expect(logs.sum { |l| l.count(&:note_on?) }).to eq(random_events(seed).count(&:note_on?))
+        end
+      end
+
+      it "with :restrike and dropped note-offs, keeps lanes balanced and ends every key pressed once more (#{voices} voices, #{spares} spares)" do
+        [1, 2, 3].each do |seed|
+          rng = Random.new(seed + 100)
+          events = random_events(seed).reject { |e| e.type == :note_off && rng.rand < 0.2 }
+          keys = [0, 1].product((50..57).to_a)
+          events += keys.flat_map { |ch, n| [on(n, ch: ch), off(n, ch: ch)] }
+          a = MB::Sound::MIDI::Allocator.new(
+            stream(*events), voices: voices, spares: spares, glide_mode: glide, mono: false, same_key: :restrike
+          )
+          a.lanes.each_with_index { |l, idx| l.idle_check = -> { idx.even? } }
+          readers = a.lanes.map(&:reader)
+          logs = Array.new(readers.length) { [] }
+          500.times { readers.each_with_index { |r, idx| logs[idx].concat(r.next(1/100r)) } }
+
+          logs.each do |log| expect_one_note_at_a_time(log) end
+          expect(a.lanes.map(&:state) - [:free, :released, :choking]).to eq([])
+          expect(logs.sum { |l| l.count(&:note_on?) }).to eq(events.count(&:note_on?))
         end
       end
     end
