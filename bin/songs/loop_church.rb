@@ -250,9 +250,11 @@ module MB::Sound
     track(:stabs, q: 1) { |c| funk_clav_voice(c) }
     track(:lead, q: 1) { |c| funk_talkbox_voice(c) }
     track(:hook, q: 1) { |c| funk_talkbox_voice(c, level: 0.6).pan(-0.3) }
-    track(:choir, q: 1) { |c| funk_dub_loop(funk_choir_voice(c), dub: knob(:dub), keep: knob(:keep)) }
+    # (knobs before the track that reads them: tracks build their patch
+    # when defined; see Arrangement::PatchCheck)
     knob :dub, 0, smooth: 20.ms
     knob :keep, 0.82
+    track(:choir, q: 1) { |c| funk_dub_loop(funk_choir_voice(c), dub: knob(:dub), keep: knob(:keep)) }
     nil
   end
 

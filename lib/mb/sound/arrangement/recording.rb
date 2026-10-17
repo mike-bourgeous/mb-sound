@@ -27,7 +27,93 @@ module MB
         # The armed tracks: a Hash from name to the MIDI input's name (nil
         # for the default input).
         def armed
-          @mutex.synchronize { (@armed ||= {}).dup }
+          @mutex.synchronize { (@arms ||= {}).transform_values(&:input) }
+        end
+
+        # The armed tracks' states: a Hash from name to Arm (input,
+        # whether a monitor was asked for, and :monitoring or :silent; see
+        # Arm for the state machine).
+        def arms
+          @mutex.synchronize { (@arms ||= {}).dup }
+        end
+
+        # Applies +event+ (see Arm::TABLE) to track +name+'s arm state,
+        # creating it from +input+ and +monitor+ when disarmed.  Returns the
+        # new Arm, or nil once disarmed.
+        def arm_event(name, event, input: nil, monitor: true)
+          @mutex.synchronize {
+            @arms ||= {}
+            arm = @arms[name] || Arm.new(input: input, monitor: monitor, state: :disarmed)
+            arm = arm.with(input: input, monitor: monitor) if %i[arm arm_silent].include?(event)
+            nxt = arm.on(event)
+            nxt ? @arms[name] = nxt : @arms.delete(name)
+            nxt
+          }
+        end
+
+        # Brings the arm states in line with the Session's players: an
+        # armed track whose monitor stopped (`stop :"x/live"`, an undone
+        # arm, a cancelled start) becomes :silent, and one whose monitor
+        # plays again (undo, resume) :monitoring.  Session#command runs
+        # this after every command, and undo, redo, and seeks after they
+        # land, so the invariant in #arm_problems holds between commands.
+        #
+        # The arm state owns the monitors: a monitor brought back for a
+        # track that isn't armed (undoing `stop :"x/live"` after `disarm`)
+        # is stopped again with a declick.
+        def sync_arms
+          a = arms
+          tracks.each_key do |name|
+            next if a.key?(name)
+            mon = Recording.monitor_name(name)
+            @session.remove(mon, fade: @session.declick_bars) if @session.playing_after_queue?(mon)
+          end
+
+          a.each do |name, arm|
+            playing = @session.playing_after_queue?(Recording.monitor_name(name))
+            if arm.monitoring? && !playing
+              arm_event(name, :monitor_lost)
+            elsif !arm.monitoring? && playing
+              arm_event(name, :monitor_found)
+            end
+          end
+          nil
+        end
+
+        # Broken invariants between the arm states and the players, as
+        # Strings (empty when all is well): a :monitoring track whose
+        # monitor isn't playing or queued, a :silent one whose monitor is,
+        # or a disarmed track's monitor still playing.  For specs (like
+        # UI::Tiles#mode_problems).
+        def arm_problems
+          a = arms
+          problems = a.filter_map { |name, arm|
+            playing = @session.playing_after_queue?(Recording.monitor_name(name))
+            next if arm.monitoring? == playing
+            "#{name.inspect} is #{arm.state} but its monitor is #{playing ? '' : 'not '}playing"
+          }
+          tracks.each_key do |name|
+            next if a.key?(name)
+            problems << "#{name.inspect} is disarmed but its monitor plays" if @session.playing_after_queue?(Recording.monitor_name(name))
+          end
+          problems
+        end
+
+        # Disarms every armed track for #panic (see Arm: panic disarms, so
+        # a broken armed track can't keep making noise, and the prompt and
+        # listings agree with what plays).  Panic has already stopped the
+        # monitors.  Returns the names disarmed.
+        def panic_disarm
+          names = arms.keys
+          return [] if names.empty?
+          time = @session.now
+          before = undo_state
+          names.each do |n|
+            arm_event(n, :panic)
+            @session.change(:disarm, n, time, data: { by: :panic }) { |_t| }
+          end
+          @session.note_undo_extra(self, before, undo_state)
+          names
         end
 
         # True if track +name+ is armed.
@@ -66,9 +152,10 @@ module MB
               # Armed right away (Set state, like a track's clip), so `arm
               # :lead; rec 4` works while the :arm change waits (in a
               # replay, lines run ahead of their landing times)
-              @mutex.synchronize { (@armed ||= {})[tr.name] = input }
+              want = monitor && tr.patch?
+              arm_event(tr.name, want ? :arm : :arm_silent, input: input, monitor: monitor)
               c = @session.change(:arm, tr.name, @session.now, data: { input: input }.compact) { |_t| }
-              start_monitor(tr, input) if monitor && tr.patch?
+              arm_event(tr.name, :arm_silent, input: input, monitor: monitor) if want && !start_monitor(tr, input)
               c
             }
             @session.note_undo_extra(self, before, undo_state)
@@ -94,7 +181,7 @@ module MB
             entries = names.map { |n|
               mon = Recording.monitor_name(n)
               @session.remove(mon, fade: @session.declick_bars, time: time) if @session.playing_after_queue?(mon)
-              @mutex.synchronize { (@armed ||= {}).delete(n) }
+              arm_event(n, :disarm)
               @session.change(:disarm, n, time) { |_t| }
             }
             @session.note_undo_extra(self, before, undo_state)
@@ -312,9 +399,10 @@ module MB
         # patch, and a capture then played a very different one).
         def refresh_monitor(tr)
           return unless tr.patch?
-          known, input = @mutex.synchronize { a = (@armed ||= {}); [a.key?(tr.name), a[tr.name]] }
-          return unless known && @session.playing_after_queue?(Recording.monitor_name(tr.name))
-          start_monitor(tr, input)
+          arm = arms[tr.name]
+          return unless arm&.monitoring? && @session.playing_after_queue?(Recording.monitor_name(tr.name))
+          # (a patch that fails to build leaves the old monitor playing)
+          arm_event(tr.name, :redefine) if start_monitor(tr, arm.input)
         end
 
         # Starts the player that monitors armed track +tr+ (see #arm).
@@ -323,7 +411,10 @@ module MB
           graph = begin
                     GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(live) }
                   rescue => e
-                    warn "Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}); recording still works"
+                    # (not a PatchError: a patch may play clips but not live
+                    # MIDI, e.g. ghost_chords; the track still arms, silent)
+                    where = patch_line(tr.patch, e)
+                    notice_patch_problem("Track #{tr.name.inspect} can't monitor live MIDI (#{e.class}: #{e.message}#{where ? " at #{where}" : ''}); recording still works")
                     return nil
                   end
           @session.add(graph, name: Recording.monitor_name(tr.name), on: :now, fade: 0, description: "#{tr.name}: live monitor (armed; #{input ? "MIDI input #{input.inspect}" : 'live MIDI'})")

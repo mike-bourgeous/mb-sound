@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::Session::Buses) do
       session.bus(:b) { |sig| sig * 0.25 }
       session.add(1.constant, name: :x, send: { b: 1 })
       run(800)
-      session.add(2.constant, name: :x, on: :now)
+      session.add(2.constant, name: :x, on: :now, fade: 0)
       expect(run(800).to_a.uniq).to eq([2.5])
     end
 

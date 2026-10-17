@@ -221,7 +221,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
       MB::Sound::Session.with_context(session: s) do
         MB::Sound.bg(:clock, 0.constant, on: :now) # (the timeline moves)
         MB::Sound.track(:lead, q: 1) { |c| c.number * c.gate }
-        MB::Sound.track(:l_bass, q: 1) { |c| c.synth { |v| v.nosuch_patch_method } }
+        MB::Sound.track(:l_bass, q: 1) { |c| c.equal?(MB::Sound::Arrangement::PatchCheck.probe) ? c.number : c.synth { |v| v.nosuch_patch_method } } # (passes the definition check)
         MB::Sound.arm(:lead, monitor: false)
         MB::Sound.arm(:l_bass, monitor: false)
       end

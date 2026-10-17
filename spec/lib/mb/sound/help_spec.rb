@@ -223,7 +223,6 @@ RSpec.describe MB::Sound::Help do
         expect(runner.index).to eq(1)
       end
     ensure
-      MB::Sound::Help::Progress.save(:set, 0)
       session&.close
     end
 
@@ -306,17 +305,83 @@ RSpec.describe MB::Sound::Help do
       MB::Sound::Help::LessonRunner.active = nil
     end
 
-    it 'saves progress, resumes, and lists lessons' do
+    it 'declares every (state, event) pair of a lesson run' do
+      r = MB::Sound::Help::LessonRunner
+      r::STATES.each do |st|
+        expect(r::TABLE[st].keys).to eq(r::EVENTS)
+        r::EVENTS.each { |ev| expect(r::STATES).to include(r.next_state(st, ev)) }
+      end
+      expect { r.next_state(:asleep, :quit) }.to raise_error(ArgumentError, /Unknown lesson state/)
+    end
+
+    it "resumes a run in this console and Session, starts over in a new one, and keeps completion apart (ux-r3 item 34)" do
       lesson = MB::Sound::Help::LESSONS[:knobs]
-      runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
-      runner.next
-      runner.next
-      expect(MB::Sound::Help::LessonRunner.new(lesson).index).to eq(2)
-      expect(File.exist?(File.join(ENV['MB_SOUND_HELP_DIR'], 'progress.json'))).to eq(true)
-      list = MB::U.remove_ansi(MB::Sound::Help::LessonList.new.to_s)
-      expect(list).to include(':record').and include('step 3/5')
-      text = MB::U.remove_ansi(runner.to_s)
-      expect(text).to include('step 3/5').and include('turn :l_cut')
+      runs = MB::Sound::Help::LessonRunner.runs
+      runs.delete(:knobs)
+      session = new_session
+      MB::Sound::Session.with_context(session: session) do
+        runner = MB::Sound.lesson(:knobs)
+        expect(runner.index).to eq(0)
+        runner.next
+        runner.next
+        expect { runner.quit }.to output(/left knobs at step 3 .*resumes it in this console/).to_stdout
+        expect(runner.state).to eq(:left)
+
+        again = MB::Sound.lesson(:knobs)
+        expect(again).to equal(runner)
+        expect([again.index, again.state]).to eq([2, :running])
+        expect(MB::U.remove_ansi(MB::Sound::Help::LessonList.new.to_s)).to match(/:knobs .*step 3\/5/)
+
+        # A new console (no runs): step 1; nothing saved per step
+        runs.clear
+        expect(MB::Sound.lesson(:knobs).index).to eq(0)
+        expect(MB::Sound::Help::History.completed?(lesson)).to eq(false)
+
+        # Finished: remembered across consoles, shown as done before, and
+        # a new run starts at step 1
+        r = MB::Sound.lesson(:knobs)
+        lesson.steps.length.times { r.next }
+        expect(r.state).to eq(:done)
+        expect(MB::Sound::Help::History.completed?(lesson)).to eq(true)
+        runs.clear
+        expect(MB::U.remove_ansi(MB::Sound::Help::LessonList.new.to_s)).to match(/:knobs .*5 steps ✓ done before/)
+        expect(MB::Sound.lesson(:knobs).index).to eq(0)
+      end
+      # Another Session: starts over
+      other = new_session
+      MB::Sound::Session.with_context(session: other) { expect(MB::Sound.lesson(:knobs).session).to equal(other) }
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
+      MB::Sound::Help::LessonRunner.runs.clear
+      session&.close
+      other&.close
+    end
+
+    it 'reads finished lessons from progress files written before ux-r3 (name => next step)' do
+      lesson = MB::Sound::Help::LESSONS[:knobs]
+      FileUtils.mkdir_p(MB::Sound::Help::History.dir)
+      File.write(MB::Sound::Help::History.path, JSON.generate(knobs: lesson.steps.length, set: 1))
+      expect(MB::Sound::Help::History.completed?(lesson)).to eq(true)
+      expect(MB::Sound::Help::History.completed?(MB::Sound::Help::LESSONS[:set])).to eq(false)
+    ensure
+      File.delete(MB::Sound::Help::History.path) rescue nil
+    end
+
+    it 'starts at a later step with from:, replaying the steps before it' do
+      session = new_session
+      lesson = MB::Sound::Help::LESSONS[:knobs]
+      MB::Sound::Session.with_context(session: session) do
+        runner = nil
+        expect { runner = MB::Sound.lesson(:knobs, from: 3) }.to output(/replaying step 1: .*\n.*replaying step 2: /).to_stdout
+        expect(runner.index).to eq(2)
+        expect(lesson.steps[0].passed?).to eq(true)
+        expect(lesson.steps[1].passed?).to eq(true)
+        expect { MB::Sound.lesson(:knobs, from: 9) }.to raise_error(ArgumentError, /from: is a step number of lesson :knobs \(1..5\)/)
+      end
+    ensure
+      MB::Sound::Help::LessonRunner.active = nil
+      MB::Sound::Help::LessonRunner.runs.clear
+      session&.close
     end
 
     it 'starts from the console command' do
@@ -588,8 +653,8 @@ RSpec.describe MB::Sound::Help do
     end
 
     it 'sets lesson steps apart with blank lines and a "lesson :x · step n/m" line' do
-      allow(MB::Sound::Help::Progress).to receive(:load).and_return({})
-      allow(MB::Sound::Help::Progress).to receive(:save)
+      allow(MB::Sound::Help::History).to receive(:load).and_return({})
+      allow(MB::Sound::Help::History).to receive(:complete)
       t = text(MB::Sound::Help::LessonRunner.new(MB::Sound::Help::LESSONS[:set]))
       expect(t).to start_with("\nlesson :set · step 1/")
       expect(t).to end_with("\n")

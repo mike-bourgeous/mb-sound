@@ -859,7 +859,8 @@ module MB
           when :copy then copy
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
           when :redraw then @full = true
-          when :panic then run_safely { UI.run_line('panic', keys_session || Session.current) }
+          when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
+            @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
           when :key_help then key_help
           when :messages then messages

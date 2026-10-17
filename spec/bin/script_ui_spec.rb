@@ -47,13 +47,30 @@ RSpec.describe('bin/ scripts with --ui', :aggregate_failures) do
     status = in_pty('bin/songs/tempo_song.rb', '--ui', '-b', '1') do |text, w, wait|
       expect(wait.(' PLAY ')).to eq(true), text.call
       # (panes draw at their own rates after the status line: wait for each, a loaded machine is slower)
-      %w[TRACKS MASTER frequency\ (Hz) q\ quit\ \ Space\ pause].each { |s| expect(wait.(s)).to eq(true), "#{s}\n#{text.call}" }
+      %w[TRACKS MASTER frequency\ (Hz) q\ Esc\ quit\ \ Space\ pause].each { |s| expect(wait.(s)).to eq(true), "#{s}\n#{text.call}" }
       w.write(' ')
       expect(wait.('paused: Space plays on')).to eq(true), text.call
       w.write(' ')
       expect(wait.('ended: q quits')).to eq(true), text.call
       expect(text.call).to match(/S -\d+\.\d LUFS/) # the final meters stay
       w.write('q')
+    end
+    expect(status).to be_success
+  end
+
+  it 'steps bars with Right and Left and quits a song screen with Esc (ux-r3 items 42, 43)' do
+    status = in_pty('bin/songs/tempo_song.rb', '--ui', '-b', '8') do |text, w, wait|
+      expect(wait.(' PLAY ')).to eq(true), text.call
+      w.write("\e[C")
+      expect(wait.('bar 2')).to eq(true), text.call
+      sleep 0.1
+      w.write("\e[C")
+      expect(wait.('bar 3')).to eq(true), text.call # from the previous target
+      sleep 0.1
+      w.write("\e[D")
+      expect(wait.(/bar [23]\b/)).to eq(true), text.call
+      sleep 0.7
+      w.write("\e")
     end
     expect(status).to be_success
   end

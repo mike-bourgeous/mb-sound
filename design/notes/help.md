@@ -63,6 +63,10 @@ A lesson (`Help.lesson :name, title, minutes:`) is steps with `say` (prose), `ty
 
 Lessons in phase 1: `:set` (6 steps), `:knobs` (5), `:flow` (4), `:record` (5: arm, `rec 2`, `capture :l_keys, 1`, `rec_audio`, wrap up).  Their names start with `l_`.
 
+Lesson runs (ux-r3 item 34, 2026-10-17): progress saved across consoles made `lesson :set` in a new console say done (or resume at step N) without the tracks, clips, and knobs its steps had built.  Now a run (`LessonRunner`: lesson, step, Session) lives only in this console: STATES running/left/done, EVENTS advance/finish/back/restart/quit/resume, `TABLE` over every pair; `lesson :x` resumes this console's run in the current Session unless it is done, else starts at step 1; `restart: true` starts over; `from: 4` runs steps 1-3's code first ("replaying step 1: ...").  `Help::History` (progress.json) records only finished lessons (`name => { "completed" => time }`; older files' `name => next step` counts as finished past the last step), shown as "✓ done before" in the list.
+
+`demo` (ux-r3 item 26): topic `help :demo` (group :arrange), and the sheet's first group reads `now; demo`.
+
 ## The guard spec (`spec/lib/mb/sound/help_spec.rb`, ~10 s)
 
 - Every topic name is a real method; every console command a topic lists is a console command; every method a sheet line calls exists (placeholders `g b l r bass2 beat` and section names allowed).

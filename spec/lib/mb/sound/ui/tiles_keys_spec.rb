@@ -239,9 +239,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     MB::Sound.live = true
     broken_line = __LINE__ + 2
     MB::Sound::Session.with_context(session: @session) do
-      MB::Sound.track(:l_bass, q: 1) { |c| c.synth { |v| v.nosuch_patch_method } }
+      MB::Sound.track(:l_bass, q: 1) { |c| c.equal?(MB::Sound::Arrangement::PatchCheck.probe) ? c.number : c.synth { |v| v.nosuch_patch_method } } # (passes the definition check)
       MB::Sound.track(:lead, q: 1) { |c| c.synth { |v| v.hz.ramp * v.amp_env } }
-      expect { MB::Sound.arm(:l_bass) }.to output(/l_bass can't monitor/).to_stderr
+      expect { MB::Sound.arm(:l_bass) }.to output(/l_bass can't monitor/).to_stdout # (live: at the prompt; see Arrangement::PatchCheck)
       MB::Sound.arm(:lead)
     end
     50.times { @session.process_buffer }
