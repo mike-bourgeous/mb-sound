@@ -15,6 +15,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_svf.h"
+#include "mb_four_pole_tuning.h"
 
 // Cutoff limits: at least 1 Hz, at most this fraction of the sample rate.
 #define FP_MIN_CUTOFF 1.0
@@ -267,6 +268,42 @@ static inline double dl_loop_gain(double r, int curve, double k_max)
 	}
 }
 
+// The edge tuning's cutoff scale (+tuning+ 1..FP_TUNING_COUNT for the modes
+// lp4, lp2, bp2, bp4, hp2, hp4, diode; 0, the hardware tuning, gives 1) for
+// x, the loop gain over the oscillation edge's (lp4 k / 4, the diode ladder
+// k / DL_EDGE_K): the factor by which the filter's frequency is raised
+// above the hardware mapping (where the cutoff is the frequency the filter
+// would oscillate at), so that without resonance a lowpass is 3 dB down at
+// the cutoff, and its resonant peak is at the cutoff once it stands 6 dB
+// over the passband (see FourPole::Tuning in Ruby, the exact mirror, and
+// TuningAnalysis for the definition).  A cubic Hermite interpolation of the
+// generated fp_tuning_tables, within 1 cent of the definition; 1 from the
+// oscillation edge up.
+static inline double fp_tuning_scale(int tuning, double x)
+{
+	if (tuning <= 0 || tuning > FP_TUNING_COUNT) {
+		return 1.0;
+	}
+	if (!(x > 0.0)) {
+		x = 0.0;
+	}
+	if (x >= 1.0) {
+		return 1.0;
+	}
+
+	const double *t = fp_tuning_tables[tuning - 1];
+	double p = x * FP_TUNING_SEGMENTS;
+	int i = (int)p;
+	double f = p - (double)i;
+	int j = 2 * i;
+	double y0 = t[j], d0 = t[j + 1], y1 = t[j + 2], d1 = t[j + 3];
+	double c2 = 3.0 * (y1 - y0) - 2.0 * d0 - d1;
+	double c3 = 2.0 * (y0 - y1) + d0 + d1;
+	return y0 + f * (d0 + f * (c2 + f * c3));
+}
+
+// The diode ladder's edge tuning number (fp_tuning_scale).
+#define FP_TUNING_DIODE 7
 
 // A four-pole or diode ladder's settings (the kernels' arguments other
 // than the signals and the state).
@@ -275,6 +312,7 @@ struct mb_fp_args {
 	double mix[5];      // four-pole output mix (cascade input, four stages)
 	int curve, drive_mode, clip;
 	int normalize;      // diode ladder only
+	int tuning;         // 0 hardware, else fp_tuning_scale's table (lp4's taps 1..6, the diode ladder FP_TUNING_DIODE)
 };
 
 // Flushes states that are not finite or below FP_FLUSH to zero (on the
@@ -304,8 +342,9 @@ struct mb_fp_coef {
 	double g, G, one, G4, k, inv, in_gain;
 };
 
+// ...with the prewarped cutoff t and the tuning's scale (g = t × scale).
 struct mb_fp_cache {
-	double last_fc, last_res;
+	double last_fc, last_res, t, scale;
 	struct mb_fp_coef c;
 };
 
@@ -314,6 +353,8 @@ static inline void mb_fp_cache_init(struct mb_fp_cache *cc)
 {
 	cc->last_fc = NAN;
 	cc->last_res = NAN;
+	cc->t = 0;
+	cc->scale = 1;
 	cc->c.g = 0;
 	cc->c.G = 0;
 	cc->c.G4 = 0;
@@ -324,12 +365,13 @@ static inline void mb_fp_cache_init(struct mb_fp_cache *cc)
 }
 
 // Updates the coefficients for cutoff +fc+ and resonance +res+ if either
-// changed (the loop gain only when the resonance changes; +pi_over_rate+ is
-// pi / sample rate, +fc_max+ the highest cutoff).
+// changed (the loop gain and the tuning's scale only when the resonance
+// changes; +pi_over_rate+ is pi / sample rate, +fc_max+ the highest cutoff).
 static inline void mb_fp_coef_update(struct mb_fp_cache *cc, const struct mb_fp_args *args, double fc, double res, double pi_over_rate, double fc_max)
 {
 	if (fc != cc->last_fc || res != cc->last_res) {
 		struct mb_fp_coef *c = &cc->c;
+		_Bool new_g = 0;
 		if (res != cc->last_res) {
 			cc->last_res = res;
 			if (!(res >= 0.0)) {
@@ -339,6 +381,10 @@ static inline void mb_fp_coef_update(struct mb_fp_cache *cc, const struct mb_fp_
 			}
 			c->k = fp_loop_gain(res, args->curve, args->k_max);
 			c->in_gain = 1.0 + args->comp * c->k;
+			if (args->tuning) {
+				cc->scale = fp_tuning_scale(args->tuning, c->k * 0.25);
+				new_g = 1;
+			}
 		}
 
 		if (fc != cc->last_fc) {
@@ -348,7 +394,12 @@ static inline void mb_fp_coef_update(struct mb_fp_cache *cc, const struct mb_fp_
 			} else if (fc > fc_max) {
 				fc = fc_max;
 			}
-			c->g = mb_tan_pade(fc * pi_over_rate);
+			cc->t = mb_tan_pade(fc * pi_over_rate);
+			new_g = 1;
+		}
+
+		if (new_g) {
+			c->g = cc->t * cc->scale;
 			c->G = c->g / (1.0 + c->g);
 			c->one = 1.0 - c->G;
 			double G2 = c->G * c->G;
@@ -513,8 +564,12 @@ static inline void mb_dl_coef_update(struct mb_dl_cache *cc, const struct mb_fp_
 				c->dcomp = dl_compensation(c->k, fp_loop_gain(res, args->curve, args->k_max), args->comp);
 			}
 			c->in_gain = 1.0 + c->dcomp * c->k;
-			if (args->normalize) {
+			if (args->tuning) {
+				cc->scale = fp_tuning_scale(args->tuning, c->k * DL_INV_EDGE_K) * DL_INV_W180;
+			} else if (args->normalize) {
 				cc->scale = dl_cutoff_scale(c->k) * DL_INV_W180;
+			}
+			if (args->normalize) {
 				double headroom = dl_headroom(c->k);
 				double inv_drive = args->drive > 0 ? 1.0 / args->drive : 0.0;
 				c->sat_drive = args->drive / headroom;

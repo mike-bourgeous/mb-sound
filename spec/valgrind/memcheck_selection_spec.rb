@@ -190,6 +190,7 @@ RSpec.describe(MemcheckSelection) do
       expect(MemcheckSelection.depend_problems_for(ext)).to contain_exactly(
         'ext/mb/sound/fast_filter/depend: fast_filter.o is missing ext/mb/sound/include/mb_svf.h',
         'ext/mb/sound/fast_filter/depend: fast_filter.o is missing ext/mb/sound/include/mb_four_pole.h',
+        'ext/mb/sound/fast_filter/depend: fast_filter.o is missing ext/mb/sound/include/mb_four_pole_tuning.h',
         "ext/mb/sound/fast_filter/depend: fast_filter.o lists ext/mb/sound/include/mb_envelope.h, which it doesn't include",
         'ext/mb/sound/fast_filter/depend: gone.o has no source file'
       )

@@ -314,13 +314,15 @@ static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
 		.rate = rate, .k_max = cfg[0], .comp = cfg[1], .drive = cfg[2],
 		.mix = { cfg[3], cfg[4], cfg[5], cfg[6], cfg[7] },
 		.curve = (int)cfg[8], .drive_mode = (int)cfg[9], .clip = (int)cfg[10], .normalize = (int)cfg[11],
+		.tuning = (int)cfg[13],
 	};
 	f->args = args;
 	f->diode = cfg[12] != 0;
 	if (!isfinite(args.k_max) || !isfinite(args.comp) || !(args.drive >= 0) || !isfinite(args.drive) ||
 			args.curve < FP_CURVE_LINEAR || args.curve > FP_CURVE_SELF_OSC_DB ||
 			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (f->diode && args.drive_mode == FP_DRIVE_STAGES) ||
-			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD) {
+			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD ||
+			(f->diode ? args.tuning != 0 && args.tuning != FP_TUNING_DIODE : args.tuning < 0 || args.tuning >= FP_TUNING_DIODE)) {
 		rb_raise(rb_eArgError, "Bad plan four-pole settings");
 	}
 

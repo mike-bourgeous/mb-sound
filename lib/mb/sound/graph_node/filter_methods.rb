@@ -192,18 +192,20 @@ module MB
         #     play 110.hz.ramp.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
         def lp4(
           cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
-          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true
+          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, tuning: :edge
         )
           raise ArgumentError, 'Give lp4 resonance: or quality:, not both' if resonance && quality
 
           f = MB::Sound::Filter::FourPole.new(
             mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
             resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip, normalize: normalize,
-            sample_rate: sample_rate
+            tuning: tuning, sample_rate: sample_rate
           )
-          # The normalized diode ladder takes lp4's knob for a Q (same settings, similar sound)
-          diode = mode == :diode && !normalize
-          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: diode) if quality
+          # Edge tuning: each filter's own gain q at the cutoff.  Hardware
+          # tuning: the normalized diode ladder takes lp4's knob for a Q (same
+          # settings, similar sound)
+          diode = mode == :diode && (tuning == :edge || !normalize)
+          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: diode, tuning: tuning) if quality
           resonance ||= 0.0
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
         end

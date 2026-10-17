@@ -173,6 +173,12 @@ module MB
         # Drive modes (the kernel's +drive_mode+): where the saturation is.
         DRIVE_MODES = { input: 0, stages: 1, feedback: 2 }.freeze
 
+        # Cutoff tunings (see FourPole::Tuning): :edge (default) keeps the
+        # cutoff at the -3 dB edge without resonance and on the resonant
+        # peak with it; :hardware is the frequency the filter would
+        # oscillate at (the behavior until 2026-10-17).
+        TUNINGS = [:edge, :hardware].freeze
+
         # Clipper shapes for +drive_mode: :feedback+.
         CLIPS = { soft: 0, hard: 1 }.freeze
 
@@ -191,13 +197,13 @@ module MB
         ].freeze
 
         attr_reader :sample_rate, :cutoff, :resonance, :mode, :drive, :compensation, :k_max,
-          :resonance_curve, :drive_mode, :clip
+          :resonance_curve, :drive_mode, :clip, :tuning
 
         # Creates a filter at +cutoff+ Hz with +resonance+ 0..1 (see the
         # class description for the options).
         def initialize(
           cutoff: 1000.0, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
-          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, sample_rate: 48000
+          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, tuning: :edge, sample_rate: 48000
         )
           raise ArgumentError, "Unknown four-pole mode #{mode.inspect} (use one of #{MODES.keys.join(', ')})" unless MODES.include?(mode)
           raise ArgumentError, "Unknown resonance curve #{resonance_curve.inspect} (use :db or :linear)" unless RESONANCE_CURVES.include?(resonance_curve)
@@ -205,9 +211,12 @@ module MB
           raise ArgumentError, "Unknown clip #{clip.inspect} (use :soft or :hard)" unless CLIPS.include?(clip)
           raise ArgumentError, 'clip: only applies to drive_mode: :feedback' if clip != :soft && drive_mode != :feedback
           raise ArgumentError, 'The diode ladder takes drive_mode: :input or :feedback' if mode == :diode && drive_mode == :stages
+          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge or :hardware)" unless TUNINGS.include?(tuning)
 
           @mode = mode
           @normalize = !!normalize
+          @tuning = tuning
+          @tuning_number = Tuning.number(mode, tuning)
           @resonance_curve = resonance_curve
           @drive_mode = drive_mode
           @clip = clip
@@ -275,9 +284,9 @@ module MB
         def dynamic_process(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
           out = if diode?
-                  MB::Sound::FastFilter.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize)
+                  MB::Sound::FastFilter.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
                 else
-                  MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+                  MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
                 end
           remember(cutoff, resonance)
           out
@@ -287,9 +296,9 @@ module MB
         def dynamic_process_ruby(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
           out = if diode?
-                  self.class.diode_process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize)
+                  self.class.diode_process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize, @tuning_number)
                 else
-                  self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+                  self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options, @tuning_number)
                 end
           remember(cutoff, resonance)
           out
@@ -324,10 +333,18 @@ module MB
             # The bilinear transform of (1 + c k) / (D(s) + k), D(s) = s^4 +
             # 7 s^3 + 15 s^2 + 10 s + 1, with s in units of the stages'
             # angular frequency (g = tan(pi fc / rate) / sqrt(10/7))
-            scale = @normalize ? self.class.diode_cutoff_scale(k) * DIODE_INV_W180 : DIODE_INV_W180
+            scale = if @tuning_number != 0
+                      Tuning.scale(@tuning_number, k * DIODE_INV_EDGE_K) * DIODE_INV_W180
+                    elsif @normalize
+                      self.class.diode_cutoff_scale(k) * DIODE_INV_W180
+                    else
+                      DIODE_INV_W180
+                    end
             s = (1 - z1) / ((1 + z1) * (g * scale))
             return (1 + passband_compensation(k) * k) / ((((s + 7) * s + 15) * s + 10) * s + 1 + k)
           end
+
+          g *= Tuning.scale(@tuning_number, k * 0.25)
 
           # One TPT stage: g (1 + z^-1) / ((1 + g) - (1 - g) z^-1)
           h = g * (z1 + 1) / ((1 + g) - (1 - g) * z1)
@@ -357,14 +374,14 @@ module MB
 
         def to_s
           drive = @drive > 0 ? ", drive #{@drive}#{@drive_mode == :input ? '' : " #{@drive_mode}"}#{@clip == :hard ? ' hard' : ''}" : ''
-          "#{@mode}(#{@cutoff.round(2)} Hz, r=#{@resonance.round(3)}#{@resonance_curve == :linear ? ' linear' : ''}#{drive}#{@self_oscillate ? ', self-osc' : ''})"
+          "#{@mode}(#{@cutoff.round(2)} Hz, r=#{@resonance.round(3)}#{@resonance_curve == :linear ? ' linear' : ''}#{drive}#{@self_oscillate ? ', self-osc' : ''}#{@tuning == :hardware ? ', hardware tuning' : ''})"
         end
 
         # The Ruby mirror of MB::Sound::FastFilter.four_pole: the same
         # arguments, the same operations in the same order, and the same
         # samples (specs check every sample).  Returns a new SFloat (the C
         # version filters an inplace SFloat in place).
-        def self.process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, mix, curve = 0, drive_mode = 0, clip = 0)
+        def self.process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, mix, curve = 0, drive_mode = 0, clip = 0, tuning = 0)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           k_max = k_max.to_f
@@ -374,6 +391,7 @@ module MB
           raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
+          raise ArgumentError, 'Four-pole tuning must be 0 (hardware) or 1..6 (edge, by output tap)' unless (0..6).include?(tuning)
           raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
           raise ArgumentError, 'Four-pole mix must have five elements' unless mix.is_a?(Array) && mix.length == 5
 
@@ -398,6 +416,8 @@ module MB
 
           last_fc = Float::NAN
           last_res = Float::NAN
+          t = 0.0
+          scale = 1.0
           g = 0.0
           g_ = 0.0
           g4 = 0.0
@@ -412,6 +432,7 @@ module MB
 
             if fc != last_fc || res != last_res
               # (NaN != NaN, like C, so NaN inputs recompute every sample)
+              new_g = false
               if res != last_res
                 last_res = res
                 if !(res >= 0.0)
@@ -421,6 +442,10 @@ module MB
                 end
                 k = lp4_loop_gain(res, curve, k_max)
                 in_gain = 1.0 + comp * k
+                if tuning != 0
+                  scale = Tuning.scale(tuning, k * 0.25)
+                  new_g = true
+                end
               end
 
               if fc != last_fc
@@ -430,7 +455,12 @@ module MB
                 elsif fc > fc_max
                   fc = fc_max
                 end
-                g = tan(fc * pi_over_rate)
+                t = tan(fc * pi_over_rate)
+                new_g = true
+              end
+
+              if new_g
+                g = t * scale
                 g_ = g / (1.0 + g)
                 one = 1.0 - g_
                 g2 = g_ * g_
@@ -451,8 +481,8 @@ module MB
                 u = tanh(u * drive) * inv_drive
               elsif drive_mode == 2
                 r = g4 * u + sum - comp * x
-                t = secant(r * drive, clip)
-                kt = k * t
+                sec = secant(r * drive, clip)
+                kt = k * sec
                 u = (x * (1.0 + comp * kt) - kt * sum) / (1.0 + kt * g4)
               else
                 p1 = g_ * (u - s0) + s0
@@ -507,7 +537,7 @@ module MB
         # ladder, +mode: :diode+): four_pole's arguments without the mix,
         # the same operations in the same order (see fast_filter.c for the
         # model).  Returns a new SFloat.
-        def self.diode_process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, curve = 0, drive_mode = 0, clip = 0, normalize = 1)
+        def self.diode_process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, curve = 0, drive_mode = 0, clip = 0, normalize = 1, tuning = 0)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           k_max = k_max.to_f
@@ -518,6 +548,7 @@ module MB
           raise ArgumentError, 'Diode ladder drive mode must be 0 (input) or 2 (feedback)' unless [0, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
           raise ArgumentError, 'Normalize must be 0 (off) or 1 (on)' unless [0, 1].include?(normalize)
+          raise ArgumentError, 'Diode ladder tuning must be 0 (hardware) or 7 (edge)' unless [0, Tuning::MODES.index(:diode) + 1].include?(tuning)
           raise ArgumentError, 'Diode ladder state must have four elements' unless state.is_a?(Array) && (state.length == 4 || state.length == 5)
 
           s0, s1, s2, s3 = state.first(4).map { |v| v = v.to_f; v.finite? ? v : 0.0 }
@@ -570,8 +601,12 @@ module MB
                   dcomp = diode_compensation(k, lp4_loop_gain(res, curve, k_max), comp)
                 end
                 in_gain = 1.0 + dcomp * k
-                if normalize == 1
+                if tuning != 0
+                  scale = Tuning.scale(tuning, k * DIODE_INV_EDGE_K) * DIODE_INV_W180
+                elsif normalize == 1
                   scale = diode_cutoff_scale(k) * DIODE_INV_W180
+                end
+                if normalize == 1
                   headroom = diode_headroom(k)
                   sat_drive = drive / headroom
                   sat_inv = headroom * inv_drive
@@ -786,13 +821,28 @@ module MB
         end
 
         # The resonance (0..1) that gives this filter the gain at the cutoff
-        # (relative to DC) of a 2-pole filter of quality +q+, which is q:
-        # log(4 q) / log(196) with the :db curve (q 0.25 or less gives 0,
-        # 0.707 gives 0.19, 4 gives 0.39, 10 gives 0.70, 49 or more gives
-        # 1), or the same loop gain with the :linear curve.  +q+ may be a
-        # number or an NArray.  +diode: true+ maps to the diode ladder's
+        # (relative to DC) of a 2-pole filter of quality +q+, which is q
+        # (the cookbook filters' and Filter::SVF's gain at their cutoff), on
+        # the :db curve or (same loop gain) the :linear curve.  +q+ may be a
+        # number or an NArray.
+        #
+        # With +tuning: :edge+ (default) the cutoff is the filter's -3 dB
+        # edge without resonance and its peak with it (see Tuning), so q
+        # 0.707 or less gives 0 (no resonance, like a Butterworth 2-pole),
+        # and from about q 2 up the peak stands q over DC at the cutoff
+        # (lp4: q 1 gives 0.19, 2 gives 0.29, 4 gives 0.44, 10 gives 0.63,
+        # 70 or more gives 1); +diode: true+ uses the diode ladder's own
+        # response (normalized or not).  Computed from a table of the
+        # analog response (.edge_quality_table).
+        #
+        # With +tuning: :hardware+: log(4 q) / log(196) (q 0.25 or less
+        # gives 0, 0.707 gives 0.19, 4 gives 0.39, 10 gives 0.70, 49 or more
+        # gives 1); +diode: true+ maps to the unnormalized diode ladder's
         # curves (log(18.39 q) / log(757.12) on the :db curve).
-        def self.quality_to_resonance(q, curve: :db, diode: false)
+        def self.quality_to_resonance(q, curve: :db, diode: false, tuning: :edge)
+          return edge_quality_to_resonance(q, curve, diode) if tuning == :edge
+          raise ArgumentError, "Unknown tuning #{tuning.inspect} (use :edge or :hardware)" unless tuning == :hardware
+
           # Gain ratio at the cutoff from r = 0 to 1 and the gain at r = 0
           log_ratio = Math.log(diode ? 40 + 39 * DIODE_EDGE_K : 196)
           edge = diode ? DIODE_EDGE_K : 4.0
@@ -808,6 +858,79 @@ module MB
           r = q > 1.0 / edge ? (Math.log(edge * q) / log_ratio).clamp(0.0, 1.0) : 0.0
           curve == :linear ? to_linear.(r) : r
         end
+
+        # Points in .edge_quality_table (uniform in log q).
+        EDGE_QUALITY_POINTS = 1024
+
+        # The edge tuning's quality table for lp4 (+diode+ false) or the
+        # diode ladder: [log q at the first point, log q step, resonances on
+        # the :db curve (an Array of EDGE_QUALITY_POINTS)] for q from 1 /
+        # sqrt(2) (resonance 0) to the gain at the cutoff at full
+        # resonance, from the analog response with the edge tuning (the
+        # gain at the cutoff relative to DC; kept rising where it is flat,
+        # below resonance 0.1).  Memoized.
+        def self.edge_quality_table(diode)
+          @edge_quality_tables ||= {}
+          @edge_quality_tables[!!diode] ||= begin
+            steps = 4000
+            gains = (0..steps).map do |i|
+              r = i.to_f / steps
+              if diode
+                k = diode_loop_gain(r, 1, MAX_K)
+                w = 1.0 / (Tuning.scale(Tuning::MODES.index(:diode) + 1, k * DIODE_INV_EDGE_K) * DIODE_INV_W180)
+                s = Complex(0, w)
+                d = (((s + 7) * s + 15) * s + 10) * s + 1
+              else
+                k = lp4_loop_gain(r, 1, MAX_K)
+                s = Complex(0, 1.0 / Tuning.scale(1, k * 0.25))
+                d = (1 + s)**4
+              end
+              Math.log(((1 + k) / (d + k)).abs)
+            end
+            # (strictly rising, for the search)
+            gains.each_index { |i| gains[i] = [gains[i], gains[i - 1] + 1e-12].max if i > 0 }
+
+            lo = Math.log(Math.sqrt(0.5))
+            hi = gains.last
+            step = (hi - lo) / (EDGE_QUALITY_POINTS - 1)
+            rs = (0...EDGE_QUALITY_POINTS).map do |j|
+              lq = lo + j * step
+              i = gains.bsearch_index { |g| g >= lq } || steps
+              next 0.0 if i == 0 || j == 0 # (no resonance at 1 / sqrt(2))
+              (i - 1 + (lq - gains[i - 1]) / (gains[i] - gains[i - 1])) / steps
+            end
+            [lo, step, rs.freeze].freeze
+          end
+        end
+
+        # .quality_to_resonance for the edge tuning (linear interpolation in
+        # .edge_quality_table).
+        def self.edge_quality_to_resonance(q, curve, diode)
+          lo, step, rs = edge_quality_table(diode)
+          last = rs.length - 1
+          to_linear = ->(v) { diode ? diode_resonance_curve(v) : resonance_curve(v) }
+
+          if q.is_a?(Numo::NArray)
+            q = Numo::DFloat.cast(q.is_a?(Numo::SComplex) || q.is_a?(Numo::DComplex) ? q.real : q)
+            p = ((Numo::NMath.log(q.clip(1e-30, nil)) - lo) * (1.0 / step)).clip(0.0, last)
+            i = p.floor.clip(0, last - 1)
+            f = p - i
+            table = Numo::DFloat.cast(rs)
+            i = Numo::Int64.cast(i)
+            r = table[i] * (1.0 - f) + table[i + 1] * f
+            r = r.map { |v| to_linear.(v) } if curve == :linear
+            return Numo::SFloat.cast(r)
+          end
+
+          q = q.to_f
+          return 0.0 unless q > 0
+          p = ((Math.log(q) - lo) / step).clamp(0.0, last.to_f)
+          i = [p.floor, last - 1].min
+          f = p - i
+          r = rs[i] * (1.0 - f) + rs[i + 1] * f
+          curve == :linear ? to_linear.(r) : r
+        end
+        private_class_method :edge_quality_to_resonance
 
         # The kernel's 2^y for y >= 0 (a Taylor series for the fraction).
         def self.exp2(y)

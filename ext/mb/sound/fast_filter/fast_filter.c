@@ -61,7 +61,8 @@
 /*
  * Filters +buffer+ (SFloat, modified in place if marked inplace):
  *   four_pole(buffer, cutoff, resonance, state, sample_rate, k_max,
- *             compensation, drive, mix, curve = 0, drive_mode = 0, clip = 0)
+ *             compensation, drive, mix, curve = 0, drive_mode = 0, clip = 0,
+ *             tuning = 0)
  *
  * +cutoff+ (Hz) and +resonance+ (0..1, through the curve and times +k_max+
  * for the loop gain k) are Numerics or NArrays of the buffer's length (read
@@ -72,11 +73,14 @@
  * (self-oscillation over dB; +k_max+ is then the loop gain at r = 1);
  * +drive_mode+ 0 (input), 1 (stages), or 2
  * (feedback); +clip+ 0 (soft) or 1 (hard), for the feedback mode.
+ * +tuning+ 0 is the hardware tuning (the cutoff is the frequency the
+ * filter would oscillate at), 1..6 the edge tuning for the output taps lp4,
+ * lp2, bp2, bp4, hp2, hp4 (fp_tuning_scale in mb_four_pole.h).
  */
 static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 {
-	if (argc < 9 || argc > 12) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 9..12)", argc);
+	if (argc < 9 || argc > 13) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 9..13)", argc);
 	}
 	VALUE buffer = argv[0], cutoff = argv[1], resonance = argv[2], state = argv[3];
 	double rate = NUM2DBL(argv[4]);
@@ -93,6 +97,10 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	int curve = argc > 9 ? NUM2INT(argv[9]) : 0;
 	int drive_mode = argc > 10 ? NUM2INT(argv[10]) : FP_DRIVE_INPUT;
 	int clip = argc > 11 ? NUM2INT(argv[11]) : FP_CLIP_SOFT;
+	int tuning = argc > 12 ? NUM2INT(argv[12]) : 0;
+	if (tuning < 0 || tuning >= FP_TUNING_DIODE) {
+		rb_raise(rb_eArgError, "Four-pole tuning must be 0 (hardware) or 1..6 (edge, by output tap)");
+	}
 	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
 		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
 	}
@@ -134,7 +142,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	struct mb_fp_args args = {
 		.rate = rate, .k_max = k_max, .comp = comp, .drive = drive,
 		.mix = { m0, m1, m2, m3, m4 },
-		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = 0,
+		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = 0, .tuning = tuning,
 	};
 	double st[4] = { s0, s1, s2, s3 };
 	long fk = mb_flush_count_read(state, 4);
@@ -482,16 +490,20 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
 /*
  * Filters +buffer+ (SFloat, modified in place if marked inplace):
  *   diode_ladder(buffer, cutoff, resonance, state, sample_rate, k_max,
- *                compensation, drive, curve = 0, drive_mode = 0, clip = 0)
+ *                compensation, drive, curve = 0, drive_mode = 0, clip = 0,
+ *                normalize = 1, tuning = 0)
  *
  * The arguments are four_pole's without the output mix (the output is the
  * fourth stage); +k_max+ is lp4's (3.9, or 5 with self-oscillation), scaled
- * by DL_SCALE here.  +drive_mode+ 0 (input) or 2 (feedback).
+ * by DL_SCALE here.  +drive_mode+ 0 (input) or 2 (feedback).  +normalize+
+ * 1 matches the compensation and saturation to lp4's (and, with the
+ * hardware tuning, the cutoff to lp4's hardware tuning); +tuning+ 0 is the
+ * hardware tuning, FP_TUNING_DIODE (7) the edge tuning.
  */
 static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 {
-	if (argc < 8 || argc > 12) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 8..12)", argc);
+	if (argc < 8 || argc > 13) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 8..13)", argc);
 	}
 	VALUE buffer = argv[0], cutoff = argv[1], resonance = argv[2], state = argv[3];
 	double rate = NUM2DBL(argv[4]);
@@ -508,6 +520,10 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	int drive_mode = argc > 9 ? NUM2INT(argv[9]) : FP_DRIVE_INPUT;
 	int clip = argc > 10 ? NUM2INT(argv[10]) : FP_CLIP_SOFT;
 	int normalize = argc > 11 ? NUM2INT(argv[11]) : 1;
+	int tuning = argc > 12 ? NUM2INT(argv[12]) : 0;
+	if (tuning != 0 && tuning != FP_TUNING_DIODE) {
+		rb_raise(rb_eArgError, "Diode ladder tuning must be 0 (hardware) or 7 (edge)");
+	}
 	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
 		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
 	}
@@ -543,7 +559,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	struct mb_fp_args args = {
 		.rate = rate, .k_max = k_max, .comp = comp, .drive = drive,
 		.mix = { 0, 0, 0, 0, 1 },
-		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = normalize,
+		.curve = curve, .drive_mode = drive_mode, .clip = clip, .normalize = normalize, .tuning = tuning,
 	};
 	double st[4] = { s0, s1, s2, s3 };
 	long fk = mb_flush_count_read(state, 4);
@@ -594,6 +610,12 @@ static VALUE ruby_diode_headroom(VALUE self, VALUE k)
 	return rb_float_new(dl_headroom(NUM2DBL(k)));
 }
 
+// Exposes the edge tuning's cutoff scale for specs (fp_tuning_scale).
+static VALUE ruby_tuning_scale(VALUE self, VALUE tuning, VALUE x)
+{
+	return rb_float_new(fp_tuning_scale(NUM2INT(tuning), NUM2DBL(x)));
+}
+
 // Exposes the tan approximation for specs and the Ruby mirror's checks.
 static VALUE ruby_tan(VALUE self, VALUE w)
 {
@@ -640,6 +662,7 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "resonance_curve", ruby_resonance_curve, 1);
 	rb_define_module_function(fast_filter, "self_osc_gain", ruby_self_osc_gain, 3);
 	rb_define_module_function(fast_filter, "diode_ladder", ruby_diode_ladder, -1);
+	rb_define_module_function(fast_filter, "tuning_scale", ruby_tuning_scale, 2);
 	rb_define_module_function(fast_filter, "diode_resonance_curve", ruby_diode_resonance_curve, 1);
 	rb_define_module_function(fast_filter, "diode_loop_gain", ruby_diode_loop_gain, 3);
 	rb_define_module_function(fast_filter, "diode_cutoff_scale", ruby_diode_cutoff_scale, 1);

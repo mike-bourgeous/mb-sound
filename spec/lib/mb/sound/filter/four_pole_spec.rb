@@ -23,13 +23,15 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     let(:resonances) { Numo::SFloat.new(4801).seq.map { |i| 1.3 * Math.sin(i * 0.0021)**2 - 0.1 } }
 
     FP::MODES.each do |mode, mix|
-      [0.0, 1.5].each do |drive|
-        it "give identical samples for #{mode} with modulated parameters#{drive > 0 ? ' and drive' : ''}" do
+      [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1]].each do |drive, tuned|
+        # (the edge tuning's table for this tap; the diode's mix gets lp4's)
+        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, :edge)
+        it "give identical samples for #{mode} with modulated parameters#{drive > 0 ? ' and drive' : ''}, tuning #{tuning}" do
           s1 = [0.0] * 4
           s2 = [0.0] * 4
           [0...800, 800...801, 801...2400, 2400...4801].each do |r|
-            c = MB::Sound::FastFilter.four_pole(noise[r].dup, cutoffs[r], resonances[r], s1, 48000, 4.3, 0.375, drive, mix)
-            ruby = FP.process_ruby(noise[r].dup, cutoffs[r], resonances[r], s2, 48000, 4.3, 0.375, drive, mix)
+            c = MB::Sound::FastFilter.four_pole(noise[r].dup, cutoffs[r], resonances[r], s1, 48000, 4.3, 0.375, drive, mix, 0, 0, 0, tuning)
+            ruby = FP.process_ruby(noise[r].dup, cutoffs[r], resonances[r], s2, 48000, 4.3, 0.375, drive, mix, 0, 0, 0, tuning)
             expect(c).to eq(ruby)
             expect(s1).to eq(s2)
           end
@@ -53,6 +55,33 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       end
     end
 
+    [[1, 0, 0], [1, 1, 0], [1, 2, 1], [3, 0, 0], [3, 2, 0]].each do |curve, drive_mode, clip|
+      it "give identical samples with a constant cutoff and a moving resonance, edge tuning, curve #{curve}, drive mode #{drive_mode}" do
+        # (a resonance change alone recomputes the stages' frequency)
+        s1 = [0.0] * 4
+        s2 = [0.0] * 4
+        loud = noise * 3
+        k_max = curve >= 2 ? 5.0 : 3.9
+        [0...800, 800...801, 801...4801].each do |r|
+          c = MB::Sound::FastFilter.four_pole(loud[r].dup, 700, resonances[r], s1, 48000, k_max, 0.375, 1.5, FP::MODES[:lp4], curve, drive_mode, clip, 1)
+          ruby = FP.process_ruby(loud[r].dup, 700, resonances[r], s2, 48000, k_max, 0.375, 1.5, FP::MODES[:lp4], curve, drive_mode, clip, 1)
+          expect(c).to eq(ruby)
+          expect(s1).to eq(s2)
+        end
+      end
+    end
+
+    it 'use the same tuning scales' do
+      xs = Numo::DFloat.linspace(-0.1, 1.1, 1201).to_a + [0.5 / 64, 1 - 1e-12, 1e-300]
+      (0..7).each do |t|
+        xs.each { |x| expect(MB::Sound::FastFilter.tuning_scale(t, x)).to eq(FP::Tuning.scale(t, x)) }
+      end
+      expect(FP::Tuning.scale(0, 0.3)).to eq(1)
+      expect(FP::Tuning.scale(1, 0)).to be_within(1e-12).of(1 / Math.sqrt(2**0.25 - 1)) # -3 dB at the cutoff
+      expect(FP::Tuning.scale(1, 1)).to eq(1)
+      expect(FP::Tuning.scale(1, 1.2)).to eq(1)
+    end
+
     it 'use the same secant gains' do
       [-10, -3.5, -1.1, -0.5, 0, 0.3, 0.8, 0.9, 1.2, 2.9, 3, 10].each do |x|
         [0, 1].each do |clip|
@@ -69,7 +98,10 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect { MB::Sound::FastFilter.four_pole(*args, -1) }.to raise_error(ArgumentError, /curve/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 2) }.to raise_error(ArgumentError, /Clip/)
-      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 0) }.to raise_error(ArgumentError, /arguments/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 0, 0) }.to raise_error(ArgumentError, /arguments/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, -1) }.to raise_error(ArgumentError, /tuning/)
+      expect { FP.process_ruby(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
       expect { FP.process_ruby(*args, 4) }.to raise_error(ArgumentError, /curve/)
       expect { FP.process_ruby(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
     end
@@ -137,14 +169,21 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
   end
 
   describe 'response' do
-    it 'is -12 dB at the cutoff with no resonance, 0 dB at DC, and 24 dB/octave above' do
+    it 'is -3 dB at the cutoff with no resonance, 0 dB at DC, and 24 dB/octave above' do
       f = FP.new(cutoff: 1000, resonance: 0)
       db = measured_db(f)
       expect(db.(1)).to be_within(0.01).of(0)
-      expect(db.(1000)).to be_within(0.05).of(-12.04)
+      expect(db.(1000)).to be_within(0.05).of(-3.01)
 
       db100 = measured_db(FP.new(cutoff: 100))
       expect(db100.(1600) - db100.(3200)).to be_within(0.5).of(24)
+    end
+
+    it 'is -12 dB at the cutoff with no resonance with tuning: :hardware' do
+      db = measured_db(FP.new(cutoff: 1000, resonance: 0, tuning: :hardware))
+      expect(db.(1)).to be_within(0.01).of(0)
+      expect(db.(1000)).to be_within(0.05).of(-12.04)
+      expect(db.(435)).to be_within(0.05).of(-3.01)
     end
 
     it 'matches the analytic linear response' do
@@ -161,6 +200,8 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     it 'keeps the cutoff frequency at high cutoffs (prewarped)' do
       f = FP.new(cutoff: 15000, resonance: 0)
+      expect(measured_db(f).(15000)).to be_within(0.05).of(-3.01)
+      f = FP.new(cutoff: 15000, resonance: 0, tuning: :hardware)
       expect(measured_db(f).(15000)).to be_within(0.05).of(-12.04)
     end
 
@@ -183,13 +224,19 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(measured_db(FP.new(cutoff: 1000, resonance: 1, compensation: 0)).(1)).to be_within(0.1).of(20 * Math.log10(1 / 4.9))
     end
 
-    it 'gives unity passbands for the other modes without resonance' do
-      expect(measured_db(FP.new(cutoff: 1000, mode: :lp2)).(1000)).to be_within(0.05).of(-6.02)
+    it 'gives unity passbands for the other modes without resonance, 3 dB down (or the bandpasses peaking) at the cutoff' do
+      expect(measured_db(FP.new(cutoff: 1000, mode: :lp2)).(1000)).to be_within(0.05).of(-3.01)
       expect(measured_db(FP.new(cutoff: 1000, mode: :bp2)).(1000)).to be_within(0.05).of(0)
       expect(measured_db(FP.new(cutoff: 1000, mode: :bp4)).(1000)).to be_within(0.05).of(0)
       expect(measured_db(FP.new(cutoff: 1000, mode: :hp2)).(20000)).to be_within(0.1).of(0)
-      expect(measured_db(FP.new(cutoff: 1000, mode: :hp4)).(1000)).to be_within(0.05).of(-12.04)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :hp2)).(1000)).to be_within(0.05).of(-3.01)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :hp4)).(1000)).to be_within(0.05).of(-3.01)
       expect(measured_db(FP.new(cutoff: 1000, mode: :hp4, resonance: 0.9)).(20000)).to be_within(0.3).of(0)
+
+      # The hardware tuning: the stages' frequency at the cutoff
+      expect(measured_db(FP.new(cutoff: 1000, mode: :lp2, tuning: :hardware)).(1000)).to be_within(0.05).of(-6.02)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :bp2, tuning: :hardware)).(1000)).to be_within(0.05).of(0)
+      expect(measured_db(FP.new(cutoff: 1000, mode: :hp4, tuning: :hardware)).(1000)).to be_within(0.05).of(-12.04)
     end
   end
 
@@ -220,9 +267,9 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(FP.resonance_curve(0.999)).to be_within(1e-3).of(1)
     end
 
-    it 'makes the gain at the cutoff linear in dB from -12 to +33.8 dB' do
+    it 'makes the gain at the cutoff linear in dB from -12 to +33.8 dB with the hardware tuning' do
       [0.1, 0.3, 0.5, 0.7, 0.9].each do |r|
-        f = FP.new(cutoff: 1000, resonance: r)
+        f = FP.new(cutoff: 1000, resonance: r, tuning: :hardware)
         at_cutoff = 20 * Math.log10(f.response(2 * Math::PI * 1000 / 48000).abs / f.response(0).abs)
         expect(at_cutoff).to be_within(0.01).of(-12.04 + r * (33.80 + 12.04))
       end
@@ -482,7 +529,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       imp = Numo::SFloat.zeros(65536)
       imp[0] = 1
       mag = Numo::Pocketfft.rfft(Numo::DFloat.cast(f.process(imp))).abs
-      expect(20 * Math.log10(mag[(1000 * 65536 / 96000.0).round])).to be_within(0.1).of(-12.04)
+      expect(20 * Math.log10(mag[(1000 * 65536 / 96000.0).round])).to be_within(0.1).of(-3.01)
     end
   end
 

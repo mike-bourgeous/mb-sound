@@ -563,16 +563,19 @@ RSpec.describe(MB::Sound::Notes) do
       expect(out.abs.max).to be_between(0.05, 4)
     end
 
-    it 'follows CC 71 in lp4 (a sine at the cutoff: -12 dB at 0, +33.8 dB at 127)' do
+    it 'follows CC 71 in lp4 (a sine at the cutoff: -3 dB at 0, the resonant peak at 64 and 127)' do
       levels = [0, 64, 127].map { |raw|
         v = notes_for(ev.note_on(69, 1.0), ev.cc_raw(71, raw), ev.cc(99, 0, time: 10r))
         sig = v.hz.sine.lp4(440, resonance: v.reso(0.5))
         60.times.map { sig.sample(800).dup }.reduce(:concatenate)[-4800..].abs.max
       }
-      expect(levels[0].to_db).to be_within(0.3).of(-12.04)
-      k = MB::Sound::Filter::FourPole.resonance_curve(0.5) * 3.9
-      expect(levels[1].to_db).to be_within(0.3).of(-12.04 + 0.5 * 45.84 + 20 * Math.log10((1 + 0.375 * k) / (1 + k))) # over the passband
-      expect(levels[2].to_db).to be_within(0.5).of(33.8 - 20 * Math.log10(4.9 / (1 + 0.375 * 3.9)))
+      # (the analytic gain at the cutoff; the peak stands 14.5 and 36.9 dB
+      # over the passband at resonance 0.5 and 1)
+      at_cutoff = ->(r) { 20 * Math.log10(MB::Sound::Filter::FourPole.new(cutoff: 440, resonance: r).response(2 * Math::PI * 440 / 48000).abs) }
+      expect(levels[0].to_db).to be_within(0.3).of(-3.01)
+      expect(levels[1].to_db).to be_within(0.3).of(at_cutoff.(0.5))
+      expect(levels[2].to_db).to be_within(0.5).of(at_cutoff.(1))
+      expect(at_cutoff.(1)).to be_within(0.1).of(36.86 + 20 * Math.log10((1 + 0.375 * 3.9) / 4.9))
     end
   end
 
