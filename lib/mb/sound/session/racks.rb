@@ -26,6 +26,11 @@ module MB
           # key's Session knobs by macro name
           @macro_keys = {}
           @macro_knobs = {}
+          # Named racks whose macros are per instance (see #macro_names),
+          # and the group names standing for every instance's macro
+          # (:"dub/space" => [:dub, :space])
+          @per_instance = {}
+          @macro_groups = {}
         end
 
         # Registers named +rack+, claiming its name.  Returns the rack, or
@@ -35,6 +40,45 @@ module MB
           return nil unless @session.names.claim(rack.name, :rack)
           @mutex.synchronize { @entries[rack.name] = Entry.new(rack, 0, nil, [], {}) }
           rack
+        end
+
+        # Replaces the definition of rack +name+ with +rack+ as one undo
+        # step labeled +label+ (instances already built keep playing as they
+        # were; later applications use +rack+).  Returns +rack+.
+        def replace(name, rack, label:)
+          before = self[name]
+          Session.with_context(session: @session) {
+            @session.command(label) {
+              define(rack)
+              @session.note_undo_extra(self, { name => before }, { name => rack })
+            }
+          }
+          rack
+        end
+
+        # Puts rack definitions back (undo and redo of #replace): +state+
+        # maps names to Racks (nil: no rack).
+        def restore_undo_state(state)
+          state.each do |name, rack|
+            @mutex.synchronize {
+              if rack.nil?
+                @entries.delete(name)
+              elsif (e = @entries[name])
+                e.rack = rack
+              else
+                @entries[name] = Entry.new(rack, 0, nil, [], {})
+              end
+            }
+          end
+        end
+
+        # The first free name +base+_2, +base+_3, ... (free of racks and of
+        # every other Session name).
+        def free_name(base)
+          (2..).each do |i|
+            n = :"#{base}_#{i}"
+            return n if self[n].nil? && @session.names.kind(n).nil?
+          end
         end
 
         # The rack named +name+, or nil.
@@ -176,8 +220,9 @@ module MB
               keys = (@macro_keys[rack] ||= [])
               next if keys.include?(key_of[k])
               keys << key_of[k]
-              if rack && keys.length == 2
-                (@macro_knobs[[rack, keys[0]]] || {}).each { |m, knob| renames << [knob, instance_name(rack, keys[0], keys, m)] }
+              if rack && keys.length >= 2 && !@per_instance[rack]
+                @per_instance[rack] = true
+                keys.each { |key| (@macro_knobs[[rack, key]] || {}).each { |m, knob| renames << [knob, instance_name(rack, key, keys, m)] } }
               end
             end
             knobs.each do |k|
@@ -187,7 +232,7 @@ module MB
               keys = @macro_keys[rack]
               name = if rack.nil?
                        anonymous_name(key, info.macro)
-                     elsif keys.length == 1
+                     elsif !@per_instance[rack]
                        :"#{rack}/#{info.macro}"
                      else
                        instance_name(rack, key, keys, info.macro)
@@ -199,9 +244,60 @@ module MB
         end
 
         # Remembers Session knob +knob+ as macro +macro+ of instance +key+
-        # of rack +rack+ (see #macro_names).
+        # of rack +rack+ (see #macro_names).  Returns the group name to
+        # claim (:"dub/space", once the rack's macros are per instance) or
+        # nil.
         def macro_joined(rack, key, macro, knob)
-          @mutex.synchronize { (@macro_knobs[[rack, key]] ||= {})[macro] = knob }
+          @mutex.synchronize {
+            (@macro_knobs[[rack, key]] ||= {})[macro] = knob
+            next nil unless rack && @per_instance[rack]
+            group = :"#{rack}/#{macro}"
+            next nil if @macro_groups.key?(group)
+            @macro_groups[group] = [rack, macro]
+            group
+          }
+        end
+
+        # True if +name+ is a macro group: a rack's short macro name
+        # (:"dub/space") standing for every instance's knob once the
+        # macros are per instance.
+        def macro_group?(name)
+          @mutex.synchronize { @macro_groups.key?(name) }
+        end
+
+        # The Session knobs a macro group stands for (see #macro_group?),
+        # or nil if +name+ isn't one.
+        def group_members(name)
+          @mutex.synchronize {
+            rack, macro = @macro_groups[name]
+            next nil unless rack
+            (@macro_keys[rack] || []).filter_map { |key| @macro_knobs[[rack, key]]&.[](macro) }
+          }
+        end
+
+        # Drops the macro instances of players that are gone (forgotten:
+        # neither playing, stopped for resume, nor an arrangement track),
+        # so names don't go stale.  The block tells whether a player name
+        # is still around.  Returns [knobs to forget, group names to
+        # release] (a rack left with no instances goes back to plain
+        # names).
+        def prune_macro_instances
+          gone = []
+          groups = []
+          @mutex.synchronize {
+            @macro_keys.each do |rack, keys|
+              keys.reject! { |key|
+                player = key[0]
+                next false if player.nil? || yield(player)
+                gone.concat((@macro_knobs.delete([rack, key]) || {}).values)
+                true
+              }
+              next unless keys.empty?
+              @per_instance.delete(rack)
+              @macro_groups.reject! { |g, (r, _)| r == rack && groups << g }
+            end
+          }
+          [gone, groups]
         end
 
         private

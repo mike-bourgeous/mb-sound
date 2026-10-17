@@ -85,7 +85,7 @@ RSpec.describe('rack macros') do
       s.turn(:"lvl/level", 0.8, smooth: 0)
       s.bg(:keys, 2.constant.then(&r))
       expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
-      expect(session.names.kind(:"lvl/level")).to be_nil
+      expect(session.names.kind(:"lvl/level")).to eq(:macro_group)
       render(800)
       expect(session.knobs[:"bass/lvl/level"].value).to eq(0.8)
       expect(session.knobs[:"keys/lvl/level"].value).to eq(0.5)
@@ -95,6 +95,46 @@ RSpec.describe('rack macros') do
       expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
       expect(session.knobs[:"bass/lvl/level"].value).to eq(0.8)
       expect(r.macros).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
+    end
+
+    it 'turns every instance by the short name once they are per instance' do
+      r = level_rack
+      s.bg(:bass, 1.constant.then(&r), fade: 0)
+      s.bg(:keys, 2.constant.then(&r), fade: 0, on: :now)
+      entries = s.turn(:"lvl/level", 0.25, smooth: 0)
+      expect(entries.length).to eq(2)
+      expect(entries.map(&:subject)).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
+      render(800)
+      expect(session.knobs.values.map(&:value)).to eq([0.25, 0.25])
+      s.turn(:"keys/lvl/level", 0.75, smooth: 0)
+      render(800)
+      expect(session.knobs[:"keys/lvl/level"].value).to eq(0.75)
+      expect(session.undo_steps.last.label).to eq('turn :"keys/lvl/level"')
+      expect(session.undo_steps[-2].changes.length).to eq(2) # (the group turn is one undo step)
+    end
+
+    it 'drops the instances of forgotten players' do
+      r = level_rack
+      s.bg(:bass, 1.constant.then(&r), fade: 0)
+      s.bg(:keys, 2.constant.then(&r), fade: 0, on: :now)
+      render(800)
+      s.stop(:keys, on: :now, fade: 0)
+      render(800)
+      expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level") # (stopped: kept for resume)
+      session.forget(:keys)
+      render(800)
+      expect(session.knobs.keys).to eq([:"bass/lvl/level"])
+      expect(session.names.kind(:"keys/lvl/level")).to be_nil
+      expect(session.racks.group_members(:"lvl/level").map(&:name)).to eq([:"bass/lvl/level"])
+
+      s.stop(:bass, on: :now, fade: 0)
+      render(800)
+      session.forget(:bass)
+      render(800)
+      expect(session.knobs).to be_empty
+      expect(session.names.kind(:"lvl/level")).to be_nil
+      s.bg(:pad, 1.constant.then(&r))
+      expect(session.knobs.keys).to eq([:"lvl/level"]) # (plain names again)
     end
 
     it 'names two instances in one player apart' do

@@ -35,7 +35,8 @@ module MB
           macros = app.macros
           knob_nodes = macros.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s }
           inputs = stand.transform_keys(&:to_s)
-          writer = GraphNode::Recipe::RubyWriter.new(result, inputs: inputs, seeds: :marked, knob_nodes: knob_nodes, assets: @assets, define_racks: true)
+          # (no seeds: each application of a rack draws its own)
+          writer = GraphNode::Recipe::RubyWriter.new(result, inputs: inputs, seeds: false, knob_nodes: knob_nodes, assets: @assets, define_racks: true)
           body = writer.to_s
           problems = writer.problems.dup
           if (clash = macros.keys.find { |n| stand.key?(n) })

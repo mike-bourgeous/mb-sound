@@ -120,6 +120,7 @@ module MB
           macros = own.keys.select { |k| k.macro && !k.session && !k.macro.share }
           macro_keys = {}.compare_by_identity
           unless macros.empty?
+            prune_macros
             names, renames = racks.macro_names(macros, player)
             renames.each { |k, name| rename_knob(k, name) }
             names.each { |k, (name, rack, key)|
@@ -169,14 +170,37 @@ module MB
               joined[k.name] = k
               fresh << k
             end
-            if (rk = macro_keys[k])
-              racks.macro_joined(rk[0], rk[1], k.macro.macro, joined[k.name])
+            if (rk = macro_keys[k]) && joined[k.name]
+              group = racks.macro_joined(rk[0], rk[1], k.macro.macro, joined[k.name])
+              @names.claim(group, :macro_group) if group
             end
           end
 
           fresh.each { |k| follow_macro(k) if k.macro&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
           joined
+        end
+
+        # Drops the macro knobs of players that are gone (see
+        # Racks#prune_macro_instances): forgotten players' instances leave
+        # the session's knobs and names, so listings and group turns don't
+        # go stale.  Called when graphs join (#adopt_knobs) and when players
+        # are forgotten.
+        def prune_macros
+          gone, groups = racks.prune_macro_instances { |player| player_around?(player) }
+          gone.each do |k|
+            removed = @knob_lock.synchronize { @knobs.delete(k.name) if @knobs[k.name].equal?(k) }
+            @names.release(k.name) if removed
+          end
+          groups.each { |g| @names.release(g) if @names.kind(g) == :macro_group }
+        end
+
+        # True if player +name+ is playing, stopped for #resume, waiting to
+        # start in the change queue, or an arrangement track.
+        def player_around?(name)
+          @mutex.synchronize { @players.values.any? { |p| p.name == name && p.current? } || @stopped.key?(name) } ||
+            @changes.dup.any? { |c| c.subject == name && c.starts } ||
+            !!@arrangement&.tracks&.key?(name)
         end
 
         # Renames Session knob +k+ to +name+ (a rack's macros becoming per
@@ -227,7 +251,15 @@ module MB
         # +from:+ a value), or following a graph node
         # (+value+ or +follow:+ a node or another knob's name) until it is
         # turned again.  Returns the Change (see Changes#change).
+        #
+        # A rack's macro group name (:"dub/space" once the rack plays in
+        # several players; see Racks#macro_group?) turns every instance's
+        # knob, returning the Changes.
         def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil)
+          if name.is_a?(Symbol) && (members = racks.group_members(name))
+            offset = binding.local_variable_get(:in)
+            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time) }
+          end
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
           value = follow unless follow.nil?
@@ -272,6 +304,7 @@ module MB
         def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, smooth: nil, start_time: nil, only: nil, except: nil)
           point = LaunchPoint.of(binding) or return nil
           names = filter_knob_names(snapshot_knob_names(name), only, except)
+          names &= knobs.keys # (macros of forgotten players are gone)
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
 
           names.map { |n|

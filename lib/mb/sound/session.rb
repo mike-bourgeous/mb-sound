@@ -553,7 +553,10 @@ module MB
           names = @mutex.synchronize { @stopped.keys } if names.empty?
           names.select { |n|
             next false unless time || @mutex.synchronize { @stopped.key?(n) }
-            change(:forget, n, time) { |_t| @mutex.synchronize { @stopped.delete(n) } }
+            change(:forget, n, time) { |_t|
+              @mutex.synchronize { @stopped.delete(n) }
+              prune_macros # (a forgotten player's rack macros leave the session)
+            }
             true
           }
         }

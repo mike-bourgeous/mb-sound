@@ -143,10 +143,97 @@ RSpec.describe('rack documents') do
       end
     end
 
-    it "uses the session's definition where the rack is defined" do
-      text = io.dump(1.constant.then(&s.arack(:twice) { |sig| sig * 2 }), name: 'g')
-      s.arack(:twice) { |sig| sig * 3 }
-      expect(io.load(text).sample(4)[0]).to eq(3)
+    it 'keeps optional ports as parameters in the definition' do
+      text = io.dump(1.constant.then(&dub.with(side: 0.constant)), name: 'g')
+      expect(text).to include('|sig, side:, depth: 0.5|').and include('* depth + side')
+    end
+
+    describe 'a rack defined differently in the session' do
+      let(:text) { io.dump(1.constant.then(&s.arack(:twice) { |sig| sig * 2 }), name: 'g') }
+
+      it 'uses the session\'s rack without asking when the definitions print the same' do
+        text
+        expect(io.load(text).sample(4)[0]).to eq(2)
+        expect(session.racks.names).to eq([:twice])
+      end
+
+      it 'raises outside live mode unless racks: chooses' do
+        text
+        s.arack(:twice) { |sig| sig * 3 }
+        expect { io.load(text) }.to raise_error(io::LoadError, /rack :twice in .* differs from the session's; load with racks: .*:twice_2/)
+        expect(io.load(text, racks: :session).sample(4)[0]).to eq(3)
+        expect { io.load(text, racks: :keep) }.to raise_error(ArgumentError, /racks: must be/)
+      end
+
+      it 'loads the saved copy under the next free name for this document with racks: :rename' do
+        text
+        s.arack(:twice) { |sig| sig * 3 }
+        session.names.claim(:twice_2, :track)
+        g = nil
+        expect { g = io.load(text, racks: :rename) }.to output(/loaded as :twice_3/).to_stdout
+        expect(g.sample(4)[0]).to eq(2)
+        expect(s.rack(:twice).(1.constant).sample(4)[0]).to eq(3)
+        expect(s.rack(:twice_3).(1.constant).sample(4)[0]).to eq(2)
+      end
+
+      it 'replaces the session\'s rack with racks: :saved, as one undo step' do
+        text
+        s.arack(:twice) { |sig| sig * 3 }
+        expect(io.load(text, racks: :saved).sample(4)[0]).to eq(2)
+        expect(s.rack(:twice).(1.constant).sample(4)[0]).to eq(2)
+        expect(session.undo_steps.last.label).to eq('rack :twice from (graph document)')
+        session.undo(on: :now)
+        expect(s.rack(:twice).(1.constant).sample(4)[0]).to eq(3)
+      end
+
+      it 'asks the conflict handler in live mode, with the choices as a value' do
+        text
+        s.arack(:twice) { |sig| sig * 3 }
+        seen = nil
+        old = io.rack_conflict_handler
+        io.rack_conflict_handler = ->(c) { seen = c; :rename }
+        allow(MB::Sound).to receive(:live?).and_return(true)
+        g = nil
+        expect { g = io.load(text) }.to output(/loaded as :twice_2/).to_stdout
+        expect(g.sample(4)[0]).to eq(2)
+        expect(seen).to be_a(MB::Sound::Rack::Conflict)
+        expect(seen.options).to eq(%i[session saved rename])
+        expect(seen.rename_to).to eq(:twice_2)
+        expect(seen.session_rack).to equal(session.racks[:twice])
+      ensure
+        io.rack_conflict_handler = old
+      end
+
+      it 'asks on the console in one line' do
+        c = MB::Sound::Rack::Conflict.new(name: :dub, session_rack: nil, saved_rack: nil, source: 'song.mbg.rb', rename_to: :dub_2)
+        out = StringIO.new
+        expect(c.ask(input: StringIO.new("r\n"), output: out)).to eq(:rename)
+        expect(out.string).to eq("rack :dub in song.mbg.rb differs from the session's: keep the session's [s], replace it with the saved copy [v], or load the saved copy as :dub_2 [r]? ")
+        expect(c.ask(input: StringIO.new("\n"), output: out)).to eq(:session)
+        expect(c.ask(input: StringIO.new("v\n"), output: out)).to eq(:saved)
+        expect(c.ask(input: StringIO.new(''), output: out)).to be_nil
+      end
+
+      it 'records the choice in the take and gives it back when the line replays' do
+        text
+        s.arack(:twice) { |sig| sig * 3 }
+        take = MB::Sound::Take.new(session: session)
+        line = take.begin_line('preset :song')
+        begin
+          io.load(text, racks: :session)
+        ensure
+          take.end_line
+        end
+        expect(line.choices).to eq([[:rack, :twice, :session]])
+        expect(take.to_ruby).to include(', choices: [[:rack, :twice, :session]]')
+
+        Thread.current[:mb_sound_replay_choices] = line.choices
+        begin
+          expect(io.load(text).sample(4)[0]).to eq(3) # (no racks:, no error: the take's choice)
+        ensure
+          Thread.current[:mb_sound_replay_choices] = nil
+        end
+      end
     end
 
     describe 'references' do

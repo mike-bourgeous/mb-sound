@@ -135,9 +135,14 @@ module MB
         # +params+ overrides its param defaults; +trust+ :code allows
         # runtime blocks outside the safe subset (TrustedCode); +limits+
         # overrides GraphIO::LIMITS.
-        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved)
+        def initialize(text, path: nil, inputs: {}, params: {}, trust: nil, limits: {}, base_dir: nil, session: nil, seeds: :saved, racks: nil)
           @text = text
           @session = session
+          unless racks.nil? || Rack::Conflict::CHOICES.include?(racks)
+            raise ArgumentError, "racks: must be :session, :saved, or :rename (got #{racks.inspect})"
+          end
+          @racks_choice = racks
+          @rack_aliases = {}
           raise ArgumentError, "seeds: must be :saved or :fresh (got #{seeds.inspect})" unless %i[saved fresh].include?(seeds)
           @fresh_seeds = seeds == :fresh
           # Whether the document marks drawn seeds (format 2 and later; see
@@ -277,14 +282,17 @@ module MB
           result
         end
 
-        # The Session's rack +name+, if it has one, for a named rack
-        # constructor in the document (a graph's embedded definition, see
-        # RubyWriter's define_racks): where the rack is defined, the
-        # session's definition plays (as rack(:name) does; live edits of
-        # the rack apply), and the document's definition defines it
-        # everywhere else.  nil when the session has none.
-        def same_rack(_node, name, _block)
-          (@session || Session.current).racks[name]
+        # A named rack constructor in the document (a graph's embedded
+        # definition, see RubyWriter.rack_definition): defines the rack, or
+        # settles a conflict with the session's rack of that name
+        # (GraphIO.place_rack); a rack loaded under a new name (:rename)
+        # is what this document's rack(:dub) means from then on.
+        def define_named_rack(node, receiver, ctor, args, kwargs, block)
+          name = args[0]
+          saved = receiver.public_send(ctor, *args[1..], **kwargs, &block).renamed(name)
+          rack = GraphIO.place_rack(@session || Session.current, saved, racks: @racks_choice, source: @label.to_s) { |msg| error(node, msg) }
+          @rack_aliases[name] = rack.name unless rack.name == name
+          rack
         end
 
         # rack(:name) in a document: the Session's rack, else a rack
@@ -292,6 +300,7 @@ module MB
         # the Session), else a LoadError.
         def rack_reference(node, scope)
           name = node.arguments.arguments[0].unescaped.to_sym
+          name = @rack_aliases.fetch(name, name)
           session = @session || Session.current
           found = session.racks[name]
           return found if found
@@ -991,8 +1000,7 @@ module MB
           args, kwargs = call_args(node, scope)
           block = call_block(node, scope)
           if receiver.equal?(MB::Sound) && Rack::CONSTRUCTORS.include?(name) && args[0].is_a?(Symbol) && block
-            same = same_rack(node, args[0], block)
-            return same if same
+            return define_named_rack(node, receiver, name, args, kwargs, block)
           end
           check_limits(node, receiver, name, args, kwargs)
           check_file(node, name, args) if Registry::FILE_METHODS.include?(name)

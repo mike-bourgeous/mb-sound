@@ -109,6 +109,37 @@ module MB
         end
       end
 
+      # A named rack in a document whose definition differs from the
+      # session's rack of that name (see GraphIO.place_rack): the value a
+      # chooser gets (the console prompt, #ask, or later a UI picker).
+      # +options+ are the choices: :session (keep the session's rack),
+      # :saved (replace it with the document's, for every later
+      # application), :rename (load the document's as +rename_to+ for this
+      # document only).
+      Conflict = Data.define(:name, :session_rack, :saved_rack, :source, :rename_to) do
+        def options
+          Conflict::CHOICES
+        end
+
+        def to_s
+          "rack #{name.inspect} in #{source.to_s.empty? ? 'the document' : source} differs from the session's"
+        end
+
+        # Asks on the console (one line): s, v, or r (Enter keeps the
+        # session's).  Returns the choice, or nil without an answer.
+        def ask(input: $stdin, output: $stdout)
+          output.print "#{self}: keep the session's [s], replace it with the saved copy [v], or load the saved copy as #{rename_to.inspect} [r]? "
+          output.flush
+          case input.gets&.strip&.downcase
+          when nil then nil
+          when '', 's', 'session' then :session
+          when 'v', 'saved' then :saved
+          when 'r', 'rename' then :rename
+          end
+        end
+      end
+      Conflict::CHOICES = %i[session saved rename].freeze
+
       # Latencies of racks by Rack (identity; see #latency).
       LATENCIES = ObjectSpace::WeakMap.new
 
@@ -414,6 +445,15 @@ module MB
       end
       alias [] call
 
+      # A copy of this rack named +name+ (a Symbol, or nil for anonymous;
+      # not registered anywhere): how a document's rack loads under a new
+      # name (`racks: :rename`).
+      def renamed(name)
+        raise ArgumentError, "#{label} is composed; rename its parts" if @parts
+        Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: @bound,
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true)
+      end
+
       # Builds the block on stand-ins for every port, without recording
       # the application (its calls are recorded as top-level calls, so
       # the instance prints as the block's body): for rack documents
@@ -426,7 +466,11 @@ module MB
         @ports.each_value { |p| stand[p.name] = Rack.stand_in(p.type) }
         kw = @ports.keys.to_h { |k| [k, stand[k]] }
         app = Application.new(self)
-        result = Rack.applying(app) { kw.empty? ? @block.call(stand[@input.name]) : @block.call(stand[@input.name], **kw) }
+        # (seed 0, restored after, so inspecting or saving a rack never moves
+        # the random seeds graphs draw)
+        result = MB::Sound.with_seed(0) {
+          Rack.applying(app) { kw.empty? ? @block.call(stand[@input.name]) : @block.call(stand[@input.name], **kw) }
+        }
         [result, stand, app]
       end
 
@@ -621,18 +665,7 @@ module MB
                   when GraphNode, GraphNode::MultiOutput then [result]
                   else return nil
                   end
-          memo = {}.compare_by_identity
-          visiting = {}.compare_by_identity
-          walk = nil
-          walk = ->(n) {
-            return memo[n] if memo.key?(n)
-            return 0 if visiting[n]
-            visiting[n] = true
-            own = node_latency(n)
-            srcs = (n.respond_to?(:sources) ? n.sources.values : []).flatten.select { |x| x.respond_to?(:sources) }
-            memo[n] = own + (srcs.map { |x| walk.(x) }.max || 0)
-          }
-          roots.map { |r| walk.(r) }.max || 0
+          roots.map { |r| GraphNode.longest_path(r) { |n| node_latency(n) } }.max || 0
         end
 
         # Runs the block with +app+ as the innermost rack application on
@@ -666,8 +699,13 @@ module MB
 
         def node_latency(n)
           l = n.latency if n.respond_to?(:latency) && n.method(:latency).arity == 0
-          owner = n.respond_to?(:owner) ? n.owner : n.instance_variable_get(:@owner) # (outputs of multi-output nodes)
-          l = owner.latency if l.nil? && owner.respond_to?(:latency) && owner.method(:latency).arity == 0
+          if l.nil?
+            # Outputs of a multi-output node whose sources don't include it
+            # (dynamics outputs) carry its latency
+            owner = n.respond_to?(:owner) ? n.owner : n.instance_variable_get(:@owner)
+            srcs = n.respond_to?(:sources) ? n.sources.values : []
+            l = owner.latency if owner.respond_to?(:latency) && owner.method(:latency).arity == 0 && srcs.none? { |x| x.equal?(owner) }
+          end
           l.is_a?(Numeric) ? l : 0
         rescue StandardError
           0
