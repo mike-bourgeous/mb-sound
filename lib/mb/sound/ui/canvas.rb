@@ -100,7 +100,7 @@ module MB
         # Writes +str+ at (+x+, +y+) in +role+'s color with attributes
         # (+reverse+: the color as the background, +bold+), clipped to the
         # pane.  Returns the column after it.
-        def run(x, y, str, role = nil, reverse: false, bold: false)
+        def run(x, y, str, role = nil, reverse: false, bold: false, bg: nil)
           str = str.to_s
           return x + str.length if y < 0 || y >= @h || x >= @w || x + str.length <= 0
 
@@ -109,7 +109,7 @@ module MB
             x = 0
           end
           attr = (reverse ? Plot::Text::Cells::REVERSE : 0) | (bold || Themes.bold?(role) ? Plot::Text::Cells::BOLD : 0)
-          @grid.put_run(@x + x, @y + y, str[0, @w - x], Plot::Text::Cells.pack(Theme.rgb(role)), nil, attr)
+          @grid.put_run(@x + x, @y + y, str[0, @w - x], Plot::Text::Cells.pack(Theme.rgb(role)), bg && Plot::Text::Cells.pack(Theme.rgb(bg)), attr)
           x + str.length
         end
 

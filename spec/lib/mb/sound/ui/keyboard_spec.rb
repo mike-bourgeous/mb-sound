@@ -276,10 +276,20 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
       expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  release')
-      expect(lines[1]).to eq("#{' ' * 14}q2w3e r5t6y7u i9o0p [=] \\")
-      expect(lines[3]).to start_with('C3D E F G A B C4D E F G A B C5D E F G A')
-      expect(lines[4]).to eq('zsxdc vgbhnjm ,l.;/')
-      expect(lines[5]).to eq('played C3 E4')
+      # Scaled (3 columns per white key at 60 wide, 5 rows): letters in the
+      # keys, black keys' on their lowest row, C names above the white ones
+      expect(lines[3]).to eq(' s  d     g  h  j     l2 ;3    5  6  7     9  0     =')
+      expect(lines[4]).to eq('C3                   C4                   C5')
+      expect(lines[5]).to eq('z  x  c  v  b  n  m  ,q .w /e r  t  y  u  i  o  p  [  ]  \\')
+      expect(lines[6]).to eq('played C3 E4')
+      # Held keys fill from the bottom by velocity (96 of 127: 4 of 5 rows)
+      armed = "38;2;#{MB::Sound::UI::Themes.rgb(:armed).join(';')}"
+      colored = grid.lines(:truecolor).map { |l| l.include?(armed) }
+      expect(colored[1..5]).to eq([false, true, true, true, true])
+      # A narrow pane falls back to the compact strip
+      small = MB::Sound::Plot::Text::Cells.new(36, 8)
+      pane.draw(MB::Sound::UI::Canvas.new(small, 0, 0, 36, 8), nil, {})
+      expect(small.to_text(:none).lines.map(&:rstrip)[4]).to eq('zsxdc vgbhnjm ,l.;/')
 
       kb.entry = :step
       %w[z x].each_with_index { |k, i| press(k, 1.0 + i); press(k, 1.0 + i, type: :release) }
