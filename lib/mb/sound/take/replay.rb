@@ -150,6 +150,12 @@ module MB
               break
             end
 
+            # Recorded MIDI still to come means the live timeline was moving
+            # (something not in the take, like the keyboard's default patch,
+            # kept it going), so it keeps moving here until the last row
+            # plays, then pauses when idle as it would live
+            session.advance_idle = midi_pending?(session)
+
             before = transport.position
             n = [sizes.next, max_frames - frames].min
             session.process_buffer(n)
@@ -235,6 +241,11 @@ module MB
         # The default +:max_seconds+ (see #render).
         def default_max_seconds
           @seconds ? @seconds + EXTRA_SECONDS : MAX_SECONDS
+        end
+
+        # True if any MIDI input of +session+ has recorded rows left to play.
+        def midi_pending?(session)
+          @midi.each_key.any? { |name| session.midi_in(name).replay_pending? }
         end
 
         # A timeline position for messages: bar:beat and whole notes.
