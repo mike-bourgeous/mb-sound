@@ -8,12 +8,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#play' do
-    # A NullOutput that renders as fast as it can and keeps what it writes
+    # A NullOutput that renders as fast as it can and keeps what it writes,
+    # except silent buffers (the idle Session renders about 16000 a second)
     let(:out) {
       Class.new(MB::Sound::NullOutput) {
         def written = @written ||= []
         def write(data)
-          written << data.map(&:dup)
+          written << data.map(&:dup) if data.any? { |c| c.abs.max > 0 }
           super
         end
         def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |d| d[c] })
