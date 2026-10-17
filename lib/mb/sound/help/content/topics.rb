@@ -396,7 +396,7 @@ module MB
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
-      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :synth, :tone, :amp_env, :swap
+      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
       note :sequences
       see :tempo, :sets
       example 'a looping arpeggio' do
