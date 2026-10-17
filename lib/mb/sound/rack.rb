@@ -72,6 +72,35 @@ module MB
       # (`it`), by type: how racks print their blocks.
       MAIN_NAMES = { notes: :stream, audio: :sig, control: :ctl }.freeze
 
+      # What a macro knob (MB::Sound::RackMethods#macro) knows about where
+      # it came from: the Rack, the macro's own name (:space), the
+      # Application that made it (one per Rack#call; instances are told
+      # apart by it), +share+ (joins the Session knob of its own name), and
+      # +follow+ (the Session knob it follows through its own range), and
+      # its description.
+      MacroInfo = Data.define(:rack, :macro, :application, :share, :follow, :description) do
+        # The rack's name, or nil for an anonymous rack.
+        def rack_name
+          rack&.name
+        end
+      end
+
+      # One application of a rack (Rack#call) while its block builds: the
+      # macros made so far by name.  Rack.application is the innermost one
+      # on this thread.
+      class Application
+        attr_reader :rack, :macros
+
+        def initialize(rack)
+          @rack = rack
+          @macros = {}
+        end
+
+        def inspect
+          "#<Rack::Application #{@rack.label} macros: #{@macros.keys.join(', ')}>"
+        end
+      end
+
       # A typed port: its name, type (:notes, :audio, :control), whether
       # it's required, and the main input or an extra port.  Port.for(type)
       # gives the class for a type; each coerces values given to it and
@@ -342,9 +371,10 @@ module MB
         values_by_port = { @input => main }.merge(kw.to_h { |k, v| [@ports[k], v] })
 
         applied = ports.empty? ? self : with(**ports)
+        app = Application.new(self)
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
-            r = kw.empty? ? blk.call(main) : blk.call(main, **kw)
+            r = Rack.applying(app) { kw.empty? ? blk.call(main) : blk.call(main, **kw) }
             # A note rack on a Notes gives a Notes (console midi stays mono-capable)
             r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
             r
@@ -352,10 +382,61 @@ module MB
         }
 
         check_output(result)
-        Rack.registry_use(self, result) if @name
+        Rack.registry_use(self, result, app) if @name
         result
       end
       alias [] call
+
+      # Builds the block on stand-ins for every port, without recording
+      # the application (its calls are recorded as top-level calls, so
+      # the instance prints as the block's body): for rack documents
+      # (GraphIO::Writer) and help.  Returns [result, stand-ins by port
+      # name ({ sig: node, side: node }), the Application (its macros)].
+      def build_on_stand_ins
+        raise ArgumentError, "#{label} is composed; save or inspect its parts" if @parts
+
+        stand = { @input.name => Rack.stand_in(@input.type) }
+        @ports.each_value { |p| stand[p.name] = Rack.stand_in(p.type) }
+        kw = @ports.keys.to_h { |k| [k, stand[k]] }
+        app = Application.new(self)
+        result = Rack.applying(app) { kw.empty? ? @block.call(stand[@input.name]) : @block.call(stand[@input.name], **kw) }
+        [result, stand, app]
+      end
+
+      # The macros of the rack (MacroInfo-backed Knob Specs by macro name),
+      # from a stand-in build (see #build_on_stand_ins): what `help
+      # rack(:x)` and rack documents list.
+      def macro_specs
+        _, _, app = build_on_stand_ins
+        app.macros.transform_values(&:spec)
+      end
+
+      # Remembers the values of this rack's macros (every instance's, in
+      # the current Session) as snapshot :"name/+snap+" (a named rack's
+      # variation; see KnobMethods#snap).  Returns the journal entry.
+      #
+      #     rack(:dub).snap :wide
+      #     recall :"dub/wide", over: 1.bar, only: [:space]
+      def snap(snap, **opts)
+        raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
+        names = Session.current.racks.macro_knob_names(@name)
+        raise ArgumentError, "#{label} has no macros in the session yet (apply it in a graph that plays)" if names.empty?
+        MB::Sound.snap(:"#{@name}/#{snap}", knobs: names, **opts)
+      end
+
+      # Recalls this rack's snapshot +snap+ (see #snap and
+      # KnobMethods#recall for the options, including +only:+ and
+      # +except:+).
+      def recall(snap, **opts)
+        raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
+        MB::Sound.recall(:"#{@name}/#{snap}", **opts)
+      end
+
+      # The Session knobs of this rack's macros (names), every instance's.
+      def macros
+        return [] unless @name
+        Session.current.racks.macro_knob_names(@name)
+      end
 
       # A Proc applying the rack, for Kernel#then and other Proc users
       # (`midi.then(&rack)`).
@@ -443,9 +524,37 @@ module MB
         end
 
         # Records a use of named rack +rack+ (see Session::Racks).
-        def registry_use(rack, result)
+        def registry_use(rack, result, app = nil)
           s = MB::Sound::Session.existing
-          s&.racks&.used(rack, result)
+          s&.racks&.used(rack, result, app)
+        end
+
+        # Runs the block with +app+ as the innermost rack application on
+        # this thread (see #application; macros made inside belong to it).
+        def applying(app)
+          stack = (Thread.current[:mb_sound_rack_applications] ||= [])
+          stack.push(app)
+          begin
+            yield
+          ensure
+            stack.pop
+          end
+        end
+
+        # The innermost rack Application building on this thread, or nil.
+        def application
+          Thread.current[:mb_sound_rack_applications]&.last
+        end
+
+        # A stand-in value for a port of +type+ (see
+        # Rack#build_on_stand_ins): a silent node for audio and control, an
+        # empty note stream (as Notes) for notes.
+        def stand_in(type)
+          case type
+          when :audio then GraphNode::Constant.new(0)
+          when :control then GraphNode::Constant.new(0)
+          when :notes then MB::Sound::Notes.new(MIDI::Stream.new(MIDI::ClipSource.new(Sequence::Clip.new([], length: 1))))
+          end
         end
 
         private

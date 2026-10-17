@@ -57,11 +57,13 @@ module MB
       alias move turn
 
       # Remembers every knob's value as snapshot +name+ (at the launch
-      # point; now by default).  Returns the journal entry.
-      def snap(name, at: nil, on: nil, in: nil)
+      # point; now by default), or only the values of +knobs:+ (knob names;
+      # a rack's macros with `rack(:dub).snap :wide`).  Returns the journal
+      # entry.
+      def snap(name, at: nil, on: nil, in: nil, knobs: nil)
         point = LaunchPoint.of(binding) or return nil
         session_command(name, label: "snap #{name.inspect}", kind: :snap) { |session, time|
-          session.snap(name, at: point, start_time: point.given? ? nil : time)
+          session.snap(name, at: point, start_time: point.given? ? nil : time, knobs: knobs)
         }
       end
 
@@ -71,11 +73,13 @@ module MB
       end
 
       # Turns every knob in snapshot +name+ back (see #turn for +over:+ and
-      # +curve:+).  Returns the journal entries.
-      def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil)
+      # +curve:+), or only some: +only:+ / +except:+ take knob names or a
+      # rack's macro names (`recall :"dub/wide", only: [:space]`).  Returns
+      # the journal entries.
+      def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, only: nil, except: nil)
         point = LaunchPoint.of(binding) or return nil
         knob_entries(session_command(name, label: "recall #{name.inspect}") { |session, time|
-          session.recall(name, at: point, over: over, curve: curve, start_time: point.given? ? nil : time)
+          session.recall(name, at: point, over: over, curve: curve, start_time: point.given? ? nil : time, only: only, except: except)
         })
       end
 

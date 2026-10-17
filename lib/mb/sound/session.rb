@@ -424,7 +424,7 @@ module MB
         fade = bars_or_nil(fade)
 
         nodes = match_rate(to_nodes(sound))
-        adopt_knobs(nodes) # graph documents' knobs join the Session (see Knobs#adopt_knobs)
+        adopt_knobs(nodes, player: name) # graph documents' knobs and rack macros join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq

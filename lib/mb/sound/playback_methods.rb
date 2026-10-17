@@ -187,7 +187,7 @@ module MB
         # too); those with a controller get live MIDI input
         if sound.is_a?(GraphNode) || sound.is_a?(GraphNode::MultiOutput) || (sound.is_a?(Array) && sound.all? { |s| s.is_a?(GraphNode) || s.is_a?(GraphNode::MultiOutput) })
           s = Session.current
-          attach_knob_midi(s, s.adopt_knobs(sound))
+          attach_knob_midi(s, s.adopt_knobs(sound, player: name))
         end
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|

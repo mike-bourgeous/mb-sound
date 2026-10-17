@@ -219,6 +219,8 @@ module MB
             root.graph.each do |n|
               k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
               next unless k.is_a?(GraphNode::Knob)
+              # A rack's macros print inside its block (macro(:space, ...))
+              next if k.macro
 
               if (other = found[k.name]) && !other.equal?(k)
                 problems << "two different knobs are named #{k.name.inspect}"

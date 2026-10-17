@@ -531,10 +531,57 @@ module MB
             "#{text}[#{tap.outputs.index(o)}]"
           end
 
-          # knob(:name) for a Knob or Knob::Reader.
+          # knob(:name) for a Knob or Knob::Reader; a rack's macro as the
+          # macro call that makes it (inside its rack's block, each
+          # macro(:name, ...) of one application returns the same knob).
           def knob_text(o)
-            "knob(#{(o.is_a?(Knob::Reader) ? o.knob : o).name.to_sym.inspect})"
+            k = o.is_a?(Knob::Reader) ? o.knob : o
+            return macro_text(k) if k.macro
+            "knob(#{k.name.to_sym.inspect})"
           end
+
+          public
+
+          # macro(:space, 0.3, range: ...) for macro knob +k+, with the value
+          # it holds (a moving macro: where it is) and its options.
+          def macro_text(k)
+            "macro(#{Recipe::RubyWriter.knob_args(k, method(:knob_literal)).join(', ')})"
+          end
+
+          # A knob setting as text: numbers as Knob.number prints them (800,
+          # 0.3), ranges of numbers alike (100..8000), others as literals.
+          def knob_literal(v)
+            case v
+            when Float, Integer then Knob.number(v)
+            when Range
+              v.begin.is_a?(Numeric) && v.end.is_a?(Numeric) ? "#{Knob.number(v.begin)}#{v.exclude_end? ? '...' : '..'}#{Knob.number(v.end)}" : leaf(v, '')
+            else leaf(v, '')
+            end
+          end
+
+          # The arguments that make knob +k+ again (name or a macro's own
+          # name, held value, options as the console's knob takes them,
+          # share:/follow:/description: of a macro), as text, each value
+          # printed by +literal+.
+          def self.knob_args(k, literal, name: nil)
+            spec = k.spec
+            value = k.moving? || k.target.nil? ? k.value : k.target
+            parts = [(name || (k.macro ? k.macro.macro : k.name)).to_sym.inspect, literal.(value)]
+            parts << "range: #{literal.(spec.range)}" unless spec.range == (0.0..1.0)
+            parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
+            parts << "unit: #{literal.(spec.unit)}" if spec.unit
+            parts << "cc: #{k.cc}" if k.cc
+            parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
+            parts << "smooth: #{literal.(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
+            if (m = k.macro)
+              parts << 'share: true' if m.share
+              parts << "follow: #{m.follow.inspect}" if m.follow
+              parts << "description: #{literal.(m.description)}" if m.description
+            end
+            parts
+          end
+
+          private
 
           def channels_printable?(o)
             o.to_a.all? { |x| @names.key?(x) || Recipe.call_of(x, @scope) || x.is_a?(Constant) || x.is_a?(MB::Sound::Pitch) || x.is_a?(BusTap::Channel) }
