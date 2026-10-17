@@ -38,6 +38,36 @@ module MB
           t.keys(off: off, step: step, patch: patch)
         end
 
+        # Brings back the tiled screen hidden with Ctrl-Z, as `fg` does for a
+        # shell's stopped job (the same as `ui`).  Returns the screen, or nil
+        # (with a hint) if nothing is hidden.
+        def fg
+          t = UI.tiles
+          return UI.show if t&.hidden?
+          return UI.screen if UI.screen
+          puts "\e[2mfg: no hidden UI (Ctrl-Z in the tiles hides them; `ui :tiles` shows them)\e[0m"
+          nil
+        end
+
+        # What runs in the background, as a shell's `jobs` lists: a hidden
+        # (or shown) terminal UI and the session's players.  Returns the
+        # lines (also printed).
+        def jobs
+          lines = []
+          t = UI.tiles
+          if t&.hidden?
+            lines << "[ui]+ hidden   ui #{t.layout_name.inspect}   (fg or Ctrl-Z brings it back)"
+          elsif (s = UI.screen)
+            lines << "[ui]  on screen   ui #{(s.is_a?(UI::Tiles) ? s.layout_name : s.layout.name).inspect}"
+          end
+          session = Session.existing
+          players = session ? session.players.keys : []
+          lines << "[bg]  playing   #{players.map(&:inspect).join(', ')}" unless players.empty?
+          lines << 'nothing in the background' if lines.empty?
+          puts lines
+          lines
+        end
+
         # :off, so `ui off` reads as it sounds.
         def off
           :off

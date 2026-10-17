@@ -280,7 +280,7 @@ module MB
           detach
           paste = @host.vt.bracketed_paste?
           @term.write("\e[?2026l\e[?1006l\e[?1002l\e[?1000l\e[0m\e[?25h\e[?1049l#{paste ? '' : "\e[?2004l"}" \
-                      "\r\n\e[2m(ui: tiles hidden; the session plays on.  Ctrl-Z or `ui` brings them back.)\e[0m\r\n")
+                      "\r\n\e[2m(ui: tiles hidden; the session plays on.  fg, Ctrl-Z, or `ui` brings them back; jobs lists what runs.)\e[0m\r\n")
           @host.relay = @term.output
           # Reline redraws its prompt and line on the terminal, at its size
           rows, cols = @term.size

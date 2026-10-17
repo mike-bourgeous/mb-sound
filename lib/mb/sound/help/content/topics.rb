@@ -761,7 +761,8 @@ module MB
         Esc, or Enter go back.  `ui.split :v`, `ui.zoom`, `ui.show :cpu`,
         `ui.save :mine` do the same from the prompt; `ui.on C1, :zoom` maps
         a pad.  Ctrl-Z hides the tiles (the set plays on and the console
-        carries on in the normal screen); Ctrl-Z or `ui` brings them back
+        carries on in the normal screen); `fg`, Ctrl-Z, or `ui` brings them back
+        (`jobs` lists what runs)
         as they were.  `ui.theme :mono`, `ui.nav_esc 0.3` (a lone Esc enters NAV),
         `ui.mouse` (wheel scrolls, clicks focus).  Themes, pane files, and
         layouts are data files in the ui folder, reloaded when they
@@ -786,7 +787,7 @@ module MB
         Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
         line and in `ui.keyboard.clip`.
       TEXT
-      commands :ui, :off, :pane, :layout, :keys
+      commands :ui, :off, :pane, :layout, :keys, :fg, :jobs
       note :terminal_ui
       see :now, :plots
     end
