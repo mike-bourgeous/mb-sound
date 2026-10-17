@@ -1,5 +1,7 @@
 require 'optparse'
 
+require_relative 'script_runner/live_keys'
+
 module MB
   module Sound
     # Runs standalone scripts in bin/ (effects, synths, and songs; see
@@ -780,6 +782,8 @@ module MB
         return live_ui(@options[:ui]) if @options[:ui]
 
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]
+        # Esc: all notes off (twice: all sound off), q quits, l recent MIDI
+        keys = LiveKeys.new(Session.current).start if %i[synth effect].include?(@kind) && !@options[:plot]
         if @options[:plot]
           waiter = Thread.new { MB::Sound.wait }
           waiter.report_on_exception = false
@@ -791,6 +795,7 @@ module MB
       rescue Interrupt
         puts
       ensure
+        keys&.stop
         waiter&.kill
       end
 
@@ -814,9 +819,12 @@ module MB
         waiter.report_on_exception = false
         quit = false
         tiles = nil
+        panic = LiveKeys.new(session, out: UI::Messages::Writer.new(UI.messages, $stdout))
         on_key = ->(k) {
           next quit = true if k == :interrupt
           case k.chord
+          when [:escape, []]
+            tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
           when ['q', []], ['Q', []] then quit = true
           when [' ', []]
             session.paused = !session.paused?
@@ -829,7 +837,7 @@ module MB
             end
           end
         }
-        hints = 'q quit  Space pause  Left/Right section  Ctrl-] nav  F2 keys'
+        hints = 'q quit  Space pause  Left/Right section  Esc notes off  Ctrl-] nav  F2 keys'
         UI.warm_up
         tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, hints: hints, probe: $stdin.tty?)
         UI.instance_variable_set(:@tiles, tiles) # UI.screen: warnings and plots go to it
