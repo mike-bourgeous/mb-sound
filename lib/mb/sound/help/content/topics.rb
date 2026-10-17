@@ -563,6 +563,32 @@ module MB
       end
     end
 
+    Help.topic :racks, 'Racks: reusable graphs with typed ports', group: :perform do
+      about <<~TEXT
+        A rack is a piece of graph you can reuse, like a Proc: `mrack` takes
+        notes, `irack` notes and makes audio, `arack` audio, `lrack` audio
+        and makes notes or control, `modrack` control (`rack(in:)` is the
+        general form).  Apply it with `then`, `.()`, or `through`; each use
+        builds a fresh copy.  Extra ports are keywords (`arack :dub, side:
+        :audio do |sig, side:|`), bound with `with` (bus, track, and knob
+        names work as values).  `>>` chains racks; note streams merge with
+        `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
+      TEXT
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
+      note :racks
+      see :buses, :midi, :presets
+      example 'a note rack: an anonymous value' do
+        wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
+        bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'an effect rack with a sidechain port' do
+        arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }
+        track(:try_kick) { |k| tr808(k).at(-14.db) }
+        bg :try_kick, grid(16, kick: 'x...x...x...x...').loop
+        bg :try, 55.hz.saw.at(-24.db).lp4(700).then(&rack(:try_pump).with(side: :try_kick)).until(1.bar)
+      end
+    end
+
     Help.topic :midi, 'MIDI', group: :perform do
       about <<~TEXT
         `midi` is a Notes on live input; `synth` allocates voices from any
