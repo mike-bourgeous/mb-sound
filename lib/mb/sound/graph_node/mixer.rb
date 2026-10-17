@@ -58,7 +58,10 @@ module MB
         # Session the code runs for (Session#ring, set by render(ring:)),
         # else :first.
         def self.ring_mode
-          Thread.current[:mb_sound_mixer_ring] || MB::Sound::Session.context&.[](:session)&.ring || :first
+          return Thread.current[:mb_sound_mixer_ring] if Thread.current[:mb_sound_mixer_ring]
+
+          session = MB::Sound::Session.context&.[](:session)
+          (session.respond_to?(:ring) && session.ring) || :first
         end
 
         # Makes sums built in the block (`a + b`, `a - b`, Mixers without
