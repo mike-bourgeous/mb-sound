@@ -23,34 +23,41 @@ module MB
         input&.close
       end
 
-      # Writes an Array of Numo::NArrays into the given sound file.  If the sound
-      # file already exists and +:overwrite+ is false, an error will be raised.
+      # Writes an Array of Numo::NArrays (one per channel) into the given
+      # sound file, exactly as given (no master gain).  If the sound file
+      # already exists and +:overwrite+ is false, an error will be raised.
       #
-      # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
-      # graph (PlaybackMethods::MAX_RENDER_SECONDS by default, since
-      # oscillators never end).  See also PlaybackMethods#render.
+      # Anything else #play takes (see Playable.graph: graphs, bundles,
+      # files, Samples, Clips, ...) is rendered sample by sample, also
+      # without the master gain, for at most +:max_length+ seconds
+      # (PlaybackMethods::MAX_RENDER_SECONDS by default, since oscillators
+      # never end).  See also PlaybackMethods#render, which plays through
+      # a Session (tempo, master effects and gain).
       #
       # The +:sample_rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
       def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil, metadata: nil)
-        data = [data] if data.is_a?(GraphNode)
-
-        if data.is_a?(Array) && data.all?(GraphNode)
+        if Playable.audio_data?(data)
+          data = Internal.any_sound_to_array(data)
+          output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
+          output.write(data)
+        else
+          nodes = Playable.nodes(data)
           max_length = max_length ? Length.seconds(max_length, sample_rate: sample_rate) : PlaybackMethods::MAX_RENDER_SECONDS
-          buffer_size = data.map(&:graph_buffer_size).compact.min || 800
+          buffer_size = nodes.map(&:graph_buffer_size).compact.min || 800
 
           output = file_output(
             filename,
             sample_rate: sample_rate,
-            channels: data.length,
+            channels: nodes.length,
             overwrite: overwrite,
             buffer_size: buffer_size,
             metadata: metadata
           )
 
-          input = data.as_input
+          input = nodes.as_input
 
           t = 0
           loop do
@@ -62,19 +69,7 @@ module MB
             t += buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
-        elsif data.is_a?(MB::Sound::IOInput) || data.is_a?(MB::Sound::InputBufferWrapper)
-          output = file_output(filename, sample_rate: sample_rate, channels: data.channels, overwrite: overwrite, metadata: metadata)
-          loop do
-            d = input.read(data.buffer_size)
-            break if d.nil? || d.empty? || d[0].nil? || d[0].empty?
-            output.write(d)
-          end
-        else
-          data = Internal.any_sound_to_array(data)
-          output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
-          output.write(data)
         end
-
       ensure
         output&.close
       end
