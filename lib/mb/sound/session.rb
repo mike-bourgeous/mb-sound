@@ -367,6 +367,10 @@ module MB
             next unless c.subject == name
             playing = true if START_KINDS.include?(c.kind) && c.kind != :restore
             playing = false if c.kind == :stop
+            # An undo's :restore puts back a player (its +starts+ are the
+            # restored graph's timeline nodes) or none (nil +starts+), so
+            # e.g. undoing `arm` counts its monitor as stopping
+            playing = !c.starts.nil? if c.kind == :restore
           end
           playing
         }
@@ -518,9 +522,16 @@ module MB
         point = LaunchPoint.of(binding) or return nil
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
 
+        # A disarmed track's monitor stays stopped (see Arrangement::Arm:
+        # it plays exactly while its track is armed); `arm` starts it
+        if name && disarmed_monitor?(name)
+          track = Arrangement::Recording.monitored_track(name)
+          return MB::Sound.live_error(ArgumentError.new("#{name.inspect} is track #{track.inspect}'s live monitor, which plays while the track is armed (arm #{track.inspect})"))
+        end
+
         @render_lock.synchronize {
           p = @mutex.synchronize {
-            name ||= @stopped.keys.last
+            name ||= @stopped.keys.reject { |n| disarmed_monitor?(n) }.last
             p = @stopped[name] || ringing_player(name)
             next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
             p
@@ -537,6 +548,13 @@ module MB
             start_thread
           end
         }
+      end
+
+      # True if +name+ is the live monitor of a track that isn't armed (see
+      # Arrangement::Recording.monitor_name).
+      private def disarmed_monitor?(name)
+        track = Arrangement::Recording.monitored_track(name)
+        !track.nil? && !(@arrangement&.armed?(track))
       end
 
       # Returns a Hash from name to description of stopped graphs that can be

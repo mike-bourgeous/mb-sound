@@ -364,7 +364,8 @@ module MB
           state = @session.playing_after_queue?(tr.name) ? 'playing' : 'stopped'
           state += ', muted' if @session.muted?(tr.name)
           state += ', soloed' if @session.soloed?(tr.name)
-          state += ', armed' if armed?(tr.name)
+          arm = arms[tr.name]
+          state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped
@@ -386,7 +387,7 @@ module MB
 
       # The Set state for undo (see Session#note_undo_extra).
       def undo_state
-        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, armed: (@armed || {}).dup } }
+        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, arms: (@arms || {}).dup } }
       end
 
       # Puts the Set state back (called by Session undo and redo).
@@ -394,7 +395,7 @@ module MB
         @mutex.synchronize {
           state[:clips].each { |n, c| @tracks[n].clip = c if @tracks[n] }
           @current_scene = state[:scene]
-          @armed = state[:armed].dup if state[:armed]
+          @arms = state[:arms].dup if state[:arms]
         }
       end
 
