@@ -65,8 +65,9 @@ module MB
 
         # Rows of [label, description]: labels in the key color (or as
         # given if already colored), aligned; descriptions with doc markup,
-        # cut to the width.
-        def rows(pairs, indent: 2, max_label: 30, wrap: false)
+        # cut to the width (+dim+: descriptions dimmer than the commands,
+        # as the welcome screen and the sheet's footer list them).
+        def rows(pairs, indent: 2, max_label: 30, wrap: false, dim: false)
           return self if pairs.empty?
           left = [pairs.map { |l, _| visible_length(label_text(l)) }.max.to_i, max_label].min
           room = @width - indent - left - 2
@@ -80,7 +81,7 @@ module MB
                 parts.drop(1).map { |more| "#{' ' * (indent + left + 2)}#{c(:dim, more)}" }
             else
               t = "#{t[0, [room - 3, 0].max]}..." if visible_length(t) > room
-              ["#{' ' * indent}#{pad(l, left)}  #{doc(t)}".rstrip]
+              ["#{' ' * indent}#{pad(l, left)}  #{dim ? c(:dim, t) : doc(t)}".rstrip]
             end
           end
           # Even groups of at most ROW_GROUP lines (10 rows: 5 and 5, not
@@ -96,6 +97,20 @@ module MB
             group.concat(e)
           end
           @blocks << [group, nil] unless group.empty?
+          self
+        end
+
+        # Groups of commands under headings ([heading, [[command,
+        # description], ...]], ...): one command per line in the command
+        # color, descriptions dim and aligned in one column across every
+        # group.  The welcome screen and the sheet's footer both list
+        # commands this way (ux-1 r3 item 1), so they can't drift apart.
+        def commands(groups, indent: 2)
+          left = groups.flat_map { |_, pairs| pairs.map { |cmd, _| cmd.length } }.max.to_i
+          groups.each do |head, pairs|
+            heading(head) if head
+            rows(pairs.map { |cmd, what| [Text.code(cmd).then { |t| Text.pad(t, left) }, what] }, indent: indent, max_label: left, dim: true)
+          end
           self
         end
 

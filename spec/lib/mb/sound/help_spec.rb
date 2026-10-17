@@ -638,7 +638,19 @@ RSpec.describe MB::Sound::Help do
     it 'is a few lines plus one runnable tip' do
       t = MB::U.remove_ansi(MB::Sound::Help.welcome(random: Random.new(3)))
       expect(t).to include('help').and include('now').and include('tip').and include('play it')
-      expect(t.lines.length).to be <= 14
+      expect(t.lines.length).to be <= 24
+    end
+
+    it 'lists one command per line in groups, descriptions aligned, the same formatter as the sheet\'s footer (ux-1 r3 item 1)' do
+      t = MB::U.remove_ansi(MB::Sound::Help.welcome(random: Random.new(3))).lines.map(&:chomp)
+      expect(t).to include('Learn', 'Play', 'Help')
+      cmds = MB::Sound::Help::WELCOME.flat_map { |_, pairs| pairs }
+      rows = cmds.map { |cmd, what| t.find { |l| l.start_with?("  #{cmd} ") && l.end_with?(what) } }
+      expect(rows).to all(be_a(String))
+      expect(rows.map { |r| r.index(r.strip.split(/  +/).last) }.uniq.length).to eq(1) # (one description column)
+      expect(rows.map(&:length).max).to be <= 80
+      # Plain to a pipe (or NO_COLOR)
+      expect(MB::Sound::Help.welcome(io: StringIO.new)).not_to include("\e[")
     end
 
     it 'mentions the level check until there is one, then the monitor trim' do
