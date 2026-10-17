@@ -262,6 +262,20 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(described_class::Targeting.last.held).to eq(r.integrated < -14 - 0.05)
     end
 
+    it 'measures a render window from its first frame' do
+      a = tmp_path('window.flac')
+      MB::Sound.seed(5)
+      expect {
+        MB::Sound.render(a, from: 2, bars: 1, overwrite: true) {
+          MB::Sound.master :streaming
+          # (a loud first bar that the file leaves out, then a quiet one)
+          MB::Sound.bg :loud, 110.hz.ramp.at(0.5).until(1.bar)
+          MB::Sound.at_bar(2) { MB::Sound.bg :quiet, 220.hz.triangle.at(0.03) }
+        }
+      }.to output(/mastering :streaming: pass/).to_stdout
+      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-14)
+    end
+
     it 'refuses a block that plays graphs built outside it' do
       g = 220.hz.ramp.at(0.2)
       expect {
