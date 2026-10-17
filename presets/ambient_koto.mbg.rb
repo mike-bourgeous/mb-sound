@@ -1,14 +1,14 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "ambient_koto",
   kind: :synth,
-  saved: "2026-10-16T14:11:20Z",
-  mb_sound: "0.12.0.usegit (f4cd275c)",
+  saved: "2026-10-17T04:19:33Z",
+  mb_sound: "0.12.0.usegit (bdc41124)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :koto from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :koto, tune: -7.0, spread: 0.7 }
-inputs :midi
+inputs midi: :notes
 param :space, 0.5, range: 0.0..1.0, description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 param :wear, 0.6, range: 0.0..1.0, description: "Tape wear 0..1 (koto, harp): 12 bits of grain at 0, 10 at 0.6, 7 at 1"
 

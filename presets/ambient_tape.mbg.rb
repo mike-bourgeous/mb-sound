@@ -1,13 +1,13 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "ambient_tape",
   kind: :effect,
-  saved: "2026-10-16T14:12:24Z",
-  mb_sound: "0.12.0.usegit (f4cd275c)",
+  saved: "2026-10-17T04:21:29Z",
+  mb_sound: "0.12.0.usegit (bdc41124)",
   from: "bin/synths/ambient.rb",
   description: "Effect :ambient_tape from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen)."
-inputs :input
+inputs input: :audio
 param :wear, 0.6, range: 0.0..1.0, description: "Tape wear 0..1"
 
 sig = drift(1.3, range: -0.0007..0.0007, smooth: :smoothstep, from: 0.0)

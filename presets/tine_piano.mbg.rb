@@ -1,14 +1,14 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "tine_piano",
   kind: :synth,
-  saved: "2026-10-14T03:18:28Z",
-  mb_sound: "0.12.0.usegit (796a1077)",
+  saved: "2026-10-17T04:20:39Z",
+  mb_sound: "0.12.0.usegit (bdc41124)",
   from: "bin/synths/electric_pianos.rb",
   description: "Tine piano (Rhodes-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :tine, tremolo: 0.3 }
-inputs :midi
+inputs midi: :notes
 param :bark, 1.0, range: 0.0..2.0, description: "Velocity-driven bark (FM index and pickup growl) scale"
 param :pickup, 0.5, range: 0.0..3.0, description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
 param :amp, 1.0, range: 0.25..8.0, description: "Tine amp drive: 1 clean, 1.5 a warm edge, 2 crunch, 4-8 broken up (quiet notes keep their level; default tine 1, crunch 4)"
