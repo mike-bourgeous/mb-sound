@@ -290,6 +290,7 @@ Phase R1 of the racks proposal (`research-racks`, approved 2026-10-17; later pha
 Device I/O through bundled miniaudio (`fast_audio`), plus a small JACK backend (one client per process, ports added any time; user requirement).  `OUTPUT_TYPE`/`INPUT_TYPE`: `device` (default), `ffmpeg` (output), `null`.  `DeviceOutput` writes a lock-free ring drained on the device thread (Ruby never on the audio thread); the card's clock paces the Session.
 - Latency profiles `:default` (512/128/50 ms), `:low`, `:video`, `:safe` (`AUDIO_PROFILE`, `-L`, `latency :low`); adaptive queue; live MIDI switches to `:low`.  Graphs stay at 48 kHz and the writer resamples to the card's rate.  Env: `AUDIO_BACKEND`, `OUTPUT_DEVICE`, `AUDIO_SAMPLE_RATE`, `JACK_CLIENT_NAME`, ...
 - Never `jack_port_unregister` on an active JACK client (races libjack's notification thread; segfault 2026-10-12): the shared client keeps closed ports as disconnected spares and unregisters them behind `jack_deactivate` once no port is in use.
+- Things closed at exit register with `ExitClose` (one hook, held weakly), never their own `at_exit` block: a block given to `at_exit` is a GC root, and per-Session blocks once kept every closed Session's graphs alive (guard in `exit_close_spec.rb`).
 - bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang (busy threads starve the writer otherwise).  Tools: `bin/audio_check.rb`, `bin/audio_load_check.rb`.
 
 ### Scripts (`design/notes/scripts.md`)

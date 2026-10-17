@@ -62,9 +62,7 @@ module MB
 
         # Like MB::M::Plot, make sure the queue is drained before exit so the
         # end of the last sound isn't cut off.
-        at_exit do
-          close rescue nil
-        end
+        ExitClose.register(self)
       end
 
       # Queues a copy of +data+ (an Array of Numo::NArrays with one element per
@@ -98,6 +96,7 @@ module MB
       def close(timeout: 5)
         return if @closed
         @closed = true
+        ExitClose.unregister(self)
 
         @queue.close
         @thread.kill unless @thread.join(timeout)
