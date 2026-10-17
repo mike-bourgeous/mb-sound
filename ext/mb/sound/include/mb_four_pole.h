@@ -277,7 +277,7 @@ static inline double dl_loop_gain(double r, int curve, double k_max)
 // the cutoff, and its resonant peak is at the cutoff once it stands 6 dB
 // over the passband (see FourPole::Tuning in Ruby, the exact mirror, and
 // TuningAnalysis for the definition).  A cubic Hermite interpolation of the
-// generated fp_tuning_tables, within 1 cent of the definition; 1 from the
+// generated fp_tuning_tables, within 0.5 cent of the definition; 1 from the
 // oscillation edge up.
 static inline double fp_tuning_scale(int tuning, double x)
 {
@@ -302,8 +302,25 @@ static inline double fp_tuning_scale(int tuning, double x)
 	return y0 + f * (d0 + f * (c2 + f * c3));
 }
 
-// The diode ladder's edge tuning number (fp_tuning_scale).
+// The diode ladder's edge tuning number (fp_tuning_scale); also the number
+// of tuned modes: tunings 1..7 are the edge tuning (-3 dB without
+// resonance), 8..14 the -6 dB edge tuning (:edge6, an experiment), each in
+// the order lp4, lp2, bp2, bp4, hp2, hp4, diode.
 #define FP_TUNING_DIODE 7
+
+// Whether +tuning+ fits a four-pole (+diode+ false: 0 or a tap's table) or
+// the diode ladder (0 or a diode table).
+static inline _Bool fp_tuning_valid(int tuning, _Bool diode)
+{
+	if (tuning == 0) {
+		return 1;
+	}
+	if (tuning < 0 || tuning > FP_TUNING_COUNT) {
+		return 0;
+	}
+	_Bool diode_table = (tuning - 1) % FP_TUNING_DIODE + 1 == FP_TUNING_DIODE;
+	return diode ? diode_table : !diode_table;
+}
 
 // A four-pole or diode ladder's settings (the kernels' arguments other
 // than the signals and the state).
@@ -312,7 +329,7 @@ struct mb_fp_args {
 	double mix[5];      // four-pole output mix (cascade input, four stages)
 	int curve, drive_mode, clip;
 	int normalize;      // diode ladder only
-	int tuning;         // 0 hardware, else fp_tuning_scale's table (lp4's taps 1..6, the diode ladder FP_TUNING_DIODE)
+	int tuning;         // 0 hardware, else fp_tuning_scale's table (see FP_TUNING_DIODE and fp_tuning_valid)
 };
 
 // Flushes states that are not finite or below FP_FLUSH to zero (on the

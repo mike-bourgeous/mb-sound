@@ -322,7 +322,7 @@ static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
 			args.curve < FP_CURVE_LINEAR || args.curve > FP_CURVE_SELF_OSC_DB ||
 			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (f->diode && args.drive_mode == FP_DRIVE_STAGES) ||
 			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD ||
-			(f->diode ? args.tuning != 0 && args.tuning != FP_TUNING_DIODE : args.tuning < 0 || args.tuning >= FP_TUNING_DIODE)) {
+			!fp_tuning_valid(args.tuning, f->diode)) {
 		rb_raise(rb_eArgError, "Bad plan four-pole settings");
 	}
 

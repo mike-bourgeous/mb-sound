@@ -160,6 +160,8 @@ module MB
         # without resonance, the peak below it until high resonance), the
         # behavior before 2026-10-17.  Every +mode:+ is tuned alike (hp2 and
         # hp4 3 dB down from the top, bp2 and bp4 peaking at the cutoff).
+        # +tuning: :edge6+ (an experiment) puts the -6 dB point at the cutoff
+        # without resonance instead.
         #
         # Like the SQ-80 it never self-oscillates by default: full resonance
         # rings strongly and keeps most of the bass (about -6 dB, from the
@@ -217,7 +219,7 @@ module MB
           # Edge tuning: each filter's own gain q at the cutoff.  Hardware
           # tuning: the normalized diode ladder takes lp4's knob for a Q (same
           # settings, similar sound)
-          diode = mode == :diode && (tuning == :edge || !normalize)
+          diode = mode == :diode && (tuning != :hardware || !normalize)
           resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: diode, tuning: tuning) if quality
           resonance ||= 0.0
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)

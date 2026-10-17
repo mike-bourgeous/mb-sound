@@ -38,6 +38,10 @@ module MB
           # The -3 dB level (half power).
           HALF_POWER_DB = 10 * Math.log10(0.5)
 
+          # The edge level (dB re the passband) for each edge tuning: :edge
+          # the -3 dB point, :edge6 (an experiment, 2026-10-17) -6 dB.
+          EDGE_LEVELS = { edge: HALF_POWER_DB, edge6: 20 * Math.log10(0.5) }.freeze
+
           # The resonant peak's height over the passband (dB) at which the
           # cutoff reaches the peak (see .target).
           PEAK_DB = 6.0
@@ -128,18 +132,18 @@ module MB
           # The edge tuning's target: the frequency (hardware units) that
           # the cutoff should mean for +mode+ at +x+.  Bandpasses: the
           # peak.  Without resonance, lowpasses and highpasses: the -3 dB
-          # edge.  As the resonant peak grows from 0 to PEAK_DB over the
+          # edge (+level+; -6 dB for :edge6).  As the resonant peak grows from 0 to PEAK_DB over the
           # passband the target moves onto it (weight smoothstep(dB /
           # PEAK_DB), linear in frequency), and it is the peak from there
           # up.  Lowpasses follow their edge as the resonance rises (it
           # moves up quickly); highpasses keep the edge they have without
           # resonance (theirs barely moves for hp4 and sits on a shoulder
           # near -3 dB for hp2, where it jumps around).
-          def self.target(mode, x)
+          def self.target(mode, x, level = HALF_POWER_DB)
             pk = peak(mode, x)
             return pk[0] if KINDS[mode] == :bp
 
-            e = KINDS[mode] == :lp ? edge(mode, x) : edge(mode, 0.0)
+            e = KINDS[mode] == :lp ? edge(mode, x, level) : edge(mode, 0.0, level)
             return e unless pk
 
             a = smoothstep(pk[1] / PEAK_DB)
@@ -149,14 +153,14 @@ module MB
           # The cutoff scale m for +mode+ at +x+: the factor by which the
           # filter's frequency is raised above the hardware mapping so that
           # the cutoff is .target (1 / target).
-          def self.scale(mode, x)
+          def self.scale(mode, x, level = HALF_POWER_DB)
             return 1.0 if x >= 1.0
-            1.0 / target(mode, x)
+            1.0 / target(mode, x, level)
           end
 
           # The response of +mode+ at +x+ with the edge tuning at +w+
           # (units of the cutoff), in dB.
-          def self.tuned_db(mode, x, w, m = scale(mode, x))
+          def self.tuned_db(mode, x, w, level = HALF_POWER_DB, m = scale(mode, x, level))
             db(mode, x, w * m)
           end
         end

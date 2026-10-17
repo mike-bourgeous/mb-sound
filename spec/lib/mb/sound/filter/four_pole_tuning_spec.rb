@@ -131,21 +131,74 @@ RSpec.describe(MB::Sound::Filter::FourPole::Tuning) do
     end
   end
 
+  describe 'the -6 dB edge tuning (:edge6, an experiment)' do
+    it 'puts the -6 dB point of lowpasses and highpasses at the cutoff without resonance, bandpasses peaking there' do
+      [:lp4, :lp2, :hp2, :hp4, :diode].each do |mode|
+        [100, 1000, 15000].each do |fc|
+          f = fp.new(mode: mode, cutoff: fc, resonance: 0, tuning: :edge6)
+          expect(rel_db(f, fc)).to be_within(0.01).of(-6.0206), "#{mode} at #{fc} Hz"
+        end
+      end
+      expect(rel_db(fp.new(mode: :bp2, cutoff: 1000, tuning: :edge6), 1000)).to be_within(0.01).of(0)
+      expect(fp.new(mode: :bp4, cutoff: 1000, tuning: :edge6).response(0.3)).to eq(fp.new(mode: :bp4, cutoff: 1000).response(0.3))
+    end
+
+    it 'puts the resonant peak at the cutoff from the same 6 dB peak, like :edge' do
+      { lp4: 0.3, lp2: 0.2, hp2: 0.8, hp4: 0.9, diode: 0.5 }.each do |mode, from|
+        [from, 1.0].each do |r|
+          f = fp.new(mode: mode, cutoff: 1000, resonance: r, tuning: :edge6)
+          expect(cents(peak_hz(f, 1000), 1000).abs).to be < 1, "#{mode} r #{r}"
+          expect(f.response(0.2)).to eq(fp.new(mode: mode, cutoff: 1000, resonance: r).response(0.2)) if r == 1.0
+        end
+      end
+    end
+
+    it 'sits between :hardware and :edge without resonance (lp4 -3 dB at 676 Hz for a 1 kHz cutoff)' do
+      f = fp.new(cutoff: 1000, tuning: :edge6)
+      expect(rel_db(f, 676)).to be_within(0.05).of(-3.01)
+      expect(f.to_s).to include('edge6')
+    end
+
+    it 'gives the same samples in C and Ruby' do
+      noise = MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(2000)) }
+      res = Numo::SFloat.new(2000).seq.map { |i| 0.5 + 0.5 * Math.sin(i * 0.004) }
+      [:lp4, :hp2, :bp4, :diode].each do |mode|
+        a = fp.new(mode: mode, drive: 1.5, tuning: :edge6)
+        b = fp.new(mode: mode, drive: 1.5, tuning: :edge6)
+        expect(a.dynamic_process(noise.dup, cutoff: 700, resonance: res)).to eq(b.dynamic_process_ruby(noise.dup, cutoff: 700, resonance: res))
+        expect(a.state).to eq(b.state)
+      end
+    end
+
+    it 'maps quality: to the gain q at the cutoff, none at 0.5 or less' do
+      [[:lp4, false], [:diode, true]].each do |mode, diode|
+        expect(fp.quality_to_resonance(0.5, diode: diode, tuning: :edge6)).to eq(0)
+        [0.707, 2, 10].each do |q|
+          f = fp.new(mode: mode, cutoff: 1000, resonance: fp.quality_to_resonance(q, diode: diode, tuning: :edge6), tuning: :edge6)
+          expect(10**(rel_db(f, 1000) / 20)).to be_within(0.003 * q).of(q)
+        end
+      end
+      expect(110.hz.ramp.diode(800, quality: 4, tuning: :edge6).resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true, tuning: :edge6))
+    end
+  end
+
   describe 'the tables' do
     it 'hold the analysis target at the table points (make_tuning.rb --check regenerates all of them)' do
       ta = MB::Sound::Filter::FourPole::TuningAnalysis
-      described_class::MODES.each do |mode|
-        [0, 9, 30, 57].each do |i|
-          expect(described_class::TABLES.fetch(mode)[2 * i]).to eq(ta.scale(mode, i / 64.0))
+      described_class::TABLE_KEYS.each do |key|
+        mode, level = described_class.table_mode(key)
+        [0, 9, 30, 57, 101].each do |i|
+          expect(described_class::TABLES.fetch(key)[2 * i]).to eq(ta.scale(mode, i.to_f / described_class::SEGMENTS, level))
         end
       end
     end
 
     it 'interpolate the analysis target within a cent' do
       ta = MB::Sound::Filter::FourPole::TuningAnalysis
-      described_class::MODES.each_with_index do |mode, i|
+      described_class::TABLE_KEYS.each_with_index do |key, i|
+        mode, level = described_class.table_mode(key)
         [0.003, 0.05, 0.11, 0.27, 0.42, 0.61, 0.83, 0.97].each do |x|
-          expect(cents(described_class.scale(i + 1, x), ta.scale(mode, x)).abs).to be < 1, "#{mode} x #{x}"
+          expect(cents(described_class.scale(i + 1, x), ta.scale(mode, x, level)).abs).to be < 1, "#{key} x #{x}"
         end
       end
     end

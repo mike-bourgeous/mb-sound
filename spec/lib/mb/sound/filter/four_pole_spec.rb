@@ -23,9 +23,9 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     let(:resonances) { Numo::SFloat.new(4801).seq.map { |i| 1.3 * Math.sin(i * 0.0021)**2 - 0.1 } }
 
     FP::MODES.each do |mode, mix|
-      [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1]].each do |drive, tuned|
+      [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1], [1.5, 2]].each do |drive, tuned|
         # (the edge tuning's table for this tap; the diode's mix gets lp4's)
-        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, :edge)
+        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, tuned == 2 ? :edge6 : :edge)
         it "give identical samples for #{mode} with modulated parameters#{drive > 0 ? ' and drive' : ''}, tuning #{tuning}" do
           s1 = [0.0] * 4
           s2 = [0.0] * 4
@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     it 'use the same tuning scales' do
       xs = Numo::DFloat.linspace(-0.1, 1.1, 1201).to_a + [0.5 / 64, 1 - 1e-12, 1e-300]
-      (0..7).each do |t|
+      (0..14).each do |t|
         xs.each { |x| expect(MB::Sound::FastFilter.tuning_scale(t, x)).to eq(FP::Tuning.scale(t, x)) }
       end
       expect(FP::Tuning.scale(0, 0.3)).to eq(1)
@@ -102,6 +102,11 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, -1) }.to raise_error(ArgumentError, /tuning/)
       expect { FP.process_ruby(*args, 0, 0, 0, 7) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 14) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 15) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 8) }.not_to raise_error
+      expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 8) }.to raise_error(ArgumentError, /tuning/)
+      expect { MB::Sound::FastFilter.diode_ladder(noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, 0, 0, 0, 1, 14) }.not_to raise_error
       expect { FP.process_ruby(*args, 4) }.to raise_error(ArgumentError, /curve/)
       expect { FP.process_ruby(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
     end

@@ -7,7 +7,7 @@
 #     bundle exec ruby lib/mb/sound/filter/four_pole/make_tuning.rb [--check]
 #
 # --check compares the files with freshly generated ones instead of writing
-# (exit status 1 if they differ).  About 15 seconds.
+# (exit status 1 if they differ).  About 20 seconds.
 
 $LOAD_PATH.unshift File.expand_path('../../../..', __dir__)
 require 'mb/sound'
@@ -27,25 +27,28 @@ module MB
           # Step for the numeric derivatives (in x).
           H = 1e-5
 
-          # One table: [m, dm/dx / SEGMENTS] at x = i / SEGMENTS.
-          def self.table(mode, segments = Tuning::SEGMENTS)
+          # One table (a Tuning::TABLE_KEYS entry: a mode, or mode_6 for
+          # :edge6): [m, dm/dx / SEGMENTS] at x = i / SEGMENTS.
+          def self.table(key, segments = Tuning::SEGMENTS)
+            mode, level = Tuning.table_mode(key)
+            sc = ->(x) { TA.scale(mode, x, level) }
             (0..segments).flat_map do |i|
               x = i.to_f / segments
-              v = i == segments ? 1.0 : TA.scale(mode, x)
+              v = i == segments ? 1.0 : sc.(x)
               d =
                 if i == 0
-                  (-3 * v + 4 * TA.scale(mode, H) - TA.scale(mode, 2 * H)) / (2 * H)
+                  (-3 * v + 4 * sc.(H) - sc.(2 * H)) / (2 * H)
                 elsif i == segments
-                  (3.0 - 4 * TA.scale(mode, 1 - H) + TA.scale(mode, 1 - 2 * H)) / (2 * H)
+                  (3.0 - 4 * sc.(1 - H) + sc.(1 - 2 * H)) / (2 * H)
                 else
-                  (TA.scale(mode, x + H) - TA.scale(mode, x - H)) / (2 * H)
+                  (sc.(x + H) - sc.(x - H)) / (2 * H)
                 end
               [v, d / segments]
             end
           end
 
           def self.tables
-            Tuning::MODES.to_h { |mode| [mode, table(mode)] }
+            Tuning::TABLE_KEYS.to_h { |key| [key, table(key)] }
           end
 
           def self.number(v)
