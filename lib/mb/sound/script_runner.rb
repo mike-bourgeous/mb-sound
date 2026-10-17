@@ -405,7 +405,11 @@ module MB
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           Session.current.exact_lanes = true if @options[:take]
-          Session.current.mastering_override = mastering_option if @options.key?(:master)
+          if @options.key?(:master)
+            Session.current.mastering_override = mastering_option
+            # (a song that never sets master effects gets the preset too)
+            Session.current.master(Session.current.mastering_override, on: :now) if Session.current.mastering_override
+          end
           arrange_song(&block)
           start = @options[:from] ? seek_live(@options[:from]) : 0r
           if @options[:bars]

@@ -959,6 +959,8 @@ module MB
         end
         mastering[:session] = session
         mastering[:origin] = 0
+        # (a song that never sets master effects gets the override too)
+        session.master(mastering[:override], on: :now) if mastering[:override]
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)

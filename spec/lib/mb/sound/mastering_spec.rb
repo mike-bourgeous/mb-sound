@@ -276,6 +276,14 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-8.5)
     end
 
+    it 'masters a block that sets no master effects through render(master:)' do
+      a = tmp_path('plain.flac')
+      expect {
+        MB::Sound.render(a, bars: 1, master: :quiet) { MB::Sound.bg :a, 220.hz.triangle.at(0.05).until(1.bar) }
+      }.to output(/mastering :quiet: pass/).to_stdout
+      expect(MB::Sound.loudness(a).integrated).to be_within(0.02).of(-18)
+    end
+
     it 'measures a render window from its first frame' do
       a = tmp_path('window.flac')
       MB::Sound.seed(5)
