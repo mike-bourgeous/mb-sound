@@ -84,6 +84,10 @@ module MB
               reason: 'value readers and views (Slices print through their lineage)',
               names: %i[[] absolute bounds chop_list count each fade first instrument keymap last length lineage name names sample size starts to_a],
             },
+            'MB::Sound::Unison::Pending' => {
+              reason: 'plumbing that hands consumers the built unison (its shape methods are recorded)',
+              names: %i[get_sampler outputs],
+            },
             'MB::Sound::Sampler::Instrument' => {
               reason: 'readers and the region builder (instruments print through their lineage)',
               names: %i[channel_count envelope kernel_tables lineage mips name region regions samples split],
@@ -154,6 +158,7 @@ module MB
               MB::Sound::GraphNode::Channels, MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq,
               MB::Sound::Envelope, MB::Sound::Notes::NoteEnvelope,
               MB::Sound::Sequence::Kit, MB::Sound::Sample, MB::Sound::Sample::Slices, MB::Sound::Sampler::Instrument,
+              MB::Sound::Unison::Pending, MB::Sound::Unison::PendingChannels,
             ]
           end
         end
@@ -230,6 +235,8 @@ module MB
             @wrapped[:numeric] << :constant
 
             record(Array, [:channels, :reverb], key: :array)
+            # Tone#unison comes from Unison::ToneMethods (see there)
+            record(MB::Sound::Tone, [:unison])
             DelayMethods::InsertPipeline.prepend(PipelineRecording)
             MB::Sound.singleton_class.prepend(SeedRecording)
 

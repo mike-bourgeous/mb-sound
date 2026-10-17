@@ -200,10 +200,6 @@ module MB
       #     play 110.hz.unison(5, spread: 0.5).ramp.at(-12.db)
       #     play 110.hz.ramp.unison(5, spread: 0.5).at(-12.db)
       #     midi.synth(voices: 4) { |v| v.hz.square.pwm(0.3).unison(5) * v.amp_env }
-      # The defaults of #unison's options (a blockless unison's shapes pass
-      # on only the others, so recipes print what was given).
-      UNISON_DEFAULTS = { detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, detune_mode: :exact }.freeze
-
       def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :exact, &block)
         options = { detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, detune_mode: detune_mode }
         return Unison.build(self, count, seed: seed, **options, &block) if block
@@ -211,7 +207,7 @@ module MB
         # Without a block: saws when used as a signal, or another shape
         # from Unison::Shapes, built when needed (see Unison::Spec)
         count = Unison.check(count, detune: detune, phase: phase, spread: spread, mix: mix, detune_mode: detune_mode, normalize: normalize)
-        spec = Unison::Spec.new(self, count, seed: seed.nil? ? MB::Sound.next_seed : Integer(seed), drawn: seed.nil?, options: options, given: options.reject { |k, v| UNISON_DEFAULTS[k] == v })
+        spec = Unison::Spec.new(self, count, seed: seed.nil? ? MB::Sound.next_seed : Integer(seed), drawn: seed.nil?, options: options)
         spec.stereo? ? Unison::PendingChannels.new(spec) : Unison::Pending.new(spec)
       end
 

@@ -127,17 +127,6 @@ module MB
           },
         }.freeze
 
-        # DSL methods that a module overrides for its own node classes, so
-        # they aren't recorded there (the guard spec allows these), by
-        # module name, with the reason.
-        EXEMPT_OVERRIDES = {
-          'MB::Sound::Unison::Shapes' => {
-            at: 'after an oscillator method, each copy\'s Tone#at in a pending unison (built and printed as the block form); otherwise the recorded GraphNode#at',
-            gain: 'after an oscillator method, each copy\'s Tone#gain in a pending unison (built and printed as the block form); otherwise the recorded GraphNode#gain',
-            wavetable: 'a unison of wavetable oscillators (built and printed as the block form)',
-          },
-        }.freeze
-
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
         # How build block locals are read (see #trace_locals): :frame (the
         # block frame's Binding through FastRecipe, the default) or :trace
@@ -198,16 +187,17 @@ module MB
             record_of(obj)&.config || []
           end
 
-          # Runs the block as if no recorded call were running on this thread
-          # (a call it makes is recorded as an outermost call), e.g. a
-          # pending unison built while a consumer's call is recorded.
-          def at_top
+          # Runs the block without recording the calls it makes (as if a
+          # recorded call were running), e.g. a pending unison built from
+          # its recorded stand-in (see Unison::Spec#built).
+          def quietly
             st = state
-            depth = st.depth
-            st.depth = 0
-            yield
-          ensure
-            st.depth = depth if st
+            st.depth += 1
+            begin
+              yield
+            ensure
+              st.depth -= 1
+            end
           end
 
           # True while calls are recorded (MB_SOUND_RECIPES isn't 0).

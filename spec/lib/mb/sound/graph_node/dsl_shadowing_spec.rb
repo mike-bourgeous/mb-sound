@@ -19,7 +19,7 @@ RSpec.describe('GraphNode DSL shadowing', :aggregate_failures) do
     'MB::Sound::Pitch#at' => 'a sine Tone at this pitch and amplitude (Tone#at)',
     'MB::Sound::Unison::Pending#get_sampler' => 'consumers get the built unison itself, so the pending node never stays in a graph',
     'MB::Sound::Unison::PendingChannel#get_sampler' => 'consumers get the built unison channel itself',
-    'MB::Sound::Unison::Shapes#wavetable' => 'a unison of wavetable oscillators (Pitch#wavetable on every copy)',
+    'MB::Sound::Unison::Pending#wavetable' => 'a unison of wavetable oscillators (Pitch#wavetable on every copy)',
   }.freeze
 
   def dsl_names

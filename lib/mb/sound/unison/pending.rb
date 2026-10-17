@@ -26,36 +26,36 @@ module MB
           :with_phase, :reset, :free, :random_phase, :rnd, :noise, :wavetable, :harmonics, :additive,
         ].freeze
 
-        (WAVES + OSCILLATORS).each do |name|
-          define_method(name) do |*args, **kwargs, &block|
-            @pending.then_call(name, args, kwargs, block)
+        # The methods are defined on each including class itself (as its
+        # own methods), so the recipe recorder wraps them like the DSL
+        # surface of Pitch and Tone (see GraphNode::Recipe::Surface): a
+        # graph prints as it was written, `110.hz.unison(5).ramp`.
+        def self.included(klass)
+          (WAVES + OSCILLATORS).each do |name|
+            klass.define_method(name) do |*args, **kwargs, &block|
+              @pending.then_call(name, args, kwargs, block)
+            end
           end
-        end
 
-        # After an oscillator method: the copies' level (Tone#at, so the
-        # unison matches the block form bit for bit).  Without one: the
-        # level of the unison of saws (GraphNode#at).
-        def at(amplitude)
-          return super if @pending.chain.empty?
-          @pending.then_call(:at, [amplitude], {}, nil)
-        end
+          # After an oscillator method: the copies' level (Tone#at, so the
+          # unison matches the block form bit for bit).  Without one: the
+          # level of the unison of saws (GraphNode#at).
+          klass.define_method(:at) do |amplitude|
+            return super(amplitude) if @pending.chain.empty?
+            @pending.then_call(:at, [amplitude], {}, nil)
+          end
 
-        # After an oscillator method: the copies' Tone#gain.  Without one:
-        # the gain of the unison of saws.
-        def gain(gain)
-          return super if @pending.chain.empty?
-          @pending.then_call(:gain, [gain], {}, nil)
+          # After an oscillator method: the copies' Tone#gain.  Without
+          # one: the gain of the unison of saws.
+          klass.define_method(:gain) do |gain|
+            return super(gain) if @pending.chain.empty?
+            @pending.then_call(:gain, [gain], {}, nil)
+          end
         end
 
         # The pitch the unison was made from.
         def unison_pitch
           @pending.pitch
-        end
-
-        # Prints the unison as it is built (see GraphNode#to_ruby).
-        def to_ruby(...)
-          @pending.built
-          super
         end
       end
 
@@ -69,15 +69,13 @@ module MB
         attr_reader :pitch, :count, :seed, :options, :chain
 
         # +seed+ is drawn when the unison is asked for (+drawn+ true), as
-        # the block form draws it, or given.  +given+ is the part of
-        # +options+ that differs from the defaults (recipes print it).
-        def initialize(pitch, count, seed:, drawn:, options:, given: options, chain: [])
+        # the block form draws it, or given.
+        def initialize(pitch, count, seed:, drawn:, options:, chain: [])
           @pitch = pitch
           @count = count
           @seed = seed
           @drawn = drawn
           @options = options.freeze
-          @given = given.freeze
           @chain = chain.freeze
           @built = nil
           @owner = nil
@@ -96,28 +94,25 @@ module MB
         # A new pending unison with oscillator call +name+ added to the
         # chain.
         def then_call(name, args, kwargs, block)
-          spec = Spec.new(@pitch, @count, seed: @seed, drawn: @drawn, options: @options, given: @given, chain: @chain + [[name, args, kwargs, block]])
+          spec = Spec.new(@pitch, @count, seed: @seed, drawn: @drawn, options: @options, chain: @chain + [[name, args, kwargs, block]])
           spec.stereo? ? PendingChannels.new(spec) : Pending.new(spec)
         end
 
-        # The unison, built once: saws through Unison.build (printed as the
-        # blockless call that made the owner), or the chain's oscillator
-        # on each copy through Pitch#unison with a block (printed as that
-        # block form, also when built while another call is recorded).
+        # The unison, built once: saws without a chain, else the chain's
+        # oscillator on each copy (the block form's samples).  The calls
+        # made building it aren't recorded: the built unison takes the
+        # recipe of the stand-in that made it (`110.hz.unison(5).ramp`).
         def built
-          @built ||= if @chain.empty?
-            Unison.build(@pitch, @count, seed: @seed, **@options).tap { |b| GraphNode::Recipe.share_record(@owner, b) if @owner }
-          else
-            chain = @chain
-            make = -> {
-              @pitch.unison(@count, seed: @seed, **@given) { |p|
+          @built ||= GraphNode::Recipe.quietly {
+            if @chain.empty?
+              Unison.build(@pitch, @count, seed: @seed, **@options)
+            else
+              chain = @chain
+              Unison.build(@pitch, @count, seed: @seed, **@options) { |p, _|
                 chain.reduce(p) { |o, (name, args, kwargs, block)| o.public_send(name, *args, **kwargs, &block) }
               }
-            }
-            GraphNode::Recipe.at_top {
-              @drawn ? GraphNode::Recipe.given_drawn_seed(@seed, &make) : make.call
-            }.tap { |b| GraphNode::Recipe.share_record(b, @owner) if @owner }
-          end
+            end
+          }.tap { |b| GraphNode::Recipe.share_record(@owner, b) if @owner }
         end
       end
 
@@ -244,7 +239,9 @@ module MB
           }
 
           if seed.nil? && drawn.length == 1
-            GraphNode::Recipe.given_drawn_seed(drawn[0]) { base.unison(count, seed: drawn[0], **options) { |p| rebuild.(p) } }
+            # The tone's one draw is the unison's seed: the root generator
+            # moved once, as the block form moves it
+            base.unison(count, seed: drawn[0], **options) { |p| rebuild.(p) }
           elsif seed
             base.unison(count, seed: seed, **options) { |p| rebuild.(p) }
           else

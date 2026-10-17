@@ -213,8 +213,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
         classes = ObjectSpace.each_object(Class).select { |c| c.name&.start_with?('MB::Sound') && c.include?(MB::Sound::GraphNode) }
         expect(classes.length).to be > 50
-        overrides = ->(c, n) { recipe::EXEMPT_OVERRIDES[c.instance_method(n).owner.name]&.key?(n) }
-        missing = classes.flat_map { |c| (dsl & c.public_instance_methods).reject { |n| recorded?(c, n) || overrides.(c, n) }.map { |n| "#{c}##{n}" } }
+        missing = classes.flat_map { |c| (dsl & c.public_instance_methods).reject { |n| recorded?(c, n) }.map { |n| "#{c}##{n}" } }
         expect(missing).to eq([])
       end
 

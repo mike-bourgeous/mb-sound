@@ -85,11 +85,24 @@ RSpec.describe('unison spellings') do
     expect(after.(-> { 110.hz.ramp.rnd.unison(3) })).to eq(after.(-> { 110.hz.unison(3) { |p| p.ramp.rnd } }))
   end
 
-  it 'prints the block form in recipes' do
-    MB::Sound.seed(1)
-    expect((110.hz.unison(5).ramp * 0.5).to_ruby).to eq("110.hz.unison(5) { |p|\n  p.ramp\n} * 0.5")
-    expect((110.hz.square.pwm(0.3).unison(5, spread: 1).at(0.5)).to_ruby).to include('110.hz.unison(5, spread: 1) { |p|', 'p.square.pwm(0.3)')
-    expect((110.hz.unison(5) * 0.5).to_ruby).to eq('110.hz.unison(5) * 0.5')
+  it 'prints each spelling the way it was written, and the printed Ruby rebuilds the same samples' do
+    cases = {
+      -> { 110.hz.unison(5).ramp * 0.5 } => '110.hz.unison(5).ramp * 0.5',
+      -> { 110.hz.unison(5, spread: 1).square.pwm(0.3).at(0.5) } => '110.hz.unison(5, spread: 1).square.pwm(0.3).at(0.5)',
+      -> { 110.hz.square.pwm(0.3).unison(5) * 0.5 } => '110.hz.square.pwm(0.3).unison(5) * 0.5',
+      -> { 110.hz.unison(5) * 0.5 } => '110.hz.unison(5) * 0.5',
+      -> { 110.hz.unison(3) { |p| p.ramp } * 0.5 } => "110.hz.unison(3) { |p|\n  p.ramp\n} * 0.5",
+    }
+    cases.each do |build, text|
+      MB::Sound.seed(3)
+      g = build.call
+      expect(g.to_ruby).to eq(text)
+      MB::Sound.seed(3)
+      a = render(build.call)
+      MB::Sound.seed(3)
+      b = render(MB::Sound.module_eval(text))
+      a.each_with_index { |c, ch| expect(b[ch]).to eq(c), text }
+    end
   end
 
   it 'points to the block form for a tone it cannot make again' do
