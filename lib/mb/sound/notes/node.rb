@@ -169,6 +169,11 @@ module MB
           false
         end
 
+        # Port type of the output (see GraphNode::Traversable#port_type).
+        def port_type
+          :control
+        end
+
         def sources
           { stream: @stream }
         end

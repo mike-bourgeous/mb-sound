@@ -17,8 +17,13 @@ module MB
       about <<~TEXT
         Everything plays through one background Session that mixes every
         player on a shared timeline; `play` is the foreground version
-        (Ctrl-C to stop).  Commands return journal entries that say where
-        they land.  Sounds end through envelopes, clips, `until`, or `stop`.
+        (waits until the sound ends; Ctrl-C to stop).  Commands return
+        journal entries that say where they land.  Sounds end through
+        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        take graphs and more: files, audio arrays, Samples (once), Slices
+        (one by one), clips (on their instrument, e.g. a chop's slices, or
+        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
@@ -30,6 +35,15 @@ module MB
       example 'a pattern on the next bar' do
         bass = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
         bg :try, bass.tone.ramp.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
+      end
+      example 'play a clip on the default patch' do
+        play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
+      end
+      example 'play two seconds of a drum file as a Sample', bars: 1 do
+        play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
+      end
+      example 'play a grid on a TR-808' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
       end
     end
 
@@ -609,6 +623,32 @@ module MB
         track(:try_drums) { |k| tr808(k).at(-14.db) }
         bg :try_drums, grid(16, kick: 'x...x...x...x...').loop
         bg :try, 110.hz.saw.at(-24.db).lp4(900).duck(:try_drums, only: :kick).until(1.bar)
+      end
+    end
+
+    Help.topic :racks, 'Racks: reusable graphs with typed ports', group: :perform do
+      about <<~TEXT
+        A rack is a piece of graph you can reuse, like a Proc: `mrack` takes
+        notes, `irack` notes and makes audio, `arack` audio, `lrack` audio
+        and makes notes or control, `modrack` control (`rack(in:)` is the
+        general form).  Apply it with `then`, `.()`, or `through`; each use
+        builds a fresh copy.  Extra ports are keywords (`arack :dub, side:
+        :audio do |sig, side:|`), bound with `with` (bus, track, and knob
+        names work as values).  `>>` chains racks; note streams merge with
+        `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
+      TEXT
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
+      note :racks
+      see :buses, :midi, :presets
+      example 'a note rack: an anonymous value' do
+        wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
+        bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'an effect rack with a sidechain port' do
+        arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }
+        track(:try_kick) { |k| tr808(k).at(-14.db) }
+        bg :try_kick, grid(16, kick: 'x...x...x...x...').loop
+        bg :try, 55.hz.saw.at(-24.db).lp4(700).then(&rack(:try_pump).with(side: :try_kick)).until(1.bar)
       end
     end
 

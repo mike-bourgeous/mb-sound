@@ -19,11 +19,11 @@ module MB
         #
         # TODO: give more useful data than just the first output, e.g. sum,
         # multiple channels, etc.
-        def spy(handle: nil, interval: false, phase: :post)
+        def spy(handle: nil, interval: false, phase: :post, snapshot: false)
           if outputs[0].equal?(self)
             super
           else
-            outputs[0].spy(handle: handle, interval: interval, phase: phase) do |v|
+            outputs[0].spy(handle: handle, interval: interval, phase: phase, snapshot: snapshot) do |v|
               yield v
             end
           end

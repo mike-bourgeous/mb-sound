@@ -21,6 +21,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/monitor_trim'
 require_relative 'session/buses'
+require_relative 'session/racks'
 require_relative 'session/ui_feed'
 
 module MB
@@ -313,6 +314,7 @@ module MB
         init_monitor(monitor.nil? ? realtime : monitor)
         init_buses
         @names = Names.new
+        @racks = Racks.new(self)
         @arrangement = nil
 
         # Set later, in varying orders (here so every Session has one
@@ -327,6 +329,9 @@ module MB
         @at_exit_registered = nil
         @span_players = nil
         @span_graphs = nil
+        # The span being rendered, for taps that stamp what they see (see
+        # Session.span; MIDI::Stream#spy)
+        @span = Span.new(self, 0, 0r, 0r, false, 48000)
         @player_frame = nil
         @asleep_ids = nil
         @asleep_graphs = nil
@@ -337,6 +342,9 @@ module MB
 
       # The Session's top-level names (see Names).
       attr_reader :names
+
+      # Named racks (see Session::Racks and MB::Sound::RackMethods).
+      attr_reader :racks
 
       # The marker table (see Markers), created when first needed.
       def markers
@@ -379,7 +387,8 @@ module MB
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per
-      # channel), or a sound filename.  Returns the player's name for #remove:
+      # channel), a sound filename, or anything else Playable.graph converts
+      # (samples, clips, instruments, audio arrays, ...).  Returns the player's name for #remove:
       # +:name+ if given, or else the lowest unused Integer.
       #
       # If a graph is already playing under +:name+, it keeps playing until
@@ -415,12 +424,13 @@ module MB
         explicit_fade = !fade.nil?
         fade = bars_or_nil(fade)
 
-        nodes = match_rate(to_nodes(sound))
+        playable = Playable.graph(sound, sample_rate: sample_rate)
+        nodes = match_rate(playable.nodes)
         adopt_knobs(nodes) # graph documents' knobs join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
-        description = shorten(description || MB::Sound.send(:playback_info, sound).to_s)
+        description = shorten(description || playable.description)
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 
@@ -765,6 +775,13 @@ module MB
         @thread
       end
 
+      # True if this Session plays in real time through its output (a
+      # render thread paced by the output), false for renders driven by
+      # #process_buffer.
+      def realtime?
+        @realtime
+      end
+
       # Returns true if the background rendering thread is running (see
       # #add).
       def running?
@@ -854,6 +871,13 @@ module MB
       def render_span(count, per_sample)
         from = @transport.position
         to = from + count * per_sample
+        old_span = Thread.current[:mb_sound_span]
+        @span.frame = @frame
+        @span.pos = from
+        @span.per_sample = per_sample
+        @span.moving = @advance_idle || !idle?
+        @span.sample_rate = sample_rate
+        Thread.current[:mb_sound_span] = @span
 
         # If the timeline was seeked, move every running graph's clips there,
         # and move repeating schedules to their next time
@@ -917,8 +941,26 @@ module MB
         mix
       ensure
         @knob_frame = nil
+        Thread.current[:mb_sound_span] = old_span
       end
       private :render_span
+
+      # The span a Session is rendering on this thread (frame and timeline
+      # position of its first sample, whole notes per sample, whether the
+      # timeline moves, and the sample rate), or nil outside a render.
+      # Taps use it to stamp what they see with the Session clock
+      # (MIDI::Stream#spy; Span#stamp).  Read it, don't keep it: it changes
+      # every span.
+      Span = Struct.new(:session, :frame, :pos, :per_sample, :moving, :sample_rate) do
+        # A Stamp for the sample +offset+ frames into the span.
+        def stamp(offset = 0)
+          Stamp.at(moving ? pos + offset * per_sample : pos, session.transport, frame: frame + offset)
+        end
+      end
+
+      def self.span
+        Thread.current[:mb_sound_span]
+      end
 
       # Stops the background and scheduler threads and closes the output.
       def close
@@ -1098,21 +1140,11 @@ module MB
         }
       end
 
-      # Converts something playable into an Array of GraphNodes.
+      # Converts something playable into an Array of GraphNodes, one per
+      # channel (see Playable.graph: graphs, bundles, Arrays, files,
+      # samples, clips, instruments, ...).
       def to_nodes(sound)
-        case sound
-        when String
-          [MB::Sound.file_input(sound, resample: sample_rate.round)]
-        when MB::Sound::GraphNode, MB::Sound::GraphNode::MultiOutput
-          sound.outputs
-        when Array
-          unless !sound.empty? && sound.all? { |s| s.is_a?(MB::Sound::GraphNode) || s.is_a?(MB::Sound::GraphNode::MultiOutput) }
-            raise ArgumentError, 'Pass an Array of GraphNodes, one per channel'
-          end
-          sound.flat_map(&:outputs)
-        else
-          raise ArgumentError, "Cannot play #{sound.class} in the background; use a GraphNode, a channel bundle, an Array of GraphNodes, or a filename"
-        end
+        Playable.nodes(sound, sample_rate: output_open? ? sample_rate : 48000) # (without opening the output)
       end
 
       # Sets each node to the session's sample rate (see #sample_rate) if it

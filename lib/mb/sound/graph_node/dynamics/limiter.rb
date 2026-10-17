@@ -105,7 +105,7 @@ module MB
           end
 
           # Settings as the kernel reads them.
-          def params
+          def kernel_params
             release = Length.samples(@release, sample_rate: @sample_rate)
             Numo::DFloat[@ceiling, release > 0 ? Math.exp(-1.0 / release) : 0.0, @lookahead, @true_peak ? 1 : 0, @link ? 1 : 0]
           end
@@ -121,7 +121,7 @@ module MB
           private
 
           def process(outs, data, n)
-            @params ||= params
+            @params ||= kernel_params
             MB::Sound::FastDynamics.limit(outs, data, @params, @state, @rings, Limiter.phases)
           end
 

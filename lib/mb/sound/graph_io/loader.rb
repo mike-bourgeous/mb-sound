@@ -255,6 +255,12 @@ module MB
 
         # Walks a build block's body in +scope+ (called by the procs that
         # #build_proc makes).
+        # The value of a build block keyword's default (a rack's optional
+        # port, `|sig, depth: 0.5|`), in the block's scope.
+        def keyword_default(node, scope)
+          eval_node(node, scope)
+        end
+
         def walk_block(body, scope)
           eval_statements(body, scope)
         end
@@ -913,7 +919,9 @@ module MB
           if b.is_a?(Prism::BlockArgumentNode)
             raise error(b, 'a block argument needs a value (&named_proc(:name))') unless b.expression
             pr = eval_node(b.expression, scope)
-            raise error(b, "a block argument must be a proc (got #{describe(pr)})") unless pr.is_a?(Proc)
+            # A rack applied with then(&rack) (MB::Sound::Rack#to_proc)
+            pr = pr.to_proc if pr.is_a?(MB::Sound::Rack)
+            raise error(b, "a block argument must be a proc or a rack (got #{describe(pr)})") unless pr.is_a?(Proc)
             return pr
           end
 
@@ -926,23 +934,25 @@ module MB
 
         # Block parameter names (required, optional without defaults
         # aren't allowed, a rest parameter is).
-        def block_params(b)
+        def block_params(b, keywords: false)
           params = b.parameters
-          return [[], nil] if params.nil?
+          return [[], nil, []] if params.nil?
           if params.is_a?(Prism::NumberedParametersNode) || params.is_a?(Prism::ItParametersNode)
             raise error(b, 'implicit block parameters (_1, it) aren\'t allowed; name them')
           end
           list = params.is_a?(Prism::BlockParametersNode) ? params.parameters : params
-          return [[], nil] if list.nil?
-          unless list.optionals.empty? && list.posts.empty? && list.keywords.empty? && list.keyword_rest.nil? && list.block.nil?
-            raise error(b, 'block parameters may only be plain names (|v, i|) and a *rest')
+          return [[], nil, []] if list.nil?
+          unless list.optionals.empty? && list.posts.empty? && (keywords || list.keywords.empty?) && list.keyword_rest.nil? && list.block.nil?
+            raise error(b, "block parameters may only be plain names (|v, i|)#{', keywords (|sig, side:|),' if keywords} and a *rest")
           end
           names = list.requireds.map { |r|
             raise error(r, 'destructuring block parameters aren\'t allowed') unless r.is_a?(Prism::RequiredParameterNode)
             r.name
           }
           rest = list.rest&.name
-          [names, rest]
+          # Keywords of build blocks (a rack's ports): [name, default node or nil]
+          kws = list.keywords.map { |k| [k.name, k.respond_to?(:value) ? k.value : nil] }
+          [names, rest, kws]
         end
 
         # A build block: a proc that walks the block's body for each call,
@@ -950,11 +960,11 @@ module MB
         # parameters, and lambda? like the literal block, and gives the
         # recorder its locals (GraphNode::Recipe.trace_locals).
         def build_proc(b, outer)
-          names, rest = block_params(b)
+          names, rest, kws = block_params(b, keywords: true)
           loader = self
           count = names.length
           last = nil
-          pr = proc do |*args|
+          pr = proc do |*args, **kw|
             args = args[0] if count > 1 && args.length == 1 && args[0].is_a?(Array)
             # A set's patches build again long after the load: each build
             # gets the limits afresh
@@ -965,18 +975,30 @@ module MB
             scope.implicit_self = self unless self.equal?(loader)
             names.each_with_index { |n, i| scope.vars[n] = args[i] }
             scope.vars[rest] = args[count..] || [] if rest
+            kws.each do |k, default|
+              if kw.key?(k)
+                scope.vars[k] = kw[k]
+              elsif default
+                scope.vars[k] = loader.keyword_default(default, scope)
+              else
+                raise ArgumentError, "missing keyword: :#{k}"
+              end
+            end
+            unknown = kw.keys - kws.map(&:first)
+            raise ArgumentError, "unknown keyword#{'s' if unknown.length > 1}: #{unknown.map(&:inspect).join(', ')}" unless unknown.empty?
             last = scope
             loader.walk_block(b.body, scope)
           end
           params = names.map { |n| [:opt, n] }
           params << [:rest, rest] if rest
+          kws.each { |k, default| params << [default ? :key : :keyreq, k] }
           arity = rest ? -(count + 1) : count
           pr.define_singleton_method(:arity) { arity }
           pr.define_singleton_method(:parameters) { |**| params }
           pr.define_singleton_method(:lambda?) { false }
           source = b.slice
           pr.define_singleton_method(:graph_io_source) { source }
-          pr.define_singleton_method(:graph_io_locals) { last ? last.vars.reject { |k, _| names.include?(k) || k == rest } : {} }
+          pr.define_singleton_method(:graph_io_locals) { last ? last.vars.reject { |k, _| names.include?(k) || k == rest || kws.any? { |kk, _| kk == k } } : {} }
           pr
         end
 
