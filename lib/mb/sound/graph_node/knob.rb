@@ -310,16 +310,24 @@ module MB
         # that made it, share:, follow:); nil for other knobs.
         attr_reader :macro
 
+        # The Session knob this standalone knob's readers were moved to
+        # when it joined one of the same name (see #redirect), or nil.
+        attr_reader :joined
+
         # Creates a knob named +name+ starting at +default+ (see Spec for
         # the options).  +session+ is the Session that advances it (see
         # Session::Knobs; Session#knob makes knobs), and +frame+ the first
         # frame it renders (the Session's frame counter).
-        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, macro: nil, **spec)
+        #
+        # +initial+ starts the knob at another value than its Spec's
+        # default (a rack instance's saved macro value; see Rack#using).
+        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, macro: nil, initial: nil, **spec)
           @spec = Spec.new(name: name, default: default, **spec)
           @macro = macro
+          @joined = nil
           @session = session
           @sample_rate = sample_rate.to_f
-          @value = @spec.default
+          @value = initial.nil? ? @spec.default : @spec.clamp(initial)
           @segment = Hold.new(frame, @value)
           @pending = []
           @next_frame = frame
@@ -399,6 +407,7 @@ module MB
         # Reads +knob+ instead where this knob is read directly (#sample),
         # after its readers were rebound to it (see Reader#rebind).
         def redirect(knob)
+          @joined = knob
           (@self_reader ||= Reader.new(self)).rebind(knob)
           self
         end

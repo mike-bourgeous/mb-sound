@@ -149,9 +149,13 @@ module MB
       class Application
         attr_reader :rack, :macros
 
-        def initialize(rack)
+        # Macro start values by name (see Rack#using).
+        attr_reader :start
+
+        def initialize(rack, start: {})
           @rack = rack
           @macros = {}
+          @start = start
         end
 
         def inspect
@@ -307,11 +311,18 @@ module MB
 
       # Creates a rack.  See MB::Sound::RackMethods#rack for the arguments.
       # +constructor+ is the method name that prints it back.
-      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false)
+      #
+      # +settings+ are an application's (see #using): +seed+ (the seed its
+      # block builds under), +drawn+ (true if the application drew it),
+      # +macros+ (macro start values by name), and +application+ (the
+      # Application of the call that applied the rack, for printing its
+      # macros' current values).
+      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {})
         main_type = binding.local_variable_get(:in)
         raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
 
         @name = name
+        @settings = settings.dup.freeze
         @constructor = constructor
         @parts = parts&.freeze
         @listener = listener
@@ -404,9 +415,33 @@ module MB
         if @parts
           raise ArgumentError, "#{label} is composed (>>); bind ports on its parts before composing"
         end
-        Rack.new(@name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: @bound.merge(ports),
-          listener: @listener, ports: @ports.transform_values(&:type), quiet: true)
+        copy(bound: @bound.merge(ports))
       end
+
+      # A new Rack whose applications build with these settings (racks R2
+      # round 3; how graph documents save each instance so it reloads
+      # exactly): +seed:+ the random seed the block builds under (without
+      # it each application draws one from the root generator), and macro
+      # start values by macro name (`space: 0.7`; macros not given start
+      # at their defaults).
+      #
+      #     bass.then(&rack(:dub).using(seed: 1234, space: 0.7))
+      def using(seed: nil, **macros)
+        raise ArgumentError, "#{label} is composed (>>); set its parts" if @parts
+        raise ArgumentError, "seed: must be an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
+        bad = macros.reject { |_, v| v.is_a?(Numeric) && v.real? }
+        raise ArgumentError, "macro values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
+        clash = macros.keys & [@input.name, *@ports.keys]
+        raise ArgumentError, "#{clash.join(', ')} #{clash.length > 1 ? 'are ports' : 'is a port'}; bind ports with .with" unless clash.empty?
+        # A seed a graph document marked as drawn (`seed: drawn_seed(N)`,
+        # given back by its loader through Recipe.given_drawn_seed) stays a
+        # drawn seed, so the graph saves it the same way again
+        drawn = !seed.nil? && GraphNode::Recipe.state.drawn == seed
+        copy(settings: { seed: seed || @settings[:seed], drawn: drawn || (seed.nil? && @settings[:drawn]) || nil, macros: (@settings[:macros] || {}).merge(macros) }.compact)
+      end
+
+      # The settings of an applied rack (see #initialize and #using).
+      attr_reader :settings
 
       # Builds an instance on +input+ (a source of the main input's type),
       # with extra +ports+ (merged over #with's).  Each call builds a fresh
@@ -428,11 +463,17 @@ module MB
         kw = @ports.keys.select { |k| values.key?(k) }.to_h { |k| [k, @ports[k].coerce(values[k], self)] }
         values_by_port = { @input => main }.merge(kw.to_h { |k, v| [@ports[k], v] })
 
-        applied = ports.empty? ? self : with(**ports)
-        app = Application.new(self)
+        # Every application builds under its own seed (given with #using,
+        # else drawn, bypassing the recorder: it isn't a seed of `then`),
+        # so a graph document can save it and reload the instance exactly
+        seed = @settings[:seed]
+        drawn = seed.nil? || !!@settings[:drawn]
+        seed = MB::Sound::Internal.root_rng.rand(1 << 62) if seed.nil?
+        app = Application.new(self, start: @settings[:macros] || {})
+        applied = (ports.empty? ? self : with(**ports)).send(:copy, settings: @settings.merge(seed: seed, drawn: drawn, application: app))
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
-            r = Rack.applying(app) { kw.empty? ? blk.call(main) : blk.call(main, **kw) }
+            r = Rack.applying(app) { MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) } }
             # A note rack on a Notes gives a Notes (console midi stays mono-capable)
             r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
             r
@@ -450,8 +491,7 @@ module MB
       # name (`racks: :rename`).
       def renamed(name)
         raise ArgumentError, "#{label} is composed; rename its parts" if @parts
-        Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: @bound,
-          listener: @listener, ports: @ports.transform_values(&:type), quiet: true)
+        copy(name: name)
       end
 
       # Builds the block on stand-ins for every port, without recording
@@ -628,6 +668,16 @@ module MB
       def hash
         [@name, @block, @bound, @parts].hash
       end
+
+      private
+
+      # A copy of this rack with +changes+ (name:, bound:, settings:).
+      def copy(name: @name, bound: @bound, settings: @settings)
+        Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: bound,
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings)
+      end
+
+      public
 
       class << self
         # A composed rack: +a+ then +b+ (Racks, or callables wrapped as

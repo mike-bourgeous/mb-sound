@@ -129,7 +129,7 @@ RSpec.describe('rack documents') do
       text = io.dump(g, name: 'song')
       expect(text).to include("arack(:dub, side: :audio, depth: :control) { |sig, side:, depth: 0.5|\n")
       expect(text).to include('macro(:space, 0.3)')
-      expect(text).to include("220.hz.ramp.then(&rack(:dub).with(side: 110.hz.sine))\n")
+      expect(text).to match(/^220\.hz\.ramp\.then\(&rack\(:dub\)\.with\(side: 110\.hz\.sine\)\.using\(seed: drawn_seed\(\d+\)\)\)\n/)
 
       other = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false))
       begin
@@ -141,6 +141,49 @@ RSpec.describe('rack documents') do
       ensure
         other.close
       end
+    end
+
+    it 'reloads each instance exactly: its seed and its macros\' current values' do
+      def new_session
+        MB::Sound::Session.new(master_gain: 1, realtime: false, channels: 1, buffer_size: 800, raise_errors: true,
+          output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 800))
+      end
+
+      wobbly = s.arack(:wobbly) { |sig|
+        texture = s.noise.at(0.05) + s.drift(3, range: -0.1..0.1) + 110.hz.unison(3, detune: 10.cents) { |p, _| p.saw.rnd }.at(0.1)
+        (sig + texture).filter(:lowpass, cutoff: s.macro(:tone, 2000, range: 200..8000, curve: :exp)) * s.macro(:level, 0.5)
+      }
+      g = 220.hz.ramp.at(0.2).then(&wobbly) + 330.hz.ramp.at(0.2).then(&wobbly)
+      s.bg(:pad, g, fade: 0)
+      session.process_buffer(800)
+      s.turn(:"wobbly/level", 0.8, smooth: 0)
+      s.turn(:"wobbly/tone", 900, smooth: 0)
+      session.process_buffer(800)
+      text = io.dump(g, name: 'pad')
+      expect(text).to include("arack(:wobbly) { |sig|\n").and include('macro(:level, 0.5)')
+      uses = text.scan(/rack\(:wobbly\)\.using\(seed: drawn_seed\((\d+)\), tone: 900, level: 0\.8\)/)
+      expect(uses.length).to eq(2)
+      expect(uses.uniq.length).to eq(2) # (each instance its own seed)
+      want = 6.times.map { session.process_buffer(800)[0].dup }
+
+      fresh = new_session
+      begin
+        got = MB::Sound::Session.with_context(session: fresh) {
+          loaded = io.load(text)
+          s.bg(:pad, loaded, fade: 0)
+          2.times { fresh.process_buffer(800) }
+          expect(fresh.knobs.keys).to contain_exactly(:"pad/wobbly/level", :"pad/wobbly/tone", :"pad/wobbly.2/level", :"pad/wobbly.2/tone")
+          6.times.map { fresh.process_buffer(800)[0].dup }
+        }
+        expect(got).to eq(want)
+        expect(want.map { |b| b.abs.max }.max).to be > 0.01
+      ensure
+        fresh.close
+      end
+
+      # seeds: :fresh leaves the drawn seeds out (new texture), keeping the macros
+      again = io.load(text, seeds: :fresh)
+      expect(io.dump(again, name: 'pad')).to include('rack(:wobbly).using(seed: drawn_seed(')
     end
 
     it 'keeps optional ports as parameters in the definition' do

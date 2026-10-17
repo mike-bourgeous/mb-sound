@@ -83,7 +83,7 @@ module MB
           'MB::Sound::Notes' => %i[then],
           'MB::Sound::Sequence::Clip' => %i[then],
           'MB::Sound::MIDI::Stream' => %i[then],
-          'MB::Sound::Rack' => %i[with >> <<],
+          'MB::Sound::Rack' => %i[with >> << using],
           # A rack's macros with modulation around them (racks R2)
           'MB::Sound::GraphNode::Knob' => %i[mod],
         }.freeze

@@ -162,7 +162,8 @@ module MB
         rack = app.rack
         full = share ? name : (rack.name ? :"#{rack.name}/#{name}" : name)
         info = Rack::MacroInfo.new(rack: rack, macro: name, application: app, share: share, follow: follow, description: description)
-        k = GraphNode::Knob.new(full, default, macro: info, **spec)
+        start = share || follow ? nil : app.start[name] # (a saved instance's value; see Rack#using)
+        k = GraphNode::Knob.new(full, default, macro: info, initial: start, **spec)
         app.macros[name] = k
       end
 

@@ -688,9 +688,31 @@ module MB
                        end
                 "#{rack.constructor}#{"(#{args.join(', ')})" unless args.empty?}#{body}"
               end
-            return text if rack.bound.empty?
+            text = "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})" unless rack.bound.empty?
+            using = rack.name ? using_args(rack, c) : []
+            using.empty? ? text : "#{text}.using(#{using.join(', ')})"
+          end
 
-            "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})"
+          # The settings an application of named rack +rack+ (call +c+)
+          # needs to rebuild exactly (see Rack#using): the seed its block
+          # built under (a drawn one as drawn_seed(N) in documents, left
+          # out without seeds and in synth lanes, whose seeds derive from
+          # the lane's), and its macros' current values where they differ
+          # from the definition's defaults (shared and following macros
+          # belong to their session knobs).
+          def using_args(rack, c)
+            st = rack.settings
+            args = []
+            if (seed = st[:seed]) && (!st[:drawn] || (@seeds && c.lane.nil?))
+              args << "seed: #{st[:drawn] && @seeds == :marked ? "drawn_seed(#{seed})" : seed}"
+            end
+            (st[:application]&.macros || {}).each do |name, k|
+              next if k.macro.share || k.macro.follow
+              cur = k.joined || k
+              v = cur.moving? || cur.target.nil? ? cur.value : cur.target
+              args << "#{key_text(name)} #{knob_literal(v)}" unless v == k.spec.default
+            end
+            args
           end
 
           # Remembers the definition of named rack +rack+ for the lines
