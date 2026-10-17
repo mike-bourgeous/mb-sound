@@ -217,8 +217,8 @@ module MB
         role :title, Theme::ROLES[:title].dup, bold: true
         GLYPHS[:unicode].each { |k, v| glyphs(:unicode) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
         GLYPHS[:ascii].each { |k, v| glyphs(:ascii) { public_send(k, v) } if Themes::GLYPH_NAMES.include?(k) }
-        glyphs(:unicode) { rule '│' }
-        glyphs(:ascii) { rule '|' }
+        glyphs(:unicode) { rule '│'; hrule '─' }
+        glyphs(:ascii) { rule '|'; hrule '-' }
       end
 
       Themes.define(:paper) do

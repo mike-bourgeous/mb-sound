@@ -490,8 +490,7 @@ module MB
           unless @tiler.layout.panes.include?(:keyboard)
             tile do |t|
               t.split(@tiler.layout.panes.include?(:repl) ? :repl : t.focus, :rows, :keyboard)
-              h = t.rects[:keyboard]&.h.to_i
-              t.resize(:keyboard, :down, h - 8) if h > 8
+              fit_height(t, :keyboard, 8)
             end
           end
           tile { |t| t.focus!(:keyboard) }
@@ -508,8 +507,7 @@ module MB
           tile do |t|
             was = t.focus
             t.split(t.layout.panes.include?(:repl) ? :repl : was, :rows, kind)
-            h = t.rects[kind]&.h.to_i
-            t.resize(kind, :down, h - height) if h > height
+            fit_height(t, kind, height)
             t.focus!(was)
           end
           -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
@@ -625,6 +623,17 @@ module MB
         private
 
         def mono_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        # Makes pane +name+ (just split off below another) +height+ rows by
+        # moving its top edge, the rows going to or coming from the pane
+        # above (weights round, so it may take a second step).
+        def fit_height(t, name, height)
+          2.times do
+            h = t.rects[name]&.h.to_i
+            break if h == height || h == 0
+            t.resize(name, :up, height - h)
+          end
+        end
 
         # The keyboard's Enter (capture) and step entry's Enter (a clip).
         def hook_keyboard
@@ -955,6 +964,9 @@ module MB
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
+          @gaps = gap_cells
+          @title_rules = title_rules(@gaps)
+          @placed.each { |pl| @states[pl.name][:title_in_rule] = @title_rules.key?(pl.name) if pl.name }
           @canvases = {}
           @drawn_at = {}
           @relayout = false
@@ -1093,25 +1105,67 @@ module MB
           end
         end
 
-        # Vertical rules in the columns no pane covers (the gaps), the
-        # focused pane's in the key color.
-        def draw_gaps
+        # Box-drawing glyphs for a rule cell by the rule cells around it
+        # (bits: 1 up, 2 down, 4 left, 8 right).
+        JOINS = {
+          unicode: { 1 => '│', 2 => '│', 3 => '│', 4 => '─', 8 => '─', 12 => '─', 15 => '┼', 11 => '├', 7 => '┤',
+                     14 => '┬', 13 => '┴', 10 => '┌', 6 => '┐', 9 => '└', 5 => '┘', 0 => '│' },
+          ascii: Hash.new { |_, k| [1, 2, 3, 0].include?(k) ? '|' : [4, 8, 12].include?(k) ? '-' : '+' },
+        }.freeze
+
+        # The cells no pane covers (the rules), as rows of booleans.
+        def gap_cells
           h = @rows - 1
           covered = Array.new(h) { Array.new(@cols, false) }
           @placed.each do |p|
             r = p.rect
             r.h.times { |dy| covered[r.y + dy]&.fill(true, r.x, r.w) }
           end
+          covered.map { |row| row.map(&:!) }
+        end
+
+        # Panes whose title goes into the rule above them (a rule row
+        # across their whole width): they draw their body from their first
+        # row.  Set by #relayout.
+        def title_rules(gaps)
+          @placed.each_with_object({}) do |p, h|
+            next if p.name.nil? || p.tabs || p.name == :repl
+            r = p.rect
+            pane = @panes[p.name]
+            next unless pane&.title && !pane.bytes? && r.y > 0
+            h[p.name] = r if (r.x...(r.x + r.w)).all? { |x| gaps[r.y - 1][x] }
+          end
+        end
+
+        # The rules between panes: vertical in the columns between panes
+        # side by side, horizontal in the rows between stacked panes,
+        # joined with box-drawing glyphs (|-+ for :ascii glyphs), the
+        # focused pane's edges in the key color, and pane titles set into
+        # the rule above them.
+        def draw_gaps
+          gaps = @gaps || gap_cells
+          h = gaps.length
           focus = @placed.find { |p| p.name == @tiler.focus }&.rect
-          glyph = Themes.glyphs(@glyphs)[:rule] || '|'
+          set = Themes.glyphs(@glyphs)
+          joins = JOINS[@glyphs == :ascii ? :ascii : :unicode]
           dim = Plot::Text::Cells.pack(Theme.rgb(:dim))
           key = Plot::Text::Cells.pack(Theme.rgb(:key))
           h.times do |y|
             @cols.times do |x|
-              next if covered[y][x]
-              near = focus && y >= focus.y && y < focus.y + focus.h && (x == focus.x - 1 || x == focus.x + focus.w)
+              next unless gaps[y][x]
+              bits = (y > 0 && gaps[y - 1][x] ? 1 : 0) | (y < h - 1 && gaps[y + 1][x] ? 2 : 0) |
+                     (x > 0 && gaps[y][x - 1] ? 4 : 0) | (x < @cols - 1 && gaps[y][x + 1] ? 8 : 0)
+              glyph = joins[bits]
+              glyph = set[:rule] || glyph if [0, 1, 2, 3].include?(bits)
+              glyph = set[:hrule] || glyph if [4, 8, 12].include?(bits)
+              near = focus && y >= focus.y - 1 && y <= focus.y + focus.h && x >= focus.x - 1 && x <= focus.x + focus.w
               @grid.put_run(x, y, glyph, near ? key : dim, nil, 0)
             end
+          end
+          (@title_rules || {}).each do |name, r|
+            title = " #{@panes[name].title.to_s.upcase} "
+            next if title.length + 2 > r.w
+            @grid.put_run(r.x + 1, r.y - 1, title, Plot::Text::Cells.pack(Theme.rgb(:title)), nil, Plot::Text::Cells::BOLD)
           end
         end
 

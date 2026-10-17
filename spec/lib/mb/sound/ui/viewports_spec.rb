@@ -33,7 +33,7 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
       expect(r[:transport]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 0, 120, 1))
       expect(r[:tracks]).to eq(MB::Sound::UI::Viewports::Rect.new(0, 1, 28, 39))
       # 120 - 28 - 2 gaps = 90 shared 2:1
-      expect(r[:repl]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 1, 60, 31))
+      expect(r[:repl]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 1, 60, 30)) # a rule row below it
       expect(r[:journal]).to eq(MB::Sound::UI::Viewports::Rect.new(29, 32, 60, 8))
       expect(r[:scope]).to eq(MB::Sound::UI::Viewports::Rect.new(90, 2, 30, 38))
       expect(r).not_to have_key(:meters)

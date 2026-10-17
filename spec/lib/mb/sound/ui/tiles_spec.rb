@@ -209,6 +209,24 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_meters_only_in_place
   end
 
+  it 'draws rules between stacked panes, joined, with the lower pane\'s title set into the rule (ux-1 item 9)' do
+    %i[unicode ascii].each do |glyphs|
+      @tiles&.stop
+      @term&.close
+      start(:studio, rows: 34, cols: 120, glyphs: glyphs, source: -> { ui_fake_snapshot })
+      expect(@term.wait_for('QUEUED')).to eq(true)
+      @term.settle
+      lines = @term.lines
+      q = @tiles.tiler.rects[:queue]
+      h, j = glyphs == :ascii ? ['-', '+'] : ['─', '┤']
+      expect(lines[q.y - 1][0, q.w + 1]).to eq("#{h} QUEUED ".ljust(q.w, h) + j), lines[q.y - 1]
+      expect(lines[q.y]).to include('17:3   knob :cut') # the body starts on the pane's first row
+      expect(@tiles.to_text.scan('QUEUED').length).to eq(1)
+      r = @tiles.tiler.rects[:repl]
+      expect(lines[r.y + r.h][r.x - 1]).to eq(glyphs == :ascii ? '+' : '├') # the REPL's rule meets the column rule
+    end
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')

@@ -37,7 +37,7 @@ module MB
           .each_with_index.to_h.freeze
 
         # Glyph names a theme may set.
-        GLYPH_NAMES = %i[play stop on off armed rec queued sep arrow rule].freeze
+        GLYPH_NAMES = %i[play stop on off armed rec queued sep arrow rule hrule].freeze
 
         # Theme file calls by block level (a closed table: glyph names too).
         CALLS = { nil => %i[theme], theme: %i[role glyphs], glyphs: GLYPH_NAMES }.freeze

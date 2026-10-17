@@ -36,7 +36,9 @@ module MB
         # +state+ is a Hash kept for this placement of the pane.
         def draw(c, s, state)
           c.clear
-          if @title
+          # (A screen that sets its title into the rule above the pane sets
+          # state[:title_in_rule]: the body starts on the first row)
+          if @title && !state[:title_in_rule]
             c.text(0, 0, (@title_text ||= @title.to_s.upcase.freeze), :title)
             # The body follows the canvas: a relayout (resize, another
             # layout, a split) gives the pane a new canvas, and a body kept
