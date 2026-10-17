@@ -162,7 +162,8 @@ module MB::Sound
       script, setup, form, form_options, description = st
       require File.join(root, script)
       MB::Sound.with_seed(0) do
-        box = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false))
+        # (its own transport: the set sets the tempo and meter)
+        box = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false), transport: Sequence::Transport.new(bpm: 120))
         begin
           Dir.chdir(root) do
             Session.with_context(session: box) do

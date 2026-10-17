@@ -106,7 +106,7 @@ RSpec.describe('bin/save_presets.rb') do
 
       bar = 0
       play = ->(&build) {
-        s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1)
+        s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
         begin
           MB::Sound.seed(3)
           f = MB::Sound::Session.with_context(session: s) { build.call(s) }

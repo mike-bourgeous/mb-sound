@@ -1,5 +1,6 @@
 RSpec.describe(MB::Sound::DemoMethods) do
-  let(:session) { MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1) }
+  # (its own transport: the set sets the tempo and meter of the Session's transport)
+  let(:session) { MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, transport: MB::Sound::Sequence::Transport.new(bpm: 120)) }
 
   after { session.close }
 
