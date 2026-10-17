@@ -42,8 +42,13 @@ module MB
       # gains everywhere else (dB is written -12.db); older documents load
       # with their old meaning (bare levels at 0 and below and every bare
       # gain or point in dB, warning once; see
-      # GraphNode::DynamicsMethods.from_old_document).
-      FORMAT = 3
+      # GraphNode::DynamicsMethods.from_old_document).  Format 4
+      # (2026-10-17, omnibus8) marks the default change of sums, which ring
+      # until every input ends (GraphNode#ring); graphs of older documents
+      # are built with sums ending with their first input, as they were
+      # saved (GraphNode::Mixer.with_ring(:first); set documents' track
+      # patches, built when they launch, ring).
+      FORMAT = 4
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

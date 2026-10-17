@@ -138,14 +138,15 @@ module MB
         raise ArgumentError, "Unison phase must be :random, :reset, cycles, or a Phase like 1.2.radians (got #{phase.inspect})"
       end
 
-      # Builds a unison of +pitch+ (see Pitch#unison for the arguments):
-      # calls the block once per copy with a detuned Pitch (oscillators
-      # made from it get the +phase+ setting) and the copy's index, and
-      # returns the copies mixed by a GraphNode::ChannelMixer::Unison (one
-      # node for mono, a Channels bundle for stereo).
-      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :exact, mix: 1)
+      # Checks the arguments of a unison (see Pitch#unison), raising
+      # ArgumentError for bad ones.  Returns the copy count (+count+, or
+      # the default for the +detune:+ given).
+      def self.check(count, detune:, phase:, spread:, mix:, detune_mode:, normalize: :power)
         count ||= detune.is_a?(Array) ? detune.length : DEFAULT_COUNT
         check_phase(phase)
+        unless normalize == :power || normalize == :peak || normalize.is_a?(Numeric)
+          raise ArgumentError, "normalize must be :power, :peak, or a number (got #{normalize.inspect})"
+        end
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
           raise ArgumentError, "Unison spread must be 0..1 or a graph node (got #{spread.inspect})"
         end
@@ -158,6 +159,16 @@ module MB
         if detune.is_a?(Array) && detune.any? { |d| d.respond_to?(:sample) }
           raise ArgumentError, 'A unison detune Array takes fixed offsets only; for a changing detune give one node (with a layout:) instead'
         end
+        count
+      end
+
+      # Builds a unison of +pitch+ (see Pitch#unison for the arguments):
+      # calls the block once per copy with a detuned Pitch (oscillators
+      # made from it get the +phase+ setting) and the copy's index, and
+      # returns the copies mixed by a GraphNode::ChannelMixer::Unison (one
+      # node for mono, a Channels bundle for stereo).
+      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :exact, mix: 1)
+        count = check(count, detune: detune, phase: phase, spread: spread, mix: mix, detune_mode: detune_mode)
 
         seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
         rng = Random.new(seed)
@@ -212,3 +223,4 @@ require_relative 'unison/detune'
 require_relative 'unison/copy'
 require_relative 'unison/copy_pitch'
 require_relative 'unison/swarm'
+require_relative 'unison/pending'

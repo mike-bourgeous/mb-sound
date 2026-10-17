@@ -187,6 +187,37 @@ module MB
             record_of(obj)&.config || []
           end
 
+          # Runs the block without recording the calls it makes (as if a
+          # recorded call were running), e.g. a pending unison built from
+          # its recorded stand-in (see Unison::Spec#built).
+          def quietly
+            st = state
+            st.depth += 1
+            begin
+              yield
+            ensure
+              st.depth -= 1
+            end
+          end
+
+          # True while calls are recorded (MB_SOUND_RECIPES isn't 0).
+          def enabled?
+            @enabled
+          end
+
+          # Gives +to+ the recipe of +from+ (an object standing in for it,
+          # e.g. a blockless unison and the unison built for it later), so
+          # graphs reading +to+ print it as +from+ was made.
+          def share_record(from, to)
+            rec = record_of(from)
+            return if rec.nil? || to.frozen? || record_of(to)
+
+            copy = Record.new(to, rec.call)
+            copy.config = rec.config&.dup
+            copy.scoped = rec.scoped&.dup
+            to.instance_variable_set(:@graph_recipe, copy)
+          end
+
           # True for objects that recipes are about.
           def graph_object?(obj)
             obj.is_a?(GraphNode) || obj.is_a?(Channels) || obj.is_a?(MB::Sound::Notes) ||

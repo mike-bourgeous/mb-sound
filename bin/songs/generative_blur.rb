@@ -25,6 +25,14 @@
 #           agree on the key; ranges and chord blends stay per part)
 #   -c sparse  the earlier, thinner cloud: about 8 grains a second
 #           (Poisson-like: chance 0.7 per thirty-second), 150 ms each
+#   -c 60   any number of grains a second (0.5 to 160), on the dense
+#           cloud's tone: the strike chance per 128th (44.8 a second at 84
+#           BPM; 256ths or 512ths above 40 a second, keeping the chance at
+#           most 0.9) hits that rate, grains last 350 ms up to 40 a second
+#           and 14/rate seconds above (about 14 overlapping, under the
+#           32-grain limit), and the level scales by sqrt(14 / overlap) (at
+#           most one grain's worth), so thinner clouds aren't much quieter
+#           (#generative_blur_cloud_settings)
 #   -t 1    shorter key changes (the cloud's default): F major lands on bar
 #           9 (the B flat chord) and D dorian comes back on bar 13 (the G7),
 #           each blended over the 1 bar before it (-t 0: a step; -t slow:
@@ -52,12 +60,15 @@
 #     bin/songs/generative_blur.rb -O 3 -C 0.5 blur.flac      # three octaves (A3..A6), chords blending over half a bar
 #     bin/songs/generative_blur.rb -m grains blur.flac        # the granular cloud
 #     bin/songs/generative_blur.rb -m grains -u 0.4 -c sparse --no-bass blur.flac  # a thin cloud, many wrong notes, no anchor
+#     bin/songs/generative_blur.rb -m grains -c 60 blur.flac  # 60 grains a second (233 ms each)
+#     bin/songs/generative_blur.rb -m grains -c 15 blur.flac  # 15 a second, between sparse and dense
 #     bin/songs/generative_blur.rb -m both blur.flac          # both together
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/generative_blur.rb'
 #     generative_blur(mode: :grains)
 #     generative_blur(mode: :grains, cloud: :sparse, transition: :slow, bass: false, blur: 0.3)
+#     generative_blur(mode: :grains, cloud: 60)                  # 60 grains a second
 #
 # Snippets (after `load 'bin/songs/generative_blur.rb'`):
 #     f = (scale(:dorian, :d).weights.blur(0.3) + chord(:min7, root: :d).weights).over(A3..A5, around: E4, width: 7)
@@ -137,13 +148,41 @@ module MB::Sound
     grains: { chord_blend: 0.5, octaves: 3, transition: 1 }.freeze,
   }.freeze
 
+  # The piece's tempo.
+  GENERATIVE_BLUR_BPM = 84
+
+  # Grains a second a numeric +cloud+ may ask for.
+  GENERATIVE_BLUR_CLOUD_RATES = 0.5..160
+
+  # The strike grid, chance, grain size (seconds), and gain of a cloud of
+  # +rate+ grains a second (a number; :dense and :sparse keep their own
+  # settings): the coarsest of 128ths, 256ths, and 512ths at 84 BPM (44.8,
+  # 89.6, 179.2 slots a second) where the chance stays at most 0.9; grains
+  # 350 ms long (the dense cloud's) up to 40 a second and 14 / rate seconds
+  # above, so about 14 overlap at most (Grains holds 32); and the dense
+  # cloud's 0.2 gain times sqrt(14 / overlap) (overlap at least 1), the
+  # level of random-phase grains summed.
+  def self.generative_blur_cloud_settings(rate)
+    unless rate.is_a?(Numeric) && GENERATIVE_BLUR_CLOUD_RATES.cover?(rate)
+      raise ArgumentError,
+        "cloud is :dense, :sparse, or grains a second from #{GENERATIVE_BLUR_CLOUD_RATES.begin} to #{GENERATIVE_BLUR_CLOUD_RATES.end} (got #{rate.inspect})"
+    end
+
+    whole = 240.0 / GENERATIVE_BLUR_BPM
+    division = [128, 256, 512].find { |n| rate / (n / whole) <= 0.9 } || 512
+    size = [0.35, 14.0 / rate].min
+    overlap = [rate * size, 1.0].max
+    { division: division, chance: rate / (division / whole), size: size, gain: 0.2 * Math.sqrt(14.0 / overlap) }
+  end
+
   # Starts the piece on the current session (live, or in a render block).
   # +mode+ :dense, :grains, or :both; +blur+ 0..1; +seed+ the draws.
   # +division+ the dense line's notes per whole note (16: sixteenths, 64:
   # sixty-fourths, about 22 notes a second at 84 BPM).  +bass+ the anchor
   # bassline (#generative_blur_bass_clip; false leaves it out).  +cloud+
-  # :dense (about 40 grains a second, long, overlapping, spread wide) or
-  # :sparse (about 8 a second).  +transition+ the bars over which the key
+  # :dense (about 40 grains a second, long, overlapping, spread wide),
+  # :sparse (about 8 a second), or a number of grains a second (see
+  # #generative_blur_cloud_settings).  +transition+ the bars over which the key
   # changes (:slow: the original 4- and 6-bar blends; see
   # #generative_blur_field).  +chord_blend+ the bars over which each chord
   # blends into the next (0: steps).  +octaves+ 2 or 3 (the field's range).
@@ -156,7 +195,11 @@ module MB::Sound
   # transition: :slow, chord_blend: 0, octaves: 2)` plays that again.
   def self.generative_blur(mode: :dense, blur: 0.03, seed: 3, division: 64, bass: true, cloud: :dense, transition: nil,
                            chord_blend: nil, octaves: nil)
-    bpm 84
+    bpm GENERATIVE_BLUR_BPM
+    numeric_cloud = cloud.is_a?(Numeric) ? generative_blur_cloud_settings(cloud) : nil
+    unless numeric_cloud || cloud == :dense || cloud == :sparse
+      raise ArgumentError, "cloud is :dense, :sparse, or grains a second (got #{cloud.inspect})"
+    end
     raise ArgumentError, "mode is :dense, :grains, or :both (got #{mode.inspect})" unless [:dense, :grains, :both].include?(mode)
     transition ||= mode == :both ? 1 : GENERATIVE_BLUR_DEFAULTS[mode][:transition]
     unless transition == :slow || (transition.is_a?(Numeric) && transition >= 0)
@@ -174,7 +217,16 @@ module MB::Sound
     end
 
     if mode == :grains || mode == :both
-      if cloud == :dense
+      if numeric_cloud
+        # The dense cloud's tone and spread at another rate (see
+        # #generative_blur_cloud_settings)
+        c = numeric_cloud
+        tone = bounce(3.seconds, root: D4, name: 'tone') { D4.triangle * 0.6 + D4.transpose(12).sine * 0.2 }
+        n = strikes(field_for.(:grains), every: Rational(1, c[:division]).whole, chance: c[:chance], gap: 1, sharpen: 1, seed: seed + 1).notes
+        cloud_node = tone.grains(freq: n.freq, trigger: n.trigger, density: 0, position: 0.5, spread: 0.2, size: c[:size],
+          pan_spread: 1, normalize: false, seed: seed + 2)
+        bg :grains, ambient_room(cloud_node.lp4(4500) * c[:gain], space: 0.4, decay: 3, room_size: 0.8), fade: 0
+      elsif cloud == :dense
         # About 40 grains a second (chance 0.9 per 128th), 350 ms each, so
         # about 14 overlap; spread over a 3 s tone so even grains pitched
         # up to A5 read inside it.
@@ -211,7 +263,14 @@ module MB::Sound
       seed: [3, Integer, '-s', 'The seed of the draws', 0..1_000_000],
       division: [64, Integer, '-n', 'Notes per whole note in the dense line (16, 32, 64)', [8, 16, 32, 64]],
       bass: [true, '-B', 'The anchor bassline: one unblurred root (and fifth) a bar, following the chords (--no-bass leaves it out)'],
-      cloud: [:dense, Symbol, '-c', 'The granular cloud: dense (about 40 grains a second, long, overlapping) or sparse (about 8)', [:sparse, :dense]],
+      cloud: [:dense, ->(s) {
+        next s.to_sym if s == 'dense' || s == 'sparse'
+        rate = Float(s, exception: false)
+        unless rate && GENERATIVE_BLUR_CLOUD_RATES.cover?(rate)
+          raise ArgumentError, "must be sparse, dense, or grains a second from #{GENERATIVE_BLUR_CLOUD_RATES.begin} to #{GENERATIVE_BLUR_CLOUD_RATES.end}"
+        end
+        rate
+      }, '-c', 'The granular cloud: dense (about 40 grains a second, long, overlapping), sparse (about 8), or grains a second (0.5..160)'],
       transition: [nil, ->(s) { s == 'slow' ? :slow : Float(s).tap { |t| raise ArgumentError, 'must be slow or 0..4' unless (0..4).cover?(t) } }, '-t',
         'Bars over which the key changes (F major on bar 9, D dorian on bar 13; 0 a step), or slow (the 4- and 6-bar blends); ' \
         'default: slow for the line, 1 for the cloud and both'],
