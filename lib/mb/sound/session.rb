@@ -318,6 +318,7 @@ module MB
         # Set later, in varying orders (here so every Session has one
         # instance variable layout; see GraphNode::IvarPreset)
         @exact_lanes = nil
+        @ring = nil
         @stems = nil
         @master_block = nil
         @master_playing = nil
@@ -753,6 +754,18 @@ module MB
       # render(exact_lanes: true) turn it on).  Applies to players started
       # after it is set.
       attr_accessor :exact_lanes
+
+      # How sums built for this Session end (GraphNode::Mixer.ring_mode):
+      # nil or :first (the default; a sum ends with its first input to end)
+      # or :all (sums ring until every input has ended), for graphs built
+      # in its context from now on: a render block (render(ring: :all)),
+      # scheduled blocks, and track patches.  GraphNode#ring sets one sum.
+      attr_reader :ring
+
+      def ring=(mode)
+        GraphNode::Mixer.check_ring(mode) unless mode.nil?
+        @ring = mode
+      end
 
       # Stops calling a block given to #add_tap.
       def remove_tap(block)

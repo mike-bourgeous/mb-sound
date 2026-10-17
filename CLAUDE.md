@@ -67,6 +67,7 @@ DSL methods live in topic modules `lib/mb/sound/graph_node/*_methods.rb`; node t
 - Every consumer must call `get_sampler` on nodes it stores in its constructor, so a node used in several places branches through a `Tee` instead of advancing twice.
 - Tee branches reading in lockstep share one frozen buffer; otherwise the Tee copies through a CircularBuffer (made lazily).  A node processing its input in place copies it first only if `buf.frozen?` (user rule; `GraphNode::FrozenCopy`).  `MB_SOUND_CHECK_SHARED=1` / the `:check_shared` tag verify shared buffers aren't modified (multi-output nodes, Synth and ChannelMixer, alternate two sets of output buffers so a channel's buffer outlives the next frame); `MB_SOUND_SHARED_TEE=0` turns sharing off.
 - `oversample(m)` raises upstream rates when the graph first plays or is planned; nodes also read outside the region keep their rate and the region's Tee branch resamples them (`Branch#resampled?`, `Tee.pin_rates`), so shared nodes are never read at two rates.
+- Sums end with their first input to end; `(a + b).ring` (also `Mixer.with_ring(:all) { }`, `Session#ring`, `render(ring: :all)`) rings until all have ended (gong tails, dry + reverb).
 - Multiplier, Mixer, and Pan have allocation-free C fast paths (`fast_arithmetic`), bit-identical to the general path.
 - Measure graph cost with `bin/graph_profile.rb [-n 32,128,800] [--profile] [--plan on|off|ruby|both] script.rb` (worst-case synth input: `spec/test_data/dense_modulated.mid`); compare branches in alternating runs against a master-ai worktree.
 

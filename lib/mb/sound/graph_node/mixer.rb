@@ -37,16 +37,54 @@ module MB
         # of two-element Arrays of the form [summand, gain], or a Hash from
         # summand to gain (yes, this is a bit redundant for Numeric summands).
         #
-        # If +:stop_early+ is true (the default), then any summand returning nil
-        # or an empty NArray from its #sample method will cause this #sample
-        # method to return nil.  Otherwise, the #sample method only returns nil
-        # when all summands return nil or empty.
+        # If +:stop_early+ is true, then any summand returning nil or an empty
+        # NArray from its #sample method will cause this #sample method to
+        # return nil.  Otherwise, the #sample method only returns nil when all
+        # summands return nil or empty (shorter ones are padded with zeros).
+        # The default (nil) is true unless sums ring until every input ends
+        # where the mixer is made (see .ring_mode: Mixer.with_ring,
+        # Session#ring, render(ring: :all)); GraphNode#ring changes it
+        # later.
         #
         # Numeric summands are rolled into the constant value.  Duplicated
         # GraphNode summands will have their gains summed and only a single
         # copy of the summand added.
-        def initialize(summands, sample_rate: nil, stop_early: true)
+        # How sums end (see GraphNode#ring): :first (the default: when any
+        # input ends) or :all (when every input has ended).
+        RING_MODES = [:first, :all].freeze
+
+        # The ring mode new Mixers made without +:stop_early+ get on this
+        # thread: the innermost .with_ring block's, else the ring of the
+        # Session the code runs for (Session#ring, set by render(ring:)),
+        # else :first.
+        def self.ring_mode
+          Thread.current[:mb_sound_mixer_ring] || MB::Sound::Session.context&.[](:session)&.ring || :first
+        end
+
+        # Makes sums built in the block (`a + b`, `a - b`, Mixers without
+        # +:stop_early+) ring until every input ends (+mode+ :all) or end
+        # with the first (:first).  Returns the block's result.
+        #
+        #     g = Mixer.with_ring(:all) { gong + rain.until(3) }   # rings as long as the gong
+        def self.with_ring(mode)
+          check_ring(mode)
+          old = Thread.current[:mb_sound_mixer_ring]
+          Thread.current[:mb_sound_mixer_ring] = mode
+          yield
+        ensure
+          Thread.current[:mb_sound_mixer_ring] = old
+        end
+
+        # Raises unless +mode+ is a ring mode (see RING_MODES).
+        def self.check_ring(mode)
+          return if RING_MODES.include?(mode)
+          raise ArgumentError, "ring is :all (until every input ends) or :first (with the first; the default), got #{mode.inspect}"
+        end
+
+        def initialize(summands, sample_rate: nil, stop_early: nil)
+          stop_early = Mixer.ring_mode != :all if stop_early.nil?
           @constant = 0
+          @ended = nil # summands that have ended, without stop_early
           @gains = {}
           @orig_to_samp = {}
 
@@ -86,6 +124,25 @@ module MB
           @sample_rate = @sample_rate.to_f
         end
 
+        # True if the sum ends with its first input to end (see #initialize
+        # and GraphNode#ring).
+        def stop_early?
+          @stop_early
+        end
+
+        # Internal (see GraphNode#ring): ends with the first input to end
+        # (true) or with the last (false).
+        def stop_early=(stop)
+          @stop_early = !!stop
+          @ended = nil
+          Plan.changed(self)
+        end
+
+        # The summand nodes as given to the sum (Tee branches included).
+        def summands
+          @gains.keys
+        end
+
         # Calls the #sample methods of all summands, applies gains, adds them all
         # to the initial #constant value, and returns the result.
         #
@@ -93,6 +150,8 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
+          return sample_ringing(count) unless @stop_early
+
           sampled = arithmetic_inputs(count, @gains)
 
           # Fast path: the same arithmetic as below without the general
@@ -122,6 +181,25 @@ module MB
           end
 
           arithmetic_combine(count, sampled, sources: @gains, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+            inputs.each do |v, gain|
+              tmpbuf = @tmpbuf[0...v.length]
+              tmpbuf.fill(gain).inplace * v
+              retbuf.inplace + tmpbuf
+            end
+          end
+        end
+
+        # #sample without stop_early: a summand that gives a short buffer or
+        # nil has ended and isn't sampled again (a node's last short read
+        # is its end), and the sum goes on until every summand has ended.
+        def sample_ringing(count)
+          sampled = arithmetic_inputs(count, @gains, @ended)
+          sampled.each_with_index do |(v, _), idx|
+            next unless v.nil? || v.length < count
+            (@ended ||= {}.compare_by_identity)[@gains.keys[idx]] = true
+          end
+
+          arithmetic_combine(count, sampled, sources: @gains, pad: 0, fill: @constant, stop_early: false) do |retbuf, inputs|
             inputs.each do |v, gain|
               tmpbuf = @tmpbuf[0...v.length]
               tmpbuf.fill(gain).inplace * v

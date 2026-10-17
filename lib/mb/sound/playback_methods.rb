@@ -789,6 +789,12 @@ module MB
       #     render 'drop.flac', from: :drop, bars: 8 { my_song }
       #     render 'drop.flac', from: :drop, to: :breakdown, preroll: false { my_song }
       #
+      # +ring: :all+ makes every sum built for the render (in the block,
+      # scheduled blocks, and track patches; `a + b`) ring until all of its
+      # inputs have ended instead of ending with the first (a gong plus a
+      # short click, a dry part plus its reverb); see GraphNode#ring for one
+      # sum.  Sums that ring are plan boundaries (more CPU).
+      #
       # +:exact_lanes+ (true) makes the render the same at any buffer size
       # where Synths free lanes for new notes (see Synth#exact_lanes?; costs
       # CPU at buffer sizes other than 800).
@@ -818,7 +824,7 @@ module MB
       end
 
       # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, &block)
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -832,6 +838,7 @@ module MB
         output = RenderWindow::Gate.new(output) if from
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         session.exact_lanes = exact_lanes
+        session.ring = ring
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)

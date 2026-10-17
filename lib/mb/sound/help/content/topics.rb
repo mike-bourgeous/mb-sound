@@ -114,11 +114,13 @@ module MB
 
     Help.topic :effects, 'Effects', group: :sound do
       about <<~TEXT
+        A sum ends with its first input: `(gong + click).ring` (or
+        `render(..., ring: :all)` for a whole song) rings until the last.
         Delays (sinc-interpolated, tempo-synced lengths), feedback loops that
         run one sample at a time in C, the FDN reverb with presets, the
         Juno chorus, and antialiased shapers.
       TEXT
-      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample
+      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
