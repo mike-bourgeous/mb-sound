@@ -127,6 +127,18 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound).to have_received(:visualize)
     end
 
+    it 'plots into the terminal UI\'s scope pane while one is up, writing nothing over its screen (ux-1 bug 3)' do
+      restored = 0
+      screen = double('screen')
+      allow(screen).to receive(:plot_pane) { |kind| expect(kind).to eq(:spectrum); -> { restored += 1 } }
+      allow(MB::Sound::UI).to receive(:screen).and_return(screen)
+      expect {
+        expect { MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true, spectrum: true) }.to output(/Playing/).to_stderr
+      }.not_to output.to_stdout
+      expect(screen).to have_received(:plot_pane).once
+      expect(restored).to eq(1) # the slot it put in comes out again
+    end
+
     it 'gives a friendly error for things it cannot play' do
       expect { MB::Sound.play(Object.new) }.to raise_error(MB::Sound::Playable::Unplayable, /Can't play Object.*help :play/)
       expect { MB::Sound.play(nil) }.to raise_error(ArgumentError, /Nothing to play/)

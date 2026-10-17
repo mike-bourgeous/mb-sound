@@ -38,7 +38,8 @@ module MB
       Graph = Data.define(:nodes, :description, :ends, :note)
 
       # The default patch for notes without one (Clips, Notes, MIDI files
-      # and Streams): a soft filtered saw, like the keyboard pane's.
+      # and Streams) and the keyboard pane's (UI::Keyboard::Link::PATCH is this
+      # one): a soft filtered saw.
       PATCH = proc { |v| v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1800), quality: 0.9) * v.amp_env(0.004, 0.4, 0.6, 0.3) * 0.5 }
 
       # Voices of the default patch and demo phrases.
