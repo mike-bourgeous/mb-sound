@@ -95,6 +95,29 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
     expect(MB::Sound::GraphNode.graph(loaded).grep(MB::Sound::MIDI::ClipSource).map { |s| s.clip.performed? }).to eq([true])
   end
 
+  describe 'format 4 (sums ring)' do
+    let(:sum) { "2000.hz.sine * env([[1, 0.001], [0, 0.01, 30]]) + 100.hz.sine * env([[1, 0.001], [0, 0.05, 30]])" }
+
+    def length_of(g)
+      n = 0
+      while (b = g.sample(800)) && !b.empty?
+        n += b.length
+        break if b.length < 800 || n > 48000 * 2
+      end
+      n
+    end
+
+    it 'builds sums that ring in format 4 documents and sums that end with their first input in older ones' do
+      expect(io.parse("graph 4\n#{sum}").format).to eq(4)
+      new_len = length_of(io.load("graph 4\n#{sum}"))
+      old_len = length_of(io.load("graph 3\n#{sum}"))
+      expect(new_len).to be > 0.05 * 48000
+      expect(old_len).to be < new_len
+      expect(io.load("graph 3\n#{sum}")).to be_stop_early
+      expect(io.load("graph 4\n#{sum}")).not_to be_stop_early
+    end
+  end
+
   describe 'seeds: :fresh' do
     # A clip with a pinned seed, one that draws its seed, and a noise tone
     # that draws one

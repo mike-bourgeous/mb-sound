@@ -152,6 +152,9 @@ module MB
           # (documents before format 3; see GraphIO::FORMAT)
           @old_db = false
           @old_db_warned = false
+          # Whether sums end with their first input (documents before
+          # format 4; see GraphIO::FORMAT)
+          @old_ring = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -182,7 +185,9 @@ module MB
           fresh_limits!
           scope = Scope.new
           result = nil
-          body.each { |s| result = eval_node(s, scope) }
+          GraphNode::Mixer.with_ring(@old_ring ? :first : GraphNode::Mixer.ring_mode) {
+            body.each { |s| result = eval_node(s, scope) }
+          }
           unless GraphNode::Recipe.graph_object?(result) || result.is_a?(MB::Sound::Synth) || graph_array?(result)
             raise error(body.last, "the document's last line must be a graph (got #{describe(result)})")
           end
@@ -492,6 +497,7 @@ module MB
               @document.format = version
               @seed_marks = version >= 2
               @old_db = version < 3
+              @old_ring = version < 4
               @document.meta = kwargs
             when :inputs
               bad = args.reject { |a| a.is_a?(Symbol) }

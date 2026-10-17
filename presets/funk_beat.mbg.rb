@@ -3,8 +3,8 @@
 graph 4,
   name: "funk_beat",
   kind: :synth,
-  saved: "2026-10-17T04:19:56Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:17:53Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :beat from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :beat, dub: 0.0, keep: 0.82 }

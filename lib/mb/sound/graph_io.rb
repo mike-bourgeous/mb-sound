@@ -43,11 +43,15 @@ module MB
       # with their old meaning (bare levels at 0 and below and every bare
       # gain or point in dB, warning once; see
       # GraphNode::DynamicsMethods.from_old_document).  Format 4
-      # (2026-10-17, racks R2) types the inputs (`inputs sig: :audio, side:
-      # :audio`; `inputs :midi` still loads, as notes, other names as
-      # audio), adds `outputs :audio`, and rack documents (`graph 4, kind:
-      # :effect, rack: :arack`, whose knob lines are the rack's macros);
-      # graphs using named racks carry their definitions.
+      # (2026-10-17) marks two changes made together: sums ring until every
+      # input ends (omnibus8, GraphNode#ring; graphs of older documents are
+      # built with sums ending with their first input, as they were saved,
+      # GraphNode::Mixer.with_ring(:first); set documents' track patches,
+      # built when they launch, ring), and typed inputs (racks R2: `inputs
+      # sig: :audio, side: :audio`; `inputs :midi` still loads, as notes,
+      # other names as audio), `outputs :audio`, and rack documents (`graph
+      # 4, kind: :effect, rack: :arack`, whose knob lines are the rack's
+      # macros); graphs using named racks carry their definitions.
       FORMAT = 4
 
       # The file extension of graph documents.

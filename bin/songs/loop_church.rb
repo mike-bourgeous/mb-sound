@@ -17,9 +17,10 @@
 # and an overdub footswitch (a knob) on a delay-line audio loop.  The
 # master bus is recorded with `rec_audio` from the first bar.
 #
-# Each performer command is a console line in a Take (Take#line), so
-# `--take FILE` saves a replay script that plays the whole night back
-# bit for bit (the hands' MIDI is in the take).
+# Each performer command is console code run at its bar, and `--take
+# FILE` (every song script's) records the run as a take: its replay
+# script plays the whole night back bit for bit (the hands' MIDI is in
+# the take).
 #
 #   bars 1-2   `arm :beat; rec :beat, 2`: mouth-drum kit (an 808 through
 #              a formant "mouth"), kick on the ONE, snare laid back 18 ms
@@ -295,18 +296,14 @@ module MB::Sound
     ENV.fetch('LOOP_CHURCH_AUDIO') { File.join(Dir.tmpdir, 'loop_church_rec_audio.flac') }
   end
 
-  class << self
-    attr_accessor :loop_church_take
-  end
-
   # Sets up the set on the current session, attaches the hands, and
-  # schedules the performance as take lines.
+  # schedules the performance: console code run at its bars (a song
+  # script's --take records the whole run as a take).
   def self.loop_church(quantize: 0, swing: 0.57)
     session = Session.current
     transport.bpm = LOOP_CHURCH_BPM
-    t = self.loop_church_take = Take.new(session: session)
     b = Take.console_binding
-    Session.with_context(session: session) { t.line("loop_church_setup(quantize: #{quantize.inspect})", b) }
+    Session.with_context(session: session) { b.eval("loop_church_setup(quantize: #{quantize.inspect})") }
 
     hands = loop_church_hands(swing: swing)
     hands.each { |name, events| session.midi_in(name).input = MIDI::Stream.new(LoopChurchHands.new(events)) }
@@ -316,7 +313,7 @@ module MB::Sound
       perform = -> {
         lines.each { |code, hype|
           say[bar, code, hype]
-          Session.with_context(session: session) { t.line(code, b) }
+          Session.with_context(session: session) { b.eval(code, "loop_church bar #{bar}") }
         }
       }
       # Bar 1's lines run right away (typed before the count-in), so the
@@ -328,27 +325,12 @@ module MB::Sound
   end
 
   if main_script?(__FILE__)
-    take_path = nil
     song_script(
       bars: LOOP_CHURCH_BARS,
       quantize: [0.0, 'Quantize amount for the recorded loops (0: as played, keeping the swing)', '-Q', Float, 0.0..1.0],
       swing: [0.57, "The hands' swing (0.5 straight)", '-S', Float, 0.5..0.75],
-      take: ['', 'Save the performance as a replay script (a take) to this path', '-T', String],
     ) { |p|
-      take_path = p.take
       loop_church(quantize: p.quantize, swing: p.swing)
     }
-
-    if take_path && !take_path.empty? && loop_church_take
-      # The replay needs this file's patches and helpers: Take#save has no
-      # way to say so, so the saved script gets a require line.
-      text = loop_church_take.to_ruby(title: '"Loop Church" (Tiko Marvell)')
-      require 'pathname'
-      rel = Pathname.new(File.expand_path(__FILE__)).relative_path_from(Pathname.new(File.expand_path(File.dirname(take_path)))).to_s.delete_suffix('.rb')
-      gemfile = Pathname.new(File.expand_path('../../Gemfile', __dir__)).relative_path_from(Pathname.new(File.expand_path(File.dirname(take_path)))).to_s
-      text = text.sub(/^(ENV\['BUNDLE_GEMFILE'\].*\n)/) { "ENV['BUNDLE_GEMFILE'] ||= File.expand_path(#{gemfile.inspect}, __dir__)\n#{$1}require_relative #{rel.inspect}\n" }
-      File.write(take_path, text)
-      puts "Saved the take to #{take_path}"
-    end
   end
 end

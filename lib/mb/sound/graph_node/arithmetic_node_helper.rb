@@ -34,7 +34,11 @@ module MB
         # #arithmetic_sample, but in an Array (and pairs) reused by every
         # call, so a buffer allocates nothing here.  The result is only valid
         # until the next call.
-        def arithmetic_inputs(count, sources)
+        #
+        # Sources in +ended+ (a Hash by identity, or nil) aren't sampled
+        # again: their buffer is nil (see Mixer, which keeps summing after an
+        # input ends when it rings until all have).
+        def arithmetic_inputs(count, sources, ended = nil)
           sampled = (@arithmetic_sampled ||= [])
           if sampled.length != sources.length
             sampled.clear
@@ -44,7 +48,7 @@ module MB
           idx = 0
           sources.each do |s, extra|
             pair = sampled[idx]
-            pair[0] = s.sample(count)
+            pair[0] = ended&.key?(s) ? nil : s.sample(count)
             pair[1] = extra
             idx += 1
           end

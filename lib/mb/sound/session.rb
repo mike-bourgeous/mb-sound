@@ -320,13 +320,13 @@ module MB
         # Set later, in varying orders (here so every Session has one
         # instance variable layout; see GraphNode::IvarPreset)
         @exact_lanes = nil
+        @ring = nil
         @stems = nil
         @master_block = nil
         @master_playing = nil
         @markers = nil
         @epoch = nil
         @replay_epoch = nil
-        @at_exit_registered = nil
         @span_players = nil
         @span_graphs = nil
         # The span being rendered, for taps that stamp what they see (see
@@ -387,7 +387,8 @@ module MB
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per
-      # channel), or a sound filename.  Returns the player's name for #remove:
+      # channel), a sound filename, or anything else Playable.graph converts
+      # (samples, clips, instruments, audio arrays, ...).  Returns the player's name for #remove:
       # +:name+ if given, or else the lowest unused Integer.
       #
       # If a graph is already playing under +:name+, it keeps playing until
@@ -423,12 +424,13 @@ module MB
         explicit_fade = !fade.nil?
         fade = bars_or_nil(fade)
 
-        nodes = match_rate(to_nodes(sound))
+        playable = Playable.graph(sound, sample_rate: sample_rate)
+        nodes = match_rate(playable.nodes)
         adopt_knobs(nodes, player: name) # graph documents' knobs and rack macros join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
-        description = shorten(description || MB::Sound.send(:playback_info, sound).to_s)
+        description = shorten(description || playable.description)
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 
@@ -765,6 +767,18 @@ module MB
       # after it is set.
       attr_accessor :exact_lanes
 
+      # How sums built for this Session end (GraphNode::Mixer.ring_mode):
+      # nil or :all (the default; sums ring until every input has ended)
+      # or :first (or false; a sum ends with its first input to end), for
+      # graphs built in its context from now on: a render block
+      # (render(ring: :first)), scheduled blocks, and track patches.
+      # GraphNode#ring sets one sum.
+      attr_reader :ring
+
+      def ring=(mode)
+        @ring = mode.nil? ? nil : GraphNode::Mixer.ring_value(mode)
+      end
+
       # Stops calling a block given to #add_tap.
       def remove_tap(block)
         @mutex.synchronize { @taps.delete(block) }
@@ -774,6 +788,13 @@ module MB
       # measurements like the terminal UI's GVL probe (bin/ui_demo.rb).
       def render_thread
         @thread
+      end
+
+      # True if this Session plays in real time through its output (a
+      # render thread paced by the output), false for renders driven by
+      # #process_buffer.
+      def realtime?
+        @realtime
       end
 
       # Returns true if the background rendering thread is running (see
@@ -960,6 +981,7 @@ module MB
       def close
         return if @closed
         @closed = true
+        ExitClose.unregister(self)
         @thread&.join(5)
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
@@ -1134,21 +1156,11 @@ module MB
         }
       end
 
-      # Converts something playable into an Array of GraphNodes.
+      # Converts something playable into an Array of GraphNodes, one per
+      # channel (see Playable.graph: graphs, bundles, Arrays, files,
+      # samples, clips, instruments, ...).
       def to_nodes(sound)
-        case sound
-        when String
-          [MB::Sound.file_input(sound, resample: sample_rate.round)]
-        when MB::Sound::GraphNode, MB::Sound::GraphNode::MultiOutput
-          sound.outputs
-        when Array
-          unless !sound.empty? && sound.all? { |s| s.is_a?(MB::Sound::GraphNode) || s.is_a?(MB::Sound::GraphNode::MultiOutput) }
-            raise ArgumentError, 'Pass an Array of GraphNodes, one per channel'
-          end
-          sound.flat_map(&:outputs)
-        else
-          raise ArgumentError, "Cannot play #{sound.class} in the background; use a GraphNode, a channel bundle, an Array of GraphNodes, or a filename"
-        end
+        Playable.nodes(sound, sample_rate: output_open? ? sample_rate : 48000) # (without opening the output)
       end
 
       # Sets each node to the session's sample rate (see #sample_rate) if it
@@ -1487,11 +1499,10 @@ module MB
         end
         @thread.name = 'MB::Sound::Session'
 
-        # Stop the thread and close the output cleanly at exit
-        unless @at_exit_registered
-          at_exit { close rescue nil }
-          @at_exit_registered = true
-        end
+        # Stop the thread and close the output cleanly at exit (held
+        # weakly: an at_exit block would keep this Session and every graph
+        # it played alive until exit)
+        ExitClose.register(self)
       end
 
       # The bar number (counting from 1) of a timeline position.

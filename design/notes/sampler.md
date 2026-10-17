@@ -90,7 +90,7 @@ Round 3 (granular-2, 2026-10-15): the cyclic stretch crossfades 3 ms by default 
 
 ## SoundFont 2 (sf2-1, 2026-10-16)
 
-Maintainer, 2026-10-16: "Start sf2 import" (SFZ import existed; an SF2 exporter is planned in the on-hold export-1 brief, so the mapping below is meant to be its mirror).
+Maintainer, 2026-10-16: "Start sf2 import" (SFZ import existed; an SF2 exporter is planned in the on-hold export-1 brief, so the mapping below is meant to be its mirror).  Exporters (MIDI file, SFZ, Serum-style clm wavetables, SF2) are research only until the maintainer says go (2026-10-14: "this is research; don't begin work").
 
 API: `font = sf2('GM.sf2')` is a `Sampler::SF2::Font` (`font.presets` lists `bank:program name`, `font[0]`, `font['Pad']`, `font[128, 0]`, `font.play(v)` plays the first preset); `sf2(path, 0)` / `sf2(path, preset: [128, 0] | 'Strings', name:, mips: :octave, attenuation: 0.4, wheel: true)` is the `Sampler::Instrument` (alias `soundfont`).  Instruments print as `sf2(path, preset: ...)`; documents read fonts relative to themselves (`Registry::FILE_METHODS`, `KEEP_NAME`), and bundles copy `.sf2` files as assets (`Assets::EXTENSIONS`).
 

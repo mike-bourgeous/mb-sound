@@ -3,8 +3,8 @@
 graph 4,
   name: "sq80_flutter_pad",
   kind: :synth,
-  saved: "2026-10-17T04:21:03Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:18:57Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :flutter_pad: A slow pad: no chop, deep per-key pressure flutter (press one finger harder than the others), a long second-release tail. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :flutter_pad, voices: nil, drive_mode: nil, drive: nil, chop: nil, second_release: false }

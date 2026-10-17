@@ -17,8 +17,13 @@ module MB
       about <<~TEXT
         Everything plays through one background Session that mixes every
         player on a shared timeline; `play` is the foreground version
-        (Ctrl-C to stop).  Commands return journal entries that say where
-        they land.  Sounds end through envelopes, clips, `until`, or `stop`.
+        (waits until the sound ends; Ctrl-C to stop).  Commands return
+        journal entries that say where they land.  Sounds end through
+        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        take graphs and more: files, audio arrays, Samples (once), Slices
+        (one by one), clips (on their instrument, e.g. a chop's slices, or
+        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
       dsl :at, :until, :and_then
@@ -30,6 +35,15 @@ module MB
       example 'a pattern on the next bar' do
         bass = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
         bg :try, bass.tone.ramp.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
+      end
+      example 'play a clip on the default patch' do
+        play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
+      end
+      example 'play two seconds of a drum file as a Sample', bars: 1 do
+        play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
+      end
+      example 'play a grid on a TR-808' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
       end
     end
 
@@ -65,6 +79,25 @@ module MB
       end
     end
 
+    Help.topic :unison, 'Unison and supersaws', group: :sound do
+      about <<~TEXT
+        Three spellings, the same sound bit for bit:
+        `110.hz.unison(5, spread: 0.5) { |p| p.ramp }` (the block form, any
+        oscillator per copy), `110.hz.unison(5, spread: 0.5).ramp` (shape
+        methods on a blockless unison; used as a signal it is saws), and
+        `110.hz.ramp.unison(5, spread: 0.5)` (a tone made again on every
+        copy).  In synth voices: `v.hz.saw.unison(5) * v.amp_env`.
+        `detune:`, `spread:` (0..1, stereo above 0), `mix:` (side copies),
+        `swarm` for gliding copies.
+      TEXT
+      dsl :unison, :swarm
+      note :oscillators
+      see :tones
+      example 'three spellings, one supersaw' do
+        bg :try, 110.hz.saw.unison(5, detune: 0.2, spread: 0.5).lp4(1200).at(-24.db).until(2.bars)
+      end
+    end
+
     Help.topic :envelopes, 'Envelopes and curves', group: :sound do
       about <<~TEXT
         Envelopes land exactly on their targets at whole samples; curves
@@ -95,11 +128,14 @@ module MB
 
     Help.topic :effects, 'Effects', group: :sound do
       about <<~TEXT
+        Sums ring until their last input ends (a gong past its click, a
+        dry part plus its reverb); `(drone + hit).ring(:first)` (or
+        `render(..., ring: :first)`) ends with the first.
         Delays (sinc-interpolated, tempo-synced lengths), feedback loops that
         run one sample at a time in C, the FDN reverb with presets, the
         Juno chorus, and antialiased shapers.
       TEXT
-      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample
+      dsl :delay, :multitap, :feedback, :reverb, :chorus, :softclip, :clip, :decimate, :quantize, :ease, :oversample, :ring
       note :delays, :feedback_loops, :reverbs, :chorus
       see :dynamics, :mixing
       example 'a dotted-eighth echo' do
@@ -411,7 +447,7 @@ module MB
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
-      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :synth, :tone, :amp_env, :swap
+      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
       note :sequences
       see :tempo, :sets
       example 'a looping arpeggio' do
@@ -654,6 +690,10 @@ module MB
         `midi` is a Notes on live input; `synth` allocates voices from any
         MIDI source; transforms (echo, arp, chord, strum, ...) work on
         Streams, Notes, and Clips; mod_sum and friends route modulation.
+        Stuck note on live input (a keyboard dropped a note-off)?  Press
+        the key again and let go: live input restrikes held keys
+        (`same_key: :restrike`; files and clips count overlaps,
+        `same_key: :count`).
       TEXT
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
@@ -669,7 +709,10 @@ module MB
         what you played first); an armed track's live monitor is its own
         player, :"name/live", which `stop :name` leaves playing and
         `disarm` stops.  `rec_audio` records the master bus to a file;
-        `render` bounces graphs offline.  No MIDI keyboard?  The tiles'
+        `render` bounces graphs offline (`render 'drop.flac', from: :drop,
+        bars: 8 { song }` renders one section, exactly as in the whole
+        song; scripts take `--from drop --to breakdown`, and `--take
+        take.rb` saves a run as a replay script).  No MIDI keyboard?  The tiles'
         virtual keyboard (`ui.keys`, see `help :ui`) plays into the same
         input, and Enter there captures.
       TEXT
@@ -720,7 +763,12 @@ module MB
     end
 
     Help.topic :loudness, 'Loudness', group: :look do
-      about 'BS.1770 loudness of files and graphs, live meters, and normalized renders.'
+      about <<~TEXT
+        BS.1770 loudness of files and graphs, live meters, and normalized
+        renders.  `render 'mix.flac', bars: 64, report: :tracks { song }`
+        (scripts: `--report`) prints LUFS, short-term max, true peak, and
+        PLR per track and the mix, and each section pass's loudness.
+      TEXT
       commands :loudness, :render
       dsl :loudness_meter
       note :method_modules, :dynamics

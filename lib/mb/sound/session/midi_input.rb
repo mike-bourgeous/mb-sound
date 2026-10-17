@@ -131,6 +131,11 @@ module MB
           !@replay.nil?
         end
 
+        # True while a take's events (see #replay) are still to play.
+        def replay_pending?
+          @lock.synchronize { !@replay.nil? && @replay_index < @replay.length }
+        end
+
         # True if the input was closed (live input closed with
         # MidiMethods#close_midi).
         def closed?
@@ -338,6 +343,13 @@ module MB
             @last_id = hub.span_id
             @pending = []
             @node_type_name = 'MIDI Input'
+          end
+
+          # A Session's MIDI input is real-time input, also while a take
+          # replays it, so replays allocate the same way (see
+          # Source#realtime_input?).
+          def realtime_input?
+            true
           end
 
           # Live input has no content position (see LiveSource).

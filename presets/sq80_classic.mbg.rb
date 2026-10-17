@@ -3,8 +3,8 @@
 graph 4,
   name: "sq80_classic",
   kind: :synth,
-  saved: "2026-10-17T04:20:56Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:18:50Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :classic: The voice as first built (bin/synths/sq80_voice.rb): a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave down into a driven four-pole; 32nd-note filter chop and poly pressure flutter. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :classic, voices: nil, drive_mode: nil, drive: nil, second_release: false }

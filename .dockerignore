@@ -8,6 +8,10 @@
 .gh-user/
 .claude/settings.local.json
 
+# Agent workbench (briefs, persona sheets, page sources; gitignored, its own
+# repo later): bind-mounted with the checkout, never baked into the image
+workbench/
+
 # Worktrees and build/test output
 .claude/worktrees/
 tmp/

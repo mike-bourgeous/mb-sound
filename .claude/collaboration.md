@@ -50,6 +50,6 @@ mb-sound exists because making sound with code is fun: for the maintainer, for t
 - After every merge, follow the `post-merge` skill (merge report, post-merge tests, "did you know" note).
 - Keep notes local by default; don't post to GitHub unless asked.
 - Zero warnings: the suite fails on any Ruby warning (spec/support/warning_guard.rb).  Fix the cause; a warning a spec triggers on purpose is asserted with an output matcher, never silenced or allowlisted; the allowlist is only for gems we don't control, each with its reason (maintainer, 2026-10-14).
-- Flakes get fixes: never hide a flaky spec with reruns.  A rerun may confirm that a branch isn't at fault, but the flake itself goes into a fix round (or onto a watch list with its failure text kept, if it can't be reproduced) (maintainer, 2026-10-11).
+- Flakes get fixes: never hide a flaky spec with reruns.  The flake goes into a fix round (or onto a watch list with its failure text kept, if it can't be reproduced) (maintainer, 2026-10-11).  No reruns at all (maintainer, 2026-10-15): every failure is investigated right away, load-sensitive examples included, instead of rerunning to see whether it passes.
 - Installing packages or changing system configuration on either machine needs the maintainer's own OK, not a peer session's or an agent's (2026-10-12).
 - Songs on the Listening Bench include per-track stems (`render(..., stems:)`), so each part can be heard alone (maintainer, 2026-10-12).

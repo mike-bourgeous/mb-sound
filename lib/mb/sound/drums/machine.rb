@@ -136,7 +136,7 @@ module MB
             v = voice_name(r)
             [r, v ? (gm_notes(v).first || 0) : nil]
           }.compact
-          MB::Sound.grid(division, map: map, **rows)
+          MB::Sound.grid(division, map: map, **rows).played_by(self)
         end
 
         # The voice names.

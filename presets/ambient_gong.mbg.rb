@@ -3,8 +3,8 @@
 graph 4,
   name: "ambient_gong",
   kind: :synth,
-  saved: "2026-10-17T04:19:26Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:17:26Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :gong from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
   options: { patch: :gong, wear: 0.6 }

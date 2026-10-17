@@ -38,7 +38,7 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui].freeze
 
       class << self
         # The console's take, created when first needed.
@@ -250,7 +250,7 @@ module MB
         out << "# Each line runs again at the time it was typed, with every change it\n"
         out << "# made landing exactly where it landed live.\n"
         out << "#\n"
-        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it\n"
+        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it (-f overwrites)\n"
         out << "#     ruby #{'this_file.rb'}                  # plays it\n"
         out << "#     ruby #{'this_file.rb'} -o t.flac -b 367,368   # alternating buffer sizes\n"
         out << "ENV['BUNDLE_GEMFILE'] ||= #{File.expand_path('../../../Gemfile', __dir__).inspect}\n"

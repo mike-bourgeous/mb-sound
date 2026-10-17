@@ -4,8 +4,8 @@ graph 4,
   name: "dub_echo",
   kind: :effect,
   rack: :arack,
-  saved: "2026-10-17T04:25:58Z",
-  mb_sound: "0.12.0.usegit (eb1e3857)",
+  saved: "2026-10-17T17:19:19Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/songs/rack_demo.rb",
   description: "Rack :dub_echo from bin/songs/rack_demo.rb (racks-r2, 2026-10-17): dub echoes of the input, macro :space (echo level and feedback) and :tone (the echoes' lowpass, swinging slowly around the knob)"
 inputs sig: :audio

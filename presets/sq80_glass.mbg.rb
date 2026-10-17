@@ -3,8 +3,8 @@
 graph 4,
   name: "sq80_glass",
   kind: :synth,
-  saved: "2026-10-17T04:21:29Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:19:19Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :glass: Glassy keys: SYNTH 3 an octave up over a little formant and the PRIME blip, decaying to nothing with a second-release tail. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :glass, voices: nil, drive_mode: nil, drive: nil, chop: nil, second_release: false }

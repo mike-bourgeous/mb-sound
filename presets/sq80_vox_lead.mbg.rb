@@ -3,8 +3,8 @@
 graph 4,
   name: "sq80_vox_lead",
   kind: :synth,
-  saved: "2026-10-17T04:21:16Z",
-  mb_sound: "0.12.0.usegit (bdc41124)",
+  saved: "2026-10-17T17:19:08Z",
+  mb_sound: "0.12.0.usegit (47598381)",
   from: "bin/synths/sq80_voice.rb",
   description: "SQ-80 voice :vox_lead: A vowel lead: the formant wave up front with a slightly flat SYNTH 3, input drive, deeper delayed vibrato. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :vox_lead, voices: nil, drive_mode: nil, drive: nil, chop: nil, second_release: false }

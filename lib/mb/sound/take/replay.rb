@@ -130,10 +130,10 @@ module MB
         # +:max_seconds+ (the live take's length plus EXTRA_SECONDS, or
         # MAX_SECONDS for takes without a recorded length), so a replay that
         # never reaches its end can't run forever.
-        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, &tap)
+        def render(output, buffer_sizes: [800], finish: @ends, tail: 2, channels: 2, max_seconds: nil, overwrite: true, &tap)
           raise ArgumentError, 'Pass finish: (whole notes) for a take without an end' if finish.nil?
 
-          output = MB::Sound.file_output(output, channels: channels, overwrite: true) if output.is_a?(String)
+          output = MB::Sound.file_output(output, channels: channels, overwrite: overwrite) if output.is_a?(String)
           transport = Sequence::Transport.new(bpm: @start[:bpm], bar_length: @start[:bar_length])
           session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_sizes.first, realtime: false, raise_errors: false)
           session.exact_lanes = true # the same lanes at any buffer size (Synth#exact_lanes?)
@@ -151,6 +151,12 @@ module MB
               warn "Stopped replaying the take after #{max_seconds.round(3)} seconds without reaching its end (#{stamp(session, finish)}; at #{stamp(session, transport.position)}); pass max_seconds: to render longer"
               break
             end
+
+            # Recorded MIDI still to come means the live timeline was moving
+            # (something not in the take, like the keyboard's default patch,
+            # kept it going), so it keeps moving here until the last row
+            # plays, then pauses when idle as it would live
+            session.advance_idle = midi_pending?(session)
 
             before = transport.position
             n = [sizes.next, max_frames - frames].min
@@ -217,14 +223,18 @@ module MB
 
           out = nil
           sizes = [800]
-          OptionParser.new do |o|
-            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-b buffer_sizes]"
+          force = false
+          rest = OptionParser.new do |o|
+            o.banner = "Usage: #{$PROGRAM_NAME} [-o output.flac] [-f] [-b buffer_sizes]"
             o.on('-o', '--output FILE', 'Render to a file instead of playing') { |f| out = f }
+            o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { force = true }
             o.on('-b', '--buffer-sizes LIST', Array, 'Buffer sizes to cycle through (e.g. 367,368)') { |l| sizes = l.map { |x| Integer(x) } }
           end.parse!(argv)
+          # An audio file name alone renders to it, as in song scripts
+          out ||= rest.find { |a| a.match?(ScriptRunner::AUDIO_EXTENSIONS) }
 
           if out
-            frames = render(out, buffer_sizes: sizes)
+            frames = render(out, buffer_sizes: sizes, overwrite: force ? true : :prompt)
             puts "Rendered #{frames} frames to #{out}"
           else
             play
@@ -237,6 +247,11 @@ module MB
         # The default +:max_seconds+ (see #render).
         def default_max_seconds
           @seconds ? @seconds + EXTRA_SECONDS : MAX_SECONDS
+        end
+
+        # True if any MIDI input of +session+ has recorded rows left to play.
+        def midi_pending?(session)
+          @midi.each_key.any? { |name| session.midi_in(name).replay_pending? }
         end
 
         # A timeline position for messages: bar:beat and whole notes.

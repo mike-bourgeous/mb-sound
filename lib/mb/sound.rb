@@ -43,6 +43,8 @@ require_relative 'sound/fast_recipe'
 require_relative 'sound/version'
 require_relative 'sound/tuning'
 require_relative 'sound/internal'
+require_relative 'sound/exit_close'
+require_relative 'sound/playable'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot'
 require_relative 'sound/plot_methods'
@@ -210,6 +212,11 @@ require_relative 'sound/multi_writer'
 require_relative 'sound/process_reader'
 
 require_relative 'sound/io_logger'
+
+# Clips and grids keep the instrument they play on through every transform
+# (see Sequence::PlayedBy); after everything that adds clip methods, before
+# the recipe recorders wrap them
+[MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq, MB::Sound::Sequence::Kit].each { |c| MB::Sound::Sequence::PlayedBy.carry!(c) }
 
 # Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
 # every DSL method exists
