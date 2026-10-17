@@ -953,7 +953,7 @@ module MB
         session.mastering_trim = mastering[:trim]
         if (capture = mastering[:capture])
           session.mastering_capture = capture
-          session.add_tap { |mix| capture.add_mix(session.frame - mix[0].length, mix) }
+          session.add_tap { |mix| capture.add_mix(session.frame - (mix[0]&.length || 0), mix) }
         elsif mastering[:check]
           session.mastering_capture = Mastering::Targeting::Capture.new(check: mastering[:check])
         end

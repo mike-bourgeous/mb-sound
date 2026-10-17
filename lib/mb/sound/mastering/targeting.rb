@@ -83,6 +83,7 @@ module MB
 
           # Records the mix leaving the Session at +frame+ (a tap).
           def add_mix(frame, data)
+            return if data.empty? || data[0].nil? || data[0].empty? # (a buffer of no frames, e.g. at a seek)
             @mix << [frame, data.map(&:dup)]
           end
 
