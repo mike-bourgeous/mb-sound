@@ -443,6 +443,7 @@ require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
 require_relative 'graph_node/knob'
+require_relative 'graph_node/knob_value_at'
 require_relative 'graph_node/silence'
 require_relative 'graph_node/time_limit'
 require_relative 'graph_node/input_channel_split'

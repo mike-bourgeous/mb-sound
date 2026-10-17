@@ -61,6 +61,7 @@ module MB
           @seconds = seconds
           @lines = []
           @midi = {}
+          @decisions = []
           yield self if block_given?
           self.class.last = self
         end
@@ -84,6 +85,20 @@ module MB
         def midi(rows, input: nil)
           (@midi[input] ||= []).concat(rows.map { |epoch, pos, bytes| [epoch, pos.to_r, bytes] })
           self
+        end
+
+        # Adds decisions made during the take by params read ahead of time
+        # (knobs read for a future position: [name, epoch, pos, value]
+        # rows; see Session::Decisions), answered again instead of decided
+        # anew.
+        def decisions(rows)
+          @decisions.concat(rows.map { |name, epoch, pos, value| [name, epoch, pos.to_r, value] })
+          self
+        end
+
+        # The recorded decisions (see #decisions).
+        def decision_rows
+          @decisions
         end
 
         # The recorded MIDI (a Hash from input name to rows; see #midi).
@@ -111,6 +126,7 @@ module MB
           # MIDI plays from the take, never from live input
           session.replay_midi!(@base_epoch)
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
+          session.replay_decisions!(@decisions, base_epoch: @base_epoch) unless @decisions.empty?
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do

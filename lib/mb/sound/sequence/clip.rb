@@ -673,6 +673,15 @@ module MB
           events.reverse_each.find { |e| e.start <= phase } || (@loop ? events_for(cycle - 1).last : nil)
         end
 
+        # A clip as a MIDI::Param (midi-consol-2): the value of the note that
+        # most recently started at or before timeline position +position+
+        # (#event_at; a looping clip follows the timeline from 0), or nil
+        # before the first one.  `midi.transpose(seq(0, -4, 3, -2).n1.loop)`
+        # moves played notes by a step per bar.
+        def value_at(position, transport: nil, stream: nil)
+          event_at(position.to_r)&.value
+        end
+
         # Returns the Event before the one #event_at returns for +position+
         # (whole notes): the previous event of the same cycle, the last one
         # of the cycle before for a loop's first event, or nil (no event, or

@@ -190,6 +190,12 @@ module MB
           @multmap.keys
         end
 
+        # Returns [multiplicand, count] pairs: each multiplicand and how many
+        # times it is multiplied in (x * x counts x twice).
+        def multiplicand_counts
+          @multmap.map { |m, samplers| [m, samplers.length] }
+        end
+
         # See GraphNode#sources
         def sources
           {

@@ -62,7 +62,7 @@ module MB
             },
             'MB::Sound::Sequence::Clip' => {
               reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values],
+              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values value_at],
             },
             'MB::Sound::Sequence::Seq' => {
               reason: 'readers',

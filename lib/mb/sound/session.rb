@@ -16,6 +16,7 @@ require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
 require_relative 'session/knobs'
+require_relative 'session/decisions'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
@@ -70,6 +71,7 @@ module MB
       include Seeks
       include GraphView
       include Knobs
+      include Decisions
       include MidiIn
       include AudioRecording
       include Stems
@@ -311,6 +313,7 @@ module MB
         init_strip
         init_undo
         init_knobs
+        init_decisions
         init_midi_in
         init_audio_recording
         init_monitor(monitor.nil? ? realtime : monitor)

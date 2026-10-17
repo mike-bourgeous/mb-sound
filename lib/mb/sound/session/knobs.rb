@@ -270,7 +270,8 @@ module MB
           warn_clamp(k, value) if value.is_a?(Numeric)
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          knob_change(k, time, turn_data(value, over, curve).merge(from ? { from: from } : {})) { |kn, frame, t|
+          data = turn_data(value, over, curve).merge(from ? { from: from } : {}).merge(smooth.nil? ? {} : { smooth: smooth })
+          knob_change(k, time, data) { |kn, frame, t|
             apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
           }
         end
