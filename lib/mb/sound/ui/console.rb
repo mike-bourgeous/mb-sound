@@ -10,9 +10,9 @@ module MB
         # with #layout or saved with `ui.save`), `ui off` (or `ui :off`,
         # `ui false`).  +at:+ :bottom (default; scrolled lines reach the
         # terminal's scrollback) or :top, +color:+ :ansi256 (default),
-        # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:quad
-        # default, :scope for Braille).  Returns the band (`ui.save`,
-        # `ui.stats`).
+        # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:auto
+        # default: :scope Braille for short or wide panes, else :quad).
+        # Returns the band (`ui.save`, `ui.stats`).
         #
         # A layout with a `repl` pane takes the whole screen instead (`ui
         # :tiles`, `ui :studio`): panes tiled around the console, NAV mode

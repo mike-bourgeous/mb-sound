@@ -166,6 +166,17 @@ module MB
             change(zoom: @layout.zoom == name ? nil : name, focus: name)
           end
 
+          # Sets pane +name+'s option +key+ (a literal; nil removes it): the
+          # pane's settings for this placement (`look: :scope`), saved with
+          # the layout.  Not an undo step.
+          def set_option(name, key, value)
+            find!(name)
+            raise Error, "Pane options are literals (got #{value.inspect})" unless Viewports.literal?(value)
+            change(record: false) do |root|
+              edit(root, name) { |leaf, _| [leaf.with(opts: value.nil? ? leaf.opts.except(key) : leaf.opts.merge(key => value))] }
+            end
+          end
+
           # Focuses +name+ (not an undo step).
           def focus!(name)
             find!(name)

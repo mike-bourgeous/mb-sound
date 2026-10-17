@@ -262,10 +262,28 @@ module MB
           end
         end
 
-        # A scope of the master mix through Plot::Live (look :quad by
-        # default; UI.start(look:) or ScopePane.new(look:) to change it).
-        # Writes its own terminal bytes: only the cells that changed.
+        # A scope of the master mix through Plot::Live (look :auto by
+        # default: Braille for short or wide panes, see .auto_look;
+        # `ui look: :quad`, a layout's `pane :scope, look: :blocks`, or
+        # `ui.look` on the focused pane to change it).  Writes its own
+        # terminal bytes: only the cells that changed.
         class Scope < Pane
+          # The looks `ui.look` cycles through, Braille first.
+          LOOK_CYCLE = %i[scope quad blocks mosaic spark ascii].freeze
+
+          # Rows up to which :auto picks Braille whatever the width.
+          AUTO_BRAILLE_ROWS = 16
+
+          # The look :auto means for a +w+ x +h+ pane: :scope (Braille, the
+          # finest trace) for short or wide panes, :quad for tall narrow ones
+          # (ux-1 r3 item 4; measured 2026-10-17: the same painter CPU as
+          # :quad within noise, about 2x the bytes per scope frame, 1.9 kB
+          # per written frame of :tiles at 120x40, ~56 kB/s at 30 frames/s,
+          # far under a terminal's throughput).
+          def self.auto_look(w, h)
+            h <= AUTO_BRAILLE_ROWS || w >= 3 * h ? :scope : :quad
+          end
+
           def initialize(name = :scope, look: nil)
             super(name, rate: 30, height: 6, width: 40, needs: [:scope], title: name.to_s, min_height: 3)
             @look = look
@@ -279,10 +297,12 @@ module MB
           # in color +mode+ (nil if there is nothing to draw).
           def frame_bytes(s, state, row:, col:, w:, h:, mode:, look:, full: false)
             live = state[:live]
-            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != (@look || look)
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: @look || look, color: mode)
+            lk = @look || look || :auto
+            lk = Scope.auto_look(w, h) if lk == :auto
+            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, color: mode)
               state[:mode] = mode
-              state[:look] = @look || look
+              state[:look] = lk
             end
             data = s&.scope
             data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?

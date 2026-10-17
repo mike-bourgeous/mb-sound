@@ -38,7 +38,7 @@ module MB
 
         # UI commands the palette runs on this screen (`split :v`); every
         # other line is evaluated in the console binding.
-        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys].freeze
+        COMMANDS = %i[split close zoom focus resize equalize swap show undo redo tab layout save theme mouse nav_esc scroll search copy stats keys look].freeze
 
         # Keys hinted on the status line per mode.
         HINTS = {
@@ -129,7 +129,7 @@ module MB
         # (UI.keyboard), +keys_kitty+ true/false forces the kitty protocol
         # in KEYS mode on or off (nil: if the probe found it); other
         # options as for Band.
-        def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :quad,
+        def initialize(layout:, input: STDIN, output: STDOUT, session: nil, repl: :adopt, color: :ansi256, look: :auto,
                        glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil,
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil)
@@ -422,6 +422,30 @@ module MB
 
         # Shows pane +name+ in the focused slot (or +at+).
         def show(name, at: nil) = tile { |t| t.show(name, at: at || t.focus) }
+
+        # The look of plot pane +pane+ (default: the focused pane; a scope or
+        # spectrum): +name+ a Plot look (:scope Braille, :quad, :blocks,
+        # :mosaic, :spark, :ascii, or :auto), or nil for the next one in
+        # Panes::Scope::LOOK_CYCLE.  Kept in the layout's pane options, so
+        # `ui.save` saves it.  Returns the look.
+        #
+        #     ui.look            # the focused scope's next look
+        #     ui.look :quad, pane: :spectrum
+        def look(name = nil, pane: nil)
+          pane ||= @tiler.focus
+          raise ArgumentError, "#{pane.inspect} isn't a plot pane (scope, spectrum): its look is fixed" unless @panes[pane]&.bytes?
+          if name.nil?
+            cycle = Panes::Scope::LOOK_CYCLE
+            now = @states[pane][:look] || @tiler.layout.options_of(pane)[:look]
+            name = cycle[((cycle.index(now) || -1) + 1) % cycle.length]
+          end
+          unless name == :auto || Plot::Text::LOOKS.key?(name)
+            raise ArgumentError, "Unknown look #{name.inspect} (:auto, #{Plot::Text::LOOKS.keys.map(&:inspect).join(', ')})"
+          end
+          tile { |t| t.set_option(pane, :look, name) }
+          flash("#{pane}: look #{name.inspect}", :ok)
+          name
+        end
 
         def undo = tile(&:undo)
         def redo = tile(&:redo)
