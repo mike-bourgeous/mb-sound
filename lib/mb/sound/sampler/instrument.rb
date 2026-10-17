@@ -342,12 +342,15 @@ module MB
         # this instrument with +voices+ (1 by default: a new note cuts the
         # last, the classic chop); the block, if given, gets each voice's
         # Notes and sampler output and returns the voice (add an envelope,
-        # a filter, ...).
+        # a filter, ...).  Like Clip#synth, a synth playing a clip ends when
+        # its last voice goes quiet (other sources keep Synth::TAIL_SECONDS
+        # of silence).
         #
         #     amen.sampler(brk) { |v, s| s * v.env(0.0005, 0.01, 1, 0.006) }
         def sampler(source, voices: 1, **options, &block)
           inst = self
-          MB::Sound.synth(source, voices: voices) { |v|
+          tail = source.is_a?(Sequence::Clip) ? { tail: 0 } : {}
+          MB::Sound.synth(source, voices: voices, **tail) { |v|
             s = inst.play(v, **options)
             block ? block.call(v, s) : s
           }

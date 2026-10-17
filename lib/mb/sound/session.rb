@@ -1111,7 +1111,7 @@ module MB
       # channel (see Playable.graph: graphs, bundles, Arrays, files,
       # samples, clips, instruments, ...).
       def to_nodes(sound)
-        Playable.nodes(sound, sample_rate: sample_rate)
+        Playable.nodes(sound, sample_rate: output_open? ? sample_rate : 48000) # (without opening the output)
       end
 
       # Sets each node to the session's sample rate (see #sample_rate) if it

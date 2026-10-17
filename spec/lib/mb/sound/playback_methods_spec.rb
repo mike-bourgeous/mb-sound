@@ -122,7 +122,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         sleep 0.01 until stop.call
         { frames: 0, fps: 0 }
       }
-      MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true)
+      expect { MB::Sound.play(440.hz.sine.until(0.05), quiet: false, plot: true) }.to output(/Playing/).to_stderr
       expect(MB::Sound).to have_received(:visualize)
     end
 
