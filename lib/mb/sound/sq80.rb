@@ -5,8 +5,9 @@ module MB
     # out of the library's general pieces (multi-segment envelopes, LFOs,
     # modulation sums, poly pressure), and the SQ-80-flavored voice built
     # from them (SQ80::Voice, SQ80::Waves, SQ80::PATCHES; console
-    # MB::Sound.sq80).  SysEx program import is designed in
-    # design/notes/sq80.md, not built.
+    # MB::Sound.sq80), and SysEx programs (SQ80::SysEx, SQ80::Program; their
+    # mapping onto the voice is designed in design/notes/sq80.md, not
+    # built).
     #
     # Sources: the SQ-80 Musician's Manual (time chart, envelope pages); see
     # research/sq80/README.md on the research-sq80 branch.  Values marked
@@ -232,3 +233,4 @@ end
 require_relative 'sq80/waves'
 require_relative 'sq80/voice'
 require_relative 'sq80/patches'
+require_relative 'sq80/sysex'
