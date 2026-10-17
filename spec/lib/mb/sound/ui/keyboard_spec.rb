@@ -298,5 +298,52 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       expect(lines[5]).to eq('len n8  steps 2  0.25 whole notes')
       expect(lines[6]).to eq('seq(C3, D3).n8')
     end
+
+    it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do
+      kb.releases = true
+      %w[z c b].each { |k| press(k, 0.0) } # C3 E3 G3
+      grid = MB::Sound::Plot::Text::Cells.new(100, 36)
+      c = MB::Sound::UI::Canvas.new(grid, 0, 0, 100, 36)
+      pane = MB::Sound::UI::Panes::Keyboard.new(kb)
+      state = {}
+      snap = ui_fake_snapshot
+      pane.draw(c, snap, state)
+      lines = grid.to_text(:none).lines.map(&:rstrip)
+      parts = MB::Sound::UI::Sections.allocate(pane.sections(false), 36)
+      expect(parts.keys).to eq(%i[header piano chord played roll armed])
+      expect(parts[:piano]).to eq(14)
+      expect(lines.join("\n")).to include('held C3 E3 G3  C', 'last 4 s', 'armed lead', 'Enter: capture what you played into :lead')
+      roll = lines.index { |l| l.start_with?('last 4 s') }
+      expect(lines[roll + 1, 3].map { |l| l[0, 3] }).to eq(%w[G3 E3 C3])
+      # At its usual 8 rows only the header, piano, and played lines
+      expect(MB::Sound::UI::Sections.allocate(pane.sections(false), 8)).to eq(header: 1, piano: 5, played: 2)
+    end
+  end
+
+  describe MB::Sound::UI::Sections do
+    S = MB::Sound::UI::Sections::Section unless defined?(S)
+
+    it 'gives sections their preferred rows in priority order, then grows them, never past the height' do
+      secs = [S.new(name: :a, min: 1, priority: 0), S.new(name: :b, min: 2, pref: 3, max: 6, priority: 1), S.new(name: :c, min: 4, pref: 4, max: 9, priority: 2)]
+      expect(described_class.allocate(secs, 3)).to eq(a: 1, b: 2)
+      expect(described_class.allocate(secs, 8)).to eq(a: 1, b: 3, c: 4)
+      expect(described_class.allocate(secs, 30)).to eq(a: 1, b: 6, c: 9)
+      100.times do |h|
+        got = described_class.allocate(secs, h)
+        expect(got.values.sum).to be <= h
+        got.each { |n, r| s = secs.find { |x| x.name == n }; expect(r).to be_between(s.min, s.max) }
+      end
+    end
+  end
+
+  describe MB::Sound::UI::ChordName do
+    it 'names chords from held notes, inversions with their bass' do
+      expect(described_class.of([60, 64, 67])).to eq('C')
+      expect(described_class.of([57, 60, 64, 67])).to eq('Am7')
+      expect(described_class.of([64, 67, 72])).to eq('C/E')
+      expect(described_class.of([55, 62])).to eq('G5')
+      expect(described_class.of([60])).to eq('C')
+      expect(described_class.of([60, 61])).to be_nil
+    end
   end
 end
