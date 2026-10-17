@@ -235,44 +235,75 @@ module MB
         [centers, counts / (data.length * width)]
       end
 
-      # Plots several curves on the same axes in each pane: +panes+ is a Hash
-      # of pane titles to Hashes of curve labels to data (an Array of [x, y]
-      # pairs, or [xs, ys] NArrays), drawn with +styles+ (a style for all
-      # curves, or an Array with one per curve position: 'lines', 'steps',
-      # 'points', 'impulses', 'filledcurves'; default steps for the first
-      # curve, lines for the rest).  Ranges: +xrange+ and +yrange+ (Arrays,
-      # or nil for each pane's own data, from 0 for y).  Prints the plot (or
-      # returns its lines if the plotter's print is off, as for #plot).
-      # See #hist.
-      def overlay(panes, graphical: false, styles: nil, xrange: nil, yrange: nil, columns: nil)
-        charts = panes.map { |title, curves|
-          ymax = 0
-          xs_all = []
-          series = curves.each_with_index.map { |(label, data), i|
-            xs, ys = overlay_arrays(data)
-            finite = ys[ys.isfinite]
-            ymax = [ymax, finite.length > 0 ? finite.max : 0].max
-            xs_all << xs.min << xs.max if xs.length > 0
-            style = styles.is_a?(Array) ? styles[i] : styles
-            [label.to_s, xs, ys, (style || (i == 0 ? 'steps' : 'lines')).to_s]
-          }
+      # Plots curves on the same axes (ux-1 item 31; maintainer: "`overlay`
+      # is a pain to build hash of title to hash to etc"): positional
+      # curves, labeled from what they are (a graph's name, else "1",
+      # "2", ...), and named ones, labeled by their names.  Each curve is
+      # an NArray or Array of numbers (x = 0, 1, ...), [xs, ys], an Array
+      # of [x, y] pairs, or a graph or tone (+samples+ of it).  The title
+      # is the labels joined with "vs" unless given.  Charts (from
+      # #overlay_chart) put side by side make a figure.  +styles+: one
+      # style or one per curve ('lines' default, 'steps', 'points',
+      # 'impulses', 'filledcurves'); +xrange+ and +yrange+: [lo, hi]
+      # (default: the data's, y from 0 when it is never negative).
+      #
+      #     overlay a, b, c
+      #     overlay saw: 220.hz.saw, square: 220.hz.square, samples: 400
+      #     overlay overlay_chart(est, theory: t, title: 'sine'), overlay_chart(est2, title: 'noise')
+      def overlay(*curves, title: nil, styles: nil, xrange: nil, yrange: nil, samples: 960, graphical: false, columns: nil, **named)
+        if !curves.empty? && curves.all? { |c| c.is_a?(Plot::Chart) }
+          raise ArgumentError, 'Charts to overlay side by side take no other curves' unless named.empty?
+          return plot_chart(Plot.figure(*curves, columns: columns), graphical: graphical)
+        end
+        plot_chart(overlay_chart(*curves, title: title, styles: styles, xrange: xrange, yrange: yrange, samples: samples, **named), graphical: graphical)
+      end
 
-          xr = xrange || [xs_all.min || 0, xs_all.max || 1]
-          yr = yrange || [0, ymax > 0 ? ymax * 1.05 : 1]
-          Plot.chart(title: title.to_s, x: Plot::Scale::Linear.new(xr, nice: false), y: Plot::Scale::Linear.new(yr), legend: true) { |c|
-            series.each do |label, xs, ys, style|
-              case style
-              when /steps/ then c.step(ys, x: xs, label: label)
-              when 'points', 'dots' then c.points(ys, x: xs, label: label)
-              when 'impulses', 'boxes' then c.stems(ys, x: xs, label: label)
-              when /filled/ then c.area(ys, x: xs, label: label)
-              else c.line(ys, x: xs, label: label)
-              end
-            end
-          }
+      # The chart #overlay draws (for figures of several: pass them to
+      # #overlay together).
+      def overlay_chart(*curves, title: nil, styles: nil, xrange: nil, yrange: nil, samples: 960, **named)
+        entries = curves.each_with_index.map { |c, i| [overlay_label(c, i), c] } + named.map { |k, v| [k.to_s, v] }
+        raise ArgumentError, 'overlay takes curves: overlay a, b or overlay saw: a, square: b' if entries.empty?
+
+        ymin = 0
+        ymax = 0
+        xs_all = []
+        series = entries.each_with_index.map { |(label, data), i|
+          xs, ys = overlay_arrays(data, samples)
+          finite = ys[ys.isfinite]
+          if finite.length > 0
+            ymax = [ymax, finite.max].max
+            ymin = [ymin, finite.min].min
+          end
+          xs_all << xs.min << xs.max if xs.length > 0
+          style = styles.is_a?(Array) ? styles[i] : styles
+          [label, xs, ys, (style || 'lines').to_s]
         }
 
-        plot_chart(Plot.figure(*charts, columns: columns), graphical: graphical)
+        xr = xrange || [xs_all.min || 0, xs_all.max || 1]
+        pad = (ymax - ymin) * 0.05
+        yr = yrange || [ymin < 0 ? ymin - pad : 0, ymax > 0 ? ymax + pad : (ymin < 0 ? 0 : 1)]
+        Plot.chart(title: (title || entries.map(&:first).join(' vs ')).to_s, x: Plot::Scale::Linear.new(xr, nice: false), y: Plot::Scale::Linear.new(yr), legend: entries.length > 1 || !named.empty?) { |c|
+          series.each do |label, xs, ys, style|
+            case style
+            when /steps/ then c.step(ys, x: xs, label: label)
+            when 'points', 'dots' then c.points(ys, x: xs, label: label)
+            when 'impulses', 'boxes' then c.stems(ys, x: xs, label: label)
+            when /filled/ then c.area(ys, x: xs, label: label)
+            else c.line(ys, x: xs, label: label)
+            end
+          end
+        }
+      end
+
+      # A label for positional curve +c+ (number +i+ from 0).
+      private def overlay_label(c, i)
+        if c.is_a?(GraphNode) && c.respond_to?(:graph_node_name) && c.graph_node_name
+          c.graph_node_name.to_s
+        elsif c.is_a?(Tone) || c.is_a?(Pitch)
+          c.to_s
+        else
+          (i + 1).to_s
+        end
       end
 
       # Plots estimated densities of +data+ (a Hash of names to NArrays) with
@@ -281,7 +312,7 @@ module MB
         width = (range.end.to_f - range.begin.to_f) / bins
         fine = Numo::DFloat.new(bins * 4 + 1).seq * (width / 4) + range.begin.to_f
 
-        panes = data.to_h { |name, d|
+        charts = data.map { |name, d|
           centers, dens = density(d, bins: bins, range: range)
           curves = { 'estimate' => [centers, dens] }
 
@@ -298,17 +329,23 @@ module MB
             curves[label] = [fine, ys]
           end
 
-          [name, curves]
+          overlay_chart(title: name.to_s, xrange: [range.begin, range.end], styles: ['steps'], **curves.transform_keys(&:to_sym))
         }
 
-        overlay(panes, graphical: graphical, xrange: [range.begin, range.end])
+        overlay(*charts, graphical: graphical)
       end
 
-      # [xs, ys] (Numo::DFloats) for #overlay from pairs or [xs, ys];
-      # non-finite y values are drawn as 0.
-      private def overlay_arrays(data)
-        if data.is_a?(Array) && data.length == 2 && data.all? { |d| d.is_a?(Numo::NArray) || (d.is_a?(Array) && !d[0].is_a?(Array)) }
+      # [xs, ys] (Numo::DFloats) for #overlay: from ys (x = 0, 1, ...),
+      # [xs, ys], [x, y] pairs, or +samples+ of a graph or tone; non-finite
+      # y values are drawn as 0.
+      private def overlay_arrays(data, samples = 960)
+        data = data.sample(samples).dup if data.is_a?(GraphNode) && !data.is_a?(Tone)
+        data = data.sample(samples).dup if data.is_a?(Tone) || data.is_a?(Pitch)
+        if data.is_a?(Array) && data.length == 2 && data.all? { |d| d.is_a?(Numo::NArray) || (d.is_a?(Array) && !d[0].is_a?(Array)) } && data[0].length == data[1].length && data[0].length != 2
           xs, ys = data
+        elsif data.is_a?(Numo::NArray) || (data.is_a?(Array) && data.all?(Numeric))
+          ys = data
+          xs = Numo::DFloat.new(ys.length).seq
         else
           pairs = data.to_a
           xs = pairs.map(&:first)

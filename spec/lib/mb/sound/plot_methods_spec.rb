@@ -76,16 +76,25 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
   describe '#overlay' do
     let(:output) {
-      MB::Sound.overlay({
-        'a_b' => { 'line_1' => [[0, 0], [1, 1]], 'line 2' => [Numo::DFloat[0, 1], Numo::DFloat[1, 0]] },
-        'c' => { 'flat' => [[0, 0.5], [1, 0.5]] },
-      })
+      MB::Sound.overlay(
+        MB::Sound.overlay_chart(title: 'a_b', line_1: [[0, 0], [1, 1]], 'line 2': [Numo::DFloat[0, 1, 2], Numo::DFloat[1, 0, 1]]),
+        MB::Sound.overlay_chart(title: 'c', flat: [[0, 0.5], [1, 0.5]])
+      )
     }
 
     it 'plots several curves per pane with legends, keeping underscores in titles' do
       check_size(lines)
       expect(text).to include('a_b', 'line_1', 'line 2', 'flat')
       expect(lines.count { |l| l.match?(/\+[-+]{20,}/) }).to eq(2)
+    end
+
+    it 'takes curves as arguments (labels and title inferred) or by name (ux-1 item 31)' do
+      chart = MB::Sound.overlay_chart(Numo::DFloat[0, 1, 0.5], [3, 2, 1])
+      expect(chart.title).to eq('1 vs 2')
+      named = MB::Sound.overlay_chart(saw: 110.hz.ramp, square: 110.hz.square, samples: 100)
+      expect(named.title).to eq('saw vs square')
+      expect(MB::Sound.overlay_chart(Numo::DFloat[-1, 1]).title).to eq('1')
+      expect { MB::Sound.overlay_chart }.to raise_error(ArgumentError, /overlay a, b/)
     end
   end
 
