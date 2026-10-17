@@ -43,6 +43,16 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     expect(vt.screen[0].fg_at(3)).to be_nil
   end
 
+  it 'records sync marks (an OSC that draws nothing), split across feeds too' do
+    expect(vt.sync_mark).to eq(0)
+    vt.feed("ab\e]7765;")
+    expect(vt.sync_mark).to eq(0)
+    vt.feed("3\acd\e]7765;4\e\\")
+    expect(vt.sync_mark).to eq(4)
+    expect(rows[0]).to eq('abcd')
+    expect(vt.take_replies).to eq('')
+  end
+
   it 'reads SGR colors and attributes' do
     vt.feed("\e[1;4;38;5;200;48;2;1;2;3mA\e[22;24;39;49;7mB\e[0;93;2;3mC")
     r = vt.screen[0]
