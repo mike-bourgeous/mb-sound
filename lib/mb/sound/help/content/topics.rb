@@ -733,9 +733,12 @@ module MB
       about <<~TEXT
         `now` shows what plays, knobs, scenes, the flow, and queued changes
         with the commands that apply; `help node` explains a graph;
-        `lesson` teaches the newer layers step by step.
+        `lesson` teaches the newer layers step by step.  When something
+        goes wrong live, `debug_dump` writes the state (players, changes,
+        graphs as Ruby, the screen, the take, recent MIDI, threads) to a
+        folder to read or send along.
       TEXT
-      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby
+      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump
       see :sets, :knobs, :ui
     end
 

@@ -727,6 +727,12 @@ module MB
         }
       end
 
+      # Each current player's graph by name (for debug_dump; takes the
+      # render lock).
+      def debug_graphs
+        @render_lock.synchronize { @mutex.synchronize { @players.values.select(&:current?).to_h { |p| [p.name, p.input] } } }
+      end
+
       # Changes the description #players shows for the player named +name+
       # (e.g. after a recording swapped a new clip into it).
       def describe_player(name, description)
