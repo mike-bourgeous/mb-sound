@@ -3,8 +3,10 @@ module MB
     # Ensoniq SQ-80 flavored helpers: panel units (0..63 times, -63..+63
     # levels) converted to mb-sound's units, for building SQ-80-style voices
     # out of the library's general pieces (multi-segment envelopes, LFOs,
-    # modulation sums, poly pressure).  A full patch model (SysEx import)
-    # may live here later.
+    # modulation sums, poly pressure), and the SQ-80-flavored voice built
+    # from them (SQ80::Voice, SQ80::Waves, SQ80::PATCHES; console
+    # MB::Sound.sq80).  SysEx program import is designed in
+    # design/notes/sq80.md, not built.
     #
     # Sources: the SQ-80 Musician's Manual (time chart, envelope pages); see
     # research/sq80/README.md on the research-sq80 branch.  Values marked
@@ -226,3 +228,7 @@ module MB
     end
   end
 end
+
+require_relative 'sq80/waves'
+require_relative 'sq80/voice'
+require_relative 'sq80/patches'

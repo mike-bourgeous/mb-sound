@@ -69,6 +69,7 @@ require_relative 'sound/mod_methods'
 require_relative 'sound/random_methods'
 require_relative 'sound/live_methods'
 require_relative 'sound/drum_methods'
+require_relative 'sound/sq80_methods'
 require_relative 'sound/structure_methods'
 require_relative 'sound/genre_methods'
 require_relative 'sound/sampler_methods'
@@ -107,6 +108,7 @@ module MB
     extend RandomMethods
     extend LiveMethods
     extend DrumMethods
+    extend SQ80Methods
     extend StructureMethods
     extend GenreMethods
     extend SamplerMethods
