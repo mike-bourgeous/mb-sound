@@ -153,6 +153,7 @@ module MB
           d.heading('Commands').rows(console) unless console.empty?
           d.heading('Node and value methods').rows(dsl) unless dsl.empty?
           extra_sections(d)
+          Help.ui_section(d, UI::HelpIndex.named(@topic.name))
           unless @topic.examples.empty?
             d.heading('Examples')
             @topic.examples.each_with_index do |ex, i|
@@ -231,6 +232,7 @@ module MB
           end
           rest = leftovers
           d.heading('Also on the sheet').rows(rest.map { |n, summary| [n.to_s, summary] }) unless rest.empty?
+          Help.ui_section(d, UI::HelpIndex.named(@group))
           d.to_s
         end
 
@@ -298,6 +300,7 @@ module MB
             d.note("#{file.sub(%r{.*/lib/}, 'lib/')}:#{line}") if file
           end
           names = @entries.flat_map { |e| [e.name, e.original].compact }.uniq
+          Help.ui_section(d, names.flat_map { |n| UI::HelpIndex.named(n) }.uniq)
           topics = TOPICS.values.select { |t| names.any? { |n| (t.commands + t.dsl).include?(n) } }
           d.note("Topics: #{topics.map { |t| "help :#{t.name}" }.join(', ')}.") unless topics.empty?
           learn = Help.lessons_using(names)
@@ -375,14 +378,30 @@ module MB
           }
         end
 
+        # Terminal UI panes, layouts, looks, keys, and ui methods that match
+        # (UI::HelpIndex, ux-1 r3 item 35).
+        # (Exact names first, then names that match, then descriptions.)
+        def ui_hits
+          UI::HelpIndex.search(@pattern).sort_by.with_index do |e, i|
+            whole = e.name.match(@pattern)
+            [whole && whole[0] == e.name ? 0 : whole ? 1 : 2, i]
+          end
+        end
+
         def to_s
           h = hits
           ts = topics
+          ui = ui_hits
           by_name = h.select { |e| e.name.to_s.match?(@pattern) }
           by_doc = h - by_name
           d = Doc.new
-          d.title("help #{@pattern.inspect}", "#{h.length + ts.length} matches")
+          d.title("help #{@pattern.inspect}", "#{h.length + ts.length + ui.length} matches")
+          if h.empty? && ts.empty? && ui.empty?
+            Help.nothing_found(d, @pattern)
+            return d.to_s
+          end
           d.heading('Topics').rows(ts.map { |t| [":#{t.name}", t.title] }) unless ts.empty?
+          Help.ui_section(d, ui)
           [['Names', by_name], ['Mentioned in docs', by_doc]].each do |label, list|
             next if list.empty?
             rows = list.first(24).map do |e|
@@ -394,6 +413,36 @@ module MB
           end
           d.to_s
         end
+      end
+    end
+  end
+end
+
+module MB
+  module Sound
+    module Help
+      # Rows for UI::HelpIndex entries under a "Terminal UI" heading (ux-1
+      # r3 item 35): panes, layouts, looks, keys, and ui methods, with how
+      # to get each.
+      def self.ui_section(doc, entries)
+        return doc if entries.empty?
+        rows = entries.first(24).map { |e| [e.label, "#{e.what}#{e.kind == :key || e.kind == :ui_method ? '' : "  (#{e.how})"}"] }
+        doc.heading('Terminal UI').rows(rows)
+        doc.note("... #{entries.length - 24} more") if entries.length > 24
+        doc
+      end
+
+      # What a search page says when nothing matched: near names (topics,
+      # commands, node methods, UI panes, layouts, and methods), and how to
+      # search with a regular expression.
+      def self.nothing_found(doc, pattern)
+        word = pattern.source.gsub(/\\(.)/, '\1').gsub(/[^\w:.?!]/, '')
+        dict = (TOPICS.keys.map(&:to_s) + TOPIC_ALIASES.keys.map(&:to_s) + (index.console_methods + index.dsl_methods).map { |e| e.name.to_s } + UI::HelpIndex.names).uniq
+        near = word.empty? ? [] : DidYouMean::SpellChecker.new(dictionary: dict).correct(word).first(5)
+        doc.para("Nothing matches #{pattern.inspect}.")
+        doc.rows(near.map { |n| ["help #{n}", 'did you mean?'] }) unless near.empty?
+        doc.note('help /regex/ searches names and docs with a regular expression (help /reson|filter/); help.topics lists the topics.')
+        doc
       end
     end
   end

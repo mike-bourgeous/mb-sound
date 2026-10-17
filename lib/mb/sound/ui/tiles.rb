@@ -484,7 +484,10 @@ module MB
           self
         end
 
+        # Undoes the last layout change (split, close, resize, ...; 100 steps).
         def undo = tile(&:undo)
+
+        # Redoes a layout change undone with #undo.
         def redo = tile(&:redo)
 
         # The next (+dir+ 1) or previous tab.
@@ -1014,7 +1017,13 @@ module MB
         def complete_palette
           l = @router.line or return
           word = l.text[0, l.cursor][/[a-z_][a-zA-Z0-9_]*\z/] or return
-          names = (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
+          names =
+            if l.text[0, l.cursor - word.length].end_with?(':')
+              # A Symbol: pane names (the catalog) and layouts (`show :sc` Tab)
+              UI.pane_catalog.names.map(&:to_s) + UI.layout_table.map { |r| r[0].to_s }
+            else
+              (COMMANDS + palette_binding.receiver.public_methods(false) + palette_binding.local_variables).map(&:to_s).uniq
+            end
           found = names.select { |n| n.start_with?(word) }.sort
           if found.length == 1
             l.insert(found[0][word.length..])

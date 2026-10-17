@@ -33,6 +33,7 @@ require_relative 'ui/chrome'
 require_relative 'ui/screen/term'
 require_relative 'ui/keyboard'
 require_relative 'ui/tiles'
+require_relative 'ui/help_index'
 
 module MB
   module Sound
