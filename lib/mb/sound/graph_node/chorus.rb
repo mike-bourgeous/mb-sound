@@ -153,7 +153,7 @@ module MB
             w = w * tap_gain unless rates.length == 1
             if hiss
               noise = MB::Sound.noise(seed: seeds[side]).at(Decibels.gain_of(hiss, 'hiss', zero: true)).at_rate(sample_rate)
-              w = w + HissGate.new(noise, dry_inputs, enders, tail)
+              w = (w + HissGate.new(noise, dry_inputs, enders, tail)).ring(:first) # (the hiss ends with the wet signal)
             end
             w = bbd_filter(w, BBD_POST_POLES, scale) if cutoff
             w

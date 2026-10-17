@@ -18,6 +18,33 @@ module MB
           Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
         end
 
+        # Sets how a sum ends: with its last input (+mode+ :all or true, the
+        # default for every sum since omnibus8: a gong's long tail plus a
+        # short click, a dry part plus its reverb) or with its first (:first
+        # or false: a drone plus a hit ending with the hit, the old
+        # default).  Applies to this sum and the sums directly inside it
+        # (`a + b + c` is two Mixers), not to other nodes; anything else goes
+        # through MB::Sound.live_error.  Returns this node.  For every sum a
+        # song builds, see Mixer.with_ring, Session#ring, and render(ring:
+        # :first).
+        #
+        #     (drone + hit).ring(:first)        # ends when the hit ends
+        #     (pings + noise * n.env(0.001, 0.08)).ring   # (the default) rings past the noise burst
+        def ring(mode = :all)
+          mode = Mixer.ring_value(mode)
+          unless is_a?(Mixer)
+            return MB::Sound.live_error(ArgumentError.new("ring(#{mode.inspect}) applies to sums (a + b), not #{self}"))
+          end
+
+          todo = [self]
+          until todo.empty?
+            m = todo.pop
+            m.stop_early = mode == :first
+            todo.concat(m.summands.grep(Mixer))
+          end
+          self
+        end
+
         # Creates a multiplier that multiplies +other+ (a numeric constant or
         # another GraphNode) by this node's #sample output.
         def *(other)

@@ -345,6 +345,13 @@ module MB
             @node_type_name = 'MIDI Input'
           end
 
+          # A Session's MIDI input is real-time input, also while a take
+          # replays it, so replays allocate the same way (see
+          # Source#realtime_input?).
+          def realtime_input?
+            true
+          end
+
           # Live input has no content position (see LiveSource).
           def seek(_time)
             self

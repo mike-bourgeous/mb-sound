@@ -124,6 +124,26 @@ module MB
           Kit.new(@rows.transform_values { |c| seed ? c.loop(seed: seed, align: align) : c.loop(align: align) })
         end
 
+        # Returns a Kit with every row's times and lengths multiplied by
+        # +factor+ (see Clip#stretch).
+        def stretch(factor)
+          Kit.new(@rows.transform_values { |c| c.stretch(factor) })
+        end
+
+        # Returns a Kit with every row in half time (see Clip#halftime).
+        # Also called #half_time.
+        def halftime(factor = 2)
+          Kit.new(@rows.transform_values { |c| c.halftime(factor) })
+        end
+        alias half_time halftime
+
+        # Returns a Kit with every row in double time (see
+        # Clip#doubletime).  Also called #double_time.
+        def doubletime(factor = 2)
+          Kit.new(@rows.transform_values { |c| c.doubletime(factor) })
+        end
+        alias double_time doubletime
+
         # Returns a Kit with every row's notes shortened (see Clip#legato).
         def legato(fraction)
           Kit.new(@rows.transform_values { |c| c.legato(fraction) })

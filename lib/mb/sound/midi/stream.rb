@@ -333,6 +333,18 @@ module MB
           Stream.new(Transform::Sustain.new(self, soft: soft))
         end
 
+        # Returns a stream where a note-on for a key already held on its
+        # channel first ends the held note (a note-off at the same time),
+        # and the note-off that would have ended the older note is dropped,
+        # so the output never has overlapping notes on one key.  This is
+        # +same_key: :restrike+ for readers without an Allocator (Notes on
+        # real-time input; see Allocator and Source#realtime_input?): a
+        # keyboard that dropped a note-off is fixed by pressing the key
+        # again.  All notes off (CC 123-127) forgets the channel's notes.
+        def restrike
+          Stream.new(Transform::Restrike.new(self))
+        end
+
         # Returns a stream with note-on velocities (0..1) passed through a
         # curve: an exponent (1 is linear, 2 softer, 0.5 louder), a Range
         # (0..1 mapped linearly onto it, e.g. 0.4..0.9 to compress), or a
@@ -356,6 +368,12 @@ module MB
         # A transform's input stream, skipping the transform itself (it
         # shows as this stream's name), except for transforms that follow
         # the timeline (Transform::Timeline), which a Session must find.
+        # True if the stream is fed from a real-time input (see
+        # Source#realtime_input?).
+        def realtime_input?
+          @source.respond_to?(:realtime_input?) && @source.realtime_input?
+        end
+
         # Port type of the output (see GraphNode::Traversable#port_type).
         def port_type
           :notes

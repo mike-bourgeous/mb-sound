@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 3,
+graph 4,
   name: "jungle_perc",
   kind: :synth,
-  saved: "2026-10-14T03:17:17Z",
-  mb_sound: "0.12.0.usegit (796a1077)",
+  saved: "2026-10-17T05:42:40Z",
+  mb_sound: "0.12.0.usegit (504ed966)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :perc from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :perc, cutoff: 16000.0, echo: 0.3 }

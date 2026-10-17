@@ -369,6 +369,32 @@ module MB
           map_clip(length: @length * factor) { |e| e.with(start: e.start * factor, length: e.length * factor) }
         end
 
+        # Half time: every time and length (and the loop) +factor+ times as
+        # long (2 by default), so a groove plays at half the speed over the
+        # same tempo, the drum-and-bass halftime feel; exact Rationals
+        # (#stretch).  Also called #half_time.
+        #
+        #     beat.halftime              # a one-bar beat over two bars
+        #     riff.halftime(3/2r)        # two thirds as fast
+        def halftime(factor = 2)
+          factor = factor.to_r
+          raise ArgumentError, "Half time factor must be positive (got #{factor})" unless factor > 0
+          stretch(factor)
+        end
+        alias half_time halftime
+
+        # Double time: every time and length (and the loop) 1/+factor+ as
+        # long (half by default), the groove twice as fast over the same
+        # tempo (#stretch).  Also called #double_time.
+        #
+        #     hats.doubletime            # sixteenths become thirty-seconds
+        def doubletime(factor = 2)
+          factor = factor.to_r
+          raise ArgumentError, "Double time factor must be positive (got #{factor})" unless factor > 0
+          stretch(1 / factor)
+        end
+        alias double_time doubletime
+
         # Dotted rhythm: stretches the clip by 3/2.
         def d
           stretch(Duration::DOTTED)

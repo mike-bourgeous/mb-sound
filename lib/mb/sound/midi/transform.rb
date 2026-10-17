@@ -76,6 +76,11 @@ module MB
           { input: @parent }
         end
 
+        # True if the parent stream is fed from a real-time input.
+        def realtime_input?
+          @parent.realtime_input?
+        end
+
         def to_s
           node_type_name
         end
@@ -322,6 +327,46 @@ module MB
               out << off.at(time)
               true
             end
+          end
+        end
+
+        # Ends a held note before a note-on for the same key (see
+        # Stream#restrike): at most one note per (channel, key) is held in
+        # the output, and the note-off that would have ended an older
+        # duplicate is dropped.
+        class Restrike < Transform
+          def initialize(parent)
+            super(parent)
+            @held = {}
+            @node_type_name = 'restrike'
+          end
+
+          private
+
+          def process(events, from, to)
+            return events if events.none? { |e| e.type == :note_on || e.type == :note_off }
+
+            out = []
+            events.each do |e|
+              case e.type
+              when :note_on
+                key = [e.channel, e.note]
+                out << Event.note_off(e.note, channel: e.channel, time: e.time) if @held[key]
+                @held[key] = true
+                out << e
+
+              when :note_off
+                out << e if @held.delete([e.channel, e.note])
+
+              when :cc
+                @held.delete_if { |(ch, _), _| ch == e.channel } if e.all_notes_off?
+                out << e
+
+              else
+                out << e
+              end
+            end
+            out
           end
         end
 

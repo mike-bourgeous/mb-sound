@@ -236,7 +236,7 @@ module MB
         out << "# Each line runs again at the time it was typed, with every change it\n"
         out << "# made landing exactly where it landed live.\n"
         out << "#\n"
-        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it\n"
+        out << "#     ruby #{'this_file.rb'} -o take.flac     # renders it (-f overwrites)\n"
         out << "#     ruby #{'this_file.rb'}                  # plays it\n"
         out << "#     ruby #{'this_file.rb'} -o t.flac -b 367,368   # alternating buffer sizes\n"
         out << "ENV['BUNDLE_GEMFILE'] ||= #{File.expand_path('../../../Gemfile', __dir__).inspect}\n"
