@@ -4,12 +4,11 @@ require_relative '../../../../support/ui_helpers'
 # and declared minimum heights hold (ux-1 r3 item 30: each `play` round trip
 # with a temporary scope shrank the keyboard until it disappeared).
 RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
-  V = MB::Sound::UI::Viewports unless defined?(V)
   let(:ui) { MB::Sound::UI }
   let(:mins) { ->(name, axis) { axis == :rows ? ui.panes[name]&.min_height || (name == :repl ? 4 : nil) : nil } }
 
   def tiler(name, w, h)
-    t = V::Tiler.new(ui.tile_layouts.fetch(name), w, h)
+    t = MB::Sound::UI::Viewports::Tiler.new(ui.tile_layouts.fetch(name), w, h)
     t.mins = mins
     t.header_rule = h >= 24
     t
@@ -25,7 +24,7 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
     when 3 then t.equalize(panes.sample(random: rng))
     else t.focus!(panes.sample(random: rng))
     end
-  rescue V::Error
+  rescue MB::Sound::UI::Viewports::Error
     nil
   end
 
@@ -80,7 +79,7 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
       t = tiler(%i[tiles studio keys wall].sample(random: rng), rng.rand(80..240), rng.rand(22..80))
       rng.rand(0..3).times { random_edit(t, rng) }
       root = t.layout.root
-      next if V.min_of(root, :rows, mins) > t.h # (the screen can't hold them all)
+      next if MB::Sound::UI::Viewports.min_of(root, :rows, mins) > t.h # (the screen can't hold them all)
       t.placed.each do |p|
         next unless p.name
         least = mins.(p.name, :rows) || 1

@@ -16,5 +16,6 @@ RSpec.describe(MB::Sound::DebugMethods) do
     end
   ensure
     session&.close
+    MB::Sound.rewind # (a Session on the shared transport: inspection_spec's stamps failed after this ran first)
   end
 end

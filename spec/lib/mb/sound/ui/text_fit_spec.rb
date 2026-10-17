@@ -5,25 +5,25 @@ require_relative '../../../../support/ui_helpers'
 # messages panes wrap long messages so their tails stay readable.
 RSpec.describe('UI text fitting', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
-  LONG = 'LONGNAME_' * 8
+  def long = 'LONGNAME_' * 8
 
   def long_snapshot
     base = ui_fake_snapshot
     slow = base.slow.with(
-      tracks: [ui::TrackInfo.new(name: :"#{LONG}track", q: '1', clip: "#{LONG}clip", armed: false)].freeze,
-      queued: [ui::QueuedInfo.new(seq: 1, kind: :knob, subject: :"#{LONG}subject", lands: '18:1', pos: 17r)].freeze,
-      buses: [ui::BusInfo.new(name: :"#{LONG}bus", to: :master, description: "#{LONG}chain", asleep: false, muted: false)].freeze,
-      routes: { "#{LONG}player": { to: :master, send: { "#{LONG}bus": 0.5 } } }.freeze,
-      landed: [ui::LandedInfo.new(seq: 2, kind: :mute, subject: :"#{LONG}landed", lands: '17:1', pos: 16r, at: nil)].freeze,
-      clips: [ui::ClipInfo.new(name: "#{LONG}clip", kind: :clip, bars: 1r, pattern: '█' * 32, used: [:"#{LONG}track"].freeze)].freeze,
-      midi: ui::MidiInfo.new(events: [['17:1', :"#{LONG}src", :on, "#{LONG}event"]].freeze, ccs: {}.freeze, mapped: [].freeze),
+      tracks: [ui::TrackInfo.new(name: :"#{long}track", q: '1', clip: "#{long}clip", armed: false)].freeze,
+      queued: [ui::QueuedInfo.new(seq: 1, kind: :knob, subject: :"#{long}subject", lands: '18:1', pos: 17r)].freeze,
+      buses: [ui::BusInfo.new(name: :"#{long}bus", to: :master, description: "#{long}chain", asleep: false, muted: false)].freeze,
+      routes: { "#{long}player": { to: :master, send: { "#{long}bus": 0.5 } } }.freeze,
+      landed: [ui::LandedInfo.new(seq: 2, kind: :mute, subject: :"#{long}landed", lands: '17:1', pos: 16r, at: nil)].freeze,
+      clips: [ui::ClipInfo.new(name: "#{long}clip", kind: :clip, bars: 1r, pattern: '█' * 32, used: [:"#{long}track"].freeze)].freeze,
+      midi: ui::MidiInfo.new(events: [['17:1', :"#{long}src", :on, "#{long}event"]].freeze, ccs: {}.freeze, mapped: [].freeze),
       recording: [].freeze,
-      form: base.slow.form.with(section: :"#{LONG}section", next: :"#{LONG}next")
+      form: base.slow.form.with(section: :"#{long}section", next: :"#{long}next")
     )
     base.with(
       slow: slow,
-      parts: [ui::PartLoad.new(name: :"#{LONG}part", kind: :player, state: :playing, load: 0.1)].freeze,
-      knobs: [ui::KnobValue.new(name: :"#{LONG}knob", value: 1.0, spec: ui_knob_spec(:"#{LONG}knob", 0.0, 0.0..2.0, unit: "#{LONG}unit"))].freeze
+      parts: [ui::PartLoad.new(name: :"#{long}part", kind: :player, state: :playing, load: 0.1)].freeze,
+      knobs: [ui::KnobValue.new(name: :"#{long}knob", value: 1.0, spec: ui_knob_spec(:"#{long}knob", 0.0, 0.0..2.0, unit: "#{long}unit"))].freeze
     )
   end
 

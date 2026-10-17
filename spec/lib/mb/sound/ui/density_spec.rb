@@ -1,12 +1,11 @@
 require_relative '../../../../support/ui_helpers'
 require_relative '../../../../support/golden'
 
-# Layout decisions by terminal size in one place (UI::Density; ux-1 r3
+# Layout decisions by terminal size in one place (MB::Sound::UI::Density; ux-1 r3
 # pattern E, items 3, 13, 24), with golden captures of the bands and the
 # tiled screen at 80x24, 120x40, and 236x80.
 RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
-  UI = MB::Sound::UI unless defined?(UI)
-  SIZES = [[24, 80], [40, 120], [80, 236]].freeze
+  golden_sizes = [[24, 80], [40, 120], [80, 236]]
 
   it 'decides rules, boxes, and levels by size' do
     expect(described_class.decide(:band, 24, 80)).to have_attributes(level: :compact, rule: false, boxes: false, max_band_rows: nil)
@@ -59,7 +58,7 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     end
   end
 
-  SIZES.each do |rows, cols|
+  golden_sizes.each do |rows, cols|
     %i[mini band deck].each do |layout|
       it "matches the golden capture of the #{layout} band at #{cols}x#{rows}" do
         band, = ui_fake_band(layout, size: [rows, cols], at: :bottom)
@@ -87,9 +86,9 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     @capture&.stop
     @capture_term&.close
     @capture_term = UIHelpers::FakeTerminal.new(rows, cols)
-    @capture = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: @capture_term.slave, output: @capture_term.slave, repl: :none,
+    @capture = MB::Sound::UI::Tiles.new(layout: MB::Sound::UI.tiles_layout_named(layout), input: @capture_term.slave, output: @capture_term.slave, repl: :none,
                              probe: false, size: [rows, cols], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
-                             keyboard: UI::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+                             keyboard: MB::Sound::UI::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
     @capture.start(thread: false)
     @capture.refresh(0.0)
     @capture

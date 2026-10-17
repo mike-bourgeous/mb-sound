@@ -321,10 +321,10 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
   end
 
   describe MB::Sound::UI::Sections do
-    S = MB::Sound::UI::Sections::Section unless defined?(S)
 
     it 'gives sections their preferred rows in priority order, then grows them, never past the height' do
-      secs = [S.new(name: :a, min: 1, priority: 0), S.new(name: :b, min: 2, pref: 3, max: 6, priority: 1), S.new(name: :c, min: 4, pref: 4, max: 9, priority: 2)]
+      sec = MB::Sound::UI::Sections::Section
+      secs = [sec.new(name: :a, min: 1, priority: 0), sec.new(name: :b, min: 2, pref: 3, max: 6, priority: 1), sec.new(name: :c, min: 4, pref: 4, max: 9, priority: 2)]
       expect(described_class.allocate(secs, 3)).to eq(a: 1, b: 2)
       expect(described_class.allocate(secs, 8)).to eq(a: 1, b: 3, c: 4)
       expect(described_class.allocate(secs, 30)).to eq(a: 1, b: 6, c: 9)
