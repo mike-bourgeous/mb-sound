@@ -9,15 +9,20 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     MB::Sound::Session.monitor_gain = old
   end
 
-  # Keeps every buffer written to it.
+  # Keeps every buffer written to it (+audible_only+: only buffers with
+  # sound, for a realtime Session that renders silence as fast as it can
+  # while a foreground play waits: keeping those made the spec run for
+  # minutes and grow to gigabytes under load, ux-1).
   let(:out_class) {
     Class.new(MB::Sound::NullOutput) {
+      attr_accessor :audible_only
       def written = @written ||= []
       def write(data)
-        written << data.map(&:dup)
+        written << data.map(&:dup) unless audible_only && data.all? { |c| c.abs.max == 0 }
         super
       end
-      def channel(c) = written.map { |b| b[c] }.reduce(:concatenate)
+      # (one concatenate: pairwise ones over thousands of buffers were quadratic)
+      def channel(c) = Numo::SFloat.zeros(0).concatenate(*written.map { |b| b[c] })
     }
   }
 
@@ -116,6 +121,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
   it 'reaches foreground play (which plays through the live Session)' do
     MB::Sound::Session.monitor_gain = 6.db
     live = out_class.new(channels: 2, sleep: false, buffer_size: 800)
+    live.audible_only = true
     MB::Sound.use_output(live)
     MB::Sound.play(100.hz.sine.at(-20.db).until(0.1), plot: false, quiet: true)
     expect(peak(live.channel(0))).to be_within(0.05).of(-14 + MB::Sound.master_gain.to_db)
