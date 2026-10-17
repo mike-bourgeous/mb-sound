@@ -21,6 +21,16 @@ module MB
           # the screen, not the tree.
           attr_accessor :header_rule
 
+          # The smallest sizes of panes (a Proc of a pane name and an axis,
+          # :rows or :cols, returning cells or nil), which placement never
+          # goes under while the screen has room (see Viewports.shares).
+          attr_accessor :mins
+
+          # A temporary pane opened by #open_temporary: its +name+, the
+          # layout +before+ it opened and +after+ (to know whether anything
+          # changed the tree since).
+          Temporary = Data.define(:name, :before, :after)
+
           def initialize(layout, w, h)
             @layout = layout
             @w = w
@@ -29,6 +39,7 @@ module MB
             @redo = []
             @counter = 0
             @header_rule = false
+            @mins = nil
           end
 
           # A new screen size (placement follows; the tree is unchanged).
@@ -43,8 +54,8 @@ module MB
             record(layout)
           end
 
-          def rects = @layout.rects(@w, @h, header_rule: @header_rule)
-          def placed = @layout.place(@w, @h, header_rule: @header_rule)
+          def rects = @layout.rects(@w, @h, header_rule: @header_rule, mins: @mins)
+          def placed = @layout.place(@w, @h, header_rule: @header_rule, mins: @mins)
 
           # The focused pane (the layout's focus, else the first pane).
           def focus = @layout.focus || @layout.panes.first
@@ -208,6 +219,49 @@ module MB
             change(focus: nt.children[nt.active].panes.first) { |root| replace(root, tabs, nt) }
           end
 
+          # Opens pane +name+ for a while (a plot, the messages pane), +rows+
+          # tall, below the pane it takes the rows from: the largest pane
+          # (by area) that is flexible (no fixed size), not in +keep+ (the
+          # REPL, the keyboard), and has the rows to spare above its
+          # minimum; else +fallback+ (when shown), else the largest of all.
+          # The focus stays.  Not an undo step.  Returns a Temporary for
+          # #close_temporary, or nil if +name+ is already shown.
+          def open_temporary(name, rows, keep: [], fallback: nil)
+            return nil if @layout.panes.include?(name)
+            before = @layout
+            target = temporary_target(rows, keep, fallback)
+            change(record: false) do |root|
+              edit(root, target) do |leaf, parent_axis|
+                if parent_axis == :rows
+                  [leaf, Pane.new(name: name, size: rows)]
+                else
+                  [Split.new(axis: :rows, children: [leaf.with(size: nil, weight: 1, min: nil), Pane.new(name: name, size: rows)], size: leaf.size, weight: leaf.weight, min: leaf.min)]
+                end
+              end
+            end
+            Temporary.new(name: name, before: before, after: @layout)
+          end
+
+          # Closes a pane opened by #open_temporary: the tree comes back
+          # exactly as it was before (sizes, weights, focus) when nothing
+          # changed it meanwhile; otherwise only the pane goes (if still
+          # there), its slot going back to its neighbor.  Not an undo step.
+          def close_temporary(temp)
+            return self unless temp
+            if @layout == temp.after
+              @layout = temp.before
+            elsif @layout.with(focus: temp.after.focus) == temp.after && temp.before.panes.include?(@layout.focus)
+              # Only the focus moved (onto a pane that stays)
+              @layout = temp.before.with(focus: @layout.focus)
+            elsif @layout.panes.include?(temp.name) && @layout.panes.length > 1
+              left = @layout.panes - [temp.name]
+              change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(temp.name, left), zoom: (@layout.zoom == temp.name ? nil : @layout.zoom), record: false) do |root|
+                edit(root, temp.name) { [] }
+              end
+            end
+            self
+          end
+
           def undo
             return self if @undo.empty?
 
@@ -257,6 +311,21 @@ module MB
             raise Error, "No pane #{name.inspect} in the layout#{hint ? " (did you mean :#{hint}?)" : ''} (panes: #{@layout.panes.map(&:inspect).join(', ')})"
           end
 
+          # The pane a temporary pane of +rows+ takes its rows from (see
+          # #open_temporary).
+          def temporary_target(rows, keep, fallback)
+            r = rects
+            fixed = {}
+            walk = ->(n) { n.is_a?(Pane) ? (fixed[n.name] = !n.size.nil?) : n.children.each(&walk) }
+            walk.(@layout.root)
+            least = ->(name) { Viewports.find_leaf(@layout.root, name)&.min || @mins&.call(name, :rows) || 1 }
+            ok = r.reject { |name, rect| keep.include?(name) || fixed[name] || rect.h - rows - @layout.gap < least.(name) }
+            best = ok.max_by { |name, rect| [rect.area, -numbered.index(name).to_i] }
+            return best[0] if best
+            return fallback if fallback && r.key?(fallback)
+            r.max_by { |_, rect| rect.area }&.first || @layout.panes.first
+          end
+
           # The pane nearest +name+ in reading order among +left+.
           def neighbor_of(name, left)
             order = numbered
@@ -268,7 +337,7 @@ module MB
           # (zoom ignored).
           def cells_of(parent)
             slots = {}.compare_by_identity
-            Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots, header_rule: @header_rule)
+            Viewports.place(@layout.root, Rect.new(0, 0, @w, @h), @layout.gap, [], slots, header_rule: @header_rule, mins: @mins)
             parent.children.map { |c| (r = slots[c]) ? (parent.axis == :cols ? r.w : r.h) : 1 }
           end
 

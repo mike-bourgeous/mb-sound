@@ -102,7 +102,7 @@ module MB
 
         # Tracks and other players: state, clip, armed and recording.
         class Tracks < Pane
-          def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks')
+          def initialize = super(:tracks, rate: 8, height: 6, width: 30, title: 'tracks', min_height: 2)
 
           STATE_ROLES = {
             playing: :ok, starting: :queued, stopping: :warn, fading: :warn, ringing: :warn,
@@ -191,7 +191,7 @@ module MB
           # Seconds a peak is held.
           HOLD = 1.5
 
-          def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master')
+          def initialize = super(:meters, rate: 30, height: 6, width: 30, needs: [:meters], title: 'master', min_height: 4)
 
           def draw_body(c, s, state)
             m = s&.master
@@ -267,7 +267,7 @@ module MB
         # Writes its own terminal bytes: only the cells that changed.
         class Scope < Pane
           def initialize(name = :scope, look: nil)
-            super(name, rate: 30, height: 6, width: 40, needs: [:scope], title: name.to_s)
+            super(name, rate: 30, height: 6, width: 40, needs: [:scope], title: name.to_s, min_height: 3)
             @look = look
           end
 

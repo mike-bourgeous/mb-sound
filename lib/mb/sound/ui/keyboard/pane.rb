@@ -13,7 +13,7 @@ module MB
           WHITE = [0, 2, 4, 5, 7, 9, 11].freeze
 
           def initialize(keyboard = nil)
-            super(:keyboard, rate: 30, height: 8, width: 44)
+            super(:keyboard, rate: 30, height: 8, width: 44, min_height: 6)
             @keyboard = keyboard
           end
 

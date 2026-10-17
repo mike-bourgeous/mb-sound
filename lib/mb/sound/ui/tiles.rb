@@ -175,6 +175,8 @@ module MB
           @density = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
+          # Panes' declared minimum heights (UI::Pane#min_height)
+          @tiler.mins = ->(name, axis) { axis == :rows ? @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil) : nil }
           @router = Input::Router.new(self, nav_esc: nav_esc)
           @router.add_keymap(NAV_EXTRA)
           @decoder = Input::Decoder.new
@@ -582,20 +584,26 @@ module MB
           self
         end
 
-        # Puts pane +kind+ (:scope, :spectrum) on the screen for a plot (see
-        # PlaybackMethods#visualize): nothing if the layout shows it, else a
-        # slot of +height+ rows below the REPL (the focus stays).  Returns a
-        # Proc that closes the slot again (nil if nothing changed).
+        # Puts pane +kind+ (:scope, :spectrum, :messages) on the screen for
+        # a while (a plot from PlaybackMethods#visualize, the messages
+        # pane): nothing if the layout shows it, else a slot of +height+
+        # rows taken from the largest flexible pane that isn't the REPL or
+        # the keyboard (UI::Viewports::Tiler#open_temporary; the focus
+        # stays).  Returns a Proc that closes the slot again, putting the
+        # split tree back exactly as it was if nothing else changed it
+        # (ux-1 r3 item 30), or nil if nothing changed.
         def plot_pane(kind, height: 10)
-          return nil if @tiler.layout.panes.include?(kind)
-          tile do |t|
-            was = t.focus
-            t.split(t.layout.panes.include?(:repl) ? :repl : was, :rows, kind)
-            fit_height(t, kind, height)
-            t.focus!(was)
-          end
-          -> { tile { |t| t.close(kind) if t.layout.panes.include?(kind) } }
+          temp = nil
+          tile { |t| temp = t.open_temporary(kind, height, keep: TEMPORARY_KEEP, fallback: :repl) }
+          return nil unless temp
+          -> { tile { |t| t.close_temporary(temp) } }
         end
+
+        # The REPL pane's smallest height.
+        REPL_MIN_ROWS = 4
+
+        # Panes temporary panes never take their rows from.
+        TEMPORARY_KEEP = %i[repl keyboard].freeze
 
         # What is wrong with the mode state, as a list (empty when every
         # invariant holds): KEYS mode's keyboard, kitty flags, and notes
