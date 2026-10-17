@@ -1,51 +1,37 @@
-RSpec.describe(MB::Sound::ScriptRunner::ScreenKeys) do
+RSpec.describe(MB::Sound::ScriptRunner::Scrub) do
   let(:key) { MB::Sound::UI::Input::Key }
 
-  describe '.action' do
-    it 'quits song screens with q or Esc, and makes Esc all notes off on synth and effect screens' do
-      expect(described_class.action(:song, key.of(:escape))).to eq(:quit)
-      expect(described_class.action(:song, key.of('q'))).to eq(:quit)
-      expect(described_class.action(:synth, key.of(:escape))).to eq(:panic)
-      expect(described_class.action(:effect, key.of(:escape))).to eq(:panic)
-      expect(described_class.action(:synth, key.of('q'))).to eq(:quit)
-    end
+  describe 'the script screens\' key tables (UI::Keys)' do
+    let(:keys) { MB::Sound::UI::Keys }
 
-    it 'maps the transport keys on song screens; repeats act as presses, releases do nothing' do
-      expect(described_class.action(:song, key.of(:left))).to eq(:bar_back)
-      expect(described_class.action(:song, key.of(:left, type: :repeat))).to eq(:bar_back)
-      expect(described_class.action(:song, key.of(:left, type: :release))).to be_nil
-      expect(described_class.action(:song, key.of(:right))).to eq(:bar_forward)
-      expect(described_class.action(:song, key.of(']'))).to eq(:section_forward)
-      expect(described_class.action(:song, key.of(:up))).to eq(:section_back)
-      expect(described_class.action(:song, key.of(:page_down))).to eq(:scene_forward)
-      expect(described_class.action(:song, key.of(:left, :ctrl))).to be_nil
-      expect(described_class.action(:synth, key.of(:left))).to be_nil
-    end
-
-    it 'writes the hints from the same table' do
-      expect(described_class.hints(:song)).to eq('q/Esc quit  Space pause  Left/Right bar  Up/Down [ ] section  PgUp/PgDn scene  Ctrl-] nav  F2 keys')
-      expect(described_class.hints(:synth)).to eq('q quit  Space pause  Esc notes off  Ctrl-] nav  F2 keys')
-      described_class::KEYS.each_value do |rows|
-        keys = rows.flat_map(&:first)
-        expect(keys.uniq).to eq(keys) # one action per key
+    it 'binds only actions live_ui acts on' do
+      [keys::SONG_SCREEN, keys::SYNTH_SCREEN].each do |map|
+        expect(map.entries.map(&:action).uniq - MB::Sound::ScriptRunner::SCREEN_ACTIONS).to eq([])
       end
+    end
+
+    it 'quits song screens with q or Esc, and makes Esc all notes off on synth and effect screens' do
+      expect(keys::SONG_SCREEN[key.of(:escape)].name).to eq(:quit)
+      expect(keys::SYNTH_SCREEN[key.of(:escape)].name).to eq(:panic)
+      expect(keys::SONG_SCREEN[key.of(:left)].name).to eq(:bar_back)
+      expect(keys::SONG_SCREEN[key.of(:page_down)].name).to eq(:scene_next)
     end
   end
 
-  describe MB::Sound::ScriptRunner::Scrub do
+  describe 'pressing Left and Right' do
     # A transport at 4/4 with a 2/4 bar at bar 5 (positions in whole notes)
     let(:transport) {
       MB::Sound::Sequence::Transport.new(bpm: 120).tap { |t| t.meter(1/2r, at: 4r); t.meter(1r, at: 4.5r) }
     }
     let(:now) { [100.0] }
     let(:seeks) { [] }
-    let(:scrub) { described_class.new(transport, seek: ->(bar) { seeks << bar; transport.seek(transport.bar_position(bar)) }, clock: -> { now[0] }) }
+    let(:scrub) { MB::Sound::ScriptRunner::Scrub.new(transport, seek: ->(bar) { seeks << bar; transport.seek(transport.bar_position(bar)) }, clock: -> { now[0] }) }
 
     def at_bar(b) = transport.seek(transport.bar_position(b))
 
     it 'declares every (state, key) pair' do
       %i[idle back forward].each do |st|
-        %i[left right].each { |k| expect(described_class::TABLE).to have_key([st, k]) }
+        %i[left right].each { |k| expect(MB::Sound::ScriptRunner::Scrub::TABLE).to have_key([st, k]) }
       end
     end
 
@@ -65,10 +51,10 @@ RSpec.describe(MB::Sound::ScriptRunner::ScreenKeys) do
     it 'counts from the playhead again after the grace window, going a bar back from a bar line' do
       at_bar(7.5r)
       scrub.press(:left)
-      now[0] += described_class::GRACE + 0.01
+      now[0] += MB::Sound::ScriptRunner::Scrub::GRACE + 0.01
       at_bar(7.25r)
       expect(scrub.press(:left)).to eq(7)
-      now[0] += described_class::GRACE + 0.01
+      now[0] += MB::Sound::ScriptRunner::Scrub::GRACE + 0.01
       at_bar(7)
       expect(scrub.press(:left)).to eq(6)
     end

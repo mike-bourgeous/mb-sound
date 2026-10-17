@@ -47,7 +47,7 @@ RSpec.describe('bin/ scripts with --ui', :aggregate_failures) do
     status = in_pty('bin/songs/tempo_song.rb', '--ui', '-b', '1') do |text, w, wait|
       expect(wait.(' PLAY ')).to eq(true), text.call
       # (panes draw at their own rates after the status line: wait for each, a loaded machine is slower)
-      %w[TRACKS MASTER frequency\ (Hz) q\ quit\ \ Space\ pause].each { |s| expect(wait.(s)).to eq(true), "#{s}\n#{text.call}" }
+      %w[TRACKS MASTER frequency\ (Hz) q\ Esc\ quit\ \ Space\ pause].each { |s| expect(wait.(s)).to eq(true), "#{s}\n#{text.call}" }
       w.write(' ')
       expect(wait.('paused: Space plays on')).to eq(true), text.call
       w.write(' ')

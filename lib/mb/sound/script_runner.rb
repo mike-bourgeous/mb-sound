@@ -1,7 +1,7 @@
 require 'optparse'
 
 require_relative 'script_runner/live_keys'
-require_relative 'script_runner/screen_keys'
+require_relative 'script_runner/scrub'
 
 module MB
   module Sound
@@ -986,7 +986,8 @@ module MB
       # `--ui [LAYOUT]`): UI::Tiles with repl: :none on +name+ (:default is
       # UI.show_layouts' :show for songs, :play for synths and effects,
       # which starts in KEYS mode with the keyboard playing the script's
-      # MIDI input).  Keys come from ScreenKeys::KEYS (also the hints): on
+      # MIDI input).  Keys come from UI::Keys::SONG_SCREEN and SYNTH_SCREEN
+      # (also the hints and the `?` overlay), acting here: on
       # song screens q or Esc quits, Space pauses (the whole Session waits;
       # see Session#paused=), Left/Right step a bar (Scrub),
       # Up/Down or [ ] a section, PageUp/PageDown a scene; on synth and
@@ -994,6 +995,10 @@ module MB
       # Ctrl-] is NAV (zoom a pane, ...), F2 the keyboard.  When the song ends the screen
       # stays with its final meters until q.  What the script prints while
       # the screen is up goes to its messages pane.
+      # The actions of UI::Keys::SONG_SCREEN and SYNTH_SCREEN that #live_ui
+      # acts on (a spec checks the key tables bind no others).
+      SCREEN_ACTIONS = %i[quit panic pause bar_back bar_forward section_prev section_next scene_prev scene_next].freeze
+
       def live_ui(name)
         name = @kind == :song ? :show : :play if name == :default
         layout = UI.show_layouts[name] || UI.layout_named(name)
@@ -1006,9 +1011,11 @@ module MB
         tiles = nil
         panic = LiveKeys.new(session, out: UI::Messages::Writer.new(UI.messages, $stdout))
         scrub = Scrub.new(session.transport, seek: ->(bar) { MB::Sound.seek(bar) })
-        on_key = ->(k) {
-          next quit = true if k == :interrupt
-          case ScreenKeys.action(@kind, k)
+        on_key = ->(k) { quit = true if k == :interrupt }
+        # The screen's keys come from UI::Keys::SONG_SCREEN or SYNTH_SCREEN
+        # (also the hints and the `?` overlay); their actions land here
+        on_action = ->(a) {
+          case a.name
           when :quit then quit = true
           when :panic
             tiles.say(panic.key("\e") == :sound_off ? 'all sound off (CC 120)' : 'all notes off (Esc again: all sound off)', :warn)
@@ -1017,15 +1024,15 @@ module MB
             tiles.note = session.paused? ? 'paused: Space plays on, q quits' : nil
           when :bar_back then ui_section(tiles) { tiles.say("bar #{scrub.press(:left)}", :dim) }
           when :bar_forward then ui_section(tiles) { tiles.say("bar #{scrub.press(:right)}", :dim) }
-          when :section_back then ui_section(tiles) { ui_section_back(tiles, session) }
-          when :section_forward then ui_section(tiles) { MB::Sound.skip }
-          when :scene_back then ui_section(tiles) { ui_scene(tiles, session, -1) }
-          when :scene_forward then ui_section(tiles) { ui_scene(tiles, session, 1) }
+          when :section_prev then ui_section(tiles) { ui_section_back(tiles, session) }
+          when :section_next then ui_section(tiles) { MB::Sound.skip }
+          when :scene_prev then ui_section(tiles) { ui_scene(tiles, session, -1) }
+          when :scene_next then ui_section(tiles) { ui_scene(tiles, session, 1) }
           end
         }
-        hints = ScreenKeys.hints(@kind)
+        play_keys = @kind == :song ? UI::Keys::SONG_SCREEN : UI::Keys::SYNTH_SCREEN
         UI.warm_up
-        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, hints: hints, probe: $stdin.tty?)
+        tiles = UI::Tiles.new(layout: layout, repl: :none, session: session, on_key: on_key, play_keys: play_keys, on_action: on_action, probe: $stdin.tty?)
         UI.instance_variable_set(:@tiles, tiles) # UI.screen: warnings and plots go to it
         out = $stdout
         $stdout = UI::Messages::Writer.new(UI.messages, out)
