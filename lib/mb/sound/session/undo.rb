@@ -29,8 +29,9 @@ module MB
         PlayerState = Struct.new(:player, :stopped, :clips, :muted, :soloed, keyword_init: true)
 
         # The master effects around a change: the chain's block (nil for
-        # bypass) and description.
-        MasterState = Struct.new(:block, :description, keyword_init: true)
+        # bypass or a preset alone), mastering preset (nil for none), and
+        # description.
+        MasterState = Struct.new(:block, :description, :preset, keyword_init: true)
 
         # Every mute and solo flag around a change to all of them (subject
         # :strip, e.g. `solo` with no names).
@@ -247,11 +248,11 @@ module MB
         def restore_change(subject, original, time)
           if subject == :master
             state = original.before
-            chain = state.is_a?(MasterState) ? build_master(state.block, description: state.description) : nil
+            chain = state.is_a?(MasterState) ? build_master(state.block, description: state.description, preset: state.preset) : nil
             return change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq, graph: chain&.chain_graph) { |t|
               if chain.nil?
                 st = original.before
-                chain = build_master(st&.block, description: st&.description)
+                chain = build_master(st&.block, description: st&.description, preset: st&.preset)
               end
               start_master(chain, t)
             }
@@ -285,7 +286,7 @@ module MB
 
           if subject == :master
             chain = @mutex.synchronize { @master_chains&.last }
-            return MasterState.new(block: chain&.block, description: chain&.description || 'bypass')
+            return MasterState.new(block: chain&.block, description: chain&.description || 'bypass', preset: chain&.preset)
           end
 
           @mutex.synchronize {
