@@ -47,14 +47,16 @@ module MB
         attr_reader :thread
 
         # +layout+ a Layout; +io+ the terminal; +session+ a Session (nil to
-        # follow Session.existing); +at+ :top or :bottom; +color+ a
+        # follow Session.existing); +at+ :bottom (default, maintainer
+        # 2026-10-17: lines scrolled out reach the terminal's scrollback) or
+        # :top; +color+ a
         # Plot::Text color mode (:ansi256 by default: the fewest bytes per
         # frame for color); +look+ the scope panes' Plot look; +size+
         # [rows, cols] for a non-terminal +io+; +clock+ a Proc returning
         # seconds (for specs); +native+ false draws into the Ruby mirror
         # grid (Plot::Text::Cells); +source+ a Proc returning the Snapshot
         # to draw instead of following a Session (specs, captures).
-        def initialize(layout:, io: $stdout, session: nil, at: :top, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
+        def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :quad, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 

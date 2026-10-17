@@ -10,7 +10,7 @@ Background: research-ui-2 d3e30356 (never merged): `research/terminal-ui-2/READM
 ui                      # the default band: transport, form, tracks, queued, master meters, scope (7 rows)
 ui :deck                # 13 rows: adds knobs and CPU per part
 ui :mini                # one line: transport and form
-ui :band, at: :bottom   # under the scrolling text (also color: :truecolor, look: :scope for Braille)
+ui :band, at: :top      # above the scrolling text (default :bottom since ux-1; also color: :truecolor, look: :scope for Braille)
 ui off                  # (`off` is :off; also ui :off, ui false)
 ui.stats                # painter CPU per refresh, bytes per frame, the slowest refreshes
 
@@ -170,7 +170,7 @@ The maintainer's request: for each bug, a mechanism that rules out its whole cla
 
 ## Open and later
 
-- Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere.
+- Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere, so it is the default since ux-1 (maintainer, 2026-10-17: "so that scrolled lines go into the terminal's scrollback buffer").
 - Ambiguous-width glyphs (▶ ● ◉ ○) are wide when a terminal treats ambiguous characters as wide: `UI.glyphs = :ascii` or `MB_SOUND_UI_GLYPHS=ascii`.
 - Remaining GVL coupling: GC pauses triggered on the painter (allocation-light panes help: the scope's chart is rebuilt per frame), the first full frame, the poll.  A process painter (option 3 in ARCHITECTURE.md) removes all of it; the snapshot contract keeps that a transport change.
 - Pager output (`less`) and the band both write to the terminal; the 2 s reassertion repairs the band afterwards.

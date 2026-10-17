@@ -21,18 +21,19 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       expect(band).to be_a(MB::Sound::UI::Band)
       expect(band).to be_active
       expect(band.layout.name).to eq(:band)
+      expect(band.position).to eq(:bottom) # the default (scrolled lines reach the terminal's scrollback)
       expect(MB::Sound.ui).to equal(band) # `ui` again returns the band on screen
 
       expect(MB::Sound.ui(:deck)).to equal(band)
       expect(band.layout.name).to eq(:deck)
 
-      bottom = MB::Sound.ui(:mini, at: :bottom)
-      expect(bottom).not_to equal(band)
+      top = MB::Sound.ui(:mini, at: :top)
+      expect(top).not_to equal(band)
       expect(band).not_to be_active
-      expect(bottom.position).to eq(:bottom)
+      expect(top.position).to eq(:top)
 
       expect(MB::Sound.ui(MB::Sound.off)).to be_nil
-      expect(bottom).not_to be_active
+      expect(top).not_to be_active
       expect($stdout.string).to include("\e[?2026h\e7").and end_with("\e8")
     end
 

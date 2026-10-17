@@ -8,7 +8,8 @@ module MB
         # the screen): `ui` (the default layout, or the band on screen),
         # `ui :deck` (a layout by name: :band, :deck, :mini, or one made
         # with #layout or saved with `ui.save`), `ui off` (or `ui :off`,
-        # `ui false`).  +at:+ :top or :bottom, +color:+ :ansi256 (default),
+        # `ui false`).  +at:+ :bottom (default; scrolled lines reach the
+        # terminal's scrollback) or :top, +color:+ :ansi256 (default),
         # :truecolor, :ansi16, :none, +look:+ the scope's Plot look (:quad
         # default, :scope for Braille).  Returns the band (`ui.save`,
         # `ui.stats`).
