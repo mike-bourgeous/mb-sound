@@ -780,12 +780,12 @@ module MB
         plays the lead and Enter captures what you just played into it
         (with nothing armed a default patch plays).  Most terminals send no
         key-up, so notes are a fixed length there (`ui.keyboard.tap = 0.5`;
-        ` cycles :hold (notes hold while a key repeats), :legato, ...); with
+        the backtick key cycles :hold (notes hold while a key repeats), :legato, ...); with
         the kitty keyboard protocol (kitty, WezTerm with
         enable_kitty_keyboard, Ghostty, foot, iTerm2 with its setting)
         notes end on key-up.  Tab is step entry: lower-row notes, 1-7
         lengths (whole to 64th), 8 dotted, 9 triplet, r rest, t tie, a
-        accent, ` slide, Backspace undo, p plays it, w swaps it (looping)
+        accent, the backtick a slide, Backspace undo, p plays it, w swaps it (looping)
         into the armed tracks at their next launch point and keeps editing,
         Enter puts the clip's Ruby (`seq(C3, E3, G3.n4).n8`) on the console
         line and in `ui.keyboard.clip`.

@@ -484,7 +484,7 @@ RSpec.describe MB::Sound::Help do
 
     it 'lists matching topics first in a search (help /sq80/)' do
       t = text(MB::Sound.help(/sq80/))
-      expect(t).to include('topics').and include(':sq80').and include('SQ-80 voice and patches')
+      expect(t).to include('Topics').and include(':sq80').and include('SQ-80 voice and patches')
       expect(t).to include('sq80_patches').and include('sq80_env')
       expect(t.index(':sq80 ')).to be < t.index('sq80_patches')
     end
@@ -518,6 +518,70 @@ RSpec.describe MB::Sound::Help do
     it 'refuses example numbers out of range' do
       expect { MB::Sound.help(:knobs).try(2) }.to raise_error(ArgumentError, /1 examples/)
       expect { MB::Sound.help(:analysis).try }.to raise_error(ArgumentError, /no examples/)
+    end
+  end
+
+  describe 'formatting (ux-1 items 22-27)' do
+    def text(x) = MB::U.remove_ansi(x.to_s)
+
+    # Runs of more than +limit+ non-blank lines that aren't code (indented
+    # 4 or more): what reads as a wall of text.
+    def walls(page, limit: 9)
+      runs = text(page).lines.map(&:chomp).slice_when { |a, b| a.strip.empty? != b.strip.empty? }
+      runs.reject { |r| r.first.strip.empty? }.map { |r| r.reject { |l| l.start_with?('    ') } }.select { |r| r.length > limit }
+    end
+
+    it 'leaves no wall of text on any topic, section, method, list, or search page' do
+      pages = MB::Sound::Help::TOPICS.keys.map { |t| [t, MB::Sound.help(t)] }
+      pages += MB::Sound::Help::GROUPS.keys.map { |g| [g, MB::Sound.help(g)] }
+      names = MB::Sound::Help::TOPICS.values.flat_map(&:names).uniq
+      pages += names.map { |n| [n, MB::Sound.help(n)] }
+      pages += [[:sheet, MB::Sound.help], [:topics, MB::Sound.help.topics], [:search, MB::Sound.help(/reverb/)], [:lessons, MB::Sound::Help::LessonList.new]]
+      bad = pages.filter_map { |name, page| w = walls(page); "#{name}: #{w.first.first(2).join(' / ')} (#{w.first.length} lines)" unless w.empty? }
+      expect(bad).to eq([])
+    end
+
+    it 'wraps at most 100 columns and prints plain under NO_COLOR or to a pipe' do
+      allow(MB::U).to receive(:width).and_return(200)
+      t = MB::Sound.help(:ui).to_s
+      expect(text(t).lines.map { |l| l.chomp.length }.max).to be <= 100
+      expect(MB::Sound::Help.for_output(t, StringIO.new)).not_to include("\e[")
+      tty = StringIO.new
+      def tty.tty? = true
+      expect(MB::Sound::Help.for_output(t, tty)).to include("\e[")
+      ENV['NO_COLOR'] = '1'
+      expect(MB::Sound::Help.for_output(t, tty)).not_to include("\e[")
+    ensure
+      ENV.delete('NO_COLOR')
+    end
+
+    it 'lists the sheet footer one command per line, lessons near the top, and sections in the headings' do
+      lines = text(MB::Sound.help).lines.map(&:chomp)
+      expect(lines[1]).to start_with('Learn: lesson :set')
+      foot = lines.drop(lines.index('More help') + 1).reject(&:empty?)
+      expect(foot.length).to eq(MB::Sound::Help::Sheet::FOOTER.length)
+      foot.each { |l| expect(l).to match(/\A  \S+( \S+)? +\S/) }
+      expect(lines.join("\n")).to include('Perform help :perform')
+    end
+
+    it 'opens a section in detail (help :perform)' do
+      t = text(MB::Sound.help(:perform))
+      expect(t).to include('On the sheet', 'Knobs and snapshots  help :knobs', 'lesson :knobs', 'Also on the sheet')
+      expect(text(MB::Sound.help.perform)).to eq(t)
+    end
+
+    it 'points method pages to the lessons that use them' do
+      expect(text(MB::Sound.help(:turn))).to match(/Learn it in: lesson :knobs \(step \d+ of \d+\)/)
+      expect(MB::Sound::Help.lessons_using([:capture]).map(&:first)).to include(:record)
+    end
+
+    it 'sets lesson steps apart with blank lines and a "lesson :x · step n/m" line' do
+      allow(MB::Sound::Help::Progress).to receive(:load).and_return({})
+      allow(MB::Sound::Help::Progress).to receive(:save)
+      t = text(MB::Sound::Help::LessonRunner.new(MB::Sound::Help::LESSONS[:set]))
+      expect(t).to start_with("\nlesson :set · step 1/")
+      expect(t).to end_with("\n")
+      expect(t).to include('waiting for:')
     end
   end
 

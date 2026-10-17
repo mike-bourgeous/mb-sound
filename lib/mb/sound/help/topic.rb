@@ -34,8 +34,9 @@ module MB
         class Builder
           def initialize(topic) = @topic = topic
 
-          # One or two sentences on what the topic is for.
-          def about(text) = @topic.about.replace(text.gsub(/\s+/, ' ').strip)
+          # What the topic is for, in paragraphs.
+          # (blank lines separate paragraphs, which the page keeps)
+          def about(text) = @topic.about.replace(text.split(/\n\s*\n/).map { |p| p.gsub(/\s+/, ' ').strip }.join("\n\n"))
 
           # Console commands (MB::Sound methods) in the order to show them.
           def commands(*names) = @topic.commands.concat(names.flatten)
@@ -67,6 +68,9 @@ module MB
 
       # The topics, keyed by name, in definition order.
       TOPICS = {}
+
+      # Other names that lead to a topic (`help :wet` is the blend topic).
+      TOPIC_ALIASES = {}
 
       # The workflow groups of the sheet and the topic list, in order.
       GROUPS = {

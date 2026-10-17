@@ -21,6 +21,9 @@ module MB
           TOPICS.each_key do |name|
             define_singleton_method(name) { Help.topic_page(name) }
           end
+          GROUPS.each_key do |name|
+            define_singleton_method(name) { SectionPage.new(name, @index) } unless TOPICS.key?(name)
+          end
         end
 
         # The topics by group, one line each.
@@ -95,17 +98,15 @@ module MB
         include Text
 
         def to_s
-          out = ["#{c(:title, 'topics')}  #{c(:dim, 'help :name, or help.name')}"]
+          d = Doc.new
+          d.title('topics', 'help :name, or help.name; help :start (a section) for more on each group')
           GROUPS.each do |g, title|
             list = TOPICS.values.select { |t| t.group == g }
             next if list.empty?
-            out << c(:head, title)
-            list.each do |t|
-              ex = t.examples.empty? ? '' : c(:dim, " (#{t.examples.length} to try)")
-              out << "  #{pad(c(:key, t.name.inspect), 14)} #{t.title}#{ex}"
-            end
+            d.heading("#{title}  #{c(:dim, "help :#{g}")}")
+            d.rows(list.map { |t| [t.name.inspect, "#{t.title}#{t.examples.empty? ? '' : c(:dim, " (#{t.examples.length} to try)")}"] })
           end
-          out.join("\n")
+          d.to_s
         end
       end
 
@@ -135,14 +136,9 @@ module MB
         end
 
         def to_s
-          w = width
-          out = []
-          out << "#{c(:title, @topic.title)}  #{c(:dim, "help :#{@topic.name}")}"
-          # Code spans wrap as one word (spaces in them held as NBSPs), so
-          # doc can color them after wrapping
-          held = doc_plain(@topic.about).gsub(/`[^`\n]+`/) { |code| code.tr(' ', "\u00A0") }
-          out << wrap(held, width: w).then { |s| doc(s).tr("\u00A0", ' ') }
-          out << ''
+          d = Doc.new
+          d.title(@topic.title, "help :#{@topic.name}")
+          d.para(@topic.about)
           names = @topic.commands.map { |n| [n, :console] } + @topic.dsl.map { |n| [n, :dsl] }
           rows = names.map { |n, kind|
             e = (kind == :console ? @index.console_methods : @index.dsl_methods).find { |x| x.name == n && !x.alias? } ||
@@ -150,30 +146,31 @@ module MB
             next [c(:warn, n.to_s), c(:warn, '(no such method: stale help entry)')] unless e
 
             aliases = aliases_of(e)
-            label = (kind == :dsl ? ".#{n}" : n.to_s) + (aliases.empty? ? '' : c(:dim, " (#{aliases.join(', ')})"))
-            [c(:key, label), e.summary]
+            label = c(:key, kind == :dsl ? ".#{n}" : n.to_s) + (aliases.empty? ? '' : c(:dim, " (#{aliases.join(', ')})"))
+            [label, e.summary]
           }
-          left = [rows.map { |l, _| visible_length(l) }.max.to_i, 34].min
-          rows.each do |label, text|
-            room = w - left - 4
-            text = text.length > room ? text[0, room - 3] + '...' : text
-            out << "  #{pad(label, left)}  #{doc(text)}"
-          end
+          console, dsl = rows.partition.with_index { |_, i| names[i][1] == :console }
+          d.heading('Commands').rows(console) unless console.empty?
+          d.heading('Node and value methods').rows(dsl) unless dsl.empty?
+          extra_sections(d)
           unless @topic.examples.empty?
-            out << ''
+            d.heading('Examples')
             @topic.examples.each_with_index do |ex, i|
-              out << "#{c(:head, "try #{i + 1}")} #{ex.title}  #{c(:dim, "help(:#{@topic.name}).try(#{i + 1})")}"
-              out << ex.source.lines.map { |l| "    #{code(l.chomp)}" }.join("\n")
+              d.lines(["  #{c(:key, "try #{i + 1}")}  #{ex.title}  #{c(:dim, "help(:#{@topic.name}).try(#{i + 1})")}"])
+              d.code_block(ex.source)
             end
           end
           more = []
-          more << "see #{@topic.see.map { |s| "help :#{s}" }.join(', ')}" unless @topic.see.empty?
-          more << "notes: #{@topic.notes.map { |n| "design/notes/#{n}.md" }.join(', ')}" unless @topic.notes.empty?
-          unless more.empty?
-            out << ''
-            out << wrap(more.join('; '), width: w).lines.map { |l| c(:dim, l.chomp) }.join("\n")
-          end
-          out.join("\n")
+          more << "See also: #{@topic.see.map { |s| "help :#{s}" }.join(', ')}." unless @topic.see.empty?
+          more << "Design notes: #{@topic.notes.map { |n| "design/notes/#{n}.md" }.join(', ')}." unless @topic.notes.empty?
+          d.note(more.join(' ')) unless more.empty?
+          d.to_s
+        end
+
+        # More sections between the commands and the examples (subclasses
+        # and topics with generated tables add them).
+        def extra_sections(d)
+          @topic.sections.each { |s| s.call(d) } if @topic.respond_to?(:sections)
         end
 
         private
@@ -184,6 +181,80 @@ module MB
           (e.owner.public_instance_methods(false) - [e.name]).select { |m|
             e.owner.instance_method(m).original_name == e.name
           }.sort
+        end
+      end
+
+      # A section of the sheet in detail (`help :perform`, ux-1 item 24;
+      # maintainer: "way more detail"): what the section is for, its sheet
+      # lines, every topic in it (its title, first sentence, main commands,
+      # first example), the lessons and demo scripts that use it, and
+      # commands from its sheet lines that no topic of it lists.
+      class SectionPage
+        include Page
+        include Text
+
+        attr_reader :group
+
+        def initialize(group, index)
+          @group = group
+          @index = index
+        end
+
+        def topics = TOPICS.values.select { |t| t.group == @group }
+
+        def to_s
+          d = Doc.new
+          d.title(GROUPS.fetch(@group), "help :#{@group}  (a section of the sheet: help)")
+          d.para(SECTIONS[@group]) if SECTIONS[@group]
+          lines = Sheet::SHEET[@group] || []
+          unless lines.empty?
+            d.heading('On the sheet')
+            d.rows(lines.map { |l| [code(l.source.gsub(/\s*\n\s*/, '; ')), l.hint.to_s] }, max_label: 60)
+          end
+          topics.each do |t|
+            d.heading("#{t.title}  #{c(:dim, "help :#{t.name}")}")
+            first = t.about.split(/(?<=[.!?])\s+(?=[A-Z`(])/).first.to_s
+            d.para(first, indent: 2)
+            main = t.commands.first(6).map { |n| c(:key, n.to_s) } + t.dsl.first(6).map { |n| c(:key, ".#{n}") }
+            d.lines(["  #{main.join(c(:dim, ', '))}"]) unless main.empty?
+            ex = t.examples.first
+            if ex
+              d.lines(["  #{c(:dim, "try: #{ex.title}  help(:#{t.name}).try")}"])
+              d.code_block(ex.source)
+            end
+          end
+          learn = lessons
+          demos = demo_scripts
+          unless learn.empty? && demos.empty?
+            d.heading('Learn and listen')
+            d.rows(learn.map { |name, title| ["lesson #{name.inspect}", title] } + demos.map { |path| [path, 'a demo script'] }, max_label: 40)
+          end
+          rest = leftovers
+          d.heading('Also on the sheet').rows(rest.map { |n, summary| [n.to_s, summary] }) unless rest.empty?
+          d.to_s
+        end
+
+        # Lessons whose steps call a command of this section's topics:
+        # [[name, title], ...].
+        def lessons
+          names = topics.flat_map(&:names)
+          LESSONS.each_value.select { |l| l.steps.any? { |st| st.code && (Lesson.call_names(st.source) & names).any? } }.map { |l| [l.name, l.title] }
+        end
+
+        # Demo scripts the section's topics mention (bin/...rb).
+        def demo_scripts
+          topics.flat_map { |t| t.about.scan(%r{bin/[\w/]+\.rb}) }.uniq
+        end
+
+        # Sheet commands of this section no topic of it lists:
+        # [[name, summary], ...].
+        def leftovers
+          listed = topics.flat_map(&:names)
+          calls = (Sheet::SHEET[@group] || []).flat_map(&:call_names).uniq - listed
+          calls.filter_map do |n|
+            e = @index.console_methods.find { |x| x.name == n }
+            [n, e.summary] if e
+          end
         end
       end
 
@@ -199,22 +270,61 @@ module MB
         end
 
         def to_s
-          out = []
+          d = Doc.new
           @entries.each do |e|
             real = e.alias? ? @index.find_all(e.original).find { |x| x.owner == e.owner } || e : e
             where = real.surface == 'console' ? 'console' : "#{real.surface == 'GraphNode DSL' ? 'node' : real.surface} method"
-            out << "#{c(:title, real.signature)}  #{c(:dim, "#{where}, #{real.owner.name.sub('MB::Sound::', '')}")}"
-            out << c(:dim, "#{e.name} is an alias of #{e.original}") if e.alias?
+            d.title(real.signature, "#{where}, #{real.owner.name.sub('MB::Sound::', '')}")
+            d.note("#{e.name} is an alias of #{e.original}.") if e.alias?
             text = real.comment.strip
             text = '(no doc comment)' if text.empty?
-            out << rewrap(text).lines.map { |l| '  ' + doc(l.chomp) }.join("\n")
+            comment_blocks(text).each do |kind, block|
+              if kind == :keep
+                # Long lists in groups of at most 8 lines, broken at items
+                group = []
+                block.each do |l|
+                  if group.length >= 6 && l =~ /^\s*[-*] / || group.length >= 8
+                    d.lines(group.map { |g| "  #{doc(g)}" })
+                    group = []
+                  end
+                  group << l
+                end
+                d.lines(group.map { |g| "  #{doc(g)}" })
+              else
+                d.para(block, indent: 2)
+              end
+            end
             file, line = real.location
-            out << c(:dim, "  #{file.sub(%r{.*/lib/}, 'lib/')}:#{line}") if file
-            out << ''
+            d.note("#{file.sub(%r{.*/lib/}, 'lib/')}:#{line}") if file
           end
-          topics = TOPICS.values.select { |t| @entries.any? { |e| t.commands.include?(e.name) || t.dsl.include?(e.name) || (e.original && (t.commands + t.dsl).include?(e.original)) } }
-          out << c(:dim, "topics: #{topics.map { |t| "help :#{t.name}" }.join(', ')}") unless topics.empty?
-          out.join("\n").rstrip
+          names = @entries.flat_map { |e| [e.name, e.original].compact }.uniq
+          topics = TOPICS.values.select { |t| names.any? { |n| (t.commands + t.dsl).include?(n) } }
+          d.note("Topics: #{topics.map { |t| "help :#{t.name}" }.join(', ')}.") unless topics.empty?
+          learn = Help.lessons_using(names)
+          d.lines(["#{c(:head, 'Learn it in:')} #{learn.map { |l, step, n| "#{c(:key, "lesson :#{l}")} #{c(:dim, "(step #{step} of #{n})")}" }.join(', ')}"]) unless learn.empty?
+          d.to_s
+        end
+
+        private
+
+        # The doc comment as [:para, text] and [:keep, lines] blocks: prose
+        # paragraphs (rewrapped by the page) and indented code or list
+        # lines kept as written.
+        def comment_blocks(text)
+          blocks = []
+          text.each_line do |l|
+            l = l.chomp
+            if l.strip.empty?
+              blocks << [:blank]
+            elsif l =~ /^( {2,}|[-*] )/ || (blocks.last&.first == :keep && l =~ /^ /)
+              blocks.last&.first == :keep ? blocks.last[1] << l : blocks << [:keep, [l]]
+            elsif blocks.last&.first == :para
+              blocks.last[1] << ' ' << l.strip
+            else
+              blocks << [:para, l.strip.dup]
+            end
+          end
+          blocks.reject { |b| b.first == :blank }
         end
       end
 
@@ -270,21 +380,19 @@ module MB
           ts = topics
           by_name = h.select { |e| e.name.to_s.match?(@pattern) }
           by_doc = h - by_name
-          out = ["#{c(:title, "help #{@pattern.inspect}")}  #{c(:dim, "#{h.length + ts.length} matches")}"]
-          unless ts.empty?
-            out << c(:head, 'topics')
-            ts.each { |t| out << "  #{pad(c(:key, ":#{t.name}"), 26)} #{t.title[0, width - 30]}" }
-          end
-          [['names', by_name], ['mentioned in docs', by_doc]].each do |label, list|
+          d = Doc.new
+          d.title("help #{@pattern.inspect}", "#{h.length + ts.length} matches")
+          d.heading('Topics').rows(ts.map { |t| [":#{t.name}", t.title] }) unless ts.empty?
+          [['Names', by_name], ['Mentioned in docs', by_doc]].each do |label, list|
             next if list.empty?
-            out << c(:head, label)
-            list.first(24).each do |e|
+            rows = list.first(24).map do |e|
               where = e.surface == 'console' ? '' : (e.surface == 'GraphNode DSL' ? 'node.' : "#{e.surface.split('::').last}#")
-              out << "  #{pad(c(:key, where + e.name.to_s), 26)} #{e.summary[0, width - 30]}"
+              [where + e.name.to_s, e.summary]
             end
-            out << c(:dim, "  ... #{list.length - 24} more") if list.length > 24
+            d.heading(label).rows(rows)
+            d.note("... #{list.length - 24} more") if list.length > 24
           end
-          out.join("\n")
+          d.to_s
         end
       end
     end

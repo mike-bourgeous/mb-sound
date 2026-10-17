@@ -1,6 +1,7 @@
 require 'mb/sound' unless defined?(MB::Sound::Session)
 
 require_relative 'help/text'
+require_relative 'help/doc'
 require_relative 'help/doc_index'
 require_relative 'help/topic'
 require_relative 'help/pages'
@@ -59,6 +60,8 @@ module MB
         when Symbol, String
           name = subject.to_sym
           return topic_page(name) if TOPICS.key?(name)
+          return topic_page(TOPIC_ALIASES[name]) if TOPIC_ALIASES.key?(name)
+          return SectionPage.new(name, index) if GROUPS.key?(name)
           entries = index.find_all(name)
           return MethodPage.new(entries, index) unless entries.empty?
           SearchPage.new(/#{Regexp.escape(subject.to_s)}/i, index)
@@ -79,7 +82,7 @@ module MB
       class PagePrinter < Proc
         def self.new(fallback)
           super() { |output, value, pry|
-            value.is_a?(Page) ? output.puts(value.to_s) : fallback.call(output, value, pry)
+            value.is_a?(Page) ? output.puts(Help.for_output(value.to_s, output)) : fallback.call(output, value, pry)
           }
         end
       end

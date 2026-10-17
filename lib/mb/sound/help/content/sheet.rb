@@ -67,3 +67,56 @@ module MB
     end
   end
 end
+
+module MB
+  module Sound
+    module Help
+      # What each section of the sheet is for (`help :start`, ...; the
+      # section pages add the rest from the topics, lessons, and sheet).
+      SECTIONS = {
+        start: <<~TEXT,
+          Everything plays in one background session.  `bg :name, graph` starts a
+          player (by name, so `bg :name` again replaces it and `stop :name` fades it),
+          `play` plays one thing in the foreground until it ends or Ctrl-C, and
+          `outro` or `panic` end everything.
+
+          Levels: oscillators are full scale, and the master bus is -10 dB, so a few
+          parts mix with headroom; `help.level` sets a comfortable listening level.
+        TEXT
+        sound: <<~TEXT,
+          Sounds are graphs of nodes built by chaining methods: a pitch makes a
+          tone (`110.hz.saw`), and every node has filters, envelopes, effects,
+          and arithmetic (`a * 0.5 + b`).  Drums, samplers, SoundFonts, wavetables,
+          granular clouds, and the SQ-80 voice are nodes too.
+        TEXT
+        time: <<~TEXT,
+          Time is bars and beats on the session's timeline: clips of notes
+          (`seq`, `grid`), tempo and meter, blocks scheduled at bars, and
+          tempo-locked LFOs and delays.  Lengths like `1.n8.dotted`, `2.bars`,
+          and `250.ms` work wherever a length does.
+        TEXT
+        arrange: <<~TEXT,
+          A set is tracks (named players with a patch for their clips), scenes
+          (which clip each track plays), and a flow (the song's form).  Changes
+          land on launch points (`on: :bar`, `in: 2.beats`, `at: bar(33)`),
+          and `undo` takes the last one back at the next bar.
+        TEXT
+        perform: <<~TEXT,
+          While it plays: knobs you turn (or move from MIDI controllers), mute and
+          solo, master effects on the whole mix, and form controls that steer
+          the flow live.
+        TEXT
+        keep: <<~TEXT,
+          Keep what happened: the take (every line typed, replayable), MIDI
+          recorded into tracks, the mix as an audio file, renders, graphs as
+          Ruby, and presets to load later.
+        TEXT
+        look: <<~TEXT,
+          See and measure: plots and spectra, the live scope (`vis`), the
+          terminal UI (`ui`, `ui :tiles`, `keys`), loudness, and `help node`
+          for what a graph is made of.
+        TEXT
+      }.freeze
+    end
+  end
+end

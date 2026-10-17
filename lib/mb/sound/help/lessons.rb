@@ -88,6 +88,34 @@ module MB
 
       LESSONS = {}
 
+      # The lessons whose steps type a call to one of +names+, as [lesson
+      # name, step number (from 1), steps] (the first such step of each),
+      # for method pages' "Learn it in" (ux-1 item 26).
+      def self.lessons_using(names)
+        names = names.map(&:to_sym)
+        LESSONS.each_value.filter_map do |l|
+          i = l.steps.index { |st| st.code && (Lesson.call_names(st.source) & names).any? }
+          [l.name, i + 1, l.steps.length] if i
+        end
+      end
+
+      class Lesson
+        # Method names called in +source+ (Prism).
+        def self.call_names(source)
+          @call_names ||= {}
+          @call_names[source] ||= begin
+            names = []
+            walk = ->(n) {
+              next if n.nil?
+              names << n.name if n.is_a?(Prism::CallNode)
+              n.compact_child_nodes.each { |c| walk.(c) }
+            }
+            walk.(Prism.parse(source.to_s).value)
+            names.uniq.freeze
+          end
+        end
+      end
+
       def self.lesson(name, title, minutes: 5, &block)
         l = Lesson.new(name, title, minutes)
         Lesson::Builder.new(l).instance_eval(&block)
@@ -157,7 +185,7 @@ module MB
 
           msg = c(:ok, "✓ #{step.check_text || step.title}")
           advance
-          "#{msg}\n\n#{self}"
+          "\n#{msg}\n#{self}"
         end
 
         def next
@@ -192,28 +220,32 @@ module MB
           LessonList.new
         end
 
+        # The step as a page: a blank line above and below (lesson
+        # messages print between console lines; ux-1 item 27), a dim
+        # "lesson :set · step 2/5" line, the step's title and text, the
+        # code to type, and the check in color.
         def to_s
           n = @lesson.steps.length
+          d = Doc.new
           if done?
-            return "#{c(:title, @lesson.title)} #{c(:ok, 'done!')}  #{c(:dim, "#{n} steps; `lesson` lists the others")}"
+            d.lines(["#{c(:dim, "lesson #{@lesson.name.inspect} · done")}  #{c(:title, @lesson.title)} #{c(:ok, 'done!')}  #{c(:dim, "#{n} steps; `lesson` lists the others")}"])
+            return "\n#{d}\n"
           end
           s = step
-          out = []
-          out << "#{c(:title, @lesson.title)}  #{progress_bar(@index, n)} #{c(:dim, "step #{@index + 1}/#{n}")}"
-          out << c(:head, s.title)
-          out << wrap(s.text.to_s, indent: 2).then { |t| doc(t) } if s.text
-          if s.source
-            out << ''
-            out << s.source.lines.map { |l| "    #{code(l.chomp)}" }.join("\n")
-          end
-          out << ''
-          if @revisit == @index && (s.passed? rescue false)
-            out << c(:ok, "  ✓ already done; lesson.next moves on, lesson.run does it again")
-          elsif s.check_text
-            out << c(:dim, "  waiting for: #{s.check_text}")
-          end
-          out << c(:dim, '  lesson.run types it for you; lesson.hint, lesson.next, lesson.back, lesson.quit')
-          out.join("\n")
+          d.lines([
+            "#{c(:dim, "lesson #{@lesson.name.inspect} · step #{@index + 1}/#{n}")}  #{progress_bar(@index, n)}",
+            "#{c(:title, @lesson.title)}: #{c(:head, s.title)}",
+          ])
+          d.para(s.text.to_s, indent: 2) if s.text
+          d.code_block(s.source) if s.source
+          check =
+            if @revisit == @index && (s.passed? rescue false)
+              c(:ok, '  ✓ already done; lesson.next moves on, lesson.run does it again')
+            elsif s.check_text
+              "  #{c(:warn, '…')} #{c(:bar, "waiting for: #{s.check_text}")}"
+            end
+          d.lines([check, c(:dim, '  lesson.run types it for you; lesson.hint, lesson.next, lesson.back, lesson.quit')].compact)
+          "\n#{d}\n"
         end
 
         private
