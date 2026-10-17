@@ -64,6 +64,7 @@ module MB
           @io = io
           @session = session
           @position = at
+          @messages_seen = UI.messages.seq
           @mode = color
           @look = look
           @glyphs = glyphs
@@ -150,6 +151,12 @@ module MB
           snap = snapshot
           c = thread_cpu
           (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
+
+          # Warnings kept off the terminal show in a strip of messages
+          if (seen = UI.messages.seq) != @messages_seen
+            @messages_seen = seen
+            plot_pane(:messages, height: 3) if owns_terminal? && !@layout.pane_names.include?(:messages)
+          end
 
           reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
           @reasserted_at = now if reassert
@@ -260,6 +267,14 @@ module MB
             setup_terminal(scroll: @height > old_height ? @height - old_height : 0)
           end
           @full = true
+        end
+
+        # True when the band draws on the process's terminal (so stderr
+        # would land in it: UI::Messages keeps warnings off it).
+        def owns_terminal?
+          @active && @io.respond_to?(:tty?) && @io.tty? && $stderr.tty?
+        rescue IOError
+          false
         end
 
         # Puts pane +kind+ (:scope, :spectrum) on the band for a plot (see

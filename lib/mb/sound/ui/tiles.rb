@@ -51,6 +51,7 @@ module MB
         NAV_EXTRA = Input::Keymap.new(:tiles) do
           on 'p', :keys
           on '?', :key_help
+          on 'm', :messages
         end
 
         # The keys by mode, in groups ([group, [[keys, what], ...]]): the
@@ -71,7 +72,7 @@ module MB
               [':', 'run a line of Ruby (show :knobs, go :drop)'], ['Ctrl-L', 'redraw'],
             ]],
             ['Modes', [
-              ['p', 'play the keyboard (KEYS)'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
+              ['p', 'play the keyboard (KEYS)'], ['m', 'messages (warnings) pane, again: away'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
               ['Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'], ['?', 'this help'],
             ]],
           ],
@@ -161,6 +162,7 @@ module MB
           @search_history = []
           @midi_seen = nil
           @overlay = nil
+          @messages_restore = nil
           @gaps = nil
           @title_rules = nil
           @rows, @cols = @fixed_size || [24, 80]
@@ -242,6 +244,11 @@ module MB
           [@term&.input, @term&.output].each { |io| io&.close rescue nil }
           self
         end
+
+        # True when the screen's REPL is the console's (adopted): stderr
+        # goes to its pane, so UI::Messages keeps warnings for the
+        # messages pane instead.
+        def owns_terminal? = @active && @repl_mode == :adopt
 
         # True while hidden with Ctrl-Z (#hide): `ui` (or Ctrl-Z again)
         # shows it again with the same panes, scrollback, and REPL.
@@ -601,6 +608,22 @@ module MB
           self
         end
 
+        # Shows the messages pane (warnings and live errors while the UI is
+        # up; see UI::Messages) in a slot below the REPL, or takes it away
+        # again (+on+ false).  Marks the messages read.
+        def messages(on = !@tiler.layout.panes.include?(:messages))
+          UI.messages.mark_read
+          if on
+            @messages_restore ||= plot_pane(:messages, height: 8)
+          elsif @messages_restore
+            @messages_restore.call
+            @messages_restore = nil
+          else
+            close(:messages) if @tiler.layout.panes.include?(:messages)
+          end
+          self
+        end
+
         # True while the key overlay shows.
         def key_help? = !@overlay.nil?
 
@@ -681,6 +704,7 @@ module MB
           when :panic then run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
           when :key_help then key_help
+          when :messages then messages
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil
           when :complete then complete_palette
@@ -1340,6 +1364,12 @@ module MB
           @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          unread = UI.messages.unread
+          if unread > 0 && !@tiler.layout.panes.include?(:messages)
+            badge_w = " ! #{unread} (m) "
+            right = badge_w + right
+            warn_at = @cols - right.length
+          end
           flash = @flash && now < @flash[2] ? @flash : nil
           @flash = nil if @flash && !flash
           x = c.line(0, [@tiler.focus.to_s, :name], (@tiler.layout.zoom ? [' (zoomed)', :warn] : ' '), x: x)
@@ -1350,6 +1380,7 @@ module MB
             c.text(x + 1, 0, c.fit(HINTS[step ? :step : mode] || '', room), :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
+          c.text(warn_at, 0, badge_w, :warn) if warn_at
         end
 
         # Where the terminal's cursor goes: the REPL's cursor in its pane,

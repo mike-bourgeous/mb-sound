@@ -15,6 +15,7 @@ require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
 require_relative 'ui/prompt'
+require_relative 'ui/messages'
 require_relative 'ui/warm_up'
 require_relative 'ui/screen/vt'
 require_relative 'ui/input/events'
@@ -72,12 +73,13 @@ module MB
       Themes.dir = -> { File.join(UI.layouts_dir, 'themes') }
       self.default_layout = :band
       self.prompt_status_enabled = true
+      install_messages! # (only acts while a screen is up; see UI::Messages)
 
       # The panes by name (built-in and defined with `pane`).
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::Keyboard.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -296,8 +298,14 @@ module MB
 
       # Turns the band or the tiled screen off.  Returns nil.
       def self.off
+        was = screen || @tiles&.hidden?
         @band&.stop
         @tiles&.stop
+        # What was hidden from the terminal while the screen owned it
+        if was && (text = messages.summary)
+          $stdout.puts "\e[33m#{text}\e[0m"
+          messages.clear
+        end
         nil
       end
 
