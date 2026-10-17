@@ -18,9 +18,13 @@ module MB
         # :tiles`, `ui :studio`): panes tiled around the console, NAV mode
         # on Ctrl-] (see UI::Tiles; `help :ui`).  +mouse:+ true turns on
         # mouse reports there, +nav_esc:+ seconds lets a lone Esc enter NAV.
+        #
+        # Returns the `ui` facade (UI::Facade): the same commands whatever
+        # is on screen (`ui.keys` from the band opens the tiles; `ui.screen`
+        # is the Band or Tiles itself).
         def ui(layout = nil, at: nil, color: nil, look: nil, mouse: nil, nav_esc: nil)
           return UI.off if layout == :off || layout == false
-          UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc)
+          UI.show(layout, at: at, color: color, look: look, mouse: mouse, nav_esc: nav_esc) && UI.facade
         end
 
         # The virtual keyboard: KEYS mode in the tiled screen (the computer

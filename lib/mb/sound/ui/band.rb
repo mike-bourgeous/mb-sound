@@ -62,6 +62,7 @@ module MB
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
           @layout = layout
+          @winch = nil
           @io = io
           @session = session
           @position = at
@@ -428,10 +429,11 @@ module MB
           return unless @io.respond_to?(:tty?) && @io.tty?
           band = self
           old = nil
-          old = Signal.trap('WINCH') do |sig|
+          @winch = proc do |sig|
             band.resized!
             old.call(sig) if old.respond_to?(:call)
           end
+          old = Signals.chain('WINCH', @winch)
           @old_winch = old
           @winch_installed = true
         rescue ArgumentError
@@ -440,7 +442,7 @@ module MB
 
         def restore_winch
           return unless @winch_installed
-          Signal.trap('WINCH', @old_winch || 'DEFAULT')
+          Signals.unchain('WINCH', @winch, @old_winch)
           @winch_installed = false
         rescue ArgumentError
           nil

@@ -12,6 +12,7 @@ require_relative 'ui/layout'
 require_relative 'ui/screen'
 require_relative 'ui/follow'
 require_relative 'ui/frame_rate'
+require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
@@ -30,6 +31,8 @@ require_relative 'ui/screen/term'
 require_relative 'ui/input/reline_keys'
 require_relative 'ui/keyboard'
 require_relative 'ui/keys'
+require_relative 'ui/console_keys'
+require_relative 'ui/facade'
 require_relative 'ui/tiles'
 
 module MB
@@ -248,6 +251,7 @@ module MB
       # Records the console's binding before each line (for the palette).
       # Called by bin/sound.rb.
       def self.install_pry!
+        ConsoleKeys.install # (Ctrl-], F2, and the IDE editing keys in the plain console and the band)
         return unless defined?(::Pry)
         ::Pry.config.hooks.add_hook(:before_eval, :mb_sound_ui) { |_code, pry| UI.console_binding = pry.current_binding }
       end

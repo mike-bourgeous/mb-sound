@@ -142,6 +142,7 @@ module MB
           @on_action = on_action
           @focus_last = nil
           @enter_mark = nil
+          @winch = nil
           @decoder = Input::Decoder.new
           @keyboard = keyboard || UI.keyboard
           @keys_kitty = keys_kitty
@@ -988,6 +989,7 @@ module MB
           n = repl_lines - @enter_mark
           return unless n > h
           @enter_mark = nil
+          @winch = nil
           flash("#{n} lines of output: #{scroll_key_name} scrolls back to its start", :key)
         end
 
@@ -1586,10 +1588,11 @@ module MB
         def install_signals
           tiles = self
           old = nil
-          old = Signal.trap('WINCH') do |sig|
+          @winch = proc do |sig|
             tiles.instance_variable_set(:@resized, true)
             old.call(sig) if old.respond_to?(:call)
           end
+          old = Signals.chain('WINCH', @winch)
           @old_winch = old
           @signals = true
         rescue ArgumentError
@@ -1598,7 +1601,7 @@ module MB
 
         def restore_signals
           return unless @signals
-          Signal.trap('WINCH', @old_winch || 'DEFAULT')
+          Signals.unchain('WINCH', @winch, @old_winch)
           @signals = false
         rescue ArgumentError
           nil
