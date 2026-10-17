@@ -101,12 +101,25 @@ module MB::Sound
                'macro :space (echo level and feedback) and :tone (the echoes\' lowpass, swinging slowly around the knob)'],
   }.freeze
 
+  # Set presets (`demo`, ux-r3 item 26): { name => [script, setup method,
+  # form method, form options, description] }; the script's setup builds
+  # the set (tracks, scenes, knobs, master) in a sandbox Session and its
+  # form method the flow, then the Arrangement is saved as a set document.
+  # (tunnel_vision.rb isn't here yet: set documents don't hold buses and
+  # sends, so its hall and echo would be lost.)
+  LIBRARY_PRESET_SETS = {
+    night_bus: ['bin/songs/night_bus_flow.rb', :last_stop, :last_stop_form, {},
+                'Set :night_bus from bin/songs/night_bus_flow.rb ("Night Bus: Last Stop", tech house at 126 BPM in A minor): ' \
+                'drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; ' \
+                'its flow (play_form doc.form).  `demo` loads it.'],
+  }.freeze
+
   # The MIDI file script patches are saved from.
   LIBRARY_PRESET_MIDI = 'spec/test_data/c_major.mid'
 
   # Every library preset name.
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -145,6 +158,23 @@ module MB::Sound
           GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), rack, from: script, meta: { description: description })
         end
       end
+    elsif (st = LIBRARY_PRESET_SETS[name])
+      script, setup, form, form_options, description = st
+      require File.join(root, script)
+      MB::Sound.with_seed(0) do
+        box = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false))
+        begin
+          Dir.chdir(root) do
+            Session.with_context(session: box) do
+              MB::Sound.public_send(setup)
+              MB::Sound.public_send(form, **form_options)
+            end
+            GraphIO.save(File.join(dir, "#{name}#{GraphIO::EXTENSION}"), box.arrangement, from: script, meta: { description: description })
+          end
+        ensure
+          box.close
+        end
+      end
     else
       raise ArgumentError, "No library preset #{name}#{GraphIO.suggest(name, library_preset_names)}"
     end
@@ -176,6 +206,7 @@ module MB::Sound
         names.each do |n|
           src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
                 LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
+                LIBRARY_PRESET_SETS[n]&.then { |s, m, *| "#{s} #{m} (set)" } ||
                 "#{LIBRARY_PRESET_EFFECTS.fetch(n)[0]} (effect)"
           puts "#{n.to_s.ljust(16)} #{src}"
         end

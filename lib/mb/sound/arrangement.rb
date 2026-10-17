@@ -80,6 +80,9 @@ module MB
         @mutex = Mutex.new
         @sections = {}
         @playback = nil
+        @arms = {} # (Recording: name => Arm)
+        @patch_checked = nil # (PatchCheck: patch => clips checked)
+        @demo_document = nil
       end
 
       # Sections declared outside a form with #section (a Hash from name to
@@ -155,6 +158,10 @@ module MB
         check_quant(q)
         @quant = q
       end
+
+      # The set document `demo` loaded into this Session (see
+      # DemoMethods), or nil.
+      attr_accessor :demo_document
 
       # The tracks (a Hash from name to Track).
       def tracks

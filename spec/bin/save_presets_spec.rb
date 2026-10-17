@@ -98,6 +98,37 @@ RSpec.describe('bin/save_presets.rb') do
     end
   end
 
+  MB::Sound::LIBRARY_PRESET_SETS.each do |name, (script, setup, form, form_options, _description)|
+    it "loads the #{name} set document and plays its flow like #{File.basename(script)}" do
+      require File.expand_path("../../#{script}", __dir__)
+      file = MB::Sound.library_preset_file(io.library_presets_dir, name)
+      expect(io.parse(file).kind).to eq(:set)
+
+      bar = 0
+      play = ->(&build) {
+        s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1)
+        begin
+          MB::Sound.seed(3)
+          f = MB::Sound::Session.with_context(session: s) { build.call(s) }
+          MB::Sound::Session.with_context(session: s) { MB::Sound.play_form(f, warm_up: false) }
+          bar = (s.transport.bar_length / s.transport.whole_notes_per_second * 48000).round
+          out = (0...(bar * 12 / 800)).map { s.process_buffer(800)[0].dup }.reduce(:concatenate)
+          [s.arrangement.tracks.keys, s.arrangement.scenes.keys, s.knobs.keys, out]
+        ensure
+          s.close
+        end
+      }
+      tracks, scenes, knobs, direct = play.() { MB::Sound.public_send(setup); MB::Sound.public_send(form, **form_options) }
+      ltracks, lscenes, lknobs, loaded = play.() { |s| io.load(file, session: s).form }
+      expect([ltracks, lscenes, lknobs]).to eq([tracks, scenes, knobs])
+
+      # The same music, bar by bar (noise and other drawn seeds differ)
+      rms = ->(x) { (0...(x.length / bar)).map { |i| Math.sqrt((x[(i * bar)...((i + 1) * bar)]**2).mean) } }
+      expect(rms.(loaded).zip(rms.(direct))).to all(satisfy { |a, b| (a - b).abs <= 0.08 * b + 1e-4 })
+      expect(rms.(loaded).max).to be > 0.01
+    end
+  end
+
   it 'loads presets by name with `preset`, taking params' do
     g = MB::Sound.preset(:dnb_reese, midi: MB::Sound::Notes.new(midi_file), cutoff: 600)
     expect(io.document_of(g)[:cutoff]).to eq(600)
