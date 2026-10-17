@@ -192,11 +192,11 @@ module MB
           key = name.respond_to?(:to_sym) ? name.to_sym : name
           definition = DEFINITIONS[key]
           unless definition
-            raise ArgumentError, "Unknown mastering preset #{name.inspect}#{Form.suggest(key, names)} (presets: #{names.map(&:inspect).join(', ')})"
+            raise ArgumentError, "Unknown mastering preset #{name.inspect}(presets: #{names.map(&:inspect).join(', ')})#{Form.suggest(key, names)}"
           end
           unknown = options.keys - OPTIONS
           unless unknown.empty?
-            raise ArgumentError, "Unknown option#{unknown.length > 1 ? 's' : ''} #{unknown.map(&:inspect).join(', ')} for master #{key.inspect}#{Form.suggest(unknown[0], OPTIONS)}"
+            raise ArgumentError, "Unknown option#{unknown.length > 1 ? 's' : ''} #{unknown.map(&:inspect).join(', ')} for master #{key.inspect} (options: #{OPTIONS.join(', ')})#{Form.suggest(unknown[0], OPTIONS)}"
           end
           if options.key?(:platform) && options.key?(:lufs)
             raise ArgumentError, 'Pass lufs: or platform:, not both'

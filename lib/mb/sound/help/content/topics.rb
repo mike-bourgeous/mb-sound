@@ -649,10 +649,31 @@ module MB
       TEXT
       commands :mute, :unmute, :solo, :unsolo, :mutes, :master, :master_gain, :monitor_gain
       note :arrangement, :master_effects
-      see :buses, :dynamics
+      see :buses, :dynamics, :mastering
       example 'a quick master chain' do
         bg :try, 110.hz.saw.at(-20.db).until(2.bars)
         master { |mix| mix.softclip.limit(ceiling: -1.db) }
+        after(3) { master nil }
+      end
+    end
+
+    Help.topic :mastering, 'Mastering presets and loudness targets', group: :perform do
+      about <<~TEXT
+        `master :club` (also :streaming, :quiet, :vinyl) ends the master
+        chain with a mastering preset: mono lows, glue, limiter, and a
+        loudness target.  Renders reach the target exactly (two passes);
+        live, `ride: true` rides the gain toward it.  `masters` lists them,
+        `master(:club) { |mix| fx }` puts your effects first, and
+        `render 'x.flac', master: :streaming { song }` or a song's
+        `--master club` masters any song.
+      TEXT
+      commands :masters, :master, :render
+      dsl :master, :ride
+      note :master_effects, :dynamics
+      see :mixing, :loudness
+      example 'a preset at the listening level (drive: keeps the level fixed)' do
+        bg :try, 110.hz.saw.at(-20.db).until(2.bars)
+        master :quiet, lufs: -35, drive: 0.db
         after(3) { master nil }
       end
     end
@@ -804,6 +825,7 @@ module MB
       commands :loudness, :render
       dsl :loudness_meter
       note :method_modules, :dynamics
+      see :mastering
     end
 
     Help.topic :now, 'Help and what is going on', group: :look do

@@ -14,9 +14,10 @@ module MB
       # there linearly over the next 100 ms.  It falls over +down+ seconds
       # (a time constant) when the program gets louder and rises over +up+
       # when it gets quieter, stays within +range+ of +start+, and holds
-      # while the output would be more than +gate+ LU under the target (or
-      # the input below -70 LUFS), so silence, fades, and breakdowns aren't
-      # pumped up.
+      # while the input is more than +gate+ LU under the loudest it has
+      # been lately (a peak of the short-term loudness that falls DECAY LU
+      # per second) or below -70 LUFS, so silence, fades, and breakdowns
+      # aren't pumped up.
       #
       # It is a Channels bundle of outputs, like a LoudnessMeter: sample
       # every output once per buffer.
@@ -59,6 +60,12 @@ module MB
         # Seconds between gain decisions (and the length of each ramp).
         STEP = 0.1
 
+        # How fast the gate's reference (the recent loudest short-term
+        # loudness) falls, LU per second: 10 LU in 20 s, so a breakdown
+        # holds the gain for its first 20 s or so, and a song that settles
+        # quieter is followed after that.
+        DECAY = 0.5
+
         # The target loudness (LUFS).
         attr_reader :target
 
@@ -72,7 +79,8 @@ module MB
         # toward +target+ LUFS.  +start+ is the first gain (Decibels or
         # linear), +range+ how far it may move from there (Decibels, either
         # way), +down+ and +up+ the time constants (seconds) for falling and
-        # rising, +gate+ the LU under the target below which it holds.
+        # rising, +gate+ the LU under the recent loudest program below which
+        # it holds.
         def initialize(inputs, target:, start: 0.db, range: 9.db, down: 3.0, up: 10.0, gate: 10.0)
           inputs = Array(inputs).flat_map { |n|
             raise ArgumentError, "Rider inputs must be graph nodes (got #{n.class})" unless n.is_a?(GraphNode) || n.is_a?(MultiOutput)
@@ -90,6 +98,7 @@ module MB
           @down = down.to_f
           @up = up.to_f
           @gate = gate.to_f
+          @program = -Float::INFINITY
           @sample_rate = @inputs[0].sample_rate.to_f
           @weights = Loudness.default_weights(@inputs.length)
           @filters = Array.new(@inputs.length) { Loudness.k_weighting(@sample_rate) }
@@ -231,7 +240,8 @@ module MB
           energy = @sums.sum / (Loudness::SHORT_TERM_SEGMENTS * @sample_rate * Loudness::SEGMENT)
           loudness = Loudness.lufs(energy)
           current = @gain
-          if loudness.finite? && loudness > -70 && loudness + current >= @target - @gate
+          @program = [loudness, @program - DECAY * STEP].max if loudness.finite? && loudness > -70
+          if loudness.finite? && loudness > -70 && loudness >= @program - @gate
             wanted = (@target - loudness).clamp(*@limits)
             tau = wanted < current ? @down : @up
             @gain = current + (wanted - current) * (1 - Math.exp(-STEP / tau))

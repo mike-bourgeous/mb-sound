@@ -700,8 +700,11 @@ module MB
               end
               @session.transport.bar_length = Rational(beats, unit)
             when :master
-              raise error(node, 'master takes a block (master { |mix| ... })') unless b && args.empty? && kwargs.empty?
-              MB::Sound.master(&build_proc(b, scope))
+              preset = args.length == 1 && Mastering.preset?(args[0])
+              unless (b && args.empty? && kwargs.empty?) || preset
+                raise error(node, "master takes a block (master { |mix| ... }) or a mastering preset (master :club, lufs: -8; #{Mastering.names.map(&:inspect).join(', ')})")
+              end
+              MB::Sound.master(*args, **kwargs, &(b && build_proc(b, scope)))
             when :track
               MB::Sound.track(*args, **kwargs, &(b && build_proc(b, scope)))
             when :scene

@@ -389,6 +389,8 @@ module MB
           else
             window[:bars] = @options[:bars] || bars
           end
+          window[:master] = mastering_option if @options.key?(:master)
+          window[:loudness] = @options[:lufs] if @options.key?(:lufs)
           seconds = MB::Sound.render(@options[:output], **window, tail: true, overwrite: overwrite, stems: @options[:stems], stem_gain: (@options[:stem_gain] || 0).db) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
           puts "Stems in #{@options[:stems]}" if @options[:stems]
@@ -399,6 +401,9 @@ module MB
 
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           Session.current.exact_lanes = true if @options[:take]
+          if @options.key?(:master)
+            Session.current.mastering_override = @options.key?(:lufs) && mastering_option ? Mastering.preset(mastering_option, lufs: @options[:lufs]) : mastering_option
+          end
           arrange_song(&block)
           start = @options[:from] ? seek_live(@options[:from]) : 0r
           if @options[:bars]
@@ -415,6 +420,14 @@ module MB
       end
 
       private
+
+      # The --master preset (a Symbol) or false for none.
+      def mastering_option
+        m = @options[:master]
+        return false if m == :none
+        raise ArgumentError, "Unknown mastering preset #{m.inspect} for --master (#{Mastering.names.join(', ')}, or none)" unless Mastering.preset?(m)
+        m
+      end
 
       # Arranges a song with +block+ on the current session, at the --bpm
       # tempo if given.
@@ -622,6 +635,14 @@ module MB
             ) { |v| @options[:from] = window_target(v) }
             o.on('--to WHERE', 'End where a section, label, or marker (a name) or a bar number starts (with --from, or from the start)') { |v| @options[:to] = window_target(v) }
             o.on('--report', 'With a render: print a mix report (LUFS, short-term max, true peak, PLR per track and the mix, and per section)') { @options[:report] = true }
+            o.on(
+              '--master PRESET',
+              "Master through a mastering preset (#{Mastering.names.join(', ')}; after the song's own master effects, replacing " \
+              'its preset if it has one; none drops presets); renders reach its loudness target'
+            ) { |v| @options[:master] = v.to_sym }
+            o.on('--lufs LUFS', 'Loudness target for a render (LUFS, or a name like spotify): the mastering preset\'s, else normalizes the file') { |v|
+              @options[:lufs] = v.match?(/\A[-+]?\d/) ? Float(v) : v.to_sym
+            }
             o.on('--seek', 'With --from in a render: seek there (faster, fresh state: no tails from before) instead of playing up to it') { @options[:seek] = true }
             o.on(
               '--take [FILE]',
