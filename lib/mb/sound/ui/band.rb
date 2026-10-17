@@ -64,7 +64,7 @@ module MB
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
-          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = nil
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -157,6 +157,7 @@ module MB
           poll(now)
           check_size(now)
           snap = snapshot
+          heard_snap = heard(snap, now) # (meters and scopes: what reaches the speakers now)
           c = thread_cpu
           (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
 
@@ -188,12 +189,12 @@ module MB
               if r.h <= 0
                 nil
               elsif p.pane.bytes?
-                b = p.pane.frame_bytes(snap, p.state, row: top + r.y, col: 1 + r.x, w: r.w, h: r.h, mode: @mode, look: @look, full: full)
+                b = p.pane.frame_bytes(p.pane.needs.empty? ? snap : heard_snap, p.state, row: top + r.y, col: 1 + r.x, w: r.w, h: r.h, mode: @mode, look: @look, full: full)
                 bytes << b if b
               else
                 canvas = (p.state[:canvas] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
-                p.pane.draw(canvas, snap, p.state)
+                p.pane.draw(canvas, p.pane.needs.empty? ? snap : heard_snap, p.state)
               end
               @failures.delete(p.pane.name)
             rescue => e

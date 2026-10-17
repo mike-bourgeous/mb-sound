@@ -135,7 +135,7 @@ module MB
                        mouse: false, nav_esc: nil, kitty: false, context: nil, probe: true, scrollback: VT::SCROLLBACK, pry: {},
                        keyboard: nil, keys_kitty: nil, on_key: nil, hints: nil)
           # (Every instance variable set up front, in one order: one object shape)
-          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = nil
+          @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = @match = @search = @flash = @reloaded_at = @size_checked_at = @resized = @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = @line_cursor = @old_winch = @signals = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
           raise ArgumentError, "Layout #{layout.name.inspect} has no repl pane (`repl` in the layout block)" unless layout.repl? || repl == :none
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -1231,6 +1231,7 @@ module MB
           reload_files(now)
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
+          heard_snap = heard(snap, now) # (meters and scopes: what reaches the speakers now)
           # Taken at the start: a redraw asked for while this frame paints
           # (another thread: a mode change, a closed overlay) stays asked
           # for, instead of being cleared when the frame ends
@@ -1263,12 +1264,12 @@ module MB
             begin
               r = @chrome.frames[p.name]&.inner || p.rect
               if pane.bytes?
-                b = pane.frame_bytes(snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
+                b = pane.frame_bytes(pane.needs.empty? ? snap : heard_snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
                 bytes << b if b
               else
                 canvas = (@canvases[p.name] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
-                pane.draw(canvas, snap, @states[p.name])
+                pane.draw(canvas, pane.needs.empty? ? snap : heard_snap, @states[p.name])
               end
               @failures.delete(p.name)
             rescue => e

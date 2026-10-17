@@ -10,6 +10,8 @@ require_relative 'ui/density'
 require_relative 'ui/listing'
 require_relative 'ui/pane'
 require_relative 'ui/panes'
+require_relative 'ui/tree_text'
+require_relative 'ui/session_panes'
 require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/screen'
@@ -87,6 +89,7 @@ module MB
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
           Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Keyboard.new,
+          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::Midi.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -125,7 +128,8 @@ module MB
         deck: ['a taller band with knobs and CPU per part (bigger, boxed, with spectrum and messages from 160x50)', '13 rows'],
         mini: ['one line: transport and form', '1 row'],
         tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
-        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu', '120x40 and up'],
+        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu, buses', '120x40 and up'],
+        session: ['the set: launch lane, tracks, landed changes, clips, buses and sends, MIDI, around the console', '160x45 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
         wall: ['every pane at once, for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
@@ -184,7 +188,18 @@ module MB
             cols {
               rows(width: 32) { pane :tracks; pane :queue, height: 6 }
               rows(weight: 3) { repl; pane :scope, height: 8 }
-              tabs :meters, :knobs, :cpu, width: 34
+              tabs :meters, :knobs, :cpu, :buses, width: 34
+            }
+          },
+          # The set at a glance (ux-1 r3 item 32): where it is and what comes,
+          # what landed, the clips, buses and sends, MIDI, around the console
+          session: Viewports.layout(:session, focus: :repl) {
+            cols(height: 1) { pane :transport; pane :form }
+            pane :lane, height: 4
+            cols {
+              rows(width: 40) { pane :tracks; pane :queue, height: 6; pane :log, height: 8 }
+              rows(weight: 3) { repl; pane :clips, height: 8 }
+              rows(width: 40) { pane :meters, height: 6; pane :buses; pane :midi, height: 8 }
             }
           },
         }

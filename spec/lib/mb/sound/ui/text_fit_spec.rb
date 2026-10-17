@@ -11,7 +11,12 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
     base = ui_fake_snapshot
     slow = base.slow.with(
       tracks: [ui::TrackInfo.new(name: :"#{LONG}track", q: '1', clip: "#{LONG}clip", armed: false)].freeze,
-      queued: [ui::QueuedInfo.new(seq: 1, kind: :knob, subject: :"#{LONG}subject", lands: '17:3', pos: 16r)].freeze,
+      queued: [ui::QueuedInfo.new(seq: 1, kind: :knob, subject: :"#{LONG}subject", lands: '18:1', pos: 17r)].freeze,
+      buses: [ui::BusInfo.new(name: :"#{LONG}bus", to: :master, description: "#{LONG}chain", asleep: false, muted: false)].freeze,
+      routes: { "#{LONG}player": { to: :master, send: { "#{LONG}bus": 0.5 } } }.freeze,
+      landed: [ui::LandedInfo.new(seq: 2, kind: :mute, subject: :"#{LONG}landed", lands: '17:1', pos: 16r, at: nil)].freeze,
+      clips: [ui::ClipInfo.new(name: "#{LONG}clip", kind: :clip, bars: 1r, pattern: '█' * 32, used: [:"#{LONG}track"].freeze)].freeze,
+      midi: ui::MidiInfo.new(events: [['17:1', :"#{LONG}src", :on, "#{LONG}event"]].freeze, ccs: {}.freeze, mapped: [].freeze),
       recording: [].freeze,
       form: base.slow.form.with(section: :"#{LONG}section", next: :"#{LONG}next")
     )
@@ -38,7 +43,7 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
       expect(cut).not_to be_empty, "#{pane.name} shows no long name: #{rows.inspect}" unless %i[transport meters].include?(pane.name)
       cut.each { |r| expect(r).to include('…'), "#{pane.name}: #{r.inspect}" }
       # Whatever reaches the right edge was cut with an ellipsis, or is a number or meter that fits
-      rows.each { |r| expect(r[-1]).to match(/[\s…\d%█▏▎▍▌▋▊▉]/), "#{pane.name}: #{r.inspect}" }
+      rows.each { |r| expect(r[-1]).to match(/[\s…\d%█▏▎▍▌▋▊▉·│]/), "#{pane.name}: #{r.inspect}" }
     end
   end
 

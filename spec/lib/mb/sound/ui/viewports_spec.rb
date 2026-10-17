@@ -45,7 +45,7 @@ RSpec.describe(MB::Sound::UI::Viewports, :aggregate_failures) do
 
     it 'shows every built-in pane in the :wall layout at 200x60 (ux-1 item 13)' do
       rects = MB::Sound::UI.tile_layouts[:wall].rects(200, 59)
-      expect(rects.keys).to include(:repl, *(MB::Sound::UI.panes.keys - MB::Sound::UI::ON_DEMAND_PANES.keys))
+      expect(rects.keys).to include(:repl, *(MB::Sound::UI.panes.keys - MB::Sound::UI::ON_DEMAND_PANES.keys - MB::Sound::UI::SESSION_PANES))
       rects.each_value { |r| expect(r.w * r.h).to be > 0 }
       expect(rects[:repl].w).to be >= 90
     end
