@@ -16,18 +16,19 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
     end
 
     it 'shows the default band, switches layouts in place, and turns off' do
-      band = MB::Sound.ui
+      band = MB::Sound.ui.screen
       band.refresh
       expect(band).to be_a(MB::Sound::UI::Band)
       expect(band).to be_active
       expect(band.layout.name).to eq(:band)
       expect(band.position).to eq(:bottom) # the default (scrolled lines reach the terminal's scrollback)
-      expect(MB::Sound.ui).to equal(band) # `ui` again returns the band on screen
+      expect(MB::Sound.ui.screen).to equal(band) # `ui` again: the band on screen (through the facade)
+      expect(MB::Sound.ui).to equal(MB::Sound::UI.facade)
 
-      expect(MB::Sound.ui(:deck)).to equal(band)
+      expect(MB::Sound.ui(:deck).screen).to equal(band)
       expect(band.layout.name).to eq(:deck)
 
-      top = MB::Sound.ui(:mini, at: :top)
+      top = MB::Sound.ui(:mini, at: :top).screen
       expect(top).not_to equal(band)
       expect(band).not_to be_active
       expect(top.position).to eq(:top)
@@ -43,7 +44,7 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       expect(MB::Sound.pane(:hello)).to equal(p)
       l = MB::Sound.layout(:hi) { cols { pane :transport; pane :hello } }
       expect(MB::Sound.layout(:hi)).to equal(l)
-      band = MB::Sound.ui(:hi)
+      band = MB::Sound.ui(:hi).screen
       band.refresh
       expect(band.to_text).to include('hello')
     ensure

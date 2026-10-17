@@ -67,6 +67,31 @@ module MB
           '&' => '7', '(' => '9', ')' => '0', '{' => '[', '}' => ']', '|' => '\\',
         }.freeze
 
+        # Play mode's keys besides the note rows (the key table: the `?`
+        # overlay and help :ui print it; #play_key acts on it).
+        KEYMAP = Input::Keymap.new(:keys) do
+          group 'Keyboard'
+          doc 'z s x d c v ...', 'notes from C3 (lower row)'
+          doc 'q 2 w 3 e r ...', 'notes from C4 (upper row)'
+          on ['-', :left], :octave, -1, help: 'octave down, up'
+          on ['+', :right], :octave, 1, help: 'octave down, up'
+          on :up, :velocity_step, 8, help: 'velocity up, down'
+          on :down, :velocity_step, -8, help: 'velocity up, down'
+          doc 'Shift / Ctrl', 'accent / soft'
+          on :home, :channel_step, -1, help: 'MIDI channel down, up'
+          on :end, :channel_step, 1, help: 'MIDI channel down, up'
+          on ' ', :sustain, help: 'sustain'
+          on :escape, :panic, help: 'all notes off'
+          on :enter, :capture, help: 'capture into the armed tracks'
+          on '`', :cycle_off_mode, help: 'note-off mode'
+          on :tab, :step_entry, help: 'step entry'
+          # (scale lock: PgUp/PgDn cycle the scale and root; the methods come with scale lock)
+          on :page_up, :cycle_scale, help: 'scale lock: next scale, next root', label: 'PgUp PgDn'
+          on :page_down, :cycle_root, help: 'scale lock: next scale, next root', label: 'PgUp PgDn'
+          doc 'Ctrl-]', 'NAV (notes off; Ctrl-] again: back to KEYS)'
+          doc 'F2 Ctrl-C', 'back to the REPL'
+        end
+
         # Note-off modes (see the class comment).
         OFF_MODES = %i[auto release hold tap legato].freeze
 
@@ -167,6 +192,17 @@ module MB
         # The note-off mode in effect (:auto resolved).
         def resolved_mode
           @off_mode == :auto ? (@releases ? :release : :tap) : @off_mode
+        end
+
+        # The OS key-repeat delay the keyboard tells autorepeats from new
+        # strikes by (learned from the repeats it sees; set it to skip the
+        # one retrigger before it is learned, e.g. `ui.keyboard.repeat_delay
+        # = 0.25` for a short delay).
+        def repeat_delay = @tracker.delay
+
+        def repeat_delay=(seconds)
+          raise ArgumentError, "Repeat delays are 0.15..1.2 seconds (got #{seconds.inspect})" unless seconds.is_a?(Numeric) && seconds.between?(0.15, 1.2)
+          @lock.synchronize { @tracker.delay = seconds }
         end
 
         # Seconds each note sounds in :tap mode.
@@ -346,22 +382,22 @@ module MB
           return note_key(k, semis, vel, now) if semis
 
           return false if k.release? && k.key != ' '
-          case k.key
-          when '-', :left then octave(-1)
-          when '+', :right then octave(1)
-          when :up then self.velocity = @velocity + 8
-          when :down then self.velocity = @velocity - 8
-          when :home then self.channel = @channel - 1
-          when :end then self.channel = @channel + 1
-          when ' ' then sustain_key(k, now)
-          when :escape then all_off_unlocked(now, panic: true)
-          when :enter then @on_capture&.call
-          when '`'
+          a = KEYMAP[Input::Key.of(k.key)] or return false # (modifiers as without: Shift-Up is Up)
+          case a.name
+          when :octave then octave(a.args[0])
+          when :velocity_step then self.velocity = @velocity + a.args[0]
+          when :channel_step then self.channel = @channel + a.args[0]
+          when :sustain then sustain_key(k, now)
+          when :panic then all_off_unlocked(now, panic: true)
+          when :capture then @on_capture&.call
+          when :cycle_off_mode
             i = OFF_MODES.index(@off_mode)
             self.off_mode = OFF_MODES[(i + 1) % OFF_MODES.length]
             say("note-off: #{@off_mode}#{@off_mode == :auto ? " (#{resolved_mode})" : ''}")
-          when :tab then self.entry = :step
-          else return false
+          when :step_entry then self.entry = :step
+          when :cycle_scale, :cycle_root
+            return false unless respond_to?(a.name, true) # (until scale lock is built)
+            send(a.name)
           end
           true
         end

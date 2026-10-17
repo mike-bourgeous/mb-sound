@@ -28,12 +28,6 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for('t> ')).to eq(true), @term.text
   end
 
-  def wait_until(timeout: 5)
-    deadline = MB::U.clock_now + timeout
-    sleep 0.01 until yield || MB::U.clock_now > deadline
-    yield
-  end
-
   it 'starts the :keys layout in KEYS mode and plays with kitty press and release events' do
     start(:keys, keys_kitty: true)
     expect(@term.wait_for(' KEYS ')).to eq(true), @term.text
@@ -47,8 +41,11 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     @term.write("\e[122;1:2u\e[122;1:3u")
     expect(wait_until { out.sounding == [52] }).to eq(true), out.log.inspect
 
-    # Ctrl-] (as the kitty protocol sends it) leaves: notes off, back to the REPL
+    # Ctrl-] (as the kitty protocol sends it) is NAV: notes off; i: the REPL
     @term.write("\e[93;5u")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    expect(out.sounding).to be_empty
+    @term.write('i')
     expect(@term.wait_for(' REPL ')).to eq(true)
     expect(out.sounding).to be_empty
     expect(@tiles.instance_variable_get(:@kitty_pushed)).to eq(false)
@@ -70,9 +67,13 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
 
     @term.type('zc')
     expect(wait_until { out.sounding.sort == [48, 52] }).to eq(true)
-    # Ctrl-]: off, and back in from NAV with p
+    # Ctrl-]: off in NAV; Ctrl-] again: back to KEYS; F2: the REPL
     @term.write("\x1d")
-    expect(wait_until { @tiles.router.mode == :repl && out.sounding.empty? }).to eq(true), out.log.inspect
+    expect(wait_until { @tiles.router.mode == :nav && out.sounding.empty? }).to eq(true), out.log.inspect
+    @term.write("\x1d")
+    expect(wait_until { @tiles.router.mode == :grab }).to eq(true)
+    @term.write("\eOQ")
+    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
 
     # Ctrl-C in KEYS mode: off and back to the REPL (no interrupt)
     @tiles.keys
@@ -121,7 +122,12 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for(' KEYS ')).to eq(true)
     pushes = -> { @tiles.instance_variable_get(:@kitty_pushed) }
     leave_ways = {
-      ctrl_bracket: -> { @term.write("\e[93;5u") },
+      ctrl_bracket_i: -> {
+        @term.write("\e[93;5u")
+        expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+        @term.write('i')
+      },
+      f2: -> { @term.write("\e[1;1:1Q\e[1;1:3Q") },
       ctrl_c: -> { @term.write("\e[99;5u") },
       ctrl_z_and_back: -> {
         @term.write("\e[122;5u")
@@ -132,18 +138,12 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     }
     enter_ways = {
       nav_p: -> { @term.write("\x1d"); expect(wait_until { @tiles.router.mode == :nav }).to eq(true); @term.write('p') },
-      pane_number: -> {
-        @term.write("\x1d")
-        expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
-        @term.write((@tiles.tiler.numbered.index(:keyboard) + 1).to_s)
-        expect(wait_until { @tiles.tiler.focus == :keyboard }).to eq(true)
-        @term.write("\r")
-      },
+      f2: -> { @term.write("\eOQ") },
       ruby: -> { @tiles.keys },
     }
 
     # Leave the start's KEYS mode and put a line in the history
-    leave_ways[:ctrl_bracket].call
+    leave_ways[:ctrl_bracket_i].call
     expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
     @term.type("40 + 2\r")
     expect(@term.wait_for('=> 42')).to eq(true)
@@ -185,6 +185,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
       ctrl_z: "\x1a", note: "\e[122;1:1u", note_legacy: 'x', z: 'z', esc: "\e", digit: -> { rng.rand(1..7).to_s },
       ruby_keys: -> { @tiles.keys; nil }, ruby_off: -> { @tiles.keys(false); nil },
+      # (round 3: window prefix, overlay, palette, F2, a pane shown over the REPL's slot)
+      ctrl_w: "\x17", ctrl_w_l: "\x17l", ctrl_w_p: "\x17p", question: '?', colon: ':', f2: "\eOQ",
+      show_on_repl: -> { @tiles.show(:knobs, at: :repl) if @tiles.tiler.layout.panes.include?(:repl); nil },
     }
     path = []
     40.times do
@@ -193,14 +196,16 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
       @term.settle(quiet: 0.05)
-      expect(@tiles.mode_problems).to eq([]), path.join(' ')
+      expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
     # Back to the REPL from wherever the walk ended
     @term.write("\x1a") if @tiles.hidden?
     @tiles.keys(false)
     @tiles.router.mode = :repl
     expect(wait_until { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
-    @term.write("\x05\x15") # Ctrl-E Ctrl-U: whatever the walk typed on the line goes
+    @term.write("\x03") # Ctrl-C: whatever the walk typed (maybe several lines: ? and : are Ruby) goes
+    @term.settle(quiet: 0.1)
+    @term.write("\x05\x15") # Ctrl-E Ctrl-U
     @term.settle(quiet: 0.1)
     @term.type("6 * 7\r")
     expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
