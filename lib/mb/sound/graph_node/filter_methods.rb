@@ -150,6 +150,17 @@ module MB
         # e.g. Notes#cutoff); +resonance+ is 0..1 (a number or node).  Both
         # are read per sample, so audio-rate filter FM works.
         #
+        # The cutoff means the same at every resonance (+tuning: :edge+, the
+        # default since 2026-10-17; Filter::FourPole::Tuning): without
+        # resonance the filter is 3 dB down there, and once the resonant
+        # peak stands 6 dB over the passband (resonance 0.29 up) the peak is
+        # at the cutoff, so resonance sweeps keep their pitch and
+        # self-oscillation is at the cutoff.  +tuning: :hardware+ is the
+        # analog mapping (the stages' frequency at the cutoff: -12 dB there
+        # without resonance, the peak below it until high resonance), the
+        # behavior before 2026-10-17.  Every +mode:+ is tuned alike (hp2 and
+        # hp4 3 dB down from the top, bp2 and bp4 peaking at the cutoff).
+        #
         # Like the SQ-80 it never self-oscillates by default: full resonance
         # rings strongly and keeps most of the bass (about -6 dB, from the
         # CEM3379's passband compensation; +compensation: 0+ gives the
@@ -167,14 +178,16 @@ module MB
         # given.  +mode:+ picks another tap mix: :lp2, :bp2, :bp4, :hp2,
         # :hp4, or :diode (a TB-303-style diode ladder; see #diode).
         #
-        # +resonance_curve: :db+ (default) makes the gain at the cutoff
-        # rise linearly in dB with +resonance+ (-12 dB to +33.8 dB; the peak
-        # about 4.5 dB per 0.1 above 0.2); :linear is the loop gain itself
+        # +resonance_curve: :db+ (default) makes the resonant peak rise
+        # about linearly in dB with +resonance+ (about 4.5 dB per 0.1 above
+        # 0.2, +14.5 dB at 0.5, +36.9 at 1; with the hardware tuning the
+        # gain at the cutoff is exactly linear, -12 dB to +33.8 dB); :linear is the loop gain itself
         # (round 1: +7.5 dB at 0.5; Filter::FourPole.db_resonance converts
         # its values, e.g. 0.5 -> 0.33, 0.75 -> 0.51, 0.9 -> 0.68).
         # +quality:+ (a number or node, e.g. Notes#quality) instead of
         # +resonance:+ gives the gain at the cutoff of a 2-pole filter of
-        # that Q (see Filter::FourPole.quality_to_resonance).  In synth voices,
+        # that Q, as Filter::SVF has it (0.707 or less: no resonance; see
+        # Filter::FourPole.quality_to_resonance).  In synth voices,
         # Notes#reso follows CC 71 (resonance) like Notes#quality.
         #
         # Examples:
@@ -217,16 +230,19 @@ module MB
         # lp4's resonance scale and curves (the same knob positions sit the
         # same distance from oscillation), self-oscillation, compensation,
         # and drive (+drive_mode:+ :input or :feedback).  The coupled stages
-        # spread their poles: a gentler, longer slope (about 8, 11, 16, and
-        # 21 dB/octave over the first four octaves above the cutoff without
-        # resonance, against lp4's 16, 21, 24) and a peak that narrows and squelches as the resonance
-        # rises.  By default (+normalize: true+) it is matched to lp4 for
-        # easy switching: -12 dB at the cutoff without resonance, the
-        # resonant peak moving to the cutoff as the resonance rises,
-        # self-oscillation at lp4's level, and +quality:+ giving lp4's knob
-        # position; +normalize: false+ is the unmatched ladder (resonant
-        # peak at the cutoff at every resonance, so -25 dB there without
-        # resonance, about two octaves darker; quieter self-oscillation).
+        # spread their poles: a gentler, longer slope (without resonance
+        # about 4, 6, 9, and 13 dB/octave over the first four octaves above
+        # the cutoff, against lp4's 7, 15, 21, 24) and a peak that narrows
+        # and squelches as the resonance rises.  Its cutoff means what lp4's
+        # does (+tuning: :edge+: -3 dB there without resonance, the peak on
+        # it from resonance 0.41 up).  +normalize: true+ (default) matches
+        # its bass and saturation to lp4's (the same DC gain at every
+        # resonance, self-oscillation at lp4's level); with
+        # +tuning: :hardware+ it also matches its cutoff to hardware lp4's
+        # (-12 dB there without resonance, +quality:+ giving lp4's knob),
+        # and +normalize: false, tuning: :hardware+ is the unmatched ladder
+        # (resonant peak at the cutoff at every resonance, so -25 dB there
+        # without resonance; quieter self-oscillation).
         # Alias #diode_ladder.
         #
         #     play 55.hz.saw.diode(0.25.hz.lfo.at(150..2500), resonance: 0.8, drive: 2) * 0.5

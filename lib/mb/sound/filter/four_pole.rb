@@ -13,7 +13,14 @@ module MB
       # and holds the state.
       #
       # Behavior (measured; see the specs):
-      # - 24 dB/octave; -12 dB at the cutoff without resonance.
+      # - 24 dB/octave.  +tuning: :edge+ (default since 2026-10-17; see
+      #   Tuning): -3 dB at the cutoff without resonance, and the resonant
+      #   peak at the cutoff once it stands 6 dB over the passband
+      #   (resonance 0.29 up on the :db curve), for every +mode+.
+      #   +tuning: :hardware+: the stages' frequency is the cutoff, so -12 dB
+      #   there without resonance and the peak below it (782 Hz at
+      #   resonance 0.3 for a 1 kHz cutoff, 917 at 0.5, 990 at 0.9).  The
+      #   descriptions below give the hardware tuning's frequencies.
       # - +resonance+ 0..1 sets the loop gain k = curve(resonance) × #k_max.
       #   By default #k_max is MAX_K (3.9, just below the oscillation edge
       #   at 4), so like the SQ-80 the filter rings but never self-oscillates
@@ -69,6 +76,11 @@ module MB
       #   -25.3 dB at 0 to +32.3 dB at 1, linear in dB), +self_oscillate:+
       #   has the same onset and rise, and compensation and drive work
       #   alike (:input or :feedback).
+      # - With the edge tuning the diode ladder's cutoff means what lp4's
+      #   does (its own response: -3 dB without resonance, the peak on the
+      #   cutoff from resonance 0.41 up), and +normalize: true+ matches its
+      #   bass (.diode_compensation) and saturation (.diode_headroom) to
+      #   lp4's.  With the hardware tuning:
       # - +normalize: true+ (default; diode only, user decision 2026-10-09:
       #   easy switching over hardware fidelity) matches the diode ladder to
       #   lp4 at the same settings.  Cutoff: the stages' frequency is raised

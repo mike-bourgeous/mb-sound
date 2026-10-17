@@ -11,9 +11,10 @@ module MB
         #   lp2, the diode ladder), a highpass 3 dB down from its top (hp2,
         #   hp4), and a bandpass peaks at the cutoff (bp2, bp4).
         # - Once the resonant peak stands PEAK_DB (6 dB) over the passband
-        #   (lp4: resonance 0.29 on the :db curve) it is at the cutoff, so a
-        #   resonance sweep keeps its pitch, and self-oscillation is at the
-        #   cutoff.
+        #   (on the :db curve from resonance 0.29 for lp4, 0.20 lp2, 0.48 hp2,
+        #   0.63 hp4, 0.41 the diode ladder; always for bp2 and bp4) it is at
+        #   the cutoff (within 1 cent), so a resonance sweep keeps its pitch,
+        #   and self-oscillation is at the cutoff.
         # - In between, the cutoff moves from the edge onto the peak as the
         #   peak grows (TuningAnalysis.target has the exact definition).
         #
