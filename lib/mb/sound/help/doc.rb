@@ -66,19 +66,36 @@ module MB
         # Rows of [label, description]: labels in the key color (or as
         # given if already colored), aligned; descriptions with doc markup,
         # cut to the width.
-        def rows(pairs, indent: 2, max_label: 30)
+        def rows(pairs, indent: 2, max_label: 30, wrap: false)
           return self if pairs.empty?
           left = [pairs.map { |l, _| visible_length(label_text(l)) }.max.to_i, max_label].min
-          lines = pairs.map do |label, text|
+          room = @width - indent - left - 2
+          entries = pairs.map do |label, text|
             l = label_text(label)
-            room = @width - indent - left - 2
             t = text.to_s
-            t = "#{t[0, [room - 3, 0].max]}..." if visible_length(t) > room
-            "#{' ' * indent}#{pad(l, left)}  #{doc(t)}".rstrip
+            if wrap
+              # Long descriptions continue under themselves (+wrap+)
+              parts = Text.wrap(MB::U.remove_ansi(t), width: room).lines.map(&:chomp)
+              ["#{' ' * indent}#{pad(l, left)}  #{doc(parts.first.to_s)}".rstrip] +
+                parts.drop(1).map { |more| "#{' ' * (indent + left + 2)}#{c(:dim, more)}" }
+            else
+              t = "#{t[0, [room - 3, 0].max]}..." if visible_length(t) > room
+              ["#{' ' * indent}#{pad(l, left)}  #{doc(t)}".rstrip]
+            end
           end
-          # Even groups of at most ROW_GROUP (10 rows: 5 and 5, not 8 and 2)
-          size = (lines.length.to_f / (lines.length.to_f / ROW_GROUP).ceil).ceil
-          lines.each_slice(size) { |g| @blocks << [g, nil] }
+          # Even groups of at most ROW_GROUP lines (10 rows: 5 and 5, not
+          # 8 and 2), never splitting a wrapped row
+          total = entries.sum(&:length)
+          size = (total.to_f / (total.to_f / ROW_GROUP).ceil).ceil
+          group = []
+          entries.each do |e|
+            if !group.empty? && group.length + e.length > size
+              @blocks << [group, nil]
+              group = []
+            end
+            group.concat(e)
+          end
+          @blocks << [group, nil] unless group.empty?
           self
         end
 

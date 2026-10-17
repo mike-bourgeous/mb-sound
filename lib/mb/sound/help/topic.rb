@@ -14,7 +14,7 @@ module MB
           def source = Text.block_body(block)
         end
 
-        attr_reader :name, :title, :group, :about, :commands, :dsl, :notes, :examples, :see
+        attr_reader :name, :title, :group, :about, :commands, :dsl, :notes, :examples, :see, :sections
 
         def initialize(name, title, group)
           @name, @title, @group = name, title, group
@@ -24,6 +24,7 @@ module MB
           @notes = []
           @examples = []
           @see = []
+          @sections = []
         end
 
         # Every method name the topic lists (console commands and DSL).
@@ -46,6 +47,11 @@ module MB
 
           # Design notes (design/notes/<name>.md) to read for details.
           def note(*names) = @topic.notes.concat(names)
+
+          # A generated section of the page: the block gets the page's
+          # Help::Doc after the commands (tables built from the code, like
+          # help :ui's layouts and keys).
+          def section(&block) = @topic.sections << block
 
           # Related topics.
           def see(*names) = @topic.see.concat(names)

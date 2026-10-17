@@ -110,6 +110,35 @@ module MB
         }
       end
 
+      # What each built-in layout is for, and the terminal size it wants
+      # (help :ui lists them).
+      LAYOUT_NOTES = {
+        band: ['the default band: transport, form, tracks, queue, meters, scope', '7 rows'],
+        deck: ['a taller band with knobs and CPU per part', '13 rows'],
+        mini: ['one line: transport and form', '1 row'],
+        tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
+        studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu', '120x40 and up'],
+        keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
+        wall: ['every pane at once, for big terminals', '200x60 and up'],
+        show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
+        play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
+      }.freeze
+
+      # Every layout `ui` can show, as [name, kind (:band, :tiles, :script),
+      # description, size hint, pane names, current?] rows: built-in,
+      # defined with `layout`, and saved in .layouts_dir.
+      def self.layout_table
+        current = screen && (screen.is_a?(Tiles) ? screen.layout_name : screen.layout.name)
+        names = (layouts.keys + tile_layouts.keys + show_layouts.keys + saved_layouts).uniq
+        names.filter_map do |name|
+          l = show_layouts[name] || (layout_named(name) rescue nil) or next
+          kind = show_layouts.key?(name) ? :script : l.is_a?(Viewports::Layout) ? :tiles : :band
+          panes = l.is_a?(Viewports::Layout) ? l.panes : l.pane_names
+          desc, size = LAYOUT_NOTES[name] || [saved_layouts.include?(name) ? "saved in #{layouts_dir}" : 'defined with layout', nil]
+          [name, kind, desc, size, panes, name == current]
+        end
+      end
+
       # Options saved with layouts (e.g. at: :bottom), by name.
       def self.layout_options
         @layout_options ||= {}

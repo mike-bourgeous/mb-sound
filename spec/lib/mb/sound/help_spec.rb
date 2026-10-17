@@ -575,6 +575,18 @@ RSpec.describe MB::Sound::Help do
       expect(MB::Sound::Help.lessons_using([:capture]).map(&:first)).to include(:record)
     end
 
+    it 'lists every layout on help :ui, the one on screen marked, and the keys from the screen\'s own table (ux-1 item 25)' do
+      MB::Sound.layout(:spec_mine) { cols { pane :transport; pane :meters } }
+      band = MB::Sound::UI::Band.new(layout: MB::Sound::UI.layouts[:deck], io: StringIO.new, size: [30, 100])
+      allow(MB::Sound::UI).to receive(:screen).and_return(band)
+      t = text(MB::Sound.help(:ui))
+      %i[band deck mini tiles studio keys wall spec_mine].each { |n| expect(t).to include("ui :#{n}") }
+      expect(t).to include('* ui :deck', '--ui :show', 'defined with layout')
+      expect(t).to include('pick a pane by its number', 'capture into the armed tracks')
+    ensure
+      MB::Sound::UI.layouts.delete(:spec_mine)
+    end
+
     it 'sets lesson steps apart with blank lines and a "lesson :x · step n/m" line' do
       allow(MB::Sound::Help::Progress).to receive(:load).and_return({})
       allow(MB::Sound::Help::Progress).to receive(:save)
