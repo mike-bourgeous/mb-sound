@@ -114,19 +114,57 @@ module MB
           end
         end
 
-        # The outcome of .solve: the +trim+ (Decibels), the +target+
-        # (Loudness::Target) and +ceiling+ (Decibels), the predicted
-        # integrated loudness and true peak of the render, the first pass's
-        # loudness, the number of chain runs, and +held+ (true when the
-        # ceiling, not the target, set the trim).
-        Result = Data.define(:trim, :target, :ceiling, :integrated, :true_peak, :first_pass, :runs, :held) do
+        # The outcome of .solve: the +preset+ name, the +trim+ (Decibels),
+        # the +target+ (Loudness::Target) and +ceiling+ (Decibels), and the
+        # render as predicted from the first pass: +integrated+ and
+        # +short_term_max+ (LUFS), +range+ (LRA, LU), +true_peak+ (dBTP),
+        # +side+ (dB, the side against the mid below +side_hz+; see
+        # Genre.low_side_db), the first pass's loudness, the number of chain
+        # runs, and +held+ (true when the ceiling, not the target, set the
+        # trim).  +codec_peaks+ ({ codec => dBTP } of the written file, or
+        # nil) is filled in by the render when measured.
+        Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
+                             :first_pass, :runs, :held, :codec_peaks) do
+          # Peak-to-loudness ratio (LU).
+          def plr
+            true_peak - integrated
+          end
+
+          # True if the loudness is within 0.5 LU of the target (or the
+          # ceiling held it under) and the true peak is under the ceiling
+          # (within 0.1 dB, the limiter's tolerance).
+          def pass?
+            (held || (integrated - target.lufs).abs <= 0.5) && true_peak <= ceiling.db_value + 0.1
+          end
+
+          # The decoded peaks over -0.1 dBTP (players clip them), or {}.
+          def codec_overs
+            (codec_peaks || {}).select { |_c, tp| tp > CODEC_LIMIT }
+          end
+
           def to_s
-            tp = true_peak ? format(', %.2f dBTP', true_peak) : ''
-            held_text = held ? format(' (held under the %.1f dBTP ceiling without a limiter)', ceiling.db_value) : ''
-            format('mastering: trim %+.2f dB for %.1f LUFS -> %.2f LUFS%s%s (first pass %.2f LUFS; %d chain runs)',
-                   trim.db_value, target.lufs, integrated, tp, held_text, first_pass, runs)
+            lines = []
+            lines << format('mastering %s: %s (trim %+.2f dB; first pass %.2f LUFS, %d chain runs)',
+                            preset.inspect, pass? ? 'pass' : 'FAIL', trim.db_value, first_pass, runs)
+            lines << format('  loudness %.2f LUFS (target %.1f%s), short-term max %.1f, LRA %.1f LU, PLR %.1f LU',
+                            integrated, target.lufs, held ? format(', held by the %.1f dBTP ceiling: no limiter', ceiling.db_value) : '',
+                            short_term_max, range, plr)
+            side_text = side ? (side.finite? ? format('%.1f dB', side) : '-inf dB') : 'n/a'
+            lines << format('  true peak %.2f dBTP (ceiling %.1f), side below %d Hz %s re mid', true_peak, ceiling.db_value, side_hz, side_text)
+            if codec_peaks
+              text = codec_peaks.map { |c, tp| format('%s %.2f', c, tp) }.join(', ')
+              lines << "  decoded true peaks: #{text} dBTP"
+              unless codec_overs.empty?
+                worst = codec_overs.values.max
+                lines << format('  decoded peaks over %.1f dBTP clip in players: try ceiling: %.1f.db', CODEC_LIMIT, ceiling.db_value - (worst - CODEC_LIMIT) - 0.1)
+              end
+            end
+            lines.join("\n")
           end
         end
+
+        # Decoded true peaks above this (dBTP) get ceiling advice.
+        CODEC_LIMIT = -0.1
 
         # Finds the trim (see Targeting) for the chains +capture+ recorded
         # in +session+ (the first pass's, closed), measured from frame
@@ -148,12 +186,13 @@ module MB
           base, length = mix_from(capture, origin, session.channels)
           first = measure(base, session.sample_rate, true_peak: false)[0]
           runs = 0
-          eval = ->(db, peak = !limited) {
+          output = ->(db) {
             runs += 1
             out = base.map(&:dup)
             records.each { |r| add_chain(session, r, db.db.to_f, out, origin, length, post_gain) }
-            measure(out, session.sample_rate, true_peak: peak)
+            out
           }
+          eval = ->(db, peak = !limited) { measure(output.(db), session.sample_rate, true_peak: peak) }
 
           x0 = presets.last.drive.db_value
           f0 = first
@@ -178,9 +217,19 @@ module MB
               f1, tp = eval.(x1)
             end
           end
-          f1, tp = eval.(x1, true) if tp.nil?
+          # The whole report on the final trim
+          out = output.(x1)
+          a = Loudness::Analyzer.new(channels: out.length, sample_rate: session.sample_rate)
+          a.process(out)
+          r = a.result
+          hz = presets.last.options.fetch(:mono) { DEFINITIONS[presets.last.name][:defaults][:mono] } || 120
+          side = out.length == 2 ? Genre.low_side_db(out, frequency: hz, sample_rate: session.sample_rate) : nil
 
-          Result.new(trim: x1.db, target: target, ceiling: ceiling, integrated: f1, true_peak: tp, first_pass: first, runs: runs, held: held)
+          Result.new(
+            preset: presets.last.name, trim: x1.db, target: target, ceiling: ceiling,
+            integrated: r.integrated, short_term_max: r.short_term_max, range: r.range, true_peak: r.true_peak,
+            side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil
+          )
         end
 
         # The recorded mix from frame +origin+ as full-length channels.

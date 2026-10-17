@@ -201,7 +201,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
     def render_song(path, **opts, &block)
       MB::Sound.seed(5)
-      expect { MB::Sound.render(path, bars: 2, overwrite: true, **opts, &block) }.to output(/mastering: trim/).to_stdout
+      expect { MB::Sound.render(path, bars: 2, overwrite: true, **opts, &block) }.to output(/mastering :\w+: pass/).to_stdout
     end
 
     it 'reaches the target exactly, the same at any buffer size' do

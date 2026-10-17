@@ -861,8 +861,11 @@ module MB
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
 
         if capture.nil? || capture.targeted.empty?
-          puts MixReport.last if kwargs[:report] && MixReport.last
           normalize_render(filename, loudness, peak) if loudness
+          if kwargs[:report] && MixReport.last
+            MixReport.last.codec_peaks = Mastering.codec_peaks(filename) if filename.is_a?(String)
+            puts MixReport.last
+          end
           return seconds
         end
 
@@ -874,8 +877,18 @@ module MB
         Internal.restore_rng(rng.dup, seed)
         second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true }
         seconds = render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
-        puts result
-        puts MixReport.last if kwargs[:report] && MixReport.last
+        # Decoded peaks for streaming masters and reports (see Mastering::CodecPeaks)
+        if filename.is_a?(String) && (kwargs[:report] || result.preset == :streaming)
+          result = result.with(codec_peaks: Mastering.codec_peaks(filename))
+        end
+        Mastering::Targeting.last = result
+        if kwargs[:report] && MixReport.last
+          MixReport.last.mastering = result
+          MixReport.last.codec_peaks = result.codec_peaks
+          puts MixReport.last
+        else
+          puts result
+        end
         seconds
       end
 
