@@ -253,7 +253,7 @@ module MB
 
         # #params with the declared ranges (see Traversable#param_info).
         def param_info
-          params.to_h { |name, v| [name, Traversable.describe_param(v, self.class.params.dig(name, :range))] }
+          params.to_h { |name, v| [name, Traversable.describe_param(v, self.class.params.dig(name, :range))] }.freeze
         end
 
         # The current gain matrix (Arrays of rows; per-sample NArrays for

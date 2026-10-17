@@ -31,8 +31,12 @@ module MB
         #
         # With +snapshot: true+ (for taps that hand buffers to another
         # thread, e.g. a UI painter), a :post spy gets a frozen copy of each
-        # buffer it may keep (one copy shared by every snapshot spy of the
-        # node; nil when the node ends).  Spies on nodes fused into a plan
+        # buffer it may keep: `buf.dup.freeze`, the same NArray class the
+        # node returns (Numo::SFloat for most nodes; complex nodes give
+        # SComplex/DComplex), one buffer long, shared by every snapshot spy
+        # of the node for that buffer; nil when the node ends.  It carries
+        # no frame number (spy from inside a Session render and read
+        # Session.span for the frame; Session taps with frames are phase V).  Spies on nodes fused into a plan
         # get their buffers from Plan::Op::Tap the same way.  Spies run on
         # the render thread: queue snapshots there, draw elsewhere.
         #

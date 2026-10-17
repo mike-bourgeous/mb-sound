@@ -116,19 +116,41 @@ module MB
         def params
           sources.each_with_object({}) do |(name, src), h|
             next unless port_role(name) == :param && !Traversable.owner_edge?(self, src)
+            src = GraphNode.climb_tee_tree(src)
             h[name] = src.is_a?(Constant) ? src.constant : src
           end
         end
 
-        # #params with what is known about each: { name => { value:, type:,
-        # unit:, range:, label:, detail: } } (nil where unknown).  Knob
-        # readers give their knob's value, range, and name; nodes their
-        # port type and description.
+        # #params as frozen values for painters and other threads: a frozen
+        # Hash { name => ParamValue }.  Each ParamValue is deep-frozen
+        # (Ractor-shareable): +value+ is the number for constants and knobs
+        # (their current value) and nil for parameters fed by other nodes
+        # (+detail+ names the node), +type+ the edge type (:control, or
+        # :notes), +unit+/+range+ where known (Constants, knobs, declared
+        # ChannelMixer params), +label+ a knob's name.  Reads settings only
+        # (never samples, no render lock), so a poll thread may call it.
         def param_info
-          sources.each_with_object({}) do |(name, src), h|
+          info = sources.each_with_object({}) do |(name, src), h|
             next unless port_role(name) == :param && !Traversable.owner_edge?(self, src)
             h[name] = Traversable.describe_param(src, param_range(name))
           end
+          info.freeze
+        end
+
+        # Everything a panel needs to draw this node at rest, as one frozen
+        # value (see Params): its class, name, #param_info, and
+        # #preview_data.  Safe to take from a poll thread; previews are a
+        # pure function of it (Plot::Panels.preview).
+        def param_snapshot
+          name = respond_to?(:named?) && named? ? graph_node_name.to_s.dup.freeze : nil
+          Params.new(node_class: self.class, name: name, values: param_info, preview: Ractor.make_shareable(preview_data))
+        end
+
+        # Settings a panel preview needs beyond #param_info (a filter's type
+        # and sample rate, a shaper's mode), as a Hash of plain values, or
+        # nil (the default).  Deep-frozen by #param_snapshot.
+        def preview_data
+          nil
         end
 
         # The range of parameter +name+, if the node knows it (nil by
@@ -140,24 +162,44 @@ module MB
         # Draws a picture of the node at rest that only the node can compute
         # (a filter's response, a shaper's transfer curve) onto +chart+ (a
         # Plot::ChartBuilder), returning the chart, or nil if the node has
-        # none (the default).  Safe to call from any thread: it reads the
-        # node's settings, never samples it.  See Plot.preview.
+        # none.  A convenience for Plot::Panels.preview(self.class,
+        # param_snapshot, chart), which is a pure function of the frozen
+        # snapshot (painters call that with a snapshot taken on a poll
+        # thread).  See Plot.preview.
         def plot_preview(chart)
-          nil
+          MB::Sound::Plot::Panels.preview(self.class, param_snapshot, chart)
         end
 
-        # One #param_info entry for value +v+.
+        # One parameter of #param_info (deep-frozen; see there).
+        ParamValue = Data.define(:value, :type, :unit, :range, :label, :detail)
+
+        # A node's frozen parameter snapshot (#param_snapshot): its class,
+        # name String (nil if unnamed), #param_info Hash, and #preview_data (frozen Hash or
+        # nil).
+        Params = Data.define(:node_class, :name, :values, :preview) do
+          # The numeric value of parameter +name+ (nil if a node drives it).
+          def [](name)
+            values[name]&.value
+          end
+        end
+
+        # One #param_info entry for value +v+ (frozen).
         def self.describe_param(v, range = nil)
+          range = range&.frozen? ? range : range&.dup&.freeze
+          f = ->(x) { x.is_a?(String) ? x.dup.freeze : x }
+          v = GraphNode.climb_tee_tree(v) # a node shared through a Tee: the node itself
           case v
           when Numeric
-            { value: v, type: :control, unit: nil, range: range, label: nil, detail: nil }
+            ParamValue.new(value: v, type: :control, unit: nil, range: range, label: nil, detail: nil)
           when Constant
-            { value: v.constant, type: :control, unit: v.unit, range: range || v.range, label: nil, detail: nil }
+            ParamValue.new(value: v.constant, type: :control, unit: f.(v.unit), range: range || v.range, label: nil, detail: nil)
           when Knob::Reader, Knob
             k = v.is_a?(Knob::Reader) ? v.knob : v
-            { value: k.value, type: :control, unit: k.spec.unit, range: range || k.spec.range, label: k.name, detail: k.to_s }
+            ParamValue.new(value: k.value, type: :control, unit: f.(k.spec.unit), range: range || k.spec.range, label: k.name, detail: k.to_s.dup.freeze)
           else
-            { value: v, type: port_type_of(v), unit: nil, range: range, label: v.respond_to?(:graph_node_name) ? v.graph_node_name : nil, detail: v.to_s }
+            type = port_type_of(v)
+            ParamValue.new(value: nil, type: type == :notes ? :notes : :control, unit: nil, range: range,
+              label: v.respond_to?(:named?) && v.named? ? v.graph_node_name.to_s.dup.freeze : nil, detail: v.to_s.dup.freeze)
           end
         end
 

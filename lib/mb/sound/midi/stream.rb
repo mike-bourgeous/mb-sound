@@ -196,12 +196,20 @@ module MB
         end
 
         # Calls the block with each event this stream reads from its
-        # source, once per event however many readers it has, and a
-        # Session::Stamp of the frame and timeline position it lands on
-        # when a Session is rendering (nil otherwise; the event's +time+ is
-        # its stream time).  Events are frozen values, safe to keep (queue
-        # them for a painter; never draw here: this runs on the render
-        # thread).  Pass +:handle+ to remove the spy later with
+        # source, once per event however many readers it has, as
+        # +|event, stamp|+:
+        # - +event+: the MIDI::Event as the stream's readers get it (a
+        #   frozen Data: type, channel, note, value, velocity, raw, bytes (a
+        #   frozen String), time (Rational stream seconds), bend_range,
+        #   legato, pitch, flam, length_hint (a Duration or nil)); the same
+        #   object the readers share, safe to keep.
+        # - +stamp+: a Session::Stamp (frozen Data: frame (Integer), pos
+        #   (Rational whole notes), bar_length, meter_pos, meter_bar; #bar,
+        #   #beat, #to_s "bar:beat") of the exact frame and timeline
+        #   position the event lands on while a Session renders, nil outside
+        #   one.
+        # Spies run on the render thread: queue what they get for a painter,
+        # never draw there.  Pass +:handle+ to remove the spy later with
         # #clear_spies.  Returns self.
         #
         #     notes = []

@@ -9,20 +9,20 @@ RSpec.describe('GraphNode inspection protocol') do
     it 'lists a filter node\'s parameters, constants as numbers' do
       f = 110.hz.ramp.filter(:lowpass, cutoff: 800, quality: 4)
       expect(f.params).to eq(cutoff: 800, quality: 4)
-      expect(f.param_info[:cutoff]).to include(value: 800, type: :control)
+      expect(f.param_info[:cutoff].to_h).to include(value: 800, type: :control, unit: 'Hz')
     end
 
     it 'gives nodes as they are, typed' do
       lfo = 3.hz.lfo.at(200..900)
       f = 110.hz.ramp.filter(:lowpass, cutoff: lfo)
       expect(f.params[:cutoff]).to be_a(MB::Sound::GraphNode)
-      expect(f.param_info[:cutoff][:type]).to eq(:audio)
+      expect(f.param_info[:cutoff].to_h).to include(value: nil, type: :control, detail: lfo.to_s)
     end
 
     it 'describes knob readers with their range' do
       k = MB::Sound::GraphNode::Knob.new(:cut, 800, range: 100..8000)
       f = 110.hz.ramp.filter(:lowpass, cutoff: k)
-      info = f.param_info[:cutoff]
+      info = f.param_info[:cutoff].to_h
       expect(info).to include(value: 800, range: 100..8000, label: :cut)
     end
 
@@ -34,11 +34,40 @@ RSpec.describe('GraphNode inspection protocol') do
       w = MB::Sound.stereo(110.hz.ramp, 220.hz.ramp).width(0.5)
       mixer = w.to_a[0].original_source rescue w.to_a[0].sources[:mixer]
       expect(mixer.params).to include(amount: 0.5)
-      expect(mixer.param_info[:amount]).to include(value: 0.5)
+      expect(mixer.param_info[:amount].value).to eq(0.5)
+    end
+  end
+
+  describe '#param_snapshot' do
+    it 'is one deep-frozen value a poll thread can take' do
+      k = MB::Sound::GraphNode::Knob.new(:cut, 800, range: 100..8000)
+      f = 110.hz.ramp.filter(:lowpass, cutoff: k, quality: 2).named('lp')
+      snap = f.param_snapshot
+      expect(Ractor.shareable?(snap)).to eq(true)
+      expect(snap.node_class).to eq(MB::Sound::Filter::SampleWrapper)
+      expect(snap.name).to eq('lp')
+      expect(snap[:cutoff]).to eq(800)
+      expect(snap[:quality]).to eq(2)
+      expect(snap.preview).to include(structure: :svf, filter_type: :lowpass, cutoff: 800.0, quality: 2.0, sample_rate: 48000.0)
+    end
+
+    it 'gives nil preview data for nodes without previews' do
+      expect(110.hz.ramp.param_snapshot.preview).to be_nil
     end
   end
 
   describe '#plot_preview' do
+    it 'is a pure function of the snapshot (Plot::Panels.preview)' do
+      c = 800.constant
+      f = 110.hz.ramp.filter(:lowpass, cutoff: c, quality: 4)
+      snap = f.param_snapshot
+      c.constant = 3000
+      chart = MB::Sound::Plot::Panels.preview(f.class, snap, MB::Sound::Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: :auto, grid: true))
+      line = chart.build.marks.find { |m| m.is_a?(MB::Sound::Plot::Mark::Line) }
+      expect(line.label).to include('800.0 Hz')
+      expect(MB::Sound::Plot::Panels.registered).to include('MB::Sound::Filter::SampleWrapper', 'MB::Sound::GraphNode::Shaper')
+    end
+
     it 'is nil by default' do
       expect(MB::Sound::Plot.preview(110.hz.ramp)).to be_nil
       expect(110.hz.ramp.plot_preview(nil)).to be_nil
