@@ -25,7 +25,7 @@ ui :mine
 ui.save                 # ~/.local/share/mb-sound/ui/mine.rb (Mac: Application Support), loaded by `ui :mine` later
 ```
 
-The prompt shows the session's status when one has rendered: `sound.rb 17:3 rec:lead arm:pad 31% MB::Sound(0) >` (bar:beat, recording and armed tracks, render load; `UI.prompt_status_enabled = false` turns it off).  Tab completes track, scene, knob, bus, layout, and pane names after the commands that take them (`go :<Tab>`, `turn :c<Tab>`, `ui :<Tab>`), and lists session names first for any other Symbol.  `now` suggests `ui`; `help :ui` is the topic.
+The prompt shows Pry's line counter and only state that commands change (ux-1, maintainer 2026-10-17: a prompt is drawn once, so a playback position read as a line number): recording and armed tracks and the form's section or scene, `sound.rb [12] ●rec:lead arm:pad drop MB::Sound(0) >` (`UI::Prompt.main`, `UI.prompt_status`; `UI.prompt_status_enabled = false` turns the state off).  Lines inside unclosed constructs get a dim prompt as wide as the main one naming what is open (`do ( … >`; `UI::Prompt.continuation`, from Ripper tokens, set as Reline's `prompt_proc`).  Enter runs a complete buffer wherever the cursor is (`UI::EnterSubmits`, prepended to `Reline::LineEditor`); an incomplete buffer gets a new line, and Alt-Enter always does (not Ctrl-J: type-ahead reaches Reline as "\n" through the tty's ICRNL).  Tab completes track, scene, knob, bus, layout, and pane names after the commands that take them (`go :<Tab>`, `turn :c<Tab>`, `ui :<Tab>`), and lists session names first for any other Symbol.  `now` suggests `ui`; `help :ui` is the topic.
 
 ## How it works
 

@@ -14,6 +14,7 @@ require_relative 'ui/follow'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
 require_relative 'ui/console'
+require_relative 'ui/prompt'
 require_relative 'ui/warm_up'
 require_relative 'ui/screen/vt'
 require_relative 'ui/input/events'
@@ -384,28 +385,29 @@ module MB
         l
       end
 
-      # A short status for the console prompt: bar:beat, armed and
-      # recording tracks, and render load, e.g. "17:3 rec:lead 31%"; nil
-      # without a Session that has rendered.  With +color+, colors are wrapped in
-      # \1 and \2 for Reline's prompt width.  Reads nothing that takes the
-      # render lock.
+      # A short status for the console prompt: what only commands change
+      # (the prompt is drawn once per line, so a playback position or load
+      # would be stale at once; the band, the tiles' status line, and `now`
+      # show those): recording and armed tracks and the form's section (or
+      # the scene), e.g. "●rec:lead arm:pad drop"; nil when there is none.
+      # With +color+, colors are wrapped in \1 and \2 for Reline's prompt
+      # width.  Reads nothing that takes the render lock.
       def self.prompt_status(color: true)
         return nil unless prompt_status_enabled
         s = Session.existing
-        rec = s&.transport_record
-        return nil if s.nil? || rec.nil? || s.frame.to_i == 0
+        return nil if s.nil?
 
         c = ->(code, text) { color ? "\1\e[#{code}m\2#{text}\1\e[0m\2" : text }
-        stamp = Session::Stamp.at(rec[:pos], s.transport)
-        out = [c.(rec[:playing] ? '33' : '2', "#{stamp.bar}:#{stamp.beat.floor}")]
+        out = []
         armed = s.arrangement.armed.keys
         pos = s.transport.position
         recording = s.journal.changes.select { |e| e.kind == :rec && e.status == :landed && e.data[:ends]&.pos.to_r > pos }.map(&:subject)
-        out << c.('31', "rec:#{recording.join(',')}") unless recording.empty?
+        out << c.('31', "#{glyphs == :ascii ? '*' : '●'}rec:#{recording.join(',')}") unless recording.empty?
         out << c.('33', "arm:#{(armed - recording).join(',')}") unless (armed - recording).empty?
-        load = s.render_load
-        out << c.(load < 0.5 ? '2' : load < 0.8 ? '33' : '31', "#{(load * 100).round}%") if load
-        out.join(' ')
+        pb = s.arrangement.playback
+        where = pb && !pb.ended? && pb.section ? pb.section : s.arrangement.current_scene
+        out << c.('36', where.to_s) if where
+        out.empty? ? nil : out.join(' ')
       rescue StandardError
         nil
       end

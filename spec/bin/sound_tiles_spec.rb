@@ -66,7 +66,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     w.write("\x1a")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
-    expect(lock.synchronize { vt.alt? }).to eq(false)
+    expect(lock.synchronize { vt.alt? }).to eq(false), text.call
     expect(wait.('tiles hidden; the session plays on')).to eq(true), text.call
     type.("players.keys\r")
     expect(wait.('[:hum]')).to eq(true), text.call # still playing
@@ -79,7 +79,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     type.("ui off\r")
     d = MB::U.clock_now + 10
     sleep 0.05 while lock.synchronize { vt.alt? } && MB::U.clock_now < d
-    expect(lock.synchronize { vt.alt? }).to eq(false)
+    expect(lock.synchronize { vt.alt? }).to eq(false), text.call
     type.("1 + 2\r")
     expect(wait.('=> 3')).to eq(true), text.call
 
