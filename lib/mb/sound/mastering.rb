@@ -109,9 +109,11 @@ module MB
         club: {
           title: 'Club: loud, low crest, mono lows',
           defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: true },
-          notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS), a soft clipper that only rounds ' \
-                 'the highest peaks, then a true-peak limiter at -0.5 dBTP; about -8 to -9 LUFS integrated.  ' \
-                 '"Less clipping, more limiting" (maintainer, 2026-10-13): clip: false leaves the peaks to the limiter.',
+          notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), a soft ' \
+                 'clipper rounding peaks above -0.9 dBFS (softclip(0.9, 1.4)), then a true-peak limiter at -0.5 dBTP ' \
+                 '(80 ms release); -8.5 LUFS integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13): ' \
+                 'clip: false replaces the clipper with a fast limiter 2 dB over the ceiling (20 ms release).  At -0.5 dBTP ' \
+                 'decoded MP3/AAC peaks can pass 0 dBTP (reports say so; ceiling: -1.db for files to share).',
           source: 'Maintainer picks 2026-10-13/17 (low crest, near max true peak, -0.5 dBTP shares); genre templates dnb/house/techno; ' \
                   'Giannoulis et al. 2012 (compressor design); BS.1770-4 Annex 2 (true peak)',
         },
