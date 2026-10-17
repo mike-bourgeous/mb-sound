@@ -65,6 +65,25 @@ module MB
       end
     end
 
+    Help.topic :unison, 'Unison and supersaws', group: :sound do
+      about <<~TEXT
+        Three spellings, the same sound bit for bit:
+        `110.hz.unison(5, spread: 0.5) { |p| p.ramp }` (the block form, any
+        oscillator per copy), `110.hz.unison(5, spread: 0.5).ramp` (shape
+        methods on a blockless unison; used as a signal it is saws), and
+        `110.hz.ramp.unison(5, spread: 0.5)` (a tone made again on every
+        copy).  In synth voices: `v.hz.saw.unison(5) * v.amp_env`.
+        `detune:`, `spread:` (0..1, stereo above 0), `mix:` (side copies),
+        `swarm` for gliding copies.
+      TEXT
+      dsl :unison, :swarm
+      note :oscillators
+      see :tones
+      example 'three spellings, one supersaw' do
+        bg :try, 110.hz.saw.unison(5, detune: 0.2, spread: 0.5).lp4(1200).at(-24.db).until(2.bars)
+      end
+    end
+
     Help.topic :envelopes, 'Envelopes and curves', group: :sound do
       about <<~TEXT
         Envelopes land exactly on their targets at whole samples; curves

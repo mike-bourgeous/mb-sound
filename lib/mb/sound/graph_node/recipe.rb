@@ -120,6 +120,17 @@ module MB
           },
         }.freeze
 
+        # DSL methods that a module overrides for its own node classes, so
+        # they aren't recorded there (the guard spec allows these), by
+        # module name, with the reason.
+        EXEMPT_OVERRIDES = {
+          'MB::Sound::Unison::Shapes' => {
+            at: 'after an oscillator method, each copy\'s Tone#at in a pending unison (built and printed as the block form); otherwise the recorded GraphNode#at',
+            gain: 'after an oscillator method, each copy\'s Tone#gain in a pending unison (built and printed as the block form); otherwise the recorded GraphNode#gain',
+            wavetable: 'a unison of wavetable oscillators (built and printed as the block form)',
+          },
+        }.freeze
+
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
         # How build block locals are read (see #trace_locals): :frame (the
         # block frame's Binding through FastRecipe, the default) or :trace
@@ -178,6 +189,36 @@ module MB
           # Calls that configured +obj+ after it was made (Tone#at, #named...).
           def config_of(obj)
             record_of(obj)&.config || []
+          end
+
+          # Runs the block as if no recorded call were running on this thread
+          # (a call it makes is recorded as an outermost call), e.g. a
+          # pending unison built while a consumer's call is recorded.
+          def at_top
+            st = state
+            depth = st.depth
+            st.depth = 0
+            yield
+          ensure
+            st.depth = depth if st
+          end
+
+          # True while calls are recorded (MB_SOUND_RECIPES isn't 0).
+          def enabled?
+            @enabled
+          end
+
+          # Gives +to+ the recipe of +from+ (an object standing in for it,
+          # e.g. a blockless unison and the unison built for it later), so
+          # graphs reading +to+ print it as +from+ was made.
+          def share_record(from, to)
+            rec = record_of(from)
+            return if rec.nil? || to.frozen? || record_of(to)
+
+            copy = Record.new(to, rec.call)
+            copy.config = rec.config&.dup
+            copy.scoped = rec.scoped&.dup
+            to.instance_variable_set(:@graph_recipe, copy)
           end
 
           # True for objects that recipes are about.

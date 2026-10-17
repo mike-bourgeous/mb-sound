@@ -114,7 +114,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, `fast_s
 - `softclip`, `clip`, `abs`, `quantize` use ADAA plus a half-sample allpass (half a sample of delay); `asoftclip` etc. are exact.  Ports (`tone.wraps`, `.increment`, TempoNode `jumps`): every reader must read each buffer.
 - `sig.decimate(rate, jitter:, interpolation: :hold | :linear)` (`crush_rate`, `srr`; `GraphNode::Decimator`, `fast_lofi`): sample-rate reduction aliasing on purpose, the rate a number or a per-sample node (key-track with `v.freq * n`); vocal-lead demo `bin/synths/vocal_lead.rb` / `bin/songs/vocal_lead_song.rb` (formants + resonant filter + key-tracked crusher, ghost chords).
 - Wavetables (`lib/mb/sound/wavetable.rb`, `fast_wavetable`): `Wavetable` cycle tables and samples, mipmapped (`:half_octave` default), `440.hz.wavetable(t, scan:)` with FM/PM/pwm/sync/resets, `KeyMap` zones, `phase_table`, `waveshape`, `Pitch#harmonics` additive.  Demo `bin/songs/wavetable_song.rb`.
-- Unison (`lib/mb/sound/unison.rb`): `pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }`; `pitch.swarm(...)` per-copy glides.  Demos `bin/songs/unison_song.rb`, `swarm_song.rb`.  Still aliasing: FM/PM sidebands (use `oversample`), `gauss`, naive shapes.
+- Unison (`lib/mb/sound/unison.rb`): `pitch.unison(n, detune:, spread:, mix:) { |p, i| p.saw }`, also `pitch.unison(n).saw` (a pending unison whose oscillator methods chain) and `pitch.saw.unison(n)` (`Tone#unison` from the tone's recipe), bit for bit the same; `pitch.swarm(...)` per-copy glides.  Demos `bin/songs/unison_song.rb`, `swarm_song.rb`.  Still aliasing: FM/PM sidebands (use `oversample`), `gauss`, naive shapes.
 
 ### Method Modules (`design/notes/method_modules.md`)
 
