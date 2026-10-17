@@ -23,5 +23,26 @@ Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and 
 - `GainMethods`, `WindowMethods`
 - `AnalysisMethods` - correlation, `freq_estimate`, and `loudness(file_or_channels, sample_rate:, weights:, true_peak:)`: ITU-R BS.1770-4 / EBU R 128 (`lib/mb/sound/loudness.rb`) returning a `Loudness::Result` with `integrated` (alias `lufs`; gated -70 LUFS / -10 LU over complete 400 ms blocks), `momentary`/`short_term` series every 100 ms from 0.1 s and their maxima (10 ms grid), `range` (alias `lra`), `true_peak`/`true_peaks` (dBTP; `true_peak: :annex2` default = BS.1770-4 Annex 2's 4x filter, `:accurate` = 32-tap Kaiser, `false`; kernel in `fast_loudness`; max with the sample peak), `gain_to(target)`, `to_h`.  Windows before the start count as silence (user rule: short audio gets values, as in ffmpeg; under 400 ms, integrated is one block padded to 400 ms).  LRA follows Tech 3342's MATLAB literally (>= gates, `sorted(round((n-1)*p+1))`, no interpolation, plus its 1.5 s of silence after the end; no leading padding, which the text doesn't state).  Files are read at their own rate in 10 s chunks; K-weighting is two Biquads from the analog prototype (exact 48 kHz table; other rates within ~0.03 dB).  Channel weights by count in ffmpeg/SMPTE order (L R C LFE Ls Rs; LFE 0, surrounds 1.41; mono 1.0, i.e. 3 LU under the same signal in stereo); `weights:` for other layouts.  Targets: `Loudness::TARGETS` (`ebu_r128`, `atsc_a85`, `spotify`/`_loud`/`_quiet` verified 2026-10-07 with sources; `apple_music`, `youtube`, `amazon_music`, `soundcloud` marked reported, unverified), `Loudness.target(name | lufs)`, `Loudness.normalize_file(path, target, peak: :warn | :reduce)`, `render(..., loudness: :spotify | -16, peak:)` (second pass over the written file).  `Loudness::Analyzer` streams any buffer sizes (~1% of realtime per 512-sample stereo buffer; 180 s of stereo in ~1 s); `node.loudness_meter` (alias `lufs_meter`; `GraphNode::LoudnessMeter`) is a pass-through bundle measuring all its channels live (`m.momentary`, `short_term`, `integrated`, `true_peak`, `to_s`, `reset`).  `bin/loudness.rb` prints a table (`-t spotify,ebu` gain columns, `--json`, `--markdown`, `-n spotify|-14` writes gain-only copies, `--targets`, `--accurate`); `bin/ab_listen.rb -m` matches by LUFS (`--match-by rms`, `M` key).  Validated against EBU Tech 3341 cases 1-6/9 and burst maxima, Tech 3342 cases 1-4, and ffmpeg's `ebur128` (`spec/lib/mb/sound/loudness_spec.rb`; differences in `/app/tmp/listening/loudness_report.md`)
 - `StructureMethods` - `analyze_form(source, **options)` (alias `analyze_structure`): tempo, beats, bars, and meter of a file, audio data, or a graph or block rendered in memory (exact render grid by default); see `structure.md`.
-- `HelpMethods` (loaded by bin/sound.rb with `lib/mb/sound/help.rb`, not by `require 'mb/sound'`) - `help`, `now`, `lesson`; see `help.md`
+- `HelpMethods` (loaded by bin/sound.rb with `lib/mb/sound/help.rb`, not by `require 'mb/sound'`; elsewhere `HelpAutoload`, extended into MB::Sound, loads it on the first `help`/`now`/`lesson` call, so plain scripts have them too, 2026-10-13) - `help`, `now`, `lesson`; see `help.md`
 - `LiveMethods` - `MB::Sound.live?`/`live=` (`bin/sound.rb` turns it on) and `live_error(exception)`: raise in scripts and specs, warn and return nil in live mode so a live set keeps playing (the caller skips the change; used by Tone's build-time-only settings)
+
+Further modules extended into MB::Sound (listed 2026-10-17 from `lib/mb/sound.rb`; details in each subsystem's note):
+- `GenerationMethods` - `tone`, `noise`, `impulse`, `silence`, `dust`, `drift` (textures.md)
+- `EnvelopeMethods` - `adsr`, `env`, `amp_env`, `fm_env`, `filter_env`, `sq80_env` (envelopes.md)
+- `ModMethods` - `mod_sum`, `mod_scale`, `mod_mixer`, ... (modulation amounts as nodes; midi.md)
+- `RandomMethods` - `seed`, `next_seed`, `with_seed`, `drawn_seed`, `random_seed`, `keeping_random_state` (oscillators.md, graph_io.md)
+- `TuningMethods` (in `tuning.rb`) - `tuning b4: 480` (numbers_lengths_phases.md)
+- `WarmUpMethods` - `warm_up(midi:, tracks:)` for YJIT before live playback (scripts.md, arrangement.md)
+- `MidiMethods` - `midi`, `midi_stream`, `midi_file`, `synth`, `per_voice` (midi.md)
+- `SequenceMethods` - `seq`, `grid`, `events`, `euclid`, `melody`, `acid`, `arp`, `chord`, `strum`, `echo`, `scale`, `tween`, `bounce_hits`, `bpm`, `transport`, `seek`, `rewind` (sequences.md, curves.md)
+- `GenerativeMethods` - `dice`, `weights`, `harmony`, `generate`, `motifs`, `strikes`, `tones` (generative.md)
+- `FormMethods` - `flow`/`form`, `section`, `play_form`, `goto`, `loop!`, `onward`, `practice`, `finish`, `skip`, `marker`, `markers`, `at_marker`, `meter` (arrangement.md)
+- `KnobMethods` - `knob`, `knobs`, `turn`, `snap`/`recall`, `xfade`, `learn` (arrangement.md)
+- `BusMethods` - `bus`, `buses`, `feed`, `routes` (buses.md)
+- `RackMethods` - `rack`, `mrack`, `irack`, `arack`, `lrack`, `modrack`, `define_rack`, `racks` (racks.md)
+- `RecordMethods` - `arm`, `disarm`, `armed`, `rec`, `capture`, `captures`, `recordings`, `rec_audio`, `stop_rec_audio` (arrangement.md, Recording)
+- `DrumMethods` - `tr808`, `tr909`, `kit` (drums.md)
+- `SQ80Methods` - `sq80`, `sq80_patches` (sq80.md)
+- `GenreMethods` - `genre`, `genres` (genres.md)
+- `SamplerMethods` - `bounce`, `capture_audio`, `chop`, `sampler`, `sfz`, `sf2`, `loops` (sampler.md, loops.md)
+- `GraphIOMethods` (extended from `graph_io.rb`) - `save`, `preset`, `presets`, `named_proc` (graph_io.md)
