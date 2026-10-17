@@ -49,7 +49,9 @@ module MB
           # One master chain's record: the Session::Master::Chain, and per
           # span its +frames+ (session frame of the first sample), +inputs+,
           # +outputs+ (with its ramp applied, as added to the mix).
-          ChainRecord = Struct.new(:chain, :frames, :inputs, :outputs, :ramps) do
+          # +built+ lists the chain's presets (Mastering::Built: each with
+          # the Tap recording the signal entering its trim).
+          ChainRecord = Struct.new(:chain, :frames, :inputs, :outputs, :ramps, :built) do
             def add(frame, input, data, ramp)
               frames << frame
               inputs << input.map { |d| d.dup }
@@ -73,9 +75,10 @@ module MB
 
           # A new ChainRecord for +chain+ (Session#build_master; nil in a
           # second pass).
-          def chain(chain)
+          def chain(chain, built)
             return nil if @check # (the second pass only checks graphs)
-            ChainRecord.new(chain, [], [], [], []).tap { |r| @chains << r }
+            built.each { |b| b.tap&.recording = true }
+            ChainRecord.new(chain, [], [], [], [], built).tap { |r| @chains << r }
           end
 
           # Records the mix leaving the Session at +frame+ (a tap).
@@ -111,6 +114,67 @@ module MB
           # built).
           def presets
             targeted.flat_map { |c| c.chain.mastering.select(&:targeted?) }
+          end
+        end
+
+        # A pass-through bundle at a preset's trim that records what enters
+        # it (every buffer, while +recording+), so .solve can run the trim
+        # and the steps after it again without the rest of the chain (which
+        # may read knobs, buses, or players, and draw random seeds).
+        class Tap < GraphNode::Channels
+          # One output of a Tap.
+          class Output
+            include GraphNode
+            include GraphNode::NodeOutput
+
+            def initialize(tap:, index:, input:)
+              @owner = tap
+              @index = index
+              @input = input
+              @node_type_name = 'Mastering tap'
+            end
+
+            def sample(count)
+              @owner.sample_internal(count, @index)
+            end
+
+            def sample_rate
+              @owner.sample_rate
+            end
+
+            def sources
+              { input: @input }
+            end
+          end
+
+          # True while recording (set by Capture#chain).
+          attr_accessor :recording
+
+          # The recorded buffers, one Array of channels per buffer.
+          attr_reader :buffers
+
+          def initialize(inputs)
+            @inputs = inputs.map(&:get_sampler)
+            @recording = false
+            @buffers = []
+            @sampled = Array.new(@inputs.length, false)
+            @data = nil
+            super(@inputs.each_with_index.map { |input, idx| Output.new(tap: self, index: idx, input: input) })
+          end
+
+          def sample_rate
+            @inputs[0].sample_rate
+          end
+
+          # Samples every input when output +index+ starts a new buffer.
+          def sample_internal(count, index)
+            if @sampled[index] || @data.nil?
+              @sampled.fill(false)
+              @data = @inputs.map { |i| i.sample(count) }
+              @buffers << @data.map { |d| d&.dup } if @recording
+            end
+            @sampled[index] = true
+            @data[index]
           end
         end
 
@@ -183,6 +247,11 @@ module MB
           ceiling = presets.map(&:ceiling).min_by(&:db_value)
           limited = presets.all?(&:limiter)
 
+          inexact = records.reject { |r| tail_of(r) }
+          unless inexact.empty?
+            warn "The master chain (#{inexact.first.chain.description}) doesn't end with its mastering preset, so the loudness target is found by rebuilding the whole chain; nodes in it that read knobs, buses, or players make that approximate"
+          end
+
           base, length = mix_from(capture, origin, session.channels)
           first = measure(base, session.sample_rate, true_peak: false)[0]
           runs = 0
@@ -246,24 +315,59 @@ module MB
           [out, length]
         end
 
-        # Rebuilds a recorded chain with trim +gain+ (linear), runs it over
-        # its recorded inputs, and adds the difference from its recorded
-        # outputs into +out+ (from frame +origin+).
+        # The one targeted preset whose output is +record+'s chain's output
+        # and whose Tap recorded every buffer (the chain can then be run
+        # again from the trim on), or nil.
+        def self.tail_of(record)
+          targeted = record.built.select { |b| b.preset.targeted? }
+          return nil unless targeted.length == 1
+          b = targeted[0]
+          return nil unless b.tap && b.tap.buffers.length == record.frames.length
+          outs = b.output.respond_to?(:outputs) ? b.output.outputs : [b.output]
+          outs = outs * record.chain.nodes.length if outs.length == 1
+          outs.length == record.chain.nodes.length && outs.zip(record.chain.nodes).all? { |a, n| a.equal?(n) } ? b : nil
+        end
+
+        # Runs a recorded chain again with trim +gain+ (linear) and adds the
+        # difference from its recorded outputs into +out+ (from frame
+        # +origin+): from the recorded trim input through the preset's trim
+        # and later steps when the chain ends with the preset (see
+        # .tail_of), else the whole chain rebuilt from its block over its
+        # recorded inputs (same random seeds; nodes that read knobs, buses,
+        # or players see their state after the first pass, so such chains
+        # are approximate: see .solve's check).
         def self.add_chain(session, record, gain, out, origin, length, post_gain)
-          old = session.mastering_trim
-          old_capture = session.mastering_capture
-          c = nil
-          MB::Sound.keeping_random_state do
-            Internal.restore_rng(record.chain.rng.dup) if record.chain.rng
-            session.mastering_trim = gain
-            session.mastering_capture = nil
-            c = session.send(:build_master, record.chain.block, preset: record.chain.preset)
+          if (b = tail_of(record))
+            src = GraphNode::MixSource.new(channels: b.tap.outputs.length, sample_rate: session.sample_rate)
+            result = b.preset.apply(GraphNode::Channels.new(src.outputs), trim: gain, from_trim: true)
+            nodes = result.respond_to?(:outputs) ? result.outputs : [result]
+            nodes *= record.chain.nodes.length if nodes.length == 1
+            run = ->(i, count) {
+              src.write(b.tap.buffers[i])
+              cache = {}
+              nodes.map { |n| cache[n.__id__] ||= n.sample(count) }
+            }
+          else
+            old = session.mastering_trim
+            old_capture = session.mastering_capture
+            c = nil
+            begin
+              MB::Sound.keeping_random_state do
+                Internal.restore_rng(record.chain.rng.dup) if record.chain.rng
+                session.mastering_trim = gain
+                session.mastering_capture = nil
+                Session.with_context(session: session) { c = session.send(:build_master, record.chain.block, preset: record.chain.preset) }
+              end
+            ensure
+              session.mastering_trim = old
+              session.mastering_capture = old_capture
+            end
+            run = ->(i, count) { session.send(:master_chain_output, c, record.inputs[i], count) }
           end
 
           record.frames.each_with_index do |frame, i|
-            input = record.inputs[i]
-            count = input[0].length
-            data = session.send(:master_chain_output, c, input, count)
+            count = record.inputs[i][0].length
+            data = run.(i, count)
             ramp = record.ramps[i]
             next if frame + count <= origin || frame - origin >= length
 
@@ -277,9 +381,6 @@ module MB
               out[ch][at...(at + n)] = out[ch][at...(at + n)] + diff
             end
           end
-        ensure
-          session.mastering_trim = old
-          session.mastering_capture = old_capture
         end
 
         # [integrated LUFS, true peak dBTP or nil] of +channels+.

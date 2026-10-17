@@ -47,12 +47,18 @@ module MB
       Preset = Data.define(:name, :title, :steps, :target, :ceiling, :limiter, :drive, :fixed, :ride, :options, :notes, :source) do
         # Applies the chain to +mix+ (a node or bundle), with +trim+ (a gain,
         # Decibels or linear) instead of the preset's drive if given.
-        # Returns a node (one channel) or a bundle.
-        def apply(mix, trim: nil)
+        # Returns a node (one channel) or a bundle.  +tap+ (a callable)
+        # gets the signal entering the trim and returns what the trim reads
+        # (a render's first pass records it there; see Targeting).
+        # +from_trim+ applies only the trim and the steps after it (to the
+        # signal entering the trim).
+        def apply(mix, trim: nil, tap: nil, from_trim: false)
           gain = trim || drive
-          steps.reduce(mix) { |m, (method, args, kwargs)|
+          list = from_trim ? steps.drop_while { |st| st[0] != :trim } : steps
+          list.reduce(mix) { |m, (method, args, kwargs)|
             case method
             when :trim
+              m = tap.call(m) if tap
               if ride
                 m.ride(target.lufs, start: gain, **ride)
               else
@@ -241,25 +247,39 @@ module MB
         # or nil) as the trim of targeted presets built in it (a render's
         # measured gain; see Targeting), collecting the presets built.
         # Returns [block value, presets].
-        def building(trim: nil)
+        #
+        # With +capture+, every preset records the signal entering its trim
+        # (Targeting::Tap), and the presets come back as Built values.
+        def building(trim: nil, capture: false)
           old = Thread.current[:mb_sound_mastering]
-          state = { trim: trim, built: [] }
+          state = { trim: trim, built: [], capture: capture }
           Thread.current[:mb_sound_mastering] = state
-          [yield, state[:built]]
+          value = yield
+          [value, capture ? state[:built] : state[:built].map(&:preset)]
         ensure
           Thread.current[:mb_sound_mastering] = old
         end
 
-        # The trim for targeted presets in the chain being built (see
-        # .building), or nil for their drive.
-        def render_trim
-          Thread.current[:mb_sound_mastering]&.dig(:trim)
+        # A preset built while capturing (see .building): the Preset, the
+        # Targeting::Tap recording the signal entering its trim, and the
+        # bundle or node it returned.
+        Built = Struct.new(:preset, :tap, :output)
+
+        # Applies +preset+ to +mix+ for GraphNode#master in the chain being
+        # built (see .building): the render's trim for targeted presets,
+        # and a Targeting::Tap at the trim while capturing.  Returns the
+        # result.
+        def build(preset, mix)
+          state = Thread.current[:mb_sound_mastering]
+          trim = preset.targeted? ? state&.dig(:trim) : nil
+          return (preset.apply(mix, trim: trim).tap { state&.dig(:built)&.push(Built.new(preset, nil, nil)) }) unless state&.dig(:capture)
+
+          built = Built.new(preset, nil, nil)
+          built.output = preset.apply(mix, trim: trim, tap: ->(m) { built.tap = Targeting::Tap.new(m.outputs) })
+          state[:built] << built
+          built.output
         end
 
-        # Records a preset built into the chain being built (see .building).
-        def note_built(preset)
-          Thread.current[:mb_sound_mastering]&.dig(:built)&.push(preset)
-        end
 
         # The Loudness::Target for a +lufs:+ value.
         def target_of(value)

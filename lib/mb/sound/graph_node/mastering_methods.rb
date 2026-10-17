@@ -18,9 +18,7 @@ module MB
         #     master { |mix| mix.reverb(:hall, wet: -12.db).master(:club) }
         #     play file_input('mix.flac').master(:streaming, platform: :apple)
         def master(preset = :club, **options)
-          p = Mastering.preset(preset, **options)
-          Mastering.note_built(p)
-          p.apply(self, trim: p.targeted? ? Mastering.render_trim : nil)
+          Mastering.build(Mastering.preset(preset, **options), self)
         end
         alias mastering master
 

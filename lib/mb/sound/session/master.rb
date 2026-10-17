@@ -277,7 +277,8 @@ module MB
           end
 
           chans = source.outputs
-          result, built = Mastering.building(trim: @mastering_trim) {
+          capturing = !@mastering_capture.nil?
+          result, built = Mastering.building(trim: @mastering_trim, capture: capturing) {
             r = if block.nil?
                   GraphNode::Channels.new(chans)
                 elsif block.arity == 0 || block.arity == 1
@@ -294,8 +295,8 @@ module MB
             end
             r
           }
-          chain.mastering = built
-          chain.capture = @mastering_capture&.chain(chain) if built.any?(&:targeted?)
+          chain.mastering = capturing ? built.map(&:preset) : built
+          chain.capture = @mastering_capture&.chain(chain, built) if chain.mastering.any?(&:targeted?)
 
           list = master_nodes(result)
           list *= @channels if list.length == 1
