@@ -277,6 +277,7 @@ module MB
       # true+, else to the user data directory (see .data_dir).  Returns
       # the path.
       def save(path = nil, repo: false)
+        path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
         path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb")
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, to_ruby)
