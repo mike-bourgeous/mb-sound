@@ -73,6 +73,8 @@ module MB
             @pry_opts = pry
             @vt = VT.new(rows, cols, scrollback: scrollback, ambiguous_width: ambiguous_width)
             @lock = Mutex.new
+            @synced = ConditionVariable.new
+            @sync_seq = 0
             @bytes_read = 0
             @reader_cpu = 0.0
             @changed = true
@@ -135,6 +137,31 @@ module MB
             @reader&.kill
             @master = @slave = @reader = nil
             self
+          end
+
+          # Waits until the VT has everything the program wrote to the pty
+          # so far (output still in the pty, or read and not yet fed, when
+          # the reader thread is behind): a sync mark (VT::SYNC_OSC) is
+          # written after it, and the VT has it when it reaches the mark.
+          # Call it before reading the VT for what the program just wrote
+          # (a screen switch copying the REPL's lines).  Returns true, or
+          # false after +timeout+ seconds (or when not hosting).
+          def sync_output(timeout = 2.0)
+            return false unless @slave && @reader&.alive?
+            [$stdout, $stderr].each { |io| io.flush rescue nil }
+            n = @lock.synchronize { @sync_seq += 1 }
+            @slave.write("\e]#{VT::SYNC_OSC};#{n}\a")
+            deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+            @lock.synchronize do
+              until @vt.sync_mark >= n
+                left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+                return false if left <= 0
+                @synced.wait(@lock, left)
+              end
+            end
+            true
+          rescue IOError, SystemCallError
+            false
           end
 
           # Writes key bytes to the program (as typed on a terminal).
@@ -260,7 +287,9 @@ module MB
                 piece = data.byteslice(pos, CHUNK)
                 pos += CHUNK
                 replies, relay = @lock.synchronize {
+                  mark = @vt.sync_mark
                   @vt.feed(piece)
+                  @synced.broadcast if @vt.sync_mark != mark
                   r = @vt.take_replies
                   [@relay ? '' : r, @relay]
                 }

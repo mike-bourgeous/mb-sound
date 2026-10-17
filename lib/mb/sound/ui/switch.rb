@@ -131,6 +131,10 @@ module MB
           def repl_lines(tiles, n = REPLAY_LINES)
             vt = tiles&.host&.vt
             return [] unless vt
+            # (what the console just wrote, the echo of the command typed
+            # at the prompt included, may still be in the pty: the reader
+            # runs at a low priority)
+            tiles.host.sync_output
             last = vt.dropped + vt.scrollback.length + vt.row
             last -= 1 unless Thread.current.equal?(Thread.main)
             first = [vt.dropped, last - n + 1].max
