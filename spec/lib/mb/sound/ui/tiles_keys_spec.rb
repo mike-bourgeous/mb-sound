@@ -224,6 +224,39 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     MB::Sound::UI.instance_variable_set(:@tiles, nil)
   end
 
+  it "captures into every armed track that builds, naming a broken patch's track and line in the messages (ux-1 item 17)" do
+    ev = MB::Sound::MIDI::Event
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false,
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    events = [ev.parse([0x90, 60, 90], time: 0.1r), ev.parse([0x80, 60, 64], time: 0.3r)]
+    @session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+    live = MB::Sound.live?
+    MB::Sound.live = true
+    broken_line = __LINE__ + 2
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:l_bass, q: 1) { |c| c.synth { |v| v.nosuch_patch_method } }
+      MB::Sound.track(:lead, q: 1) { |c| c.synth { |v| v.hz.ramp * v.amp_env } }
+      expect { MB::Sound.arm(:l_bass) }.to output(/l_bass can't monitor/).to_stderr
+      MB::Sound.arm(:lead)
+    end
+    50.times { @session.process_buffer }
+    session = @session
+    out = Object.new
+    out.define_singleton_method(:target_session) { session }
+    %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
+    start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
+    @tiles.send(:capture_keys)
+    150.times { @session.process_buffer } # to the launch point
+    expect(@session.arrangement.captures.keys).to eq([:lead_1])
+    msg = MB::Sound::UI.messages.recent(1)[0]
+    expect(msg.severity).to eq(:error)
+    expect(msg.text).to match(/\Acapture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/ui\/tiles_keys_spec\.rb:#{broken_line}\)\z/)
+    expect(@tiles.instance_variable_get(:@flash)[0]).to match(/\Acapture: what you played loops into :lead at \d+:\d.*; :l_bass failed \(m: messages\)\z/)
+  ensure
+    MB::Sound.live = live unless live.nil?
+    MB::Sound::UI.messages.clear
+  end
+
   it 'builds a clip in step entry and puts its Ruby on the REPL line' do
     start(context: MB::Sound.module_eval('binding'))
     @tiles.keys(step: true)

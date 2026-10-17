@@ -769,36 +769,46 @@ module MB
           armed = s&.arrangement&.armed || {}
           return flash('swap: arm a track first (arm :lead); Enter puts the clip on the console line instead', :warn) if armed.empty?
           ruby = clip.to_ruby
-          landed = armed.keys.map { |name| [name, run_quietly { UI.run_line("bg #{name.inspect}, #{ruby}", s) }] }
+          landed = armed.keys.map { |name| [name, run_for_track('swap', name) { UI.run_line("bg #{name.inspect}, #{ruby}", s) }] }
           flash_changes('swap', landed, "#{ruby} ")
         end
 
-        # Enter in KEYS mode: `capture` into the armed tracks.
+        # Enter in KEYS mode: `capture` into each armed track (one line
+        # each, so a track whose patch fails leaves the others captured).
         def capture_keys
           s = keys_session
           armed = s&.arrangement&.armed || {}
           return flash('capture: arm a track first (arm :lead), then play and press Enter', :warn) if armed.empty?
-          entry = run_quietly { UI.run_line('capture', s) }
-          flash_changes('capture', armed.keys.map { |name| [name, entry] }, 'what you played ')
+          landed = armed.keys.map { |name| [name, run_for_track('capture', name) { UI.run_line("capture #{name.inspect}", s) }] }
+          flash_changes('capture', landed, 'what you played ')
         end
 
-        # Runs a UI action's change; an error is flashed (nil).
-        def run_quietly
+        # Runs a UI action's change for track +name+.  An error (a patch
+        # that doesn't build, ...) goes to the messages pane naming the
+        # track and where in the patch it happened; returns :failed.
+        def run_for_track(what, name)
           yield
         rescue StandardError, ScriptError => e
-          flash("#{e.class}: #{e.message}", :bad)
-          nil
+          where = UI.error_origin(e)
+          UI.messages.add("#{what} into #{name.inspect} failed: #{e.class}: #{e.message}#{where ? " (at #{where})" : ''}", severity: :error)
+          :failed
         end
 
         # Says what KEYS mode's Enter or step entry's w did, so an
         # accidental capture is obvious: "capture: what you played loops
-        # into :lead at 5:1 (undo takes it back)".  +landed+ is [track,
-        # journal entry] pairs (nil entries failed and flashed already).
+        # into :lead at 5:1 (undo takes it back)", and which tracks failed
+        # ("; :bass failed (m: messages)").  +landed+ is [track, journal
+        # entry, nil, or :failed] pairs.
         def flash_changes(what, landed, thing)
-          ok = landed.reject { |_, e| e.nil? }
-          return if ok.empty?
+          failed = landed.select { |_, e| e == :failed }.map(&:first)
+          ok = landed.reject { |_, e| e.nil? || e == :failed }
+          fail_text = failed.empty? ? '' : "#{failed.map(&:inspect).join(', ')} failed (m: messages)"
+          if ok.empty?
+            flash("#{what}: #{fail_text.empty? ? 'nothing changed' : fail_text}", :bad)
+            return
+          end
           where = ok.map { |name, e| "#{name.inspect}#{e.respond_to?(:lands) && e.lands ? " at #{e.lands}" : ''}" }.uniq.join(', ')
-          flash("#{what}: #{thing}loops into #{where} (undo takes it back)", :ok)
+          flash("#{what}: #{thing}loops into #{where} (undo takes it back)#{fail_text.empty? ? '' : "; #{fail_text}"}", failed.empty? ? :ok : :warn)
         end
 
         # Enter in step entry: the clip goes to UI.keyboard.clips, and its

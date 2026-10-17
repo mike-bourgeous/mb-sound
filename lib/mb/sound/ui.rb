@@ -186,6 +186,21 @@ module MB
         end
       end
 
+      # Where +error+ came from in the user's code ("(pry):3",
+      # "songs/x.rb:12"): its first backtrace frame outside mb-sound's
+      # lib/ and installed gems, or nil.
+      def self.error_origin(error)
+        lib = File.expand_path('..', __dir__)
+        loc = (error.backtrace_locations || []).find do |l|
+          path = l.absolute_path || l.path.to_s
+          !path.start_with?(lib) && !path.include?('/gems/') && !path.start_with?('<internal')
+        end
+        return nil unless loc
+        path = loc.absolute_path || loc.path
+        path = path.delete_prefix("#{Dir.pwd}/") if path
+        "#{path}:#{loc.lineno}"
+      end
+
       # Records the console's binding before each line (for the palette).
       # Called by bin/sound.rb.
       def self.install_pry!
