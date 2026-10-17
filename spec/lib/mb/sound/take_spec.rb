@@ -426,6 +426,18 @@ RSpec.describe(MB::Sound::Take) do
     expect { path = take.save }.to output(/sets\/take_/).to_stdout
   end
 
+  it 'expands ~ in a given path to the home directory (it used to make a folder named ~)' do
+    home = tmp_path('home')
+    old = ENV['HOME']
+    ENV['HOME'] = home
+    path = nil
+    expect { path = take.save('~/sets/mine.rb') }.to output(/Saved the take to .*home\/sets\/mine\.rb/).to_stdout
+    expect(path).to eq(File.join(home, 'sets', 'mine.rb'))
+    expect(File.exist?(path)).to eq(true)
+  ensure
+    ENV['HOME'] = old
+  end
+
   it 'gives the user data directory per platform' do
     expect(described_class.data_dir).to end_with('mb-sound/takes')
   end
