@@ -253,6 +253,11 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     MB::Sound::UI.instance_variable_set(:@tiles, @tiles) # (UI.screen: the live warning goes to the messages)
     # (and to stderr too: this screen isn't the console's terminal)
     expect { @tiles.send(:capture_keys) }.to output(/capture into :l_bass failed/).to_stderr
+    # The painter has seen the error (it opened the pane) after the capture's
+    # own flash, and kept that flash: the order a slower machine always
+    # gets, which once replaced it (see messages_spec)
+    @tiles.refresh
+    expect(@tiles.tiler.layout.panes).to include(:messages)
     150.times { @session.process_buffer } # to the launch point
     expect(@session.arrangement.captures.keys).to eq([:lead_1])
     msg = MB::Sound::UI.messages.recent(1)[0]
