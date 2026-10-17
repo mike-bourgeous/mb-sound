@@ -21,14 +21,12 @@ RSpec.describe('graph-io round trips of bin/ scripts', :smoke) do
   # to the peak (tables made in memory are saved as FLAC, read back as
   # float32)
   bundled = {
-    'bin/synths/sq80_voice.rb' => 1e-5,
     'bin/synths/wavetable_bass.rb' => 1e-5,
   }.freeze
 
   not_representable = {
     'bin/effects/reverse_delay.rb' => 'the proc block uses a from the code around it',
     'bin/synths/fm_chain.rb' => 'a class defined outside the library',
-    'bin/synths/sq80_voice.rb' => "a Wavetable that isn't a library table",
     'bin/synths/wavetable_bass.rb' => "isn't a library table",
   }.freeze
 
