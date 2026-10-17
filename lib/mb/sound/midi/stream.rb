@@ -183,6 +183,11 @@ module MB
           @log = []
           @readers = ObjectSpace::WeakMap.new
           @bends = source.is_a?(Transform) ? nil : BendTracker.new(Interval.semitones(bend_range))
+          # Set while reading (here so every stream has one instance
+          # variable layout; see GraphNode::IvarPreset)
+          @last_from = @last_to = @last_events = nil
+          @advance_from = @advance_to = @advance_count = @advance_rate = @advance_step = nil
+          @graph_node_name = nil
           # Set by #spy
           @spies = nil
           @spy_frame = nil

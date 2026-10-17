@@ -21,6 +21,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/monitor_trim'
 require_relative 'session/buses'
+require_relative 'session/racks'
 require_relative 'session/ui_feed'
 
 module MB
@@ -313,6 +314,7 @@ module MB
         init_monitor(monitor.nil? ? realtime : monitor)
         init_buses
         @names = Names.new
+        @racks = Racks.new(self)
         @arrangement = nil
 
         # Set later, in varying orders (here so every Session has one
@@ -340,6 +342,9 @@ module MB
 
       # The Session's top-level names (see Names).
       attr_reader :names
+
+      # Named racks (see Session::Racks and MB::Sound::RackMethods).
+      attr_reader :racks
 
       # The marker table (see Markers), created when first needed.
       def markers

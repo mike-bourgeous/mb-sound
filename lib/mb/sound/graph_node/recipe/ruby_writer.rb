@@ -561,6 +561,9 @@ module MB
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
               return events_text(c.args, c.kwargs, indent)
             end
+            if c.name == :then && c.args.length == 1 && c.args[0].is_a?(MB::Sound::Rack)
+              return "#{recv}.then(&#{rack_text(c.args[0], c, indent)})"
+            end
             args = c.args.map { |a| value(a, indent) }
             kwargs = c.kwargs.dup
             if DELAY_CALLS.include?(c.name)
@@ -603,6 +606,42 @@ module MB
               text += runtime_block(c, c.block)
             end
             text
+          end
+
+          # A Rack applied by call +c+ (`src.then(&rack)`): a named rack as
+          # rack(:name), an anonymous one as its constructor with the block
+          # printed from the application's recorded body (parameters named
+          # after its ports, so `it` blocks print with names), and bound
+          # ports as .with(...).
+          def rack_text(rack, c, indent)
+            text =
+              if rack.name
+                "rack(#{rack.name.inspect})"
+              else
+                args = []
+                args << "in: #{rack.input.type.inspect}" if rack.constructor == :rack
+                args << "out: #{rack.out.inspect}" if rack.out && rack.constructor != :irack
+                rack.ports.each_value { |p| args << "#{key_text(p.name)} #{p.type.inspect}" }
+                body = if c.block_kind == :build && c.invocations && !c.invocations.empty?
+                         rack_block_text(c, rack, indent)
+                       else
+                         runtime_block(c, rack.block)
+                       end
+                "#{rack.constructor}#{"(#{args.join(', ')})" unless args.empty?}#{body}"
+              end
+            return text if rack.bound.empty?
+
+            "#{text}.with(#{rack.bound.map { |k, v| "#{key_text(k)} #{value(v, indent)}" }.join(', ')})"
+          end
+
+          # The block of a rack application, from its one invocation.
+          def rack_block_text(c, rack, indent)
+            inv = c.invocations[0]
+            present = rack.ports.keys.select { |k| rack.bound.key?(k) }
+            names = [rack.input.name, *present].map(&:to_s)
+            inner = indent + '  '
+            body = block_body(c, inv, names, inner)
+            " { |#{rack.param_list}|\n#{body}\n#{indent}}"
           end
 
           # The name of +block+ in MB::Sound.named_proc's registry, or nil.
