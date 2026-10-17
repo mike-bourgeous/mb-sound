@@ -115,18 +115,77 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       kb.off_mode = :hold
       press('z', 0.0)
       press('z', 0.2) # faster than any autorepeat delay: a new strike
-      kb.tick(0.81)
-      kb.tick(0.83)
-      expect(out.log).to eq([[:on, 48, 96, 0, 0.0], [:off, 48, 0, 0.2], [:on, 48, 96, 0, 0.2], [:off, 48, 0, 0.82]])
+      kb.tick(0.86)
+      kb.tick(0.88)
+      expect(out.log).to eq([[:on, 48, 96, 0, 0.0], [:off, 48, 0, 0.2], [:on, 48, 96, 0, 0.2], [:off, 48, 0, 0.87]])
     end
 
-    it 'learns the repeat delay and interval' do
+    it 'learns the repeat delay and interval, even a delay outside the first window (retriggering at most once)' do
       kb.off_mode = :hold
       hold('z', 0.0, 1.5, delay: 0.3, interval: 0.03)
       kb.tick(5)
       tracker = kb.instance_variable_get(:@tracker)
-      expect(tracker.delay).to be_within(0.001).of(0.4) # halfway from 0.5 after one hold
+      expect(tracker.delay).to be_within(1e-9).of(0.3) # from the strike that the repeats after it showed was the delay
       expect(tracker.interval).to be_within(0.002).of(0.03)
+      expect(out.log.count { |e| e[0] == :on }).to eq(2)
+      out.log.clear
+      hold('z', 10.0, 11.5, delay: 0.3, interval: 0.03)
+      kb.tick(20)
+      expect(out.log.count { |e| e[0] == :on }).to eq(1) # learned: one note
+    end
+
+    # Konsole 23.08 on KDE (ux-1 round 3 item 9): held keys retriggered in
+    # every mode.  Each OS timing (KDE's default, X11's, GNOME's, a vim
+    # user's short delay, macOS) in each mode: one note per hold once the
+    # delay is known (at most one extra on the very first hold), and
+    # quick taps still strike.
+    {
+      kde: [0.6, 0.04], x11: [0.66, 0.04], gnome: [0.5, 0.033], short: [0.25, 0.033], mac: [0.375, 0.03], slow_rate: [0.6, 0.07],
+    }.each do |name, (delay, interval)|
+      %i[tap hold legato].each do |mode|
+        it "never retriggers a held key in :#{mode} with #{name} repeat timing (#{(delay * 1000).round} ms, #{(1 / interval).round}/s)" do
+          kb.off_mode = mode
+          ons = ->(t0, t1) { out.log.count { |e| e[0] == :on && e[4] >= t0 && e[4] < t1 } }
+          hold('z', 0.0, 2.0, delay: delay, interval: interval)
+          kb.tick(4.0)
+          expect(ons.(0, 3)).to be <= 2
+          # (batched reads: two repeats at the same instant)
+          press('z', 10.0)
+          r = 10.0 + delay
+          while r < 12.0
+            press('z', r)
+            press('z', r + 1e-5) if (r * 100).round.even?
+            kb.tick(r)
+            r += interval
+          end
+          kb.tick(14.0)
+          expect(ons.(10, 13)).to eq(1)
+          # Quick taps of one key (6 per second) are notes
+          6.times { |i| press('z', 20.0 + i / 6.0); kb.tick(20.0 + i / 6.0 + 0.1) }
+          kb.tick(30)
+          expect(ons.(20, 22)).to eq(6)
+        end
+      end
+    end
+
+    it 'walks every per-key (state, event) pair of the hold tracker' do
+      tr = MB::Sound::UI::Keyboard::HoldTracker
+      expect(tr::TRANSITIONS.keys.map(&:first).uniq.sort).to eq(tr::STATES.sort)
+      t = tr.new
+      expect(t.press(:a, 0.0)).to eq(:new)
+      expect(t.state(:a, 0.0)).to eq(:pressed)
+      expect(t.press(:a, 0.05)).to eq(:repeat) # short gap
+      expect(t.state(:a, 0.05)).to eq(:repeating)
+      expect(t.press(:a, 0.09)).to eq(:repeat)
+      expect(t.press(:a, 0.25)).to eq(:new) # its record ran out: a new press
+      expect(t.press(:a, 0.25 + tr::DELAY)).to eq(:repeat) # about the delay
+      expect(t.learned?).to eq(true)
+      expect(t.press(:b, 5.0)).to eq(:new)
+      expect(t.press(:b, 5.2)).to eq(:strike)
+      expect(t.press(:b, 5.2, repeat: true)).to eq(:repeat) # reported (kitty)
+      expect(t.press(:b, 5.3)).to eq(:strike) # a gap that isn't a repeat ends the repeating
+      expect(t.state(:c, 0)).to eq(:idle)
+      expect(t.press(:c, 6.0, repeat: true)).to eq(:repeat)
     end
 
     it 'holds a chord as long as its last key repeats (the OS repeats only that one)' do

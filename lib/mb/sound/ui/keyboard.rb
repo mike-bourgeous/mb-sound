@@ -191,6 +191,17 @@ module MB
           @off_mode == :auto ? (@releases ? :release : :tap) : @off_mode
         end
 
+        # The OS key-repeat delay the keyboard tells autorepeats from new
+        # strikes by (learned from the repeats it sees; set it to skip the
+        # one retrigger before it is learned, e.g. `ui.keyboard.repeat_delay
+        # = 0.25` for a short delay).
+        def repeat_delay = @tracker.delay
+
+        def repeat_delay=(seconds)
+          raise ArgumentError, "Repeat delays are 0.15..1.2 seconds (got #{seconds.inspect})" unless seconds.is_a?(Numeric) && seconds.between?(0.15, 1.2)
+          @lock.synchronize { @tracker.delay = seconds }
+        end
+
         # Seconds each note sounds in :tap mode.
         def tap=(seconds)
           raise ArgumentError, "Tap lengths are positive seconds (got #{seconds.inspect})" unless seconds.is_a?(Numeric) && seconds > 0
