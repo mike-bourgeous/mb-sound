@@ -130,7 +130,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/jungle.rb' => ['-p', 'breaks', '-c', '4000'],
     'bin/synths/pluck.rb' => ['--stretch', '1', '--damping', '4'],
     'bin/synths/sinewave.rb' => [],
-    'bin/synths/sq80_voice.rb' => [],
+    'bin/synths/sq80_voice.rb' => ['-p', 'flutter_pad', '--cutoff', '700'],
     'bin/synths/stereo_graph_synth_example.rb' => [],
     'bin/synths/vocal_lead.rb' => ['-V', 'i,a,u', '-j', '0.2'],
     'bin/synths/wavetable_bass.rb' => [],

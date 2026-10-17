@@ -202,6 +202,31 @@ RSpec.describe MB::Sound::Help do
       end
     end
 
+    it 'lesson.back stays on a step that already passes until lesson.next (it used to move on at once)' do
+      session = new_session
+      lesson = MB::Sound::Help::LESSONS[:set]
+      MB::Sound::Session.with_context(session: session) do
+        runner = MB::Sound::Help::LessonRunner.new(lesson, 0)
+        first = runner.step
+        MB::Sound.instance_exec(&first.code)
+        expect(runner.after_line).to include('✓')
+        expect(runner.index).to eq(1)
+
+        runner.back
+        expect(runner.step).to equal(first)
+        expect(first.passed?).to eq(true)
+        expect(runner.after_line).to be_nil # the line that went back doesn't undo it
+        expect(runner.index).to eq(0)
+        expect(MB::U.remove_ansi(runner.to_s)).to include('already done')
+
+        runner.next
+        expect(runner.index).to eq(1)
+      end
+    ensure
+      MB::Sound::Help::Progress.save(:set, 0)
+      session&.close
+    end
+
     it 'record: files the lesson makes go to the help directory, never the take directory' do
       takes = tmp_path('takes')
       session = new_session
@@ -457,6 +482,17 @@ RSpec.describe MB::Sound::Help do
       expect(t).to include('matches').and include('lp4')
     end
 
+    it 'lists matching topics first in a search (help /sq80/)' do
+      t = text(MB::Sound.help(/sq80/))
+      expect(t).to include('topics').and include(':sq80').and include('SQ-80 voice and patches')
+      expect(t).to include('sq80_patches').and include('sq80_env')
+      expect(t.index(':sq80 ')).to be < t.index('sq80_patches')
+    end
+
+    it 'keeps code spans whole when wrapping topic text' do
+      expect(text(MB::Sound.help(:sq80))).not_to include('`')
+    end
+
     it 'falls back to a search for unknown names' do
       expect(text(MB::Sound.help(:xyzzy_nothing))).to include('0 matches')
     end
@@ -481,7 +517,7 @@ RSpec.describe MB::Sound::Help do
 
     it 'refuses example numbers out of range' do
       expect { MB::Sound.help(:knobs).try(2) }.to raise_error(ArgumentError, /1 examples/)
-      expect { MB::Sound.help(:flow).try }.to raise_error(ArgumentError, /no examples/)
+      expect { MB::Sound.help(:analysis).try }.to raise_error(ArgumentError, /no examples/)
     end
   end
 

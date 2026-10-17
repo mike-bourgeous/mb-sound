@@ -171,6 +171,42 @@ module MB
       end
     end
 
+    Help.topic :sq80, 'SQ-80 voice and patches', group: :sound do
+      about <<~TEXT
+        `sq80` is an Ensoniq SQ-80-flavored synth built from the library's
+        pieces (original wave tables, nothing from the SQ-80's ROM): OSC1
+        a formant wave whose vowel stays put across the keyboard, OSC2 a
+        SYNTH 3-style table, OSC3 a PRIME-style table an octave down
+        blipped by ENV1, into a driven four-pole (lp4); SQ-80 panel units
+        on the envelopes (`sq80_env`: times 0..63, levels -63..+63), a
+        delayed vibrato, and two oddities: chop (octaves; a looping
+        32nd-note filter envelope) and flutter (octaves; each key's poly
+        pressure sets its own sample-and-hold filter flutter).  It takes
+        any MIDI source (none: live `midi`), a patch, and settings, as in
+        `sq80(clip, :chop)` or `sq80(:glass, cutoff: 900)`.  Patches:
+        :classic (the defaults), :flutter_pad, :chop, :vox_lead,
+        :prime_bass, :glass (`sq80_patches` lists them).  Settings:
+        voices, cutoff (Hz), reso (0..1), drive_mode (:feedback or
+        :input), drive, chop, flutter, second_release, osc1..osc3 (wave,
+        semitones, level, vibrato, env1), env1, env2, env4 (sq80_env panel
+        values), lfo1 (rate in Hz, depth in semitones, delay, wheel,
+        pressure), filter (env2, key, velocity, aftertouch, in octaves),
+        level; Hash settings change only the keys given
+        (`env4: { t4: 50 }`).  Each patch is a preset too
+        (`preset :sq80_glass, midi: midi`), and the shell plays them with
+        bin/synths/sq80_voice.rb -p glass.
+      TEXT
+      commands :sq80, :sq80_patches, :sq80_env
+      note :sq80, :envelopes
+      see :midi, :presets, :envelopes
+      example 'the chop patch on a chord' do
+        bg :try, sq80(seq(A3, F3).n2 & seq(C4, A3).n2 & seq(E4, C4).n2, :chop).at(-16.db)
+      end
+      example 'a vowel lead, darker, with a longer release' do
+        bg :try, sq80(seq(A4, C5, E5.n4, D5, C5, B4.n4).n8, :vox_lead, cutoff: 900, env4: { t4: 40 }).at(-16.db)
+      end
+    end
+
     Help.topic :sampler, 'Sampler: bounce, slice, chop', group: :sound do
       about <<~TEXT
         Samples are sounds in memory: `Sample['kick.flac']`, `bounce(graph,
@@ -487,6 +523,19 @@ module MB
       commands :flow, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
       note :arrangement
       see :sets
+      example 'a tiny song form' do
+        track(:try_lead, q: 1) { |c| c.tone.triangle.at(-12.db) * c.amp_env }
+        scene :try_intro, try_lead: seq(A4, E4).n4.loop
+        scene :try_verse, try_lead: seq(A4, C5, E5, C5).n8.loop
+        scene :try_outro, try_lead: seq(A4).n2.loop
+        flow do
+          try_intro 1
+          label :top
+          try_verse 2
+          goto :top, times: 1
+          try_outro 1
+        end
+      end
     end
 
     Help.topic :genres, 'Genre templates', group: :arrange do
@@ -626,7 +675,8 @@ module MB
         lists them): drum & bass, jungle, ambient, and funk instruments,
         like `preset :dnb_reese, midi: midi` or `preset :ambient_tape, input: mic`,
         and electric pianos: `:tine_piano` clean, `:tine_crunch` with its amp
-        pushed (`amp: 1..8`), `:reed_piano`.
+        pushed (`amp: 1..8`), `:reed_piano`, and the SQ-80 voice's patches
+        (`:sq80_glass` and friends; see `help :sq80`).
       TEXT
       commands :ruby, :save, :preset, :presets, :set, :named_proc
       note :graph_io
