@@ -273,6 +273,8 @@ module MB
         end
 
         def plan_unsupported_reason
+          # A ringing sum whose summands have all ended returns nil (unfused)
+          return 'every summand has ended' if @ended && live_gains.each_key.all? { |x| steady?(x) }
           return "a #{@buf.class} buffer" unless @buf.is_a?(Numo::SFloat) || @buf.is_a?(Numo::SComplex)
           return 'a non-numeric gain' unless @gains.each_value.all? { |g| g.is_a?(Numeric) }
 
