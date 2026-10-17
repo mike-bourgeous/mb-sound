@@ -52,8 +52,22 @@ module MB
 
         # Bars to fade in new graphs when Session#add isn't given a +:fade+
         # (nil for no fade).  Graphs replacing a named graph crossfade over
-        # DECLICK_SECONDS unless Session#add is given a fade.
+        # DECLICK_SECONDS unless Session#add is given a fade (see
+        # #replace_declick).
         attr_reader :fade_in
+
+        # True (the default) if a graph replacing a playing one under the
+        # same name crossfades over DECLICK_SECONDS when Session#add isn't
+        # given a fade; false cuts on the exact sample, as every Session
+        # did before 2026-10-17 (take replays of older takes set it).
+        def replace_declick
+          @replace_declick.nil? ? true : @replace_declick
+        end
+
+        # Sets #replace_declick.
+        def replace_declick=(on)
+          @replace_declick = !!on
+        end
 
         # Bars to fade out graphs when Session#remove isn't given a +:fade+
         # (nil to stop right away).

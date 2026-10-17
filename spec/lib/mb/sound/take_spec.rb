@@ -404,6 +404,27 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays takes saved before replace_declick with hard-cut replacements, and newer ones with the declick crossfade' do
+    render = ->(**opts) {
+      r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 1, fade_in: nil, fade_out: nil, rng: nil, ends: 2r, **opts) { |rp|
+        rp.line(0r, [0r], 'bg :x, 1.constant, on: :now')
+        rp.line(0r, [1r], 'bg :x, 2.constant')
+      }
+      out = []
+      r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, tail: 0) { |mix| out << mix[0].dup }
+      out.reduce(:concatenate)
+    }
+    old = render.()
+    expect(old[95999]).to eq(1)
+    expect(old[96000]).to eq(2)
+    new = render.(replace_declick: true)
+    expect(new[96000]).to eq(1)
+    expect(new[96000 + 240]).to eq(2)
+    s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1)
+    expect(MB::Sound::Take.new(session: s).send(:start_state)[:replace_declick]).to eq(true)
+    s.close
+  end
+
   it 'warns when a replay goes quiet with take lines left to run' do
     r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 6r) { |rp|
       rp.line(0r, [0r], 'bg :x, 0.1.constant.until(1.bar)')

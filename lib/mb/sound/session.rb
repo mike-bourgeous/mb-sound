@@ -286,6 +286,7 @@ module MB
         self.master_gain_post = master_gain_post
         self.fade_in = fade_in
         self.fade_out = fade_out
+        @replace_declick = nil
         @output = output
         @channels = channels
         @buffer_size = buffer_size
@@ -1046,7 +1047,7 @@ module MB
           # A replacement crossfades over the declick time (5 ms, exact
           # frames, like undo's restores; ux-r3 item 5: a hard cut between
           # two unrelated graphs clicked), unless given a fade (0: cut)
-          fade = replacing ? declick_bars : @fade_in unless explicit_fade
+          fade = replacing ? (replace_declick ? declick_bars : nil) : @fade_in unless explicit_fade
 
           # Hand over from the graph being replaced at the new start time
           @players.each_value do |p|
