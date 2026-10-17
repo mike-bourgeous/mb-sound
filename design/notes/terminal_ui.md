@@ -169,7 +169,9 @@ The maintainer's notes from testing natively in Konsole, item by item (brief: /a
 - **Scripts**: `--ui [LAYOUT]` plays songs (`:show`) and synths/effects (`:play`, KEYS mode) in a console-less screen (`Tiles` with `repl: :none`, `on_key:`; `Session#paused=` for Space); live synth/effect scripts take Esc (all notes off, twice all sound off), q, l, `MIDI_LOG=1`, `MIDI_STUCK=s` (`ScriptRunner::LiveKeys`).
 - `debug_dump` writes the console's state to tmp/debug/<time>/.
 
-Not done here (reported): the plotting UX (`overlay`) and one themed table component (items 31-32), a `sig.blend` helper, `ui :wall` picked by size, the console's own `capture` per track.
+- **Plots and tables**: `overlay a, b` / `overlay saw: a, square: b` (labels and titles inferred; `overlay_chart` for figures; the Hash-of-Hashes form is gone), and one themed table, `MB::Sound::Table`, for `table`, processing matrices, and the scripts (no `MB::U.table` left).
+
+Not done here (reported): a `sig.blend` helper, `ui :wall` picked by size, the console's own `capture` per track, a guard against raw terminal writes while a screen is up.
 
 ## Patterns and lessons (ux-1, 2026-10-17)
 
