@@ -42,7 +42,7 @@ module MB
         # Keys hinted on the status line per mode.
         HINTS = {
           repl: 'Ctrl-] nav',
-          nav: '1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
+          nav: '? keys  1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
           grab: 'Ctrl-] back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
           step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
@@ -50,6 +50,58 @@ module MB
         # NAV keys of mb-sound's own panes (after Router::NAV).
         NAV_EXTRA = Input::Keymap.new(:tiles) do
           on 'p', :keys
+          on '?', :key_help
+        end
+
+        # The keys by mode, in groups ([group, [[keys, what], ...]]): the
+        # `?` overlay in NAV mode shows the :nav groups and the focused
+        # pane's (the keyboard's :grab or :step), and `help :ui` prints
+        # them (Tiles.key_table).
+        KEY_HELP = {
+          nav: [
+            ['Panes', [
+              ['1-9', 'pick a pane by its number'], ['Tab S-Tab h j k l', 'next, previous, by direction'],
+              ['z', 'zoom (again: back)'], ['s v', 'split below, beside'], ['x', 'close (the REPL stays)'],
+              ['=', 'even out sizes'], ['arrows', 'resize by 1 (Shift: 5)'], ['[ ]', 'previous, next tab'],
+              ['u Ctrl-R', 'undo, redo'],
+            ]],
+            ['Console', [
+              ['PgUp PgDn', 'scroll the REPL (also Ctrl-B Ctrl-F)'], ['g G', 'oldest line, live'],
+              ['/ n N', 'search back, next, previous'], ['y', 'copy the match or the view (OSC 52)'],
+              [':', 'run a line of Ruby (show :knobs, go :drop)'], ['Ctrl-L', 'redraw'],
+            ]],
+            ['Modes', [
+              ['p', 'play the keyboard (KEYS)'], ['i Esc Enter Ctrl-]', 'back to the REPL'],
+              ['Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'], ['?', 'this help'],
+            ]],
+          ],
+          grab: [
+            ['Keyboard', [
+              ['z s x d c v ...', 'notes from C3 (lower row)'], ['q 2 w 3 e r ...', 'notes from C4 (upper row)'],
+              ['- + Left Right', 'octave down, up'], ['Up Down', 'velocity'], ['Shift / Ctrl', 'accent / soft'],
+              ['Space', 'sustain'], ['Esc', 'all notes off'], ['Enter', 'capture into the armed tracks'],
+              ['`', 'note-off mode'], ['Tab', 'step entry'], ['Ctrl-] Ctrl-C', 'back to the REPL'],
+            ]],
+          ],
+          step: [
+            ['Step entry', [
+              ['z x c v ...', 'a note (several at once: a chord)'], ['1-7', 'whole .. 64th'], ['8 9', 'dotted, triplet'],
+              ['r t', 'rest, tie'], ['a `', 'accent, slide the last step'], ['BkSp Del', 'undo a step, clear'],
+              ['p', 'play the clip'], ['w', 'swap it into the armed tracks'], ['Enter', 'done: its Ruby on the REPL line'],
+              ['Tab', 'back to playing'],
+            ]],
+          ],
+        }.freeze
+
+        # The key table for +modes+ as text lines (for help :ui).
+        def self.key_table(*modes)
+          modes = KEY_HELP.keys if modes.empty?
+          modes.flat_map do |m|
+            KEY_HELP.fetch(m).flat_map do |group, keys|
+              w = keys.map { |k, _| k.length }.max
+              ["#{group}:", *keys.map { |k, what| "  #{k.ljust(w)}  #{what}" }, '']
+            end
+          end
         end
 
         # Kitty keyboard protocol flags pushed while KEYS mode has the
@@ -108,6 +160,9 @@ module MB
           @palette_history = []
           @search_history = []
           @midi_seen = nil
+          @overlay = nil
+          @gaps = nil
+          @title_rules = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
           @router = Input::Router.new(self, nav_esc: nav_esc)
@@ -531,6 +586,24 @@ module MB
           out
         end
 
+        # Shows (or hides) the key overlay: NAV's keys, and the focused
+        # pane's (the keyboard's).  Any key closes it.
+        def key_help(on = @overlay.nil?)
+          @lock.synchronize do
+            @overlay =
+              if on
+                groups = KEY_HELP[:nav].dup
+                groups += KEY_HELP[@keyboard.entry == :step ? :step : :grab] if @tiler.focus == :keyboard
+                groups
+              end
+            @full = true
+          end
+          self
+        end
+
+        # True while the key overlay shows.
+        def key_help? = !@overlay.nil?
+
         ### Router host (called on the input thread)
 
         # A key in KEYS mode (:grab).
@@ -607,6 +680,7 @@ module MB
           when :redraw then @full = true
           when :panic then run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
+          when :key_help then key_help
           when :call then run_safely { a.args[0].call }
           when :line_changed then nil
           when :complete then complete_palette
@@ -852,6 +926,13 @@ module MB
             relay_event(e)
             return
           end
+          if @overlay && e.is_a?(Input::Key) && !e.release?
+            # Any key closes the key overlay (and does nothing else); under
+            # the screen lock, so a frame being painted can't drop the
+            # full redraw that takes it off
+            key_help(false)
+            return
+          end
           if e.is_a?(Input::Key) && @router.mode != :line
             return if e.release? && @router.mode != :grab
             case e.chord
@@ -991,7 +1072,11 @@ module MB
           reload_files(now)
           relayout if @relayout || !@placed_layout.equal?(@tiler.layout)
           snap = snapshot
+          # Taken at the start: a redraw asked for while this frame paints
+          # (another thread: a mode change, a closed overlay) stays asked
+          # for, instead of being cleared when the frame ends
           full = @full
+          @full = false
           if full
             @grid.clear
             draw_gaps
@@ -1034,13 +1119,13 @@ module MB
             Thread.pass
           end
           draw_badges if @router.mode == :nav
+          draw_overlay if @overlay
           draw_status(now, snap)
 
           cells = @grid.frame(full ? nil : @shown, @mode, row: 1, col: 1, sync: false)
           cells = '' if cells == "\e[0m" || cells.empty?
           bytes = '' if bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
-          @full = false
           cursor = cursor_bytes
           out = nil
           if !cells.empty? || !bytes.empty? || cursor != @last_cursor || full
@@ -1166,6 +1251,63 @@ module MB
             title = " #{@panes[name].title.to_s.upcase} "
             next if title.length + 2 > r.w
             @grid.put_run(r.x + 1, r.y - 1, title, Plot::Text::Cells.pack(Theme.rgb(:title)), nil, Plot::Text::Cells::BOLD)
+          end
+        end
+
+        # The key overlay (#key_help): groups in columns in a box centered
+        # on the screen, over the panes.
+        def draw_overlay
+          cols = @overlay.map do |group, keys|
+            kw = keys.map { |k, _| k.length }.max
+            lines = [[group, nil]] + keys.map { |k, what| [k.ljust(kw), what] }
+            [lines, lines.map { |a, b| b ? a.length + 2 + b.length : a.length }.max]
+          end
+          # Columns as wide as fit; groups fill each column downward
+          avail_w = @cols - 4
+          avail_h = @rows - 4
+          columns = [[]]
+          height = 0
+          cols.each do |lines, w|
+            if height > 0 && height + lines.length + 1 > avail_h
+              columns << []
+              height = 0
+            end
+            columns.last << [lines, w]
+            height += lines.length + 1
+          end
+          widths = columns.map { |c| c.map(&:last).max }
+          box_w = [widths.sum + 3 * (widths.length - 1) + 4, avail_w + 2].min
+          box_h = [columns.map { |c| c.sum { |l, _| l.length + 1 } - 1 }.max + 4, avail_h + 2].min
+          x0 = [(@cols - box_w) / 2, 0].max
+          y0 = [(@rows - 1 - box_h) / 2, 0].max
+          c = Canvas.new(@grid, x0, y0, box_w, box_h, glyphs: @glyphs).clear
+          rule = @glyphs == :ascii ? ['+', '-', '|'] : ['┼', '─', '│']
+          border = Plot::Text::Cells.pack(Theme.rgb(:key))
+          @grid.put_run(x0, y0, (@glyphs == :ascii ? '+' : '┌') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┐'), border, nil, 0)
+          @grid.put_run(x0, y0 + box_h - 1, (@glyphs == :ascii ? '+' : '└') + rule[1] * (box_w - 2) + (@glyphs == :ascii ? '+' : '┘'), border, nil, 0)
+          (1...(box_h - 1)).each do |dy|
+            @grid.put_run(x0, y0 + dy, rule[2], border, nil, 0)
+            @grid.put_run(x0 + box_w - 1, y0 + dy, rule[2], border, nil, 0)
+          end
+          title = ' keys (any key closes) '
+          c.text([(box_w - title.length) / 2, 1].max, 0, c.fit(title, box_w - 2), :title)
+          x = 2
+          columns.each_with_index do |column, i|
+            y = 2
+            column.each do |lines, _|
+              lines.each do |a, b|
+                break if y >= box_h - 1
+                if b.nil?
+                  c.text(x, y, c.fit(a, box_w - x - 2), :title)
+                else
+                  c.line(y, [a, :key], '  ', [c.fit(b, [box_w - x - a.length - 4, 0].max), :dim], x: x)
+                end
+                y += 1
+              end
+              y += 1
+            end
+            x += widths[i] + 3
+            break if x >= box_w - 2
           end
         end
 

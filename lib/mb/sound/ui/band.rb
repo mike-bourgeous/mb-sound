@@ -152,22 +152,24 @@ module MB
           (parts ||= {})[:poll] = c - cpu0 if c - cpu0 > SLOW_PART
 
           reassert = @full || @reasserted_at.nil? || now - @reasserted_at >= REASSERT
-          if reassert
-            @full = true
-            @reasserted_at = now
-          end
+          @reasserted_at = now if reassert
           return nil if @rows < @height + MIN_PROMPT_ROWS
+
+          # Taken at the start: a redraw asked for while this frame paints
+          # (another thread: a new layout) stays asked for
+          full = reassert
+          @full = false
 
           top = band_top
           drawn = 0
           bytes = +''
           @placed.each do |p|
-            next unless @full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
+            next unless full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
 
             c = thread_cpu
             begin
               if p.pane.bytes?
-                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: @full)
+                b = p.pane.frame_bytes(snap, p.state, row: top + p.y, col: 1 + p.x, w: p.w, h: p.h, mode: @mode, look: @look, full: full)
                 bytes << b if b
               else
                 canvas = (p.state[:canvas] ||= Canvas.new(@grid, p.x, p.y, p.w, p.h, glyphs: @glyphs))
@@ -186,12 +188,11 @@ module MB
             Thread.pass # the render thread waits at most one pane's draw for the GVL
           end
 
-          cells = @grid.frame(@full ? nil : @shown, @mode, row: top, col: 1, sync: false)
+          cells = @grid.frame(full ? nil : @shown, @mode, row: top, col: 1, sync: false)
           cells = '' if cells == EMPTY_FRAMES[@mode]
           bytes = '' if bytes.empty? || bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
           region_cmd = reassert ? "\e[#{region[0]};#{region[1]}r" : ''
-          @full = false
 
           out = nil
           if !cells.empty? || !bytes.empty? || reassert

@@ -227,6 +227,31 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     end
   end
 
+  it 'shows the keys with ? in NAV (the focused keyboard\'s too), and any key closes them (ux-1 item 10)' do
+    start(:keys, rows: 40, cols: 140)
+    expect(@term.wait_for(' KEYS ')).to eq(true)
+    @term.write("\x1d") # KEYS -> REPL
+    expect(@term.wait_for(' REPL ')).to eq(true)
+    @term.write("\x1d") # -> NAV
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.type((@tiles.tiler.numbered.index(:keyboard) + 1).to_s)
+    @term.settle(quiet: 0.1)
+    @term.type('?')
+    expect(@term.wait_for('keys (any key closes)')).to eq(true)
+    @term.settle(quiet: 0.1)
+    expect(@term.text).to include('Panes', 'Console', 'Modes', 'pick a pane by its number', 'Keyboard', 'capture into the armed tracks')
+    @term.type('z') # closes the overlay only (no zoom)
+    expect(@term.wait_for(/\A(?!.*any key closes)/m)).to eq(true)
+    expect(@tiles.key_help?).to eq(false)
+    expect(@tiles.tiler.layout.zoom).to be_nil
+    # Focus elsewhere: only NAV's keys
+    @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
+    @term.type('?')
+    expect(@term.wait_for('keys (any key closes)')).to eq(true)
+    expect(@term.text).not_to include('capture into the armed tracks')
+    expect(MB::Sound::UI::Tiles.key_table(:nav).join("\n")).to include("Panes:\n  1-9")
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')
