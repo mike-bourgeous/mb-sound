@@ -43,6 +43,22 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       end
     end
 
+    it 'give identical samples with a constant cutoff and a moving resonance in every drive mode' do
+      # (the Ruby mirror's feedback secant once overwrote its cached
+      # prewarped cutoff, so a resonance change without a cutoff change
+      # computed the stages from the wrong frequency)
+      [[0, 0, 0.0], [0, 0, 2.0], [2, 0, 1.5], [2, 1, 1.5]].each do |drive_mode, clip, drive|
+        [0, 1].each do |normalize|
+          s1 = [0.0] * 4
+          s2 = [0.0] * 4
+          c = ff.diode_ladder(noise * 2, 800, resonances, s1, 48000, 3.9, 0.375, drive, 1, drive_mode, clip, normalize)
+          ruby = fp.diode_process_ruby(noise * 2, 800, resonances, s2, 48000, 3.9, 0.375, drive, 1, drive_mode, clip, normalize)
+          expect(c).to eq(ruby)
+          expect(s1).to eq(s2)
+        end
+      end
+    end
+
     it 'give identical samples for constant parameters and odd values' do
       [[1000, 0.5], [0.0, 1.0], [Float::NAN, Float::NAN], [-5, -1], [1e9, 2]].each do |c, r|
         s1 = [0.3, -0.1, 0.0, 0.2]

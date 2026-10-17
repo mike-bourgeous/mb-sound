@@ -618,8 +618,8 @@ module MB
                 u = tanh(u * sat_drive) * sat_inv
               else
                 fb = p4 + q4 * u - dcomp * x
-                t = secant(fb * drive, clip)
-                kt = k * t
+                sec = secant(fb * drive, clip) # (not t: that is the prewarped cutoff)
+                kt = k * sec
                 u = (x * (1.0 + dcomp * kt) - kt * p4) / (1.0 + kt * q4)
               end
             end
