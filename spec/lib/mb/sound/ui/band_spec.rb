@@ -189,4 +189,37 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band.refresh(0.0)
     expect(band.to_text).to include('no session yet')
   end
+
+  it 'grows and shrinks at the bottom without asking the terminal for its cursor, the console\'s lines scrolled up (ux-1 r3 item 2)' do
+    band, io = ui_fake_band(:band, size: [30, 120], at: :bottom)
+    band.start(thread: false)
+    band.refresh(0.0)
+    screen = MB::Sound::UI::Screen.new(30, 120)
+    # The console's lines just above the band, the cursor on the last
+    screen << io.string << "\e[1;1H" << (1..22).map { |i| "line #{i}" }.join("\r\n")
+    io.truncate(0)
+    io.rewind
+    close = nil
+    Thread.new { close = band.plot_pane(:messages, height: 4) }.join # (from another thread, as the painter does)
+    expect(io.string).not_to include("\e[6n")
+    screen << io.string
+    lines = screen.lines.map(&:rstrip)
+    expect(band.height).to eq(12)
+    expect(lines[17]).to eq('line 22') # (scrolled up by the 4 rows the band grew)
+    expect(lines[14]).to eq('line 19')
+    expect([screen.row, screen.col]).to eq([17, 7]) # (back after line 22)
+    expect(lines[18..].join).not_to include('line')
+
+    # Shrinking back leaves the console's lines and the cursor where they are
+    io.truncate(0)
+    io.rewind
+    Thread.new { close.call }.join
+    expect(io.string).not_to include("\e[6n")
+    screen << io.string
+    lines = screen.lines.map(&:rstrip)
+    expect(band.height).to eq(8)
+    expect(lines[17]).to eq('line 22')
+    expect([screen.row, screen.col]).to eq([17, 7])
+    expect(lines[18..21].join.strip).to eq('')
+  end
 end

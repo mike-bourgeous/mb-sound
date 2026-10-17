@@ -64,7 +64,7 @@ module MB
         # to draw instead of following a Session (specs, captures).
         def initialize(layout:, io: $stdout, session: nil, at: :bottom, color: :ansi256, look: :auto, glyphs: UI.glyphs, size: nil, clock: nil, native: Plot.native, fps: 60, panes: UI.panes, source: nil)
           # (Every instance variable set up front, in one order: one object shape)
-          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = nil
+          @stopping = @thread = @first_refresh = @reasserted_at = @full = @resized = @rows = @cols = @density = @shown_layout = @boxed = @height = @placed = @rule_row = @grid = @shown = @chrome = @size_checked_at = @old_winch = @winch_installed = @attached = @poll = @polled_at = @poll_warned = @last = @painter_warned = @heard = @starter = nil
           raise ArgumentError, "at: is :top or :bottom (got #{at.inspect})" unless %i[top bottom].include?(at)
           raise ArgumentError, "Unknown color mode #{color.inspect}" unless Plot::Text::Cells::MODES.key?(color)
 
@@ -119,6 +119,7 @@ module MB
           return self if @active
 
           @active = true
+          @starter = Thread.current
           setup_terminal
           install_winch
           RelineGuard.install
@@ -277,13 +278,31 @@ module MB
           old_height = @height
           @layout = layout
           relayout(@rows, @cols)
-          if @active && old_height != @height
-            # Clear the old band and set the new region
-            clear = (1..@rows).select { |r| top? ? r <= [old_height, @height].max : r > @rows - [old_height, @height].max }.map { |r| "\e[#{r};1H\e[2K" }.join
-            write("\e7\e[r#{clear}\e8")
-            setup_terminal(scroll: @height > old_height ? @height - old_height : 0)
-          end
+          resize_band(old_height) if @active && old_height != @height
           @full = true
+        end
+
+        # Moves the band's edge from +old+ rows to its current height
+        # without asking the terminal where the cursor is (ux-1 r3 item 2: a
+        # painter-thread cursor query raced Reline reading stdin, and the
+        # rows the band grew into were cleared before the console's lines
+        # were scrolled out of the way, erasing the end of a multi-line
+        # command): the console's lines scroll with the edge, the band's
+        # rows are cleared, and the cursor comes back to its line (saved,
+        # restored, moved up by the rows scrolled).  One write.
+        def resize_band(old)
+          grow = @height - old
+          a, b = region
+          out = +"\e7"
+          if grow > 0
+            out << (top? ? "\e[#{old + 1};#{@rows}r" : "\e[r") << "\e[#{@rows};1H#{"\n" * grow}"
+          end
+          rows = top? ? (1..[old, @height].max) : ((@rows - [old, @height].max + 1)..@rows)
+          out << rows.map { |r| "\e[#{r};1H\e[2K" }.join
+          out << "\e[#{a};#{b}r\e8"
+          out << "\e[#{grow}A" if grow > 0
+          write(out)
+          @reasserted_at = @clock.call
         end
 
         # True when the band draws on the process's terminal (so stderr
@@ -447,7 +466,11 @@ module MB
           rows, cols = terminal_size
           return if rows == @rows && cols == @cols
 
+          old = @height
           relayout(rows, cols)
+          # (A size that changes the band's height, e.g. its rule from
+          # Density::RULE_MIN_ROWS rows, moves the edge as layout= does)
+          resize_band(old) if @active && old != @height
           @reasserted_at = nil
         end
 
@@ -465,8 +488,12 @@ module MB
           @reasserted_at = @clock.call
         end
 
-        # The cursor's row (1-based) from the terminal, or nil.
+        # The cursor's row (1-based) from the terminal, or nil.  Only the
+        # thread that started the band asks (the console's, between lines):
+        # a cursor report asked for from the painter would race Reline's
+        # reads of stdin (ux-1 r3 item 2).
         def cursor_row
+          return nil unless Thread.current.equal?(@starter)
           return nil unless @io.respond_to?(:tty?) && @io.tty? && $stdin.tty?
           IO.console&.cursor&.first&.+(1)
         rescue StandardError
