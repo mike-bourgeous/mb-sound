@@ -11,6 +11,10 @@ ui                      # the default band: transport, form, tracks, queued, mas
 ui :deck                # 13 rows: adds knobs and CPU per part
 ui :mini                # one line: transport and form
 ui :band, at: :top      # above the scrolling text (default :bottom since ux-1; also color: :truecolor, look: :scope for Braille)
+ui :wall                # every pane (200x60 and up); ui :tiles, :studio, :keys
+keys                    # the keyboard (F2 in the tiles); fg after Ctrl-Z; jobs
+ui.fps; ui.target_fps = 30; ui.frame_rate   # measured vs the painter's rate (NAV f shows it)
+UI.messages.recent      # warnings while a screen was up (NAV m: the messages pane)
 ui off                  # (`off` is :off; also ui :off, ui false)
 ui.stats                # painter CPU per refresh, bytes per frame, the slowest refreshes
 
@@ -154,6 +158,18 @@ ui.keyboard.base = 60     # z is C4 (octaves; also - and +)
 **Specs**: `keyboard_spec.rb` (rows and keys; each mode with a fake clock: release/repeat events, autorepeat hold, quick re-strikes, learned timing, chords, tap, legato, sustain, panic, all_off in every mode; step entry with the to_ruby round trip, chords by time and by held keys, preview, Enter; the pane's text), `tiles_keys_spec.rb` (a pty: `:keys` with kitty sequences, NAV p with legacy keys and every exit, step entry onto the REPL line, an armed track captured from typed keys through a realtime Session), `decoder_spec.rb` (event types), `midi_input_spec.rb` (merged sources, a VirtualInput's timing).
 
 **Open**: the band (ui-3) can show the pane but has no input of its own (Reline owns stdin), so KEYS mode is tiles-only; a plain-console `keys` prompt is possible later.  Non-US layouts: legacy Shift detection maps a US layout's shifted punctuation; kitty's base keys are layout-independent for the letter rows only.  Program/bank keys, per-row octaves (ZynAddSubFX), and showing a hardware keyboard's notes on the strip are not built.
+
+## The usability sweep (ux-1, 2026-10-17)
+
+The maintainer's notes from testing natively in Konsole, item by item (brief: /app/tmp/briefs/ux-1.md).
+
+- **Bugs**: pane bodies follow their canvas (stale panes after any relayout); leaving KEYS focuses the REPL (NAV i went back into KEYS, where Up/Down are velocity) and kitty-only key bytes reach Reline as legacy; `vis` and play's plot go to a scope/spectrum slot (`Tiles#plot_pane`, `Band#plot_pane`, `PlaybackMethods#visualize_in_ui`) instead of drawing over the screen; KEYS Enter's capture and step entry's swap run console lines through `UI.run_line` (journaled, undoable, take lines), one per armed track, a broken patch named in the messages pane with its line (`UI.error_origin`).
+- **Prompt and line editing**: see "Using it" above (`UI::Prompt`, `UI::EnterSubmits`).
+- **Tiles**: the band at the bottom by default; rules between stacked panes (box-drawing joins, `hrule` glyph, titles set into the rule, the focused pane's border in the key color); `?` in NAV shows the keys (`Tiles::KEY_HELP`, also on help :ui); warnings and live errors go to `UI.messages` while a screen is up (`:messages` pane, "! n (m)" on the status line, NAV m, a band strip, a summary on `ui off`; kept off the terminal when the screen owns it); `ui.fps` is measured (frames written per second), `ui.target_fps` the painter's rate, NAV f a readout, `ui.stats[:pane_cpu_ms]`; `ui :wall` for big terminals; the keyboard pane scales to a piano (2-5 columns per white key, velocity fill, neighbor octaves dimmed); `keys` and F2; `fg` and `jobs` after Ctrl-Z.
+- **Scripts**: `--ui [LAYOUT]` plays songs (`:show`) and synths/effects (`:play`, KEYS mode) in a console-less screen (`Tiles` with `repl: :none`, `on_key:`; `Session#paused=` for Space); live synth/effect scripts take Esc (all notes off, twice all sound off), q, l, `MIDI_LOG=1`, `MIDI_STUCK=s` (`ScriptRunner::LiveKeys`).
+- `debug_dump` writes the console's state to tmp/debug/<time>/.
+
+Not done here (reported): the plotting UX (`overlay`) and one themed table component (items 31-32), a `sig.blend` helper, `ui :wall` picked by size, the console's own `capture` per track.
 
 ## Patterns and lessons (ux-1, 2026-10-17)
 
