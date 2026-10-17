@@ -268,6 +268,16 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect(stats[:target_fps]).to eq(30)
   end
 
+  it 'tips ui :wall on a big terminal, and not on a small one (ux-1 round 2)' do
+    start(rows: 60, cols: 200)
+    expect(@term.wait_for('ui :wall shows every pane')).to eq(true), @term.lines.last
+    @tiles.stop
+    @term.close
+    start(rows: 30, cols: 100)
+    @term.settle
+    expect(@term.text).not_to include('ui :wall')
+  end
+
   it 'evaluates palette lines in the console binding and shows the result' do
     start
     nav(':')

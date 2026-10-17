@@ -171,7 +171,9 @@ The maintainer's notes from testing natively in Konsole, item by item (brief: /a
 
 - **Plots and tables**: `overlay a, b` / `overlay saw: a, square: b` (labels and titles inferred; `overlay_chart` for figures; the Hash-of-Hashes form is gone), and one themed table, `MB::Sound::Table`, for `table`, processing matrices, and the scripts (no `MB::U.table` left).
 
-Not done here (reported): a `sig.blend` helper, `ui :wall` picked by size, the console's own `capture` per track, a guard against raw terminal writes while a screen is up.
+Round 2 (maintainer's answers, 2026-10-17): `sig.blend` (graph_nodes.md), the console's `capture` per armed track (arrangement.md); `:wall` stays opt-in, and a tiled screen starting on a 200x60+ terminal flashes a tip for it; Alt-Enter is the newline key; Space in `--ui` is a full pause.
+
+Not done here: a guard against raw terminal writes while a screen is up (proposed).
 
 ## Patterns and lessons (ux-1, 2026-10-17)
 

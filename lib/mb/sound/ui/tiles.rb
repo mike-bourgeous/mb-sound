@@ -224,6 +224,10 @@ module MB
           @term.typed_during_probe.each { |e| handle(e) }
           hook_keyboard
           keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
+          # :wall stays opt-in (maintainer, 2026-10-17); big terminals get a tip
+          if @host && @layout_name != :wall && @rows >= 60 && @cols >= 200
+            flash('a big terminal: ui :wall shows every pane at once', :dim)
+          end
           if thread
             @painter = Thread.new { paint_loop }
             @reader = Thread.new { input_loop }
