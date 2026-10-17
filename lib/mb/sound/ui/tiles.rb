@@ -808,10 +808,17 @@ module MB
         # that doesn't build, ...) goes to the messages pane naming the
         # track and where in the patch it happened; returns :failed.
         def run_for_track(what, name)
-          yield
+          r = yield
+          # (live, a failure is a warning, which the messages pane got, and
+          # nothing to show for it)
+          r.respond_to?(:lands) ? r : :failed
         rescue StandardError, ScriptError => e
-          where = UI.error_origin(e)
-          UI.messages.add("#{what} into #{name.inspect} failed: #{e.class}: #{e.message}#{where ? " (at #{where})" : ''}", severity: :error)
+          if e.is_a?(Arrangement::Recording::CaptureFailed)
+            UI.messages.add(e.message, severity: :error) # (it names the track and line itself)
+          else
+            where = UI.error_origin(e)
+            UI.messages.add("#{what} into #{name.inspect} failed: #{e.class}: #{e.message}#{where ? " (at #{where})" : ''}", severity: :error)
+          end
           :failed
         end
 

@@ -245,15 +245,18 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     out.define_singleton_method(:target_session) { session }
     %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
     start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
-    @tiles.send(:capture_keys)
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles) # (UI.screen: the live warning goes to the messages)
+    # (and to stderr too: this screen isn't the console's terminal)
+    expect { @tiles.send(:capture_keys) }.to output(/capture into :l_bass failed/).to_stderr
     150.times { @session.process_buffer } # to the launch point
     expect(@session.arrangement.captures.keys).to eq([:lead_1])
     msg = MB::Sound::UI.messages.recent(1)[0]
     expect(msg.severity).to eq(:error)
-    expect(msg.text).to match(/\Acapture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/ui\/tiles_keys_spec\.rb:#{broken_line}\)\z/)
+    expect(msg.text).to match(/capture into :l_bass failed: NoMethodError: undefined method 'nosuch_patch_method'.* \(at spec\/lib\/mb\/sound\/ui\/tiles_keys_spec\.rb:#{broken_line}\)/)
     expect(@tiles.instance_variable_get(:@flash)[0]).to match(/\Acapture: what you played loops into :lead at \d+:\d.*; :l_bass failed \(m: messages\)\z/)
   ensure
     MB::Sound.live = live unless live.nil?
+    MB::Sound::UI.instance_variable_set(:@tiles, nil)
     MB::Sound::UI.messages.clear
   end
 

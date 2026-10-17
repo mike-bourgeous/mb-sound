@@ -161,6 +161,7 @@ module MB
           recording_align(align) or return nil
 
           entries = nil
+          failed = []
           @session.command("capture #{names.map(&:inspect).join(', ')}") {
             before = undo_state
             entries = trs.map { |tr|
@@ -169,12 +170,41 @@ module MB
                 MB::Sound.live_error(ArgumentError.new("Nothing played on #{hub} to capture")) or next
               end
               close = resolve(tr.q || @quant, tr, point)
-              capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+              # One track's failure (a patch that doesn't build) leaves the
+              # others captured (ux-1 round 2), and is reported below
+              begin
+                capture_into(tr, hub, close: close, length: len, from: len && close - len, quantize: quantize, humanize: humanize, channel: channel, sustain: sustain, align: align)
+              rescue StandardError, ScriptError => e
+                failed << [tr.name, e]
+                nil
+              end
             }.compact
             @session.note_undo_extra(self, before, undo_state)
           }
           entries = entries.map { |c| @session.journal[c.seq] }
+          unless failed.empty?
+            text = failed.map { |name, e|
+              where = Internal.error_origin(e)
+              "capture into #{name.inspect} failed: #{e.class}: #{e.message.lines.first&.strip}#{where ? " (at #{where})" : ''}"
+            }.join('; ')
+            ok = entries.map(&:subject).uniq
+            text += " (#{ok.map(&:inspect).join(', ')} captured)" unless ok.empty?
+            MB::Sound.live_error(CaptureFailed.new(text, failed: failed, entries: entries))
+          end
           entries.length == 1 ? entries.first : entries
+        end
+
+        # Raised (through live_error: a warning when live) when #capture
+        # couldn't capture into some of its tracks; +failed+ is [track
+        # name, error] pairs, +entries+ the captures that went through.
+        class CaptureFailed < StandardError
+          attr_reader :failed, :entries
+
+          def initialize(message, failed:, entries:)
+            super(message)
+            @failed = failed
+            @entries = entries
+          end
         end
 
         # The length of the last phrase played before +pos+ on +hub+ (see
