@@ -290,7 +290,7 @@ module MB
             case k.key
             when :enter then "\r"
             when :tab then k.mods.include?(:shift) ? "\e[Z" : "\t"
-            when :backspace then "\x7f"
+            when :backspace then k.mods.include?(:ctrl) ? "\x08" : "\x7f" # (Ctrl-Backspace: ^H, as xterm sends it)
             when :escape then "\e"
             when :up then "\e[A"
             when :down then "\e[B"

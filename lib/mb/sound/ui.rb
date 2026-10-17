@@ -27,7 +27,9 @@ require_relative 'ui/viewports/tree'
 require_relative 'ui/viewports/tiler'
 require_relative 'ui/viewports/loader'
 require_relative 'ui/screen/term'
+require_relative 'ui/input/reline_keys'
 require_relative 'ui/keyboard'
+require_relative 'ui/keys'
 require_relative 'ui/tiles'
 
 module MB

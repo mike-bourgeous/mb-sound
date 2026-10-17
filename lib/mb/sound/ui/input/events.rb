@@ -80,45 +80,69 @@ module MB
           end
         end
 
-        # A mode's key bindings, written as Ruby:
+        # A mode's key bindings, written as Ruby, with what each does (the
+        # key table: the `?` overlay, help pages, and specs read it):
         #
         #     Keymap.new :nav do
-        #       on '1'..'9', :focus_index        # the digit is passed along
-        #       on 'z', :zoom
-        #       on [:right, :shift], :resize, :right, 5
+        #       group 'Panes'
+        #       on '1'..'9', :focus_index, help: 'pick a pane by its number'  # the digit is passed along
+        #       on 'z', :zoom, help: 'zoom (again: back)'
+        #       on [:right, :shift], :resize, :right, 5, help: 'resize by 5'
+        #       doc 'z s x ...', 'notes (handled elsewhere; listed only)'
         #     end
         #
         # Keys are Strings (text), Symbols (:up, :escape, :tab), Ranges of
         # Strings (the key's digit or character is passed as the last
-        # argument), Arrays of those, or [key, *mods].
+        # argument), Arrays of those, or [key, *mods].  Bindings with the
+        # same help text in a group print as one line.
         class Keymap
+          # One binding: its keys as written, the chord, the Action's name
+          # and arguments, the help text, and the group.
+          Binding = Data.define(:keys, :chord, :action, :args, :help, :group)
+
           attr_reader :name
 
           def initialize(name, &block)
             @name = name
             @map = {}
+            @docs = []
+            @group = nil
             instance_exec(&block) if block
           end
 
-          # Binds +keys+ to Action +action+ with +args+.  Returns self.
-          def on(keys, action, *args)
-            chord = keys.is_a?(Array) && keys.length > 1 && keys.drop(1).all? { |m| MODS.include?(m) }
-            list = chord ? [keys] : keys.is_a?(Range) ? keys.to_a : Array(keys)
-            list.each do |k|
-              key = k.is_a?(Array) ? Key.of(*k) : Key.of(k)
-              @map[key.chord] = [action, args, keys.is_a?(Range)]
+          # Starts a group of bindings (a heading in the key table).
+          def group(title)
+            @group = title
+            self
+          end
+
+          # Binds +keys+ to Action +action+ with +args+ (+help+: what it
+          # does, for the key table).  Returns self.
+          # +label+ names the keys in the key table instead (several
+          # bindings with one label show once: 'arrows').
+          def on(keys, action, *args, help: nil, label: nil)
+            seq = (@seq = @seq.to_i + 1)
+            each_chord(keys) do |key|
+              @map[key.chord] = [action, args, keys.is_a?(Range), help, @group, label || keys, seq]
             end
+            self
+          end
+
+          # A key-table line for keys handled outside the keymap (note
+          # keys, chords a mode reads itself).
+          def doc(keys, help)
+            @docs << [@group, keys, help, (@seq = @seq.to_i + 1)]
             self
           end
 
           # Removes the bindings of +keys+.
           def off(keys)
-            Array(keys.is_a?(Range) ? keys.to_a : keys).each do |k|
-              key = k.is_a?(Array) ? Key.of(*k) : Key.of(k)
-              @map.delete(key.chord)
-            end
+            each_chord(keys) { |key| @map.delete(key.chord) }
             self
           end
+
+          # True if +key+ is bound.
+          def bound?(key) = @map.key?(key.chord)
 
           # The Action for +key+, or nil.
           def [](key)
@@ -127,13 +151,65 @@ module MB
             pass ? Action.of(action, *args, key.key =~ /\A\d\z/ ? key.key.to_i : key.key) : Action.of(action, *args)
           end
 
+          # Every binding (Binding), in the order bound.
+          def entries
+            @map.map { |chord, (a, args, _, help, group, keys)| Binding.new(keys: keys, chord: chord, action: a, args: args, help: help, group: group) }
+          end
+
           # Bindings as {"key" => :action} (for the keys line and help).
           def bindings
-            @map.to_h { |(k, mods), (a, _)| [[*mods, k].join('-'), a] }
+            @map.to_h { |(k, mods), (a, _)| [Keymap.chord_name([k, mods]), a] }
+          end
+
+          # The key table: [[group, [[keys text, help], ...]], ...], keys
+          # with the same help in a group joined ("h j k l"), ranges as
+          # "1-9"; bindings without help are left out.
+          def help_groups
+            groups = {}
+            items = @map.each_value.filter_map { |_a, _args, _pass, help, group, keys, seq| [seq, group, keys.is_a?(String) && keys.length > 1 ? keys : Keymap.keys_name(keys), help] if help }
+            items += @docs.map { |group, keys, help, seq| [seq, group, keys, help] }
+            items.sort_by(&:first).each do |_, group, name, help|
+              lines = (groups[group] ||= {})
+              (lines[help] ||= []) << name unless lines[help]&.include?(name)
+            end
+            groups.map { |group, lines| [group || @name.to_s.capitalize, lines.map { |help, names| [names.uniq.reject(&:empty?).join(" "), help] }] }
           end
 
           def inspect
             "#<UI::Input::Keymap #{@name.inspect} #{@map.length} keys>"
+          end
+
+          # Key names as people write them: "Ctrl-W", "S-Tab", "Alt-PgUp",
+          # "1-9", "Left".
+          NAMES = {
+            page_up: 'PgUp', page_down: 'PgDn', escape: 'Esc', enter: 'Enter', tab: 'Tab', backspace: 'BkSp',
+            delete: 'Del', insert: 'Ins', left: 'Left', right: 'Right', up: 'Up', down: 'Down', home: 'Home', end: 'End',
+          }.freeze
+          MOD_NAMES = { shift: 'S', alt: 'Alt', ctrl: 'Ctrl', meta: 'Meta' }.freeze
+
+          # The name of keys as written for #on.
+          def self.keys_name(keys)
+            return "#{keys.first}-#{keys.last}" if keys.is_a?(Range)
+            if keys.is_a?(Array) && keys.length > 1 && keys.drop(1).all? { |m| MODS.include?(m) }
+              return chord_name([keys[0], keys.drop(1)])
+            end
+            return Array(keys).map { |k| keys_name(k) }.join(' ') if keys.is_a?(Array)
+            chord_name([keys, []])
+          end
+
+          # The name of a [key, mods] chord.
+          def self.chord_name((key, mods))
+            k = key.is_a?(Symbol) ? (NAMES[key] || key.to_s.capitalize.sub(/\AF(\d)/, 'F\\1')) : key == ' ' ? 'Space' : key
+            k = k.upcase if mods.include?(:ctrl) && k.is_a?(String) && k.length == 1
+            [*mods.sort_by { |m| MODS.index(m) }.reverse.map { |m| MOD_NAMES[m] }, k].join('-')
+          end
+
+          private
+
+          def each_chord(keys)
+            chord = keys.is_a?(Array) && keys.length > 1 && keys.drop(1).all? { |m| MODS.include?(m) }
+            list = chord ? [keys] : keys.is_a?(Range) ? keys.to_a : Array(keys)
+            list.each { |k| yield(k.is_a?(Array) ? Key.of(*k) : Key.of(k)) }
           end
         end
       end
