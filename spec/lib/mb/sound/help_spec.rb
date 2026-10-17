@@ -481,7 +481,7 @@ RSpec.describe MB::Sound::Help do
 
     it 'refuses example numbers out of range' do
       expect { MB::Sound.help(:knobs).try(2) }.to raise_error(ArgumentError, /1 examples/)
-      expect { MB::Sound.help(:flow).try }.to raise_error(ArgumentError, /no examples/)
+      expect { MB::Sound.help(:analysis).try }.to raise_error(ArgumentError, /no examples/)
     end
   end
 

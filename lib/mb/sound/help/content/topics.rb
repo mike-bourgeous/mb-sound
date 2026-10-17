@@ -487,6 +487,19 @@ module MB
       commands :flow, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
       note :arrangement
       see :sets
+      example 'a tiny song form' do
+        track(:try_lead, q: 1) { |c| c.tone.triangle.at(-12.db) * c.amp_env }
+        scene :try_intro, try_lead: seq(A4, E4).n4.loop
+        scene :try_verse, try_lead: seq(A4, C5, E5, C5).n8.loop
+        scene :try_outro, try_lead: seq(A4).n2.loop
+        flow do
+          try_intro 1
+          label :top
+          try_verse 2
+          goto :top, times: 1
+          try_outro 1
+        end
+      end
     end
 
     Help.topic :genres, 'Genre templates', group: :arrange do
