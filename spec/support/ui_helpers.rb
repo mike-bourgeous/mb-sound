@@ -170,6 +170,23 @@ module UIHelpers
     yield
   end
 
+  # Waits for +tiles+' Router to reach +mode+ and the transition to finish:
+  # the Router changes its state before the screen's #mode_changed pins the
+  # focus and puts panes in, so a spec that reads the focus right after
+  # seeing the new mode raced the input thread (tiles_keys_spec's F2 example
+  # under load, 2026-10-18).  Reading under the screen's input lock waits
+  # for the whole event.  Returns true when reached within +timeout+.
+  def wait_mode(tiles, mode, timeout: 5)
+    wait_settled(tiles, timeout: timeout) { tiles.router.mode == mode }
+  end
+
+  # As #wait_until, with the block run under +tiles+' input lock (see
+  # #wait_mode): for conditions on the mode and what it drives.
+  def wait_settled(tiles, timeout: 5, &cond)
+    lock = tiles.instance_variable_get(:@input_lock)
+    wait_until(timeout: timeout) { lock.synchronize(&cond) }
+  end
+
   # A Tiles screen on a FakeTerminal with a Pry of its own (prompt "t> "),
   # started with threads, its keyboard playing into NullKeyboardOut unless
   # +keyboard:+ is given.  Returns [tiles, terminal].

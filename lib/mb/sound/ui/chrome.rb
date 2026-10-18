@@ -16,9 +16,11 @@ module MB
       #     Chrome.paint(grid, plan, glyphs: :unicode)
       module Chrome
         # A pane to frame: +name+, its +rect+ (Viewports::Rect), +title+
-        # (text, or nil), +number+ (NAV's number, or nil), +focused+.
-        Item = Data.define(:name, :rect, :title, :number, :focused) do
-          def initialize(name:, rect:, title: nil, number: nil, focused: false)
+        # (text, or nil), +number+ (NAV's number, or nil), +focused+,
+        # +jump+ (its NAV jump letter, shown beside the number in NAV), and
+        # +note+ (text after the number, e.g. its rate with NAV f).
+        Item = Data.define(:name, :rect, :title, :number, :focused, :jump, :note) do
+          def initialize(name:, rect:, title: nil, number: nil, focused: false, jump: nil, note: nil)
             super
           end
         end
@@ -26,7 +28,7 @@ module MB
         # Where a pane's chrome went: +at+ :rule (the title in the rule
         # above), :inside (a title row at the top of +rect+), or :none (no
         # room, or nothing to show); +inner+ the rectangle the pane draws in.
-        Frame = Data.define(:name, :rect, :inner, :title, :at, :number, :focused)
+        Frame = Data.define(:name, :rect, :inner, :title, :at, :number, :focused, :jump, :note)
 
         # The chrome of one screen: +gaps+ (rows of booleans: rule cells, or
         # nil without rules), the area's +w+ and +h+, and the Frames by name.
@@ -72,7 +74,7 @@ module MB
                 :none
               end
             inner = at == :inside ? Viewports::Rect.new(r.x, r.y + 1, r.w, r.h - 1) : r
-            [it.name, Frame.new(name: it.name, rect: r, inner: inner, title: it.title, at: at, number: it.number, focused: it.focused)]
+            [it.name, Frame.new(name: it.name, rect: r, inner: inner, title: it.title, at: at, number: it.number, focused: it.focused, jump: it.jump, note: it.note)]
           end
           Plan.new(gaps: gaps, w: w, h: h, frames: frames.freeze)
         end
@@ -135,12 +137,15 @@ module MB
           end
         end
 
-        # A pane's number as text: " 3 " (or " 3 name " for the focused
-        # pane in NAV, when it fits in +w+).
+        # A pane's number as text: " 3 " (in NAV with its jump letter,
+        # " 3 t ", and " 3 t name " for the focused pane when it fits in
+        # +w+), any note after it (" 3 t 60/s ").
         def badge(f, nav:, w:)
           return '' unless f.number
-          long = " #{f.number} #{f.name} "
-          nav && f.focused && long.length + 2 <= w ? long : " #{f.number} "
+          short = "#{f.number}#{nav && f.jump ? " #{f.jump}" : ''}#{f.note ? " #{f.note}" : ''}"
+          long = " #{short} #{f.name} "
+          return long if nav && f.focused && long.length + 2 <= w
+          short.length + 4 <= w ? " #{short} " : " #{f.number} "
         end
 
         # The title set into the rule above the pane (" TRACKS "), and the

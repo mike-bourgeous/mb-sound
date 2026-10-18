@@ -20,6 +20,18 @@ RSpec.describe(MB::Sound::UI::Keys, :aggregate_failures) do
     expect(ui::Tiles::KEY_HELP.keys).to include(:repl, :nav, :window, :grab, :step, :elsewhere)
   end
 
+  it "keeps every pane's jump letter clear of NAV's keys, the Ctrl-W window keys, and the others' (ux-r4)" do
+    declared = ObjectSpace.each_object(Class).select { |c| c < ui::Pane && c.name && c.jump }.to_h { |c| [ui::PaneKeys.kind_of(c.allocate), c.jump] }
+    expect(ui::Keys.check_jumps(declared)).to eq([])
+    expect(ui::Keys::JUMPS).to eq(repl: 'i', keyboard: 'K', tracks: 't', meters: 'e')
+    expect(ui::Keys.reserved_letters).to include('h', 'j', 'k', 'l', 'p', 'w', 'o', 'c', 's', 'v', 'z', 'x', 'm', 'f', 'g', 'G')
+    expect(ui::Keys.reserved_letters).not_to include('i', 'K', 't', 'e', 'a', 'r', 'b')
+    # What the check catches
+    expect(ui::Keys.check_jumps(clips: 'h').join).to include(":clips's jump \"h\" is a NAV or Ctrl-W key")
+    expect(ui::Keys.check_jumps(clips: 'a', racks: 'a').join).to include('jump "a" is claimed by :clips and :racks')
+    expect(ui::Keys.check_jumps(clips: 't').join).to include('claimed by :tracks and :clips')
+  end
+
   it 'says what each UI key read in the REPL does in the band and without a UI (none dropped silently, item 18)' do
     names = ui::Keys::ELSEWHERE.map(&:first).join(' ')
     repl_keys = ['Ctrl-]', 'F2', 'Ctrl-W', 'Alt-PgUp', 'Ctrl-BkSp', 'Ctrl-Del', 'Ctrl-S-Del', 'Ctrl-C', 'Ctrl-Z']

@@ -19,13 +19,44 @@ module MB
 
         # NAV keys of mb-sound's own panes (after Router::NAV).
         NAV_EXTRA = Keymap.new(:tiles) do
+          group 'Jump'
+          on 'i', :jump, :repl, help: 'into: REPL i, KEYS K, tracks t, meters e', label: 'i K t e'
+          on 'K', :jump, :keyboard, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
+          on 't', :jump, :tracks, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
+          on 'e', :jump, :meters, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
+          doc 'a b ...', "a pane's letter (by its number in NAV)"
           group 'Modes'
-          on 'p', :keys, help: 'play the keyboard (KEYS; F2 also from the REPL)'
           on 'm', :messages, help: 'messages (warnings) pane, again: away'
           on 'f', :show_fps, help: 'frame rate on the status line'
           on '?', :key_help, help: 'this help (a key listed here closes it and acts)'
           doc 'Ctrl-]', 'back to where NAV came from (REPL, KEYS, a prompt)'
           doc 'Ctrl-Z', 'hide the tiles (the set plays on; Ctrl-Z or ui: back)'
+        end
+
+        # Jump letters of the built-in panes (pane name => letter, as bound
+        # in NAV_EXTRA); other pane kinds declare theirs with
+        # `jump 'a'` (UI::PaneKeys).  #check_jumps keeps them all clear of
+        # NAV's keys and the Ctrl-W window keys.
+        JUMPS = NAV_EXTRA.entries.select { |b| b.action == :jump }.to_h { |b| [b.args[0], b.chord[0]] }.freeze
+
+        # Letters a jump may not take: every key NAV binds (Router::NAV,
+        # NAV_EXTRA but jumps), and the Ctrl-W window keys (NAV mirrors
+        # vim's window commands, so a jump letter there would read two ways).
+        def self.reserved_letters
+          maps = [Input::Router::NAV, Input::Router::WINDOW, NAV_EXTRA]
+          maps.flat_map { |m| m.entries.reject { |b| b.action == :jump }.map(&:chord) }.select { |k, mods| k.is_a?(String) && mods.empty? }.map(&:first).uniq.sort
+        end
+
+        # Problems with jump letters ({name => letter} of panes' declared
+        # jumps): reserved letters and letters claimed twice.  Empty when
+        # all is well.
+        def self.check_jumps(declared)
+          out = []
+          reserved = reserved_letters
+          all = JUMPS.to_a + declared.to_a
+          all.each { |name, l| out << "#{name.inspect}'s jump #{l.inspect} is a NAV or Ctrl-W key" if reserved.include?(l) }
+          all.group_by(&:last).each { |l, list| out << "jump #{l.inspect} is claimed by #{list.map { |n, _| n.inspect }.uniq.join(' and ')}" if list.map(&:first).uniq.length > 1 }
+          out
         end
 
         # Direct REPL keys (scrolling without NAV), each taken only when
