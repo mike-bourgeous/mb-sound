@@ -1,3 +1,5 @@
+require 'tempfile'
+
 module MB
   module Sound
     # Library plumbing that used to be console commands (MB::Sound extended
@@ -11,6 +13,57 @@ module MB
     # and PlotMethods#plotter (the shared plotters).
     module Internal
       module_function
+
+      # Added to an error raised inside .quiet_stderr: the text C libraries
+      # printed to stderr meanwhile.
+      module CapturedStderr
+        attr_accessor :captured_stderr
+
+        # The captured lines, stripped, without repeats, joined with "; ".
+        def stderr_summary
+          captured_stderr.to_s.lines.map(&:strip).reject(&:empty?).uniq.join('; ')
+        end
+      end
+
+      # Runs the block with the process's stderr (file descriptor 2)
+      # captured, since C libraries (ALSA, RtMidi, miniaudio) print their
+      # errors there: an error of one of +error_classes+ (default
+      # StandardError) raised by the block is raised again extended with
+      # CapturedStderr (#captured_stderr holds the text), so the caller can
+      # print one line instead of a wall of ALSA messages (no sound card:
+      # 35 lines per attempt, ux-review-1); on success the text is printed
+      # after all.  Other threads' output to stderr in the meantime is held
+      # until the block returns.
+      def quiet_stderr(*error_classes)
+        error_classes = [StandardError] if error_classes.empty?
+        $stderr.flush
+        STDERR.flush
+        saved = STDERR.dup
+        Tempfile.create('mb_sound_stderr') do |f|
+          error = nil
+          begin
+            STDERR.reopen(f)
+            result = yield
+          rescue *error_classes => e
+            error = e
+          ensure
+            STDERR.flush
+            STDERR.reopen(saved)
+            saved.close
+          end
+
+          f.rewind
+          text = f.read
+          if error
+            error.extend(CapturedStderr)
+            error.captured_stderr = text
+            raise error
+          end
+
+          STDERR.write(text) unless text.empty?
+          result
+        end
+      end
 
       # Where +error+ came from in the user's code ("(pry):3",
       # "songs/x.rb:12"): its first backtrace frame outside mb-sound's lib/

@@ -3,7 +3,20 @@ module MB
     module Help
       # Shared printing for help pages: Pry shows the page's text instead of
       # an object dump, and pages stay values (`t = help :knobs; t.try`).
+      #
+      # Every page's #to_s is plain text when $stdout may not be colored
+      # (a pipe, a log, NO_COLOR, TERM=dumb; see ColorPolicy), so `puts
+      # help(:turn)` and `now.to_s` read cleanly in captured output.
       module Page
+        # Prepended to each class that includes Page.
+        module PlainOutput
+          def to_s = ColorPolicy.for_output(super)
+        end
+
+        def self.included(base)
+          base.prepend(PlainOutput)
+        end
+
         def inspect = to_s
         def pretty_print(q) = q.text(to_s)
       end

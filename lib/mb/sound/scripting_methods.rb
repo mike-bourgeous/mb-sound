@@ -36,7 +36,8 @@ module MB
       # picked with -p), returning a String or nil.
       def effect_script(input_channels: nil, live_channels: nil, profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile, description: description).run_effect(&block)
+        r = runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile, description: description)
+        script_errors { r.run_effect(&block) }
       end
 
       # Runs a synthesizer script: the block gets the script's MIDI (a
@@ -57,7 +58,8 @@ module MB
       #     MB::Sound.synth_script { |midi| midi.hz.square * midi.amp_env }   # mono
       def synth_script(profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Provide a block that turns the MIDI input into a node graph' unless block
-        runner(:synth, params, profile: profile, description: description).run_synth(&block)
+        r = runner(:synth, params, profile: profile, description: description)
+        script_errors { r.run_synth(&block) }
       end
 
       # Runs a song script: the block arranges the song on the current
@@ -75,7 +77,8 @@ module MB
         # Loaded by a take replay (ScriptRunner.replay_song): only register
         return nil if ScriptRunner.song_replay_file == File.expand_path(file)
 
-        runner(:song, params, profile: profile).run_song(bars: bars, &block)
+        r = runner(:song, params, profile: profile)
+        script_errors { r.run_song(bars: bars, &block) }
       end
 
       # Returns true if +file+ (pass __FILE__) is the script being run, rather
@@ -110,14 +113,36 @@ module MB
       # Creates a ScriptRunner for the script calling a *_script method,
       # printing the error and option help and exiting for invalid
       # arguments.
+      #
+      # Color codes are dropped from the script's output when it isn't a
+      # terminal (or NO_COLOR or TERM=dumb; ColorPolicy).
       def runner(kind, params, **options)
         script = caller_locations(2, 1)[0]&.absolute_path || $0
         MB::U.sigquit_backtrace # Ctrl-\ prints every thread's backtrace
+        ColorPolicy.strip_output!
         ScriptRunner.new(kind, params, script: script, **options)
       rescue ScriptRunner::UsageError => e
         $stderr.puts "#{File.basename(script.to_s)}: #{e.message}\n\n"
         $stderr.puts e.help
         exit 1
+      rescue ScriptRunner::InputError => e
+        script_input_error(script, e)
+      end
+
+      # Runs the block (a script runner's run), printing errors about the
+      # script's inputs or the sound card as one line and exiting with
+      # status 2 (ux-fix-1: these were backtraces and walls of ALSA text).
+      def script_errors(script = $0)
+        yield
+      rescue ScriptRunner::InputError, DeviceOutput::Unavailable, RenderWindow::TargetError => e
+        script_input_error(script, e)
+      end
+
+      def script_input_error(script, e)
+        message, suggestions = ErrorFormat.message_and_suggestions(e)
+        message += " (did you mean #{suggestions.first(3).join(', ')}?)" unless suggestions.empty?
+        $stderr.puts "#{File.basename(script.to_s)}: #{message}"
+        exit 2
       end
     end
   end

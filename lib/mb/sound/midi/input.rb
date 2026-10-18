@@ -107,34 +107,14 @@ module MB
           # device; the looper persona, 2026-10-13), and on success the text
           # is printed after all.  Other threads' output to stderr in the
           # meantime is held until the block returns.
-          def rtmidi_quietly
-            $stderr.flush
-            STDERR.flush
-            saved = STDERR.dup
-            Tempfile.create('mb_sound_rtmidi') do |f|
-              error = nil
-              begin
-                STDERR.reopen(f)
-                result = yield
-              rescue FastMIDI::Error => e
-                error = e
-              ensure
-                STDERR.flush
-                STDERR.reopen(saved)
-                saved.close
-              end
+          def rtmidi_quietly(&block)
+            Internal.quiet_stderr(FastMIDI::Error, &block)
+          rescue FastMIDI::Error => e
+            raise unless e.respond_to?(:stderr_summary)
 
-              f.rewind
-              text = f.read
-              if error
-                detail = text.lines.map(&:strip).reject(&:empty?).uniq.join('; ')
-                message = error.message.sub(" (see RtMidi's message above)", '')
-                raise FastMIDI::Error, detail.empty? ? message : "#{message}: #{detail}"
-              end
-
-              STDERR.write(text) unless text.empty?
-              result
-            end
+            detail = e.stderr_summary
+            message = e.message.sub(" (see RtMidi's message above)", '')
+            raise FastMIDI::Error, detail.empty? ? message : "#{message}: #{detail}"
           end
 
           # Formats the port lists from .find_port for error messages.

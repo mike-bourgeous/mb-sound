@@ -608,6 +608,8 @@ RSpec.describe MB::Sound::Help do
 
     it 'wraps at most 100 columns and prints plain under NO_COLOR or to a pipe' do
       allow(MB::U).to receive(:width).and_return(200)
+      expect(MB::Sound.help(:ui).to_s).not_to include("\e[") # $stdout is a pipe here
+      allow($stdout).to receive(:tty?).and_return(true)
       t = MB::Sound.help(:ui).to_s
       expect(text(t).lines.map { |l| l.chomp.length }.max).to be <= 100
       expect(MB::Sound::Help.for_output(t, StringIO.new)).not_to include("\e[")
