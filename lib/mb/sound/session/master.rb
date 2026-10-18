@@ -145,6 +145,16 @@ module MB
           chain.description
         end
 
+        # What #master_info adds to "bypass" while the live output's safety
+        # limiter stands in for a chain (see SafetyLimiter).
+        SAFETY_NOTE = ' (live output: a safety limiter at -1 dBFS until a master chain is set)'
+
+        # True if no master chain runs or waits to start (#master_info is
+        # "bypass", with or without SAFETY_NOTE).
+        def master_bypassed?
+          master_info.delete_suffix(SAFETY_NOTE) == 'bypass'
+        end
+
         # Returns a description of the master chain, noting when a new chain
         # is waiting to start.
         def master_info
@@ -156,7 +166,7 @@ module MB
           @mutex.synchronize {
             chain = @master_chains&.last
             # The live output's safety limiter (see SafetyLimiter)
-            safety = @safety_limiter ? ' (live output: a safety limiter at -1 dBFS until a master chain is set)' : ''
+            safety = @safety_limiter ? SAFETY_NOTE : ''
             next "bypass#{safety}" if chain.nil?
             next "#{chain.description}#{safety}" if chain.bypass? && (chain.started || chain.start <= @transport.position)
             next "#{chain.description}#{rider_info(chain)}" if chain.started

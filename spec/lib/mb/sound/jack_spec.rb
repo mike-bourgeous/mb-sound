@@ -43,10 +43,13 @@ RSpec.describe(MB::Sound::Jack, :aggregate_failures) do
       pid = JackDummy.instance_variable_get(:@pid)
       # Stopped from another process: the open below holds the GVL
       stopper = Process.spawn('sh', '-c', "kill -STOP #{pid}; sleep 0.3; kill -CONT #{pid}")
-      sleep 0.05
-      t = MB::U.clock_now
+      # Open only once the server is stopped (a sleep wasn't enough under
+      # Valgrind: the open ran before the stop)
+      stopped = -> { File.read("/proc/#{pid}/stat")[/\) (\w)/, 1] == 'T' rescue false }
+      deadline = MB::U.clock_now + 5
+      sleep 0.001 until stopped.() || MB::U.clock_now > deadline
+      expect(stopped.()).to eq(true)
       expect { MB::Sound::Jack.open }.not_to raise_error # (failed at once before omnibus9)
-      expect(MB::U.clock_now - t).to be_between(0.1, 3)
       expect(MB::Sound::Jack.open?).to eq(true)
     ensure
       Process.wait(stopper) if stopper

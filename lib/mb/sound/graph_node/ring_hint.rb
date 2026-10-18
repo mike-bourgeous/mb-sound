@@ -15,7 +15,7 @@ module MB
       # never end only if they have main inputs (Traversable#port_role) and
       # none of them ends; sequences (#and_then) never end if one part
       # doesn't.  Everything else (files, clips, envelopes, notes,
-      # TimeLimit) counts as ending.
+      # TimeLimit, Ringdown) counts as ending.
       module RingHint
         # Nodes that never end by themselves.
         STEADY = [Constant, Knob, Knob::Reader].freeze
@@ -74,8 +74,8 @@ module MB
               case node
               when *STEADY
                 true
-              when TimeLimit
-                false
+              when TimeLimit, Ringdown
+                false # (cut at a time, or after the signal falls silent)
               when MB::Sound::Tone
                 inputs(node, main: false).all? { |s| endless?(s, memo) }
               when Mixer

@@ -292,7 +292,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players[:b]).to match(/starts at bar 2/)
       end
 
-      it 'says once how to end a ringing sum with an input that never ends' do
+      it 'says once in the console how to end a ringing sum with an input that never ends' do
+        allow(MB::Sound).to receive(:live?).and_return(true)
         MB::Sound::GraphNode::RingHint.enabled = true
         hit = 330.hz.triangle * MB::Sound.adsr(0.001, 0.05, 0, 0.01)
         expect {
@@ -302,7 +303,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound::GraphNode::RingHint.enabled).to eq(false)
       end
 
-      it 'gives no ringing-sum hint for sums that end, never end anyway, or end with their first input' do
+      it 'gives no ringing-sum hint for sums that end, never end anyway, or end with their first input, nor in scripts' do
+        allow(MB::Sound).to receive(:live?).and_return(true)
         MB::Sound::GraphNode::RingHint.enabled = true
         hit = -> { 330.hz.triangle * MB::Sound.adsr(0.001, 0.05, 0, 0.01) }
         expect {
@@ -311,6 +313,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
           MB::Sound.bg(:c, (110.hz.sine + hit.()) * MB::Sound.adsr(0.01, 0.1, 0, 0.1))
           MB::Sound.bg(:d, hit.() + 0.1)
         }.not_to output.to_stderr
+        allow(MB::Sound).to receive(:live?).and_return(false)
+        expect { MB::Sound.bg(:e, 110.hz.sine + hit.()) }.not_to output.to_stderr
         expect(MB::Sound::GraphNode::RingHint.enabled).to eq(true)
       end
 

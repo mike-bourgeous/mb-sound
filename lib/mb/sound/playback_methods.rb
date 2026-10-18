@@ -158,8 +158,10 @@ module MB
         end
 
         # A ringing sum with an input that never ends (`drone + hit`): say
-        # once how to end it with its first input (GraphNode::RingHint)
-        GraphNode::RingHint.notice(playable.nodes) if playable.ends.nil?
+        # once in the console how to end it with its first input
+        # (GraphNode::RingHint; scripts end their graphs themselves, e.g.
+        # effect scripts after their input rings down)
+        GraphNode::RingHint.notice(playable.nodes) if playable.ends.nil? && MB::Sound.live?
 
         # Graph documents' knobs join the session (Session#add does this
         # too); those with a controller get live MIDI input
@@ -353,7 +355,7 @@ module MB
           out = session.output
           return :low if out.respond_to?(:profile) && out.profile == :low
 
-          unless session.idle? && session.master_info == 'bypass'
+          unless session.idle? && session.master_bypassed?
             warn 'Live MIDI: `latency :low` lowers the latency once players and master effects are stopped' unless quiet
             return nil
           end
