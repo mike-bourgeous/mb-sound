@@ -94,6 +94,24 @@ RSpec.describe(MB::Sound::Playable) do
       expect(session_render(beat, frames: 9600)).to eq(session_render(frames: 9600) { m.kit(beat) })
     end
 
+    it 'plays a plain grid on a TR-909, or on a TR-808 when it names 808-only voices' do
+      beat = MB::Sound.grid(16, kick: 'x...', snare: '..x.', hat: 'xxxx')
+      expect(described_class.graph(beat)).to have_attributes(description: /\Atr909: /, note: /TR-909/)
+      expect(session_render(beat, frames: 9600)).to eq(session_render(frames: 9600) { MB::Sound.tr909(beat) })
+
+      cow = MB::Sound.grid(16, kick: 'x...', cowbell: '..x.')
+      expect(described_class.graph(cow).description).to start_with('tr808: ')
+    end
+
+    it 'plays an envelope on a triangle with some noise' do
+      env = MB::Sound.adsr(0.01, 0.05, 0, 0.01)
+      g = described_class.graph(env)
+      expect(g.description).to match(/triangle with pink noise/)
+      out = Array.new(10) { g.nodes[0].sample(800)&.dup }.compact.reduce(:concatenate)
+      expect(out.abs.max).to be_between(0.2, 1.0)
+      expect(g.nodes[0].graph(include_tees: false).count { |n| n.is_a?(MB::Sound::Tone) }).to eq(2) # the triangle and the noise
+    end
+
     it 'plays a grid on a drum machine module' do
       beat = MB::Sound.grid(16, kick: 'x...').played_by(MB::Sound::Drums::TR909)
       expect(described_class.graph(beat).description).to start_with('tr909')

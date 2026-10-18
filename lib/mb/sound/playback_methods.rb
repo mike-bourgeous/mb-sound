@@ -17,12 +17,12 @@ module MB
       #
       # Anything playable plays (see Playable.graph), each in a useful way:
       # - graphs and bundles (oscillators play until Ctrl-C), Pitches and
-      #   Notes as sines, an Envelope as the level of a soft triangle
+      #   Notes as sines, an Envelope as the level of a soft triangle plus pink noise
       # - sound files, Numo arrays (48 kHz), Arrays (one channel each)
       # - a Sample once (stereo kept); Slices one by one with gaps
       # - an Instrument, an SFZ or SF2 file or font: a demo phrase
       # - a Clip, Notes, a MIDI file or Stream on a soft saw (loops play
-      #   until Ctrl-C); a grid on a TR-808; a kit design's voices once
+      #   until Ctrl-C); a grid on a TR-909 (a TR-808 for 808-only voices); a kit design's voices once
       # - a Wavetable as one note; a preset's Symbol (synth presets play a
       #   demo phrase); a genre template (`genre(:dnb)`, or `play :dnb`):
       #   about a minute of its form (set up in the background Session)
@@ -39,7 +39,7 @@ module MB
       #     play 220.hz.triangle.at(-20.db)               # until Ctrl-C
       #     play Sample['sounds/drums.flac']              # once, then back to the prompt
       #     play seq(C4, E4, G4, C5).n8                   # a clip on the default patch
-      #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-808
+      #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-909
       #     play sf2('GeneralUser.sf2')                   # a demo phrase
       def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil

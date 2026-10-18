@@ -22,7 +22,8 @@ module MB
         envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
-        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        a soft saw), grids (a TR-909, or a TR-808 for its own voices like
+        cowbell), envelopes (on a triangle with noise), instruments and SF2/SFZ files (a
         demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
@@ -42,8 +43,8 @@ module MB
       example 'play two seconds of a drum file as a Sample', bars: 1 do
         play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
       end
-      example 'play a grid on a TR-808' do
-        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
+      example 'play a grid on a TR-909' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.db
       end
     end
 
