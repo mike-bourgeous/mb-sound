@@ -138,6 +138,7 @@ module MB
           @on_capture = nil
           @on_finish = nil
           @on_swap = nil
+          @deferred = [] # (callbacks for after the lock: see #defer)
           @tracker = HoldTracker.new
           @step = StepEntry.new(self, tempo: tempo)
           @entry = :play
@@ -287,18 +288,40 @@ module MB
         # Handles one key event (UI::Input::Key) at monotonic time +now+.
         # Returns true if it was a keyboard key.
         def key(k, now = @clock.call)
-          @lock.synchronize do
+          r = @lock.synchronize do
             r = @entry == :step ? @step.key(k, now) : nil
             r = play_key(k, now) if r.nil?
             changed! if r
             r
+          end
+          run_deferred
+          r
+        end
+
+        # Runs +block+ now, or after the keyboard's lock is released when
+        # this thread holds it: the screen's callbacks (on_finish, on_swap,
+        # on_capture) take the screen's lock, and the painter holds that
+        # while it reads the keyboard (#view), so calling them under the
+        # keyboard's lock deadlocked (ui-api-1: a step-entry spec hung, the
+        # input thread in Tiles#tile under Keyboard#key, the painter in
+        # Keyboard#view under Tiles#refresh).
+        def defer(&block)
+          @lock.mon_owned? ? @lock.synchronize { @deferred << block } : block.call
+          nil
+        end
+
+        # Runs what #defer kept (outside the lock).
+        def run_deferred
+          return if @lock.mon_owned?
+          while (b = @lock.synchronize { @deferred.shift })
+            b.call
           end
         end
 
         # Ends notes whose time is up (:hold, :tap) and plays due preview
         # notes.  Returns true if anything changed.
         def tick(now = @clock.call)
-          @lock.synchronize do
+          r = @lock.synchronize do
             changed = false
             @held.to_a.each do |ch, h|
               next unless h[:off_at] && now >= h[:off_at]
@@ -309,6 +332,8 @@ module MB
             changed!(now) if changed
             changed
           end
+          run_deferred
+          r
         end
 
         # Seconds until #tick has something to do, or nil.
@@ -360,7 +385,7 @@ module MB
         # Called by StepEntry when a clip is done.
         def finished(clip)
           @clips << clip
-          @on_finish&.call(clip)
+          defer { @on_finish&.call(clip) }
         end
 
         # Called by StepEntry to swap +clip+ into the armed tracks (see
@@ -368,13 +393,26 @@ module MB
         def swap_in(clip)
           @clips << clip unless @clips.last.equal?(clip)
           return say('swap: nothing to swap into here') unless @on_swap
-          @on_swap.call(clip)
+          defer { @on_swap&.call(clip) }
         end
 
         # Sets the message shown in the pane.
         def say(text)
           @message = text
           changed!
+        end
+
+        # The note-off mode as the pane and the ` key name it: "auto (tap)"
+        # for :auto (the maintainer saw "tap" twice in the ` cycle,
+        # 2026-10-18), else the mode.
+        def off_mode_label
+          @off_mode == :auto ? "auto (#{resolved_mode})" : @off_mode.to_s
+        end
+
+        # The modes the ` key cycles through: OFF_MODES, without :release
+        # where the terminal reports no key-ups (it would act as :tap).
+        def cycle_modes
+          @releases ? OFF_MODES : OFF_MODES - [:release]
         end
 
         # How #off_mode works now, in a few words (for the pane and help).
@@ -435,11 +473,12 @@ module MB
           when :channel_step then self.channel = @channel + a.args[0]
           when :sustain then sustain_key(k, now)
           when :panic then all_off_unlocked(now, panic: true)
-          when :capture then @on_capture&.call
+          when :capture then defer { @on_capture&.call }
           when :cycle_off_mode
-            i = OFF_MODES.index(@off_mode)
-            self.off_mode = OFF_MODES[(i + 1) % OFF_MODES.length]
-            say("note-off: #{@off_mode}#{@off_mode == :auto ? " (#{resolved_mode})" : ''}")
+            modes = cycle_modes
+            i = modes.index(@off_mode) || -1
+            self.off_mode = modes[(i + 1) % modes.length]
+            say("note-off: #{off_mode_label}#{@releases ? '' : ' (release needs a terminal that reports key-ups)'}")
           when :step_entry then self.entry = :step
           when :cycle_scale then cycle_scale # (scale lock: the next scale; ux-r3 item 44)
           when :cycle_root then cycle_root   # (its root a fifth up)
