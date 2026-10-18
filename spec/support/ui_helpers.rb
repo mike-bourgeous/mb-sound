@@ -69,22 +69,22 @@ module UIHelpers
     UI::MatrixInfo.new(tracks: tracks, scenes: scenes)
   end
 
-  # One rack instance with two macros (knobs :"bass/dub/space" and
+  # One rack instance with two knobs (knobs :"bass/dub/space" and
   # :"bass/dub/tone" in ui_fake_rack_knobs).
   def ui_fake_racks(prefix = '')
     specs = { space: ui_knob_spec(:"#{prefix}space", 0.35, 0.0..1.0), tone: ui_knob_spec(:"#{prefix}tone", 2400.0, 600.0..8000.0, curve: :exp, unit: 'Hz') }.freeze
     [MB::Sound::Rack::RackInfo.new(
       name: :"#{prefix}dub", path: :"bass/#{prefix}dub", kind: :effect, signature: 'audio(sig) + audio(side) -> audio',
       ports: [{ name: :sig, type: :audio, role: :main, required: true }.freeze, { name: :side, type: :audio, role: :side, required: false }.freeze].freeze,
-      latency: 72, macros: [:"bass/#{prefix}dub/space", :"bass/#{prefix}dub/tone"].freeze, macro_specs: specs, slots: [].freeze
+      latency: 72, knobs: [:"bass/#{prefix}dub/space", :"bass/#{prefix}dub/tone"].freeze, knob_specs: specs, slots: [].freeze
     )].freeze
   end
 
-  # The macro knobs of ui_fake_racks as KnobValues.
+  # The rack knobs of ui_fake_racks as KnobValues.
   def ui_fake_rack_knobs(prefix = '')
     r = ui_fake_racks(prefix).first
-    [UI::KnobValue.new(name: r.macros[0], value: 0.6, spec: r.macro_specs[:space]),
-     UI::KnobValue.new(name: r.macros[1], value: 1800.0, spec: r.macro_specs[:tone])]
+    [UI::KnobValue.new(name: r.knobs[0], value: 0.6, spec: r.knob_specs[:space]),
+     UI::KnobValue.new(name: r.knobs[1], value: 1800.0, spec: r.knob_specs[:tone])]
   end
 
   # Bus and send levels for the fake set's buses.
@@ -99,8 +99,8 @@ module UIHelpers
 
   # A full Snapshot at bar 17 beat 3 (+t+ seconds, +seq+), with a 440 Hz
   # scope of +scope_phase+.
-  # +macros+ adds the rack macros' knobs (the :session captures).
-  def ui_fake_snapshot(t: 1.0, seq: 1, scope_phase: 0.0, peak: -8.1, macros: false)
+  # +knobs+ adds the rack knobs' knobs (the :session captures).
+  def ui_fake_snapshot(t: 1.0, seq: 1, scope_phase: 0.0, peak: -8.1, rack_knobs: false)
     scope = [0.7, 0.35].map { |a|
       Numo::SFloat.new(1024).seq.map { |i| a * Math.sin(2 * Math::PI * (440.0 * i / 48000 + scope_phase)) }.freeze
     }.freeze
@@ -120,7 +120,7 @@ module UIHelpers
       knobs: [
         UI::KnobValue.new(name: :cut, value: 2400.0, spec: ui_knob_spec(:cut, 800.0, 100.0..8000.0, curve: :exp, unit: 'Hz')),
         UI::KnobValue.new(name: :drive, value: 0.3, spec: ui_knob_spec(:drive, 0.0, 0.0..1.0)),
-        *(macros ? ui_fake_rack_knobs : []),
+        *(rack_knobs ? ui_fake_rack_knobs : []),
       ].freeze,
       slow: ui_fake_slow,
       bus_levels: ui_fake_bus_levels[0],

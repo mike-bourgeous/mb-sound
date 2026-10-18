@@ -22,7 +22,7 @@ module MB
           attr_writer :implicit_self
 
           # Names bound per application of a rack document (its ports and
-          # macros), read where the body names them; nil elsewhere.
+          # knobs), read where the body names them; nil elsewhere.
           attr_accessor :bindings
 
           def initialize(parent = nil)
@@ -201,7 +201,7 @@ module MB
         # Loads a rack document (`graph 4, ..., rack: :arack`; see
         # RackWriter): returns its Rack, whose block walks the body for each
         # application with the ports bound to the values given and the
-        # knob lines made as the rack's macros (RackMethods#macro, so they
+        # knob lines made as the rack's knobs (RackMethods#rack_knob, so they
         # are named and shared like any rack's).  With the inputs given,
         # returns the Rack applied to them.  The Rack is named after the
         # document (registered in a Session only by `preset` or a graph's
@@ -210,7 +210,7 @@ module MB
           types = @document.input_types
           raise LoadError.new("#{@label}: a rack document needs typed inputs (inputs sig: :audio)", path: @path) if types.empty?
           unless @document.params.values.all? { |p| p[:knob] }
-            raise LoadError.new("#{@label}: rack documents keep settings in knob lines (macros), not param lines", path: @path)
+            raise LoadError.new("#{@label}: rack documents keep settings in knob lines, not param lines", path: @path)
           end
           constructor = @document.meta[:rack]
           unless constructor.is_a?(Symbol) && Rack::CONSTRUCTORS.include?(constructor)
@@ -220,7 +220,7 @@ module MB
           main_name, main_type = types.first
           ports = types.drop(1).to_h
           defaults = @document.input_defaults
-          macros = @document.params.select { |_, p| p[:knob] }
+          rack_knobs = @document.params.select { |_, p| p[:knob] }
           out = @document.outputs.first
           listener = %i[lrack amrack listener_rack].include?(constructor)
           out = nil if listener
@@ -246,9 +246,9 @@ module MB
                 raise ArgumentError, "missing keyword: :#{k}"
               end
             end
-            macros.each do |n, spec|
-              opts = spec.slice(*Document::KNOB_KEYS, *Document::MACRO_KEYS).except(:description)
-              b[n] = MB::Sound.macro(n, spec[:value], description: spec[:description], **opts)
+            rack_knobs.each do |n, spec|
+              opts = spec.slice(*Document::KNOB_KEYS, *Document::RACK_KNOB_KEYS).except(:description)
+              b[n] = MB::Sound.knob(n, spec[:value], description: spec[:description], **opts)
             end
             scope.bindings = b
             last = scope
@@ -529,12 +529,12 @@ module MB
               name, value = args
               raise error(node, 'knob needs a name and a value (knob :cut, 800, range: 100..8000, curve: :exp)') unless name.is_a?(Symbol) && args.length == 2
               raise error(node, "knob #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
-              keys = Document::KNOB_KEYS + (@document.rack? ? Document::MACRO_KEYS : [])
+              keys = Document::KNOB_KEYS + (@document.rack? ? Document::RACK_KNOB_KEYS : [])
               unknown = kwargs.keys - keys
-              raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{keys.join(', ')}#{'; share: and follow: are for rack documents\' macros' if (unknown & Document::MACRO_KEYS).any?})") unless unknown.empty?
+              raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{keys.join(', ')}#{'; share: and follow: are for rack documents\' knobs' if (unknown & Document::RACK_KNOB_KEYS).any?})") unless unknown.empty?
               raise error(node, "#{name} is declared twice") if @document.params.key?(name)
               begin
-                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description, *Document::MACRO_KEYS))
+                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description, *Document::RACK_KNOB_KEYS))
               rescue ArgumentError => e
                 raise error(node, "knob #{name}: #{e.message}")
               end
@@ -974,7 +974,8 @@ module MB
             return named_proc(node, scope) if name == :named_proc
             return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
-            if Document::HEADER.include?(name)
+            # (knob inside a rack's block is the rack's own knob: RackMethods#rack_knob)
+            if Document::HEADER.include?(name) && !(name == :knob && MB::Sound::Rack.application)
               raise error(node, "#{name} belongs in the header, before the graph")
             end
             if @header

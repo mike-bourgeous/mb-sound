@@ -1,6 +1,6 @@
 require_relative '../../../../support/ui_helpers'
 
-# Keys around the REPL (ux-1 round 3 items 11, 15, 16, 17): Ctrl-W window
+# Keys around the REPL (ux-1 round 3 items 11, 15, 16, 17; ux-r4b): Ctrl-W one-shot NAV
 # keys with pass-through, direct scrolling that never takes a key the
 # user's inputrc binds, Reline's own PgUp history search, ui.bind.
 RSpec.describe('UI REPL keys', :aggregate_failures) do
@@ -76,22 +76,36 @@ RSpec.describe('UI REPL keys', :aggregate_failures) do
     @term.write("\x15")
   end
 
-  it 'moves between panes with Ctrl-W then a window key, and passes other keys through to the REPL (Ctrl-W deletes a word)' do
+  it 'reads Ctrl-W as one NAV key: Ctrl-W arrows and Ctrl-W Ctrl-W move between panes, Ctrl-W z zooms and comes back' do
     @tiles, @term = ui_tiles(:tiles)
     expect(@term.wait_for('t> ')).to eq(true)
     @term.write("\x17")
-    expect(@term.wait_for('Ctrl-W: h j k l')).to eq(true)
-    @term.write('l')
-    expect(wait_until { @tiles.tiler.focus != :repl }).to eq(true)
-    expect(@tiles.router.mode).to eq(:nav) # (another pane: its keys, NAV's)
-    @term.write("\x17p") # back to the last pane: the REPL
+    expect(wait_mode(@tiles, :once)).to eq(true)
+    expect(@term.wait_for(' ^W ')).to eq(true)
+    @term.write("\t") # Ctrl-W Tab: the next pane, gone into as Enter would
+    expect(wait_settled(@tiles) { @tiles.tiler.focus != :repl && @tiles.router.state != :once }).to eq(true)
+    other = @tiles.tiler.focus
+    expect(%i[nav pane grab]).to include(@tiles.router.mode)
+    expect(@tiles.mode_problems).to eq([])
+    @term.write("\x17\x17") # Ctrl-W Ctrl-W: the pane focused before (the REPL), in REPL mode
     expect(wait_settled(@tiles) { @tiles.tiler.focus == :repl && @tiles.router.mode == :repl }).to eq(true)
-    @term.type('6 * 7 junk')
-    @term.write("\x17") # Ctrl-W then a key that isn't a window key: word deleted, the key typed
+    @term.write("\x17\x17") # and back
+    expect(wait_settled(@tiles) { @tiles.tiler.focus == other && @tiles.router.state != :once }).to eq(true)
+    @term.write("\x17\x17")
+    expect(wait_settled(@tiles) { @tiles.tiler.focus == :repl && @tiles.router.mode == :repl }).to eq(true)
+    @term.write("\x17z") # zoom, still in the REPL
+    expect(wait_settled(@tiles) { @tiles.tiler.layout.zoom == :repl && @tiles.router.mode == :repl }).to eq(true)
+    @term.write("\x17z")
+    expect(wait_settled(@tiles) { @tiles.tiler.layout.zoom.nil? && @tiles.router.mode == :repl }).to eq(true)
+    @term.write("\x17Q") # unbound: the key overlay, Esc back
+    expect(wait_mode(@tiles, :overlay)).to eq(true)
+    @term.write("\e")
+    expect(wait_mode(@tiles, :repl)).to eq(true)
+    @term.type('6 * 7')
     @term.write("\r")
     expect(@term.wait_for('=> 42')).to eq(true), @term.text
     expect(@tiles.mode_problems).to eq([])
-    @tiles.router.window_prefix = false
+    @tiles.router.nav_once = false # (Ctrl-W back to Reline: delete a word)
     @term.type('7 * 6 junk')
     @term.write("\x17\r")
     expect(@term.wait_for('=> 42', timeout: 4)).to eq(true)

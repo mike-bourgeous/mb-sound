@@ -335,10 +335,10 @@ module MB
         # or nil.
         attr_reader :cc
 
-        # For a rack's macro (MB::Sound::RackMethods#macro), its
-        # Rack::MacroInfo (the rack, the macro's own name, the application
+        # For a rack's knob (MB::Sound::RackMethods#rack_knob), its
+        # Rack::KnobInfo (the rack, the knob's own name, the application
         # that made it, share:, follow:); nil for other knobs.
-        attr_reader :macro
+        attr_reader :rack_knob
 
         # The Session knob this standalone knob's readers were moved to
         # when it joined one of the same name (see #redirect), or nil.
@@ -350,10 +350,10 @@ module MB
         # frame it renders (the Session's frame counter).
         #
         # +initial+ starts the knob at another value than its Spec's
-        # default (a rack instance's saved macro value; see Rack#using).
-        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, macro: nil, initial: nil, **spec)
+        # default (a rack instance's saved knob value; see Rack#using).
+        def initialize(name, default = nil, session: nil, sample_rate: 48000, frame: 0, rack_knob: nil, initial: nil, **spec)
           @spec = Spec.new(name: name, default: default, **spec)
-          @macro = macro
+          @rack_knob = rack_knob
           @joined = nil
           @session = session
           @sample_rate = sample_rate.to_f
@@ -395,7 +395,7 @@ module MB
         # range.  Turning the knob moves the center of the modulation
         # instead of fighting it.
         #
-        #     cut = macro(:cut, 800, range: 100..8000, curve: :exp)
+        #     cut = knob(:cut, 800, range: 100..8000, curve: :exp)
         #     sig.lp4(cut.mod(0.2.hz.lfo, depth: 0.2))   # +-20% of the range around the knob
         def mod(source, depth: 0.25)
           raise ArgumentError, "mod needs a graph node to modulate by (got #{source.inspect})" unless source.respond_to?(:sample)

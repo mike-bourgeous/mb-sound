@@ -444,7 +444,7 @@ module MB
         playable = Playable.graph(sound, sample_rate: sample_rate)
         nodes = match_rate(playable.nodes)
         @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
-        adopt_knobs(nodes, player: name) # graph documents' knobs and rack macros join the Session (see Knobs#adopt_knobs)
+        adopt_knobs(nodes, player: name) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
@@ -589,7 +589,7 @@ module MB
             next false unless time || @mutex.synchronize { @stopped.key?(n) }
             change(:forget, n, time) { |_t|
               @mutex.synchronize { @stopped.delete(n) }
-              prune_macros # (a forgotten player's rack macros leave the session)
+              prune_rack_knobs # (a forgotten player's rack knobs leave the session)
             }
             true
           }

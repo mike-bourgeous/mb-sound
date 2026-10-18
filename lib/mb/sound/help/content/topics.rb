@@ -573,7 +573,9 @@ module MB
         clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
         and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
         :reverse, :halftime, :doubletime, :double, :half) plays a changed
-        copy as a new slot.
+        copy as a new slot, named with a version mark (`:bass_b_v2`, then
+        `_v3`; `launch :bass, :bass_b_v2` plays it again); the clip pane
+        shows what made it.
       TEXT
       commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
@@ -745,19 +747,19 @@ module MB
         :audio do |sig, side:|`), bound with `with` (bus, track, and knob
         names work as values).  `>>` chains racks; note streams merge with
         `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
-        `macro :space, 0.3` inside a rack block is a knob scoped to the rack
+        `knob :space, 0.3` inside a rack block is a knob scoped to the rack
         (`turn :"dub/space", 0.6`; per player, `:"bass/dub/space"`, when the
         rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
-        `:space`, `follow: :space` maps it onto the macro's range, and
+        `:space`, `follow: :space` maps it onto this knob's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
         and `recall :"dub/wide", only: [:space]` keep variations.  `help
-        rack(:dub)` shows ports, macros, and latency.  `save :dub,
+        rack(:dub)` shows ports, knobs, and latency.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
         session's asks, or takes `racks: :session`, `:saved`, or `:rename`.
       TEXT
-      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack, :macro
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
       note :racks
       see :buses, :midi, :presets
       example 'a note rack: an anonymous value' do
@@ -978,9 +980,12 @@ module MB
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback
         of its own.  Ctrl-] is NAV mode (`?` there lists its keys): numbers
-        and h j k l pick a pane, Enter goes into it (the REPL, KEYS on the
+        and arrows pick a pane, Enter goes into it (the REPL, KEYS on the
         keyboard, a pane's own keys until Esc), and a pane's letter beside
-        its number jumps straight in (i the REPL, K the keyboard).  F2 or
+        its number jumps straight in (i the REPL, k the keyboard, a the
+        clips).  Ctrl-W is NAV for one key: Ctrl-W z zooms and comes back,
+        Ctrl-W a goes into the clips, Ctrl-W Ctrl-W swaps between the last
+        two panes, Ctrl-W Ctrl-] stays in NAV.  F2 or
         `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
         on (`fg` brings them back, `jobs` lists what runs).
 
@@ -1016,12 +1021,13 @@ module MB
         track, a column per scene, then each track's other slots; ▶ plays,
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
-        macros, buses with meters.  Focus a pane in NAV (its number, or a
+        knobs, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked macro (Shift: fine).
+        u undo; in racks Left/Right turn the picked knob (Shift: fine;
+        a held key is one `turn ..., over:` line when you let go).
         Every key runs one console line, printed in the console: journaled,
         undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT

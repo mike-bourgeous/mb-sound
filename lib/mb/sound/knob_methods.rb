@@ -29,7 +29,20 @@ module MB
       # jumps).  Returns the knob, a GraphNode to use anywhere a graph takes
       # a node: `110.hz.ramp.lp4(knob(:cut))`.  Knob names share a
       # namespace with tracks and mute groups.
-      def knob(name, default = nil, **spec)
+      #
+      # Inside a rack's block (arack, irack, ...), a knob with a default
+      # is scoped to the rack: :"dub/space" for knob :space in rack :dub
+      # (see RackMethods#rack_knob for +share:+, +follow:+,
+      # +description:+, and the names); without a default it reads the
+      # rack's knob of that name, else the Session knob.
+      def knob(name, default = nil, share: nil, follow: nil, description: nil, **spec)
+        if (app = Rack.application) && (!default.nil? || !share.nil? || !follow.nil? || !description.nil? || !spec.empty? || app.knobs.key?(name) || !Session.current.knobs.key?(name))
+          return rack_knob(app, name, default, share: share || false, follow: follow, description: description, **spec)
+        end
+        unless share.nil? && follow.nil? && description.nil?
+          raise ArgumentError, "knob #{name.inspect}: share:, follow:, and description: are for knobs inside a rack's block (arack(:dub) { |sig| sig * knob(#{name.inspect}, 0.5, share: true) })"
+        end
+
         session = Session.current
         k = session.knob(name, default, **spec)
         listen_knob_midi(session, k) if k && spec[:cc]
@@ -47,19 +60,23 @@ module MB
       # +curve:+ (from where it is, or +from:+ a value), or following a node
       # or another knob's name until it is turned again.  Returns the change's journal entry.  Also available
       # as #move.
-      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil)
+      #
+      # +steps:+ ([[frames, value], ...], frames after the first step) is a
+      # held key's gesture from the racks pane, as the pane writes it (see
+      # Session::Knobs#gesture_line): each step a turn on its frame.
+      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, steps: nil)
         point = LaunchPoint.of(binding) or return nil
         name = knob_name(name)
-        group = Session.current.racks.macro_group?(name) # (every instance's knob; see Session::Knobs#turn)
+        group = Session.current.racks.knob_group?(name) # (every instance's knob; see Session::Knobs#turn)
         session_command(name, label: "turn #{name.inspect}", kind: :turn, all: group) { |session, time|
-          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time)
+          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time, steps: steps)
         }
       end
       alias move turn
 
       # Remembers every knob's value as snapshot +name+ (at the launch
       # point; now by default), or only the values of +knobs:+ (knob names;
-      # a rack's macros with `rack(:dub).snap :wide`).  Returns the journal
+      # a rack's knobs with `rack(:dub).snap :wide`).  Returns the journal
       # entry.
       def snap(name, at: nil, on: nil, in: nil, knobs: nil)
         point = LaunchPoint.of(binding) or return nil
@@ -75,7 +92,7 @@ module MB
 
       # Turns every knob in snapshot +name+ back (see #turn for +over:+ and
       # +curve:+), or only some: +only:+ / +except:+ take knob names or a
-      # rack's macro names (`recall :"dub/wide", only: [:space]`).  Returns
+      # rack's knob names (`recall :"dub/wide", only: [:space]`).  Returns
       # the journal entries.
       def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, only: nil, except: nil)
         point = LaunchPoint.of(binding) or return nil

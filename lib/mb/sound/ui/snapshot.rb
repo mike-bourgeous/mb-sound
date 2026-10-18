@@ -44,9 +44,12 @@ module MB
       # matrix and detail pane): +key+ (a stable display key: the name, or
       # "bass#3" for an unnamed clip in slot 3 of track :bass), +loop+,
       # +length+ (whole notes), +events+ (NoteInfos), +ruby+ (its to_ruby
-      # text, or nil), +range+ (lowest..highest note, or nil).
-      ClipInfo = Data.define(:name, :kind, :bars, :pattern, :used, :key, :loop, :length, :events, :ruby, :range) do
-        def initialize(name:, kind:, bars:, pattern:, used:, key: nil, loop: false, length: 0r, events: [].freeze, ruby: nil, range: nil)
+      # text, or nil), +range+ (lowest..highest note, or nil).  ux-r4b:
+      # +history+ (a `tweak` version's lineage: the clip its tweaks started
+      # from, then each transform as tweak takes it, e.g. ["bass_a",
+      # "transpose: 2", ":reverse"]; empty for other clips).
+      ClipInfo = Data.define(:name, :kind, :bars, :pattern, :used, :key, :loop, :length, :events, :ruby, :range, :history) do
+        def initialize(name:, kind:, bars:, pattern:, used:, key: nil, loop: false, length: 0r, events: [].freeze, ruby: nil, range: nil, history: [].freeze)
           super
         end
       end

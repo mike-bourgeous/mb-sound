@@ -542,21 +542,21 @@ module MB
             "#{text}[#{tap.outputs.index(o)}]"
           end
 
-          # knob(:name) for a Knob or Knob::Reader; a rack's macro as the
-          # macro call that makes it (inside its rack's block, each
-          # macro(:name, ...) of one application returns the same knob).
+          # knob(:name) for a Knob or Knob::Reader; a rack's knob as the
+          # knob call that makes it (inside its rack's block, each
+          # knob(:name, ...) of one application returns the same knob).
           def knob_text(o)
             k = o.is_a?(Knob::Reader) ? o.knob : o
-            return macro_text(k) if k.macro
+            return rack_knob_text(k) if k.rack_knob
             "knob(#{k.name.to_sym.inspect})"
           end
 
           public
 
-          # macro(:space, 0.3, range: ...) for macro knob +k+, with the value
-          # it holds (a moving macro: where it is) and its options.
-          def macro_text(k)
-            "macro(#{Recipe::RubyWriter.knob_args(k, method(:knob_literal)).join(', ')})"
+          # knob(:space, 0.3, range: ...) for rack knob +k+, with the value
+          # it holds (a moving knob: where it is) and its options.
+          def rack_knob_text(k)
+            "knob(#{Recipe::RubyWriter.knob_args(k, method(:knob_literal)).join(', ')})"
           end
 
           # A knob setting as text: numbers as Knob.number prints them (800,
@@ -570,21 +570,21 @@ module MB
             end
           end
 
-          # The arguments that make knob +k+ again (name or a macro's own
+          # The arguments that make knob +k+ again (name or a knob's own
           # name, held value, options as the console's knob takes them,
-          # share:/follow:/description: of a macro), as text, each value
+          # share:/follow:/description: of a knob), as text, each value
           # printed by +literal+.
           def self.knob_args(k, literal, name: nil)
             spec = k.spec
             value = k.moving? || k.target.nil? ? k.value : k.target
-            parts = [(name || (k.macro ? k.macro.macro : k.name)).to_sym.inspect, literal.(value)]
+            parts = [(name || (k.rack_knob ? k.rack_knob.knob : k.name)).to_sym.inspect, literal.(value)]
             parts << "range: #{literal.(spec.range)}" unless spec.range == (0.0..1.0)
             parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
             parts << "unit: #{literal.(spec.unit)}" if spec.unit
             parts << "cc: #{k.cc}" if k.cc
             parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
             parts << "smooth: #{literal.(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
-            if (m = k.macro)
+            if (m = k.rack_knob)
               parts << 'share: true' if m.share
               parts << "follow: #{m.follow.inspect}" if m.follow
               parts << "description: #{literal.(m.description)}" if m.description
@@ -697,8 +697,8 @@ module MB
           # needs to rebuild exactly (see Rack#using): the seed its block
           # built under (a drawn one as drawn_seed(N) in documents, left
           # out without seeds and in synth lanes, whose seeds derive from
-          # the lane's), and its macros' current values where they differ
-          # from the definition's defaults (shared and following macros
+          # the lane's), and its knobs' current values where they differ
+          # from the definition's defaults (shared and following knobs
           # belong to their session knobs).
           def using_args(rack, c)
             st = rack.settings
@@ -706,8 +706,8 @@ module MB
             if (seed = st[:seed]) && (!st[:drawn] || (@seeds && c.lane.nil?))
               args << "seed: #{st[:drawn] && @seeds == :marked ? "drawn_seed(#{seed})" : seed}"
             end
-            (st[:application]&.macros || {}).each do |name, k|
-              next if k.macro.share || k.macro.follow
+            (st[:application]&.knobs || {}).each do |name, k|
+              next if k.rack_knob.share || k.rack_knob.follow
               cur = k.joined || k
               v = cur.moving? || cur.target.nil? ? cur.value : cur.target
               args << "#{key_text(name)} #{knob_literal(v)}" unless v == k.spec.default
@@ -733,7 +733,7 @@ module MB
           # The definition of named rack +rack+ as Ruby, and the problems
           # found printing it: its constructor call with the block printed
           # from a build on stand-ins for its ports (Rack#build_on_stand_ins;
-          # every port a parameter, macros as macro(...) at their defaults,
+          # every port a parameter, knobs as knob(...) at their defaults,
           # seeds left out so each application draws its own).  Racks used
           # inside go into +rack_defs+.  The same rack always prints the
           # same text, which is how documents compare a saved definition

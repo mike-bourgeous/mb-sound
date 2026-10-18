@@ -6,7 +6,7 @@ module MB
       # (the band, no UI), in one place.  The `?` overlay, `help :ui`
       # (Tiles::KEY_HELP), and the specs read it, so they can't drift.
       #
-      # Keymaps: Input::Router::NAV and WINDOW (the Router's own), NAV_EXTRA
+      # Keymaps: Input::Router::NAV (the Router's own), NAV_EXTRA
       # (mb-sound's NAV keys), Keyboard::KEYMAP (KEYS mode), the REPL's
       # direct keys (REPL_DEFAULTS, minus what the user's inputrc binds,
       # plus `ui.bind`), and doc lines for keys the Router reads itself.
@@ -20,10 +20,10 @@ module MB
         # NAV keys of mb-sound's own panes (after Router::NAV).
         NAV_EXTRA = Keymap.new(:tiles) do
           group 'Jump'
-          on 'i', :jump, :repl, help: 'into: REPL i, KEYS K, tracks t, meters e', label: 'i K t e'
-          on 'K', :jump, :keyboard, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
-          on 't', :jump, :tracks, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
-          on 'e', :jump, :meters, help: 'into: REPL i, KEYS K, tracks t, meters e', label: ''
+          on 'i', :jump, :repl, help: 'into: REPL i, KEYS k, tracks t, meters e', label: 'i k t e'
+          on 'k', :jump, :keyboard, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
+          on 't', :jump, :tracks, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
+          on 'e', :jump, :meters, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
           doc 'a b ...', "a pane's letter (by its number in NAV)"
           group 'Modes'
           on 'm', :messages, help: 'messages (warnings) pane, again: away'
@@ -36,14 +36,13 @@ module MB
         # Jump letters of the built-in panes (pane name => letter, as bound
         # in NAV_EXTRA); other pane kinds declare theirs with
         # `jump 'a'` (UI::PaneKeys).  #check_jumps keeps them all clear of
-        # NAV's keys and the Ctrl-W window keys.
+        # NAV's keys and each other.
         JUMPS = NAV_EXTRA.entries.select { |b| b.action == :jump }.to_h { |b| [b.args[0], b.chord[0]] }.freeze
 
         # Letters a jump may not take: every key NAV binds (Router::NAV,
-        # NAV_EXTRA but jumps), and the Ctrl-W window keys (NAV mirrors
-        # vim's window commands, so a jump letter there would read two ways).
+        # NAV_EXTRA but jumps; Ctrl-W reads the same keys once).
         def self.reserved_letters
-          maps = [Input::Router::NAV, Input::Router::WINDOW, NAV_EXTRA]
+          maps = [Input::Router::NAV, NAV_EXTRA]
           maps.flat_map { |m| m.entries.reject { |b| b.action == :jump }.map(&:chord) }.select { |k, mods| k.is_a?(String) && mods.empty? }.map(&:first).uniq.sort
         end
 
@@ -54,7 +53,7 @@ module MB
           out = []
           reserved = reserved_letters
           all = JUMPS.to_a + declared.to_a
-          all.each { |name, l| out << "#{name.inspect}'s jump #{l.inspect} is a NAV or Ctrl-W key" if reserved.include?(l) }
+          all.each { |name, l| out << "#{name.inspect}'s jump #{l.inspect} is a NAV key" if reserved.include?(l) }
           all.group_by(&:last).each { |l, list| out << "jump #{l.inspect} is claimed by #{list.map { |n, _| n.inspect }.uniq.join(' and ')}" if list.map(&:first).uniq.length > 1 }
           out
         end
@@ -71,12 +70,24 @@ module MB
         REPL_DOCS = Keymap.new(:repl_docs) do
           group 'REPL'
           doc 'Ctrl-]', 'NAV (Ctrl-] again: back)'
-          doc 'Ctrl-W then h j k l w p', 'focus a pane, as in vim (other keys: Ctrl-W deletes a word, then the key)'
+          doc 'Ctrl-W then a NAV key', 'that one NAV action, then back (Ctrl-W Ctrl-W: the last pane)'
           doc 'F2', 'KEYS (the keyboard pane)'
           doc 'Ctrl-BkSp Ctrl-Del', 'delete the word before, after the cursor'
           doc 'Ctrl-S-Del', 'delete to the end of the line'
           doc 'PgUp PgDn', 'history search (Reline; your inputrc decides)'
           doc 'Ctrl-C Ctrl-Z', 'interrupt, hide the tiles'
+        end
+
+        # The one-shot NAV (Ctrl-W, the Router's :once; doc lines).
+        ONCE_DOCS = Keymap.new(:once) do
+          group 'Ctrl-W then (one NAV key, then back)'
+          doc 'any NAV key', 'that action, then back where you were (z zooms, u undoes, ...)'
+          doc 'arrows Tab 1-9 p', 'focus a pane and go into it, as Enter would'
+          doc 'a k t e i ...', 'jump into that pane'
+          doc 'Ctrl-W', 'the pane focused before, gone into (again: back)'
+          doc 'Ctrl-]', 'stay in NAV'
+          doc 'Esc', 'back, nothing done'
+          doc 'other keys', 'this overlay (a key listed here then acts once)'
         end
 
         # Step entry's keys (StepEntry reads them; doc lines).
@@ -135,7 +146,7 @@ module MB
         ELSEWHERE = [
           ['Ctrl-]', 'the band\'s tiled screen, in NAV', 'the tiled screen, in NAV'],
           ['F2', 'KEYS (the tiled :keys screen)', 'KEYS (the tiled :keys screen)'],
-          ['Ctrl-W', 'Reline: delete a word', 'Reline: delete a word'],
+          ['Ctrl-W', 'Reline: delete a word (in the tiles: one NAV key)', 'Reline: delete a word'],
           ['Alt-PgUp Alt-PgDn', 'the terminal\'s own (scrollback: Shift-PgUp)', 'the terminal\'s own'],
           ['Ctrl-BkSp Ctrl-Del', 'delete the word before, after', 'delete the word before, after'],
           ['Ctrl-S-Del', 'delete to the end of the line', 'delete to the end of the line'],
@@ -196,15 +207,15 @@ module MB
             self
           end
 
-          # Key-table groups for +mode+ (:repl, :nav, :window, :grab, :step).
+          # Key-table groups for +mode+ (:repl, :nav, :once, :grab, :step).
           def groups(mode)
             case mode
             when :repl then merge(repl_keymap.help_groups, REPL_DOCS.help_groups)
             when :nav then merge(Input::Router::NAV.help_groups, NAV_EXTRA.help_groups, user[:nav].help_groups)
-            when :window then Input::Router::WINDOW.help_groups
+            when :once then ONCE_DOCS.help_groups
             when :grab then Keyboard::KEYMAP.help_groups
             when :step then STEP_DOCS.help_groups
-            else raise ArgumentError, "Key table modes are :repl, :nav, :window, :grab, :step (got #{mode.inspect})"
+            else raise ArgumentError, "Key table modes are :repl, :nav, :once, :grab, :step (got #{mode.inspect})"
             end
           end
 
@@ -212,7 +223,7 @@ module MB
           # +live+ false lists the REPL's default keys without reading the
           # inputrc (Tiles::KEY_HELP, built at load time).
           def table(live: true)
-            %i[repl nav window grab step].to_h { |m|
+            %i[repl nav once grab step].to_h { |m|
               [m, m == :repl && !live ? merge(REPL_DEFAULTS.help_groups, REPL_DOCS.help_groups) : groups(m)]
             }.merge(elsewhere: [['Outside the tiles', ELSEWHERE.map { |k, band, off| [k, band == off ? "band, no UI: #{band}" : "band: #{band}; no UI: #{off}"] }]])
           end

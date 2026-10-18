@@ -2,7 +2,7 @@ module MB
   module Sound
     module Help
       # `help rack(:dub)` explains a rack (racks R2): its kind and ports,
-      # its macros with ranges (and their Session knobs while it plays),
+      # its knobs with ranges (and their Session knobs while it plays),
       # its latency, where it plays, and its source.  Built from
       # Rack#info / Session::Racks#rack_info (the data a rack pane reads).
       class RackPage
@@ -27,14 +27,14 @@ module MB
             out << "  #{pad(c(:key, p[:name].to_s), 18)} #{pad(p[:type].to_s, 8)} #{c(:dim, role)}"
           end
           out << "  #{pad(c(:key, '(output)'), 18)} #{r.out || (r.name && session&.racks&.output_of(r.name)) || '?'}"
-          out << c(:head, 'macros') + c(:dim, '  (turn :"name/macro", ...)')
-          if info.macro_specs.empty?
-            out << "  #{c(:dim, 'none (macro :name, value, range: lo..hi inside the block)')}"
+          out << c(:head, 'knobs') + c(:dim, '  (turn :"name/knob", ...)')
+          if info.knob_specs.empty?
+            out << "  #{c(:dim, 'none (knob :name, value, range: lo..hi inside the block)')}"
           else
-            info.macro_specs.each do |n, spec|
-              knobs = infos.select(&:path).flat_map(&:macros).select { |k| k.to_s.split('/').last == n.to_s }
+            info.knob_specs.each do |n, spec|
+              knobs = infos.select(&:path).flat_map(&:knobs).select { |k| k.to_s.split('/').last == n.to_s }
               where = knobs.empty? ? 'not playing' : knobs.map(&:inspect).join(', ')
-              out << "  #{pad(c(:key, Session::Racks.macro_text(n, spec)), 34)} #{c(:dim, where)}"
+              out << "  #{pad(c(:key, Session::Racks.spec_text(n, spec)), 34)} #{c(:dim, where)}"
             end
           end
           lat = info.latency

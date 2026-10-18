@@ -1,12 +1,12 @@
 require_relative '../../../../support/ui_helpers'
 
 # Round 4's panes (ux-r4-panes): the clip matrix and its keys, the clip
-# detail, racks with macros to turn, buses with meters, the keyboard
+# detail, racks with knobs to turn, buses with meters, the keyboard
 # lighting MIDI input.  Panes draw from ui_fake_snapshot (feed contract
 # data); keys return console lines (PaneKeys::Run) the screen runs.
 RSpec.describe('UI round 4 panes', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
-  let(:snap) { ui_fake_snapshot(macros: true) }
+  let(:snap) { ui_fake_snapshot(rack_knobs: true) }
 
   def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 8)
     grid = MB::Sound::Plot::Text::Cells.new(w, h)
@@ -87,13 +87,38 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       ui::Panes::Clips.selected = nil
     end
 
+    it "shows a tweak version's lineage under its name (ux-r4b)" do
+      ui::Panes::Clips.selected = nil
+      lane = snap.matrix.tracks.find { |t| t.name == :bass }
+      base = lane.slots[0]
+      ui::Panes::Clips.selected = [:bass, base.with(name: 'bass_a_v3', key: 'bass_a_v3', history: ['bass_a', 'transpose: 2', ':reverse'].freeze)]
+      lines = draw(:clip, snap, h: 10)
+      expect(lines[0]).to start_with('bass_a_v3')
+      expect(lines[1]).to eq('bass_a → transpose: 2 → :reverse')
+    ensure
+      ui::Panes::Clips.selected = nil
+    end
+
+    it 'marks a slot several scene columns give only in its home column with play_marks :current (ux-r4b item 5; :all by default)' do
+      expect(ui::Panes::Clips.play_marks).to eq(:all)
+      all = draw(:clips, snap, w: 70)
+      expect(all[2].scan('▶bass_a').length).to eq(2) # (intro and drop)
+      ui::Panes::Clips.play_marks = :current
+      home = draw(:clips, snap, w: 70)
+      expect(home[2].scan('▶bass_a').length).to eq(1)
+      expect(home[2].index('▶bass_a')).to eq(all[2].rindex('▶bass_a')) # (drop: the current scene)
+      expect(ui::Panes::Clips.home_column(snap.matrix, snap.matrix.tracks.find { |t| t.name == :bass }, 0)).to eq(1)
+    ensure
+      ui::Panes::Clips.play_marks = nil
+    end
+
     it 'says how to make tracks when there are none' do
       expect(draw(:clips, ui_fake_snapshot.with(slow: ui_fake_slow.with(matrix: nil)))[0]).to start_with('no tracks yet')
     end
   end
 
   describe 'racks' do
-    it 'draws each instance with its kind, typed ports, latency, and macros as knob rows' do
+    it 'draws each instance with its kind, typed ports, latency, and knobs as rows' do
       lines = draw(:racks, snap, w: 50)
       expect(lines[0]).to eq('bass/dub  effect  lat 72 smp')
       expect(lines[1]).to eq('  in sig:audio side:audio?  out audio')
@@ -102,19 +127,45 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(draw(:racks, ui_fake_snapshot.with(slow: ui_fake_slow.with(racks: [].freeze)))[0]).to start_with('no racks')
     end
 
-    it 'picks macros and turns them by position steps (Shift: fine) as turn lines, from the value it just set' do
+    it 'picks knobs and turns them by position steps (Shift: fine): live previews, one commit per held gesture' do
+      now = 100.0
+      ui::Panes::Racks.clock = -> { now }
+      pk = ui::PaneKeys
       st = { title_in_rule: true, mode: true }
       draw(:racks, snap, st)
-      expect(key(:racks, st, :turn, 0.02)).to eq(ui::PaneKeys::Run['turn :"bass/dub/space", 0.62', 'bass/dub/space 0.62'])
-      expect(key(:racks, st, :turn, 0.02).code).to eq('turn :"bass/dub/space", 0.64') # (before the knob caught up)
+      pane = ui.panes.fetch(:racks)
+      # A press: a live preview, the commit once GAP has passed
+      expect(key(:racks, st, :turn, 0.02)).to eq([pk::Preview[:"bass/dub/space", 0.62]])
+      expect(pane.key_wait(st)).to be_within(1e-9).of(ui::TurnGesture::GAP)
+      expect(pane.key_tick(st)).to be_nil
+      now += ui::TurnGesture::GAP
+      expect(pane.key_tick(st)).to eq(pk::Commit[:"bass/dub/space", 'bass/dub/space 0.62'])
+      pane.lines_ran(st)
+      expect(pane.key_wait(st)).to be_nil
+      # A held key: repeats 40 ms apart after a 0.5 s delay, each a preview, one commit
+      now += 1
+      previews = [key(:racks, st, :turn, 0.02)]
+      now += 0.5
+      10.times { previews << key(:racks, st, :turn, 0.02); expect(pane.key_tick(st)).to be_nil; now += 0.04 }
+      expect(previews.map { |p| p[0].value }).to eq((1..11).map { |i| (0.6 + 0.02 * i).round(2) })
+      expect(draw(:racks, snap, st, w: 50)[2]).to include('0.82 0..1')
+      now += ui::TurnGesture::GAP
+      expect(pane.key_tick(st)).to eq(pk::Commit[:"bass/dub/space", 'bass/dub/space 0.82 (0.86 s held)'])
+      pane.lines_ran(st)
+      # Another key goes out first: picking commits a gesture, reset adds its own line
       key(:racks, st, :pick, 1)
-      tone = key(:racks, st, :turn, -0.002).code
-      expect(tone).to start_with('turn :"bass/dub/tone", 17')
-      expect(tone[/[\d.]+\z/].to_f).to be_within(10).of(1800 * (8000 / 600.0)**-0.002)
-      expect(key(:racks, st, :reset).code).to eq('turn :"bass/dub/tone", 2400')
+      key(:racks, st, :turn, -0.002)
+      out = key(:racks, st, :reset)
+      expect(out[0]).to be_a(pk::Commit)
+      expect(out[0].knob).to eq(:"bass/dub/tone")
+      expect(out[1]).to eq(pk::Run['turn :"bass/dub/tone", 2400', 'bass/dub/tone 2400'])
+      pane.lines_ran(st)
       key(:racks, st, :pick, 5) # (clamped)
-      expect(key(:racks, st, :turn, 1.0).code).to eq('turn :"bass/dub/tone", 8000')
-      expect(key(:racks, { snap: ui_fake_snapshot }, :turn, 0.1)).to include('no macro')
+      expect(key(:racks, st, :turn, 1.0)).to eq([pk::Preview[:"bass/dub/tone", 8000.0]])
+      expect(key(:racks, st, :pick, -1)).to eq([pk::Commit[:"bass/dub/tone", 'bass/dub/tone 8000']])
+      expect(key(:racks, { snap: ui_fake_snapshot }, :turn, 0.1)).to include('no knob')
+    ensure
+      ui::Panes::Racks.clock = nil
     end
   end
 
@@ -181,7 +232,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
 
     def run(r) = ui.run_line(r.code, @session)
 
-    it 'launches, tweaks, goes to scenes, stops, and turns macros from pane keys, journaled and undoable, the matrix following' do
+    it 'launches, tweaks, goes to scenes, stops, and turns rack knobs from pane keys, journaled and undoable, the matrix following' do
       MB::Sound::Session.with_context(session: @session) do
         arr = @session.arrangement
         bass_a = MB::Sound.seq(MB::Sound::C2, MB::Sound::G2).n8.loop.named(:bass_a)
@@ -192,7 +243,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
         @session.bus(:verb) { |sig| sig * 0.5 }
         @session.route(:bass, send: { verb: 0.5 })
         MB::Sound.instance_eval do
-          arack(:dub) { |sig| sig * macro(:space, 0.35) }
+          arack(:dub) { |sig| sig * knob(:space, 0.35) }
           bg :drone, 110.hz.saw.at(-30.db).then(&rack(:dub))
         end
 
@@ -224,13 +275,18 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
         kinds = @session.journal.changes.map(&:kind)
         expect(kinds).to include(:scene, :stop)
 
-        # Racks: the macro, turned
+        # Racks: the knob, turned
         rk = { title_in_rule: true, mode: true }
         lines = draw(:racks, s, rk, w: 50)
         expect(lines.join("\n")).to include('dub', 'space')
-        t = key(:racks, rk, :turn, 0.1)
-        expect(t.code).to match(/\Aturn :"(drone\/)?dub\/space", 0\.45\z/)
-        run(t)
+        prev = key(:racks, rk, :turn, 0.1)[0]
+        @session.preview_turn(prev.knob, prev.value) # (as Tiles#pane_result does)
+        sleep ui::TurnGesture::GAP
+        c = ui.panes.fetch(:racks).key_tick(rk)
+        line = @session.gesture_line(c.knob)
+        expect(line).to match(/\Aturn :"(drone\/)?dub\/space", 0\.45\z/)
+        ui.run_line(line, @session)
+        ui.panes.fetch(:racks).lines_ran(rk)
         4.times { @session.process_buffer }
         expect(@session.knobs.values.find { |k| k.name.to_s.end_with?('dub/space') }.value).to be_within(1e-9).of(0.45)
 
@@ -268,6 +324,55 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       pump&.join
       @tiles&.stop
       @term&.close
+    end
+  end
+
+  describe 'a held arrow in the racks pane (ux-r4b)' do
+    after do
+      @tiles&.stop
+      @term&.close
+      @session&.close
+      MB::Sound.rewind
+    end
+
+    it 'sweeps the knob live while the arrow is held, then journals one line for the gesture' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: @session) do
+        MB::Sound.instance_eval do
+          arack(:dub) { |sig| sig * knob(:space, 0.3) }
+          bg :drone, 110.hz.saw.at(-30.db).then(&rack(:dub))
+        end
+        4.times { @session.process_buffer }
+      end
+      @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.005; end }
+      expect(@term.wait_for('t> ')).to eq(true)
+      @tiles.show(:racks, at: :queue)
+      expect(@term.wait_for(/space .*0\.3 0\.\.1/)).to eq(true), @term.text
+      expect(wait_until { @session.knobs.keys.any? { |k| k.to_s.end_with?('dub/space') } }).to eq(true)
+      @term.write("\x1d")
+      expect(@term.wait_for(' NAV ')).to eq(true)
+      @term.type('r')
+      expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :racks }).to eq(true)
+      turns = -> { @session.journal.changes.count { |e| e.kind == :turn } }
+      before = turns.call
+      # A held Right: a press, then repeats 40 ms apart
+      @term.write("\e[C")
+      sleep 0.3
+      8.times { @term.write("\e[C"); sleep 0.04 }
+      expect(turns.call).to eq(before) # (nothing journaled until the keys stop)
+      sp = @session.knobs.values.find { |k| k.name.to_s.end_with?('dub/space') }
+      expect(wait_until { sp.value > 0.4 }).to eq(true) # (but the knob moved, heard while held)
+      expect(@term.wait_for(/turn :"(drone\/)?dub\/space", steps: \[\[0, 0\.32\], \[\d+, 0\.34\]/, timeout: 3)).to eq(true), @term.text
+      expect(@term.text).to include("dub/space 0.48 (")
+      expect(wait_until { turns.call == before + 1 }).to eq(true)
+      sleep ui::TurnGesture::GAP + 0.1
+      expect(turns.call).to eq(before + 1)
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
     end
   end
 

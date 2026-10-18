@@ -53,11 +53,11 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for('=> 42')).to eq(true)
   end
 
-  it 'puts the keyboard pane in with NAV K, holds legacy keys while they repeat, and ends notes on every way out' do
+  it 'puts the keyboard pane in with NAV k, holds legacy keys while they repeat, and ends notes on every way out' do
     start
     @term.write("\x1d")
     expect(@term.wait_for(' NAV ')).to eq(true)
-    @term.type('K')
+    @term.type('k')
     expect(@term.wait_for(' KEYS ')).to eq(true)
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     expect(@tiles.tiler.rects[:keyboard].h).to eq(8)
@@ -137,7 +137,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       },
     }
     enter_ways = {
-      nav_k: -> { @term.write("\x1d"); expect(wait_mode(@tiles, :nav)).to eq(true); @term.write('K') },
+      nav_k: -> { @term.write("\x1d"); expect(wait_mode(@tiles, :nav)).to eq(true); @term.write('k') },
       f2: -> { @term.write("\eOQ") },
       ruby: -> { @tiles.keys },
     }
@@ -182,11 +182,11 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     start(:keys, keys_kitty: true)
     @keyboard.off_mode = :hold
     steps = {
-      nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', k_jump: 'K', t_jump: 't', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
+      nav: "\x1d", nav_kitty: "\e[93;5u", p: 'p', k_jump: 'k', t_jump: 't', i: 'i', enter: "\r", ctrl_c: "\e[99;5u", legacy_ctrl_c: "\x03",
       ctrl_z: "\x1a", note: "\e[122;1:1u", note_legacy: 'x', z: 'z', esc: "\e", digit: -> { rng.rand(1..7).to_s },
       ruby_keys: -> { @tiles.keys; nil }, ruby_off: -> { @tiles.keys(false); nil },
       # (round 3: window prefix, overlay, palette, F2, a pane shown over the REPL's slot)
-      ctrl_w: "\x17", ctrl_w_l: "\x17l", ctrl_w_p: "\x17p", question: '?', colon: ':', f2: "\eOQ",
+      ctrl_w: "\x17", ctrl_w_right: "\x17\e[C", ctrl_w_w: "\x17\x17", ctrl_w_z: "\x17z", ctrl_w_nav: "\x17\x1d", ctrl_w_a: "\x17a", question: '?', colon: ':', f2: "\eOQ",
       show_on_repl: -> { @tiles.show(:knobs, at: :repl) if @tiles.tiler.layout.panes.include?(:repl); nil },
     }
     path = []

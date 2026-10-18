@@ -93,8 +93,29 @@ module MB
 
           # The clip the cursor is on (for the detail pane): [track name,
           # ClipInfo] or nil.  Kept per process: one screen at a time.
+          #
+          # +play_marks+ (ux-r4b item 5, a choice the maintainer is making
+          # from captures; :all until then): where a playing slot shows ▶
+          # when several scene columns give the track that slot: :all, in
+          # every such column; :current, only in its home column (the
+          # current scene's column if that scene gives it, else the first
+          # column showing it).
           class << self
             attr_accessor :selected
+            attr_writer :play_marks
+
+            def play_marks = @play_marks || :all
+          end
+
+          # The column where track +t+'s playing +slot+ shows ▶ with
+          # play_marks :current (see above).
+          def self.home_column(m, t, slot)
+            cur = m.scenes.index(&:current)
+            return cur if cur && m.scenes[cur].cells.fetch(t.name, :stop) == slot
+            j = m.scenes.index { |sc| sc.cells.fetch(t.name, :stop) == slot }
+            return j if j
+            k = others(m, t).index(slot)
+            k && m.scenes.length + k
           end
 
           def draw_body(c, s, state)
@@ -158,7 +179,7 @@ module MB
                 name = clip ? (clip.key || clip.name).to_s : "##{slot}"
                 if q && q.kind == :launch && q.slot == slot
                   ["◆#{name}", :queued]
-                elsif t.playing == slot && lstate != :stopped
+                elsif t.playing == slot && lstate != :stopped && (Clips.play_marks == :all || Clips.home_column(m, t, slot) == j)
                   ["#{c.glyph(:play)}#{name}", lstate == :ringing || lstate == :stopping ? :dim : :ok]
                 else
                   [" #{name}", :text]
@@ -277,6 +298,12 @@ module MB
                    [clip.loop ? '  loop' : '  once', :dim], [range, :dim], [track ? "  on #{track}" : '', :dim],
                    ["  #{clip.events.length} notes", :dim])
             y = 1
+            hist = clip.respond_to?(:history) ? clip.history : []
+            if !hist.empty? && c.h > 5
+              # (what made this tweak version: tweak keys name versions bass_a_v2, _v3, ...)
+              c.text(0, y, c.fit("#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w), :dim)
+              y += 1
+            end
             if clip.ruby && c.h > 4
               c.text(0, y, c.fit(clip.ruby.lines.first.to_s.strip, c.w), :key)
               y += 1
@@ -325,11 +352,16 @@ module MB
 
         # Racks (ux-r4 item 12): a block per rack instance: its path (or
         # name), kind, signature, typed ports in and out, latency, and its
-        # macros as knob rows with ranges.  In the pane's mode (NAV Enter)
-        # Up/Down pick a macro and Left/Right turn it (Shift: fine), each
-        # turn a `turn :"bass/dub/space", 0.42` console line.
+        # knobs as knob rows with ranges.  In the pane's mode (NAV Enter)
+        # Up/Down pick a knob and Left/Right turn it (Shift: fine).  Keys
+        # within TurnGesture::GAP of each other (a held arrow) are one
+        # gesture: the knob moves live with each key (heard as you hold),
+        # and when the keys stop the gesture becomes one console line from
+        # the Session (`turn :"bass/dub/space", 0.42` for one press, else
+        # `turn :"bass/dub/space", steps: [[0, 0.32], [4800, 0.34], ...]`),
+        # journaled at its first step.
         #
-        # Data: Snapshot#racks (Rack::RackInfo per instance), macro values
+        # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
         class Racks < Pane
           jump 'r'
@@ -338,39 +370,46 @@ module MB
           STEP = 0.02
           FINE = 0.002
 
-          # Seconds a turned value is used over the snapshot's (keys faster
-          # than the snapshot's knob values catch up).
+          # Seconds a turned value is used over the snapshot's, until the
+          # snapshot catches up.
           PENDING = 0.6
+
+          class << self
+            # The gestures' clock (monotonic seconds; specs set their own).
+            attr_writer :clock
+
+            def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+          end
 
           mode_keys do
             group 'Racks'
-            on [:up, 'k'], :pick, -1, help: 'previous macro', label: 'Up Down j k'
-            on [:down, 'j'], :pick, 1, help: 'next macro', label: 'Up Down j k'
-            on [:right, 'l'], :turn, STEP, help: 'turn the macro up', label: 'Right l'
-            on [:left, 'h'], :turn, -STEP, help: 'turn the macro down', label: 'Left h'
+            on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
+            on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down j k'
+            on [:right, 'l'], :turn, STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Right l'
+            on [:left, 'h'], :turn, -STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left h'
             on [:right, :shift], :turn, FINE, help: 'turn up, fine'
             on [:left, :shift], :turn, -FINE, help: 'turn down, fine'
             on ['L'], :turn, FINE, help: 'turn up, fine'
             on ['H'], :turn, -FINE, help: 'turn down, fine'
-            on '0', :reset, help: "the macro's default"
+            on '0', :reset, help: "the knob's default"
           end
 
           keys do
             group 'Racks'
-            doc 'Enter', 'pick and turn macros (Esc back to NAV)'
+            doc 'Enter', 'pick and turn knobs (Esc back to NAV)'
           end
 
           def priority = :list
 
           def initialize = super(:racks, rate: 10, height: 10, width: 44, title: 'racks', min_height: 3,
-                                         description: 'rack instances: kind, typed ports, latency, macros as knobs to turn')
+                                         description: 'rack instances: kind, typed ports, latency, knobs to turn')
 
-          # The turnable macros of +racks+ in pane order: [[knob name,
-          # macro, RackInfo], ...] (only instances playing have knobs).
-          def self.macros(racks, knobs)
+          # The turnable knobs of +racks+ in pane order: [[knob name,
+          # knob, RackInfo], ...] (only instances playing have knobs).
+          def self.knobs(racks, knobs)
             names = knobs.to_h { |k| [k.name, k] }
             racks.flat_map { |r|
-              r.macros.filter_map { |kn| names[kn] && [kn, kn.to_s.split('/').last.to_sym, r] }
+              r.knobs.filter_map { |kn| names[kn] && [kn, kn.to_s.split('/').last.to_sym, r] }
             }
           end
 
@@ -382,7 +421,7 @@ module MB
               return
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
-            list = Racks.macros(racks, s.knobs)
+            list = Racks.knobs(racks, s.knobs)
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
             picked = pick && list[pick][0]
             y = 0
@@ -398,19 +437,23 @@ module MB
               out = r.signature.to_s.split('->').last.to_s.strip
               c.line(y, ['  in ', :dim], [ins.join(' '), :text], ['  out ', :dim], [out, :text])
               y += 1
-              r.macros.each do |kn|
+              r.knobs.each do |kn|
                 break if y >= c.h
                 k = knobs[kn]
-                macro = kn.to_s.split('/').last
-                spec = k&.spec || r.macro_specs[macro.to_sym]
+                short = kn.to_s.split('/').last
+                spec = k&.spec || r.knob_specs[short.to_sym]
                 value = pending(state, kn) || k&.value || spec&.default
+                g = state[:gesture]
+                target = g&.turning? && g.knob == kn ? g.value : nil
+                value = target if target
                 sel = state[:mode] && kn == picked
-                x = c.run(0, y, "  #{c.fit(macro, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
+                x = c.run(0, y, "  #{c.fit(short, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
                 range = spec ? " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}" : ''
                 vtext = "#{Panes.fmt(value)}#{spec&.unit ? " #{spec.unit}" : ''}"
                 mw = [c.w - x - vtext.length - range.length - 2, 3].max
                 x = c.meter(spec ? spec.position(value).to_f : 0.0, width: mw, x: x + 1, y: y, role: k ? :key : :dim)
-                x = c.text(x + 1, y, vtext, :text)
+                # (the queued color while a gesture turns it: its line comes when the keys stop)
+                x = c.text(x + 1, y, vtext, target ? :queued : :text)
                 c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
                 y += 1
               end
@@ -418,40 +461,74 @@ module MB
           end
 
           def key_pick(state, d)
+            out = flush(state)
             state[:pick] = state[:pick].to_i + d
-            nil
+            out
           end
 
+          # A turn key: starts or extends the gesture on the picked knob
+          # (another knob's gesture goes out first) with a live Preview;
+          # its Commit comes from #key_tick when the keys stop (or #flush).
           def key_turn(state, step)
-            cell = picked(state) or return 'no macro to turn (racks playing with macros have knobs)'
+            cell = picked(state) or return 'no knob to turn (racks with knobs show them while they play)'
             kn, k = cell
-            v = pending(state, kn) || k.value
-            nv = k.spec.clamp(k.spec.value((k.spec.position(v) + step).clamp(0.0, 1.0)))
-            set(state, kn, nv)
+            now = Racks.clock.call
+            g = (state[:gesture] ||= TurnGesture.new)
+            out = g.turning? && g.knob != kn ? flush(state) : nil
+            v = g.turning? ? g.value : (pending(state, kn) || k.value)
+            nv = Float(TurnGesture.number(k.spec.clamp(k.spec.value((k.spec.position(v) + step).clamp(0.0, 1.0)))))
+            [*out, g.step(kn, v, nv, now)]
           end
 
           def key_reset(state)
-            cell = picked(state) or return 'no macro'
+            cell = picked(state) or return 'no knob'
             kn, k = cell
-            set(state, kn, k.spec.default)
+            [*flush(state), set(state, kn, k.spec.default)]
+          end
+
+          # Time passes (the screen calls it while #key_wait says so): the
+          # gesture's Commit once its keys stopped, else nil.
+          def key_tick(state)
+            g = state[:gesture] or return nil
+            run = g.tick(Racks.clock.call)
+            remember(state, g) if run
+            run
+          end
+
+          # Seconds until #key_tick has a Commit, or nil.
+          def key_wait(state) = state[:gesture]&.wait(Racks.clock.call)
+
+          # The screen ran the lines a key or #tick returned.
+          def lines_ran(state)
+            state[:gesture]&.ran
           end
 
           private
 
-          def set(state, kn, value)
-            (state[:pending] ||= {})[kn] = [value, MB::U.clock_now]
-            PaneKeys::Run["turn #{kn.inspect}, #{Racks.number(value)}", "#{kn} #{Racks.number(value)}"]
+          # The gesture's Commit now (another key), as an Array (empty
+          # without one).
+          def flush(state)
+            g = state[:gesture] or return []
+            run = g.flush(Racks.clock.call) or return []
+            remember(state, g)
+            [run]
           end
 
-          # A value to 4 significant figures, as Ruby.
-          def self.number(v)
-            v = v.to_f
-            v == v.round ? v.round.to_s : MB::M.sigfigs(v, 4).to_s
+          # The gesture's last value stands in for the knob until the
+          # snapshot catches up.
+          def remember(state, g)
+            (state[:pending] ||= {})[g.knob] = [g.value, Racks.clock.call]
+          end
+
+          def set(state, kn, value)
+            (state[:pending] ||= {})[kn] = [value, Racks.clock.call]
+            v = TurnGesture.number(value)
+            PaneKeys::Run["turn #{kn.inspect}, #{v}", "#{kn} #{v}"]
           end
 
           def picked(state)
             s = state[:snap] or return nil
-            list = Racks.macros(s.racks || [], s.knobs)
+            list = Racks.knobs(s.racks || [], s.knobs)
             return nil if list.empty?
             kn = list[state[:pick].to_i.clamp(0, list.length - 1)][0]
             [kn, s.knobs.find { |k| k.name == kn }]
@@ -459,7 +536,7 @@ module MB
 
           def pending(state, kn)
             v, at = state[:pending]&.[](kn)
-            v if at && MB::U.clock_now - at < PENDING
+            v if at && Racks.clock.call - at < PENDING
           end
         end
       end

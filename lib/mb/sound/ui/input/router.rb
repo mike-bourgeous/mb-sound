@@ -13,14 +13,25 @@ module MB
         #
         # States:
         # - :repl: keys go to the REPL (the host's #repl_key), except the
-        #   NAV key (Ctrl-], always), the REPL keymap (#repl_keys: direct
-        #   bindings like Alt-PgUp, `ui.bind`), and prefix chords (Ctrl-W
-        #   then a window key; with #nav_esc, a lone held Escape).
+        #   NAV key (Ctrl-], always), the one-shot NAV key (Ctrl-W), the
+        #   REPL keymap (#repl_keys: direct bindings like Alt-PgUp,
+        #   `ui.bind`), and with #nav_esc a lone held Escape (a prefix).
         # - :play (instead of :repl on a screen without a console, a
         #   script's --ui screen): keys go to the host's #play_key.
         # - :nav: keys go through the focused pane's keymap (#pane_keymap),
         #   then NAV, then the extra keymaps; Ctrl-] goes back to where NAV
         #   was entered from (:repl, :grab, :line, :play).
+        # - :once (Ctrl-W from :repl, :play, :nav, :grab, or :pane; the
+        #   maintainer's one-shot NAV, 2026-10-18): the next key acts as in
+        #   NAV (the same keymaps: no separate window keys), then the Router
+        #   goes back to #once_return, or, when the action moved the focus,
+        #   into the pane it landed on as Enter would (the host's
+        #   #once_target).  Ctrl-W again (Ctrl-W Ctrl-W) is the pane focused
+        #   before, gone into (twice: back); Ctrl-] stays in NAV; Esc goes
+        #   back; an unbound key opens the ? overlay over :once (a key
+        #   there closes it and acts once; Esc goes back).  An action that
+        #   changes the mode itself (Enter, a jump, :, /, ?) keeps the mode
+        #   it chose.
         # - :line (the palette and search prompts): keys edit a one-line
         #   input (LineInput); Enter submits, Esc cancels.
         # - :grab (a pane that takes the keyboard, like the virtual piano):
@@ -33,17 +44,16 @@ module MB
         #   Esc and Ctrl-] go to NAV, ? shows the keys.
         # - :overlay (the `?` key help over NAV): Esc, ?, and Ctrl-] close
         #   it; any other key closes it and acts as in the state below.
-        # - :pending: a prefix key waits for the next key (Prefix: Ctrl-W
-        #   for window keys, a held Escape for NAV); #origin is the state it
-        #   came from, which #mode reports.
+        # - :pending: a prefix key waits for the next key (Prefix: a held
+        #   Escape for NAV); #origin is the state it came from, which #mode
+        #   reports.
         #
         # Outside :grab, key releases are ignored and repeats act as presses
         # (terminals report them only while a grab asks for them, but a
         # release can arrive just after the grab ends).
         #
         # The host receives #act(Action) for everything else, among them
-        # :interrupt (Ctrl-C), :hide (Ctrl-Z), :keys (F2), :window (a
-        # window-prefix action), :refused (a key a state can't take, with
+        # :interrupt (Ctrl-C), :hide (Ctrl-Z), :keys (F2), :refused (a key a state can't take, with
         # why: shown, never silently dropped), :unbound (a NAV key that
         # isn't one), and :event (mouse, focus, replies).
         class Router
@@ -59,26 +69,25 @@ module MB
           NAV = Keymap.new :nav do
             group 'Panes'
             on '1'..'9', :focus_index, help: 'pick a pane by its number'
-            on :tab, :focus_next, help: 'next, previous, by direction'
-            on [:tab, :shift], :focus_prev, help: 'next, previous, by direction'
-            on 'h', :focus_dir, :left, help: 'next, previous, by direction'
-            on 'j', :focus_dir, :down, help: 'next, previous, by direction'
-            on 'k', :focus_dir, :up, help: 'next, previous, by direction'
-            on 'l', :focus_dir, :right, help: 'next, previous, by direction'
+            on :tab, :focus_next, help: 'next, previous, by direction (arrows)'
+            on [:tab, :shift], :focus_prev, help: 'next, previous, by direction (arrows)'
+            %i[left right up down].each do |dir|
+              on dir, :focus_dir, dir, help: 'next, previous, by direction (arrows)', label: 'arrows'
+            end
+            on 'p', :focus_last, help: 'the pane focused before'
             on 'z', :zoom, help: 'zoom (again: back)'
             on 's', :split, :rows, help: 'split below, beside'
             on 'v', :split, :cols, help: 'split below, beside'
             on 'x', :close, help: 'close (the REPL stays)'
             on '=', :equalize, help: 'even out sizes'
             %i[left right up down].each do |dir|
-              on dir, :resize, dir, 1, help: 'resize by 1 (Shift: 5)', label: 'arrows'
-              on [dir, :shift], :resize, dir, 5, help: 'resize by 1 (Shift: 5)', label: 'arrows'
+              on [dir, :shift], :resize, dir, 1, help: 'resize by 1 (Ctrl-Shift: 5)', label: 'S-arrows'
+              on [dir, :shift, :ctrl], :resize, dir, 5, help: 'resize by 1 (Ctrl-Shift: 5)', label: 'S-arrows'
             end
             on '[', :tab, -1, help: 'previous, next tab'
             on ']', :tab, 1, help: 'previous, next tab'
             on 'u', :undo, help: 'undo, redo'
             on ['r', :ctrl], :redo, help: 'undo, redo'
-            on 'p', :focus_last, help: 'the pane focused before (as Ctrl-W p)'
             group 'Console'
             on :page_up, :scroll, :page_up, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
             on :page_down, :scroll, :page_down, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
@@ -97,24 +106,9 @@ module MB
             on :escape, :mode, :repl, help: 'back to the REPL'
           end
 
-          # Window keys after the Ctrl-W prefix (vim's window commands).
-          WINDOW = Keymap.new :window do
-            group 'Ctrl-W then'
-            %w[h j k l].zip(%i[left down up right]).each do |key, dir|
-              on key, :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)'
-              on [key, :ctrl], :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)', label: ''
-              on dir, :focus_dir, dir, help: 'the pane in that direction (also arrows, Ctrl-H ...)', label: ''
-            end
-            on 'w', :focus_next, help: 'next pane, previous (W), last focused (p)'
-            on ['w', :ctrl], :focus_next, help: 'next pane, previous (W), last focused (p)', label: 'Ctrl-W'
-            on 'W', :focus_prev, help: 'next pane, previous (W), last focused (p)'
-            on 'p', :focus_last, help: 'next pane, previous (W), last focused (p)'
-            on 's', :split, :rows, help: 'split below, beside'
-            on 'v', :split, :cols, help: 'split below, beside'
-            on 'o', :zoom, help: 'zoom (again: back)'
-            on 'c', :close, help: 'close the pane'
-            on '=', :equalize, help: 'even out sizes'
-          end
+          # The one-shot NAV key (maintainer, 2026-10-18): Ctrl-W then any
+          # NAV key does that one action and comes back (the :once state).
+          ONCE_KEY = Key.of('w', :ctrl)
 
           # Keys that act in every state but :grab (none by default; e.g.
           # `Router::GLOBAL.on ['\\', :ctrl], :panic`).
@@ -124,14 +118,14 @@ module MB
           # maps the next key (nil: none), +timeout+ seconds (nil: waits
           # forever) after which +on_timeout+ (an Action) happens, and
           # +pass_through+: a key the keymap doesn't bind goes to the REPL
-          # after the prefix key (so Ctrl-W x deletes a word and types x).
+          # after the prefix key (a held Escape then x: Esc, x).
           Prefix = Data.define(:name, :key, :keymap, :timeout, :on_timeout, :pass_through)
 
           # The states (see the class comment).
-          STATES = %i[repl play nav line grab pane overlay pending].freeze
+          STATES = %i[repl play nav once line grab pane overlay pending].freeze
 
           # What the Router tells apart in an event (#classify).
-          EVENTS = %i[nav_key keys_key interrupt suspend prefix global key release paste tick other].freeze
+          EVENTS = %i[nav_key keys_key interrupt suspend once_key prefix global key release paste tick other].freeze
 
           # What each (state, event) pair does: [handler, what it does].
           # Every pair is declared (a spec checks), so no key falls through
@@ -142,7 +136,8 @@ module MB
             [:repl, :keys_key] => [:act_keys, 'to KEYS (the keyboard pane)'],
             [:repl, :interrupt] => [:act_interrupt, 'interrupt the REPL (SIGINT)'],
             [:repl, :suspend] => [:act_hide, 'hide the tiles (Ctrl-Z or `ui` brings them back)'],
-            [:repl, :prefix] => [:start_prefix, 'wait for the next key (Ctrl-W: a window key; held Esc: NAV)'],
+            [:repl, :once_key] => [:start_once, 'one NAV key, then back (Ctrl-W z, Ctrl-W arrows, Ctrl-W Ctrl-W)'],
+            [:repl, :prefix] => [:start_prefix, 'wait for the next key (held Esc: NAV)'],
             [:repl, :global] => [:act_global, 'the global binding'],
             [:repl, :key] => [:repl_key, 'a REPL keymap binding (Alt-PgUp, ui.bind), else to the REPL'],
             [:repl, :release] => [:ignore, 'ignored (only a grab reads releases)'],
@@ -154,6 +149,7 @@ module MB
             [:play, :keys_key] => [:act_keys, 'to KEYS'],
             [:play, :interrupt] => [:act_interrupt, 'interrupt (the script decides)'],
             [:play, :suspend] => [:act_hide, 'hide (only with a console; else refused)'],
+            [:play, :once_key] => [:start_once, 'one NAV key, then back'],
             [:play, :prefix] => [:start_prefix, 'wait for the next key'],
             [:play, :global] => [:act_global, 'the global binding'],
             [:play, :key] => [:play_key, "the screen's own keys (repeats too)"],
@@ -166,18 +162,33 @@ module MB
             [:nav, :keys_key] => [:act_keys, 'to KEYS'],
             [:nav, :interrupt] => [:act_interrupt, 'interrupt the REPL'],
             [:nav, :suspend] => [:act_hide, 'hide the tiles'],
-            [:nav, :prefix] => [:start_prefix, 'wait for a window key (Ctrl-W)'],
+            [:nav, :once_key] => [:start_once, 'one NAV key, then back in NAV (Ctrl-W Ctrl-W: the last pane, gone into)'],
+            [:nav, :prefix] => [:ignore, 'no prefixes in NAV (cannot happen)'],
             [:nav, :global] => [:act_global, 'the global binding'],
             [:nav, :key] => [:nav_key, "the focused pane's keys, then NAV's (unbound: says so)"],
             [:nav, :release] => [:ignore, 'ignored (only a grab reads releases)'],
             [:nav, :paste] => [:repl_paste, 'to the REPL whole'],
             [:nav, :tick] => [:ignore, 'nothing waits'],
             [:nav, :other] => [:act_event, 'mouse, focus, replies to the host'],
+            # once (Ctrl-W: one NAV key, then back where it came from)
+            [:once, :nav_key] => [:once_to_nav, 'stay in NAV (Ctrl-W Ctrl-]; Ctrl-] again: back where Ctrl-W came from)'],
+            [:once, :keys_key] => [:once_then, 'back, then F2 as before Ctrl-W'],
+            [:once, :interrupt] => [:once_then, 'back, then Ctrl-C as before Ctrl-W'],
+            [:once, :suspend] => [:once_then, 'back, then hide'],
+            [:once, :once_key] => [:once_last, 'the pane focused before, gone into as Enter would (Ctrl-W Ctrl-W twice: back)'],
+            [:once, :prefix] => [:ignore, 'no prefixes here (cannot happen)'],
+            [:once, :global] => [:once_then, 'back, then the global binding'],
+            [:once, :key] => [:once_key, "a NAV key (the focused pane's first), then back; a moved focus goes into its pane; Esc: back; unbound: the ? overlay"],
+            [:once, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:once, :paste] => [:once_then, 'back, then the paste as before Ctrl-W'],
+            [:once, :tick] => [:ignore, 'nothing waits'],
+            [:once, :other] => [:act_event, 'mouse, focus, replies to the host'],
             # line (palette, search)
             [:line, :nav_key] => [:enter_nav, 'to NAV, the line kept (Ctrl-] again restores it)'],
             [:line, :keys_key] => [:line_then_keys, 'cancel the line, to KEYS'],
             [:line, :interrupt] => [:line_cancel, 'cancel the line'],
             [:line, :suspend] => [:act_hide, 'hide the tiles (the line kept)'],
+            [:line, :once_key] => [:line_key, 'edit the line (Ctrl-W deletes a word)'],
             [:line, :prefix] => [:refuse, 'no prefixes in a line'],
             [:line, :global] => [:act_global, 'the global binding'],
             [:line, :key] => [:line_key, 'edit the line (Enter runs, Esc cancels)'],
@@ -190,6 +201,7 @@ module MB
             [:grab, :keys_key] => [:to_base, 'back to the REPL, notes off'],
             [:grab, :interrupt] => [:to_base, 'all notes off, back to the REPL'],
             [:grab, :suspend] => [:act_hide, 'hide the tiles, notes off'],
+            [:grab, :once_key] => [:start_once, 'notes off, one NAV key, then back (to KEYS unless the focus moved)'],
             [:grab, :prefix] => [:refuse, 'no prefixes in a grab (the grab takes every key)'],
             [:grab, :global] => [:grab_key, 'to the grab (it takes every key)'],
             [:grab, :key] => [:grab_key, 'to the grab (presses and repeats)'],
@@ -202,7 +214,8 @@ module MB
             [:pane, :keys_key] => [:act_keys, 'to KEYS'],
             [:pane, :interrupt] => [:act_interrupt, 'interrupt the REPL'],
             [:pane, :suspend] => [:act_hide, 'hide the tiles'],
-            [:pane, :prefix] => [:refuse, 'no prefixes in a pane (Esc: NAV, where Ctrl-W works)'],
+            [:pane, :once_key] => [:start_once, 'one NAV key, then back into the pane (unless the focus moved)'],
+            [:pane, :prefix] => [:ignore, 'no prefixes in a pane (cannot happen)'],
             [:pane, :global] => [:act_global, 'the global binding'],
             [:pane, :key] => [:pane_key, "the pane's keys (Esc: NAV; ? lists them; others refused)"],
             [:pane, :release] => [:ignore, 'ignored (only a grab reads releases)'],
@@ -214,6 +227,7 @@ module MB
             [:overlay, :keys_key] => [:overlay_then, 'close it, then F2 as below it'],
             [:overlay, :interrupt] => [:overlay_then, 'close it, then Ctrl-C as below it'],
             [:overlay, :suspend] => [:overlay_then, 'close it, then hide'],
+            [:overlay, :once_key] => [:overlay_then, 'close it, then Ctrl-W as below it'],
             [:overlay, :prefix] => [:overlay_then, 'close it, then the prefix as below it'],
             [:overlay, :global] => [:overlay_then, 'close it, then the global binding'],
             [:overlay, :key] => [:overlay_key, 'Esc or ? close it; other keys close it and act as below it'],
@@ -226,7 +240,8 @@ module MB
             [:pending, :keys_key] => [:prefix_then, 'drop the prefix, then F2 as before it'],
             [:pending, :interrupt] => [:prefix_then, 'drop the prefix, then Ctrl-C as before it'],
             [:pending, :suspend] => [:prefix_then, 'drop the prefix, then hide'],
-            [:pending, :prefix] => [:prefix_key, 'the prefix keymap, else pass-through (Ctrl-W Ctrl-W: next pane)'],
+            [:pending, :once_key] => [:prefix_then, 'drop the prefix (Esc to the REPL), then Ctrl-W as before it'],
+            [:pending, :prefix] => [:prefix_key, 'the prefix keymap, else pass-through'],
             [:pending, :global] => [:prefix_key, 'the prefix keymap, else pass-through'],
             [:pending, :key] => [:prefix_key, 'the prefix keymap; else to the REPL after the prefix key (pass-through) or refused'],
             [:pending, :release] => [:ignore, 'ignored (the prefix key let go)'],
@@ -250,10 +265,12 @@ module MB
           # always goes to the REPL; 0.25-0.4 is a comfortable range).
           attr_accessor :nav_esc
 
-          # True (default) when Ctrl-W is the window prefix in :repl and
-          # :nav (vim's Ctrl-W h/j/k/l, w, p); false leaves Ctrl-W to the
-          # REPL (Reline's delete word).
-          attr_accessor :window_prefix
+          # True (default) when Ctrl-W is the one-shot NAV key (:once);
+          # false leaves Ctrl-W to the REPL and the keyboard.
+          attr_accessor :nav_once
+
+          # Where :once goes back to (nil outside :once).
+          attr_reader :once_return
 
           # The palette or search prompt while in :line (or in :nav entered
           # from :line, kept for coming back).
@@ -272,15 +289,18 @@ module MB
 
           # +host+ responds to #repl_key(Key), #repl_paste(String),
           # #act(Action), #line_done(kind, text or nil), #mode_changed(mode),
-            # #grab_key(Key) (for :grab), #play_key(Key) (without a console),
+          # #grab_key(Key) (for :grab), #play_key(Key) (without a console),
           # #pane_mode_key(Key) (for :pane: true if the pane took it), and
-          # optionally #pane_keymap (the focused pane's Keymap, or nil).
+          # optionally #pane_keymap (the focused pane's Keymap, or nil) and
+          # #once_target(origin) (where :once goes after its action: the
+          # origin, or the mode of the pane the focus moved to).
           # +console+ false: no REPL (the base state is :play).
-          def initialize(host, nav: NAV, nav_esc: nil, console: true, window_prefix: true, repl_keys: nil)
+          def initialize(host, nav: NAV, nav_esc: nil, console: true, nav_once: true, repl_keys: nil)
             @host = host
             @nav = nav
             @nav_esc = nav_esc
-            @window_prefix = window_prefix
+            @nav_once = nav_once
+            @once_return = nil
             @console = console
             @base = console ? :repl : :play
             @state = @base
@@ -317,7 +337,7 @@ module MB
           # console).  Entering :nav remembers where from (Ctrl-] goes back).
           def mode=(m)
             m = @base if m == :repl || m == :play
-            raise ArgumentError, "Router states to set are #{(STATES - %i[pending play]).map(&:inspect).join(', ')} (got #{m.inspect})" unless STATES.include?(m) && m != :pending
+            raise ArgumentError, "Router states to set are #{(STATES - %i[pending play once]).map(&:inspect).join(', ')} (got #{m.inspect})" unless STATES.include?(m) && m != :pending && m != :once
             drop_prefix if @state == :pending
             return if m == @state
             go(m)
@@ -328,21 +348,24 @@ module MB
             drop_prefix if @state == :pending
             @line = LineInput.new(kind, prompt, history)
             from = @state == :overlay ? @overlay_return : @state
+            from = @once_return if from == :once
             @line_return = from == :line ? @line_return : from
             go(:line, force: true)
           end
 
           # The prefixes active in +state+ (a held Esc in :repl with
-          # #nav_esc, Ctrl-W in :repl, :play, and :nav with #window_prefix).
+          # #nav_esc).
           def prefixes(state = @state)
-            out = []
-            out << esc_prefix if state == :repl && @nav_esc
-            out << WINDOW_PREFIX if @window_prefix && %i[repl play nav].include?(state)
-            out
+            state == :repl && @nav_esc ? [esc_prefix] : []
           end
 
-          # The Ctrl-W window prefix (pass-through to the REPL).
-          WINDOW_PREFIX = Prefix.new(name: :window, key: Key.of('w', :ctrl), keymap: WINDOW, timeout: nil, on_timeout: nil, pass_through: true)
+          # What the Router calls on its host (the optional ones through
+          # respond_to?, which is false for a private method: a spec checks
+          # that Tiles has each one public, ux-r4b).
+          HOST_METHODS = %i[repl_key repl_paste act line_done mode_changed grab_key play_key pane_mode_key pane_keymap once_target].freeze
+
+          # The states Ctrl-W starts :once from.
+          ONCE_FROM = %i[repl play nav grab pane].freeze
 
           # Seconds until #tick has something to do (a prefix with a
           # timeout), or nil.
@@ -367,6 +390,7 @@ module MB
               return :keys_key if chord == KEYS_KEY.chord
               return :interrupt if chord == INTERRUPT_KEY.chord
               return :suspend if chord == SUSPEND_KEY.chord
+              return :once_key if @nav_once && chord == ONCE_KEY.chord
               return :prefix if state == :pending ? prefix_chord?(e) : prefixes(state).any? { |p| p.key.chord == chord }
               return :global if GLOBAL.bound?(e)
               :key
@@ -425,7 +449,7 @@ module MB
           end
 
           def inspect
-            "#<UI::Input::Router #{@state}#{@state == :pending ? " #{@prefix.name} from #{@origin}" : ''}>"
+            "#<UI::Input::Router #{@state}#{@state == :pending ? " #{@prefix.name} from #{@origin}" : ''}#{@state == :once ? " from #{@once_return}" : ''}>"
           end
 
           private
@@ -441,14 +465,24 @@ module MB
             from = mode
             if to == :nav
               src = @state == :overlay ? @overlay_return : @state
+              src = @once_return if src == :once
               @nav_return = src == :line ? :line : base_of(src) unless src == :nav
             end
             @overlay_return = @state == :pending ? @origin : @state if to == :overlay && @state != :overlay
-            unless to == :line || (to == :nav && @nav_return == :line) || (to == :overlay && @overlay_return == :nav && @nav_return == :line)
+            unless to == :line || (to == :nav && @nav_return == :line) || line_kept?(to)
               drop_line
             end
+            @once_return = nil unless to == :once || (to == :overlay && @overlay_return == :once)
             @state = to
             @host.mode_changed(to) if force || to != from
+          end
+
+          # True if going to +to+ (:overlay or :once) keeps a prompt line
+          # NAV was entered from.
+          def line_kept?(to)
+            under = to == :overlay ? @overlay_return : to
+            under = @once_return if under == :once
+            %i[overlay once].include?(to) && under == :nav && @nav_return == :line
           end
 
           # The state +s+ falls back to (the base for anything not grab).
@@ -473,6 +507,16 @@ module MB
 
           def prefix_chord?(e)
             @prefix.keymap&.bound?(e) || false
+          end
+
+          # The NAV action for +e+: the focused pane's keys, then the first
+          # keymaps, NAV, the extra keymaps; nil if none binds it.
+          def nav_action(e)
+            pane = @host.respond_to?(:pane_keymap) ? @host.pane_keymap : nil
+            if (pa = pane&.[](e))
+              return Action.of(:pane_key, pa)
+            end
+            @first.lazy.map { |m| m[e] }.find(&:itself) || @nav[e] || @extra.lazy.map { |m| m[e] }.find(&:itself)
           end
 
           ### Handlers (e, now, event)
@@ -527,13 +571,58 @@ module MB
           end
 
           def nav_key(e, *)
-            pane = @host.respond_to?(:pane_keymap) ? @host.pane_keymap : nil
-            if (pa = pane&.[](e))
-              return @host.act(Action.of(:pane_key, pa))
-            end
-            a = @first.lazy.map { |m| m[e] }.find(&:itself) || @nav[e] || @extra.lazy.map { |m| m[e] }.find(&:itself)
+            a = nav_action(e)
             return @host.act(a) if a
             @host.act(Action.of(:unbound, e))
+          end
+
+          ### One-shot NAV (:once)
+
+          def start_once(*)
+            @once_return = @state
+            go(:once)
+          end
+
+          # Back where Ctrl-W came from.
+          def once_back
+            to = @once_return
+            go(to == :line && @line.nil? ? @base : to)
+          end
+
+          # After the one action: back, or into the pane the focus moved to
+          # (#once_target); nothing if the action changed the mode itself.
+          def once_done
+            return unless @state == :once
+            to = @host.respond_to?(:once_target) ? @host.once_target(@once_return) : @once_return
+            to = @once_return unless STATES.include?(to) && !%i[once pending overlay line].include?(to)
+            go(to == :repl ? @base : to)
+          end
+
+          def once_key(e, *)
+            return once_back if e.key == :escape && e.mods.empty?
+            a = nav_action(e)
+            unless a
+              go(:overlay)
+              return @host.act(Action.of(:unbound, e, 'Ctrl-W then'))
+            end
+            @host.act(a)
+            once_done
+          end
+
+          # Ctrl-W Ctrl-W: the pane focused before, gone into.
+          def once_last(*)
+            @host.act(Action.of(:focus_last))
+            once_done
+          end
+
+          # Ctrl-W Ctrl-]: NAV to stay (Ctrl-] there goes back where Ctrl-W
+          # came from).
+          def once_to_nav(*) = go(:nav)
+
+          # Back where Ctrl-W came from, then the event as there.
+          def once_then(e, now, _event)
+            once_back
+            dispatch(classify(e), e, now)
           end
 
           def start_prefix(e, now, _event)
@@ -552,7 +641,7 @@ module MB
             origin = @origin
             if (a = p.keymap&.[](e))
               drop_prefix
-              @host.act(p.name == :window ? Action.of(:window, a.name, *a.args) : a)
+              @host.act(a)
               return
             end
             drop_prefix
@@ -593,7 +682,7 @@ module MB
 
           def overlay_key(e, now, event)
             if e.key == :escape || e.key == '?'
-              return go(@overlay_return)
+              return @overlay_return == :once ? once_back : go(@overlay_return)
             end
             overlay_then(e, now, event)
           end

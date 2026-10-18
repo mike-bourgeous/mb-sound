@@ -27,9 +27,9 @@ module MB
         # command takes them, plus a description).
         KNOB_KEYS = %i[range curve unit cc takeover smooth description].freeze
 
-        # Options only a rack document's knob lines (its macros) take (see
-        # MB::Sound::RackMethods#macro).
-        MACRO_KEYS = %i[share follow].freeze
+        # Options only a rack document's knob lines (its knobs) take (see
+        # MB::Sound::RackMethods#rack_knob).
+        RACK_KNOB_KEYS = %i[share follow].freeze
 
         # Metadata keys GraphIO.dump writes (others are kept as given).
         META_KEYS = %i[name kind saved mb_sound from options].freeze
@@ -118,7 +118,7 @@ module MB
 
         # True for a rack document (`graph 4, ..., rack: :arack`): loading it
         # gives a Rack (applied when its inputs are given), and its knob
-        # lines are the rack's macros.
+        # lines are the rack's knobs.
         def rack?
           !@meta[:rack].nil?
         end
@@ -248,8 +248,8 @@ module MB
             root.graph.each do |n|
               k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n
               next unless k.is_a?(GraphNode::Knob)
-              # A rack's macros print inside its block (macro(:space, ...))
-              next if k.macro
+              # A rack's knobs print inside its block (knob(:space, ...))
+              next if k.rack_knob
 
               if (other = found[k.name]) && !other.equal?(k)
                 problems << "two different knobs are named #{k.name.inspect}"

@@ -14,23 +14,23 @@ module MB
       # racks and slots are a later phase).
       class Racks
         # A named rack, its applications, the output type seen last, and
-        # the macros' Specs seen last ({ name => Knob::Spec }).
-        Entry = Struct.new(:rack, :uses, :out, :instances, :macros)
+        # the knobs' Specs seen last ({ name => Knob::Spec }).
+        Entry = Struct.new(:rack, :uses, :out, :instances, :knobs)
 
         def initialize(session)
           @session = session
           @entries = {}
           @mutex = Mutex.new
-          # Macro instances by rack name (nil for anonymous racks): the
+          # Knob instances by rack name (nil for anonymous racks): the
           # keys ([player, ordinal]) in the order they appeared, and each
-          # key's Session knobs by macro name
-          @macro_keys = {}
-          @macro_knobs = {}
-          # Named racks whose macros are per instance (see #macro_names),
-          # and the group names standing for every instance's macro
+          # key's Session knobs by knob name
+          @knob_keys = {}
+          @instance_knobs = {}
+          # Named racks whose knobs are per instance (see #instance_knob_names),
+          # and the group names standing for every instance's knob
           # (:"dub/space" => [:dub, :space])
           @per_instance = {}
-          @macro_groups = {}
+          @knob_groups = {}
         end
 
         # Registers named +rack+, claiming its name.  Returns the rack, or
@@ -104,14 +104,14 @@ module MB
         end
 
         # Notes an application of +rack+ that returned +result+ (+app+ is
-        # its Rack::Application, holding the macros it made).
+        # its Rack::Application, holding the knobs it made).
         def used(rack, result, app = nil)
           @mutex.synchronize {
             e = @entries[rack.name]
             return unless e && e.rack.block.equal?(rack.block)
             e.uses += 1
             e.out = MB::Sound::Rack.output_type(result)
-            e.macros = app.macros.transform_values(&:spec) if app && !app.macros.empty?
+            e.knobs = app.knobs.transform_values(&:spec) if app && !app.knobs.empty?
             e.instances.reject! { |w| !w.weakref_alive? }
             result = result.stream if result.is_a?(MB::Sound::Notes)
             e.instances << WeakRef.new(result) if result && !result.frozen?
@@ -119,15 +119,15 @@ module MB
         end
 
         # The racks: name => "effect audio(sig) + audio(side) -> audio,
-        # macros space 0.3 (0..1), 2 uses (in :bass)".
+        # knobs space 0.3 (0..1), 2 uses (in :bass)".
         def info
           entries = @mutex.synchronize { @entries.values.map(&:dup) }
           entries.to_h { |e|
             r = e.rack
             out = r.out || e.out
             used = uses_text(e)
-            macros = e.macros.empty? ? '' : "macros #{e.macros.map { |n, spec| Racks.macro_text(n, spec) }.join(', ')}, "
-            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{macros}#{used}"]
+            list = e.knobs.empty? ? '' : "knobs #{e.knobs.map { |n, spec| Racks.spec_text(n, spec) }.join(', ')}, "
+            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{list}#{used}"]
           }
         end
 
@@ -141,68 +141,68 @@ module MB
         # Frozen RackInfo values for the named racks, for rack panes and
         # other threads (no render lock; the rack's latency comes from a
         # stand-in build the first time, then is remembered): { name =>
-        # [RackInfo, ...] }, one per instance with macros in the Session
+        # [RackInfo, ...] }, one per instance with knobs in the Session
         # (path :"bass/dub", or :dub while one instance uses them), else
         # one for the rack (path nil).
         def rack_info
           entries = @mutex.synchronize { @entries.values.map(&:dup) }
           entries.to_h { |e|
             r = e.rack
-            instances = macro_instances(r.name)
-            specs = e.macros.empty? ? (r.macro_specs rescue {}) : e.macros
+            instances = knob_instances(r.name)
+            specs = e.knobs.empty? ? (r.knob_specs rescue {}) : e.knobs
             infos = if instances.empty?
                       [r.info(specs: specs, out: e.out)]
                     else
                       instances.map { |key, knobs|
                         names = knobs.values.map(&:name)
                         path = names.first.to_s.split('/')[0..-2].join('/').to_sym
-                        r.info(path: path, macros: names, specs: specs, out: e.out)
+                        r.info(path: path, knobs: names, specs: specs, out: e.out)
                       }
                     end
             [r.name, infos.freeze]
           }.freeze
         end
 
-        # "space 0.3 (0..1)", "cut 800 Hz (100..8000 exp)" for macro +name+
+        # "space 0.3 (0..1)", "cut 800 Hz (100..8000 exp)" for knob +name+
         # with Knob::Spec +spec+.
-        def self.macro_text(name, spec)
+        def self.spec_text(name, spec)
           k = GraphNode::Knob
           "#{name} #{k.number(spec.default)}#{spec.unit ? " #{spec.unit}" : ''} (#{k.number(spec.range.begin)}..#{k.number(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''})"
         end
 
-        # The macros of named rack +name+ seen in the latest application
-        # ({ macro => Knob::Spec }), or an empty Hash.
-        def macro_specs(name)
-          @mutex.synchronize { @entries[name]&.macros || {} }
+        # The knobs of named rack +name+ seen in the latest application
+        # ({ knob => Knob::Spec }), or an empty Hash.
+        def knob_specs(name)
+          @mutex.synchronize { @entries[name]&.knobs || {} }
         end
 
-        # The Session knobs (names) of the macros of rack +name+ (nil for
+        # The Session knobs (names) of the knobs of rack +name+ (nil for
         # anonymous racks), every instance's.
-        def macro_knob_names(name)
+        def knob_names(name)
           @mutex.synchronize {
-            (@macro_keys[name] || []).flat_map { |key| (@macro_knobs[[name, key]] || {}).values.map(&:name) }
+            (@knob_keys[name] || []).flat_map { |key| (@instance_knobs[[name, key]] || {}).values.map(&:name) }
           }
         end
 
-        # The Session knobs of the macros of rack +name+ by instance key
-        # ({ [player, ordinal] => { macro => Knob } }).
-        def macro_instances(name)
+        # The Session knobs of the knobs of rack +name+ by instance key
+        # ({ [player, ordinal] => { knob => Knob } }).
+        def knob_instances(name)
           @mutex.synchronize {
-            (@macro_keys[name] || []).to_h { |key| [key, (@macro_knobs[[name, key]] || {}).dup] }
+            (@knob_keys[name] || []).to_h { |key| [key, (@instance_knobs[[name, key]] || {}).dup] }
           }
         end
 
-        # Names for macro knobs joining the Session (see
-        # Session::Knobs#adopt_knobs): +knobs+ are standalone macro knobs
+        # Names for rack knobs joining the Session (see
+        # Session::Knobs#adopt_knobs): +knobs+ are standalone rack knobs
         # (not shared) of a graph played by +player+ (a player name, or
         # nil).  Instances are told apart by their Rack::Application, in
         # the order they appear in the graph, keyed [player, ordinal].
         # Returns [{ knob => [name, rack name, key] }, renames], where
         # renames are [session knob, new name] pairs: a named rack's
-        # macros are :"dub/space" while one key uses them, and per instance
+        # knobs are :"dub/space" while one key uses them, and per instance
         # (:"bass/dub/space") from the second key on, which renames the
         # first key's knobs.
-        def macro_names(knobs, player)
+        def instance_knob_names(knobs, player)
           renames = []
           out = {}.compare_by_identity
           @mutex.synchronize {
@@ -210,32 +210,32 @@ module MB
             apps = {}.compare_by_identity
             key_of = {}.compare_by_identity
             knobs.each do |k|
-              info = k.macro
+              info = k.rack_knob
               rack = info.rack_name
               key_of[k] = (apps[info.application] ||= begin
                 ord = ordinals[rack]
                 ordinals[rack] += 1
                 [player, ord]
               end)
-              keys = (@macro_keys[rack] ||= [])
+              keys = (@knob_keys[rack] ||= [])
               next if keys.include?(key_of[k])
               keys << key_of[k]
               if rack && keys.length >= 2 && !@per_instance[rack]
                 @per_instance[rack] = true
-                keys.each { |key| (@macro_knobs[[rack, key]] || {}).each { |m, knob| renames << [knob, instance_name(rack, key, keys, m)] } }
+                keys.each { |key| (@instance_knobs[[rack, key]] || {}).each { |m, knob| renames << [knob, instance_name(rack, key, keys, m)] } }
               end
             end
             knobs.each do |k|
-              info = k.macro
+              info = k.rack_knob
               rack = info.rack_name
               key = key_of[k]
-              keys = @macro_keys[rack]
+              keys = @knob_keys[rack]
               name = if rack.nil?
-                       anonymous_name(key, info.macro)
+                       anonymous_name(key, info.knob)
                      elsif !@per_instance[rack]
-                       :"#{rack}/#{info.macro}"
+                       :"#{rack}/#{info.knob}"
                      else
-                       instance_name(rack, key, keys, info.macro)
+                       instance_name(rack, key, keys, info.knob)
                      end
               out[k] = [name, rack, key]
             end
@@ -243,58 +243,58 @@ module MB
           [out, renames]
         end
 
-        # Remembers Session knob +knob+ as macro +macro+ of instance +key+
-        # of rack +rack+ (see #macro_names).  Returns the group name to
-        # claim (:"dub/space", once the rack's macros are per instance) or
+        # Remembers Session knob +knob+ as the rack knob +short+ of instance +key+
+        # of rack +rack+ (see #instance_knob_names).  Returns the group name to
+        # claim (:"dub/space", once the rack's knobs are per instance) or
         # nil.
-        def macro_joined(rack, key, macro, knob)
+        def knob_joined(rack, key, short, knob)
           @mutex.synchronize {
-            (@macro_knobs[[rack, key]] ||= {})[macro] = knob
+            (@instance_knobs[[rack, key]] ||= {})[short] = knob
             next nil unless rack && @per_instance[rack]
-            group = :"#{rack}/#{macro}"
-            next nil if @macro_groups.key?(group)
-            @macro_groups[group] = [rack, macro]
+            group = :"#{rack}/#{short}"
+            next nil if @knob_groups.key?(group)
+            @knob_groups[group] = [rack, short]
             group
           }
         end
 
-        # True if +name+ is a macro group: a rack's short macro name
+        # True if +name+ is a knob group: a rack's short knob name
         # (:"dub/space") standing for every instance's knob once the
-        # macros are per instance.
-        def macro_group?(name)
-          @mutex.synchronize { @macro_groups.key?(name) }
+        # knobs are per instance.
+        def knob_group?(name)
+          @mutex.synchronize { @knob_groups.key?(name) }
         end
 
-        # The Session knobs a macro group stands for (see #macro_group?),
+        # The Session knobs a knob group stands for (see #knob_group?),
         # or nil if +name+ isn't one.
         def group_members(name)
           @mutex.synchronize {
-            rack, macro = @macro_groups[name]
+            rack, short = @knob_groups[name]
             next nil unless rack
-            (@macro_keys[rack] || []).filter_map { |key| @macro_knobs[[rack, key]]&.[](macro) }
+            (@knob_keys[rack] || []).filter_map { |key| @instance_knobs[[rack, key]]&.[](short) }
           }
         end
 
-        # Drops the macro instances of players that are gone (forgotten:
+        # Drops the knob instances of players that are gone (forgotten:
         # neither playing, stopped for resume, nor an arrangement track),
         # so names don't go stale.  The block tells whether a player name
         # is still around.  Returns [knobs to forget, group names to
         # release] (a rack left with no instances goes back to plain
         # names).
-        def prune_macro_instances
+        def prune_knob_instances
           gone = []
           groups = []
           @mutex.synchronize {
-            @macro_keys.each do |rack, keys|
+            @knob_keys.each do |rack, keys|
               keys.reject! { |key|
                 player = key[0]
                 next false if player.nil? || yield(player)
-                gone.concat((@macro_knobs.delete([rack, key]) || {}).values)
+                gone.concat((@instance_knobs.delete([rack, key]) || {}).values)
                 true
               }
               next unless keys.empty?
               @per_instance.delete(rack)
-              @macro_groups.reject! { |g, (r, _)| r == rack && groups << g }
+              @knob_groups.reject! { |g, (r, _)| r == rack && groups << g }
             end
           }
           [gone, groups]
@@ -309,22 +309,22 @@ module MB
           used
         end
 
-        # A per-instance macro name: :"bass/dub/space" (the second instance
+        # A per-instance knob name: :"bass/dub/space" (the second instance
         # in one player :"bass/dub.2/space"; without a player, by order:
         # :"dub.1/space").
-        def instance_name(rack, key, keys, macro)
+        def instance_name(rack, key, keys, short)
           player, ord = key
-          return :"#{rack}.#{keys.index(key) + 1}/#{macro}" if player.nil?
-          :"#{player}/#{rack}#{ord > 0 ? ".#{ord + 1}" : ''}/#{macro}"
+          return :"#{rack}.#{keys.index(key) + 1}/#{short}" if player.nil?
+          :"#{player}/#{rack}#{ord > 0 ? ".#{ord + 1}" : ''}/#{short}"
         end
 
-        # An anonymous rack's macro name: the player's (:"bass/space",
+        # An anonymous rack's knob name: the player's (:"bass/space",
         # :"bass/rack.2/space" for a second instance), else :"rack/space".
-        def anonymous_name(key, macro)
+        def anonymous_name(key, short)
           player, ord = key
           parts = [player || 'rack']
           parts << "rack.#{ord + 1}" if ord > 0
-          :"#{parts.join('/')}/#{macro}"
+          :"#{parts.join('/')}/#{short}"
         end
 
         # Names of the current players whose graphs hold an instance of

@@ -8,9 +8,9 @@
 # - a named arack with a sidechain port pumps the pad from the drum track
 #   (the port is bound to the track by name: .with(side: :drums)),
 # - a named arack colors the bass,
-# - a named arack with macros (racks R2) echoes the pluck: macro :space
+# - a named arack with knobs (racks R2) echoes the pluck: knob :space
 #   (the knob :"dub/space") opens over bars 4-6, and :tone's lowpass
-#   swings around its knob (macro(...).mod(lfo, depth:)).
+#   swings around its knob (knob(...).mod(lfo, depth:)).
 #
 # Usage:
 #     bin/songs/rack_demo.rb             # plays live in the background session
@@ -23,7 +23,7 @@
 #     rack_demo
 #     racks                    # name => kind and ports, and where each is used
 #     rack(:pump).to_ruby      # a rack's definition
-#     help rack(:dub)          # ports, macros with ranges, latency
+#     help rack(:dub)          # ports, knobs with ranges, latency
 #     turn :"dub/space", 0.8, over: 2.bars
 #     rack(:dub).snap :wide; turn :"dub/space", 0.1; recall :"dub/wide", over: 1, only: [:space]
 #     save :my_dub, rack(:dub) # a rack document; preset :my_dub gives the Rack back
@@ -45,13 +45,13 @@ module MB::Sound
   # The demo's length in bars.
   RACK_DEMO_BARS = 8
 
-  # The dub echo rack (racks R2): echoes of the input, fed back by macro
-  # :space and darkened by macro :tone, whose lowpass swings slowly around
+  # The dub echo rack (racks R2): echoes of the input, fed back by knob
+  # :space and darkened by knob :tone, whose lowpass swings slowly around
   # the knob.  Defines the named rack :dub (or +name+) and returns it.
   def self.rack_demo_dub(name = :dub)
     arack(name) { |sig|
-      space = macro(:space, 0.35, description: 'Echo level and feedback 0..1')
-      tone = macro(:tone, 2400, range: 600..8000, curve: :exp, unit: 'Hz', description: 'Echo lowpass')
+      space = knob(:space, 0.35, description: 'Echo level and feedback 0..1')
+      tone = knob(:tone, 2400, range: 600..8000, curve: :exp, unit: 'Hz', description: 'Echo lowpass')
       echoes = sig.delay(3.n16, feedback: space * 0.7, wet: space, dry: 0)
       sig + echoes.filter(:lowpass, cutoff: tone.mod(0.13.hz.lfo, depth: 0.15))
     }
@@ -79,7 +79,7 @@ module MB::Sound
     # Audio in: a little grit for the bass
     arack(:grit) { |sig| sig.lp4(420, resonance: 0.35).softclip(0.4, 0.9) }
 
-    # Audio in with macros: dub echoes for the pluck
+    # Audio in with knobs: dub echoes for the pluck
     rack_demo_dub
 
     chords = seq(A2, F2, C3, G2).n2.loop

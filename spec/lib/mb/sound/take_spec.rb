@@ -281,7 +281,7 @@ RSpec.describe(MB::Sound::Take) do
     end
     live = out.reduce(:concatenate)
     expect(live.abs.max).to be > 0.1
-    expect(session.arrangement.slots(:bass).map(&:name)).to eq([:riff_a, nil, :"bass#1/t+5", :"bass#1/t+5/rev", :"bass#1/t+5/rev/dbl"])
+    expect(session.arrangement.slots(:bass).map(&:name)).to eq([:riff_a, nil, :bass_slot1_v2, :bass_slot1_v3, :bass_slot1_v4])
 
     r = t.replay
     [[800], [367, 368]].each do |sizes|

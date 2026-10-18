@@ -72,13 +72,13 @@ module MB
       # (`it`), by type: how racks print their blocks.
       MAIN_NAMES = { notes: :stream, audio: :sig, control: :ctl }.freeze
 
-      # What a macro knob (MB::Sound::RackMethods#macro) knows about where
-      # it came from: the Rack, the macro's own name (:space), the
+      # What a rack knob (MB::Sound::RackMethods#rack_knob) knows about where
+      # it came from: the Rack, the knob's own name (:space), the
       # Application that made it (one per Rack#call; instances are told
       # apart by it), +share+ (joins the Session knob of its own name), and
       # +follow+ (the Session knob it follows through its own range), and
       # its description.
-      MacroInfo = Data.define(:rack, :macro, :application, :share, :follow, :description) do
+      KnobInfo = Data.define(:rack, :knob, :application, :share, :follow, :description) do
         # The rack's name, or nil for an anonymous rack.
         def rack_name
           rack&.name
@@ -99,13 +99,13 @@ module MB
       # - latency: samples the rack delays its main input by (the longest
       #   path through nodes reporting #latency: dynamics lookahead,
       #   limiters), or nil if unknown
-      # - macros: frozen Array of the instance's Session knob names (a
-      #   rack not playing: its macro names)
-      # - macro_specs: frozen { macro name => Knob::Spec }
+      # - knobs: frozen Array of the instance's Session knob names (a
+      #   rack not playing: its knob names)
+      # - knob_specs: frozen { knob name => Knob::Spec }
       # - slots: frozen Array (slots come in phase R3)
-      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :macros, :macro_specs, :slots) do
+      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :knobs, :knob_specs, :slots) do
         def to_s
-          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{macros.empty? ? '' : ", macros #{macros.join(', ')}"}"
+          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}"
         end
       end
 
@@ -144,22 +144,22 @@ module MB
       LATENCIES = ObjectSpace::WeakMap.new
 
       # One application of a rack (Rack#call) while its block builds: the
-      # macros made so far by name.  Rack.application is the innermost one
+      # knobs made so far by name.  Rack.application is the innermost one
       # on this thread.
       class Application
-        attr_reader :rack, :macros
+        attr_reader :rack, :knobs
 
-        # Macro start values by name (see Rack#using).
+        # Knob start values by name (see Rack#using).
         attr_reader :start
 
         def initialize(rack, start: {})
           @rack = rack
-          @macros = {}
+          @knobs = {}
           @start = start
         end
 
         def inspect
-          "#<Rack::Application #{@rack.label} macros: #{@macros.keys.join(', ')}>"
+          "#<Rack::Application #{@rack.label} knobs: #{@knobs.keys.join(', ')}>"
         end
       end
 
@@ -314,9 +314,9 @@ module MB
       #
       # +settings+ are an application's (see #using): +seed+ (the seed its
       # block builds under), +drawn+ (true if the application drew it),
-      # +macros+ (macro start values by name), and +application+ (the
+      # +knobs+ (knob start values by name), and +application+ (the
       # Application of the call that applied the rack, for printing its
-      # macros' current values).
+      # knobs' current values).
       def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {})
         main_type = binding.local_variable_get(:in)
         raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
@@ -421,23 +421,23 @@ module MB
       # A new Rack whose applications build with these settings (racks R2
       # round 3; how graph documents save each instance so it reloads
       # exactly): +seed:+ the random seed the block builds under (without
-      # it each application draws one from the root generator), and macro
-      # start values by macro name (`space: 0.7`; macros not given start
+      # it each application draws one from the root generator), and knob
+      # start values by knob name (`space: 0.7`; knobs not given start
       # at their defaults).
       #
       #     bass.then(&rack(:dub).using(seed: 1234, space: 0.7))
-      def using(seed: nil, **macros)
+      def using(seed: nil, **knobs)
         raise ArgumentError, "#{label} is composed (>>); set its parts" if @parts
         raise ArgumentError, "seed: must be an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
-        bad = macros.reject { |_, v| v.is_a?(Numeric) && v.real? }
-        raise ArgumentError, "macro values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
-        clash = macros.keys & [@input.name, *@ports.keys]
+        bad = knobs.reject { |_, v| v.is_a?(Numeric) && v.real? }
+        raise ArgumentError, "knob values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
+        clash = knobs.keys & [@input.name, *@ports.keys]
         raise ArgumentError, "#{clash.join(', ')} #{clash.length > 1 ? 'are ports' : 'is a port'}; bind ports with .with" unless clash.empty?
         # A seed a graph document marked as drawn (`seed: drawn_seed(N)`,
         # given back by its loader through Recipe.given_drawn_seed) stays a
         # drawn seed, so the graph saves it the same way again
         drawn = !seed.nil? && GraphNode::Recipe.state.drawn == seed
-        copy(settings: { seed: seed || @settings[:seed], drawn: drawn || (seed.nil? && @settings[:drawn]) || nil, macros: (@settings[:macros] || {}).merge(macros) }.compact)
+        copy(settings: { seed: seed || @settings[:seed], drawn: drawn || (seed.nil? && @settings[:drawn]) || nil, knobs: (@settings[:knobs] || {}).merge(knobs) }.compact)
       end
 
       # The settings of an applied rack (see #initialize and #using).
@@ -469,7 +469,7 @@ module MB
         seed = @settings[:seed]
         drawn = seed.nil? || !!@settings[:drawn]
         seed = MB::Sound::Internal.root_rng.rand(1 << 62) if seed.nil?
-        app = Application.new(self, start: @settings[:macros] || {})
+        app = Application.new(self, start: @settings[:knobs] || {})
         applied = (ports.empty? ? self : with(**ports)).send(:copy, settings: @settings.merge(seed: seed, drawn: drawn, application: app))
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
@@ -498,7 +498,7 @@ module MB
       # the application (its calls are recorded as top-level calls, so
       # the instance prints as the block's body): for rack documents
       # (GraphIO::Writer) and help.  Returns [result, stand-ins by port
-      # name ({ sig: node, side: node }), the Application (its macros)].
+      # name ({ sig: node, side: node }), the Application (its knobs)].
       def build_on_stand_ins
         raise ArgumentError, "#{label} is composed; save or inspect its parts" if @parts
 
@@ -514,15 +514,15 @@ module MB
         [result, stand, app]
       end
 
-      # The macros of the rack (MacroInfo-backed Knob Specs by macro name),
+      # The knobs of the rack (KnobInfo-backed Knob Specs by knob name),
       # from a stand-in build (see #build_on_stand_ins): what `help
       # rack(:x)` and rack documents list.
-      def macro_specs
+      def knob_specs
         _, _, app = build_on_stand_ins
-        app.macros.transform_values(&:spec)
+        app.knobs.transform_values(&:spec)
       end
 
-      # Remembers the values of this rack's macros (every instance's, in
+      # Remembers the values of this rack's knobs (every instance's, in
       # the current Session) as snapshot :"name/+snap+" (a named rack's
       # variation; see KnobMethods#snap).  Returns the journal entry.
       #
@@ -530,8 +530,8 @@ module MB
       #     recall :"dub/wide", over: 1.bar, only: [:space]
       def snap(snap, **opts)
         raise ArgumentError, "#{label}: snapshots belong to named racks" unless @name
-        names = Session.current.racks.macro_knob_names(@name)
-        raise ArgumentError, "#{label} has no macros in the session yet (apply it in a graph that plays)" if names.empty?
+        names = Session.current.racks.knob_names(@name)
+        raise ArgumentError, "#{label} has no knobs in the session yet (apply it in a graph that plays)" if names.empty?
         MB::Sound.snap(:"#{@name}/#{snap}", knobs: names, **opts)
       end
 
@@ -556,22 +556,22 @@ module MB
         LATENCIES[self] = value
       end
 
-      # A frozen RackInfo for this rack (+path+ and +macros+ for one
+      # A frozen RackInfo for this rack (+path+ and +knobs+ for one
       # instance; see Session::Racks#rack_info).
-      def info(path: nil, macros: nil, specs: nil, out: nil)
-        specs ||= (macro_specs rescue {})
+      def info(path: nil, knobs: nil, specs: nil, out: nil)
+        specs ||= (knob_specs rescue {})
         ports = [{ name: @input.name, type: @input.type, role: :main, required: true }.freeze]
         @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
         RackInfo.new(
           name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
-          macros: (macros || specs.keys).map(&:to_sym).freeze, macro_specs: specs.dup.freeze, slots: [].freeze
+          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: [].freeze
         )
       end
 
-      # The Session knobs of this rack's macros (names), every instance's.
-      def macros
+      # The Session knobs of this rack's knobs (names), every instance's.
+      def knobs
         return [] unless @name
-        Session.current.racks.macro_knob_names(@name)
+        Session.current.racks.knob_names(@name)
       end
 
       # A Proc applying the rack, for Kernel#then and other Proc users
@@ -719,7 +719,7 @@ module MB
         end
 
         # Runs the block with +app+ as the innermost rack application on
-        # this thread (see #application; macros made inside belong to it).
+        # this thread (see #application; knobs made inside belong to it).
         def applying(app)
           stack = (Thread.current[:mb_sound_rack_applications] ||= [])
           stack.push(app)

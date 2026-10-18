@@ -79,9 +79,14 @@ module MB
         #     tweak :bass, :double           # played twice: twice the length
         #     tweak :bass, :half             # its first half
         #
-        # The new clip is named after the old one and the transform
-        # (`:"bass_a/t+2"`) and becomes a new slot.  Returns the journal
-        # entry.
+        # The new clip gets a version mark on the name of the clip its
+        # tweaks started from, in characters a Ruby name can use
+        # (maintainer, 2026-10-18): `bass_a` tweaked is `:bass_a_v2`, then
+        # `:bass_a_v3`, ... (an unnamed clip in slot 1 of track :bass:
+        # `:bass_slot1_v2`), and becomes a new slot.  What made each
+        # version stays in #tweak_history (the clip detail pane shows it)
+        # and in the journal's command label (`tweak :bass, transpose: 2 ->
+        # :bass_a_v2`).  Returns the journal entry.
         def tweak(name, op = nil, at: nil, on: nil, in: nil, fade: nil, **opts)
           point = LaunchPoint.of(binding) or return nil
           tr = tracks[name]
@@ -98,7 +103,23 @@ module MB
           kind, value = ops[0]
           new_clip = tweaked(name, clip, kind, value) or return nil
           slot_of(name, new_clip)
-          play(name, new_clip, at: point, fade: fade)
+          entry = nil
+          @session.command("tweak #{name.inspect}, #{tweak_text(kind, value)} -> #{new_clip.name.inspect}") {
+            entry = play(name, new_clip, at: point, fade: fade)
+          }
+          entry
+        end
+
+        # What made +clip+ (a #tweak version): the clip its tweaks started
+        # from (its name, or nil) and the transforms in order, as #tweak
+        # takes them ("transpose: 2", ":reverse").  Nil for a clip that
+        # isn't a tweak.
+        #
+        #     tweak_history(clip)  # => [:bass_a, ["transpose: 2", ":reverse"]]
+        #     # (an unnamed root: :"bass#1", its track and slot)
+        def tweak_history(clip)
+          info = @mutex.synchronize { @tweaks[clip] } or return nil
+          [info[:root], info[:ops]]
         end
 
         private
@@ -161,39 +182,75 @@ module MB
           end
         end
 
-        # +clip+ with one #tweak transform, named, or nil after a
-        # live_error.
+        # +clip+ with one #tweak transform, named with the next version
+        # mark of its root (see #tweak), or nil after a live_error.
         def tweaked(track, clip, kind, value)
-          base = clip.named? ? clip.name.to_s : "#{track}##{slot_of(track, clip)}"
-          suffix, result =
+          result =
             case kind
             when :transpose
               check_tweak_number(kind, value, integer: true) or return nil
-              ["t#{value >= 0 ? '+' : ''}#{value}", clip.transpose(value)]
+              clip.transpose(value)
             when :legato
               check_tweak_number(kind, value) or return nil
-              ["legato#{value}", clip.legato(value)]
+              clip.legato(value)
             when :swing
               check_tweak_number(kind, value) or return nil
-              ["swing#{value}", clip.swing(value)]
+              clip.swing(value)
             when :quantize
               grid = value == true ? nil : value
               check_tweak_number(kind, grid) or return nil if grid
-              ["q#{grid ? Sequence::Duration.format(grid.to_r) : ''}", grid ? clip.quantize(grid) : clip.quantize]
-            when :reverse then ['rev', clip.reverse]
-            when :halftime then ['x2', clip.halftime]
-            when :doubletime then ['/2', clip.doubletime]
-            when :double then ['dbl', resized(clip, 2)]
-            when :half then ['half', resized(clip, 1/2r)]
+              grid ? clip.quantize(grid) : clip.quantize
+            when :reverse then clip.reverse
+            when :halftime then clip.halftime
+            when :doubletime then clip.doubletime
+            when :double then resized(clip, 2)
+            when :half then resized(clip, 1/2r)
             else
               all = TWEAK_VALUES + TWEAK_FLAGS
               hint = DidYouMean::SpellChecker.new(dictionary: all.map(&:to_s)).correct(kind.to_s).first
               return MB::Sound.live_error(ArgumentError.new("tweak can't #{kind.inspect}#{hint ? " (did you mean #{hint}?)" : ''}; it takes #{TWEAK_VALUES.map { |k| "#{k}:" }.join(', ')}, #{TWEAK_FLAGS.map(&:inspect).join(', ')}"))
             end
-          result.named(:"#{base}/#{suffix}")
+          parent = tweak_history(clip)
+          root = parent ? @mutex.synchronize { @tweaks[clip][:mark] } : version_root(track, clip)
+          ops = [*parent&.last, tweak_text(kind, value)]
+          named = result.named(next_version(root))
+          first = parent ? parent[0] : (clip.named? ? clip.name : :"#{track}##{slot_of(track, clip)}")
+          @mutex.synchronize { @tweaks[named] = { root: first, mark: root, ops: ops.freeze } }
+          named
         rescue NoMethodError => e
           raise unless e.receiver.equal?(clip)
           MB::Sound.live_error(ArgumentError.new("A #{clip.class.name.split('::').last.downcase} can't #{kind} (track #{track.inspect})"))
+        end
+
+        # The name versions of +clip+ count from: its name as a Ruby name
+        # (characters a symbol or variable can't have become _), or
+        # "<track>_slot<n>" for an unnamed clip.
+        def version_root(track, clip)
+          base = clip.named? ? clip.name.to_s : "#{track}_slot#{slot_of(track, clip)}"
+          base = base.gsub(/[^A-Za-z0-9_]/, '_')
+          base = "_#{base}" if base.match?(/\A\d/)
+          base
+        end
+
+        # The next free version name of +root+ (:"root_v2", :"root_v3",
+        # ...): one more than the last made, past any name a slot or
+        # capture already has.
+        def next_version(root)
+          taken = all_slots.each_value.flat_map { |l| l.select { |c| c.respond_to?(:named?) && c.named? }.map(&:name) } + captures.keys
+          @mutex.synchronize {
+            n = (@versions[root] || 1) + 1
+            n += 1 while taken.include?(:"#{root}_v#{n}")
+            @versions[root] = n
+            :"#{root}_v#{n}"
+          }
+        end
+
+        # A tweak as #tweak takes it: "transpose: 2", ":reverse",
+        # "quantize: true".
+        def tweak_text(kind, value)
+          return kind.inspect if value.nil?
+          v = value.is_a?(Rational) ? "#{value.numerator}/#{value.denominator}r" : value.inspect
+          "#{kind}: #{v}"
         end
 
         def check_tweak_number(kind, value, integer: false)

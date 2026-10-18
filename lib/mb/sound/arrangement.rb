@@ -86,6 +86,8 @@ module MB
         @demo_document = nil
         @slots = {} # (ClipMatrix: name => clips)
         @launch_clips = {} # (ClipMatrix: journal seq => clip)
+        @tweaks = {}.compare_by_identity # (ClipMatrix: tweak version => its root, mark, transforms)
+        @versions = {} # (ClipMatrix: version root => last version made)
       end
 
       # Sections declared outside a form with #section (a Hash from name to

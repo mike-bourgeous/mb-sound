@@ -23,6 +23,12 @@ module MB
         # A knob's state around a change, for undo (see Knob#state_at).
         KnobState = Struct.new(:mode, :value, keyword_init: true)
 
+        # A live knob gesture (a held key in the racks pane; see
+        # #preview_turn): the knob's name, the frame and timeline position
+        # of its first step, the knob's state before it (for undo), and its
+        # steps ([frames after the first, value], one per span at most).
+        KnobGesture = Struct.new(:name, :frame, :pos, :before, :steps, keyword_init: true)
+
         # The first frame of the buffer (span) being rendered, while knobs
         # and players render it (nil otherwise).  Knob readers read this
         # frame's values.
@@ -103,12 +109,12 @@ module MB
         # this or another Session are left alone.  Returns the Session knobs
         # the graph now reads (a Hash from name to Knob).
         #
-        # Rack macros (RackMethods#macro) are named here, for player
-        # +player+ (see Racks#macro_names): :"dub/space" for a rack in one
+        # Rack knobs (RackMethods#rack_knob) are named here, for player
+        # +player+ (see Racks#instance_knob_names): :"dub/space" for a rack in one
         # player, per instance (:"bass/dub/space") once it plays in
-        # several, renaming the first instance's knobs.  A macro instance
+        # several, renaming the first instance's knobs.  A knob instance
         # joining its own earlier knob (the same player playing the rack
-        # again) takes the macro's new range and curve.  Macros with
+        # again) takes the knob's new range and curve.  Knobs with
         # +follow:+ start following their Session knob when they join.
         def adopt_knobs(sound, player: nil)
           nodes = to_nodes(sound)
@@ -117,15 +123,15 @@ module MB
           own = {}.compare_by_identity
           (readers.map(&:knob) + found.grep(GraphNode::Knob)).each { |k| own[k] = true }
 
-          macros = own.keys.select { |k| k.macro && !k.session && !k.macro.share }
-          macro_keys = {}.compare_by_identity
-          unless macros.empty?
-            prune_macros
-            names, renames = racks.macro_names(macros, player)
+          rack_knobs = own.keys.select { |k| k.rack_knob && !k.session && !k.rack_knob.share }
+          rack_knob_keys = {}.compare_by_identity
+          unless rack_knobs.empty?
+            prune_rack_knobs
+            names, renames = racks.instance_knob_names(rack_knobs, player)
             renames.each { |k, name| rename_knob(k, name) }
             names.each { |k, (name, rack, key)|
               k.respec(name: name)
-              macro_keys[k] = [rack, key]
+              rack_knob_keys[k] = [rack, key]
             }
           end
 
@@ -138,7 +144,7 @@ module MB
             end
 
             existing = @knob_lock.synchronize { @knobs[k.name] }
-            if existing && existing.macro && k.macro && macro_keys.key?(k) && !k.macro.share
+            if existing && existing.rack_knob && k.rack_knob && rack_knob_keys.key?(k) && !k.rack_knob.share
               # The same instance again (a player replaying the rack): the
               # rack's current range and curve
               if existing.range != k.range || existing.spec.curve != k.spec.curve
@@ -170,29 +176,29 @@ module MB
               joined[k.name] = k
               fresh << k
             end
-            if (rk = macro_keys[k]) && joined[k.name]
-              group = racks.macro_joined(rk[0], rk[1], k.macro.macro, joined[k.name])
-              @names.claim(group, :macro_group) if group
+            if (rk = rack_knob_keys[k]) && joined[k.name]
+              group = racks.knob_joined(rk[0], rk[1], k.rack_knob.knob, joined[k.name])
+              @names.claim(group, :knob_group) if group
             end
           end
 
-          fresh.each { |k| follow_macro(k) if k.macro&.follow }
+          fresh.each { |k| follow_rack_knob(k) if k.rack_knob&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
           joined
         end
 
-        # Drops the macro knobs of players that are gone (see
-        # Racks#prune_macro_instances): forgotten players' instances leave
+        # Drops the rack knobs of players that are gone (see
+        # Racks#prune_knob_instances): forgotten players' instances leave
         # the session's knobs and names, so listings and group turns don't
         # go stale.  Called when graphs join (#adopt_knobs) and when players
         # are forgotten.
-        def prune_macros
-          gone, groups = racks.prune_macro_instances { |player| player_around?(player) }
+        def prune_rack_knobs
+          gone, groups = racks.prune_knob_instances { |player| player_around?(player) }
           gone.each do |k|
             removed = @knob_lock.synchronize { @knobs.delete(k.name) if @knobs[k.name].equal?(k) }
             @names.release(k.name) if removed
           end
-          groups.each { |g| @names.release(g) if @names.kind(g) == :macro_group }
+          groups.each { |g| @names.release(g) if @names.kind(g) == :knob_group }
         end
 
         # True if player +name+ is playing, stopped for #resume, waiting to
@@ -203,7 +209,7 @@ module MB
             !!@arrangement&.tracks&.key?(name)
         end
 
-        # Renames Session knob +k+ to +name+ (a rack's macros becoming per
+        # Renames Session knob +k+ to +name+ (a rack's knobs becoming per
         # instance; see #adopt_knobs), keeping its value, readers, and
         # snapshot values.
         def rename_knob(k, name)
@@ -219,20 +225,20 @@ module MB
           }
           @names.release(old)
           k.respec(name: name)
-          puts "Knob #{old.inspect} is #{name.inspect} now (rack #{k.macro.rack_name.inspect} plays in more than one place)" if MB::Sound.live?
+          puts "Knob #{old.inspect} is #{name.inspect} now (rack #{k.rack_knob.rack_name.inspect} plays in more than one place)" if MB::Sound.live?
         end
 
-        # Makes macro knob +k+ follow the Session knob its +follow:+ names,
-        # through the macro's own range and curve (the knob's position in
-        # its range is the macro's position in its own).  A missing knob
-        # goes through MB::Sound.live_error (live: the macro holds its
+        # Makes rack knob +k+ follow the Session knob its +follow:+ names,
+        # through the knob's own range and curve (the knob's position in
+        # its range is the knob's position in its own).  A missing knob
+        # goes through MB::Sound.live_error (live: the knob holds its
         # value).
-        def follow_macro(k)
-          src_name = k.macro.follow
+        def follow_rack_knob(k)
+          src_name = k.rack_knob.follow
           src = @knob_lock.synchronize { @knobs[src_name] }
           unless src
             MB::Sound.live_error(ArgumentError.new(
-              "Macro #{k.name.inspect} follows knob #{src_name.inspect}, which the session doesn't have#{knob_suggestion(src_name)}; define it first (knob #{src_name.inspect}, 0.5)"
+              "Knob #{k.name.inspect} follows knob #{src_name.inspect}, which the session doesn't have#{knob_suggestion(src_name)}; define it first (knob #{src_name.inspect}, 0.5)"
             ))
             return
           end
@@ -252,16 +258,18 @@ module MB
         # (+value+ or +follow:+ a node or another knob's name) until it is
         # turned again.  Returns the Change (see Changes#change).
         #
-        # A rack's macro group name (:"dub/space" once the rack plays in
-        # several players; see Racks#macro_group?) turns every instance's
+        # A rack's knob group name (:"dub/space" once the rack plays in
+        # several players; see Racks#knob_group?) turns every instance's
         # knob, returning the Changes.
-        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil)
+        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, steps: nil)
           if name.is_a?(Symbol) && (members = racks.group_members(name))
             offset = binding.local_variable_get(:in)
-            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time) }
+            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time, steps: steps) }
           end
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
+          steps = [[0, value]] if steps.nil? && gesture_for?(k, value, over, follow, point)
+          return turn_steps(k, steps, point, start_time) if steps
           value = follow unless follow.nil?
           raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
           check_turn_value(k, value)
@@ -274,6 +282,47 @@ module MB
           knob_change(k, time, data) { |kn, frame, t|
             apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
           }
+        end
+
+        # A turn through +steps+ ([[frames after its time, value], ...],
+        # rising; each a turn without over:, the knob's smooth glide): what
+        # #gesture_line writes for a held key.  When the steps are a live
+        # gesture's (#preview_turn), the change is that gesture's: it is
+        # journaled at the gesture's first frame (the take replays it from
+        # there; Take.note_change), its undo restores the value from before
+        # the gesture, and it changes nothing live (the steps played as
+        # they came).  Otherwise the steps play from the change's landing
+        # frame (a replay).
+        def turn_steps(k, steps, point, start_time)
+          unless steps.is_a?(Array) && !steps.empty? && steps.all? { |st| st.is_a?(Array) && st.length == 2 && st[0].is_a?(Integer) && st[0] >= 0 && st[1].is_a?(Numeric) && st[1].real? && st[1].finite? }
+            raise ArgumentError, "steps: are [[frames, value], ...] with whole frames from 0 (got #{steps.inspect})"
+          end
+          raise ArgumentError, 'steps: must rise (frames after the first)' unless steps.each_cons(2).all? { |a, b| b[0] > a[0] } && steps[0][0] == 0
+          steps.each { |_, v| warn_clamp(k, v) }
+          data = { value: steps.last[1], steps: steps.length }
+          g = @render_lock.synchronize { @knob_gestures[k.name] }
+          if g && g.steps == steps.map { |off, v| [off, v.to_f] }
+            begin
+              @committing_gesture = g
+              return change(:turn, k.name, g.pos, data: data.merge(gesture: true)) { |_t|
+                @knob_gestures.delete(k.name) if @knob_gestures[k.name].equal?(g)
+              }
+            ensure
+              @committing_gesture = nil
+            end
+          end
+          time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
+          knob_change(k, time, data) { |kn, frame, _t|
+            steps.each { |off, v| kn.set(v, frame: frame + off) }
+          }
+        end
+
+        # True if a plain turn of +k+ to +value+ is a live one-step
+        # gesture's line (see #gesture_line).
+        def gesture_for?(k, value, over, follow, point)
+          return false unless value.is_a?(Numeric) && over.nil? && follow.nil? && !point.given?
+          g = @render_lock.synchronize { @knob_gestures[k.name] } or return false
+          g.steps == [[0, value.to_f]]
         end
 
         # Remembers every knob's value (or where it is heading, while it
@@ -301,12 +350,12 @@ module MB
 
         # Turns every knob in snapshot +name+ back to its value there (see
         # #turn for the options).  +only:+ and +except:+ (knob names, or a
-        # rack's macro names: :space matches :"dub/space") limit the recall
+        # rack's knob names: :space matches :"dub/space") limit the recall
         # to some knobs (a partial recall).  Returns the Changes.
         def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, smooth: nil, start_time: nil, only: nil, except: nil)
           point = LaunchPoint.of(binding) or return nil
           names = filter_knob_names(snapshot_knob_names(name), only, except)
-          names &= knobs.keys # (macros of forgotten players are gone)
+          names &= knobs.keys # (knobs of forgotten players are gone)
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
 
           names.map { |n|
@@ -379,6 +428,48 @@ module MB
           k
         end
 
+        # Moves knob +name+ to +value+ live, at the next frame to render,
+        # without a journal entry: a step of a gesture (a held key in the
+        # racks pane, UI::TurnGesture) that #gesture_line then writes as ONE
+        # console line, whose turn the take replays from the gesture's
+        # first frame (see #turn's +steps:+), so a replay plays what was
+        # heard.  Each step is a #turn without +over:+ (the knob's smooth
+        # glide).  Values are rounded as the line prints them.  Returns the
+        # value.
+        def preview_turn(name, value)
+          k = knob!(name)
+          raise ArgumentError, "Turn #{k.name.inspect} to a real number (got #{value.inspect})" unless value.is_a?(Numeric) && value.real? && value.finite?
+          v = Float(GraphNode::Knob.number(k.spec.clamp(value)))
+          @render_lock.synchronize {
+            f = @frame
+            g = @knob_gestures[k.name]
+            unless g
+              mode, before = k.state_at(f)
+              g = @knob_gestures[k.name] = KnobGesture.new(name: k.name, frame: f, pos: @transport.position, before: KnobState.new(mode: mode, value: before), steps: [])
+            end
+            off = f - g.frame
+            g.steps.last&.first == off ? (g.steps[-1] = [off, v]) : (g.steps << [off, v])
+            k.set(v, frame: f)
+          }
+          v
+        end
+
+        # The console line for the live gesture on knob +name+ (see
+        # #preview_turn): `turn :"dub/space", 0.42` for one step, else
+        # `turn :"dub/space", steps: [[0, 0.32], [4800, 0.34], ...]`
+        # (frames after the first step).  Nil without a gesture.
+        def gesture_line(name)
+          g = @render_lock.synchronize { @knob_gestures[knob!(name).name]&.dup } or return nil
+          n = GraphNode::Knob.method(:number)
+          return "turn #{g.name.inspect}, #{n.(g.steps[0][1])}" if g.steps.length == 1 && g.steps[0][0] == 0
+          "turn #{g.name.inspect}, steps: [#{g.steps.map { |off, v| "[#{off}, #{n.(v)}]" }.join(', ')}]"
+        end
+
+        # The live gestures ({ knob name => KnobGesture }).
+        def knob_gestures
+          @render_lock.synchronize { @knob_gestures.transform_values(&:dup) }
+        end
+
         # A listing of the knobs: name => "800 Hz (100..8000 exp) cc74 -> 3000".
         def knob_info
           knobs.transform_values { |k|
@@ -399,6 +490,8 @@ module MB
           @knob_lock = Mutex.new
           @knob_frame = nil
           @knob_midi = nil
+          @knob_gestures = {}
+          @committing_gesture = nil
         end
 
         def knob_suggestion(name)
@@ -505,7 +598,7 @@ module MB
         end
 
         # +names+ (knob names) limited by +only+ and +except+ (Arrays of
-        # knob names or macro names; a macro name matches the last part of
+        # knob names or knob names; a knob name matches the last part of
         # a rack knob's path).
         def filter_knob_names(names, only, except)
           match = ->(n, list) {
@@ -545,6 +638,9 @@ module MB
 
         # A knob's state just before the change landing now (for undo).
         def knob_snapshot(subject)
+          # (a live gesture's change, landing now: the state from before its first step)
+          g = @committing_gesture
+          return g.before.dup if g && g.name == subject.name && @knob_gestures[g.name].equal?(g)
           k = @knob_lock.synchronize { @knobs[subject.name] } or return nil
           mode, value = k.state_at(@landing_frame || @frame)
           KnobState.new(mode: mode, value: value)

@@ -160,7 +160,16 @@ module MB
                        bars: bar > 0 ? (len / bar) : len, pattern: cells.join.freeze, used: [].freeze,
                        key: (clip.respond_to?(:named?) && clip.named? ? clip.name.to_s.freeze : nil),
                        loop: clip.respond_to?(:looping?) ? clip.looping? : clip.rows.each_value.any?(&:looping?),
-                       length: len, events: notes, ruby: ruby, range: values.empty? ? nil : (values.min..values.max))
+                       length: len, events: notes, ruby: ruby, range: values.empty? ? nil : (values.min..values.max),
+                       history: history_of(arr, clip))
+        end
+
+        # A tweak version's lineage for ClipInfo#history (empty for other
+        # clips).
+        def history_of(arr, clip)
+          root, ops = arr.respond_to?(:tweak_history) ? arr.tweak_history(clip) : nil
+          return [].freeze unless ops
+          [root.to_s, *ops].map(&:freeze).freeze
         end
 
         # A clip's (or kit's) first cycle as frozen NoteInfos (see

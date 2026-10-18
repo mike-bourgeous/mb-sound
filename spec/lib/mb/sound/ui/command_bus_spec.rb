@@ -10,7 +10,7 @@ module CommandBusGuard
   # Methods that change a performance.
   MUTATORS = %i[
     add remove change go play swap capture rec record arm disarm turn move mute unmute solo unsolo stop bg
-    launch seek skip forget panic undo redo! master feed learn snap recall xfade
+    launch seek skip forget panic undo redo! master feed learn snap recall xfade preview_turn
   ].freeze
 
   # Receivers that are the performance (source text of the receiver).
@@ -21,6 +21,7 @@ module CommandBusGuard
     'lib/mb/sound/ui/warm_up.rb:add' => 'a private sandbox Session for YJIT warm-up, closed afterwards',
     'lib/mb/sound/ui/keyboard/link.rb:add' => "the keyboard's default patch, a live monitor for playing with nothing armed (not part of the performance; takes replay the MIDI it played through the MIDI log)",
     'lib/mb/sound/ui/keyboard/link.rb:remove' => 'rings out that monitor once a track is armed',
+    'lib/mb/sound/ui/tiles.rb:preview_turn' => "a held key's live knob sweep (UI::TurnGesture): the Session records its steps and the gesture's one console line (Session#gesture_line) is journaled at its first step and replayed from there by takes",
   }.freeze
 end
 
