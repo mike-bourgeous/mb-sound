@@ -278,8 +278,21 @@ module MB
           "#{graph_node_name || 'Channels'}(#{channel_count}: #{@outputs.map(&:to_s).join(', ')})"
         end
 
+        # `#<Channels 2: code>` (see GraphNode::Inspect).
         def inspect
-          "#<#{self.class.name.rpartition('::').last} #{channel_count} channels>"
+          code = Inspect.code_of(self)
+          head = "#<#{self.class.name.rpartition('::').last} #{channel_count} channels"
+          return "#{head}>" if code.nil? || code.empty?
+
+          Inspect.cap("#{head}: #{code}>")
+        end
+
+        def inspect_full
+          Kernel.instance_method(:inspect).bind_call(self)
+        end
+
+        def pretty_print(q)
+          q.text(inspect)
         end
 
         # A short label for graph visualizations (see Traversable#graphviz).

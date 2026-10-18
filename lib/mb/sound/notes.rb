@@ -43,6 +43,7 @@ module MB
     # and synth scripts' block argument are Notes on live or file MIDI.
     class Notes
       include ModMethods
+      include GraphNode::Inspect
 
       # The note number held before the first note when the source can't
       # tell its first note (C4).

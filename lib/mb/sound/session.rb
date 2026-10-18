@@ -846,6 +846,22 @@ module MB
         @thread
       end
 
+      # A one-line summary (ux-fix-1): the default #inspect printed every
+      # player's graph with its buffers.  #inspect_full is the old dump.
+      def inspect
+        mode = @realtime ? 'realtime' : 'render'
+        count = @players&.size.to_i
+        "#<Session #{mode}, #{count} player#{count == 1 ? '' : 's'}, #{MB::M.sigformat(@transport&.bpm.to_f)} bpm>"
+      end
+
+      def inspect_full
+        Kernel.instance_method(:inspect).bind_call(self)
+      end
+
+      def pretty_print(q)
+        q.text(inspect)
+      end
+
       # True if this Session plays in real time through its output (a
       # render thread paced by the output), false for renders driven by
       # #process_buffer.
