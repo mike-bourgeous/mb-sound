@@ -63,6 +63,7 @@ require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
+require_relative 'sound/key_methods'
 require_relative 'sound/bus_methods'
 require_relative 'sound/rack'
 require_relative 'sound/rack_methods'
@@ -103,6 +104,7 @@ module MB
     extend ArrangementMethods
     extend FormMethods
     extend KnobMethods
+    extend KeyMethods
     extend BusMethods
     extend RackMethods
     extend RecordMethods
@@ -179,6 +181,7 @@ require_relative 'sound/tone'
 require_relative 'sound/pitch'
 require_relative 'sound/note'
 require_relative 'sound/scale'
+require_relative 'sound/musical_key'
 require_relative 'sound/sequence'
 require_relative 'sound/generative'
 require_relative 'sound/midi/streams'

@@ -270,6 +270,10 @@ module MB
             return change(:restore, subject.name, time, data: { knob: true }, undoes: original.seq) { |_t| restore_knob(subject.name, original.before) }
           end
 
+          if subject == :key
+            return change(:restore, :key, time, data: { key: original.before&.key.to_s }, undoes: original.seq) { |t| restore_key(original.before, t) }
+          end
+
           state = original.before
           starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
           change(:restore, subject, time, data: {}, undoes: original.seq, starts: starts) { |t|
@@ -283,6 +287,7 @@ module MB
           return knob_snapshot(subject) if subject.is_a?(Knobs::KnobSubject)
           return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
           return timeline_snapshot if subject == :timeline
+          return key_snapshot if subject == :key
 
           if subject == :master
             chain = @mutex.synchronize { @master_chains&.last }

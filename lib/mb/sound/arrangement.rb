@@ -282,6 +282,10 @@ module MB
         check_quant(q) if q
 
         values.each do |k, v|
+          if KEY_VALUES.include?(k)
+            check_key_value(name, k, v) or return nil
+            next
+          end
           kind = @session.names.kind(k)
           if kind == :knob
             check_knob_value(name, k, v) or return nil
@@ -324,7 +328,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, _| @session.names.kind(k) == :knob }
+        knob_values = sc.values.select { |k, _| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}"))
@@ -556,6 +560,7 @@ module MB
       # number, a node or knob name to follow, or an Array of a value and
       # turn options (`[8000, over: 2.bars, curve: :smooth]`).
       def turn_knob(name, value, time)
+        return change_key_value(name, value, time) if KEY_VALUES.include?(name)
         v, options = knob_value(value)
         @session.turn(name, v, start_time: time, **options)
       end
@@ -565,6 +570,42 @@ module MB
         return [value, {}] unless value.is_a?(Array)
         v, options = value
         [v, (options || {}).slice(:over, :curve, :smooth, :from)]
+      end
+
+      # Scene and section values that change the session key (see
+      # KeyMethods): `key: :d`, `key: [:a, :minor]`, `mode: :dorian`.
+      KEY_VALUES = [:key, :mode].freeze
+
+      # The root and mode of a scene's (or section's) key value.
+      def key_value(name, value)
+        if name == :mode
+          [nil, value]
+        elsif value.is_a?(Array)
+          value
+        elsif MusicalKey.mode_name?(value)
+          [nil, value]
+        else
+          [value, nil]
+        end
+      end
+
+      # Changes the session key at +time+ (a scene's or section's key:
+      # or mode: value).
+      def change_key_value(name, value, time)
+        root, mode = key_value(name, value)
+        @session.change_key(root: root, mode: mode, start_time: time)
+      end
+
+      # Checks a scene's (or section's) key: or mode: value; false (after
+      # live_error) if it can't be used.
+      def check_key_value(owner, name, value)
+        root, mode = key_value(name, value)
+        raise ArgumentError, 'empty' if root.nil? && mode.nil?
+        MusicalKey.parse_root(root) unless root.nil?
+        MusicalKey.check_mode(mode) unless mode.nil?
+        true
+      rescue ArgumentError => e
+        !!MB::Sound.live_error(ArgumentError.new("#{owner.inspect}: #{name}: takes a root (:d), a mode (:dorian), or [root, mode] (got #{value.inspect}: #{e.message})"))
       end
 
       # Checks a scene's (or section's) knob value; false (after

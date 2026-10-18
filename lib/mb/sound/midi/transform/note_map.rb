@@ -248,6 +248,32 @@ module MB
           end
         end
 
+        # Maps each note through a MIDI::Lock map (Stream#degrees,
+        # Stream#snap without a fixed scale or with :chord, Stream#lock)
+        # read at the note's timeline position; note-offs and poly
+        # pressure follow the note as it was mapped, so a held note keeps
+        # its pitch when the key or chord changes.  Silent keys (nil) play
+        # nothing.
+        class Locked < NoteMap
+          # Options that go to the transform, not the map (Stream#lock).
+          OPTIONS = [:overlap, :jump, :transport, :length].freeze
+
+          attr_reader :map
+
+          def initialize(parent, map, **options)
+            super(parent, **options)
+            @map = map
+            @node_type_name = map.to_s
+          end
+
+          private
+
+          def map_on(e)
+            out = @map.event(e, timeline_at(e.time), transport: transport, stream: @reading)
+            out ? [[out, 0r]] : []
+          end
+        end
+
         # Adds notes above (or below) each played note (see Stream#chord).
         class Chord < NoteMap
           # Chord shapes in semitones above the root (root included).

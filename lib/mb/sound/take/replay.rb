@@ -54,8 +54,8 @@ module MB
         # +:replace_declick+ likewise (see Session#replace_declick): takes
         # saved before 2026-10-17 don't give it, and switched replacements
         # with a hard cut, so they replay exactly.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
@@ -112,6 +112,10 @@ module MB
           t = session.transport
           t.bar_length = @start[:bar_length]
           (@start[:meters] || []).each { |pos, len| t.meter(len, at: pos) }
+          # The session key the take started in (takes saved before
+          # midi-consol-2 start in C major, the only key there was)
+          root, mode = @start[:key] || ['C', :major]
+          t.reset_key(MusicalKey.default.with_root(root).with_mode(mode))
           t.bpm = @start[:bpm]
           session.master_gain = @start[:master_gain]
           session.master_gain_post = !!@start[:master_gain_post]

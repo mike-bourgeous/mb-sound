@@ -74,6 +74,7 @@ module MB
           @detached_frame = 0
           @extras = {}.compare_by_identity
           @cc_old = {} # [channel or nil, cc] => raw value of controllers dropped from the history
+          @live_lock = nil # the Session's input lock while it maps (see #locked)
         end
 
         # The raw value (0..127) of controller +number+ (on 0-based
@@ -262,7 +263,25 @@ module MB
               out << Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
             }
           end
-          list.length > 1 ? out.sort_by.with_index { |st, i| [st.frame, i] } : out
+          out = out.sort_by.with_index { |st, i| [st.frame, i] } if list.length > 1
+          locked(out)
+        end
+
+        # +stamped+ through the Session's input lock (`lock :play`; see
+        # MIDI::Lock::Live), each note at its own timeline position.  Takes
+        # log the locked events, so replays don't lock them again.
+        def locked(stamped)
+          style = @session.input_lock
+          if style.nil?
+            @live_lock = nil if @live_lock && !@live_lock.holding?
+            return stamped if @live_lock.nil?
+          end
+          return stamped if stamped.empty?
+
+          @live_lock ||= MIDI::Lock::Live.new(style)
+          @live_lock.style = style || MIDI::Lock::Style.new(:off)
+          t = @session.transport
+          stamped.flat_map { |st| @live_lock.process(st.event, st.pos, transport: t).map { |e| st.with(event: e) } }
         end
 
         # Reads the added sources for a span and drops their events (while a

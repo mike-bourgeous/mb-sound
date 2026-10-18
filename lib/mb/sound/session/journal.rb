@@ -83,7 +83,7 @@ module MB
         Entry = Data.define(:seq, :kind, :subject, :issued, :commits, :lands, :status, :source, :line, :data, :undoes) do
           # Text for the console, e.g. "bg :bass lands 9:1".
           def to_s
-            what = "#{kind} #{subject.inspect}"
+            what = kind == :key ? "key #{data.values_at(:root, :mode).compact.map(&:to_s).join(' ')}" : "#{kind} #{subject.inspect}"
             case status
             when :queued then "#{what} lands #{lands} (queued)"
             when :landed then "#{what} landed #{lands}"
