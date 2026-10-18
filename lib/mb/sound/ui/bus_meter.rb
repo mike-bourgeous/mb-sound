@@ -58,10 +58,10 @@ module MB
           # Adds +x+ (one channel's SFloat) to channel +c+.
           def add(c, x)
             return if x.nil? || x.empty?
-            x.not_inplace! if x.inplace? # (a ramped bus output: x.abs must not write into it)
-            peak = x.abs.max.to_f
+            x = Numo::SFloat.cast(x) unless x.is_a?(Numo::SFloat)
+            peak, sumsq = BusMeter.native ? FastLoudness.peak_sumsq(x, 1.0) : BusMeter.peak_sumsq_ruby(x, 1.0)
             @peak[c] = peak if peak > @peak[c]
-            @sumsq[c] += (x * x).sum.to_f
+            @sumsq[c] += sumsq
             @frames[c] += x.length
           end
 
@@ -95,6 +95,29 @@ module MB
             @span_sumsq = Array.new(@channels, 0.0)
             @frames = Array.new(@channels, 0)
           end
+        end
+
+        class << self
+          # False to use the Ruby mirror (.peak_sumsq_ruby) instead of
+          # FastLoudness.peak_sumsq.
+          attr_accessor :native
+        end
+        self.native = true
+
+        # The exact Ruby mirror of FastLoudness.peak_sumsq: the peak and
+        # the sum of squares of SFloat +x+ times +gain+, in double
+        # precision, added in order.
+        def self.peak_sumsq_ruby(x, gain)
+          peak = 0.0
+          sumsq = 0.0
+          g = gain.to_f
+          x.each do |v|
+            y = v * g
+            a = y.abs
+            peak = a if a > peak
+            sumsq += y * y
+          end
+          [peak, sumsq]
         end
 
         # Signals not seen for this many seconds (a bus removed, a send
@@ -145,7 +168,7 @@ module MB
         # node's per-sample values) in this span, also when nothing is sent
         # (gain 0).  Returns its accumulator.
         def send_seen(player, bus, gain)
-          acc = (@sends[[player, bus]] ||= Acc.new(@channels))
+          acc = ((@sends[player] ||= {})[bus] ||= Acc.new(@channels))
           acc.seen = @clock
           acc.gain = gain.is_a?(Numeric) ? gain.to_f : (gain.respond_to?(:[]) && gain.length > 0 ? gain[-1].to_f : nil)
           acc
@@ -160,7 +183,7 @@ module MB
           decay = Math.exp(-count / (SHORT_SECONDS * @rate))
           @inputs.each_value { |a| a.end_span(decay, count) }
           @outputs.each_value { |a| a.end_span(decay, count) }
-          @sends.each_value { |a| a.end_span(decay, count) }
+          @sends.each_value { |h| h.each_value { |a| a.end_span(decay, count) } }
         end
 
         # The levels since the last take: [{ bus => BusLevels }, { [player,
@@ -170,7 +193,8 @@ module MB
           n = @frames
           @frames = 0
           old = @clock - FORGET_SECONDS * @rate
-          [@inputs, @outputs, @sends].each { |h| h.delete_if { |_, a| a.seen.nil? || a.seen < old } }
+          [@inputs, @outputs, *@sends.values].each { |h| h.delete_if { |_, a| a.seen.nil? || a.seen < old } }
+          @sends.delete_if { |_, h| h.empty? }
 
           names = (@inputs.keys | @outputs.keys)
           levels = names.to_h { |name|
@@ -178,11 +202,15 @@ module MB
             o = @outputs[name] ||= Acc.new(@channels)
             [name, BusLevels.new(input: i.take(n), output: o.take(n))]
           }.freeze
-          send_levels = @sends.to_h { |key, a|
-            g = a.gain
-            db = g.nil? ? nil : (g > 0 ? 20 * Math.log10(g) : -Float::INFINITY)
-            [key.dup.freeze, SendLevel.new(player: key[0], bus: key[1], gain: db, level: a.take(n))]
-          }.freeze
+          send_levels = {}
+          @sends.each do |player, h|
+            h.each do |bus, a|
+              g = a.gain
+              db = g.nil? ? nil : (g > 0 ? 20 * Math.log10(g) : -Float::INFINITY)
+              send_levels[[player, bus].freeze] = SendLevel.new(player: player, bus: bus, gain: db, level: a.take(n))
+            end
+          end
+          send_levels.freeze
           [levels, send_levels]
         end
       end

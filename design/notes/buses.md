@@ -7,7 +7,7 @@ Branch buses-1 (2026-10-13).  The maintainer queued "Buses, sends, bus sidechain
 ```ruby
 bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }        # a named bus: its own effect chain, into the master
 bus(:slap, to: :verb) { |sig| sig.delay(1.n8) }       # into another bus (no loops)
-bus(:drums) { |sig| sig.compress(threshold: -18.db) } # a group bus
+bus(:drums) { |sig| sig.compress(threshold: -18.db) } # the same kind of bus, used as a group
 track(:keys, send: { verb: -12.db }) { |c| ... }      # sends (post-fader), per player name
 track(:kick, to: :drums) { |k| tr808(k) }             # the track's main out goes into a bus
 bg :pad, graph, send: { verb: -6.db, slap: :space }   # bg too; a knob name follows the knob
@@ -23,6 +23,8 @@ render('x.flac', stems: 'stems/') { ... }             # one stem per bus too
 ```
 
 ## Decisions (agent's, open to the maintainer's review)
+
+- **One concept** (maintainer, 2026-10-18: "bus and send should be the same thing unlike in some DAWs"): a bus is a named chain; a player reaches it with a level (`send:`, `feed`) or with all of its sound (`to:`).  There are no aux, return, or group kinds: the routing tree, the buses pane, and the meters (`Snapshot#bus_levels`, `#send_levels`, terminal_ui.md "UI round 4") show one kind of bus with its sends and sources.
 
 - **Names.** Buses share the Session namespace with tracks, groups, and knobs (`Names#claim(name, :bus)`), so a bus can't be named like a track; `:master` stays reserved.  `send` is `Object#send` (every object, used all over the library), so the console command is `feed` (aliases `send_level`, `fx_send`; maintainer 2026-10-13: keep `feed`, add `fx_send`); `send:` stays the keyword on `track`/`bg`.
 - **The bus is a master-like chain with its own input.** A bus reuses `Session::Master`'s chain machinery (`Chain`, `build_master`, spill/fade/cut handover): the block gets the bus input as a bundle (one parameter) or per channel, `bus :verb { ... }` again swaps the chain at a launch point with the old one spilling over (or `fade:`), and undo rebuilds the previous chain from its block (`:bus` changes, `BusState`).  Bus chains are installed as plans like players (`Plan.install`): the `MixSource` channels are boundaries, the chain behind them fuses.
