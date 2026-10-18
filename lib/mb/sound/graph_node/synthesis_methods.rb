@@ -7,7 +7,8 @@ module MB
         # Converts a fractional MIDI note number to a frequency in Hz with the
         # current tuning, following tuning changes (see MB::Sound.tuning).
         def freq
-          MB::Sound.tuning.freq(self)
+          # (tagged as a frequency for type-dispatched parameters; see ArgTypes)
+          ArgTypes.tag(MB::Sound.tuning.freq(self), :frequency)
         end
 
         # Uses this node as the frequency value for a full-scale oscillator.

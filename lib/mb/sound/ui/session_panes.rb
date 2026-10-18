@@ -212,7 +212,20 @@ module MB
               c.text(x, 1, '◆', e.equal?(nxt) ? :key : :queued)
               labels << [x, "#{e.kind} #{e.subject}"]
             end
-            labels.first(c.h - 2).each_with_index { |(x, t), i| c.text([x - 1, 0].max, 2 + i, c.fit(t, c.w - [x - 1, 0].max), :dim) }
+            # Clocks (time-automation) on the bottom rows the labels leave
+            clocks = s.clocks
+            free = c.h - 2 - [labels.length, c.h - 2].min
+            shown = clocks.first([free, clocks.length].min)
+            labels.first(c.h - 2 - shown.length).each_with_index { |(x, t), i| c.text([x - 1, 0].max, 2 + i, c.fit(t, c.w - [x - 1, 0].max), :dim) }
+            shown.each_with_index { |k, i| Lane.clock_row(c, c.h - shown.length + i, k) }
+          end
+
+          # One clock row: name, a phase bar, what it is, and its count.
+          def self.clock_row(c, y, k)
+            x = c.line(y, ['⏱ ', :dim], [k.name.to_s, :name], ' ')
+            bar = [[c.w / 5, 4].max, 10].min
+            x = c.meter(k.phase, width: bar, x: x, y: y, role: :key)
+            c.text(x + 1, y, c.fit("#{k.unit == :cycles ? 'cycle' : 'bar'} #{k.count} · #{k.what}", [c.w - x - 1, 0].max), :dim)
           end
         end
 

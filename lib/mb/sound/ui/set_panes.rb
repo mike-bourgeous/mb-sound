@@ -136,7 +136,19 @@ module MB
             left = col if col < left
             left = col - vis_cols + 1 if col >= left + vis_cols
             state[:left] = left = left.clamp(0, [cols - 1, 0].max)
-            body_h = c.h - 1
+            # A clock row at the bottom when there are clocks and room
+            # (time-automation)
+            clock_rows = s.clocks.empty? || c.h < m.tracks.length + 3 ? 0 : 1
+            body_h = c.h - 1 - clock_rows
+            if clock_rows == 1
+              x = c.line(c.h - 1, ['⏱ ', :dim])
+              s.clocks.each do |k|
+                break if x >= c.w - 4
+                x = c.text(x, c.h - 1, c.fit("#{k.name} ", c.w - x), :name)
+                x = c.meter(k.phase, width: 4, x: x, y: c.h - 1, role: :key) if x < c.w - 5
+                x = c.text(x, c.h - 1, '  ', nil)
+              end
+            end
             top = state[:top].to_i
             top = row if row < top
             top = row - body_h + 1 if body_h > 0 && row >= top + body_h

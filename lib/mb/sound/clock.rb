@@ -379,10 +379,13 @@ module MB
       # integrated so far (extending them to +rf+ if needed).
       def integrated(rf, _cell, ctx)
         @cell_lock.synchronize {
-          extend_cells(rf + 1, ctx) if @cells.empty? || @cells.last[0] <= rf && next_cell_start(@cells.last[0], ctx) <= rf
+          stale = @cells.empty? || @cells.last[0] <= rf && next_cell_start(@cells.last[0], ctx) <= rf
+          # Only renders (and graphs outside a Session) integrate: a poll
+          # thread asking ahead (the UI) mustn't read speeds before the
+          # frames they belong to are rendered
+          extend_cells(rf + 1, ctx) if stale && (ctx.is_a?(Free) || Thread.current[:mb_sound_span] || @cells.empty?)
           i = @cells.bsearch_index { |c| c[0] > rf }
-          c = i.nil? ? @cells.last : (i > 0 ? @cells[i - 1] : @cells.first)
-          c
+          i.nil? ? @cells.last : (i > 0 ? @cells[i - 1] : @cells.first)
         }
       end
 

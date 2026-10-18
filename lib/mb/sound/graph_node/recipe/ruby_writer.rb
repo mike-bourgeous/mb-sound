@@ -634,6 +634,8 @@ module MB
               return "#{recv}.then(&#{rack_text(c.args[0], c, indent)})"
             end
             args = c.args.map { |a| value(a, indent) }
+            # Clock periods read as seconds (`clocked(19.7.seconds)`, not 19700.ms)
+            args[0] = MB::Sound::Clock.base_ruby(c.args[0]) if CLOCK_CALLS.include?(c.name) && c.args[0].is_a?(MB::Sound::Length::Seconds) && c.args[0].fixed?
             kwargs = c.kwargs.dup
             @clocks_used << c.args[0] if CLOCK_CALLS.include?(c.name) && c.args[0].is_a?(Symbol)
             @clocks_used << kwargs[:clock] if c.name == :follow && kwargs[:clock].is_a?(Symbol)
