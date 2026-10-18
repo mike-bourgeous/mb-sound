@@ -43,6 +43,22 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       end
     end
 
+    it 'give identical samples with a constant cutoff and a moving resonance in every drive mode' do
+      # (the Ruby mirror's feedback secant once overwrote its cached
+      # prewarped cutoff, so a resonance change without a cutoff change
+      # computed the stages from the wrong frequency)
+      [[0, 0, 0.0], [0, 0, 2.0], [2, 0, 1.5], [2, 1, 1.5]].each do |drive_mode, clip, drive|
+        [0, 1].each do |normalize|
+          s1 = [0.0] * 4
+          s2 = [0.0] * 4
+          c = ff.diode_ladder(noise * 2, 800, resonances, s1, 48000, 3.9, 0.375, drive, 1, drive_mode, clip, normalize)
+          ruby = fp.diode_process_ruby(noise * 2, 800, resonances, s2, 48000, 3.9, 0.375, drive, 1, drive_mode, clip, normalize)
+          expect(c).to eq(ruby)
+          expect(s1).to eq(s2)
+        end
+      end
+    end
+
     it 'give identical samples for constant parameters and odd values' do
       [[1000, 0.5], [0.0, 1.0], [Float::NAN, Float::NAN], [-5, -1], [1e9, 2]].each do |c, r|
         s1 = [0.3, -0.1, 0.0, 0.2]
@@ -85,8 +101,8 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       # Without resonance only the cutoff scale differs: the normalized
       # ladder at fc / m0 is the round-1 ladder at fc
       m0 = 1 + fp::DIODE_NORM_M0
-      f = fp.new(mode: :diode, cutoff: 1000, normalize: false)
-      g = fp.new(mode: :diode, cutoff: 1000 / m0)
+      f = fp.new(mode: :diode, cutoff: 1000, normalize: false, tuning: :hardware)
+      g = fp.new(mode: :diode, cutoff: 1000 / m0, tuning: :hardware)
       [100, 1000, 5000].each do |hz|
         w = 2 * Math::PI * hz / 48000
         expect(g.response(w).abs).to be_within(0.03 * f.response(w).abs).of(f.response(w).abs)
@@ -154,11 +170,11 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       end
     end
 
-    it 'is -12 dB at the cutoff without resonance like lp4, with slopes of about 8, 11, 16, and 21 dB/octave' do
-      f = diode(cutoff: 1000, resonance: 0)
+    it 'is -12 dB at the cutoff without resonance like lp4 with the hardware tuning, with slopes of about 8, 11, 16, and 21 dB/octave' do
+      f = diode(cutoff: 1000, resonance: 0, tuning: :hardware)
       expect(analytic_db(f, 1000)).to be_within(0.05).of(-12.04)
       expect(analytic_db(f, 1)).to be_within(0.01).of(0)
-      f = diode(cutoff: 300, resonance: 0)
+      f = diode(cutoff: 300, resonance: 0, tuning: :hardware)
       slopes = [300, 600, 1200, 2400].map { |hz| analytic_db(f, hz) - analytic_db(f, 2 * hz) }
       expect(slopes[0]).to be_within(1.0).of(8)
       expect(slopes[1]).to be_within(1.0).of(11)
@@ -166,7 +182,7 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(slopes[3]).to be_within(1.0).of(21)
     end
 
-    it 'falls 12 dB below DC near lp4 without resonance and puts its resonant peak at lp4\'s frequency' do
+    it 'falls 12 dB below DC near lp4 without resonance and puts its resonant peak at lp4\'s frequency with the hardware tuning' do
       point = ->(f, rel) {
         dc = f.response(1e-6).abs
         hz = 20000.0
@@ -178,15 +194,15 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       # in between, where the cutoff is lifted to put the diode's broader
       # resonant peak at lp4's frequency (round 3, 2026-10-09)
       { 0 => [-0.02, 0.02], 0.15 => [0.3, 0.5], 0.3 => [0.25, 0.4], 0.45 => [0.05, 0.2], 0.6 => [0, 0.1], 0.75 => [0, 0.1], 0.9 => [0, 0.1] }.each do |r, (lo, hi)|
-        lp4 = fp.new(cutoff: 1000, resonance: r)
-        d = diode(cutoff: 1000, resonance: r)
-        old = diode(cutoff: 1000, resonance: r, normalize: false)
+        lp4 = fp.new(cutoff: 1000, resonance: r, tuning: :hardware)
+        d = diode(cutoff: 1000, resonance: r, tuning: :hardware)
+        old = diode(cutoff: 1000, resonance: r, normalize: false, tuning: :hardware)
         octaves = Math.log2(point.(d, -12) / point.(lp4, -12))
         expect(octaves).to be_between(lo, hi), "r #{r}: #{octaves} octaves from lp4"
         expect(Math.log2(point.(old, -12) / point.(lp4, -12))).to be < -0.3 if r <= 0.3
       end
       [0.3, 0.4, 0.45, 0.6, 0.75, 0.9].each do |r|
-        cents = 1200 * Math.log2(peak.(diode(cutoff: 1000, resonance: r)).to_f / peak.(fp.new(cutoff: 1000, resonance: r)))
+        cents = 1200 * Math.log2(peak.(diode(cutoff: 1000, resonance: r, tuning: :hardware)).to_f / peak.(fp.new(cutoff: 1000, resonance: r, tuning: :hardware)))
         expect(cents.abs).to be < 30, "r #{r}: peak #{cents} cents from lp4's"
       end
     end
@@ -204,10 +220,10 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
     end
 
     it 'is -25.3 dB at the cutoff without resonance with normalize: false, with slopes of about 14, 18, and 22 dB/octave' do
-      f = diode(cutoff: 1000, resonance: 0, normalize: false)
+      f = diode(cutoff: 1000, resonance: 0, normalize: false, tuning: :hardware)
       expect(analytic_db(f, 1000)).to be_within(0.05).of(20 * Math.log10(49 / 901.0))
       expect(analytic_db(f, 1)).to be_within(0.01).of(0)
-      f = diode(cutoff: 300, resonance: 0, normalize: false)
+      f = diode(cutoff: 300, resonance: 0, normalize: false, tuning: :hardware)
       slopes = [300, 600, 1200].map { |hz| analytic_db(f, hz) - analytic_db(f, 2 * hz) }
       expect(slopes[0]).to be_within(1.0).of(14)
       expect(slopes[1]).to be_within(1.0).of(18)
@@ -216,7 +232,7 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
 
     it 'makes the gain at the cutoff linear in dB from -25.3 to +32.3 dB on the :db curve with normalize: false' do
       gains = [0, 0.25, 0.5, 0.75, 1].map { |r|
-        f = diode(cutoff: 1000, resonance: r, normalize: false)
+        f = diode(cutoff: 1000, resonance: r, normalize: false, tuning: :hardware)
         analytic_db(f, 1000) - analytic_db(f, 0.01)
       }
       expect(gains[0]).to be_within(0.01).of(-25.29)
@@ -326,16 +342,17 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(loud[-4800..].abs.max).to be > 0.03
     end
 
-    it 'maps quality: to the same gain at the cutoff with normalize: false' do
+    it 'maps quality: to the same gain at the cutoff with normalize: false and the hardware tuning' do
       [0.707, 2, 10].each do |q|
-        r = fp.quality_to_resonance(q, diode: true)
-        f = diode(cutoff: 1000, resonance: r, normalize: false)
+        r = fp.quality_to_resonance(q, diode: true, tuning: :hardware)
+        f = diode(cutoff: 1000, resonance: r, normalize: false, tuning: :hardware)
         expect(10**((analytic_db(f, 1000) - analytic_db(f, 0.01)) / 20)).to be_within(1e-6).of(q)
       end
-      expect(fp.quality_to_resonance(Numo::SFloat[0.01, 2, 1000], diode: true).to_a.map { |v| v.round(5) }).to eq(
-        [0, fp.quality_to_resonance(2, diode: true).round(5), 1]
+      hw = { diode: true, tuning: :hardware }
+      expect(fp.quality_to_resonance(Numo::SFloat[0.01, 2, 1000], **hw).to_a.map { |v| v.round(5) }).to eq(
+        [0, fp.quality_to_resonance(2, **hw).round(5), 1]
       )
-      expect(fp.quality_to_resonance(2, curve: :linear, diode: true)).to be_within(1e-12).of(fp.diode_resonance_curve(fp.quality_to_resonance(2, diode: true)))
+      expect(fp.quality_to_resonance(2, curve: :linear, **hw)).to be_within(1e-12).of(fp.diode_resonance_curve(fp.quality_to_resonance(2, **hw)))
     end
   end
 
@@ -405,9 +422,11 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       n = 110.hz.ramp.diode(2.hz.lfo.at(200..2000), resonance: 0.5.constant)
       expect(n.sample(4800).isfinite.all?).to eq(true)
       q = 110.hz.ramp.diode(800, quality: 4)
-      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4)) # lp4's knob
-      q = 110.hz.ramp.diode(800, quality: 4, normalize: false)
-      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true))
+      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true)) # its own gain at the cutoff
+      q = 110.hz.ramp.diode(800, quality: 4, tuning: :hardware)
+      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, tuning: :hardware)) # lp4's knob
+      q = 110.hz.ramp.diode(800, quality: 4, normalize: false, tuning: :hardware)
+      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true, tuning: :hardware))
       expect(q.kernel_filter).not_to be_normalize
     end
   end

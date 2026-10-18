@@ -94,7 +94,9 @@ RSpec.describe('script runner scripts', :smoke) do
       end
 
       it 'processes a short file, ringing out after it ends' do
-        MB::Sound.write(infile, [220.hz.ramp.at(0.5).sample(4800), 330.hz.ramp.at(0.5).sample(4800)], sample_rate: 48000, overwrite: true)
+        # (-12 dB: effect scripts play at 0 dB, and dry + wet (flanger, ping
+        # pong) went over full scale with 0.5, which renders warn about)
+        MB::Sound.write(infile, [220.hz.ramp.at(0.25).sample(4800), 330.hz.ramp.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
 
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text

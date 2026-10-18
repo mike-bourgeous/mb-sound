@@ -1,4 +1,5 @@
 require_relative 'render_window'
+require_relative 'render_peak'
 require_relative 'mix_report'
 
 module MB
@@ -741,6 +742,8 @@ module MB
       # gain still applies while rendering, so it doesn't change the result
       # (except for clipping in integer formats, which the second pass
       # can't undo: leave headroom, as the default -10 dB master gain does).
+      # Any file render warns if its mix went over full scale (RenderPeak),
+      # with the +gain:+ that would leave headroom.
       #
       # With +:stems+ (a directory), each player (track) is also written to
       # its own file there, "<name>.<ext>" (+:stem_format+, else the
@@ -848,6 +851,8 @@ module MB
         current = Sequence.current_transport
         transport = Sequence::Transport.new(bpm: bpm || current.bpm, bar_length: current.bar_length)
         output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
+        # Files keep their peak, to warn if the mix went over full scale
+        output = peak_meter = RenderPeak.new(output) unless filename.respond_to?(:write)
         # A pre-roll plays the song up to +from+ without writing it
         output = RenderWindow::Gate.new(output) if from
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
@@ -957,6 +962,10 @@ module MB
 
         if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+        end
+
+        if peak_meter && (message = peak_meter.warning(filename, session.master_gain))
+          warn message
         end
 
         if meter

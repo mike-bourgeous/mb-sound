@@ -26,14 +26,16 @@ RSpec.describe('bin/synths/funk.rb') do
   end
 
   # Renders +graph+ (a block, built inside the render) for +bars+ at 96 BPM
-  # in a Session, so tempo-synced LFOs follow the timeline; the left channel.
+  # in a Session, so tempo-synced LFOs follow the timeline; the left channel
+  # at 0 dB (rendered 12 dB down and scaled back: the beat peaks near +5
+  # dBFS, which the FLAC would clip).
   def render_bars(bars)
     path = tmp_path('bars.flac')
-    MB::Sound.render(path, bars: bars, overwrite: true, gain: 0.db) do
+    MB::Sound.render(path, bars: bars, overwrite: true, gain: -12.db) do
       MB::Sound.bpm 96
       MB::Sound.bg :x, MB::Sound.with_seed(3) { yield }, fade: 0
     end
-    MB::Sound.read(path)[0]
+    MB::Sound.read(path)[0] * 12.db.to_f
   end
 
   # The share of +x+'s power from +lo+ to +hi+ Hz in each +step+ seconds.
@@ -126,8 +128,10 @@ RSpec.describe('bin/synths/funk.rb') do
     expect(peak_hz(seconds(hard, 0.05, 0.45), 40, 120)).to be_within(3).of(MB::Sound::D2.frequency)
     expect(rms_db(seconds(hard, 0, 0.1))).to be > rms_db(seconds(soft, 0, 0.1)) + 9
     # (the saw's lowpass opens with velocity, but the sine body dominates:
-    # 1.38% of the power at 300 Hz-3 kHz at velocity 0.3, 1.46% at 1.0)
-    expect(band_share(seconds(hard, 0, 0.1), 300, 3000)).to be > band_share(seconds(soft, 0, 0.1), 300, 3000)
+    # the power at 300 Hz-3 kHz stays about 1.4%; above 3 kHz it goes from
+    # 0.014% at velocity 0.3 to 0.063% at 1.0 with lp4's musical tuning, from
+    # 0.013% to 0.043% with the hardware tuning)
+    expect(band_share(seconds(hard, 0, 0.1), 3000, 12000)).to be > band_share(seconds(soft, 0, 0.1), 3000, 12000) * 2
   end
 
   it 'plays the keys, clav, and talkbox' do
