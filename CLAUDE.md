@@ -165,7 +165,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 
 ### Tweening curves (`design/notes/curves.md`)
 
-`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` table in C) is shared by glides (`v.hz.glide(t, shape:)`), `tween([300.hz, 3000.hz], 1.bar, curve:)`, `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Tween cutoffs as Pitches (since graph filters became SVFs, 2026-10-08, only `structure: :biquad` filters make DC bumps at very low cutoffs).  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
+`MB::Sound::Curve` (`Curve[:elastic, overshoot:]`, many named easings, `Curve.db`/`Curve.s`, `bezier`, Procs; `#lookup` table in C) is shared by glides (`v.hz.glide(t, shape:)`), `tween([300.hz, 3000.hz], 1.bar, curve:)` (the length is per step between keyframes, not the total), `smooth(t, curve:)`, and the antialiased shaper `sig.ease(curve, ...)` (`aease` exact).  `bounce_hits(2.bars, count:, elasticity:, decay:)` makes bouncing-ball rhythms.  Tween cutoffs as Pitches (since graph filters became SVFs, 2026-10-08, only `structure: :biquad` filters make DC bumps at very low cutoffs).  Demos `bin/songs/tween_song.rb`, `bin/songs/bouncing_ball.rb`.
 
 ### Filters (`design/notes/filters.md`)
 

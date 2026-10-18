@@ -128,7 +128,11 @@ module MB
       about <<~TEXT
         Envelopes land exactly on their targets at whole samples; curves
         are signed dB (+60 falls like a 60 dB exponential).  Without a gate
-        they are one-shots.
+        they are one-shots.  `tween(values, step)` moves through keyframes
+        with `step` between each two (not the whole length):
+        `tween([100.hz, 5000.hz, 100.hz], 2.bars)` takes 4 bars to come
+        back down, then (looping) takes 2 more back to its first value;
+        `tween([100.hz, 5000.hz], 2.bars)` is up and down in 4 bars.
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
       dsl :smooth, :ease
@@ -147,8 +151,8 @@ module MB
       dsl :filter, :lp4, :diode, :peq, :formant, :smooth
       note :filters
       see :knobs
-      example 'a swept four-pole' do
-        bg :try, 55.hz.ramp.at(-16.db).lp4(tween([200.hz, 4000.hz, 200.hz], 2.bars), resonance: 0.6).until(2.bars)
+      example 'a swept four-pole (one bar up, one bar down: the length is per step)' do
+        bg :try, 55.hz.ramp.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
       end
     end
 

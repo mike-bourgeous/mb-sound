@@ -228,9 +228,11 @@ module MB
       # +step+, along +curve+ (a MB::Sound::Curve name such as :smoothstep
       # (default), :elastic, :bounce, :squiggle, :steps, :back, a Curve, or a
       # Proc): automation for a cutoff, a detune, a mix, ... following the
-      # session's tempo and timeline.  +step+ is a length (e.g. `1.bar`,
-      # `2.beats`, `3.n16`; a plain number counts bars) or an Array of
-      # lengths, one per value (cycling).  Values are keyframes: each is the
+      # session's tempo and timeline.  +step+ is the time between two
+      # keyframes, not the length of the whole tween: a length (e.g.
+      # `1.bar`, `2.beats`, `3.n16`; a plain number counts bars) or an
+      # Array of lengths, one per value (cycling), so N values take N steps
+      # per loop (N - 1 to reach the last one).  Values are keyframes: each is the
       # output at the start of its step, and the step tweens to the next
       # value (arriving as the next step starts, or after +time+ and then
       # holding).  The last value holds, or with +loop: true+ (default)
@@ -251,10 +253,16 @@ module MB
       # values tween the same way.
       #
       #     # 300 -> 3000 Hz during bar 1, 3000 -> 800 during bar 2, back to 300 during bar 3
+      #     # (three bars per loop: the length is per step)
       #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: tween([300.hz, 3000.hz, 800.hz], 1.bar, curve: :elastic), quality: 4) * 0.3
       #     tween([0, 1, 0.3], 1.bar, curve: :bounce, loop: false)    # a bouncing mix knob, then 0.3
       #     tween([0, 12, 12, 7], 2.beats, curve: :steps, cycles: 4)  # stepped automation, holding 12 for a step
       #     tween([200, 1000], 1.bar, align: :launch)  # from 200 wherever it launches
+      #     # 2 bars per step: up for 2 bars, down for 2 (5000 Hz after 2
+      #     # bars, back at 100 Hz after 4), then 2 bars from 100 to 100
+      #     # (the loop back to the first keyframe): 6 bars per loop
+      #     tween([100.hz, 5000.hz, 100.hz], 2.bars)
+      #     tween([100.hz, 5000.hz], 2.bars)   # up and down in 4 bars
       def tween(values, step = 1.bar, curve: :smoothstep, time: nil, overshoot: nil, cycles: nil, log: nil, loop: true, align: :timeline)
         values = Array(values)
         raise ArgumentError, 'A tween needs at least one value' if values.empty?

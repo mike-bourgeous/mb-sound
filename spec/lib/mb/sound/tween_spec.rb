@@ -99,6 +99,16 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
       expect([0, 1, 2, 3, 4, 5, 6, 7].map { |i| out[i * 48000].round(1) }).to eq([300, 1650, 3000, 1900, 800, 550, 300, 1650])
     end
 
+    it 'takes its length per step, as its docs say: [100.hz, 5000.hz, 100.hz] over 2.bars is back down after 4 bars, loops after 6' do
+      out = take(MB::Sound.tween([100.hz, 5000.hz, 100.hz], 2.bars, curve: :linear), 14) # 2 bars = 4 s
+      at = ->(bars) { out[(bars * 2 * 48000).round] }
+      expect(at.(0)).to be_within(0.5).of(100)
+      expect(at.(2)).to be_within(1).of(5000)
+      expect(at.(4)).to be_within(0.5).of(100)
+      expect(at.(5)).to be_within(0.5).of(100) # the loop's last step: 100 back to 100
+      expect(at.(6.5)).to be_within(1).of(100 * 50**0.25) # up again, in octaves
+    end
+
     it 'holds a repeated value for its step' do
       out = take(MB::Sound.tween([0, 1, 1, 0], 1.bar, curve: :linear, loop: false), 8)
       expect(out[96000...192000].to_a.uniq).to eq([1.0])
