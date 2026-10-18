@@ -35,8 +35,11 @@ RSpec.describe('bin/songs/memory_card.rb') do
     expect(peak).to be <= -1.db + 1e-3
   end
 
-  it 'masters with the vinyl preset by default, the snare slices 3 dB under the rest of the break' do
-    MB::Sound.render(tmp_path('m.flac'), bars: 0.1) { MB::Sound.memory_card }
+  it "masters with Nev's chain by default and the vinyl preset with vinyl: true, the snare slices 3 dB under the rest of the break" do
+    MB::Sound::Mastering::Targeting.last = nil
+    MB::Sound.render(tmp_path('n.flac'), bars: 0.1) { MB::Sound.memory_card }
+    expect(MB::Sound::Mastering::Targeting.last).to be_nil
+    MB::Sound.render(tmp_path('m.flac'), bars: 0.1) { MB::Sound.memory_card(vinyl: true) }
     expect(MB::Sound::Mastering::Targeting.last.preset).to eq(:vinyl)
 
     snare = MB::Sound.memory_card_chops(snare: -3.db)[:a]
