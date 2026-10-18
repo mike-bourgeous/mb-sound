@@ -97,6 +97,7 @@ module MB
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
           :blend, # (the effect gets the whole bundle)
+          *MasteringMethods.public_instance_methods(false), # (one chain for every channel)
           *DynamicsMethods.public_instance_methods(false),
         ].freeze
 

@@ -84,7 +84,11 @@ module MB
       loudness(-10..-8)
       true_peak(-0.5.db)
       mono_below 120 # club systems: a mono low end (and the sub is mono already)
-      master :dnb_master, air: :air, drive: 8
+      # (the air knob's highpass, then the club mastering preset with two
+      # limiters: mastering-2, 2026-10-17, the maintainer's Bench pick over
+      # dnb_master's clip and limit)
+      master :filter, :highpass, cutoff: :air, quality: 0.7
+      master :club
       master_gain 0.db
 
       tip 'Sections come in 8s; phrases in 16 and 32.  DJs want a 32-bar intro of drums and light elements, and the drop on a 32-bar line.'

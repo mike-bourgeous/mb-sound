@@ -198,7 +198,7 @@ module MB
             curve, drive_mode, clip = f.send(:kernel_options)
             [
               f.instance_variable_get(:@k_max), f.instance_variable_get(:@compensation), f.instance_variable_get(:@drive),
-              *f.instance_variable_get(:@mix), curve, drive_mode, clip, f.normalize? ? 1 : 0, f.diode? ? 1 : 0,
+              *f.instance_variable_get(:@mix), curve, drive_mode, clip, f.normalize? ? 1 : 0, f.diode? ? 1 : 0, f.instance_variable_get(:@tuning_number),
             ]
           end
 

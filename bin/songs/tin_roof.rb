@@ -163,7 +163,7 @@ module MB::Sound
     knob :ring, 1, range: 0..1          # how hard the bowls are struck (0: left to ring)
 
     master_gain(-1.db) # quiet on purpose: about -18 LUFS (the usual -10 dB would be -27)
-    master { |mix| mix.limit(ceiling: -1.db) } # a safety, not a sound
+    master :quiet # -18 LUFS, a slow limiter as a safety, not a sound (mastering-2: the maintainer's Bench pick)
 
     # Each patch draws its randomness from its own seed (seed + n), so a
     # patch sounds the same whenever it's built: live, in a render, or in

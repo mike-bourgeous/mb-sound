@@ -87,7 +87,7 @@ enum {
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
-	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[13], sc[14]); sc[0..12] settings; object: the Filter::FourPole
+	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[14], sc[15]); sc[0..13] settings; object: the Filter::FourPole
 	OP_BIQUAD,    // dst, a, cut, q, object, type  dst = Filter::Cookbook (structure: :biquad) on a (plan_biquad.c); cut/q registers; object: the Filter::Cookbook
 	OP_CLIP,      // dst, a, sc                  dst = Numo clip of a to (float)sc[0]..(float)sc[1] (NaN stays NaN)
 	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
@@ -1117,12 +1117,12 @@ static void four_pole_operands(const int32_t *op, size_t pc, const struct regs *
 	const char *cplx = R->c;
 	if (cplx[op[1]] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
 	if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
-	if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
+	if (op[6] < 0 || (size_t)op[6] + 16 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
 	for (int k = 0; k < 2; k++) {
 		int r = op[3 + k];
 		if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
 		prm[k].p = r >= 0 ? ptrs[r] : NULL;
-		prm[k].scalar = sc[op[6] + 13 + k];
+		prm[k].scalar = sc[op[6] + 14 + k];
 	}
 	*obj = rb_ary_entry(objects, op[5]);
 }

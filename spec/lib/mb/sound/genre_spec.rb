@@ -137,7 +137,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(mix.report(result)).to eq(['loudness -9.2 LUFS (target -10..-8: on target)', 'true peak -0.30 dBTP (ceiling -0.5: over)'])
       expect(mix.report(result.class.new(-12.0, -1.0)).first).to include('quiet')
       expect(mix.report(result.class.new(-7.0, -1.0)).first).to include('loud')
-      expect(mix.summary).to include('-10..-8 LUFS', 'mono below 120 Hz', 'master dnb_master')
+      expect(mix.summary).to include('-10..-8 LUFS', 'mono below 120 Hz', 'master filter -> club')
     end
 
     it 'reports the side below 120 Hz (or mono_below) against the mid' do
@@ -230,17 +230,19 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(10 * Math.log10(level.(t) / level.(plain))).to be < -3
     end
 
-    it 'tames the techno stab, with the heavy drive as an option, and masters techno with a limiter only' do
+    it 'tames the techno stab, with the heavy drive as an option, and masters techno with the club preset (two limiters)' do
       t = genre[:techno]
       expect(t.roles[:stab].patch).to eq(:stab)
-      expect(t.mix.master.map(&:first)).to eq([:compress, :at, :limit])
+      expect(t.mix.master).to eq([[:club, [], {}]])
 
       clip = MB::Sound.seq(MB::Sound::F3).n2
-      # Clipping a stab lowpassed at 300 Hz makes harmonics above 1 kHz:
-      # the heavy drive (the Reese's) has 8 dB more there than the default
+      # Clipping a stab lowpassed at 240 Hz (its -3 dB point at the patch's
+      # resonance 0.25 is 326 Hz with lp4's musical tuning, like the hardware
+      # tuning's 300 Hz) makes harmonics above 1 kHz: the heavy drive (the
+      # Reese's) has 6 dB more there than the default (8.5)
       high_share = ->(drive) {
         MB::Sound.seed(5)
-        node = MB::Sound::Genre::Patches.stab(clip, cutoff: 300, drive: drive)
+        node = MB::Sound::Genre::Patches.stab(clip, cutoff: 240, drive: drive)
         x = Numo::DFloat.cast(Numo::SFloat.hstack(Array.new(24) { node.outputs.map { |o| o.sample(800).dup }[0] })[4800..])
         f = Numo::Pocketfft.rfft(x).abs**2
         10 * Math.log10(f[(1000 * x.length / 48000.0).round..].sum / f.sum)

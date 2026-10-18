@@ -120,11 +120,17 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
 
     it 'maps quality for four-pole filters to the same gain at the cutoff' do
       node = saw.filter(:lp4, cutoff: 500, quality: 4)
-      expect(node.resonance).to be_within(1e-12).of(Math.log(16) / Math.log(196))
+      expect(node.resonance).to be_within(1e-12).of(MB::Sound::Filter::FourPole.quality_to_resonance(4))
       f = node.kernel_filter
       f.resonance = node.resonance
       at_cutoff = f.response(2 * Math::PI * 500 / 48000).abs / f.response(0).abs
-      expect(at_cutoff).to be_within(1e-6).of(4)
+      expect(at_cutoff).to be_within(0.005).of(4)
+
+      hw = saw.lp4(500, quality: 4, tuning: :hardware)
+      expect(hw.resonance).to be_within(1e-12).of(Math.log(16) / Math.log(196))
+      g = hw.kernel_filter
+      g.resonance = hw.resonance
+      expect(g.response(2 * Math::PI * 500 / 48000).abs / g.response(0).abs).to be_within(1e-6).of(4)
 
       lin = saw.lp4(500, quality: 4, resonance_curve: :linear)
       lin.kernel_filter.resonance = lin.resonance
@@ -138,7 +144,7 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     it 'takes a quality node such as Notes#quality' do
       v = MB::Sound.seq(MB::Sound::C4.n4).notes
       node = v.hz.saw.lp4(v.cutoff(400), quality: v.quality(4))
-      expect(node.resonance.sample(10).to_a.uniq.map { |r| r.round(5) }).to eq([(Math.log(16) / Math.log(196)).round(5)])
+      expect(node.resonance.sample(10).to_a.uniq.map { |r| r.round(5) }).to eq([MB::Sound::Filter::FourPole.quality_to_resonance(4).round(5)])
       expect(node.sample(800).isfinite.all?).to eq(true)
     end
 

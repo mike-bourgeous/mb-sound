@@ -212,11 +212,15 @@ module MB
         end
 
         # The master chain for +mix+ (a node or bundle) from Mix#master steps
-        # [name, args, params]: each a preset with an :input, else a
-        # GraphNode method of that name.
+        # [name, args, params]: each a mastering preset (:club, :streaming,
+        # :quiet, :vinyl; see Mastering, params its options), else an
+        # effect preset with an :input, else a GraphNode method of that
+        # name.
         def master_chain(mix, steps)
           steps.reduce(mix) { |m, (name, args, params)|
-            if GraphIO.find_preset(name)
+            if Mastering.preset?(name)
+              m.master(name, *args, **params)
+            elsif GraphIO.find_preset(name)
               MB::Sound.preset(name, input: m, **params)
             else
               m.public_send(name, *args, **knob_params(params))
@@ -334,6 +338,14 @@ module MB
           unless mix.master.empty? && !mix.mono_below
             chain = mix.master
             mono = mix.mono_below
+            # A mastering preset makes the low end mono itself (at the
+            # template's frequency)
+            if mono && (i = chain.index { |n, _a, _p| Mastering.preset?(n) })
+              name, args, params = chain[i]
+              chain = chain.dup
+              chain[i] = [name, args, { mono: mono }.merge(params)]
+              mono = nil
+            end
             MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
           end
           template = self
@@ -565,8 +577,9 @@ module MB
           @mix[:mono_below] = hz
         end
 
-        # Adds a step to the master chain: an effect preset (`master
-        # :dnb_master`) or a GraphNode method with its arguments (`master
+        # Adds a step to the master chain: a mastering preset (`master
+        # :club, lufs: -9`; see Mastering), an effect preset (`master
+        # :dnb_master`), or a GraphNode method with its arguments (`master
         # :limit, ceiling: -1.db`).  Steps run in order; `master nil` clears
         # the chain.
         def master(name, *args, **params)

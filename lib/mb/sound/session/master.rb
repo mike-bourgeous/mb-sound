@@ -45,11 +45,19 @@ module MB
         #
         # +cpu+ is the seconds its nodes took since the terminal UI's feed
         # last read it (see UIFeed).
+        #
+        # +preset+ is the Mastering::Preset given to #master (nil for a
+        # plain block), +mastering+ every preset built into the chain (also
+        # `mix.master(:club)` inside a block), +capture+ what a render's
+        # first pass records of it (see Mastering::Targeting), and +rng+ the
+        # root random generator's state when it was built (for rebuilding
+        # it with the same seeds).
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from, :read_to, :cpu,
+          :preset, :mastering, :capture, :rng,
           keyword_init: true
         ) do
           def bypass?
@@ -102,20 +110,31 @@ module MB
         # +:fade+ - nil (default) to let the old chain's tails spill over,
         #           a number of bars to crossfade, or 0 to cut over.
         #
+        # A mastering preset (+preset+: :club, :streaming, :quiet, :vinyl,
+        # or a Mastering::Preset, with +options+; see Mastering) ends the
+        # chain: the block's result (or the mix, without a block) runs
+        # through it.
+        #
         # Examples:
         #     session.master { |mix| mix.softclip(0.5, 0.95) }
         #     session.master { |l, r| [l, r.delay(0.01)] }
+        #     session.master(:club, lufs: -9)
+        #     session.master(:streaming) { |mix| mix.reverb(:hall, wet: -14.db) }
         #     session.master # bypass
         #
         # The change goes through the change queue (see Changes), so several
         # master changes can wait for different times.
-        def master(at: nil, on: nil, in: nil, fade: nil, start_time: nil, description: nil, &block)
+        def master(preset = nil, at: nil, on: nil, in: nil, fade: nil, start_time: nil, description: nil, **options, &block)
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
+          raise ArgumentError, "master options #{options.keys.map(&:inspect).join(', ')} go with a mastering preset (master :club, ...)" if preset.nil? && !options.empty?
+          preset = Mastering.preset(preset, **options) if preset
+          preset = mastering_override_for(preset, block)
 
-          chain = build_master(block, description: description)
+          chain = build_master(block, description: description, preset: preset)
           chain.mode, chain.fade = master_mode(fade)
           @master_block = block
+          @master_preset = preset
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           change(:master, :master, time, data: { description: chain.description, fade: fade }, graph: chain.chain_graph) { |t|
@@ -137,11 +156,20 @@ module MB
           @mutex.synchronize {
             chain = @master_chains&.last
             next 'bypass' if chain.nil?
-            next chain.description if chain.started
+            next "#{chain.description}#{rider_info(chain)}" if chain.started
             next "#{chain.description} (starting)" if chain.start <= @transport.position
             "#{chain.description} (starts at bar #{bar_of(chain.start)})"
           }
         end
+
+        # " (ride +3.2 dB)" for a chain with a loudness rider (see
+        # GraphNode::Rider), else ''.
+        def rider_info(chain)
+          return '' unless chain.preset&.ride
+          rider = chain.chain_graph.graph.find { |n| n.is_a?(GraphNode::Rider::Output) }&.owner_rider
+          rider ? format(' (ride %+.1f dB)', rider.gain) : ''
+        end
+        private :rider_info
 
         # The block given to the latest #master call (whether its chain
         # started or still waits), or nil for bypass (graph documents save it; see
@@ -149,6 +177,32 @@ module MB
         def master_block
           @master_block
         end
+
+        # The Mastering::Preset given to the latest #master call (nil for a
+        # plain block or bypass; graph documents save it).
+        def master_preset
+          @master_preset
+        end
+
+        # A mastering preset that replaces the one every #master call gives
+        # (and is added after master blocks that give none): a
+        # Mastering::Preset, false to drop presets from #master calls, or nil
+        # (default) for none.  `render(master: :club)` and scripts'
+        # `--master club` set it (see PlaybackMethods#render).
+        attr_reader :mastering_override
+
+        # Sets #mastering_override (a preset name or Preset, false, or nil).
+        def mastering_override=(preset)
+          @mastering_override = preset.nil? || preset == false ? preset : Mastering.preset(preset)
+        end
+
+        # The gain renders give the trim of targeted mastering presets (see
+        # Mastering::Targeting), or nil for their drive.
+        attr_accessor :mastering_trim
+
+        # A Mastering::Targeting::Capture recording what targeted master
+        # chains get and give (a render's first pass), or nil.
+        attr_accessor :mastering_capture
 
         # Rebuilds the latest master chain from its block, cutting over at
         # +time+ (whole notes; now if nil).  Clears reverb and delay tails
@@ -158,7 +212,7 @@ module MB
           return if chain.nil? || chain.bypass? && @master_chains.length == 1
 
           time = nil if time && time <= @transport.position
-          master(on: :now, start_time: time, fade: 0, description: chain.description, &chain.block)
+          master(chain.preset, on: :now, start_time: time, fade: 0, description: chain.description, &chain.block)
         rescue => e
           raise if @raise_errors
           warn "Could not rebuild the master chain (#{e.class}: #{e.message}); bypassing it"
@@ -198,8 +252,9 @@ module MB
         # Builds a Chain from a master block (a bypass chain for nil).
         # +label+ names the chain in its default description ("master: ...";
         # a bus's name for buses, see Buses).
-        def build_master(block, description: nil, label: 'master')
+        def build_master(block, description: nil, label: 'master', preset: nil)
           source = GraphNode::MixSource.new(channels: @channels, sample_rate: output.sample_rate)
+          rng = @mastering_capture ? Internal.root_rng.dup : nil
 
           chain = Chain.new(
             block: block,
@@ -211,23 +266,37 @@ module MB
             gain_step: 0.0,
             tail_frames: 0,
             quiet_frames: 0,
-            slow_warned: false
+            slow_warned: false,
+            preset: preset,
+            rng: rng
           )
 
-          if block.nil?
+          if block.nil? && preset.nil?
             chain.description = description || 'bypass'
             return chain
           end
 
           chans = source.outputs
-          arity = block.arity
-          result = if arity == 0 || arity == 1
-                     block.call(GraphNode::Channels.new(chans))
-                   elsif arity < 0 || arity == @channels
-                     block.call(*chans)
-                   else
-                     raise ArgumentError, "Give the master block one parameter (the whole mix) or #{@channels} (one per channel); got #{arity}"
-                   end
+          capturing = !@mastering_capture.nil?
+          result, built = Mastering.building(trim: @mastering_trim, capture: capturing) {
+            r = if block.nil?
+                  GraphNode::Channels.new(chans)
+                elsif block.arity == 0 || block.arity == 1
+                  block.call(GraphNode::Channels.new(chans))
+                elsif block.arity < 0 || block.arity == @channels
+                  block.call(*chans)
+                else
+                  raise ArgumentError, "Give the master block one parameter (the whole mix) or #{@channels} (one per channel); got #{block.arity}"
+                end
+            if preset
+              list = master_nodes(r)
+              list *= @channels if list.length == 1
+              r = GraphNode::Channels.new(list).master(preset)
+            end
+            r
+          }
+          chain.mastering = capturing ? built.map(&:preset) : built
+          chain.capture = @mastering_capture&.chain(chain, built) if chain.mastering.any?(&:targeted?)
 
           list = master_nodes(result)
           list *= @channels if list.length == 1
@@ -238,8 +307,21 @@ module MB
 
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
           bind_bus_taps(chain.nodes, :master) if label == 'master' # readers of buses and players (see Buses)
-          chain.description = description || shorten("#{label}: #{chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq.join(', ')}")
+          chain.description = description || shorten(
+            preset && block.nil? ? "#{label}: #{preset.call_ruby}" : "#{label}: #{[*(preset && preset.call_ruby), *chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq].join(', ')}"
+          )
           chain
+        end
+
+        # The preset a #master call uses after #mastering_override: the
+        # override (if set and the call gives a preset or a block), none
+        # (override false), or +preset+.
+        def mastering_override_for(preset, block)
+          return preset if @mastering_override.nil?
+          return nil if @mastering_override == false
+          return preset if preset.nil? && block.nil? # bypass stays bypass
+
+          @mastering_override
         end
 
         # Converts a master block's result to an Array of GraphNodes.
@@ -369,6 +451,7 @@ module MB
           data = master_chain_output(c, input, count)
 
           ramp = master_ramp(c, count, c.ramp_from || 0)
+          c.capture&.add(@frame, input, data, ramp)
           out.each_with_index do |o, idx|
             d = data[idx]
             d = d * ramp if ramp
