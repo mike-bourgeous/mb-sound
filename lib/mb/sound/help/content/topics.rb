@@ -41,7 +41,7 @@ module MB
         play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
       end
       example 'play two seconds of a drum file as a Sample', bars: 1 do
-        play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
+        play Sample['sounds/drums_short.flac'].trim(...2.seconds), gain: -8.db
       end
       example 'play a grid on a TR-909' do
         play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.db
