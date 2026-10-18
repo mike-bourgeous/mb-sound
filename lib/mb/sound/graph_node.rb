@@ -403,6 +403,9 @@ module MB
         when s.respond_to?(:arithmetic_string)
           parenthesize(s.arithmetic_string(separator))
 
+        when s.respond_to?(:display_label) && s.display_label
+          s.display_label
+
         when s.respond_to?(:name_or_id)
           s.name_or_id
 
