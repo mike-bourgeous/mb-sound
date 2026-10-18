@@ -41,8 +41,10 @@ module MB
       #     play seq(C4, E4, G4, C5).n8                   # a clip on the default patch
       #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-808
       #     play sf2('GeneralUser.sf2')                   # a demo phrase
-      def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil)
+      #     play riff, clock: 138.75.bpm                 # on a clock (see #bg)
+      def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
         point = LaunchPoint.of(binding) or return nil
+        sound = Sequence::Clocked.apply(sound, clock) if clock
         foreground = Session.context.nil? && Session.current.realtime?
 
         if sound.is_a?(Genre::Template) || (sound.is_a?(Symbol) && Genre.names.include?(sound) && !GraphIO.find_preset(sound))
@@ -132,9 +134,14 @@ module MB
       #
       # +send:+ (bus name => level, e.g. `send: { verb: -12.db }`) and +to:+
       # (a bus for its main out) route a named player (see BusMethods).
-      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil)
+      #
+      # +clock:+ plays the clip (or Sample loop, or the clips and loops in a
+      # graph) on a clock (see MB::Sound::Clock): `bg :bass, bassline,
+      # clock: :reese`, `bg :bowl, strike, clock: 19.7.seconds`.
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil, to: nil, send: nil, clock: nil)
         point = LaunchPoint.of(binding) or return nil
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
         # A clip given to a track with a patch plays through the patch (see

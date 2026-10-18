@@ -977,7 +977,7 @@ module MB
 
           def leaf?(v)
             case v
-            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Sequence::Duration
+            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Sequence::Duration, MB::Sound::Tempo
               true
             when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
               v.value.is_a?(Numeric)
@@ -1020,6 +1020,7 @@ module MB
             when MB::Sound::Generative::Dice then "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
+            when MB::Sound::Tempo, MB::Sound::Clock then v.to_ruby
             when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")
             when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")

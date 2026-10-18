@@ -41,9 +41,16 @@ module MB
       # see #track's +lead_max:+).  Maintainer-approved 2026-10-11.
       ATTACK_LEAD_MAX = 1
 
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, keyword_init: true) do
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :clock, :clocked, keyword_init: true) do
         def patch?
           !patch.nil?
+        end
+
+        # +clip+ on the track's clock (the same clocked copy each time, so
+        # a scene giving the clip again finds it playing), or +clip+.
+        def clocked_clip(clip)
+          return clip unless clock && clip.is_a?(Sequence::Clip) && clip.clocking.nil?
+          (self.clocked ||= {}.compare_by_identity)[clip] ||= clip.clocked(clock)
         end
       end
 
@@ -220,7 +227,15 @@ module MB
       #
       #     track(:keys, send: { verb: -12.db }) { |c| c.synth { |v| v.hz.triangle * v.amp_env } }
       #     track(:kick, to: :drums) { |k| tr808(k) }
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, &patch)
+      #
+      # +clock:+ plays the track's clips on a clock (a clock's name, a
+      # Tempo, a Rational ratio, or a loop period; see MB::Sound::Clock):
+      # every clip a scene, `bg`, or `launch` gives it (clips with a clock
+      # of their own keep theirs).  A graph track's clips and loops are
+      # clocked once.
+      #
+      #     track(:bowl, clock: :tide) { |c| c.trigger.resonate(:bowl) }
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
@@ -231,6 +246,9 @@ module MB
         check_offset(:lead_max, lead_max)
         raise ArgumentError, "lead_max: caps an attack lead (lead: :attack or 0.5.attack; got lead: #{lead.inspect})" if lead_max && !lead.is_a?(Length::Attack)
         raise ArgumentError, "nudge: takes a Length or Duration (e.g. 5.ms; got #{nudge.inspect})" if nudge.is_a?(Numeric)
+        clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
+        clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
+        graph = Sequence::Clocked.apply(graph, clock) if graph && clock
         # Built once now, so a broken patch fails here (see PatchCheck)
         check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip }) or return nil
         return nil unless @session.names.claim(name, :track)
@@ -239,7 +257,7 @@ module MB
         tr = nil
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
@@ -662,10 +680,11 @@ module MB
 
         when :on, true
           return nil if playing
-          start_track(tr, tr.clip, musical, fade)
+          start_track(tr, tr.clocked_clip(tr.clip), musical, fade)
 
         else
           check_clip(tr, value)
+          value = tr.clocked_clip(value)
           if playing && tr.clip.equal?(value)
             nil
           elsif playing && tr.patch? && (tr.clip.nil? || new_rows?(tr.clip, value) || !swappable?(tr, value))

@@ -273,6 +273,7 @@ module MB
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
               names |= [:named] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named
               names |= MB::Sound::Sampler::ClipMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Clip
+              names |= [:clocked] if c == MB::Sound::Sequence::Clip # Sequence::Clocked (clock, clocked_at, at, over, and % call it unrecorded, so graphs print the canonical name)
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end
