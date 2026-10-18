@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
   describe '.preset' do
     it 'makes the four presets with their targets and ceilings' do
-      expect(described_class.names).to eq(%i[club streaming quiet vinyl])
+      expect(described_class.names).to eq(%i[club streaming quiet vinyl hot])
       club = described_class.preset(:club)
       expect(club.target.lufs).to eq(-8.5)
       expect(club.ceiling.db_value).to eq(-0.5)
@@ -231,7 +231,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(s.master_info).to start_with('master: ')
       chain = s.instance_variable_get(:@master_chains).last
       expect(chain.mastering.map(&:name)).to eq([:club])
-      expect(chain.mastering[0].options).to eq(mono: 120, loudest_bars: 16, lufs: -8, clip: false) # (techno: one 16-bar phrase)
+      expect(chain.mastering[0].options).to eq(mono: 120, measure: :loudest, loudest_bars: 16, lufs: -8, clip: false) # (techno: one 16-bar phrase)
     end
 
     it 'refuses options without a preset' do

@@ -43,7 +43,7 @@
 #     bin/songs/memory_card.rb                # plays live
 #     bin/songs/memory_card.rb out.flac       # renders
 #     bin/songs/memory_card.rb --stems dir/ out.flac
-#     bin/songs/memory_card.rb --no-vinyl out.flac   # Nev's master and drum levels
+#     bin/songs/memory_card.rb --vinyl out.flac      # the vinyl preset, drums rebalanced for it
 #     bin/songs/memory_card.rb --help
 #
 # Or in bin/sound.rb:
@@ -62,10 +62,13 @@
 # had listened yet): -11.5 LUFS integrated, -0.8 dBTP (limiter at -1 dBTP);
 # sections from -16.1 (intro) to -9.1 LUFS (drop2).
 #
-# Mastered with the vinyl preset since omnibus9 (2026-10-18; the
-# maintainer's mastering-2 Bench pick: "the original master was relying on
-# the master chain to bring the drums in line ... the drums, especially
-# snare, become dominant"): the drums play at MEMORY_CARD_DRUMS (snare
+# Mastered with Nev's own glue and limiter (-D/-C).  --vinyl masters with
+# the vinyl preset instead (omnibus9, 2026-10-18, its default until
+# bench-fixes-1: the maintainer on the omnibus9 Bench, "The vinyl master
+# is good for hi-fi but shouldn't be the default"; on mastering-2: "the
+# original master was relying on the master chain to bring the drums in
+# line ... the drums, especially snare, become dominant"), so with it the
+# drums play at MEMORY_CARD_DRUMS (snare
 # slices -5 dB in all, the rest of the break -2 dB, perc -1.5 dB), so the
 # drums sit under the music as Nev's glue and limiter had them.  Drums
 # alone against the music alone (LUFS of the drop / drop2): Nev's master
@@ -221,12 +224,12 @@ module MB::Sound
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
   #
-  # +vinyl+ (true by default; the maintainer's mastering-2 Bench pick)
+  # By default Nev's original: the song's glue and limiter (+drive+,
+  # +ceiling+) with the drums as loud as he had them.  +vinyl+ (true)
   # masters with the vinyl preset and plays the drums at
-  # MEMORY_CARD_DRUMS (+drums+ overrides); false is Nev's original: the
-  # song's glue and limiter (+drive+, +ceiling+) and the drums as loud as
-  # they were.
-  def self.memory_card(drive: 5.0, ceiling: -1.0, vinyl: true, drums: nil)
+  # MEMORY_CARD_DRUMS (+drums+ overrides): hi-fi, not the default
+  # (maintainer, omnibus9 Bench).
+  def self.memory_card(drive: 5.0, ceiling: -1.0, vinyl: false, drums: nil)
     drums ||= vinyl ? MEMORY_CARD_DRUMS : { snare: 1, breaks: 1, perc: 1 }
     map = memory_card_break.instrument # (the record bounces at its own tempo)
     chops = memory_card_chops(snare: drums[:snare])
@@ -291,9 +294,9 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: MEMORY_CARD_BARS,
-      drive: [5.0, Float, '-D', 'With --no-vinyl: gain in dB into the master limiter', -20.0..20.0],
-      ceiling: [-1.0, Float, '-C', 'With --no-vinyl: master limiter true-peak ceiling in dBTP', -12.0..0.0],
-      vinyl: [true, 'The vinyl preset (mono lows, de-esser, no brickwall) with rebalanced drums (--no-vinyl: Nev\'s glue and limiter, -D/-C, and the old drum levels)'],
+      drive: [5.0, Float, '-D', 'Gain in dB into the master limiter (Nev\'s master)', -20.0..20.0],
+      ceiling: [-1.0, Float, '-C', 'Master limiter true-peak ceiling in dBTP (Nev\'s master)', -12.0..0.0],
+      vinyl: [false, 'The vinyl preset (mono lows, de-esser, no brickwall) with the drums rebalanced for it, instead of Nev\'s glue and limiter'],
     ) { |p|
       memory_card(drive: p.drive, ceiling: p.ceiling, vinyl: p.vinyl)
       memory_card_form

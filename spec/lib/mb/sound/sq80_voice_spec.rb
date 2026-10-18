@@ -183,8 +183,8 @@ RSpec.describe(MB::Sound::SQ80Methods) do
   end
 
   describe MB::Sound::SQ80::PATCHES do
-    it 'has :classic as the defaults two octaves down (level matched)' do
-      expect(MB::Sound::SQ80.patch(:classic).full_settings).to eq(MB::Sound::SQ80::Voice::DEFAULTS.merge(transpose: -24, level: 2.81))
+    it 'has :classic as the defaults an octave down (level matched)' do
+      expect(MB::Sound::SQ80.patch(:classic).full_settings).to eq(MB::Sound::SQ80::Voice::DEFAULTS.merge(transpose: -12, level: 1.99))
     end
 
     it 'plays :chop an octave down and :prime_bass an octave up (maintainer, sq80-lib-1 Bench)' do

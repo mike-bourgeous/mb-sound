@@ -100,6 +100,21 @@ module MB
           options[:loudest_bars] || LOUDEST_BARS
         end
 
+        # The share of bars at or under the level +measure: :bars+ targets
+        # (BARS_PERCENTILE unless given).
+        def percentile
+          options.fetch(:percentile) { DEFINITIONS.dig(name, :defaults, :percentile) || BARS_PERCENTILE }
+        end
+
+        # Words for what renders measure ("loudest 16 bars", "bars at the
+        # 25th percentile"), or nil for :integrated.
+        def measure_text
+          case measure
+          when :loudest then "loudest #{loudest_bars} bars"
+          when :bars then "bars at the #{Mastering.ordinal((percentile * 100).round)} percentile"
+          end
+        end
+
         # True if renders measure and set the trim (not with a fixed
         # +drive+ or a rider).
         def targeted?
@@ -123,7 +138,7 @@ module MB
           tp = format('%.1f dBTP', ceiling.db_value)
           chain = steps.map(&:first).join(' -> ')
           drive_text = fixed ? ", drive #{format('%+.1f', drive.db_value)} dB" : ''
-          "#{name}: #{format('%.1f', target.lufs)} LUFS#{measure == :loudest ? " (loudest #{loudest_bars} bars)" : ''}, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}; #{chain}"
+          "#{name}: #{format('%.1f', target.lufs)} LUFS#{measure_text ? " (#{measure_text})" : ''}, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}; #{chain}"
         end
 
         def to_s
@@ -178,10 +193,23 @@ module MB
           source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
                   'advice (mono lows, controlled sibilance, headroom), from memory',
         },
+        hot: {
+          title: 'Hot: glue, then drive into a clipper and a true-peak limiter',
+          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: false, glue: true, measure: :bars },
+          notes: 'Kez Volta\'s drum & bass master from "Tunnel Vision" (bin/synths/dnb.rb dnb_master) as a preset: ' \
+                 'a 2:1 glue compressor at -14 dBFS on the mix as it arrives (before the trim, as Kez had it), the trim ' \
+                 '(Kez drove 11 dB), a hard softclip(0.6, 1.0), and a true-peak limiter at -0.5 dBTP (60 ms release).  ' \
+                 'Louder and brighter drops than :club, with audible clipping on dense parts.  Renders measure ' \
+                 'the bars\' loudness distribution by default (measure: :bars, the quieter quarter of the bars at ' \
+                 'the target), so the clipper closes the gap between drops and breakdowns.  `drive: 11.db` is Kez\'s ' \
+                 'render exactly.',
+          source: 'Kez Volta, persona panel 2026-10-13 (research-persona-edm); maintainer\'s omnibus9 Bench pick ' \
+                  '(2026-10-18: "I like the direction but now the breakdown is too quiet")',
+        },
       }.freeze
 
       # Options every preset takes (see .preset).
-      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess measure loudest_bars].freeze
+      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess measure loudest_bars percentile].freeze
 
       # What a render's target measures (+measure:+): the song's integrated
       # loudness, or that of its loudest +loudest_bars:+ bars (windows
@@ -189,7 +217,25 @@ module MB
       # sections keep their distance from the drops instead of coming up
       # to fill the integrated target.  :club measures :loudest (the
       # maintainer's decision, 2026-10-18).
-      MEASURES = %i[integrated loudest].freeze
+      #
+      # :bars (bench-fixes-1, 2026-10-18; interim, see
+      # design/notes/master_effects.md) reads the distribution of the
+      # bars' loudness: each bar's gated loudness, the bars within
+      # BARS_RANGE LU of the loudest one (not silence or tails), and the
+      # level +percentile:+ of them sit at or under (0.25: the quieter
+      # quarter, breakdowns and intros).  Targeting that level raises the
+      # trim until the quiet sections reach it; on a chain that clips and
+      # limits, the drops then gain less than the breakdown, so the spread
+      # between them closes (Tunnel Vision on :hot: the breakdown 1.8 LU
+      # under the drops instead of 3.0).
+      MEASURES = %i[integrated loudest bars].freeze
+
+      # The default +percentile:+ of +measure: :bars+.
+      BARS_PERCENTILE = 0.25
+
+      # Bars more than this many LU under the loudest bar don't count for
+      # +measure: :bars+ (silence, tails, a lone fading hat).
+      BARS_RANGE = 20.0
 
       # The default window (bars) of +measure: :loudest+ (genre templates
       # set their own from their phrase lengths: Genre::Mix#loudest_bars).
@@ -233,8 +279,11 @@ module MB
         # - +measure:+ :loudest to reach the target with the loudest
         #   +loudest_bars:+ bars (LOUDEST_BARS by default; windows on bar
         #   lines) rather than the whole song (renders; see MEASURES), or
-        #   :integrated (the default except for :club);
-        # - +loudest_bars:+ the window of measure: :loudest, in bars.
+        #   :integrated (the default except for :club), or :bars to reach it
+        #   with the level +percentile:+ of the bars sit at or under (see
+        #   MEASURES);
+        # - +loudest_bars:+ the window of measure: :loudest, in bars;
+        # - +percentile:+ (0..1) the share of measure: :bars.
         def preset(name, **options)
           if name.is_a?(Preset)
             return name if options.empty?
@@ -258,6 +307,9 @@ module MB
           end
           if options.key?(:loudest_bars) && !(options[:loudest_bars].is_a?(Integer) && options[:loudest_bars] > 0)
             raise ArgumentError, "loudest_bars: is a number of bars, a positive Integer (got #{options[:loudest_bars].inspect})"
+          end
+          if options.key?(:percentile) && !(options[:percentile].is_a?(Numeric) && options[:percentile] >= 0 && options[:percentile] <= 1)
+            raise ArgumentError, "percentile: is a share of bars from 0 to 1, e.g. 0.25 (got #{options[:percentile].inspect})"
           end
 
           o = definition[:defaults].merge(options)
@@ -351,7 +403,23 @@ module MB
           end
         end
 
+        # "25th", "1st", "12th" for an Integer.
+        def ordinal(n)
+          suffix = (11..13).cover?(n % 100) ? 'th' : { 1 => 'st', 2 => 'nd', 3 => 'rd' }.fetch(n % 10, 'th')
+          "#{n}#{suffix}"
+        end
+
         private
+
+        # Kez's chain (see DEFINITIONS[:hot]): the glue reads the mix
+        # before the trim, as in bin/synths/dnb.rb's dnb_master.
+        def hot_steps(o, _target, ceiling)
+          steps = mono_steps(o)
+          steps << [:compress, [], { threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12 }] if o[:glue]
+          steps << [:trim, [], {}]
+          steps << [:softclip, [0.6, 1.0], {}]
+          steps << [:limit, [], { ceiling: ceiling, release: 0.06 }]
+        end
 
         def mono_steps(o)
           o[:mono] ? [[:mono_below, [o[:mono]], {}]] : []

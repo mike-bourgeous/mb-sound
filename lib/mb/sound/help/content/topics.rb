@@ -282,7 +282,7 @@ module MB
         pressure sets its own sample-and-hold filter flutter).  It takes
         any MIDI source (none: live `midi`), a patch, and settings, as in
         `sq80(clip, :chop)` or `sq80(:glass, cutoff: 900)`.  Patches:
-        :classic (the defaults, two octaves down), :flutter_pad, :chop, :vox_lead,
+        :classic (the defaults, an octave down), :flutter_pad, :chop, :vox_lead,
         :prime_bass, :glass (`sq80_patches` lists them).  Settings:
         voices, cutoff (Hz), reso (0..1), drive_mode (:feedback or
         :input), drive, chop, flutter, second_release, osc1..osc3 (wave,
@@ -753,7 +753,7 @@ module MB
 
     Help.topic :mastering, 'Mastering presets and loudness targets', group: :perform do
       about <<~TEXT
-        `master :club` (also :streaming, :quiet, :vinyl) ends the master
+        `master :club` (also :streaming, :quiet, :vinyl, :hot) ends the master
         chain with a mastering preset: mono lows, glue, limiter, and a
         loudness target.  Renders reach the target exactly (two passes);
         live, `ride: true` rides the gain toward it.  `masters` lists them,
@@ -762,7 +762,10 @@ module MB
         `--master club` masters any song.  `:club` reaches its target with
         the loudest 16 bars (`loudest_bars:`; windows on bar lines) instead
         of the whole song, so breakdowns stay under the drops; `measure:
-        :integrated` targets the whole song.
+        :integrated` targets the whole song, and `measure: :bars` (`:hot`'s
+        default) the level the quieter quarter of the bars sit at
+        (`percentile: 0.25`), so a clipping chain closes the gap from the
+        drops to the breakdown.
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.

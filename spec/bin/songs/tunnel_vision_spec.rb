@@ -3,11 +3,11 @@ RSpec.describe('bin/songs/tunnel_vision.rb') do
 
   after { MB::Sound.rewind }
 
-  it 'masters with the club preset at -8.5 LUFS on the loudest 8 bars by default' do
+  it "masters with Kez's chain (:hot) at -9.0 LUFS on the quieter quarter of the bars by default" do
     MB::Sound.render(tmp_path('m.flac'), bars: 0.1) { MB::Sound.tunnel_vision }
     result = MB::Sound::Mastering::Targeting.last
-    expect(result).to have_attributes(preset: :club, measure: :loudest)
-    expect(result.target.lufs).to eq(-8.5)
+    expect(result).to have_attributes(preset: :hot, measure: :bars, percentile: 0.25)
+    expect(result.target.lufs).to eq(-9.0)
   end
 
   it 'has a 112-bar DJ-friendly form with a snare roll every 16 bars' do
@@ -34,9 +34,9 @@ RSpec.describe('bin/songs/tunnel_vision.rb') do
 
     reese = tmp_path('reese.flac')
     MB::Sound.render(reese, bars: 2) do
-      # (Kez's master: the club master's targeting would drive the soloed
-      # Reese alone into its limiters, flattening the duck)
-      MB::Sound.tunnel_vision(club: nil)
+      # (Kez's master at his drive: targeting would drive the soloed
+      # Reese alone into the clipper and limiter, flattening the duck)
+      MB::Sound.tunnel_vision(master: nil)
       MB::Sound.go :drop, on: :now
       MB::Sound.solo :reese, on: :now
     end

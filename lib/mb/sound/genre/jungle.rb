@@ -90,7 +90,6 @@ module MB
       loudness(-12..-9)
       true_peak(-1.db)
       mono_below 150 # cut for vinyl: mono below 150 Hz
-      loudest_bars 16 # the club master's loudest-part window: one phrase
       master :compress, threshold: -14.db, ratio: 2, knee: 8, attack: 0.02, release: 0.15
       master :at, 5.db
       master :limit, ceiling: -1.db, release: 0.1

@@ -3,8 +3,8 @@
 graph 4,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-18T16:06:50Z",
-  mb_sound: "0.12.0.usegit (617c024b)",
+  saved: "2026-10-18T19:27:42Z",
+  mb_sound: "0.12.0.usegit (77119678)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
 knob :cut, 2400.0, range: 150.0..8000.0, curve: :exp, unit: "Hz"
@@ -35,7 +35,7 @@ kit = grid(16, kick: "X.........X.....", snare: "....X.......X...", clap: ".....
 kit_outro = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_outro)
 kit = grid(16, kick: "X.........X.....", snare: "................", clap: "................", rim: "................", hat: "7.4.7.4.7.4.7.45", open_hat: "................", shaker: "................", crash: "................", low_tom: "................")
 kit_tail = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_tail)
-master(:club, lufs: -8.5, air: :static) { |mix|
+master(:hot, lufs: -9.0, measure: :bars) { |mix|
   mix.filter(:highpass, cutoff: air, quality: 0.7)
 }
 bus(:hall) { |sig|
@@ -47,7 +47,7 @@ bus(:echo) { |sig|
   sig.delay(1.n8.dotted, feedback: 0.4)
 }
 track(:pad, send: { hall: 0.35 }) { |clip|
-  synth(clip, voices: 10) { |v|
+  synth(clip, voices: 10, seed: drawn_seed(900450186894289455)) { |v|
     saws = v.hz.unison(3, detune: 0.12) { |p, _i|
       p.saw
     }
@@ -62,10 +62,10 @@ track(:pluck, send: { echo: :space, hall: 0.25 }) { |clip|
   } * 0.3375
 }
 track(:drums, send: { hall: -24.db }) { |kit|
-  tr808(kit, kick: { tune: 54, decay: 0.38, tone: 0.62, sigh: 0.9 }, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 }, clap: { decay: 0.16, tone: 0.8, level: 0.5 }, rimshot: { level: 0.35 }, closed_hat: { decay: 0.035, tone: 0.85, level: 0.55 }, open_hat: { decay: 0.16, tone: 0.7, level: 0.25 }, cymbal: { decay: 1.4, tone: 0.7, level: 0.3 }, maracas: { level: 0.25 }, low_tom: { tune: 120, decay: 0.35 }, accent: 6.db).compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9.db, mix: 0.35)
+  tr808(kit, kick: { tune: 54, decay: 0.38, tone: 0.62, sigh: 0.9 }, snare: { tune: 205, decay: 0.2, snappy: 0.8, tone: 0.8, level: 0.95 }, clap: { decay: 0.16, tone: 0.8, level: 0.5 }, rimshot: { level: 0.35 }, closed_hat: { decay: 0.035, tone: 0.85, level: 0.55 }, open_hat: { decay: 0.16, tone: 0.7, level: 0.25 }, cymbal: { decay: 1.4, tone: 0.7, level: 0.3 }, maracas: { level: 0.25 }, low_tom: { tune: 120, decay: 0.35 }, accent: 6.db, seed: drawn_seed(1895649597198586619)).compress(threshold: -24.db, ratio: 4, attack: 0.002, release: 0.06, makeup: 9.db, mix: 0.35)
 }
 track(:reese, send: { hall: 0.1 }) { |clip|
-  (synth(clip, voices: 1) { |v|
+  (synth(clip, voices: 1, seed: drawn_seed(827948490035658087)) { |v|
     pitch = v.hz.glide(0.035, legato: true)
     saws = pitch.unison(6, detune: 0.32, spread: 0.5) { |p, _i|
       p.saw
@@ -84,7 +84,7 @@ track(:sub) { |clip|
   } * 0.5).duck(:drums, only: :kick, amount: -12.db, release: 1.n16)
 }
 track(:neuro, send: { hall: 0.1 }) { |clip|
-  (synth(clip, voices: 1) { |v|
+  (synth(clip, voices: 1, seed: drawn_seed(2691271404617651954)) { |v|
     pitch = v.hz.glide(0.02, legato: true)
     sig = pitch.unison(3, detune: 0.18) { |p, _i|
       p.saw
@@ -109,7 +109,7 @@ track(:boom, send: { hall: 0.1 }) { |clip|
   }.reverb(:hall, mix: 0.2, highpass: 200, output_channels: 2) * 0.4
 }
 track(:riser, fade: 1r/8, send: { hall: -18.db }) { |_clip|
-  noise.filter(:bandpass, cutoff: tween([250, 10000], 8.bars, log: true, loop: false), quality: 3) * tween([0.03, 0.25], 8.bars, loop: false)
+  noise(seed: drawn_seed(2615250280207662552)).filter(:bandpass, cutoff: tween([250, 10000], 8.bars, log: true, loop: false), quality: 3) * tween([0.03, 0.25], 8.bars, loop: false)
 }
 scene :intro, drums: kit_intro, pad: pad, reese: bar, neuro: bar, cut: 250, air: 20
 scene :build, drums: kit_build, reese: riff, neuro: bar, cut: [2500, { from: 250, over: 8, curve: :smooth }]

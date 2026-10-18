@@ -263,6 +263,32 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(MB::Sound.next_seed).to eq(before)
   end
 
+  it 'prints a drawn seed of its own for each patch, also when saved inside with_seed, so a load plays the same after other draws' do
+    a = session
+    text = nil
+    MB::Sound.with_seed(0) do
+      within(a) {
+        MB::Sound.track(:n1) { |c| MB::Sound.noise.at(0.1) * c.env }
+        MB::Sound.track(:n2) { |c| MB::Sound.noise.at(0.1) * c.env }
+        MB::Sound.scene :a, n1: MB::Sound.seq(MB::Sound::C4).n4.loop, n2: MB::Sound.seq(MB::Sound::E4).n4.loop
+      }
+      text = io.dump(a.arrangement, name: 'demo')
+    end
+    seeds = text.scan(/noise\(seed: drawn_seed\((\d+)\)\)/).flatten
+    expect(seeds.length).to eq(2)
+    expect(seeds.uniq.length).to eq(2) # (each block drew its own; they once all drew the same)
+
+    play = -> {
+      s = session
+      io.load(text, session: s)
+      within(s) { s.arrangement.tracks[:n1].patch.call(s.arrangement.scenes[:a].values[:n1]).sample(800).dup }
+    }
+    first = play.()
+    MB::Sound.next_seed
+    MB::Sound.noise.sample(100)
+    expect(play.()).to eq(first)
+  end
+
   it 'saves sets with save :name, set and loads them with preset' do
     dir = File.dirname(tmp_path('presets/x'))
     FileUtils.mkdir_p(dir)

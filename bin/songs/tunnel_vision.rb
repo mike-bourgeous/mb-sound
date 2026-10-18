@@ -15,19 +15,24 @@
 # softclipper, highpassed off the sub), a separate clean mono sub, a
 # "switch-up" neuro bass in the second drop (diode ladder + talking
 # formants on 16ths + a key-tracked crusher, squeezed), minor 9th pads
-# and a liquid pluck in the breakdown.  Mastered with the club preset
-# (`master :club`: glue, a fast limiter, a true-peak limiter at -0.5 dBTP)
-# at -8.5 LUFS on the loudest 16 bars (the maintainer's mastering-2 Bench
-# pick, 2026-10-18, and omnibus9's `measure: :loudest`: targeting the
-# whole song lifted the breakdown to the drops' level, since the limiters
-# hold the drops while one trim raises everything).  Kez's own master, a
-# softclipper into a true-peak limiter (clip-then-limit), is --dnb-master.
+# and a liquid pluck in the breakdown.  Mastered with Kez's own chain as
+# the :hot preset (`master :hot`: glue, drive into a hard softclipper, a
+# true-peak limiter at -0.5 dBTP; the maintainer's omnibus9 Bench pick,
+# 2026-10-18: "I like the direction but now the breakdown is too quiet"),
+# its drive found by the render so the quieter quarter of the bars
+# reaches -9.0 LUFS (`measure: :bars`, bench-fixes-1: the bars' loudness
+# distribution, so the breakdown comes up while the clipper holds the
+# drops; -9.0 the maintainer's pick over -8.5).  Kez's fixed drive (11 dB) is --dnb-master; the club preset
+# (two limiters, on the loudest 16 bars) is --master club.
 #
-# Sections (integrated LUFS of each, measured 2026-10-18): the club
-# master at -8.5 on the loudest 16 bars (windows on bar lines): drop -9.6,
-# breakdown -13.2 (-3.6 LU), drop2 -8.5, song -10.25; at -8.5 integrated: drop -8.7,
-# breakdown -8.2 (+0.5 LU), drop2 -7.7; Kez's master: drop -6.5,
-# breakdown -9.5 (-3.0 LU), drop2 -6.6, song -7.6.
+# Sections (integrated LUFS of each, measured 2026-10-18): :hot at -9.0
+# on the bars' 25th percentile (drive +12.4 dB): drop -6.0, breakdown
+# -8.2 (-2.2 LU), drop2 -6.3, song -7.0 (--lufs -8.5: drive +12.9 dB,
+# drop -5.8, breakdown -7.7, song -6.8); Kez's master (drive 11): drop
+# -6.5, breakdown -9.5 (-3.0 LU), drop2 -6.6, song -7.6; the club master
+# at -8.5 on the loudest 16 bars: drop -9.6, breakdown -13.2 (-3.6 LU),
+# drop2 -8.5, song -10.25; at -8.5 integrated: drop -8.7, breakdown -8.2
+# (+0.5 LU), drop2 -7.7.
 #
 #   (bars: intro 1-16, build 17-24, drop 25-56, breakdown 57-71, pullup
 #   72, drop2 73-88 and 89-96, outro 97-104, tail 105-112.  A club edit
@@ -63,9 +68,10 @@
 #     bin/songs/tunnel_vision.rb                 # plays live in the background session
 #     bin/songs/tunnel_vision.rb tv.flac         # renders (-f to overwrite)
 #     bin/songs/tunnel_vision.rb --stems stems/ tv.flac
-#     bin/songs/tunnel_vision.rb --dnb-master tv.flac  # Kez's own master (a clipper into a limiter)
+#     bin/songs/tunnel_vision.rb --dnb-master tv.flac  # Kez's own master at his drive (11 dB)
 #     bin/songs/tunnel_vision.rb --dnb-master -D 8 -C -1 tv.flac   # gentler
-#     bin/songs/tunnel_vision.rb --measure integrated tv.flac      # -8.5 LUFS over the whole song (a louder breakdown)
+#     bin/songs/tunnel_vision.rb --lufs -8.5 tv.flac    # the quieter bars at -8.5 (a louder breakdown, harder drops)
+#     bin/songs/tunnel_vision.rb --master club tv.flac  # the club master (two limiters) on the loudest 16 bars
 #     bin/songs/tunnel_vision.rb --no-buses tv.flac   # Kez's original ambience (no buses)
 #
 # Or in bin/sound.rb:
@@ -93,12 +99,13 @@ module MB::Sound
   # Master drive (dB into the clipper/limiter) and true-peak ceiling (dBTP).
   TV_DRIVE = 11.0
   TV_CEILING = -0.5
-  # The club master's target (LUFS) and what it measures (omnibus9: the
-  # maintainer's mastering-2 Bench pick, --club -8.5, measured on the
-  # loudest 16 bars, the club preset's default since omnibus9, so the
-  # breakdown stays under the drops; see below)
-  TV_CLUB = -8.5
-  TV_MEASURE = :loudest
+  # The master preset, its target (LUFS), and what it measures
+  # (bench-fixes-1: Kez's chain as :hot, its drive set so the quieter
+  # quarter of the bars reaches -9.0 LUFS; see the header and
+  # Mastering::MEASURES)
+  TV_MASTER = :hot
+  TV_LUFS = -9.0
+  TV_MEASURE = :bars
 
   # The :hall bus's return gain in dB (buses): its reverb is wet only and
   # energy-normalized (about 20 dB under its input), so the return needs
@@ -209,14 +216,13 @@ module MB::Sound
   # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
   # kick for the ducks).
   #
-  # +club+ (a LUFS target, -8.5 by default; nil for Kez's dnb_master with
-  # +drive+ and +ceiling+) masters with the club preset (two limiters;
-  # mastering-2), keeping the air knob's highpass: renders reach that
-  # loudness exactly, measured as +measure+ (Mastering::MEASURES:
-  # :loudest, the default, on the loudest 16 bars; :integrated on the whole
-  # song, which raised the breakdown to the drops' level: the limiters
-  # hold the drops while the one trim lifts everything else).
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, club: TV_CLUB, air: :static, measure: TV_MEASURE)
+  # +master+ (a mastering preset name, :hot by default: Kez's chain; or
+  # :club; nil for Kez's dnb_master at a fixed +drive+ and +ceiling+)
+  # after the air knob's highpass: renders reach +lufs+ exactly, measured
+  # as +measure+ (Mastering::MEASURES: :bars, the default, on the quieter
+  # quarter of the bars; :loudest on the loudest 16 bars; :integrated on
+  # the whole song).  +air+ is the club preset's air stage.
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, master: TV_MASTER, lufs: TV_LUFS, air: :static, measure: TV_MEASURE)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -228,10 +234,12 @@ module MB::Sound
     knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'     # a master highpass
     knob :lift, lift, range: 0..1                              # upward lift of the hall's tail in rests (buses)
 
-    # A club master: glue, then clip-then-limit, master bus at 0 dB.
+    # A loud master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1
-    if club
-      master(:club, lufs: club, air: air, **(measure == :loudest ? {} : { measure: measure })) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
+    if master
+      options = { lufs: lufs, measure: measure }
+      options[:air] = air if master == :club
+      master(master, **options) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
     else
       master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
     end
@@ -306,12 +314,11 @@ module MB::Sound
       hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
       lift: [TV_LIFT, Float, '-U', 'Upward lift of the hall tail in rests, 0..1, the lifted return 6 dB down (the :lift knob; with buses; 0 before patches-5)', 0.0..1.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
-      club: [TV_CLUB, Float, 'The club master (two limiters) reaches this many LUFS', -20.0..-4.0],
-      measure: [TV_MEASURE, Symbol, 'What the club target measures: loudest (the loudest 16 bars) or integrated (the whole song, which lifts the breakdown)', %i[integrated loudest]],
+      measure: [TV_MEASURE, Symbol, 'What the target measures: bars (the quieter quarter of the bars), loudest (the loudest 16 bars), or integrated (the whole song)', %i[bars loudest integrated]],
       air: [:static, Symbol, "The club master's air stage before its limiters", %i[static dynamic band none]],
-      dnb_master: [false, "Kez's original master instead of the club preset: dnb_master's clipper and limiter (-D, -C)"],
+      dnb_master: [false, "Kez's master at a fixed drive instead of a measured one (-D, -C)"],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, club: p.dnb_master ? nil : p.club,
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, master: p.dnb_master ? nil : TV_MASTER,
         air: p.air == :none ? false : p.air, measure: p.measure)
       tunnel_vision_form
     }

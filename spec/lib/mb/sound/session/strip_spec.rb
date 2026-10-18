@@ -159,6 +159,34 @@ RSpec.describe(MB::Sound::Session::Strip) do
       s&.close
     end
 
+    # omnibus10: the node-set caches above refresh only on
+    # GraphNode.structure_changes (Plan.changed); the structure check (on
+    # in specs) catches edits that bypass it
+    it 'raises when a Session graph changes its nodes without Plan.changed, and not when it calls it' do
+      expect(MB::Sound::Session::Strip.structure_check).to eq(true)
+      s = new_session
+      lfo = 3.hz.lfo
+      b = lfo * 0.25
+      s.add(lfo * 0.5, name: :a)
+      s.add(b, name: :b)
+      run_in(s, 800, [800])
+      s.mute(:b)
+      run_in(s, 1600, [800])
+
+      b.add(2.constant) # (Plan.changed: the caches refresh)
+      run_in(s, 1600, [800])
+
+      sneaky = 3.constant
+      b.instance_variable_get(:@multiplicands)[sneaky.get_sampler] = sneaky
+      # (checked every STRUCTURE_CHECK_SPANS spans, and at close)
+      spans = MB::Sound::Session::Strip::STRUCTURE_CHECK_SPANS
+      expect { run_in(s, 800 * spans, [800]) }.to raise_error(MB::Sound::Session::Strip::UnannouncedStructureChange, /without Plan.changed.*added: .*Constant/)
+      expect { s.close }.to raise_error(MB::Sound::Session::Strip::UnannouncedStructureChange)
+      expect(s.closed?).to eq(true)
+    ensure
+      s&.close
+    end
+
     # fixes-11: :b's own branch of the LFO wasn't read while it slept,
     # because the LFO's other branch (inside x) is in :b's graph too
     it 'keeps a muted player in step with a node it reads both directly and through a node another player plays' do

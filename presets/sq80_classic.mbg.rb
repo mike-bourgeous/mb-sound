@@ -3,10 +3,10 @@
 graph 4,
   name: "sq80_classic",
   kind: :synth,
-  saved: "2026-10-18T05:39:14Z",
-  mb_sound: "0.12.0.usegit (20fdd89e)",
+  saved: "2026-10-18T18:33:25Z",
+  mb_sound: "0.12.0.usegit (3eacfbad)",
   from: "bin/synths/sq80_voice.rb",
-  description: "SQ-80 voice :classic: The voice as first built (bin/synths/sq80_voice.rb), two octaves down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
+  description: "SQ-80 voice :classic: The voice as first built (bin/synths/sq80_voice.rb), an octave down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter. (from bin/synths/sq80_voice.rb: the voice since 2026-10-07, patches since sq80-lib-1, 2026-10-17)",
   options: { patch: :classic, voices: nil, drive_mode: nil, drive: nil, second_release: false }
 inputs midi: :notes
 param :cutoff, 500.0, range: 20..10000, description: "Filter cutoff in Hz before modulation (classic 500)"

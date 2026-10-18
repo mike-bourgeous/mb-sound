@@ -8,7 +8,7 @@ module MB
     # maintainer's Bench pick).
     Genre.define :house, 'House (Detroit/Chicago deep house)' do
       about 'Deep house for DJs: four on the floor on a TR-909 with shuffle 2, claps on 2 and 4, open hats on the "and"s, ' \
-            'a one-saw bass bouncing in octaves (swung with the hats, ducked by the kick), Rhodes stabs under a knob, ' \
+            'a saw-and-sine bass bouncing in octaves (swung with the hats, ducked by the kick), Rhodes stabs under a knob, ' \
             'strings that change once a phrase, a ride and shaker pickup, 16-bar DJ intro and outro.  ' \
             'From Charlie "Munro" Munro\'s template data for the persona panel of 2026-10-18.'
       tempo 124, range: 120..128
@@ -72,7 +72,7 @@ module MB
       knob :cut, 8000, range: 200..12000, curve: :exp, unit: 'Hz' # the stabs' lowpass
 
       role :drums, :tr909, level: -4.db, params: { shuffle: 2 }, about: 'the TR-909 with shuffle 2, the house kit'
-      role :bass, :house_bass, level: 3.db, duck: -3.db, about: 'one saw, a tempo-set decay, bouncing in octaves, ducked 3 dB by the kick'
+      role :bass, :house_bass, level: -4.4.db, duck: -3.db, about: 'a saw with a sine body, a tempo-set decay, bouncing in octaves, ducked 3 dB by the kick'
       role :keys, :tine_piano, filter: :cut, level: -4.db, about: 'Rhodes-ish stabs on the offbeats, under the :cut knob'
       role :pad, :jungle_pad, level: 0.db, duck: -2.db, about: 'string pad, one chord a phrase, breathing with the kick'
       role :perc, :tr808, level: -2.db, about: 'an 808 shaker in 16ths for the pickup (soft, accent, soft)'
@@ -96,7 +96,7 @@ module MB
       loudness(-10..-8)
       true_peak(-1.db) # (Munro: -1 dBTP for codec overshoot; genre-fixes)
       mono_below 120 # club systems
-      loudest_bars 16 # the club master's loudest-part window: one phrase
+      measure :integrated # the whole song (maintainer, omnibus9 Bench: "House whole")
       # (the club mastering preset with its gentle clipper, the house feel:
       # mastering-2, 2026-10-17, maintainer on the Bench: "The two limiter
       # setup isn't much different so both are good to have"; Munro's

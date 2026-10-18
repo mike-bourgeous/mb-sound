@@ -61,8 +61,22 @@ module MB
         end
 
         def to_s
-          # Patches and master blocks build in the set's Session (knob(:x))
-          Session.with_context(session: @session) { text }
+          # Patches and master blocks build in the set's Session (knob(:x)),
+          # one after another from one random state, so each draws its own
+          # seeds (omnibus10: every block from the same state drew the same
+          # seeds, so a loaded set's noises were one noise), and the save
+          # leaves the random state as it was.  The builds print the seeds
+          # they draw even inside MB::Sound.with_seed (bin/save_presets.rb
+          # saves sets in one; Recipe::SeedRecording would take them as
+          # derived): they are fresh builds for the document.
+          st = GraphNode::Recipe.state
+          seeded = st.seeded
+          st.seeded = 0
+          MB::Sound.keeping_random_state do
+            Session.with_context(session: @session) { text }
+          end
+        ensure
+          st.seeded = seeded if st
         end
 
         private
@@ -247,13 +261,13 @@ module MB
         # Recipe.wrap_block like a synth's lane block, so its locals are
         # read by the recorder's frame capture (no TracePoint, which would
         # make YJIT drop its code while a set plays), and the RubyWriter
-        # prints the call with the block's own parameter names.  The
-        # random state is kept (MB::Sound.keeping_random_state).  Returns
+        # prints the call with the block's own parameter names.  Seeds come
+        # from the save's running random state (see #to_s).  Returns
         # the lines, or none with a problem if the block raised.
         def block_statement(name, args, kwargs, block, block_args, what)
           call = GraphNode::Recipe::Call.new(MB::Sound, name, args, kwargs, block, :build, nil, nil, 0, nil, nil)
           wrapped = GraphNode::Recipe.wrap_block(block, call)
-          MB::Sound.keeping_random_state { wrapped.call(*block_args) }
+          wrapped.call(*block_args)
 
           # The writer prints objects through their calls: a holder whose
           # recipe is this call prints as the statement

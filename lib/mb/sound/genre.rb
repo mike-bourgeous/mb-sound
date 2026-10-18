@@ -71,13 +71,23 @@ module MB
       # the low end stays mono (+mono_below+, Hz), the +master+ chain as an
       # Array of steps [preset or GraphNode method name, args, params]
       # applied in order (empty for none), and the master bus +gain+ (nil to
-      # keep the Session's).  +loudest_bars+ is the window, in bars, of a
-      # mastering preset that targets the loudest part (`measure:
-      # :loudest`, the :club default; Mastering::LOUDEST_BARS when nil),
-      # from the genre's phrase lengths.
-      Mix = Data.define(:loudness, :true_peak, :mono_below, :master, :gain, :loudest_bars) do
-        def initialize(loudness: nil, true_peak: nil, mono_below: nil, master: [], gain: nil, loudest_bars: nil)
-          super(loudness: loudness, true_peak: true_peak, mono_below: mono_below, master: master.dup.freeze, gain: gain, loudest_bars: loudest_bars)
+      # keep the Session's).  +measure+ is what the template's mastering
+      # preset measures in renders, as preset options ({ measure: :loudest,
+      # loudest_bars: 16 }, { measure: :integrated }, { measure: :bars,
+      # percentile: 0.25 }; see Mastering::MEASURES), or nil for the
+      # preset's own default (bench-fixes-1, 2026-10-18: the maintainer's
+      # picks, dnb on its loudest 16 bars, house on the whole song).
+      Mix = Data.define(:loudness, :true_peak, :mono_below, :master, :gain, :measure) do
+        def initialize(loudness: nil, true_peak: nil, mono_below: nil, master: [], gain: nil, measure: nil)
+          super(loudness: loudness, true_peak: true_peak, mono_below: mono_below, master: master.dup.freeze, gain: gain, measure: measure&.dup&.freeze)
+        end
+
+        # The template's #measure line as Ruby arguments (`:loudest, bars:
+        # 16`), or nil.
+        def measure_ruby
+          return nil unless measure
+          [measure[:measure].inspect, *("bars: #{measure[:loudest_bars]}" if measure[:loudest_bars]),
+           *("percentile: #{measure[:percentile]}" if measure[:percentile])].join(', ')
         end
 
         # A one-line summary (e.g. "-8..-6 LUFS, -0.5 dBTP, mono below 120 Hz,
@@ -432,11 +442,12 @@ module MB
               chain[i] = [name, args, { mono: mono }.merge(params)]
               mono = nil
             end
-            # The template's loudest-part window (phrase length)
-            if mix.loudest_bars && (i = chain.index { |n, _a, _p| Mastering.preset?(n) })
+            # What the template's preset measures (its phrase length, or the
+            # whole song)
+            if mix.measure && (i = chain.index { |n, _a, _p| Mastering.preset?(n) })
               name, args, params = chain[i]
               chain = chain.dup
-              chain[i] = [name, args, { loudest_bars: mix.loudest_bars }.merge(params)]
+              chain[i] = [name, args, mix.measure.merge(params)]
             end
             MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
           end
@@ -481,7 +492,7 @@ module MB
           l << call.(:loudness, mix.loudness) if mix.loudness
           l << call.(:true_peak, mix.true_peak) if mix.true_peak
           l << call.(:mono_below, mix.mono_below) if mix.mono_below
-          l << call.(:loudest_bars, mix.loudest_bars) if mix.loudest_bars
+          l << "  measure #{mix.measure_ruby}" if mix.measure
           mix.master.each { |n, a, o|
             l << "  master #{[n.inspect, *a.map { |v| Genre.ruby(v) }, (Genre.kwargs(o) unless o.empty?)].compact.join(', ')}"
           }
@@ -738,11 +749,19 @@ module MB
           @mix[:master] = [*@mix[:master], [name, args.freeze, params.freeze].freeze]
         end
 
-        # The window, in bars, of a mastering preset that targets the loudest
-        # part (`measure: :loudest`, the :club default): the genre's phrase
-        # length (Mastering::LOUDEST_BARS, 16, when not given).
-        def loudest_bars(bars)
-          @mix[:loudest_bars] = bars
+        # What the template's mastering preset measures in renders (see
+        # Mastering::MEASURES): `measure :loudest, bars: 16` (the loudest
+        # phrase), `measure :integrated` (the whole song), `measure :bars,
+        # percentile: 0.25` (the bars' loudness distribution); `measure
+        # nil` for the preset's own default.
+        def measure(kind, bars: nil, percentile: nil)
+          return @mix[:measure] = nil if kind.nil?
+          unless Mastering::MEASURES.include?(kind)
+            raise ArgumentError, "measure is #{Mastering::MEASURES.map(&:inspect).join(', ')} (got #{kind.inspect})#{Form.suggest(kind, Mastering::MEASURES)}"
+          end
+          raise ArgumentError, 'bars: goes with measure :loudest' if bars && kind != :loudest
+          raise ArgumentError, 'percentile: goes with measure :bars' if percentile && kind != :bars
+          @mix[:measure] = { measure: kind, loudest_bars: bars, percentile: percentile }.compact.freeze
         end
 
         # The master bus gain (e.g. `master_gain 0.db`).
