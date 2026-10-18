@@ -26,14 +26,16 @@ RSpec.describe('bin/synths/funk.rb') do
   end
 
   # Renders +graph+ (a block, built inside the render) for +bars+ at 96 BPM
-  # in a Session, so tempo-synced LFOs follow the timeline; the left channel.
+  # in a Session, so tempo-synced LFOs follow the timeline; the left channel
+  # at 0 dB (rendered 12 dB down and scaled back: the beat peaks near +5
+  # dBFS, which the FLAC would clip).
   def render_bars(bars)
     path = tmp_path('bars.flac')
-    MB::Sound.render(path, bars: bars, overwrite: true, gain: 0.db) do
+    MB::Sound.render(path, bars: bars, overwrite: true, gain: -12.db) do
       MB::Sound.bpm 96
       MB::Sound.bg :x, MB::Sound.with_seed(3) { yield }, fade: 0
     end
-    MB::Sound.read(path)[0]
+    MB::Sound.read(path)[0] * 12.db.to_f
   end
 
   # The share of +x+'s power from +lo+ to +hi+ Hz in each +step+ seconds.

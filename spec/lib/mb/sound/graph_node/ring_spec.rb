@@ -94,11 +94,13 @@ RSpec.describe('ring: :all') do
       MB::Sound.at_bar(3) { MB::Sound.go :s, on: :now }
     end
 
+    # (rendered at -12 dB and scaled back: the gongs and clicks add up to
+    # +6 dBFS, which the FLAC would clip)
     def render(**opts)
       path = tmp_path('ring.flac')
-      MB::Sound.render(path, overwrite: true, gain: 1, **opts) { song }
+      MB::Sound.render(path, overwrite: true, gain: 0.25, **opts) { song }
       MB::Sound.rewind
-      MB::Sound.read(path)[0]
+      MB::Sound.read(path)[0] * 4
     end
 
     it 'lets the sums in the block, scheduled blocks, and track patches ring (or end with ring: :first)' do

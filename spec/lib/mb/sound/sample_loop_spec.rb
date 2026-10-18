@@ -302,7 +302,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
 
     it 'stays on the bar through a tempo change in a session' do
       path = tmp_path('follow.flac')
-      MB::Sound.render(path, bars: 6, bpm: 100, gain: 1) {
+      MB::Sound.render(path, bars: 6, bpm: 100, gain: 0.5) { # (the break peaks at +4 dBFS)
         MB::Sound.bg :brk, rec.follow
         MB::Sound.at_bar(3) { MB::Sound.bpm 125 }
       }

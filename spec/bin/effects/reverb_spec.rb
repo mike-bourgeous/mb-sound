@@ -21,6 +21,9 @@ RSpec.describe('bin/effects/reverb.rb') do
   end
 
   it 'can downmix channels' do
+    # (the reverb's mono output trim, +3 dB, takes the near-full-scale arp
+    # 0.2 dB over full scale at effect scripts' 0 dB master gain)
+    expect_script_warnings(/over full scale/)
     reverb('-f', '-q', 'spec/test_data/arp_a7.flac', outfile, '--output-channels', '1')
     expect(MB::Sound::FFMPEGInput.parse_info(outfile).dig(:streams, 0, :channels)).to eq(1)
   end
