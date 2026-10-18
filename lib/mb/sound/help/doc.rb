@@ -109,7 +109,7 @@ module MB
           left = groups.flat_map { |_, pairs| pairs.map { |cmd, _| cmd.length } }.max.to_i
           groups.each do |head, pairs|
             heading(head) if head
-            rows(pairs.map { |cmd, what| [Text.code(cmd).then { |t| Text.pad(t, left) }, what] }, indent: indent, max_label: left, dim: true)
+            rows(pairs.map { |cmd, what| [Text.code(cmd).then { |t| Text.pad(t, left) }, what] }, indent: indent, max_label: left, dim: true, wrap: true)
           end
           self
         end

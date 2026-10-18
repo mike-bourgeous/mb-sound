@@ -66,7 +66,16 @@ module MB
           head = "#{c(:title, 'mb-sound')} #{c(:dim, '- the one-screen sheet; help :start etc. open a section')}"
           learn = "#{c(:head, 'Learn:')} #{c(:key, 'lesson')} #{LESSONS.keys.map { |l| c(:key, l.inspect) }.join(c(:dim, ', '))}  #{c(:dim, '(guided)')}"
           foot = Doc.new(width: w).commands([['More help', FOOTER]]).to_s
-          ([head, learn, ''] + lines + [foot]).join("\n")
+          all = [head, learn, ''] + lines + [foot]
+          # Taller than the terminal (one column below 100): the top has
+          # scrolled away, so the last line says so (ux-fix-1 item 16)
+          total_lines = all.sum { |l| l.count("\n") + 1 }
+          if total_lines + 1 > (MB::U.height rescue 24)
+            sections = GROUPS.keys.first(3).map { |g| "help #{g.inspect}" }.join(', ')
+            note = "(#{total_lines} lines: scroll up for the top, or open one section: #{sections}, ...)"
+            all << '' << c(:dim, wrap(note, width: w))
+          end
+          all.join("\n")
         end
 
         # The sheet's footer: one command per line (ux-1 item 23; the

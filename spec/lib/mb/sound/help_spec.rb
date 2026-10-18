@@ -144,6 +144,7 @@ RSpec.describe MB::Sound::Help do
     [80, 110, 160].each do |w|
       it "fits one screen at #{w} columns" do
         allow(MB::U).to receive(:width).and_return(w)
+        allow(MB::U).to receive(:height).and_return(50) # (a taller sheet says to scroll up; see below)
         lines = MB::Sound.help.to_s.lines.map { |l| MB::U.remove_ansi(l.chomp) }
         expect(lines.map(&:length).max).to be <= w
         expect(lines.length).to be <= 48 if w >= 110
@@ -625,7 +626,7 @@ RSpec.describe MB::Sound::Help do
     it 'lists the sheet footer one command per line, lessons near the top, and sections in the headings' do
       lines = text(MB::Sound.help).lines.map(&:chomp)
       expect(lines[1]).to start_with('Learn: lesson :set')
-      foot = lines.drop(lines.index('More help') + 1).reject(&:empty?)
+      foot = lines.drop(lines.index('More help') + 1).reject(&:empty?).take_while { |l| !l.start_with?('(') }
       expect(foot.length).to eq(MB::Sound::Help::Sheet::FOOTER.length)
       foot.each { |l| expect(l).to match(/\A  \S+( \S+)? +\S/) }
       expect(lines.join("\n")).to include('Perform help :perform')
@@ -635,6 +636,20 @@ RSpec.describe MB::Sound::Help do
       t = text(MB::Sound.help(:perform))
       expect(t).to include('On the sheet', 'Knobs and snapshots  help :knobs', 'lesson :knobs', 'Also on the sheet')
       expect(text(MB::Sound.help.perform)).to eq(t)
+    end
+
+    # ux-fix-1 item 16: help :render was 147 lines, the sheet 71 with its top scrolled away
+    it 'cuts long method pages to a summary with .full, and says where the sheet starts' do
+      page = MB::Sound.help(:render)
+      expect(text(page).lines.length).to be < 50
+      expect(text(page)).to include('more paragraphs: help(:render).full')
+      expect(text(page.full).lines.length).to be > 100
+      expect(text(page.full)).not_to include('.full')
+      allow(MB::U).to receive(:height).and_return(24)
+      allow(MB::U).to receive(:width).and_return(80)
+      expect(text(MB::Sound.help).lines.last(2).join.gsub(/\s+/, ' ')).to match(/\(\d+ lines: scroll up for the top, or open one section: help :start/)
+      allow(MB::U).to receive(:width).and_return(40)
+      expect(text(MB::Sound.help).lines.drop_while { |l| !l.start_with?('More help') }.map { |l| l.chomp.length }.max).to be <= 40
     end
 
     # ux-fix-1 item 15: the sheet teaches saw, graphs print ramp
