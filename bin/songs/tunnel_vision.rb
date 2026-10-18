@@ -193,7 +193,7 @@ module MB::Sound
   # +club+ (a LUFS target, or nil) masters with the club preset (two
   # limiters; mastering-2) instead of dnb_master, keeping the air knob's
   # highpass: renders reach that loudness exactly.
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, club: nil)
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, club: nil, air: :static)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -208,7 +208,7 @@ module MB::Sound
     # A club master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1
     if club
-      master(:club, lufs: club) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
+      master(:club, lufs: club, air: air) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
     else
       master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
     end
@@ -284,8 +284,9 @@ module MB::Sound
       lift: [TV_LIFT, Float, '-U', 'Upward lift of the hall tail in rests, 0..1, the lifted return 6 dB down (the :lift knob; with buses; 0 before patches-5)', 0.0..1.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
       club: [nil, Float, 'Master with the club preset (two limiters) at this many LUFS (e.g. -7.6) instead of dnb_master (-D, -C)', -20.0..-4.0],
+      air: [:static, Symbol, "With --club: the club's air stage before its limiters", %i[static dynamic band none]],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, club: p.club)
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, club: p.club, air: p.air == :none ? false : p.air)
       tunnel_vision_form
     }
   end
