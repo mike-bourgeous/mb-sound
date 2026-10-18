@@ -314,7 +314,7 @@ module MB
 
           # Records +call+ on +result+ (see the module description).
           def note(receiver, call, result)
-            return unless graph_object?(result) && !result.frozen?
+            return unless (graph_object?(result) || result.is_a?(MB::Sound::Wavetable)) && !result.frozen?
 
             rec = record_of(result)
             if result.equal?(receiver)

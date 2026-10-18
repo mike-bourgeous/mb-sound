@@ -1010,7 +1010,7 @@ module MB
             when ChannelValues then "per_channel(#{v.values.map { |x| value(x, indent) }.join(', ')})"
             when ChannelSpread then "per_channel(#{leaf(v.range, indent)})"
             when Module then class_name(v)
-            when MB::Sound::Wavetable then wavetable_text(v)
+            when MB::Sound::Wavetable then wavetable_text(v, indent)
             when MB::Sound::Sample then sample_text(v, indent)
             when MB::Sound::Sample::Slices then slices_text(v, indent)
             when MB::Sound::Sampler::Instrument then instrument_text(v, indent)
@@ -1301,7 +1301,9 @@ module MB
             "#{num(f)}.hz"
           end
 
-          def wavetable_text(t)
+          def wavetable_text(t, indent = '')
+            # Built by a recorded call (wavetable_of)
+            return expr(t, indent: indent) if Recipe.record_of(t)&.call
             name = t.name
             if name
               cached = MB::Sound::Wavetable.instance_variable_get(:@cache)&.[](name.to_sym)

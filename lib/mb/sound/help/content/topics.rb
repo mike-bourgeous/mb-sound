@@ -80,6 +80,31 @@ module MB
       end
     end
 
+    Help.topic :wavetables, 'Wavetables and shape morphs', group: :sound do
+      about <<~TEXT
+        `pitch.wavetable(t, scan: x)` plays a table, morphing through its
+        frames as `scan` moves 0..1 (a number, an LFO, a knob).  Library
+        tables: `Wavetable[:basic]` (sine, triangle, saw, square),
+        `:organ`, `:pulses`, ... (`Wavetable.names`).  `wavetable_of`
+        builds a scan table from a list of frames: table names, harmonic
+        amplitudes (`[1, 0.5, 0.33]`), functions of the phase in cycles
+        (`->(p) { ... }`), tables, and sample arrays (`normalize: :peak`
+        by default, `:loudness` for even levels); it saves and prints as
+        the call.  Turn a knob to change the shape while it plays:
+        `110.hz.wavetable(t, scan: knob(:shape))`.
+      TEXT
+      commands :wavetable_of
+      dsl :wavetable, :harmonics
+      note :oscillators
+      see :tones, :knobs
+      example 'a shape morph on a knob' do
+        knob :try_shape, 0, range: 0..1
+        t = wavetable_of(:sine, [1, 0.5, 0.33, 0.25], :saw, ->(p) { Math.sin(2 * Math::PI * p)**3 }, normalize: :loudness)
+        bg :try, 110.hz.wavetable(t, scan: knob(:try_shape)).at(-22.db).until(2.bars)
+        turn :try_shape, 1, over: 2.bars
+      end
+    end
+
     Help.topic :unison, 'Unison and supersaws', group: :sound do
       about <<~TEXT
         Three spellings, the same sound bit for bit:

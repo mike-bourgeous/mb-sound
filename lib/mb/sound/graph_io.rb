@@ -79,6 +79,7 @@ module MB
         copies: 64,
         repeats: 4096,
         steps: 4096,
+        wavetable_size: 1 << 16,
       }.freeze
 
       # A document that can't be loaded: syntax outside the subset, an

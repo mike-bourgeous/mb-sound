@@ -1334,6 +1334,8 @@ module MB
             count(node, name, samples_of(args[0]), :buffer_samples)
           when :silence, :until
             seconds(node, name, args[0], nil, :render_seconds) if args[0]
+          when :wavetable_of
+            count(node, name, kwargs[:size], :wavetable_size) if kwargs.key?(:size)
           when :oversample
             count(node, name, args[0], :oversample) if args[0].is_a?(Numeric)
           when :resample
