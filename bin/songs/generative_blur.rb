@@ -17,15 +17,17 @@
 #           sine on D4): every grain starts on a note-on of a generator
 #           drawing a note from the field by weight, and plays at that
 #           note's pitch, so each grain's pitch is one draw from the
-#           probability scale; about 40 grains a second (chance 0.9 per
-#           128th), 350 ms each, so about 14 overlap, spread wide in the
-#           tone and across the stereo field, over three octaves, chords
-#           blending over 1/2 bar, the key changing over 1 bar (below)
+#           probability scale; 120 grains a second (-c 120, below), 117
+#           ms each, so about 14 overlap, spread wide in the tone and
+#           across the stereo field, over three octaves, chords blending
+#           over 1/2 bar, the key changing over 1 bar (below)
 #   both    the two together (the key changes over 1 bar for both, so they
 #           agree on the key; ranges and chord blends stay per part)
-#   -c sparse  the earlier, thinner cloud: about 8 grains a second
+#   -c dense   the cloud before omnibus9: about 40 grains a second
+#           (chance 0.9 per 128th), 350 ms each
+#   -c sparse  the earliest, thinner cloud: about 8 grains a second
 #           (Poisson-like: chance 0.7 per thirty-second), 150 ms each
-#   -c 60   any number of grains a second (0.5 to 160), on the dense
+#   -c 60   any number of grains a second (0.5 to 160; 120 by default), on the dense
 #           cloud's tone: the strike chance per 128th (44.8 a second at 84
 #           BPM; 256ths or 512ths above 40 a second, keeping the chance at
 #           most 0.9) hits that rate, grains last 350 ms up to 40 a second
@@ -45,11 +47,13 @@
 #
 # The defaults are the maintainer's Listening Bench picks (2026-10-16:
 # blur 1-5%, the bass anchor, a 1/4-bar chord blend for the line, and
-# "cloud, 3 octaves, 1/2-bar blend").  The earlier defaults (blur 0.15, no
+# "cloud, 3 octaves, 1/2-bar blend"; 2026-10-17, fixes-prepanel-1: -c 120
+# over dense, 15, and 60).  The earlier defaults (blur 0.15, no
 # bass, chord steps, two octaves, the slow key blends, a sparse cloud) are
 # still there with explicit options:
 #     bin/songs/generative_blur.rb -n 16 -u 0.15 --no-bass -C 0 blur.flac                        # the old dense line
 #     bin/songs/generative_blur.rb -m grains -u 0.15 --no-bass -c sparse -t slow -C 0 -O 2 blur.flac  # the old cloud
+#     bin/songs/generative_blur.rb -m grains -c dense blur.flac   # the 40-a-second cloud (the default before omnibus9)
 #
 # Usage:
 #     bin/songs/generative_blur.rb                            # dense 64ths (about 22 draws a second), blur 0.03, bass, live
@@ -58,7 +62,7 @@
 #     bin/songs/generative_blur.rb -n 16 blur.flac            # sixteenths instead of sixty-fourths
 #     bin/songs/generative_blur.rb -C 0 blur.flac             # chords stepping instead of blending
 #     bin/songs/generative_blur.rb -O 3 -C 0.5 blur.flac      # three octaves (A3..A6), chords blending over half a bar
-#     bin/songs/generative_blur.rb -m grains blur.flac        # the granular cloud
+#     bin/songs/generative_blur.rb -m grains blur.flac        # the granular cloud, 120 grains a second
 #     bin/songs/generative_blur.rb -m grains -u 0.4 -c sparse --no-bass blur.flac  # a thin cloud, many wrong notes, no anchor
 #     bin/songs/generative_blur.rb -m grains -c 60 blur.flac  # 60 grains a second (233 ms each)
 #     bin/songs/generative_blur.rb -m grains -c 15 blur.flac  # 15 a second, between sparse and dense
@@ -69,6 +73,7 @@
 #     generative_blur(mode: :grains)
 #     generative_blur(mode: :grains, cloud: :sparse, transition: :slow, bass: false, blur: 0.3)
 #     generative_blur(mode: :grains, cloud: 60)                  # 60 grains a second
+#     generative_blur(mode: :grains, cloud: :dense)              # about 40 a second, 350 ms each (before omnibus9)
 #
 # Snippets (after `load 'bin/songs/generative_blur.rb'`):
 #     f = (scale(:dorian, :d).weights.blur(0.3) + chord(:min7, root: :d).weights).over(A3..A5, around: E4, width: 7)
@@ -193,7 +198,7 @@ module MB::Sound
   # sparse cloud, slow key blends, chord steps, and two octaves for both
   # parts: `generative_blur(blur: 0.15, bass: false, cloud: :sparse,
   # transition: :slow, chord_blend: 0, octaves: 2)` plays that again.
-  def self.generative_blur(mode: :dense, blur: 0.03, seed: 3, division: 64, bass: true, cloud: :dense, transition: nil,
+  def self.generative_blur(mode: :dense, blur: 0.03, seed: 3, division: 64, bass: true, cloud: 120, transition: nil,
                            chord_blend: nil, octaves: nil)
     bpm GENERATIVE_BLUR_BPM
     numeric_cloud = cloud.is_a?(Numeric) ? generative_blur_cloud_settings(cloud) : nil
@@ -263,14 +268,14 @@ module MB::Sound
       seed: [3, Integer, '-s', 'The seed of the draws', 0..1_000_000],
       division: [64, Integer, '-n', 'Notes per whole note in the dense line (16, 32, 64)', [8, 16, 32, 64]],
       bass: [true, '-B', 'The anchor bassline: one unblurred root (and fifth) a bar, following the chords (--no-bass leaves it out)'],
-      cloud: [:dense, ->(s) {
+      cloud: [120, ->(s) {
         next s.to_sym if s == 'dense' || s == 'sparse'
         rate = Float(s, exception: false)
         unless rate && GENERATIVE_BLUR_CLOUD_RATES.cover?(rate)
           raise ArgumentError, "must be sparse, dense, or grains a second from #{GENERATIVE_BLUR_CLOUD_RATES.begin} to #{GENERATIVE_BLUR_CLOUD_RATES.end}"
         end
         rate
-      }, '-c', 'The granular cloud: dense (about 40 grains a second, long, overlapping), sparse (about 8), or grains a second (0.5..160)'],
+      }, '-c', 'The granular cloud: grains a second (0.5..160; 120: 117 ms each), dense (the earlier default: about 40 a second, 350 ms, overlapping), or sparse (about 8)'],
       transition: [nil, ->(s) { s == 'slow' ? :slow : Float(s).tap { |t| raise ArgumentError, 'must be slow or 0..4' unless (0..4).cover?(t) } }, '-t',
         'Bars over which the key changes (F major on bar 9, D dorian on bar 13; 0 a step), or slow (the 4- and 6-bar blends); ' \
         'default: slow for the line, 1 for the cloud and both'],
