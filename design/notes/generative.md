@@ -74,7 +74,7 @@ G2 (gen-3, 2026-10-16, same container, Ruby without YJIT, 2000 cycles each from 
 ## Not built yet (later phases)
 
 - Evolving rhythms (`beats`, energy, holds, Euclidean mutation, groove velocity curves, fills): the proposal's G2, not yet scheduled (phrase memory went first, maintainer 2026-10-16).
-- G3: knob steering at decision points (`Knob#value_at`, per-generator `lead:`), e.g. motifs' `vary`/`mutate`/`density` from knobs.
+- G3: knob steering at decision points (per-generator `lead:`), e.g. motifs' `vary`/`mutate`/`density` from knobs.  `Knob#value_at` itself is built (midi-consol-2, see midi.md "Parameters that move": future positions answer the known value or a queued turn, decisions logged for takes); `strikes(chance:)` already reads a param at each cycle start.
 - G4: long form (`markov`, `lsystem`, `flow { generate ... }`, per-occurrence section lengths).
 - (Fixed in midi-consol-1, 2026-10-16: `ghost_chords`, `permute` without `vary:`, `ratchet`, `roll`, and `truncate` now work per generated cycle through `Clip#map_cycles`; see sequences.md.)
 

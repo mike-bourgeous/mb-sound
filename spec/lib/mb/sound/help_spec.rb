@@ -703,7 +703,11 @@ RSpec.describe MB::Sound::Help do
     it 'is a few lines plus one runnable tip' do
       t = MB::U.remove_ansi(MB::Sound::Help.welcome(random: Random.new(3)))
       expect(t).to include('help').and include('now').and include('tip').and include('play it')
-      expect(t.lines.length).to be <= 24
+      # (The tip is a random topic example: count the fixed part and the
+      # tip separately, so new topics' examples don't move the total)
+      fixed = t.lines.take_while { |l| !l.start_with?('tip ') }
+      expect(fixed.length).to be <= 20
+      expect(t.lines.length - fixed.length).to be <= 7
     end
 
     it 'lists one command per line in groups, descriptions aligned, the same formatter as the sheet\'s footer (ux-1 r3 item 1)' do

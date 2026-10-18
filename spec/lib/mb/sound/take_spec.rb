@@ -175,6 +175,43 @@ RSpec.describe(MB::Sound::Take) do
     MB::Sound::Take.instance_variable_set(:@current, before)
   end
 
+  it 'replays key and mode changes, scale locks, and params (knobs, choices, LFOs) bit for bit' do
+    lines = {
+      0 => [
+        'key :d, :dorian',
+        'knob :p, 0.9',
+        'knob :style, 0',
+        'riff = seq(C4, Db4, D4, Eb4, E4, F4, Gb4, G4, A4, B4, C5).n16.loop',
+        'bg :keys, riff.chance(knob(:p)).stream.lock(knob(:style).choose(:mash, :play)).swing(2.bars.lfo.at(0.5..0.6)).synth { |v| v.hz.ramp.at(0.2) * v.amp_env }, at: :now',
+      ],
+      97 => ['mode :lydian, on: :bar'],
+      151 => ['turn :p, 0.3, over: 1'],
+      240 => ['key :ab', 'turn :style, 1'],
+      300 => ['undo'],
+      333 => ['mode knob(:style)'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    480.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.01
+    expect(t.entries.map(&:kind)).to include(:key, :turn, :restore)
+    expect(t.to_ruby).to include('key: ["D", :dorian]').or include('key: ["C", :major]')
+
+    r = t.replay
+    [[800], [367, 368], [64]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays knob turns, ramps, snapshots, crossfades, and undo bit for bit' do
     lines = {
       0 => [
