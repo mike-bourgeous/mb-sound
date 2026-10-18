@@ -96,6 +96,6 @@ The maintainer's notes: "`help :ui` (just as an example) is a solid wall of text
 ## Later
 
 - The full tutorial (`help_tutorial.md`).
-- `now` as a live panel with the terminal UI (knob bars that move, per-player level sparklines, the flow timeline).
+- `now` as a live panel: partly covered by the terminal UI's `:knobs`, `:tracks`, `:form`, and `:meters` panes (ui-3..ux-r4); left: per-player level sparklines and `now`'s command hints in a pane.
 - A doc pass: example lines for console commands without one (the spike counted 122 of 189), following Pitch/Notes delegation to documented methods in method pages.
 - did_you_mean in mb-util's `color_trace`, then drop the handler workaround.
