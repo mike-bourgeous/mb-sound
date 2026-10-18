@@ -165,7 +165,7 @@ module MB
         end
 
         class GhostChords < NoteMap
-          def initialize(parent, chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
+          def initialize(parent, chords, per: nil, scale: nil, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
             super(parent, **options)
             unless passing.nil?
               raise ArgumentError, "A stream's ghost_chords can't keep passing notes: a note's length isn't known at its note-on (Clip#ghost_chords can)"

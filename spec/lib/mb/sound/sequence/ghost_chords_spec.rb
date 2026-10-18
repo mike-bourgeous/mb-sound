@@ -30,6 +30,13 @@ RSpec.describe('MB::Sound::Sequence::Clip#ghost_chords', :aggregate_failures) do
     expect(bars[3]).to eq([s::A3, s::C4, s::F4, s::C4, s::A3, s::C4].map(&:number))
   end
 
+  it 'builds chords in the session key by default (maintainer, 2026-10-18)' do
+    expect(numbers(hook.ghost_chords(1, 4, 7, 6))).to eq(numbers(hook.ghost_chords(1, 4, 7, 6, scale: s.scale(:major, :c))))
+    MB::Sound::Sequence.transport.key_change(MB::Sound::MusicalKey.new(root: 9, mode: :minor), at: 0r)
+    expect(numbers(hook.ghost_chords(1, 4, 7, 6))).to eq(numbers(hook.ghost_chords(1, 4, 7, 6, scale: am)))
+    expect(numbers(hook.ghost_chords(1, 4, root: :d))).to eq(numbers(hook.ghost_chords(1, 4, scale: s.scale(:minor, :d))))
+  end
+
   it 'leaves chord tones where they are' do
     g = hook.ghost_chords(1, scale: am)
     expect(g.length).to eq(1)

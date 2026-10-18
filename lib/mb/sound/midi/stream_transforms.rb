@@ -230,7 +230,7 @@ module MB
         #
         #     hook.loop.stream.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))
         #     midi.ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))   # keys snap to the bar's chord
-        def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
+        def ghost_chords(*chords, per: nil, scale: nil, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
           Stream.new(Transform::GhostChords.new(self, chords, per: per, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie, passing: passing, **options))
         end
 
@@ -253,7 +253,7 @@ module MB
         #     midi.snap                         # the session key
         #     midi.snap(:chord, from: chords)   # the chord playing in a clip
         #     midi.snap(:chord, from: [1, 6, 4, 5], extend: :above, bass: :root_fifth)
-        def snap(scale = nil, root = nil, direction: :nearest, from: nil, extend: false, avoid: true, bass: nil, per: nil, micro: :note, **options)
+        def snap(scale = nil, root = nil, direction: :nearest, from: nil, extend: false, avoid: true, bass: nil, per: nil, micro: :mark, **options)
           if scale == :chord
             map = Lock::Chord.new(from: from, extend: extend, avoid: avoid, bass: bass, per: per, micro: micro)
             return Stream.new(Transform::Locked.new(self, map, **options))
@@ -277,7 +277,7 @@ module MB
         #     midi.degrees                       # the session key, flowing
         #     midi.degrees(:minor_pentatonic, layout: :fit)
         #     midi.degrees(scale(:dorian, :d), black: :silent)
-        def degrees(scale = nil, layout: :flow, black: :passing, micro: :note, **options)
+        def degrees(scale = nil, layout: :flow, black: :passing, micro: :mark, **options)
           Stream.new(Transform::Locked.new(self, Lock::Degrees.new(scale, layout: layout, black: black, micro: micro), **options))
         end
 

@@ -31,10 +31,11 @@ module MB
         BLACKS = [:passing, :silent, :lower].freeze
 
         # How Degrees and Chord give notes between semitones (cents
-        # scales): :note (a fractional note number: internal synths play it
-        # exactly, but it has no MIDI 1.0 bytes) or :mark (the nearest whole
-        # note with a pitch mark for the rest: MIDI bytes as a bend before
-        # the note-on; samplers and `v.hz.transpose(v.pitch_mark)` play it).
+        # scales): :mark (the default, maintainer 2026-10-18: the nearest
+        # whole note with a pitch mark for the rest: MIDI bytes as a bend
+        # before the note-on; samplers and `v.hz.transpose(v.pitch_mark)`
+        # play it) or :note (a fractional note number: internal synths play
+        # it exactly through `v.hz`, but it has no MIDI 1.0 bytes).
         MICRO = [:note, :mark].freeze
 
         # Graph nodes (knobs, LFOs) read by params in +x+ (a Style or a Map)
@@ -100,7 +101,7 @@ module MB
         class Map
           attr_reader :micro
 
-          def initialize(micro: :note)
+          def initialize(micro: :mark)
             raise ArgumentError, "micro: must be #{MICRO.map(&:inspect).join(' or ')} (got #{micro.inspect})" unless MICRO.include?(micro)
             @micro = micro
           end
@@ -120,9 +121,9 @@ module MB
           end
         end
 
-        # +e+ moved to note +n+ (a whole note as is; a fraction as a
-        # fractional note, or the nearest whole note with a pitch mark for
-        # the rest with +micro: :mark+).
+        # +e+ moved to note +n+ (a whole note as is; a fraction as the
+        # nearest whole note with a pitch mark for the rest, or a fractional
+        # note with +micro: :note+).
         def self.with_note(e, n, micro)
           n = Transform::Transpose.whole(n)
           return e.with_note(n) if n.is_a?(Integer) || micro == :note
@@ -150,7 +151,7 @@ module MB
         class Degrees < Map
           attr_reader :scale, :layout, :black
 
-          def initialize(given = nil, scale: given, layout: :flow, black: :passing, micro: :note)
+          def initialize(given = nil, scale: given, layout: :flow, black: :passing, micro: :mark)
             super(micro: micro)
             raise ArgumentError, "layout: must be #{LAYOUTS.map(&:inspect).join(' or ')} (got #{layout.inspect})" unless LAYOUTS.include?(layout)
             raise ArgumentError, "black: must be #{BLACKS.map(&:inspect).join(', ')} (got #{black.inspect})" unless BLACKS.include?(black)
@@ -167,7 +168,7 @@ module MB
           end
 
           def options
-            { layout: (@layout unless @layout == :flow), black: (@black unless @black == :passing), micro: (@micro unless @micro == :note) }.compact
+            { layout: (@layout unless @layout == :flow), black: (@black unless @black == :passing), micro: (@micro unless @micro == :mark) }.compact
           end
 
           def to_s
@@ -226,7 +227,7 @@ module MB
         class ScaleSnap < Map
           attr_reader :scale, :direction
 
-          def initialize(given = nil, scale: given, direction: :nearest, micro: :note)
+          def initialize(given = nil, scale: given, direction: :nearest, micro: :mark)
             super(micro: micro)
             raise ArgumentError, "direction: must be :nearest, :down, or :up (got #{direction.inspect})" unless [:nearest, :down, :up].include?(direction)
             @scale = Lock.check_scale(scale)
@@ -238,7 +239,7 @@ module MB
           end
 
           def options
-            { direction: (@direction unless @direction == :nearest), micro: (@micro unless @micro == :note) }.compact
+            { direction: (@direction unless @direction == :nearest), micro: (@micro unless @micro == :mark) }.compact
           end
 
           def to_s
@@ -274,7 +275,7 @@ module MB
 
           attr_reader :from, :extend, :avoid, :bass, :per
 
-          def initialize(from: nil, extend: false, avoid: true, bass: nil, per: nil, scale: nil, micro: :note)
+          def initialize(from: nil, extend: false, avoid: true, bass: nil, per: nil, scale: nil, micro: :mark)
             super(micro: micro)
             raise ArgumentError, "extend: must be false, :above, or true (got #{extend.inspect})" unless EXTENDS.include?(extend)
             raise ArgumentError, "bass: must be nil or :root_fifth (got #{bass.inspect})" unless bass.nil? || bass == :root_fifth
@@ -315,7 +316,7 @@ module MB
           end
 
           def options
-            { from: @from, extend: (@extend unless @extend == false), avoid: (@avoid unless @avoid), bass: @bass, per: @per && Sequence::Duration.new(@per) }.compact
+            { from: @from, extend: (@extend unless @extend == false), avoid: (@avoid unless @avoid), bass: @bass, per: @per && Sequence::Duration.new(@per), micro: (@micro unless @micro == :mark) }.compact
           end
 
           def to_s

@@ -795,7 +795,12 @@ module MB
         streams take the same styles: `riff.stream.lock(:mash)`,
         `midi.degrees(:minor_pentatonic, layout: :fit)`, `midi.snap(:chord,
         from: chords)`.  A knob can pick the style: `lock
-        knob(:style).choose(:mash, :play, :chord)`.
+        knob(:style).choose(:mash, :play, :chord)`.  The virtual keyboard's
+        own scale lock (`ui.keyboard.scale = ...`) is :mash unless
+        `ui.keyboard.scale_mode` says otherwise.  Cents scales give whole
+        notes with pitch marks (`micro: :mark`, sent as MIDI bends; voices
+        play them with `v.hz.transpose(v.pitch_mark)`); `micro: :note`
+        gives fractional notes that `v.hz` plays directly.
       TEXT
       commands :lock, :key
       dsl :degrees, :snap
@@ -961,6 +966,10 @@ module MB
         WezTerm, Ghostty, foot, iTerm2 with its setting) they end on
         key-up.  Tab is step entry: Enter puts the clip's Ruby
         (`seq(C3, E3, G3.n4).n8`) on the console line.
+        `ui.keyboard.scale = scale(:dorian, :d)` locks the keys in mash
+        style (every white key the next degree, black keys silent: never a
+        wrong note); `ui.keyboard.scale_mode = :play` fits the scale to the
+        octave instead (see `help :lock`); PgUp/PgDn cycle scales and roots.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|

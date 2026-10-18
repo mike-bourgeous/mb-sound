@@ -10,11 +10,12 @@ module MB
         # `stream.lock(...)` and the console's `lock` apply to external
         # keyboards, so a computer key and the same key on a MIDI keyboard
         # give the same note:
-        # - :play (default; also :degrees) - degrees fitted to the octave
-        #   (the scale's root on every C), black keys passing notes between
-        #   their neighbours (silent between half steps).
-        # - :mash - each white key the next degree, flowing from the root on
-        #   middle C; black keys silent.
+        # - :mash (default, maintainer 2026-10-18: every key in scale, never
+        #   a wrong note) - each white key the next degree, flowing from the
+        #   root on middle C; black keys silent.
+        # - :play (also :degrees) - degrees fitted to the octave (the
+        #   scale's root on every C), black keys passing notes between their
+        #   neighbours (silent between half steps).
         # - :along (also :snap) - every key plays the scale note nearest its
         #   own pitch (ties go down), keeping the layout.
         #
@@ -22,7 +23,7 @@ module MB
         # notes heard.  CYCLE lists the scales the cycling keys step through.
         class ScaleLock
           # The modes (see the class comment), and the older names.
-          MODES = %i[play mash along].freeze
+          MODES = %i[mash play along].freeze
           ALIASES = { degrees: :play, snap: :along }.freeze
 
           # Scales the cycle key steps through (nil: no lock).
@@ -30,7 +31,7 @@ module MB
 
           attr_reader :scale, :mode, :style
 
-          def initialize(scale, mode: :play)
+          def initialize(scale, mode: :mash)
             m = ALIASES.fetch(mode, mode)
             raise ArgumentError, "Scale lock modes are #{(MODES + ALIASES.keys).map(&:inspect).join(', ')} (got #{mode.inspect})" unless MODES.include?(m)
             raise ArgumentError, "Scale lock needs a Scale (e.g. scale(:dorian, :d); got #{scale.inspect})" unless scale.is_a?(Scale)
@@ -50,7 +51,7 @@ module MB
           # A short label for the keyboard pane, e.g. "D dorian".
           def label
             root = Note.new(@scale.root).name.sub(/-?\d+\z/, '')
-            "#{root} #{@scale.name || 'scale'}#{@mode == :play ? '' : " (#{@mode})"}"
+            "#{root} #{@scale.name || 'scale'}#{@mode == :mash ? '' : " (#{@mode})"}"
           end
 
           # The next lock in CYCLE after +lock+ (a ScaleLock or nil), keeping
@@ -58,7 +59,7 @@ module MB
           def self.next_scale(lock, root: 0)
             i = CYCLE.index(lock&.scale&.name) || 0
             name = CYCLE[(i + 1) % CYCLE.length]
-            name && new(Scale[name, lock ? lock.scale.root_class : root], mode: lock&.mode || :play)
+            name && new(Scale[name, lock ? lock.scale.root_class : root], mode: lock&.mode || :mash)
           end
 
           # +lock+ with its root a fifth up (around the circle of fifths).
