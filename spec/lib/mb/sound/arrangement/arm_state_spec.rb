@@ -155,7 +155,11 @@ RSpec.describe(MB::Sound::Arrangement::Arm) do
           problems = s.arrangement.arm_problems
           expect(problems).to be_empty, "after #{log.inspect}: #{problems.inspect}"
           rng.rand(3).times do
-            s.process_buffer(800)
+            begin
+              s.process_buffer(800)
+            rescue StandardError => e
+              raise e.class, "#{e.message}\nafter #{log.inspect} (walk #{walk})", e.backtrace
+            end
             problems = s.arrangement.arm_problems
             expect(problems).to be_empty, "after #{log.inspect} and buffers: #{problems.inspect}"
           end

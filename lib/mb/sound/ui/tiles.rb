@@ -1032,9 +1032,12 @@ module MB
 
         # Shows +text+ on the status line for FLASH seconds: one line, no
         # control characters (a newline in a cell would scroll the whole
-        # screen: item 22), "..." where it was longer.
+        # screen: item 22), "..." where it was longer.  The flash remembers
+        # the newest message at the time (UI.messages.seq), so a message
+        # the painter notices later can't replace a flash that came after
+        # it (#auto_messages).
         def flash(text, role = :text)
-          @flash = [Tiles.one_line(text), role, @clock.call + FLASH]
+          @flash = [Tiles.one_line(text), role, @clock.call + FLASH, UI.messages.seq]
         end
 
         # A window-prefix action (Ctrl-W then a key): done as in NAV, then
@@ -1124,7 +1127,11 @@ module MB
 
         # A new warning or error opens the messages pane below the REPL
         # (item 25: a count on the status line was easy to miss), with a
-        # flash; NAV m takes it away again (the layout as it was).
+        # flash; NAV m takes it away again (the layout as it was).  Events
+        # count in the order they happened, not the order the painter sees
+        # them: a flash shown after the message came (an action's summary
+        # naming its own failures, as KEYS mode's Enter capture does) stays,
+        # and only the pane opens.
         def auto_messages
           seq = UI.messages.seq
           return if seq == @messages_seen
@@ -1132,6 +1139,8 @@ module MB
           e = UI.messages.recent(1).first
           return unless e && e.severity != :note && !@tiler.layout.panes.include?(:messages)
           messages(true)
+          f = @flash
+          return if f && f[3] >= e.seq && @clock.call < f[2]
           flash("#{e.severity}: #{e.text}  (NAV m: away)", e.severity == :error ? :bad : :warn)
         end
 

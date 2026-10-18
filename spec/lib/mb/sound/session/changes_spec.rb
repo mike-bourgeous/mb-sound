@@ -56,6 +56,31 @@ RSpec.describe(MB::Sound::Session::Changes) do
       expect(changes(data)).to eq([[0, 1], [96000, 0]])
     end
 
+    # (arm_state_spec's random walk, seed 11181: a scene queued for 2:1,
+    # then a seek to bar 2 and another scene landing now; the earlier
+    # scene's swap then failed on a stopped player)
+    it 'lands a queued change whose time has come between buffers before a change made now' do
+      MB::Sound::Session.with_context(session: session) { MB::Sound.bg(:y, MB::Sound.seq(MB::Sound::C4).n4.loop) }
+      run(800)
+      MB::Sound::Session.with_context(session: session) { MB::Sound.swap(:y, MB::Sound.seq(MB::Sound::E4).n4.loop) }
+      run(96000 - 800) # (ends on the bar line: the swap is due, not yet landed)
+      expect(session.queued.map(&:kind)).to eq([:swap])
+      MB::Sound::Session.with_context(session: session) { MB::Sound.stop(:y, fade: 0) }
+      expect(session.queued).to eq([])
+      expect(session.journal.changes.last(2).map { |e| [e.kind, e.status, e.lands.pos] }).to eq([[:swap, :landed, 1r], [:stop, :landed, 1r]])
+      expect { run(1600) }.not_to raise_error
+    end
+
+    it 'lands a queued change due after a seek that lands now before the next change made now' do
+      MB::Sound::Session.with_context(session: session) { MB::Sound.bg(:y, MB::Sound.seq(MB::Sound::C4).n4.loop) }
+      run(800)
+      MB::Sound::Session.with_context(session: session) { MB::Sound.swap(:y, MB::Sound.seq(MB::Sound::E4).n4.loop) }
+      session.seek(2)
+      MB::Sound::Session.with_context(session: session) { MB::Sound.stop(:y, fade: 0) }
+      expect(session.journal.changes.last(3).map { |e| [e.kind, e.status] }).to eq([[:swap, :landed], [:seek, :landed], [:stop, :landed]]) # (issue order)
+      expect { run(1600) }.not_to raise_error
+    end
+
     it 'lets a queued graph start after a queued stop' do
       session.add(1.constant, name: :x)
       session.remove(:x, fade: 0, time: 1r)
