@@ -328,31 +328,31 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       h = MB::Sound.harmony(0 => MB::Sound.scale(:dorian, :d), 4.bars => MB::Sound.scale(:major, :f)).blur(0.2)
       g = MB::Sound.strikes(h.over(MB::Sound::A2..MB::Sound::A4, around: MB::Sound::D3), every: 1.n4, chance: 0.4, gap: 2, seed: 2).synth(voices: 2) { |v| v.hz.sine * v.env(0.005, 1, 0, 1) }
       expect(round_trip(g)).to start_with('strikes(harmony(0 => scale(:dorian, D4), 4.bars => scale(:major, F4)).blur(0.2).over(A2..A4, around: D3), every: 1.n4, chance: 0.4, gap: 2, seed: 2).synth(voices: 2)')
-      m = MB::Sound.melody(MB::Sound.scale(:dorian, :d).weights.blur(0.1) + MB::Sound.tones(MB::Sound::D3, MB::Sound::F3, MB::Sound::A3) * 2, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 4).loop.tone.sine
-      expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.1) + tones(D3, F3, A3) * 2, 8, range: A3..A5, vary: true, seed: 4).loop.tone.sine')
+      m = MB::Sound.melody(MB::Sound.scale(:dorian, :d).weights.blur(0.1) + MB::Sound.tones(MB::Sound::D3, MB::Sound::F3, MB::Sound::A3) * 2, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 4).loop.hz.sine
+      expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.1) + tones(D3, F3, A3) * 2, 8, range: A3..A5, vary: true, seed: 4).loop.hz.sine')
     end
 
     it 'prints named chord layers back, and loads them (also as harmony keyframes)' do
       MB::Sound.rewind
       w = MB::Sound.scale(:dorian, :d).weights.blur(0.15) + MB::Sound.chord(:min7, root: :d).weights(2, 1, 1.5, 1) * 1.5
-      m = MB::Sound.melody(w, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 4).loop.tone.sine
-      expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.15) + chord(:min7, root: :d).weights(2, 1, 1.5, 1) * 1.5, 8, range: A3..A5, vary: true, seed: 4).loop.tone.sine')
+      m = MB::Sound.melody(w, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 4).loop.hz.sine
+      expect(round_trip(m)).to eq('melody(scale(:dorian, D4).weights.blur(0.15) + chord(:min7, root: :d).weights(2, 1, 1.5, 1) * 1.5, 8, range: A3..A5, vary: true, seed: 4).loop.hz.sine')
 
       MB::Sound.rewind
       chords = MB::Sound.harmony(0 => MB::Sound.chord(:min7, root: MB::Sound::D3), 1.bar => MB::Sound.chord(:'7', root: :g2, inversion: 1), loop: 2.bars, curve: :step)
-      s = MB::Sound.strikes(chords.over(MB::Sound::A2..MB::Sound::A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).tone.sine
-      expect(round_trip(s)).to eq('strikes(harmony(0 => chord(:min7, root: D3), 1.bar => chord(:"7", root: :g2, inversion: 1), curve: :step, loop: 2.bars).over(A2..A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).tone.sine')
+      s = MB::Sound.strikes(chords.over(MB::Sound::A2..MB::Sound::A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).hz.sine
+      expect(round_trip(s)).to eq('strikes(harmony(0 => chord(:min7, root: D3), 1.bar => chord(:"7", root: :g2, inversion: 1), curve: :step, loop: 2.bars).over(A2..A4), every: 1.n8, chance: 0.5, gap: 1, seed: 3).hz.sine')
 
       MB::Sound.rewind
-      m2 = MB::Sound.melody(MB::Sound.scale(:dorian, :d).weights.blur(0.2) + chords * 2, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 5).loop.tone.sine
-      expect(round_trip(m2)).to eq('melody(scale(:dorian, D4).weights.blur(0.2) + harmony(0 => chord(:min7, root: D3), 1.bar => chord(:"7", root: :g2, inversion: 1), curve: :step, loop: 2.bars) * 2, 8, range: A3..A5, vary: true, seed: 5).loop.tone.sine')
+      m2 = MB::Sound.melody(MB::Sound.scale(:dorian, :d).weights.blur(0.2) + chords * 2, 8, range: MB::Sound::A3..MB::Sound::A5, vary: true, seed: 5).loop.hz.sine
+      expect(round_trip(m2)).to eq('melody(scale(:dorian, D4).weights.blur(0.2) + harmony(0 => chord(:min7, root: D3), 1.bar => chord(:"7", root: :g2, inversion: 1), curve: :step, loop: 2.bars) * 2, 8, range: A3..A5, vary: true, seed: 5).loop.hz.sine')
     end
 
     it 'prints generate blocks as their source (loaded with trust: :code)' do
       MB::Sound.rewind
       c = MB::Sound.generate(1.bar, values: [60, 64], seed: 9) { |_c, d| [[0r, 1r / 4, d.pick([60, 64], 0), 0.8]] }.tone
       text = c.to_ruby
-      expect(text).to eq('generate(1.bar, values: [60, 64], seed: 9) { |_c, d| [[0r, 1r / 4, d.pick([60, 64], 0), 0.8]] }.tone')
+      expect(text).to eq('generate(1.bar, values: [60, 64], seed: 9) { |_c, d| [[0r, 1r / 4, d.pick([60, 64], 0), 0.8]] }.hz')
       expect { MB::Sound::GraphIO.load(text) }.to raise_error(MB::Sound::GraphIO::LoadError, /trust: :code/)
       expect { round_trip(c, trust: :code) }.to output(/trust: :code/).to_stderr
     end

@@ -3,8 +3,8 @@
 graph 4,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-18T00:22:07Z",
-  mb_sound: "0.12.0.usegit (51750987)",
+  saved: "2026-10-18T07:25:47Z",
+  mb_sound: "0.12.0.usegit (7ffa245e)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, 700.0, range: 200.0..6000.0, curve: :exp, unit: "Hz"
@@ -168,7 +168,7 @@ track(:tension) { |clip|
 track(:pad, lead: 0.5.attack) { |clip|
   fx = clip.synth(voices: 2) { |v|
     swell = v.amp_env(0.6, 1.0, 0.8, 2, sensitivity: -6.db..0.db, curve: :smooth)
-    bloom = v.filt_env(0.8999999999999999, 2.0, 0.43, 2, depth: 1.584962500721156, curve: [6, 0, -6], shape: :s)
+    bloom = v.filter_env(0.8999999999999999, 2.0, 0.43, 2, depth: 1.584962500721156, curve: [6, 0, -6], shape: :s)
     sig = v.hz
     sig2 = sig.transpose(7)
     ((sig.ramp.at(0.5) + sig.transpose(0.07).ramp.at(0.5) + (sig2.ramp.at(0.5) + sig2.transpose(0.07).ramp.at(0.5)) * 0.7) * swell * 0.35).filter(:lowpass, cutoff: v.cutoff(450.0, env: bloom, keytrack: 0), quality: 0.9)

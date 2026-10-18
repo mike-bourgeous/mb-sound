@@ -88,7 +88,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
         [1r/4, 1r/8, 67, 0.5],
         [1r/2, 31r/64, 64, 0.5],
         length: 1r, loop: true, performed: true
-      ).named(:lead_1).tone.ramp
+      ).named(:lead_1).hz.ramp
     RUBY
     loaded = io.load(doc)
     expect(RecipeHelpers.max_diff(render(graph), render(loaded))).to eq(0)

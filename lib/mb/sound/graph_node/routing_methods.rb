@@ -106,7 +106,7 @@ module MB
         #     bg 220.hz.ramp.at(-6.db).until(2.bars)
         #
         # Alias #for (`220.hz.ramp.for(2.bars)`); recipes and graph documents
-        # print the official name, #until (Recipe::PRINT_AS).
+        # print the official name, #until (Recipe.official_name).
         def until(length)
           MB::Sound::GraphNode::TimeLimit.new(self, length)
         end

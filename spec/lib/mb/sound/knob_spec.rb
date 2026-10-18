@@ -147,7 +147,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
         g = 220.hz.saw.lp4(MB::Sound.knob(:cut), resonance: MB::Sound.knob(:res)) * MB::Sound.knob(:cut).get_sampler
         text = g.to_ruby
         expect(text).not_to include('input')
-        expect(text).to eq('220.hz.saw.lp4(knob(:cut), resonance: knob(:res)) * knob(:cut)')
+        expect(text).to eq('220.hz.ramp.lp4(knob(:cut), resonance: knob(:res)) * knob(:cut)')
       end
     end
 

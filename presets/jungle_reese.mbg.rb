@@ -3,8 +3,8 @@
 graph 4,
   name: "jungle_reese",
   kind: :synth,
-  saved: "2026-10-17T17:16:45Z",
-  mb_sound: "0.12.0.usegit (47598381)",
+  saved: "2026-10-18T07:25:42Z",
+  mb_sound: "0.12.0.usegit (7ffa245e)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :reese from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :reese, cutoff: 16000.0, echo: 0.3 }
@@ -13,7 +13,7 @@ inputs midi: :notes
 synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |v|
   p = v.hz.glide(0.06, legato: true)
   saws = p.unison(2, detune: 16.cents, phase: 0.0) { |c, _i|
-    c.saw.free(true)
+    c.ramp.free(true)
   }
   breath = 1.bar.hz.transpose(-12).lfo.at(260..700)
   body = saws.lp4(breath, resonance: 0.2)

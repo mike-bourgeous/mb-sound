@@ -949,7 +949,7 @@ module MB
 
           # A runtime block's source text, found with Prism.
           def runtime_block(c, block)
-            src = Recipe.block_source(block, c.name)
+            src = Recipe.block_source(block, c.written || c.name)
             if src
               outer = Recipe.outer_locals(block, src)
               return " #{src}" if outer.empty?

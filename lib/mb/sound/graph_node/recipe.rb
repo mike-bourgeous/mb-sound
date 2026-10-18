@@ -36,7 +36,9 @@ module MB
         # MB::Sound.next_seed during the call; +lane+ the synth lane
         # [index, count] the call was made in, :seeded inside another
         # MB::Sound.with_seed block, or nil (see Recipe.lane).
-        Call = Struct.new(:receiver, :name, :args, :kwargs, :block, :block_kind, :invocations, :scope, :seq, :seeds, :lane, :statements)
+        # +written+ is the name the code called when it differs from +name+
+        # (an alias, recorded under its official name; see .official_name).
+        Call = Struct.new(:receiver, :name, :args, :kwargs, :block, :block_kind, :invocations, :scope, :seq, :seeds, :lane, :statements, :written)
 
         # One call of a recorded build block: its arguments, result, the
         # block's local variables when it returned, whether anything inside
@@ -128,12 +130,21 @@ module MB
           },
         }.freeze
 
-        # Aliases recorded under their official name, so recipes and saved
-        # documents print the official name whichever one the code used
-        # (maintainer, 2026-10-17: saved files use the official name unless
-        # it reads drastically different).  Other aliases print as written.
-        PRINT_AS = {
-          for: :until,
+        # Aliases are recorded under their official name (the method they
+        # alias, found through Ruby's method table: .official_name), so
+        # recipes and saved documents print `.until(2)` for `.for(2)`,
+        # `.feedback` for `.fb`, `.ramp` for `.saw` (maintainer, 2026-10-17
+        # and omnibus9's merge review, 2026-10-18: saved files use the
+        # official name).  Old documents still load: their names are
+        # public methods.  These aliases keep the spelling the code used,
+        # with the reason (a guard spec checks every recorded alias is
+        # official or listed here).
+        KEEP_SPELLING = {
+          :* => 'operator: `seq * 3` reads as written (Seq#repeat)',
+          :a! => 'note mark: `!A1` prints through the mark, not a call name',
+          :s! => 'note mark: `~A1` prints through the mark, not a call name',
+          at_rate: 'a setter alias (sample_rate=) that can\'t chain',
+          channels: 'bundle element access (Channels#outputs)',
         }.freeze
 
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
@@ -242,11 +253,10 @@ module MB
           # block to pass on (wrapped for build blocks).  +kind+ overrides
           # BUILD_BLOCKS for the block (:build for a Rack application, whose
           # block is the rack's; see Rack#call).
-          def call(receiver, name, args, kwargs, block, kind: nil)
+          def call(receiver, name, args, kwargs, block, kind: nil, written: nil)
             st = state
             return yield(block) if st.depth > 0 || !@enabled
             take_frame(st.scopes.last)
-            name = PRINT_AS.fetch(name, name)
 
             if SILENT.include?(name)
               st.depth += 1
@@ -270,6 +280,7 @@ module MB
 
             kind = block && (kind || (BUILD_BLOCKS.include?(name) ? :build : :runtime))
             call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, seeds, lane(st))
+            call.written = written if written && written != name
             pass = kind == :build ? wrap_block(block, call) : block
 
             st.depth += 1
@@ -515,6 +526,17 @@ module MB
             kind ? iseq : nil
           end
 
+          # The official name of method +name+ of +target+: the method it
+          # aliases, if it is an alias (the definition at the end of its
+          # super chain, past recorders and generated dispatchers), unless
+          # KEEP_SPELLING lists it; else +name+.
+          def official_name(target, name)
+            return name if KEEP_SPELLING.key?(name)
+            m = target.instance_method(name) rescue (return name)
+            m = m.super_method while m.super_method
+            m.original_name
+          end
+
           # Prepends recorders for +names+ to +target+ (a class or module).
           # +key+ files the names for #wrapped.
           def record(target, names, key: target)
@@ -540,8 +562,10 @@ module MB
                   super(*args, **kwargs, &block)
                 end
               else
+                official = ([first] + aliases).to_h { |n| [n, official_name(target, n)] }
                 mod.define_method(first) do |*args, **kwargs, &block|
-                  Recipe.call(self, __callee__, args, kwargs, block) { |b| super(*args, **kwargs, &b) }
+                  callee = __callee__
+                  Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b| super(*args, **kwargs, &b) }
                 end
               end
               aliases.each { |a| mod.send(:alias_method, a, first) }
