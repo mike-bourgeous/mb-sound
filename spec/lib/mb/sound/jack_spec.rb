@@ -95,6 +95,19 @@ RSpec.describe(MB::Sound::Jack, :aggregate_failures) do
       expect(MB::Sound::Jack.connections(inp.jack_ports[0])).to eq([physical_in[0]])
     end
 
+    it 'names CUE channels cue_1 and cue_2 after the outputs, connected to the next physical ports' do
+      MB::Sound::Jack.open
+      physical_out = MB::Sound::FastAudio.jack_ports(nil, false, MB::Sound::FastAudio::JACK_PORT_IS_INPUT | MB::Sound::FastAudio::JACK_PORT_IS_PHYSICAL)
+
+      out = open(MB::Sound::DeviceOutput.new(channels: 4, cue: 2))
+      expect(out.jack_ports).to eq(%w[out_1 out_2 cue_1 cue_2].map { |p| "#{client}:#{p}" })
+      expect(out.cue_channels).to eq(2)
+      out.jack_ports.each_with_index do |port, i|
+        expect(MB::Sound::Jack.connections(port)).to eq(physical_out[i] ? [physical_out[i]] : [])
+      end
+      out.write(Array.new(4) { Numo::SFloat.zeros(out.buffer_size) })
+    end
+
     it "leaves ports unconnected with OUTPUT_DEVICE=none, and connects by name otherwise" do
       ENV['OUTPUT_DEVICE'] = 'none'
       out = open(MB::Sound::DeviceOutput.new(channels: 2))
