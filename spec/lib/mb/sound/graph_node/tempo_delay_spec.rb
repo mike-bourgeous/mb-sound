@@ -11,7 +11,7 @@ RSpec.describe('Tempo-synced delays') do
 
   # Renders +frames+ frames (in 800-frame buffers) and returns channel 0.
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   def clicks(data)
@@ -95,7 +95,7 @@ RSpec.describe('Tempo-synced delays') do
     it 'accepts Durations and is also available as multitap_delay' do
       l, r = bar_clicks.multitap_delay(1.n8.dotted, 0.25)
       session.add([l, r])
-      data = Array.new(120) { session.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+      data = Array.new(120) { session.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
       expect(clicks(data[0])).to eq([18000])
       expect(clicks(data[1])).to eq([12000])
     end

@@ -17,7 +17,7 @@ RSpec.describe(MB::Sound::Session::Strip) do
       out << session.process_buffer(n)[0].dup
       left -= n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def player(name)
@@ -90,7 +90,7 @@ RSpec.describe(MB::Sound::Session::Strip) do
         out << s.process_buffer(n)[0].dup
         frames -= n
       end
-      out.reduce(:concatenate)
+      SpecBuffers.join(out)
     end
 
     # Plays +graphs+ (name => node) in a new Session, mutes :b after 800
@@ -433,7 +433,7 @@ RSpec.describe(MB::Sound::Session::Strip) do
         left -= n
       end
       s.close
-      out.reduce(:concatenate)
+      SpecBuffers.join(out)
     }
 
     expect(renders[0].abs.max).to be > 40

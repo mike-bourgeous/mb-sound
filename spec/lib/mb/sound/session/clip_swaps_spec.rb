@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
 
   # Renders +frames+ frames (in 800-frame buffers) and returns channel 0.
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   def clips(name)

@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::LaunchPoint) do
   after { session.close }
 
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   # The first sample where a 1.constant added with +opts+ after 4000

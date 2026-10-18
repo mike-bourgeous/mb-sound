@@ -77,5 +77,5 @@ The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms afte
 
 - Node-valued thresholds/ratios (the curve is fixed per node; times and the sidechain already take nodes); crossover frequencies as nodes.
 - Done: the plan-layer op for one-channel companders (`Op::Dynamics`, optimizer-2, 7dae731c; Plan layer above).  Multichannel dynamics, limiters, and crossover bands are still plan boundaries.
-- Mastering is deferred (maintainer, 2026-10-14: "We can defer any further mastering work"; the db-master-1 addendum holds the questions; genres.md).  Master limiter/softclip always on is to be reevaluated in the effects project (maintainer, 2026-10-13).
+- Mastering: done as presets in mastering-1/2 (2761e83a; `master :club`/`:streaming`/`:quiet`/`:vinyl`, targets, rider; master_effects.md), which ended the 2026-10-14 deferral.  Still open: whether a master limiter/softclip should be on by default (maintainer, 2026-10-13: reevaluate in the effects project).
 - Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30.db, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).

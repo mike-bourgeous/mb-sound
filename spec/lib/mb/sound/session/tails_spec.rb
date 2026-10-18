@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::Session::Tails) do
       out << session.process_buffer(n)[0].dup
       left -= n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def player(name)

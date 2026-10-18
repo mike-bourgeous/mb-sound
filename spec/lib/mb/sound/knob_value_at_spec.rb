@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob::ValueAt) do
       out << session.process_buffer(n)[0].dup
       done += n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   let(:session) { new_session }

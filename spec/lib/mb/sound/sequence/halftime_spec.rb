@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#halftime and #doubletime') do
 
     [800, 367].each do |size|
       trig = h.trigger(transport: transport)
-      data = Array.new((4 * 96000) / size + 1) { trig.sample(size).dup }.reduce(:concatenate)[0...(4 * 96000)]
+      data = SpecBuffers.join(Array.new((4 * 96000) / size + 1) { trig.sample(size).dup })[0...(4 * 96000)]
       hits = data.to_a.each_with_index.reject { |v, _| v == 0 }.map(&:last)
       # The riff is half a bar (eighth, eighth, quarter): in half time a bar
       # of quarter, quarter, half, looping every bar

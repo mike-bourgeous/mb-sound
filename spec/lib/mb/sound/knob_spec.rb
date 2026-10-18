@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       out << session.process_buffer(n)[0].dup
       done += n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def within(session, &block)
@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       out << node.sample(n).dup
       done += n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   describe 'Spec' do
@@ -94,8 +94,8 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
         ra << a.sample(n).dup
         rb << b.sample(n).dup
       end
-      expect(ra.reduce(:concatenate)).to eq(rb.reduce(:concatenate))
-      expect(ra.reduce(:concatenate)[0...110]).to eq(Numo::SFloat.zeros(10).concatenate(Numo::SFloat.new(100).seq(1) / 100))
+      expect(SpecBuffers.join(ra)).to eq(SpecBuffers.join(rb))
+      expect(SpecBuffers.join(ra)[0...110]).to eq(Numo::SFloat.zeros(10).concatenate(Numo::SFloat.new(100).seq(1) / 100))
 
       # A reader made later starts with the block being read
       a.sample(10)

@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
 
     # The channels written so far, joined.
     def channels_written
-      @written.transpose.map { |c| c.reduce(:concatenate) }
+      @written.transpose.map { |c| SpecBuffers.join(c) }
     end
   end
 

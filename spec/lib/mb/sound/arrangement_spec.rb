@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::Arrangement) do
   end
 
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   # Returns [sample index, value] for each change in +data+.
@@ -211,7 +211,7 @@ RSpec.describe(MB::Sound::Arrangement) do
       d << session.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 1.5
       set.go(:pb)
       d << session.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 3
-      changes(d.reduce(:concatenate)).first(6)
+      changes(SpecBuffers.join(d)).first(6)
     end
 
     it 'plays a track early, launching and swapping early, the same at any buffer size' do
@@ -248,7 +248,7 @@ RSpec.describe(MB::Sound::Arrangement) do
         a.go(:pa, in: 1)
         d = []
         d << s.process_buffer(size)[0].dup while d.sum(&:length) < 96000 * 2
-        d = d.reduce(:concatenate)
+        d = SpecBuffers.join(d)
         expect(a.ahead(:p)).to eq(1/16r) # half of 0.25 s at 120 BPM
         expect(a.track_info[:p]).to include('ahead 125 ms')
         [(1...d.length).find { |i| d[i] != 0 }, d[0...96000 * 2].dup]
@@ -366,7 +366,7 @@ RSpec.describe(MB::Sound::Arrangement) do
         a.scene(:y, n: MB::Sound.seq(MB::Sound::G3).n8.loop)
         a.warm_up if warm
         MB::Sound::Session.with_context(session: s) { a.play_form(MB::Sound::Form.build { x 1; y 1 }, warm_up: false) }
-        data = Array.new(240) { s.process_buffer[0].dup }.reduce(:concatenate)
+        data = SpecBuffers.join(Array.new(240) { s.process_buffer[0].dup })
         s.close
         data
       }

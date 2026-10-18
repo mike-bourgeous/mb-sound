@@ -9,7 +9,7 @@ RSpec.describe(MB::Sound::Session) do
   def run(frames)
     bufs = []
     (frames / 800).times { bufs << session.process_buffer[0].dup }
-    bufs.reduce(:concatenate)
+    SpecBuffers.join(bufs)
   end
 
   def nonzero(data)
@@ -76,7 +76,7 @@ RSpec.describe(MB::Sound::Session) do
     it 'opens files at the session rate' do
       s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), transport: transport, realtime: false, master_gain: 1)
       s.add(sine_file)
-      data = Array.new(56) { s.process_buffer[0].dup }.reduce(:concatenate)
+      data = SpecBuffers.join(Array.new(56) { s.process_buffer[0].dup })
       expect(data[0...44100]).to eq(MB::Sound.read(sine_file, sample_rate: 44100)[0])
     ensure
       s&.close
@@ -102,7 +102,7 @@ RSpec.describe(MB::Sound::Session) do
         s.add(0.constant)
         5.times { s.process_buffer }
         s.add(10.constant, on: on)
-        data = Array.new(250) { s.process_buffer[0].dup }.reduce(:concatenate)
+        data = SpecBuffers.join(Array.new(250) { s.process_buffer[0].dup })
         expect(nonzero(data).first).to eq(expected), "launch point #{on.inspect}"
       end
     end

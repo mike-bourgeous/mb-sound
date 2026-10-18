@@ -10,7 +10,9 @@ RSpec.describe('bin/songs/night_bus_capture.rb') do
     old_stdout = $stdout
     $stdout = out
     begin
-      MB::Sound.render(path, bars: 15) do
+      # (loudness: false: one pass; the song's mastering preset would render
+      # it twice to reach its loudness target, which mastering_spec covers)
+      MB::Sound.render(path, bars: 15, loudness: false) do
         MB::Sound.night_bus_capture
         session = MB::Sound::Session.current
       end

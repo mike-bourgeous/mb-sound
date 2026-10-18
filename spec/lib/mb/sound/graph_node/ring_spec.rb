@@ -16,7 +16,7 @@ RSpec.describe('ring: :all') do
       out << b.dup
       raise 'never ended' if out.length > 100_000
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   it 'rings a sum until its last input ends by default, and ends with its first after ring(:first)' do
