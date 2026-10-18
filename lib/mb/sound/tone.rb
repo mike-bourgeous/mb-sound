@@ -1143,6 +1143,7 @@ module MB
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
+        GraphNode::ArithmeticMethods.check_at(amplitude) unless @in_or_at
 
         configure do
           @musical_time = durations == 2

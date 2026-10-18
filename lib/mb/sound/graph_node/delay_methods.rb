@@ -85,6 +85,7 @@ module MB
         # so pipeline delays cost about one more delay.
         def delay(time = nil, seconds: nil, smooth: nil, smoothing: nil, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, ring_out: true, &insert)
           time = DelayMethods.seconds_keyword(time, seconds)
+          DelayMethods.check_plain_time(time)
           smoothing = DelayMethods.smooth_keyword(smooth, smoothing, true)
 
           if insert
@@ -233,13 +234,6 @@ module MB
           end
         end
 
-        # The library's own directory, skipped when looking for call sites.
-        LIB_DIR = File.expand_path('../../..', __dir__) + File::SEPARATOR
-        private_constant :LIB_DIR
-
-        @warned_sites = {}
-        @warned_lock = Mutex.new
-
         # The delay time from #delay's +time+ and its deprecated +:seconds+
         # keyword (maintainer decision 2026-10-13; research-api-surface
         # R2): +seconds+ warns once per call site (the first caller outside
@@ -250,15 +244,22 @@ module MB
           raise ArgumentError, 'Pass a delay time or seconds:, not more than one' if time
           return seconds if Thread.current[:mb_sound_quiet_seconds]
 
-          site = caller_locations(1).find { |l|
-            path = l.absolute_path || l.path
-            !path.start_with?(LIB_DIR) && !path.start_with?('<internal:')
-          }
-          where = site ? "#{site.path}:#{site.lineno}" : '(unknown)'
-          first = @warned_lock.synchronize { @warned_sites[where] ? false : (@warned_sites[where] = true) }
-          warn "#{where}: warning: delay(seconds: t) is deprecated; write delay(t) (seconds, or any length like 250.ms)" if first
-
+          Internal.warn_once_per_site(:delay_seconds, 'delay(seconds: t) is deprecated; write delay(t) (seconds, or any length like 250.ms)')
           seconds
+        end
+
+        # Plain numbers longer than this are probably meant as samples or
+        # milliseconds (see .check_plain_time).
+        LONG_PLAIN_SECONDS = 10
+
+        # Warns once per calling line for a plain-number delay time over
+        # LONG_PLAIN_SECONDS (ux-fix-1, maintainer decision 2026-10-18:
+        # plain numbers stay seconds, but `delay(96)` was a 96-second delay
+        # line, silently).
+        def self.check_plain_time(time)
+          return unless [Integer, Float, Rational].include?(time.class) && time > LONG_PLAIN_SECONDS
+
+          Internal.warn_once_per_site(:delay_long, "delay(#{time}) is #{time} seconds (plain numbers are seconds); for samples write delay(#{time}.samples), for milliseconds delay(#{time}.ms)")
         end
 
         # Runs the block without .seconds_keyword's deprecation warning

@@ -1,6 +1,23 @@
 # GraphNode#at on any node (ArithmeticMethods): numbers and nodes multiply,
 # Ranges map -1..1 onto them as Tone#at does for full-scale signals.
 RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
+  # ux-fix-1 item 12 (maintainer decision): a bare number below -1 still
+  # multiplies (control signals), with one warning per calling line
+  it 'warns once per line for at(-20), suggesting -20.db or a range' do
+    line = __LINE__ + 3
+    result = nil
+    expect {
+      2.times { 220.hz.ramp.at(-20); result = 220.hz.ramp.lp4(800).at(-20) }
+    }.to output(/\A\S*#{Regexp.escape(File.basename(__FILE__))}:#{line}: warning: at\(-20\) multiplies by -20 \(\+26 dB, inverted\); for a level write at\(-20\.db\), for a range at\(-20\.\.20\)\n\z/).to_stderr
+    expect { 220.hz.ramp.at(-1); 220.hz.ramp.at(-20.db); 220.hz.ramp.lp4(800).at(-0.5); 220.hz.ramp.at(-3..3) }.not_to output.to_stderr
+    expect(result).to be_a(MB::Sound::GraphNode::Multiplier)
+  end
+
+  it 'warns once per line for a plain-number delay over 10 seconds' do
+    expect { 2.times { 220.hz.ramp.delay(96) } }.to output(/warning: delay\(96\) is 96 seconds \(plain numbers are seconds\); for samples write delay\(96\.samples\), for milliseconds delay\(96\.ms\)\n\z/).to_stderr
+    expect { 220.hz.ramp.delay(2); 220.hz.ramp.delay(96.samples) }.not_to output.to_stderr
+  end
+
   let(:src) { PlanSpecHelpers::Source }
 
   # A non-Tone node with known samples.

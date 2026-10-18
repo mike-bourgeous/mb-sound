@@ -84,11 +84,27 @@ module MB
             at_error("#at takes a number, a graph node, or a Range of numbers, not a Duration (#{amplitude})")
 
           when Numeric, GraphNode
+            ArithmeticMethods.check_at(amplitude)
             self * amplitude
 
           else
             at_error("#at takes a number, a graph node, or a Range of numbers (got #{amplitude.inspect})")
           end
+        end
+
+        # Warns once per calling line when #at gets a bare number below -1
+        # (ux-fix-1, maintainer decision 2026-10-18): `at(-20)` multiplies
+        # by -20 (+26 dB, inverted), usually a typo for `at(-20.db)`, but it
+        # is valid for control signals (a frequency input), so it isn't an
+        # error.  Decibels and gains from -1 to 1 pass silently.
+        def self.check_at(amplitude)
+          return unless amplitude.is_a?(Numeric) && !amplitude.is_a?(Decibels) && amplitude.real? && amplitude < -1
+
+          n = amplitude.to_f
+          text = n == n.round ? n.round.to_s : n.to_s
+          Internal.warn_once_per_site(:at_negative,
+            "at(#{text}) multiplies by #{text} (#{format('%+.0f', 20 * Math.log10(n.abs))} dB, inverted); " \
+            "for a level write at(#{text}.db), for a range at(#{text}..#{text.delete_prefix('-')})")
         end
 
         # Divides incoming data by +other+, which may be a Numeric or another
