@@ -562,7 +562,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   describe '#named?' do
     it 'returns false before and true after a node is given a name' do
       n = 50.hz.proc {}
-      expect(n.graph_node_name).not_to be_nil # make sure named? and graph_node_name are independent
+      # (ux-fix-2: a ProcNode's block location is its source_location, not its name)
+      expect(n.source_location).to match(/graph_node_spec\.rb:\d+\z/)
+      expect(n.graph_node_name).to be_nil
       expect(n.named?).to eq(false)
       n.named('test')
       expect(n.named?).to eq(true)

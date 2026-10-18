@@ -54,4 +54,28 @@ RSpec.describe(MB::Sound::GraphNode::Inspect) do
     end
     expect(seen).to be > 200
   end
+
+  # ux-fix-2: ProcNodes were named after their block's source location, and
+  # names are shown as values, so `play C4.saw` printed
+  # `freq=/.../lib/mb/sound/tuning.rb:87`.  Descriptions shown to users
+  # (to_s, inspect, play/players descriptions) never hold file locations.
+  it 'never shows a source location in any graph sweep node\'s descriptions' do
+    location = /\.rb:\d+|#{Regexp.escape(MB::Sound::GraphNode::ProcNode::ROOT)}/
+    seen = 0
+    GraphSweep.factories.each do |name, factory|
+      MB::Sound.seed(1)
+      graph = factory.call(GraphSweep::Context.new)
+      nodes = graph.respond_to?(:graph) ? graph.graph : [graph]
+      texts = ([graph] + nodes).flat_map { |n| [n.to_s, n.inspect] }
+      texts << MB::Sound::Playable.describe(graph)
+      texts.each do |text|
+        seen += 1
+        expect(text).not_to match(location), "#{name}: #{text[0, 300]}"
+      end
+    end
+    expect(seen).to be > 400
+
+    expect(MB::Sound::C4.saw.to_s).to match(/ freq=C4 /)
+    expect(MB::Sound::C4.saw.fm(MB::Sound::C5.sine.at(100)).to_s).to match(/ freq=\(C4 \+ /)
+  end
 end

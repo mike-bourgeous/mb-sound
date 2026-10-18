@@ -71,6 +71,11 @@ module MB
         end
       end
 
+      # Raised when OUTPUT_DEVICE/INPUT_DEVICE (or +device:+) names no
+      # device; the message lists the devices.  Scripts print it without a
+      # backtrace (ScriptingMethods#script_errors; ux-fix-2).
+      class NoSuchDevice < ArgumentError; end
+
       # Runs the block (a FastAudio device open) with stderr captured (see
       # Internal.quiet_stderr), raising Unavailable if it fails.  +kind+ is
       # :output or :input.
@@ -145,7 +150,7 @@ module MB
           found = list.find { |d| d[:name].downcase.include?(device.to_s.downcase) }
           if found.nil?
             names = list.map { |d| "  #{d[:index]}: #{d[:name]}" }.join("\n")
-            raise ArgumentError, "No #{kind == :capture ? 'input' : 'output'} device matches #{device.inspect}.  Devices:\n#{names}"
+            raise NoSuchDevice, "No #{kind == :capture ? 'input' : 'output'} device matches #{device.inspect}.  Devices:\n#{names}"
           end
 
           found[:index]

@@ -38,8 +38,36 @@ RSpec.describe(MB::Sound::ScriptRunner, 'render windows') do
   it 'refuses --seek without --from and --to with --bars' do
     out = tmp_path('song.flac')
     r = MB::Sound::ScriptRunner.new(:song, {}, argv: [out, '-q', '--seek'], script: 'bin/example.rb')
-    expect { r.run_song(bars: 2) { song } }.to raise_error(ArgumentError, /--seek goes with --from/)
+    expect { r.run_song(bars: 2) { song } }.to raise_error(MB::Sound::ScriptRunner::InputError, /--seek goes with --from/)
     r = MB::Sound::ScriptRunner.new(:song, {}, argv: [out, '-q', '--to', '3', '--bars', '1'], script: 'bin/example.rb')
-    expect { r.run_song(bars: 2) { song } }.to raise_error(ArgumentError, /--to or --bars/)
+    expect { r.run_song(bars: 2) { song } }.to raise_error(MB::Sound::ScriptRunner::InputError, /--to or --bars/)
+    r = MB::Sound::ScriptRunner.new(:song, {}, argv: [out, '-q', '--from', '0'], script: 'bin/example.rb')
+    expect { r.run_song(bars: 2) { raise 'not built' } }.to raise_error(MB::Sound::ScriptRunner::InputError, '--from is a section, label, or marker name, or a bar number from 1 (got 0)')
+  end
+
+  # ux-fix-2: a misspelled --from was checked after the form started (live:
+  # after its 2 s warm-up), with different messages live and in renders.
+  it 'refuses a --from or --to name the form lacks as the form starts, with one message live and in renders' do
+    out = tmp_path('song.flac')
+    messages = [['-q'], [out, '-q']].flat_map { |argv|
+      ['--from', '--to'].map { |opt|
+        r = MB::Sound::ScriptRunner.new(:song, {}, argv: argv + [opt, 'drp'], script: 'bin/example.rb')
+        after_form = false
+        message = nil
+        expect { r.run_song(bars: 2) { song; after_form = true } }.to raise_error(MB::Sound::ScriptRunner::InputError) { |e|
+          message = e.message
+          expect(MB::Sound::ErrorFormat.message_and_suggestions(e).last).to eq([':drop'])
+        }
+        expect(after_form).to eq(false)
+        expect(MB::Sound::Session.current.arrangement.playback).to be_nil
+        expect(MB::Sound::Session.current.arrangement.instance_variable_get(:@form_checks)).to be_empty
+        message.sub(opt, 'OPT')
+      }
+    }
+    expect(messages.uniq.length).to eq(1)
+    expect(messages.first).to start_with('OPT no section, label, or marker :drp (sections and labels: :intro, :gap, :drop, :outro)')
+    expect(File.exist?(out)).to eq(false) # no empty file left behind
+  ensure
+    MB::Sound.bpm 120
   end
 end

@@ -383,12 +383,15 @@ module MB
       # after +bars+ or when the song ends).  --graphviz draws the graph as
       # it is at the start (players started later by #at_bar are missing).
       def run_song(bars: nil, &block)
+        raise InputError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
+        raise InputError, '--seek goes with --from' if @options[:seek] && !@options[:from]
+        raise InputError, '--take records a whole run (not with --from or --to)' if @options[:take] && (@options[:from] || @options[:to])
+        window_targets.each { |what, target| check_window_target(Session.current, target, what) unless target.is_a?(Symbol) }
+        raise InputError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems] && !@options[:output]
+        raise InputError, '--report needs a render (-o FILE or an output file name)' if @options[:report] && !@options[:output]
+
         print_params
         open_song_graphviz(&block) if @options[:graphviz]
-        raise ArgumentError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
-        raise ArgumentError, '--seek goes with --from' if @options[:seek] && !@options[:from]
-
-        raise ArgumentError, '--take records a whole run (not with --from or --to)' if @options[:take] && (@options[:from] || @options[:to])
 
         if @options[:output]
           window = {}
@@ -411,9 +414,6 @@ module MB
           puts "Stems in #{@options[:stems]}" if @options[:stems]
           save_take
         else
-          raise ArgumentError, '--stems needs a render (-o FILE or an output file name)' if @options[:stems]
-          raise ArgumentError, '--report needs a render (-o FILE or an output file name)' if @options[:report]
-
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           Session.current.exact_lanes = true if @options[:take]
           if @options.key?(:master)
@@ -453,12 +453,41 @@ module MB
       end
 
       # Arranges a song with +block+ on the current session, at the --bpm
-      # tempo if given.
+      # tempo if given.  --from/--to names are checked against the song's
+      # form as it starts (before its warm-up; Arrangement#before_form),
+      # and against the markers once the block has run, so live and render
+      # runs print the same one line (InputError) before anything plays.
       def arrange_song(&block)
         return record_song_take(&block) if @options[:take]
 
         MB::Sound.transport.override_bpm(@options[:bpm]) if @options[:bpm]
-        block.call(@params)
+        session = Session.current
+        names = window_targets.select { |_, target| target.is_a?(Symbol) }
+        return block.call(@params) if names.empty?
+
+        check = session.arrangement.before_form { |form|
+          names.each { |what, target| check_window_target(session, target, what, form: form) }
+        }
+        begin
+          result = block.call(@params)
+        ensure
+          session.arrangement.remove_before_form(check)
+        end
+        names.each { |what, target| check_window_target(session, target, what) }
+        result
+      end
+
+      # The --from and --to targets given, as { '--from' => target }.
+      def window_targets
+        { '--from' => @options[:from], '--to' => @options[:to] }.compact
+      end
+
+      # RenderWindow.check_target, raising an InputError (one line from
+      # ScriptingMethods, exit 2) for a target the song doesn't have.
+      def check_window_target(session, target, what, form: nil)
+        RenderWindow.check_target(session, target, what, form: form)
+      rescue RenderWindow::TargetError => e
+        raise InputError, e.message
       end
 
       # --take: starts a Take on the current session and arranges the song

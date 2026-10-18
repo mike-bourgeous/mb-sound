@@ -88,6 +88,13 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect { runner(:synth, ['-o', 'y.flac', 'Keystation']).send(:check_inputs) }.not_to raise_error
     end
 
+    it 'exits 2 with one line from a plain script (MB::Sound.script) when the sound card is missing' do
+      out = `OUTPUT_TYPE=device OUTPUT_DEVICE=no-such-device-ux-fix-2 bin/play.rb spec/test_data/arp_a7.flac 2>&1`
+      expect($?.exitstatus).to eq(2)
+      expect(out).to start_with(%Q{play.rb: No output device matches "no-such-device-ux-fix-2".  Devices:\n})
+      expect(out).not_to include('from ')
+    end
+
     it 'exits 2 with one line from a real script' do
       out = `bin/effects/tape_delay.rb nosuch.flac -o #{tmp_path('x.flac')} 2>&1`
       expect($?.exitstatus).to eq(2)

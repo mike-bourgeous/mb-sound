@@ -105,7 +105,8 @@ module MB
       #     }
       def script(args: nil, **params, &block)
         raise ArgumentError, 'Pass a block that runs the script' unless block
-        runner(:script, params, args: args).run_script(&block)
+        r = runner(:script, params, args: args)
+        script_errors { r.run_script(&block) }
       end
 
       private
@@ -129,12 +130,21 @@ module MB
         script_input_error(script, e)
       end
 
+      # Errors #script_errors prints as one line (exit status 2): problems
+      # with the script's inputs or the sound card, not bugs.
+      def self.script_errors
+        [
+          ScriptRunner::InputError, RenderWindow::TargetError,
+          DeviceOutput::Unavailable, DeviceOutput::NoSuchDevice,
+        ]
+      end
+
       # Runs the block (a script runner's run), printing errors about the
       # script's inputs or the sound card as one line and exiting with
       # status 2 (ux-fix-1: these were backtraces and walls of ALSA text).
       def script_errors(script = $0)
         yield
-      rescue ScriptRunner::InputError, DeviceOutput::Unavailable, RenderWindow::TargetError => e
+      rescue *ScriptingMethods.script_errors => e
         script_input_error(script, e)
       end
 

@@ -737,21 +737,22 @@ module MB
       # step.  Branches made while building the lanes but read by no lane
       # (e.g. a `band * 0.5` left unused in the voice block) don't count:
       # reading for them would run the lane's nodes while it sleeps,
-      # changing its sound.  Cached until any Tee's branches change.
+      # changing its sound.  Cached until one of these Tees gains or loses
+      # a branch (GraphNode::BranchWatch).
       def boundary(idx)
         own, tee_branches, knobs = @boundary[idx]
         return own if tee_branches.empty? && knobs.empty?
 
         cache = @boundary_cache[idx]
-        changes = GraphNode::Tee.branch_changes
-        return cache[1] if cache && cache[0] == changes
+        return cache[1] if cache && cache[0].current?
 
+        watch = GraphNode::BranchWatch.new(tee_branches.map(&:owner_tee))
         set = @lane_sets[idx]
         shared = tee_branches.select { |n|
           n.owner_tee.branches.any? { |b| !set[b.__id__] && !unread_branch?(b) }
         }
         list = own + shared + knobs
-        @boundary_cache[idx] = [changes, list]
+        @boundary_cache[idx] = [watch, list]
         list
       end
 

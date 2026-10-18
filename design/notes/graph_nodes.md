@@ -26,7 +26,7 @@ Measure graph cost with `bin/graph_profile.rb [-n 32,128,800] [--profile] [--pla
 
 ## Inspecting nodes (ux-fix-1, 2026-10-18)
 
-`GraphNode::Inspect` (`graph_node/inspect.rb`, included by Traversable and MultiOutput, so every node, bundle, Tee, and ChannelMixer; also Notes) makes `#inspect` and `#pretty_print` one line, `#<Type code>`, from the node's recipe (to_ruby joined onto one line, at most 200 characters), else `#<Type/name>`; `#inspect_full` is Ruby's old dump (2,000,000 characters for one delay: Pry opened a pager).  `inspect_spec.rb` inspects every node of every graph sweep graph.  Session prints `#<Session realtime, 3 players, 120 bpm>`.
+`GraphNode::Inspect` (`graph_node/inspect.rb`, included by Traversable and MultiOutput, so every node, bundle, Tee, and ChannelMixer; also Notes) makes `#inspect` and `#pretty_print` one line, `#<Type code>`, from the node's recipe (to_ruby joined onto one line, at most 200 characters), else `#<Type/name>`; `#inspect_full` is Ruby's old dump (2,000,000 characters for one delay: Pry opened a pager).  `inspect_spec.rb` inspects every node of every graph sweep graph, and checks that no node's `to_s`/`inspect` or Playable description holds a source location (ux-fix-2: ProcNodes were named after their block's location, and names show as values, so `play C4.saw` printed `freq=/.../tuning.rb:87`; the location is now `ProcNode#source_location`, in graphviz only, and Tuning#freq nodes display their note, `freq=C4`, through `ProcNode#display_label`).  Session prints `#<Session realtime, 3 players, 120 bpm>`.
 
 ## ProcNode uses and dedicated nodes (omnibus3, 2026-10-11)
 

@@ -45,6 +45,21 @@ RSpec.describe(MB::Sound::RenderProgress) do
     }.to output(/\A(?:(?!the drop).)*the drop\n(?:(?!the drop).)*\z/m).to_stdout
   end
 
+  # ux-fix-2: the progress line seemed to restart in the mastering pass
+  it "labels a targeted render's two passes" do
+    labels = []
+    allow(described_class).to receive(:new).and_wrap_original { |m, *args, **kwargs| labels << kwargs[:label]; m.call(*args, **kwargs) }
+    path = tmp_path('passes.flac')
+    expect {
+      MB::Sound.render(path, bars: 1, master: :club) { MB::Sound.bg 110.hz.saw.at(-12.db) }
+    }.to output(/mastering :club: /).to_stdout
+    expect(labels).to eq(['passes.flac (pass 1/2, measuring)', 'passes.flac (pass 2/2, mastered)'])
+
+    labels.clear
+    MB::Sound.render(path, bars: 1, overwrite: true) { MB::Sound.bg 110.hz.saw.at(-12.db) }
+    expect(labels).to eq(['passes.flac'])
+  end
+
   it 'mentions the faster seek before a long pre-roll, and draws no progress into a pipe' do
     path = tmp_path('late.flac')
     expect {

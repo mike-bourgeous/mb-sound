@@ -173,6 +173,7 @@ module MB
         # a Multiplier's constant, a Mixer gain) only recompiles the region
         # computing +node+.
         def changed(node, structure: true)
+          GraphNode.structure_changed(node) if structure
           list = watch[node]
           return nil unless list
 

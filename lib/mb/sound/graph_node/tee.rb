@@ -387,6 +387,12 @@ module MB
 
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
+
+        # How many times this Tee gained or lost a branch (only grows): a
+        # cache derived from #branches stays valid while the versions of
+        # the Tees it read are unchanged (see BranchWatch), whatever other
+        # Tees do meanwhile (Tee.branch_changes counts every Tee's).
+        attr_reader :branch_version
         alias outputs branches
 
         def_delegators :@source, :sample_rate, :sample_rate=
@@ -407,6 +413,7 @@ module MB
           @cbuf_size = circular_buffer_size
 
           @branch_index = 0
+          @branch_version = 0 # (see #branch_version)
           @branches = []
           n.times { add_branch }
 
@@ -431,6 +438,7 @@ module MB
           branch.frame = @frame || 0
 
           @branch_index += 1
+          @branch_version += 1
           Tee.branch_changes += 1
 
           @branches << branch
@@ -446,6 +454,7 @@ module MB
         # For internal use by Branch#destroy.
         def remove_branch(b)
           @branches.delete(b)
+          @branch_version += 1
           Tee.branch_changes += 1
           Plan.changed(self)
           Plan.changed(@source)

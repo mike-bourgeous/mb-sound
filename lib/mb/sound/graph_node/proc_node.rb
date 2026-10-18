@@ -10,6 +10,23 @@ module MB
 
         attr_reader :sources, :source, :callers
 
+        # Where the block was written ("lib/mb/sound/tuning.rb:87" inside
+        # mb-sound, else the full path), or nil.
+        attr_reader :source_location
+
+        # The root of the mb-sound checkout or gem (paths inside it are shown
+        # relative to it).
+        ROOT = File.expand_path('../../../..', __dir__) + File::SEPARATOR
+
+        # A block's source_location as "file:line", relative to ROOT when
+        # inside it.
+        def self.short_location(location)
+          return nil unless location
+
+          file, line = location
+          "#{file.delete_prefix(ROOT)}:#{line}"
+        end
+
         # Initializes a graph node that calls the +block+ with the result of the
         # +source+'s sample method when this object's #sample method is called.
         #
@@ -21,7 +38,10 @@ module MB
         # +:type_name+ is stored in @node_type_name for display in e.g.
         # GraphViz graphs.  See GraphNode#graphviz.
         def initialize(source, extra_sources: {}, sample_rate: nil, type_name: nil, &block)
-          @graph_node_name = block.source_location&.join(':')&.rpartition('mb-sound')&.last
+          # Where the block was written, for graphviz and debugging; not the
+          # node's name (ux-fix-2: names are shown as values, so `play C4`
+          # printed freq=/.../lib/mb/sound/tuning.rb:87)
+          @source_location = ProcNode.short_location(block.source_location)
           @node_type_name = "ProcNode (#{type_name})"
 
           source = source.get_sampler if source.respond_to?(:sample)
@@ -51,6 +71,25 @@ module MB
           @operator = nil
           @plan_operator = nil
           @plan_tuning = nil
+        end
+
+        # What GraphNode#make_source_name shows for this node when it isn't
+        # named: the note for Tuning#freq of a constant note number (C4),
+        # hz(...) of other note numbers; nil for other blocks (shown by id).
+        def display_label
+          return nil unless @plan_operator == :note_freq
+
+          src = climb_tee_tree(@source)
+          if src.is_a?(Constant) && src.constant.is_a?(Numeric) && src.constant.real? && src.constant == src.constant.round
+            Note.new(src.constant.round).to_s
+          else
+            "hz(#{make_source_name(src)})"
+          end
+        end
+
+        # See GraphNode#to_s_graphviz (adds where the block was written).
+        def to_s_graphviz
+          @source_location ? "#{super}#{@source_location}\n" : super
         end
 
         # Calls the block given to the constructor with the input data and

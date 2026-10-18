@@ -189,6 +189,33 @@ module MB
       # printed 994 such warnings for one #graph).  Graphs whose #sources
       # form a loop (feedback goes through #feedback_sources instead) fall
       # back to the path walk.
+      # Structural changes (Plan.changed: inputs added or removed, a Tee's
+      # branches) to nodes of graphs whose node sets someone caches (see
+      # .watch_structure; Session::Strip#asleep_reads): a count that only
+      # grows.  Changes to other nodes, e.g. graphs being built for the
+      # next scene, don't count, so those caches stay valid while the
+      # scheduler thread builds (ux-fix-2).
+      def self.structure_changes
+        @structure_changes
+      end
+
+      # Counts structural changes to +nodes+ from now on (see
+      # .structure_changes).  Held weakly.
+      def self.watch_structure(nodes)
+        watched = @structure_watch
+        nodes.each { |n| watched[n] = true unless n.is_a?(Numeric) }
+        nil
+      end
+
+      # Called by Plan.changed for a structural change to +node+.
+      def self.structure_changed(node)
+        @structure_changes += 1 if @structure_watch.key?(node)
+        nil
+      end
+
+      @structure_changes = 0
+      @structure_watch = ObjectSpace::WeakMap.new
+
       def self.graph(node, include_tees: true)
         root = graph_key(node, include_tees)
 
@@ -403,6 +430,9 @@ module MB
         when s.respond_to?(:arithmetic_string)
           parenthesize(s.arithmetic_string(separator))
 
+        when s.respond_to?(:display_label) && s.display_label
+          s.display_label
+
         when s.respond_to?(:name_or_id)
           s.name_or_id
 
@@ -460,6 +490,7 @@ require_relative 'graph_node/sounding'
 require_relative 'graph_node/chorus_nodes'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
+require_relative 'graph_node/branch_watch'
 require_relative 'graph_node/multitap_delay'
 require_relative 'graph_node/feedback_loop'
 require_relative 'graph_node/unary_function'

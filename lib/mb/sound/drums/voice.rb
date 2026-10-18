@@ -363,14 +363,14 @@ module MB
         # building the voice's graph and read by nothing in it (e.g. an
         # unused `band * 0.5`; see GraphNode::Tee.collect_branches) don't
         # count: reading for them would run the voice's nodes while it
-        # sleeps.  Decided when skipping, and cached until any Tee's
-        # branches change.
+        # sleeps.  Decided when skipping, and cached until one of its Tees'
+        # branches change (GraphNode::BranchWatch).
         def boundary
           return [] unless @skippable
 
-          changes = GraphNode::Tee.branch_changes
-          return @boundary_cache[1] if @boundary_cache && @boundary_cache[0] == changes
+          return @boundary_cache[1] if @boundary_cache && @boundary_cache[0].current?
 
+          watch = GraphNode::BranchWatch.new(@tee_branches.map(&:owner_tee))
           set = @set
           built = @built
           shared = @tee_branches.select { |n|
@@ -387,7 +387,7 @@ module MB
           notes_nodes.reject! { |n| upstream[n.__id__] }
 
           list = shared + notes_nodes
-          @boundary_cache = [changes, list]
+          @boundary_cache = [watch, list]
           list
         end
       end
