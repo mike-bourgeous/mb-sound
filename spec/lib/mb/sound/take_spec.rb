@@ -217,6 +217,44 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays clip launches and tweaks (the clip matrix) bit for bit' do
+    lines = {
+      0 => [
+        'a = seq(C3, E3, G3, B3).n8.loop.named(:riff_a)',
+        'b = seq(A2, C3, E3, G3).n8.loop',
+        'track(:bass, q: 1) { |c| c.number * 0.01 }',
+        'scene :one, bass: a',
+        'scene :two, bass: b',
+        'go :one, at: :now',
+      ],
+      97 => ['launch :bass, 1'],
+      230 => ['tweak :bass, transpose: 5'],
+      330 => ['tweak :bass, :reverse, on: :beat'],
+      420 => ['launch :bass, :riff_a', 'undo'],
+      500 => ['tweak :bass, :double'],
+      560 => ['launch :bass, 3, in: 1.beat'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    680.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = out.reduce(:concatenate)
+    expect(live.abs.max).to be > 0.1
+    expect(session.arrangement.slots(:bass).map(&:name)).to eq([:riff_a, nil, :"bass#1/t+5", :"bass#1/t+5/rev", :"bass#1/t+5/rev/dbl"])
+
+    r = t.replay
+    [[800], [367, 368]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays buses, sends, feeds, bus readers, bus mutes and solos, and undo bit for bit' do
     lines = {
       0 => [

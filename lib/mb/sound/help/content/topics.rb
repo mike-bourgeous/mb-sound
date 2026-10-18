@@ -569,8 +569,13 @@ module MB
         The Set layer: tracks remember a patch and a clip, scenes are the
         state of every track, `go` launches one at its launch point
         (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step.
+        Each track keeps the clips it has played as numbered slots (the
+        clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
+        and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
+        :reverse, :halftime, :doubletime, :double, :half) plays a changed
+        copy as a new slot.
       TEXT
-      commands :track, :tracks, :scene, :scenes, :go, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now
       example 'two scenes' do
@@ -579,6 +584,12 @@ module MB
         scene :try_b, try_bass: seq(F1, rest, F1, F2).n8.loop
         go :try_a
         go :try_b, in: 1.bar
+      end
+      example 'launch and tweak a clip' do
+        track(:try_bass, q: 1) { |c| c.tone.ramp.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
+        bg :try_bass, seq(A1, rest, A1, A2).n8.loop.named(:try_riff)
+        tweak :try_bass, transpose: 12
+        launch :try_bass, :try_riff, in: 1.bar
       end
     end
 
@@ -681,9 +692,9 @@ module MB
 
     Help.topic :buses, 'Buses, sends, sidechains', group: :perform do
       about <<~TEXT
-        A bus is a named chain of effects, and there is one kind: a track
-        reaches it whole (`to:`) or by a level (`send:`, `feed`); there are
-        no separate aux, return, or group buses.  Buses ring out on their own,
+        Named buses with their own effects: tracks send a level to them
+        (`send:`, `feed`) or play all of their sound into them (`to:`): one
+        kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
         read a bus or track by name on the exact sample.  Buses mute and
         solo like tracks (a solo keeps the buses it feeds).
