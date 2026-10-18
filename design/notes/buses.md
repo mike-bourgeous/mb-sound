@@ -56,6 +56,10 @@ A bus chain may share nodes with players (`lfo = 3.hz.lfo; bg :a, lfo * 0.5; bus
 
 Measured on master-ai b6b06139 (mono, 120 bpm, 128/801/7, 800, and 7-frame buffers): a chain queued 0.3 s ahead read the LFO 0.155-0.176 off, 1.5 s raised `BranchBufferOverflow`; a sleeping bus waking after 1.5 s, a muted bus unmuted, a muted sender sharing the LFO only with the bus, a replacement chain while the old one spilled over, and an undo back to an LFO chain all raised; a track's stem copy read the LFO a span ahead (0.039 off in a 0.25 stem).  After: within 1.2e-7 everywhere (`buses_spec` 'nodes shared with players', 9 examples, all failing before).  Cost: 16 players sending to one bus with four asleep reverb buses, 800-frame stereo buffers, 311/320 us vs master-ai 307/308 (alternating, within noise).
 
+## Key tracks (duck-keys, 2026-10-18)
+
+A key route (`route(name, key: true)`, made by `sidechain :pump, clip` or `track(..., key: true)`) is a player name whose sound goes only to its readers: no main out, sends, stems, CUE, or meters; `to:`/`send:`/`feed` raise.  Readers read it like any source (before its mute; it keeps rendering while read), and any key route turns on the routed render.  `Session#key_tracks`, `#key_track?`, `#bus_readers_of` (source => reader names, for `sidechains`).  Details and measurements in dynamics.md ("Key tracks").
+
 ## Later
 
 - Pre-fader sends; sends from buses (buses have only `to:`); latency compensation for buses with lookahead; scene keys for send levels (sends following knobs cover scenes today); per-bus gain faders (the block can scale); bus readers in plans (`p.param`).
