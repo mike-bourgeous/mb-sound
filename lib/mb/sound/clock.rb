@@ -79,6 +79,29 @@ module MB
         end
       end
 
+      # The Clock for +ref+ (a Clock, or a clock's name) where +ctx+ plays
+      # it: a Session's clock of that name, else one the console's Session
+      # (Session.existing) has, defined in +ctx+ with the same settings
+      # (a render Session playing a clip on a clock defined at the prompt;
+      # like knobs joining the Session that plays them).  Outside a
+      # Session (+ctx+ a Clock::Free), the console Session's clock.
+      def self.resolve(ref, ctx)
+        return ref if ref.is_a?(Clock)
+        own = ctx.is_a?(Session) ? ctx.clock_named(ref) : nil
+        return own if own
+        other = Session.existing
+        other = nil if other.equal?(ctx)
+        found = other&.clock_named(ref)
+        unless found
+          raise ArgumentError, "No clock #{ref.inspect} where this plays; define it with `clock #{ref.inspect}, 19.7.seconds` (or 138.75.bpm, or 5/4r)" unless ctx.is_a?(Session)
+          return ctx.clock!(ref) # (raises with suggestions)
+        end
+        return found unless ctx.is_a?(Session)
+        speed = found.speed
+        speed = 1 if speed.is_a?(Symbol) && !ctx.knobs.key?(speed) && warn("clock #{ref.inspect} plays at speed 1 here (its speed knob #{speed.inspect} isn't in this Session)").nil?
+        ctx.define_clock(ref, found.base, speed: speed)
+      end
+
       # Checks a speed: a non-negative number, a knob name, a Knob or
       # reader, or a MIDI::Param.
       def self.check_speed(speed)

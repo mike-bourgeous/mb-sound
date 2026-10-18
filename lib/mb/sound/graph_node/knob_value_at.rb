@@ -74,7 +74,15 @@ module MB
           #     riff.loop.stream.arp(:up, knob(:rate).choose(8, 16, 32))
           def choose(*choices)
             choices = choices[0] if choices.length == 1 && choices[0].is_a?(Array)
+            @stepped = true # (gestures keep their steps; see Gesture.fit)
             MIDI::Param::Choice.new(self, choices)
+          end
+
+          # True once something reads this knob through #choose (its value
+          # picks between steps): gesture lines keep the raw steps
+          # (`curve: :step`) rather than fitting curves (Session#gesture_line).
+          def stepped?
+            @joined ? @joined.stepped? : !!@stepped
           end
 
           private

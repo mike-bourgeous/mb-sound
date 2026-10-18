@@ -37,8 +37,8 @@ module MB
       # "ambiguous" width, drawn wide by terminals set to treat ambiguous
       # characters as wide; UI.glyphs = :ascii avoids them.
       GLYPHS = {
-        unicode: { play: '▶', stop: '■', on: '●', off: '○', armed: '◉', rec: '●', queued: '◷', sep: '│', arrow: '→' }.freeze,
-        ascii: { play: '>', stop: '#', on: '*', off: 'o', armed: '@', rec: 'R', queued: '~', sep: '|', arrow: '->' }.freeze,
+        unicode: { play: '▶', will: '▷', stop: '■', on: '●', off: '○', armed: '◉', rec: '●', queued: '◷', sep: '│', arrow: '→' }.freeze,
+        ascii: { play: '>', will: ')', stop: '#', on: '*', off: 'o', armed: '@', rec: 'R', queued: '~', sep: '|', arrow: '->' }.freeze,
       }.freeze
 
       # A pane's rectangle of a cell grid (Plot::Text::NativeCells, or the

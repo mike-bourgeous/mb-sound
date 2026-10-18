@@ -99,8 +99,19 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       ui::Panes::Clips.selected = nil
     end
 
-    it 'marks a slot several scene columns give only in its home column with play_marks :current (ux-r4b item 5; :all by default)' do
-      expect(ui::Panes::Clips.play_marks).to eq(:all)
+    it 'marks a playing slot ▶ in its home column and ▷ where another scene would keep it playing (gesture-curves default :will_play)' do
+      expect(ui::Panes::Clips.play_marks).to eq(:will_play)
+      will = draw(:clips, snap, w: 70)
+      expect(will[2].scan('▶bass_a').length).to eq(1)
+      expect(will[2].scan('▷bass_a').length).to eq(1) # (intro: would keep it playing)
+      expect(will[2].index('▷bass_a')).to be < will[2].index('▶bass_a')
+      expect(will[2]).to include('◆bass_b 2.0')
+    ensure
+      ui::Panes::Clips.play_marks = nil
+    end
+
+    it 'marks a slot several scene columns give in every column with :all, only its home column with :current (ux-r4b item 5)' do
+      ui::Panes::Clips.play_marks = :all
       all = draw(:clips, snap, w: 70)
       expect(all[2].scan('▶bass_a').length).to eq(2) # (intro and drop)
       ui::Panes::Clips.play_marks = :current
@@ -364,7 +375,8 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(turns.call).to eq(before) # (nothing journaled until the keys stop)
       sp = @session.knobs.values.find { |k| k.name.to_s.end_with?('dub/space') }
       expect(wait_until { sp.value > 0.4 }).to eq(true) # (but the knob moved, heard while held)
-      expect(@term.wait_for(/turn :"(drone\/)?dub\/space", steps: \[\[0, 0\.32\], \[\d+, 0\.34\]/, timeout: 3)).to eq(true), @term.text
+      # (the fitted keyframes: gesture-curves)
+      expect(@term.wait_for(/turn :"(drone\/)?dub\/space", 0 => 0\.32, \S+ => 0\.3\d/, timeout: 3)).to eq(true), @term.text
       expect(@term.text).to include("dub/space 0.48 (")
       expect(wait_until { turns.call == before + 1 }).to eq(true)
       sleep ui::TurnGesture::GAP + 0.1

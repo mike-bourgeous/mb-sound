@@ -248,10 +248,7 @@ module MB
         end
 
         def resolved_clock(ctx)
-          return @clock if @clock.is_a?(MB::Sound::Clock)
-          session = ctx.is_a?(MB::Sound::Session) ? ctx : MB::Sound::Session.existing
-          raise ArgumentError, "The loop plays on clock #{@clock.inspect}, which needs a Session" unless session
-          session.clock!(@clock)
+          MB::Sound::Clock.resolve(@clock, ctx)
         end
 
         # A buffer on the clock: the phase of each sample from the clock
