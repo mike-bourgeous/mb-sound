@@ -3,8 +3,8 @@
 graph 4,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-18T16:06:49Z",
-  mb_sound: "0.12.0.usegit (617c024b)",
+  saved: "2026-10-18T18:40:07Z",
+  mb_sound: "0.12.0.usegit (c53e4bb5)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, 700.0, range: 200.0..6000.0, curve: :exp, unit: "Hz"
@@ -41,7 +41,7 @@ master(:streaming, lufs: :apple_music) { |mix|
   mix.filter(:highpass, cutoff: air, quality: 0.8).softclip(0.5, 0.97)
 }
 track(:drums) { |kit|
-  tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }, clap: { decay: 0.25, tone: 0.6 }, closed_hat: { decay: 0.04 }, open_hat: { decay: 0.25 }, cymbal: { decay: 0.9, tone: 0.65 }, maracas: { level: 0.22 }, low_tom: { decay: 0.6 }, accent: 6.db) * 0.85
+  tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }, clap: { decay: 0.25, tone: 0.6 }, closed_hat: { decay: 0.04 }, open_hat: { decay: 0.25 }, cymbal: { decay: 0.9, tone: 0.65 }, maracas: { level: 0.22 }, low_tom: { decay: 0.6 }, accent: 6.db, seed: drawn_seed(3969543146641149120)) * 0.85
 }
 track(:sub) { |clip|
   synth(clip, voices: 1) { |n|
@@ -119,7 +119,7 @@ track(:hook_wash) { |clip|
   } * 0.4).delay(1.n8.dotted, feedback: 0.55, wet: 0.55, dry: 1).softclip(0.5, 0.95) * 0.45
 }
 track(:answer) { |clip|
-  clip.synth(voices: 3) { |v|
+  clip.synth(voices: 3, seed: drawn_seed(3941382327821454732)) { |v|
     fx = v.velocity.aease(:quad_out, out: 0.0..1.0)
     sig = v.freq
     sig2 = v.period
@@ -140,7 +140,7 @@ track(:answer) { |clip|
   }.delay(1.n8.dotted, feedback: 0.3, wet: 0.35, dry: 1) * 0.26
 }
 track(:arp) { |clip|
-  clip.synth(voices: 3) { |v|
+  clip.synth(voices: 3, seed: drawn_seed(2461561594657129153)) { |v|
     fx = v.velocity.aease(:quad_out, out: 0.0..1.0)
     sig = v.freq
     sig2 = v.period
@@ -176,7 +176,7 @@ track(:pad, lead: 0.5.attack) { |clip|
   stereo(fx, fx.delay(0.012)) * 0.25
 }
 track(:riser, fade: 1r/8) { |_clip|
-  noise.filter(:highpass, cutoff: tween([250, 8000], 4.bars, log: true, loop: false), quality: 3) * tween([0.06, 0.12], 4.bars, loop: false)
+  noise(seed: drawn_seed(1255200654889945937)).filter(:highpass, cutoff: tween([250, 8000], 4.bars, log: true, loop: false), quality: 3) * tween([0.06, 0.12], 4.bars, loop: false)
 }
 scene :intro, drums: kit_intro
 scene :groove, drums: kit_groove, sub: sub, hook_far: hook, cut: 700
