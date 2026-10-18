@@ -27,6 +27,24 @@ module MB
         # is the cache of #asleep_reads.
         WaitingGraph = Struct.new(:input, :asleep_reads)
 
+        # Raised by the structure check (Strip.structure_check) when a
+        # Session graph's nodes changed without Plan.changed(node): the
+        # node-set caches (#graph_node_set) refresh only on
+        # GraphNode.structure_changes, so such an edit leaves them stale.
+        class UnannouncedStructureChange < RuntimeError; end
+
+        class << self
+          # True to check, at the start of every span, that each cached
+          # node set (#graph_node_set) still matches a fresh walk of its
+          # graph while GraphNode.structure_changes says nothing changed
+          # (omnibus10: a guard for ux-fix-2's caches, which trust every
+          # structural edit to call Plan.changed).  On in specs
+          # (spec_helper) and with MB_SOUND_CHECK_STRUCTURE=1; off by
+          # default (a graph walk per cached graph per span).
+          attr_accessor :structure_check
+        end
+        self.structure_check = !['', '0', nil].include?(ENV['MB_SOUND_CHECK_STRUCTURE'])
+
         # Mutes the players named +names+ (or mute groups; see #mute_group).
         # Returns the changes (see Changes#change).
         def mute(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
@@ -291,6 +309,30 @@ module MB
           [nodes, ids]
         end
 
+        # Raises UnannouncedStructureChange if a cached node set (see
+        # #graph_node_set) no longer matches its graph while
+        # GraphNode.structure_changes hasn't moved (Strip.structure_check).
+        def check_structure!
+          structure = GraphNode.structure_changes
+          @graph_node_sets.each do |graph, (count, (nodes, ids))|
+            next unless count == structure
+
+            now = graph.graph(include_tees: true)
+            next if now.length == nodes.length && now.all? { |n| ids.key?(n.__id__) }
+
+            fresh = {}
+            now.each { |n| fresh[n.__id__] = true }
+            added = now.reject { |n| ids.key?(n.__id__) }
+            removed = nodes.reject { |n| fresh.key?(n.__id__) }
+            names = ->(list) { list.first(4).map { |n| n.class.name.sub('MB::Sound::', '') }.join(', ') + (list.length > 4 ? ', ...' : '') }
+            raise UnannouncedStructureChange,
+                  "A Session graph (#{graph.class.name.sub('MB::Sound::', '')}) changed its nodes without Plan.changed(node) " \
+                  "(#{added.length} added#{added.empty? ? '' : ": #{names.(added)}"}; #{removed.length} removed#{removed.empty? ? '' : ": #{names.(removed)}"}): " \
+                  'call MB::Sound::Plan.changed(node) after changing a node\'s inputs, so caches of graph node sets (Session::Strip) refresh'
+          end
+          nil
+        end
+
         # The inputs of the Session's graphs (players' and kept graphs', and
         # the ChainGraphs of master chains: running, spilling over, or
         # landed and starting in this span; fixes-12; and of bus chains,
@@ -340,6 +382,7 @@ module MB
         # ChainGraphs); one starting in a later segment of the span reads
         # the frames before it first (see Buses#bus_read_shared).
         def catch_up_waiting(players)
+          check_structure! if Strip.structure_check
           waiting = nil
           @changes.each { |c| (waiting ||= []) << c.graph if c.graph }
           players.each { |p| (waiting ||= []) << p.input unless p.started }

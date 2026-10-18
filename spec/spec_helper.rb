@@ -93,6 +93,11 @@ RSpec::Matchers.define_negated_matcher :not_change, :change
 #
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 RSpec.configure do |config|
+  # Session graphs' structural edits must go through Plan.changed (the
+  # node-set caches of Session::Strip trust it; omnibus10): checked every
+  # span in specs
+  MB::Sound::Session::Strip.structure_check = true
+
   # Examples tagged :check_shared raise if a node modifies a buffer that a
   # Tee shares among its branches (see MB::Sound::GraphNode::Tee)
   config.around(:each, :check_shared) do |example|
