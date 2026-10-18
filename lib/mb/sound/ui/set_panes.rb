@@ -94,18 +94,28 @@ module MB
           # The clip the cursor is on (for the detail pane): [track name,
           # ClipInfo] or nil.  Kept per process: one screen at a time.
           #
-          # +play_marks+ (ux-r4b item 5, a choice the maintainer is making
-          # from captures; :all until then): where a playing slot shows ▶
-          # when several scene columns give the track that slot: :all, in
-          # every such column; :current, only in its home column (the
-          # current scene's column if that scene gives it, else the first
-          # column showing it).
+          # +play_marks+: where a playing slot shows when several columns
+          # give the track that slot (gesture-curves, agreed 2026-10-18; the
+          # table PLAY_MARKS, so the marks are easy to change):
+          # :will_play (the default) ▶ in its home column (the current
+          # scene's if that scene gives it, else the first column showing it)
+          # and a dim ▷ in the other scene columns that would keep it playing
+          # if launched; :current only the home ▶; :all ▶ everywhere.  A
+          # queued launch is ◆ with its countdown in every mode.
           class << self
             attr_accessor :selected
             attr_writer :play_marks
 
-            def play_marks = @play_marks || :all
+            def play_marks = @play_marks || :will_play
           end
+
+          # Marks by mode: [glyph and role in the home column, glyph and
+          # role in other columns giving the playing slot] (nil: no mark).
+          PLAY_MARKS = {
+            will_play: [[:play, :ok], [:will, :dim]],
+            current: [[:play, :ok], nil],
+            all: [[:play, :ok], [:play, :ok]],
+          }.freeze
 
           # The column where track +t+'s playing +slot+ shows ▶ with
           # play_marks :current (see above).
@@ -136,7 +146,19 @@ module MB
             left = col if col < left
             left = col - vis_cols + 1 if col >= left + vis_cols
             state[:left] = left = left.clamp(0, [cols - 1, 0].max)
-            body_h = c.h - 1
+            # A clock row at the bottom when there are clocks and room
+            # (time-automation)
+            clock_rows = s.clocks.empty? || c.h < m.tracks.length + 3 ? 0 : 1
+            body_h = c.h - 1 - clock_rows
+            if clock_rows == 1
+              x = c.line(c.h - 1, ['⏱ ', :dim])
+              s.clocks.each do |k|
+                break if x >= c.w - 4
+                x = c.text(x, c.h - 1, c.fit("#{k.name} ", c.w - x), :name)
+                x = c.meter(k.phase, width: 4, x: x, y: c.h - 1, role: :key) if x < c.w - 5
+                x = c.text(x, c.h - 1, '  ', nil)
+              end
+            end
             top = state[:top].to_i
             top = row if row < top
             top = row - body_h + 1 if body_h > 0 && row >= top + body_h
@@ -179,8 +201,8 @@ module MB
                 name = clip ? (clip.key || clip.name).to_s : "##{slot}"
                 if q && q.kind == :launch && q.slot == slot
                   ["◆#{name}", :queued]
-                elsif t.playing == slot && lstate != :stopped && (Clips.play_marks == :all || Clips.home_column(m, t, slot) == j)
-                  ["#{c.glyph(:play)}#{name}", lstate == :ringing || lstate == :stopping ? :dim : :ok]
+                elsif t.playing == slot && lstate != :stopped && (mark = PLAY_MARKS.fetch(Clips.play_marks)[Clips.home_column(m, t, slot) == j ? 0 : 1])
+                  [c.glyph(mark[0]) + name, lstate == :ringing || lstate == :stopping ? :dim : mark[1]]
                 else
                   [" #{name}", :text]
                 end
@@ -358,8 +380,8 @@ module MB
         # gesture: the knob moves live with each key (heard as you hold),
         # and when the keys stop the gesture becomes one console line from
         # the Session (`turn :"bass/dub/space", 0.42` for one press, else
-        # `turn :"bass/dub/space", steps: [[0, 0.32], [4800, 0.34], ...]`),
-        # journaled at its first step.
+        # its fitted keyframes, `turn :"bass/dub/space", 0 => 0.32, 1.n4 =>
+        # 0.48`), journaled at its first step with the raw steps takes replay.
         #
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.

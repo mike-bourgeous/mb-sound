@@ -112,7 +112,7 @@ RSpec.describe('bin/save_presets.rb') do
           f = MB::Sound::Session.with_context(session: s) { build.call(s) }
           MB::Sound::Session.with_context(session: s) { MB::Sound.play_form(f, warm_up: false) }
           bar = (s.transport.bar_length / s.transport.whole_notes_per_second * 48000).round
-          out = SpecBuffers.join((0...(bar * 12 / 800)).map { s.process_buffer(800)[0].dup })
+          out = SpecBuffers.join((0...(bar * 8 / 800)).map { s.process_buffer(800)[0].dup }) # (8 bars: tunnel_vision at 12 took 6.65 s on the runner, over the 6 s example budget)
           [s.arrangement.tracks.keys, s.arrangement.scenes.keys, s.knobs.keys, out]
         ensure
           s.close

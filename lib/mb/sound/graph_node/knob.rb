@@ -374,6 +374,7 @@ module MB
           @node_type_name = 'Knob'
           @self_reader = nil
           @decisions = {} # timeline position => value decided there (see ValueAt)
+          @stepped = nil # read through #choose (see #stepped?)
           @implicit = false
         end
 
@@ -546,6 +547,21 @@ module MB
         def target
           s = @segment
           s.is_a?(Follow) ? nil : s.is_a?(Ramp) ? s.to : s.value
+        end
+
+        # Where the knob ends up after the changes queued so far: [:follow,
+        # source node] or [:hold, value] (a ramp counts as its target), from
+        # the last queued hold, ramp, or follow, else the current segment
+        # (set documents save send levels set but not yet rendered).
+        def queued_state
+          @lock.synchronize {
+            seg = @pending.reverse_each.find { |s| s.is_a?(Hold) || s.is_a?(Ramp) || s.is_a?(Follow) } || @segment
+            case seg
+            when Follow then [:follow, seg.source]
+            when Ramp then [:hold, seg.to]
+            else [:hold, seg.value]
+            end
+          }
         end
 
         # The source node while following one (else nil).

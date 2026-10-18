@@ -16,6 +16,8 @@ require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
 require_relative 'session/knobs'
+require_relative 'session/clocks'
+require_relative 'session/gestures'
 require_relative 'session/decisions'
 require_relative 'session/key_changes'
 require_relative 'session/midi_in'
@@ -74,6 +76,8 @@ module MB
       include Seeks
       include GraphView
       include Knobs
+      include Clocks
+      include Gestures
       include Decisions
       include KeyChanges
       include MidiIn
@@ -111,7 +115,7 @@ module MB
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue,
+        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue, :waited,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -322,6 +326,9 @@ module MB
         init_strip
         init_undo
         init_knobs
+        init_clocks
+        @smoothed_gestures = Gestures::Smoothed.new
+        @replayed_gestures = nil
         init_decisions
         init_midi_in
         init_audio_recording
@@ -352,7 +359,7 @@ module MB
         @span_graphs = nil
         # The span being rendered, for taps that stamp what they see (see
         # Session.span; MIDI::Stream#spy)
-        @span = Span.new(self, 0, 0r, 0r, false, 48000)
+        @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
         @asleep_ids = nil
         @asleep_graphs = nil
@@ -454,6 +461,7 @@ module MB
         nodes = match_rate(playable.nodes)
         @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
         adopt_knobs(nodes, player: name) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
@@ -957,6 +965,7 @@ module MB
         @span.per_sample = per_sample
         @span.moving = @advance_idle || !idle?
         @span.sample_rate = sample_rate
+        @span.run = @run_frame
         Thread.current[:mb_sound_span] = @span
 
         # If the timeline was seeked, move every running graph's clips there,
@@ -985,6 +994,8 @@ module MB
 
         # Knobs move before anything reads them (see Knobs)
         advance_knobs(@frame, count) unless @knobs.empty?
+        # Clocks: tempo points and variable-speed cells (see Clocks)
+        begin_clock_span(count, per_sample)
 
         players = @mutex.synchronize { @players.values }
         @span_players = players # for Strip#asleep_reads
@@ -1012,6 +1023,7 @@ module MB
 
         moving = playing || keep_time
         @transport.advance(to - from) if moving
+        end_clock_span(count, to - from, moving)
         # Pre-chain master gain (the default; see #master_gain_post?)
         mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
         begin_bus_read(0) if routed # master chains reading buses or players
@@ -1033,7 +1045,7 @@ module MB
       # Taps use it to stamp what they see with the Session clock
       # (MIDI::Stream#spy; Span#stamp).  Read it, don't keep it: it changes
       # every span.
-      Span = Struct.new(:session, :frame, :pos, :per_sample, :moving, :sample_rate) do
+      Span = Struct.new(:session, :frame, :pos, :per_sample, :moving, :sample_rate, :run) do
         # A Stamp for the sample +offset+ frames into the span.
         def stamp(offset = 0)
           Stamp.at(moving ? pos + offset * per_sample : pos, session.transport, frame: frame + offset)
@@ -1299,7 +1311,12 @@ module MB
       # +stem+ (stems with routing; see Buses#render_routed) gets the
       # player's main out wherever it goes.
       def render_player(p, mix, from, to, per_sample, count, stem: nil)
-        return if p.start >= to
+        if p.start >= to
+          # (a started graph waiting for its start again after a backward
+          # seek: clocks keep running meanwhile; see Clocks)
+          p.waited = true if p.started
+          return
+        end
 
         rate = output.sample_rate.to_f
         base = @frame
@@ -1319,6 +1336,13 @@ module MB
           align_grids(p, base + offset)
           catch_up_kept(p, base + offset) # a graph kept since it stopped
           catch_up_started(p, offset) # a graph that waited to start
+        end
+
+        if p.waited
+          # Clocked clips and loops resync to their clocks where it plays
+          # again (the timeline jumped back before its start)
+          p.waited = false
+          p.timeline_nodes.each { |n| n.clock_resync(from) if n.respond_to?(:clock_resync) }
         end
 
         ringing = p.ring&.active && !p.fade_out

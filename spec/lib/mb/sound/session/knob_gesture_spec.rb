@@ -1,8 +1,9 @@
 # Held-key knob gestures (ux-r4b item 3, maintainer 2026-10-18): a held
 # arrow in the racks pane moves the knob live (Session#preview_turn, no
 # journal entry), then the gesture becomes one console line
-# (Session#gesture_line) journaled at its first step: one journal entry,
-# one undo step, one take line, and the take replays what was heard.
+# (Session#gesture_line: its fitted keyframes, gesture-curves) journaled at
+# its first step: one journal entry, one undo step, one take line, and the
+# take replays what was heard (the raw steps it keeps).
 RSpec.describe('Session knob gestures', :aggregate_failures) do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:session) {
@@ -30,7 +31,7 @@ RSpec.describe('Session knob gestures', :aggregate_failures) do
         before = SpecBuffers.join(out)
         expect(session.journal.changes.count { |e| e.kind == :turn }).to eq(0)
         code = session.gesture_line(:g)
-        expect(code).to eq('turn :g, steps: [[0, 0.32], [800, 0.36], [1600, 0.38], [8000, 0.5]]')
+        expect(code).to eq('turn :g, 0 => 0.32, (1r/60).seconds => 0.36, (1r/30).seconds => 0.38, (1r/6).seconds => 0.5') # (one unit per line: a key off the grid prints them all in seconds)
         line.(code)
       end
       out << session.process_buffer[0].dup
@@ -54,7 +55,8 @@ RSpec.describe('Session knob gestures', :aggregate_failures) do
     # One journal entry, one take line landing at the gesture's first step
     turns = session.journal.changes.select { |e| e.kind == :turn }
     expect(turns.length).to eq(1)
-    expect(turns[0].data).to include(gesture: true, value: 0.5)
+    expect(turns[0].data).to include(gesture: true, value: 0.5, raw: [[0, 0.32], [800, 0.36], [1600, 0.38], [8000, 0.5]])
+    expect(take.gestures).to eq([[:g, 0, 20 * 800 / 96000r, [[0, 0.32], [800, 0.36], [1600, 0.38], [8000, 0.5]]]])
     expect(take.lines.last.lands).to eq([20 * 800 / 96000r])
     expect(session.knob_gestures).to eq({})
     # Replays: the same samples
@@ -81,10 +83,12 @@ RSpec.describe('Session knob gestures', :aggregate_failures) do
     MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, 0.25) }
     expect(session.knob_gestures).to eq({})
     expect(session.journal.changes.last.data).to include(gesture: true)
-    MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, steps: [[0, 0.5], [1600, 0.7]]) }
+    MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, 0 => 0.5, 1600.samples => 0.7) }
     expect(session.journal.changes.last.data).not_to include(:gesture)
     4.times { session.process_buffer }
     expect(session.knobs[:h].value).to be_within(1e-9).of(0.7)
-    expect { MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, steps: [[5, 0.5]]) } }.to raise_error(ArgumentError, /from 0|rise/)
+    expect { MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, 0.5, 0 => 0.6) } }.to raise_error(ArgumentError, /keyframes .* or a value, not both/)
+    expect { MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, 0 => 0.6, ovr: 2) } }.to raise_error(ArgumentError, /unknown keyword: :ovr.*did you mean over/)
+    expect { MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:h, 0 => 0.6, 0.samples => 0.7) } }.to raise_error(ArgumentError, /Two gesture keys land on frame 0/)
   end
 end

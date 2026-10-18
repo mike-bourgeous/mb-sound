@@ -113,6 +113,8 @@ module MB
             return MB::Sound.live_error(ArgumentError.new("bus #{name.inspect} to: #{to.inspect} would make a loop of buses"))
           end
 
+          @mutex.synchronize { @bus_defs[name] = [block, to || :master, description].freeze }
+
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           c = change(:bus, name, time, data: { description: chain.description, fade: fade, to: to || :master }, graph: chain.chain_graph) { |t|
             start_bus_chain(name, chain, block, t)
@@ -131,6 +133,32 @@ module MB
             state = b.asleep ? ', asleep' : ''
             state += ', muted' if muted?(b.name)
             [b.name, "#{desc} (to #{b.to || :master}#{state})"]
+          }
+        end
+
+        # What each bus was last defined with (whether its chain started or
+        # still waits; graph documents save them, see GraphIO::SetWriter):
+        # name => [block (nil for a plain bus), destination (:master or a
+        # bus name), description given (or nil)], in the order the buses
+        # were first defined.
+        def bus_definitions
+          @mutex.synchronize { @buses.keys.to_h { |n| [n, @bus_defs[n]] }.compact }
+        end
+
+        # The routing of every player name for saving: name => { to: a bus
+        # name or nil (the master), send: { bus => level } }, each level the
+        # send's held value (a linear gain), or the name of the Session knob
+        # it follows (a Symbol), or the node it follows.
+        def route_definitions
+          knobs = self.knobs
+          @mutex.synchronize { @routes.dup }.transform_values { |r|
+            sends = r.sends.transform_values { |k|
+              mode, v = k.queued_state
+              next v if mode == :hold
+              v = v.knob if v.is_a?(GraphNode::Knob::Reader)
+              knobs.key(v) || v
+            }
+            { to: r.to, send: sends }
           }
         end
 
@@ -283,6 +311,7 @@ module MB
 
         def init_buses
           @buses = {}
+          @bus_defs = {}
           @routes = {}
           @bus_order = nil
           @bus_readers = Hash.new { |h, k| h[k] = ::Set.new }

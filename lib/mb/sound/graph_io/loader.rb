@@ -323,7 +323,7 @@ module MB
 
         # Set commands of `kind: :set` documents (see #load_set), called
         # with their evaluated arguments on the set's Session.
-        SET_COMMANDS = %i[bpm meter master_gain quant master track scene mutes section flow].freeze
+        SET_COMMANDS = %i[bpm meter master_gain quant master bus track scene mutes section flow].freeze
 
         # Commands a scene block may hold (they land at the scene's launch
         # point, as in an #at_bar block): meter and tempo, knob turns and
@@ -343,6 +343,8 @@ module MB
           @inputs = {}
           Session.with_context(session: @session) do
             bind_params
+            # The header's clocks (after its knobs, which speeds may name)
+            @document.clocks.each { |n, spec| @session.define_clock(n, spec[:base], speed: spec[:speed] || 1) }
             fresh_limits!
             scope = Scope.new
             # Graphs built here (graph tracks, clips' sums) keep the
@@ -545,6 +547,22 @@ module MB
                 raise error(node, "knob #{name}: #{e.message}")
               end
               @document.params[name] = kwargs.merge(value: value, knob: true)
+            when :clock
+              name, base = args
+              raise error(node, 'clock needs a name and a tempo, ratio, or period (clock :tide, 31.1.seconds)') unless name.is_a?(Symbol) && args.length == 2
+              unknown = kwargs.keys - [:speed]
+              raise error(node, "unknown clock option#{'s' if unknown.length > 1} #{unknown.join(', ')} (speed)") unless unknown.empty?
+              raise error(node, "clock #{name} is declared twice") if @document.clocks.key?(name)
+              speed = kwargs[:speed]
+              unless speed.nil? || speed.is_a?(Symbol) || (speed.is_a?(Numeric) && speed.real? && speed >= 0)
+                raise error(node, "clock #{name}: speed: is a number or a knob's name (got #{speed.inspect})")
+              end
+              begin
+                MB::Sound::Clock.new(base)
+              rescue ArgumentError => e
+                raise error(node, "clock #{name}: #{e.message}")
+              end
+              @document.clocks[name] = { base: base, speed: speed }
             when :asset
               name = args[0]
               unless args.length == 1 && name.is_a?(String) && kwargs.keys.all? { |k| k == :sha256 }
@@ -692,7 +710,7 @@ module MB
           if b && !b.is_a?(Prism::BlockNode)
             raise error(b, "#{name} takes a literal block here")
           end
-          if b && !%i[master track flow scene].include?(name)
+          if b && !%i[master bus track flow scene].include?(name)
             raise error(b, "#{name} takes no block in set documents")
           end
 
@@ -713,6 +731,11 @@ module MB
               MB::Sound.master(*args, **kwargs, &(b && build_proc(b, scope)))
             when :track
               MB::Sound.track(*args, **kwargs, &(b && build_proc(b, scope)))
+            when :bus
+              unless args.length == 1 && args[0].is_a?(Symbol) && (kwargs.keys - %i[to]).empty? && (b || kwargs.key?(:to))
+                raise error(node, 'bus takes a name, to:, and a block (bus(:hall, to: :verb) { |sig| ... }, or bus :drums, to: :master)')
+              end
+              MB::Sound.bus(*args, **kwargs, &(b && build_proc(b, scope)))
             when :scene
               MB::Sound.scene(*args, **kwargs, &(b && scene_proc(b, scope)))
             when :flow

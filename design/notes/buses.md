@@ -58,4 +58,6 @@ Measured on master-ai b6b06139 (mono, 120 bpm, 128/801/7, 800, and 7-frame buffe
 
 ## Later
 
-- Pre-fader sends; sends from buses (buses have only `to:`); latency compensation for buses with lookahead; scene keys for send levels (sends following knobs cover scenes today); saving buses in set documents (graph-io); per-bus gain faders (the block can scale); bus readers in plans (`p.param`).
+- Pre-fader sends; sends from buses (buses have only `to:`); latency compensation for buses with lookahead; scene keys for send levels (sends following knobs cover scenes today); per-bus gain faders (the block can scale); bus readers in plans (`p.param`).
+
+Set documents (genre-fixes, 2026-10-18): `Session#bus_definitions` (each bus's block, destination, and description as last defined, whether its chain started or waits) and `#route_definitions` (each player name's `to:` and sends: the level a send will hold after the changes queued so far, from `Knob#queued_state`, or the Session knob name it follows) feed `GraphIO::SetWriter`, which prints `bus(:hall, to: :verb) { |sig| ... }` / `bus :plain, to: :master` and `track(:keys, to: :group, send: { hall: -24.db, echo: :space })`; graph_io.md has the rest.  Genre templates declare buses and routes as data (genres.md).

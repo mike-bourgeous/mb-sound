@@ -10,10 +10,10 @@ module MB
       # with Session#preview_turn: unjournaled, at the next frame to
       # render, recorded as a step of the Session's live gesture); when
       # the keys stop (GAP) or another key comes, a PaneKeys::Commit (the
-      # screen runs Session#gesture_line: `turn :"bass/dub/space", steps:
-      # [[0, 0.32], [24000, 0.34], ...]`, which the take lands at the
-      # gesture's first frame, and whose undo restores the value from
-      # before it).
+      # screen runs Session#gesture_line: its fitted keyframes, `turn
+      # :"bass/dub/space", 0 => 0.32, 1.n4 => 0.48`, which the take lands
+      # at the gesture's first frame, replaying the raw steps it keeps, and
+      # whose undo restores the value from before it).
       #
       # An explicit state machine (STATES, EVENTS, every pair declared in
       # TRANSITIONS; turn_gesture_spec walks them):

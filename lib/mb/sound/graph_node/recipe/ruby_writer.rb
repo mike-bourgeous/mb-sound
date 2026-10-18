@@ -81,6 +81,13 @@ module MB
             @knob_nodes = knob_nodes.each_with_object({}.compare_by_identity) { |(k, v), h| h[k] = v.to_s }
           end
 
+          # Clock names printed in `clocked(:name)` calls (graph documents
+          # write their `clock` header lines).
+          def clocks_used
+            to_s
+            @clocks_used.to_a
+          end
+
           # Knob names printed (see #initialize).
           def knobs_used
             to_s
@@ -140,6 +147,7 @@ module MB
             @output_owner = {}.compare_by_identity
             @given_inputs.each_value { |obj| register_outputs(obj) }
             @knobs_used = Set.new
+            @clocks_used = Set.new
             @rack_defs = @shared_rack_defs || {}
             @used.merge(@knobs.keys)
             @used.merge(@knob_nodes.values)
@@ -615,6 +623,9 @@ module MB
           DELAY_CALLS = [:delay, :feedback_delay, :multitap, :multitap_delay].freeze
 
           # receiver.name(args) { block } for call +c+.
+          # Calls whose first argument may name a Session clock.
+          CLOCK_CALLS = Set[:clocked].freeze
+
           def call_text(recv, c, indent)
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
               return events_text(c.args, c.kwargs, indent)
@@ -623,7 +634,11 @@ module MB
               return "#{recv}.then(&#{rack_text(c.args[0], c, indent)})"
             end
             args = c.args.map { |a| value(a, indent) }
+            # Clock periods read as seconds (`clocked(19.7.seconds)`, not 19700.ms)
+            args[0] = MB::Sound::Clock.base_ruby(c.args[0]) if CLOCK_CALLS.include?(c.name) && c.args[0].is_a?(MB::Sound::Length::Seconds) && c.args[0].fixed?
             kwargs = c.kwargs.dup
+            @clocks_used << c.args[0] if CLOCK_CALLS.include?(c.name) && c.args[0].is_a?(Symbol)
+            @clocks_used << kwargs[:clock] if c.name == :follow && kwargs[:clock].is_a?(Symbol)
             if DELAY_CALLS.include?(c.name)
               # Current spellings: delay(t), not the deprecated
               # delay(seconds: t); smooth:, not smoothing:
@@ -977,7 +992,7 @@ module MB
 
           def leaf?(v)
             case v
-            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Sequence::Duration
+            when Numeric, Symbol, String, true, false, nil, MB::Sound::Interval, MB::Sound::Sequence::Duration, MB::Sound::Tempo
               true
             when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
               v.value.is_a?(Numeric)
@@ -1020,6 +1035,7 @@ module MB
             when MB::Sound::Generative::Dice then "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
             when MB::Sound::Sequence::Seq::Step then step_text(v)
             when MB::Sound::Length::Attack then v.to_ruby
+            when MB::Sound::Tempo, MB::Sound::Clock then v.to_ruby
             when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")
             when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
@@ -1096,7 +1112,8 @@ module MB
           def duration_text(v)
             r = v.whole_notes
             # The spelling it was made with, when that rebuilds it exactly
-            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/))
+            # (a label like n192 names no method: Duration.new(1/192r))
+            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/)) && 1.respond_to?("n#{m[3]}")
               k = (m[2] || 1).to_i
               d = k.public_send("n#{m[3]}")
               d = d.public_send(DURATION_MODS[m[1]]) if m[1]
@@ -1326,6 +1343,10 @@ module MB
             if s.lineage
               parent, name, args, kwargs = s.lineage
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
+            end
+            # (a break that ships with mb-sound)
+            if s.file && (brk = MB::Sound::SamplerMethods.breakbeat_name(s.file))
+              return "breakbeat(#{brk.inspect})"
             end
             if @assets && (asset = @assets.sample(s))
               return "Sample[#{asset.inspect}]"

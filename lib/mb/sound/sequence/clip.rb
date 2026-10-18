@@ -21,6 +21,7 @@ module MB
         include Enumerable
         include Named
         include PlayedBy
+        include Clocked
 
         # Velocity for events that don't specify one (roughly MIDI velocity 96).
         DEFAULT_VELOCITY = 0.75
@@ -108,6 +109,7 @@ module MB
         # see .generate); drum kits choose their voices from #values.
         def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false, values: nil)
           @instrument = nil # (see PlayedBy)
+          @clock = nil # (see Clocked)
           @events = events.sort_by(&:start).freeze
           @values = values&.uniq&.freeze
           @performed = !!performed

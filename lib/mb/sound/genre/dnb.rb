@@ -62,14 +62,26 @@ module MB
       # shift when the neuro stopped; before: drums 0, bass 0, sub -6, neuro
       # -1.5 dB, drive 11 dB, -7.5 LUFS, the clipper and limiter holding
       # drop2 7.1 dB down (median of 100 ms peaks) and the outro 3.9)
-      role :drums, :dnb_drums, level: -1.db, about: 'two-step 808 kit at DnB tunings, parallel compression'
-      role :bass, :dnb_reese, params: { cutoff: :cut }, level: -2.db, duck: -8.db, about: 'the Reese: detuned saws, highpassed off the sub'
+      # (genre-fixes, 2026-10-18: the ducks key from the drums track's own
+      # kick voice, `duck(:drums, only: :kick)`, so only kicks that play
+      # duck (Kez: "Every ducked part building its own ghost kick?  That's
+      # not sidechain, that's cosplay"); before, a ghost 808 kick played the
+      # drop kit's kick row under every scene.  A little of every track but
+      # the sub goes to a :hall bus, as in Tunnel Vision's bus version.)
+      role :drums, :dnb_drums, level: -1.db, send: { hall: -24.db }, about: 'two-step 808 kit at DnB tunings, parallel compression'
+      role :bass, :dnb_reese, params: { cutoff: :cut }, level: -2.db, duck: -8.db, send: { hall: -20.db }, about: 'the Reese: detuned saws, highpassed off the sub'
       role :sub, :dnb_sub, level: -9.db, duck: -12.db, about: 'a clean mono sine an octave down'
-      role :neuro, :dnb_neuro, params: { grit: :grit }, level: -5.5.db, duck: -8.db, about: 'the switch-up bass for drop 2'
+      role :neuro, :dnb_neuro, params: { grit: :grit }, level: -5.5.db, duck: -8.db, send: { hall: -20.db }, about: 'the switch-up bass for drop 2'
       role :pad, :dnb_pad, level: -4.5.db, about: 'minor 9th pads'
       role :pluck, :dnb_pluck, params: { echo: :space }, level: -7.db, about: 'liquid pluck with a dotted-eighth delay'
-      role :impact, :dnb_boom, about: 'a falling sine hit on the downbeat'
-      role :riser, :riser, params: { bars: 4 }, fade: 1/8r, about: 'noise riser (a fill scene)'
+      role :impact, :dnb_boom, send: { hall: -20.db }, about: 'a falling sine hit on the downbeat'
+      role :riser, :riser, params: { bars: 4 }, fade: 1/8r, send: { hall: -18.db }, about: 'noise riser (a fill scene)'
+
+      sidechain :drums, only: :kick
+      # The hall: highpassed so the kick's body stays out, wet only, ducked
+      # by the kick (Tunnel Vision's :hall bus without its tail lift)
+      bus :hall, [:filter, :highpass, { cutoff: 250, quality: 0.7 }], [:reverb, :hall, { mix: 1 }], [:at, 12.db],
+          [:duck, :drums, { only: :kick, amount: -6.db, release: 1.n8 }]
 
       scene :intro, drums: :intro, pad: :chords, cut: 250, air: 20
       scene :build, drums: :build, bass: :riff, cut: [2500, { from: 250, over: 8, curve: :smooth }]
@@ -79,7 +91,6 @@ module MB
       scene :drop2, drums: :drop2, neuro: :neuro, sub: :riff, impact: :hit, air: 20, grit: [0.6, { over: 8 }]
       scene :outro, drums: :outro, sub: :riff
       scene :riser, riser: :bar, others: :keep
-      pulse :drop
 
       loudness(-10..-8)
       true_peak(-0.5.db)

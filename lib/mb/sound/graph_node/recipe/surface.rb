@@ -94,6 +94,20 @@ module MB
             },
           }.freeze
 
+          # Recorded methods that classes get from mixins rather than
+          # define themselves (own_surface doesn't see them): the clock
+          # modules' canonical #clocked (their aliases and prepositions
+          # call it unrecorded, so graphs print `clocked`).
+          MIXIN_SURFACE = {
+            'MB::Sound::Sequence::Clip' => [:clocked],
+            'MB::Sound::Sample' => [:clocked],
+          }.freeze
+
+          # Recorded mixin methods of +klass+ (see MIXIN_SURFACE).
+          def self.mixin_surface(klass)
+            MIXIN_SURFACE[klass.name] || []
+          end
+
           # Top-level MB::Sound modules whose methods build graphs, with the
           # methods left out.
           TOP = {
@@ -113,6 +127,7 @@ module MB
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
               resample_to_sample: 'alias of bounce', capture_audio: 'live capture (performance, not graph structure)',
               loops: 'lists loop files (a listing; samples print through their lineage)',
+              breakbeat: 'returns a Sample (prints as breakbeat(:name) through its file)',
             },
             'GenerativeMethods' => {
               tones: 'a Weights value (prints through its own recipe)', weights: 'a Weights value (prints through its own recipe)',
@@ -273,6 +288,7 @@ module MB
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
               names |= [:named] if c == MB::Sound::Sequence::Clip || c == MB::Sound::Sequence::Kit # Sequence::Named
               names |= MB::Sound::Sampler::ClipMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Clip
+              names |= Surface.mixin_surface(c)
               names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end

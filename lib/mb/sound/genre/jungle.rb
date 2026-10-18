@@ -4,8 +4,8 @@ module MB
     # (2026-10-13): Nev Ashdown's research (research-persona-jungle,
     # research/persona-panel/jungle/research.md) and "Memory Card"
     # (bin/songs/memory_card.rb, patches in bin/synths/jungle.rb and
-    # presets/jungle_*.mbg.rb; the break is the jungle_breaks bundle, a
-    # sliced record on key zones).
+    # presets/jungle_*.mbg.rb; the break is `breakbeat(:jungle)`, the
+    # jungle_breaks bundle's record, chopped with Slices#chop).
     Genre.define :jungle, 'Jungle (90s atmospheric)' do
       about 'Chopped breaks over half-time pads: a sliced break re-sequenced in 16ths, ' \
             'a sine sub, Rhodes stabs and string pads in jazz chords, a flute lead, long DJ builds.  ' \
@@ -25,23 +25,26 @@ module MB
         outro     16
       end
 
-      # The jungle_breaks slices are key zones; these are their in-tempo
-      # keys (see .jungle_slice_keys in bin/synths/jungle.rb): kick, hat,
-      # snare, snare + ghost kick, ghost snare, kick on the "and" of 3,
-      # snare + open hat, double kick, snare 3, the whole record, a reversed
-      # snare.
-      k, h, s, sk, g, kk, s2, k2, s3, full, rev = [6, 17, 28, 39, 50, 61, 72, 83, 94, 105, 116].map { |n| Note.new(n) }
-      clip :full, seq(full, *[T] * 31).n16.loop(align: :launch)
-      clip :chop_a, seq(
-        k, T, h, g,   sk, T, T, T,   h, T, kk, T,   s2, T, T, T,
-        k2, T, T, T,  s3, T, T, T,   h, g, kk, T,   s, T, g.transpose(2), s.transpose(3),
-      ).n16.loop(align: :launch)
-      clip :chop_b, seq(
-        k, T, g, k,   s, T, g, h,    T, k, kk, T,   s2, T, g, h,
-        k2, T, T, T,  s, g, s3, T,   T, T, kk, T,   rev, T, T, T,
-      ).n16.loop(align: :launch)
-      clip :build, (seq(s, T).n16 * 8 | seq(*(0...16).map { |i| s.transpose((i * 6 / 15.0).round) }).n16).loop(align: :launch)
-      clip :no_break, seq(R).n1.loop
+      # The chop is the instrument (genre-fixes, 2026-10-18; Nev: "You
+      # built the sampler and the template didn't move in"): the shipped
+      # break (Nev's record, two bars pressed at 138.75 BPM, 12-bit) cut
+      # into its 32 sixteenths, with names for its runs: kick, hat, snare,
+      # snare + ghost kick, ghost snare, kick on the "and" of 3, snare +
+      # open hat, double kick, snare 3, the whole record.  Chops play the
+      # slices with pitch marks (3 semitones up: 138.75 lands on 165), so
+      # slice and pitch stay apart; brk[:s2].rev is the snare backwards.
+      brk = breakbeat(:jungle).slices(32).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)
+      clip :full, brk.chop(:full, *[T] * 31).transpose(3).loop(align: :launch)
+      clip :chop_a, brk.chop(
+        :k, T, :h, :g,   :sk, T, T, T,   :h, T, :kk, T,   :s2, T, T, T,
+        :k2, T, T, T,    :s3, T, T, T,   :h, :g, :kk, T,  :s, T, [:g, 2], [:s, 3],
+      ).transpose(3).loop(align: :launch)
+      clip :chop_b, brk.chop(
+        :k, T, :g, :k,   :s, T, :g, :h,     T, :k, :kk, T,   :s2, T, :g, :h,
+        :k2, T, T, T,    :s, :g, :s3, T,    T, T, :kk, T,    brk[:s2].rev, T, T, T,
+      ).transpose(3).loop(align: :launch)
+      clip :build, brk.chop(*[:s, T] * 8, *(0...16).map { |i| [:s, (i * 6 / 15.0).round] }).transpose(3).loop(align: :launch)
+      clip :no_break, brk.chop(nil, per: 1).loop
 
       ride = '6.4.6.4.6.4.6.4.'
       shaker = '3537353735373537'
@@ -66,7 +69,7 @@ module MB
       knob :brk, 16000, range: 200..16000, curve: :exp, unit: 'Hz'   # the break's lowpass
       knob :space, 0.3, range: 0..1                                  # the lead's echo send
 
-      role :breaks, :jungle_breaks, params: { cutoff: :brk }, about: 'the sliced break: one voice, each slice cuts the last, 12-bit'
+      role :breaks, :breaks, params: { cutoff: :brk }, about: 'the chopped break: slices of the shipped break on one voice, each hit cutting the last, 12-bit'
       role :perc, :jungle_perc, about: 'ride and shaker over the break'
       role :sub, :jungle_sub, about: 'sine sub, long notes under busy breaks'
       role :reese, :jungle_reese, level: -3.db, about: 'a warm Reese for the second drop, used sparingly'
@@ -92,7 +95,7 @@ module MB
       master :limit, ceiling: -1.db, release: 0.1
       master_gain 0.db
 
-      tip 'The chop is the instrument: re-sequence slices of a break in 16ths (kick-snare reorders, ghost snares at low velocity, pitched snare rolls into the drop, a reversed hit).'
+      tip 'The chop is the instrument: re-sequence slices of a break in 16ths (kick-snare reorders, ghost snares at low velocity, pitched snare rolls into the drop, a reversed hit): brk = breakbeat(:jungle).slices(32).name(k: 0..1, s: 4..5); brk.chop(:k, T, [:s, 2], brk[:s].rev).'
       tip 'Pitch the record until it fits: a break recorded at 138.75 BPM played 3 semitones up lands exactly on 165.'
       tip 'Half-time underneath: pads and bass move at half the drums\' speed, in jazz and soul chords (minor 9ths, major 7ths, 11ths).'
       tip 'Long builds for DJs: 16-32 bar intros of pads and filtered breaks (turn :brk), breakdowns with only pads, keys and a lead, then the full break and the sub back together.'

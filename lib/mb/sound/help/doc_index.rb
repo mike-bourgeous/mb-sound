@@ -99,7 +99,7 @@ module MB
             surf = GraphNode::Recipe::Surface
             dsl = dsl.select { |e| surf.graph_node_dsl.include?(e.name) }
             classes = surf.classes.flat_map { |c|
-              names = surf.own_surface(c)
+              names = surf.own_surface(c) | surf.mixin_surface(c)
               names.map { |n|
                 um = DocIndex.unwrap(c.instance_method(n))
                 Entry.new(name: n, owner: c, surface: c.name.sub('MB::Sound::', ''), original: (um.original_name == n ? nil : um.original_name), unbound: um)

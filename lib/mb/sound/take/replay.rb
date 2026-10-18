@@ -54,14 +54,15 @@ module MB
         # +:replace_declick+ likewise (see Session#replace_declick): takes
         # saved before 2026-10-17 don't give it, and switched replacements
         # with a hard cut, so they replay exactly.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng, run_frame: run_frame, odometer: odometer }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
           @lines = []
           @midi = {}
           @decisions = []
+          @gestures = []
           yield self if block_given?
           self.class.last = self
         end
@@ -97,6 +98,12 @@ module MB
         end
 
         # The recorded decisions (see #decisions).
+        # Raw steps of knob gestures (see Take#gestures).
+        def gestures(rows)
+          @gestures.concat(rows.map { |name, epoch, pos, steps| [name, epoch, pos.to_r, steps] })
+          self
+        end
+
         def decision_rows
           @decisions
         end
@@ -122,6 +129,7 @@ module MB
           session.fade_in = @start[:fade_in]
           session.fade_out = @start[:fade_out]
           session.replace_declick = @start[:replace_declick]
+          session.restore_run(@start[:run_frame], @start[:odometer]) if @start[:run_frame].to_i > 0
           MB::Sound::Internal.restore_rng(Marshal.load(@start[:rng].unpack1('m0'))) if @start[:rng]
 
           binding = Take.console_binding
@@ -131,6 +139,7 @@ module MB
           session.replay_midi!(@base_epoch)
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           session.replay_decisions!(@decisions, base_epoch: @base_epoch) unless @decisions.empty?
+          session.replay_gestures!(@gestures, base_epoch: @base_epoch) unless @gestures.empty?
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do

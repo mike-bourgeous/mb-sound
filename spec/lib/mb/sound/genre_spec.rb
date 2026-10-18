@@ -47,6 +47,12 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
 
       expect(genre[:jungle].tempo).to eq(165)
       expect(genre[:ambient].clips[:bowl_a].length).to eq(197/40r) # 19.7 s at 60 BPM
+      expect(genre[:ambient].clips[:bowl_a].to_ruby).to end_with('.clocked(19.7.seconds)') # (its own clock: 19.7 s at any tempo)
+      expect(genre[:ambient].roles.values_at(:rain, :wind).map(&:to)).to eq([:weather, :weather])
+      expect(genre[:ambient].buses[:weather].steps).to eq([[:hiss, [], {}]])
+      expect(genre[:house].sidechain).to eq([:drums, :kick])
+      expect(genre[:techno].buses.keys).to eq([:rumble, :echo])
+      expect(genre[:house].form.bars).to eq(136) # (Munro: 16, 16, 16, 32, 8, 32, 16)
       expect(genre[:funk].scenes[:keys]).to eq({ beat: :beat, bass: :bass, keys: :keys })
       expect(genre[:funk].scale).to be_a(MB::Sound::Scale)
     end
@@ -121,7 +127,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect { build { tempo 120; flow { a 1 }; role :bass, :tr808; scene :a, bass: :nope } }.to raise_error(ArgumentError, /no kit or clip/)
       expect { build { tempo 120; flow { a 1; b 1 }; scene :a } }.to raise_error(ArgumentError, /section :b has no scene/)
       expect { build { tempo 200, range: 100..140; flow { a 1 }; scene :a } }.to raise_error(ArgumentError, /outside its range/)
-      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, duck: -6.db } }.to raise_error(ArgumentError, /no pulse/)
+      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, duck: -6.db } }.to raise_error(ArgumentError, /no sidechain/)
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, filter: :cut } }.to raise_error(ArgumentError, /no knob/)
       expect { build { flow { a 1 }; scene :a } }.to raise_error(ArgumentError, /needs a tempo/)
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, params: { cutoff: :cutt } } }.to raise_error(ArgumentError, /param cutoff: names :cutt, which is no knob/)
@@ -177,6 +183,43 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(data[0].length).to be_within(48).of((3 * 4 * 60 / 96.0 * 48000).round)
     end
 
+    it 'sets up buses and routes, and saves them in a set document that loads to the same text' do
+      new_session = -> {
+        MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
+                               transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      }
+      a = new_session.()
+      b = new_session.()
+      t = genre[:dnb].short
+      text = MB::Sound::Session.with_context(session: a) { t.setup; MB::Sound::GraphIO.dump(a.arrangement, name: 'dnb') }
+      expect(a.bus_names).to eq([:hall])
+      expect(a.route_definitions[:drums]).to eq({ to: nil, send: { hall: -24.db.to_f } })
+      expect(a.route_definitions[:bass][:send]).to eq({ hall: -20.db.to_f })
+      expect(a.route_definitions).not_to have_key(:sub)
+      expect(text).to include('bus(:hall) { |sig|', '.duck(:drums, only: :kick, amount: -6.db, release: 1.n8)')
+      expect(text).to include('track(:drums, send: { hall: -24.db })')
+      # (breakdown: the hats-only kit keeps a silent kick row for the ducks)
+      expect(text).to match(/kick: grid\(16, kick: "\.{16}"\)\[:kick\]\.loop\(align: :launch\)/)
+      MB::Sound::GraphIO.load(text, session: b)
+      expect(b.route_definitions).to eq(a.route_definitions)
+      again = MB::Sound::GraphIO.dump(b.arrangement, name: 'dnb')
+      expect(again.sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
+    ensure
+      a&.close
+      b&.close
+    end
+
+    it 'chops the jungle break through the sampler: slices of breakbeat(:jungle) with pitch marks' do
+      t = genre[:jungle]
+      chop = t.clips[:chop_a]
+      expect(chop.instrument).to be_a(MB::Sound::Sample::Slices)
+      expect(chop.instrument.sample.file).to end_with('jungle_breaks.mbg/assets/jungle_record.flac')
+      expect(chop.events.map(&:pitch).compact.uniq.sort).to eq([3, 5, 6]) # (+3: 138.75 BPM to 165; [:g, 2], [:s, 3])
+      expect(chop.to_ruby).to start_with('breakbeat(:jungle).slices(32).name(k: 0..1')
+      expect(t.roles[:breaks].patch).to eq(:breaks)
+      expect(t.to_ruby).not_to include('Note.new')
+    end
+
     it 'lets template knobs drive preset params and puts mono_below first in the master chain' do
       MB::Sound.knob(:cut, 600, range: 150..8000, curve: :exp)
       bass = genre[:dnb].patch(:bass, genre[:dnb].clips[:riff])
@@ -185,22 +228,22 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(master.to_ruby).to include('mono_below(120).compress(')
     end
 
-    it 'filters, levels, and ducks a role under the pulse kick' do
+    it 'filters, levels, and ducks a role under the drums track\'s kick voice' do
       t = genre[:dnb]
       clip = t.clips[:riff]
       MB::Sound.knob(:cut, 2400, range: 150..8000, curve: :exp)
       node = t.patch(:sub, clip)
-      expect(node.to_ruby).to include('duck(').and include('kick: { tune: 54')
+      expect(node.to_ruby).to include('duck(:drums, only: :kick, amount: -12.db')
       expect { t.patch(:nope, clip) }.to raise_error(ArgumentError, /No role :nope/)
       expect { MB::Sound::Genre.build_patch(:no_such_patch_x, clip) }.to raise_error(ArgumentError, /No preset or method/)
     end
 
-    it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked under the pulse kick' do
+    it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked by the kick voice' do
       t = genre[:techno]
       expect(t.roles[:bass].patch).to eq(:roller)
       expect(t.roles[:bass].duck).to eq(-4.db)
       expect(t.roles[:bass].level).to eq(2.db)
-      expect(t.pulse).to eq(:peak)
+      expect(t.sidechain).to eq([:drums, :kick])
       MB::Sound.knob(:cut, 400, range: 150..6000, curve: :exp)
 
       # The roller alone: stereo, its tick above 1 kHz, its low end mono
@@ -221,6 +264,9 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
         p2 = tmp_path("roller_#{tt.equal?(t) ? 'duck' : 'plain'}.flac")
         MB::Sound.render(p2, bars: 1, tail: false) do
           MB::Sound.bpm 132
+          # (the drums play muted: a source something reads keeps feeding it)
+          MB::Sound.bg :drums, tt.patch(:drums, tt.kits[:peak]), fade: 0
+          MB::Sound.mute :drums
           MB::Sound.bg :bass, tt.patch(:bass, tt.clips[:bass]), fade: 0
         end
         x = MB::Sound.read(p2)[0]

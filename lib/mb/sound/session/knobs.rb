@@ -25,9 +25,12 @@ module MB
 
         # A live knob gesture (a held key in the racks pane; see
         # #preview_turn): the knob's name, the frame and timeline position
-        # of its first step, the knob's state before it (for undo), and its
-        # steps ([frames after the first, value], one per span at most).
-        KnobGesture = Struct.new(:name, :frame, :pos, :before, :steps, keyword_init: true)
+        # of its first step, the knob's state before it (for undo), its
+        # steps ([frames after the first, value], one per span at most), the
+        # timeline's whole notes per frame there (for printing times), and
+        # the fitted MB::Sound::Gesture its line printed (see
+        # #gesture_line).
+        KnobGesture = Struct.new(:name, :frame, :pos, :before, :steps, :per_sample, :fitted, keyword_init: true)
 
         # The first frame of the buffer (span) being rendered, while knobs
         # and players render it (nil otherwise).  Knob readers read this
@@ -298,15 +301,26 @@ module MB
         # A rack's knob group name (:"dub/space" once the rack plays in
         # several players; see Racks#knob_group?) turns every instance's
         # knob, returning the Changes.
-        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, steps: nil)
+        #
+        # Keyframes (gesture-curves): `turn :space, 0 => 0.30, 1.n8 => 0.50,
+        # 1.n4 => 0.62` moves through the values at those times after the
+        # launch point (0, note lengths, Lengths, or bars), joined by a
+        # monotone cubic in the knob's scale, or by +curve:+ (:linear,
+        # :step, or a Curve name per segment; see MB::Sound::Gesture).  A
+        # racks-pane gesture's line (#gesture_line) is this form.
+        def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, **keys)
           if name.is_a?(Symbol) && (members = racks.group_members(name))
             offset = binding.local_variable_get(:in)
-            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time, steps: steps) }
+            return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time, **keys) }
           end
+          check_turn_keywords(keys)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
-          steps = [[0, value]] if steps.nil? && gesture_for?(k, value, over, follow, point)
-          return turn_steps(k, steps, point, start_time) if steps
+          unless keys.empty?
+            raise ArgumentError, "Turn #{k.name.inspect} with keyframes (0 => a, 1.n8 => b) or a value, not both" unless value.nil? && over.nil? && follow.nil? && from.nil?
+            return turn_keys(k, keys, curve, point, start_time)
+          end
+          return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
           value = follow unless follow.nil?
           raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
           check_turn_value(k, value)
@@ -321,38 +335,77 @@ module MB
           }
         end
 
-        # A turn through +steps+ ([[frames after its time, value], ...],
-        # rising; each a turn without over:, the knob's smooth glide): what
-        # #gesture_line writes for a held key.  When the steps are a live
-        # gesture's (#preview_turn), the change is that gesture's: it is
-        # journaled at the gesture's first frame (the take replays it from
-        # there; Take.note_change), its undo restores the value from before
-        # the gesture, and it changes nothing live (the steps played as
-        # they came).  Otherwise the steps play from the change's landing
-        # frame (a replay).
-        def turn_steps(k, steps, point, start_time)
-          unless steps.is_a?(Array) && !steps.empty? && steps.all? { |st| st.is_a?(Array) && st.length == 2 && st[0].is_a?(Integer) && st[0] >= 0 && st[1].is_a?(Numeric) && st[1].real? && st[1].finite? }
-            raise ArgumentError, "steps: are [[frames, value], ...] with whole frames from 0 (got #{steps.inspect})"
-          end
-          raise ArgumentError, 'steps: must rise (frames after the first)' unless steps.each_cons(2).all? { |a, b| b[0] > a[0] } && steps[0][0] == 0
-          steps.each { |_, v| warn_clamp(k, v) }
-          data = { value: steps.last[1], steps: steps.length }
+        # Ruby's own error for Symbol keys that aren't keywords of #turn (the
+        # other keys are keyframe times).
+        def check_turn_keywords(keys)
+          bad = keys.keys.grep(Symbol)
+          return if bad.empty?
+          known = %i[at on in over curve from follow smooth]
+          hint = bad.filter_map { |b| s = DidYouMean::SpellChecker.new(dictionary: known.map(&:to_s)).correct(b.to_s).first; s && "#{b}: (did you mean #{s}:?)" }
+          raise ArgumentError, "unknown keyword#{'s' if bad.length > 1}: #{bad.map(&:inspect).join(', ')}#{" (#{hint.join(', ')})" unless hint.empty?}"
+        end
+        private :check_turn_keywords
+
+        # A turn through keyframes ({ time => value }; see #turn), playing
+        # their MB::Sound::Gesture from the change's landing frame.  When
+        # the keys are a live gesture's line (#gesture_line), the change is
+        # that gesture's: journaled at the gesture's first frame with its
+        # raw steps (takes replay those, bit for bit; Take#gestures), its
+        # undo restores the value from before the gesture, and it changes
+        # nothing live (the steps played as they came).  A take replaying
+        # the line plays the raw steps it recorded (unless smoothed; see
+        # #smooth_gesture).
+        def turn_keys(k, keys, curve, point, start_time)
           g = @render_lock.synchronize { @knob_gestures[k.name] }
-          if g && g.steps == steps.map { |off, v| [off, v.to_f] }
+          per_sample = g&.per_sample || (@transport.whole_notes_per_second / clock_rate)
+          gesture = Gesture.from_hash(keys, curve: curve, per_sample: per_sample, rate: clock_rate, bar_length: @transport.bar_length)
+          gesture.keys.each { |_, v| warn_clamp(k, v) }
+          data = { value: gesture.keys.last[1], keys: gesture.keys.length }
+
+          if g && g.fitted && g.fitted.keys == gesture.keys && g.fitted.curve == gesture.curve
             begin
               @committing_gesture = g
-              return change(:turn, k.name, g.pos, data: data.merge(gesture: true)) { |_t|
+              raw = g.steps.map(&:dup).freeze
+              return change(:turn, k.name, g.pos, data: data.merge(gesture: true, raw: raw, epoch: epoch, pos: g.pos)) { |_t|
                 @knob_gestures.delete(k.name) if @knob_gestures[k.name].equal?(g)
               }
             ensure
               @committing_gesture = nil
             end
           end
+
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          knob_change(k, time, data) { |kn, frame, _t|
-            steps.each { |off, v| kn.set(v, frame: frame + off) }
+          knob_change(k, time, data) { |kn, frame, t|
+            # (a take replaying a gesture's line: the raw steps it recorded,
+            # at the gesture's time, which the take gives the action)
+            raw = replayed_gesture(k.name, t)
+            if raw
+              raw.each { |off, v| kn.set(v, frame: frame + off) }
+            else
+              play_gesture(kn, gesture, frame)
+            end
           }
         end
+
+        # Schedules +gesture+ on knob +kn+ from frame +frame+ (see
+        # Gesture#segments).
+        def play_gesture(kn, gesture, frame)
+          if gesture.curve == :step
+            gesture.keys.each { |off, v| kn.set(v, frame: frame + off) }
+            return
+          end
+          (f0, v0), segs = gesture.segments(kn.spec)
+          if f0 == 0
+            kn.set(v0, frame: frame, smooth: 0)
+          else
+            # (from where the knob is to the first key)
+            kn.ramp_to(v0, frames: f0, frame: frame + 1, curve: gesture.curve.nil? || gesture.curve == :linear ? nil : MB::Sound::Curve[gesture.curve])
+          end
+          segs.each do |start, frames, va, vb, c|
+            kn.ramp_to(vb, frames: frames, frame: frame + start, curve: c, from: va)
+          end
+        end
+        private :play_gesture
 
         # True if a plain turn of +k+ to +value+ is a live one-step
         # gesture's line (see #gesture_line).
@@ -468,9 +521,9 @@ module MB
         # Moves knob +name+ to +value+ live, at the next frame to render,
         # without a journal entry: a step of a gesture (a held key in the
         # racks pane, UI::TurnGesture) that #gesture_line then writes as ONE
-        # console line, whose turn the take replays from the gesture's
-        # first frame (see #turn's +steps:+), so a replay plays what was
-        # heard.  Each step is a #turn without +over:+ (the knob's smooth
+        # console line (its fitted keyframes), whose turn the take replays
+        # from the gesture's first frame with the raw steps (see
+        # #turn_keys), so a replay plays what was heard.  Each step is a #turn without +over:+ (the knob's smooth
         # glide).  Values are rounded as the line prints them.  Returns the
         # value.
         def preview_turn(name, value)
@@ -482,7 +535,8 @@ module MB
             g = @knob_gestures[k.name]
             unless g
               mode, before = k.state_at(f)
-              g = @knob_gestures[k.name] = KnobGesture.new(name: k.name, frame: f, pos: @transport.position, before: KnobState.new(mode: mode, value: before), steps: [])
+              g = @knob_gestures[k.name] = KnobGesture.new(name: k.name, frame: f, pos: @transport.position, before: KnobState.new(mode: mode, value: before), steps: [],
+                                                           per_sample: @transport.whole_notes_per_second / clock_rate, fitted: nil)
             end
             off = f - g.frame
             g.steps.last&.first == off ? (g.steps[-1] = [off, v]) : (g.steps << [off, v])
@@ -492,14 +546,19 @@ module MB
         end
 
         # The console line for the live gesture on knob +name+ (see
-        # #preview_turn): `turn :"dub/space", 0.42` for one step, else
-        # `turn :"dub/space", steps: [[0, 0.32], [4800, 0.34], ...]`
-        # (frames after the first step).  Nil without a gesture.
-        def gesture_line(name)
-          g = @render_lock.synchronize { @knob_gestures[knob!(name).name]&.dup } or return nil
-          n = GraphNode::Knob.method(:number)
-          return "turn #{g.name.inspect}, #{n.(g.steps[0][1])}" if g.steps.length == 1 && g.steps[0][0] == 0
-          "turn #{g.name.inspect}, steps: [#{g.steps.map { |off, v| "[#{off}, #{n.(v)}]" }.join(', ')}]"
+        # #preview_turn): `turn :"dub/space", 0.42` for one step, else its
+        # fitted keyframes (MB::Sound::Gesture.fit: the fewest keys within
+        # +tolerance+ of the knob's range), `turn :"dub/space", 0 => 0.32,
+        # 1.n8 => 0.4, 1.n4 => 0.62`; stepped knobs (Knob#choose) keep their
+        # steps (`curve: :step`).  The take keeps the raw steps (see
+        # #turn_keys).  Nil without a gesture.
+        def gesture_line(name, tolerance: Gesture::TOLERANCE)
+          k = knob!(name)
+          g = @render_lock.synchronize { @knob_gestures[k.name] } or return nil
+          steps = @render_lock.synchronize { g.steps.map(&:dup) }
+          fitted = Gesture.fit(steps, k.spec, tolerance: tolerance, stepped: k.stepped?)
+          @render_lock.synchronize { g.fitted = fitted }
+          fitted.to_ruby(g.name, per_sample: g.per_sample, rate: clock_rate)
         end
 
         # The live gestures ({ knob name => KnobGesture }).

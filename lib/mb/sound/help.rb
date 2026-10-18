@@ -209,5 +209,6 @@ end
 
 require_relative 'help/content/topics'
 require_relative 'help/content/textures'
+require_relative 'help/content/clocks'
 require_relative 'help/content/sheet'
 require_relative 'help/content/lessons'
