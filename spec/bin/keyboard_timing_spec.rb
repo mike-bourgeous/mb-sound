@@ -1,6 +1,5 @@
 require 'pty'
 require 'json'
-load File.expand_path('../../bin/keyboard_timing.rb', __dir__) unless defined?(MB::Sound::KeyboardTiming)
 
 # bin/keyboard_timing.rb (ui-api-1 round 3; maintainer, 2026-10-18: "a live
 # test that asks me to press chords and fast arps and measures the
@@ -40,12 +39,12 @@ RSpec.describe('bin/keyboard_timing.rb', :aggregate_failures) do
   end
 
   it 'separates well-apart gaps and refuses overlapping ones' do
-    kt = MB::Sound::KeyboardTiming
-    window, overlap = kt.suggest(chord: [0.01, 0.02], arp: [0.06, 0.08], run: [0.07])
-    expect(window).to be_within(1e-9).of((0.02 + 0.06) / 2)
-    expect(overlap).to eq(0)
-    window, overlap = kt.suggest(chord: [0.01, 0.07], arp: [0.05, 0.08], run: [])
-    expect(window).to be_nil
-    expect(overlap).to be > 0
+    # (in a process of its own: loading the script here would redefine its
+    # constants when the smoke spec forks it)
+    code = 'kt = MB::Sound::KeyboardTiming; p kt.suggest(chord: [0.01, 0.02], arp: [0.06, 0.08], run: [0.07]); p kt.suggest(chord: [0.01, 0.07], arp: [0.05, 0.08], run: [])'
+    out = IO.popen(['bundle', 'exec', 'ruby', '-e', "load 'bin/keyboard_timing.rb'; #{code}"], err: [:child, :out], &:read)
+    lines = out.lines.map(&:strip)
+    expect(lines[-2]).to eq('[0.04, 0]'), out
+    expect(lines[-1]).to match(/\Anil, [1-9]|\A\[nil, [1-9]/), out
   end
 end
