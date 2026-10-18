@@ -21,7 +21,13 @@ module MB
       # reading order), +keys+ (the keyboard: mode, note-off mode, entry),
       # +messages+ (total and unread), +pacing+ (refreshes and written
       # frames per second).  Frozen; prints as a table.
-      Listing = Data.define(:mode, :layout, :size, :density, :panes, :keys, :messages, :pacing) do
+      Listing = Data.define(:mode, :layout, :size, :density, :panes, :keys, :messages, :pacing, :clocks) do
+        # (+clocks+: the Session's clocks as UI::ClockInfos, a line after
+        # the panes when there are any; time-automation)
+        def initialize(mode:, layout:, size:, density:, panes:, keys:, messages:, pacing:, clocks: UI.clock_infos)
+          super
+        end
+
         def to_s = lines.join("\n")
         def inspect = to_s
         def pretty_print(q) = q.text(to_s)
@@ -31,12 +37,13 @@ module MB
           k = keys
           tail = "keyboard #{k[:active] ? 'playing' : 'idle'} (#{k[:entry]}, note-off #{k[:off]}) · messages #{messages[:total]} (#{messages[:unread]} unread)" \
                  "#{pacing ? " · #{pacing}" : ''}"
-          return [head, tail] if panes.empty?
+          extra = clocks.empty? ? [] : ["clocks: #{clocks.map(&:to_s).join(' · ')}"]
+          return [head, tail, *extra] if panes.empty?
 
           rows = panes.map { |p|
             [p.number, p.name, p.kind, p.rect.to_s, [p.focused ? 'focus' : nil, p.zoomed ? 'zoom' : nil].compact.join(' '), p.rate, p.look, p.title_at]
           }
-          [head, *Sound::Table.new(rows, header: %w[# pane kind rect state rate look title]).lines(color: false), tail]
+          [head, *Sound::Table.new(rows, header: %w[# pane kind rect state rate look title]).lines(color: false), tail, *extra]
         end
       end
 
@@ -106,6 +113,19 @@ module MB
                           layouts: used[p.name].uniq.freeze, open: open)
           end
           PaneCatalog.new(entries: entries.freeze)
+        end
+
+        # The current Session's clocks for Listing (none without a Session).
+        def clock_infos(s = Session.existing)
+          return [].freeze unless s
+          return [].freeze if s.clocks.empty?
+          rf = s.run_frame
+          s.clocks.map { |name, c|
+            pos = c.position(rf, s)
+            ClockInfo.new(name: name, what: c.describe.freeze, unit: c.unit, count: pos.floor + 1, phase: (pos - pos.floor).to_f)
+          }.freeze
+        rescue StandardError
+          [].freeze
         end
 
         # The keyboard's state for Listing.

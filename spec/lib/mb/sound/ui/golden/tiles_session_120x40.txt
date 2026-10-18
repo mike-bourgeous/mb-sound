@@ -29,9 +29,9 @@ bass/dub  effect  lat 72 smp            │                                     
                                         ├─ CLIPS ────────── 8 ─┬─ CLIP ──── 9 ─┤└─ bass
                                         │        int… ▶drop    │beat_a  1 bar …│
                                         │▶drums  ■    ▶bea…    │kick  !███████·├─ MIDI ──────────────────────────── 10 ─
-─ LANDED ────────────────────────── 11 ─┤▶bass  ▶bas… ▶bas…    │snare ·██··██··│no MIDI yet
+─ LANDED ────────────────────────── 11 ─┤▶bass  ▷bas… ▶bas…    │snare ·██··██··│no MIDI yet
 nothing landed yet                      │ lead   ■     hook    │hat   ···██··██│
-                                        │ pad   ▶cho… ▶cho…    │               │
+                                        │ pad   ▷cho… ▶cho…    │               │
                                         │                      │               │
                                         │                      │               │
                                         │                      │               │

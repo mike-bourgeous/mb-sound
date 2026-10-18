@@ -664,14 +664,28 @@ module MB
         Named values that graphs read (`knob(:cut)`) and you turn, with
         ramps, launch points, MIDI learn, snapshots, and crossfades.  Turns
         are journaled and undoable.
+
+        Keyframes move a knob through values over time: `turn :space, 0 =>
+        0.3, 1.n8 => 0.5, 1.n4 => 0.62` (a monotone cubic through them in
+        the knob's scale; `curve: :linear`, `:step`, or a Curve name).  A
+        held key in the racks pane prints its gesture this way, fitted to
+        the fewest keys within 1/1000 of the knob's range (knobs read with
+        `choose` keep their steps).  Takes keep the raw steps, so a replay
+        sounds as you played it; `smooth_gesture` makes the last gesture the
+        fitted curve on purpose (undoable).
       TEXT
-      commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn
+      commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn, :smooth_gesture
       note :arrangement
       see :sets, :now
       example 'a filter knob' do
         knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
         bg :try, 55.hz.ramp.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
         turn :try_cut, 4000, over: 2.bars
+      end
+      example 'a gesture in keyframes' do
+        knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
+        bg :try, 55.hz.ramp.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
+        turn :try_cut, 0 => 400, 1.n4 => 3000, 1.n2 => 900, 1.bar => 2400
       end
     end
 
@@ -1045,7 +1059,9 @@ module MB
         octave instead (see `help :lock`); PgUp/PgDn cycle scales and roots.
 
         `ui :session` shows the set: the clip matrix (`clips`: a row per
-        track, a column per scene, then each track's other slots; ▶ plays,
+        track, a column per scene, then each track's other slots; ▶ plays
+        (in one column: the current scene's, else the first giving it), a
+        dim ▷ marks the other scenes that would keep it playing if launched,
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
@@ -1054,7 +1070,8 @@ module MB
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
         u undo; in racks Left/Right turn the picked knob (Shift: fine;
-        a held key is one `turn ..., over:` line when you let go).
+        a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line when you let
+        go: its fitted keyframes; the take keeps the raw steps).
         Every key runs one console line, printed in the console: journaled,
         undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT

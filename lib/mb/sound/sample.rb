@@ -731,7 +731,10 @@ module MB
       #     bg :pad, pad.follow(stretch: :slice)    # say which
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
-      def follow(mode = :stretch, stretch: :auto, align: :timeline)
+      #
+      # +clock:+ plays it on a clock instead of the session tempo (see
+      # #clocked).
+      def follow(mode = :stretch, stretch: :auto, align: :timeline, clock: nil)
         mode = { true => :stretch, resample: :resample, varispeed: :resample, stretch: :stretch }.fetch(mode) {
           raise ArgumentError, "follow takes :stretch (pitch kept) or :resample (pitch follows) (got #{mode.inspect})"
         }
@@ -744,7 +747,8 @@ module MB
           reason = 'stretch: given'
         end
         opts = stretch.is_a?(Hash) ? stretch : { mode: stretch }
-        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason) }
+        clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
+        nodes = Array.new(channel_count) { |c| GraphNode::LoopPlayer.new(self, channel: c, mode: mode, stretch: opts, align: align, reason: reason, clock: clock) }
         nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
       end
 
@@ -1300,3 +1304,4 @@ require_relative 'sample/spectral'
 require_relative 'sample/riff'
 require_relative 'sample/loop_info'
 require_relative 'sample/slice_stretch'
+require_relative 'sample/clocked'

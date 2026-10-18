@@ -72,6 +72,7 @@ module MB
           @used = Set.new(@knobs.keys.map(&:to_s))
 
           body = []
+          clocks = clock_lines
           body.concat(settings)
           # Clips first: patches and graphs may use them by name
           body.concat(clips)
@@ -91,6 +92,7 @@ module MB
           header << '# MB::Sound::GraphIO.load read without running it (no eval).'
           header << graph_line(@lit, {})
           @knobs.each_value { |k| header.concat(knob_lines(@lit, k)) }
+          header.concat(clocks)
           (@assets&.entries || []).each do |e|
             header << "asset #{e.name.inspect}#{", sha256: #{e.sha256.inspect}" if e.sha256}"
           end
@@ -128,6 +130,17 @@ module MB
           lines
         end
 
+        # The session's clocks as header lines (after the knobs their
+        # speeds may read; time-automation).
+        def clock_lines
+          @session.clocks.filter_map do |name, c|
+            "clock #{[name.inspect, *c.line_args].join(', ')}"
+          rescue ArgumentError => e
+            @problems << e.message
+            nil
+          end
+        end
+
         # The master chain, built again from its block with a fresh mix
         # input named after the block's parameters.
         # A mastering preset prints as `master :club, lufs: -8` (with the
@@ -152,6 +165,7 @@ module MB
             opts[:lead] = tr.lead if tr.lead
             opts[:lead_max] = tr.lead_max if tr.lead_max
             opts[:nudge] = tr.nudge if tr.nudge
+            opts[:clock] = tr.clock if tr.clock
             if tr.patch
               block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
             else

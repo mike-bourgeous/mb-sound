@@ -23,6 +23,16 @@ module MB
       # for `bg ..., on: :bar`).  While the timeline is paused the output
       # is silent.  Never ends (use #until).
       #
+      # +clock+ (a Clock, or a clock's name; see MB::Sound::Clock and
+      # Sample#clocked) plays the loop on a clock instead of the session
+      # tempo: one loop per period on a period clock (19.7.seconds; no
+      # tempo needed), its #beats at the clock's tempo on tempo and ratio
+      # clocks.  Its phase comes from the clock (session run frames: scene
+      # drops, seeks, and replays keep it), counted per sample from each
+      # clock cell, so the same at any buffer size.  :stretch restretches
+      # when the clock's rate changes (a speed knob) by more than
+      # CLOCK_STEP; :resample bends the pitch with it (tape).
+      #
       # The stretch for a new tempo is made on the render thread the first
       # time that tempo plays (the slice stretch of a two-bar loop takes
       # 3-15 ms; spectral modes much longer: call #prepare for tempos
@@ -44,6 +54,11 @@ module MB
         # The most stretches kept per player.
         CACHE = 24
 
+        # Clocked :stretch players restretch when the loop's length on the
+        # clock changes by more than this ratio (a speed knob moving), like
+        # BPM_STEP for tempo followers (1/2000: under a cent).
+        CLOCK_STEP = 1r / 2000
+
         # The Sample played, and the channel.
         attr_reader :loop_sample, :channel
 
@@ -57,13 +72,14 @@ module MB
         # "spectral: tonal, spectral flatness 0.000"), or nil.
         attr_reader :stretch_reason
 
-        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000, reason: nil)
+        def initialize(sample, channel: 0, mode: :stretch, stretch: { mode: :slice }, align: :timeline, transport: nil, sample_rate: 48000, reason: nil, clock: nil)
           raise ArgumentError, "Give a Sample to follow the tempo (got #{sample.class})" unless sample.is_a?(Sample)
           raise ArgumentError, "mode: is one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
           raise ArgumentError, "align: is one of #{ALIGNS.inspect} (got #{align.inspect})" unless ALIGNS.include?(align)
+          clock = MB::Sound::Clock.coerce(clock) unless clock.nil?
           beats = sample.beats
-          unless beats
-            raise ArgumentError, "#{sample.name || 'The sample'} has no tempo to follow from: give one (Sample[path, bpm: 98] or sample.with(bpm: 98)) or detect it (Sample[path, detect: true])"
+          if beats.nil? && !(clock.is_a?(MB::Sound::Clock) && clock.unit == :cycles)
+            raise ArgumentError, "#{sample.name || 'The sample'} has no tempo to follow from: give one (Sample[path, bpm: 98] or sample.with(bpm: 98)) or detect it (Sample[path, detect: true]), or play it on a loop period (sample.clocked(19.7.seconds))"
           end
 
           @loop_sample = sample
@@ -74,7 +90,12 @@ module MB
           @align = align
           @transport = transport
           @sample_rate = sample_rate.to_f
-          @whole_notes = beats.to_r.rationalize(Rational(1, 100_000)) / sample.meter[1]
+          @whole_notes = beats && beats.to_r.rationalize(Rational(1, 100_000)) / sample.meter[1]
+          @clock = clock
+          @clock_ctx = nil
+          @clock_rf = nil
+          @clock_zero = nil
+          @clock_launch = nil
           @pos = nil
           @zero = 0r
           @source_data = sample.data(@channel)
@@ -84,7 +105,27 @@ module MB
           @timeline_launch = nil
           @node_type_name = 'LoopPlayer'
           @graph_node_name = sample.name
-          prepare if mode == :stretch
+          prepare if mode == :stretch && clock.nil?
+        end
+
+        # The clock this loop plays on (a Clock or a clock's name), or nil
+        # (the session tempo).
+        def clocking
+          @clock
+        end
+
+        # Plays this loop on +clock+ from now on (see Sequence::Clocked.apply).
+        def reclock(clock)
+          @clock = clock
+          @clock_rf = nil
+          self
+        end
+
+        # Resyncs to the clock at timeline time +time+ (see
+        # Session#render_player).
+        def clock_resync(time)
+          clock_anchor(time) if @clock
+          self
         end
 
         # Makes (and caches) the stretches for +bpms+ (numbers; the
@@ -99,6 +140,7 @@ module MB
         def sample(count)
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           return @buf.fill(0) if timeline_paused?
+          return sample_clocked(count) if @clock
 
           @pos ||= 0r
           wnps = transport.whole_notes_per_second
@@ -129,7 +171,8 @@ module MB
         end
 
         def to_s
-          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch" : 'resample'}, #{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats#{"; #{@stretch_reason}" if @stretch_reason})"
+          len = @whole_notes ? "#{MB::M.sigfigs(@whole_notes.to_f * 4, 4)} beats" : "#{MB::M.sigfigs(@loop_sample.seconds, 4)} s"
+          "LoopPlayer #{@loop_sample.name || 'sample'}#{" ch#{@channel}" unless @loop_sample.mono?} (#{@follow_mode == :stretch ? "#{@stretch_options[:mode] || :cyclic} stretch" : 'resample'}, #{len}#{", #{@clock.is_a?(MB::Sound::Clock) ? @clock : "clock #{@clock.inspect}"}" if @clock}#{"; #{@stretch_reason}" if @stretch_reason})"
         end
 
         private
@@ -171,6 +214,86 @@ module MB
         def timeline_start(time, _origin)
           @pos = time
           @zero = @align == :launch ? (timeline_launch || time) : 0r
+          clock_anchor(time, launch: @align == :launch ? (timeline_launch || time) : nil) if @clock
+        end
+
+        # The loop's length in clock units: one cycle on a period clock,
+        # its whole notes on tempo and ratio clocks.
+        def clock_length(c)
+          c.unit == :cycles ? 1r : @whole_notes
+        end
+
+        # Lines up with the clock at timeline time +time+ (the next sample
+        # read): the run frame there, and with +launch+ (align: :launch)
+        # the clock position the loop starts from.
+        def clock_anchor(time, launch: nil)
+          ctx = clock_ctx
+          c = resolved_clock(ctx)
+          @clock_ctx = ctx
+          if ctx.is_a?(MB::Sound::Session)
+            @clock_rf = ctx.run_frame_of(time)
+            if launch && @clock_launch != launch
+              @clock_launch = launch
+              @clock_zero = c.position(ctx.run_frame_of(launch), ctx)
+            end
+          else
+            @clock_rf ||= 0r
+          end
+          @clock_zero ||= 0r
+        end
+
+        def clock_ctx
+          span = MB::Sound::Session.span
+          span ? span.session : (@clock_ctx.is_a?(MB::Sound::Clock::Free) ? @clock_ctx : MB::Sound::Clock::Free.new(rate: @sample_rate, transport: transport))
+        end
+
+        def resolved_clock(ctx)
+          MB::Sound::Clock.resolve(@clock, ctx)
+        end
+
+        # A buffer on the clock: the phase of each sample from the clock
+        # cell it falls in (exact base, whole-sample offsets), so the same
+        # floats at any buffer size.
+        def sample_clocked(count)
+          clock_anchor(transport.position) if @clock_rf.nil?
+          ctx = @clock_ctx
+          c = resolved_clock(ctx)
+          len = clock_length(c)
+          a = @clock_rf
+          phase = Numo::DFloat.zeros(count)
+          step0 = nil
+          c.pieces(a, a + count, ctx).each do |r0, r1, _pos0, step|
+            bp_rf, bp_pos, _ = c.breakpoint(r0, ctx)
+            i0 = (r0 - a).to_i
+            n = (r1 - r0).to_i
+            next if n <= 0
+            base = (((bp_pos - @clock_zero) % len) / len).to_f
+            inc = (step / len).to_f
+            phase[i0...(i0 + n)] = (Numo::DFloat.new(n).seq + (r0 - bp_rf).to_f) * inc + base
+            step0 ||= step
+          end
+          phase -= phase.floor
+          @clock_rf = a + count
+
+          if @follow_mode == :stretch
+            # The loop's length in seconds at the clock's rate now
+            seconds = step0 && step0 > 0 ? len / (step0 * ctx.clock_rate) : @loop_sample.seconds.to_r
+            data = stretched(clock_ratio(seconds))
+            n = data.length
+            idx = Numo::Int64.cast((phase * n + 1e-6).floor) % n
+            @buf[true] = data[idx]
+          else
+            @buf[true] = cubic(@source_data, phase * @source_data.length)
+          end
+          @buf
+        end
+
+        # The stretch ratio for a loop lasting +seconds+ (quantized to
+        # CLOCK_STEP steps around 1, so a moving speed reuses stretches).
+        def clock_ratio(seconds)
+          r = seconds.to_r / @loop_sample.seconds.to_r
+          steps = (Math.log(r.to_f) / Math.log(1 + CLOCK_STEP.to_f)).round
+          steps.zero? ? 1.0 : (1 + CLOCK_STEP.to_f) ** steps
         end
       end
     end

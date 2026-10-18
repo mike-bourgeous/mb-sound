@@ -15,6 +15,10 @@ require_relative 'sound/phase'
 require_relative 'sound/curve'
 require_relative 'sound/decibels'
 require_relative 'sound/numeric_sound_mixins'
+require_relative 'sound/tempo'
+require_relative 'sound/arg_types'
+require_relative 'sound/clock'
+require_relative 'sound/gesture'
 require_relative 'sound/source_mismatch'
 
 # Load C extensions
@@ -63,6 +67,7 @@ require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
+require_relative 'sound/clock_methods'
 require_relative 'sound/key_methods'
 require_relative 'sound/bus_methods'
 require_relative 'sound/cue_methods'
@@ -105,6 +110,7 @@ module MB
     extend ArrangementMethods
     extend FormMethods
     extend KnobMethods
+    extend ClockMethods
     extend KeyMethods
     extend BusMethods
     extend CueMethods # after ArrangementMethods (its #launch calls super)
@@ -230,6 +236,8 @@ require_relative 'sound/io_logger'
 # (see Sequence::PlayedBy); after everything that adds clip methods, before
 # the recipe recorders wrap them
 [MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq, MB::Sound::Sequence::Kit].each { |c| MB::Sound::Sequence::PlayedBy.carry!(c) }
+# ... and the clock they play on (see Sequence::Clocked)
+[MB::Sound::Sequence::Clip, MB::Sound::Sequence::Seq].each { |c| MB::Sound::Sequence::Clocked.carry!(c) }
 
 # Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
 # every DSL method exists

@@ -69,9 +69,9 @@ bass/dub  effect  lat 72 smp            │                                     
                                         ├─ CLIPS ──────────────────────────────────────────────────────────────────────────────── 8 ─┬─ CLIP ────────────────────────────────────────────────── 9 ─┤
                                         │        intro      ▶drop        break       slots                                           │beat_a  1 bar  loop  on drums  8 notes                       │
                                         │▶drums  ■          ▶beat_a      fill                                                        │kick  !██████······████████······████████······████████······├─ MIDI ──────────────────────────── 10 ─
-─ LANDED ────────────────────────── 11 ─┤▶bass  ▶bass_a     ▶bass_a     ◆bass_b 2.0  bass_1                                          │snare ······████████····················████████·············│no MIDI yet
+─ LANDED ────────────────────────── 11 ─┤▶bass  ▷bass_a     ▶bass_a     ◆bass_b 2.0  bass_1                                          │snare ······████████····················████████·············│no MIDI yet
 nothing landed yet                      │ lead   ■           hook        ·                                                           │hat   ····················████████····················███████│
-                                        │ pad   ▶chords     ▶chords     ◆■                                                           │                                                             │
+                                        │ pad   ▷chords     ▶chords     ◆■                                                           │                                                             │
                                         │                                                                                            │                                                             │
                                         │                                                                                            │                                                             │
                                         │                                                                                            │                                                             │
