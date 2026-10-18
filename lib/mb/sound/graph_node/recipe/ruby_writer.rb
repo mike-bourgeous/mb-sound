@@ -81,6 +81,13 @@ module MB
             @knob_nodes = knob_nodes.each_with_object({}.compare_by_identity) { |(k, v), h| h[k] = v.to_s }
           end
 
+          # Clock names printed in `clocked(:name)` calls (graph documents
+          # write their `clock` header lines).
+          def clocks_used
+            to_s
+            @clocks_used.to_a
+          end
+
           # Knob names printed (see #initialize).
           def knobs_used
             to_s
@@ -140,6 +147,7 @@ module MB
             @output_owner = {}.compare_by_identity
             @given_inputs.each_value { |obj| register_outputs(obj) }
             @knobs_used = Set.new
+            @clocks_used = Set.new
             @rack_defs = @shared_rack_defs || {}
             @used.merge(@knobs.keys)
             @used.merge(@knob_nodes.values)
@@ -615,6 +623,9 @@ module MB
           DELAY_CALLS = [:delay, :feedback_delay, :multitap, :multitap_delay].freeze
 
           # receiver.name(args) { block } for call +c+.
+          # Calls whose first argument may name a Session clock.
+          CLOCK_CALLS = Set[:clocked].freeze
+
           def call_text(recv, c, indent)
             if c.name == :events && recv.nil? && c.receiver.equal?(MB::Sound) && c.block.nil?
               return events_text(c.args, c.kwargs, indent)
@@ -624,6 +635,8 @@ module MB
             end
             args = c.args.map { |a| value(a, indent) }
             kwargs = c.kwargs.dup
+            @clocks_used << c.args[0] if CLOCK_CALLS.include?(c.name) && c.args[0].is_a?(Symbol)
+            @clocks_used << kwargs[:clock] if c.name == :follow && kwargs[:clock].is_a?(Symbol)
             if DELAY_CALLS.include?(c.name)
               # Current spellings: delay(t), not the deprecated
               # delay(seconds: t); smooth:, not smoothing:

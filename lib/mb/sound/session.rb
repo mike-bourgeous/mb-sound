@@ -451,6 +451,7 @@ module MB
         nodes = match_rate(playable.nodes)
         @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
         adopt_knobs(nodes, player: name) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq

@@ -103,6 +103,11 @@ module MB
         @kind == :period ? :cycles : :whole_notes
       end
 
+      # The exact number the clock is made from (BPM, ratio, or seconds).
+      def base_exact
+        @exact
+      end
+
       # The ratio for :ratio clocks.
       def ratio
         @kind == :ratio ? @exact : nil
@@ -207,6 +212,23 @@ module MB
         return @speed_r if @speed_r
         s = ctx.clock_speed_value(@speed, rf).to_f
         s.finite? && s > 0 ? s.to_r : 0r
+      end
+
+      # The arguments of this clock's `clock` line (console and graph
+      # documents): `:tide, 31.1.seconds` plus `speed:` when it isn't 1.
+      # Raises ArgumentError for a speed that doesn't print as Ruby.
+      def line_args
+        parts = [Clock.base_ruby(@base)]
+        case @speed
+        when 1 then nil
+        when Numeric, Symbol then parts << "speed: #{@speed.inspect}"
+        when GraphNode::Knob then parts << "speed: #{@speed.name.inspect}"
+        when GraphNode::Knob::Reader then parts << "speed: #{@speed.knob.name.inspect}"
+        else
+          raise ArgumentError, "clock #{@name.inspect}'s speed doesn't print as Ruby (#{@speed.class})" unless @speed.respond_to?(:to_ruby)
+          parts << "speed: #{@speed.to_ruby}"
+        end
+        parts
       end
 
       # Ruby code for this clock: its name (Session clocks) or the value

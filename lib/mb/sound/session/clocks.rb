@@ -144,6 +144,33 @@ module MB
           end
         end
 
+        # Defines the clocks graph documents in +sound+ (a graph, bundle,
+        # or Array) declare with `clock` header lines that this Session
+        # doesn't have yet (GraphIO::Document#clocks), so their clips find
+        # them.  A clock of the same name with other settings goes through
+        # MB::Sound.live_error (live: the Session's clock stays).  Returns
+        # the names defined.
+        def adopt_clocks(sound)
+          roots = sound.is_a?(Array) ? sound : [sound]
+          roots = roots.flat_map { |r| r.respond_to?(:outputs) && !r.is_a?(GraphNode) ? [r, *r.outputs] : [r] }
+          docs = roots.filter_map { |r| GraphIO.document_of(r) }.uniq
+          defined = []
+          docs.each do |doc|
+            doc.clocks.each do |name, spec|
+              existing = clock_named(name)
+              if existing
+                same = Clock.new(spec[:base], speed: spec[:speed] || 1)
+                unless existing.kind == same.kind && existing.base_exact == same.base_exact && existing.speed == (spec[:speed] || 1)
+                  MB::Sound.live_error(ArgumentError.new("The document's clock #{name.inspect} (#{same.describe}) doesn't match the session's (#{existing.describe}); rename one of them"))
+                end
+                next
+              end
+              define_clock(name, spec[:base], speed: spec[:speed] || 1) and defined << name
+            end
+          end
+          defined
+        end
+
         # Takes: the run frame and odometer a replay starts from (see
         # Take#start_state).
         def restore_run(run_frame, odometer)
