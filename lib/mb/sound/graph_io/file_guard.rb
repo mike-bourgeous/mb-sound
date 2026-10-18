@@ -26,8 +26,24 @@ module MB
       # after the load.
       module FileGuard
         # Where a document's file names point: its directory (nil for text
-        # loaded without base_dir:) and a label for messages.
-        Context = Struct.new(:base_dir, :label, :assets)
+        # loaded without base_dir:) and a label for messages; +tables+ holds
+        # the Wavetables the document read (see WavetableFile).
+        Context = Struct.new(:base_dir, :label, :assets, :tables) do
+          # The Wavetable this document read from the file at absolute
+          # +path+ with +options+, read once (while the file stays the same):
+          # a synth's voice block naming a table file runs once per lane,
+          # and each read spawned ffprobe and ffmpeg and rebuilt the levels
+          # (test-speed-3: 58 reads in one bundles spec example).  Tables
+          # are values (their levels frozen), so lanes share one.
+          def table(path, options)
+            st = File.stat(path)
+            key = [path, st.mtime.to_r, st.size, options].freeze
+            cache = (self.tables ||= {})
+            cache[key] ||= yield
+          rescue SystemCallError
+            yield
+          end
+        end
 
         class << self
           # Marks +string+ (not frozen yet) as text of a document read in
@@ -80,12 +96,17 @@ module MB
         module WavetableFile
           def from_file(path, **kwargs)
             resolved = FileGuard.resolve(path, 'Wavetable.from_file')
-            super(resolved, **kwargs).tap { |t|
-              # Bundles copy the files of tables read with no options
-              if kwargs.empty? && (resolved.is_a?(String) || resolved.is_a?(Pathname)) && !t.frozen?
-                t.instance_variable_set(:@graph_io_file, File.expand_path(resolved.to_s))
-              end
+            read = -> {
+              super(resolved, **kwargs).tap { |t|
+                # Bundles copy the files of tables read with no options
+                if kwargs.empty? && (resolved.is_a?(String) || resolved.is_a?(Pathname)) && !t.frozen?
+                  t.instance_variable_set(:@graph_io_file, File.expand_path(resolved.to_s))
+                end
+              }
             }
+            return read.call unless FileGuard.document_string?(path)
+
+            path.instance_variable_get(:@graph_io_file_context).table(File.expand_path(resolved.to_s), kwargs.dup.freeze, &read)
           end
         end
 

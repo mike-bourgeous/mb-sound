@@ -24,8 +24,11 @@ RSpec.describe('UI::Tiles relayout property', :aggregate_failures) do
     end
   end
 
-  def settle(term)
-    term.settle(quiet: 0.1)
+  # Draws a frame now, as the painter's next one would (a relayout makes
+  # it a full frame; test-speed-3: waiting for 0.1 s of quiet output, 18
+  # times, took most of the example).
+  def settle(tiles)
+    tiles.refresh
   end
 
   it 'draws every pane as a fresh screen would after random edits' do
@@ -54,9 +57,9 @@ RSpec.describe('UI::Tiles relayout property', :aggregate_failures) do
       expect(@ta.wait_for(/ (REPL|KEYS) /)).to eq(true)
       8.times do
         ops.sample(random: rng).call
-        settle(@ta) if rng.rand < 0.5 # some edits drawn, some only queued
+        settle(@a) if rng.rand < 0.5 # some edits drawn, some only queued
       end
-      settle(@ta)
+      settle(@a)
       layout = @a.tiler.layout
       rows, cols = @a.rows, @a.cols
       a = pane_texts(@a)
@@ -66,7 +69,7 @@ RSpec.describe('UI::Tiles relayout property', :aggregate_failures) do
 
       @b, @tb = ui_tiles(layout, rows: rows, cols: cols, source: -> { snap })
       expect(@tb.wait_for(/ (REPL|KEYS) /)).to eq(true)
-      settle(@tb)
+      settle(@b)
       b = pane_texts(@b)
       expect(a.keys.sort).to eq(b.keys.sort), "round #{round}"
       a.each { |name, lines| expect(lines).to eq(b[name]), "round #{round}, pane #{name.inspect} (#{layout.to_ruby})" }

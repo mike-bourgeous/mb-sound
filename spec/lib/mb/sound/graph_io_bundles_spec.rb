@@ -32,7 +32,8 @@ RSpec.describe('graph document bundles', :aggregate_failures) do
   end
 
   it 'saves a graph that reads files as a bundle with its assets' do
-    path = io.save(:tables, graph)
+    g = graph
+    path = io.save(:tables, g)
     dir = File.join(presets, 'tables.mbg')
     expect(path).to eq(File.join(dir, 'tables.mbg.rb'))
     expect(Dir.children(File.join(dir, 'assets')).sort).to eq(['arp_a7.flac', 'c_major.mid', 'mine.flac'])
@@ -46,7 +47,7 @@ RSpec.describe('graph document bundles', :aggregate_failures) do
 
     # Files copied as they are play the same; tables made in memory are
     # saved as FLAC with their tags (within float32 rounding)
-    a = render(graph)
+    a = render(g)
     b = render(MB::Sound.preset(:tables))
     expect(RecipeHelpers.max_diff(a, b)).to be < 1e-6
     expect(b.map { |c| c.abs.max }.max).to be > 0.1
@@ -56,6 +57,21 @@ RSpec.describe('graph document bundles', :aggregate_failures) do
     expect(stable(again)).to eq(stable(path))
     expect(RecipeHelpers.max_diff(b, render(MB::Sound.preset(:tables2)))).to eq(0)
     expect(MB::Sound.preset(File.join(presets, 'tables2.mbg'))).to be_a(MB::Sound::Synth)
+  end
+
+  it 'reads each table file once per load, every voice sharing the table (test-speed-3)' do
+    io.save(:tables, graph)
+    allow(MB::Sound).to receive(:read).and_call_original
+    synth = MB::Sound.preset(:tables)
+    reads = ->(name) { RSpec::Mocks.space.proxy_for(MB::Sound).messages_arg_list.count { |args| args[0].to_s.end_with?(name) } }
+    expect(reads.('assets/arp_a7.flac')).to eq(1) # (Wavetable["assets/arp_a7.flac"] and the String, in both lanes)
+    expect(reads.('assets/mine.flac')).to eq(1)
+    tables = synth.graph.select { |n| n.respond_to?(:wavetable?) && n.wavetable? }.map(&:table).uniq(&:object_id)
+    expect(tables.length).to eq(2) # (arp_a7 read with no options, and mine)
+
+    # Another load reads again
+    MB::Sound.preset(:tables)
+    expect(reads.('assets/arp_a7.flac')).to eq(2)
   end
 
   it 'refuses assets that changed since the bundle was saved' do

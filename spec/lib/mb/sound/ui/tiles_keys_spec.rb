@@ -102,22 +102,26 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
   end
 
   # The REPL's last prompt line ("t> 40 + 2"), without the panes beside it.
-  def prompt_line = @term.lines.reverse.find { |l| l.match?(/\At[>*] /) }&.split("\u2502")&.first&.rstrip
+  # Read from the REPL's VT (what Reline wrote, not yet the painted screen:
+  # the painter draws the pane a frame later, ~55 ms per wait).
+  def prompt_line
+    host = @tiles.instance_variable_get(:@host)
+    host.synchronize { host.vt.lines }.reverse.find { |l| l.match?(/\At[>*] /) }&.rstrip
+  end
 
   # Waits for the REPL's last prompt line to read +text+ (true when it does).
   def wait_prompt(text) = wait_until { prompt_line == text }
 
-  # Up at the REPL prompt recalls +line+ (then clears the prompt again).
-  # FIXME(test-speed-2): this matches the whole screen, where the line typed
-  # earlier still shows, so it passes before Up does anything; checking the
-  # prompt line (wait_prompt) instead found other examples' lines in the
-  # history (Reline's history is per process) and the second, kitty Up
-  # after Ctrl-U not recalling.  Recorded for a fix round.
-  def expect_history(line)
-    @term.write("\e[A")
-    expect(@term.wait_for(/t> #{Regexp.escape(line)}/)).to eq(true), @term.text
-    @term.write("\x15") # Ctrl-U: an empty line again
-    expect(wait_prompt('t>')).to eq(true), @term.text
+  # Up at the REPL prompt recalls +line+, and Down goes back to the empty
+  # line being edited (as in readline, Ctrl-U would only empty the
+  # recalled line: the next Up then goes on to older lines, or stays put
+  # at the first one; test-speed-3 found the old check, matching the whole
+  # screen, passing before Up acted).  +up+ is the Up key's sequence.
+  def expect_history(line, up: "\e[A", why: nil)
+    @term.write(up)
+    expect(wait_prompt("t> #{line}")).to eq(true), "#{why}: Up showed #{prompt_line.inspect}"
+    @term.write("\e[B")
+    expect(wait_prompt('t>')).to eq(true), "#{why}: Down showed #{prompt_line.inspect}"
   end
 
   # Ctrl-] and back with +key+ (i or Enter): the REPL, not KEYS.
@@ -172,12 +176,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
         expect(out.sounding).to be_empty
         nav_round_trip(n.even? ? 'i' : "\r")
         n += 1
-        expect_history('40 + 2')
+        expect_history('40 + 2', why: "#{how_in}/#{how_out}")
         # What a terminal that kept the kitty flags would send still recalls
-        @term.write("\e[1;1:1A")
-        expect(@term.wait_for(/t> 40 \+ 2/)).to eq(true), "#{how_in}/#{how_out}: #{@term.text}" # (see expect_history)
-        @term.write("\x15")
-        expect(wait_prompt('t>')).to eq(true), "#{how_in}/#{how_out}: #{@term.text}"
+        expect_history('40 + 2', up: "\e[1;1:1A", why: "#{how_in}/#{how_out}, kitty Up")
       end
     end
 
@@ -206,18 +207,19 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       path << name
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
-      @term.read_and_settle
+      expect(wait_input_idle(@tiles, @term)).to eq(true), path.join(' ')
       expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
     # Back to the REPL from wherever the walk ended
     @term.write("\x1a") if @tiles.hidden?
+    expect(wait_input_idle(@tiles, @term)).to eq(true)
     @tiles.keys(false)
     @tiles.router.mode = :repl
     expect(wait_settled(@tiles) { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
     @term.write("\x03") # Ctrl-C: whatever the walk typed (maybe several lines: ? and : are Ruby) goes
-    @term.settle(quiet: 0.1)
+    expect(wait_input_idle(@tiles, @term)).to eq(true)
     @term.write("\x05\x15") # Ctrl-E Ctrl-U
-    @term.settle(quiet: 0.1)
+    expect(wait_prompt('t>')).to eq(true), "#{path.join(' ')}: #{prompt_line.inspect}"
     @term.type("6 * 7\r")
     expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
   end
