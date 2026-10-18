@@ -207,18 +207,19 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       path << name
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
-      @term.read_and_settle
+      expect(wait_input_idle(@tiles, @term)).to eq(true), path.join(' ')
       expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
     # Back to the REPL from wherever the walk ended
     @term.write("\x1a") if @tiles.hidden?
+    expect(wait_input_idle(@tiles, @term)).to eq(true)
     @tiles.keys(false)
     @tiles.router.mode = :repl
     expect(wait_settled(@tiles) { @tiles.active? && @tiles.router.mode == :repl }).to eq(true)
     @term.write("\x03") # Ctrl-C: whatever the walk typed (maybe several lines: ? and : are Ruby) goes
-    @term.settle(quiet: 0.1)
+    expect(wait_input_idle(@tiles, @term)).to eq(true)
     @term.write("\x05\x15") # Ctrl-E Ctrl-U
-    @term.settle(quiet: 0.1)
+    expect(wait_prompt('t>')).to eq(true), "#{path.join(' ')}: #{prompt_line.inspect}"
     @term.type("6 * 7\r")
     expect(@term.wait_for('=> 42')).to eq(true), "#{path.join(' ')}\n#{@term.text}"
   end

@@ -280,6 +280,21 @@ module UIHelpers
     wait_settled(tiles, timeout: timeout) { tiles.router.mode == mode }
   end
 
+  # Waits for +tiles+' input thread to have handled everything written to
+  # +term+: the terminal's bytes all read, no escape sequence pending in
+  # the decoder, and the thread waiting for input (not running or holding
+  # the input lock), twice in a row.  A condition instead of a quiet
+  # period: output never goes quiet while a pane animates, so
+  # read_and_settle's 0.3 s cap ran out and late keys landed after the
+  # spec moved on (tiles_keys_spec's walk under load, test-speed-3).
+  def wait_input_idle(tiles, term, timeout: 5)
+    reader = tiles.instance_variable_get(:@reader)
+    decoder = tiles.instance_variable_get(:@decoder)
+    lock = tiles.instance_variable_get(:@input_lock)
+    idle = -> { term.unread.zero? && !decoder.pending? && reader&.status == 'sleep' && !(lock.respond_to?(:mon_locked?) ? lock.mon_locked? : lock.locked?) }
+    wait_until(timeout: timeout) { idle.call && (sleep(0.005); idle.call) }
+  end
+
   # As #wait_until, with the block run under +tiles+' input lock (see
   # #wait_mode): for conditions on the mode and what it drives.
   def wait_settled(tiles, timeout: 5, &cond)
