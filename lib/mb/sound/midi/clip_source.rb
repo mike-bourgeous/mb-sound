@@ -455,14 +455,7 @@ module MB
         # The Clock for the playing clip (named clocks from the context's
         # Session).
         def resolve_clock(ctx)
-          c = @clip.clocking
-          return c if c.is_a?(Clock)
-          if ctx.is_a?(Session)
-            ctx.clock!(c)
-          else
-            s = Session.existing or raise ArgumentError, "The clip plays on clock #{c.inspect}, which needs a Session (define it with `clock #{c.inspect}, ...`)"
-            s.clock!(c)
-          end
+          Clock.resolve(@clip.clocking, ctx)
         end
 
         # Starts (or resyncs) the playing clip on its clock: timeline time

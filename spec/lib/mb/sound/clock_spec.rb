@@ -86,6 +86,19 @@ RSpec.describe(MB::Sound::Clock) do
     end
   end
 
+  describe '.resolve' do
+    it "defines a console Session's clock in the Session that plays it (a render)" do
+      console = new_session
+      render = new_session
+      console.define_clock(:tide, 31.1.seconds)
+      allow(MB::Sound::Session).to receive(:existing).and_return(console)
+      c = described_class.resolve(:tide, render)
+      expect(c).not_to equal(console.clock!(:tide))
+      expect(render.clock!(:tide).period).to eq(311/10r)
+      expect { described_class.resolve(:tid, render) }.to raise_error(ArgumentError, /No clock :tid/)
+    end
+  end
+
   # Kaede (persona panel round 2): two bowls on 19.7 and 23.3 s and a rin
   # on 31.1 s, dropped by the hush and brought back by the tide, seeked
   # into, and replayed from a take at 367/368-frame buffers.
