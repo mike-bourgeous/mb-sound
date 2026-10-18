@@ -217,7 +217,9 @@ module MB
                 if mon && session.playing_after_queue?(mon)
                   warn "stop #{name.inspect}: its live monitor #{mon.inspect} is still playing (disarm #{name.inspect} or stop #{mon.inspect})"
                 elsif !stopped.include?(name)
-                  warn "No background player #{name.inspect} is playing"
+                  playing = session.players.keys
+                  list = playing.empty? ? 'nothing is playing' : "playing: #{playing.map(&:inspect).join(', ')}"
+                  warn "No background player #{name.inspect} is playing (#{list})#{Form.suggest(name, playing.grep(Symbol)) if name.is_a?(Symbol)}"
                 end
               end
             }

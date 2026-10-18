@@ -56,7 +56,10 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
 
     it 'raises for missing inputs and warns about extra ones' do
       expect_load_error("inputs :input\ninput.softclip", nil, /missing input input \(give input: \.\.\.\)/)
-      expect { io.load("220.hz.ramp", inputs: { input: 1.constant }) }.to output(/ignoring input input/).to_stderr
+      expect { io.load("220.hz.ramp", inputs: { input: 1.constant }) }.to output(/ignoring input: \(the document.s inputs: none\)/).to_stderr
+      # ux-fix-1 item 11: a mistyped knob or param is suggested
+      expect { io.load("knob :cut, 800.0, range: 100.0..8000.0\n220.hz.ramp.filter(:lowpass, cutoff: cut)", inputs: { cutt: 2000 }) }
+        .to output(/ignoring cutt: \(the document.s inputs: none; params and knobs: cut\) \(did you mean cut:\?\)/).to_stderr
     end
 
     it 'reads a header with the format, metadata, inputs, and params' do

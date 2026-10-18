@@ -361,6 +361,12 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.stop).to eq([])
       end
 
+      it 'lists what plays and suggests a close name for a player that is not playing (ux-fix-1)' do
+        MB::Sound.bg(:bass, 220.hz.sine)
+        expect { expect(MB::Sound.stop(:bas, fade: 0)).to eq([]) }.to output(/No background player :bas is playing \(playing: :bass\)\nDid you mean\?  :bass/).to_stderr
+        MB::Sound.stop(:all, fade: 0)
+      end
+
       it 'stops named players' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine)

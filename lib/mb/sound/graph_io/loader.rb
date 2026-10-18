@@ -618,7 +618,14 @@ module MB
           extra = @given_inputs.keys - declared
           # Overrides of params can arrive mixed with inputs (preset :x, input: a, drive: 2)
           extra -= @document.params.keys
-          warn "#{@label}: ignoring input#{'s' if extra.length > 1} #{extra.join(', ')} (the document's inputs: #{declared.empty? ? 'none' : declared.join(', ')})" unless extra.empty?
+          unless extra.empty?
+            params = @document.params.keys
+            known = "the document's inputs: #{declared.empty? ? 'none' : declared.join(', ')}"
+            known += "; params and knobs: #{params.join(', ')}" unless params.empty?
+            hint = extra.flat_map { |e| DidYouMean::SpellChecker.new(dictionary: (declared + params).map(&:to_s)).correct(e.to_s) }.uniq
+            hint = hint.empty? ? '' : " (did you mean #{hint.map { |h| "#{h}:" }.join(', ')}?)"
+            warn "#{@label}: ignoring #{extra.map { |e| "#{e}:" }.join(', ')} (#{known})#{hint}"
+          end
           @inputs = @given_inputs.slice(*declared)
         end
 

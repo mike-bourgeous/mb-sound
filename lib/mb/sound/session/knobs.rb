@@ -74,7 +74,7 @@ module MB
 
           if default.nil? && spec.empty?
             return implicit_knob(name) if MB::Sound.live?
-            raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name)}; define it with `knob #{name.inspect}, value, range: lo..hi`"
+            raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
           end
 
           return nil unless @names.claim(name, :knob)
@@ -120,7 +120,7 @@ module MB
         def knob!(name)
           return name.knob if name.is_a?(GraphNode::Knob::Reader)
           return name if name.is_a?(GraphNode::Knob)
-          @knob_lock.synchronize { @knobs[name] } or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name)}"
+          @knob_lock.synchronize { @knobs[name] } or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
         end
 
         # The knobs (a Hash from name to GraphNode::Knob).
@@ -591,10 +591,11 @@ module MB
           @committing_gesture = nil
         end
 
-        def knob_suggestion(name)
+        def knob_suggestion(name, define: false)
           names = @knob_lock.synchronize { @knobs.keys }
-          return '' if names.empty?
-          " (knobs: #{names.map(&:inspect).join(', ')})#{Form.suggest(name, names)}"
+          how = define ? "; `knob #{name.inspect}, value, range: lo..hi` makes one" : ''
+          return " (no knobs yet#{how})" if names.empty?
+          " (knobs: #{names.map(&:inspect).join(', ')}#{how})#{Form.suggest(name, names)}"
         end
 
         # Queues a change to knob +k+ at +time+ (now if nil), calling the

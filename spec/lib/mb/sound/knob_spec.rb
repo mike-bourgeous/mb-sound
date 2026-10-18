@@ -38,6 +38,15 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
     SpecBuffers.join(out)
   end
 
+  # ux-fix-1 item 11: unknown names list what there is and suggest
+  it 'lists knobs and suggests close names for an unknown knob' do
+    session = MB::Sound::Session.new(realtime: false)
+    session.knob(:cut, 800, range: 100..8000)
+    expect { session.knob!(:cutt) }.to raise_error(ArgumentError, /No knob :cutt \(knobs: :cut; `knob :cutt, value, range: lo..hi` makes one\)\nDid you mean\?  :cut/)
+  ensure
+    session&.close
+  end
+
   describe 'Spec' do
     it 'checks and normalizes its options' do
       s = described_class::Spec.new(name: :cut, default: 800, range: 100..8000, curve: :exponential, unit: 'Hz', cc: 74)
@@ -374,7 +383,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
     end
 
     it 'stays strict outside live mode (scripts, specs), naming the knob' do
-      expect { session.knob(:shape) }.to raise_error(ArgumentError, /No knob :shape; define it with `knob :shape, value, range: lo..hi`/)
+      expect { session.knob(:shape) }.to raise_error(ArgumentError, /No knob :shape \(no knobs yet; `knob :shape, value, range: lo..hi` makes one\)/)
     end
   end
 
