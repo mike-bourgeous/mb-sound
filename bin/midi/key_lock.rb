@@ -55,12 +55,12 @@ module MB::Sound
     voice = proc { |v|
       (v.hz.ramp + v.hz.transpose(0.08).ramp)
         .filter(:lowpass, cutoff: v.cutoff(1200, env: v.filt_env(0.001, 0.25, 0.2, 0.2, depth: 2)), quality: 1.2) *
-        v.amp_env(0.003, 0.3, 0.3, 0.2) * 0.12
+        v.amp_env(0.003, 0.3, 0.3, 0.2) * 0.45
     }
     master { |mix| mix.reverb(:hall, wet: -12.db).softclip(0.6, 0.98) }
 
     bg :keys, keys.synth(voices: 10, &voice), fade: 0
-    bg :bass, bass.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.005, 0.4, 0.5, 0.2) * 0.3 }, fade: 0
+    bg :bass, bass.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.005, 0.4, 0.5, 0.2) * 1.2 }, fade: 0
     at_bar(5) { key :bb, :lydian }
     at_bar(9) {
       mode knob(:dark)

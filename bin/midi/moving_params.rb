@@ -39,7 +39,7 @@ module MB::Sound
   MOVING_PARAMS_EXAMPLES = [:all, :cc_feel, :clip_transpose, :lfo_swing, :knob_arp].freeze
 
   # A short plucked saw.
-  def self.params_pluck(v, cutoff: 700, decay: 0.4, level: 0.25)
+  def self.params_pluck(v, cutoff: 700, decay: 0.4, level: 1.0)
     v.hz.ramp
       .filter(:lowpass, cutoff: v.cutoff(cutoff, env: v.filt_env(0.001, 0.25, 0, 0.2, depth: 3)), quality: 2) *
       v.amp_env(0.002, decay, 0, 0.25) * level
@@ -69,7 +69,7 @@ module MB::Sound
       clip_transpose: -> {
         steps = seq(0, 5, -2, 3).n1.loop
         riff.stream.transpose(steps).synth(voices: 8, &pluck) +
-          riff.transpose(steps).transpose(-12).synth(voices: 4) { |v| params_pluck(v, cutoff: 300, level: 0.2) }
+          riff.transpose(steps).transpose(-12).synth(voices: 4) { |v| params_pluck(v, cutoff: 300, level: 0.8) }
       },
       lfo_swing: -> {
         riff.stream.swing(4.bars.lfo.triangle.at(0.5..0.68)).synth(voices: 8, &pluck)
@@ -81,7 +81,7 @@ module MB::Sound
         chords.stream
           .arp(:updown, knob(:rate).choose(8, 16, 32), octaves: 2, gate: 0.6)
           .ratchet(knob(:hits).choose(1, 2), rate: 1.n32)
-          .synth(voices: 8) { |v| params_pluck(v, cutoff: 1200, decay: 0.2, level: 0.3) }
+          .synth(voices: 8) { |v| params_pluck(v, cutoff: 1200, decay: 0.2, level: 1.2) }
       },
     }
 
