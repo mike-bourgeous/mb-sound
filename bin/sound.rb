@@ -47,6 +47,10 @@ end
 puts
 clear if ARGV.include?('--clear')
 
+# The terminal's name and version (XTVERSION), asked once, for debug_dump
+# (see MB::Sound::TerminalInfo)
+MB::Sound::TerminalInfo.query!
+
 # Console help (lib/mb/sound/help.rb): help, now, lesson; Pry's own help
 # moves to pry-help.  The welcome screen is a few lines and one random tip.
 require 'mb/sound/help'
@@ -59,13 +63,14 @@ puts MB::Sound::Help.welcome, ''
 # it made landed (see MB::Sound::Take); `take.save` writes a script that
 # replays the performance.  Started after warm_up, so it records the random
 # generator as the first line will find it.
-MB::Sound::Take.current
+# The take saves itself every minute to the user data dir (autosave_*.rb), so
+# even a crash leaves it.
+MB::Sound::Take.current.autosave!
 Pry.config.hooks.add_hook(:before_eval, :mb_sound_take) { |code, _pry| MB::Sound::Take.current.begin_line(code) }
 Pry.config.hooks.add_hook(:after_eval, :mb_sound_take) { |_result, _pry| MB::Sound::Take.current.end_line }
 
-Pry.config.commands.rename_command('pry-play', 'play')
-Pry.config.commands.rename_command('pry-reset', 'reset')
-Pry.config.commands.rename_command('pry-hist', 'hist')
+# Pry commands named like console commands (help, play, finish, ...) move
+# to pry-<name> (see MB::Sound::Help.rename_pry_collisions!)
 MB::Sound::Help.install_pry!
 
 # Tab completion of track, scene, knob, bus, layout, and pane names after the
@@ -103,6 +108,9 @@ class PryByebugWorkaround < Pry::REPL
   end
 end
 
+# An exception that ends the console writes a debug_dump (the take, the
+# session's state, the exception) before it prints
+begin
 Pry.start(
   MB::Sound,
   prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
@@ -122,3 +130,16 @@ Pry.start(
   load_pry_byebug: false,
   driver: PryByebugWorkaround
 )
+rescue Exception => e # rubocop:disable Lint/RescueException (SystemExit and Interrupt pass)
+  raise if e.is_a?(SystemExit) || e.is_a?(Interrupt)
+  begin
+    dir = MB::Sound.debug_dump(exception: e) # (before the UI closes: ui.txt keeps the screen)
+    MB::Sound::UI.off rescue nil
+    $stderr.puts "\e[1;31mThe console ended with #{e.class}: #{e.message}\e[0m (debug dump: #{dir})"
+  rescue Exception => e2 # rubocop:disable Lint/RescueException
+    $stderr.puts "(debug_dump failed: #{e2.class}: #{e2.message})"
+  end
+  raise
+ensure
+  MB::Sound::Take.active&.stop_autosave
+end

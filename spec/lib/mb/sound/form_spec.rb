@@ -716,7 +716,9 @@ RSpec.describe(MB::Sound::Form) do
 
     it 'are FormMethods, not Kernel or Object methods, and not Pry commands' do
       require 'pry'
-      pry_commands = Pry::Commands.keys.map(&:to_s)
+      require 'mb/sound/help'
+      # (pry-byebug's finish is moved to pry-finish by Help.install_pry!)
+      pry_commands = Pry::Commands.keys.map(&:to_s) - MB::Sound::Help::PRY_RENAMES
       names.each do |n|
         expect(MB::Sound.method(n).owner).to eq(MB::Sound::FormMethods), "#{n} is defined by #{MB::Sound.method(n).owner}"
         expect(Object.new.respond_to?(n, true)).to eq(false), "#{n} is an Object method"
