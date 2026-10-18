@@ -20,9 +20,8 @@ files:
     example: 8
     reason: lane allocation and sampler chops at one-sample buffers (1.1 s each); runner 25 s
   spec/lib/mb/sound/help_spec.rb:
-    file: 30
-    example: 12
-    reason: every help example played and measured; the drum-file example builds sample tables for a 30 s file (8.6 s on the runner)
+    file: 25
+    reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file)
   spec/lib/mb/sound/ui/tiles_spec.rb:
     file: 25
     reason: many real Tiles screens with a Pry REPL on a pty, each started and waited for; runner 18 s
@@ -32,6 +31,3 @@ files:
   spec/bin/songs/night_bus_capture_spec.rb:
     example: 12
     reason: renders 15 bars of the night bus jam with captures and learn (8.5 s on the runner)
-  spec/lib/mb/sound/graph_io_bundles_spec.rb:
-    example: 11
-    reason: saves and loads a file-reading synth bundle three times; each lane reads its tables through ffprobe and ffmpeg (7.7 s on the runner)
