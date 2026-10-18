@@ -30,7 +30,13 @@ module MB
       # +velocity_curve:+, and +flam:+ in its knob Hash (see #kit).
       class Machine
         # One voice of a design.
-        VoiceSpec = Struct.new(:name, :defaults, :block, :gm, :aliases, keyword_init: true)
+        VoiceSpec = Struct.new(:name, :defaults, :block, :gm, :aliases, :silent, keyword_init: true)
+
+        # The decay (seconds) of a silent voice without a block: a key
+        # pulse at the hit's velocity, falling linearly to 0, long enough
+        # that a duck with a 1 ms attack follows it (a one-sample impulse
+        # barely moves it; see Builder#voice).
+        TRIGGER_PULSE = 0.03
 
         # Knobs every voice takes besides its own (see #kit).
         COMMON_KNOBS = [:accent, :velocity_curve, :flam].freeze
@@ -70,7 +76,7 @@ module MB
         end
 
         # Adds a voice (see Builder#voice).
-        def add_voice(name, defaults, block, gm: nil, aliases: [])
+        def add_voice(name, defaults, block, gm: nil, aliases: [], silent: false)
           name = name.to_sym
           raise ArgumentError, "The #{@name} already has a #{name.inspect} voice" if @voices.key?(name)
           bad = defaults.keys & Hit::METHODS
@@ -81,7 +87,7 @@ module MB
 
           gm = gm.nil? ? default_gm(name) : Array(gm).map { |n| Sequence::Grid.row_value(n) }
           defaults = { level: 1.0 }.merge(defaults)
-          @voices[name] = VoiceSpec.new(name: name, defaults: defaults.freeze, block: block, gm: gm.freeze, aliases: Array(aliases).map(&:to_sym).freeze)
+          @voices[name] = VoiceSpec.new(name: name, defaults: defaults.freeze, block: block, gm: gm.freeze, aliases: Array(aliases).map(&:to_sym).freeze, silent: !!silent)
           Array(aliases).each { |a| @aliases[a.to_sym] = name }
           self
         end
@@ -116,7 +122,7 @@ module MB
             spec = other.voices.fetch(k)
             changed = knobs.fetch(k, {})
             Drums.knobs(k, spec.defaults, changed)
-            add_voice(k, spec.defaults.merge(changed), spec.block, gm: spec.gm, aliases: spec.aliases.reject { |a| @aliases.key?(a) || @voices.key?(a) })
+            add_voice(k, spec.defaults.merge(changed), spec.block, gm: spec.gm, aliases: spec.aliases.reject { |a| @aliases.key?(a) || @voices.key?(a) }, silent: spec.silent)
           end
           keys.each do |k|
             (other.chokes[k] || []).each { |by| add_choke([k], by: by) if keys.include?(by) }
@@ -142,6 +148,12 @@ module MB
         # The voice names.
         def names
           @voices.keys
+        end
+
+        # The names of the silent voices (see Builder#voice): played, read
+        # by sidechains (`duck(:drums, only: :trigger)`), never mixed.
+        def silent_names
+          @voices.each_value.select(&:silent).map(&:name)
         end
 
         # The voice name for +name+ (a voice, an alias, or a GM drum name or
@@ -183,7 +195,7 @@ module MB
         #   later (seconds or a Length; DEFAULT_FLAM, 16 ms);
         # - +outputs:+ :mix (a Kit) or :separate (alias :individual: a
         #   Channels bundle of the voices, named, in definition order,
-        #   adding up to the mix exactly);
+        #   adding up to the mix exactly; silent voices are left out);
         # - +seed:+ the random seed (voice i, in definition order, is built
         #   in MB::Sound.with_seed(seed + 1 + i));
         # - +skip_idle:+ as for Voice.
@@ -225,11 +237,14 @@ module MB
             }
           end
 
+          silent = voices.keys & silent_names
           if outputs == :mix
             clip_notes = source.is_a?(Sequence::Clip) && !source.performed? ? voices.keys.flat_map { |v| gm_notes(v, map) } : nil
-            Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: flams)
+            Kit.new(voices, machine: @name, clip_notes: clip_notes, velocity_curve: velocity_curve.nil? && !source.is_a?(Sequence::Kit) ? Drums.velocity_curve(source) : nil, flams: flams, silent: silent)
           else
-            GraphNode::Channels.new(voices.values, names: voices.keys).named("#{@name} outputs")
+            heard = voices.except(*silent)
+            raise SourceMismatch, "Nothing in #{source} plays a voice that is heard (silent: #{silent.join(', ')})" if heard.empty?
+            GraphNode::Channels.new(heard.values, names: heard.keys).named("#{@name} outputs")
           end
         end
         alias call kit
@@ -389,14 +404,28 @@ module MB
         #
         # Given a Sample instead of a block, the voice plays it (knobs
         # +tune+ in semitones and +decay+, nil for the sample's own).
-        def voice(name, sample = nil, gm: nil, as: [], **defaults, &block)
+        #
+        # +silent: true+ makes a trigger voice: it plays (a sidechain reads it,
+        # `duck(:drums, only: :trigger)`) but is never mixed into the kit, so a
+        # line of closed hats or a dedicated trigger row can pump the bass
+        # without being heard.  Without a block it plays a trigger pulse per
+        # hit (Machine::TRIGGER_PULSE: the hit's velocity falling linearly to 0
+        # over 30 ms, so a duck with a 1 ms attack follows it); it has no
+        # GM note unless given +gm:+ (grid rows and kit grids name it).
+        #
+        #     voice :trigger, silent: true
+        #     voice(:ghost, silent: true) { |h| h.body(55, decay: 0.3) }
+        def voice(name, sample = nil, gm: nil, as: [], silent: false, **defaults, &block)
+          if silent && block.nil? && sample.nil?
+            block = proc { |h| h.env(Machine::TRIGGER_PULSE, attack: 0, curve: 0) }
+          end
           if sample
             raise ArgumentError, "Give the #{name} a sample or a block, not both" if block
             s = sample
             defaults = { tune: 0, decay: nil }.merge(defaults)
             block = proc { |h| h.sample(s, tune: h.tune, decay: h.decay) }
           end
-          @machine.add_voice(name, defaults, block, gm: gm, aliases: as)
+          @machine.add_voice(name, defaults, block, gm: gm, aliases: as, silent: silent)
           name.to_sym
         end
 

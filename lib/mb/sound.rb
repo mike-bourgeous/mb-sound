@@ -70,6 +70,7 @@ require_relative 'sound/knob_methods'
 require_relative 'sound/clock_methods'
 require_relative 'sound/key_methods'
 require_relative 'sound/bus_methods'
+require_relative 'sound/sidechain_methods'
 require_relative 'sound/cue_methods'
 require_relative 'sound/rack'
 require_relative 'sound/rack_methods'
@@ -113,6 +114,7 @@ module MB
     extend ClockMethods
     extend KeyMethods
     extend BusMethods
+    extend SidechainMethods
     extend CueMethods # after ArrangementMethods (its #launch calls super)
     extend RackMethods
     extend RecordMethods

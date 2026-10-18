@@ -114,7 +114,7 @@ module MB
 
             parts = s.players.to_h { |p| [p.name, p] }
             rec = s.recording.to_h { |r| [r.name, r] }
-            rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed] }
+            rows = s.tracks.map { |t| [t.name, t.clip, parts[t.name]&.state || :stopped, t.armed, t.trigger] }
             names = s.tracks.map(&:name)
             parts.each_value do |p|
               next if names.include?(p.name) || Arrangement::Recording.monitored_track(p.name)
@@ -127,7 +127,7 @@ module MB
 
             name_w = [[rows.map { |r| r[0].to_s.length }.max, 6].max, 12].min
             show = rows.length > c.h ? rows.first(c.h - 1) : rows
-            show.each_with_index do |(name, clip, st, armed), y|
+            show.each_with_index do |(name, clip, st, armed, trigger), y|
               r = rec[name]
               glyph, role =
                 if r then [c.glyph(:rec), :rec]
@@ -137,6 +137,7 @@ module MB
                 end
               x = c.line(y, [glyph, role], ' ', [c.pad(name, name_w), :name], ' ')
               what = r ? "rec #{c.glyph(:arrow)}#{r.ends}#{r.queued ? ' (queued)' : ''}" : st == :playing ? clip.to_s : "#{st} #{clip}"
+              what = "trigger #{what}" if trigger # (a trigger track: heard only by sidechains)
               c.text(x, y, c.fit(what, c.w - x), r ? :rec : st == :playing ? :text : :dim)
             end
             c.text(0, c.h - 1, "+#{rows.length - show.length} more", :dim) if show.length < rows.length

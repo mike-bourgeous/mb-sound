@@ -784,9 +784,17 @@ module MB
         kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
         read a bus or track by name on the exact sample.  Buses mute and
-        solo like tracks (a solo keeps the buses it feeds).
+        solo like tracks (a solo keeps the buses it feeds).  A trigger track
+        (`sidechain :pump, grid(16, 'x...x...').loop`) is a sidechain line
+        nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
+        like any track, and it never reaches the mix, stems, or CUE
+        (`shape: env(0, 0.08)`, or a block: closed hats as the key; also
+        `pump`).  `turn :"pump/level", 0` turns the pump off (its level
+        knob; scenes take `"pump/level": 0`), or `stop :pump`.  In a kit,
+        `voice :trigger, silent: true` plays a row only for
+        `duck(:drums, only: :trigger)`.
       TEXT
-      commands :bus, :buses, :feed, :routes
+      commands :bus, :buses, :feed, :routes, :sidechain, :sidechains
       dsl :duck, :compress
       note :buses
       see :mixing, :dynamics
@@ -798,6 +806,10 @@ module MB
         track(:try_drums) { |k| tr808(k).at(-14.db) }
         bg :try_drums, grid(16, kick: 'x...x...x...x...').loop
         bg :try, 110.hz.saw.at(-24.db).lp4(900).duck(:try_drums, only: :kick).until(1.bar)
+      end
+      example 'duck a pad by a trigger track nobody hears' do
+        sidechain :try_pump, grid(16, 'x...x...x...x.x.').loop
+        bg :try, 110.hz.saw.at(-14.db).lp4(900).duck(:try_pump, amount: -12.db).until(1.bar)
       end
     end
 
