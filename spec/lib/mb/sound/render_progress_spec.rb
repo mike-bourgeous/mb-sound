@@ -52,9 +52,22 @@ RSpec.describe(MB::Sound::RenderProgress) do
     }.to output(/\A\S*render: playing bars 1-11 unheard first.*preroll: false.*\n\z/).to_stderr
   end
 
+  # ux-fix-1 item 20
+  it 'says how to replace an existing file, and prints what it rendered at the console' do
+    path = tmp_path('again.flac')
+    MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05)
+    expect { MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05) }
+      .to raise_error(MB::Util::FileMethods::FileExistsError, "#{path} exists; overwrite: true replaces it (scripts: -f)")
+    old = MB::Sound.live?
+    MB::Sound.live = true
+    expect { MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05, overwrite: true) }.to output("rendered 0.05 s to #{path}\n").to_stdout
+  ensure
+    MB::Sound.live = old
+  end
+
   it 'redraws one line in a terminal' do
     io = StringIO.new
-    session = MB::Sound::Session.new(realtime: false)
+    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
     p = described_class.new(session, label: 'x.flac', io: io, animate: true)
     p.update(:preroll, target: :drop)
     p.update(:render, frames: 48000) # (a new phase draws at once)

@@ -526,6 +526,23 @@ RSpec.describe MB::Sound::Help do
         expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: bad)).to be_nil
         expect(out.string).to include('Level check skipped')
       end
+
+      # ux-fix-1 item 20: the instructions printed before the error
+      it 'says only that it skipped when there is no sound card' do
+        none = Object.new.tap { |o|
+          def o.prepare = raise(MB::Sound::DeviceOutput::Unavailable, 'No audio output device (Failed to open backend device).  bin/audio_check.rb --list shows devices')
+          def o.start(_) = nil
+          def o.stop = nil
+        }
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: none)).to be_nil
+        expect(MB::U.remove_ansi(out.string)).to eq("Level check skipped: No audio output device (Failed to open backend device).  bin/audio_check.rb --list shows devices; help.level runs it later\n")
+      end
+
+      it 'answers lesson commands when no lesson runs' do
+        list = MB::Sound::Help::LessonList.new
+        expect { expect(list.run).to equal(list) }.to output(/lesson\.run: no lesson is running; `lesson :name` starts one/).to_stdout
+      end
     end
   end
 

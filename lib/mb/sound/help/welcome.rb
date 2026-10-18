@@ -57,10 +57,15 @@ module MB
         return nil unless input.respond_to?(:tty?) && input.tty?
         return nil unless output_type == :device
 
+        # The sound card first, so a missing one is one line instead of the
+        # check's instructions and then an error (ux-fix-1 item 20)
+        player ||= Level::SessionPlayer.new
+        player.prepare if player.respond_to?(:prepare)
         out.puts Text.c(:dim, 'First launch: a quick level check (Enter keeps the default; help.level runs it again).')
-        Level::Calibration.new(input: input, out: out, player: player || Level::SessionPlayer.new).run
+        Level::Calibration.new(input: input, out: out, player: player).run
       rescue StandardError => e
-        out.puts Text.c(:warn, "Level check skipped (#{e.class}: #{e.message}); help.level runs it later")
+        why = e.is_a?(DeviceOutput::Unavailable) ? e.message : "#{e.class}: #{e.message}"
+        out.puts Text.c(:warn, "Level check skipped: #{why}; help.level runs it later")
         nil
       end
     end

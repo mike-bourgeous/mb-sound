@@ -866,7 +866,19 @@ module MB
       #
       #     render 'song.flac', bars: 64 { master :club; my_song }
       #     render 'song_streaming.flac', bars: 64, master: :streaming { my_song }
+      #
+      # Returns the seconds rendered (a Float); at the console it also prints
+      # `rendered 4.0 s to x.flac` (ux-fix-1 item 20: Pry showed a bare
+      # number).
       def render(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
+        seconds = render_targeted(filename, *sounds, loudness: loudness, peak: peak, master: master, **kwargs, &block)
+        if MB::Sound.live? && filename.is_a?(String) && seconds.is_a?(Numeric)
+          puts "rendered #{MB::M.sigfigs(seconds.to_f, 4)} s to #{filename}"
+        end
+        seconds
+      end
+
+      private def render_targeted(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
         override = master == :none ? false : master
         override = Mastering.preset(override) if override
         targeting = loudness != false
