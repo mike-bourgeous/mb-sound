@@ -16,6 +16,111 @@ module MB
           MB::Sound.noise.filter(:bandpass, cutoff: sweep, quality: 3) * MB::Sound.tween([level * 0.12, level], bars.bars, loop: false)
         end
 
+        # A chopped break: plays +source+, a chop clip of a break's slices
+        # (`brk.chop(:k, T, [:s, 2], brk[:s].rev)`, which knows what plays
+        # it: Sequence::PlayedBy), on one truncating sampler voice (each hit
+        # cuts the last through a 1.3 ms declick), velocity 0.75 (MIDI 95)
+        # as cut, then the S950-ish output stage of Nev Ashdown's jungle
+        # sampler (bin/synths/jungle.rb): a 13 kHz lowpass, +grit+ of
+        # sample-rate reduction to 30 kHz, a lowpass at +cutoff+ (a number
+        # or a node such as a knob), and a little tape saturation, times
+        # +level+.  Other sources (live MIDI, plain clips) play the 32
+        # sixteenths of breakbeat(:jungle) from C2.  (genre-fixes, 2026-10-18: the jungle template's chops,
+        # replacing the key-zone notes of the jungle_breaks preset.)
+        def breaks(source, cutoff: 16000, grit: 0.25, level: 1.6)
+          slices = source.respond_to?(:instrument) && source.instrument
+          slices = MB::Sound.breakbeat.slices(32) unless slices.respond_to?(:sampler)
+          slices.sampler(source) { |v, s| s * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * (1 / 0.75)) }
+            .filter(:lowpass, cutoff: 13000, quality: 0.6)
+            .decimate(30000, mix: grit)
+            .filter(:lowpass, cutoff: cutoff, quality: 0.9)
+            .softclip(0.6, 0.98) * level
+        end
+
+        # Rain that ignores its notes (play it on a looping rest clip):
+        # per side, a bed of pink noise through a bandpass that wanders
+        # (drift) between 600 and 1700 Hz, a little hiss above 6.5 kHz, and
+        # drops: +density+ random impulses a second (dust, at least 4 ms
+        # apart) each pinging a resonance at its own pitch (2.6-3.5 kHz)
+        # for 20 ms, the whole swelling with slow gusts.  +level+ may be a
+        # node (a knob: louder rain is denser too).  Stereo, the sides
+        # independent.  (genre-fixes, 2026-10-18: the ambient template's
+        # weather, after bin/songs/tin_roof.rb's rain.)
+        def rain(_source, level: 0.5, density: 70)
+          side = -> {
+            bed = MB::Sound.noise(:pink).filter(:bandpass, cutoff: MB::Sound.drift(0.31, range: 600..1700), quality: 0.9) * 0.35 +
+              MB::Sound.noise.filter(:highpass, cutoff: 6500, quality: 0.5) * 0.03
+            drops = MB::Sound.dust(density, min_gap: 0.004)
+            pitch = MB::Sound.noise.sample_hold(drops) * 450 + 3050
+            gusts = MB::Sound.drift(0.07, range: 0.55..1.0)
+            (bed + drops.ping(pitch, decay: 0.02) * 0.5) * gusts
+          }
+          MB::Sound.stereo(side.(), side.()) * level
+        end
+
+        # Wind that ignores its notes: per side, brown noise through a
+        # bandpass wandering between 220 and 800 Hz (drift), its level
+        # rising and falling in gusts of several seconds, times +level+ (a
+        # number or a knob).  Stereo, the sides independent.  (genre-fixes:
+        # the ambient template's weather.)
+        def wind(_source, level: 0.5)
+          side = -> {
+            cut = MB::Sound.drift(0.11, range: 220..800)
+            gusts = MB::Sound.drift(0.17, range: 0.15..1.0, smooth: :cubic)
+            MB::Sound.noise(:brown).filter(:bandpass, cutoff: cut, quality: 1.6) * gusts
+          }
+          MB::Sound.stereo(side.(), side.()) * level * 10
+        end
+
+        # Tape hiss that stops with the sound (a bus effect: +input+ is the
+        # bus input, a bundle): the input plus pink hiss above 2.5 kHz at
+        # +level+ (a gain), gated by `input.sounding` (open while the input
+        # is above -90 dB, held 1 s and faded over 0.3 s after), so the
+        # hiss ends with the weather.  Each channel hisses on its own.
+        # (genre-fixes: the ambient template's :weather bus; the
+        # ambient_tape preset does this with wow and wear too, but costs
+        # 27% of realtime per stereo 800-frame buffer, this ~1%.)
+        def hiss(input, level: -42.db)
+          chans = input.respond_to?(:outputs) ? input.outputs : [input]
+          noises = chans.map { MB::Sound.noise(:pink).filter(:highpass, cutoff: 2500, quality: 0.6) * level }
+          gate = input.sounding(hold: 1, fade: 0.3)
+          (input + MB::Sound.channels(*noises) * gate).ring(:first)
+        end
+
+        # A house bass (Munro's "one saw with a tempo-set decay"): one saw
+        # voice through a four-pole lowpass at +cutoff+ Hz opened +env+
+        # octaves by a short filter envelope, a plucked level with no
+        # sustain (+decay+ a length: an eighth note by default, so it
+        # follows the tempo), a little velocity, and a soft clip.  Mono.
+        # (genre-fixes, 2026-10-18: the house template's bass.)
+        def house_bass(source, cutoff: 240, env: 2.5, resonance: 0.35, decay: 1.n8, level: 1.0)
+          MB::Sound.synth(source, voices: 1) { |v|
+            fenv = v.env(0.001, 0.06, 0, 0.04, gm: false)
+            amp = v.env(0.002, decay, 0, 0.04, gm: false) * (v.velocity * 0.4 + 0.6)
+            (v.hz.saw.lp4(2 ** (fenv * env) * cutoff, resonance: resonance) * amp).softclip(0.7, 0.97)
+          } * level
+        end
+
+        # A TB-303-style line (bin/synths/acid.rb's voice, compact): one
+        # saw voice with slides (legato glides of +glide+ s) through the
+        # diode ladder at +cutoff+ Hz (a number or a node such as a knob),
+        # +reso+ resonance, the 303's envelope (Notes#acid_env) opening
+        # +env_mod+ octaves, accents adding level and the accent sweep
+        # (Notes#accent_sweep).  Mono.  (genre-fixes: techno's peak2 acid.)
+        def acid(source, cutoff: 300, reso: 0.6, env_mod: 3.0, glide: 0.06, drive: 1.5, gain: 3.0)
+          MB::Sound.synth(source, voices: 1) { |v|
+            pitch = v.hz.glide(glide, legato: true)
+            acc = v.accent
+            meg = v.acid_env
+            sweep = v.accent_sweep(meg, resonance: reso.respond_to?(:sample) ? 0.6 : reso)
+            octaves = meg * (1 - acc * 0.5) * env_mod + sweep * (0.8 * 5.25)
+            cut = ((2 ** octaves) * cutoff).clip(20, 16000)
+            veg = v.env(0.002, 3.5, 0.0, 0.008, sensitivity: 1.0..1.0, curve: [0, 30, 0], gm: false).legato
+            amp = veg * (acc * 0.36 + sweep * 0.112 + 0.55)
+            (pitch.saw.diode(cut, resonance: reso, drive: drive) * amp * gain).filter(:highpass, cutoff: 35, quality: 0.7).softclip(0.6, 0.95)
+          }
+        end
+
         # A techno roller: a short sub sine (lowpassed at +cutoff+ Hz, one
         # voice) with a tick of filtered noise on every note (a bandpass
         # +tone+ times the note's frequency; +noise+ its level), and only

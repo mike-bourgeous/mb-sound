@@ -105,13 +105,18 @@ module MB::Sound
   # form method, form options, description] }; the script's setup builds
   # the set (tracks, scenes, knobs, master) in a sandbox Session and its
   # form method the flow, then the Arrangement is saved as a set document.
-  # (tunnel_vision.rb isn't here yet: set documents don't hold buses and
-  # sends, so its hall and echo would be lost.)
+  # (tunnel_vision since genre-fixes, 2026-10-18, when set documents
+  # learned buses, sends, and routes.)
   LIBRARY_PRESET_SETS = {
     night_bus: ['bin/songs/night_bus_flow.rb', :last_stop, :last_stop_form, {},
                 'Set :night_bus from bin/songs/night_bus_flow.rb ("Night Bus: Last Stop", tech house at 126 BPM in A minor): ' \
                 'drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; ' \
                 'its flow (play_form doc.form).  `demo` loads it.'],
+    tunnel_vision: ['bin/songs/tunnel_vision.rb', :tunnel_vision, :tunnel_vision_form, { play: false },
+                    'Set :tunnel_vision from bin/songs/tunnel_vision.rb ("Tunnel Vision", Kez Volta\'s drum & bass at 174 BPM in F minor, ' \
+                    'the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, ' \
+                    'the basses ducked by the drums\' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; ' \
+                    'its flow (play_form doc.form).  `demo :tunnel_vision` loads it.'],
   }.freeze
 
   # The MIDI file script patches are saved from.

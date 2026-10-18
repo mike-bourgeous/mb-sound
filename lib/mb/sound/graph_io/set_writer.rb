@@ -10,7 +10,8 @@ module MB
       #
       #     bpm 124
       #     master { |mix| mix.softclip(0.5, 0.97) }
-      #     track(:bass) { |clip| ... }
+      #     bus(:hall) { |sig| sig.reverb(:hall, mix: 1) }
+      #     track(:bass, send: { hall: -12.db }) { |clip| ... }
       #     bass_a = acid(A1, R, ...).loop.named(:bass_a)
       #     scene :drop, bass: bass_a, cut: 2600
       #     mutes :rhythm, :drums, :bass
@@ -21,7 +22,9 @@ module MB
       #
       # Tempo, meter, master gain, launch quantization, the session's knobs
       # (as `knob` header lines, with their held values), the master chain,
-      # tracks (patches print as blocks: the patch is built once from the
+      # buses (their chains built once from their blocks, like the
+      # master's), tracks with their routing (to: a bus, send: levels as
+      # held gains or the knob names they follow) (patches print as blocks: the patch is built once from the
       # track's clip, or the first clip a scene gives it, keeping the random
       # state, and its recipe printed with the block's parameter name), the
       # clips and kits scenes play, scenes, mute groups, sections declared
@@ -77,6 +80,7 @@ module MB
           # Clips first: patches and graphs may use them by name
           body.concat(clips)
           body.concat(master)
+          body.concat(buses)
           body.concat(tracks)
           body.concat(scenes)
           body.concat(mute_groups)
@@ -157,7 +161,52 @@ module MB
           block_statement(:master, preset ? [preset.name] : [], preset ? preset.options : {}, block, args, 'master')
         end
 
+        # The buses (Session::Buses), each bus after the bus its output
+        # feeds: `bus(:hall, to: :verb) { |sig| ... }` (the chain built once
+        # from its block, like the master's), or `bus :drums, to: :master`
+        # without a block.
+        def buses
+          defs = @session.bus_definitions
+          order = []
+          visit = ->(n) {
+            next if order.include?(n) || !defs.key?(n)
+            to = defs[n][1]
+            visit.(to) unless to == :master
+            order << n
+          }
+          defs.each_key { |n| visit.(n) }
+          order.flat_map { |name|
+            block, to, _description = defs[name]
+            kwargs = {}
+            kwargs[:to] = to unless to == :master
+            # (a plain bus: `bus :drums, to: :master`; bus(:drums) alone reads one)
+            next ["bus #{name.inspect}, to: #{lit(to)}"] unless block
+            source = GraphNode::MixSource.new(channels: @session.channels, sample_rate: 48000)
+            chans = source.outputs
+            args = block.arity == 0 || block.arity == 1 ? [GraphNode::Channels.new(chans)] : chans
+            block_statement(:bus, [name], kwargs, block, args, "bus #{name.inspect}")
+          }
+        end
+
+        # A player's routing as track options (to:, send:), from
+        # Session#route_definitions: send levels as held gains or the knob
+        # names they follow.
+        def route_options(name, routes)
+          r = routes[name] or return {}
+          opts = {}
+          opts[:to] = r[:to] if r[:to]
+          sends = r[:send].to_h { |bus, v|
+            unless v.is_a?(Numeric) || v.is_a?(Symbol)
+              @problems << "track #{name.inspect}: its send to #{bus.inspect} follows a node that isn't a session knob (set documents save gains and knob names)"
+            end
+            [bus, v]
+          }
+          opts[:send] = sends unless sends.empty?
+          opts
+        end
+
         def tracks
+          routes = @session.route_definitions
           @arrangement.tracks.flat_map { |name, tr|
             opts = {}
             opts[:q] = tr.q if tr.q
@@ -166,6 +215,7 @@ module MB
             opts[:lead_max] = tr.lead_max if tr.lead_max
             opts[:nudge] = tr.nudge if tr.nudge
             opts[:clock] = tr.clock if tr.clock
+            opts.merge!(route_options(name, routes))
             if tr.patch
               block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
             else

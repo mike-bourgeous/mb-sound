@@ -1342,6 +1342,10 @@ module MB
               parent, name, args, kwargs = s.lineage
               return "#{lineage_receiver(parent, indent)}#{lineage_call(name, args, kwargs, indent)}"
             end
+            # (a break that ships with mb-sound)
+            if s.file && (brk = MB::Sound::SamplerMethods.breakbeat_name(s.file))
+              return "breakbeat(#{brk.inspect})"
+            end
             if @assets && (asset = @assets.sample(s))
               return "Sample[#{asset.inspect}]"
             end

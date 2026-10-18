@@ -278,8 +278,10 @@ module MB
     Help.topic :sampler, 'Sampler: bounce, slice, chop', group: :sound do
       about <<~TEXT
         Samples are sounds in memory: `Sample['kick.flac']`, `bounce(graph,
-        2.bars, bpm:)` (any graph, offline, at its own tempo), or
-        `capture_audio(4.bars)` (the master bus or a node, live).  Cut them
+        2.bars, bpm:)` (any graph, offline, at its own tempo),
+        `capture_audio(4.bars)` (the master bus or a node, live), or
+        `breakbeat(:jungle)` (a synthesized break that ships with mb-sound,
+        two bars at 138.75 BPM).  Cut them
         with `rec.slices(16)` (or `slices(:onsets)`), name runs of slices
         (`brk.name(k: 0..1, s: 4..5)`), and edit them as values: `.rev`,
         `.at(7.n16)` (a tracker's 9xx offset), `.looped`, `.bits(12)`,
@@ -311,7 +313,7 @@ module MB
         `mode: :paul` stretch in the frequency domain, and `.grains` plays
         a sample as a grain cloud: see `help :granular`.
       TEXT
-      commands :bounce, :capture_audio, :chop, :sampler, :sfz
+      commands :bounce, :capture_audio, :chop, :sampler, :sfz, :breakbeat
       dsl :bounce
       note :sampler
       see :drums, :sequences, :granular
@@ -645,10 +647,16 @@ module MB
       about <<~TEXT
         `genre :dnb` is a template of a genre: tempo, form, drum grids and
         fills, track roles with suggested presets, scenes, mix targets, and
-        tips.  `genre(:dnb).short.play` plays it, `.setup` makes its tracks
-        and scenes to play by hand, `.to_ruby` prints it, and a block or
-        keywords change any part (:dnb, :jungle, :ambient, :funk; :house and
-        :techno are stubs).
+        tips.  `genre(:dnb).short.play` plays it, `.setup` makes its tracks,
+        buses, and scenes to play by hand, `.to_ruby` prints it, and a block
+        or keywords change any part (:dnb, :jungle, :ambient, :funk, :house,
+        :techno).  Templates route roles into buses (`bus :hall, [:reverb,
+        :hall, { mix: 1 }]`, `role :pad, ..., send: { hall: -12.db }`, `to:`)
+        and duck from the drums' own kick (`sidechain :drums, only: :kick`;
+        `duck: -8.db` on a role); jungle chops `breakbeat(:jungle)` with
+        `brk.chop`, ambient's bowls loop on clocks in seconds and its
+        weather (rain, wind) runs through a hiss bus.  `save :x, set` after
+        `.setup` keeps the buses and routes.
       TEXT
       commands :genre, :genres
       note :genres
@@ -656,6 +664,10 @@ module MB
       example 'a genre in numbers', sound: false do
         t = genre(:jungle)
         [t.tempo, t.form.steps.first(3), t.roles.keys, t.mix.summary]
+      end
+      example 'the techno template, its routing', sound: false do
+        t = genre(:techno)
+        [t.sidechain, t.buses.keys, t.roles[:stab].send, t.form.bars]
       end
     end
 

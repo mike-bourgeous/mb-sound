@@ -23,6 +23,21 @@ RSpec.describe(MB::Sound::DemoMethods) do
     expect(session.players.keys).to include(:drums, :hook)
   end
 
+  it 'loads Tunnel Vision with its buses, sends, and kick-keyed ducks' do
+    doc = nil
+    expect { doc = within { MB::Sound.demo(:tunnel_vision) } }.to output(/demo :tunnel_vision.*paused at bar 1.*tracks  pad pluck drums/m).to_stdout
+    expect(session.bus_names).to eq(%i[hall echo])
+    routes = session.route_definitions
+    expect(routes[:pluck][:send]).to eq({ echo: :space, hall: 0.25 })
+    expect(routes[:drums][:send][:hall]).to be_within(1e-12).of(-24.db.to_f)
+    expect(routes).not_to have_key(:sub)
+    expect(doc.form.steps.map(&:first)).to start_with(:intro, :build, :drop)
+
+    within { MB::Sound.go(:drop) }
+    20.times { session.process_buffer(800) }
+    expect(session.players.keys).to include(:drums, :reese, :sub)
+  end
+
   it 'asks before loading over players, and replace: true stops them' do
     within { MB::Sound.bg(:hum, 110.hz.at(0.1), on: :now) }
     session.process_buffer(800)
@@ -34,7 +49,7 @@ RSpec.describe(MB::Sound::DemoMethods) do
 
   it 'suggests names for unknown demos and lists the demos' do
     expect { within { MB::Sound.demo(:night_buss) } }.to raise_error(ArgumentError, /No demo :night_buss.*night_bus/)
-    expect { MB::Sound.demos }.to output(/:night_bus +"Night Bus: Last Stop"/).to_stdout
+    expect { MB::Sound.demos }.to output(/:night_bus +"Night Bus: Last Stop".*:tunnel_vision +"Tunnel Vision"/m).to_stdout
   end
 
   it 'is not taken by Pry or another MB::Sound method' do

@@ -187,6 +187,46 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(x, y)).to eq(0)
   end
 
+  it 'saves buses, sends (gains and knob names), and to: routes, loading them to play bit for bit like the original' do
+    build = -> {
+      MB::Sound.instance_exec do
+        bpm 128
+        knob :space, 0.4
+        bus(:verb) { |sig| sig.delay(0.05, feedback: 0.3) * 0.7 }
+        bus(:group, to: :verb) { |sig| sig.softclip(0.5, 0.97) }
+        bus :plain, to: :master
+        beat = grid(16, kick: 'x...x...x...x...', snare: '....x.......x...').loop.named(:beat)
+        line = seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::R).n8.loop.named(:line)
+        track(:drums, to: :group, send: { verb: -12.db }) { |kit| tr808(kit, seed: 4) * 0.5 }
+        track(:keys, send: { verb: :space, plain: 0.5 }) { |c|
+          c.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.01, 0.1, 0.5, 0.1) }.duck(:drums, only: :kick, amount: -6.db) * 0.3
+        }
+        scene :a, drums: beat, keys: line
+        flow(play: false) { a 4 }
+      end
+    }
+    a = session
+    within(a) { MB::Sound.seed(3); build.() }
+    text = io.dump(a.arrangement, name: 'routed')
+    expect(text).to include("bus(:verb) { |sig|\n  sig.delay(0.05, feedback: 0.3) * 0.7\n}")
+    expect(text).to include('bus(:group, to: :verb) { |sig|', 'bus :plain, to: :master')
+    expect(text.index('bus(:verb)')).to be < text.index('bus(:group')
+    expect(text).to include('track(:drums, to: :group, send: { verb: -12.db }) { |kit|')
+    expect(text).to include('track(:keys, send: { verb: :space, plain: 0.5 }) { |c|')
+    expect(text).to include('duck(:drums, only: :kick, amount: -6.db)')
+
+    b = session
+    doc = io.load(text, session: b)
+    expect(b.bus_names).to eq(%i[verb group plain])
+    expect(b.route_definitions).to eq({ drums: { to: :group, send: { verb: -12.db.to_f } }, keys: { to: nil, send: { verb: :space, plain: 0.5 } } })
+    expect(stable(io.dump(b.arrangement, name: 'routed'))).to eq(stable(text))
+
+    ref = play(a, a.arrangement.last_form, 120)
+    got = play(b, doc.form, 120)
+    expect(ref[0].abs.max).to be > 0.05
+    expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
+  end
+
   it 'builds patches to save them without a TracePoint (YJIT would drop its code)' do
     a = session
     within(a) { MB::Sound::GraphIOSetSpec.build }
