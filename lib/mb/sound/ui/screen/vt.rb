@@ -176,6 +176,15 @@ module MB
         # Counters: bytes fed, lines scrolled.
         attr_reader :bytes_fed, :scrolled
 
+        # The OSC number of a sync mark: a host writes "\e]7765;N\a" after
+        # the program's output and knows the VT has everything written
+        # before it once #sync_mark reaches N (an unknown OSC, which a real
+        # terminal ignores).  See Input::ReplHost#sync_output.
+        SYNC_OSC = '7765'
+
+        # The newest sync mark fed (0: none).
+        attr_reader :sync_mark
+
         def initialize(rows, cols, scrollback: SCROLLBACK, ambiguous_width: 1)
           raise ArgumentError, "A VT needs at least 1x1 cells (got #{rows}x#{cols})" unless rows.is_a?(Integer) && cols.is_a?(Integer) && rows > 0 && cols > 0
 
@@ -191,6 +200,7 @@ module MB
           @pending = +''.b
           @bytes_fed = 0
           @scrolled = 0
+          @sync_mark = 0
           @title = nil
           @dirty = Array.new(rows, true)
           @all_dirty = true
@@ -676,6 +686,7 @@ module MB
         def osc(body)
           num, text = body.split(';', 2)
           @title = text if %w[0 2].include?(num)
+          @sync_mark = text.to_i if num == SYNC_OSC
         end
 
         def restore_cursor

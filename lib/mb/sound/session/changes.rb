@@ -125,6 +125,9 @@ module MB
 
           c = nil
           @render_lock.synchronize {
+            # Changes already queued for a time this one would land at or
+            # after land first, in queue order (see #commit_queued_due)
+            commit_queued_due if time.nil? || time <= @transport.position
             pos = @transport.position
             check_late(kind, subject, time, pos) unless perform&.[](:forced)
             seq = @journal.next_seq
@@ -213,6 +216,28 @@ module MB
         # or @mutex held, or for an estimate).
         def queued_start?(name = nil)
           @changes.any? { |c| START_KINDS.include?(c.kind) && (name.nil? || c.subject == name) && !knob_change?(c) }
+        end
+
+        # Lands queued changes whose time has come (at or before the
+        # current position) now, in queue order, before a change that lands
+        # now (see #change): when the position reaches a queued change's
+        # time between buffers (a buffer ending on its bar line, or a seek
+        # landing now), it is due, and was issued first, so it lands first,
+        # as #commit_due and #commit_due_seeks order changes of the same
+        # time (fixes-ui-specs, 2026-10-17: `go :both` queued for 2:1, then
+        # `seek 2` and `go :none` landing at 2:1 now: :none stopped :y,
+        # and the scene's swap of :y failed on the next buffer).  Called
+        # with the render lock held, outside any console command's undo
+        # step (the changes belong to whoever queued them).
+        def commit_queued_due
+          return if @changes.empty? || @changes.first.time > @transport.position
+          without_command do
+            while (c = @changes.first) && c.time <= @transport.position
+              @changes.shift
+              pos = @transport.position
+              commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: false)
+            end
+          end
         end
 
         # Applies queued changes whose time is before +to+, each on its

@@ -44,6 +44,37 @@ RSpec.describe(MB::Sound::UI::Messages, :aggregate_failures) do
     expect(@tiles.tiler.layout.root).to eq(before.root)
   end
 
+  # The painter notices messages on its next frame, which may come before
+  # or after an action's own flash; holding the screen's lock fixes the
+  # order (the 2026-10-17 Mac failure of tiles_keys_spec's capture example,
+  # where the painter's late look replaced the capture summary).
+  it "orders a message's flash and an action's flash by when they happened, not when the painter looked" do
+    @tiles, @term = ui_tiles(:tiles, source: -> { ui_fake_snapshot })
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles) # (UI.screen)
+    expect(@term.wait_for('t> ')).to eq(true)
+    lock = @tiles.instance_variable_get(:@lock)
+    flash = -> { @tiles.instance_variable_get(:@flash)&.first }
+
+    # A message, then a summary naming it: the pane opens, the summary stays
+    lock.synchronize do
+      expect { warn 'spec warning: a track failed' }.to output(/a track failed/).to_stderr
+      @tiles.send(:flash, 'action: one thing done; :x failed (m: messages)', :warn)
+    end
+    @tiles.refresh
+    expect(@tiles.tiler.layout.panes).to include(:messages)
+    expect(flash.()).to eq('action: one thing done; :x failed (m: messages)')
+
+    # A flash, then a message: the message's flash replaces it
+    @tiles.messages(false)
+    lock.synchronize do
+      @tiles.send(:flash, 'an older flash', :ok)
+      expect { warn 'spec warning: newer' }.to output(/newer/).to_stderr
+    end
+    @tiles.refresh
+    expect(@tiles.tiler.layout.panes).to include(:messages)
+    expect(flash.()).to eq('warn: spec warning: newer  (NAV m: away)')
+  end
+
   it "prints the REPL's own command's warnings in the REPL, and the palette's output and value there too (ux-1 r3 items 22, 25)" do
     @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120)
     MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
