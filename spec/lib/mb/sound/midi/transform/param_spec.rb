@@ -132,4 +132,38 @@ RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_tra
       expect(run_stream.chance(MB::Sound.cc(2)).to_s).to include('chance(cc(2))')
     end
   end
+  describe 'clip operations with params' do
+    let(:riff) { MB::Sound.seq(60, 64, 67, 72).n8.loop }
+
+    it 'transpose by the step at each event, per cycle' do
+      c = riff.transpose(MB::Sound.seq(0, 5).n2.loop)
+      expect(c.events_for(0).map(&:value)).to eq([60, 64, 67, 72])
+      expect(c.events_for(1).map(&:value)).to eq([65, 69, 72, 77])
+      expect(c.to_ruby).to eq('seq(60, 64, 67, 72).n8.loop.transpose(seq(0, 5).n2.loop)')
+    end
+
+    it 'swing, chance, quantize, and humanize by params' do
+      k = MB::Sound.knob(:cp, 0.25)
+      expect(riff.chance(k).events_for(3).map(&:probability)).to eq([0.25] * 4)
+      sw = MB::Sound.seq(60, 62, 64, 65).n16.loop.swing(MB::Sound.seq(0.5, 2/3r).n8.loop)
+      expect(sw.events_for(0).map(&:start)).to eq([0r, 1/16r, 1/8r, 1/8r + 1/12r])
+      q = MB::Sound::Sequence::Clip.new([MB::Sound::Sequence::Event.new(start: 1/100r, length: 1/16r, value: 60)], length: 1, loop: true)
+      expect(q.quantize(16, amount: MB::Sound.seq(1, 0).n1.loop).events_for(0).map(&:start)).to eq([0r])
+      expect(q.quantize(16, amount: MB::Sound.seq(1, 0).n1.loop).events_for(1).map(&:start)).to eq([1/100r])
+      h = riff.humanize(0.01 + 0 * 2.bars.lfo, seed: 3)
+      expect(h.events_for(2)).to eq(h.events_for(2))
+      expect(h.events_for(2).map(&:start)).not_to eq(riff.events.map(&:start))
+    end
+
+    it 'every reads n at each cycle start' do
+      c = riff.every(MB::Sound.seq(1, 2).n2.loop)
+      expect(c.events_for(0).map(&:condition).uniq).to eq([[1, 1]])
+      expect(c.events_for(1).map(&:condition).uniq).to eq([[2, 1]])
+    end
+
+    it 'leaves plain values to the original operations' do
+      expect(riff.chance(0.5).events).to eq(riff.chance(0.5).events)
+      expect(riff.transpose(2).class).to eq(MB::Sound::Sequence::Seq)
+    end
+  end
 end

@@ -36,7 +36,12 @@ module MB
         # The events of +cycle+ with +dice+ (Dice.new(seed, cycle)).
         def events(cycle, dice)
           root = Dice.new(dice.seed, :strike)
-          chance = @chance.respond_to?(:call) ? @chance.call(cycle).to_f : @chance.to_f
+          chance = if @chance.respond_to?(:call) then @chance.call(cycle).to_f
+                   elsif MIDI::Param.param?(@chance)
+                     # A moving parameter (a knob, cc, LFO) read at the cycle's start
+                     MIDI::Param.value_at(MIDI::Param.wrap(@chance, 'strikes chance'), cycle * @length).to_f
+                   else @chance.to_f
+                   end
           first = cycle * @steps
           # Candidates from gap - 1 steps before the cycle on (one call into C)
           from = first - (@gap - 1)
