@@ -1,8 +1,8 @@
 module MB
   module Sound
     class Sample
-      # Audio loops on clocks (see MB::Sound::Clock): `loop.clocked(19.7.seconds,
-      # fit: :resample)`, `brk.clocked(138.75.bpm)`, `pad.clocked(:tide)`,
+      # Audio loops on clocks (see MB::Sound::Clock): `loop.clocked(19.7.seconds)`
+      # (stretched, pitch kept), `brk.clocked(138.75.bpm)`, `pad.clocked(:tide)`,
       # and by type `loop % 19.7.seconds`, `loop.over(19.7.seconds)`,
       # `brk.at(138.75.bpm)` (Sample#at keeps its sample offsets for lengths
       # and numbers).  Prepended to Sample.
@@ -49,7 +49,8 @@ module MB
         # its loops from the launch instead of session time.
         #
         #     clock :tide, 19.7.seconds
-        #     bg :tape, pad.clocked(:tide, fit: :resample)
+        #     bg :pad, pad.clocked(:tide)                     # stretched to 19.7 s, pitch kept
+        #     bg :tape, pad.clocked(:tide, fit: :resample)    # tape: slower, lower
         #     bg :brk, brk.clocked(138.75.bpm)                # a 138.75 record in a 165 set
         def clocked(clock = nil, fit: :stretch, stretch: :auto, align: :timeline, **kwargs)
           vals = SIGNATURE.bind(clock.nil? ? [] : [clock], kwargs)

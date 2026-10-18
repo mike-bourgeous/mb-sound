@@ -32,8 +32,9 @@ module MB
         `clip.clocked(:tide)` (also `clip % 19.7.seconds`, `clip.at(138.75.bpm)`,
         `clip.over(19.7.seconds)`; graphs print `clocked`), or a whole track
         with `track :bowl, clock: :tide do |c| ... end`, or `bg ..., clock:`.
-        Audio loops too: `pad.clocked(19.7.seconds, fit: :resample)` (tape:
-        pitch follows the length) or `fit: :stretch` (pitch kept).
+        Audio loops too: `pad.clocked(19.7.seconds)` stretches the loop to
+        the period, keeping its pitch (`fit: :stretch`, the default), or
+        `fit: :resample` plays it slower or faster like tape.
 
         Clocks count session time, not bars: a clip dropped by a scene comes
         back where it would have been, a seek leaves it alone, and a take
