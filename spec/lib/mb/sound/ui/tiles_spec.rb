@@ -56,7 +56,13 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     expect_same_screen
 
     before = term.slave.console_mode
+    # The input thread ends when told to (the wake pipe), not killed after
+    # its 0.5 s wait for input (test-speed-3: every stop took 0.5 s)
+    reader = @tiles.instance_variable_get(:@reader)
+    allow(reader).to receive(:kill).and_call_original
     @tiles.stop
+    expect(reader).not_to have_received(:kill)
+    expect(reader.alive?).to eq(false)
     term.settle
     expect(term.vt.alt?).to eq(false)
     expect(term.vt.cursor_visible?).to eq(true)

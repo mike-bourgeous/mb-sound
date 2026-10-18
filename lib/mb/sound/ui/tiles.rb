@@ -120,7 +120,7 @@ module MB
           @term = @ambiguous = @host = @stopping = @full = @painter = @reader = @hidden = @relayout = @repl_full = nil
           @match = @search = @flash = @painter_warned = @reloaded_at = @size_checked_at = @resized = nil
           @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
-          @line_cursor = @old_winch = @signals = nil
+          @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @attached = @poll = @polled_at = @poll_warned = @last = nil
           @input = input
           @output = output
@@ -246,6 +246,7 @@ module MB
           end
           if thread
             @painter = Thread.new { paint_loop }
+            @wake_r, @wake_w = IO.pipe
             @reader = Thread.new { input_loop }
           end
           self
@@ -261,10 +262,14 @@ module MB
           @active = false
           @hidden = false
           [@reader, @painter].each { |t| t&.wakeup rescue nil }
-          @reader&.join(0.5) unless Thread.current.equal?(@reader)
-          @reader&.kill unless Thread.current.equal?(@reader)
+          # (Thread#wakeup doesn't end the reader's wait for input: the
+          # wake pipe does, so stop doesn't wait out its 0.5 s timeout)
+          @wake_w&.write_nonblock('.', exception: false) rescue nil
+          (@reader.join(0.5) || @reader.kill) if @reader && !Thread.current.equal?(@reader)
           @painter&.join(1)
           @painter = @reader = nil
+          [@wake_r, @wake_w].each { |io| io&.close rescue nil }
+          @wake_r = @wake_w = nil
           restore_signals
           detach
           @host&.relay = nil
@@ -1473,6 +1478,20 @@ module MB
           warn "UI input: #{e.class}: #{e.message}" unless @stopping
         end
 
+        # Waits up to +wait+ seconds for +io+ to be readable (true) or for
+        # #stop's wake pipe (false, as at the timeout).
+        def wait_input(io, wait)
+          wake = @wake_r
+          return io.wait_readable(wait) if wake.nil? || wake.closed?
+
+          ready, = IO.select([io, wake], nil, nil, wait)
+          return false unless ready
+          wake.read_nonblock(64, exception: false) if ready.include?(wake)
+          ready.include?(io)
+        rescue IOError
+          false
+        end
+
         def read_input(timeout)
           io = @term.input
           now = @clock.call
@@ -1480,7 +1499,8 @@ module MB
           waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), @input_lock.synchronize { pane_wait }, timeout].compact
           wait = waits.min
           wait = 0.25 if wait.nil? && !timeout.nil?
-          ready = io.wait_readable(wait.nil? ? 0.5 : wait)
+          ready = wait_input(io, wait.nil? ? 0.5 : wait)
+          return now if @stopping
           events =
             if ready
               data = io.read_nonblock(4096, exception: false)
