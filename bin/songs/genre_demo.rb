@@ -19,6 +19,7 @@
 #     bin/songs/genre_demo.rb -G funk -s 30 --show    # half a minute, printing the template first
 #     bin/songs/genre_demo.rb -G dnb --bpm 170        # another tempo
 #     bin/songs/genre_demo.rb -G techno -M club t.flac  # the club mastering preset instead of the template's chain
+#     bin/songs/genre_demo.rb -G dnb -K pump.flac     # ducks keyed by the two-step :pump trigger track, not the kick
 #
 # Or in bin/sound.rb:
 #     genres                                  # the list
@@ -38,8 +39,13 @@ module MB::Sound
       seconds: [60.0, Float, '-s', 'About how long the short form plays (seconds)', 5.0..3600.0],
       show: [false, 'Print the template as Ruby first'],
       mastering: [:template, Symbol, '-M', "Master with a mastering preset instead of the template's chain (the template's mono_below and loudness range stay)", [:template, *Mastering.names]],
+      pump: [false, '-K', "Key the ducks from the template's :pump line, a trigger track nobody hears (dnb's ghost-kick pump), instead of its sidechain"],
     ) { |p|
       t = genre(p.genre)
+      if p.pump
+        raise ArgumentError, "Genre #{p.genre.inspect} has no :pump clip to key from" unless t.clips.key?(:pump)
+        t = t.with { sidechain :pump, :pump }
+      end
       unless p.mastering == :template
         preset = p.mastering
         t = t.with { master nil; master preset }

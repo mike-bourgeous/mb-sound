@@ -323,7 +323,7 @@ module MB
 
         # Set commands of `kind: :set` documents (see #load_set), called
         # with their evaluated arguments on the set's Session.
-        SET_COMMANDS = %i[bpm meter master_gain quant master bus track scene mutes section flow].freeze
+        SET_COMMANDS = %i[bpm meter master_gain quant master bus track sidechain scene mutes section flow].freeze
 
         # Commands a scene block may hold (they land at the scene's launch
         # point, as in an #at_bar block): meter and tempo, knob turns and
@@ -717,7 +717,7 @@ module MB
           if b && !b.is_a?(Prism::BlockNode)
             raise error(b, "#{name} takes a literal block here")
           end
-          if b && !%i[master bus track flow scene].include?(name)
+          if b && !%i[master bus track sidechain flow scene].include?(name)
             raise error(b, "#{name} takes no block in set documents")
           end
 
@@ -738,6 +738,11 @@ module MB
               MB::Sound.master(*args, **kwargs, &(b && build_proc(b, scope)))
             when :track
               MB::Sound.track(*args, **kwargs, &(b && build_proc(b, scope)))
+            when :sidechain
+              unless args.length == 1 && args[0].is_a?(Symbol) && (kwargs.keys - %i[q fade nudge]).empty? && b
+                raise error(node, 'sidechain takes a name, q:, fade:, nudge:, and a block in set documents (sidechain(:pump) { |clip| clip.trigger })')
+              end
+              MB::Sound.sidechain(*args, **kwargs, &build_proc(b, scope))
             when :bus
               unless args.length == 1 && args[0].is_a?(Symbol) && (kwargs.keys - %i[to]).empty? && (b || kwargs.key?(:to))
                 raise error(node, 'bus takes a name, to:, and a block (bus(:hall, to: :verb) { |sig| ... }, or bus :drums, to: :master)')

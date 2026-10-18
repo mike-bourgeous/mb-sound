@@ -41,7 +41,7 @@ module MB
       # see #track's +lead_max:+).  Maintainer-approved 2026-10-11.
       ATTACK_LEAD_MAX = 1
 
-      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :clock, :clocked, keyword_init: true) do
+      Track = Struct.new(:name, :patch, :graph, :q, :fade, :clip, :lead, :nudge, :ahead, :lead_max, :capped, :clock, :clocked, :trigger, keyword_init: true) do
         def patch?
           !patch.nil?
         end
@@ -237,7 +237,11 @@ module MB
       # clocked once.
       #
       #     track(:bowl, clock: :tide) { |c| c.trigger.resonate(:bowl) }
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, &patch)
+      #
+      # +trigger: true+ makes it a trigger track (SidechainMethods#sidechain): heard
+      # only by readers such as `duck(:name)`, never mixed (see
+      # Session::Buses#route); +to:+ and +send:+ don't apply.
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
         raise ArgumentError, "Track names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "Give track #{name.inspect} a patch block or a graph" unless graph || patch
@@ -260,13 +264,17 @@ module MB
         end
         return note_failed_track(name, @last_patch_error) unless ok
         @mutex.synchronize { @failed_tracks.delete(name) }
+        raise ArgumentError, "A trigger track's sound goes only to its readers (duck(#{name.inspect})); it takes no to: or send:" if trigger && (to || send)
         return nil unless @session.names.claim(name, :track)
+        if trigger || @session.trigger_track?(name)
+          @session.route(name, trigger: !!trigger)
+        end
         @session.route(name, to: to || :keep, send: send) if to || send
 
         tr = nil
         @mutex.synchronize {
           old = @tracks[name]
-          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil)
+          tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
         }
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
@@ -448,6 +456,7 @@ module MB
           state += ', soloed' if @session.soloed?(tr.name)
           arm = arms[tr.name]
           state += arm.monitoring? ? ', armed' : ', armed (no monitor)' if arm
+          state = "trigger, #{state}" if tr.trigger
           what = tr.patch? ? (tr.clip ? name_of(tr.clip) : 'no clip') : 'graph'
           lead = tr.ahead && !tr.ahead.zero? ? " #{tr.ahead > 0 ? 'ahead' : 'behind'} #{MB::M.sigfigs((tr.ahead.abs / @session.transport.whole_notes_per_second * 1000).to_f, 3)} ms" : ''
           lead += ' (attack capped)' if tr.capped

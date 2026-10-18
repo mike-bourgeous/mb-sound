@@ -250,6 +250,48 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect { MB::Sound::Genre.build_patch(:no_such_patch_x, clip) }.to raise_error(ArgumentError, /No preset or method/)
     end
 
+    it 'keys the ducks from a trigger line instead (dnb\'s ghost-kick pump option): a trigger track under every scene' do
+      t = genre[:dnb].with { sidechain :pump, :pump }
+      expect(t.sidechain).to eq([:pump, nil, :pump, nil])
+      expect(t.trigger_track).to eq(:pump)
+      expect(in_sound(t.to_ruby)).to eq(t)
+      expect(t.to_ruby).to include('  sidechain :pump, :pump')
+      t.scenes.each do |name, values|
+        next if values[:others] == :keep
+        expect(t.scene(name)[:pump]).to equal(t.clips[:pump])
+      end
+      expect(t.scene(:riser)).not_to have_key(:pump)
+      MB::Sound.knob(:cut, 2400, range: 150..8000, curve: :exp)
+      expect(t.patch(:sub, t.clips[:riff]).to_ruby).to include('duck(:pump, amount: -12.db')
+
+      # A clip given to sidechain joins the clips; a scene can rest the line
+      off = genre[:dnb].with {
+        sidechain :pump, grid(16, 'x...').loop, shape: :impulse
+        scene :breakdown, drums: :breakdown, pad: :chords, pump: :off
+      }
+      expect(off.clips[:pump]).not_to equal(genre[:dnb].clips[:pump])
+      expect(off.scene(:breakdown)[:pump]).to eq(:off)
+      expect(off.to_ruby).to include('sidechain :pump, :pump, shape: :impulse')
+
+      s = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
+                                 transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      MB::Sound::Session.with_context(session: s) do
+        t.short.setup
+        expect(s.trigger_tracks).to eq([:pump])
+        expect(s.arrangement.tracks[:pump].trigger).to eq(true)
+        expect(s.arrangement.scenes[:drop].values[:pump]).to equal(t.clips[:pump])
+      end
+    ensure
+      s&.close
+    end
+
+    it 'checks trigger lines: names unlike roles, knobs, and buses, and lines that are clips' do
+      expect { genre[:dnb].with { sidechain :bass, :pump } }.to raise_error(ArgumentError, /trigger track :bass is named like a role/)
+      expect { genre[:dnb].with { sidechain :pump, :nope } }.to raise_error(ArgumentError, /trigger line :nope is no clip/)
+      expect { genre[:dnb].with { sidechain :pump, :pump, shape: :wobble } }.to raise_error(ArgumentError, /shape:/)
+      expect { genre[:dnb].with { sidechain :pump, :pump, only: :kick } }.to raise_error(ArgumentError, /only:/)
+    end
+
     it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked by the kick voice' do
       t = genre[:techno]
       expect(t.roles[:bass].patch).to eq(:roller)

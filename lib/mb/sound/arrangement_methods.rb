@@ -33,8 +33,10 @@ module MB
       # the master (see BusMethods).  +clock:+ plays its clips on a clock
       # (`track :bowl, clock: :tide do |c| ... end`; see MB::Sound::Clock).
       # Also available as #define_track.
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, &patch)
-        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, &patch)
+      # +trigger: true+ makes it a trigger track, heard only by sidechain readers
+      # (see SidechainMethods#sidechain).
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
+        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, &patch)
       end
       alias define_track track
 
@@ -111,6 +113,7 @@ module MB
       # change's journal entry (an Array for several names).
       def mute(*names, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
+        (hint = SidechainMethods.mute_hint(names)) && puts(hint) # (trigger tracks: their level knob)
         strip_command(:mute, names, point, fade: fade)
       end
 
