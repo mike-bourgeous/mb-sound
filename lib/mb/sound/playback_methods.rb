@@ -877,6 +877,7 @@ module MB
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
 
         if capture.nil? || capture.targeted.empty?
+          warn first[:peak_warning] if first[:peak_warning]
           normalize_render(filename, loudness, peak) if loudness
           if kwargs[:report] && MixReport.last
             MixReport.last.codec_peaks = Mastering.codec_peaks(filename) if filename.is_a?(String)
@@ -1088,7 +1089,13 @@ module MB
         end
 
         if peak_meter && (message = peak_meter.warning(filename, session.master_gain))
-          warn message
+          # A targeted render's first pass isn't the file it writes: its
+          # warning waits until #render knows whether a second pass follows
+          if mastering[:capture]
+            mastering[:peak_warning] = message
+          else
+            warn message
+          end
         end
 
         if meter

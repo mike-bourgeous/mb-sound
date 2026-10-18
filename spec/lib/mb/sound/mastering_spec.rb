@@ -285,6 +285,19 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       MB::Sound.bpm 120
     end
 
+    it "warns about clipping only for the file it writes, not a targeted render's first pass" do
+      a = tmp_path('hot.flac')
+      expect {
+        expect {
+          MB::Sound.render(a, bars: 1, overwrite: true) {
+            MB::Sound.master :vinyl
+            MB::Sound.bg 220.hz.sine.at(2).until(1.bar)
+          }
+        }.to output(/mastering :vinyl/).to_stdout
+      }.not_to output(/over full scale/).to_stderr
+      expect(MB::Sound.loudness(a).true_peak).to be <= -0.9
+    end
+
     it 'rejects unknown measures' do
       expect { described_class.preset(:club, measure: :peak) }.to raise_error(ArgumentError, /measure: is :integrated or :loudest/)
       expect(described_class.preset(:club).measure).to eq(:integrated)
