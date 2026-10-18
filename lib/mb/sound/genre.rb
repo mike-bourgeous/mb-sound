@@ -338,7 +338,9 @@ module MB
         def keyed_kit(kit)
           row = sidechain&.last
           return kit unless row && kit.is_a?(Sequence::Kit) && !kit.rows.key?(row)
-          Sequence::Kit.new(kit.rows.merge(row => MB::Sound.grid(16, row => '.' * 16)[row].loop(align: :launch)))
+          rows = kit.rows.merge(row => MB::Sound.grid(16, row => '.' * 16)[row].loop(align: :launch))
+          # (recorded as user code would be, so set documents print it)
+          GraphNode::Recipe.call(Sequence::Kit, :new, [rows], {}, nil) { Sequence::Kit.new(rows) }
         end
 
         # The Kit or Clip named +name+.

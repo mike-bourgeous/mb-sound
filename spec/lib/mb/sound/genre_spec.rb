@@ -177,6 +177,43 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(data[0].length).to be_within(48).of((3 * 4 * 60 / 96.0 * 48000).round)
     end
 
+    it 'sets up buses and routes, and saves them in a set document that loads to the same text' do
+      new_session = -> {
+        MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2,
+                               transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      }
+      a = new_session.()
+      b = new_session.()
+      t = genre[:dnb].short
+      text = MB::Sound::Session.with_context(session: a) { t.setup; MB::Sound::GraphIO.dump(a.arrangement, name: 'dnb') }
+      expect(a.bus_names).to eq([:hall])
+      expect(a.route_definitions[:drums]).to eq({ to: nil, send: { hall: -24.db.to_f } })
+      expect(a.route_definitions[:bass][:send]).to eq({ hall: -20.db.to_f })
+      expect(a.route_definitions).not_to have_key(:sub)
+      expect(text).to include('bus(:hall) { |sig|', '.duck(:drums, only: :kick, amount: -6.db, release: 1.n8)')
+      expect(text).to include('track(:drums, send: { hall: -24.db })')
+      # (breakdown: the hats-only kit keeps a silent kick row for the ducks)
+      expect(text).to match(/kick: grid\(16, kick: "\.{16}"\)\[:kick\]\.loop\(align: :launch\)/)
+      MB::Sound::GraphIO.load(text, session: b)
+      expect(b.route_definitions).to eq(a.route_definitions)
+      again = MB::Sound::GraphIO.dump(b.arrangement, name: 'dnb')
+      expect(again.sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
+    ensure
+      a&.close
+      b&.close
+    end
+
+    it 'chops the jungle break through the sampler: slices of breakbeat(:jungle) with pitch marks' do
+      t = genre[:jungle]
+      chop = t.clips[:chop_a]
+      expect(chop.instrument).to be_a(MB::Sound::Sample::Slices)
+      expect(chop.instrument.sample.file).to end_with('jungle_breaks.mbg/assets/jungle_record.flac')
+      expect(chop.events.map(&:pitch).compact.uniq.sort).to eq([3, 5, 6]) # (+3: 138.75 BPM to 165; [:g, 2], [:s, 3])
+      expect(chop.to_ruby).to start_with('breakbeat(:jungle).slices(32).name(k: 0..1')
+      expect(t.roles[:breaks].patch).to eq(:breaks)
+      expect(t.to_ruby).not_to include('Note.new')
+    end
+
     it 'lets template knobs drive preset params and puts mono_below first in the master chain' do
       MB::Sound.knob(:cut, 600, range: 150..8000, curve: :exp)
       bass = genre[:dnb].patch(:bass, genre[:dnb].clips[:riff])

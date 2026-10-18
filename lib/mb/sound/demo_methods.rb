@@ -14,6 +14,7 @@ module MB
       # The demo sets: name => what it is.
       DEMOS = {
         night_bus: '"Night Bus: Last Stop", tech house at 126 BPM in A minor (bin/songs/night_bus_flow.rb)',
+        tunnel_vision: '"Tunnel Vision", drum & bass at 174 BPM in F minor with hall and echo buses (bin/songs/tunnel_vision.rb)',
       }.freeze
 
       # Loads demo set +name+ (see #demos) into the current Session, paused
