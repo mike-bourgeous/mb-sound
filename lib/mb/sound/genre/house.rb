@@ -94,13 +94,13 @@ module MB
       scene :riser, riser: :bar, others: :keep
 
       loudness(-10..-8)
-      true_peak(-0.5.db)
+      true_peak(-1.db) # (Munro: -1 dBTP for codec overshoot; genre-fixes)
       mono_below 120 # club systems
       # (the club mastering preset with its gentle clipper, the house feel:
       # mastering-2, 2026-10-17, maintainer on the Bench: "The two limiter
       # setup isn't much different so both are good to have"; Munro's
       # compress 2:1, light softclip, limit is the same shape)
-      master :club, clip: true
+      master :club, clip: true, ceiling: -1.db
       master_gain 0.db
 
       tip 'DJ structure: 16-32 bar intros and outros of drums for mixing, changes on 8- and 16-bar lines, the bass out first in the outro and the drums alone at the end.'
