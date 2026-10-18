@@ -104,7 +104,9 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     expect(wait_until { @tiles.tiler.focus == :grid }).to eq(true)
     @term.write("\r")
     expect(wait_mode(@tiles, :pane)).to eq(true)
-    expect(@term.lines.last).to start_with(' GRID ')
+    # (the mode changes before the painter's next frame shows its badge:
+    # checking the last line at once failed now and then, master-ai too)
+    expect(wait_until { @term.read_and_settle; @term.lines.last.start_with?(' GRID ') }).to eq(true), @term.lines.last
     expect(@tiles.router.mode).to eq(:pane)
     @term.write("\e[B\e[Bjk") # Down Down j k: the pane's keys, not NAV's (1 + 1 + 1 - 1)
     expect(@term.wait_for('row=2 [in]')).to eq(true), @term.text
@@ -131,17 +133,20 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     expect(@tiles.router.mode).to eq(:nav)
     expect(@tiles.mode_problems).to eq([])
     # Ctrl-] from NAV now: the pane's mode isn't where the focus is, so NAV -> pane -> NAV
-    # Jumps: a (the grid, in), t (tracks: no keys of its own, focused in NAV), i (the REPL)
+    # Jumps: a (the grid, in), t (tracks: in its view mode, as every pane; ui-api-1), i (the REPL)
     @term.type('a')
     expect(wait_settled(@tiles) { @tiles.router.mode == :pane && @tiles.tiler.focus == :grid }).to eq(true)
     @term.write("\e")
     expect(wait_mode(@tiles, :nav)).to eq(true) # (an Esc and a quick key would read as Alt-t)
     @term.type('t')
-    expect(wait_until { @tiles.tiler.focus == :tracks }).to eq(true)
-    expect(@tiles.router.mode).to eq(:nav)
-    expect(@term.wait_for('no keys of its own')).to eq(true)
-    @term.write("\r") # Enter on a pane without keys: stays in NAV
-    expect(@tiles.router.mode).to eq(:nav)
+    expect(wait_settled(@tiles) { @tiles.router.mode == :pane && @tiles.tiler.focus == :tracks }).to eq(true)
+    expect(@term.wait_for(' TRACKS ')).to eq(true) # (the badge)
+    @term.write("\e")
+    expect(wait_mode(@tiles, :nav)).to eq(true)
+    @term.write("\r") # Enter: into tracks' view mode
+    expect(wait_mode(@tiles, :pane)).to eq(true)
+    @term.write("\e")
+    expect(wait_mode(@tiles, :nav)).to eq(true)
     @term.type('i')
     expect(wait_mode(@tiles, :repl)).to eq(true)
     expect(@tiles.tiler.focus).to eq(:repl)
@@ -211,5 +216,35 @@ RSpec.describe('UI script screen keys', :aggregate_failures) do
   ensure
     tiles&.stop
     term&.close
+  end
+  # Guard (ui-api-1; maintainer, 2026-10-18: "Every panel should be
+  # enterable"): every pane kind has keys inside (its own mode or the view
+  # mode: copy, scroll), so NAV Enter goes in and Esc comes back.
+  it 'gives every pane kind keys inside, and copies a read-only pane with y' do
+    kinds = MB::Sound::UI.panes.values + MB::Sound::UI::Panes.constants.filter_map { |c|
+      k = MB::Sound::UI::Panes.const_get(c)
+      k if k.is_a?(Class) && k < MB::Sound::UI::Pane
+    }.uniq.reject { |k| MB::Sound::UI.panes.values.any? { |p| p.instance_of?(k) } }
+    kinds.each do |p|
+      map = p.is_a?(Class) ? p.mode_keymap : p.mode_keymap
+      expect(map).not_to be_nil, "#{p} has no keys inside"
+    end
+    view = MB::Sound::UI::Pane.mode_keymap
+    expect(view.entries.map(&:action)).to include(:copy_text, :scroll)
+
+    @tiles, @term = ui_tiles(:tiles)
+    expect(@term.wait_for('t> ')).to eq(true)
+    @tiles.router.mode = :nav
+    @tiles.enter(:tracks)
+    expect(@tiles.router.mode).to eq(:pane)
+    expect(@tiles.copy_pane(:tracks)).to include('nothing playing')
+    @term.type('y')
+    expect(@term.wait_for(/copied \d+ characters of tracks/)).to eq(true), @term.text
+    @term.write("\e")
+    expect(wait_mode(@tiles, :nav)).to eq(true)
+    expect(@tiles.mode_problems).to eq([])
+  ensure
+    @tiles&.stop
+    @term&.close
   end
 end

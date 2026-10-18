@@ -62,7 +62,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     expect(@tiles.tiler.rects[:keyboard].h).to eq(8)
     expect(@keyboard.resolved_mode).to eq(:tap)
-    expect(@term.text).to include('tap (no key-up)')
+    expect(@term.text).to include('auto (tap) (no key-up)') # (:auto shown as itself, ui-api-1)
     @keyboard.off_mode = :hold # (notes that last until an exit)
 
     @term.type('zc')

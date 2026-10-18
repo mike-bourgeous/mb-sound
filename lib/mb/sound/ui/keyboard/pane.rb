@@ -230,7 +230,7 @@ module MB
                 else
                   c.text(0, 0, 'KEYBOARD', :title)
                 end
-            mode = v.off_mode.to_s
+            mode = kb.off_mode_label
             mode += ' (no key-up)' unless v.releases
             c.line(0, ' ', [kb.note_name(v.base), :key], ['-', :dim], [kb.note_name(v.base + UI::Keyboard::SPAN - 1), :key],
                    ['  vel ', :dim], [v.velocity.to_s, :key], ['  ch ', :dim], [(v.channel + 1).to_s, :key],

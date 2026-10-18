@@ -10,7 +10,7 @@ bass/dub  effect  …│                                        │L ███�
   tone     █▎  180…│                                        │RMS -18.0 -18.2
                    │                                        │
                    │                                        │
-                   ├─ CLIPS ─────────── 7 ─┬─ CLIP ───── 8 ─┼─ BUSES ─────── 9 ─
+                   ├─ CLIP MATRIX ───── 7 ─┬─ CLIP DE… ─ 8 ─┼─ BUSES ─────── 9 ─
                    │        int… ▶drop     │beat_a  1 bar  …│● verb    → master
                    │▶drums  ■    ▶bea…     │kick  !███·████·│ ← pad    -12.0 dB
 ─ LANDED ───── 10 ─┤▶bass  ▷bas… ▶bas…     │snare ·██···██··├─ MIDI ─────── 11 ─

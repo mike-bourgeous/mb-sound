@@ -228,15 +228,31 @@ module MB
         class Messages < Pane
           ROLES = { error: :bad, warn: :warn, note: :dim }.freeze
 
+          mode_keys do
+            group 'Messages'
+            on [:up, 'k'], :scroll, 1, help: 'older, newer messages', label: 'Up Down'
+            on [:down, 'j'], :scroll, -1, help: 'older, newer messages', label: ''
+            on [:end, 'G'], :scroll, :newest, help: 'back to the newest', label: 'End'
+            on 'y', :copy_text, help: 'copy the pane\'s text (OSC 52)'
+          end
+
+          # Scrolls back +by+ messages (positive: older), or to the newest.
+          def key_scroll(state, by)
+            n = UI.messages.recent(10_000).length
+            state[:scroll] = by == :newest ? 0 : (state[:scroll].to_i + by).clamp(0, [n - 1, 0].max)
+            state[:scroll] == 0 ? 'newest messages' : "#{state[:scroll]} newer message#{state[:scroll] == 1 ? '' : 's'} above... below (End: newest)"
+          end
+
           def initialize = super(:messages, rate: 4, height: 6, width: 40, title: 'messages', min_height: 2, description: 'warnings and live errors while a screen is up, wrapped, numbered (ui.message n)')
 
-          def draw_body(c, _s, _state)
-            list = UI.messages.recent(c.h)
+          def draw_body(c, _s, state)
+            skip = state ? state[:scroll].to_i : 0
+            list = UI.messages.recent(c.h + skip).drop(skip)
             if list.empty?
-              c.puts ['no warnings', :dim]
+              c.puts [skip > 0 ? 'no older warnings (Down: newer)' : 'no warnings', :dim]
               return
             end
-            gutters = list.each_with_index.map { |e, i| "#{i + 1}#{e.count > 1 ? " ×#{e.count}" : ''} " }
+            gutters = list.each_with_index.map { |e, i| "#{i + skip + 1}#{e.count > 1 ? " ×#{e.count}" : ''} " }
             gw = [gutters.map(&:length).max, c.w / 3].min
             # Newest first until the pane is full, then drawn oldest first
             blocks = []
@@ -248,7 +264,9 @@ module MB
               blocks << [gutters[i], lines, ROLES.fetch(e.severity, :warn)]
               used += lines.length
             end
-            y = c.h - used
+            # From the top down, newest at the bottom (maintainer, 2026-10-18:
+            # "would prefer starting from the top"); once full it scrolls
+            y = 0
             blocks.reverse_each do |gutter, lines, role|
               c.text(0, y, gutter.rjust(gw)[0, gw], :dim)
               lines.each_with_index { |l, k| c.text(gw, y + k, l, role) }
@@ -265,7 +283,7 @@ module MB
           attr_accessor :index
 
           def initialize
-            super(:message, rate: 2, height: 10, width: 60, title: 'message', min_height: 3, description: 'one message in full (ui.message n opens it)')
+            super(:message, rate: 2, height: 10, width: 60, title: 'message detail', min_height: 3, description: 'one message in full (ui.message n opens it)')
             @index = 1
           end
 

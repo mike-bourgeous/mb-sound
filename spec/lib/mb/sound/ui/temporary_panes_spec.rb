@@ -113,4 +113,82 @@ RSpec.describe('UI temporary panes and pane minimums', :aggregate_failures) do
     tiles&.stop
     term&.close
   end
+  # ui-api-1 (maintainer, 2026-10-18)
+  def headless(layout, rows, cols)
+    term = UIHelpers::FakeTerminal.new(rows, cols)
+    tiles = ui::Tiles.new(layout: ui.tiles_layout_named(layout), input: term.slave, output: term.slave, repl: :none, probe: false,
+                          size: [rows, cols], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
+                          keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    tiles.start(thread: false)
+    [tiles, term]
+  end
+
+  it "toggles focus to a layout's own messages pane and back, never moving it (the ^W m bug)" do
+    tiles, term = headless(:wall, 60, 200)
+    start = tiles.tiler.layout
+    rect = tiles.tiler.rects[:messages]
+    tiles.tiler.focus!(:scope)
+    tiles.messages
+    expect(tiles.tiler.focus).to eq(:messages)
+    expect(tiles.tiler.rects[:messages]).to eq(rect)
+    tiles.messages(true) # (a new warning: it is there already)
+    tiles.messages
+    expect(tiles.tiler.focus).to eq(:scope)
+    expect(tiles.tiler.layout.with(focus: start.focus)).to eq(start)
+    expect(tiles.tiler.rects[:messages]).to eq(rect)
+  ensure
+    tiles&.stop
+    term&.close
+  end
+
+  it 'opens a temporary messages pane below the REPL when it has the rows, else below the largest other pane' do
+    [[24, 80], [60, 200]].each do |rows, cols|
+      tiles, term = headless(:tiles, rows, cols)
+      start = tiles.tiler.layout
+      repl = tiles.tiler.rects[:repl]
+      tiles.messages
+      m = tiles.tiler.rects[:messages]
+      expect([m.x, m.w]).to eq([repl.x, repl.w]), "#{rows}x#{cols}"
+      expect(tiles.tiler.rects[:repl].h).to be >= ui::Tiles::REPL_MIN_ROWS
+      tiles.messages
+      expect(tiles.tiler.layout).to eq(start)
+    ensure
+      tiles&.stop
+      term&.close
+    end
+    t = tiler(:studio, 120, 40) # (no rows to spare in the REPL: the largest other pane, as plots)
+    expect(t.send(:temporary_room?, :repl, 60)).to eq(false)
+    t.open_temporary(:messages, 60, keep: %i[repl keyboard], fallback: :repl, prefer: :repl)
+    expect(t.layout.panes).to include(:messages)
+  end
+
+  it 'lets siblings take the space of a closed pane, and undo puts it back in its slot' do
+    rng = Random.new(RSpec.configuration.seed)
+    flexible = ->(node) {
+      next true if node.is_a?(ui::Viewports::Pane)
+      kids = node.children
+      (node.is_a?(ui::Viewports::Split) ? kids.any? { |c| c.size.nil? } : true) && kids.all? { |c| flexible.(c) }
+    }
+    40.times do
+      name = %i[tiles studio keys wall session mixer].sample(random: rng)
+      t = tiler(name, rng.rand(80..240), rng.rand(24..80))
+      start = t.layout
+      expect(flexible.(start.root)).to eq(true), "#{name} starts with a split of only fixed panes"
+      closed = []
+      rng.rand(1..3).times do
+        victim = (t.layout.panes - [:repl]).sample(random: rng) or break
+        t.close(victim)
+        closed << victim
+        expect(flexible.(t.layout.root)).to eq(true), "#{name} after closing #{closed.inspect}: #{t.layout.to_ruby}"
+        area = t.rects.values.sum { |r| r.w * r.h }
+        expect(area).to be > 0
+      end
+      closed.length.times { t.undo }
+      expect(t.layout).to eq(start)
+    end
+    t = tiler(:wall, 200, 60)
+    before = t.rects
+    t.close(:messages)
+    expect(t.rects[:spectrum].h).to be > before[:spectrum].h # (the pane above grows into the slot)
+  end
 end

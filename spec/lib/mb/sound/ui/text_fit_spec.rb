@@ -69,7 +69,9 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
     rows = draw(ui.panes[:messages], nil, 30, 6)
     text = rows.join("\n")
     expect(text).to include('TAILEND')
-    expect(rows.last).to include('TAILEND') # (the newest at the bottom)
+    last = rows.rindex { |r| !r.strip.empty? }
+    expect(rows[last]).to include('TAILEND') # (the newest at the bottom of what is there)
+    expect(rows[0]).to start_with('2 older') # (filled from the top down: maintainer, 2026-10-18)
     expect(rows.find { |r| r.include?('older') }).to start_with('2 ')
     expect(rows.find { |r| r.include?('Track :y') }).to start_with('1 ')
     expect(rows.select { |r| r.start_with?('  ') && !r.strip.empty? }).not_to be_empty # (hanging indent)
