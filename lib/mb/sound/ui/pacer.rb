@@ -50,6 +50,9 @@ module MB
 
         attr_reader :state, :period, :deadline, :skipped
 
+        # Called with each Frame after it (UI::PaneRates#observe).
+        attr_accessor :on_frame
+
         # +fps+ the target rate; +clock+ a Proc of seconds; +sleeper+ a
         # Proc that sleeps (fake clocks advance their time there).
         def initialize(fps, clock:, sleeper: ->(s) { sleep(s) })
@@ -61,6 +64,7 @@ module MB
           @deadline = nil
           @write = 0.0
           @lock = Mutex.new
+          @on_frame = nil
           self.fps = fps
         end
 
@@ -124,6 +128,7 @@ module MB
             @frames << f
             @frames.shift if @frames.length > KEEP
           end
+          @on_frame&.call(f)
           f
         end
 

@@ -77,32 +77,57 @@ module MB
             parts = Sections.canvases(c, sections(!v.step.nil?))
             header(parts[:header], v, kb)
             held = v.held.map { |n| n - v.base }
+            inputs = Keyboard.input_fills(s, v.base)
             if (pc = parts[:piano])
               ww = [pc.w / Keyboard.span_whites, 5].min
               if ww >= 2 && pc.h >= 4
-                piano(pc, 0, pc.h, ww, held, v, kb)
+                piano(pc, 0, pc.h, ww, held, v, kb, inputs)
               else
                 # Compact: letters over and under a two-row strip
                 letters(pc, 0, UI::Keyboard::UPPER, held, v)
-                keys(pc, 1, held, v, kb)
+                keys(pc, 1, held, v, kb, inputs)
                 letters(pc, 3, UI::Keyboard::LOWER, held, v)
               end
             end
             step(parts[:step], v, 0) if parts[:step]
-            chord(parts[:chord], v, kb) if parts[:chord]
+            chord(parts[:chord], v, kb, s) if parts[:chord]
             played(parts[:played], v, kb, 0) if parts[:played]
             roll(parts[:roll], state, kb) if parts[:roll]
             armed(parts[:armed], s) if parts[:armed]
           end
 
+          # Notes from the Session's MIDI input (ux-r4 item 9: external
+          # keyboards; Snapshot#notes, not the UI keyboard's own, which
+          # Keyboard#held shows) as { semitone from +base+ => [velocity
+          # 1..127, :input or :pressed] }.  With Snapshot#sounding (a scale
+          # transform's output, from midi-consol-2), sounding notes fill and
+          # keys pressed but mapped elsewhere show :pressed (one row).
+          def self.input_fills(s, base)
+            notes = (s.respond_to?(:notes) && s.notes) || []
+            ext = notes.reject { |n| n.source == :keyboard }
+            return {}.freeze if ext.empty? && !(s.respond_to?(:sounding) && s.sounding)
+            sounding = s.respond_to?(:sounding) ? s.sounding : nil
+            fills = {}
+            if sounding
+              ext.each { |n| fills[n.note - base] = [n.velocity, :pressed] }
+              sounding.reject { |n| n.respond_to?(:source) && n.source == :keyboard }.each { |n| fills[n.note - base] = [n.velocity, :input] }
+            else
+              ext.each { |n| fills[n.note - base] = [n.velocity, :input] }
+            end
+            fills
+          end
+
           private
+
+          # Color of input notes (a second color beside the keyboard's own).
+          def input_rgb = Themes.rgb(:key)
 
           # The scaled piano (ux-1 item 14): white keys +ww+ columns wide
           # (one of them a gap), black keys about 60% of that and of the
           # height +ph+, the computer keys' letters inside the keys and
           # the C's names, held keys filled from the bottom by velocity,
           # and the octaves beside the span dimmed where there is room.
-          def piano(c, y0, ph, ww, held, v, kb)
+          def piano(c, y0, ph, ww, held, v, kb, inputs = {})
             extra = (c.w - Keyboard.span_whites * ww) / ww
             left = [extra / 2, 7].min
             right = [extra - left, 7].min
@@ -117,14 +142,14 @@ module MB
               next unless WHITE.include?(s % 12)
               x = x0 + white_index(s) * ww
               playable = s >= 0 && s < UI::Keyboard::SPAN
-              fill = playable && held.include?(s) ? fill_rows(ph, v.velocities[v.base + s]) : 0
+              fill, frgb = key_fill(ph, s, playable, held, v, inputs)
               ph.times do |dy|
                 filled = dy >= ph - fill
-                rgb = filled ? Themes.rgb(:armed) : playable ? WHITE_KEY : WHITE_DIM
+                rgb = filled ? frgb : playable ? WHITE_KEY : WHITE_DIM
                 c.run(x, y0 + dy, ' ' * (ww - 1), rgb, reverse: true)
               end
               next unless playable
-              ink = ->(dy) { [[30, 30, 30], { bg: dy >= ph - fill ? Themes.rgb(:armed) : WHITE_KEY }] }
+              ink = ->(dy) { [[30, 30, 30], { bg: dy >= ph - fill ? frgb : WHITE_KEY }] }
               label = letters[s]&.join || ''
               unless label.empty?
                 fg, o = ink.(ph - 1)
@@ -141,16 +166,26 @@ module MB
               gap = x0 + white_index(s - 1) * ww + ww - 1
               x = gap - bw / 2
               playable = s >= 0 && s < UI::Keyboard::SPAN
-              fill = playable && held.include?(s) ? fill_rows(bh, v.velocities[v.base + s]) : 0
+              fill, frgb = key_fill(bh, s, playable, held, v, inputs)
               bh.times do |dy|
                 filled = dy >= bh - fill
-                rgb = filled ? Themes.rgb(:armed) : playable ? BLACK_KEY : BLACK_DIM
+                rgb = filled ? frgb : playable ? BLACK_KEY : BLACK_DIM
                 c.run(x, y0 + dy, ' ' * bw, rgb, reverse: true)
               end
               next unless playable && letters[s]
               filled = bh - 1 >= bh - fill
-              c.run(x, y0 + bh - 1, letters[s].join[0, bw], filled ? [20, 20, 20] : [210, 210, 210], bg: filled ? Themes.rgb(:armed) : BLACK_KEY)
+              c.run(x, y0 + bh - 1, letters[s].join[0, bw], filled ? [20, 20, 20] : [210, 210, 210], bg: filled ? frgb : BLACK_KEY)
             end
+          end
+
+          # Rows filled and their color for semitone +s+: the keyboard's own
+          # held keys first (only in the playable span), else an input note
+          # (anywhere on the strip; :pressed ones a single dim row).
+          def key_fill(rows, s, playable, held, v, inputs)
+            return [fill_rows(rows, v.velocities[v.base + s]), Themes.rgb(:armed)] if playable && held.include?(s)
+            vel, kind = inputs[s]
+            return [0, nil] unless kind
+            kind == :pressed ? [1, Themes.rgb(:dim)] : [fill_rows(rows, vel), input_rgb]
           end
 
           # Rows of a held key filled for raw velocity +vel+ (1..127).
@@ -211,16 +246,17 @@ module MB
           end
 
           # Black keys on row +y+, white keys (note names on the Cs) below.
-          def keys(c, y, held, v, kb)
+          def keys(c, y, held, v, kb, inputs = {})
             UI::Keyboard::SPAN.times do |s|
               x = Keyboard.column(s)
               on = held.include?(s)
+              role = on ? :armed : inputs[s] ? (inputs[s][1] == :pressed ? :dim : :key) : nil
               if WHITE.include?(s % 12)
                 label = s % 12 == 0 ? kb.note_name(v.base + s)[0, 2] : kb.note_name(v.base + s)[0]
                 label = label.ljust(2)[0, 2] if s % 12 == 0
-                c.run(x, y + 1, label, on ? :armed : :text, reverse: on)
+                c.run(x, y + 1, label, role || :text, reverse: !role.nil?)
               else
-                c.run(x, y, ' ', on ? :armed : :dim, reverse: true)
+                c.run(x, y, ' ', role || :dim, reverse: true)
               end
             end
           end
@@ -229,15 +265,23 @@ module MB
             notes = v.played.last(12).map { |p| kb.note_name(p.note) }
             c.line(y, ['played ', :dim], [notes.join(' '), :name]) unless notes.empty?
             c.line(y, [v.message.to_s, :dim]) if notes.empty? && v.message
-            hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV p (or ui.keys): play the keyboard'
+            hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV K (or ui.keys, F2): play the keyboard'
             c.text(0, c.h - 1, c.fit(hint, c.w), :dim) if c.h > y + 1
           end
 
           # The notes held and their chord's name ("held C3 E3 G3  C").
-          def chord(c, v, kb)
-            return if v.held.empty?
-            name = ChordName.of(v.held)
-            x = c.line(0, ['held ', :dim], [v.held.sort.map { |n| kb.note_name(n) }.join(' '), :name])
+          def chord(c, v, kb, s = nil)
+            ext = ((s.respond_to?(:notes) && s.notes) || []).reject { |n| n.source == :keyboard }.map(&:note).uniq
+            x = 0
+            unless v.held.empty?
+              name = ChordName.of(v.held)
+              x = c.line(0, ['held ', :dim], [v.held.sort.map { |n| kb.note_name(n) }.join(' '), :name])
+              x = c.line(0, ['  ', nil], [name, :key], x: x) if name
+              x = c.text(x, 0, '  ', nil)
+            end
+            return if ext.empty?
+            name = ChordName.of(ext)
+            x = c.line(0, ['input ', :dim], [ext.sort.map { |n| kb.note_name(n) }.join(' '), :key], x: x)
             c.line(0, ['  ', nil], [name, :key], x: x) if name
           end
 

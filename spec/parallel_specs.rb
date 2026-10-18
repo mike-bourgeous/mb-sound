@@ -64,7 +64,8 @@ module ParallelSpecs
     pids = groups.each_with_index.map do |(group, _), i|
       log = File.join(OUT_DIR, "#{i}.log")
       json = File.join(OUT_DIR, "#{i}.json")
-      env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json"), 'MB_SOUND_RSS_REPORT' => File.join(OUT_DIR, "#{i}.rss.json") }
+      env = { 'MB_SOUND_WARNINGS_REPORT' => File.join(OUT_DIR, "#{i}.warnings.json"), 'MB_SOUND_RSS_REPORT' => File.join(OUT_DIR, "#{i}.rss.json"),
+              'MB_SOUND_TRANSPORT_REPORT' => File.join(OUT_DIR, "#{i}.transport.json") }
       Process.spawn(env, 'bundle', 'exec', 'rspec', '--format', 'progress', '--format', 'json', '--out', json, *extra_args, *group,
                     out: log, err: [:child, :out], chdir: ROOT)
     end
@@ -110,6 +111,7 @@ module ParallelSpecs
     end
 
     report_rss(groups.length, out_dir)
+    report_transport(groups.length, out_dir)
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
     report_warnings(groups.length, out_dir)
@@ -136,6 +138,23 @@ module ParallelSpecs
     records.sort_by { |r| -r['grew_mb'] }.first(15).each do |r|
       puts format('  %+6d MB (to %d) %s %s', r['grew_mb'], r['rss_mb'], r['example'].delete_prefix('./'), r['description'].to_s[0, 70])
     end
+    records.length
+  end
+
+  # Lists the examples that left the default transport moved (written by
+  # spec/support/transport_guard.rb to N.transport.json; report only:
+  # spec_helper resets it before each example).  Returns how many.
+  def report_transport(count, out_dir)
+    records = (0...count).flat_map do |i|
+      JSON.parse(File.read(File.join(out_dir, "#{i}.transport.json")))
+    rescue Errno::ENOENT, JSON::ParserError
+      []
+    end
+    return 0 if records.empty?
+
+    files = records.group_by { |r| r['example'].delete_prefix('./').sub(/:\d+\z/, '') }
+    puts "Examples leaving the default transport moved (#{records.length} in #{files.length} files; spec/support/transport_guard.rb):"
+    files.sort_by { |_, rs| -rs.length }.first(10).each { |f, rs| puts format('  %3d %s  (%s)', rs.length, f, rs.first['moved']) }
     records.length
   end
 

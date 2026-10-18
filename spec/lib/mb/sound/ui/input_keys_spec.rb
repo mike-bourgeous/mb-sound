@@ -85,7 +85,7 @@ RSpec.describe('UI REPL keys', :aggregate_failures) do
     expect(wait_until { @tiles.tiler.focus != :repl }).to eq(true)
     expect(@tiles.router.mode).to eq(:nav) # (another pane: its keys, NAV's)
     @term.write("\x17p") # back to the last pane: the REPL
-    expect(wait_until { @tiles.tiler.focus == :repl && @tiles.router.mode == :repl }).to eq(true)
+    expect(wait_settled(@tiles) { @tiles.tiler.focus == :repl && @tiles.router.mode == :repl }).to eq(true)
     @term.type('6 * 7 junk')
     @term.write("\x17") # Ctrl-W then a key that isn't a window key: word deleted, the key typed
     @term.write("\r")
@@ -105,9 +105,9 @@ RSpec.describe('UI REPL keys', :aggregate_failures) do
     @tiles, @term = ui_tiles(:tiles)
     expect(@term.wait_for('t> ')).to eq(true)
     @term.write("\x0b")
-    expect(wait_until { @tiles.router.mode == :grab }).to eq(true)
+    expect(wait_mode(@tiles, :grab)).to eq(true)
     @term.write("\eOQ")
-    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(wait_mode(@tiles, :repl)).to eq(true)
     keys.unbind(['k', :ctrl])
     expect(keys.repl_keymap[key.of('k', :ctrl)]).to be_nil
     @term.type('6 * 7 junk')

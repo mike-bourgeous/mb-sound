@@ -46,6 +46,10 @@ module MB
           # carries on in the REPL pane with the same line.
           def switch(what)
             return @handler.call(what) if @handler
+            # (A screen's own Pry thread: that screen, never a new one on the
+            # real terminal; ux-r4-panes found specs' hidden tiles opening one)
+            owner = Thread.current[:mb_sound_ui_tiles]
+            return owner.console_switch(what) if owner
 
             t = UI.tiles
             if t&.active?

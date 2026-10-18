@@ -569,8 +569,13 @@ module MB
         The Set layer: tracks remember a patch and a clip, scenes are the
         state of every track, `go` launches one at its launch point
         (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step.
+        Each track keeps the clips it has played as numbered slots (the
+        clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
+        and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
+        :reverse, :halftime, :doubletime, :double, :half) plays a changed
+        copy as a new slot.
       TEXT
-      commands :track, :tracks, :scene, :scenes, :go, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now
       example 'two scenes' do
@@ -579,6 +584,12 @@ module MB
         scene :try_b, try_bass: seq(F1, rest, F1, F2).n8.loop
         go :try_a
         go :try_b, in: 1.bar
+      end
+      example 'launch and tweak a clip' do
+        track(:try_bass, q: 1) { |c| c.tone.ramp.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
+        bg :try_bass, seq(A1, rest, A1, A2).n8.loop.named(:try_riff)
+        tweak :try_bass, transpose: 12
+        launch :try_bass, :try_riff, in: 1.bar
       end
     end
 
@@ -681,8 +692,9 @@ module MB
 
     Help.topic :buses, 'Buses, sends, sidechains', group: :perform do
       about <<~TEXT
-        Named buses with their own effects: tracks send to them (`send:`,
-        `feed`) or play into them (`to:`), and they ring out on their own,
+        Named buses with their own effects: tracks send a level to them
+        (`send:`, `feed`) or play all of their sound into them (`to:`): one
+        kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
         read a bus or track by name on the exact sample.  Buses mute and
         solo like tracks (a solo keeps the buses it feeds).
@@ -942,13 +954,18 @@ module MB
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback
-        of its own.  Ctrl-] is NAV mode (`?` there lists its keys), F2 or
-        `keys` the keyboard, Ctrl-Z hides the tiles while the set plays on
-        (`fg` brings them back, `jobs` lists what runs).
+        of its own.  Ctrl-] is NAV mode (`?` there lists its keys): numbers
+        and h j k l pick a pane, Enter goes into it (the REPL, KEYS on the
+        keyboard, a pane's own keys until Esc), and a pane's letter beside
+        its number jumps straight in (i the REPL, K the keyboard).  F2 or
+        `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
+        on (`fg` brings them back, `jobs` lists what runs).
 
         Warnings go to a messages pane while a screen is up (NAV m shows
-        it; `ui off` sums them up).  NAV f shows the frame rate
-        (`ui.fps` is what was drawn, `ui.target_fps` the painter's rate).
+        it; `ui off` sums them up).  NAV f shows the frame rate and each
+        pane's rate beside its number (`ui.fps` is what was drawn,
+        `ui.target_fps` the painter's rate; meters and scopes run at it and
+        everything slows in steps when the CPU is busy).
 
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a
@@ -965,11 +982,25 @@ module MB
         (`ui.keyboard.tap = 0.5`); with the kitty keyboard protocol (kitty,
         WezTerm, Ghostty, foot, iTerm2 with its setting) they end on
         key-up.  Tab is step entry: Enter puts the clip's Ruby
-        (`seq(C3, E3, G3.n4).n8`) on the console line.
+        (`seq(C3, E3, G3.n4).n8`) on the console line.  Notes from a MIDI
+        keyboard light the piano too, in a second color.
         `ui.keyboard.scale = scale(:dorian, :d)` locks the keys in mash
         style (every white key the next degree, black keys silent: never a
         wrong note); `ui.keyboard.scale_mode = :play` fits the scale to the
         octave instead (see `help :lock`); PgUp/PgDn cycle scales and roots.
+
+        `ui :session` shows the set: the clip matrix (`clips`: a row per
+        track, a column per scene, then each track's other slots; ▶ plays,
+        ◆ is queued with its countdown in beats), the clip under its cursor
+        (`clip`: a piano roll and the Ruby that made it), racks with their
+        macros, buses with meters.  Focus a pane in NAV (its number, or a
+        for clips, r racks, b buses) and press Enter for its keys: arrows
+        move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
+        :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
+        quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
+        u undo; in racks Left/Right turn the picked macro (Shift: fine).
+        Every key runs one console line, printed in the console: journaled,
+        undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|

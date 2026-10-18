@@ -30,11 +30,16 @@ module MB
           raise ArgumentError, "target_fps is a rate from 1 to 240 (got #{rate.inspect})" unless rate.is_a?(Numeric) && rate >= 1 && rate <= 240
           @target_fps = rate
           @pacer.fps = rate
+          @rates.fps = rate
         end
 
         # The painter's pacing (UI::Pacer): deadlines, and each frame's
         # paint, write, and wait times.
         attr_reader :pacer
+
+        # The panes' adaptive rates (UI::PaneRates): live panes at the
+        # target rate, slowing in steps under load.
+        attr_reader :rates
 
         # fps (frames written), the painter's CPU per frame (p50 ms), kB/s
         # written, and the pacing breakdown (UI::Pacer#breakdown: refreshes
@@ -51,7 +56,8 @@ module MB
           f = (rows.length / WINDOW).round
           pace = @pacer.breakdown(window: WINDOW)
           text = pace[:refreshes] > 0 ? "#{@pacer.readout(window: WINDOW)} · #{kbs.round} kB/s" : "#{f} fps · #{format('%.1f', cpu)} ms · #{kbs.round} kB/s"
-          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, text: text }
+          text += " · #{@rates.readout}" if @rates.level > 0
+          { fps: f, cpu_ms: cpu, kb_per_s: kbs.round(1), pacing: pace, rates: @rates.to_h, text: text }
         end
 
         private
@@ -61,6 +67,32 @@ module MB
           @written = []
           @written_lock = Mutex.new
           @pacer = Pacer.new(target, clock: @clock)
+          @rates = PaneRates.new(target, clock: @clock)
+          @render_load = nil
+          @pacer.on_frame = ->(f) { @rates.observe(f.paint + f.write, @render_load, f.at) }
+        end
+
+        # Which of the panes due this frame draw (UI::PaneRates): +items+
+        # are [key, name, pane, explicit rate or nil, drawn_at]; all of
+        # them on a +full+ frame.  Returns the keys that draw, and notes
+        # the render load from +snap+.
+        def panes_to_draw(items, now, full, snap)
+          @render_load = snap&.load
+          @rates.begin_frame(now)
+          cands = items.filter_map do |key, name, pane, explicit, drawn_at|
+            pr = PaneRates.priority_of(name, pane)
+            next [key, pr, Float::INFINITY] if full || drawn_at.nil?
+            next unless @rates.due?(pr, pane.rate, explicit, drawn_at, now)
+            [key, pr, (now - drawn_at) * @rates.rate(pr, pane.rate, explicit)]
+          end
+          full ? cands.map(&:first) : @rates.pick(cands)
+        end
+
+        # A pane's rate for NAV f's badges: measured redraws per second
+        # ("60/s").
+        def rate_text(name, now = @clock.call)
+          r = @rates.measured(now)[name] || 0
+          "#{r >= 10 ? r.round : r}/s"
         end
 
         # The painter thread's loop: frames on the Pacer's deadlines until

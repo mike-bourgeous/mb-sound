@@ -72,7 +72,7 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     expect(wait.('[:hum]')).to eq(true), text.call # still playing
     type.("jobs\r")
     expect(wait.('[ui]+ hidden   ui :tiles')).to eq(true), text.call
-    expect(text.call).to include('[bg]  playing   :hum')
+    expect(wait.('[bg]  playing   :hum')).to eq(true), text.call # (the next line of the same output: wait for it too)
     type.("fg\r") # as a shell's fg
     expect(wait.(' REPL ')).to eq(true), text.call
     expect(lock.synchronize { vt.alt? }).to eq(true)
