@@ -89,6 +89,18 @@ The maintainer's notes: "`help :ui` (just as an example) is a solid wall of text
 - `help` and `lesson` are Pry commands too (`Help.install_commands`): `help flow`, `help mix an effect in`, `help :turn`, `help g` (literals and names defined in the console are evaluated, never calls), words matched against topic names, aliases (`TOPIC_ALIASES`: `:wet`, `:dry`, `:mix` lead to `:blend`), titles, and text, else a search; `lesson set`, `lesson :set, restart: true`.  `help(:x).try`, `help.topics`, `lesson.next` stay Ruby.
 - Topic `:blend` ("Mixing an effect in (wet and dry)"): `sig.blend(mix) { |s| fx }` first (round 2, maintainer 2026-10-17), the arithmetic form, effects with their own mix, buses for shared effects.
 
+## Errors, color, and output for people and agents (ux-fix-1, 2026-10-18)
+
+From the Mac's ux-review-1 (22 findings; workbench `briefs/ux-review-1-findings.md`).  Mechanisms that rule out whole classes:
+
+- One color policy, `ColorPolicy.color?(io)` (`lib/mb/sound/color_policy.rb`): a terminal, NO_COLOR unset, TERM not dumb; FORCE_COLOR forces it.  Table, `Help::Doc.for_output`, and every help page's `#to_s` (`Page::PlainOutput`, prepended by `Page`) ask it; bin/sound.rb and script runners call `ColorPolicy.strip_output!` (SGR codes dropped from $stdout/$stderr writes: Pry, mb-util highlighting, bin/ scripts' own escapes) and turn Pry's color off.  `ColorPolicy.animate?` (also needs NO_COLOR unset and TERM not dumb) gates animations: `play`'s live scope (PLOT=1 forces it).  New colored output: build it with escapes as before; the policy strips it where it can't show.
+- One error format, `ErrorFormat` (`lib/mb/sound/error_format.rb`): `summary(e)` is `Class: message (did you mean x, y?)` (Ruby's corrections, and `Did you mean?` blocks in messages, as one parenthesis); the console's exception handler prints that for typos and errors raised on purpose, and a backtrace without Pry/bin frames for likely bugs raised inside lib/ (`BUG_CLASSES`: NameError, TypeError, ...).  Scripts print input errors (`ScriptRunner::InputError`, `DeviceOutput::Unavailable`, `RenderWindow::TargetError`) as `script.rb: message` and exit 2.
+- One unknown-keyword wrapper: every recorded DSL method's recorder (`Recipe.record`) passes an `unknown keyword` ArgumentError raised by the method itself to `ErrorFormat.unknown_keyword`, which names the method and suggests its keywords (`lp4: unknown keyword: :resonanse` / `Did you mean?  resonance:`).
+- C library noise: `Internal.quiet_stderr(*errors) { }` holds fd 2 while a device opens (RtMidi's capture, shared); `DeviceOutput.opening` turns a failed open into `DeviceOutput::Unavailable` saying what to do (audio_check, OUTPUT_TYPE=null, render).
+- One-line inspect for nodes (`GraphNode::Inspect`, in Traversable and MultiOutput; Notes, Session): see graph_nodes.md.
+- Per-call-site warnings: `Internal.warn_once_per_site(key, message)` (`path:line: warning: ...`, once per line of user code): `at(-20)`, `delay(96)`, `delay(seconds:)`.
+- Method pages show ~30 lines of their doc comment (`help(:render).full` for all), head with aliases (`ramp  (alias saw, sawtooth)`); the sheet says to scroll up when taller than the terminal; pages lay out down to 40 columns.
+
 ## Takes
 
 `help`, `now`, `lesson`, `monitor_gain`/`monitor`, and ux-1's `keys`, `fg`, `jobs`, `debug_dump` lines are in `Take::FOREGROUND`, so replays skip them (including the sound a `try` or `lesson.run` made).

@@ -3,6 +3,19 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
   after { sessions.each(&:close) }
 
+  # ux-fix-1 item 22: "trim +23.62 dB; first pass -12.05 LUFS" read as a
+  # wrong number for a 3.5 LU change
+  it "relates a targeted render's trim to the first pass's drive" do
+    r = MB::Sound::Mastering::Targeting::Result.new(
+      preset: :club, trim: 23.62.db, target: MB::Sound::Loudness.target(-8.5), ceiling: -1.db, integrated: -8.5, short_term_max: -7.0,
+      range: 3.0, true_peak: -1.0, side: -40.0, side_hz: 120, first_pass: -12.05, runs: 6, held: false, codec_peaks: nil,
+      measure: :integrated, loudest: nil, loudest_bars: nil, drive: 11.5.db
+    )
+    expect(r.to_s.lines.first.chomp).to match(
+      /\Amastering :club: \w+ \(trim \+23\.62 dB into the chain; the first pass's drive \+11\.50 dB gave -12\.05 LUFS; \+12\.12 dB more trim for \+3\.55 LU \(the chain compresses and limits\); 6 chain runs\)\z/
+    )
+  end
+
   def session(**opts)
     MB::Sound::Session.new(
       master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),

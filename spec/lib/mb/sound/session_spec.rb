@@ -607,6 +607,16 @@ RSpec.describe(MB::Sound::Session) do
       16.times { session.process_buffer }
     end
 
+    # ux-fix-1 item 21: GC pauses landed in whichever player allocated
+    it 'leaves garbage collection out of a player\'s load' do
+      session.add(sleepy(0.02) { true })
+      gc = 0
+      allow(GC).to receive(:stat).and_call_original
+      allow(GC).to receive(:stat).with(:time) { gc += 20 } # every read "spends" 20 ms collecting
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
     it 'warns once about a player that stays slow' do
       session.add(sleepy(0.02) { true }) # 800 frames are 16.7 ms
       expect(session).to receive(:warn).with(/is taking \d+% of its audio buffer time/).once

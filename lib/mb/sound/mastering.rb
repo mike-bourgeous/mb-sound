@@ -244,7 +244,7 @@ module MB
           key = name.respond_to?(:to_sym) ? name.to_sym : name
           definition = DEFINITIONS[key]
           unless definition
-            raise ArgumentError, "Unknown mastering preset #{name.inspect}(presets: #{names.map(&:inspect).join(', ')})#{Form.suggest(key, names)}"
+            raise ArgumentError, "Unknown mastering preset #{name.inspect} (presets: #{names.map(&:inspect).join(', ')})#{Form.suggest(key, names)}"
           end
           unknown = options.keys - OPTIONS
           unless unknown.empty?
