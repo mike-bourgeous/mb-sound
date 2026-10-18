@@ -498,7 +498,11 @@ module MB
         rescue => e
           raise if @raise_errors
           warn "The master chain (#{c.description}) stopped with an error, so it is bypassed: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+          old = c.nodes
           c.nodes = nil
+          # (its ChainGraph lost its nodes: the Session's node-set caches
+          # refresh; found by Strip.structure_check, bench-fixes-1)
+          old&.each { |n| Plan.changed(n) }
           c.timeline_nodes = []
           c.description = 'bypass (the master chain stopped with an error)'
           input
