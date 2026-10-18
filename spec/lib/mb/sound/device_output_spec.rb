@@ -250,7 +250,15 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     # apart.  Waiting for half the queue to play instead would let about
     # half the writes return at once (measured on the null device: median
     # queue 1664 of 2400, 33 of 50 writes returning at once).
-    o = device_output(profile: :default)
+    #
+    # The queue stays fixed (adaptive: false): this is about pacing, and a
+    # writer stalled for longer than the queue (a loaded machine, a GC
+    # pause) made an adaptive output warn "Audio dropout: raising the
+    # output queue" and grow its limit mid-measurement (spec:parallel,
+    # 2026-10-18; reproduced with an 80 ms stall).  With a fixed queue the
+    # same stall is one underrun, and the bounds below still hold (median
+    # 2176 of 2400, 5 instant writes).
+    o = device_output(profile: :default, adaptive: false)
     data = [Numo::SFloat.zeros(o.buffer_size)] * 2
     20.times { o.write(data) } # fill the queue
 
