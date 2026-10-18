@@ -611,7 +611,7 @@ RSpec.describe(MB::Sound::Envelope) do
           gate: MB::Sound::GraphNode::ProcNode.new(0.constant) { g.shift },
           trigger: MB::Sound::GraphNode::ProcNode.new(0.constant) { tr.shift }
         )
-        data = gates.length.times.map { env.public_send(method, 100).dup }.reduce(:concatenate)
+        data = SpecBuffers.join(gates.length.times.map { env.public_send(method, 100).dup })
         [data, env.instance_variable_get(:@state).to_a]
       }
 
@@ -631,7 +631,7 @@ RSpec.describe(MB::Sound::Envelope) do
         gate = MB::Sound::GraphNode::ProcNode.new(0.constant) { b = g.shift || off; reuse ? b : b.dup }
         velocity = MB::Sound::GraphNode::ProcNode.new(0.constant) { b = v.shift; reuse || b.nil? ? b : b.dup }
         env = described_class.new(attack: 0.002, decay: 0.002, sustain: 0.5, release: 0.002, gate: gate, velocity: velocity, sensitivity: 0..1)
-        12.times.map { env.sample(100).dup }.reduce(:concatenate)
+        SpecBuffers.join(12.times.map { env.sample(100).dup })
       }
       expect(outputs[0].to_a).to eq(outputs[1].to_a)
       expect(outputs[0].max).to be > 0.5

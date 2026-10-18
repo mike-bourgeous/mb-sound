@@ -32,7 +32,7 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       n += b.length
       i += 1
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   describe 'Clip.generate' do
@@ -90,7 +90,7 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
         MB::Sound.bg(:a, graph, on: :now)
         MB::Sound.seek(seek) if seek
       }
-      Array.new(bars * 120) { s.process_buffer[0].dup }.reduce(:concatenate)
+      SpecBuffers.join(Array.new(bars * 120) { s.process_buffer[0].dup })
     ensure
       s&.close
     end
@@ -293,10 +293,10 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       bnd = MB::Sound::Take.console_binding
       MB::Sound.seed(5)
       t = MB::Sound::Take.new(session: session)
-      live = Array.new(480) { |i|
+      live = SpecBuffers.join(Array.new(480) { |i|
         lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, bnd) } }
         session.process_buffer[0].dup
-      }.reduce(:concatenate)
+      })
       expect(live.abs.max).to be > 0.3
 
       path = tmp_path('take.rb')
@@ -307,7 +307,7 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
         MB::Sound.seed(5)
         out = []
         r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| out << mix[0].dup }
-        data = out.reduce(:concatenate)
+        data = SpecBuffers.join(out)
         expect(data.length).to be >= live.length
         expect(data[0...live.length]).to eq(live), "buffer sizes #{sizes}"
       end

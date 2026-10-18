@@ -40,7 +40,7 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
       total += buf.length
       i += 1
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def null_test(**options, &source)
@@ -104,10 +104,10 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
       MB::Sound::Notes.fast_paths = fast
       src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
       synth = MB::Sound::Synth.new(src, voices: 2, spares: 1, seed: 3, &patch)
-      30.times.map { |i|
+      SpecBuffers.join(30.times.map { |i|
         src.seek(0.3) if i == 12
         synth.sample(400).dup
-      }.reduce(:concatenate).to_a
+      }).to_a
     }.then { |fast, slow| expect(fast).to eq(slow) }
   end
 end

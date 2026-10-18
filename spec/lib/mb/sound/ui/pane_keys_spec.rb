@@ -178,7 +178,7 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
       path << name
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
-      @term.settle(quiet: 0.05)
+      @term.read_and_settle
       expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
   end

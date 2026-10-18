@@ -93,7 +93,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
         a = MB::Sound.noise(:pink, seed: 4)
         b = MB::Sound.noise(:pink, seed: 4)
         whole = a.sample(2000).dup
-        parts = [b.sample(7).dup, b.sample(1).dup, b.sample(1992).dup].reduce(:concatenate)
+        parts = SpecBuffers.join([b.sample(7).dup, b.sample(1).dup, b.sample(1992).dup])
         expect(parts).to eq(whole)
       end
 
@@ -121,7 +121,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
       n = MB::Sound.noise(seed: 9)
       whole = n.sample(600).dup
       m = MB::Sound.noise(seed: 9)
-      parts = [m.sample(100).dup, m.sample(1).dup, m.sample(499).dup].reduce(:concatenate)
+      parts = SpecBuffers.join([m.sample(100).dup, m.sample(1).dup, m.sample(499).dup])
       expect(parts).to eq(whole)
       expect(m.state.to_h[:noise]).to eq(n.state.to_h[:noise])
     end
@@ -148,7 +148,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
             out << n.sample(c).dup
             got += c
           end
-          out.reduce(:concatenate)
+          SpecBuffers.join(out)
         }
         runs[1..].each { |r| expect(r.to_a).to eq(runs[0][0...r.length].to_a) }
       end

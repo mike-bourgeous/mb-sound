@@ -179,6 +179,35 @@ module UIHelpers
     # Writes +str+ at once (an escape sequence, a paste).
     def write(str) = @master.write(str)
 
+    # Waits until the screen's input thread has read everything written to
+    # the terminal (nothing left unread on the slave side).  It may still
+    # be handling the bytes: wait for what they do with wait_settled or
+    # wait_for.  Returns true when drained within +timeout+.
+    def wait_read(timeout: 5)
+      deadline = MB::U.clock_now + timeout
+      sleep 0.005 until unread == 0 || MB::U.clock_now > deadline
+      unread == 0
+    end
+
+    # For random key walks: waits until the screen read what was written,
+    # then for what it drew, at most +max+ seconds (a held note or a
+    # sounding track keeps a meter moving for seconds, which a plain
+    # #settle waits out: up to 3 s per key in tiles_keys_spec; test-speed-2).
+    def read_and_settle(quiet: 0.05, max: 0.3)
+      wait_read
+      settle(quiet: quiet, timeout: max)
+    end
+
+    # FIONREAD (io/wait's #nread is gone in Ruby 4)
+    FIONREAD = RUBY_PLATFORM.include?('darwin') ? 0x4004667F : 0x541B
+
+    # Bytes written to the terminal that the screen hasn't read yet.
+    def unread
+      buf = [0].pack('l')
+      @slave.ioctl(FIONREAD, buf)
+      buf.unpack1('l')
+    end
+
     def text = @lock.synchronize { @vt.text }
     def lines = @lock.synchronize { @vt.lines }
 

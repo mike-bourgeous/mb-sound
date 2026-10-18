@@ -51,13 +51,13 @@ RSpec.describe(MB::Sound::Take) do
       end
       out << session.process_buffer[0].dup
     end
-    [out.reduce(:concatenate), t]
+    [SpecBuffers.join(out), t]
   end
 
   def replay(replay, sizes)
     out = []
     replay.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| out << mix[0].dup }
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   it 'records lines with their issue times and where their changes landed' do
@@ -115,7 +115,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.3
     expect(session.arrangement.captures.keys).to eq([:lead_1, :bass_1])
     expect(session.knobs[:cut].cc).to eq(74)
@@ -162,7 +162,7 @@ RSpec.describe(MB::Sound::Take) do
       MB::Sound::UI.run_line('bg :bass, seq(C3, E3).n8.loop', session) if i == 300 # step entry's w
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.3
     expect(session.arrangement.captures.keys).to eq([:lead_1])
     expect(t.lines.map(&:code)).to include('capture', 'bg :bass, seq(C3, E3).n8.loop')
@@ -198,7 +198,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.01
     expect(t.entries.map(&:kind)).to include(:key, :turn, :restore)
     expect(t.to_ruby).to include('key: ["D", :dorian]').or include('key: ["C", :major]')
@@ -241,7 +241,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.1
     expect(t.entries.map(&:kind)).to include(:turn, :snap, :restore)
 
@@ -279,7 +279,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.1
     expect(session.arrangement.slots(:bass).map(&:name)).to eq([:riff_a, nil, :bass_slot1_v2, :bass_slot1_v3, :bass_slot1_v4])
 
@@ -323,7 +323,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
       out << session.process_buffer[0].dup
     end
-    live = out.reduce(:concatenate)
+    live = SpecBuffers.join(out)
     expect(live.abs.max).to be > 0.05
     expect(t.entries.map(&:kind)).to include(:bus, :send, :mute, :solo)
 
@@ -384,7 +384,7 @@ RSpec.describe(MB::Sound::Take) do
         lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, bnd) } }
         out << session.process_buffer[0].dup
       end
-      [out.reduce(:concatenate), t]
+      [SpecBuffers.join(out), t]
     }
     live, t = run.call
     expect(live.abs.max).to be > 0.1
@@ -419,7 +419,7 @@ RSpec.describe(MB::Sound::Take) do
       lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, bnd) } }
       out << session.process_buffer(size)[0].dup
     end
-    [out.reduce(:concatenate), t]
+    [SpecBuffers.join(out), t]
   end
 
   [
@@ -487,7 +487,7 @@ RSpec.describe(MB::Sound::Take) do
       }
       out = []
       r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, tail: 0) { |mix| out << mix[0].dup }
-      out.reduce(:concatenate)
+      SpecBuffers.join(out)
     }
     old = render.()
     expect(old[95999]).to eq(1)

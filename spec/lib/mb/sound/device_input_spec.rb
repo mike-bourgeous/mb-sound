@@ -48,8 +48,8 @@ RSpec.describe(MB::Sound::DeviceInput, :aggregate_failures) do
     data = [1, 479, 480, 1000, 2840].map { |n| i.read(n) }
     elapsed = MB::U.clock_now - t
 
-    l = data.map(&:first).reduce(:concatenate)
-    r = data.map(&:last).reduce(:concatenate)
+    l = SpecBuffers.join(data.map(&:first))
+    r = SpecBuffers.join(data.map(&:last))
     expect(l.length).to eq(4800)
     expect(breaks(l)).to be_empty
     expect((r - l).abs.max).to be_within(1e-6).of(0.001) # the channel offset
@@ -90,7 +90,7 @@ RSpec.describe(MB::Sound::DeviceInput, :aggregate_failures) do
     expect(i.resampling?).to eq(true)
     expect(i.inspect).to include('44100Hz->48000Hz')
 
-    data = Array.new(10) { i.read(480) }.map(&:first).reduce(:concatenate)
+    data = SpecBuffers.join(Array.new(10) { i.read(480) }.map(&:first))
     expect(data.length).to eq(4800)
 
     # The device frames the reads used: 4410 at 44.1 kHz for 4800 at 48

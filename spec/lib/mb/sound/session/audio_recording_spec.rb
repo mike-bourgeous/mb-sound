@@ -27,7 +27,7 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
     end
 
     def channel(c)
-      @buffers.map { |b| b[c] }.reduce(:concatenate)
+      SpecBuffers.join(@buffers.map { |b| b[c] })
     end
   end
 
@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::Session::AudioRecording) do
       out << session.process_buffer(n)[0].dup
       left -= n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   it 'records the master bus from the exact start frame to the exact stop frame at any buffer size' do

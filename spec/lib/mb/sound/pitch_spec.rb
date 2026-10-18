@@ -69,7 +69,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     end
 
     it 'gives delays and envelopes the same samples as a plain seconds length' do
-      take = ->(n) { 3.times.map { n.sample(500)&.dup }.compact.inject(:concatenate) } # the envelope ends
+      take = ->(n) { SpecBuffers.join(3.times.map { n.sample(500)&.dup }.compact) } # the envelope ends
       [
         ->(l) { 100.hz.ramp.delay(l, smoothing: false) },
         ->(l) { MB::Sound.adsr(0, 0, 1, 0, hold: l) * 1 },

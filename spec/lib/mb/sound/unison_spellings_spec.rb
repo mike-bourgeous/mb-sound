@@ -7,7 +7,7 @@ RSpec.describe('unison spellings') do
   # +n+ 800-sample buffers of each channel of +node+, joined.
   def render(node, n = 12)
     outs = node.outputs
-    Array.new(n) { outs.map { |o| o.sample(800).dup } }.transpose.map { |l| l.reduce(:concatenate) }
+    Array.new(n) { outs.map { |o| o.sample(800).dup } }.transpose.map { |l| SpecBuffers.join(l) }
   end
 
   # Renders the graph each lambda builds after the same seed.
