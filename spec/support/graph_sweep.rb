@@ -331,6 +331,7 @@ module GraphSweep
       ['ride', ->(c) { c.stereo_sig.ride(-14, down: 0.05, up: 0.05) }],
       ['master :club', ->(c) { c.stereo_sig.master(:club) }],
       ['master :vinyl', ->(c) { c.stereo_sig.master(:vinyl) }],
+      ['master :club, air: :dynamic and :band', ->(c) { c.stereo_sig.master(:club, air: :dynamic) + c.stereo_sig.master(:club, air: :band, clip: true) }],
       ['resample and oversample', ->(c) { c.sig.resample(44100) + c.sig.oversample(2) { |n| n.softclip } }],
       ['MixSource (master chain input)', ->(c) { MixFeeder.new(c.stereo_sig) { |mix| mix.softclip.filter(:highpass, cutoff: 50).mixdown } }],
       ['BusTap (bus and track readers; silence outside a Session, see buses_spec)', ->(c) { c.sig.duck(:sweep_drums, only: :kick) + MB::Sound.bus(:sweep_bus).mixdown + c.sig.compress(sidechain: MB::Sound.bus(:sweep_bus)) }],

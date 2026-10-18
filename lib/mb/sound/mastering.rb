@@ -66,6 +66,20 @@ module MB
               end
             when :de_ess
               m.bands(*args) { |lo, hi| [lo, hi.compress(**kwargs)] }
+            when :dynamic_air
+              # Dynamic EQ: the band above args[0] is turned down only
+              # while the whole mix (the sidechain) is near the limiters,
+              # looking ahead; the rest waits as long, so the bands line up
+              m.bands(*args) { |lo, hi|
+                cut = hi.compress(sidechain: m, **kwargs)
+                [lo.delay(GraphNode::BlendMethods.latency_of(cut, hi).samples), cut]
+              }
+            when :air_band
+              # Multiband: the band above args[0] compressed on its own level
+              m.bands(*args) { |lo, hi|
+                cut = hi.compress(**kwargs)
+                [lo.delay(GraphNode::BlendMethods.latency_of(cut, hi).samples), cut]
+              }
             when :highpass
               m.filter(:highpass, cutoff: args[0], quality: kwargs.fetch(:quality, 0.7071))
             else
@@ -114,12 +128,13 @@ module MB
       DEFINITIONS = {
         club: {
           title: 'Club: loud, low crest, mono lows',
-          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false },
-          notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), a soft ' \
-                 'clipper rounding peaks above -0.9 dBFS (softclip(0.9, 1.4)), then a true-peak limiter at -0.5 dBTP ' \
-                 '(80 ms release); -8.5 LUFS integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13): ' \
-                 'clip: false replaces the clipper with a fast limiter 2 dB over the ceiling (20 ms release).  At -0.5 dBTP ' \
-                 'decoded MP3/AAC peaks can pass 0 dBTP (reports say so; ceiling: -1.db for files to share).',
+          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false, air: :static },
+          notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), the top ' \
+                 'octave above 18 kHz rolled off (lossy encoders cut it anyway, and their decoded peaks grow less; air: :dynamic, :band, false), a fast ' \
+                 'limiter 2 dB over the ceiling for transients, then a true-peak limiter at -0.5 dBTP; -8.5 LUFS ' \
+                 'integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13; mastering-2 Bench: the two limiters ' \
+                 'for dnb and techno); clip: true puts a gentle softclip(0.9, 1.4) in place of the fast limiter.  At ' \
+                 '-0.5 dBTP decoded MP3/AAC peaks can still pass 0 dBTP on dense masters (reports say so).',
           source: 'Maintainer picks 2026-10-13/17 (low crest, near max true peak, -0.5 dBTP shares); genre templates dnb/house/techno; ' \
                   'Giannoulis et al. 2012 (compressor design); BS.1770-4 Annex 2 (true peak)',
         },
@@ -154,7 +169,7 @@ module MB
       }.freeze
 
       # Options every preset takes (see .preset).
-      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip de_ess].freeze
+      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess].freeze
 
       # Rider settings for `ride: true` (see GraphNode::Rider; +range+ and
       # times as there).
@@ -318,16 +333,50 @@ module MB
           steps = mono_steps(o)
           steps << [:trim, [], {}]
           steps << glue_step(target, over: 3, ratio: 2, attack: 0.01, release: 0.15) if o[:glue]
-          # Peaks: a soft clipper that starts 0.9 dB under full scale and
-          # rounds peaks up to +2.9 dBFS (the limiter takes the rest), or
-          # with clip: false a fast first limiter 2 dB over the ceiling
-          # (release 20 ms: catches transients) before the final one
+          steps.concat(air_steps(o[:air]))
+          # Peaks: two limiters (mastering-2 default): a fast one 2 dB
+          # over the ceiling (1 ms lookahead, 20 ms release) takes the
+          # transients, the final one (1.5 ms, 60 ms) the rest.  (Longer
+          # lookaheads, 3 and 5 ms, took 0.06 dB more off the decoded
+          # peaks for 1.8x the gain reduction and 3.6x the CPU.)  clip: true
+          # puts a gentle softclip(0.9, 1.4) in front of the final limiter
+          # instead of the fast one (house's feel).
           if o[:clip]
             steps << [:softclip, [0.9, 1.4], {}]
           else
             steps << [:limit, [], { ceiling: (ceiling.db_value + 2).db, lookahead: 0.001, release: 0.02 }]
           end
-          steps << [:limit, [], { ceiling: ceiling, release: 0.08 }]
+          steps << [:limit, [], { ceiling: ceiling, release: 0.06 }]
+        end
+
+        # The club's top-octave stage (+air:+): lossy encoders cut the top
+        # octave, and their decoded peaks grow where they do; cutting it
+        # here first keeps them nearer the ceiling.  :static (default) a
+        # 4th-order Butterworth lowpass at 18 kHz; :dynamic the band above
+        # 12 kHz turned down while the full mix is over the ceiling (20:1,
+        # 1 ms lookahead like the limiters); :band the band above 12 kHz
+        # compressed on its own level (3:1 over -18 dBFS); false none.
+        # Measured (mastering-2, decoded 192k MP3 true peak, power above 12
+        # kHz re the mix, Tunnel Vision at -7.6 LUFS / dnb at -8.5): none
+        # +1.13 / +0.22 dBTP, -20.5 / -20.2 dB; :static +0.24 / -0.04,
+        # -22.9 / -21.7; two gentle 17.5 kHz lowpasses +0.15 / +0.21,
+        # -24.1 / -22.7; :dynamic +0.94 / +0.51, -22.7 / -21.1 (cut 3.5 dB
+        # on average, 78% of the time); :band +0.32 / +0.24, -23.5 / -21.7.
+        # The decoded overs come from the encoder's own lowpass, not from
+        # air at the peaks, so only a static cut reaches them.
+        def air_steps(air)
+          case air
+          when :static, true
+            [[:filter, [:lowpass], { cutoff: 18000, quality: 0.5412 }], [:filter, [:lowpass], { cutoff: 18000, quality: 1.3066 }]]
+          when :dynamic
+            [[:dynamic_air, [12000], { threshold: -0.5.db, ratio: 20, knee: 2, attack: 0.0002, release: 0.02, lookahead: 0.001 }]]
+          when :band
+            [[:air_band, [12000], { threshold: -18.db, ratio: 3, knee: 6, attack: 0.0005, release: 0.03, lookahead: 0.001 }]]
+          when false, nil
+            []
+          else
+            raise ArgumentError, "air: is :static, :dynamic, :band, or false (got #{air.inspect})"
+          end
         end
 
         def streaming_steps(o, target, ceiling)

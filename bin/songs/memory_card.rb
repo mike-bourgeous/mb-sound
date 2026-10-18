@@ -187,7 +187,9 @@ module MB::Sound
 
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
-  def self.memory_card(drive: 5.0, ceiling: -1.0)
+  #
+  # +vinyl+ true masters with the vinyl preset (mastering-2) instead.
+  def self.memory_card(drive: 5.0, ceiling: -1.0, vinyl: false)
     map = memory_card_break.instrument # (the record bounces at its own tempo)
     chops = memory_card_chops
     c = memory_card_clips
@@ -199,10 +201,14 @@ module MB::Sound
     knob :space, 0.3, range: 0..1                              # the lead's echo send
 
     master_gain 1
-    master { |mix|
-      glued = mix.compress(threshold: -14.db, ratio: 2, knee: 8, attack: 0.02, release: 0.15)
-      (glued * drive.db).limit(ceiling: ceiling.db, release: 0.1)
-    }
+    if vinyl
+      master :vinyl
+    else
+      master { |mix|
+        glued = mix.compress(threshold: -14.db, ratio: 2, knee: 8, attack: 0.02, release: 0.15)
+        (glued * drive.db).limit(ceiling: ceiling.db, release: 0.1)
+      }
+    end
 
     track(:breaks) { |clip| jungle_breaks_voice(clip, map: map, cutoff: knob(:brk)) }
     track(:perc) { |kit| jungle_perc(kit) }
@@ -247,8 +253,9 @@ module MB::Sound
       bars: MEMORY_CARD_BARS,
       drive: [5.0, Float, '-D', 'Gain in dB into the master limiter', -20.0..20.0],
       ceiling: [-1.0, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
+      vinyl: [false, 'Master with the vinyl preset (mono lows, de-esser, no brickwall) instead of the song\'s glue and limiter'],
     ) { |p|
-      memory_card(drive: p.drive, ceiling: p.ceiling)
+      memory_card(drive: p.drive, ceiling: p.ceiling, vinyl: p.vinyl)
       memory_card_form
     }
   end

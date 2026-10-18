@@ -189,7 +189,11 @@ module MB::Sound
   # own kick (`duck(:drums, only: :kick)`) instead of a ghost kick.
   # +buses: false+ is Kez's original (reverbs inside each patch, a ghost
   # kick for the ducks).
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT)
+  #
+  # +club+ (a LUFS target, or nil) masters with the club preset (two
+  # limiters; mastering-2) instead of dnb_master, keeping the air knob's
+  # highpass: renders reach that loudness exactly.
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, club: nil)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -203,7 +207,11 @@ module MB::Sound
 
     # A club master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1
-    master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
+    if club
+      master(:club, lufs: club) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
+    else
+      master { |mix| dnb_master(mix, drive: drive, ceiling: ceiling, air: knob(:air)) }
+    end
 
     # A little of every other track in the hall (maintainer, round 3: "a
     # tiny bit of send from every track"; not the sub)
@@ -275,8 +283,9 @@ module MB::Sound
       hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
       lift: [TV_LIFT, Float, '-U', 'Upward lift of the hall tail in rests, 0..1, the lifted return 6 dB down (the :lift knob; with buses; 0 before patches-5)', 0.0..1.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
+      club: [nil, Float, 'Master with the club preset (two limiters) at this many LUFS (e.g. -7.6) instead of dnb_master (-D, -C)', -20.0..-4.0],
     ) { |p|
-      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift)
+      tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, club: p.club)
       tunnel_vision_form
     }
   end

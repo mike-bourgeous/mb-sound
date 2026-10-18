@@ -43,8 +43,8 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(club.target.lufs).to eq(-8.5)
       expect(club.ceiling.db_value).to eq(-0.5)
       expect(club.limiter).to eq(true)
-      expect(club.steps.map(&:first)).to eq(%i[mono_below trim compress limit limit])
-      expect(described_class.preset(:club, clip: true).steps.map(&:first)).to eq(%i[mono_below trim compress softclip limit])
+      expect(club.steps.map(&:first)).to eq(%i[mono_below trim compress filter filter limit limit])
+      expect(described_class.preset(:club, clip: true).steps.map(&:first)).to eq(%i[mono_below trim compress filter filter softclip limit])
       expect(club).to be_frozen
       expect(club.steps).to be_frozen
 
@@ -65,12 +65,25 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
     it 'takes options that change the chain' do
       p = described_class.preset(:club, lufs: -9, ceiling: -1.db, clip: false, mono: false)
-      expect(p.steps.map(&:first)).to eq(%i[trim compress limit limit])
+      expect(p.steps.map(&:first)).to eq(%i[trim compress filter filter limit limit])
       expect(p.steps.last[2][:ceiling].db_value).to eq(-1)
       expect(p.target.lufs).to eq(-9)
       expect(described_class.preset(:club, drive: 6.db).targeted?).to eq(false)
       expect(described_class.preset(:club, ride: true).ride).to eq(described_class::RIDE_DEFAULTS)
-      expect(described_class.preset(p, glue: false).steps.map(&:first)).to eq(%i[trim limit limit])
+      expect(described_class.preset(p, glue: false).steps.map(&:first)).to eq(%i[trim filter filter limit limit])
+    end
+
+    it 'takes the club\'s air stage as an option' do
+      expect(described_class.preset(:club, air: :dynamic).steps.map(&:first)).to include(:dynamic_air)
+      expect(described_class.preset(:club, air: :band).steps.map(&:first)).to include(:air_band)
+      expect(described_class.preset(:club, air: false).steps.map(&:first)).to eq(%i[mono_below trim compress limit limit])
+      expect { described_class.preset(:club, air: :loud) }.to raise_error(ArgumentError, /air: is :static/)
+      [:dynamic, :band].each do |air|
+        out = run(test_mix(level: 0.6).master(:club, air: air), 24000, 800)
+        a = MB::Sound::Loudness::Analyzer.new(channels: 2)
+        a.process(out)
+        expect(a.true_peak).to be <= -0.4
+      end
     end
 
     it 'prints itself back as the call that makes it' do
