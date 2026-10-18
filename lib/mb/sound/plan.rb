@@ -86,9 +86,11 @@ module MB
       class Unsupported < StandardError
         attr_reader :node
 
-        def initialize(node, why)
+        # +label: false+ leaves the node's label out of the message (for
+        # messages that name the DSL method instead).
+        def initialize(node, why, label: true)
           @node = node
-          super("#{Plan.node_label(node)}: #{why}")
+          super(label ? "#{Plan.node_label(node)}: #{why}" : why)
         end
       end
 

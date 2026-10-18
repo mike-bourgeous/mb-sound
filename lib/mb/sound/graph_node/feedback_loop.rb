@@ -267,6 +267,29 @@ module MB
           "#{node_type_name}#{@fallback ? ' (fallback)' : ''}"
         end
 
+        # What runs inside a feedback loop, for messages.
+        LOOP_OPS = 'delays, arithmetic, shapers, and SVF filters run inside loops'
+
+        # The message for a loop that can't run one sample at a time
+        # because of +e+ (a Plan::Unsupported): names the DSL method and
+        # what to use instead where there is a known alternative (ux-fix-1
+        # item 19: `fb.lp4(2000)` said "no loop lowering for
+        # MB::Sound::Plan::Op::FourPole").  Returns [message, whether to
+        # prefix the node's label].
+        def self.unsupported_message(e)
+          node = e.node
+          live = 'in live mode it runs as a block graph instead (slower; op latencies aren\'t compensated)'
+          if node.is_a?(FourPole)
+            c = node.cutoff
+            cut = c.is_a?(Numeric) ? (c == c.round ? c.round : c.to_f.round(2)).to_s : '...'
+            ["lp4 and diode (four-pole ladders) can't run inside a feedback loop yet; use .filter(:lowpass, cutoff: #{cut}) (an SVF), which can (#{LOOP_OPS}); #{live}", false]
+          elsif node.respond_to?(:base_filter) && node.base_filter.is_a?(Filter::Biquad)
+            ["structure: :biquad filters can't run inside a feedback loop; leave structure: out (an SVF, which can: #{LOOP_OPS}); #{live}", false]
+          else
+            ["this feedback loop can't run one sample at a time (#{e.message.sub(/\A#{Regexp.escape(Plan.node_label(node))}: /, '')}; #{LOOP_OPS}); #{live}", true]
+          end
+        end
+
         private
 
         # Finds the loop's nodes, describes them as a Plan::Loop::Program,
@@ -284,8 +307,8 @@ module MB
           @delays = Array.new(@program.rings.length)
 
         rescue Plan::Unsupported => e
-          message = "this feedback loop can't run one sample at a time (#{e.message.sub(/\A#{Regexp.escape(Plan.node_label(e.node))}: /, '')}); in live mode it runs as a block graph instead (slower; op latencies aren't compensated)"
-          MB::Sound.live_error(Plan::Unsupported.new(e.node, message))
+          message, label = FeedbackLoop.unsupported_message(e)
+          MB::Sound.live_error(Plan::Unsupported.new(e.node, message, label: label))
 
           @fallback_reason = e.message
           @program = nil
