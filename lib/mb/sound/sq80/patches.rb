@@ -24,8 +24,8 @@ module MB
       PATCHES = [
         Patch.new(
           :classic,
-          'The voice as first built (bin/synths/sq80_voice.rb), two octaves down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter.',
-          { transpose: -24, level: 2.81 }
+          'The voice as first built (bin/synths/sq80_voice.rb), an octave down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter.',
+          { transpose: -12, level: 1.99 }
         ),
         Patch.new(
           :flutter_pad,
