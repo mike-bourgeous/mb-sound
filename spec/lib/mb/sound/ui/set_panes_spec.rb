@@ -99,6 +99,19 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       ui::Panes::Clips.selected = nil
     end
 
+    it 'marks a slot several scene columns give only in its home column with play_marks :current (ux-r4b item 5; :all by default)' do
+      expect(ui::Panes::Clips.play_marks).to eq(:all)
+      all = draw(:clips, snap, w: 70)
+      expect(all[2].scan('▶bass_a').length).to eq(2) # (intro and drop)
+      ui::Panes::Clips.play_marks = :current
+      home = draw(:clips, snap, w: 70)
+      expect(home[2].scan('▶bass_a').length).to eq(1)
+      expect(home[2].index('▶bass_a')).to eq(all[2].rindex('▶bass_a')) # (drop: the current scene)
+      expect(ui::Panes::Clips.home_column(snap.matrix, snap.matrix.tracks.find { |t| t.name == :bass }, 0)).to eq(1)
+    ensure
+      ui::Panes::Clips.play_marks = nil
+    end
+
     it 'says how to make tracks when there are none' do
       expect(draw(:clips, ui_fake_snapshot.with(slow: ui_fake_slow.with(matrix: nil)))[0]).to start_with('no tracks yet')
     end

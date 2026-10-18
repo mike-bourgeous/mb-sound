@@ -93,8 +93,29 @@ module MB
 
           # The clip the cursor is on (for the detail pane): [track name,
           # ClipInfo] or nil.  Kept per process: one screen at a time.
+          #
+          # +play_marks+ (ux-r4b item 5, a choice the maintainer is making
+          # from captures; :all until then): where a playing slot shows ▶
+          # when several scene columns give the track that slot: :all, in
+          # every such column; :current, only in its home column (the
+          # current scene's column if that scene gives it, else the first
+          # column showing it).
           class << self
             attr_accessor :selected
+            attr_writer :play_marks
+
+            def play_marks = @play_marks || :all
+          end
+
+          # The column where track +t+'s playing +slot+ shows ▶ with
+          # play_marks :current (see above).
+          def self.home_column(m, t, slot)
+            cur = m.scenes.index(&:current)
+            return cur if cur && m.scenes[cur].cells.fetch(t.name, :stop) == slot
+            j = m.scenes.index { |sc| sc.cells.fetch(t.name, :stop) == slot }
+            return j if j
+            k = others(m, t).index(slot)
+            k && m.scenes.length + k
           end
 
           def draw_body(c, s, state)
@@ -158,7 +179,7 @@ module MB
                 name = clip ? (clip.key || clip.name).to_s : "##{slot}"
                 if q && q.kind == :launch && q.slot == slot
                   ["◆#{name}", :queued]
-                elsif t.playing == slot && lstate != :stopped
+                elsif t.playing == slot && lstate != :stopped && (Clips.play_marks == :all || Clips.home_column(m, t, slot) == j)
                   ["#{c.glyph(:play)}#{name}", lstate == :ringing || lstate == :stopping ? :dim : :ok]
                 else
                   [" #{name}", :text]
