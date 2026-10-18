@@ -758,9 +758,10 @@ module MB
         live, `ride: true` rides the gain toward it.  `masters` lists them,
         `master(:club) { |mix| fx }` puts your effects first, and
         `render 'x.flac', master: :streaming { song }` or a song's
-        `--master club` masters any song.  `measure: :loudest` reaches the
-        target with the loudest 8 bars instead of the whole song, so
-        breakdowns stay under the drops (`master :club, measure: :loudest`).
+        `--master club` masters any song.  `:club` reaches its target with
+        the loudest 16 bars (`loudest_bars:`; windows on bar lines) instead
+        of the whole song, so breakdowns stay under the drops; `measure:
+        :integrated` targets the whole song.
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.

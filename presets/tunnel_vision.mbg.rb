@@ -3,8 +3,8 @@
 graph 4,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-18T05:50:07Z",
-  mb_sound: "0.12.0.usegit (0e9d7ce1)",
+  saved: "2026-10-18T07:36:39Z",
+  mb_sound: "0.12.0.usegit (5234db82)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
 knob :cut, 2400.0, range: 150.0..8000.0, curve: :exp, unit: "Hz"
@@ -35,8 +35,8 @@ kit = grid(16, kick: "X.........X.....", snare: "....X.......X...", clap: ".....
 kit_outro = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_outro)
 kit = grid(16, kick: "X.........X.....", snare: "................", clap: "................", rim: "................", hat: "7.4.7.4.7.4.7.45", open_hat: "................", shaker: "................", crash: "................", low_tom: "................")
 kit_tail = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_tail)
-master { |mix|
-  (mix.filter(:highpass, cutoff: air, quality: 0.7).compress(threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12) * 11.0.db).softclip(0.6, 1.0).limit(ceiling: -0.5.db, release: 0.06)
+master(:club, lufs: -8.5, air: :static) { |mix|
+  mix.filter(:highpass, cutoff: air, quality: 0.7)
 }
 bus(:hall) { |sig|
   wet = sig.filter(:highpass, cutoff: 250, quality: 0.7).reverb(:hall, mix: 1) * 18.0.db
@@ -49,7 +49,7 @@ bus(:echo) { |sig|
 track(:pad, send: { hall: 0.35 }) { |clip|
   synth(clip, voices: 10) { |v|
     saws = v.hz.unison(3, detune: 0.12) { |p, _i|
-      p.saw
+      p.ramp
     }
     saws.lp4(2600, resonance: 0.1) * v.env(0.6, 0.5, 0.8, 1.2, gm: false) * 0.25
   }.filter(:highpass, cutoff: 200, quality: 0.7) * 0.39
@@ -68,7 +68,7 @@ track(:reese, send: { hall: 0.1 }) { |clip|
   (synth(clip, voices: 1) { |v|
     pitch = v.hz.glide(0.035, legato: true)
     saws = pitch.unison(6, detune: 0.32, spread: 0.5) { |p, _i|
-      p.saw
+      p.ramp
     }
     lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8)
     amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato
@@ -87,7 +87,7 @@ track(:neuro, send: { hall: 0.1 }) { |clip|
   (synth(clip, voices: 1) { |v|
     pitch = v.hz.glide(0.02, legato: true)
     sig = pitch.unison(3, detune: 0.18) { |p, _i|
-      p.saw
+      p.ramp
     }
     src = sig + pitch.transpose(12).square * 0.4
     lfo = v.lfo(1.n16, shape: :square, depth: 1.3)
@@ -96,7 +96,7 @@ track(:neuro, send: { hall: 0.1 }) { |clip|
     ratio = (v.env(0.002, 0.12, 0.6, 0.04, gm: false).legato * 4 + lfo * 1.5 + 3.5).aclip(2, 9)
     buzz = (pitch.pulse(0.3) + 1) * 0.5
     osc = noise
-    talk = ladder.formant(:o, :a, :i, voice: :bass, morph: v.lfo(1.n8, shape: :triangle, unipolar: true) * 2) + pitch.saw.sync(nil, ratio: ratio).filter(:highpass, cutoff: 1200, quality: 0.7).filter(:lowpass, cutoff: 14000, quality: 0.7) * 0.16000000000000003 + osc.filter(:highpass, cutoff: 3000, quality: 0.7) * buzz * 0.15
+    talk = ladder.formant(:o, :a, :i, voice: :bass, morph: v.lfo(1.n8, shape: :triangle, unipolar: true) * 2) + pitch.ramp.sync(nil, ratio: ratio).filter(:highpass, cutoff: 1200, quality: 0.7).filter(:lowpass, cutoff: 14000, quality: 0.7) * 0.16000000000000003 + osc.filter(:highpass, cutoff: 3000, quality: 0.7) * buzz * 0.15
     crushed = (talk * 3).softclip(0.3, 0.95).decimate(v.freq * 24, mix: grit)
     env = v.env(0.002, 0.12, 0.6, 0.04, gm: false).legato
     crushed * env

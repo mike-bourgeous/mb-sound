@@ -190,10 +190,10 @@ module MB
         # nil) is filled in by the render when measured.
         #
         # +measure+ is what the target measured (:integrated, or :loudest:
-        # +loudest+ is then the loudest window's LUFS; see
-        # Mastering::MEASURES).
+        # +loudest+ is then the loudest +loudest_bars+-bar window's LUFS;
+        # see Mastering::MEASURES).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
-                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest) do
+                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars) do
           # The loudness the target was reached with (integrated, or the
           # loudest window's).
           def measured
@@ -221,7 +221,7 @@ module MB
             lines = []
             lines << format('mastering %s: %s (trim %+.2f dB; first pass %.2f LUFS, %d chain runs)',
                             preset.inspect, pass? ? 'pass' : 'FAIL', trim.db_value, first_pass, runs)
-            target_text = measure == :loudest ? format('loudest %d bars %.2f LUFS, target %.1f', LOUDEST_BARS_TEXT, loudest, target.lufs) : format('target %.1f', target.lufs)
+            target_text = measure == :loudest ? format('loudest %d bars %.2f LUFS, target %.1f', loudest_bars, loudest, target.lufs) : format('target %.1f', target.lufs)
             lines << format('  loudness %.2f LUFS (%s%s), short-term max %.1f, LRA %.1f LU, PLR %.1f LU',
                             integrated, target_text, held ? format(', held by the %.1f dBTP ceiling: no limiter', ceiling.db_value) : '',
                             short_term_max, range, plr)
@@ -238,8 +238,6 @@ module MB
             lines.join("\n")
           end
         end
-
-        LOUDEST_BARS_TEXT = Mastering::LOUDEST_BARS
 
         # Decoded true peaks above this (dBTP) get ceiling advice.
         CODEC_LIMIT = -0.1
@@ -268,9 +266,10 @@ module MB
 
           base, length = mix_from(capture, origin, session.channels)
           # What the target measures (Mastering::MEASURES): with :loudest,
-          # the loudest LOUDEST_BARS bars at the render's tempo
+          # the loudest +loudest_bars+ bars, windows starting on bar lines
           mode = presets.last.measure
-          window = mode == :loudest && session.transport.seconds(Mastering::LOUDEST_BARS * session.transport.bar_length).to_f
+          bars = presets.last.loudest_bars
+          window = mode == :loudest ? loudest_windows(session.transport, origin, length, session.sample_rate, bars) : nil
           first = measure(base, session.sample_rate, true_peak: false, loudest: window)[0]
           runs = 0
           output = ->(db) {
@@ -323,7 +322,7 @@ module MB
             preset: presets.last.name, trim: x1.db, target: target, ceiling: ceiling,
             integrated: r.integrated, short_term_max: r.short_term_max, range: r.range, true_peak: r.true_peak,
             side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil,
-            measure: mode, loudest: window ? a.loudest(window) : nil
+            measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil
           )
         end
 
@@ -410,12 +409,45 @@ module MB
         end
 
         # [integrated LUFS, true peak dBTP or nil] of +channels+; with
-        # +loudest+ (seconds), the loudest window's LUFS instead of the
-        # integrated loudness (see Loudness::Analyzer#loudest).
+        # +loudest+ (see .loudest_windows), the loudest window's LUFS
+        # instead of the integrated loudness.
         def self.measure(channels, sample_rate, true_peak:, loudest: nil)
           a = Loudness::Analyzer.new(channels: channels.length, sample_rate: sample_rate, true_peak: true_peak)
           a.process(channels)
-          [loudest ? a.loudest(loudest) : a.integrated, true_peak ? a.true_peak : nil]
+          [loudest ? loudest_of(a, loudest) : a.integrated, true_peak ? a.true_peak : nil]
+        end
+
+        # The windows of measure: :loudest over a render of +length+ frames
+        # from session frame +origin+: +bars+ bars starting on each bar line
+        # of +transport+ (through its meter map, at its current tempo) that
+        # fits, as { ranges: [[start, end], ...] } in seconds from the
+        # render's first frame; without a transport, { seconds: } windows
+        # of that many bars' length every second (Analyzer#loudest).  A
+        # render shorter than the window measures the whole (the
+        # integrated loudness).
+        def self.loudest_windows(transport, origin, length, sample_rate, bars)
+          unless transport
+            return { seconds: bars * 2.0, hop: 1.0 } # (4/4 at 120 BPM)
+          end
+
+          wnps = transport.whole_notes_per_second
+          start_pos = Rational(origin, sample_rate.to_i) * wnps
+          end_pos = Rational(origin + length, sample_rate.to_i) * wnps
+          b = transport.bar_at(start_pos).ceil
+          ranges = []
+          loop do
+            from = transport.bar_position(b)
+            to = transport.bar_position(b + bars)
+            break if to > end_pos
+            ranges << [((from - start_pos) / wnps).to_f, ((to - start_pos) / wnps).to_f]
+            b += 1
+          end
+          { ranges: ranges }
+        end
+
+        # Analyzer +a+'s loudest window per +spec+ (see .loudest_windows).
+        def self.loudest_of(a, spec)
+          spec[:ranges] ? a.loudest_in(spec[:ranges]) : a.loudest(spec[:seconds], hop: spec[:hop])
         end
       end
     end
