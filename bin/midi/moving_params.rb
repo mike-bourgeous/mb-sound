@@ -15,11 +15,13 @@
 #   .triangle.at(0.5..0.68))`).
 # - knob_arp: an arpeggiator whose rate a knob picks
 #   (`arp(:up, knob(:rate).choose(8, 16, 32))`), turned across the song;
-#   ratchets per step from a knob too.
+#   ratchets per step from a knob too.  The default (the maintainer's
+#   Bench pick, 2026-10-18).
 # - all: each in turn, 4 bars apiece.
 #
 # Usage:
-#     bin/midi/moving_params.rb                       # plays all live
+#     bin/midi/moving_params.rb                       # plays knob_arp live
+#     bin/midi/moving_params.rb -e all                # each example in turn
 #     bin/midi/moving_params.rb -e cc_feel -c 100 out.flac
 #     bin/midi/moving_params.rb -e knob_arp out.flac
 #
@@ -113,7 +115,7 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: 16,
-      example: [:all, Symbol, '-e', 'The example to play', MOVING_PARAMS_EXAMPLES],
+      example: [:knob_arp, Symbol, '-e', 'The example to play', MOVING_PARAMS_EXAMPLES],
       cc: [64, Integer, '-c', 'Resting value (0..127) of the controllers of cc_feel when nothing moves them', 0..127],
     ) { |p| moving_params(example: p.example, rest: p.cc) }
   end

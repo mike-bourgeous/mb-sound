@@ -251,7 +251,7 @@ module MB
           if source
             trigger ||= source.trigger
             number ||= source.number
-            freq = source.freq if freq == :auto
+            freq = source.freq(marks: false) if freq == :auto
             gate = release_loop? ? source.gate : nil if gate == :auto
             shift = source.pitch_mark if shift == :auto
           else
@@ -261,6 +261,9 @@ module MB
             shift = nil if shift == :auto
           end
           freq = freq.oscillator_frequency if freq.is_a?(MB::Sound::Pitch)
+          # A voice's own marked frequency (`freq: v.hz.glide(...)`) already
+          # holds the pitch mark: don't add it again
+          shift = nil if source && shift.equal?(source.pitch_mark) && freq.is_a?(MB::Sound::Notes::Frequency) && freq.number.respond_to?(:marks?) && freq.number.marks?
 
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           choke = source ? chokes_for(source) : nil
@@ -313,7 +316,7 @@ module MB
           mask = layer && source ? per_note(coverage, source, local) : nil
           mods = @modulation && source ? modulators(source, shared, mask, local) : nil
           if mods && mods[:pitch]
-            freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
+            freq = shared[[:pitch, freq, mods[:keys][:pitch]]] ||= shift_by((freq || source.freq(marks: false)).then { |f| f.respond_to?(:sample) ? f : f.constant }, mods, :pitch)
           end
 
           nodes = Array.new(channel_count) { |c|

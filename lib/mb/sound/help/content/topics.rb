@@ -828,7 +828,13 @@ module MB
         streams take the same styles: `riff.stream.lock(:mash)`,
         `midi.degrees(:minor_pentatonic, layout: :fit)`, `midi.snap(:chord,
         from: chords)`.  A knob can pick the style: `lock
-        knob(:style).choose(:mash, :play, :chord)`.
+        knob(:style).choose(:mash, :play, :chord)`.  The virtual keyboard's
+        own scale lock (`ui.keyboard.scale = ...`) is :mash unless
+        `ui.keyboard.scale_mode` says otherwise.  Cents scales give whole
+        notes with pitch marks (`micro: :mark`, sent as MIDI bends); `v.hz`
+        and samplers play the marks, so they sound in tune everywhere
+        (`v.freq(marks: false)` leaves them out); `micro: :note` gives
+        fractional note numbers instead (no MIDI bytes).
       TEXT
       commands :lock, :key
       dsl :degrees, :snap
@@ -1001,6 +1007,10 @@ module MB
         key-up.  Tab is step entry: Enter puts the clip's Ruby
         (`seq(C3, E3, G3.n4).n8`) on the console line.  Notes from a MIDI
         keyboard light the piano too, in a second color.
+        `ui.keyboard.scale = scale(:dorian, :d)` locks the keys in mash
+        style (every white key the next degree, black keys silent: never a
+        wrong note); `ui.keyboard.scale_mode = :play` fits the scale to the
+        octave instead (see `help :lock`); PgUp/PgDn cycle scales and roots.
 
         `ui :session` shows the set: the clip matrix (`clips`: a row per
         track, a column per scene, then each track's other slots; ▶ plays,

@@ -81,12 +81,22 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
       expect(map(described_class.new(sc), 61)).to eq(61)
     end
 
-    it 'gives cents notes as pitch marks with micro: :mark' do
-      m = described_class.new(cents, micro: :mark)
+    it 'gives cents notes as pitch marks by default' do
+      m = described_class.new(cents)
+      expect(m.micro).to eq(:mark)
       e = m.event(MB::Sound::MIDI::Event.note_on(61), 0r, transport: transport)
       expect(e.note).to be_a(Integer)
       expect(e.note + e.pitch).to be_within(1e-9).of(map(m, 61))
       expect(e.bytes).not_to be_nil
+    end
+
+    it 'gives cents notes as fractional notes with micro: :note' do
+      m = described_class.new(cents, micro: :note)
+      e = m.event(MB::Sound::MIDI::Event.note_on(61), 0r, transport: transport)
+      expect(e.note).to be_within(1e-9).of(map(m, 61))
+      expect(e.note).not_to be_a(Integer)
+      expect(e.pitch).to be_nil
+      expect(m.to_s).to include('micro: :note')
     end
 
     it 'follows the session key at each note' do
