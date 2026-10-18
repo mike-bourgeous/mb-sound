@@ -173,17 +173,26 @@ RSpec.describe('bin/synths/ambient.rb') do
   it 'stops the tape a second after its input falls silent, and ends after its input ends (textures-5)' do
     x = Numo::SFloat.zeros(48000 * 2)
     x[0...24000] = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(24000).seq * (2 * Math::PI * 220 / 48000)) * 0.1)
-    out = {}
-    [1, 128, 800].each do |bs|
-      out[bs] = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [x])), 4, buffer: bs)[0] }
-    end
-    expect(out[1]).to eq(out[800])
-    expect(out[128]).to eq(out[800])
-    o = out[800]
+    o = MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [x])), 4)[0] }
     expect(rms_db(seconds(o, 0.6, 1.4))).to be_between(-76, -66)   # hiss held for a second (10 bits)
     expect(rms_db(seconds(o, 1.9, o.length / 48000.0))).to be < -120 # stopped
     # The input ends at 2 s, long after it fell silent: the tape ends at once
     expect(o.length).to be_between(2 * 48000, 2 * 48000 + 800)
+
+    # The same samples at any buffer size, through the same edges (sound
+    # to silence, the hold's end, the fade, the stop, the input's end) on
+    # a shorter tape (stop: 0.25 s; test-speed-3: one-sample buffers over
+    # the 2 s tape took 7.5 s)
+    short = Numo::SFloat.zeros(38400)
+    short[0...6000] = x[0...6000]
+    out = [1, 128, 800].to_h { |bs|
+      [bs, MB::Sound.with_seed(2) { render_patch(MB::Sound.ambient_tape(MB::Sound::ArrayInput.new(data: [short]), stop: 0.25), 1, buffer: bs)[0] }]
+    }
+    expect(out[800].length).to be_between(38400, 38400 + 800)
+    expect(rms_db(seconds(out[800], 0.15, 0.35))).to be_between(-76, -66) # held
+    expect(rms_db(seconds(out[800], 0.7, 0.8))).to be < -120               # stopped
+    expect(out[1]).to eq(out[800])
+    expect(out[128]).to eq(out[800])
   end
 
   it 'drones on the note: root, fifth, and octave' do
