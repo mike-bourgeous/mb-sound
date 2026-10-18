@@ -68,9 +68,10 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
       end
     end
 
-    %i[tiles studio].each do |layout|
+    %i[tiles studio session mixer].each do |layout|
       it "matches the golden capture of the #{layout} screen at #{cols}x#{rows}" do
-        expect_golden("tiles_#{layout}_#{cols}x#{rows}", tiles_capture(layout, rows, cols).to_text)
+        set = %i[session mixer].include?(layout) # (ux-r4: the set's panes with rack macro knobs)
+        expect_golden("tiles_#{layout}_#{cols}x#{rows}", tiles_capture(layout, rows, cols, macros: set).to_text)
       end
     end
   end
@@ -82,12 +83,12 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
 
   # A tiled screen at +rows+ x +cols+ drawing ui_fake_snapshot once, without
   # a console (so its text is deterministic; the REPL pane stays empty).
-  def tiles_capture(layout, rows, cols)
+  def tiles_capture(layout, rows, cols, macros: false)
     @capture&.stop
     @capture_term&.close
     @capture_term = UIHelpers::FakeTerminal.new(rows, cols)
     @capture = MB::Sound::UI::Tiles.new(layout: MB::Sound::UI.tiles_layout_named(layout), input: @capture_term.slave, output: @capture_term.slave, repl: :none,
-                             probe: false, size: [rows, cols], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
+                             probe: false, size: [rows, cols], clock: -> { 0.0 }, source: -> { ui_fake_snapshot(macros: macros) },
                              keyboard: MB::Sound::UI::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
     @capture.start(thread: false)
     @capture.refresh(0.0)

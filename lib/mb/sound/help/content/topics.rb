@@ -977,7 +977,21 @@ module MB
         (`ui.keyboard.tap = 0.5`); with the kitty keyboard protocol (kitty,
         WezTerm, Ghostty, foot, iTerm2 with its setting) they end on
         key-up.  Tab is step entry: Enter puts the clip's Ruby
-        (`seq(C3, E3, G3.n4).n8`) on the console line.
+        (`seq(C3, E3, G3.n4).n8`) on the console line.  Notes from a MIDI
+        keyboard light the piano too, in a second color.
+
+        `ui :session` shows the set: the clip matrix (`clips`: a row per
+        track, a column per scene, then each track's other slots; ▶ plays,
+        ◆ is queued with its countdown in beats), the clip under its cursor
+        (`clip`: a piano roll and the Ruby that made it), racks with their
+        macros, buses with meters.  Focus a pane in NAV (its number, or a
+        for clips, r racks, b buses) and press Enter for its keys: arrows
+        move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
+        :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
+        quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
+        u undo; in racks Left/Right turn the picked macro (Shift: fine).
+        Every key runs one console line, printed in the console: journaled,
+        undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|

@@ -18,6 +18,8 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
       clips: [ui::ClipInfo.new(name: "#{long}clip", kind: :clip, bars: 1r, pattern: '█' * 32, used: [:"#{long}track"].freeze)].freeze,
       midi: ui::MidiInfo.new(events: [['17:1', :"#{long}src", :on, "#{long}event"]].freeze, ccs: {}.freeze, mapped: [].freeze),
       recording: [].freeze,
+      matrix: ui_fake_matrix(long),
+      racks: ui_fake_racks(long),
       form: base.slow.form.with(section: :"#{long}section", next: :"#{long}next")
     )
     base.with(

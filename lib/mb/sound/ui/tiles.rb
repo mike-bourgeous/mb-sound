@@ -225,6 +225,11 @@ module MB
             @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
+            # A Pry of our own (:thread) reads through the global Reline,
+            # whose Ctrl-]/F2 bindings (ConsoleKeys) act on the screen that
+            # owns the reading thread: this one, not a new one on the real
+            # terminal (Ctrl-] relayed while hidden reaches Reline)
+            @host.thread[:mb_sound_ui_tiles] = self if @host.thread
           end
           @active = true
           @stopping = false
@@ -303,6 +308,15 @@ module MB
           # Reline redraws its prompt and line on the terminal, at its size
           rows, cols = @term.size
           @host.resize(rows, cols, force: true)
+          self
+        end
+
+        # Ctrl-] or F2 read by the Reline of this screen's own Pry thread
+        # (ConsoleKeys.switch; :thread mode): back from hidden, then NAV
+        # (or KEYS).  Returns self.
+        def console_switch(what)
+          show_again if hidden?
+          what == :keys ? keys : (@router.mode = :nav)
           self
         end
 
@@ -1213,8 +1227,26 @@ module MB
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
           r = pane.key_action(action, @states[name], *args)
-          flash(r, :key) if r.is_a?(String)
+          r.is_a?(PaneKeys::Run) ? run_pane_line(r) : (flash(r, :key) if r.is_a?(String))
           @full = true
+        end
+
+        # Runs a pane key's console line (PaneKeys::Run) through UI.run_line
+        # in the screen's session: journaled, undoable, a take line; the
+        # Ruby it ran and what it printed go into the REPL pane (the
+        # messages without one), its note or result on the status line.
+        def run_pane_line(run)
+          out = StringIO.new
+          r = err = nil
+          begin
+            with_output_to(out) { r = UI.run_line(run.code, @session || Session.existing) }
+          rescue StandardError, ScriptError => e
+            err = e
+          end
+          result = err ? "#{err.class}: #{err.message}" : "=> #{Tiles.one_line(r.inspect)[0, 120]}"
+          print_to_repl("# #{run.note || 'ui'}\n#{run.code}\n#{out.string}#{result}\n")
+          err ? flash(Tiles.one_line(result), :bad) : flash(Tiles.one_line("#{run.note || run.code}  (#{run.code})"), :ok)
+          r
         end
 
         # After a command whose output is taller than the REPL pane, says
