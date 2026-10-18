@@ -31,7 +31,7 @@ module PatchHelpers
 
       bufs.each_with_index { |b, i| data[i] << b.dup }
     end
-    data.map { |c| c.empty? ? Numo::SFloat[] : Numo::SFloat.cast(c.reduce(:concatenate)) }
+    data.map { |c| c.empty? ? Numo::SFloat[] : Numo::SFloat.cast(SpecBuffers.join(c)) }
   end
 
   # Samples of +data+ (an SFloat) from +from+ to +to+ seconds.

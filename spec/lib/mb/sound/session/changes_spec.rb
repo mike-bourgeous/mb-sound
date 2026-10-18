@@ -15,7 +15,7 @@ RSpec.describe(MB::Sound::Session::Changes) do
       out << session.process_buffer(n)[0].dup
       left -= n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   # Returns [sample index, value] for each change in +data+.

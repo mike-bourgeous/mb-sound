@@ -193,7 +193,7 @@ RSpec.describe 'Buffer size invariance' do
 
         i += 1
       end
-      out.reduce(:concatenate)
+      SpecBuffers.join(out)
     ensure
       MB::Sound.rewind
     end
@@ -565,7 +565,7 @@ RSpec.describe 'Buffer size invariance' do
         s.close
         expect(syn.exact_lanes?).to eq(true)
         expect(pieces).to eq(i - 17) if sizes == [800] # one piece per buffer once it started (frame 13714, in buffer 17)
-        data.reduce(:concatenate)
+        SpecBuffers.join(data)
       }
       n = results.map(&:length).min
       results.each { |r| expect(r[0...n]).to eq(results[0][0...n]) }

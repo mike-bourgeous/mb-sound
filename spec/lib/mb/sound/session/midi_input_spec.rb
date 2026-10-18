@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::Session::MidiInput) do
       out << session.process_buffer(n)[0].dup
       left -= n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   # Frame indices where +data+ changes.

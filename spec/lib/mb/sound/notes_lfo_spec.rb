@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::Notes, '#lfo') do
   end
 
   def run(node, seconds, buffer: 480)
-    (seconds * 48000 / buffer).ceil.times.map { node.sample(buffer).dup }.reduce(:concatenate)
+    SpecBuffers.join((seconds * 48000 / buffer).ceil.times.map { node.sample(buffer).dup })
   end
 
   let(:held) { notes_for(ev.note_on(60, 1.0)) }

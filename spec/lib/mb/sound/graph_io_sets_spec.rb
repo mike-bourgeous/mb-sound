@@ -78,7 +78,7 @@ RSpec.describe('set documents', :aggregate_failures) do
   # The set's flow from the start (seeded chance), +buffers+ x 800 frames.
   def play(s, form, buffers)
     within(s) { MB::Sound.play_form(form, on: :now, seed: 5) }
-    Array.new(buffers) { s.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+    Array.new(buffers) { s.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
   end
 
   def stable(text)

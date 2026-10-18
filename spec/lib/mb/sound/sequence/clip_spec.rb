@@ -268,7 +268,7 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     # Renders +frames+ samples of +node+ in 800-sample buffers (nil buffers
     # end it early).
     def render(node, frames)
-      Array.new(frames / 800) { node.sample(800)&.dup }.compact.reduce(:concatenate)
+      SpecBuffers.join(Array.new(frames / 800) { node.sample(800)&.dup }.compact)
     end
 
     it 'returns a Synth on the clip with Notes for each lane and the lane index' do
@@ -328,7 +328,7 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     let(:clip) { MB::Sound.seq(MB::Sound::C3, nil).n8 | MB::Sound.seq(MB::Sound::E3).n8.vel(1.0) }
 
     def render(node, frames)
-      Array.new(frames / 800) { node.sample(800)&.dup }.compact.reduce(:concatenate)
+      SpecBuffers.join(Array.new(frames / 800) { node.sample(800)&.dup }.compact)
     end
 
     it 'plays the clip through Notes on a new ClipSource stream each time' do

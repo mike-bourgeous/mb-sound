@@ -14,7 +14,7 @@ RSpec.describe(MB::Sound::Form) do
   end
 
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   def run_bars(n)
@@ -479,7 +479,7 @@ RSpec.describe(MB::Sound::Form) do
         }
         h = s2.arrangement.playback.history
         s2.close
-        [out.reduce(:concatenate), h]
+        [SpecBuffers.join(out), h]
       }
 
       data, history = results[800]

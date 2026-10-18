@@ -587,7 +587,7 @@ RSpec.describe(MB::Sound::BandLimit) do
         done += s
         break if done >= total
       end
-      data = bufs.reduce(:concatenate)
+      data = SpecBuffers.join(bufs)
       data.ne(0).where.to_a.map { |i| [i, data[i]] }
     end
 

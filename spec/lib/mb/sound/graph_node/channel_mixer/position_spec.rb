@@ -52,7 +52,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer::Position, :aggregate_failures
     # again starts a new frame)
     outs = 1000.hz.sine.place(x: 0, y: 0).outputs
     bufs = Array.new(6) { outs.map { |o| o.sample(800).dup } }
-    l, r = bufs.transpose.map { |b| b.reduce(:concatenate) }
+    l, r = bufs.transpose.map { |b| SpecBuffers.join(b) }
     expect(l).to be_a(Numo::SFloat)
 
     # Compare the analytic signals of the outputs after the Hilbert filter settles

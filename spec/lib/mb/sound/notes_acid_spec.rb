@@ -10,7 +10,7 @@ RSpec.describe(MB::Sound::Notes, 'acid helpers') do
     (count / 800.0).ceil.times do
       samplers.each_with_index { |s, i| bufs[i] << s.sample(800).dup }
     end
-    bufs.map { |b| b.reduce(:concatenate)[0...count] }
+    bufs.map { |b| SpecBuffers.join(b)[0...count] }
   end
 
   def peaks(data, step, count)

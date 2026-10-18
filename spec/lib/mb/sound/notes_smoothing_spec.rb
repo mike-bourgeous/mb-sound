@@ -21,7 +21,7 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
       n += count
       i += 1
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   # Offline reference: the triangle kernel (two moving averages of n1 and
@@ -74,7 +74,7 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
         out << r.dup
         pos += n
       end
-      y = out.reduce(:concatenate)
+      y = SpecBuffers.join(out)
 
       expect((Numo::DFloat.cast(y) - triangle(x, 240, 240)).abs.max).to be < 1e-6
       expect(y[(130 + 478)..999].to_a.uniq).to eq([x[200]])
@@ -134,7 +134,7 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
           out << o
           pos += n
         end
-        out.reduce(:concatenate)
+        SpecBuffers.join(out)
       }
       expect(runs[0].to_a).to eq(runs[1].to_a)
       expect(runs[0][12805]).to eq(x[12805])

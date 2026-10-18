@@ -708,7 +708,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
             a = (x * 0.5).oversample(2)
           end
           mix = a - b
-          out = 20.times.map { mix.sample(800).dup }.reduce(:concatenate)
+          out = SpecBuffers.join(20.times.map { mix.sample(800).dup })
           expect(x.sample_rate).to eq(48000)
           expect(b.sample_rate).to eq(48000)
           expect(mix.sample_rate).to eq(48000)

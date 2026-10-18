@@ -305,7 +305,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     # comparison; one underrun is the end of the audio
     skip 'the Session fell behind the sound card (e.g. under rake memcheck)' if o.underruns > 1
 
-    expected = 2.times.map { |c| rendered.map { |b| b[c] }.reduce(:concatenate) }
+    expected = 2.times.map { |c| SpecBuffers.join(rendered.map { |b| b[c] }) }
 
     # The ramp starts at zero, so align the first nonzero samples
     captured = o.captured

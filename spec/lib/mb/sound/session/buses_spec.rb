@@ -23,7 +23,7 @@ RSpec.describe(MB::Sound::Session::Buses) do
       out << s.process_buffer(n).map(&:dup)
       left -= n
     end
-    chans = out.transpose.map { |c| c.reduce(:concatenate) }
+    chans = out.transpose.map { |c| SpecBuffers.join(c) }
     all ? chans : chans[0]
   end
 
@@ -149,7 +149,7 @@ RSpec.describe(MB::Sound::Session::Buses) do
         asleep ||= total if s.instance_variable_get(:@buses)[:echo].asleep
       end
       s.close
-      [out.reduce(:concatenate), asleep]
+      [SpecBuffers.join(out), asleep]
     end
 
     it 'rings out after the sender stops, then sleeps on the grid at any buffer size' do
@@ -266,11 +266,11 @@ RSpec.describe(MB::Sound::Session::Buses) do
       spy = []
       session.add(session.bus_tap(:drums, only: :kick).spy { |d| spy << d.dup if d } * 0, name: :rd)
       run(48000)
-      kick = spy.reduce(:concatenate)
+      kick = SpecBuffers.join(spy)
 
       MB::Sound.seed(1)
       alone = MB::Sound.tr808(MB::Sound.grid(4, kick: 'x...', clap: '..x.').loop, outputs: :separate)[:kick]
-      expected = Array.new(60) { alone.sample(800).dup }.reduce(:concatenate)
+      expected = SpecBuffers.join(Array.new(60) { alone.sample(800).dup })
       expect(kick.length).to eq(48000)
       expect(kick).to eq(expected[0...48000])
       expect(kick.abs.max).to be > 0.1
