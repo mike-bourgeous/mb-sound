@@ -72,12 +72,35 @@ module MB
         end
       end
 
+      # Shows +page+ (a Page or text) at the console, wherever it reads
+      # best (ux-fix-1, maintainer: "Help pages load in less pager and/or
+      # as ui overlay when ui is up"): in the tiled screen's page pane
+      # while `ui :tiles` (or any tiled layout) is up (UI::Tiles#page:
+      # scrollable, q closes); else in a terminal through Pry's pager
+      # ($PAGER, default `less -R -F -X`, which prints pages that fit
+      # directly), plain text when color is off (ColorPolicy); into pipes
+      # and non-terminals, the whole plain text.  +pry+ is the Pry
+      # instance (nil outside the console: plain output).
+      def self.show(page, output = $stdout, pry = nil)
+        text = Help.for_output(page.to_s, output)
+        screen = defined?(UI) && UI.respond_to?(:screen) ? UI.screen : nil
+        if screen.respond_to?(:page)
+          title = page.respond_to?(:title) ? page.title : nil
+          screen.page(MB::U.remove_ansi(text), title: title)
+        elsif pry && ColorPolicy.animate?(output) && Pry.config.pager
+          Pry::Pager.new(pry).page(text.end_with?("\n") ? text : "#{text}\n")
+        else
+          output.puts(text)
+        end
+        nil
+      end
+
       # Wraps Pry's printer so help pages print as their text, without
-      # Pry's "=> " and inspect quoting.
+      # Pry's "=> " and inspect quoting, through Help.show.
       class PagePrinter < Proc
         def self.new(fallback)
           super() { |output, value, pry|
-            value.is_a?(Page) ? output.puts(Help.for_output(value.to_s, output)) : fallback.call(output, value, pry)
+            value.is_a?(Page) ? Help.show(value, output, pry) : fallback.call(output, value, pry)
           }
         end
       end
@@ -180,7 +203,7 @@ module MB
 
           def process
             page = MB::Sound::Help.page_for_text(arg_string, target)
-            output.puts MB::Sound::Help.for_output(page.to_s, output)
+            MB::Sound::Help.show(page, output, pry_instance)
           end
         end
         cmds.create_command('lesson') do

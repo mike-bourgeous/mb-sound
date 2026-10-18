@@ -99,7 +99,7 @@ From the Mac's ux-review-1 (22 findings; workbench `briefs/ux-review-1-findings.
 - C library noise: `Internal.quiet_stderr(*errors) { }` holds fd 2 while a device opens (RtMidi's capture, shared); `DeviceOutput.opening` turns a failed open into `DeviceOutput::Unavailable` saying what to do (audio_check, OUTPUT_TYPE=null, render).
 - One-line inspect for nodes (`GraphNode::Inspect`, in Traversable and MultiOutput; Notes, Session): see graph_nodes.md.
 - Per-call-site warnings: `Internal.warn_once_per_site(key, message)` (`path:line: warning: ...`, once per line of user code): `at(-20)`, `delay(96)`, `delay(seconds:)`.
-- Method pages show ~30 lines of their doc comment (`help(:render).full` for all), head with aliases (`ramp  (alias saw, sawtooth)`); the sheet says to scroll up when taller than the terminal; pages lay out down to 40 columns.
+- Where pages go (`Help.show`; maintainer: "Help pages load in less pager and/or as ui overlay when ui is up"): pages are always whole.  While a tiled screen is up, the page pane (`UI::Panes::Page` through `Tiles#page`: a temporary pane split off the console's slot, which keeps REPL_MIN_ROWS; focused in its own mode: j k, PgUp PgDn b Space, g G; q closes it and returns to the console; `ui.page false`); else at the console in a terminal that animates, Pry's pager (`$PAGER`, default `less -R -F -X`, so pages that fit print directly; plain under the color policy); into pipes and non-terminals, the whole plain text.  Pry's printer (`PagePrinter`) and the `help` Pry command both use it; lesson steps print directly.  Method pages head with their aliases (`saw  (alias ramp, sawtooth)`); pages lay out down to 40 columns.
 
 ## Takes
 

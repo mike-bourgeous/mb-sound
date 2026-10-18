@@ -144,7 +144,6 @@ RSpec.describe MB::Sound::Help do
     [80, 110, 160].each do |w|
       it "fits one screen at #{w} columns" do
         allow(MB::U).to receive(:width).and_return(w)
-        allow(MB::U).to receive(:height).and_return(50) # (a taller sheet says to scroll up; see below)
         lines = MB::Sound.help.to_s.lines.map { |l| MB::U.remove_ansi(l.chomp) }
         expect(lines.map(&:length).max).to be <= w
         expect(lines.length).to be <= 48 if w >= 110
@@ -656,15 +655,32 @@ RSpec.describe MB::Sound::Help do
     end
 
     # ux-fix-1 item 16: help :render was 147 lines, the sheet 71 with its top scrolled away
-    it 'cuts long method pages to a summary with .full, and says where the sheet starts' do
+    # ux-fix-1 item 16 (maintainer: "Help pages load in less pager and/or
+    # as ui overlay when ui is up"): pages are whole; Help.show picks where
+    it 'shows whole pages: the page pane when tiles are up, the pager in a terminal, else plain text' do
       page = MB::Sound.help(:render)
-      expect(text(page).lines.length).to be < 50
-      expect(text(page)).to include('more paragraphs: help(:render).full')
-      expect(text(page.full).lines.length).to be > 100
-      expect(text(page.full)).not_to include('.full')
-      allow(MB::U).to receive(:height).and_return(24)
-      allow(MB::U).to receive(:width).and_return(80)
-      expect(text(MB::Sound.help).lines.last(2).join.gsub(/\s+/, ' ')).to match(/\(\d+ lines: scroll up for the top, or open one section: help :start/)
+      expect(text(page).lines.length).to be > 100
+
+      out = StringIO.new
+      MB::Sound::Help.show(page, out, double('pry'))
+      expect(out.string).to eq("#{MB::U.remove_ansi(page.to_s)}\n") # (a pipe: all of it, plain)
+
+      tty = StringIO.new
+      def tty.tty? = true
+      pager = double('pager')
+      expect(Pry::Pager).to receive(:new).and_return(pager)
+      expect(pager).to receive(:page).with(a_string_including('render(filename'))
+      MB::Sound::Help.show(page, tty, double('pry'))
+      expect(tty.string).to eq('')
+
+      body = page.to_s # (the page reads the UI's state; only the screen is stubbed below)
+      screen = double('tiles')
+      allow(MB::Sound::UI).to receive(:screen).and_return(screen)
+      expect(screen).to receive(:page).with(a_string_including('render(filename'), title: nil)
+      MB::Sound::Help.show(body, out, nil)
+    end
+
+    it 'wraps the sheet footer to 40 columns' do
       allow(MB::U).to receive(:width).and_return(40)
       expect(text(MB::Sound.help).lines.drop_while { |l| !l.start_with?('More help') }.map { |l| l.chomp.length }.max).to be <= 40
     end

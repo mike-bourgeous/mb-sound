@@ -99,7 +99,7 @@ module MB
       def self.panes
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
-          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Keyboard.new,
+          Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::Keyboard.new,
           Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::Midi.new,
         ].to_h { |p| [p.name, p] }
       end

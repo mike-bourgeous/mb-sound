@@ -523,6 +523,31 @@ module MB
           self
         end
 
+        # Shows +text+ (a help page; see Help.show) in the page pane: split
+        # off the console's slot below it (the console keeps
+        # REPL_MIN_ROWS), focused and scrolling with its own keys (UI::
+        # Panes::Page: j k, PgUp PgDn, g G), q closing it and going back to
+        # the console.  `ui.page false` closes it.  Returns self.
+        def page(text = nil, title: nil)
+          if text.nil? || text == false
+            @page_close&.call
+            @page_close = nil
+            @full = true
+            return self
+          end
+          @panes[:page].show(text, title: title) if @panes[:page].respond_to?(:show)
+          unless @page_close
+            repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
+            rows = [(repl ? repl.h : @rows) - REPL_MIN_ROWS - 1, 3].max
+            temp = nil
+            tile { |t| temp = t.open_temporary(:page, rows, keep: t.layout.panes - [:repl], fallback: :repl) }
+            @page_close = temp && -> { tile { |t| t.close_temporary(temp) } }
+          end
+          enter(:page) if @tiler.layout.panes.include?(:page)
+          @full = true
+          self
+        end
+
         # Undoes the last layout change (split, close, resize, ...; 100 steps).
         def undo = tile(&:undo)
 
@@ -1280,6 +1305,10 @@ module MB
               ran = true
             when String
               flash(x, :key)
+            when :close
+              # (a pane asking to be closed: the page pane's q)
+              page(false) if name == :page
+              act(Input::Action.of(:mode, :repl)) if @host
             end
           end
           pane = @panes[name]

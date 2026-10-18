@@ -279,18 +279,10 @@ module MB
         include Page
         include Text
 
-        # Doc comment lines a page shows before cutting to a summary
-        # (ux-fix-1 item 16: `help :render` was 147 lines); #full shows all.
-        SUMMARY_LINES = 30
-
-        def initialize(entries, index, full: false)
+        def initialize(entries, index)
           @entries = entries
           @index = index
-          @full = full
         end
-
-        # The page with the whole doc comment.
-        def full = MethodPage.new(@entries, @index, full: true)
 
         # Other public names of +entry+'s method in its owner.
         def method_aliases(entry)
@@ -318,9 +310,7 @@ module MB
             d.note("#{e.name} is an alias of #{e.original}; graphs print it back as #{e.original} (ruby, to_ruby).") if e.alias?
             text = real.comment.strip
             text = '(no doc comment)' if text.empty?
-            blocks = comment_blocks(text)
-            shown = @full ? blocks.length : summary_blocks(blocks)
-            blocks.first(shown).each do |kind, block|
+            comment_blocks(text).each do |kind, block|
               if kind == :keep
                 # Long lists in groups of at most 8 lines, broken at items
                 group = []
@@ -336,9 +326,6 @@ module MB
                 d.para(block, indent: 2)
               end
             end
-            if shown < blocks.length
-              d.lines([c(:dim, "... #{blocks.length - shown} more paragraphs: ") + c(:key, "help(#{e.name.inspect}).full")])
-            end
             file, line = real.location
             d.note("#{file.sub(%r{.*/lib/}, 'lib/')}:#{line}") if file
           end
@@ -352,18 +339,6 @@ module MB
         end
 
         private
-
-        # How many of +blocks+ (see #comment_blocks) fit in SUMMARY_LINES
-        # (at least one).
-        def summary_blocks(blocks)
-          room = width - 2
-          used = 0
-          blocks.each_with_index do |(kind, block), i|
-            used += (kind == :keep ? block.length : (block.length.fdiv(room).ceil)) + 1
-            return [i, 1].max if used > SUMMARY_LINES
-          end
-          blocks.length
-        end
 
         # The doc comment as [:para, text] and [:keep, lines] blocks: prose
         # paragraphs (rewrapped by the page) and indented code or list
