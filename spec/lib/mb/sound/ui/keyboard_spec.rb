@@ -369,8 +369,9 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       %w[z x].each_with_index { |k, i| press(k, 1.0 + i); press(k, 1.0 + i, type: :release) }
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
-      expect(lines[5]).to eq('len n8  steps 2  0.25 whole notes')
-      expect(lines[6]).to eq('seq(C3, D3).n8')
+      expect(lines[5]).to eq('next note n8  steps 2  0.25 whole notes')
+      expect(lines[6]).to start_with('1=n1 2=n2 3=n4') # (the length legend, panel round 2 K17)
+      expect(lines.join("\n")).to include('seq(C3, D3).n8')
     end
 
     it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do

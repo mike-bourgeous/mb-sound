@@ -175,7 +175,7 @@ module MB
             if axis == :rows
               @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil)
             else
-              name == :repl ? REPL_MIN_COLS : PANE_MIN_COLS
+              name == :repl ? Tiles.repl_min_cols(@cols) : PANE_MIN_COLS
             end
           }
           @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
@@ -748,6 +748,15 @@ module MB
         # it when the terminal is narrow (they keep PANE_MIN_COLS).
         REPL_MIN_COLS = 40
         PANE_MIN_COLS = 12
+
+        # The console's narrowest width wanted on a wider terminal: half the
+        # columns, up to this (panel round 2, N10: `ui :session` at 120
+        # columns left the REPL 40 columns, wrapping results mid-word).
+        REPL_WANT_COLS = 60
+
+        # The REPL's minimum width on a +cols+-column terminal: half of it,
+        # from REPL_MIN_COLS up to REPL_WANT_COLS.
+        def self.repl_min_cols(cols) = (cols.to_i / 2).clamp(REPL_MIN_COLS, REPL_WANT_COLS)
 
         # Panes temporary panes never take their rows from.
         TEMPORARY_KEEP = %i[repl keyboard].freeze

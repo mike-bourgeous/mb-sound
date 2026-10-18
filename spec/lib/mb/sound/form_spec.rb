@@ -749,11 +749,26 @@ RSpec.describe(MB::Sound::Form) do
       expect(set.playback.ended?).to eq(true)
     end
 
-    it 'ends the flow where a scene typed during it lands, and says so' do
+    it 'seeks the flow to the next section playing a scene typed during it (maintainer: "Seek within the flow")' do
+      setup_scenes(:a, :b, :c)
+      flow { a 2; b 2; c 2 }
+      run(bar / 2)
+      e = nil
+      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: the flow seeks to its section :c \(2:1\) and plays on/).to_stdout
+      expect(e.kind).to eq(:seek)
+      run(bar) # (to bar 2, where the seek lands: the timeline jumps to c at bar 5)
+      expect(transport.position).to be_within(1/100r).of(4 + 1/2r)
+      data = run_bars(3)
+      expect(changes(data).map(&:last)).to eq([52])
+      expect(set.playback.history).to eq([:a, :c])
+      expect(set.playback.ended?).to eq(true) # (c is the last section: the flow ends after it, as written)
+    end
+
+    it 'ends the flow where a scene typed during it lands when no section plays it, and says so' do
       setup_scenes(:a, :b, :c)
       flow { a 2; b 2 }
       run(bar / 2)
-      expect { within { MB::Sound.go :c, on: :bar } }.to output(/go :c: the flow ends at 2:1; you're driving/).to_stdout
+      expect { within { MB::Sound.go :c, on: :bar } }.to output(/go :c: no section of the flow plays it, so the flow ends at 2:1; you're driving/).to_stdout
       data = run_bars(4)
       expect(changes(data).map(&:last)).to eq([48, 52])
       expect(set.playback.history).to eq([:a])

@@ -63,21 +63,33 @@ module MB
       # lands.  Also available as #launch_scene.  With no name, starts
       # playback (see TransportMethods#start).
       #
-      # Typed at the console while a flow plays, the scene takes over: the
-      # flow ends where the scene lands (no later section replaces it;
-      # maintainer, 2026-10-18: "I tried `go :outro` but other scenes took
-      # over afterward"), and it says so.  `start` plays the flow again;
-      # goto, practice, and skip steer the flow instead.
+      # Typed at the console while a flow plays, `go` seeks within the flow
+      # (maintainer, 2026-10-18: "Seek within the flow"; `go :outro` used
+      # to land and then the flow's next scenes took over): the flow jumps
+      # to the next section that plays the scene (Form::Playback
+      # #section_for_scene), a :seek change at the scene's launch point,
+      # and plays on from there.  When no section plays it, the scene
+      # launches and the flow ends where it lands ("you're driving";
+      # `start` plays the flow again), and it says so.
       def go(name = nil, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
         return start(at: point) if name.nil?
 
         arr = Session.current.arrangement
         pb = arr.playback
+        console = pb && !pb.ended? && Session.context&.[](:time).nil?
+        if console && (section = pb.section_for_scene(name))
+          sc = arr.scenes[name]
+          point = LaunchPoint.on(sc&.q || arr.quant || :bar) unless point.given?
+          entry = seek(section, at: point)
+          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there\e[0m" if entry
+          return entry
+        end
+
         entry = arr.go(name, at: point, fade: fade)
-        if pb && !pb.ended? && Session.context&.[](:time).nil? && entry.respond_to?(:lands) && entry.lands
+        if console && entry.respond_to?(:lands) && entry.lands
           at = pb.end_at(entry.lands.pos)
-          puts "\e[2mgo #{name.inspect}: the flow ends at #{at}; you're driving (start plays the flow again; goto/practice/skip steer it instead)\e[0m"
+          puts "\e[2mgo #{name.inspect}: no section of the flow plays it, so the flow ends at #{at}; you're driving (start plays the flow again)\e[0m"
         end
         entry
       end

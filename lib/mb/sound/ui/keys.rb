@@ -22,6 +22,10 @@ module MB
           group 'Jump'
           on 'i', :jump, :repl, help: 'into: REPL i, KEYS k, tracks t, meters e', label: 'i k t e'
           on 'k', :jump, :keyboard, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
+          # (K as the docs and the keyboard pane's hint say; panel round 2,
+          # K16/N7: "K: not a NAV key" in :studio, and the next letters
+          # went to NAV)
+          on 'K', :keys, help: 'KEYS: the keyboard (put in below the REPL if missing; F2 too)'
           on 't', :jump, :tracks, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
           on 'e', :jump, :meters, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
           doc 'a b ...', "a pane's letter (by its number in NAV)"

@@ -303,6 +303,17 @@ module MB
           @session.stamp(@end_at)
         end
 
+        # The section that plays scene +scene+ next: the first in the play
+        # order (played straight through) after the current one, wrapping
+        # around, whose scene is +scene+; nil if no section plays it.
+        def section_for_scene(scene)
+          steps = @form.steps.map(&:first)
+          names = steps.select { |n| (s = @form.sections[n]) && scene_of(s) == scene }
+          return nil if names.empty?
+          i = steps.index(@section) || -1
+          (steps[(i + 1)..] + steps[0..i]).find { |n| names.include?(n) }
+        end
+
         # Where #end_at ends the form (whole notes), or nil.
         def ends_at
           @end_at
@@ -348,7 +359,7 @@ module MB
           if @ended
             lines << '  start (or play) plays it again from the start'
           else
-            lines << '  steer: loop!  onward  goto :name  skip  practice :name'
+            lines << '  steer: loop!  onward  goto :name  skip  practice :name  go :scene (seeks to the section playing it)'
             lines << '  end:   finish (the ending next)  outro in: 4.bars (fades out, ends the flow)  stop :all'
           end
           lines.join("\n")

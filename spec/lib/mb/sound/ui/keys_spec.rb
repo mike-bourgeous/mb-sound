@@ -25,8 +25,10 @@ RSpec.describe(MB::Sound::UI::Keys, :aggregate_failures) do
     expect(ui::Keys.check_jumps(declared)).to eq([])
     expect(ui::Keys::JUMPS).to eq(repl: 'i', keyboard: 'k', tracks: 't', meters: 'e')
     expect(ui::Keys.reserved_letters).to include('p', 's', 'v', 'z', 'x', 'm', 'f', 'g', 'G', 'u', 'n', 'y')
-    # (h j l are free since ux-r4b: arrows move the focus; K is free too)
-    expect(ui::Keys.reserved_letters).not_to include('h', 'j', 'l', 'i', 'k', 'K', 't', 'e', 'a', 'r', 'b')
+    # (h j l are free since ux-r4b: arrows move the focus; K is NAV's KEYS
+    # again since ui-api-1, as the docs say: panel round 2 K16/N7)
+    expect(ui::Keys.reserved_letters).to include('K')
+    expect(ui::Keys.reserved_letters).not_to include('h', 'j', 'l', 'i', 'k', 't', 'e', 'a', 'r', 'b')
     # What the check catches
     expect(ui::Keys.check_jumps(clips: 'z').join).to include(":clips's jump \"z\" is a NAV key")
     expect(ui::Keys.check_jumps(clips: 'a', racks: 'a').join).to include('jump "a" is claimed by :clips and :racks')

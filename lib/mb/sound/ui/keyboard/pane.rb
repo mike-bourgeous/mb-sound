@@ -335,9 +335,14 @@ module MB
 
           def step(c, v, y = 5)
             st = v.step
-            c.line(y, ['len ', :dim], [st.length, :key], ['  steps ', :dim], [st.count.to_s, :key],
+            # The length the next note gets (a length key sets it for the
+            # notes that follow, until the next length key; panel round 2,
+            # K17: "I couldn't predict what 1 and 2 meant"), and the legend
+            c.line(y, ['next note ', :dim], [st.length, :key], ['  steps ', :dim], [st.count.to_s, :key],
                    ['  ', nil], [Panes.fmt(st.total.to_f), :key], [' whole notes', :dim])
-            text = st.text || 'lower row: notes  1-7 length  8 dot  9 triplet  r rest  t tie'
+            y += 1
+            c.text(0, y, UI::Keyboard::StepEntry.legend, :dim)
+            text = st.text || 'lower row: notes  r rest  t tie  Enter done  Shift-Enter swap'
             rows = [c.h - y - 1, 1].max
             Keyboard.wrap(text, c.w).last(rows).each_with_index { |l, i| c.text(0, y + 1 + i, l, st.text ? :name : :dim) }
           end
