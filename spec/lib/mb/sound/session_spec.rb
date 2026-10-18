@@ -617,6 +617,20 @@ RSpec.describe(MB::Sound::Session) do
       16.times { session.process_buffer }
     end
 
+    # ux-fix-2: at priority 0 the render thread lost the GVL at timer
+    # ticks inside players' reads while the scheduler thread built a scene
+    # (a 0.7 ms read took 10.7 ms), which these warnings blamed on the player
+    it 'renders on a thread above the scheduler thread\'s Ruby priority' do
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: :virtual), channels: 1, realtime: true)
+      s.add(0.constant, name: :x)
+      s.ensure_running
+      thread = s.instance_variable_get(:@thread)
+      expect(thread.priority).to eq(MB::Sound::Session::RENDER_THREAD_PRIORITY).and eq(3)
+      expect(MB::Sound::Session::Scheduler::THREAD_PRIORITY).to be < thread.priority
+    ensure
+      s&.close
+    end
+
     it 'warns once about a player that stays slow' do
       session.add(sleepy(0.02) { true }) # 800 frames are 16.7 ms
       expect(session).to receive(:warn).with(/is taking \d+% of its audio buffer time/).once

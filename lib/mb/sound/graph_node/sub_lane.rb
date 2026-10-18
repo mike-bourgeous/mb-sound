@@ -295,15 +295,17 @@ module MB
 
         private
 
-        # The pause/keep lists (recomputed when any Tee's branches change).
+        # The pause/keep lists (recomputed when a Tee upstream gains or
+        # loses a branch; BranchWatch).
         def analysis
-          analyze if @analysis.nil? || @analysis[:changes] != Tee.branch_changes
+          analyze if @analysis.nil? || !@analysis[:watch].current?
           @analysis
         end
 
         # See #attach.
         def analyze
-          changes = Tee.branch_changes
+          # (before reading the Tees' branches)
+          watch = BranchWatch.new(GraphNode.graph(self, include_tees: true).select { |n| n.is_a?(Tee) })
           lane_set = {}.compare_by_identity
           @lane_graph.each { |n| lane_set[n] = true }
           excl = exclusive(@lane_graph, @unread)
@@ -340,7 +342,7 @@ module MB
           branches = nodes.select { |n| n.is_a?(Tee::Branch) && !excl[n.owner_tee] && !upstream[n] }
 
           @analysis = {
-            changes: changes,
+            watch: watch,
             nodes: nodes,
             advance: own,
             branches: branches,

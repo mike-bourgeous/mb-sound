@@ -123,6 +123,8 @@ module MB
           @landing_frame = nil
           @kept_graphs = {}.compare_by_identity
           @waiting_graphs = {}.compare_by_identity
+          @graph_node_sets = {}.compare_by_identity # (#graph_node_set)
+          @asleep_index = nil # (#asleep_index)
         end
 
         # Expands mute group names.
@@ -209,21 +211,29 @@ module MB
         # nothing in the Session plays (an unused `lfo * 2`, or a graph not
         # started yet) don't count: reading for them would run the node
         # while the player sleeps, so a muted player's sound would depend on
-        # unused nodes.  Cached until a Tee gains or loses a branch or the
-        # Session's graphs change.
+        # unused nodes.  Cached until one of its Tees gains or loses a
+        # branch (GraphNode::BranchWatch), the Session's graphs change, or
+        # one of their nodes changes structure (GraphNode.structure_changes).
+        #
+        # Each graph's nodes are listed once (#graph_node_set) and counted
+        # once per set of graphs (#asleep_index), not once per sleeping,
+        # kept, or waiting graph; and branches made elsewhere (the next
+        # scene's graphs, built on the scheduler thread) leave the cache
+        # alone.  Before (ux-fix-2), every new branch anywhere rebuilt every
+        # such cache by walking every graph, each buffer while a scene was
+        # built: up to 45 ms of a 10.7 ms buffer at night_bus_flow's drop.
         def asleep_reads(p)
           graphs = span_graphs
-          changes = GraphNode::Tee.branch_changes
+          structure = GraphNode.structure_changes
           cache = p.asleep_reads
-          return cache[2] if cache && cache[0] == changes && cache[1].equal?(graphs)
+          return cache[3] if cache && cache[0].equal?(graphs) && cache[1] == structure && cache[2].current?
 
           input = p.input
-          others = {}
-          graphs.each do |g|
-            next if g.equal?(input)
-
-            g.graph(include_tees: true).each { |n| others[n.__id__] = true }
-          end
+          counts, members = asleep_index(graphs, structure)
+          own, own_set = graph_node_set(input, structure)
+          # Nodes in another graph than this one
+          mine = members.key?(input)
+          other = ->(n) { id = n.__id__; (counts[id] || 0) - (mine && own_set[id] ? 1 : 0) > 0 }
 
           # Branches only this graph reads (a branch inside a node another
           # graph also plays, e.g. the LFO branch in `x = lfo * 2` shared
@@ -233,16 +243,52 @@ module MB
           # `x * 0.1 + lfo * 0.1` while another played `x` left its own
           # `lfo` branch unread, and unmuting it after a second raised
           # BranchBufferOverflow
-          shared = input.graph(include_tees: true).select { |n|
-            n.is_a?(GraphNode::Tee::Branch) && n.reader && !others[n.__id__] &&
-              n.owner_tee.branches.any? { |b| !b.equal?(n) && others[b.__id__] }
+          branches = own.select { |n| n.is_a?(GraphNode::Tee::Branch) && n.reader }
+          watch = GraphNode::BranchWatch.new(branches.map(&:owner_tee)) # (before reading their branches)
+          shared = branches.select { |n|
+            !other.(n) && n.owner_tee.branches.any? { |b| !b.equal?(n) && other.(b) }
           }
           upstream = {}
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
           shared.reject! { |n| upstream[n.__id__] }
 
-          p.asleep_reads = [changes, graphs, shared]
+          p.asleep_reads = [graphs, structure, watch, shared]
           shared
+        end
+
+        # How many of +graphs+ (#span_graphs) hold each node (by __id__),
+        # and the graphs as an identity Hash: [counts, members], kept while
+        # the graphs and +structure+ (GraphNode.structure_changes) stay.
+        def asleep_index(graphs, structure)
+          index = @asleep_index
+          return index[2] if index && index[0].equal?(graphs) && index[1] == structure
+
+          members = {}.compare_by_identity
+          graphs.each { |g| members[g] = true }
+          counts = {}
+          members.each_key do |g|
+            graph_node_set(g, structure)[1].each_key { |id| counts[id] = (counts[id] || 0) + 1 }
+          end
+          # Forget node sets of graphs that left (waiting graphs ask again)
+          @graph_node_sets.select! { |g, _| members.key?(g) || @waiting_graphs.key?(g) }
+          @asleep_index = [graphs, structure, [counts, members]]
+          [counts, members]
+        end
+
+        # The nodes of +graph+ (with Tees) and a Hash of their __ids__:
+        # [nodes, ids], kept while +structure+ (GraphNode.structure_changes)
+        # stays (a Tee gaining a branch doesn't change what a graph reads
+        # through its sources).
+        def graph_node_set(graph, structure)
+          entry = @graph_node_sets[graph]
+          return entry[1] if entry && entry[0] == structure
+
+          nodes = graph.graph(include_tees: true)
+          GraphNode.watch_structure(nodes)
+          ids = {}
+          nodes.each { |n| ids[n.__id__] = true }
+          @graph_node_sets[graph] = [structure, [nodes, ids]]
+          [nodes, ids]
         end
 
         # The inputs of the Session's graphs (players' and kept graphs', and

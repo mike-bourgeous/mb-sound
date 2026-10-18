@@ -125,6 +125,40 @@ RSpec.describe(MB::Sound::Session::Strip) do
       expect((data[240..] - expected[240..]).abs.max).to be < 1e-6
     end
 
+    # ux-fix-2: every new branch anywhere (the next scene's graphs, built
+    # on the scheduler thread) rebuilt every sleeping graph's list by
+    # walking every graph, each buffer while a scene was built
+    it "keeps a muted player's reads while other graphs are built, and rebuilds them when a shared node gains a reader" do
+      s = new_session
+      lfo = 3.hz.lfo
+      s.add(lfo * 0.5, name: :a)
+      s.add(lfo * 0.25, name: :b)
+      run_in(s, 800, [800])
+      s.mute(:b)
+      run_in(s, 1600, [800])
+      b = s.instance_variable_get(:@players).values.find { |p| p.name == :b }
+      expect(b.asleep).to eq(true)
+      cache = b.asleep_reads
+      expect(cache.last.length).to eq(1)
+
+      # A graph nothing in the Session plays yet, built from new nodes
+      changes = MB::Sound::GraphNode::Tee.branch_changes
+      built = 3.times.map { x = 220.hz.saw; x.get_sampler; x.get_sampler; x * 0.5 }
+      expect(MB::Sound::GraphNode::Tee.branch_changes).to be > changes
+      run_in(s, 1600, [800])
+      expect(b.asleep_reads).to equal(cache)
+
+      # A new reader of the shared LFO changes what :b must read for
+      reader = lfo.get_sampler
+      run_in(s, 800, [800])
+      expect(b.asleep_reads).not_to equal(cache)
+      expect(b.asleep_reads.last).to eq(cache.last)
+      expect(built.length).to eq(3)
+      reader.destroy
+    ensure
+      s&.close
+    end
+
     # fixes-11: :b's own branch of the LFO wasn't read while it slept,
     # because the LFO's other branch (inside x) is in :b's graph too
     it 'keeps a muted player in step with a node it reads both directly and through a node another player plays' do

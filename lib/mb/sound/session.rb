@@ -1585,6 +1585,17 @@ module MB
         [elapsed - (GC.stat(:time) - gc) / 1000.0, 0.0].max
       end
 
+      # The render thread's Ruby priority (the highest): a thread at
+      # priority 0 gives up the GVL at a timer tick (every 10 ms with
+      # RUBY_THREAD_TIMESLICE=10) whenever another thread wants it, so
+      # while the scheduler thread built the next scene, a tick landing
+      # inside a player's read handed the GVL over for a whole slice
+      # (ux-fix-2: drums reads of 0.7 ms CPU took 10.7 ms, named by the
+      # slow-player warning on the slower Mac).  At 3 it keeps the GVL
+      # through eight ticks of running, longer than any buffer's work (the
+      # scheduler thread runs at Scheduler::THREAD_PRIORITY, -3).
+      RENDER_THREAD_PRIORITY = 3
+
       # Buffers to ignore when a player or chain starts (resamplers and other
       # nodes are much slower on their first buffers).
       SLOW_WARMUP_BUFFERS = 5
@@ -1631,6 +1642,7 @@ module MB
           warn "Background session stopped with an error: #{e.class}: #{e.message}"
         end
         @thread.name = 'MB::Sound::Session'
+        @thread.priority = RENDER_THREAD_PRIORITY
 
         # Stop the thread and close the output cleanly at exit (held
         # weakly: an at_exit block would keep this Session and every graph
