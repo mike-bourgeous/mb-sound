@@ -21,14 +21,14 @@ module MB
     #
     # .fit simplifies a recorded gesture's steps into the fewest keys whose
     # curve (monotone cubic or linear, whichever needs fewer) passes within
-    # +tolerance+ (1e-4 of the knob's range by default, in its own scale) of
+    # +tolerance+ (1e-3 of the knob's range by default, in its own scale) of
     # every step, with a deterministic budget (MAX_KEYS keys; never
     # wall-clock time), so a gesture fits the same on any machine.  Stepped
     # knobs (read through Knob#choose) keep their steps; +tolerance: 0+ too.
     class Gesture
       # The default fitting tolerance, as a share of the knob's range (in
       # its own scale).
-      TOLERANCE = 1e-4
+      TOLERANCE = 1e-3
 
       # The most keys a fit adds (its effort budget).
       MAX_KEYS = 64
@@ -206,22 +206,33 @@ module MB
       # notes per frame, else samples; values to 6 significant figures),
       # with `curve:` unless it is the default.  One key at frame 0 is
       # `turn :space, 0.42`.
-      def to_ruby(name, per_sample:)
+      def to_ruby(name, per_sample:, rate: 48000)
         return "turn #{name.inspect}, #{GraphNode::Knob.number(@keys[0][1])}" if @keys.length == 1 && @keys[0][0] == 0
-        pairs = @keys.map { |f, v| "#{Gesture.time_text(f, per_sample)} => #{GraphNode::Knob.number(v)}" }
+        times = Gesture.times_text(@keys.map(&:first), per_sample, rate)
+        pairs = @keys.each_with_index.map { |(_f, v), i| "#{times[i]} => #{GraphNode::Knob.number(v)}" }
         pairs << "curve: #{@curve.inspect}" unless @curve.nil?
         "turn #{name.inspect}, #{pairs.join(', ')}"
       end
 
-      # A frame offset as Ruby: 0, a note length (1.n8, 3.n16, 1.n12)
-      # when exact at +per_sample+ whole notes per frame, else 480.samples.
-      def self.time_text(frames, per_sample)
-        return '0' if frames == 0
-        wn = frames * per_sample.to_r
-        if wn > 0 && ((wn * 64).denominator == 1 || (wn * 24).denominator == 1)
-          return writer.literal(Sequence::Duration.new(wn))
+      # Frame offsets as Ruby, in ONE unit for the whole line (maintainer,
+      # 2026-10-18: never mixed): note lengths (1.n8, 3.n16, 1.n12) when
+      # every key is exactly on the grid at +per_sample+ whole notes per
+      # frame, else milliseconds when every key is a whole millisecond at
+      # +rate+, else exact seconds (`(1r/60).seconds`).  0 stays 0.
+      def self.times_text(frames, per_sample, rate)
+        rate = rate.to_r
+        wns = frames.map { |f| f * per_sample.to_r }
+        if wns.all? { |wn| (wn * 64).denominator == 1 || (wn * 24).denominator == 1 }
+          return wns.map { |wn| wn == 0 ? '0' : writer.literal(Sequence::Duration.new(wn)) }
         end
-        "#{frames}.samples"
+        secs = frames.map { |f| f / rate }
+        if secs.all? { |x| (x * 1000).denominator == 1 }
+          return secs.map { |x| x == 0 ? '0' : "#{(x * 1000).to_i}.ms" }
+        end
+        secs.map { |x|
+          next '0' if x == 0
+          x.denominator == 1 ? "#{x.to_i}.seconds" : "(#{x.numerator}r/#{x.denominator}).seconds"
+        }
       end
 
       # (prints note lengths)

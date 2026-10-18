@@ -521,7 +521,7 @@ module MB
           steps = @render_lock.synchronize { g.steps.map(&:dup) }
           fitted = Gesture.fit(steps, k.spec, tolerance: tolerance, stepped: k.stepped?)
           @render_lock.synchronize { g.fitted = fitted }
-          fitted.to_ruby(g.name, per_sample: g.per_sample)
+          fitted.to_ruby(g.name, per_sample: g.per_sample, rate: clock_rate)
         end
 
         # The live gestures ({ knob name => KnobGesture }).

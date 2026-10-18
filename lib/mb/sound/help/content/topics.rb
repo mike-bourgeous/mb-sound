@@ -669,7 +669,7 @@ module MB
         0.3, 1.n8 => 0.5, 1.n4 => 0.62` (a monotone cubic through them in
         the knob's scale; `curve: :linear`, `:step`, or a Curve name).  A
         held key in the racks pane prints its gesture this way, fitted to
-        the fewest keys within 1/10000 of the knob's range (knobs read with
+        the fewest keys within 1/1000 of the knob's range (knobs read with
         `choose` keep their steps).  Takes keep the raw steps, so a replay
         sounds as you played it; `smooth_gesture` makes the last gesture the
         fitted curve on purpose (undoable).
