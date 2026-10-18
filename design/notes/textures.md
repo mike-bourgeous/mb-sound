@@ -438,4 +438,3 @@ source): 0.09-0.12% of realtime at 800-sample buffers, 0.29-0.40% at
   mallet hardness as a built-in strike filter.
 - A true vibraphone (many long-ringing voices, sympathetic resonance; the
   maintainer, later).
-- Granular freezes (with the sampler's grains, granular-1).
