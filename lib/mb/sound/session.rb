@@ -17,6 +17,7 @@ require_relative 'session/scheduler'
 require_relative 'session/graph_view'
 require_relative 'session/knobs'
 require_relative 'session/clocks'
+require_relative 'session/gestures'
 require_relative 'session/decisions'
 require_relative 'session/key_changes'
 require_relative 'session/midi_in'
@@ -75,6 +76,7 @@ module MB
       include GraphView
       include Knobs
       include Clocks
+      include Gestures
       include Decisions
       include KeyChanges
       include MidiIn
@@ -320,6 +322,8 @@ module MB
         init_undo
         init_knobs
         init_clocks
+        @smoothed_gestures = Gestures::Smoothed.new
+        @replayed_gestures = nil
         init_decisions
         init_midi_in
         init_audio_recording

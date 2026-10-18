@@ -374,6 +374,7 @@ module MB
           @node_type_name = 'Knob'
           @self_reader = nil
           @decisions = {} # timeline position => value decided there (see ValueAt)
+          @stepped = nil # read through #choose (see #stepped?)
         end
 
         # Changes the Spec (keeping the value and anything in progress),

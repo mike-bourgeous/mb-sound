@@ -1112,7 +1112,8 @@ module MB
           def duration_text(v)
             r = v.whole_notes
             # The spelling it was made with, when that rebuilds it exactly
-            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/))
+            # (a label like n192 names no method: Duration.new(1/192r))
+            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/)) && 1.respond_to?("n#{m[3]}")
               k = (m[2] || 1).to_i
               d = k.public_send("n#{m[3]}")
               d = d.public_send(DURATION_MODS[m[1]]) if m[1]

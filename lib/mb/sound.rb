@@ -18,6 +18,7 @@ require_relative 'sound/numeric_sound_mixins'
 require_relative 'sound/tempo'
 require_relative 'sound/arg_types'
 require_relative 'sound/clock'
+require_relative 'sound/gesture'
 require_relative 'sound/source_mismatch'
 
 # Load C extensions

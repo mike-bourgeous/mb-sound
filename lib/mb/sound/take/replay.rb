@@ -62,6 +62,7 @@ module MB
           @lines = []
           @midi = {}
           @decisions = []
+          @gestures = []
           yield self if block_given?
           self.class.last = self
         end
@@ -97,6 +98,12 @@ module MB
         end
 
         # The recorded decisions (see #decisions).
+        # Raw steps of knob gestures (see Take#gestures).
+        def gestures(rows)
+          @gestures.concat(rows.map { |name, epoch, pos, steps| [name, epoch, pos.to_r, steps] })
+          self
+        end
+
         def decision_rows
           @decisions
         end
@@ -132,6 +139,7 @@ module MB
           session.replay_midi!(@base_epoch)
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
           session.replay_decisions!(@decisions, base_epoch: @base_epoch) unless @decisions.empty?
+          session.replay_gestures!(@gestures, base_epoch: @base_epoch) unless @gestures.empty?
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do

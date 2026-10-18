@@ -61,18 +61,33 @@ module MB
       # or another knob's name until it is turned again.  Returns the change's journal entry.  Also available
       # as #move.
       #
-      # +steps:+ ([[frames, value], ...], frames after the first step) is a
-      # held key's gesture from the racks pane, as the pane writes it (see
-      # Session::Knobs#gesture_line): each step a turn on its frame.
-      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, steps: nil)
+      # Keyframes move it through values at times after the launch point
+      # (0, note lengths, Lengths, or bars), joined by a monotone cubic in
+      # the knob's scale (+curve:+ :linear, :step, or a Curve name for
+      # others; see MB::Sound::Gesture).  A held key in the racks pane
+      # writes this form when it ends (Session::Knobs#gesture_line):
+      #
+      #     turn :space, 0 => 0.30, 1.n8 => 0.50, 1.n4 => 0.62
+      #     turn :cut, 0 => 400, 1.bar => 3000, 2.bars => 800, curve: :smooth
+      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, **keys)
         point = LaunchPoint.of(binding) or return nil
         name = knob_name(name)
         group = Session.current.racks.knob_group?(name) # (every instance's knob; see Session::Knobs#turn)
         session_command(name, label: "turn #{name.inspect}", kind: :turn, all: group) { |session, time|
-          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time, steps: steps)
+          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time, **keys)
         }
       end
       alias move turn
+
+      # Makes a recorded knob gesture (a held key in the racks pane: the
+      # last one, or the last on knob +name+) its fitted curve on purpose:
+      # takes replay the line it printed (the fitted keyframes) instead of
+      # the raw steps they keep by default (takes reproduce what was heard;
+      # this makes the performance the smoothed curve).  One undo step.
+      # Returns the gesture's journal entry, or nil if there is none.
+      def smooth_gesture(name = nil)
+        Session.current.smooth_gesture(name.nil? ? nil : knob_name(name))
+      end
 
       # Remembers every knob's value as snapshot +name+ (at the launch
       # point; now by default), or only the values of +knobs:+ (knob names;

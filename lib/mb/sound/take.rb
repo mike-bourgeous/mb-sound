@@ -136,6 +136,23 @@ module MB
         }
       end
 
+      # The raw steps of the knob gestures made during the take (racks-pane
+      # holds; see Session::Gestures): [knob name, epoch, timeline position,
+      # [[frames, value], ...]] rows, epochs counted from the take's start,
+      # leaving out gestures smoothed on purpose (Session#smooth_gesture).
+      # Replays play these, so they sound as they did; the lines print the
+      # fitted keyframes.
+      def gestures
+        s = session
+        s.gesture_entries.filter_map { |e|
+          next unless e.status == :landed && e.issued && e.issued.frame >= @start_frame && e.data[:pos]
+          next if s.smoothed_gestures.include?(e.seq)
+          ep = e.data[:epoch].to_i - @start_epoch
+          next if ep < 0
+          [e.subject, ep, e.data[:pos], e.data[:raw]]
+        }
+      end
+
       # The MIDI the session's inputs read since the take started (see
       # Session::MidiIn#midi_log): a Hash from input name (nil for the
       # default) to [epoch, pos, bytes] rows, epochs counted from the
@@ -293,6 +310,12 @@ module MB
           rows.each { |epoch, pos, bytes| out << "    [#{epoch}, #{ruby_value(pos)}, #{bytes.inspect}],\n" }
           out << "  ]#{name.nil? ? '' : ", input: #{name.inspect}"}\n"
         end
+        g = gestures
+        unless g.empty?
+          out << "  r.gestures [\n"
+          g.each { |name, epoch, pos, steps| out << "    [#{name.inspect}, #{epoch}, #{ruby_value(pos)}, #{steps.map { |f, v| [f, GraphNode::Knob.number(v)] }.inspect.delete('"')}],\n" }
+          out << "  ]\n"
+        end
         rows = decisions
         unless rows.empty?
           out << "  r.decisions [\n"
@@ -318,6 +341,7 @@ module MB
         Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
           r.decisions(decisions)
+          r.gestures(gestures)
           lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i, choices: l.choices.to_a.dup) }
         end
       end
