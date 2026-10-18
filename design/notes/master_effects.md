@@ -10,3 +10,108 @@ Shared nodes (fixes-12, 2026-10-14): a chain's nodes may share nodes with player
 Master gain placement (fixes-6, 2026-10-13; maintainer's option 1): `Session#master_gain` applies before the master chain by default (pre), so a limiter or clipper there keeps its ceiling whatever the gain (before, the gain came after the chain: Loop Church reached +0.76 dBTP with a gain above 0 dB).  `master_gain 2.db, post: true` (`Session#master_gain_post = true`, `Session.new(master_gain_post:)`) puts it back after the chain, like the Pre/Post Fader Insert FX switch in Vegas/ACID; the placement stays until changed (`master_gain post: false`).  Without a master chain both placements give the same samples (spec).  Renders take the current session's placement; set documents save `master_gain x, post: true`; takes save `master_gain_post:` (takes saved before it existed replay post, as they were recorded).  Chain tails count as quiet by the chain's output, so a pre gain changes how long a tail runs by the gain's dB.  Stems are unchanged (each part times the gain).  Always-on master limiting/softclip is for the effects project.
 
 Buses (buses-1, 2026-10-13; `buses.md`) reuse the chain machinery here (`Chain`, `build_master(label:)`, `activate_master`, `render_master_chain`, `master_chain_done?(c, list)`) for named buses with their own inputs; master chains can read buses and players (`mix.duck(:kick)`), bound by `build_master`.
+
+## Mastering presets (mastering-1, 2026-10-17)
+
+Maintainer (2026-10-17, question picker): "Could we get some mastering work done here"; loudness targets reached **both ways** (renders measure, then set the gain exactly, in two deterministic passes; live gets an opt-in slow rider into the limiter); ship all four presets `:club`, `:streaming`, `:quiet`, `:vinyl`.  Standing taste: dance masters low crest and near the maximum true peak, shares at -0.5 dBTP; "less clipping, more limiting" (2026-10-13).  Persona panel round 2 asked for this (#13, #19, H5, `master :quiet`).
+
+**API** (`lib/mb/sound/mastering.rb`, `mastering/targeting.rb`, `mastering/codec_peaks.rb`, `graph_node/rider.rb`, `graph_node/mastering_methods.rb`):
+- `master :club` (console and `Session#master(preset, **options, &block)`): a preset ends the master chain; with a block, the block's effects come first (`master(:club) { |mix| mix.filter(:highpass, cutoff: knob(:air)) }`).  Same launch points, spill-over, fades, undo (the chain, its `MasterState`, and `reset_master` carry the preset), journal entries (`master :club, lufs: -9 lands 5:1`).
+- `mix.master(:club, ...)` (alias `mastering`) applies a preset anywhere in a graph (recorded by recipes: `.master(:streaming, platform: :apple)`); `mix.ride(-14, ...)` the rider alone.
+- Options (`Mastering::OPTIONS`): `lufs:` (LUFS, a `Loudness::TARGETS` name, or a Target), `platform:` (the same, by name), `ceiling:` (true peak, `-1.db`), `drive:` (a fixed trim: renders keep it), `ride:` (true or rider settings), `mono:` (Hz or false), `glue:`, `clip:` (club), `de_ess:` (vinyl crossover Hz or false).  Unknown names raise with did_you_mean.
+- `Mastering::Preset` is a frozen Data value: `steps` ([method, args, kwargs], one `[:trim]` gain stage), `target` (Loudness::Target), `ceiling`, `limiter`, `drive`, `fixed`, `ride`, `options`, `notes`, `source`; `#call_ruby` (`:club, lufs: -9`), `#to_ruby`, `#summary`.  `masters` lists them; `masters(:vinyl).notes`.
+- Set documents save `master :club, lufs: -9` (and `master(:quiet) { |mix| ... }`), and load both.  Takes replay the typed line.  Genre templates may name a preset as a master step (`master :club, lufs: -8`; the template's `mono_below` becomes the preset's `mono:`).  Song scripts: `--master PRESET|none` (`Session#mastering_override`: replaces presets the song's `master` calls give, is added after plain master blocks; `none` drops presets) and `--lufs N|name`; `genre_demo.rb -M club` swaps a template's chain for a preset.
+
+**The trim.**  Every chain has one gain stage after the level-independent stages (mono low end, subsonic highpass) and before everything that reacts to level, so glue, clipper, and limiter see about the same level whatever the mix: thresholds are written relative to the target (`glue_step(target, over:)`).  Its value is:
+- in renders, measured (below);
+- live, the preset's `drive`: target minus `ASSUMED_INPUT_LUFS` (-20 LUFS, about where full-scale parts land at the default -10 dB master gain); or
+- with `ride: true`, a `GraphNode::Rider` starting there.
+
+**Render targeting** (`Mastering::Targeting`): `render` runs its block twice when a targeted preset ran.  Pass 1 renders normally while a `Capture` records the Session's mix (a tap) and, for each chain with a targeted preset, its input, its output times its fade ramp, and the root random generator's state when it was built.  `Targeting.solve` rebuilds those chains on the closed pass-1 Session (same block, same seeds, `Session#mastering_trim` set) and computes the render's output for any trim as the recorded mix minus the chains' recorded outputs plus their outputs at that trim (so other chains, spill-overs, fades, and post gains are exact).  Secant steps on the BS.1770 integrated loudness from the window's first frame (`from:` renders) reach the target within 0.01 LU in 2-4 chain runs; presets without a limiter (`:vinyl`) then lower the trim until the true peak is under the ceiling ("held").  Pass 2 re-renders with the trim (the root generator put back first).  Everything is sample-exact, so the trim and the file are bit-identical at any buffer size (spec: 128 vs 800).  The block must build its graphs: a graph pass 1 already played raises (`Capture#saw`).  `render(loudness:)` overrides the preset's target (without a preset it still normalizes the file, gain only); `loudness: false` renders once at the drive; `render(master: :club)` masters any render block.  Stems are pre-master, so the trim leaves them alone.  The printed report (`Targeting::Result`, `Targeting.last`; inside `MixReport` with `report:`): pass/fail, integrated vs target, short-term max, LRA, PLR, true peak vs ceiling, side below the mono frequency (or 120 Hz) re mid, decoded MP3/AAC true peaks (streaming presets and reports) with ceiling advice over -0.1 dBTP.
+
+**Rider** (`GraphNode::Rider`, a Channels bundle like LoudnessMeter): K-weighted mean square per sample; 10 ms segments filled sample by sample (sums independent of buffer boundaries); every 100 ms of its own time it reads the short-term loudness (last 3 s, silence before the start), moves the gain (dB) a one-pole step toward target minus loudness (time constants `down:` 3 s when the program gets louder, `up:` 10 s when quieter), within `range:` (9 dB) of the start, and ramps there linearly over the next 100 ms (gain a function of the absolute sample index).  It holds below -70 LUFS and while the input is more than `gate:` (10 LU) under the recent loudest short-term loudness (a peak falling 0.5 LU/s), so silence, fades, and breakdowns don't pump up.  It measures its input (feed-forward), so after heavy limiting the output lands a little under the target.  Same samples at 1/7/128/4801-sample buffers as at 800 (spec).  `master` shows its gain: `master: :club, ride: true (ride +2.4 dB)`.
+
+**Codec true peaks** (`Mastering.codec_peaks(file | channels, codecs:)`): ffmpeg encodes (MP3 320k, AAC 256k, Opus 160k, Vorbis q9), decodes, and measures BS.1770 Annex 2 true peak.
+
+**The chains** (`Mastering.preset(...).steps`; thresholds relative to the target because the trim brings the mix there first):
+
+| preset | chain | target, ceiling |
+|---|---|---|
+| `:club` | `mono_below(120)` -> trim -> glue `compress(threshold: target + 3 dB, ratio: 2, knee: 6, attack: 10 ms, release: 150 ms, detector: :rms)` -> `softclip(0.9, 1.4)` (`clip: false`: `limit(ceiling: ceiling + 2 dB, lookahead: 1 ms, release: 20 ms)`) -> `limit(ceiling: -0.5.db, release: 80 ms)` | -8.5 LUFS, -0.5 dBTP |
+| `:streaming` | trim -> glue (target + 5 dB, 1.5:1, 20/250 ms, RMS) -> `limit(ceiling: platform's, release: 150 ms)` | `platform:`/`lufs:` (default `:spotify` -14 LUFS, -1 dBTP; `:apple_music` -16, `:amazon_music` -2 dBTP, ...) |
+| `:quiet` | trim -> `limit(ceiling: -1.db, release: 250 ms)` (`glue: true` adds 1.3:1 at target + 6 dB) | -18 LUFS, -1 dBTP; `lufs: :ebu_r128` -23, `:atsc_a85` -24 / -2 dBTP |
+| `:vinyl` | `mono_below(150)` -> 25 Hz highpass -> trim -> glue (target + 5 dB, 1.5:1, 30/300 ms, RMS) -> de-esser `bands(5500) { |lo, hi| [lo, hi.compress(threshold: target - 8 dB, ratio: 4, attack: 1 ms, release: 60 ms)] }`; no limiter | -14 LUFS, true peak held under -1 dBTP by the trim |
+
+Reasons: club and vinyl mono the lows (club systems and cutting lathes; genres.md's decision, 2026-10-13: never for headphone or ambient masters, so streaming and quiet don't); glue is gentle and RMS-detected so it evens sections rather than catching transients; the club's peak stage was chosen by measurement (below) for "less clipping, more limiting"; quiet keeps dynamics (EBU R 128 programmes have LRA 5-20 LU); vinyl has no brickwall because the cutting engineer sets the cut level, and tames sibilance because the RIAA pre-emphasis (about +20 dB at 20 kHz re 1 kHz) makes treble cost groove excursion (sources in each preset's `source`; the RIAA and cutting advice from memory, unverified).
+
+**Tuning measurements** (offline lab, `/tmp/claude-0/mastering-1/lab/lab.rb` (not kept; regenerate by summing a song's `--stems` render at `--stem-gain -12` and running a preset's steps in 800-sample blocks): each song's pre-master mix, the trim found by the same secant search; limiter gain reduction mean / 95th percentile from a 1e-4 probe channel through the linked limiter; clip share = samples over the softclip's threshold):
+
+| song | variant | trim dB | LUFS | ST max | LRA | dBTP | clip % | limiter GR dB (first / final) | MP3 dBTP |
+|---|---|---|---|---|---|---|---|---|---|
+| Tunnel Vision | own master (dnb_master, drive 11) | | -7.6 | -6.0 | 4.5 | -0.5 | | | |
+| | club, softclip(0.8, 1.0) (first cut) | 8.6 | -8.5 | -6.6 | 5.6 | -0.5 | 7.9 | 0.7 / 2.8 | |
+| | club (softclip 0.9, 1.4) | 10.6 | -8.5 | -6.9 | 4.5 | -0.5 | 8.1 | 1.6 / 4.5 | +0.37 |
+| | club, two limiters (`clip: false`) | 14.3 | -8.5 | -5.6 | 2.2 | -0.5 | | 2.0 / 7.0, 1.3 / 2.0 | +0.64 |
+| | single limiter only | 29.7 | -8.6 | -5.4 | 2.9 | -0.5 | | 10.7 / 19.2 | |
+| dnb short form | club | 12.1 | -8.5 | -6.6 | 3.6 | -0.5 | 6.7 | 1.5 / 4.3 | +0.31 |
+| | club, two limiters | 14.0 | -8.5 | -5.8 | 3.3 | -0.5 | | 1.3 / 5.6, 1.1 / 2.0 | +0.79 |
+| house short form | club | 8.8 | -8.5 | -7.5 | 5.8 | -0.5 | 3.3 | 0.5 / 2.0 | -0.26 |
+| | club, two limiters | 9.7 | -8.5 | -7.5 | 5.3 | -0.5 | | 0.2 / 1.8, 0.6 / 1.8 | -0.33 |
+| techno short form | club | 11.1 | -8.5 | -7.9 | 3.9 | -0.5 | 13.6 | 1.0 / 2.5 | -0.36 |
+| | club, two limiters | 14.2 | -8.5 | -7.8 | 3.8 | -0.5 | | 1.0 / 5.1, 0.9 / 2.0 | -0.34 |
+| Night Bus (flow) | streaming (Spotify) | 12.7 | -14.0 | -10.3 | 4.4 | -1.0 | | 1.0 / 4.0 | -0.66 |
+| | streaming, `glue: false` | 12.2 | -14.0 | -10.6 | 4.2 | -1.0 | | 1.0 / 4.3 | -0.77 |
+| Tin Roof | quiet (-18) | -0.4 | -18.0 | -11.5 | 12.4 | -1.0 | | 0.0 / 0.0 | -1.02 |
+| Memory Card | vinyl at -3 dBTP (first cut) | -6.9 | -19.2 (held) | -15.1 | 8.4 | -3.0 | | | -2.97 |
+| | vinyl at -1 dBTP | -4.7 | -17.1 (held) | -13.0 | 8.3 | -1.0 | | | |
+| | -1 dBTP + peak compressor (6:1, 0.5 ms, 1 ms lookahead) | -4.4 | -16.9 (held) | -12.9 | 8.1 | -0.9 | | | |
+
+Tunnel Vision's drums peak about 15 dB over the rest of the mix before any master stage (the song's own chain clips them hard), so a limiter alone pumps and flattens it (LRA 2.9 at 10.7 dB mean gain reduction); the gentle clipper keeps the song's own LRA with 1.6 dB of limiting.  At -0.5 dBTP the decoded MP3s of peaky club masters pass 0 dBTP (Tunnel Vision +0.37, dnb +0.31); the Bench files' 192k MP3s show the same, and the report advises the ceiling.
+
+**CPU** (Mac container (Intel i9-9880H, Docker VM), no YJIT, best of 3 x 20 s of a stereo noise source with a moving level, the source's own cost subtracted; two runs alternating with the same chains written out by hand on a master-ai 8e2df6a1 worktree, which cost the same within noise):
+
+| chain | 128-sample buffers | 800-sample buffers |
+|---|---|---|
+| club | 86 us, 3.2% of realtime | 275 us, 1.7% |
+| club with `ride: true` | 138 us, 5.2% | 388-421 us, 2.3-2.5% |
+| streaming | 50 us, 1.9% | 206 us, 1.2% |
+| quiet | 34 us, 1.3% | 148 us, 0.9% |
+| vinyl | 105 us, 3.9% | 245-257 us, 1.5% |
+| rider alone | 54-57 us, 2.0-2.1% | 110-118 us, 0.7% |
+| (master-ai, by hand) club / streaming / quiet | 87-89 / 51-52 / 34 us | 287-291 / 203-211 / 143-158 us |
+
+The rider is Ruby around the C biquads (K-weighting) and Numo, so it costs most at small buffers; a C kernel would make it a few percent of that if it matters live.
+
+**Later**: presets with user inserts mid-chain (between the trim and the limiter); a C rider kernel; mapping the club peak stage to a knob (clip vs limit balance); codec-aware ceilings (a render that lowers the ceiling until decoded peaks pass); `render(stems:)` through the preset per stem for stem mastering.
+
+**Listening set** (`/app/tmp/listening/mastering-1/`, Bench set `mastering-1-2026-10-17`, not published; `jobs.txt` has every command, `levels.json` the measurements): club on the house/techno/dnb short forms (template master vs club vs `clip: false`, the last two loudness-matched at -8.5), Tunnel Vision `--master club` (after its own dnb_master: LRA 4.5 -> 2.7; `-D 0` first: 3.7), acid_song and drums_808 `--master club`; streaming on Night Bus (flow) (-24.0 LUFS today -> -14.0, Apple -16.0, the rider -15.4) and the wavetable song (-22.9 -> -14.0); quiet on Tin Roof (-17.7 -> -18.0, EBU -23.0), the ambient short form, Critters (-21.7 -> -18.0); vinyl on Memory Card (-11.4 -> -14.7, held by -1 dBTP) and the jungle short form (-11.3 -> -17.0, held).  The Bench's 192k MP3s of club masters at -0.5 dBTP decode over 0 dBTP for the peaky ones (dnb +0.66, Tunnel Vision +0.56, drums_808 +0.11; Tunnel Vision's own master today +1.32), not for house/techno (-0.4).
+
+`--master` / `render(master:)` start the session's chain with the preset before the song runs, so songs that never call `master` (critters.rb) are mastered too; a song's own `master { }` then gets the preset after its block.  Song parameters can't be named like the song scripts' common long options (`ScriptRunner::COMMON_SONG_LONG_OPTIONS`; acid_song's `master:` gain is now `limit_drive`, still `-M`).
+
+## Mastering round 2 (mastering-2, 2026-10-17/18)
+
+Maintainer's Bench verdicts on round 1: dnb and techno pick club without the clipper ("The IMD on some of the stabs is noticeable in the clipping variant"), house keeps the gentle clipper ("The two limiter setup isn't much different so both are good to have"), drums_808 non-clipping; Tunnel Vision keeps its own master ("Need a way to squeeze just a little more loudness out of the limiters without hitting dangerous true peaks levels"); Memory Card keeps its own ("It's hard to give up the treble that's lost in the vinyl preset even at matched levels"); Night Bus streaming at Apple's -16, Tin Roof and the ambient template quiet, the wavetable song streaming.  Then: "Option for the mastering: dynamic eq so air is only cut near clips, multiband dynamics to similar end" and "The peak limiting dynamics would probably need to operate on a side chain of the full mix if only touching the air band".
+
+Changes: `:club` defaults to `clip: false` (two limiters: 1 ms / 20 ms at the ceiling + 2 dB, then 1.5 ms / 60 ms at -0.5 dBTP; was 80 ms) after an `air:` stage (default `:static`, a 4th-order Butterworth lowpass at 18 kHz; `:dynamic` the band above 12 kHz cut 20:1 while the full mix is over the ceiling, `:dynamic_air` step, the maintainer's sidechain design; `:band` that band compressed on its own level, `:air_band`; `false`).  Vinyl's de-esser moved to 7 kHz, target - 4 dB, 3:1, 40 ms.  Templates (dnb: air highpass then `master :club`; techno `master :club`; house `master :club, clip: true`; ambient `master :quiet`) and songs (drums_808 club, Night Bus streaming at -16 with its own highpass and softclip first, Tin Roof quiet, wavetable streaming) use presets; `tunnel_vision.rb --club -7.6` and `memory_card.rb --vinyl` try the presets on the two songs that keep their own masters.  Targeting stops climbing once the limiters saturate (under 0.05 LU per dB of trim) and reports FAIL.
+
+Louder limiting, Tunnel Vision's pre-master mix at its own master's -7.6 LUFS (offline lab; limiter GR mean / p95 for the fast, then the final limiter; decoded 192k MP3 true peak; air = power above 12 kHz re the whole mix):
+
+| variant | LRA | GR fast | GR final | MP3 dBTP | air dB |
+|---|---|---|---|---|---|
+| song's own master (clip + limit) | 4.5 | | | +1.32 | |
+| round 1 two limiters (1 ms/20 ms, 1.5 ms/80 ms) | 2.0 | 3.6 / 10.1 | 1.6 / 2.0 | +0.67 | |
+| gentler first stage (+3 dB, 2 ms/40 ms), final 3 ms/150 ms | 2.8 | 10.4 / 19.0 | 2.6 / 3.0 | +0.63 | (saturated at -7.87) |
+| three stages (+3/10 ms, +1/50 ms, final 3 ms/150 ms) | 1.5 | 2.1 / 7.5 | 0.9 / 1.0 | +1.00 | |
+| no air cut, final 60 ms | 2.0 | 3.5 / 9.8 | 1.5 / 2.0 | +1.13 | -20.5 |
+| two gentle 17.5 kHz lowpasses | 2.0 | 3.4 / 9.7 | 1.5 / 2.0 | +0.15 | -24.1 |
+| `air: :static` (Butterworth-4, 18 kHz) | 2.0 | 3.4 / 9.8 | 1.5 / 2.0 | +0.24 | -22.9 |
+| Butterworth-8, 18 kHz | 2.0 | | | +0.43 | -22.9 |
+| 16 kHz lowpass, lookaheads 3 and 5 ms | 2.7 | 6.1 / 13.7 | 1.6 / 2.0 | +0.09 | (-7.69) |
+| `air: :dynamic` (full-mix sidechain over -0.5 dBFS, 20:1; air cut 3.5 dB mean, 8.9 p95, 78% of the time) | 2.0 | 3.3 / 9.5 | 1.5 / 2.0 | +0.94 | -22.7 |
+| `air: :band` (own level over -18 dBFS, 3:1; cut 1.8 mean, 58% of the time) | 2.0 | 3.4 / 9.7 | 1.5 / 2.0 | +0.32 | -23.5 |
+
+dnb short form at -8.5: none +0.22 dBTP / -20.2 dB air; `:static` -0.04 / -21.7; gentle 17.5 kHz +0.21 / -22.7; `:dynamic` +0.51 / -21.1; `:band` +0.24 / -21.7.  House and techno decode under -0.27 dBTP in every variant.  So cutting air only at the peaks keeps air but not the decoded peaks: the overs come from the encoder's own lowpass removing the top octave everywhere (Gibbs-style ringing at transients), which only a static cut ahead of it prevents, and steeper filters ring more themselves.  Tunnel Vision at -7.6 LUFS still decodes at +0.24 dBTP with the default (the report advises the ceiling); at the club's -8.5 the tested songs stay at or under 0 except Tunnel Vision.  CPU at 800 / 128-sample stereo buffers (Mac container, same noise source as above): two limiters without an air stage 2.7% / 4.8%, static 3.3% / 6.5%, dynamic 3.9% / 7.6%, band 3.9% / 7.8%.
+
+Vinyl de-esser (Memory Card's pre-master mix; power above 6 kHz as a share of the whole, output minus input): none +0.11 dB, round 1's (5.5 kHz, target - 8 dB, 4:1, 60 ms) -2.46, 7 kHz / -18 dBFS / 3:1 / 40 ms -0.38 (the new default, at target - 4), 7 kHz / -14 +0.03, 6 kHz / -14 / 2:1 -0.07.  Nothing else in the chain takes treble.
+
+Round 2 renders (`/app/tmp/listening/mastering-2/`, Bench set `mastering-2-2026-10-17`, not published): Tunnel Vision's own master -7.59 LUFS, LRA 4.5, decoded 192k MP3 +1.32 dBTP; `--club -7.6` -7.60, LRA 1.9, MP3 +0.55 (the song's own chain, with its air knob and buses, decodes higher than the lab's pre-master sum, +0.24); `--club -8.5` LRA 2.6, MP3 +0.26; matched at -7.6, `--air dynamic` +0.93, `band` +0.49, `none` +1.28.  Memory Card `--vinyl` -17.51 LUFS held by -1 dBTP (round 1's de-esser also took 2.8 dB off the breaks' peaks: -14.72), against the own master normalized to -17.5.  New defaults: dnb -8.50 / MP3 -0.12, techno -8.51 / -0.43, house (clip: true) -8.50 / -0.44, drums_808 -8.50 / -0.42, Night Bus -16.0, Tin Roof -18.0, ambient -18.0, wavetable -14.0.  So the louder club stays under the true-peak ceiling and keeps every tested song but Tunnel Vision's MP3 under 0 dBTP at -8.5; at -7.6 Tunnel Vision's MP3 passes 0 dBTP by 0.55 dB (less than its own master's 1.32), which only a lower ceiling would fix.

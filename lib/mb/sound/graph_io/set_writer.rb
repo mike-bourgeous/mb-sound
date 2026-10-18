@@ -130,14 +130,18 @@ module MB
 
         # The master chain, built again from its block with a fresh mix
         # input named after the block's parameters.
+        # A mastering preset prints as `master :club, lufs: -8` (with the
+        # block, if any, before it in the chain).
         def master
           block = @session.master_block
+          preset = @session.master_preset
+          return ["master #{preset.call_ruby}"] if preset && block.nil?
           return [] unless block
 
           source = GraphNode::MixSource.new(channels: @session.channels, sample_rate: 48000)
           chans = source.outputs
           args = block.arity == 0 || block.arity == 1 ? [GraphNode::Channels.new(chans)] : chans
-          block_statement(:master, [], {}, block, args, 'master')
+          block_statement(:master, preset ? [preset.name] : [], preset ? preset.options : {}, block, args, 'master')
         end
 
         def tracks

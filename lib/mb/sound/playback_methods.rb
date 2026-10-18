@@ -373,6 +373,13 @@ module MB
       # every channel.  Call with nil (or false) to remove the effects, and
       # with no arguments to see what is set.
       #
+      # A mastering preset name (:club, :streaming, :quiet, :vinyl; see
+      # Mastering and #masters) with its options ends the chain with that
+      # preset: loudness target, glue, limiting.  With a block too, the
+      # block's effects come first.  Renders reach the preset's loudness
+      # target exactly (see #render); live, the preset's drive assumes a mix
+      # around -20 LUFS, or `ride: true` rides it toward the target.
+      #
       # Like #bg, new effects start on the next bar while anything is
       # playing (+:on+, +:in+, or +:at+ picks another launch point; see #bg).  By default the old
       # effects get no more sound from that point but finish what they were
@@ -386,24 +393,51 @@ module MB
       #     master { |mix| mix.softclip(0.5, 0.95) }
       #     master { |mix| mix.filter(:highpass, cutoff: 30).reverb(:room).softclip(0.5, 0.95) }
       #     master { |l, r| [l, r.delay(0.012)] }   # Haas widening
+      #     master :club                             # loud dance master, -0.5 dBTP
+      #     master :streaming, platform: :apple, ride: true
+      #     master(:quiet) { |mix| mix.reverb(:hall, wet: -16.db) }
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
-      def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, &block)
+      def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, **options, &block)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
-        if block.nil? && effects == :show
+        preset = effects.is_a?(Mastering::Preset) || (effects.is_a?(Symbol) && effects != :show) || effects.is_a?(String) ? effects : nil
+        if preset
+          preset = Mastering.preset(preset, **options) # (errors before anything is queued)
+        elsif !options.empty?
+          raise ArgumentError, "master options #{options.keys.map(&:inspect).join(', ')} go with a mastering preset (master :club, #{options.keys.first}: ...)"
+        elsif block.nil? && effects == :show
           return session.master_info
         elsif !block.nil? && effects != :show
           raise ArgumentError, 'Pass a block for master effects, or nil to remove them, not both'
         elsif block.nil? && effects
-          raise ArgumentError, "Pass a block for master effects, or nil to remove them (got #{effects.inspect})"
+          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})"
         end
 
-        session_command(nil, label: block ? 'master' : 'master nil', kind: :master) { |s, time|
-          s.master(at: point, fade: fade, start_time: point.given? ? nil : time, &block)
+        label = preset ? "master #{preset.call_ruby}" : block ? 'master' : 'master nil'
+        session_command(nil, label: label, kind: :master) { |s, time|
+          s.master(preset, at: point, fade: fade, start_time: point.given? ? nil : time, &block)
         }
       end
       alias master_fx master
+
+      # Lists the mastering presets for #master (name, target loudness,
+      # true-peak ceiling, chain) and returns their names.  With a +name+,
+      # returns that preset (a Mastering::Preset: `.steps`, `.notes`,
+      # `.source`), with +options+ applied.
+      #
+      # Example (bin/sound.rb):
+      #     masters
+      #     masters(:vinyl).notes
+      #     masters(:streaming, platform: :apple).target
+      def masters(name = nil, **options)
+        return Mastering.preset(name, **options) if name
+
+        Mastering.presets.each_value do |p|
+          puts format('  %-11s %-44s %s', p.name.inspect, p.title, p.summary.sub(/\A\w+: /, ''))
+        end
+        Mastering.names
+      end
 
       # Returns the master bus gain of the current session (linear, -10 dB by
       # default), applied to the whole mix live and in renders alike
@@ -800,13 +834,73 @@ module MB
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
       #     render '/tmp/bass_spotify.flac', bass.tone.ramp.at(1) * bass.env, bars: 4, loudness: :spotify
-      def render(filename, *sounds, loudness: nil, peak: :warn, **kwargs, &block)
-        return render_session(filename, *sounds, **kwargs, &block) unless loudness
+      #
+      # Mastering presets (see #master and Mastering): a render whose
+      # block sets one (`master :club`), or given +master:+ (a preset name,
+      # or a Mastering::Preset; it replaces the presets #master calls in the
+      # block give and is added after their plain blocks; false drops
+      # them), reaches the preset's loudness target exactly: the block runs
+      # twice, the first pass measures, and the second renders with the
+      # trim that reaches the target (see Mastering::Targeting;
+      # Mastering::Targeting.last keeps the result, and a line is printed).
+      # +:loudness+ then overrides the preset's target instead of
+      # normalizing the file afterwards, and `loudness: false` renders once
+      # with the presets' own drive.  The block must build its graphs (a
+      # graph built outside it would play on from where the first pass
+      # left it, which raises).
+      #
+      #     render 'song.flac', bars: 64 { master :club; my_song }
+      #     render 'song_streaming.flac', bars: 64, master: :streaming { my_song }
+      def render(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
+        override = master == :none ? false : master
+        override = Mastering.preset(override) if override
+        targeting = loudness != false
+        loudness = nil if loudness == false
 
-        raise ArgumentError, 'render(loudness:) needs a filename to normalize (not an output object)' unless filename.is_a?(String)
-        target = Loudness.target(loudness)
-        seconds = render_session(filename, *sounds, **kwargs, &block)
-        Loudness.normalize_file(filename, target, peak: peak)
+        if block.nil?
+          if override && targeting
+            raise ArgumentError, 'A render with master: runs twice to reach the loudness target; give it a block that builds the sounds (render(file, master: :club) { bg ... }), or pass loudness: false'
+          end
+          seconds = render_session(filename, *sounds, mastering: { override: override }, **kwargs)
+          normalize_render(filename, loudness, peak) if loudness
+          return seconds
+        end
+
+        rng = Internal.root_rng.dup
+        seed = Internal.root_seed
+        capture = targeting ? Mastering::Targeting::Capture.new : nil
+        first = { override: override, capture: capture, defer_report: true }
+        seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
+
+        if capture.nil? || capture.targeted.empty?
+          normalize_render(filename, loudness, peak) if loudness
+          if kwargs[:report] && MixReport.last
+            MixReport.last.codec_peaks = Mastering.codec_peaks(filename) if filename.is_a?(String)
+            puts MixReport.last
+          end
+          return seconds
+        end
+
+        session = first[:session]
+        post = session.master_gain_post? ? session.master_gain : 1.0
+        result = Mastering::Targeting.solve(session, capture, origin: first[:origin], target: loudness && Loudness.target(loudness), post_gain: post)
+        Mastering::Targeting.last = result
+
+        Internal.restore_rng(rng.dup, seed)
+        second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true }
+        seconds = render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
+        # Decoded peaks for streaming masters and reports (see Mastering::CodecPeaks)
+        if filename.is_a?(String) && (kwargs[:report] || result.preset == :streaming)
+          result = result.with(codec_peaks: Mastering.codec_peaks(filename))
+        end
+        Mastering::Targeting.last = result
+        if kwargs[:report] && MixReport.last
+          MixReport.last.mastering = result
+          MixReport.last.codec_peaks = result.codec_peaks
+          puts MixReport.last
+        else
+          puts result
+        end
         seconds
       end
 
@@ -840,8 +934,19 @@ module MB
         { frames: frames || 0, fps: elapsed && elapsed > 0 ? ((frames || 0) / elapsed).round(1) : 0 }
       end
 
-      # Renders without normalization (see #render).
-      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, &block)
+      # Normalizes a rendered file to +loudness+ (gain only; see #render).
+      def normalize_render(filename, loudness, peak)
+        raise ArgumentError, 'render(loudness:) needs a filename to normalize (not an output object)' unless filename.is_a?(String)
+        Loudness.normalize_file(filename, Loudness.target(loudness), peak: peak)
+      end
+
+      # Renders without normalization (see #render).  +mastering+ (a Hash)
+      # passes a render's mastering settings to its Session (+:override+,
+      # +:trim+, +:capture+ for the first pass, +:check+ for the second; see
+      # Mastering::Targeting), gets back +:session+ and +:origin+ (the frame
+      # where the file starts), and with +:defer_report+ leaves printing the
+      # report to the caller.
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, stems: nil, stem_format: nil, stem_gain: 1.0, bus_stems: false, max_seconds: nil, exact_lanes: false, from: nil, to: nil, preroll: true, ring: nil, report: nil, mastering: {}, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, "max_seconds: must be positive (got #{max_seconds.inspect})" if max_seconds && max_seconds <= 0
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
@@ -858,6 +963,18 @@ module MB
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, master_gain_post: Session.current.master_gain_post?, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
         session.exact_lanes = exact_lanes
         session.ring = ring
+        session.mastering_override = mastering[:override]
+        session.mastering_trim = mastering[:trim]
+        if (capture = mastering[:capture])
+          session.mastering_capture = capture
+          session.add_tap { |mix| capture.add_mix(session.frame - (mix[0]&.length || 0), mix) }
+        elsif mastering[:check]
+          session.mastering_capture = Mastering::Targeting::Capture.new(check: mastering[:check])
+        end
+        mastering[:session] = session
+        mastering[:origin] = 0
+        # (a song that never sets master effects gets the override too)
+        session.master(mastering[:override], on: :now) if mastering[:override]
         if stems
           stem_format ||= filename.is_a?(String) && !File.extname(filename).empty? ? File.extname(filename) : 'flac'
           session.stems = Session::Stems::Writer.new(stems, format: stem_format, channels: channels, sample_rate: output.sample_rate, overwrite: overwrite, gain: stem_gain, buses: bus_stems)
@@ -912,6 +1029,7 @@ module MB
           end
           output.open!(skip)
           session.stems&.origin = session.frame + skip
+          mastering[:origin] = session.frame + skip
           end_time = bars && -> { transport.bar_position(transport.bar_at(from_pos) + bars.to_r) }
         end
         if to
@@ -971,7 +1089,7 @@ module MB
         if meter
           meter.finish(session.frame)
           MixReport.last = meter.report
-          puts MixReport.last
+          puts MixReport.last unless mastering[:defer_report]
         end
 
         frames.to_f / rate

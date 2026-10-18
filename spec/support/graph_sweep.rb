@@ -328,6 +328,10 @@ module GraphSweep
       ['stereo filter, lp4, softclip', ->(c) { c.stereo_sig.filter(:lowpass, cutoff: c.s.channels(500, 900), quality: 2).lp4(1000, resonance: 0.5).softclip }],
       ['left/right', ->(c) { c.stereo_sig.left + c.stereo_sig.right }],
       ['loudness_meter', ->(c) { c.stereo_sig.loudness_meter }],
+      ['ride', ->(c) { c.stereo_sig.ride(-14, down: 0.05, up: 0.05) }],
+      ['master :club', ->(c) { c.stereo_sig.master(:club) }],
+      ['master :vinyl', ->(c) { c.stereo_sig.master(:vinyl) }],
+      ['master :club, air: :dynamic and :band', ->(c) { c.stereo_sig.master(:club, air: :dynamic) + c.stereo_sig.master(:club, air: :band, clip: true) }],
       ['resample and oversample', ->(c) { c.sig.resample(44100) + c.sig.oversample(2) { |n| n.softclip } }],
       ['MixSource (master chain input)', ->(c) { MixFeeder.new(c.stereo_sig) { |mix| mix.softclip.filter(:highpass, cutoff: 50).mixdown } }],
       ['BusTap (bus and track readers; silence outside a Session, see buses_spec)', ->(c) { c.sig.duck(:sweep_drums, only: :kick) + MB::Sound.bus(:sweep_bus).mixdown + c.sig.compress(sidechain: MB::Sound.bus(:sweep_bus)) }],
@@ -397,6 +401,8 @@ module GraphSweep
   # Node classes the sweep doesn't build, with reasons.
   EXEMPT = {
     'MB::Sound::DeviceInput' => 'sound card input; device_input_spec runs it',
+    'MB::Sound::Mastering::Targeting::Tap' => "records a render's first pass at a preset's trim; mastering_spec's targeted renders run it",
+    'MB::Sound::Mastering::Targeting::Tap::Output' => 'an output of Mastering::Targeting::Tap (see there)',
     'MB::Sound::FFMPEGInput' => 'file input through ffmpeg (not traced by Valgrind)',
     'MB::Sound::IOInput' => 'base of FFMPEGInput',
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',

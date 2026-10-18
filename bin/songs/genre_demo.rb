@@ -18,6 +18,7 @@
 #     bin/songs/genre_demo.rb -G ambient --full       # the whole form (about 5 minutes)
 #     bin/songs/genre_demo.rb -G funk -s 30 --show    # half a minute, printing the template first
 #     bin/songs/genre_demo.rb -G dnb --bpm 170        # another tempo
+#     bin/songs/genre_demo.rb -G techno -M club t.flac  # the club mastering preset instead of the template's chain
 #
 # Or in bin/sound.rb:
 #     genres                                  # the list
@@ -36,8 +37,13 @@ module MB::Sound
       full: [false, '-F', 'Play the whole form instead of about --seconds'],
       seconds: [60.0, Float, '-s', 'About how long the short form plays (seconds)', 5.0..3600.0],
       show: [false, 'Print the template as Ruby first'],
+      mastering: [:template, Symbol, '-M', "Master with a mastering preset instead of the template's chain (the template's mono_below and loudness range stay)", [:template, *Mastering.names]],
     ) { |p|
       t = genre(p.genre)
+      unless p.mastering == :template
+        preset = p.mastering
+        t = t.with { master nil; master preset }
+      end
       t = t.short(p.seconds) unless p.full
       puts t.to_ruby if p.show
       puts t.summary

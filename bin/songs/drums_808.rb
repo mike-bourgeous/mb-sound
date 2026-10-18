@@ -102,7 +102,7 @@ module MB::Sound
     crash = tr808(grid(16, cymbal: 'X'), cymbal: { decay: 2.5 })
 
     master_gain(-3.db)
-    master { |mix| mix.softclip(0.7, 0.98) }
+    master :club # (mastering-2: the maintainer's Bench pick, the non-clipping club master; the render reaches -8.5 LUFS)
 
     bg :groove, groove.()
     at_bar(5) { bg :bell, bell.(), fade: 0 }

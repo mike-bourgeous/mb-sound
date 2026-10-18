@@ -43,10 +43,20 @@ module MB
       # The Sections (empty without a song form).
       attr_reader :sections
 
+      # Decoded true peaks of lossy encodes of the rendered file ({ codec
+      # => dBTP }; see Mastering.codec_peaks), when the render wrote a file.
+      attr_accessor :codec_peaks
+
+      # The render's Mastering::Targeting::Result, when a mastering preset
+      # set its loudness.
+      attr_accessor :mastering
+
       def initialize(tracks, mix, sections)
         @tracks = tracks.freeze
         @mix = mix
         @sections = sections.freeze
+        @codec_peaks = nil
+        @mastering = nil
       end
 
       # The report as plain-text tables.
@@ -75,6 +85,18 @@ module MB
           end
         end
 
+        if @mastering
+          lines << ''
+          lines << @mastering.to_s
+        elsif @codec_peaks
+          lines << ''
+          lines << "Decoded true peaks: #{@codec_peaks.map { |c, tp| format('%s %.2f', c, tp) }.join(', ')} dBTP"
+          overs = @codec_peaks.select { |_c, tp| tp > Mastering::Targeting::CODEC_LIMIT }
+          unless overs.empty?
+            lines << format('  over %.1f dBTP: players clip them; lower the true-peak ceiling by about %.1f dB', Mastering::Targeting::CODEC_LIMIT, overs.values.max - Mastering::Targeting::CODEC_LIMIT + 0.1)
+          end
+        end
+
         lines.join("\n")
       end
 
@@ -90,6 +112,10 @@ module MB
           tracks: @tracks.transform_values(&row),
           mix: row.(@mix),
           sections: @sections.map { |s| s.to_h.merge(loudness: s.loudness.transform_values(&fix), peak: fix.(s.peak)) },
+          codec_peaks: @codec_peaks&.transform_values(&fix),
+          mastering: @mastering && @mastering.to_h.except(:target, :trim, :ceiling).merge(
+            target: @mastering.target.lufs, trim: @mastering.trim.db_value, ceiling: @mastering.ceiling.db_value
+          ).transform_values(&fix),
         }
       end
 

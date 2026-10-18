@@ -331,6 +331,10 @@ module MB
         @ring = nil
         @stems = nil
         @master_block = nil
+        @master_preset = nil
+        @mastering_override = nil
+        @mastering_trim = nil
+        @mastering_capture = nil
         @master_playing = nil
         @markers = nil
         @epoch = nil
@@ -439,6 +443,7 @@ module MB
 
         playable = Playable.graph(sound, sample_rate: sample_rate)
         nodes = match_rate(playable.nodes)
+        @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
         adopt_knobs(nodes, player: name) # graph documents' knobs and rack macros join the Session (see Knobs#adopt_knobs)
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
