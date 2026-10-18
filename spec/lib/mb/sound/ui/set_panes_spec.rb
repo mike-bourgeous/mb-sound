@@ -153,6 +153,92 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
     end
   end
 
+  describe 'with a real Session (Poll, the feed, the console lines the keys run)' do
+    before do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    end
+
+    after do
+      @poll&.close
+      @session&.close
+    end
+
+    # A Snapshot of the session now (the feed's per-buffer data with Poll's
+    # Slow), as the painter would see it.
+    def live_snap
+      @poll ||= ui::Poll.new(@session)
+      feed = (@feed ||= ui::Feed.new.tap { |f| f.needs = [:buses]; @session.ui_feed = f })
+      4.times { @session.process_buffer }
+      slow, refs = @poll.call
+      feed.knob_refs = refs
+      feed.slow = slow
+      feed.take
+      @session.process_buffer
+      s = feed.take
+      s.with(slow: slow)
+    end
+
+    def run(r) = ui.run_line(r.code, @session)
+
+    it 'launches, tweaks, goes to scenes, stops, and turns macros from pane keys, journaled and undoable, the matrix following' do
+      MB::Sound::Session.with_context(session: @session) do
+        arr = @session.arrangement
+        bass_a = MB::Sound.seq(MB::Sound::C2, MB::Sound::G2).n8.loop.named(:bass_a)
+        bass_b = MB::Sound.seq(MB::Sound::F2, MB::Sound::C3).n8.loop.named(:bass_b)
+        arr.track(:bass, q: :beat) { |c| c.synth(voices: 2) { |v| v.hz.saw * v.amp_env } }
+        arr.scene(:a, bass: bass_a)
+        arr.scene(:b, bass: bass_b)
+        @session.bus(:verb) { |sig| sig * 0.5 }
+        @session.route(:bass, send: { verb: 0.5 })
+        MB::Sound.instance_eval do
+          arack(:dub) { |sig| sig * macro(:space, 0.35) }
+          bg :drone, 110.hz.saw.at(-30.db).then(&rack(:dub))
+        end
+
+        st = { title_in_rule: true, mode: true }
+        s = live_snap
+        expect(draw(:clips, s, st, w: 60)[0]).to match(/\A\s+a\s+b\z/)
+        # Enter on (bass, b): launch :bass, 1
+        key(:clips, st, :move, 1, 0)
+        r = key(:clips, st, :launch)
+        expect(r.code).to eq('launch :bass, 1')
+        run(r)
+        s = live_snap
+        30.times { @session.process_buffer } # (to the beat)
+        s = live_snap
+        expect(s.matrix.tracks.first.playing).to eq(1)
+        expect(draw(:clips, s, st, w: 60)[1]).to include('▶bass_b')
+        # A tweak: a new slot, playing
+        run(key(:clips, st, :tweak, '>'))
+        30.times { @session.process_buffer } # (to the beat)
+        s = live_snap
+        lane = s.matrix.tracks.first
+        expect(lane.slots.length).to eq(3)
+        expect(lane.slots[lane.playing].events.map(&:note)).to eq([MB::Sound::F3.number, MB::Sound::C4.number])
+        draw(:clips, s, st, w: 60)
+        expect(draw(:clip, s, h: 8)[0]).to include('bass_b')
+        # The scene key and the stop key
+        expect(run(key(:clips, st, :scene))).to respond_to(:lands)
+        expect(run(key(:clips, st, :stop))).to respond_to(:lands)
+        kinds = @session.journal.changes.map(&:kind)
+        expect(kinds).to include(:scene, :stop)
+
+        # Racks: the macro, turned
+        rk = { title_in_rule: true, mode: true }
+        lines = draw(:racks, s, rk, w: 50)
+        expect(lines.join("\n")).to include('dub', 'space')
+        t = key(:racks, rk, :turn, 0.1)
+        expect(t.code).to match(/\Aturn :"(drone\/)?dub\/space", 0\.45\z/)
+        run(t)
+        4.times { @session.process_buffer }
+        expect(@session.knobs.values.find { |k| k.name.to_s.end_with?('dub/space') }.value).to be_within(1e-9).of(0.45)
+
+        # Buses: a meter of the send
+        expect(draw(:buses, live_snap, w: 60, h: 6).join("\n")).to include('verb', '← bass')
+      end
+    end
+  end
+
   describe 'running a pane key\'s line on the screen' do
     after do
       @tiles&.stop
