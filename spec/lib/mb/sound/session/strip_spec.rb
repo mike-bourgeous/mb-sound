@@ -178,7 +178,11 @@ RSpec.describe(MB::Sound::Session::Strip) do
 
       sneaky = 3.constant
       b.instance_variable_get(:@multiplicands)[sneaky.get_sampler] = sneaky
-      expect { run_in(s, 800, [800]) }.to raise_error(MB::Sound::Session::Strip::UnannouncedStructureChange, /without Plan.changed.*added: .*Constant/)
+      # (checked every STRUCTURE_CHECK_SPANS spans, and at close)
+      spans = MB::Sound::Session::Strip::STRUCTURE_CHECK_SPANS
+      expect { run_in(s, 800 * spans, [800]) }.to raise_error(MB::Sound::Session::Strip::UnannouncedStructureChange, /without Plan.changed.*added: .*Constant/)
+      expect { s.close }.to raise_error(MB::Sound::Session::Strip::UnannouncedStructureChange)
+      expect(s.closed?).to eq(true)
     ensure
       s&.close
     end

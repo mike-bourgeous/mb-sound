@@ -34,16 +34,21 @@ module MB
         class UnannouncedStructureChange < RuntimeError; end
 
         class << self
-          # True to check, at the start of every span, that each cached
-          # node set (#graph_node_set) still matches a fresh walk of its
-          # graph while GraphNode.structure_changes says nothing changed
-          # (omnibus10: a guard for ux-fix-2's caches, which trust every
-          # structural edit to call Plan.changed).  On in specs
+          # True to check that each cached node set (#graph_node_set)
+          # still matches a fresh walk of its graph while
+          # GraphNode.structure_changes says nothing changed (omnibus10: a
+          # guard for ux-fix-2's caches, which trust every structural edit
+          # to call Plan.changed), every STRUCTURE_CHECK_SPANS spans and
+          # when the Session closes (an edit stays, so it is found; every
+          # span tripled the time of Session-heavy specs).  On in specs
           # (spec_helper) and with MB_SOUND_CHECK_STRUCTURE=1; off by
-          # default (a graph walk per cached graph per span).
+          # default.
           attr_accessor :structure_check
         end
         self.structure_check = !['', '0', nil].include?(ENV['MB_SOUND_CHECK_STRUCTURE'])
+
+        # Spans between structure checks (see Strip.structure_check).
+        STRUCTURE_CHECK_SPANS = 16
 
         # Mutes the players named +names+ (or mute groups; see #mute_group).
         # Returns the changes (see Changes#change).
@@ -142,6 +147,7 @@ module MB
           @kept_graphs = {}.compare_by_identity
           @waiting_graphs = {}.compare_by_identity
           @graph_node_sets = {}.compare_by_identity # (#graph_node_set)
+          @structure_check_spans = 0 # (Strip.structure_check)
           @asleep_index = nil # (#asleep_index)
         end
 
@@ -382,7 +388,9 @@ module MB
         # ChainGraphs); one starting in a later segment of the span reads
         # the frames before it first (see Buses#bus_read_shared).
         def catch_up_waiting(players)
-          check_structure! if Strip.structure_check
+          if Strip.structure_check && (@structure_check_spans += 1) % STRUCTURE_CHECK_SPANS == 0
+            check_structure!
+          end
           waiting = nil
           @changes.each { |c| (waiting ||= []) << c.graph if c.graph }
           players.each { |p| (waiting ||= []) << p.input unless p.started }

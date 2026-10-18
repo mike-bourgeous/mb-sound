@@ -1086,6 +1086,8 @@ module MB
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
         @scheduler.close
         @output&.close
+        # (the graphs stay; see Strip.structure_check)
+        check_structure! if Strip.structure_check
       end
 
       # Returns true if #close was called.
