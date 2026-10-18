@@ -24,13 +24,16 @@ module MB
         dissolve 8
       end
 
-      # Loops in seconds (Eno's incommensurable tape loops): whole notes at
-      # 60 BPM are 4 s, so 19.7 s is 197/40 whole notes.  Bowls and rin
-      # stay in every scene once they start, so their loops keep turning.
+      # Loops in seconds (Eno's incommensurable tape loops), on clocks of
+      # their own (genre-fixes, 2026-10-18, on time-automation's clocks):
+      # each clip spans one period of its clock, which counts from the
+      # session's start, so a bowl dropped by a scene and brought back
+      # comes in where it would have been, and tempo changes don't move it.
+      # (Until then: whole notes at 60 BPM, 197/40 for 19.7 s.)
       clip :drone, events([0, 16, D2, 0.7], length: 16, loop: true)
-      clip :bowl_a, events([0, 1/8r, D4, 0.8], length: 197/40r, loop: true)
-      clip :bowl_b, events([0, 1/8r, A3, 0.7], length: 233/40r, loop: true)
-      clip :rin, events([0, 1/16r, E5, 0.6], length: 311/40r, loop: true)
+      clip :bowl_a, events([0, 1/8r, D4, 0.8], length: 197/40r, loop: true).clocked(19.7.seconds)
+      clip :bowl_b, events([0, 1/8r, A3, 0.7], length: 233/40r, loop: true).clocked(23.3.seconds)
+      clip :rin, events([0, 1/16r, E5, 0.6], length: 311/40r, loop: true).clocked(31.1.seconds)
       clip :gong, seq(D2).n1
       # (quarter notes: 8 bars, 32 s, per pass; eighths until 2026-10-13,
       # when the maintainer asked to "slow the koto"; then "maybe half as
@@ -69,7 +72,8 @@ module MB
       scene :emerge, drone: :drone, rain: :weather, space: 0.5, wear: 0.6, drizzle: [0.4, { from: 0, over: 4 }]
       scene :drift, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, rain: :weather
       scene :bloom, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, gong: :gong, motif: :motif, harp: :harp, rain: :weather, drizzle: [0.2, { over: 8 }]
-      scene :hush, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, wind: :weather, gust: [0.5, { from: 0, over: 4 }]
+      # (the hush drops the second bowl; the tide brings it back in phase)
+      scene :hush, bowls: :bowl_a, rin: :rin, wind: :weather, gust: [0.5, { from: 0, over: 4 }]
       scene :tide, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, stick: :stick, gong: :gong, motif: :motif, harp: :harp,
                    rain: :weather, wind: :weather, drizzle: [0.7, { over: 8 }], gust: [0.3, { over: 8 }]
       scene :dissolve, bowls: :bowl_a, bowls2: :bowl_b, rin: :rin, motif: :motif, harp: :harp, rain: :weather,
@@ -82,7 +86,7 @@ module MB
 
       tip 'No verse and chorus: an arch or a tide (emerge, bloom, a still point, return, dissolve).  Most pieces run 6-60 minutes.'
       tip 'Hold a scene for minutes: `go :drift` and let it run (or `loop!` inside the flow); the loops in seconds and the weather keep moving, so nothing repeats, and `turn :drizzle, 0.8, over: 16` is a whole section.'
-      tip 'Loops of incommensurable lengths in seconds (19.7, 23.3, 31.1 s) never line up the same way twice: the phase drift is the composition.  Keep such tracks in every scene so they keep turning (dropping a track and bringing it back restarts its loop).'
+      tip 'Loops of incommensurable lengths in seconds (19.7, 23.3, 31.1 s) never line up the same way twice: the phase drift is the composition.  Put each on its own clock (clip.clocked(19.7.seconds)): it counts from the session start, so a loop dropped by a scene comes back where it would have been.'
       tip 'Silence is an instrument: few notes, wide gaps, a pentatonic or modal set (here the yo scale: D E G A B), drones on the root and fifth.'
       tip 'Protect tails: long rooms with pre-delay and damping, and let the form ring everything out at the end.'
       tip 'Master quiet (-16 to -18 LUFS, -1 dBTP; a limiter as a safety, not a sound); a loudness range of 8-15 LU is normal.  Rain and wind are filtered noise and pinged drops (roles :rain and :wind into the :weather bus, its tape hiss gated by `sounding` so it stops with the weather).'
