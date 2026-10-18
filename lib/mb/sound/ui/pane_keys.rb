@@ -42,7 +42,41 @@ module MB
           def keymap
             @keymap || (superclass.respond_to?(:keymap) ? superclass.keymap : nil)
           end
+
+          # Declares (or extends) the keys of the pane's own mode (NAV
+          # Enter on the focused pane; ux-r4-nav's Router :pane state):
+          # cursor keys, Enter, letters.  Esc is reserved (back to NAV).
+          # (The same declaration as ux-r4-nav's; at merge, nav's wins.)
+          def mode_keys(&block)
+            @mode_keymap ||= Input::Keymap.new(:"#{(name || 'pane').split('::').last.downcase}_mode")
+            @mode_keymap.instance_exec(&block) if block
+            @mode_keymap
+          end
+
+          # The kind's mode keymap, or nil.
+          def mode_keymap
+            @mode_keymap || (superclass.respond_to?(:mode_keymap) ? superclass.mode_keymap : nil)
+          end
+
+          # The NAV letter that jumps to this pane kind (with no argument:
+          # the letter, or nil).
+          def jump(letter = nil)
+            return @jump || (superclass.respond_to?(:jump) ? superclass.jump : nil) if letter.nil?
+            @jump = letter
+          end
         end
+
+        # A console line a pane key asks the screen to run (UI.run_line:
+        # journaled, undoable, a take line), printing the Ruby it ran in
+        # the REPL pane; +note+ is what the status line says.  Pane keys
+        # that change the performance return one of these instead of
+        # calling the Session (command_bus_spec).
+        Run = Data.define(:code, :note) do
+          def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
+        end
+
+        # The pane's mode keymap (its kind's), or nil.
+        def mode_keymap = self.class.mode_keymap
 
         # The pane's keymap (its kind's), or nil.
         def keymap = self.class.keymap

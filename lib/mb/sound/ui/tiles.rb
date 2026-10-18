@@ -1103,8 +1103,26 @@ module MB
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
           r = pane.key_action(action, @states[name], *args)
-          flash(r, :key) if r.is_a?(String)
+          r.is_a?(PaneKeys::Run) ? run_pane_line(r) : (flash(r, :key) if r.is_a?(String))
           @full = true
+        end
+
+        # Runs a pane key's console line (PaneKeys::Run) through UI.run_line
+        # in the screen's session: journaled, undoable, a take line; the
+        # Ruby it ran and what it printed go into the REPL pane (the
+        # messages without one), its note or result on the status line.
+        def run_pane_line(run)
+          out = StringIO.new
+          r = err = nil
+          begin
+            with_output_to(out) { r = UI.run_line(run.code, @session || Session.existing) }
+          rescue StandardError, ScriptError => e
+            err = e
+          end
+          result = err ? "#{err.class}: #{err.message}" : "=> #{Tiles.one_line(r.inspect)[0, 120]}"
+          print_to_repl("# #{run.note || 'ui'}\n#{run.code}\n#{out.string}#{result}\n")
+          err ? flash(Tiles.one_line(result), :bad) : flash(Tiles.one_line("#{run.note || run.code}  (#{run.code})"), :ok)
+          r
         end
 
         # After a command whose output is taller than the REPL pane, says
