@@ -141,9 +141,10 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     allow(Thread).to receive(:pass).and_call_original
     band.refresh(0.0) # everything (first frame)
     100.times { |k| band.refresh((k + 1) / 100r) } # 10 ms ticks for a second, before the next reassertion
-    # A pane is due 1 ms early, so at 10 ms ticks 30/s panes draw every 40
-    # ms, 15/s every 70, 8/s every 130, 4/s every 250
-    expect(drawn).to eq(transport: 26, form: 8, tracks: 8, queue: 5, knobs: 15, meters: 26, cpu: 5, scope: 26)
+    # A pane is due 1 ms early, so at 10 ms ticks the live panes (transport,
+    # knobs, meters, scope: at the 60/s target, UI::PaneRates) draw every 20
+    # ms, 8/s every 130, 4/s every 250
+    expect(drawn).to eq(transport: 51, form: 8, tracks: 8, queue: 5, knobs: 51, meters: 51, cpu: 5, scope: 51)
     expect(Thread).to have_received(:pass).exactly(drawn.values.sum).times
     expect(band.stats[:yields]).to eq(drawn.values.sum)
   end

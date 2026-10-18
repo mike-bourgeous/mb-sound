@@ -229,7 +229,7 @@ module MB
             notes = v.played.last(12).map { |p| kb.note_name(p.note) }
             c.line(y, ['played ', :dim], [notes.join(' '), :name]) unless notes.empty?
             c.line(y, [v.message.to_s, :dim]) if notes.empty? && v.message
-            hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV p (or ui.keys): play the keyboard'
+            hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV K (or ui.keys, F2): play the keyboard'
             c.text(0, c.h - 1, c.fit(hint, c.w), :dim) if c.h > y + 1
           end
 

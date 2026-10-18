@@ -851,13 +851,18 @@ module MB
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback
-        of its own.  Ctrl-] is NAV mode (`?` there lists its keys), F2 or
-        `keys` the keyboard, Ctrl-Z hides the tiles while the set plays on
-        (`fg` brings them back, `jobs` lists what runs).
+        of its own.  Ctrl-] is NAV mode (`?` there lists its keys): numbers
+        and h j k l pick a pane, Enter goes into it (the REPL, KEYS on the
+        keyboard, a pane's own keys until Esc), and a pane's letter beside
+        its number jumps straight in (i the REPL, K the keyboard).  F2 or
+        `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
+        on (`fg` brings them back, `jobs` lists what runs).
 
         Warnings go to a messages pane while a screen is up (NAV m shows
-        it; `ui off` sums them up).  NAV f shows the frame rate
-        (`ui.fps` is what was drawn, `ui.target_fps` the painter's rate).
+        it; `ui off` sums them up).  NAV f shows the frame rate and each
+        pane's rate beside its number (`ui.fps` is what was drawn,
+        `ui.target_fps` the painter's rate; meters and scopes run at it and
+        everything slows in steps when the CPU is busy).
 
         Your own panes: `pane :name do |c, s| ... end` (s a snapshot of the
         session, c the pane's canvas); arrange them with `layout`, keep a

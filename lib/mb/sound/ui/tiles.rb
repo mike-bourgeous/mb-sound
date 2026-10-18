@@ -17,7 +17,8 @@ module MB
       #
       #     ui :tiles                   # the default tiled layout
       #     # Ctrl-] : NAV mode (1-9 pick a pane, z zoom, s/v split, arrows
-      #     #          resize, u undo, / search, : palette, i back)
+      #     #          resize, u undo, / search, : palette, Enter into the
+      #     #          pane, i REPL, K keyboard, Esc back)
       #     ui.split :cols              # the same operations from Ruby
       #     ui.save :mine               # the current tree as a layout file
       #     # Ctrl-Z: hide the tiles (the set plays on; the console carries
@@ -45,7 +46,7 @@ module MB
         HINTS = {
           repl: 'Ctrl-] nav  Ctrl-W pane  Alt-PgUp scroll  F2 keys',
           overlay: 'Esc closes  a key listed here closes it and acts',
-          nav: '? keys  1-9/hjkl pane  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd  p keys  i back',
+          nav: '? keys  1-9/hjkl pane  Enter into it  i REPL  K keys  z zoom  s/v split  x close  arrows size  =  u/^R undo  [] tabs  / search  y copy  : cmd',
           grab: 'Ctrl-] nav  F2 back  z..m q..] notes  -/+ octave  Up/Dn velocity  Space sustain  Esc all off  Enter capture  ` note-off  Tab step',
           step: 'Ctrl-] back  z..m notes  1-7 length  8 dot  9 triplet  r rest  t tie  a accent  ` slide  BkSp undo  p play  w swap in  Enter done  Tab play',
         }.freeze
@@ -158,6 +159,7 @@ module MB
           @messages_restore = nil
           @message_close = nil
           @show_fps = false
+          @rate_notes_at = nil
           @pane_cpu = Hash.new { |h, k| h[k] = [] }
           @chrome = nil
           @density = nil
@@ -169,8 +171,13 @@ module MB
                                       repl_keys: play_keys || (repl == :none ? nil : Keys.repl_keymap))
           @router.add_keymap(NAV_EXTRA)
           @router.add_keymap(Keys.user[:nav], first: true)
+          # Jump letters panes declare (`jump 'a'`), for the panes on screen
+          @jump_map = Input::Keymap.new(:jumps) { group 'Jump' }
+          @router.add_keymap(@jump_map)
           @on_action = on_action
           @focus_last = nil
+          @mode_pane = nil
+          @jumps = {}
           @enter_mark = nil
           @winch = nil
           @stray_warned = false
@@ -336,7 +343,7 @@ module MB
             pane = @panes[p.name]
             kind = p.name == :repl ? :repl : pane ? pane.class.name.split('::').last.downcase.to_sym : :empty
             n = order.index(p.name)
-            rate = p.opts[:rate].is_a?(Numeric) ? p.opts[:rate] : pane&.rate
+            rate = pane ? @rates.rate(PaneRates.priority_of(p.name, pane), pane.rate, p.opts[:rate]) : nil # (now: UI::PaneRates)
             PaneOnScreen.new(number: n && n + 1, name: p.name, kind: kind, title: pane&.title, rect: p.rect, focused: p.name == @tiler.focus,
                              zoomed: @tiler.layout.zoom == p.name, rate: rate,
                              look: pane&.bytes? ? (@states[p.name][:look] || p.opts[:look] || @look) : nil, title_at: @chrome&.frames&.dig(p.name)&.at)
@@ -689,6 +696,13 @@ module MB
           out << 'KEYS mode while hidden' if grab && @hidden
           out << "notes #{@keyboard.held.inspect} held in #{@router.mode} mode" if !grab && !@keyboard.held.empty?
           out << "keyboard pane not focused in KEYS mode" if grab && @tiler.focus != :keyboard
+          if @router.mode == :pane
+            out << "pane mode on #{@tiler.focus.inspect}, which has no keys of its own" unless into(@tiler.focus) == :pane
+            out << "pane mode marks #{@mode_pane.inspect} but #{@tiler.focus.inspect} is focused" if @mode_pane != @tiler.focus
+            out << 'pane mode while hidden' if @hidden
+          elsif @mode_pane && !(@router.state == :overlay)
+            out << "#{@mode_pane.inspect} marked in its mode in #{@router.mode} mode"
+          end
           out << "overlay #{@overlay ? 'shown' : 'hidden'} in #{@router.state} state" if @overlay.nil? == (@router.state == :overlay)
           out << "a prompt line in #{@router.state} state" if @router.line && !(@router.mode == :line || (%i[nav overlay].include?(@router.mode) && @router.nav_return == :line))
           out << "no prompt line in line mode" if @router.mode == :line && @router.line.nil?
@@ -741,6 +755,7 @@ module MB
         # frame, bytes per second; see FrameRate), or hides it.
         def show_fps(on = true)
           @show_fps = on
+          @relayout = true # (the chrome shows each pane's rate beside its number while on)
           self
         end
 
@@ -758,6 +773,69 @@ module MB
         # True while the key overlay shows.
         def key_help? = @router.state == :overlay
 
+        # Goes into pane +name+ (default: the focused one), as NAV Enter
+        # does: the REPL pane into REPL mode, the keyboard into KEYS, a pane
+        # with keys of its own (a clip matrix's cursor; UI::PaneKeys
+        # `mode_keys`) into its mode until Esc; any other pane just stays
+        # focused (NAV).  Returns the mode entered.
+        #
+        #     ui.enter :clips
+        def enter(name = nil)
+          @input_lock.synchronize { enter_unlocked(name) }
+          @router.mode
+        end
+
+        private def enter_unlocked(name)
+          tile { |t| t.focus!(name) } if name && name != @tiler.focus
+          name = @tiler.focus
+          case into(name)
+          when :repl then act(Input::Action.of(:mode, :repl))
+          when :grab then keys_unlocked(true, off: nil, step: nil, patch: :keep)
+          when :pane then @router.mode = :pane
+          else
+            @router.mode = :nav unless %i[nav overlay].include?(@router.mode)
+            flash("#{name}: no keys of its own (it stays focused; NAV keys work)", :dim)
+          end
+        end
+
+        # What going into pane +name+ means: :repl, :grab (the keyboard),
+        # :pane (keys of its own), or nil (nothing: it stays focused).
+        def into(name)
+          return :repl if name == :repl && @host
+          return :grab if name == :keyboard
+          @panes[name].respond_to?(:mode_keymap) && @panes[name].mode_keymap ? :pane : nil
+        end
+
+        # Jumps to pane +name+ (a pane name or kind; NAV's jump letters: i
+        # the REPL, K the keyboard, t tracks, e meters, and any a pane kind
+        # declares): focuses it (a tab of it comes forward) and goes in as
+        # #enter does.  A pane not on screen is named in a flash with how to
+        # show it (the keyboard is put in, as KEYS does).
+        #
+        #     ui.jump :tracks
+        def jump(name)
+          @input_lock.synchronize { jump_unlocked(name) }
+          @router.mode
+        end
+
+        private def jump_unlocked(name)
+          target = jump_target(name)
+          if target.nil?
+            return keys_unlocked(true, off: nil, step: nil, patch: :keep) if name == :keyboard
+            return act(Input::Action.of(:mode, :repl)) if name == :repl && @host
+            return flash("no #{name} pane here (: show :#{name})", :dim)
+          end
+          enter_unlocked(target)
+        end
+
+        # The pane on screen for jump name +name+ (its own name first,
+        # then the first pane of that kind), or nil.
+        def jump_target(name)
+          names = @tiler.layout.panes
+          return name if names.include?(name)
+          names.find { |n| PaneKeys.kind_of(@panes[n]) == name }
+        end
+
         ### Router host (called on the input thread)
 
         # A key in KEYS mode (:grab).
@@ -770,6 +848,17 @@ module MB
         # A key on a screen without a console (a script's --ui).
         def play_key(k)
           @on_key&.call(k)
+        end
+
+        # A key in a pane's own mode (Router :pane): the focused pane's mode
+        # keys, then its NAV keys.  Returns true if the pane took it.
+        def pane_mode_key(k)
+          pane = @panes[@tiler.focus]
+          a = pane.respond_to?(:mode_keymap) && pane.mode_keymap&.[](k)
+          a ||= pane.respond_to?(:keymap) && pane.keymap&.[](k)
+          return false unless a
+          pane_action(@tiler.focus, a.name, *a.args)
+          true
         end
 
         # The focused pane's keymap (pane kinds declare one; see
@@ -798,6 +887,11 @@ module MB
         def mode_changed(m)
           @full = true
           @overlay = m == :overlay ? overlay_groups : nil
+          pane_mode(m == :pane ? @tiler.focus : nil)
+          if m == :pane && into(@tiler.focus) != :pane
+            # (Ctrl-] back from NAV after the focus moved, or the pane went)
+            return @router.mode = :nav
+          end
           return enter_keys if m == :grab
 
           leave_keys
@@ -811,6 +905,15 @@ module MB
           tile { |t| t.focus!(:repl) } unless @tiler.focus == :repl
           z = @tiler.layout.zoom
           tile { |t| t.zoom(z) } if z && z != :repl
+        end
+
+        # Marks pane +name+ as in its own mode (its state's :mode, for
+        # drawing a cursor), the pane marked before (if any) as not.
+        def pane_mode(name)
+          return if name == @mode_pane
+          @states[@mode_pane].delete(:mode) if @mode_pane
+          @mode_pane = name
+          @states[name][:mode] = true if name
         end
 
         def line_done(kind, text)
@@ -828,7 +931,7 @@ module MB
         def act(a)
           case a.name
           when :mode
-            # (NAV i, Enter, Esc: the REPL, from any pane, KEYS included; a
+            # (NAV Esc, i, or Enter on the REPL: the REPL, from any pane, KEYS included; a
             # lost REPL pane comes back, in the focused slot if it is empty)
             to = a.args[0]
             ensure_repl(here: true) if to == :repl && @host
@@ -862,6 +965,8 @@ module MB
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
             @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
           when :keys then keys
+          when :enter then enter
+          when :jump then jump(a.args[0])
           when :key_help then key_help
           when :messages then messages
           when :show_fps then show_fps(!@show_fps)
@@ -869,7 +974,7 @@ module MB
           when :line_changed then nil
           when :complete then complete_palette
           when :unbound
-            flash(a.args[1] ? "#{a.args[1]} #{a.args[0]}: not a window key" : "#{a.args[0]}: not a NAV key (? lists them; Ctrl-] or i: back)", :dim)
+            flash(a.args[1] ? "#{a.args[1]} #{a.args[0]}: not a window key" : "#{a.args[0]}: not a NAV key (? lists them; Esc or i: the REPL)", :dim)
           when :event then event(a.args[0])
           when :nop then nil
           when :pane_key then pane_action(@tiler.focus, a.args[0].name, *a.args[0].args)
@@ -1024,6 +1129,8 @@ module MB
             @focus_last = was if @tiler.focus != was && @tiler.layout.panes.include?(was)
             @relayout = true
           end
+          # (a pane's own mode ends when the focus leaves it, whatever moved it)
+          @router.mode = :nav if @router.mode == :pane && (@tiler.focus != @mode_pane || into(@tiler.focus) != :pane)
           self
         rescue Viewports::Error => e
           flash(e.message, :bad)
@@ -1042,7 +1149,7 @@ module MB
 
         # A window-prefix action (Ctrl-W then a key): done as in NAV, then
         # keys go where the focus is (the REPL: REPL mode; any other pane:
-        # NAV, where its own keys work, and i/Enter on the keyboard plays).
+        # NAV, where its own keys work, and Enter goes into it).
         def window(a)
           @router.mode = :nav unless @router.mode == :grab # (the focus may move)
           act(Input::Action.of(a.args[0], *a.args.drop(1)))
@@ -1091,8 +1198,11 @@ module MB
         # keyboard's (KEYS or step entry) when it is focused.
         def overlay_groups
           groups = Keys.groups(:nav).dup
+          groups += @jump_map.help_groups unless @jump_map.entries.empty?
           pane = pane_keymap
           groups = pane.help_groups.map { |g, k| ["#{g} (#{@tiler.focus})", k] } + groups if pane
+          mode = @panes[@tiler.focus].respond_to?(:mode_keymap) && @panes[@tiler.focus].mode_keymap
+          groups = mode.help_groups.map { |g, k| ["#{g} (#{@tiler.focus}#{@router.mode == :pane || @router.nav_return == :pane ? '' : ': Enter, then'})", k] } + groups if mode
           groups += Keys.groups(:window) if @router.window_prefix
           groups += Keys.groups(@keyboard.entry == :step ? :step : :grab) if @tiler.focus == :keyboard
           groups.freeze
@@ -1397,6 +1507,7 @@ module MB
           end
           names = @placed.map(&:name).compact
           @feed.needs = names.flat_map { |n| @panes[n]&.needs || [] }.uniq
+          rebuild_jumps(names)
           @chrome = chrome_plan
           # (Chrome draws every pane's title: panes draw their bodies only)
           @placed.each { |pl| @states[pl.name][:title_in_rule] = true if pl.name }
@@ -1407,6 +1518,36 @@ module MB
           @repl_full = true
           r = repl_rect
           @host&.resize(r.h, r.w) if r && r.w > 0 && r.h > 0
+        end
+
+        # Jump letters for the panes on screen ({name => letter}: Keys::JUMPS
+        # by name or kind, else the kind's `jump`), and the keymap of the
+        # declared ones (NAV_EXTRA binds the built-in letters).
+        # NAV f: each pane's measured rate beside its number, refreshed in
+        # the chrome once a second (only the changed cells are written).
+        def refresh_rate_notes(now)
+          return if @rate_notes_at && now - @rate_notes_at < 1.0
+          @rate_notes_at = now
+          @chrome = chrome_plan
+          Chrome.paint(@grid, @chrome, glyphs: @glyphs, nav: @router.mode == :nav)
+        end
+
+        def rate_note(p)
+          p.name == :repl || p.tabs ? nil : rate_text(p.name)
+        end
+
+        def rebuild_jumps(names)
+          @jumps = {}
+          @jump_map.entries.each { |b| @jump_map.off(b.chord[0]) }
+          names.each do |n|
+            pane = @panes[n]
+            kind = PaneKeys.kind_of(pane) || n
+            letter = Keys::JUMPS[n] || (pane.respond_to?(:jump) && pane.jump) || Keys::JUMPS[kind]
+            next unless letter && !@jumps.value?(letter)
+            @jumps[n] = letter
+            next if Keys::JUMPS.value?(letter)
+            @jump_map.on(letter, :jump, n, help: "#{pane&.title || n} (focus it, go in)")
+          end
         end
 
         def repl_rect
@@ -1438,6 +1579,11 @@ module MB
 
           drawn = 0
           bytes = +''
+          items = @placed.filter_map do |p|
+            next if p.tabs || p.name == :repl || !@panes[p.name]
+            [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
+          end
+          draw = panes_to_draw(items, now, full, snap)
           @placed.each do |p|
             if p.tabs
               draw_tabs(p) if full
@@ -1452,8 +1598,7 @@ module MB
               draw_placeholder(p) if full
               next
             end
-            rate = p.opts[:rate].is_a?(Numeric) && p.opts[:rate] > 0 ? p.opts[:rate] : pane.rate
-            next unless full || @drawn_at[p.name].nil? || now - @drawn_at[p.name] >= 1.0 / rate - 0.001
+            next unless draw.include?(p.name)
             t0 = thread_cpu
             begin
               r = @chrome.frames[p.name]&.inner || p.rect
@@ -1470,12 +1615,14 @@ module MB
               pane_failed(p, e)
             end
             @drawn_at[p.name] = now
+            @rates.drew(p.name, now)
             d = thread_cpu - t0
             (q = @pane_cpu[p.name]) << d
             q.shift if q.length > 200
             drawn += 1
             Thread.pass
           end
+          refresh_rate_notes(now) if @show_fps && !full
           Chrome.paint_overlays(@grid, @chrome) if %i[nav overlay].include?(@router.mode)
           draw_overlay if @overlay
           note_long_output
@@ -1565,7 +1712,8 @@ module MB
             under_tabs = strips.any? { |t| t.y == r.y - 1 && t.x == r.x }
             title = under_tabs || p.name == :repl ? nil : @panes[p.name]&.title || (@panes[p.name] ? p.name.to_s : nil)
             n = order.index(p.name)
-            Chrome::Item.new(name: p.name, rect: r, title: title, number: n && n + 1, focused: p.name == @tiler.focus)
+            Chrome::Item.new(name: p.name, rect: r, title: title, number: n && n + 1, focused: p.name == @tiler.focus,
+                             jump: @jumps[p.name], note: @show_fps ? rate_note(p) : nil)
           end
           Chrome.plan(items, w: @cols, h: @rows - 1, rules: true)
         end
@@ -1640,8 +1788,8 @@ module MB
           end
           @line_cursor = nil
           step = mode == :grab && @keyboard.entry == :step
-          badge = %i[nav overlay].include?(mode) ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : @host ? ' REPL ' : ' PLAY '
-          role = %i[nav overlay].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : :key
+          badge = %i[nav overlay].include?(mode) ? ' NAV ' : mode == :grab ? (step ? ' STEP ' : ' KEYS ') : mode == :pane ? " #{@tiler.focus.to_s.upcase} " : @host ? ' REPL ' : ' PLAY '
+          role = %i[nav overlay].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
           @grid.put_run(0, y, badge, Plot::Text::Cells.pack(Theme.rgb(role)), nil, Plot::Text::Cells::REVERSE | Plot::Text::Cells::BOLD)
           x = badge.length + 1
           right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
@@ -1662,6 +1810,7 @@ module MB
             hint =
               if @router.state == :pending then "#{Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
               elsif mode == :play then @note || @hints || ''
+              elsif mode == :pane then "Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''
               end
             c.text(x + 1, 0, c.fit(hint, room), @note && mode == :play ? :key : :dim)

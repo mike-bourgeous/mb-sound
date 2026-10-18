@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
   let(:host_class) {
     Class.new {
       attr_reader :log
-      attr_accessor :router, :pane_map
+      attr_accessor :router, :pane_map, :mode_map
 
       def initialize = @log = []
       def grab_key(k) = @log << [:grab, k.key, k.type]
@@ -24,11 +24,19 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
       def mode_changed(m) = @log << [:mode, m]
       def pane_keymap = @pane_map
 
+      # (a pane with mode keys, like the clip matrix: Tiles#pane_mode_key)
+      def pane_mode_key(k)
+        a = @mode_map&.[](k) or return false
+        @log << [:pane_mode, a.name, *a.args]
+        true
+      end
+
       def act(a)
         @log << [:act, a.name, *a.args]
         case a.name
         when :mode then @router.mode = a.args[0]
         when :keys then @router.mode = :grab
+        when :enter then @router.mode = @mode_map ? :pane : :nav
         when :key_help then @router.mode = :overlay
         when :palette then @router.open_line(:palette, ':')
         end
@@ -54,6 +62,7 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
     when :line then r.open_line(:palette, ':')
     when :overlay then r.event(router_class::NAV_KEY); r.mode = :overlay
     when :pending then r.event(key.of('w', :ctrl))
+    when :pane then r.mode = :pane
     when :play then nil
     end
   end
@@ -89,7 +98,7 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
   end
 
   it 'makes Ctrl-] enter NAV from every state, and a second Ctrl-] go back where it came from (item 19)' do
-    { repl: :repl, grab: :grab, line: :line, nav: :repl, overlay: :repl, pending: :repl }.each do |state, back|
+    { repl: :repl, grab: :grab, line: :line, pane: :pane, nav: :repl, overlay: :repl, pending: :repl }.each do |state, back|
       r, host = make
       enter(r, state)
       expect(r.state).to eq(state)
@@ -198,7 +207,7 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
   end
 
   it 'sends F2, Ctrl-C, Ctrl-Z to the host as actions in every state' do
-    %i[repl nav grab line overlay pending].each do |state|
+    %i[repl nav grab line pane overlay pending].each do |state|
       { key.of(:f2) => :keys, key.of('c', :ctrl) => :interrupt, key.of('z', :ctrl) => :hide }.each do |k, name|
         r, host = make
         enter(r, state)
@@ -216,10 +225,12 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
     events = [
       router_class::NAV_KEY, key.of(:f2), key.of('c', :ctrl), key.of('z', :ctrl), key.of('w', :ctrl), key.of(:escape),
       key.of('?'), key.of('i'), key.of(':'), key.of(:enter), key.of('l'), key.of('x'), key.of('h'), key.of('p'),
-      key.of('x', type: :release), key.of('x', type: :repeat), input::Paste.new(text: 'p'), nil,
+      key.of('x', type: :release), key.of('x', type: :repeat), input::Paste.new(text: 'p'), nil, key.of(:up), key.of('a'),
     ]
-    3.times do |walk|
+    mode_map = input::Keymap.new(:matrix) { on :up, :move, 0, -1; on :enter, :launch }
+    4.times do |walk|
       r, host = make(nav_esc: walk == 1 ? 0.2 : nil, console: walk != 2)
+      host.mode_map = mode_map if walk == 3
       now = 0.0
       path = []
       200.times do
@@ -236,7 +247,47 @@ RSpec.describe(MB::Sound::UI::Input::Router, :aggregate_failures) do
         expect(r.line).to be_nil, why if r.line && !(r.mode == :line || (%i[nav overlay].include?(r.mode) && r.nav_return == :line))
         expect(r.state).not_to eq(walk == 2 ? :repl : :play), why
         expect(host.log.last).not_to eq([:mode, :pending])
+        expect(r.state).not_to eq(:pane), why unless walk == 3
       end
     end
+  end
+
+  it "routes a pane's own mode (ux-r4): Enter in NAV goes in, its keys first, Esc and Ctrl-] to NAV, the rest refused" do
+    r, host = make
+    host.mode_map = input::Keymap.new(:matrix) { on :up, :move, 0, -1; on :enter, :launch; on 'j', :move, 0, 1 }
+    r.event(router_class::NAV_KEY)
+    r.event(key.of(:enter))
+    expect(r.state).to eq(:pane)
+    host.clear
+    r.event(key.of(:up))
+    r.event(key.of(:enter))
+    r.event(key.of('j')) # (NAV's focus-down does nothing here: the pane's key)
+    expect(host.log).to eq([[:pane_mode, :move, 0, -1], [:pane_mode, :launch], [:pane_mode, :move, 0, 1]])
+    host.clear
+    r.event(key.of('q'))
+    expect(host.log.last[0, 2]).to eq([:act, :refused])
+    expect(host.log.last[3]).to include('Esc: NAV')
+    r.event(input::Paste.new(text: 'x'))
+    expect(host.log.last[0, 2]).to eq([:act, :refused])
+    r.event(key.of('w', :ctrl))
+    expect(r.state).to eq(:pane) # (no prefixes in a pane: refused)
+    # ? : the overlay, which goes back to the pane
+    r.event(key.of('?'))
+    expect(r.state).to eq(:overlay)
+    r.event(key.of(:escape))
+    expect(r.state).to eq(:pane)
+    # Esc: NAV; Ctrl-] from NAV: back into the pane
+    r.event(key.of(:escape))
+    expect(r.state).to eq(:nav)
+    r.event(router_class::NAV_KEY)
+    expect(r.state).to eq(:pane)
+    r.event(router_class::NAV_KEY)
+    expect(r.state).to eq(:nav)
+    # A release outside a grab: nothing
+    host.clear
+    r.mode = :pane
+    host.clear
+    r.event(key.of('x', type: :release))
+    expect(host.log).to eq([])
   end
 end
