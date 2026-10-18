@@ -8,8 +8,9 @@ module MB
       # last note-off.  Used by the note nodes of Notes (gate, number, ...).
       class NoteStack
         # One held key: its +note+ (the event's note value), the +velocity+
-        # of its latest note-on, and how many note-ons are unmatched.
-        Entry = Struct.new(:key, :note, :velocity, :count)
+        # and +pitch+ mark (MIDI::Event#pitch, nil for none) of its latest
+        # note-on, and how many note-ons are unmatched.
+        Entry = Struct.new(:key, :note, :velocity, :count, :pitch)
 
         def initialize
           @entries = []
@@ -19,9 +20,10 @@ module MB
         def note_on(event)
           key = [event.channel, event.note]
           idx = @entries.index { |e| e.key == key }
-          entry = idx ? @entries.delete_at(idx) : Entry.new(key, event.note, event.velocity, 0)
+          entry = idx ? @entries.delete_at(idx) : Entry.new(key, event.note, event.velocity, 0, nil)
           entry.count += 1
           entry.velocity = event.velocity
+          entry.pitch = event.pitch
           @entries.push(entry)
           entry
         end

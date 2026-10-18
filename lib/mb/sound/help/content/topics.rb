@@ -831,9 +831,10 @@ module MB
         knob(:style).choose(:mash, :play, :chord)`.  The virtual keyboard's
         own scale lock (`ui.keyboard.scale = ...`) is :mash unless
         `ui.keyboard.scale_mode` says otherwise.  Cents scales give whole
-        notes with pitch marks (`micro: :mark`, sent as MIDI bends; voices
-        play them with `v.hz.transpose(v.pitch_mark)`); `micro: :note`
-        gives fractional notes that `v.hz` plays directly.
+        notes with pitch marks (`micro: :mark`, sent as MIDI bends); `v.hz`
+        and samplers play the marks, so they sound in tune everywhere
+        (`v.freq(marks: false)` leaves them out); `micro: :note` gives
+        fractional note numbers instead (no MIDI bytes).
       TEXT
       commands :lock, :key
       dsl :degrees, :snap

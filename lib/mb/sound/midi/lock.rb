@@ -33,9 +33,9 @@ module MB
         # How Degrees and Chord give notes between semitones (cents
         # scales): :mark (the default, maintainer 2026-10-18: the nearest
         # whole note with a pitch mark for the rest: MIDI bytes as a bend
-        # before the note-on; samplers and `v.hz.transpose(v.pitch_mark)`
-        # play it) or :note (a fractional note number: internal synths play
-        # it exactly through `v.hz`, but it has no MIDI 1.0 bytes).
+        # before the note-on; `v.hz`, `v.freq`, and samplers play the mark)
+        # or :note (a fractional note number, the same pitch through `v.hz`,
+        # but with no MIDI 1.0 bytes).
         MICRO = [:note, :mark].freeze
 
         # Graph nodes (knobs, LFOs) read by params in +x+ (a Style or a Map)
