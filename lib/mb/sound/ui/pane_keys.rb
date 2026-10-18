@@ -25,9 +25,35 @@ module MB
       #
       # Pick keys NAV doesn't need (NAV's are listed by help :ui); a pane's
       # key shadows NAV's while the pane is focused.  Included in UI::Pane.
+      #
+      # A pane's own mode (ux-r4: the Router's :pane state) takes every key
+      # but Esc and Ctrl-]: `mode_keys` declares them (cursor keys, Enter,
+      # letters; NAV's keys don't apply there), NAV Enter on the focused
+      # pane enters the mode, Esc or Ctrl-] leave it, and the per-placement
+      # state has `state[:mode] == true` meanwhile (draw a cursor then).
+      # Keys of `keys` work in the mode too.  `jump 'a'` gives the kind a
+      # NAV jump letter (focus it and enter its mode, as Enter would; shown
+      # beside its number in NAV), which Keys.check_jumps keeps clear of
+      # NAV's and the Ctrl-W window keys.
+      #
+      #     class Matrix < Pane
+      #       jump 'a'
+      #       mode_keys do
+      #         group 'Clips'
+      #         on :up, :move, 0, -1, help: 'move the cursor', label: 'arrows'
+      #         on :enter, :launch, help: 'launch the clip at the cursor'
+      #       end
+      #       def key_move(state, dx, dy) = ...
+      #     end
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
+        end
+
+        # A pane's kind from its class (Panes::Meters => :meters), nil for
+        # nil or an anonymous class.
+        def self.kind_of(pane)
+          pane&.class&.name&.split('::')&.last&.downcase&.to_sym
         end
 
         module ClassMethods
@@ -43,26 +69,26 @@ module MB
             @keymap || (superclass.respond_to?(:keymap) ? superclass.keymap : nil)
           end
 
-          # Declares (or extends) the keys of the pane's own mode (NAV
-          # Enter on the focused pane; ux-r4-nav's Router :pane state):
-          # cursor keys, Enter, letters.  Esc is reserved (back to NAV).
-          # (The same declaration as ux-r4-nav's; at merge, nav's wins.)
+          # Declares (or extends) the kind's mode keymap: the keys of its
+          # own mode (NAV Enter enters it, Esc leaves).
           def mode_keys(&block)
             @mode_keymap ||= Input::Keymap.new(:"#{(name || 'pane').split('::').last.downcase}_mode")
             @mode_keymap.instance_exec(&block) if block
             @mode_keymap
           end
 
-          # The kind's mode keymap, or nil.
+          # The kind's mode keymap, or nil (inherited).
           def mode_keymap
             @mode_keymap || (superclass.respond_to?(:mode_keymap) ? superclass.mode_keymap : nil)
           end
 
-          # The NAV letter that jumps to this pane kind (with no argument:
-          # the letter, or nil).
+          # The kind's NAV jump letter (with an argument: declares it).
           def jump(letter = nil)
-            return @jump || (superclass.respond_to?(:jump) ? superclass.jump : nil) if letter.nil?
-            @jump = letter
+            if letter
+              raise ArgumentError, "A jump key is one character (got #{letter.inspect})" unless letter.is_a?(String) && letter.length == 1
+              @jump = letter
+            end
+            @jump || (superclass.respond_to?(:jump) ? superclass.jump : nil)
           end
         end
 
@@ -75,11 +101,15 @@ module MB
           def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
         end
 
-        # The pane's mode keymap (its kind's), or nil.
-        def mode_keymap = self.class.mode_keymap
-
         # The pane's keymap (its kind's), or nil.
         def keymap = self.class.keymap
+
+        # The pane's mode keymap (its kind's), or nil: with one, NAV Enter
+        # enters the pane's own mode.
+        def mode_keymap = self.class.mode_keymap
+
+        # The pane's NAV jump letter, or nil.
+        def jump = self.class.jump
 
         # Runs the key_<action> method for a keymap binding.  Returns its
         # result (a String flashes), or a note if the pane has none.

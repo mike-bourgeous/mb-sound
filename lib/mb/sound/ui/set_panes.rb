@@ -62,6 +62,9 @@ module MB
             doc 'Enter', 'cursor keys, launch, tweak (Esc back to NAV)'
           end
 
+          # (UI::PaneRates: a list at its own rate, 10/s for the countdowns)
+          def priority = :list
+
           def initialize = super(:clips, rate: 10, height: 8, width: 60, title: 'clips', min_height: 3,
                                          description: 'the clip matrix: tracks x scenes and slots, playing and queued with countdowns; launch and tweak from its keys')
 
@@ -257,6 +260,8 @@ module MB
         class ClipDetail < Pane
           MARKS = { accent: '!', slide: '~', flam: 'f' }.freeze
 
+          def priority = :list
+
           def initialize = super(:clip, rate: 4, height: 10, width: 50, title: 'clip', min_height: 3,
                                         description: 'the clip under the matrix cursor: length, loop, its Ruby, and a piano roll of its notes')
 
@@ -354,6 +359,8 @@ module MB
             group 'Racks'
             doc 'Enter', 'pick and turn macros (Esc back to NAV)'
           end
+
+          def priority = :list
 
           def initialize = super(:racks, rate: 10, height: 10, width: 44, title: 'racks', min_height: 3,
                                          description: 'rack instances: kind, typed ports, latency, macros as knobs to turn')

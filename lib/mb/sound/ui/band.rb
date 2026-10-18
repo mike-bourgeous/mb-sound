@@ -182,8 +182,9 @@ module MB
           drawn = 0
           bytes = +''
           paint_chrome if full
+          draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, now, full, snap)
           @placed.each do |p|
-            next unless full || p.drawn_at.nil? || now - p.drawn_at >= 1.0 / p.pane.rate - 0.001
+            next unless draw.include?(p)
 
             c = thread_cpu
             r = p.state[:inner]
@@ -203,6 +204,7 @@ module MB
               pane_failed(p, e)
             end
             p.drawn_at = now
+            @rates.drew(p.pane.name, now)
             d = thread_cpu - c
             (parts ||= {})[p.pane.name] = d if d > SLOW_PART
             drawn += 1
@@ -345,7 +347,7 @@ module MB
           @placed.map do |p|
             f = @chrome.frames[p.pane.name]
             PaneOnScreen.new(number: nil, name: p.pane.name, kind: p.pane.class.name.split('::').last.downcase.to_sym, title: p.pane.title,
-                             rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: p.pane.rate,
+                             rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: @rates.rate(PaneRates.priority_of(p.pane.name, p.pane), p.pane.rate),
                              look: p.pane.bytes? ? (p.state[:look] || @look) : nil, title_at: f&.at)
           end
         end

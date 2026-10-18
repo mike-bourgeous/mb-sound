@@ -19,6 +19,9 @@ module MB
 
           jump 'b'
 
+          # (UI::PaneRates: meters first, at the target rate)
+          def priority = :meter
+
           def initialize = super(:buses, rate: 15, height: 8, width: 40, title: 'buses', min_height: 2, needs: [:buses],
                                           description: 'buses (named chains): input and output meters, what feeds each (to: whole, send: a level), the routing tree')
 

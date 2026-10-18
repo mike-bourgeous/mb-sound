@@ -26,6 +26,11 @@ module MB
         # - :grab (a pane that takes the keyboard, like the virtual piano):
         #   every key event, releases and repeats included, goes to the
         #   host's #grab_key, except Ctrl-], F2, Ctrl-C, Ctrl-Z.
+        # - :pane (a focused pane's own mode, entered with Enter in NAV on a
+        #   pane whose kind declares mode keys, like the clip matrix's
+        #   cursor): keys go to the host's #pane_mode_key (the pane's mode
+        #   keys, then its NAV keys; unbound keys are refused, never NAV's);
+        #   Esc and Ctrl-] go to NAV, ? shows the keys.
         # - :overlay (the `?` key help over NAV): Esc, ?, and Ctrl-] close
         #   it; any other key closes it and acts as in the state below.
         # - :pending: a prefix key waits for the next key (Prefix: Ctrl-W
@@ -73,6 +78,7 @@ module MB
             on ']', :tab, 1, help: 'previous, next tab'
             on 'u', :undo, help: 'undo, redo'
             on ['r', :ctrl], :redo, help: 'undo, redo'
+            on 'p', :focus_last, help: 'the pane focused before (as Ctrl-W p)'
             group 'Console'
             on :page_up, :scroll, :page_up, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
             on :page_down, :scroll, :page_down, help: 'scroll the REPL (also Ctrl-B Ctrl-F)'
@@ -87,9 +93,8 @@ module MB
             on ':', :palette, help: 'run a line of Ruby (show :knobs, go :drop)'
             on ['l', :ctrl], :redraw, help: 'redraw'
             group 'Modes'
-            on 'i', :mode, :repl, help: 'back to the REPL'
+            on :enter, :enter, help: "into the pane: REPL, KEYS, or its own keys"
             on :escape, :mode, :repl, help: 'back to the REPL'
-            on :enter, :mode, :repl, help: 'back to the REPL'
           end
 
           # Window keys after the Ctrl-W prefix (vim's window commands).
@@ -123,7 +128,7 @@ module MB
           Prefix = Data.define(:name, :key, :keymap, :timeout, :on_timeout, :pass_through)
 
           # The states (see the class comment).
-          STATES = %i[repl play nav line grab overlay pending].freeze
+          STATES = %i[repl play nav line grab pane overlay pending].freeze
 
           # What the Router tells apart in an event (#classify).
           EVENTS = %i[nav_key keys_key interrupt suspend prefix global key release paste tick other].freeze
@@ -192,6 +197,18 @@ module MB
             [:grab, :paste] => [:refuse, 'refused: the keyboard plays keys, not text'],
             [:grab, :tick] => [:ignore, 'nothing waits (the grab keeps its own time)'],
             [:grab, :other] => [:act_event, 'mouse, focus (focus out: notes off), replies'],
+            # pane (a focused pane's own keys, entered with NAV Enter)
+            [:pane, :nav_key] => [:enter_nav, 'to NAV (Ctrl-] again: back into the pane)'],
+            [:pane, :keys_key] => [:act_keys, 'to KEYS'],
+            [:pane, :interrupt] => [:act_interrupt, 'interrupt the REPL'],
+            [:pane, :suspend] => [:act_hide, 'hide the tiles'],
+            [:pane, :prefix] => [:refuse, 'no prefixes in a pane (Esc: NAV, where Ctrl-W works)'],
+            [:pane, :global] => [:act_global, 'the global binding'],
+            [:pane, :key] => [:pane_key, "the pane's keys (Esc: NAV; ? lists them; others refused)"],
+            [:pane, :release] => [:ignore, 'ignored (only a grab reads releases)'],
+            [:pane, :paste] => [:refuse, 'refused: a pane takes keys, not text (Esc, then i: the REPL)'],
+            [:pane, :tick] => [:ignore, 'nothing waits'],
+            [:pane, :other] => [:act_event, 'mouse, focus, replies to the host'],
             # overlay (the ? key help)
             [:overlay, :nav_key] => [:overlay_to_nav, 'close it, in NAV'],
             [:overlay, :keys_key] => [:overlay_then, 'close it, then F2 as below it'],
@@ -255,8 +272,9 @@ module MB
 
           # +host+ responds to #repl_key(Key), #repl_paste(String),
           # #act(Action), #line_done(kind, text or nil), #mode_changed(mode),
-          # #grab_key(Key) (for :grab), #play_key(Key) (without a console),
-          # and optionally #pane_keymap (the focused pane's Keymap, or nil).
+            # #grab_key(Key) (for :grab), #play_key(Key) (without a console),
+          # #pane_mode_key(Key) (for :pane: true if the pane took it), and
+          # optionally #pane_keymap (the focused pane's Keymap, or nil).
           # +console+ false: no REPL (the base state is :play).
           def initialize(host, nav: NAV, nav_esc: nil, console: true, window_prefix: true, repl_keys: nil)
             @host = host
@@ -434,7 +452,7 @@ module MB
           end
 
           # The state +s+ falls back to (the base for anything not grab).
-          def base_of(s) = s == :grab ? :grab : s == :line ? @line_return : %i[nav overlay pending].include?(s) ? @base : s
+          def base_of(s) = s == :grab || s == :pane ? s : s == :line ? @line_return : %i[nav overlay pending].include?(s) ? @base : s
 
           def drop_line
             return unless @line
@@ -498,6 +516,15 @@ module MB
 
           def repl_paste(e, *) = @host.repl_paste(e.text)
           def grab_key(e, *) = @host.grab_key(e)
+
+          # A key in a pane's own mode: Esc to NAV, else the pane (#pane_mode_key
+          # true when it took the key), else ? the overlay, else refused.
+          def pane_key(e, now, event)
+            return go(:nav) if e.key == :escape && e.mods.empty?
+            return if @host.pane_mode_key(e)
+            return go(:overlay) if e.key == '?'
+            @host.act(Action.of(:refused, e.to_s, 'not a key of this pane (Esc: NAV, ? lists its keys)'))
+          end
 
           def nav_key(e, *)
             pane = @host.respond_to?(:pane_keymap) ? @host.pane_keymap : nil
