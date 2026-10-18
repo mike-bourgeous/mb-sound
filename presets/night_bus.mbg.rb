@@ -3,8 +3,8 @@
 graph 4,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-17T20:13:34Z",
-  mb_sound: "0.12.0.usegit (245a00a0)",
+  saved: "2026-10-18T00:22:07Z",
+  mb_sound: "0.12.0.usegit (51750987)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, 700.0, range: 200.0..6000.0, curve: :exp, unit: "Hz"
@@ -37,7 +37,7 @@ kit = grid(16, kick: "................", clap: "....X.......X...", hat: "..x...x
 kit_cut = Sequence::Kit.new({ kick: kit[:kick], clap: kit[:clap], hat: kit[:hat].swing(0.54), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.54), ride: kit[:ride].swing(0.54), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).nofill(:clap, :open_hat, name: :turn).fill(:turn, clap: grid(16, "....X...x.x.xXXX", value: 39)).fill(:toms, low_tom: grid(16, "..........x..x.x", value: 45)).loop(align: :launch).named(:kit_cut)
 kit = grid(16, kick: "X...x...X...x...", clap: "................", hat: "..x...x...x...x.", open_hat: "................", shaker: "................", ride: "................", crash: "................", low_tom: "................")
 kit_outro = Sequence::Kit.new({ kick: kit[:kick], clap: kit[:clap], hat: kit[:hat].swing(0.54), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.54), ride: kit[:ride].swing(0.54), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).nofill(:clap, :open_hat, name: :turn).fill(:turn, clap: grid(16, "....X...x.x.xXXX", value: 39)).fill(:toms, low_tom: grid(16, "..........x..x.x", value: 45)).loop(align: :launch).named(:kit_outro)
-master { |mix|
+master(:streaming, lufs: :apple_music) { |mix|
   mix.filter(:highpass, cutoff: air, quality: 0.8).softclip(0.5, 0.97)
 }
 track(:drums) { |kit|
