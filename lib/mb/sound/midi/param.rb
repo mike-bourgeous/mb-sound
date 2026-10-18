@@ -50,7 +50,8 @@ module MB
 
         # True if +x+ moves (a param, or something #wrap makes one of).
         def self.param?(x)
-          x.is_a?(Base) || x.is_a?(Sequence::Clip) || (x.is_a?(GraphNode) && !x.is_a?(GraphNode::Constant)) || x.is_a?(GraphNode::Knob::Reader)
+          x.is_a?(Base) || x.is_a?(Sequence::Clip) || x.is_a?(GraphNode::Knob::Reader) ||
+            (x.is_a?(GraphNode) && !x.is_a?(GraphNode::Constant) && !x.is_a?(Pitch)) # (Pitches and Notes are values)
         end
 
         # Returns +x+ ready for #value_at: params as they are, clips and

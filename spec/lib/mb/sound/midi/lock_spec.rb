@@ -225,4 +225,53 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
       expect(MB::Sound::Session.with_context(session: session) { MB::Sound.key.to_s }).to eq('D modes(by: knob(:dark))')
     end
   end
+
+  describe 'state machines (random walks with invariants)' do
+    it 'Choice: every (choice, position) pair moves only out of the zone plus the margin' do
+      n = 4
+      h = MB::Sound::MIDI::Param::Choice::HYSTERESIS
+      # The transition table: from choice i, position x gives i while x is
+      # within zone i widened by the margin, else x's own zone
+      table = ->(i, x) {
+        raw = (x * n).floor.clamp(0, n - 1)
+        x >= (i - h) / n && x < (i + 1 + h) / n ? i : raw
+      }
+      c = MB::Sound::MIDI::Param::Choice.new(0.5, (0...n).to_a)
+      rng = Random.new(5)
+      last = nil
+      2000.times do
+        x = rng.rand < 0.5 ? rng.rand : ((rng.rand(n + 1)) + (rng.rand - 0.5) * 0.2) / n # (near borders half the time)
+        x = x.clamp(0.0, 1.0)
+        got = c.index_at(x)
+        expect(got).to eq(last.nil? ? (x * n).floor.clamp(0, n - 1) : table.(last, x))
+        last = got
+      end
+    end
+
+    it 'Live: balanced output through random styles, keys, and notes, note-offs ending what sounded' do
+      live = described_class::Live.new(described_class::Style.new(:play))
+      rng = Random.new(7)
+      down = {}
+      sounding = Hash.new(0)
+      styles = [:mash, :play, :along, :chord]
+      600.times do |i|
+        pos = i / 16r
+        case rng.rand(10)
+        when 0 then live.style = described_class::Style.new(styles.sample(random: rng))
+        when 1 then transport.key_change(MB::Sound::MusicalKey.new(root: rng.rand(12), mode: [:major, :dorian, :minor_pentatonic, :blues].sample(random: rng)), at: pos)
+        else
+          k = 48 + rng.rand(24)
+          e = down[k] ? ev.note_off(k, time: pos) : ev.note_on(k, time: pos)
+          down[k] ? down.delete(k) : (down[k] = true)
+          live.process(e, pos, transport: transport).each do |o|
+            o.note_on? ? sounding[o.note] += 1 : sounding[o.note] -= 1 if o.note?
+            expect(sounding[o.note]).to be >= 0
+          end
+        end
+      end
+      down.keys.each { |k| live.process(ev.note_off(k, time: 100r), 100r, transport: transport).each { |o| sounding[o.note] -= 1 } }
+      expect(sounding.values.uniq - [0]).to eq([])
+      expect(live.holding?).to eq(false)
+    end
+  end
 end
