@@ -329,7 +329,7 @@ How the maintainer likes agentic work to go (decisions, questions, honesty, API 
 
 ## Source Control
 
-- Use worktrees (and branches) for feature development; new worktrees go in `.claude/worktrees/` and need `bundle exec rake compile` before specs run
+- Use worktrees (and branches) for feature development; new worktrees go on the container's local disk at `/claude/worktrees/<branch>` (maintainer, 2026-10-18; every container from `dock.sh`: `/claude` is the per-machine `LOCAL_CLAUDE` directory, outlasting the container and much faster than `/app` over sshfs, where Ruby startup took ~5 s), created with `git -C /app worktree add --lock --reason "<machine>: <branch>" /claude/worktrees/<branch> -b <branch> master-ai`, and need `bundle exec rake compile` before specs run.  Their git metadata stays in the shared `/app/.git`, so the other machine sees each worktree's path as missing: never run `git worktree prune` (the `--lock` protects the other machine's worktrees from it); remove your own with `git worktree remove`.  Older worktrees under `.claude/worktrees/` stay where they are
 - Commit progress and experimentation incrementally, as step-by-step commits with detailed messages for easy review
 - Use non-fast-forward merge commits when features are complete
 - The trunk branch is `master-ai` (upstream GitHub trunk is `master`; the old unconnected local history is tagged `local-master-pre-reconcile`)
