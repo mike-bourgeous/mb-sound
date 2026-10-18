@@ -89,7 +89,7 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     @term.type('1') # transport is pane 1 (reading order); back to the REPL with h/l
     @tiles.act(MB::Sound::UI::Input::Action.of(:focus_index, @tiles.tiler.numbered.index(:repl) + 1))
     before = repl_rect.w
-    @term.write("\e[C\e[C\e[1;2C") # right, right, shift-right: 7 cells
+    @term.write("\e[1;2C\e[1;2C\e[1;6C") # shift-right, shift-right, ctrl-shift-right: 7 cells
     @term.settle
     expect(repl_rect.w).to eq(before + 7)
     expect(@tiles.host.size[1]).to eq(before + 7)

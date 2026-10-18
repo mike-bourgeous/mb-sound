@@ -145,10 +145,10 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     @term.type('i')
     expect(wait_mode(@tiles, :repl)).to eq(true)
     expect(@tiles.tiler.focus).to eq(:repl)
-    # K: the keyboard, put in and played
+    # k: the keyboard, put in and played
     @term.write("\x1d")
     expect(wait_mode(@tiles, :nav)).to eq(true)
-    @term.type('K')
+    @term.type('k')
     expect(wait_mode(@tiles, :grab)).to eq(true)
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     @tiles.keys(false)
@@ -168,7 +168,7 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     steps = {
       nav: "\x1d", enter: "\r", esc: "\e", a: 'a', t: 't', i: 'i', down: "\e[B", k: 'k', tab: "\t", q: 'q', question: '?',
       digit: -> { rng.rand(1..7).to_s }, focus: -> { @tiles.focus(:tracks); nil }, enter_ruby: -> { @tiles.enter(:grid); nil },
-      ctrl_w_l: "\x17l", f2: "\eOQ",
+      ctrl_w_right: "\x17\e[C", ctrl_w_w: "\x17\x17", ctrl_w_a: "\x17a", f2: "\eOQ",
     }
     # (letters reach the REPL in REPL mode and Enter runs them: only ones
     # that are harmless as Ruby; `j` is a deprecated Kernel method)

@@ -972,9 +972,12 @@ module MB
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback
         of its own.  Ctrl-] is NAV mode (`?` there lists its keys): numbers
-        and h j k l pick a pane, Enter goes into it (the REPL, KEYS on the
+        and arrows pick a pane, Enter goes into it (the REPL, KEYS on the
         keyboard, a pane's own keys until Esc), and a pane's letter beside
-        its number jumps straight in (i the REPL, K the keyboard).  F2 or
+        its number jumps straight in (i the REPL, k the keyboard, a the
+        clips).  Ctrl-W is NAV for one key: Ctrl-W z zooms and comes back,
+        Ctrl-W a goes into the clips, Ctrl-W Ctrl-W swaps between the last
+        two panes, Ctrl-W Ctrl-] stays in NAV.  F2 or
         `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
         on (`fg` brings them back, `jobs` lists what runs).
 
