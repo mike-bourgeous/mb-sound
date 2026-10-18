@@ -597,6 +597,7 @@ module MB
         session = Session.existing if session.nil?
         if session
           before = session.knobs
+          session.adopt_clocks(graph)
           joined = session.adopt_knobs(graph)
           attach_knob_midi(session, joined)
           joined.each do |n, _k|

@@ -6,19 +6,29 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks) do
+                         :matrix, :racks, :clocks) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
-        # UI round 4: +matrix+ a MatrixInfo (or nil), +racks+ Rack::RackInfos)
+        # UI round 4: +matrix+ a MatrixInfo (or nil), +racks+ Rack::RackInfos;
+        # time-automation: +clocks+ ClockInfos)
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
-                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze)
+                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze)
           super
         end
 
         def self.empty
           @empty ||= new(tracks: [].freeze, scenes: [].freeze, scene: nil, queued: [].freeze, recording: [].freeze, armed: [].freeze, form: nil, knob_specs: {}.freeze)
         end
+      end
+
+      # A Session clock (time-automation): +name+, +what+ in words ("31.1 s
+      # period"), its +unit+ (:cycles or :whole_notes), and where it is
+      # when polled: +count+ (whole cycles or bars from the start, from 1)
+      # and +phase+ (0...1 of the cycle or bar).
+      ClockInfo = Data.define(:name, :what, :unit, :count, :phase) do
+        # "tide 31.1 s period 4+0.42"
+        def to_s = "#{name} #{what} #{count}+#{format('%.2f', phase)}"
       end
 
       # A bus (Session#bus_info): +name+, where it goes (+to+), its chain's
@@ -193,6 +203,7 @@ module MB
         def midi = slow.midi
         def matrix = slow.matrix
         def racks = slow.racks
+        def clocks = slow.clocks
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,

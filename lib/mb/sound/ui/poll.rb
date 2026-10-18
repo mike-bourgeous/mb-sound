@@ -95,12 +95,17 @@ module MB
             clips: clip_infos(arr),
             midi: midi_info(s, knobs),
             matrix: matrix_info(arr),
-            racks: rack_infos(s)
+            racks: rack_infos(s),
+            clocks: clock_infos(s)
           )
           [slow, knobs.to_a.freeze]
         end
 
         private
+
+        # The clocks (Session#clocks: its own mutex; positions read without
+        # the render lock, extrapolated past the last rendered cell).
+        def clock_infos(s) = UI.clock_infos(s)
 
         # The buses (Session#bus_info: its own mutex).
         def bus_infos(s)

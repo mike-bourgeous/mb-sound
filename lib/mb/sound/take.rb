@@ -381,6 +381,10 @@ module MB
           replace_declick: s.replace_declick,
           rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),
           time: Time.now.strftime('%Y-%m-%d %H:%M:%S'),
+        }.tap { |h|
+          # Clocks count session run frames (see Session::Clocks): a take
+          # starting after the timeline ran replays from the same count
+          h.merge!(run_frame: s.run_frame, odometer: s.odometer) if s.run_frame > 0
         }
       end
 

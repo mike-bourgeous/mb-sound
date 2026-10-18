@@ -13,7 +13,7 @@ module MB
         # Header calls, in order: graph first, then inputs (typed since
         # format 4: `inputs sig: :audio, side: :audio`), outputs (format 4,
         # optional: `outputs :audio`), params, knobs, and a bundle's assets.
-        HEADER = %i[graph inputs outputs param knob asset].freeze
+        HEADER = %i[graph inputs outputs param knob clock asset].freeze
 
         # The rack kinds (MB::Sound::Rack#kind) a rack document's `kind:`
         # takes.
@@ -35,6 +35,13 @@ module MB
         META_KEYS = %i[name kind saved mb_sound from options].freeze
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
+
+        # Clocks the graph's clips play on (`clock :tide, 31.1.seconds`,
+        # time-automation): { name => { base:, speed: } }, defined in the
+        # Session that plays the graph (Session::Clocks#adopt_clocks).
+        def clocks
+          @clocks ||= {}
+        end
 
         # Port types of the inputs ({ sig: :audio, side: :audio }; format 4
         # writes them, older documents' `inputs :midi` are :notes, others
@@ -229,6 +236,17 @@ module MB
           graph_knobs.each do |name, k|
             next unless used.include?(name.to_s)
             header.concat(knob_lines(writer, k))
+          end
+          writer.clocks_used.each do |name|
+            c = MB::Sound::Session.existing&.clock_named(name)
+            spec = @doc&.clocks&.[](name)
+            if c
+              header << "clock #{[name.inspect, *c.line_args].join(', ')}"
+            elsif spec
+              header << "clock #{[name.inspect, MB::Sound::Clock.base_ruby(spec[:base]), *(spec[:speed].nil? || spec[:speed] == 1 ? [] : ["speed: #{spec[:speed].inspect}"])].join(', ')}"
+            else
+              raise DumpError.new("can't save this graph yet: its clips play on clock #{name.inspect}, which isn't defined (clock #{name.inspect}, 19.7.seconds)", problems: ["clock #{name.inspect} isn't defined"], code: body)
+            end
           end
           (@assets&.entries || []).each do |e|
             header << "asset #{e.name.inspect}#{", sha256: #{e.sha256.inspect}" if e.sha256}"

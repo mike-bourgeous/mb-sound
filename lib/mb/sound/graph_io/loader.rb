@@ -343,6 +343,8 @@ module MB
           @inputs = {}
           Session.with_context(session: @session) do
             bind_params
+            # The header's clocks (after its knobs, which speeds may name)
+            @document.clocks.each { |n, spec| @session.define_clock(n, spec[:base], speed: spec[:speed] || 1) }
             fresh_limits!
             scope = Scope.new
             body.each do |s|
@@ -539,6 +541,22 @@ module MB
                 raise error(node, "knob #{name}: #{e.message}")
               end
               @document.params[name] = kwargs.merge(value: value, knob: true)
+            when :clock
+              name, base = args
+              raise error(node, 'clock needs a name and a tempo, ratio, or period (clock :tide, 31.1.seconds)') unless name.is_a?(Symbol) && args.length == 2
+              unknown = kwargs.keys - [:speed]
+              raise error(node, "unknown clock option#{'s' if unknown.length > 1} #{unknown.join(', ')} (speed)") unless unknown.empty?
+              raise error(node, "clock #{name} is declared twice") if @document.clocks.key?(name)
+              speed = kwargs[:speed]
+              unless speed.nil? || speed.is_a?(Symbol) || (speed.is_a?(Numeric) && speed.real? && speed >= 0)
+                raise error(node, "clock #{name}: speed: is a number or a knob's name (got #{speed.inspect})")
+              end
+              begin
+                MB::Sound::Clock.new(base)
+              rescue ArgumentError => e
+                raise error(node, "clock #{name}: #{e.message}")
+              end
+              @document.clocks[name] = { base: base, speed: speed }
             when :asset
               name = args[0]
               unless args.length == 1 && name.is_a?(String) && kwargs.keys.all? { |k| k == :sha256 }

@@ -72,6 +72,32 @@ module MB
           @flam_queue = nil
           @flam_window = nil
           @fills_at = nil
+          @clock = nil        # (clocked clips; see #clock_start)
+          @clock_ctx = nil
+          @clock_anchor = nil
+          @clock_origin = nil
+          @clock_scale = nil
+          @clock_graph = nil
+        end
+
+        # Puts the clip playing now on +clock+ unless it has a clock of its own (see
+        # Sequence::Clocked.apply, PlaybackMethods#bg's +clock:+).
+        def reclock(clock)
+          @clip = @clip.clocked(clock) unless @clip.clocking
+          self
+        end
+
+        # Resyncs a clocked clip to its clock at timeline time +time+ (the
+        # stream's next read starts there; see Session#render_player).
+        def clock_resync(time)
+          clock_start(time + @ahead, position, fresh: false) if @clock
+          self
+        end
+
+        # The Clock the playing clip follows (see Clip#clocked), or nil
+        # for clips on the session's timeline.
+        def clock
+          @clock
         end
 
         # How far ahead of the timeline this source plays, in whole notes
@@ -188,7 +214,7 @@ module MB
         # current tempo), or nil for looping clips.
         def music_end
           return nil if @clip.looping?
-          position + (@clip.length - @clip_position) / transport.whole_notes_per_second
+          position + (@clip.length - @clip_position) / clip_wnps
         end
 
         def to_s
@@ -250,8 +276,16 @@ module MB
         def timeline_start(time, origin)
           # A new launch (rather than a seek of the same graph) forgets the
           # anchor of an earlier swap
-          @swap_anchor = nil if @graph_origin != origin
+          fresh = @graph_origin != origin
+          @swap_anchor = nil if fresh
           @graph_origin = origin
+
+          if @clip.clocking
+            clock_start(time, position, launch: @swap_anchor || timeline_launch || origin, origin: origin, fresh: fresh || @clock_graph.nil?)
+            return jumped
+          end
+          @clock = nil
+          @clock_anchor = nil
 
           @origin = clip_origin(@clip, @swap_anchor || timeline_launch || origin, origin)
           position = time - @origin
@@ -288,34 +322,69 @@ module MB
         end
 
         def read_events(from, to)
-          wnps = transport.whole_notes_per_second
+          clock_resume(from) if @clip.clocking && @clock_anchor.nil?
           swap = @pending_swap
 
           if swap
             clip, time = swap
-            start = @clip_position + @origin
-            time ||= start
-            stop = start + (to - from) * wnps
-
-            if time < stop
-              split = time > start ? from + (time - start) / wnps : from
-              out = split > from ? edges(from, split, wnps) : []
+            split, swap_time = swap_point(from, to, time)
+            if split
+              out = split > from ? read_span(from, split) : []
               @pending_swap = nil
-              @clip = clip
-              swap_time = MB::M.max(time, start)
-              @swap_anchor = clip.launch_aligned? ? swap_time : nil
-              @origin = clip_origin(clip, swap_time, swap_time)
-              @clip_position = swap_time - @origin
+              apply_swap(clip, swap_time, split)
               @generation = generation + 1
               @chase = chase_at(split)
               out << Jump.new(split)
               @early = true
               reset_flams(split)
-              return out.concat(edges(split, to, wnps))
+              return out.concat(read_span(split, to))
             end
           end
 
-          edges(from, to, wnps)
+          read_span(from, to)
+        end
+
+        # The edges for stream times [from, to): on the clip's clock, or at
+        # the transport's tempo.
+        def read_span(from, to)
+          @clock ? clock_edges(from, to) : edges(from, to, transport.whole_notes_per_second)
+        end
+
+        # Where a pending swap for timeline time +time+ (nil: now) lands in
+        # the read [from, to): [stream time, timeline time], or nil if
+        # after it.
+        def swap_point(from, to, time)
+          if @clock
+            start = clock_timeline(from)
+            time ||= start
+            split = time > start ? clock_stream_of_timeline(time) : from
+            return nil unless split < to
+            [split, MB::M.max(time, start)]
+          else
+            wnps = transport.whole_notes_per_second
+            start = @clip_position + @origin
+            time ||= start
+            stop = start + (to - from) * wnps
+            return nil unless time < stop
+            split = time > start ? from + (time - start) / wnps : from
+            [split, MB::M.max(time, start)]
+          end
+        end
+
+        # Switches to +clip+ at timeline time +swap_time+ (stream time
+        # +split+), on its clock if it has one.
+        def apply_swap(clip, swap_time, split)
+          @clip = clip
+          @swap_anchor = clip.launch_aligned? ? swap_time : nil
+          if clip.clocking
+            clock_rf = @clock ? clock_rf_of(split) : nil
+            clock_start(swap_time, split, launch_rf: clock_rf, fresh: true, rf: clock_rf)
+          else
+            @clock = nil
+            @clock_anchor = nil
+            @origin = clip_origin(clip, swap_time, swap_time)
+            @clip_position = swap_time - @origin
+          end
         end
 
         # Records a content jump (see Source#jumped); the next read plays
@@ -367,6 +436,131 @@ module MB
           due.map(&:first)
         end
 
+        # Whole notes of the clip per stream second now (the clock's or
+        # the transport's).
+        def clip_wnps
+          return transport.whole_notes_per_second unless @clock && @clock_anchor
+          rf = @clock_anchor[1]
+          s = @clock.step(rf, @clock_ctx) * @clock_scale * @clock_ctx.clock_rate
+          s > 0 ? s : transport.whole_notes_per_second
+        end
+
+        # The clock context: the Session rendering this source, else a
+        # Clock::Free counting from the graph's start.
+        def clock_context
+          span = Session.span
+          span ? span.session : (@clock_ctx.is_a?(Clock::Free) ? @clock_ctx : Clock::Free.new(transport: transport))
+        end
+
+        # The Clock for the playing clip (named clocks from the context's
+        # Session).
+        def resolve_clock(ctx)
+          c = @clip.clocking
+          return c if c.is_a?(Clock)
+          if ctx.is_a?(Session)
+            ctx.clock!(c)
+          else
+            s = Session.existing or raise ArgumentError, "The clip plays on clock #{c.inspect}, which needs a Session (define it with `clock #{c.inspect}, ...`)"
+            s.clock!(c)
+          end
+        end
+
+        # Starts (or resyncs) the playing clip on its clock: timeline time
+        # +time+ is stream time +t+.  A fresh start (a launch, a swap)
+        # fixes where clip position 0 falls on the clock: nowhere special
+        # for looping clips following session time (clip position = clock
+        # position), the launch for launch-aligned loops, the graph's first
+        # sample for one-shot clips; a seek keeps it.
+        def clock_start(time, t, launch: nil, origin: nil, fresh: true, launch_rf: nil, rf: nil)
+          ctx = clock_context
+          c = resolve_clock(ctx)
+          if ctx.is_a?(Session)
+            rf ||= ctx.run_frame_of(time)
+          else
+            rf ||= @clock_anchor ? clock_rf_of(t) : 0r
+          end
+          @clock_ctx = ctx
+          @clock = c
+          @clock_anchor = [t.to_r, rf.to_r, time.to_r].freeze
+          @clock_scale = c.unit == :cycles ? @clip.length : 1r
+          raise ArgumentError, 'A clip on a period clock needs a length' if @clock_scale <= 0
+
+          if fresh || @clock_origin.nil?
+            @clock_graph = @graph_origin
+            @clock_origin =
+              if @clip.launch_aligned? || !@clip.looping?
+                at = launch_rf || (ctx.is_a?(Session) && launch ? ctx.run_frame_of(launch) : rf)
+                at = rf if at > rf && !@clip.looping? # (a launch a fraction of a sample later)
+                c.position(at, ctx) * @clock_scale
+              else
+                0r
+              end
+          end
+
+          @clip_position = c.position(rf, ctx) * @clock_scale - @clock_origin
+          @clip_position %= @clip.length if @clip.looping? && @clip_position < 0 && @clip.length > 0
+        end
+
+        # A clocked clip read before any #start_at (outside a Session):
+        # its clock counts from this read.
+        def clock_resume(from)
+          span = Session.span
+          span ? clock_start(span.pos, from, rf: span.run) : clock_start(0r, from, rf: 0r)
+        end
+
+        # The run frame of stream time +t+.
+        def clock_rf_of(t)
+          a = @clock_anchor
+          a[1] + (t.to_r - a[0]) * @clock_ctx.clock_rate
+        end
+
+        # The stream time of run frame +rf+.
+        def clock_stream_of(rf)
+          a = @clock_anchor
+          a[0] + (rf - a[1]) / @clock_ctx.clock_rate
+        end
+
+        # The session timeline position at stream time +t+.
+        def clock_timeline(t)
+          span = Session.span
+          if span && span.session.equal?(@clock_ctx)
+            span.pos + (clock_rf_of(t) - span.run) * span.per_sample
+          else
+            @clock_anchor[2] + (t.to_r - @clock_anchor[0]) * transport.whole_notes_per_second
+          end
+        end
+
+        # The stream time of session timeline position +pos+ (in the span
+        # being rendered).
+        def clock_stream_of_timeline(pos)
+          span = Session.span
+          if span && span.session.equal?(@clock_ctx) && span.per_sample > 0
+            clock_stream_of(span.run + (pos.to_r - span.pos) / span.per_sample)
+          else
+            @clock_anchor[0] + (pos.to_r - @clock_anchor[2]) / transport.whole_notes_per_second
+          end
+        end
+
+        # Edges for stream times [from, to) on the clip's clock: each linear
+        # piece of the clock at its own tempo, the clip position set from the
+        # clock at each piece (exact Rationals, so the same at any buffer
+        # size).
+        def clock_edges(from, to)
+          ctx = @clock_ctx
+          rate = ctx.clock_rate
+          a = clock_rf_of(from)
+          b = clock_rf_of(to)
+          out = []
+          @clock.pieces(a, b, ctx).each do |r0, r1, pos0, step|
+            t0 = r0 == a ? from.to_r : clock_stream_of(r0)
+            t1 = r1 == b ? to.to_r : clock_stream_of(r1)
+            @clip_position = pos0 * @clock_scale - @clock_origin
+            @clip_position %= @clip.length if @clip.looping? && @clip_position < 0 && @clip.length > 0
+            out.concat(edges(t0, t1, step * @clock_scale * rate))
+          end
+          out
+        end
+
         # Converts the clip's edges for stream times [from, to) to Events and
         # advances the clip position.
         def edges(from, to, wnps)
@@ -376,7 +570,7 @@ module MB
           early = @early
           @early = false
 
-          fills = @fills_at ||= ->(pos) { transport.fills.names_at(pos + @origin) }
+          fills = @clock ? nil : (@fills_at ||= ->(pos) { transport.fills.names_at(pos + @origin) })
 
           # Flams at or after @flam_start play early (see #play_flams_early)
           if @flam_lead && @flam_start.nil?
