@@ -15,13 +15,13 @@ RSpec.describe('bin/sound.rb', :aggregate_failures) do
     # 2026-10-12: since Ruby 3.3 the suggestions are only in
     # Exception#detailed_message, which the console's handler didn't print
     expect(output).to include("undefined method 'sqare'"), 'shows the error'
-    expect(output).to match(/Did you mean\?\s+square/), 'shows the suggestion'
+    expect(output).to match(/undefined method 'sqare' .*\(did you mean square[,?]/), 'shows the suggestion on the same line'
 
     # Console help (lib/mb/sound/help.rb): help reaches Ruby, not Pry's
     # help command (now pry-help), and pages print as text
     expect(output).to include('Knobs and snapshots  help :knobs'), 'shows a topic page'
     expect(output).not_to include('=> Knobs'), 'prints pages without inspect'
     expect(output).to include('you can'), 'shows now'
-    expect(output).to match(/Did you mean\?\s+knobs/), 'suggests topic names'
+    expect(output).to match(/\(did you mean knobs\?\)/), 'suggests topic names'
   end
 end

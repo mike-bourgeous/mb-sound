@@ -393,7 +393,7 @@ RSpec.describe(MB::Sound::RecordMethods) do
         expect(MB::Sound.players.keys).to eq([:'lead/live'])
 
         # Naming the monitor too: no hint
-        expect { MB::Sound.stop(:lead, :'lead/live', fade: 0) }.to output("No background player :lead is playing\n").to_stderr
+        expect { MB::Sound.stop(:lead, :'lead/live', fade: 0) }.to output("No background player :lead is playing (nothing is playing)\n").to_stderr
       end
     end
   end
