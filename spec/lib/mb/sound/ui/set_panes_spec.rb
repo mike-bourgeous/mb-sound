@@ -161,6 +161,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
     after do
       @poll&.close
       @session&.close
+      MB::Sound.rewind # the Session runs on the shared transport (spec/support/transport_guard.rb)
     end
 
     # A Snapshot of the session now (the feed's per-buffer data with Poll's
