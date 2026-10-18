@@ -26,6 +26,15 @@ module MB
           @midi_lock.synchronize { @midi_inputs.dup }
         end
 
+        # The notes held now on every MIDI input (frozen UI::HeldNotes; see
+        # MidiInput#held_notes), for the terminal UI's keyboard pane.
+        def held_notes
+          inputs = @midi_lock.synchronize { @midi_inputs.values }
+          return [].freeze if inputs.empty?
+          return inputs[0].held_notes if inputs.length == 1
+          inputs.flat_map(&:held_notes).freeze
+        end
+
         # Every MIDI event the Session's inputs read, oldest first: [input
         # name, epoch, pos, bytes] (see Take).
         def midi_log(from = 0)

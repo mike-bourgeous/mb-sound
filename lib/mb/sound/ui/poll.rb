@@ -24,6 +24,12 @@ module MB
         # Note names by pitch class (the MIDI pane).
         NOTE_NAMES = %w[C C# D D# E F F# G G# A A# B].freeze
 
+        # Journal kinds that change what a track plays (the clip matrix).
+        LANE_KINDS = [:bg, :resume, :restore, :swap, :stop, :capture, :forget].freeze
+
+        # Events kept per clip for the detail pane (ClipInfo#events).
+        CLIP_EVENTS = 512
+
         def initialize(session)
           @session = session
           # Queued changes and recordings, kept from the journal's new
@@ -34,6 +40,11 @@ module MB
           @midi_seen = nil
           @midi_events = []
           @ccs = {}
+          # The clip matrix: journal entries per subject that change what
+          # it plays ({ subject => { seq => Entry } }; the newest landed
+          # one and the queued ones are kept), and queued scene launches
+          @lanes = {}
+          @scene_launches = {}
           @lock = Mutex.new
           @subscription = session.journal.subscribe { |e| note(e) }
           session.journal.changes.each { |e| note(e, seen: false) }
@@ -82,7 +93,9 @@ module MB
             routes: (s.routes.freeze rescue {}.freeze),
             landed: landed,
             clips: clip_infos(arr),
-            midi: midi_info(s, knobs)
+            midi: midi_info(s, knobs),
+            matrix: matrix_info(arr),
+            racks: rack_infos(s)
           )
           [slow, knobs.to_a.freeze]
         end
@@ -91,9 +104,13 @@ module MB
 
         # The buses (Session#bus_info: its own mutex).
         def bus_infos(s)
+          routes = (s.routes rescue {})
           s.bus_info.map { |name, desc|
             to = desc[/\(to (\S+?)[,)]/, 1]&.to_sym || :master
-            BusInfo.new(name: name, to: to, description: desc.sub(/ \(to .*\z/, '').freeze, asleep: desc.include?(', asleep'), muted: desc.include?(', muted'))
+            sends = routes.select { |_, r| (r[:send] || {}).key?(name) }.keys.freeze
+            sources = routes.select { |_, r| r[:to] == name }.keys.freeze
+            BusInfo.new(name: name, to: to, description: desc.sub(/ \(to .*\z/, '').freeze, asleep: desc.include?(', asleep'), muted: desc.include?(', muted'),
+                        sends: sends, sources: sources)
           }.freeze
         rescue StandardError
           [].freeze
@@ -118,9 +135,10 @@ module MB
         def clip_like?(v) = v.respond_to?(:events) && v.respond_to?(:length) && !v.is_a?(Symbol)
 
         def clip_info(arr, clip)
-          len = clip.length.to_r
+          kit = clip.respond_to?(:rows)
+          len = kit ? (clip.rows.each_value.map { |c| c.length.to_r }.max || 0r) : clip.length.to_r
           bar = (@session.transport.bar_length rescue 1r).to_r
-          events = (clip.respond_to?(:first_cycle_events) ? clip.first_cycle_events : clip.events) rescue clip.events
+          events = kit ? clip.rows.each_value.flat_map(&:events) : ((clip.send(:first_cycle_events) rescue clip.events))
           cells = Array.new(PATTERN, ' ')
           if len > 0
             Array(events).each do |e|
@@ -131,8 +149,119 @@ module MB
               cells[a] = '█'
             end
           end
+          notes = note_infos(clip)
+          values = notes.filter_map(&:note)
+          ruby = begin
+            clip.respond_to?(:to_ruby) ? clip.to_ruby.freeze : nil
+          rescue StandardError
+            nil
+          end
           ClipInfo.new(name: arr.name_of(clip).freeze, kind: clip.class.name.split('::').last.downcase.to_sym,
-                       bars: bar > 0 ? (len / bar) : len, pattern: cells.join.freeze, used: [].freeze)
+                       bars: bar > 0 ? (len / bar) : len, pattern: cells.join.freeze, used: [].freeze,
+                       key: (clip.respond_to?(:named?) && clip.named? ? clip.name.to_s.freeze : nil),
+                       loop: clip.respond_to?(:looping?) ? clip.looping? : clip.rows.each_value.any?(&:looping?),
+                       length: len, events: notes, ruby: ruby, range: values.empty? ? nil : (values.min..values.max))
+        end
+
+        # A clip's (or kit's) first cycle as frozen NoteInfos (see
+        # ClipInfo), at most CLIP_EVENTS.
+        def note_infos(clip)
+          rows = clip.respond_to?(:rows) ? clip.rows : { nil => clip }
+          out = []
+          rows.each do |row, c|
+            evs = (c.send(:first_cycle_events) rescue c.events)
+            Array(evs).each do |e|
+              v = e.value
+              note = v.is_a?(Integer) ? v : (v.respond_to?(:number) ? v.number.round : (v.is_a?(Numeric) ? v.round : nil))
+              marks = []
+              marks << :accent if e.accented
+              marks << :slide if e.slid
+              marks << :flam if e.flam
+              marks << :fill if e.fill_mark
+              marks << :pitch if e.pitch
+              out << NoteInfo.new(start: e.start.to_r, length: e.length.to_r, note: note, velocity: e.velocity.to_f, row: row, marks: marks.freeze)
+              break if out.length >= CLIP_EVENTS
+            end
+          end
+          out.sort_by! { |n| [n.start, n.note || 0] }
+          out.freeze
+        rescue StandardError
+          [].freeze
+        end
+
+        # The clip matrix (see MatrixInfo): each track's slots, the slot
+        # playing (from the journal: the newest landed change that changed
+        # what it plays, and the clip the Arrangement launched with it),
+        # and launches waiting; each scene's cells.
+        def matrix_info(arr)
+          tracks = arr.tracks
+          return nil if tracks.empty?
+
+          lanes = @lock.synchronize { @lanes.transform_values(&:values) }
+          scene_launches = @lock.synchronize { @scene_launches.values }
+          all = arr.all_slots
+          lane_infos = tracks.map { |name, tr|
+            slots = all[name] || []
+            index = ->(clip) { clip && slots.index { |c| c.equal?(clip) } }
+            entries = (lanes[name] || []).sort_by(&:seq)
+            landed = entries.select(&:landed?).last
+            state = :stopped
+            playing = nil
+            if landed && ![:stop, :forget].include?(landed.kind)
+              state = :playing
+              clip = arr.launch_clip(landed.seq)
+              clip = tr.clip if clip.nil? || landed.kind == :capture || landed.kind == :restore
+              playing = index.(clip)
+            end
+            queued = entries.select(&:queued?).map { |e|
+              kind = [:stop, :forget].include?(e.kind) ? :stop : :launch
+              LaunchInfo.new(seq: e.seq, kind: kind, slot: kind == :stop ? nil : index.(arr.launch_clip(e.seq)), lands: e.lands.to_s.freeze, pos: e.lands&.pos)
+            }.freeze
+            infos = slots.each_with_index.map { |c, i|
+              info = (@clip_cache[c] ||= clip_info(arr, c))
+              info.key ? info : info.with(key: "#{name}##{i}".freeze)
+            }.freeze
+            LaneInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, state: state, playing: playing, queued: queued, slots: infos)
+          }.freeze
+
+          scene_infos = arr.scenes.map { |sname, sc|
+            values = sc.values || {}
+            cells = tracks.keys.to_h { |t|
+              v = values.key?(t) ? values[t] : (sc.others == :keep ? :keep : :stop)
+              cell = case v
+                     when :keep, :on, true then :keep
+                     when :off, :cut, :stop, false, nil then :stop
+                     else (all[t] || []).index { |c| c.equal?(v) } || :keep
+                     end
+              [t, cell]
+            }.freeze
+            q = scene_launches.select { |e| e.subject == sname && e.queued? }.max_by(&:seq)
+            SceneInfo.new(name: sname, cells: cells, current: arr.current_scene == sname,
+                          queued: q && LaunchInfo.new(seq: q.seq, kind: :scene, slot: nil, lands: q.lands.to_s.freeze, pos: q.lands&.pos))
+          }.freeze
+          MatrixInfo.new(tracks: lane_infos, scenes: scene_infos)
+        rescue StandardError => e
+          warn_once(e)
+          nil
+        end
+
+        # The rack instances (Session::Racks#rack_info; its own mutex).
+        def rack_infos(s)
+          return [].freeze unless s.respond_to?(:racks)
+          s.racks.rack_info.values.flatten.freeze
+        rescue StandardError => e
+          warn_once(e)
+          [].freeze
+        end
+
+        # Warns about a poll failure once per message (the panes go on with
+        # what they have).
+        def warn_once(e)
+          @warned ||= {}
+          key = "#{e.class}: #{e.message}"
+          return if @warned[key]
+          @warned[key] = true
+          warn "UI poll: #{key} (#{e.backtrace&.first})"
         end
 
         # Recent MIDI from the Session's log (its own lock), read from where
@@ -181,6 +310,19 @@ module MB
             end
           end
           @lock.synchronize {
+            if LANE_KINDS.include?(e.kind) && e.subject.is_a?(Symbol)
+              lane = (@lanes[e.subject] ||= {})
+              if e.status == :queued || e.status == :landed
+                lane[e.seq] = e
+              else
+                lane.delete(e.seq)
+              end
+              # Only the newest landed change counts
+              newest = lane.each_value.select(&:landed?).max_by(&:seq)
+              lane.delete_if { |_, x| x.landed? && !x.equal?(newest) } if newest
+            elsif e.kind == :scene
+              e.status == :queued ? @scene_launches[e.seq] = e : @scene_launches.delete(e.seq)
+            end
             if e.status == :queued || (e.kind == :rec && e.status == :landed)
               @open[e.seq] = e
             else

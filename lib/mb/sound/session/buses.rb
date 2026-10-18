@@ -582,6 +582,9 @@ module MB
           @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
           @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
           @send_knobs.each { |k| k.read(frame, count) } unless @send_knobs.empty?
+          # Bus and send meters for the terminal UI (UI::BusMeter), while a
+          # pane shows them
+          @ui_bus_meter = @ui_feed&.bus_meter(self)
 
           ranks = bus_ranks
           items = players.each_with_index.map { |p, i| [rank_of(ranks, p.name), 0, i, p] } +
@@ -618,6 +621,7 @@ module MB
           end
 
           parts&.each { |name, data| @stems.add(name, @master_gain == 1 ? data : data.map { |d| d * @master_gain }, frame) }
+          @ui_bus_meter&.end_span(count)
         end
 
         # Adds a player's buffer (+data+, after its fades and mute: +ramp+)
@@ -638,11 +642,15 @@ module MB
           dest = main_bus || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
           track = stem && stem_name(p)
+          meter = @ui_bus_meter
           sends = route ? route.sends.filter_map { |bus, k|
             input = bus_input(bus) or next
             v = k.read(@frame, @bus_span_count)
-            next if v.is_a?(Numeric) && v == 0
-            [input, v, track && stem_shadow_input(track, bus)]
+            if v.is_a?(Numeric) && v == 0
+              meter&.send_seen(p.name, bus, 0)
+              next
+            end
+            [input, v, track && stem_shadow_input(track, bus), bus]
           } : []
           if stem && main_bus
             stem = stem_shadow_input(track, route.to)
@@ -659,10 +667,11 @@ module MB
             m[r].inplace + d
             stem[c][r].inplace + d if stem
             tap[c][r].inplace + (fade.equal?(ramp) ? d : (fade ? raw * fade[0...len] : raw)) if tap
-            sends.each do |input, v, shadow|
+            sends.each do |input, v, shadow, bus|
               x = v.is_a?(Numeric) ? (v == 1 ? d : d * v) : d * v[r]
               input[c][r].inplace + x
               shadow[c][r].inplace + x if shadow
+              meter&.send_signal(p.name, bus, c, x, v.is_a?(Numeric) ? v : v[r])
             end
           end
         end
@@ -679,6 +688,8 @@ module MB
           input = b.input
           s = 0
           e = count
+          meter = into ? nil : @ui_bus_meter
+          meter&.bus_input(b.name, input)
 
           # A bus a sidechain reads keeps processing while muted
           read = into.nil? && bus_tapped?(b.name)
@@ -744,6 +755,7 @@ module MB
               o.inplace * ramp if ramp
               dest[c][r].inplace + o
               stem[c][r].inplace + o if stem
+              meter&.bus_output(b.name, c, o)
             end
             p0 = p1
           end
