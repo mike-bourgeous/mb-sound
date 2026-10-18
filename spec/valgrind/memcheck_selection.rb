@@ -23,6 +23,18 @@
 # memcheck_map_recorder.rb: which extension methods each spec file calls).
 # Specs in SPECS but not in the map run in every selective run until the
 # map is refreshed.
+#
+# The map also records the structure of ext/ it was made against (each
+# extension's source files, Fast* modules, resolved #includes, and depend
+# entries; .structure).  A branch that adds a source, header, extension,
+# module, or include, or changes a depend file, refreshes the map in that
+# branch (`rake memcheck:map`, ~5 min natively) and commits it: the guard
+# spec in memcheck_selection_spec.rb (normal suite) and `memcheck:changed`
+# fail on .structure_problems, so a stale map can't silently under-select.
+# Edits inside existing files need no refresh.
+#
+# The full list (`rake memcheck`, or FULL=1) is manual: before a public
+# release, or when hunting a leak (maintainer decision 2026-10-18).
 require 'fileutils'
 require 'json'
 require 'open3'
@@ -119,21 +131,14 @@ module MemcheckSelection
   # More than this fraction of the extensions affected runs the full list.
   FULL_FRACTION = 0.5
 
-  # Full-run policy: a full run is due after this many merges into the
-  # current branch that touched ext/ since the last full run, or this many
-  # days (and at checkpoint merges, which people decide).
-  FULL_EVERY_MERGES = 3
-  FULL_EVERY_DAYS = 7
-
-  # Where the policy's clock starts until a full run writes the stamp (user
-  # decision 2026-10-09: the first full run waits until the policy says one
-  # is due): the feedback-loops tip selective memcheck was built on.  This
-  # is not a recorded clean run, just the starting point.
-  FULL_BASELINE = {
-    'commit' => '7cf41ccd4a3d863f3bfd65bd55da3faa315e2c0e',
-    'branch' => 'feedback-loops (baseline, no full run recorded)',
-    'date' => '2026-10-09T00:00:00Z',
-  }.freeze
+  # Full runs are manual (maintainer decision 2026-10-18): a pre-release
+  # step, or a deliberate choice when hunting a hard-to-find leak.  No
+  # recorded full run since selective memcheck began (2026-10-09) found a
+  # Valgrind error the selective runs missed, so nothing makes one "due" by
+  # merge count or age; the stamp only records the last one.  What keeps
+  # selective runs honest instead is a current map: a branch that changes
+  # the structure of ext/ refreshes it (see .structure_problems).
+  MAP_COMMAND = 'bundle exec rake -f Rakefile memcheck:map'
 
   Extension = Struct.new(:name, :dir, :modules, keyword_init: true)
 
@@ -477,19 +482,67 @@ module MemcheckSelection
     }
   end
 
-  # [due?, message]
+  # A line about the last recorded full run (full runs are manual; nothing
+  # makes one due).
   def full_status(now: Time.now)
-    stamp = read_stamp || FULL_BASELINE
+    stamp = read_stamp
+    manual = 'full runs are manual (before a public release, or to hunt a leak: `rake memcheck` or FULL=1 rake memcheck:changed)'
+    return "No full memcheck recorded; #{manual}" unless stamp
 
     days = (now - Time.parse(stamp['date'])) / 86400.0
     merges = ext_merges_since(stamp['commit'])
-    due = days >= FULL_EVERY_DAYS || merges.nil? || merges >= FULL_EVERY_MERGES
-    lead = stamp.equal?(FULL_BASELINE) ? 'No full memcheck stamp yet; counting from' : 'Last full memcheck'
-    msg = format("#{lead} %s on %s (%.1f days ago, %s ext merges since)",
-                 stamp['commit'][0, 10], stamp['branch'], days, merges.nil? ? 'unknown' : merges)
-    msg += due ? "; a full run is DUE (every #{FULL_EVERY_MERGES} ext merges or #{FULL_EVERY_DAYS} days; FULL=auto runs it)" :
-      "; next full run after #{FULL_EVERY_MERGES} ext merges or #{FULL_EVERY_DAYS} days"
-    [due, msg]
+    format("Last full memcheck %s on %s (%.1f days ago, %s ext merges since); %s",
+           stamp['commit'][0, 10], stamp['branch'], days, merges.nil? ? 'unknown' : merges, manual)
+  end
+
+  # --- ext/ structure the map was recorded against -----------------------
+
+  # {'fast_synth' => {'dir' =>, 'sources' => [basenames], 'modules' =>
+  # [Fast*], 'includes' => [repository files any source includes,
+  # transitively], 'depend' => {'x.o' => [files]}}, ...}
+  def structure
+    extensions.to_h { |e|
+      dir = path(e.dir)
+      sources = source_files(dir)
+      [e.name, {
+        'dir' => e.dir,
+        'sources' => sources.map { |f| File.basename(f) },
+        'modules' => e.modules,
+        'includes' => sources.flat_map { |f| includes(f) }.map { |f| rel(f) }.uniq.sort,
+        'depend' => parse_depend(File.join(dir, 'depend')).transform_values { |v| v.uniq.sort }.sort.to_h,
+      }]
+    }.sort.to_h
+  end
+
+  # Ways the current ext/ differs from the structure the map recorded, one
+  # line each; [] when the map is current.
+  def structure_problems(map = load_map, current = structure)
+    recorded = map['structure']
+    return ["#{MAP_PATH} has no ext/ structure (recorded before 2026-10-18)"] unless recorded.is_a?(Hash)
+
+    problems = []
+    (current.keys - recorded.keys).each { |n| problems << "new extension #{n}" }
+    (recorded.keys - current.keys).each { |n| problems << "removed extension #{n}" }
+    (current.keys & recorded.keys).each do |n|
+      now = current[n]
+      was = recorded[n]
+      %w[sources modules includes].each do |k|
+        added = now[k] - Array(was[k])
+        removed = Array(was[k]) - now[k]
+        problems << "#{n}: new #{k} #{added.join(', ')}" unless added.empty?
+        problems << "#{n}: removed #{k} #{removed.join(', ')}" unless removed.empty?
+      end
+      problems << "#{n}: depend changed" unless now['depend'] == (was['depend'] || {})
+    end
+    problems
+  end
+
+  # The message for a stale map, or nil.
+  def structure_message(problems = structure_problems)
+    return nil if problems.empty?
+
+    "#{MAP_PATH} doesn't know the current ext/ structure:\n  #{problems.join("\n  ")}\n" \
+      "Refresh it in this branch and commit it (natively, ~5 min):\n  #{MAP_COMMAND}"
   end
 
   # --- depend files ---------------------------------------------------------

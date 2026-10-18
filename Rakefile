@@ -176,16 +176,24 @@ end
 #                                   master-ai), up to TO (default: the working
 #                                   tree, uncommitted and untracked included)
 #     MEMCHECK_DRY=1                print the selection, don't run Valgrind
-#     FULL=auto                     run the full list when a full run is due
 #     FULL=1                        run the full list
-#   rake memcheck:status            last full run and whether one is due
+#   rake memcheck:status            the last full run (full runs are manual)
+#                                   and whether the map is current
 #   rake memcheck:map               rerecord spec/valgrind/memcheck_map.json
 #                                   (natively, ~5 min; a full run does it too
 #                                   unless MEMCHECK_MAP=0)
 #   rake depend:check               compare ext depend files with the includes
 #
-# A full run (no MEMCHECK_SPECS) writes the stamp in the main checkout's
-# tmp/memcheck_full.stamp and refreshes the map.
+# The full run is rare (maintainer decision 2026-10-18): a pre-release step,
+# or a deliberate choice when hunting a hard-to-find leak; nothing makes it
+# due by merge count or age.  It writes the stamp in the main checkout's
+# tmp/memcheck_full.stamp (a record of the last one) and refreshes the map.
+#
+# The map must know the current ext/ structure (sources, headers,
+# extensions, Fast* modules, includes, depend files): a branch that changes
+# it runs `rake memcheck:map` and commits the map.  memcheck:changed refuses
+# to run with a stale map (MEMCHECK_DRY=1 only warns), and
+# spec/valgrind/memcheck_selection_spec.rb fails in the normal suite.
 #
 # Suppressions for known false positives go in spec/valgrind/ruby.supp (or
 # ruby-4.0.supp etc. for one Ruby version).
@@ -302,14 +310,22 @@ begin
       Rake::Task['memcheck'].invoke
     end
 
-    desc 'Memcheck only the specs for extensions changed since the merge-base with BASE (default master-ai); MEMCHECK_DRY=1 prints the selection, FULL=auto|1'
+    desc 'Memcheck only the specs for extensions changed since the merge-base with BASE (default master-ai); MEMCHECK_DRY=1 prints the selection, FULL=1 runs the full list'
     task :changed, [:base, :to] do |_, args|
       sel = MemcheckSelection.select(base: args[:base], to: args[:to])
       MemcheckSelection.describe(sel)
-      due, status = MemcheckSelection.full_status
-      puts status
-      full = sel.full? || ENV['FULL'] == '1' || (ENV['FULL'] == 'auto' && due)
-      puts "FULL=#{ENV['FULL']}: running the full list (#{MEMCHECK_SPECS.length} globs)" if full && !sel.full?
+      puts MemcheckSelection.full_status
+      puts 'FULL=auto no longer runs anything extra: full runs are manual (FULL=1)' if ENV['FULL'] == 'auto'
+      full = sel.full? || ENV['FULL'] == '1'
+      puts "FULL=1: running the full list (#{MEMCHECK_SPECS.length} globs)" if full && !sel.full?
+      # A stale map could leave out specs; the full list doesn't use it (and
+      # refreshes it afterwards)
+      stale = MemcheckSelection.structure_message
+      if stale
+        abort "memcheck:changed: #{stale}" unless full || ENV['MEMCHECK_DRY'] == '1'
+
+        puts "WARNING: #{stale}"
+      end
       next if ENV['MEMCHECK_DRY'] == '1'
       next puts('memcheck:changed: nothing to run') if sel.empty? && !full
 
@@ -323,9 +339,10 @@ rescue LoadError => e
 end
 
 namespace :memcheck do
-  desc 'Show the last full memcheck run and whether one is due'
+  desc 'Show the last full memcheck run (full runs are manual) and whether the selection map knows the current ext/'
   task :status do
-    puts MemcheckSelection.full_status[1]
+    puts MemcheckSelection.full_status
+    puts MemcheckSelection.structure_message || "#{MemcheckSelection::MAP_PATH} knows the current ext/ structure"
   end
 
   # In memcheck mode (MB_SOUND_MEMCHECK=1, as under Valgrind), so the map

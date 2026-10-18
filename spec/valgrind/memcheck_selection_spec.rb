@@ -49,18 +49,17 @@ RSpec.describe(MemcheckSelection) do
       allow(MemcheckSelection).to receive(:stamp_path).and_return(tmp_path('memcheck_full.stamp'))
     end
 
-    it 'counts from FULL_BASELINE without a stamp' do
-      expect(MemcheckSelection.full_status[1]).to include('counting from 7cf41ccd4a')
-      later = Time.parse(MemcheckSelection::FULL_BASELINE['date']) + MemcheckSelection::FULL_EVERY_DAYS * 86400 + 1
-      expect(MemcheckSelection.full_status(now: later)[0]).to eq(true)
+    it 'says full runs are manual without a stamp' do
+      expect(MemcheckSelection.full_status).to start_with('No full memcheck recorded; full runs are manual')
     end
 
-    it 'is not due right after a full run, and due after FULL_EVERY_DAYS' do
+    it 'reports the last full run and says full runs are manual, however old' do
       stamp = MemcheckSelection.write_stamp
       expect(MemcheckSelection.ext_merges_since(stamp['commit'])).to eq(0)
-      expect(MemcheckSelection.full_status[0]).to eq(false)
-      later = Time.now + MemcheckSelection::FULL_EVERY_DAYS * 86400 + 1
-      expect(MemcheckSelection.full_status(now: later)[0]).to eq(true)
+      later = MemcheckSelection.full_status(now: Time.now + 365 * 86400)
+      expect(later).to start_with("Last full memcheck #{stamp['commit'][0, 10]}")
+      expect(later).to include('0 ext merges since', 'full runs are manual')
+      expect(later).not_to match(/due/i)
     end
 
     it 'counts first-parent merges that changed ext/' do
@@ -210,6 +209,51 @@ RSpec.describe(MemcheckSelection) do
       expect(lines[range.first - 1]).to start_with('# Valgrind memcheck')
       expect(range.last).to eq(lines.length)
       expect(range).not_to cover(lines.index { |l| l.include?("ExtensionTask.new 'mb-fast_sound'") } + 1)
+    end
+  end
+
+  describe 'ext/ structure' do
+    let(:current) { MemcheckSelection.structure }
+
+    it 'is known to the map (else run `rake memcheck:map` and commit the map)' do
+      problems = MemcheckSelection.structure_problems(map, current)
+      expect(problems).to eq([]), MemcheckSelection.structure_message(problems)
+    end
+
+    it 'lists sources, modules, includes, and depend entries' do
+      fast_filter = current.fetch('fast_filter')
+      expect(fast_filter['sources']).to include('fast_filter.c')
+      expect(fast_filter['modules']).to eq(['FastFilter'])
+      expect(fast_filter['includes']).to include('ext/mb/sound/include/mb_svf.h', 'ext/mb/sound/include/mb_ext_helpers.h')
+      expect(fast_filter['depend'].fetch('fast_filter.o')).to include('ext/mb/sound/include/mb_svf.h')
+    end
+
+    def problems_after
+      recorded = JSON.parse(JSON.generate(current))
+      yield recorded
+      MemcheckSelection.structure_problems({ 'structure' => recorded }, current)
+    end
+
+    it 'reports new and removed extensions, sources, modules, and includes' do
+      expect(problems_after { |r| r.delete('fast_lofi') }).to eq(['new extension fast_lofi'])
+      expect(problems_after { |r| r['fast_gone'] = r['fast_lofi'] }).to eq(['removed extension fast_gone'])
+      expect(problems_after { |r| r['fast_sampler']['sources'] -= ['granular.c'] }).to eq(['fast_sampler: new sources granular.c'])
+      expect(problems_after { |r| r['fast_lofi']['sources'] += ['old.c'] }).to eq(['fast_lofi: removed sources old.c'])
+      expect(problems_after { |r| r['fast_filter']['modules'] = [] }).to eq(['fast_filter: new modules FastFilter'])
+      expect(problems_after { |r| r['fast_filter']['includes'] -= ['ext/mb/sound/include/mb_svf.h'] }).to eq(
+        ['fast_filter: new includes ext/mb/sound/include/mb_svf.h']
+      )
+    end
+
+    it 'reports changed depend files' do
+      expect(problems_after { |r| r['fast_filter']['depend']['fast_filter.o'].pop }).to eq(['fast_filter: depend changed'])
+    end
+
+    it 'asks for a refresh when the map has no structure, naming the command' do
+      problems = MemcheckSelection.structure_problems({ 'specs' => {} }, current)
+      expect(problems.length).to eq(1)
+      expect(MemcheckSelection.structure_message(problems)).to include(MemcheckSelection::MAP_COMMAND)
+      expect(MemcheckSelection.structure_message([])).to eq(nil)
     end
   end
 
