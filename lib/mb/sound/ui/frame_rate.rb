@@ -12,9 +12,19 @@ module MB
         # Seconds of written frames #fps counts.
         WINDOW = 2.0
 
-        # Frames per second written to the terminal lately (not the
-        # target: frames with no change aren't written).
+        # Frames per second the painter ran lately: its refreshes over the
+        # last WINDOW seconds, the first number of the status line's
+        # readout (NAV f, "60/60 Hz"; ui-api-1: `ui.fps` counted written
+        # frames, which skip frames with no change, so it read 48.5 while
+        # the painter ran 60).  See #written_fps.
         def fps
+          r = @pacer.breakdown(window: WINDOW)[:refreshes]
+          r > 0 ? r : written_fps
+        end
+
+        # Frames per second written to the terminal lately (frames with no
+        # change aren't written).
+        def written_fps
           times = @written_lock.synchronize { @written.map(&:first) }
           return 0.0 if times.empty?
           now = @clock.call

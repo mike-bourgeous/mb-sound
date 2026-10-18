@@ -34,17 +34,77 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
     expect(frames).to be_within(1).of(600)
     b = p.breakdown(window: 2.0)
     expect(b[:oversleep_ms][:p50]).to be_within(0.01).of(2.0)
-    expect(b[:late_ms][:p50]).to be_within(0.01).of(2.0) # (each frame starts 2 ms late, and the next deadline stays put)
+    expect(b[:late_ms][:p50]).to be < 0.1 # (the wake offset learned the 2 ms: frames start on their deadlines; ui-api-1)
   end
 
-  it 'skips the deadlines a long frame missed instead of rushing' do
+  it 'skips only the whole periods a long frame overran, starting at once after a partial one' do
     p = fake(100)
-    # Every 10th frame takes 35 ms (3.5 periods)
+    # Every 10th frame takes 35 ms (3.5 periods): it skips 2 deadlines and
+    # the next frame starts at once (half a period late; ui-api-1: it used
+    # to skip 3)
     frames = run_for(p, 10.0, ->(n) { n % 10 == 0 ? 0.035 : 0.002 })
     expect(p.skipped).to be > 0
-    # 10 s at 100/s, minus 3 skipped deadlines per long frame
-    expect(frames).to be_within(3).of(1000 * 10 / 13.0)
+    # (the rate trim makes up some of the skipped frames: at most MAX_TRIM)
+    expect(frames).to be_between(1000 * 10 / 12.0 - 3, 1000 * 10 / 12.0 * (1 + described_class::MAX_TRIM) + 3)
     expect(p.breakdown[:sleep_ms][:p50]).to be > 0
+  end
+
+  # ui-api-1 (maintainer, 2026-10-18: "UI is still falling a bit short of
+  # target fps when it's capable of more"; then "adaptive pacing so that
+  # deadlines are adjusted until the target fps is hit")
+  describe 'adaptive pacing' do
+    # A fake clock whose sleeps overshoot by +overhead+ (a Proc of the
+    # frame number, or seconds) and round up to +grain+ seconds (timer
+    # granularity).
+    def adaptive(fps, overhead:, grain: 0.0)
+      @t = 0.0
+      n = 0
+      described_class.new(fps, clock: -> { @t }, sleeper: ->(s) {
+        n += 1
+        s = (s / grain).ceil * grain if grain > 0
+        @t += s + (overhead.respond_to?(:call) ? overhead.call(n) : overhead)
+      })
+    end
+
+    {
+      'a fixed 1.5 ms wake latency' => { overhead: 0.0015 },
+      'a jittery 0-3 ms wake latency' => { overhead: ->(n) { ((n * 7919) % 1000) / 1000.0 * 0.003 } },
+      '1 ms timer grain plus 0.8 ms latency' => { overhead: 0.0008, grain: 0.001 },
+    }.each do |what, opts|
+      [60, 144, 240].each do |fps|
+        it "converges on #{fps}/s within 1% with #{what} (paint 0.7 ms)" do
+          p = adaptive(fps, **opts)
+          run_for(p, 8.0, 0.0007)
+          b = p.breakdown(window: 2.0)
+          expect(b[:refreshes]).to be_within(fps * 0.01).of(fps), "#{b.inspect} trim #{p.trim} offset #{p.offset}"
+          expect(p.trim).to be <= described_class::MAX_TRIM * p.period
+          expect(p.offset).to be <= described_class::MAX_OFFSET * p.period
+        end
+      end
+    end
+
+    it 'starts frames near their deadlines: the wake offset absorbs a steady latency' do
+      p = adaptive(60, overhead: 0.002)
+      run_for(p, 4.0, 0.0007)
+      expect(p.offset).to be_within(0.0003).of(0.002)
+      expect(p.breakdown(window: 1.0)[:late_ms][:p50]).to be < 0.3
+    end
+
+    it 'never paints faster than the work allows, and resets when the target changes' do
+      p = adaptive(240, overhead: 0.0)
+      frames = run_for(p, 4.0, 0.006) # (6 ms of work: at most ~166/s)
+      expect(frames / 4.0).to be <= 1 / 0.006 + 1
+      p.fps = 60
+      expect([p.trim, p.offset]).to eq([0.0, 0.0])
+      expect(p.period).to eq(1 / 60.0)
+    end
+
+    it 'keeps 2 s of frames at 240/s (the readout said 120/240 Hz)' do
+      p = adaptive(240, overhead: 0.0)
+      run_for(p, 4.0, 0.0007)
+      expect(p.breakdown(window: 2.0)[:refreshes]).to be_within(2.4).of(240)
+      expect(p.readout).to start_with('240/240 Hz')
+    end
   end
 
   it 'splits a frame into paint and write' do

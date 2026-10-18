@@ -16,6 +16,25 @@ module MB
       # visible pane's rate (30/s for meters and scopes) whatever the
       # target.  #readout shows both.
       #
+      # ui-api-1 (maintainer, 2026-10-18: measured fps fell short of the
+      # target "when it's capable of more"; "there could be adaptive pacing
+      # so that deadlines are adjusted until the target fps is hit"):
+      # - a frame that ends past the next deadline but less than a whole
+      #   period late starts at once (catching up); only frames more than
+      #   a period late skip deadlines (one long frame used to cost a
+      #   frame each time: "15 missed" at 240);
+      # - the wake offset: the painter asks to wake +offset+ before each
+      #   deadline, +offset+ following how late wakes land (a small gain per
+      #   frame, at most half a period), so timer slack and wake latency
+      #   don't make every frame start late;
+      # - the rate trim: over windows of about ADAPT_SECONDS the measured
+      #   refresh rate is compared with the target and the deadline spacing
+      #   shortened by +trim+ (at most MAX_TRIM of a period) while it falls
+      #   short, released when it overshoots; both reset when the target
+      #   changes.  Frames never come faster than their work allows.
+      # - KEEP holds 2.5 s at 240/s (it held 240 frames, so the 2 s readout
+      #   showed "120/240 Hz" at a 240 target).
+      #
       #     pacer = Pacer.new(60, clock: -> { MB::U.clock_now })
       #     pacer.run(-> { @stopping }) { |now| refresh(now) }
       class Pacer
@@ -45,10 +64,25 @@ module MB
         # (deadlines missed before it), +wrote+ (bytes, 0 for none).
         Frame = Data.define(:at, :paint, :write, :sleep, :slept, :late, :skipped, :wrote)
 
-        # Frames kept for #breakdown.
-        KEEP = 240
+        # Frames kept for #breakdown (2.5 s at 240/s).
+        KEEP = 600
+
+        # Seconds per rate-trim window, the trim's gain (of the relative
+        # rate error, per window), and its bound (a share of the period).
+        ADAPT_SECONDS = 1.0
+        TRIM_GAIN = 0.5
+        MAX_TRIM = 0.1
+
+        # The wake offset's gain per frame and bound (a share of the period).
+        OFFSET_GAIN = 0.1
+        MAX_OFFSET = 0.5
 
         attr_reader :state, :period, :deadline, :skipped
+
+        # Seconds the deadline spacing is shortened by (the rate trim), and
+        # seconds before each deadline the painter asks to wake (the wake
+        # offset).
+        attr_reader :trim, :offset
 
         # Called with each Frame after it (UI::PaneRates#observe).
         attr_accessor :on_frame
@@ -65,12 +99,21 @@ module MB
           @write = 0.0
           @lock = Mutex.new
           @on_frame = nil
+          @trim = 0.0
+          @offset = 0.0
+          @window_at = nil
+          @window_frames = 0
           self.fps = fps
         end
 
-        # Changes the target rate (from the next frame).
+        # Changes the target rate (from the next frame), resetting the rate
+        # trim and the wake offset.
         def fps=(fps)
           @period = 1.0 / fps
+          @trim = 0.0
+          @offset = 0.0
+          @window_at = nil
+          @window_frames = 0
         end
 
         # Applies +event+, raising StateError for a pair the table lacks.
@@ -109,18 +152,23 @@ module MB
           done = @clock.call
           event!(:painted)
 
-          # The next deadline, past the ones a long frame missed
-          nxt = @deadline + @period
+          # The next deadline: one (trimmed) period on; a frame that ended
+          # less than a period past it starts at once, and only the
+          # deadlines a frame overran by more than a whole period are skipped
+          step = @period - @trim
+          nxt = @deadline + step
           missed = 0
-          if done > nxt
-            missed = ((done - nxt) / @period).floor + 1
-            nxt += missed * @period
+          if done > nxt + step
+            missed = ((done - nxt) / step).floor
+            nxt += missed * step
           end
           @skipped += missed
           @deadline = nxt
-          want = nxt - done
+          want = nxt - @offset - done
           @sleeper.call(want) if want > 0
-          slept = @clock.call - done
+          woke = @clock.call
+          slept = woke - done
+          adapt(woke, want)
           event!(:woke)
           f = Frame.new(at: start, paint: done - start - @write, write: @write, sleep: want, slept: slept, late: late, skipped: missed,
                         wrote: out.is_a?(String) ? out.bytesize : 0)
@@ -130,6 +178,27 @@ module MB
           end
           @on_frame&.call(f)
           f
+        end
+
+        # The wake offset follows where wakes land (a wake +late+ past its
+        # deadline asks earlier next time; early, later), and once per
+        # ADAPT_SECONDS the rate trim follows the measured refresh rate.
+        private def adapt(woke, want)
+          if want > 0
+            late = woke - @deadline
+            @offset = (@offset + OFFSET_GAIN * late).clamp(0.0, MAX_OFFSET * @period)
+          end
+
+          @window_at ||= woke
+          @window_frames += 1
+          span = woke - @window_at
+          return if span < ADAPT_SECONDS
+
+          measured = @window_frames / span
+          err = 1.0 / measured - @period # (seconds per frame too long, positive when short of the target)
+          @trim = (@trim + TRIM_GAIN * err).clamp(0.0, MAX_TRIM * @period)
+          @window_at = woke
+          @window_frames = 0
         end
 
         # Ends the frames (#run does this when its stop Proc says so).
