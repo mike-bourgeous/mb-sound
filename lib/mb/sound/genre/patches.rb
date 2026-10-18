@@ -72,6 +72,21 @@ module MB
           MB::Sound.stereo(side.(), side.()) * level * 10
         end
 
+        # Tape hiss that stops with the sound (a bus effect: +input+ is the
+        # bus input, a bundle): the input plus pink hiss above 2.5 kHz at
+        # +level+ (a gain), gated by `input.sounding` (open while the input
+        # is above -90 dB, held 1 s and faded over 0.3 s after), so the
+        # hiss ends with the weather.  Each channel hisses on its own.
+        # (genre-fixes: the ambient template's :weather bus; the
+        # ambient_tape preset does this with wow and wear too, but costs
+        # 27% of realtime per stereo 800-frame buffer, this ~1%.)
+        def hiss(input, level: -42.db)
+          chans = input.respond_to?(:outputs) ? input.outputs : [input]
+          noises = chans.map { MB::Sound.noise(:pink).filter(:highpass, cutoff: 2500, quality: 0.6) * level }
+          gate = input.sounding(hold: 1, fade: 0.3)
+          (input + MB::Sound.channels(*noises) * gate).ring(:first)
+        end
+
         # A house bass (Munro's "one saw with a tempo-set decay"): one saw
         # voice through a four-pole lowpass at +cutoff+ Hz opened +env+
         # octaves by a short filter envelope, a plucked level with no

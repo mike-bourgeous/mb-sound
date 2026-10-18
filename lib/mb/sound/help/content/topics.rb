@@ -655,7 +655,7 @@ module MB
         and duck from the drums' own kick (`sidechain :drums, only: :kick`;
         `duck: -8.db` on a role); jungle chops `breakbeat(:jungle)` with
         `brk.chop`, ambient's bowls loop on clocks in seconds and its
-        weather (rain, wind) runs through a tape bus.  `save :x, set` after
+        weather (rain, wind) runs through a hiss bus.  `save :x, set` after
         `.setup` keeps the buses and routes.
       TEXT
       commands :genre, :genres

@@ -239,7 +239,9 @@ module MB
         # [name, args, params]: each a mastering preset (:club, :streaming,
         # :quiet, :vinyl; see Mastering, params its options), else an
         # effect preset with an :input, else a GraphNode method of that
-        # name.  Template buses' chains (Bus#steps) are built the same way.
+        # name, else a Genre::Patches method taking the input first (bus
+        # effects like :hiss).  Template buses' chains (Bus#steps) are
+        # built the same way.
         # Symbol params name knobs (all of them, or those in +knob_names+).
         def master_chain(mix, steps, knob_names = nil)
           steps.reduce(mix) { |m, (name, args, params)|
@@ -247,6 +249,8 @@ module MB
               m.master(name, *args, **params)
             elsif GraphIO.find_preset(name)
               MB::Sound.preset(name, input: m, **params)
+            elsif Patches.respond_to?(name) && !m.respond_to?(name)
+              Patches.public_send(name, m, *args, **knob_params(params, knob_names))
             else
               m.public_send(name, *args, **knob_params(params, knob_names))
             end

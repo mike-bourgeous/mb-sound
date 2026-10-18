@@ -63,11 +63,11 @@ module MB
       role :stick, :ambient_rainstick, level: -4.db, about: 'a rain stick tipping across'
       # The weather (genre-fixes, 2026-10-18; Kaede: the rain and river
       # lived in the song, not the template): dust drops and drifting noise
-      # into a :weather bus with tape wow and hiss (ambient_tape), whose
-      # hiss is gated by the weather sounding, so it stops with the sound
+      # into a :weather bus that adds tape hiss gated by the weather
+      # sounding (Genre::Patches.hiss), so the hiss stops with the sound
       role :rain, :rain, params: { level: :drizzle }, to: :weather, about: 'rain: dust drops pinging, a pink-noise bed that wanders, slow gusts'
       role :wind, :wind, params: { level: :gust }, to: :weather, about: 'wind: brown noise through a drifting bandpass, in gusts'
-      bus :weather, [:ambient_tape, { wear: :wear }]
+      bus :weather, [:hiss]
 
       scene :emerge, drone: :drone, rain: :weather, space: 0.5, wear: 0.6, drizzle: [0.4, { from: 0, over: 4 }]
       scene :drift, drone: :drone, bowls: :bowl_a, bowls2: :bowl_b, rain: :weather

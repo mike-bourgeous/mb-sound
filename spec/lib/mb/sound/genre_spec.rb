@@ -49,7 +49,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(genre[:ambient].clips[:bowl_a].length).to eq(197/40r) # 19.7 s at 60 BPM
       expect(genre[:ambient].clips[:bowl_a].to_ruby).to end_with('.clocked(19.7.seconds)') # (its own clock: 19.7 s at any tempo)
       expect(genre[:ambient].roles.values_at(:rain, :wind).map(&:to)).to eq([:weather, :weather])
-      expect(genre[:ambient].buses[:weather].steps).to eq([[:ambient_tape, [], { wear: :wear }]])
+      expect(genre[:ambient].buses[:weather].steps).to eq([[:hiss, [], {}]])
       expect(genre[:house].sidechain).to eq([:drums, :kick])
       expect(genre[:techno].buses.keys).to eq([:rumble, :echo])
       expect(genre[:house].form.bars).to eq(136) # (Munro: 16, 16, 16, 32, 8, 32, 16)
