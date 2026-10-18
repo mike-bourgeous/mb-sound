@@ -101,7 +101,7 @@ module MB
       loudness(-10..-8)
       true_peak(-0.5.db)
       mono_below 120 # club systems: a mono low end (and the sub is mono already)
-      loudest_bars 16 # the club master's loudest-part window: one phrase
+      measure :loudest, bars: 16 # the club master targets the loudest phrase (maintainer, omnibus9 Bench: "Dnb 16")
       # (the air knob's highpass, then the club mastering preset with two
       # limiters: mastering-2, 2026-10-17, the maintainer's Bench pick over
       # dnb_master's clip and limit)

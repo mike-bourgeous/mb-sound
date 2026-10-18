@@ -96,7 +96,7 @@ module MB
       loudness(-10..-8)
       true_peak(-1.db) # (Munro: -1 dBTP for codec overshoot; genre-fixes)
       mono_below 120 # club systems
-      loudest_bars 16 # the club master's loudest-part window: one phrase
+      measure :integrated # the whole song (maintainer, omnibus9 Bench: "House whole")
       # (the club mastering preset with its gentle clipper, the house feel:
       # mastering-2, 2026-10-17, maintainer on the Bench: "The two limiter
       # setup isn't much different so both are good to have"; Munro's
