@@ -1,6 +1,7 @@
 require 'fileutils'
 
 require_relative 'ui/snapshot'
+require_relative 'ui/bus_meter'
 require_relative 'ui/poll'
 require_relative 'ui/data_file'
 require_relative 'ui/themes/theme_set'

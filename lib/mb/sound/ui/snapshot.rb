@@ -5,10 +5,12 @@ module MB
       # changes, the form, knob ranges), gathered a few times a second on
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
-      Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi, :matrix, :racks) do
+      Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
+                         :matrix, :racks) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
-        # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo)
+        # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
+        # UI round 4: +matrix+ a MatrixInfo (or nil), +racks+ Rack::RackInfos)
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
                        landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze)
           super
@@ -20,24 +22,15 @@ module MB
       end
 
       # A bus (Session#bus_info): +name+, where it goes (+to+), its chain's
-      # +description+, +asleep+, +muted+.
+      # +description+, +asleep+, +muted+, the players sending a level into
+      # it (+sends+) and routed to it (+sources+, `to:`).  A send and a
+      # `to:` are the same thing at two depths: a level into the bus, or
+      # all of the player.
       BusInfo = Data.define(:name, :to, :description, :asleep, :muted, :sends, :sources) do
         def initialize(name:, to:, description:, asleep:, muted:, sends: [].freeze, sources: [].freeze)
           super
         end
       end
-
-      # (ux-r4-panes stand-ins for ux-r4-feed's contract, terminal_ui.md "UI
-      # round 4: the feed contract"; feed's definitions replace them.)
-      Levels = Data.define(:peak, :rms, :short)
-      BusLevels = Data.define(:input, :output)
-      SendLevel = Data.define(:player, :bus, :gain, :level)
-      HeldNote = Data.define(:note, :velocity, :channel, :source, :input, :frame, :pos)
-      MatrixInfo = Data.define(:tracks, :scenes)
-      LaneInfo = Data.define(:name, :state, :playing, :queued, :slots, :q)
-      LaunchInfo = Data.define(:seq, :kind, :slot, :lands, :pos)
-      SceneInfo = Data.define(:name, :cells, :current, :queued)
-      NoteInfo = Data.define(:start, :length, :note, :velocity, :row, :marks)
 
       # A change that landed (the journal): +seq+, +kind+, +subject+, where
       # it landed (+lands+, bar:beat text; +pos+ whole notes), and +at+ (the
@@ -47,12 +40,49 @@ module MB
 
       # A clip the set uses: +name+, +kind+ (seq, clip, kit, grid), +bars+
       # (its length), +pattern+ (a one-line picture of its onsets), +used+
-      # (where: track names and scene names).
-      ClipInfo = Data.define(:name, :kind, :bars, :pattern, :used, :loop, :length, :events, :ruby, :range, :key) do
-        def initialize(name:, kind:, bars:, pattern:, used:, loop: false, length: nil, events: [].freeze, ruby: nil, range: nil, key: nil)
+      # (where: track names and scene names).  UI round 4 (the clip
+      # matrix and detail pane): +key+ (a stable display key: the name, or
+      # "bass#3" for an unnamed clip in slot 3 of track :bass), +loop+,
+      # +length+ (whole notes), +events+ (NoteInfos), +ruby+ (its to_ruby
+      # text, or nil), +range+ (lowest..highest note, or nil).
+      ClipInfo = Data.define(:name, :kind, :bars, :pattern, :used, :key, :loop, :length, :events, :ruby, :range) do
+        def initialize(name:, kind:, bars:, pattern:, used:, key: nil, loop: false, length: 0r, events: [].freeze, ruby: nil, range: nil)
           super
         end
       end
+
+      # A note of a clip (ClipInfo#events), in whole notes: +start+,
+      # +length+, +note+ (a MIDI note number, or nil), +velocity+ (0..1),
+      # +row+ (a kit row's name, or nil), +marks+ (Symbols: :accent,
+      # :slide, :flam, :fill, :pitch).
+      NoteInfo = Data.define(:start, :length, :note, :velocity, :row, :marks)
+
+      # The clip matrix (Poll): +tracks+ (LaneInfos) and +scenes+
+      # (SceneInfos).
+      MatrixInfo = Data.define(:tracks, :scenes)
+
+      # A track in the clip matrix: +name+, +q+ (launch quantization as
+      # text), +state+ (:playing or :stopped as of landed changes; see
+      # Snapshot#lane_state for the player's state per buffer), +playing+
+      # (the slot index playing, or nil), +queued+ (LaunchInfos), +slots+
+      # (ClipInfos, append-only: an index never changes in a session).
+      LaneInfo = Data.define(:name, :q, :state, :playing, :queued, :slots)
+
+      # A launch waiting to land: +seq+ (journal), +kind+ (:launch, :stop,
+      # :scene), +slot+ (index, or nil), where it +lands+ (bar:beat text)
+      # and +pos+ (whole notes).
+      LaunchInfo = Data.define(:seq, :kind, :slot, :lands, :pos)
+
+      # A scene row of the clip matrix: +name+, +cells+ ({ track => slot
+      # index, :stop, or :keep }), +current+, +queued+ (a LaunchInfo or nil).
+      SceneInfo = Data.define(:name, :cells, :current, :queued)
+
+      # A note held on one of the Session's MIDI inputs (Snapshot#notes):
+      # +note+ and +velocity+ (0..127), +channel+ (0-based), +source+
+      # (:input, or the label of an added source such as :keyboard), the
+      # MidiInput's name (+input+, nil for the default), and where its
+      # note-on landed (+frame+, +pos+).
+      HeldNote = Data.define(:note, :velocity, :channel, :source, :input, :frame, :pos)
 
       # Recent MIDI (Session#midi_log, read without the render lock):
       # +events+ ([stamp text, source name, kind, text], newest last), +ccs+
@@ -110,6 +140,12 @@ module MB
       # +latency+ (seconds from this buffer's write to the speakers: the
       # output's queue and the card's buffer; 0 without a sound card).
       # +slow+ is the latest Slow.
+      #
+      # UI round 4 (contract in design/notes/terminal_ui.md): +bus_levels+
+      # ({ bus => BusLevels }) and +send_levels+ ({ [player, bus] =>
+      # SendLevel }) while a pane needs :buses (else nil); +notes+ (the
+      # HeldNotes on the Session's MIDI inputs, always); +sounding+
+      # (reserved for notes after a scale transform; nil).
       Snapshot = Data.define(
         :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing,
         :sample_rate, :buffer_size, :load, :load_max, :parts, :master, :scope,
@@ -155,12 +191,11 @@ module MB
         def matrix = slow.matrix
         def racks = slow.racks
 
-        # A track's state now (feed contract: per-buffer player states
-        # merged with the matrix lane's :stopped).  (Stand-in.)
+        # Track +name+'s state for the clip matrix: the player's state this
+        # buffer (#parts: :playing, :starting, :stopping, :ringing,
+        # :fading, :muted, :asleep), else :stopped.
         def lane_state(name)
-          part = parts.find { |p| p.kind == :player && p.name == name }
-          return part.state if part
-          matrix&.tracks&.find { |t| t.name == name }&.state || :stopped
+          parts.find { |p| p.kind == :player && p.name == name }&.state || :stopped
         end
 
         # When what this snapshot shows is heard: its time plus the
@@ -338,6 +373,15 @@ module MB
           @knob_refs = refs.freeze
         end
 
+        # The render thread's BusMeter for +session+ while a pane needs
+        # :buses (see Session::Buses#render_routed), else nil.
+        def bus_meter(session)
+          return @bus_meter = nil unless @needs.include?(:buses)
+          ch = session.channels
+          @bus_meter = nil if @bus_meter && @bus_meter.channels != ch
+          @bus_meter ||= BusMeter.new(ch, session.sample_rate)
+        end
+
         # True when the painter has taken the last snapshot (the Session
         # then calls #capture).
         def wants_capture?
@@ -404,6 +448,7 @@ module MB
           }.freeze
           out = session.output
           underruns = out.respond_to?(:underruns) ? out.underruns : nil
+          bus_levels, send_levels = @needs.include?(:buses) && @bus_meter ? @bus_meter.take : [nil, nil]
 
           Snapshot.new(
             seq: @published + 1, time: MB::U.clock_now, frame: rec[:frame], pos: rec[:pos],
@@ -417,7 +462,9 @@ module MB
             knobs: @knob_refs.map { |name, k| KnobValue.new(name: name, value: k.value, spec: k.spec) }.freeze,
             slow: @slow,
             latency: out.respond_to?(:latency) ? out.latency.to_f : 0.0,
-            bus_levels: nil, send_levels: nil, notes: [].freeze, sounding: nil
+            bus_levels: bus_levels, send_levels: send_levels,
+            notes: session.respond_to?(:held_notes) ? session.held_notes : [].freeze,
+            sounding: nil
           )
         end
 

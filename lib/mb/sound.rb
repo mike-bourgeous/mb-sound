@@ -192,6 +192,7 @@ require_relative 'sound/take'
 require_relative 'sound/arrangement/arm_state'
 require_relative 'sound/arrangement/recording'
 require_relative 'sound/arrangement/patch_check'
+require_relative 'sound/arrangement/clip_matrix'
 require_relative 'sound/arrangement'
 require_relative 'sound/form'
 

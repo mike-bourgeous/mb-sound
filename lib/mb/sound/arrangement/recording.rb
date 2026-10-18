@@ -355,7 +355,7 @@ module MB
           # (performed, like the clip it stands for, so a drum kit built for it
           # plays any recorded note at live velocities; see TR808.kit)
           placeholder = Sequence::Clip.new([], length: length || @session.transport.bar_length, loop: true, performed: true).named(:"#{tr.name}_rec")
-          set_track(tr, placeholder, close, fade: nil)
+          set_track(tr, placeholder, close, fade: nil, slot: false)
 
           data = { length: length || :phrase, from: from && @session.stamp(from) }.compact
           @session.change(:capture, tr.name, early(tr, close), data: data) { |t|
@@ -373,6 +373,7 @@ module MB
               n = (1..).find { |i| !@captures.key?(:"#{tr.name}_#{i}") }
               @captures[:"#{tr.name}_#{n}"] = clip.named(:"#{tr.name}_#{n}")
               tr.clip = clip if tr.clip.equal?(placeholder)
+              slot_index_unlocked(tr.name, clip, true) # (ClipMatrix)
               clip.name
             }
             # (the track may be gone: stopped before the loop closed, or a
