@@ -64,6 +64,19 @@ module MB
             value
           end
 
+          # A param picking one of +choices+ by where this knob is in its
+          # range (MIDI::Param::Choice: equal zones with hysteresis), read at
+          # decision points like any param.  Choices are anything:
+          # lock styles, modes, numbers, note lengths.
+          #
+          #     knob :style, 0
+          #     lock knob(:style).choose(:mash, :play, :along, :chord)
+          #     riff.loop.stream.arp(:up, knob(:rate).choose(8, 16, 32))
+          def choose(*choices)
+            choices = choices[0] if choices.length == 1 && choices[0].is_a?(Array)
+            MIDI::Param::Choice.new(self, choices)
+          end
+
           private
 
           # Remembers a decision for +pos+ (see ValueAt) and logs it in the

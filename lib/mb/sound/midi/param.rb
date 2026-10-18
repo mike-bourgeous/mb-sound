@@ -145,6 +145,13 @@ module MB
             []
           end
 
+          # The graph nodes this param reads (knobs, tempo LFOs), so graph
+          # traversals (documents' knob headers, Sessions adopting knobs)
+          # find them through the transforms that hold the param.
+          def nodes
+            []
+          end
+
           [:+, :-, :*, :/, :**].each do |op|
             define_method(op) do |other|
               raise NotAParam, "#{self} #{op} #{other.inspect}: params combine with numbers and other params" unless other.is_a?(Numeric) || Param.param?(other)
@@ -169,6 +176,15 @@ module MB
 
           def inspect
             "#<Param #{self}>"
+          end
+
+          # Ruby for this param (see Generative::Value#to_ruby); without a
+          # block, graph nodes in it (knobs, LFOs) print as the expressions
+          # that built them.
+          def to_ruby(&value_text)
+            return super if value_text
+            writer = GraphNode::Recipe::RubyWriter.new(nil)
+            super() { |v| v.is_a?(GraphNode) || v.is_a?(GraphNode::Knob::Reader) ? Param.label(v) : writer.literal(v) }
           end
 
           # Params print without a recipe as their class name.
@@ -216,6 +232,10 @@ module MB
           def control_specs
             [@a, @b].flat_map { |x| x.respond_to?(:control_specs) ? x.control_specs : [] }
           end
+
+          def nodes
+            [@a, @b].flat_map { |x| x.is_a?(Base) ? x.nodes : [] }
+          end
         end
 
         # A MIDI controller as a param (MidiMethods#cc): the last value of
@@ -252,6 +272,87 @@ module MB
 
           def control_specs
             [@spec]
+          end
+        end
+
+        # A param that picks one of +choices+ by where +source+ is in its
+        # range (GraphNode::Knob#choose: `knob(:style).choose(:mash, :play,
+        # :along)`; KeyMethods#modes): the range split into equal zones,
+        # one per choice, with hysteresis, so a knob resting on a border
+        # (or a controller wobbling there) doesn't flutter between two
+        # choices: leaving the current choice takes a move past the border
+        # by HYSTERESIS of a zone.
+        #
+        # The hysteresis keeps the last choice made, so readers asking in
+        # time order (note-ons, steps, cycles) get stable answers; a take
+        # replays the same reads in the same order.
+        class Choice < Base
+          # How far past a border (in zones) the source must move to change
+          # the choice.
+          HYSTERESIS = 0.25
+
+          attr_reader :source, :choices
+
+          def initialize(source, choices, recipe: nil)
+            raise ArgumentError, 'choose needs at least one choice' if choices.empty?
+            @source = source.is_a?(Base) ? source : Param.wrap(source, 'choose')
+            @choices = choices.freeze
+            @last = nil
+            @lock = Mutex.new
+            receiver, name, args, kwargs = recipe || [source, :choose, choices, {}]
+            with_recipe(receiver, name, args, kwargs || {})
+          end
+
+          # The 0..1 position of the source at +pos+: a knob's position in
+          # its own range and scale, a cc's in its range, else the value
+          # itself (clamped to 0..1).
+          def position_at(pos, transport: nil, stream: nil)
+            v = Param.value_at(@source, pos, transport: transport, stream: stream).to_f
+            k = Choice.knob_of(@source)
+            if k
+              k.spec.position(v)
+            elsif @source.is_a?(CC)
+              r = @source.spec.range
+              (v - r.begin) / (r.end - r.begin)
+            else
+              v
+            end.clamp(0.0, 1.0)
+          end
+
+          def value_at(pos, transport: nil, stream: nil)
+            @choices[index_at(position_at(pos, transport: transport, stream: stream))]
+          end
+
+          # The choice index for 0..1 position +x+, with hysteresis.
+          def index_at(x)
+            n = @choices.length
+            raw = MB::M.clamp((x * n).floor, 0, n - 1)
+            @lock.synchronize {
+              last = @last
+              if last && raw != last
+                # Stay unless past the current zone's border by the margin
+                lo = last.to_f / n - HYSTERESIS / n
+                hi = (last + 1).to_f / n + HYSTERESIS / n
+                raw = last if x >= lo && x < hi
+              end
+              @last = raw
+            }
+          end
+
+          def control_specs
+            @source.respond_to?(:control_specs) ? @source.control_specs : []
+          end
+
+          def nodes
+            @source.is_a?(Base) ? @source.nodes : []
+          end
+
+          # The knob behind +source+ (a Knob, a Reader, or a Graph of one),
+          # or nil.
+          def self.knob_of(source)
+            node = source.is_a?(Graph) ? Graph.unwrap(source.node) : source
+            node = node.knob if node.is_a?(GraphNode::Knob::Reader)
+            node.is_a?(GraphNode::Knob) ? node : nil
           end
         end
 
@@ -298,6 +399,10 @@ module MB
 
           def control_specs
             Graph.nodes(@node).flat_map { |n| n.respond_to?(:control_specs) && n.is_a?(GraphNode::Knob) ? n.control_specs : [] }
+          end
+
+          def nodes
+            [@node]
           end
 
           def to_ruby(&value_text)

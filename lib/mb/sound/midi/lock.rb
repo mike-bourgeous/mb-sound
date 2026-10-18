@@ -37,6 +37,20 @@ module MB
         # the note-on; samplers and `v.hz.transpose(v.pitch_mark)` play it).
         MICRO = [:note, :mark].freeze
 
+        # Graph nodes (knobs, LFOs) read by params in +x+ (a Style or a Map)
+        # (see Transform#param_nodes).
+        def self.param_nodes(x)
+          x.instance_variables.flat_map { |iv|
+            v = x.instance_variable_get(iv)
+            case v
+            when Param::Base then v.nodes
+            when Map, Style then param_nodes(v)
+            when Hash then v.values.flat_map { |y| y.is_a?(Param::Base) ? y.nodes : y.is_a?(Map) || y.is_a?(Style) ? param_nodes(y) : [] }
+            else []
+            end
+          }
+        end
+
         # The key nearest middle C that plays a scale's root in Degrees: the
         # root's pitch class in C4's octave (pitch classes up to F#) or the
         # octave below (G up), so roots stay within half an octave of the
@@ -56,8 +70,8 @@ module MB
           x = x.value_at(pos, transport: transport, stream: stream) if x.is_a?(Param::Base)
           case x
           when Scale then x
-          when MusicalKey then x.scale
-          when nil then key_at(transport, pos).scale
+          when MusicalKey then x.scale(pos, transport: transport)
+          when nil then key_at(transport, pos).scale(pos, transport: transport)
           when Symbol, String then key_at(transport, pos).with_mode(x).scale
           when Array then Scale[x, key_at(transport, pos).root]
           else raise ArgumentError, "A lock's scale is a Scale, a mode name, nil (the session key), or a param giving one (got #{x.inspect})"

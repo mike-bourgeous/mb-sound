@@ -137,10 +137,11 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
     end
 
     it 'follows a param style' do
-      clip = MB::Sound.seq(:mash, :along).n1.loop rescue skip('no symbol steps')
+      clip = MB::Sound::Sequence::Clip.new([MB::Sound::Sequence::Event.new(start: 0r, length: 1r, value: :mash, velocity: 1.0), MB::Sound::Sequence::Event.new(start: 1r, length: 1r, value: :along, velocity: 1.0)], length: 2, loop: true)
       s = described_class.new(clip)
       expect(s.map_note(61, 0r, transport: transport)).to be_nil
       expect(s.map_note(61, 1r, transport: transport)).to eq(60)
+      expect(s.to_s).to start_with('lock(Clip')
     end
   end
 
@@ -182,6 +183,46 @@ RSpec.describe(MB::Sound::MIDI::Lock, :midi_transforms) do
       # (D in D major would be E now; the held note ends as it sounded)
       expect(mi.span.events.map(&:event).map { |e| [e.type, e.note] }).to eq([[:note_off, 62]])
       expect(session.midi_log.map { |row| row.last[1] }).to eq([62, 62])
+    end
+  end
+
+  describe 'knob choices and the mode walk' do
+    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), channels: 1, realtime: false, raise_errors: true, transport: transport) }
+    after { session.close }
+
+    it 'chooses by zones with hysteresis' do
+      c = MB::Sound::MIDI::Param::Choice.new(0.5, [:a, :b, :c, :d])
+      seq = [0.0, 0.24, 0.26, 0.31, 0.49, 0.51, 0.55, 0.57, 0.4, 0.99, 0.74, 0.70, 0.68, 0.0]
+      expect(seq.map { |x| c.index_at(x) }).to eq([0, 0, 0, 0, 1, 1, 1, 2, 1, 3, 3, 3, 2, 0])
+    end
+
+    it 'chooses from a knob in its own scale' do
+      k = session.knob(:style, 100, range: 10..1000, curve: :exp)
+      c = k.choose(:mash, :play, :along)
+      expect(c.value_at(0r)).to eq(:play)
+      expect(c.to_s).to eq('knob(:style).choose(:mash, :play, :along)')
+    end
+
+    it 'walks the modes one degree at a time by brightness' do
+      list = MB::Sound::MusicalKey::BRIGHTNESS.map { |m| MB::Sound::Scale[m].offsets }
+      list.each_cons(2) { |a, b| expect((a - b).length).to eq(1) }
+      expect(MB::Sound.modes(:dorian..:phrygian, by: 0.5).choices).to eq([:dorian, :minor, :phrygian])
+      expect(MB::Sound.modes(:phrygian..:dorian, by: 0.5).choices).to eq([:phrygian, :minor, :dorian])
+      expect(MB::Sound.modes(by: MB::Sound.cc(1)).to_s).to eq('modes(by: cc(1))')
+    end
+
+    it 'lets the session mode follow a knob' do
+      k = session.knob(:dark, 0)
+      MB::Sound::Session.with_context(session: session) {
+        MB::Sound.key(:d)
+        MB::Sound.mode(k)
+      }
+      m = described_class::Degrees.new(layout: :fit)
+      expect(m.map(65, 0r, transport: transport)).to eq(68) # D lydian: G#
+      session.turn(:dark, 1, smooth: 0)
+      session.process_buffer(800)
+      expect(m.map(65, 1/1000r, transport: transport)).to eq(67) # D locrian: G
+      expect(MB::Sound::Session.with_context(session: session) { MB::Sound.key.to_s }).to eq('D modes(by: knob(:dark))')
     end
   end
 end

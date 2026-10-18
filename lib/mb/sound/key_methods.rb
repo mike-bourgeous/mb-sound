@@ -73,11 +73,41 @@ module MB
       # With no arguments, returns the session key's mode (a scale name).
       # Otherwise changes the mode to +name+ (a scale name, :dorian,
       # :phrygian, :minor_pentatonic, ...) at the launch point, keeping the
-      # root (see #key).  Returns the change's journal entry.
+      # root (see #key).  A knob (or another param giving numbers) walks
+      # the modes by brightness (#modes): `mode knob(:dark)`.  Returns the
+      # change's journal entry.
       def mode(name = nil, at: nil, on: nil, in: nil)
         return key.mode if name.nil?
         point = LaunchPoint.of(binding) or return nil
+        name = modes(by: name) if MIDI::Param.param?(name) && !name.is_a?(MIDI::Param::Choice) && !name.is_a?(MIDI::Param::ClipValue)
         key(nil, name, at: point)
+      end
+
+      # A mode that follows +by+ (a knob, cc, or LFO param): +names+ (mode
+      # names, or a Range of MusicalKey::BRIGHTNESS like :lydian..:locrian,
+      # the default) in equal zones of +by+'s range, with hysteresis (see
+      # MIDI::Param::Choice).  In brightness order each step changes one
+      # scale degree, a morph rather than a jump.  Use it for the session
+      # mode (`mode modes(:dorian..:phrygian, by: knob(:dark))`) or any scale
+      # option (`lock :play, scale: modes(by: cc(1))`).
+      #
+      #     knob :dark, 0.3
+      #     mode knob(:dark)                       # lydian (0) .. locrian (1)
+      #     mode modes(:major, :dorian, :minor, by: knob(:dark))
+      def modes(*names, by:)
+        list = names.empty? ? [MusicalKey::BRIGHTNESS.first..MusicalKey::BRIGHTNESS.last] : names
+        expanded = list.flat_map { |n|
+          if n.is_a?(Range)
+            bright = ->(m) { m = MusicalKey.check_mode(m); MusicalKey::BRIGHTNESS.index(Scale::ALIASES.fetch(m, m)) }
+            a = bright.(n.begin)
+            b = bright.(n.end)
+            raise ArgumentError, "A Range of modes goes along #{MusicalKey::BRIGHTNESS.map(&:inspect).join(', ')} (got #{n.inspect})" unless a && b
+            a <= b ? MusicalKey::BRIGHTNESS[a..b] : MusicalKey::BRIGHTNESS[b..a].reverse
+          else
+            [MusicalKey.check_mode(n)]
+          end
+        }
+        MIDI::Param::Choice.new(by, expanded, recipe: [nil, :modes, names, { by: by }])
       end
     end
   end

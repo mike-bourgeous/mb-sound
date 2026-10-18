@@ -28,7 +28,7 @@ module MB
           mode = MusicalKey.check_mode(mode) unless mode.nil?
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
-          data = { root: root.nil? ? nil : MusicalKey.parse_root(root)[1], mode: mode }.compact
+          data = { root: root.nil? ? nil : MusicalKey.parse_root(root)[1], mode: mode.is_a?(MIDI::Param::Base) ? mode.to_s : mode }.compact
           change(:key, :key, time, data: data) { |t|
             k = @transport.key_at(t)
             k = k.with_root(root) unless root.nil?

@@ -28,9 +28,17 @@ module MB
         @default ||= new(root: 0, mode: :major)
       end
 
+      # The seven diatonic modes from brightest to darkest: each step
+      # lowers one degree (Lydian's #4, Ionian's 7, Mixolydian's 3,
+      # Dorian's 6, Aeolian's 2, Phrygian's 5), so a knob walking this
+      # order changes the scale one note at a time (KeyMethods#modes).
+      BRIGHTNESS = [:lydian, :major, :mixolydian, :dorian, :minor, :phrygian, :locrian].freeze
+
       # +mode+ as a scale name Symbol, raising with suggestions if it isn't
-      # one.
+      # one.  A param (MIDI::Param: a knob's #choose, #modes) stays as it
+      # is: the mode is read from it at each position (see #scale).
       def self.check_mode(mode)
+        return mode if mode.is_a?(MIDI::Param::Base)
         m = mode.to_s.downcase.to_sym
         return m if Scale::OFFSETS.key?(m) || Scale::ALIASES.key?(m)
         names = Scale.names
@@ -86,9 +94,21 @@ module MB
         with(mode: MusicalKey.check_mode(mode))
       end
 
-      # The key's Scale (degree 0 in the octave from C4 up).
-      def scale
-        SCALES[[mode, root]] ||= Scale[mode, root]
+      # The key's Scale (degree 0 in the octave from C4 up).  A mode that
+      # moves (a param) is read at timeline position +pos+ (the
+      # transport's position, else 0).
+      def scale(pos = nil, transport: nil)
+        m = mode
+        if m.is_a?(MIDI::Param::Base)
+          pos ||= transport&.position || 0r
+          m = MusicalKey.check_mode(m.value_at(pos, transport: transport))
+        end
+        SCALES[[m, root]] ||= Scale[m, root]
+      end
+
+      # True if the mode moves (a param; see #scale).
+      def moving?
+        mode.is_a?(MIDI::Param::Base)
       end
 
       # Scales of keys used so far (a Scale per [mode, root]; read on every
@@ -106,7 +126,7 @@ module MB
 
       # The console line that sets this key.
       def to_ruby
-        "key #{spelling.sub('#', 's').downcase.to_sym.inspect}, #{mode.inspect}"
+        "key #{spelling.sub('#', 's').downcase.to_sym.inspect}, #{mode.is_a?(Symbol) ? mode.inspect : mode.to_s}"
       end
     end
   end

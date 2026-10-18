@@ -235,6 +235,11 @@ module MB
             @knob.value_at(pos, frame: frame)
           end
 
+          # See Knob::ValueAt#choose.
+          def choose(*choices)
+            @knob.choose(*choices)
+          end
+
           # Plan layer: a param read every block (Plan::Op::Param), a fill
           # while the knob holds still.
           include Plan::Describable
