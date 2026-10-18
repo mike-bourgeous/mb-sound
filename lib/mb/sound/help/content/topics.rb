@@ -573,7 +573,9 @@ module MB
         clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
         and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
         :reverse, :halftime, :doubletime, :double, :half) plays a changed
-        copy as a new slot.
+        copy as a new slot, named with a version mark (`:bass_b_v2`, then
+        `_v3`; `launch :bass, :bass_b_v2` plays it again); the clip pane
+        shows what made it.
       TEXT
       commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement

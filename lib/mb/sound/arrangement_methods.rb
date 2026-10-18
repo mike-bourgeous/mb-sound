@@ -77,8 +77,10 @@ module MB
       end
 
       # Replaces track +name+'s clip with a transformed copy at its launch
-      # point (one change, one undo step; the copy is named after the
-      # transform, e.g. :"bass_a/t+2", and becomes a slot): `transpose: 2`
+      # point (one change, one undo step; the copy gets a version mark,
+      # e.g. :bass_a_v2, then :bass_a_v3, and becomes a slot; what made it
+      # shows in the clip detail pane and the undo step's label):
+      # `transpose: 2`
       # (an octave is 12), `legato: 0.8`, `swing: 0.6`, `quantize: 1/16r`
       # (or true), or one of :reverse, :halftime (twice as long),
       # :doubletime (half as long), :double (played twice), :half (its

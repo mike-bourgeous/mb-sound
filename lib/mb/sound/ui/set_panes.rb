@@ -277,6 +277,12 @@ module MB
                    [clip.loop ? '  loop' : '  once', :dim], [range, :dim], [track ? "  on #{track}" : '', :dim],
                    ["  #{clip.events.length} notes", :dim])
             y = 1
+            hist = clip.respond_to?(:history) ? clip.history : []
+            if !hist.empty? && c.h > 5
+              # (what made this tweak version: tweak keys name versions bass_a_v2, _v3, ...)
+              c.text(0, y, c.fit("#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w), :dim)
+              y += 1
+            end
             if clip.ruby && c.h > 4
               c.text(0, y, c.fit(clip.ruby.lines.first.to_s.strip, c.w), :key)
               y += 1

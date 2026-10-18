@@ -229,7 +229,9 @@ RSpec.describe('UI round 4 feed') do
 
         e = MB::Sound.tweak(:bass, transpose: 12)
         expect(e.queued?).to eq(true)
-        expect(lane(:bass).slots.map(&:key)).to eq(['riff_a', 'bass#1', 'bass#1/t+12'])
+        expect(lane(:bass).slots.map(&:key)).to eq(['riff_a', 'bass#1', 'bass_slot1_v2'])
+        expect(lane(:bass).slots[2].history).to eq(['bass#1', 'transpose: 12'])
+        expect(s.undo_steps.map(&:label)).to include('tweak :bass, transpose: 12 -> :bass_slot1_v2')
         expect(lane(:bass).queued.map(&:slot)).to eq([2])
         bars(1)
         expect(lane(:bass).playing).to eq(2)
@@ -242,6 +244,28 @@ RSpec.describe('UI round 4 feed') do
         MB::Sound.undo
         bars(1)
         expect(lane(:bass).playing).to eq(2)
+      end
+    end
+
+    it 'names tweak versions with a mark valid in Ruby names, keeping the lineage (ux-r4b)' do
+      MB::Sound::Session.with_context(session: s) do
+        arr.go(:one)
+        bars(1.25)
+        MB::Sound.tweak(:bass, transpose: 2)
+        bars(1)
+        MB::Sound.tweak(:bass, :reverse)
+        bars(1)
+        MB::Sound.launch(:bass, :riff_a)
+        bars(1)
+        MB::Sound.tweak(:bass, swing: 0.6)
+        bars(1)
+        names = arr.slots(:bass).map(&:name)
+        expect(names).to include(:riff_a_v2, :riff_a_v3, :riff_a_v4)
+        expect(names.compact.map(&:to_s)).to all(match(/\A[a-z_][a-zA-Z0-9_]*\z/))
+        expect(arr.tweak_history(arr.slots(:bass).find { |c| c.name == :riff_a_v3 })).to eq([:riff_a, ['transpose: 2', ':reverse']])
+        expect(arr.tweak_history(arr.slots(:bass).find { |c| c.name == :riff_a_v4 })).to eq([:riff_a, ['swing: 0.6']])
+        expect(lane(:bass).slots.find { |c| c.key == 'riff_a_v3' }.history).to eq(['riff_a', 'transpose: 2', ':reverse'])
+        expect(MB::Sound.launch(:bass, :riff_a_v3)).not_to be_nil # (version names launch by name)
       end
     end
 

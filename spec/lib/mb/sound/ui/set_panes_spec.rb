@@ -87,6 +87,18 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       ui::Panes::Clips.selected = nil
     end
 
+    it "shows a tweak version's lineage under its name (ux-r4b)" do
+      ui::Panes::Clips.selected = nil
+      lane = snap.matrix.tracks.find { |t| t.name == :bass }
+      base = lane.slots[0]
+      ui::Panes::Clips.selected = [:bass, base.with(name: 'bass_a_v3', key: 'bass_a_v3', history: ['bass_a', 'transpose: 2', ':reverse'].freeze)]
+      lines = draw(:clip, snap, h: 10)
+      expect(lines[0]).to start_with('bass_a_v3')
+      expect(lines[1]).to eq('bass_a → transpose: 2 → :reverse')
+    ensure
+      ui::Panes::Clips.selected = nil
+    end
+
     it 'says how to make tracks when there are none' do
       expect(draw(:clips, ui_fake_snapshot.with(slow: ui_fake_slow.with(matrix: nil)))[0]).to start_with('no tracks yet')
     end
