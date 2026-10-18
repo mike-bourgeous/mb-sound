@@ -605,10 +605,19 @@ module MB
         # blocks that lie inside each range.  The whole integrated loudness
         # if no range holds a block.
         def loudest_in(ranges)
+          values = loudness_in(ranges).compact
+          values.empty? ? integrated : values.max
+        end
+
+        # The gated integrated loudness (LUFS) of each of +ranges+ ([start,
+        # end] in seconds from the start, e.g. single bars), as for
+        # #loudest_in; nil for a range that holds no 400 ms block.
+        # Mastering presets with `measure: :bars` read their distribution.
+        def loudness_in(ranges)
           blocks = windows(MOMENTARY_SEGMENTS, STEP_SEGMENTS, lead: false)
           step = STEP_SEGMENTS * SEGMENT
           len = MOMENTARY_SEGMENTS * SEGMENT
-          values = ranges.filter_map { |a, b|
+          ranges.map { |a, b|
             first = (a / step - 1e-9).ceil
             last = ((b - len) / step + 1e-9).floor
             first = 0 if first < 0
@@ -616,7 +625,6 @@ module MB
             next if last < first
             Loudness.gate(blocks[first..last])[0]
           }
-          values.empty? ? integrated : values.max
         end
 
         # Loudness range (LU) so far, as if followed by 1.5 s of silence

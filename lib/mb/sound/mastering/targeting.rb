@@ -189,18 +189,19 @@ module MB
         # trim).  +codec_peaks+ ({ codec => dBTP } of the written file, or
         # nil) is filled in by the render when measured.
         #
-        # +measure+ is what the target measured (:integrated, or :loudest:
+        # +measure+ is what the target measured (:integrated; :loudest:
         # +loudest+ is then the loudest +loudest_bars+-bar window's LUFS;
-        # see Mastering::MEASURES).  +drive+ (Decibels) is the trim the
+        # :bars: +loudest+ is then the level +percentile+ of the bars sit
+        # at or under; see Mastering::MEASURES).  +drive+ (Decibels) is the trim the
         # first pass used (the preset's drive).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
-                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive) do
-          def initialize(drive: nil, **rest) = super(drive: drive, **rest)
+                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive, :percentile) do
+          def initialize(drive: nil, percentile: nil, **rest) = super(drive: drive, percentile: percentile, **rest)
 
-          # The loudness the target was reached with (integrated, or the
-          # loudest window's).
+          # The loudness the target was reached with (integrated, the
+          # loudest window's, or the bars' percentile level).
           def measured
-            measure == :loudest ? loudest : integrated
+            measure == :integrated ? integrated : loudest
           end
 
           # Peak-to-loudness ratio (LU).
@@ -230,7 +231,11 @@ module MB
             change = drive ? format('; %+.2f dB more trim for %+.2f LU (the chain compresses and limits)', trim.db_value - drive.db_value, measured - first_pass) : ''
             lines << format('mastering %s: %s (trim %+.2f dB into the chain; %s%s; %d chain runs)',
                             preset.inspect, pass? ? 'pass' : 'FAIL', trim.db_value, first, change, runs)
-            target_text = measure == :loudest ? format('loudest %d bars %.2f LUFS, target %.1f', loudest_bars, loudest, target.lufs) : format('target %.1f', target.lufs)
+            target_text = case measure
+                          when :loudest then format('loudest %d bars %.2f LUFS, target %.1f', loudest_bars, loudest, target.lufs)
+                          when :bars then format('bars at the %s percentile %.2f LUFS, target %.1f', Mastering.ordinal((percentile * 100).round), loudest, target.lufs)
+                          else format('target %.1f', target.lufs)
+                          end
             lines << format('  loudness %.2f LUFS (%s%s), short-term max %.1f, LRA %.1f LU, PLR %.1f LU',
                             integrated, target_text, held ? format(', held by the %.1f dBTP ceiling: no limiter', ceiling.db_value) : '',
                             short_term_max, range, plr)
@@ -275,10 +280,14 @@ module MB
 
           base, length = mix_from(capture, origin, session.channels)
           # What the target measures (Mastering::MEASURES): with :loudest,
-          # the loudest +loudest_bars+ bars, windows starting on bar lines
+          # the loudest +loudest_bars+ bars, windows starting on bar lines;
+          # with :bars, a percentile of the single bars' levels
           mode = presets.last.measure
           bars = presets.last.loudest_bars
-          window = mode == :loudest ? loudest_windows(session.transport, origin, length, session.sample_rate, bars) : nil
+          window = case mode
+                   when :loudest then loudest_windows(session.transport, origin, length, session.sample_rate, bars)
+                   when :bars then bar_windows(session.transport, origin, length, session.sample_rate, presets.last.percentile)
+                   end
           first = measure(base, session.sample_rate, true_peak: false, loudest: window)[0]
           runs = 0
           output = ->(db) {
@@ -333,7 +342,7 @@ module MB
             integrated: r.integrated, short_term_max: r.short_term_max, range: r.range, true_peak: r.true_peak,
             side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil,
             measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil,
-            drive: drive
+            drive: drive, percentile: mode == :bars ? presets.last.percentile : nil
           )
         end
 
@@ -456,9 +465,33 @@ module MB
           { ranges: ranges }
         end
 
-        # Analyzer +a+'s loudest window per +spec+ (see .loudest_windows).
+        # The windows of measure: :bars (see Mastering::MEASURES): every
+        # whole bar of the render (as .loudest_windows with one bar; 2 s
+        # steps without a transport) and the +percentile+.
+        def self.bar_windows(transport, origin, length, sample_rate, percentile)
+          spec = loudest_windows(transport, origin, length, sample_rate, 1)
+          unless spec[:ranges]
+            seconds = length.to_f / sample_rate
+            spec = { ranges: (0...(seconds / 2.0).floor).map { |i| [i * 2.0, (i + 1) * 2.0] } }
+          end
+          spec.merge(percentile: percentile)
+        end
+
+        # Analyzer +a+'s level per +spec+: the loudest window (see
+        # .loudest_windows), or with +:percentile+ (see .bar_windows) the
+        # level that share of the windows within Mastering::BARS_RANGE LU
+        # of the loudest sit at or under (nearest rank; the integrated
+        # loudness when no window holds a block).
         def self.loudest_of(a, spec)
-          spec[:ranges] ? a.loudest_in(spec[:ranges]) : a.loudest(spec[:seconds], hop: spec[:hop])
+          return a.loudest(spec[:seconds], hop: spec[:hop]) unless spec[:ranges]
+          return a.loudest_in(spec[:ranges]) unless spec[:percentile]
+
+          levels = a.loudness_in(spec[:ranges]).compact.select(&:finite?)
+          return a.integrated if levels.empty?
+
+          top = levels.max
+          levels = levels.select { |l| l >= top - BARS_RANGE }.sort
+          levels[((levels.length - 1) * spec[:percentile]).round]
         end
       end
     end
