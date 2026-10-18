@@ -68,7 +68,7 @@ module MB
 
       # The set's panes, shown by `ui :session` (and buses in :studio's
       # tabs) rather than on the :wall, which shows every other pane.
-      SESSION_PANES = %i[buses log lane clips midi].freeze
+      SESSION_PANES = %i[buses log lane clips clip racks midi].freeze
 
       class << self
         # The terminal's size (the screen's, else the console's).

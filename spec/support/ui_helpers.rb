@@ -26,13 +26,81 @@ module UIHelpers
       recording: [UI::RecordingInfo.new(name: :lead, ends: '21:1', pos: 20r, queued: false)].freeze,
       armed: [:lead].freeze,
       form: UI::FormInfo.new(section: :drop, pass: 1, from: 12r, to: 20r, next: :break, next_at: '21:1', committed: true, looping: false, ended: false),
-      knob_specs: {}.freeze
+      knob_specs: {}.freeze,
+      matrix: ui_fake_matrix,
+      racks: ui_fake_racks,
+      buses: [UI::BusInfo.new(name: :verb, to: :master, description: 'reverb(:hall)', asleep: false, muted: false, sends: %i[pad].freeze, sources: [].freeze),
+              UI::BusInfo.new(name: :drums, to: :master, description: 'compress', asleep: false, muted: false, sends: [].freeze, sources: %i[drums].freeze)].freeze,
+      routes: { pad: { to: :master, send: { verb: 0.25 } }, drums: { to: :drums, send: {} } }.freeze
     )
+  end
+
+  # A clip for the matrix: +notes+ as eighths from the start (nil: kit
+  # rows +rows+), +name+, +bars+.
+  def ui_fake_clip(name, notes, bars: 1r, rows: nil, ruby: nil, loop: true)
+    ev = (rows || notes).each_with_index.map { |n, i|
+      UI::NoteInfo.new(start: i * 1/8r, length: 1/8r, note: rows ? nil : n, velocity: i.zero? ? 1.0 : 0.7, row: rows ? n : nil,
+                       marks: i.zero? ? [:accent].freeze : [].freeze)
+    }.freeze
+    UI::ClipInfo.new(name: name.to_s, kind: rows ? :kit : :seq, bars: bars, pattern: '', used: [].freeze, loop: loop, length: bars, events: ev,
+                     ruby: ruby, range: rows ? nil : notes.min..notes.max, key: name.to_s)
+  end
+
+  # The clip matrix of the fake set: drums, bass, lead, pad over scenes
+  # intro, drop, break (drop current), bass's next clip queued for 18:1,
+  # pad's stop queued.  +prefix+ lengthens the names (text fitting).
+  def ui_fake_matrix(prefix = '')
+    kit = ui_fake_clip("#{prefix}beat_a", nil, rows: %i[kick snare kick hat kick snare kick hat])
+    t = ->(name, state, playing, slots, queued = []) { UI::LaneInfo.new(name: :"#{prefix}#{name}", state: state, playing: playing, queued: queued.freeze, slots: slots.freeze, q: '1') }
+    tracks = [
+      t.(:drums, :playing, 0, [kit, ui_fake_clip("#{prefix}fill", nil, rows: %i[snare snare snare snare])]),
+      t.(:bass, :playing, 0, [ui_fake_clip("#{prefix}bass_a", [36, 36, 43, 46, 36, 48, 46, 43], ruby: 'seq(C2, C2, G2, Bb2, C2, C3, Bb2, G2).n8.loop.named(:bass_a)'),
+                              ui_fake_clip("#{prefix}bass_b", [41, 41, 48, 51]), ui_fake_clip("#{prefix}bass_1", [36])],
+         [UI::LaunchInfo.new(seq: 10, kind: :launch, slot: 1, lands: '18:1', pos: 17r)]),
+      t.(:lead, :stopped, nil, [ui_fake_clip("#{prefix}hook", [72, 74, 75, 79])]),
+      t.(:pad, :playing, 0, [ui_fake_clip("#{prefix}chords", [60, 63, 67], bars: 2r)], [UI::LaunchInfo.new(seq: 9, kind: :stop, slot: nil, lands: '18:1', pos: 17r)]),
+    ].freeze
+    tn = ->(n) { :"#{prefix}#{n}" }
+    scenes = [
+      UI::SceneInfo.new(name: :"#{prefix}intro", cells: { tn.(:drums) => :stop, tn.(:bass) => 0, tn.(:lead) => :stop, tn.(:pad) => 0 }.freeze, current: false, queued: nil),
+      UI::SceneInfo.new(name: :"#{prefix}drop", cells: { tn.(:drums) => 0, tn.(:bass) => 0, tn.(:lead) => 0, tn.(:pad) => 0 }.freeze, current: true, queued: nil),
+      UI::SceneInfo.new(name: :"#{prefix}break", cells: { tn.(:drums) => 1, tn.(:bass) => 1, tn.(:lead) => :keep, tn.(:pad) => :stop }.freeze, current: false, queued: nil),
+    ].freeze
+    UI::MatrixInfo.new(tracks: tracks, scenes: scenes)
+  end
+
+  # One rack instance with two macros (knobs :"bass/dub/space" and
+  # :"bass/dub/tone" in ui_fake_rack_knobs).
+  def ui_fake_racks(prefix = '')
+    specs = { space: ui_knob_spec(:"#{prefix}space", 0.35, 0.0..1.0), tone: ui_knob_spec(:"#{prefix}tone", 2400.0, 600.0..8000.0, curve: :exp, unit: 'Hz') }.freeze
+    [MB::Sound::Rack::RackInfo.new(
+      name: :"#{prefix}dub", path: :"bass/#{prefix}dub", kind: :effect, signature: 'audio(sig) + audio(side) -> audio',
+      ports: [{ name: :sig, type: :audio, role: :main, required: true }.freeze, { name: :side, type: :audio, role: :side, required: false }.freeze].freeze,
+      latency: 72, macros: [:"bass/#{prefix}dub/space", :"bass/#{prefix}dub/tone"].freeze, macro_specs: specs, slots: [].freeze
+    )].freeze
+  end
+
+  # The macro knobs of ui_fake_racks as KnobValues.
+  def ui_fake_rack_knobs(prefix = '')
+    r = ui_fake_racks(prefix).first
+    [UI::KnobValue.new(name: r.macros[0], value: 0.6, spec: r.macro_specs[:space]),
+     UI::KnobValue.new(name: r.macros[1], value: 1800.0, spec: r.macro_specs[:tone])]
+  end
+
+  # Bus and send levels for the fake set's buses.
+  def ui_fake_bus_levels
+    lv = ->(peak, short) { UI::Levels.new(peak: [peak, peak - 1].freeze, rms: [short, short].freeze, short: short) }
+    [
+      { verb: UI::BusLevels.new(input: lv.(-14.0, -22.0), output: lv.(-12.5, -20.0)),
+        drums: UI::BusLevels.new(input: lv.(-6.0, -15.0), output: lv.(-8.0, -16.0)) }.freeze,
+      { [:pad, :verb] => UI::SendLevel.new(player: :pad, bus: :verb, gain: -12.0, level: lv.(-20.0, -28.0)) }.freeze,
+    ]
   end
 
   # A full Snapshot at bar 17 beat 3 (+t+ seconds, +seq+), with a 440 Hz
   # scope of +scope_phase+.
-  def ui_fake_snapshot(t: 1.0, seq: 1, scope_phase: 0.0, peak: -8.1)
+  # +macros+ adds the rack macros' knobs (the :session captures).
+  def ui_fake_snapshot(t: 1.0, seq: 1, scope_phase: 0.0, peak: -8.1, macros: false)
     scope = [0.7, 0.35].map { |a|
       Numo::SFloat.new(1024).seq.map { |i| a * Math.sin(2 * Math::PI * (440.0 * i / 48000 + scope_phase)) }.freeze
     }.freeze
@@ -52,8 +120,11 @@ module UIHelpers
       knobs: [
         UI::KnobValue.new(name: :cut, value: 2400.0, spec: ui_knob_spec(:cut, 800.0, 100.0..8000.0, curve: :exp, unit: 'Hz')),
         UI::KnobValue.new(name: :drive, value: 0.3, spec: ui_knob_spec(:drive, 0.0, 0.0..1.0)),
+        *(macros ? ui_fake_rack_knobs : []),
       ].freeze,
-      slow: ui_fake_slow
+      slow: ui_fake_slow,
+      bus_levels: ui_fake_bus_levels[0],
+      send_levels: ui_fake_bus_levels[1]
     )
   end
 

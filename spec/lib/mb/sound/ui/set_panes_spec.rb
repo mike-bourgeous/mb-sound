@@ -1,0 +1,176 @@
+require_relative '../../../../support/ui_helpers'
+
+# Round 4's panes (ux-r4-panes): the clip matrix and its keys, the clip
+# detail, racks with macros to turn, buses with meters, the keyboard
+# lighting MIDI input.  Panes draw from ui_fake_snapshot (feed contract
+# data); keys return console lines (PaneKeys::Run) the screen runs.
+RSpec.describe('UI round 4 panes', :aggregate_failures) do
+  let(:ui) { MB::Sound::UI }
+  let(:snap) { ui_fake_snapshot(macros: true) }
+
+  def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 8)
+    grid = MB::Sound::Plot::Text::Cells.new(w, h)
+    ui.panes.fetch(name).draw(ui::Canvas.new(grid, 0, 0, w, h), snap, state)
+    grid.to_text(:none).lines.map(&:rstrip)
+  end
+
+  def key(name, state, action, *args) = ui.panes.fetch(name).key_action(action, state, *args)
+
+  describe 'the clip matrix' do
+    it 'draws tracks against scenes then other slots, with playing, queued (with a countdown), stop, and keep cells' do
+      lines = draw(:clips, snap, w: 70)
+      expect(lines[0]).to match(/\A\s+intro\s+▶drop\s+break\s+slots\z/)
+      expect(lines[1]).to match(/\A▶drums\s+■\s+▶beat_a\s+fill\z/)
+      expect(lines[2]).to include('▶bass_a', '◆bass_b 2.0', 'bass_1') # (queued for 17r, now 16.5r: 2 beats)
+      expect(lines[3]).to match(/\A lead\s+■\s+hook\s+·\z/)
+      expect(lines[4]).to include('▶chords', '◆■')
+    end
+
+    it 'moves a cursor in its mode and launches the cell, its scene, or a stop as console lines' do
+      st = { title_in_rule: true, mode: true }
+      draw(:clips, snap, st)
+      expect(key(:clips, st, :launch)).to eq(ui::PaneKeys::Run['stop :drums', 'stop :drums']) # (intro has drums stopped)
+      key(:clips, st, :move, 1, 1) # bass, drop
+      expect(key(:clips, st, :launch).code).to eq('launch :bass, 0')
+      key(:clips, st, :move, 1, 0)
+      expect(key(:clips, st, :launch).code).to eq('launch :bass, 1')
+      expect(key(:clips, st, :scene).code).to eq('go :break')
+      key(:clips, st, :move, 1, 0) # past the scenes: bass's other slot
+      expect(key(:clips, st, :launch).code).to eq('launch :bass, 2')
+      expect(key(:clips, st, :scene)).to include('not a scene column')
+      key(:clips, st, :move, 9, 9) # clamped to the last cell
+      expect(st[:cursor]).to eq([3, 3])
+      expect(key(:clips, st, :launch)).to include('nothing in this cell')
+      key(:clips, st, :move_to, :first)
+      expect(st[:cursor]).to eq([3, 0])
+      expect(key(:clips, st, :stop).code).to eq('stop :pad')
+    end
+
+    it 'tweaks the track\'s clip with one key per edit, refusing tracks with nothing playing' do
+      st = { title_in_rule: true, mode: true }
+      draw(:clips, snap, st)
+      key(:clips, st, :move, 0, 1) # bass
+      codes = ui::Panes::Clips::EDITS.map { |k, _, _| key(:clips, st, :tweak, k).code }
+      expect(codes).to eq(['tweak :bass, transpose: 1', 'tweak :bass, transpose: -1', 'tweak :bass, transpose: 12', 'tweak :bass, transpose: -12',
+                           'tweak :bass, legato: 1.0', 'tweak :bass, swing: 0.6', 'tweak :bass, quantize: 1/16r', 'tweak :bass, :double',
+                           'tweak :bass, :half', 'tweak :bass, :halftime', 'tweak :bass, :doubletime', 'tweak :bass, :reverse'])
+      key(:clips, st, :move, 0, 1) # lead: stopped
+      expect(key(:clips, st, :tweak, '+')).to eq(':lead plays no clip to tweak')
+      expect(key(:clips, st, :undo).code).to eq('undo')
+    end
+
+    it 'binds every edit and cursor key in its mode keymap, and declares its jump letter' do
+      km = ui::Panes::Clips.mode_keymap
+      keys = km.entries.map { |b| b.chord[0].to_s }
+      expect(keys).to include('up', 'down', 'left', 'right', 'enter', 'g', 'x', *ui::Panes::Clips::EDITS.map(&:first))
+      expect(keys).not_to include('escape')
+      expect(ui::Panes::Clips.jump).to eq('a')
+      expect(ui::Panes::Racks.jump).to eq('r')
+      expect(ui::Panes::Buses.jump).to eq('b')
+    end
+
+    it 'publishes the cursor\'s clip for the detail pane, which draws its notes as a roll with marks' do
+      st = { title_in_rule: true, mode: true }
+      draw(:clips, snap, st)
+      key(:clips, st, :move, 1, 1)
+      draw(:clips, snap, st)
+      expect([ui::Panes::Clips.selected[0], ui::Panes::Clips.selected[1].name]).to eq([:bass, 'bass_a'])
+      lines = draw(:clip, snap, h: 10)
+      expect(lines[0]).to include('bass_a', '1 bar', 'loop', 'C2..C3', 'on bass', '8 notes')
+      expect(lines[1]).to start_with('seq(C2, C2, G2')
+      expect(lines.find { |l| l.start_with?('C3') }).to include('█')
+      expect(lines.find { |l| l.start_with?('C2') }).to include('!') # (the accent)
+      ui::Panes::Clips.selected = nil
+      expect(draw(:clip, snap)[0]).to include('beat_a') # (the first playing clip)
+      expect(draw(:clip, ui_fake_snapshot.with(slow: ui_fake_slow.with(matrix: nil)))[0]).to start_with('no clip selected')
+    ensure
+      ui::Panes::Clips.selected = nil
+    end
+
+    it 'says how to make tracks when there are none' do
+      expect(draw(:clips, ui_fake_snapshot.with(slow: ui_fake_slow.with(matrix: nil)))[0]).to start_with('no tracks yet')
+    end
+  end
+
+  describe 'racks' do
+    it 'draws each instance with its kind, typed ports, latency, and macros as knob rows' do
+      lines = draw(:racks, snap, w: 50)
+      expect(lines[0]).to eq('bass/dub  effect  lat 72 smp')
+      expect(lines[1]).to eq('  in sig:audio side:audio?  out audio')
+      expect(lines[2]).to match(/\A  space\s+█+.*0\.6 0\.\.1\z/)
+      expect(lines[3]).to match(/\A  tone\s+█+.*1800 Hz 600\.\.8000 exp\z/)
+      expect(draw(:racks, ui_fake_snapshot.with(slow: ui_fake_slow.with(racks: [].freeze)))[0]).to start_with('no racks')
+    end
+
+    it 'picks macros and turns them by position steps (Shift: fine) as turn lines, from the value it just set' do
+      st = { title_in_rule: true, mode: true }
+      draw(:racks, snap, st)
+      expect(key(:racks, st, :turn, 0.02)).to eq(ui::PaneKeys::Run['turn :"bass/dub/space", 0.62', 'bass/dub/space 0.62'])
+      expect(key(:racks, st, :turn, 0.02).code).to eq('turn :"bass/dub/space", 0.64') # (before the knob caught up)
+      key(:racks, st, :pick, 1)
+      tone = key(:racks, st, :turn, -0.002).code
+      expect(tone).to start_with('turn :"bass/dub/tone", 17')
+      expect(tone[/[\d.]+\z/].to_f).to be_within(10).of(1800 * (8000 / 600.0)**-0.002)
+      expect(key(:racks, st, :reset).code).to eq('turn :"bass/dub/tone", 2400')
+      key(:racks, st, :pick, 5) # (clamped)
+      expect(key(:racks, st, :turn, 1.0).code).to eq('turn :"bass/dub/tone", 8000')
+      expect(key(:racks, { snap: ui_fake_snapshot }, :turn, 0.1)).to include('no macro')
+    end
+  end
+
+  describe 'buses' do
+    it 'shows each bus with input and output meters and what feeds it: routed whole (to:) or by a send level with its meter' do
+      lines = draw(:buses, snap, w: 60, h: 6)
+      expect(lines[0]).to start_with('● verb').and include('→ master', 'reverb(:hall)')
+      expect(lines[1]).to match(/in █.*-14\.0 out █.*-12\.5\z/)
+      expect(lines[2]).to match(/\A ← pad\s+-12\.0 dB █.*-20\.0\z/)
+      expect(lines[3]).to start_with('● drums')
+      expect(lines[5]).to match(/\A ← drums\s+to:\z/)
+      expect(ui.panes[:buses].needs).to eq([:buses])
+    end
+
+    it 'leaves the meter rows out until the feed sends levels, and follows send levels given as knobs' do
+      s = ui_fake_snapshot.with(bus_levels: nil, send_levels: nil, slow: ui_fake_slow.with(routes: { pad: { to: :master, send: { verb: :wet } } }.freeze))
+      lines = draw(:buses, s, w: 60, h: 4)
+      expect(lines[1]).to match(/\A ← pad\s+follows wet\z/)
+    end
+  end
+
+  describe 'the keyboard' do
+    it 'lights notes from the MIDI input (not its own keys) and names their chord' do
+      kb = ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new)
+      base = kb.view.base
+      notes = [0, 4, 7].map { |d| ui::HeldNote.new(note: base + 12 + d, velocity: 100, channel: 0, source: :input, input: nil, frame: 0, pos: 0r) } +
+              [ui::HeldNote.new(note: base + 2, velocity: 90, channel: 0, source: :keyboard, input: nil, frame: 0, pos: 0r)]
+      s = ui_fake_snapshot.with(notes: notes.freeze)
+      expect(ui::Panes::Keyboard.input_fills(s, base)).to eq({ 12 => [100, :input], 16 => [100, :input], 19 => [100, :input] })
+      text = draw(:keyboard, s, { keyboard: kb, title_in_rule: true }, w: 120, h: 12).join("\n")
+      expect(text).to match(/input C4 E4 G4\s+C\b/)
+      # Pressed vs sounding once a scale transform reports what sounds
+      sounding = [ui::HeldNote.new(note: base + 13, velocity: 100, channel: 0, source: :input, input: nil, frame: 0, pos: 0r)].freeze
+      s2 = ui_fake_snapshot.with(notes: notes.first(1).freeze, sounding: sounding)
+      expect(ui::Panes::Keyboard.input_fills(s2, base)).to eq({ 12 => [100, :pressed], 13 => [100, :input] })
+    end
+  end
+
+  describe 'running a pane key\'s line on the screen' do
+    after do
+      @tiles&.stop
+      @term&.close
+      @session&.close
+    end
+
+    it 'runs it through UI.run_line in the screen\'s session (journaled), prints the Ruby in the REPL pane, and flashes its note' do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      @session.knob(:space, 0.2)
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100, session: @session)
+      expect(@term.wait_for('t> ')).to eq(true)
+      @tiles.send(:run_pane_line, ui::PaneKeys::Run['turn :space, 0.7', 'space 0.7'])
+      expect(@term.wait_for('turn :space, 0.7')).to eq(true), @term.text
+      expect(@term.text).to include('# space 0.7')
+      expect(@session.journal.changes.map(&:kind)).to include(:turn)
+      @tiles.send(:run_pane_line, ui::PaneKeys::Run['turn :nope_not_a_knob, 1', 'nope'])
+      expect(@term.wait_for('ArgumentError')).to eq(true), @term.text
+    end
+  end
+end

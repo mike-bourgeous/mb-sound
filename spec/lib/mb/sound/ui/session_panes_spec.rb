@@ -24,11 +24,12 @@ RSpec.describe('UI session panes', :aggregate_failures) do
               ui::BusInfo.new(name: :drums, to: :master, description: 'bypass', asleep: true, muted: false)].freeze,
       routes: { bass: { to: :master, send: { verb: 0.25 } }, kick: { to: :drums, send: {} } }.freeze
     )
-    lines = draw(:buses, snap)
+    lines = draw(:buses, snap.with(bus_levels: nil, send_levels: nil))
     text = lines.join("\n")
     expect(lines[0]).to start_with('● verb').and include('→ master', 'reverb')
     expect(text).to include('drums', 'asleep')
-    expect(lines[1]).to match(/\A  bass\s+█+.*-12\.0\z/) # (0.25 = -12 dB)
+    expect(lines[1]).to match(/\A ← bass\s+-12\.0 dB\z/) # (0.25 = -12 dB; no level meter until the feed sends levels)
+    expect(lines[3]).to match(/\A ← kick\s+to:\z/) # (routed whole)
     expect(text).to include('routing', 'master', '├─ verb', 'bass (send)', 'kick')
     expect(draw(:buses, snap_with(buses: [].freeze)).first).to start_with('no buses')
   end
@@ -48,17 +49,6 @@ RSpec.describe('UI session panes', :aggregate_failures) do
     expect(lines[1]).to include('◆')
     flash = [ui::LandedInfo.new(seq: 3, kind: :scene, subject: :drop, lands: '17:1', pos: 16r, at: MB::U.clock_now)].freeze
     expect(draw(:lane, snap_with(landed: flash), 41, 4)[0]).to include('landed: scene :drop')
-  end
-
-  it 'lists clips with a picture of their notes and where they are used, filtered' do
-    clips = [ui::ClipInfo.new(name: 'bass_a', kind: :clip, bars: 1r, pattern: '█───█───█───█───' * 2, used: %i[bass drop].freeze),
-             ui::ClipInfo.new(name: 'beat', kind: :kit, bars: 2r, pattern: '█ █ ' * 8, used: [:drums].freeze)].freeze
-    lines = draw(:clips, snap_with(clips: clips), 60, 4)
-    expect(lines[0]).to include('bass_a', '1b', '█───█', 'bass drop')
-    ui.panes[:clips].filter = 'beat'
-    expect(draw(:clips, snap_with(clips: clips), 60, 4)[0]).to start_with('beat')
-  ensure
-    ui.panes[:clips].filter = nil
   end
 
   it 'shows mapped controllers beside their knobs and the latest MIDI events' do
