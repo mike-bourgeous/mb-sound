@@ -3,8 +3,8 @@
 graph 4,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-18T16:06:50Z",
-  mb_sound: "0.12.0.usegit (617c024b)",
+  saved: "2026-10-18T18:32:31Z",
+  mb_sound: "0.12.0.usegit (3ea28fb3)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
 knob :cut, 2400.0, range: 150.0..8000.0, curve: :exp, unit: "Hz"
@@ -35,7 +35,7 @@ kit = grid(16, kick: "X.........X.....", snare: "....X.......X...", clap: ".....
 kit_outro = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_outro)
 kit = grid(16, kick: "X.........X.....", snare: "................", clap: "................", rim: "................", hat: "7.4.7.4.7.4.7.45", open_hat: "................", shaker: "................", crash: "................", low_tom: "................")
 kit_tail = Sequence::Kit.new({ kick: kit[:kick], snare: kit[:snare], clap: kit[:clap], rim: kit[:rim], hat: kit[:hat].swing(0.52), open_hat: kit[:open_hat], shaker: kit[:shaker].swing(0.52), crash: kit[:crash].every(8), low_tom: kit[:low_tom] }).loop(align: :launch).named(:kit_tail)
-master(:club, lufs: -8.5, air: :static) { |mix|
+master(:hot, lufs: -8.5, measure: :bars) { |mix|
   mix.filter(:highpass, cutoff: air, quality: 0.7)
 }
 bus(:hall) { |sig|
