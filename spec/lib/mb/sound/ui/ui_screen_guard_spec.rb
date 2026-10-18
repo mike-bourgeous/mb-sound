@@ -10,8 +10,10 @@ RSpec.describe(UIScreenGuard, :aggregate_failures) do
       def stop = self.stopped = true
     end.new(:tiles, false)
     MB::Sound::UI.instance_variable_set(:@tiles, fake)
-    File.open(File::NULL) do |null|
-      STDIN.reopen(null)
+    path = tmp_path('stdin.txt')
+    File.write(path, '')
+    File.open(path) do |other| # (not /dev/null: a worker's stdin may be that already)
+      STDIN.reopen(other)
       expect(UIScreenGuard.problems).to contain_exactly(/tiled screen is still up/, /stdin was left reopened/)
       UIScreenGuard.clean_up
     end

@@ -39,7 +39,10 @@ module UIScreenGuard
 end
 
 RSpec.configure do |config|
-  config.after(:each) do |example|
+  # (An around hook, outside the examples' own: specs that stop their
+  # screens in an around hook after example.run are clean)
+  config.around(:each) do |example|
+    example.run
     problems = UIScreenGuard.problems
     unless problems.empty?
       UIScreenGuard.clean_up
