@@ -1,4 +1,12 @@
 RSpec.describe(MB::Sound::Sequence::Grid) do
+  # ux-fix-1 item 5: CLAUDE.md and help :sequences write grid('x...')
+  it 'defaults to sixteenths when the pattern comes first' do
+    expect(MB::Sound.grid('x...x...').events).to eq(MB::Sound.grid(16, 'x...x...').events)
+    expect(MB::Sound.grid('x...x...').to_ruby).to eq('grid("x...x...")')
+    expect(MB::Sound.grid(kick: 'x...')).to be_a(MB::Sound::Sequence::Kit)
+    expect { MB::Sound.grid('x...', 'x...') }.to raise_error(ArgumentError, /step division first/)
+  end
+
   describe '.parse' do
     it 'turns characters into steps' do
       s = described_class.parse(16, 'x.X?5', value: 40)

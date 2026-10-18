@@ -3,6 +3,31 @@ RSpec.describe(MB::Sound::Sequence::Seq) do
     clip.events.map { |e| [e.value, e.start, e.length] }
   end
 
+  # ux-fix-1 item 4: chord steps (an Array or a Generative::Chord)
+  describe 'chord steps' do
+    it 'stacks an Array or a chord value in one step, taking the length methods' do
+      c = MB::Sound.seq([MB::Sound::C3, MB::Sound::E3, MB::Sound::G3], MB::Sound::Tie, MB::Sound.chord(:min7, root: :d), nil, MB::Sound::E4).n4
+      rows = c.events.map { |e| [e.start, e.length, e.value] }
+      expect(rows).to eq([
+        [0r, 1/2r, MB::Sound::C3.number], [0r, 1/2r, MB::Sound::E3.number], [0r, 1/2r, MB::Sound::G3.number],
+        *[MB::Sound::D4, MB::Sound::F4, MB::Sound::A4, MB::Sound::C5].map { |n| [1/2r, 1/4r, n.number] },
+        [1r, 1/4r, MB::Sound::E4.number],
+      ])
+      expect(c.length).to eq(5/4r)
+    end
+
+    it 'moves every note of a chord with transpose and octave marks' do
+      expect(MB::Sound.seq([MB::Sound::C3, MB::Sound::E3]).transpose(2).events.map(&:value)).to eq([MB::Sound::D3.number, MB::Sound::Gb3.number])
+      expect(MB::Sound.seq([MB::Sound::C3, MB::Sound::E3]).up.events.map(&:value)).to eq([MB::Sound::C4.number, MB::Sound::E4.number])
+    end
+
+    it 'prints back as written and names the chord form in errors' do
+      expect(MB::Sound.seq([MB::Sound::C3, MB::Sound::E3, MB::Sound::G3]).n8.to_ruby).to eq('seq([C3, E3, G3]).n8')
+      expect { MB::Sound.seq(:foo) }.to raise_error(ArgumentError, /an Array of notes for a chord \(\[C3, E3, G3\]\)/)
+      expect { MB::Sound.seq([]) }.to raise_error(ArgumentError, /at least one note/)
+    end
+  end
+
   describe 'note length methods' do
     it 'sets the length of a single note' do
       expect(times(MB::Sound::C4.n8)).to eq([[60, 0, 1/8r]])

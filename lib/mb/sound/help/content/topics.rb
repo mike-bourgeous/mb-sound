@@ -507,7 +507,8 @@ module MB
     Help.topic :sequences, 'Clips and sequences', group: :time do
       about <<~TEXT
         Immutable clips in exact whole notes: `seq(C4, E4, G4).n8`,
-        `grid('x...')`; a clip is a MIDI source (`clip.tone`, `clip.env`,
+        `seq([C3, E3, G3], chord(:min7, root: :d)).n2` (chord steps),
+        `grid('x...')` (sixteenths; `grid(8, 'x.x.')`); a clip is a MIDI source (`clip.tone`, `clip.env`,
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale

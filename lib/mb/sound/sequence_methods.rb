@@ -367,9 +367,17 @@ module MB
       # Sequence::Kit whose rows are Seqs; names are General MIDI drum names
       # (Sequence::Grid::GM_DRUMS), Notes, or numbers, unless given in +:map+.
       #
+      # The division may be left out for sixteenths (ux-fix-1).
+      #
       #     grid(16, 'x...x...')
+      #     grid('x...x...')     # the same
       #     grid(16, kick: 'x...x...x...x.x.', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.xX')
-      def grid(division, pattern = nil, value: Sequence::Grid::GM_DRUMS[:kick], map: {}, seed: 0, **rows)
+      def grid(division = 16, pattern = nil, value: Sequence::Grid::GM_DRUMS[:kick], map: {}, seed: 0, **rows)
+        if division.is_a?(String)
+          raise ArgumentError, "grid takes the step division first: grid(16, #{division.inspect}) or grid(#{division.inspect})" if pattern
+          division, pattern = 16, division
+        end
+
         if pattern
           raise ArgumentError, 'Pass either a single pattern or named rows, not both' if rows.any?
           Sequence::Grid.parse(division, pattern, value: value, seed: seed)
