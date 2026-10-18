@@ -737,6 +737,33 @@ module MB
       end
     end
 
+    Help.topic :cue, 'CUE: audition in the phones, then launch', group: :perform do
+      about <<~TEXT
+        `cue :acid, sound` plays a part in the headphones only, in time with
+        the set (player :"acid/cue"); `launch :acid` brings that same graph
+        to MAIN at the launch point (a track's `q:`, else the next bar),
+        crossfading over `fade:` and replacing what played as :acid.  `cue
+        :bass, clip` cues a track's patch on another clip; `cue :drums`
+        pre-listens a playing part without touching MAIN.  `uncue` ends
+        them, `cues` lists them.  The phones mix: `turn :phones, -6.db`,
+        `cue_mix 0.5` (0 CUE only, 1 MAIN only; `save: true` keeps it).
+        `cue :drop` cues a scene's changed tracks, `launch :drop` launches
+        the scene with them.  A 4-channel output (`CUE_OUTPUT=ports`, JACK
+        ports cue_1/cue_2) gives CUE its own channels; on 2 channels CUE
+        splits them (MAIN mono left, phones right) from the first cue, or
+        `cue_output :phones` / `:off`.  Renders never include CUE.
+      TEXT
+      commands :cue, :launch, :uncue, :cues, :cue_output, :cue_mix
+      note :cue
+      see :sets, :knobs, :mixing
+      example 'pre-listen a part, then launch a cued one' do
+        bg :try, 110.hz.saw.at(-20.db).lp4(900).until(2.bars)
+        cue :try
+        cue :try_hi, 330.hz.triangle.at(-26.db).until(2.bars)
+        launch :try_hi, on: :beat
+      end
+    end
+
     Help.topic :racks, 'Racks: reusable graphs with typed ports', group: :perform do
       about <<~TEXT
         A rack is a piece of graph you can reuse, like a Proc: `mrack` takes

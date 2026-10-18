@@ -37,14 +37,7 @@ module MB
       # $XDG_DATA_HOME/mb-sound/help or ~/.local/share/mb-sound/help
       # elsewhere), next to presets and takes.
       def self.data_dir
-        env = ENV['MB_SOUND_HELP_DIR']
-        return File.expand_path(env) unless env.to_s.empty?
-        if RbConfig::CONFIG['host_os'] =~ /darwin/
-          File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'help')
-        else
-          base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
-          File.join(base, 'mb-sound', 'help')
-        end
+        Internal.help_data_dir # (also the CUE preferences; see Session::Cue::Prefs)
       end
 
       # The doc comment index (built on first use; reading every comment

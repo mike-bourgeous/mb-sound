@@ -155,6 +155,9 @@ module MB
       # shrinks back by a third (see +:adaptive+).
       SHRINK_AFTER = 10.0
 
+      # How many of the last channels are CUE channels (see #initialize).
+      attr_reader :cue_channels
+
       attr_reader :channels, :sample_rate, :device_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
 
       # Opens and starts the sound card.  +:channels+ is how many channels
@@ -176,6 +179,11 @@ module MB
       # the sound card, in seconds) override.  +:backends+ is an Array of
       # backends to try (see .backends).
       #
+      # +:cue+ is how many of the last channels are CUE (headphones)
+      # channels (see Session::Cue): on JACK they are the ports cue_1,
+      # cue_2, ... after out_1, out_2, ..., connected after them (to
+      # physical playback 3-4 for `channels: 4, cue: 2`, if it exists).
+      #
       # With +:adaptive+ (the default), the queue grows by half after each
       # dropout while audio is being written, up to the :safe profile's
       # queue, with a note on stderr; the write size and period stay.  After
@@ -184,9 +192,10 @@ module MB
       # where it started (see also #reset_queue).
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
-        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0
+        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0, cue: 0
       )
         raise ArgumentError, 'Channels must be positive' if channels < 1
+        raise ArgumentError, "cue: must be 0 to #{channels - 1} (got #{cue.inspect})" unless cue.is_a?(Integer) && cue >= 0 && (cue == 0 || cue < channels)
 
         profile = (ENV['AUDIO_PROFILE'] || profile || :default).to_s.delete_prefix(':').to_sym
         settings = PROFILES.fetch(profile) {
@@ -201,6 +210,7 @@ module MB
         backends = self.class.backends(backends)
 
         @channels = channels
+        @cue_channels = cue
         @buffer_size = Integer(ENV['AUDIO_BUFFER'] || buffer_size || settings[:buffer_size])
         @requested_rate = requested_rate
 
@@ -226,7 +236,8 @@ module MB
           # Ports on the shared JACK client (see MB::Sound::Jack), falling
           # back to the other backends if no JACK server answers
           begin
-            names = Jack.port_names('out', @device_channels)
+            names = Jack.port_names('out', @device_channels - cue)
+            names += Jack.port_names('cue', cue) if cue > 0
             @playback = FastAudio::Playback.new(
               backends, -1, self.class.client_name, channels, @device_channels, requested_rate, 0, 0,
               queue, capture, quality, false, max_queue, names

@@ -44,6 +44,7 @@ clear if ARGV.include?('--clear')
 # moves to pry-help.  The welcome screen is a few lines and one random tip.
 require 'mb/sound/help'
 MB::Sound::Help::Level.apply # the saved listening level becomes the monitor trim
+MB::Sound::Session::Cue::Prefs.apply # the saved phones blend (cue_mix 0.3, save: true)
 MB::Sound::Help.first_level_check # first launch only, in a terminal, with a sound card
 puts MB::Sound::Help.welcome, ''
 

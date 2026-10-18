@@ -21,6 +21,7 @@ require_relative 'session/key_changes'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
+require_relative 'session/cue'
 require_relative 'session/monitor_trim'
 require_relative 'session/buses'
 require_relative 'session/racks'
@@ -79,7 +80,8 @@ module MB
       include Stems
       include MonitorTrim
       include UIFeed
-      include Buses # last: it extends Strip, Undo, and Seeks through super
+      include Buses # it extends Strip, Undo, and Seeks through super
+      include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -107,7 +109,7 @@ module MB
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu,
+        :strip_level, :strip_ramp, :asleep, :ring, :asleep_reads, :read_to, :cpu, :cue,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -283,7 +285,7 @@ module MB
       #                           and #fade_out).
       # +:monitor+ - If true, the output hears the monitor trim (see
       #              MonitorTrim; by default when +:realtime+).
-      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil)
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil)
         @transport = transport
         @tuning = tuning
         self.master_gain = master_gain
@@ -320,6 +322,7 @@ module MB
         init_audio_recording
         init_monitor(monitor.nil? ? realtime : monitor)
         init_buses
+        init_cue(cue_output)
         @names = Names.new
         @racks = Racks.new(self)
         @arrangement = nil
@@ -469,6 +472,7 @@ module MB
           change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
           }
+          end_cue_at_start(name, time) # (see Cue)
         }
 
         if @realtime
@@ -868,7 +872,10 @@ module MB
 
       # The output being written, opening it if needed.
       def output
-        @output ||= MB::Sound.output(channels: @channels, shared: false)
+        @output ||= begin
+          channels, cue = output_channels # (twice the channels for CUE ports; see Cue)
+          cue > 0 ? MB::Sound.output(channels: channels, cue: cue, shared: false) : MB::Sound.output(channels: channels, shared: false)
+        end
       end
 
       # True once the output has been given or opened (see #output).
@@ -923,7 +930,7 @@ module MB
         mix = mix.map { |c| c * @master_gain } if @master_gain_post && @master_gain != 1
 
         # The monitor trim reaches only the output (see MonitorTrim)
-        output.write(monitored(mix))
+        output.write(monitored(cue_frame(mix, count))) # with CUE (see Cue)
         record_mix(mix, @frame - count)
         call_taps(mix)
         @ui_feed&.publish(self, mix, count, @load)
@@ -979,6 +986,7 @@ module MB
         catch_up_waiting(players)
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
+        begin_cue_span(count)
         playing = !players.empty? || queued_start?
         routed = @routed_span = routed?
         if routed
@@ -1001,6 +1009,7 @@ module MB
         mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
+        end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count
         @transport_record = transport_record_for(moving)
@@ -1176,7 +1185,8 @@ module MB
           strip_level: initial_strip_level(name),
           strip_ramp: nil,
           asleep: false,
-          ring: nil
+          ring: nil,
+          cue: initial_cue_levels(name) # (see Cue)
         )
 
         @order.delete(name)
@@ -1424,6 +1434,8 @@ module MB
         fade = fade_ramp(p, base + offset, frames)
         strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
         ramp = fade ? (strip ? fade * strip : fade) : strip
+        # The route: CUE gets its share, MAIN the rest (see Cue)
+        ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
 
         if routed
           deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)

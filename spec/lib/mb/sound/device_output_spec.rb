@@ -219,6 +219,19 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.underruns).to eq(1) # the end of the audio
   end
 
+  it 'plays MAIN and CUE channels of a 4-channel output (cue: 2)' do
+    o = device_output(channels: 4, cue: 2, capture: 2000)
+    expect(o.cue_channels).to eq(2)
+    expect(o.device_channels).to eq(4)
+    chans = Array.new(4) { Numo::SFloat.new(800).rand(-1, 1) }
+    o.write(chans)
+    wait_until { o.stats[:queued] == 0 }
+    got = trim_start(o.captured)
+    expect(got.length).to eq(4)
+    4.times { |c| expect(got[c][0...800]).to eq(chans[c]) }
+    expect { device_output(channels: 2, cue: 2) }.to raise_error(ArgumentError, /cue: must be 0 to 1/)
+  end
+
   it 'plays a mono output on both channels of a stereo device' do
     o = device_output(channels: 1, capture: 3000)
     expect(o.channels).to eq(1)

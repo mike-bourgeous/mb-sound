@@ -124,6 +124,19 @@ module MB
         :device
       end
 
+      # Where help and console preferences keep per-user state (see
+      # Help.data_dir): $MB_SOUND_HELP_DIR, else the user data directory.
+      def help_data_dir
+        env = ENV['MB_SOUND_HELP_DIR']
+        return File.expand_path(env) unless env.to_s.empty?
+        if RbConfig::CONFIG['host_os'] =~ /darwin/
+          File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'help')
+        else
+          base = ENV['XDG_DATA_HOME'].to_s.empty? ? File.join(Dir.home, '.local', 'share') : ENV['XDG_DATA_HOME']
+          File.join(base, 'mb-sound', 'help')
+        end
+      end
+
       # Returns a Symbol describing the type of output that should be used:
       # OUTPUT_TYPE, else :device (see IOMethods#output).
       def detect_output
