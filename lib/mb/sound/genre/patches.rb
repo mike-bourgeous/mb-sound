@@ -37,6 +37,41 @@ module MB
             .softclip(0.6, 0.98) * level
         end
 
+        # Rain that ignores its notes (play it on a looping rest clip):
+        # per side, a bed of pink noise through a bandpass that wanders
+        # (drift) between 600 and 1700 Hz, a little hiss above 6.5 kHz, and
+        # drops: +density+ random impulses a second (dust, at least 4 ms
+        # apart) each pinging a resonance at its own pitch (2.6-3.5 kHz)
+        # for 20 ms, the whole swelling with slow gusts.  +level+ may be a
+        # node (a knob: louder rain is denser too).  Stereo, the sides
+        # independent.  (genre-fixes, 2026-10-18: the ambient template's
+        # weather, after bin/songs/tin_roof.rb's rain.)
+        def rain(_source, level: 0.5, density: 70)
+          side = -> {
+            bed = MB::Sound.noise(:pink).filter(:bandpass, cutoff: MB::Sound.drift(0.31, range: 600..1700), quality: 0.9) * 0.35 +
+              MB::Sound.noise.filter(:highpass, cutoff: 6500, quality: 0.5) * 0.03
+            drops = MB::Sound.dust(density, min_gap: 0.004)
+            pitch = MB::Sound.noise.sample_hold(drops) * 450 + 3050
+            gusts = MB::Sound.drift(0.07, range: 0.55..1.0)
+            (bed + drops.ping(pitch, decay: 0.02) * 0.5) * gusts
+          }
+          MB::Sound.stereo(side.(), side.()) * level
+        end
+
+        # Wind that ignores its notes: per side, brown noise through a
+        # bandpass wandering between 220 and 800 Hz (drift), its level
+        # rising and falling in gusts of several seconds, times +level+ (a
+        # number or a knob).  Stereo, the sides independent.  (genre-fixes:
+        # the ambient template's weather.)
+        def wind(_source, level: 0.5)
+          side = -> {
+            cut = MB::Sound.drift(0.11, range: 220..800)
+            gusts = MB::Sound.drift(0.17, range: 0.15..1.0, smooth: :cubic)
+            MB::Sound.noise(:brown).filter(:bandpass, cutoff: cut, quality: 1.6) * gusts
+          }
+          MB::Sound.stereo(side.(), side.()) * level * 10
+        end
+
         # A house bass (Munro's "one saw with a tempo-set decay"): one saw
         # voice through a four-pole lowpass at +cutoff+ Hz opened +env+
         # octaves by a short filter envelope, a plucked level with no
