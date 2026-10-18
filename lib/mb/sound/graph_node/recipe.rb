@@ -128,6 +128,14 @@ module MB
           },
         }.freeze
 
+        # Aliases recorded under their official name, so recipes and saved
+        # documents print the official name whichever one the code used
+        # (maintainer, 2026-10-17: saved files use the official name unless
+        # it reads drastically different).  Other aliases print as written.
+        PRINT_AS = {
+          for: :until,
+        }.freeze
+
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
         # How build block locals are read (see #trace_locals): :frame (the
         # block frame's Binding through FastRecipe, the default) or :trace
@@ -238,6 +246,7 @@ module MB
             st = state
             return yield(block) if st.depth > 0 || !@enabled
             take_frame(st.scopes.last)
+            name = PRINT_AS.fetch(name, name)
 
             if SILENT.include?(name)
               st.depth += 1

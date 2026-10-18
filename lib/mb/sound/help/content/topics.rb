@@ -19,14 +19,14 @@ module MB
         player on a shared timeline; `play` is the foreground version
         (waits until the sound ends; Ctrl-C to stop).  Commands return
         journal entries that say where they land.  Sounds end through
-        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
         a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
         demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
-      dsl :at, :until, :and_then
+      dsl :at, :until, :for, :and_then
       note :method_modules
       see :sets, :now, :files
       example 'a quiet triangle that stops itself' do

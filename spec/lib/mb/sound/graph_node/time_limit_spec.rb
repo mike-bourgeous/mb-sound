@@ -8,6 +8,27 @@ RSpec.describe(MB::Sound::GraphNode::TimeLimit, :aggregate_failures) do
       expect(node.sample(6)).to eq(nil)
     end
 
+    it 'is also called #for, printed and saved as #until' do
+      node = 1.constant.for(10.0 / 48000)
+      expect(node).to be_a(described_class)
+      expect(node.sample(12)).to eq(Numo::SFloat.ones(10))
+
+      graph = 220.hz.ramp.at(0.5).for(2.bars)
+      code = graph.to_ruby
+      expect(code).to include('.until(2.bars)')
+      expect(code).not_to include('.for(')
+
+      text = MB::Sound::GraphIO.dump(220.hz.ramp.for(0.01))
+      expect(text).to include('.until(0.01)')
+      expect(text).not_to include('.for(')
+      loaded = MB::Sound::GraphIO.load(text)
+      expect(loaded.sample(800).length).to eq(480)
+      expect(loaded.sample(800)).to eq(nil)
+
+      # a document written with the alias loads too
+      expect(MB::Sound::GraphIO.load('220.hz.ramp.for(0.01)').sample(800).length).to eq(480)
+    end
+
     it 'rounds the length to the nearest sample' do
       node = 1.constant.until(0.6 / 48000)
       expect(node.sample(30)).to eq(Numo::SFloat.ones(1))
