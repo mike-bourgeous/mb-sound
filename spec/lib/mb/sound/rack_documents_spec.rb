@@ -16,6 +16,9 @@ RSpec.describe('rack documents') do
     session.close
   end
 
+  # (Sessions made without a transport play on the default one)
+  after { MB::Sound.rewind }
+
   def without_saved(text)
     text.sub(/saved: "[^"]*"/, '')
   end
