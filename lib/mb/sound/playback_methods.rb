@@ -1188,9 +1188,18 @@ module MB
 
       # The plot option of #play: false if +quiet+ or PLOT=0 (unless given),
       # else +plot+ (true by default).
+      #
+      # The live scope draws only to a terminal that animates (ux-fix-1: a
+      # Braille scope per frame made 3 MB of log per 10 s through a pty
+      # or `script`): not under TERM=dumb or NO_COLOR, or when $stdout
+      # isn't a terminal (ColorPolicy.animate?).  PLOT=1 forces it, PLOT=0
+      # turns it off.
       def plot_option(plot, quiet)
         return plot unless plot.nil?
-        !(quiet || ENV['PLOT'] == '0')
+        return false if quiet || ENV['PLOT'] == '0'
+        return true if ENV['PLOT'] == '1'
+
+        ColorPolicy.animate?($stdout)
       end
 
       # Waits while +playing+ returns true, plotting the mix if +plot+ (see

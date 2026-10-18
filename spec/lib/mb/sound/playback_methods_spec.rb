@@ -128,6 +128,20 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound).to have_received(:visualize)
     end
 
+    # ux-fix-1 item 7: a Braille scope per frame flooded pty logs
+    it 'plots by default only to an animating terminal (not a pipe, TERM=dumb, or NO_COLOR)' do
+      tty = StringIO.new
+      def tty.tty? = true
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'TERM' => 'xterm' })).to eq(true)
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'TERM' => 'dumb' })).to eq(false)
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'NO_COLOR' => '1' })).to eq(false)
+      expect(MB::Sound::ColorPolicy.animate?(StringIO.new, env: {})).to eq(false)
+
+      allow(MB::Sound).to receive(:visualize)
+      expect { MB::Sound.play(440.hz.sine.until(0.05)) }.to output(/Playing/).to_stderr # $stdout is a pipe here
+      expect(MB::Sound).not_to have_received(:visualize)
+    end
+
     it 'plots into the terminal UI\'s scope pane while one is up, writing nothing over its screen (ux-1 bug 3)' do
       restored = 0
       screen = double('screen')

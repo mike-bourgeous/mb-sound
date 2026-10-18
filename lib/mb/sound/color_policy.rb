@@ -38,6 +38,19 @@ module MB
         false
       end
 
+      # True if +io+ is a terminal that should get animations (the live
+      # scope of `play`, progress redraws): a terminal, TERM isn't dumb, and
+      # NO_COLOR is unset (agents and logs set one of them).  +env+ is for
+      # specs.
+      def animate?(io = $stdout, env: ENV)
+        return false unless env['NO_COLOR'].to_s.empty?
+        return false if env['TERM'] == 'dumb'
+
+        io.respond_to?(:tty?) && io.tty?
+      rescue IOError
+        false
+      end
+
       # +text+ without SGR color codes.
       def strip(text)
         text.to_s.gsub(SGR, '')
