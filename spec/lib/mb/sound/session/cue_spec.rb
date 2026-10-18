@@ -164,12 +164,42 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
   end
 
   describe 'on 2-channel outputs' do
-    it 'leaves CUE out by default' do
+    it 'splits from the exact frame of the first cue by default, MAIN stereo before it, at any buffer size' do
+      outs = [[800], [128], [7, 801]].map { |sizes|
+        s = new_session(output_channels: 2)
+        expect(s.cue_mode).to eq(:off)
+        s.add(MB::Sound.stereo(0.5.constant, 0.25.constant), name: :a)
+        s.cue_player(:b, 0.125.constant, start_time: 1/8r) # frame 12000
+        out = run(s, 24000, sizes)
+        expect(s.cue_mode).to eq(:split)
+        out
+      }
+      l, r = outs[0]
+      expect(l[0...12000].to_a.uniq).to eq([0.5])
+      expect(r[0...12000].to_a.uniq).to eq([0.25])
+      expect(l[12000..].to_a.uniq).to eq([0.375])
+      expect(r[12000..].to_a.uniq).to eq([0.125])
+      outs.drop(1).each { |o| o.zip(outs[0]).each { |a, b| expect(a).to eq(b) } }
+    end
+
+    it 'warns once per user, in the console, the first time CUE splits a 2-channel output' do
+      ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
+      MB::Sound.live = true
       s = new_session(output_channels: 2)
-      expect(s.cue_mode).to eq(:off)
-      s.add(0.5.constant, name: :a)
-      s.cue_player(:b, 0.25.constant, start_time: 0)
-      expect(run(s, 800).map { |c| c.to_a.uniq }).to eq([[0.5], [0.5]])
+      expect { s.cue_player(:b, 0.1.constant) }.to output(/CUE on 2 channels.*cue_output :phones.*cue_output :off/m).to_stderr
+      expect(MB::Sound::Session::Cue::Prefs.split_warned?).to eq(true)
+      s2 = new_session(output_channels: 2)
+      expect { s2.cue_player(:c, 0.1.constant) }.not_to output.to_stderr
+    ensure
+      MB::Sound.live = false
+      ENV.delete('MB_SOUND_HELP_DIR')
+    end
+
+    it 'keeps MAIN in stereo with cue_output :off' do
+      s = new_session(output_channels: 2, cue_output: :off)
+      s.add(MB::Sound.stereo(0.5.constant, 0.25.constant), name: :a)
+      s.cue_player(:b, 0.125.constant, start_time: 0)
+      expect(run(s, 800).map { |c| c.to_a.uniq }).to eq([[0.5], [0.25]])
     end
 
     it 'splits MAIN (left) and the phones (right) in mono with :split' do
@@ -236,6 +266,57 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
       expect(MB::Sound.method(:launch).super_method.owner).to eq(MB::Sound::ArrangementMethods)
     end
 
+    it 'ends a cue player when bg replaces its name, at the same time' do
+      MB::Sound.bg :a, 0.5.constant
+      MB::Sound.cue :a, 0.25.constant
+      run(s, 800)
+      MB::Sound.bg :a, 0.125.constant, on: :beat
+      expect(s.cued?(:a)).to eq(true)
+      main, _, cue, _ = run(s, 30000)
+      expect(s.cued?(:a)).to eq(false)
+      expect(cue[-800..].to_a.uniq).to eq([0])
+      expect(main[-800..].to_a.uniq).to eq([0.125])
+      expect(cue[23000 - 800]).to eq(0.25) # still cued just before the beat (frame 24000)
+    end
+
+    it 'cues a scene and launches it with the cued graphs taking over' do
+      a = MB::Sound.seq(MB::Sound::C3).n4.loop
+      b = MB::Sound.seq(MB::Sound::G3).n4.loop
+      MB::Sound.track(:t, q: 1) { |c| c.gate * c.number * 0.001 }
+      MB::Sound.track(:u, q: 1) { |c| c.gate * c.number * 0.0001 }
+      MB::Sound.scene :one, t: a, u: a
+      MB::Sound.scene :two, t: b, u: a
+      MB::Sound.go :one, at: :now
+      run(s, 800)
+      MB::Sound.cue :two
+      expect(MB::Sound.cues.keys).to eq([:t])
+      cued = player(s, :"t/cue")
+      u = player(s, :u)
+      e = MB::Sound.launch :two
+      expect(e.kind).to eq(:scene)
+      main, _, cue, _ = run(s, CUE_SPEC_BAR + 4800)
+      expect(player(s, :t)).to equal(cued)
+      expect(player(s, :u)).to equal(u)
+      expect(s.arrangement.tracks[:t].clip).to equal(b)
+      expect(main[-1]).to be_within(1e-6).of(MB::Sound::G3.number * 0.001 + MB::Sound::C3.number * 0.0001)
+      expect(cue[-1]).to eq(0)
+    end
+
+    it 'sets the phones blend with cue_mix and saves it as the starting blend' do
+      ENV['MB_SOUND_HELP_DIR'] = tmp_path('help')
+      expect(MB::Sound.cue_mix).to eq(0)
+      MB::Sound.cue_mix 0.25, save: true, smooth: 0
+      run(s, 800)
+      expect(MB::Sound.cue_mix).to eq(0.25)
+      expect(MB::Sound::Session::Cue::Prefs.cue_mix).to eq(0.25)
+      expect(MB::Sound::Session.cue_mix_default).to eq(0.25)
+      s2 = new_session
+      expect(s2.cue_knobs[1].value).to eq(0.25)
+    ensure
+      MB::Sound::Session.cue_mix_default = 0
+      ENV.delete('MB_SOUND_HELP_DIR')
+    end
+
     it 'pre-listens with cue :name and lists cues' do
       MB::Sound.bg :a, 0.5.constant
       run(s, 800)
@@ -252,7 +333,9 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
     s = new_session
     lines = {
       0 => ['bg :a, 220.hz.triangle.at(0.2)', 'cue :b, 330.hz.ramp.at(0.2)'],
-      50 => ['launch :b, fade: 1.beat'],
+      30 => ['a2 = seq(A2, C3).n8.loop', 'b2 = seq(E3, G3).n8.loop', 'track(:k, q: 1) { |c| c.number * 0.002 * c.gate }', 'scene :s1, k: a2', 'scene :s2, k: b2', 'go :s1'],
+      50 => ['launch :b, fade: 1.beat', 'cue :s2'],
+      130 => ['launch :s2'],
       170 => ['cue :a', 'turn :cue_mix, 0.3, over: 1'],
       260 => ['undo'],
       300 => ['uncue'],

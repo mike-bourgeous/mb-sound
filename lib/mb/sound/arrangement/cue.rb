@@ -31,13 +31,49 @@ module MB
         # point (its +q:+, else the set's #quant; +at:+ overrides it, as in
         # #play), crossfading over +fade:+ bars.  The cued clip becomes the
         # track's clip.  Returns the Change.
-        def launch_cue(name, at: nil, fade: nil)
+        def launch_cue(name, at: nil, fade: nil, q: nil)
           tr = tracks[name] or raise ArgumentError, "No track #{name.inspect}"
-          time = resolve(tr.q || @quant, tr, at)
+          time = resolve(tr.q || q || @quant, tr, at)
           clip = @session.cued_clip(name)
           result = @session.launch_cue(name, time: time, fade: fade)
           @mutex.synchronize { tr.clip = clip } if result && clip
           result
+        end
+
+        # Cues every track scene +name+ gives a clip or kit (tracks with a
+        # patch whose clip would change; see #cue).  Returns the changes.
+        def cue_scene(name, at: nil, fade: nil)
+          sc = scenes[name] or raise ArgumentError, "No scene #{name.inspect}"
+          list = scene_cues(sc).map { |tr, clip| cue(tr.name, clip, at: at, fade: fade) }.compact
+          return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} changes no track's clip; nothing to cue")) if list.empty?
+          list
+        end
+
+        # Launches scene +name+ with its cued tracks taking over (#launch_cue
+        # at each one's launch point, the same graphs carrying on), then
+        # #go for the rest (tracks already playing the scene's clip are left
+        # alone by #go).  Returns the scene's journal entry.
+        def launch_cued_scene(name, at: nil, fade: nil)
+          sc = scenes[name] or raise ArgumentError, "No scene #{name.inspect}"
+          scene_cues(sc).each do |tr, clip|
+            next unless @session.cued?(tr.name) && @session.cued_clip(tr.name).equal?(clip)
+            launch_cue(tr.name, at: at, fade: fade.nil? ? sc.fade : fade, q: sc.q)
+          end
+          entry = go(name, at: at, fade: fade)
+          # (inside the caller's command, #go returns nil: find its change)
+          entry || (c = last_change(name)) && @session.journal[c.seq]
+        end
+
+        private
+
+        # [track, clip] pairs scene +sc+ would give new clips.
+        def scene_cues(sc)
+          sc.values.filter_map { |k, v|
+            tr = tracks[k]
+            next unless tr&.patch? && (v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit))
+            next if v.equal?(tr.clip) && @session.playing_after_queue?(tr.name)
+            [tr, v]
+          }
         end
       end
 

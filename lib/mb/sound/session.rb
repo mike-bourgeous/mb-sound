@@ -472,6 +472,7 @@ module MB
           change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes, graph: input) { |t|
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
           }
+          end_cue_at_start(name, time) # (see Cue)
         }
 
         if @realtime

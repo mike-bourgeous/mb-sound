@@ -1,3 +1,5 @@
+require_relative 'cue_prefs'
+
 module MB
   module Sound
     class Session
@@ -15,6 +17,23 @@ module MB
       # 1 MAIN only), and #process_buffer writes it where #cue_output says.
       # Renders, stems, recordings, and taps only see MAIN.
       module Cue
+        def self.included(base)
+          base.extend(ClassMethods)
+        end
+
+        module ClassMethods
+          # Where :cue_mix starts in new Sessions (0, CUE only, unless the
+          # user saved another value; see Prefs and CueMethods#cue_mix).
+          def cue_mix_default
+            @cue_mix_default || 0.0
+          end
+
+          def cue_mix_default=(value)
+            raise ArgumentError, "cue_mix must be from 0 to 1 (got #{value.inspect})" unless value.is_a?(Numeric) && value.real? && value >= 0 && value <= 1
+            @cue_mix_default = value.to_f
+          end
+        end
+
         # Where CUE goes (see #cue_output=).
         OUTPUT_MODES = [:auto, :ports, :split, :phones, :off].freeze
 
@@ -79,7 +98,10 @@ module MB
         # #cue_output as it applies to the open output (:auto resolved).
         def cue_mode
           return @cue_output unless @cue_output == :auto
-          output_open? && output_channel_count >= @channels * 2 ? :ports : :off
+          return :off unless output_open?
+          n = output_channel_count
+          return :ports if n >= @channels * 2
+          @cue_split_from && n == 2 ? :split : :off
         end
 
         # The phones knobs [:phones, :cue_mix], made on first use (a knob
@@ -87,7 +109,7 @@ module MB
         def cue_knobs
           @cue_knobs ||= [
             knobs[:phones] || knob(:phones, 1.0, range: 0.0..2.0),
-            knobs[:cue_mix] || knob(:cue_mix, 0.0, range: 0.0..1.0),
+            knobs[:cue_mix] || knob(:cue_mix, Session.cue_mix_default, range: 0.0..1.0),
           ]
         end
 
@@ -110,6 +132,7 @@ module MB
           cue_ready if on
           fade = bars_or_nil(fade) if fade
           change(on ? :cue : :uncue, name, time, data: { pfl: on, fade: fade }) { |_t|
+            engage_split if on
             on ? @cue_pfl << name : @cue_pfl.delete(name)
             apply_cue(fade)
           }
@@ -155,7 +178,8 @@ module MB
             return MB::Sound.live_error(ArgumentError.new("Nothing cued as #{name.inspect}; cue it first (`cue #{name.inspect}, sound`)"))
           end
           fade = bars_or_nil(fade) if fade
-          change(:launch, name, time, data: { fade: fade }) { |t| land_launch(name, t, fade) }
+          description = @mutex.synchronize { @players.values.select { |p| p.name == Cue.cue_name(name) && p.current? }.last&.description }
+          change(:launch, name, time, data: { fade: fade, description: description }) { |t| land_launch(name, t, fade) }
         end
 
         # Remembers the clip a track's cue player plays (see
@@ -191,6 +215,7 @@ module MB
           @cue_span_mix = nil
           @cue_span_count = 0
           @cue_warned = false
+          @cue_split_from = nil
           mode ||= ENV['CUE_OUTPUT']&.delete_prefix(':')&.to_sym
           @cue_output = mode if mode
           raise ArgumentError, "cue_output takes #{OUTPUT_MODES.map(&:inspect).join(', ')} (got #{mode.inspect})" unless OUTPUT_MODES.include?(@cue_output)
@@ -204,11 +229,36 @@ module MB
         # Makes the phones knobs and warns once if CUE goes nowhere.
         def cue_ready
           cue_knobs
-          return if @cue_warned || !MB::Sound.live? || cue_mode != :off
+          return if @cue_warned || !MB::Sound.live?
 
           @cue_warned = true
-          warn "CUE isn't heard on this output (cue_output :#{@cue_output}, #{output_channel_count} channels): " \
-            "start with CUE_OUTPUT=ports and a 4-channel output, or try cue_output :split or :phones"
+          n = output_channel_count
+          if @cue_output == :auto && n == 2 && @channels == 2
+            # Once per user (maintainer 2026-10-18: "Split with a first
+            # time warning; clubs are usually mono anyway")
+            return if Prefs.split_warned?
+            Prefs.note_split_warned
+            warn "CUE on 2 channels: from the first cue, the left channel plays MAIN in mono and the right the phones mix " \
+              "(cue_output :split).  `cue_output :phones` puts the phones mix on both, `cue_output :off` keeps MAIN in stereo " \
+              "(CUE unheard); a 4-channel output (CUE_OUTPUT=ports) gives CUE its own channels.  (Shown once.)"
+          elsif cue_mode == :off && @cue_output != :off
+            warn "CUE isn't heard on this output (cue_output :#{@cue_output}, #{n} channels): " \
+              "start with CUE_OUTPUT=ports and a 4-channel output, or try cue_output :split or :phones"
+          end
+        end
+
+        # Notes the frame where CUE is first used (a cue player starting or
+        # a PFL landing): :auto splits a 2-channel output from there.
+        def engage_split
+          @cue_split_from ||= @landing_frame || @frame
+        end
+
+        # A player starting as +name+ (not a cue player) ends +name+'s cue
+        # player at the same time (`bg :x` or `go` replacing :x; maintainer
+        # 2026-10-18).  Called by Session#add after queuing the start.
+        def end_cue_at_start(name, time)
+          return unless name.is_a?(Symbol) && Cue.cued_name(name).nil? && cued?(name)
+          remove(Cue.cue_name(name), fade: declick_bars, time: time)
         end
 
         # The output channels and cue channels for opening the output (see
@@ -229,6 +279,7 @@ module MB
         def initial_cue_levels(name)
           cue = Cue.cued_name(name)
           return nil unless cue || @cue_pfl.include?(name)
+          engage_split
           Levels.new(cue ? 0.0 : 1.0, nil, 1.0, nil)
         end
 
@@ -331,57 +382,82 @@ module MB
         end
 
         # After the span's master chain (+mix+ the MAIN mix, +count+
-        # frames): the phones mix for the span, kept for #cue_frame.
+        # frames): what the output gets for the span (MAIN with the phones
+        # mix added or blended in per #cue_mode), or nil for MAIN alone,
+        # kept for #cue_frame.
         def end_cue_span(mix, count)
           cue = @cue_span_mix
           @cue_span_mix = nil
-          return unless output_channel_count > mix.length || [:split, :phones].include?(cue_mode)
-
-          knobs = @cue_knobs
-          if knobs.nil?
-            @cue_parts << (cue || Array.new(@channels) { Numo::SFloat.zeros(count) })
+          mode = cue_mode
+          want = output_channel_count
+          if want == mix.length && mode != :split && mode != :phones
+            @cue_parts << [count, nil]
             return
           end
 
+          post = @master_gain_post && @master_gain != 1 ? @master_gain : nil
+          main = post ? mix.map { |m| m * post } : mix
+          phones = phones_mix(main, cue, count)
+          out =
+            case mode
+            when :split then want == 2 ? [mono(main), mono(phones)] : nil
+            when :phones then want == phones.length ? phones : nil
+            when :ports then main + phones.first(want - main.length)
+            end
+          out ||= pad(main, want, count)
+
+          # :auto splits from the frame the first cue landed on (see
+          # #engage_split); before it, MAIN as it was
+          k = @cue_split_from && @cue_output == :auto && mode == :split ? @cue_split_from - @frame : 0
+          if k > 0
+            plain = pad(main, want, count)
+            out = out.each_with_index.map { |o, c| k >= count ? plain[c] : plain[c][0...k].concatenate(o[k..]) }
+          end
+          @cue_parts << [count, out]
+        end
+
+        # The phones mix for a span: CUE and +main+ blended by :cue_mix,
+        # scaled by :phones.
+        def phones_mix(main, cue, count)
+          knobs = @cue_knobs
+          return cue || Array.new(@channels) { Numo::SFloat.zeros(count) } if knobs.nil?
+
           level = knobs[0].read(@frame, count)
           blend = knobs[1].read(@frame, count)
-          post = @master_gain_post && @master_gain != 1 ? @master_gain : nil
-          phones = Array.new(@channels) { |c|
+          Array.new(@channels) { |c|
             x = cue ? cue[c] : nil
             if blend.is_a?(Numeric) && blend == 0
               x ||= Numo::SFloat.zeros(count)
             else
-              m = post ? mix[c] * post : mix[c]
-              m = m * blend
+              m = main[c] * blend
               x = x ? x * (1.0 - blend) + m : m
             end
             level.is_a?(Numeric) && level == 1 ? x : x * level
           }
-          @cue_parts << phones
         end
 
-        # What #process_buffer writes for MAIN mix +mix+ (+count+ frames):
-        # the mix with the phones channels added or blended in per
-        # #cue_mode (see #end_cue_span).
+        def pad(chans, want, count)
+          return chans if chans.length == want
+          return chans.first(want) if chans.length > want
+          chans + Array.new(want - chans.length) { Numo::SFloat.zeros(count) }
+        end
+
+        # What #process_buffer writes for MAIN mix +mix+ (after the
+        # post-chain master gain): the spans #end_cue_span composed, or the
+        # mix itself.
         def cue_frame(mix, count)
           parts = @cue_parts
           @cue_parts = []
-          want = output_channel_count
-          return mix if parts.empty? && want == mix.length
+          return mix if parts.all? { |_, out| out.nil? }
 
-          phones = parts.length == 1 ? parts[0] : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
-          phones ||= Array.new(@channels) { Numo::SFloat.zeros(count) }
-          case cue_mode
-          when :split
-            return mix unless want == 2
-            [mono(mix), mono(phones)]
-          when :phones
-            want == phones.length ? phones : mix
-          when :ports
-            mix + phones.first(want - mix.length)
-          else
-            want > mix.length ? mix + Array.new(want - mix.length) { Numo::SFloat.zeros(count) } : mix
-          end
+          want = output_channel_count
+          offset = 0
+          chunks = parts.map { |n, out|
+            out ||= pad(mix.map { |m| m[offset...(offset + n)] }, want, n)
+            offset += n
+            out
+          }
+          chunks.length == 1 ? chunks[0] : chunks.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         end
 
         def mono(chans)

@@ -40,7 +40,7 @@ module MB
 
         # Change kinds that start a player (so a queued one keeps the
         # timeline moving while nothing else plays).
-        START_KINDS = [:bg, :resume, :restore].freeze
+        START_KINDS = [:bg, :resume, :restore, :launch].freeze # (:launch: a cue player becoming the name; see Cue)
 
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are

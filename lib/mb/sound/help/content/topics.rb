@@ -746,12 +746,14 @@ module MB
         :bass, clip` cues a track's patch on another clip; `cue :drums`
         pre-listens a playing part without touching MAIN.  `uncue` ends
         them, `cues` lists them.  The phones mix: `turn :phones, -6.db`,
-        `turn :cue_mix, 0.5` (0 CUE only, 1 MAIN only).  CUE needs a
-        4-channel output (`CUE_OUTPUT=ports`, JACK ports cue_1/cue_2) or,
-        on 2 channels, `cue_output :split` (MAIN left, phones right) or
-        `:phones`.  Renders never include CUE.
+        `cue_mix 0.5` (0 CUE only, 1 MAIN only; `save: true` keeps it).
+        `cue :drop` cues a scene's changed tracks, `launch :drop` launches
+        the scene with them.  A 4-channel output (`CUE_OUTPUT=ports`, JACK
+        ports cue_1/cue_2) gives CUE its own channels; on 2 channels CUE
+        splits them (MAIN mono left, phones right) from the first cue, or
+        `cue_output :phones` / `:off`.  Renders never include CUE.
       TEXT
-      commands :cue, :launch, :uncue, :cues, :cue_output
+      commands :cue, :launch, :uncue, :cues, :cue_output, :cue_mix
       note :cue
       see :sets, :knobs, :mixing
       example 'pre-listen a part, then launch a cued one' do
