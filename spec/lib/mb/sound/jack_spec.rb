@@ -81,6 +81,23 @@ RSpec.describe(MB::Sound::Jack, :aggregate_failures) do
       expect(MB::Sound::Jack.open?).to eq(true)
     end
 
+    it 'closes the shared client at exit, so a --sync server goes on without waiting for it (test-speed-2)' do
+      MB::Sound::Jack.open
+      expect(MB::Sound::ExitClose.registered?(MB::Sound::Jack)).to eq(true)
+
+      # A process that exited with the client open stalled the server for
+      # 5 s (ten client timeouts), and with it this process's next cycle,
+      # which a MIDI output's close waits for
+      require 'shellwords'
+      code = "require 'mb-sound'; MB::Sound::Jack.port_names('midi_in', 1); p MB::Sound::Jack.open?"
+      out = `ruby -I#{File.expand_path('../../../../lib', __dir__).shellescape} -e #{code.shellescape} 2>&1`
+      expect(out.strip.lines.last).to eq('true'), out
+      keys = MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_exit', nil, 'out')
+      t = MB::U.clock_now
+      keys.close
+      expect(MB::U.clock_now - t).to be < 2.5
+    end
+
     it 'connects new audio ports to the physical ports once' do
       MB::Sound::Jack.open
       physical_out = MB::Sound::FastAudio.jack_ports(nil, false, MB::Sound::FastAudio::JACK_PORT_IS_INPUT | MB::Sound::FastAudio::JACK_PORT_IS_PHYSICAL)
