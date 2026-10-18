@@ -43,6 +43,7 @@
 #     bin/songs/memory_card.rb                # plays live
 #     bin/songs/memory_card.rb out.flac       # renders
 #     bin/songs/memory_card.rb --stems dir/ out.flac
+#     bin/songs/memory_card.rb --no-vinyl out.flac   # Nev's master and drum levels
 #     bin/songs/memory_card.rb --help
 #
 # Or in bin/sound.rb:
@@ -60,6 +61,17 @@
 # As rendered by Nev on the research branch (2026-10-13, measured; nobody
 # had listened yet): -11.5 LUFS integrated, -0.8 dBTP (limiter at -1 dBTP);
 # sections from -16.1 (intro) to -9.1 LUFS (drop2).
+#
+# Mastered with the vinyl preset since omnibus9 (2026-10-18; the
+# maintainer's mastering-2 Bench pick: "the original master was relying on
+# the master chain to bring the drums in line ... the drums, especially
+# snare, become dominant"): the drums play at MEMORY_CARD_DRUMS (snare
+# slices -5 dB in all, the rest of the break -2 dB, perc -1.5 dB), so the
+# drums sit under the music as Nev's glue and limiter had them.  Drums
+# alone against the music alone (LUFS of the drop / drop2): Nev's master
+# -4.8 / -6.0 LU; vinyl at the old levels -2.3 / -4.1; vinyl rebalanced
+# -5.0 / -6.4.  The vinyl render: -16.7 LUFS integrated (-17.5 at the old
+# levels), -1.0 dBTP (the ceiling holds it: no brickwall).
 #
 require 'bundler/setup'
 require 'mb-sound'
@@ -85,22 +97,43 @@ module MB::Sound
   # semitones up so the record lands on the song's grid; e.g.
   # chop(:k, T, :h, :g, [:s, 2]).  Every hit carries a pitch mark, so
   # `chop(...).transpose(2)` pitches the hits, not the slices.
-  def self.chop(*steps)
+  #
+  # +snare+ (a gain) plays the snare slices (MEMORY_CARD_SNARES) that much quieter or louder, through their
+  # velocities (the breaks voice's gain follows velocity / 0.75).
+  def self.chop(*steps, snare: 1.0)
     brk = memory_card_break
     rev = brk[:s2].rev
-    brk.chop(*steps.map { |s| s == :rev ? rev : s }).transpose(3)
+    vel = 0.75 * snare.to_f
+    brk.chop(*steps.map { |s|
+      name, semis = s.is_a?(Array) ? s : [s, 0]
+      next(s == :rev ? rev : s) if snare == 1 || !MEMORY_CARD_SNARES.include?(name)
+      [name, semis, { vel: vel }]
+    }).transpose(3)
   end
 
+  # The slices with a snare hit (see .jungle_slices; the reversed run, a
+  # swell, keeps its level: chop steps take velocities only by name).
+  MEMORY_CARD_SNARES = %i[s sk s2 s3].freeze
+
+  # The drum levels the vinyl master needs (omnibus9, 2026-10-18): the
+  # old master's glue and limiter squashed the drums (the snare most) into
+  # the mix; without them the snare was dominant (the maintainer's
+  # mastering-2 Bench note).  Snare slices -3 dB more than the rest of the
+  # break, the break -2 dB, the perc kit -1.5 dB.
+  MEMORY_CARD_DRUMS = { snare: -3.db, breaks: -2.db, perc: -1.5.db }.freeze
+
   # The chop patterns (looping clips, named).
-  def self.memory_card_chops
+  def self.memory_card_chops(snare: 1.0)
     roll_up = (0...16).map { |i| [:s, (i * 6 / 15.0).round] }
+    chop = ->(*steps) { self.chop(*steps, snare: snare) }
+    s = snare.to_f
     {
-      full: chop(:full, *[T] * 31),
-      a: chop(
+      full: chop.(:full, *[T] * 31),
+      a: chop.(
         :k, T, :h, :g,   :sk, T, T, T,   :h, T, :kk, T,   :s2, T, T, T,
         :k2, T, T, T,    :s3, T, T, T,   :h, :g, :kk, T,  :s, T, [:g, 2], [:s, 3],
       ),
-      b: chop(
+      b: chop.(
         :k, T, :g, :k,   :s, T, :g, :h,  T, :k, :kk, T,   :s2, T, :g, :h,
         :k2, T, T, T,    :s, :g, :s3, T, T, T, :kk, T,    :rev, T, T, T,
         :k, T, :h, :g,   :sk, T, T, T,   :k, :g, :kk, T,  :s2, T, T, :g,
@@ -108,8 +141,8 @@ module MB::Sound
       ),
       # The build: snares in quarters, eighths, sixteenths, then a rising
       # sixteenth roll (4 bars), getting louder
-      build: chop(*[:s, T, T, T] * 4).vel(0.3) | chop(*[:s, T] * 8).vel(0.4) | chop(*[:s] * 16).vel(0.5) | chop(*roll_up).vel(0.7),
-      none: chop(R),
+      build: chop.(*[:s, T, T, T] * 4).vel(0.3 * s) | chop.(*[:s, T] * 8).vel(0.4 * s) | chop.(*[:s] * 16).vel(0.5 * s) | chop.(*roll_up).vel(0.7 * s),
+      none: chop.(R),
     }.transform_values { |c| c.loop(align: :launch) }.each { |name, c| c.named(:"chop_#{name}") }
   end
 
@@ -188,10 +221,15 @@ module MB::Sound
   # Sets up the song on the current session: tempo, knobs, master, tracks,
   # scenes.  Returns the chops and clips.
   #
-  # +vinyl+ true masters with the vinyl preset (mastering-2) instead.
-  def self.memory_card(drive: 5.0, ceiling: -1.0, vinyl: false)
+  # +vinyl+ (true by default; the maintainer's mastering-2 Bench pick)
+  # masters with the vinyl preset and plays the drums at
+  # MEMORY_CARD_DRUMS (+drums+ overrides); false is Nev's original: the
+  # song's glue and limiter (+drive+, +ceiling+) and the drums as loud as
+  # they were.
+  def self.memory_card(drive: 5.0, ceiling: -1.0, vinyl: true, drums: nil)
+    drums ||= vinyl ? MEMORY_CARD_DRUMS : { snare: 1, breaks: 1, perc: 1 }
     map = memory_card_break.instrument # (the record bounces at its own tempo)
-    chops = memory_card_chops
+    chops = memory_card_chops(snare: drums[:snare])
     c = memory_card_clips
     k = memory_card_kits
     bpm MEMORY_CARD_BPM
@@ -210,8 +248,10 @@ module MB::Sound
       }
     end
 
-    track(:breaks) { |clip| jungle_breaks_voice(clip, map: map, cutoff: knob(:brk)) }
-    track(:perc) { |kit| jungle_perc(kit) }
+    breaks_gain = drums[:breaks].to_f
+    perc_gain = drums[:perc].to_f
+    track(:breaks) { |clip| jungle_breaks_voice(clip, map: map, cutoff: knob(:brk), level: 1.6 * breaks_gain) }
+    track(:perc) { |kit| perc_gain == 1 ? jungle_perc(kit) : jungle_perc(kit) * perc_gain }
     track(:sub) { |clip| jungle_sub_voice(clip) }
     track(:reese) { |clip| jungle_reese_voice(clip) }
     track(:keys) { |clip| jungle_keys_voice(clip) }
@@ -251,9 +291,9 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: MEMORY_CARD_BARS,
-      drive: [5.0, Float, '-D', 'Gain in dB into the master limiter', -20.0..20.0],
-      ceiling: [-1.0, Float, '-C', 'Master limiter true-peak ceiling in dBTP', -12.0..0.0],
-      vinyl: [false, 'Master with the vinyl preset (mono lows, de-esser, no brickwall) instead of the song\'s glue and limiter'],
+      drive: [5.0, Float, '-D', 'With --no-vinyl: gain in dB into the master limiter', -20.0..20.0],
+      ceiling: [-1.0, Float, '-C', 'With --no-vinyl: master limiter true-peak ceiling in dBTP', -12.0..0.0],
+      vinyl: [true, 'The vinyl preset (mono lows, de-esser, no brickwall) with rebalanced drums (--no-vinyl: Nev\'s glue and limiter, -D/-C, and the old drum levels)'],
     ) { |p|
       memory_card(drive: p.drive, ceiling: p.ceiling, vinyl: p.vinyl)
       memory_card_form
