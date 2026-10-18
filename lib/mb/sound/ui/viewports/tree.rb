@@ -293,8 +293,8 @@ module MB
         # Sizes of +children+ along a +total+: fixed sizes first, then
         # weights by largest remainder (ties to the earlier child), then
         # minimums (+mins+, one per child; default each child's +min+, else
-        # 1): a child under its minimum takes cells from the largest
-        # siblings above theirs, fixed ones included, so a declared minimum
+        # 1): a child under its minimum takes cells one at a time from the
+        # sibling furthest above its own, fixed ones included, so a declared minimum
         # holds whenever the total allows it.  Sums to +total+ when any
         # child is flexible.
         def shares(children, total, mins = nil)
@@ -324,14 +324,17 @@ module MB
             need = mins[i] - sizes[i]
             next if need <= 0
 
-            children.each_index.reject { |d| d == i }.sort_by { |d| [-(sizes[d] - mins[d]), d] }.each do |d|
-              give = [need, sizes[d] - mins[d]].min
-              next if give <= 0
+            # One cell at a time from the sibling furthest above its
+            # minimum (ties to the earlier one), so siblings give way
+            # evenly
+            others = children.each_index.reject { |d| d == i }
+            while need > 0
+              d = others.max_by { |o| [sizes[o] - mins[o], -o] }
+              break if d.nil? || sizes[d] - mins[d] <= 0
 
-              sizes[d] -= give
-              sizes[i] += give
-              need -= give
-              break if need <= 0
+              sizes[d] -= 1
+              sizes[i] += 1
+              need -= 1
             end
           end
           sizes

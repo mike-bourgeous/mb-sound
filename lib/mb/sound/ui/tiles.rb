@@ -166,8 +166,17 @@ module MB
           @density = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
-          # Panes' declared minimum heights (UI::Pane#min_height)
-          @tiler.mins = ->(name, axis) { axis == :rows ? @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil) : nil }
+          # Panes' declared minimum heights (UI::Pane#min_height), and widths:
+          # the console keeps REPL_MIN_COLS (ux-fix-1: `ui :studio` at 80x24
+          # left it 12 columns between fixed-width panes, which give way
+          # down to PANE_MIN_COLS)
+          @tiler.mins = ->(name, axis) {
+            if axis == :rows
+              @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil)
+            else
+              name == :repl ? REPL_MIN_COLS : PANE_MIN_COLS
+            end
+          }
           @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
                                       repl_keys: play_keys || (repl == :none ? nil : Keys.repl_keymap))
           @router.add_keymap(NAV_EXTRA)
@@ -695,6 +704,11 @@ module MB
 
         # The REPL pane's smallest height.
         REPL_MIN_ROWS = 4
+
+        # The console's narrowest width, taken from fixed-width panes beside
+        # it when the terminal is narrow (they keep PANE_MIN_COLS).
+        REPL_MIN_COLS = 40
+        PANE_MIN_COLS = 12
 
         # Panes temporary panes never take their rows from.
         TEMPORARY_KEEP = %i[repl keyboard].freeze

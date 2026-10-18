@@ -76,6 +76,15 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     end
   end
 
+  # ux-fix-1 item 8: `ui :studio` at 80x24 left the console 12 columns
+  it 'keeps the console at least REPL_MIN_COLS wide in every built-in tiled layout at 80x24' do
+    min = MB::Sound::UI::Tiles::REPL_MIN_COLS
+    MB::Sound::UI.tile_layouts.each_key do |layout|
+      r = tiles_capture(layout, 24, 80).tiler.rects[:repl]
+      expect(r.w).to be >= min, "#{layout}: #{r.w} columns"
+    end
+  end
+
   after do
     @capture&.stop
     @capture_term&.close
