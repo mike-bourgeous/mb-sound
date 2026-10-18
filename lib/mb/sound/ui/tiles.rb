@@ -1881,9 +1881,10 @@ module MB
         end
 
         def install_signals
+          return if @signals # (installing twice would chain to our own wrapper)
           tiles = self
           old = nil
-          @winch = proc do |sig|
+          @winch = Signals.handler do |sig|
             tiles.instance_variable_set(:@resized, true)
             old.call(sig) if old.respond_to?(:call)
           end

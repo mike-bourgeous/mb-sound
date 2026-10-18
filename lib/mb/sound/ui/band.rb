@@ -505,9 +505,10 @@ module MB
 
         def install_winch
           return unless @io.respond_to?(:tty?) && @io.tty?
+          return if @winch_installed # (installing twice would chain to our own wrapper)
           band = self
           old = nil
-          @winch = proc do |sig|
+          @winch = Signals.handler do |sig|
             band.resized!
             old.call(sig) if old.respond_to?(:call)
           end
