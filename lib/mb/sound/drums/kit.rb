@@ -23,7 +23,9 @@ module MB
         # its source, nil if given) describe the clips it can take in a
         # swap (see #plays_clip?).
         # +:flams+ is true if the kit plays flam marks (see Drums.flams?).
-        def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, flams: false, sample_rate: 48000)
+        # +:silent+ names voices that play but aren't mixed (key voices that
+        # sidechains read; see Machine::Builder#voice).
+        def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, flams: false, silent: [], sample_rate: 48000)
           raise ArgumentError, 'A drum kit needs at least one voice' if voices.empty?
 
           @clip_notes = clip_notes&.uniq&.freeze
@@ -32,6 +34,9 @@ module MB
 
           @voices = voices.dup.freeze
           @samplers = @voices.transform_values(&:get_sampler)
+          @silent = silent.map(&:to_sym).freeze
+          unknown = @silent - @voices.keys
+          raise ArgumentError, "No voice #{unknown.first.inspect} to make silent" unless unknown.empty?
           @machine = machine
           @sample_rate = sample_rate.to_f
           @buf = nil
@@ -48,14 +53,18 @@ module MB
           @voices.keys
         end
 
+        # The silent voices' names (played, never mixed).
+        attr_reader :silent
+
         def sample(count)
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           @buf.fill(0)
 
           any = false
-          @samplers.each_value do |s|
+          @samplers.each do |name, s|
             data = s.sample(count)
             next if data.nil? || data.empty?
+            next any = true if @silent.include?(name) # (played for its readers, never mixed)
 
             any = true
             if data.length == count
