@@ -9,12 +9,15 @@
 # tmp/parallel/N.json.  Spec processes already work side by side (per-process
 # temp dirs and coverage files; JACK specs take turns through a lock file).
 require 'json'
+require 'yaml'
 require 'fileutils'
 
 module ParallelSpecs
   ROOT = File.expand_path('..', __dir__)
   OUT_DIR = File.join(ROOT, 'tmp', 'parallel')
   TIMES_PATH = File.join(ROOT, 'tmp', 'spec_file_times.json')
+  # Time budgets per file and per example (see #check_budgets)
+  BUDGETS_PATH = File.join(ROOT, 'spec', 'time_budgets.yml')
 
   # Files slower than this (seconds) or examples slower than SLOW_EXAMPLE
   # are listed as slow after every run.
@@ -81,7 +84,7 @@ module ParallelSpecs
   # (e.g. a segfault in a C library): it's listed with its signal, files, and
   # log, and the other processes' times are still written.  Returns true if
   # every process passed.
-  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH)
+  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH)
     examples = []
     crashed = []
     groups.each_index do |i|
@@ -112,6 +115,7 @@ module ParallelSpecs
 
     report_rss(groups.length, out_dir)
     report_transport(groups.length, out_dir)
+    within_budget = check_budgets(file_times, examples, budgets_path)
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
     report_warnings(groups.length, out_dir)
@@ -119,7 +123,48 @@ module ParallelSpecs
     bad = statuses.each_with_index.reject { |s, i| s.success? || crashed.include?(i) }
     bad.each { |s, i| puts "spec:parallel: process #{i} exited with #{s.exitstatus} (see #{display_path(File.join(out_dir, "#{i}.log"))})" }
     $stdout.flush # before rake's abort message on stderr
-    bad.empty? && crashed.empty?
+    bad.empty? && crashed.empty? && within_budget
+  end
+
+  # Checks measured times against spec/time_budgets.yml (test-speed-2): a
+  # file's examples together, and each example, get the default budget
+  # unless the file has its own entry, which needs a reason.  Lists what
+  # went over and returns false then, so a file that grew slow fails the
+  # run until it is made faster or its entry says why it needs the time
+  # (MB_SOUND_SPEC_BUDGET=report lists without failing: a loaded machine).
+  # Returns true when everything is within its budget.
+  def check_budgets(file_times, examples, path = BUDGETS_PATH)
+    return true unless File.exist?(path)
+
+    budgets = YAML.safe_load_file(path)
+    default = budgets.fetch('default')
+    entries = budgets['files'] || {}
+    missing = entries.reject { |_, e| e['reason'].to_s.strip.length >= 10 }.keys
+    unless missing.empty?
+      puts "Time budgets without a reason (#{display_path(path)}): #{missing.join(', ')}"
+      return false
+    end
+
+    budget = ->(file, kind) { (entries[file] || {}).fetch(kind, default.fetch(kind)) }
+    over = []
+    file_times.each do |f, t|
+      b = budget.(f, 'file')
+      over << format('  %6.2f s > %5.1f s  %s', t, b, f) if t > b
+    end
+    examples.each do |e|
+      f = e['file_path'].delete_prefix('./')
+      b = budget.(f, 'example')
+      next unless e['run_time'] > b
+
+      over << format('  %6.2f s > %5.1f s  %s:%d %s', e['run_time'], b, f, e['line_number'], e['full_description'].to_s[0, 60])
+    end
+    return true if over.empty?
+
+    report_only = ENV['MB_SOUND_SPEC_BUDGET'] == 'report'
+    puts "Over their time budgets (#{display_path(path)}#{report_only ? '; MB_SOUND_SPEC_BUDGET=report: not failing' : ''}):"
+    over.each { |l| puts l }
+    puts '  Make them faster (see CLAUDE.md, Testing), or give the file an entry with the time it needs and why.' unless report_only
+    report_only
   end
 
   # Lists the examples that grew their process's resident memory by more

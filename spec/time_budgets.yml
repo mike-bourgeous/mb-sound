@@ -1,0 +1,13 @@
+# Time budgets for rake spec:parallel (spec/parallel_specs.rb,
+# #check_budgets; test-speed-2, 2026-10-18).  Times are as measured in the
+# parallel run (the runner's PARALLEL=12 on a 16-core machine): a file's
+# examples together, and each example.  A file or example over its budget
+# fails the run; make it faster (see CLAUDE.md, Testing: condition waits
+# instead of quiet periods, short renders, one-sample buffers only over
+# what they prove, SpecBuffers.join) or give its file an entry here with
+# the time it needs and why (MB_SOUND_SPEC_BUDGET=report only lists them,
+# for a loaded machine).
+default:
+  file: 15
+  example: 6
+files: {}
