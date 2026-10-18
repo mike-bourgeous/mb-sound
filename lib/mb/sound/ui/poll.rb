@@ -63,7 +63,7 @@ module MB
           arr = s.arrangement
           armed = arr.armed.keys.freeze
           tracks = arr.tracks.map { |name, tr|
-            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name))
+            TrackInfo.new(name: name, q: (tr.q || arr.quant).inspect.freeze, clip: (tr.patch? ? (tr.clip ? arr.name_of(tr.clip) : 'no clip') : 'graph').freeze, armed: armed.include?(name), key: tr.key || false)
           }.freeze
 
           s.journal.fold # new entries reach #note

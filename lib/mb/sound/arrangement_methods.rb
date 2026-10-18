@@ -33,8 +33,10 @@ module MB
       # the master (see BusMethods).  +clock:+ plays its clips on a clock
       # (`track :bowl, clock: :tide do |c| ... end`; see MB::Sound::Clock).
       # Also available as #define_track.
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, &patch)
-        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, &patch)
+      # +key: true+ makes it a key track, heard only by sidechain readers
+      # (see SidechainMethods#sidechain).
+      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, key: false, &patch)
+        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, key: key, &patch)
       end
       alias define_track track
 

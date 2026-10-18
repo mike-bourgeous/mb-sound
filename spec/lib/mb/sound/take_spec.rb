@@ -336,6 +336,45 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  it 'replays key tracks (sidechain lines), their scenes, launches, stops, and undo bit for bit' do
+    lines = {
+      0 => [
+        'a = grid(16, "x...x...x...x.x.").loop',
+        'b = grid(16, "x.......x.......").loop.named(:half)',
+        'sidechain :pump, q: 1',
+        'sidechain(:hats, q: 1) { |c| c.env(0, 0.05) }',
+        'bg :pad, 0.2.constant.duck(:pump, amount: -12.db).duck(:hats, amount: -3.db)',
+        'scene :one, pump: a, hats: b',
+        'scene :two, pump: b',
+        'go :one, at: :now',
+      ],
+      97 => ['go :two'],
+      151 => ['bg :pump, a'],
+      200 => ['undo'],
+      260 => ['stop :pump'],
+      330 => ['sidechain :pump, b, on: :beat, shape: :impulse'],
+    }
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    480.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = SpecBuffers.join(out)
+    expect(live.min).to be < 0.2 * 0.5 * 0.9 # (master gain 0.5) ducked
+    expect(live.max).to be_within(1e-6).of(0.1)
+
+    r = t.replay
+    [[800], [367, 368], [64]].each do |sizes|
+      MB::Sound.seed(5)
+      data = replay(r, sizes)
+      diff = (data[0...live.length] - live).abs.max
+      expect(diff).to eq(0), "max difference #{diff} at buffer sizes #{sizes}"
+    end
+  end
+
   it 'replays tones exactly at the same buffer size and within 1e-6 at others' do
     live, t = perform(tones: true)
     r = t.replay

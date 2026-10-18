@@ -103,8 +103,13 @@ module MB
       MidiInfo = Data.define(:events, :ccs, :mapped)
 
       # A track: +name+, +q+ (its launch quantization, as text), +clip+ (the
-      # clip's name, or "graph"), +armed+.
-      TrackInfo = Data.define(:name, :q, :clip, :armed)
+      # clip's name, or "graph"), +armed+, +key+ (true for a key track,
+      # heard only by sidechains; SidechainMethods#sidechain).
+      TrackInfo = Data.define(:name, :q, :clip, :armed, :key) do
+        def initialize(name:, q:, clip:, armed:, key: false)
+          super
+        end
+      end
 
       # A queued change: +kind+ (:add, :stop, :knob, ...), +subject+, and
       # where it +lands+ (bar:beat text) and its timeline position +pos+

@@ -24,7 +24,8 @@ module MB
       # (as `knob` header lines, with their held values), the master chain,
       # buses (their chains built once from their blocks, like the
       # master's), tracks with their routing (to: a bus, send: levels as
-      # held gains or the knob names they follow) (patches print as blocks: the patch is built once from the
+      # held gains or the knob names they follow; key tracks as
+      # `sidechain(:pump) { |clip| ... }`) (patches print as blocks: the patch is built once from the
       # track's clip, or the first clip a scene gives it, keeping the random
       # state, and its recipe printed with the block's parameter name), the
       # clips and kits scenes play, scenes, mute groups, sections declared
@@ -216,9 +217,14 @@ module MB
             opts[:nudge] = tr.nudge if tr.nudge
             opts[:clock] = tr.clock if tr.clock
             opts.merge!(route_options(name, routes))
-            if tr.patch
+            if tr.key && tr.patch && (opts.keys - %i[q fade nudge]).empty?
+              # A key track (SidechainMethods#sidechain): its patch as a block
+              block_statement(:sidechain, [name], opts, tr.patch, [probe_clip(name, tr)], "key track #{name.inspect}")
+            elsif tr.patch
+              opts[:key] = true if tr.key
               block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
             else
+              opts[:key] = true if tr.key
               graph_statement("track #{name.inspect}", tr.graph, opts.map { |k, v| "#{k}: #{lit(v)}" })
             end
           }

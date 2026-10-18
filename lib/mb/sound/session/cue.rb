@@ -224,6 +224,7 @@ module MB
         def check_cue_name(name)
           raise ArgumentError, "Cue names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
           raise ArgumentError, "#{name.inspect} is already a cue player name; cue #{Cue.cued_name(name).inspect}" if Cue.cued_name(name)
+          raise ArgumentError, "#{name.inspect} is a key track (a sidechain line heard only by readers such as duck(#{name.inspect})), so it never plays on CUE" if key_track?(name)
         end
 
         # Makes the phones knobs and warns once if CUE goes nowhere.

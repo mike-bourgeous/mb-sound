@@ -457,6 +457,9 @@ module MB
         explicit_fade = !fade.nil?
         fade = bars_or_nil(fade)
 
+        # A key track plays signals as they are (an envelope key isn't made
+        # audible: nobody hears a key track; see Buses#route)
+        sound = Playable::Graph.new(nodes: sound.outputs, description: sound.to_s, ends: nil, note: nil) if sound.is_a?(Envelope) && name && key_track?(name)
         playable = Playable.graph(sound, sample_rate: sample_rate)
         nodes = match_rate(playable.nodes)
         @mastering_capture&.saw(nodes) # (a targeted render's passes; see Mastering::Targeting)
