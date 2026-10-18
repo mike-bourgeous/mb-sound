@@ -237,6 +237,37 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
         expect(draw(:buses, live_snap, w: 60, h: 6).join("\n")).to include('verb', '← bass')
       end
     end
+
+    it 'launches a clip from the keyboard: NAV, a (the matrix, in its mode), Right, Enter, the line printed in the console' do
+      MB::Sound::Session.with_context(session: @session) do
+        arr = @session.arrangement
+        arr.track(:bass, q: :beat) { |c| c.synth(voices: 2) { |v| v.hz.saw * v.amp_env } }
+        arr.scene(:a, bass: MB::Sound.seq(MB::Sound::C2, MB::Sound::G2).n8.loop.named(:bass_a))
+        arr.scene(:b, bass: MB::Sound.seq(MB::Sound::F2, MB::Sound::C3).n8.loop.named(:bass_b))
+      end
+      @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120, session: @session)
+      stop = false
+      pump = Thread.new { until stop; @session.process_buffer; sleep 0.005; end }
+      expect(@term.wait_for('t> ')).to eq(true)
+      @tiles.show(:clips, at: :queue)
+      expect(@term.wait_for('bass_b')).to eq(true), @term.text
+      @term.write("\x1d")
+      expect(@term.wait_for(' NAV ')).to eq(true)
+      @term.type('a')
+      expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :clips }).to eq(true)
+      @term.write("\e[C")
+      sleep 0.1
+      @term.write("\r")
+      expect(@term.wait_for('launch :bass, 1')).to eq(true), @term.text
+      expect(wait_until { @session.journal.changes.any? { |e| e.status == :landed && e.subject.to_s.include?('bass') } }).to eq(true)
+      expect(@term.wait_for('▶bass_b')).to eq(true), @term.text
+      expect(@tiles.mode_problems).to eq([])
+    ensure
+      stop = true
+      pump&.join
+      @tiles&.stop
+      @term&.close
+    end
   end
 
   describe 'running a pane key\'s line on the screen' do
