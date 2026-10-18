@@ -253,14 +253,14 @@ module MB
         pressure sets its own sample-and-hold filter flutter).  It takes
         any MIDI source (none: live `midi`), a patch, and settings, as in
         `sq80(clip, :chop)` or `sq80(:glass, cutoff: 900)`.  Patches:
-        :classic (the defaults), :flutter_pad, :chop, :vox_lead,
+        :classic (the defaults, two octaves down), :flutter_pad, :chop, :vox_lead,
         :prime_bass, :glass (`sq80_patches` lists them).  Settings:
         voices, cutoff (Hz), reso (0..1), drive_mode (:feedback or
         :input), drive, chop, flutter, second_release, osc1..osc3 (wave,
         semitones, level, vibrato, env1), env1, env2, env4 (sq80_env panel
         values), lfo1 (rate in Hz, depth in semitones, delay, wheel,
         pressure), filter (env2, key, velocity, aftertouch, in octaves),
-        level; Hash settings change only the keys given
+        transpose (semitones, every oscillator), level; Hash settings change only the keys given
         (`env4: { t4: 50 }`).  Each patch is a preset too
         (`preset :sq80_glass, midi: midi`), and the shell plays them with
         bin/synths/sq80_voice.rb -p glass.

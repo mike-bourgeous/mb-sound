@@ -9,7 +9,8 @@ RSpec.describe(MB::Sound::SQ80Methods) do
 
   # The voice as bin/synths/sq80_voice.rb built it before sq80-lib-1
   # (2026-10-17), kept as the reference the library's defaults must match
-  # sample for sample.  Both use lp4's default tuning (the musical tuning since
+  # sample for sample.  The flutter's steps glide since omnibus9
+  # (2026-10-18; Voice.flutter_lfo), changed here too.  Both use lp4's default tuning (the musical tuning since
   # filters-1, 2026-10-17; the voice was written for the hardware tuning),
   # so they change together.
   def original_voice(midi, voices: 8, cutoff: 500, reso: 0.4, drive_mode: :feedback, drive: 1.5, chop: 1.5, flutter: 1.0, second_release: false)
@@ -27,6 +28,7 @@ RSpec.describe(MB::Sound::SQ80Methods) do
       mods = { env2 => 3.oct, :key => 0.5, :velocity => 0.5.oct, :aftertouch => 1.5.oct }
       if flutter != 0
         flutter_lfo = v.lfo(v.mod_scale(2.5, :poly_pressure => 2.5.oct), shape: :noise)
+          .filter(:lowpass, cutoff: 12, quality: 0.5) # the flutter's glide (omnibus9)
         mods[flutter_lfo] = v.poly_pressure * flutter.to_f
       end
       if chop != 0
@@ -138,6 +140,39 @@ RSpec.describe(MB::Sound::SQ80Methods) do
     end
   end
 
+  describe 'transpose:' do
+    it 'moves every oscillator, as their semitones would' do
+      a = MB::Sound.with_seed(2) { MB::Sound.sq80(midi_file, transpose: -12) }
+      b = MB::Sound.with_seed(2) {
+        MB::Sound.sq80(midi_file, osc1: { semitones: -12 }, osc2: { semitones: 0.06 - 12 }, osc3: { semitones: -24 })
+      }
+      expect(render(a, 20)).to eq(render(b, 20))
+      expect { MB::Sound.sq80(midi_file, transpose: :down) }.to raise_error(ArgumentError, /transpose is a number/)
+    end
+  end
+
+  describe 'flutter' do
+    # A held note whose poly pressure jumps from 0 to full and back
+    def pressure_notes
+      ev = MB::Sound::MIDI::Event
+      MB::Sound::Notes.new(MIDIListSource.new(
+        [ev.note_on(60, 1.0, time: 0r), ev.poly_pressure(60, 1.0, time: 1/10r), ev.poly_pressure(60, 0.0, time: 6/10r)],
+        [ev.cc(99, 0, time: 1000r)]
+      ))
+    end
+
+    it 'glides between its random steps instead of jumping (no zipper on the cutoff)' do
+      v = pressure_notes
+      lfo = MB::Sound::SQ80::Voice.send(:flutter_lfo, v)
+      out = Array.new(60) { lfo.sample(800).dup }.reduce(:concatenate)
+      steps = (out[1..] - out[0...-1]).abs
+      expect(out.max - out.min).to be > 0.5 # it still flutters
+      # A raw S&H step is up to 2 per sample; the 12 Hz glide moves at most
+      # about 2 * 2 * pi * 12 / 48000 / e per sample
+      expect(steps.max).to be < 0.002
+    end
+  end
+
   describe '#sq80_patches' do
     it 'lists every patch with its description and returns the names' do
       names = nil
@@ -148,8 +183,13 @@ RSpec.describe(MB::Sound::SQ80Methods) do
   end
 
   describe MB::Sound::SQ80::PATCHES do
-    it 'has :classic as the defaults' do
-      expect(MB::Sound::SQ80.patch(:classic).full_settings).to eq(MB::Sound::SQ80::Voice::DEFAULTS)
+    it 'has :classic as the defaults two octaves down (level matched)' do
+      expect(MB::Sound::SQ80.patch(:classic).full_settings).to eq(MB::Sound::SQ80::Voice::DEFAULTS.merge(transpose: -24, level: 2.81))
+    end
+
+    it 'plays :chop an octave down and :prime_bass an octave up (maintainer, sq80-lib-1 Bench)' do
+      expect(MB::Sound::SQ80.patch(:chop).full_settings[:transpose]).to eq(-12)
+      expect(MB::Sound::SQ80.patch(:prime_bass).full_settings[:transpose]).to eq(12)
     end
 
     MB::Sound::SQ80::PATCHES.each_key do |name|

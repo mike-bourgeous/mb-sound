@@ -39,6 +39,9 @@ module MB
       #          aftertouch's extra depth in semitones).
       # +filter+ - { env2:, key:, velocity:, aftertouch: }: cutoff
       #            modulation in octaves (key: octaves per octave from C4).
+      # +transpose+ - Semitones added to every oscillator (-24 plays two
+      #               octaves down; the filter's key tracking still follows
+      #               the keys played).
       # +level+ - Output gain (linear).
       module Voice
         # The defaults: the sound of bin/synths/sq80_voice.rb.
@@ -63,6 +66,7 @@ module MB
           env4: { l1: 63, l2: 54, l3: 46, t1: 2, t2: 30, t3: 42, t4: 32, lv: 36, lv_curve: :exp },
           lfo1: { rate: 5.2, depth: 0.06, delay: 0.4, wheel: 0.35, pressure: 0.2 },
           filter: { env2: 3, key: 0.5, velocity: 0.5, aftertouch: 1.5 },
+          transpose: 0,
           level: 1.6,
         }.freeze
 
@@ -132,7 +136,9 @@ module MB
             vibrato = v.lfo(lfo1[:rate], shape: :tri, depth: lfo1[:depth], delay: lfo1[:delay], wheel: lfo1[:wheel], pressure: lfo1[:pressure])
 
             # OSC1-3 (pitched tables; levels and ENV1 applied in the mix below)
-            oscs = [o1, o2, o3].zip(tables).map { |o, table| zero?(o[:level]) ? nil : osc(v, o, table, vibrato) }
+            transpose = s[:transpose]
+            raise ArgumentError, "SQ-80 transpose is a number of semitones (got #{transpose.inspect})" unless transpose.is_a?(Numeric)
+            oscs = [o1, o2, o3].zip(tables).map { |o, table| zero?(o[:level]) ? nil : osc(v, o, table, vibrato, transpose) }
 
             # GM2 envelope time knobs (CC 72/73/75) act on ENV4 only (cheaper)
             env1 = [o1, o2, o3].any? { |o| o[:env1] && !zero?(o[:level]) } ? v.sq80_env(**s[:env1], gm: false) : nil
@@ -146,10 +152,7 @@ module MB
             mods[:aftertouch] = filter[:aftertouch] unless zero?(filter[:aftertouch])
 
             # Oddity 1: each finger's pressure sets its own S&H flutter rate and depth
-            unless zero?(flutter)
-              flutter_lfo = v.lfo(v.mod_scale(2.5, :poly_pressure => 2.5.oct), shape: :noise)
-              mods[flutter_lfo] = v.poly_pressure * (flutter.is_a?(Numeric) ? flutter.to_f : flutter)
-            end
+            mods[flutter_lfo(v)] = v.poly_pressure * (flutter.is_a?(Numeric) ? flutter.to_f : flutter) unless zero?(flutter)
 
             # Oddity 2: a looping envelope chops the filter in 16ths while held
             unless zero?(chop)
@@ -172,10 +175,27 @@ module MB
           } * s[:level]
         end
 
-        # One oscillator: +table+ at the voice's pitch (+o+'s semitones, plus
-        # +vibrato+ if o[:vibrato]).
-        def osc(v, o, table, vibrato)
+        # The cutoff of the S&H flutter's glide (see .flutter_lfo).
+        FLUTTER_GLIDE_HZ = 12
+
+        # The flutter LFO of voice +v+ (a Notes): random steps whose rate
+        # follows the key's poly pressure (2.5 Hz, up to 2.5 octaves faster
+        # at full pressure), gliding from step to step through a critically
+        # damped lowpass at FLUTTER_GLIDE_HZ (no overshoot; about 13 ms time
+        # constant), since jumps of up to 2.5 octaves on a resonant cutoff
+        # zippered (omnibus9, the maintainer's sq80-lib-1 Bench note on
+        # :flutter_pad, 2026-10-17: "seems like it's still not
+        # interpolating").  Its range stays -1..1.
+        def flutter_lfo(v)
+          v.lfo(v.mod_scale(2.5, :poly_pressure => 2.5.oct), shape: :noise)
+            .filter(:lowpass, cutoff: FLUTTER_GLIDE_HZ, quality: 0.5)
+        end
+
+        # One oscillator: +table+ at the voice's pitch (+o+'s semitones and
+        # +transpose+, plus +vibrato+ if o[:vibrato]).
+        def osc(v, o, table, vibrato, transpose = 0)
           semis = o[:semitones]
+          semis += transpose unless zero?(transpose)
           pitch = if o[:vibrato]
             zero?(semis) ? v.hz.transpose(vibrato) : v.hz.transpose(v.mod_sum(semis, vibrato => 1))
           else
