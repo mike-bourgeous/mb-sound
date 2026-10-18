@@ -257,7 +257,7 @@ module MB
       # with the table (and, for plain numbers, the spellings that would
       # work).
       class Dispatch
-        attr_reader :name, :receiver, :rows, :note
+        attr_reader :name, :receiver, :rows, :note, :fallback_meaning
 
         # +name+ the method, +receiver+ the receiver in words, +rows+ the
         # table, +fallback+ a Proc for argument types not in the table (the
