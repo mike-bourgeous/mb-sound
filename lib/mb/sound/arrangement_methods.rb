@@ -63,6 +63,34 @@ module MB
       end
       alias launch_scene go
 
+      # Plays a clip slot of track +name+ (the clip matrix: see
+      # Arrangement::ClipMatrix): +ref+ is a slot index or a clip's name
+      # (`.named(:bass_b)`, a capture like :bass_1).  The `bg :bass, clip`
+      # path: journaled, one undo step, at the track's launch point or
+      # +on:+/+in:+/+at:+.  Returns the journal entry.
+      #
+      #     launch :bass, :bass_b
+      #     launch :bass, 3, on: :beat
+      def launch(name, ref, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        Session.current.arrangement.launch(name, ref, at: point, fade: fade)
+      end
+
+      # Replaces track +name+'s clip with a transformed copy at its launch
+      # point (one change, one undo step; the copy is named after the
+      # transform, e.g. :"bass_a/t+2", and becomes a slot): `transpose: 2`
+      # (an octave is 12), `legato: 0.8`, `swing: 0.6`, `quantize: 1/16r`
+      # (or true), or one of :reverse, :halftime (twice as long),
+      # :doubletime (half as long), :double (played twice), :half (its
+      # first half).  Returns the journal entry.
+      #
+      #     tweak :bass, transpose: -12
+      #     tweak :bass, :reverse, on: :beat
+      def tweak(name, op = nil, at: nil, on: nil, in: nil, fade: nil, **opts)
+        point = LaunchPoint.of(binding) or return nil
+        Session.current.arrangement.tweak(name, op, at: point, fade: fade, **opts)
+      end
+
       # With an argument, sets the set-wide launch quantization (an
       # alignment like +on:+: a number of bars, :beat, :bar, :clip, :now, or
       # a Duration).  Returns it.

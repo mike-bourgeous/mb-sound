@@ -75,6 +75,10 @@ module MB
           @extras = {}.compare_by_identity
           @cc_old = {} # [channel or nil, cc] => raw value of controllers dropped from the history
           @live_lock = nil # the Session's input lock while it maps (see #locked)
+          @labels = {}.compare_by_identity
+          # Notes held now (see #held_notes): { [channel, note] => HeldNote }
+          @held = {}
+          @held_list = [].freeze
         end
 
         # The raw value (0..127) of controller +number+ (on 0-based
@@ -97,17 +101,38 @@ module MB
         # Adds +stream+ (a MIDI::Stream, or anything MIDI::Stream.for
         # takes) as another source of this input: its events merge with the
         # input's in every span, in time order (while a take replays, they
-        # are read and dropped).  Returns the Stream.
-        def add_source(stream)
+        # are read and dropped).  +label+ names it in #held_notes (e.g.
+        # :keyboard for the terminal UI's virtual keyboard).  Returns the
+        # Stream.
+        def add_source(stream, label: :extra)
           stream = MIDI::Stream.for(stream)
-          @lock.synchronize { @extras[stream] ||= stream.reader }
+          @lock.synchronize {
+            @extras[stream] ||= stream.reader
+            @labels[stream] = label
+          }
           stream
         end
 
         # Stops reading +stream+ (see #add_source).  Returns nil.
         def remove_source(stream)
-          @lock.synchronize { @extras.delete(stream)&.close }
+          @lock.synchronize {
+            @extras.delete(stream)&.close
+            label = @labels.delete(stream)
+            # Its held notes end with it (the source can't send their offs)
+            if label && @held.any? { |_, h| h.source == label } && @labels.none? { |_, l| l == label }
+              @held.delete_if { |_, h| h.source == label }
+              @held_list = @held.values.freeze
+            end
+          }
           nil
+        end
+
+        # The notes held now on this input and its added sources (frozen
+        # UI::HeldNote values, for the terminal UI's keyboard pane): updated
+        # on the render thread from each span's events, read by any thread
+        # without a lock (one frozen Array per change).
+        def held_notes
+          @held_list
         end
 
         # The streams added with #add_source.
@@ -200,6 +225,7 @@ module MB
             unless events.empty?
               @history.concat(events)
               @session.send(:log_midi, self, events)
+              track_held(events)
             end
             trim_history(from)
             follow_gestures(events, frame, rate)
@@ -255,12 +281,16 @@ module MB
           return [] if list.empty?
 
           out = []
+          @span_sources = nil
           list.each do |reader|
             start = reader.cursor
+            label = reader.equal?(@reader) ? :input : (@labels[@extras.key(reader)] || :extra)
             reader.next(Rational(count, rate)).each { |e|
               next unless e.is_a?(MIDI::Event)
               off = ((e.time - start) * rate).floor.clamp(0, count - 1)
-              out << Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
+              st = Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
+              (@span_sources ||= {}.compare_by_identity)[st] = label unless label == :input
+              out << st
             }
           end
           out = out.sort_by.with_index { |st, i| [st.frame, i] } if list.length > 1
@@ -282,6 +312,35 @@ module MB
           @live_lock.style = style || MIDI::Lock::Style.new(:off)
           t = @session.transport
           stamped.flat_map { |st| @live_lock.process(st.event, st.pos, transport: t).map { |e| st.with(event: e) } }
+        end
+
+        # Updates the held notes (see #held_notes) from a span's events.
+        def track_held(events)
+          changed = false
+          events.each do |st|
+            e = st.event
+            case e.type
+            when :note_on, :note_off
+              key = [e.channel, e.note]
+              if e.type == :note_on && e.velocity.to_f > 0
+                @held[key] = UI::HeldNote.new(
+                  note: e.note, velocity: (e.velocity.to_f * 127).round.clamp(1, 127), channel: e.channel,
+                  source: @span_sources&.[](st) || :input, input: @name, frame: st.frame, pos: st.pos
+                )
+              else
+                @held.delete(key)
+              end
+              changed = true
+            when :cc
+              # All notes off (123) and all sound off (120) end held notes
+              if e.note == 123 || e.note == 120
+                changed ||= @held.any? { |(ch, _), _| ch == e.channel }
+                @held.delete_if { |(ch, _), _| ch == e.channel }
+              end
+            end
+          end
+          @span_sources = nil
+          @held_list = @held.values.freeze if changed
         end
 
         # Reads the added sources for a span and drops their events (while a

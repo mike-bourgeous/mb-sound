@@ -58,7 +58,7 @@ module MB
               @monitor = false
               @virtual = MIDI::VirtualInput.new('keyboard')
               @source = MIDI::LiveSource.new(@virtual, output: s.output_open? ? s.output : nil)
-              s.midi_in(@input).add_source(MIDI::Stream.new(@source))
+              s.midi_in(@input).add_source(MIDI::Stream.new(@source), label: :keyboard)
               @virtual
             end
           end

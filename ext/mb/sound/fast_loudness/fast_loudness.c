@@ -9,6 +9,11 @@
  * output as ((0 + h[0] x[i]) + h[1] x[i-1]) + ... in double precision, in
  * the same order, so specs compare them for exact equality (built with
  * -ffp-contract=off so no FMAs change the rounding).
+ *
+ * MB::Sound::FastLoudness.peak_sumsq(x, gain) gives the peak and the sum of
+ * squares of a Numo::SFloat times +gain+ in one pass (the terminal UI's bus
+ * and send meters, MB::Sound::UI::BusMeter); its exact Ruby mirror is
+ * MB::Sound::UI::BusMeter.peak_sumsq_ruby.
  */
 #include <math.h>
 
@@ -94,6 +99,46 @@ static VALUE ruby_true_peak(VALUE self, VALUE ext, VALUE n_value, VALUE phases)
 	return DBL2NUM(max);
 }
 
+/*
+ * call-seq:
+ *   MB::Sound::FastLoudness.peak_sumsq(x, gain) -> [peak, sumsq]
+ *
+ * +x+ is a one-dimensional Numo::SFloat (a view is fine).  Each sample is
+ * read as a float, widened to double, and multiplied by +gain+; returns the
+ * largest absolute product and the sum of the products' squares, added in
+ * order from the first sample, in double precision.
+ */
+static VALUE ruby_peak_sumsq(VALUE self, VALUE x, VALUE gain_value)
+{
+	double gain = NUM2DBL(gain_value);
+	if (CLASS_OF(x) != numo_cSFloat) {
+		rb_raise(rb_eArgError, "Samples must be a Numo::SFloat");
+	}
+	if (!RTEST(nary_check_contiguous(x))) {
+		x = nary_dup(x);
+	}
+
+	narray_t *na;
+	GetNArray(x, na);
+	long n = (long)NA_SIZE(na);
+	const float *data = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+
+	double peak = 0.0;
+	double sumsq = 0.0;
+	for (long i = 0; i < n; i++) {
+		double y = (double)data[i] * gain;
+		double a = fabs(y);
+		if (a > peak) {
+			peak = a;
+		}
+		sumsq += y * y;
+	}
+
+	RB_GC_GUARD(x);
+
+	return rb_ary_new_from_args(2, DBL2NUM(peak), DBL2NUM(sumsq));
+}
+
 void Init_fast_loudness(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -101,4 +146,5 @@ void Init_fast_loudness(void)
 	VALUE fast_loudness = rb_define_module_under(sound, "FastLoudness");
 
 	rb_define_module_function(fast_loudness, "true_peak", ruby_true_peak, 3);
+	rb_define_module_function(fast_loudness, "peak_sumsq", ruby_peak_sumsq, 2);
 }

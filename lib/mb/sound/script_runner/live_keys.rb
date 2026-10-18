@@ -153,7 +153,7 @@ module MB
           @virtual ||= begin
             v = MIDI::VirtualInput.new('panic')
             src = MIDI::LiveSource.new(v, output: @session.output_open? ? @session.output : nil)
-            @session.midi_in.add_source(MIDI::Stream.new(src))
+            @session.midi_in.add_source(MIDI::Stream.new(src), label: :panic)
             v
           end
         end

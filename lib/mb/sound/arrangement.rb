@@ -23,6 +23,7 @@ module MB
     class Arrangement
       include Recording
       include PatchCheck
+      include ClipMatrix
 
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
@@ -83,6 +84,8 @@ module MB
         @arms = {} # (Recording: name => Arm)
         @patch_checked = nil # (PatchCheck: patch => clips checked)
         @demo_document = nil
+        @slots = {} # (ClipMatrix: name => clips)
+        @launch_clips = {} # (ClipMatrix: journal seq => clip)
       end
 
       # Sections declared outside a form with #section (a Hash from name to
@@ -309,6 +312,7 @@ module MB
         @mutex.synchronize {
           @scenes[name] = Scene.new(name: name, values: values.freeze, q: q, fade: fade, others: others, block: block)
         }
+        note_scene_slots(values)
         name
       end
 
@@ -629,7 +633,16 @@ module MB
       #
       # Stopping tracks ring out (+stop: :ring+; see Session::Tails) unless
       # given a fade, +stop: :cut+, or the value :cut (a 5 ms declick).
-      def set_track(tr, value, time, fade:, stop: :ring)
+      def set_track(tr, value, time, fade:, stop: :ring, slot: true)
+        change = change_track(tr, value, time, fade: fade, stop: stop)
+        # (the clip matrix: which clip each change plays; see ClipMatrix)
+        clip = value == :on || value == true ? tr.clip : value
+        note_launch(tr.name, change, slot ? clip : nil) if change && !TRACK_STATES.include?(clip)
+        change
+      end
+
+      # (#set_track without the clip matrix's bookkeeping)
+      def change_track(tr, value, time, fade:, stop: :ring)
         fade = tr.fade if fade.nil?
         playing = @session.playing_after_queue?(tr.name)
         musical = time
