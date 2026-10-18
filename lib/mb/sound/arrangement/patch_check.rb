@@ -120,6 +120,7 @@ module MB
         # the prompt (so it shows in the console, or the tiled screen's
         # REPL pane) and records it in the UI's messages, and returns nil.
         def report_patch_error(error)
+          @last_patch_error = error
           raise error unless MB::Sound.live?
 
           to_prompt("#{error.class.name.split('::').last}: #{error.message}")

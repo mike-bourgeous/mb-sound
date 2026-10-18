@@ -90,6 +90,8 @@ module MB
         @playback = nil
         @arms = {} # (Recording: name => Arm)
         @patch_checked = nil # (PatchCheck: patch => clips checked)
+        @failed_tracks = {} # track name => why its last definition failed (see #track, #scene)
+        @last_patch_error = nil # (PatchCheck#report_patch_error)
         @demo_document = nil
         @slots = {} # (ClipMatrix: name => clips)
         @launch_clips = {} # (ClipMatrix: journal seq => clip)
@@ -250,7 +252,14 @@ module MB
         clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
         graph = Sequence::Clocked.apply(graph, clock) if graph && clock
         # Built once now, so a broken patch fails here (see PatchCheck)
-        check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip }) or return nil
+        begin
+          ok = check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip })
+        rescue PatchCheck::PatchError => e
+          note_failed_track(name, e)
+          raise
+        end
+        return note_failed_track(name, @last_patch_error) unless ok
+        @mutex.synchronize { @failed_tracks.delete(name) }
         return nil unless @session.names.claim(name, :track)
         @session.route(name, to: to || :keep, send: send) if to || send
 
@@ -314,6 +323,11 @@ module MB
             check_knob_value(name, k, v) or return nil
             next
           end
+          if kind.nil? && (why = @mutex.synchronize { @failed_tracks[k] })
+            # (ux-fix-1: the scene was accepted, then `go` failed without
+            # saying why)
+            return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{k.inspect}, which isn't a track: #{why}; fix the track, then define the scene"))
+          end
           next if kind.nil? || kind == :track
           MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track or knob")) or return nil
         end
@@ -336,6 +350,19 @@ module MB
         name
       end
 
+      # Remembers that track +name+'s definition failed with +error+ (a
+      # PatchError), so scenes naming it say why (see #scene, #go).
+      # Returns nil.
+      def note_failed_track(name, error)
+        return nil if error.nil?
+
+        why = "track #{name.inspect} wasn't defined: its patch raised #{error.original&.class&.name || 'an error'}"
+        where = error.message[/ \(at ([^,]+),/, 1]
+        why += " at #{where}" if where
+        @mutex.synchronize { @failed_tracks[name] = why unless @tracks.key?(name) }
+        nil
+      end
+
       # Launches the scene +name+: each track that should change does, at
       # its launch point (+on:+, +in:+, +at:+ for every track if given (see
       # LaunchPoint), else the track's +q:+, the scene's, or the set's
@@ -355,7 +382,13 @@ module MB
         knob_values = sc.values.select { |k, _| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
-          return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}"))
+          why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
+          names = tracks.keys
+          hint = unknown.length == 1 ? Form.suggest(unknown.first, names) : ''
+          return MB::Sound.live_error(ArgumentError.new(
+            "Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}" \
+            "#{" (#{why.join('; ')})" unless why.empty?}#{" (tracks: #{names.map(&:inspect).join(', ')})" if why.empty? && !names.empty?}#{hint}"
+          ))
         end
 
         _, changes = @session.command("go #{name.inspect}") {
