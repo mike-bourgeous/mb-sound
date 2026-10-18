@@ -27,7 +27,44 @@ You might also be interested in [mb-math][4], [mb-geometry][5], and
 ## Quick start
 
 Clone the repo, follow the [installation instructions
-below](#installation-and-usage), then run `bin/sound.rb`.
+below](#installation-and-usage) (or use Docker: [DOCKER.md](DOCKER.md)), then
+run `bin/sound.rb`.
+
+### The first five minutes
+
+```ruby
+help              # the one-screen sheet of commands; help :knobs etc. for topics
+lesson :set       # a guided lesson: tracks, scenes, and a song form, step by step
+demo              # a small set (the Night Bus), paused at bar 1; `play_form demo.form`
+play C4.saw.lp4(800).at(-20.db)   # Ctrl-C stops it
+render 'first.flac', C4.saw.lp4(800).at(-20.db), seconds: 4       # no sound card needed
+```
+
+Without a sound card (in a container, over SSH), `OUTPUT_TYPE=null
+bin/sound.rb` plays silently and `render` writes files to listen to elsewhere;
+`bin/audio_check.rb --list` shows the devices mb-sound can see.
+
+### A script
+
+Scripts run inside `module MB::Sound` (note names like `C4` and the DSL
+methods live there; `include MB::Sound` at the top level doesn't bring the note
+names):
+
+```ruby
+#!/usr/bin/env ruby
+require 'bundler/setup'
+require 'mb-sound'
+
+module MB::Sound
+  render 'arp.flac', seq(C4, E4, G4, C5).n8.loop.synth(voices: 4) { |v| v.hz.saw.lp4(1200) * v.amp_env }, bars: 2
+end
+```
+
+The scripts in `bin/` (`bin/effects/`, `bin/synths/`, `bin/songs/`) use the
+script helpers (`effect_script`, `synth_script`, `song_script`); run any of them
+with `--help`.
+
+### Some sounds
 
 Try these first, then look at the examples section below:
 
@@ -192,14 +229,7 @@ There are DSL methods for working with distances and wavelengths:
 # => 343 meters
 
 343.meters.hz
-# => #<MB::Sound::Tone:0x000055f66a23a2b0
-# @amplitude=0.1,
-# @duration=5.0,
-# @frequency=1.0,
-# @oscillator=nil,
-# @sample_rate=48000,
-# @wave_type=:sine,
-# @wavelength=343.0 meters>
+# => #<MB::Sound::Pitch 1.0 Hz>
 ```
 
 You can convert between feet and meters:
@@ -535,7 +565,7 @@ There are some base packages you'll need first:
 
 ```bash
 # Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
-sudo apt-get install ffmpeg libsamplerate0-dev libasound2-dev
+sudo apt-get install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
 
 # macOS (with Homebrew)
 brew install ffmpeg libsamplerate
@@ -549,6 +579,10 @@ on one JACK client (one node in qpwgraph or qjackctl), with libjack loaded at
 run time.  Run `bin/audio_check.rb --list` to see devices, and
 `bin/midi_check.rb` for MIDI.  Set `OUTPUT_TYPE=ffmpeg` to play through an
 ffmpeg output instead (e.g. `audiotoolbox` on macOS, `pulse` on Linux).
+
+(`libasound2-dev` builds RtMidi's ALSA MIDI backend and `libjack-jackd2-dev`
+its JACK one; `jackd2` runs the dummy JACK server some tests use, and
+`graphviz` draws node graphs with `-g`.)
 
 Then you'll want to install Ruby 4.0 or newer.
 
@@ -577,20 +611,19 @@ cd sound_code_series
 # Install Ruby
 rvm install 4.0
 
+# Install OS dependencies (Ubuntu/Debian; see above for macOS)
+sudo apt install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
+
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git
 cd mb-sound
 
-# Install OS dependencies (Ubuntu/Debian)
-sudo apt install libsamplerate0-dev ffmpeg
-
 # Install Gem dependencies
-cd mb-sound
 gem install bundler
 bundle install
 
 # Compile the mb-sound C extensions
-rake compile
+bundle exec rake compile
 ```
 
 Now that everything's installed, you are ready to start playing with sound:
@@ -619,7 +652,8 @@ gem 'mb-math', git: 'https://github.com/mike-bourgeous/mb-math.git'
 
 ## Testing
 
-You can run the integrated test suite with `rspec`.
+You can run the integrated test suite with `bundle exec rspec` (after `bundle
+exec rake compile`); `bundle exec rake spec:parallel` runs it in parallel.
 
 ## Contributing
 
