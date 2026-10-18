@@ -64,6 +64,7 @@ require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'
 require_relative 'support/render_budget'
 require_relative 'support/rss_report'
+require_relative 'support/ui_screen_guard'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)
 require_relative 'valgrind/memcheck_map_recorder' if ENV['MEMCHECK_MAP'] == '1'
