@@ -103,7 +103,7 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     @term.type(n.to_s)
     expect(wait_until { @tiles.tiler.focus == :grid }).to eq(true)
     @term.write("\r")
-    expect(wait_until { @tiles.router.mode == :pane }).to eq(true)
+    expect(wait_mode(@tiles, :pane)).to eq(true)
     expect(@term.lines.last).to start_with(' GRID ')
     expect(@tiles.router.mode).to eq(:pane)
     @term.write("\e[B\e[Bjk") # Down Down j k: the pane's keys, not NAV's (1 + 1 + 1 - 1)
@@ -118,14 +118,14 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     @term.type('?')
     expect(@term.wait_for('pick the row')).to eq(true)
     @term.write("\e")
-    expect(wait_until { @tiles.router.mode == :pane }).to eq(true)
+    expect(wait_mode(@tiles, :pane)).to eq(true)
     expect(@tiles.mode_problems).to eq([])
     # Esc: NAV (the cursor goes), Ctrl-]: back in
     @term.write("\e")
-    expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+    expect(wait_mode(@tiles, :nav)).to eq(true)
     expect(@term.wait_for(/row=0(?! \[in\])/)).to eq(true)
     @term.write("\x1d")
-    expect(wait_until { @tiles.router.mode == :pane }).to eq(true)
+    expect(wait_mode(@tiles, :pane)).to eq(true)
     # A focus change from Ruby ends the mode
     @tiles.focus(:tracks)
     expect(@tiles.router.mode).to eq(:nav)
@@ -133,9 +133,9 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     # Ctrl-] from NAV now: the pane's mode isn't where the focus is, so NAV -> pane -> NAV
     # Jumps: a (the grid, in), t (tracks: no keys of its own, focused in NAV), i (the REPL)
     @term.type('a')
-    expect(wait_until { @tiles.router.mode == :pane && @tiles.tiler.focus == :grid }).to eq(true)
+    expect(wait_settled(@tiles) { @tiles.router.mode == :pane && @tiles.tiler.focus == :grid }).to eq(true)
     @term.write("\e")
-    expect(wait_until { @tiles.router.mode == :nav }).to eq(true) # (an Esc and a quick key would read as Alt-t)
+    expect(wait_mode(@tiles, :nav)).to eq(true) # (an Esc and a quick key would read as Alt-t)
     @term.type('t')
     expect(wait_until { @tiles.tiler.focus == :tracks }).to eq(true)
     expect(@tiles.router.mode).to eq(:nav)
@@ -143,13 +143,13 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     @term.write("\r") # Enter on a pane without keys: stays in NAV
     expect(@tiles.router.mode).to eq(:nav)
     @term.type('i')
-    expect(wait_until { @tiles.router.mode == :repl }).to eq(true)
+    expect(wait_mode(@tiles, :repl)).to eq(true)
     expect(@tiles.tiler.focus).to eq(:repl)
     # K: the keyboard, put in and played
     @term.write("\x1d")
-    expect(wait_until { @tiles.router.mode == :nav }).to eq(true)
+    expect(wait_mode(@tiles, :nav)).to eq(true)
     @term.type('K')
-    expect(wait_until { @tiles.router.mode == :grab }).to eq(true)
+    expect(wait_mode(@tiles, :grab)).to eq(true)
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     @tiles.keys(false)
     # A jump to a pane that isn't there says how to show it
@@ -166,10 +166,12 @@ RSpec.describe('UI pane modes and jumps', :aggregate_failures) do
     expect(@term.wait_for('t> ')).to eq(true)
     @tiles.show(:grid, at: :queue)
     steps = {
-      nav: "\x1d", enter: "\r", esc: "\e", a: 'a', t: 't', i: 'i', down: "\e[B", j: 'j', tab: "\t", q: 'q', question: '?',
+      nav: "\x1d", enter: "\r", esc: "\e", a: 'a', t: 't', i: 'i', down: "\e[B", k: 'k', tab: "\t", q: 'q', question: '?',
       digit: -> { rng.rand(1..7).to_s }, focus: -> { @tiles.focus(:tracks); nil }, enter_ruby: -> { @tiles.enter(:grid); nil },
       ctrl_w_l: "\x17l", f2: "\eOQ",
     }
+    # (letters reach the REPL in REPL mode and Enter runs them: only ones
+    # that are harmless as Ruby; `j` is a deprecated Kernel method)
     path = []
     40.times do
       name, key = steps.to_a.sample(random: rng)
