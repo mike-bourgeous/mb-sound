@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::Plot::Chart) do
   end
 
   it 'saves by extension' do
-    c = plot.chart(title: 'saw') { line 100.hz.ramp.sample(480) }
+    c = plot.chart(title: 'saw') { line 100.hz.saw.sample(480) }
     expect(File.read(c.save(tmp_path('a.svg')))).to start_with('<svg')
     expect(File.binread(c.save(tmp_path('a.png'), width: 200, height: 100))).to start_with("\x89PNG".b)
     expect(File.read(c.save(tmp_path('a.txt'), width: 40, height: 8))).to start_with('saw')

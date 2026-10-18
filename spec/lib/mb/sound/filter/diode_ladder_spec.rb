@@ -407,10 +407,10 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
 
   describe 'graph nodes' do
     it 'are made by #diode, #diode_ladder, lp4(mode: :diode), and filter(:diode)' do
-      a = 110.hz.ramp.diode(800, resonance: 0.7, drive: 2)
-      b = 110.hz.ramp.diode_ladder(800, resonance: 0.7, drive: 2)
-      c = 110.hz.ramp.lp4(800, resonance: 0.7, mode: :diode, drive: 2)
-      d = 110.hz.ramp.filter(:diode, cutoff: 800, resonance: 0.7)
+      a = 110.hz.saw.diode(800, resonance: 0.7, drive: 2)
+      b = 110.hz.saw.diode_ladder(800, resonance: 0.7, drive: 2)
+      c = 110.hz.saw.lp4(800, resonance: 0.7, mode: :diode, drive: 2)
+      d = 110.hz.saw.filter(:diode, cutoff: 800, resonance: 0.7)
       [a, b, c, d].each { |n| expect(n.kernel_filter).to be_diode }
       out = [a, b, c].map { |n| n.sample(1000) }
       expect(out[0]).to eq(out[1])
@@ -419,13 +419,13 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
     end
 
     it 'takes nodes for the cutoff and resonance, and quality:' do
-      n = 110.hz.ramp.diode(2.hz.lfo.at(200..2000), resonance: 0.5.constant)
+      n = 110.hz.saw.diode(2.hz.lfo.at(200..2000), resonance: 0.5.constant)
       expect(n.sample(4800).isfinite.all?).to eq(true)
-      q = 110.hz.ramp.diode(800, quality: 4)
+      q = 110.hz.saw.diode(800, quality: 4)
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true)) # its own gain at the cutoff
-      q = 110.hz.ramp.diode(800, quality: 4, tuning: :hardware)
+      q = 110.hz.saw.diode(800, quality: 4, tuning: :hardware)
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, tuning: :hardware)) # lp4's knob
-      q = 110.hz.ramp.diode(800, quality: 4, normalize: false, tuning: :hardware)
+      q = 110.hz.saw.diode(800, quality: 4, normalize: false, tuning: :hardware)
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true, tuning: :hardware))
       expect(q.kernel_filter).not_to be_normalize
     end

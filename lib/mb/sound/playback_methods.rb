@@ -125,7 +125,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3, C2, rest, As1, G1).n16.loop
-      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
+      #     bg :bass, bass.tone.saw.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
       #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
       #     bpm 140
       #     stop       # stops the last one started (player 1)
@@ -217,7 +217,9 @@ module MB
                 if mon && session.playing_after_queue?(mon)
                   warn "stop #{name.inspect}: its live monitor #{mon.inspect} is still playing (disarm #{name.inspect} or stop #{mon.inspect})"
                 elsif !stopped.include?(name)
-                  warn "No background player #{name.inspect} is playing"
+                  playing = session.players.keys
+                  list = playing.empty? ? 'nothing is playing' : "playing: #{playing.map(&:inspect).join(', ')}"
+                  warn "No background player #{name.inspect} is playing (#{list})#{Form.suggest(name, playing.grep(Symbol)) if name.is_a?(Symbol)}"
                 end
               end
             }
@@ -514,7 +516,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
-      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 400 + bass.env * 3000, quality: 4) * bass.env
+      #     bg :bass, bass.tone.saw.at(1).filter(:lowpass, cutoff: 400 + bass.env * 3000, quality: 4) * bass.env
       #     swap :bass, seq(C2, Eb2, G2, Bb2).n16.loop
       #     swap :bass, bass                         # back to the first bass line
       #
@@ -845,8 +847,8 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
-      #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      #     render '/tmp/bass_spotify.flac', bass.tone.ramp.at(1) * bass.env, bars: 4, loudness: :spotify
+      #     render '/tmp/bass.flac', bass.tone.saw.at(1) * bass.env * 0.5, bars: 4
+      #     render '/tmp/bass_spotify.flac', bass.tone.saw.at(1) * bass.env, bars: 4, loudness: :spotify
       #
       # Mastering presets (see #master and Mastering): a render whose
       # block sets one (`master :club`), or given +master:+ (a preset name,
@@ -864,7 +866,19 @@ module MB
       #
       #     render 'song.flac', bars: 64 { master :club; my_song }
       #     render 'song_streaming.flac', bars: 64, master: :streaming { my_song }
+      #
+      # Returns the seconds rendered (a Float); at the console it also prints
+      # `rendered 4.0 s to x.flac` (ux-fix-1 item 20: Pry showed a bare
+      # number).
       def render(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
+        seconds = render_targeted(filename, *sounds, loudness: loudness, peak: peak, master: master, **kwargs, &block)
+        if MB::Sound.live? && filename.is_a?(String) && seconds.is_a?(Numeric)
+          puts "rendered #{MB::M.sigfigs(seconds.to_f, 4)} s to #{filename}"
+        end
+        seconds
+      end
+
+      private def render_targeted(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
         override = master == :none ? false : master
         override = Mastering.preset(override) if override
         targeting = loudness != false
@@ -884,6 +898,7 @@ module MB
         capture = targeting ? Mastering::Targeting::Capture.new : nil
         first = { override: override, capture: capture, defer_report: true }
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
+        return seconds if first[:interrupted]
 
         if capture.nil? || capture.targeted.empty?
           warn first[:peak_warning] if first[:peak_warning]
@@ -902,7 +917,11 @@ module MB
 
         Internal.restore_rng(rng.dup, seed)
         second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true }
-        seconds = render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
+        # The second pass replays the first exactly: what the song's blocks
+        # print (scheduled-command logs) was printed by the first already
+        seconds = Internal.without_stdout {
+          render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
+        }
         # Decoded peaks for streaming masters and reports (see Mastering::CodecPeaks)
         if filename.is_a?(String) && (kwargs[:report] || result.preset == :streaming)
           result = result.with(codec_peaks: Mastering.codec_peaks(filename))
@@ -1023,6 +1042,9 @@ module MB
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
+        progress = RenderProgress.new(session, label: filename.is_a?(String) ? File.basename(filename) : 'output')
+        interrupted = false
+
         # A render window (see RenderWindow): play up to +from+ without
         # writing it (or seek there), then count bars: from there, or end
         # where +to+ starts
@@ -1036,7 +1058,15 @@ module MB
           session.stems&.origin = Float::INFINITY
           if preroll
             limit = ((max_seconds || MAX_RENDER_SECONDS) * rate).round
-            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit)
+            unless mastering[:check] # (once, not again in a targeted render's second pass)
+              known = RenderWindow.position(session, from, 0)
+              span = known ? "bars 1-#{transport.bar_at(known).ceil - 1}" : "the song up to #{from.inspect}"
+              if known.nil? || transport.bar_at(known) - 1 > RenderProgress::LONG_PREROLL_BARS
+                progress.notice("\e[2mrender: playing #{span} unheard first, so #{from.inspect} starts as it would in the song " \
+                                "(preroll: false, or a script's --seek, starts there fresh and sooner)\e[0m")
+              end
+            end
+            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit, progress: progress)
             from_pos = RenderWindow.position(session, from, 0)
           else
             from_pos = RenderWindow.seek(session, from)
@@ -1073,18 +1103,29 @@ module MB
             session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
         }
         session.advance_idle = true
-        until frames_left.call <= 0 || (session.idle? && !waiting.call)
-          count = MB::M.min(buffer_size, frames_left.call)
-          session.process_buffer(count)
-          frames += count - skip
-          skip = 0
+        begin
+          until frames_left.call <= 0 || (session.idle? && !waiting.call)
+            count = MB::M.min(buffer_size, frames_left.call)
+            session.process_buffer(count)
+            frames += count - skip
+            skip = 0
+            progress.update(:render, frames: frames)
+          end
+        rescue Interrupt
+          # Ctrl-C: keep what was written (a valid, shorter file)
+          interrupted = true
         end
+        progress.clear
         # Tails ring out on a paused timeline, as before
         session.advance_idle = false
 
-        if frames_left.call > 0
+        if interrupted
+          mastering[:interrupted] = true
+          where = filename.is_a?(String) ? "#{filename} keeps" : 'the output got'
+          warn "render stopped at #{progress.clock(frames.to_f / rate)} (Ctrl-C): #{where} the #{(frames.to_f / rate).round(1)} seconds rendered so far"
+        elsif frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
-        elsif tail && (bars || seconds || to)
+        elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
@@ -1092,7 +1133,7 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+        if !interrupted && bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           hint = GraphNode::RingHint.message(sounds.select { |s| s.respond_to?(:sample) || s.is_a?(GraphNode::Channels) })
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)#{"\n#{hint}" if hint}"
         end
@@ -1188,9 +1229,18 @@ module MB
 
       # The plot option of #play: false if +quiet+ or PLOT=0 (unless given),
       # else +plot+ (true by default).
+      #
+      # The live scope draws only to a terminal that animates (ux-fix-1: a
+      # Braille scope per frame made 3 MB of log per 10 s through a pty
+      # or `script`): not under TERM=dumb or NO_COLOR, or when $stdout
+      # isn't a terminal (ColorPolicy.animate?).  PLOT=1 forces it, PLOT=0
+      # turns it off.
       def plot_option(plot, quiet)
         return plot unless plot.nil?
-        !(quiet || ENV['PLOT'] == '0')
+        return false if quiet || ENV['PLOT'] == '0'
+        return true if ENV['PLOT'] == '1'
+
+        ColorPolicy.animate?($stdout)
       end
 
       # Waits while +playing+ returns true, plotting the mix if +plot+ (see

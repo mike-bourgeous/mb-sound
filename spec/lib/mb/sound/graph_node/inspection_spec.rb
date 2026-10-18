@@ -7,31 +7,31 @@ RSpec.describe('GraphNode inspection protocol') do
 
   describe '#params' do
     it 'lists a filter node\'s parameters, constants as numbers' do
-      f = 110.hz.ramp.filter(:lowpass, cutoff: 800, quality: 4)
+      f = 110.hz.saw.filter(:lowpass, cutoff: 800, quality: 4)
       expect(f.params).to eq(cutoff: 800, quality: 4)
       expect(f.param_info[:cutoff].to_h).to include(value: 800, type: :control, unit: 'Hz')
     end
 
     it 'gives nodes as they are, typed' do
       lfo = 3.hz.lfo.at(200..900)
-      f = 110.hz.ramp.filter(:lowpass, cutoff: lfo)
+      f = 110.hz.saw.filter(:lowpass, cutoff: lfo)
       expect(f.params[:cutoff]).to be_a(MB::Sound::GraphNode)
       expect(f.param_info[:cutoff].to_h).to include(value: nil, type: :control, detail: lfo.to_s)
     end
 
     it 'describes knob readers with their range' do
       k = MB::Sound::GraphNode::Knob.new(:cut, 800, range: 100..8000)
-      f = 110.hz.ramp.filter(:lowpass, cutoff: k)
+      f = 110.hz.saw.filter(:lowpass, cutoff: k)
       info = f.param_info[:cutoff].to_h
       expect(info).to include(value: 800, range: 100..8000, label: :cut)
     end
 
     it 'leaves main inputs out' do
-      expect(110.hz.ramp.softclip.params).to eq({})
+      expect(110.hz.saw.softclip.params).to eq({})
     end
 
     it 'keeps ChannelMixer#params and adds declared ranges' do
-      w = MB::Sound.stereo(110.hz.ramp, 220.hz.ramp).width(0.5)
+      w = MB::Sound.stereo(110.hz.saw, 220.hz.saw).width(0.5)
       mixer = w.to_a[0].original_source rescue w.to_a[0].sources[:mixer]
       expect(mixer.params).to include(amount: 0.5)
       expect(mixer.param_info[:amount].value).to eq(0.5)
@@ -41,7 +41,7 @@ RSpec.describe('GraphNode inspection protocol') do
   describe '#param_snapshot' do
     it 'is one deep-frozen value a poll thread can take' do
       k = MB::Sound::GraphNode::Knob.new(:cut, 800, range: 100..8000)
-      f = 110.hz.ramp.filter(:lowpass, cutoff: k, quality: 2).named('lp')
+      f = 110.hz.saw.filter(:lowpass, cutoff: k, quality: 2).named('lp')
       snap = f.param_snapshot
       expect(Ractor.shareable?(snap)).to eq(true)
       expect(snap.node_class).to eq(MB::Sound::Filter::SampleWrapper)
@@ -52,14 +52,14 @@ RSpec.describe('GraphNode inspection protocol') do
     end
 
     it 'gives nil preview data for nodes without previews' do
-      expect(110.hz.ramp.param_snapshot.preview).to be_nil
+      expect(110.hz.saw.param_snapshot.preview).to be_nil
     end
   end
 
   describe '#plot_preview' do
     it 'is a pure function of the snapshot (Plot::Panels.preview)' do
       c = 800.constant
-      f = 110.hz.ramp.filter(:lowpass, cutoff: c, quality: 4)
+      f = 110.hz.saw.filter(:lowpass, cutoff: c, quality: 4)
       snap = f.param_snapshot
       c.constant = 3000
       chart = MB::Sound::Plot::Panels.preview(f.class, snap, MB::Sound::Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: :auto, grid: true))
@@ -69,12 +69,12 @@ RSpec.describe('GraphNode inspection protocol') do
     end
 
     it 'is nil by default' do
-      expect(MB::Sound::Plot.preview(110.hz.ramp)).to be_nil
-      expect(110.hz.ramp.plot_preview(nil)).to be_nil
+      expect(MB::Sound::Plot.preview(110.hz.saw)).to be_nil
+      expect(110.hz.saw.plot_preview(nil)).to be_nil
     end
 
     it 'draws a filter response at the constant settings' do
-      lp = MB::Sound::Plot.preview(110.hz.ramp.filter(:lowpass, cutoff: 800, quality: 4))
+      lp = MB::Sound::Plot.preview(110.hz.saw.filter(:lowpass, cutoff: 800, quality: 4))
       expect(lp).to be_a(MB::Sound::Plot::Chart)
       line = lp.marks.find { |m| m.is_a?(MB::Sound::Plot::Mark::Line) }
       expect(line).not_to be_nil
@@ -87,7 +87,7 @@ RSpec.describe('GraphNode inspection protocol') do
     end
 
     it 'draws a shaper transfer curve' do
-      c = MB::Sound::Plot.preview(110.hz.ramp.softclip)
+      c = MB::Sound::Plot.preview(110.hz.saw.softclip)
       expect(c).to be_a(MB::Sound::Plot::Chart)
       expect(c.marks.length).to eq(2)
     end
@@ -96,7 +96,7 @@ RSpec.describe('GraphNode inspection protocol') do
   describe 'spy(snapshot: true)' do
     it 'hands each buffer frozen and kept' do
       got = []
-      t = 110.hz.ramp.spy(snapshot: true) { |b| got << b }
+      t = 110.hz.saw.spy(snapshot: true) { |b| got << b }
       bufs = 3.times.map { t.sample(10).dup }
       expect(got.length).to eq(3)
       expect(got).to all(be_frozen)
@@ -107,7 +107,7 @@ RSpec.describe('GraphNode inspection protocol') do
     it 'shares one copy among snapshot spies of a node' do
       a = []
       b = []
-      t = 110.hz.ramp.spy(snapshot: true) { |x| a << x }.spy(snapshot: true) { |x| b << x }
+      t = 110.hz.saw.spy(snapshot: true) { |x| a << x }.spy(snapshot: true) { |x| b << x }
       t.sample(10)
       expect(a[0]).to equal(b[0])
     end
@@ -116,7 +116,7 @@ RSpec.describe('GraphNode inspection protocol') do
       old = MB::Sound::Plan.enabled
       MB::Sound::Plan.enabled = true
       got = []
-      inner = 110.hz.ramp.filter(:lowpass, cutoff: 800)
+      inner = 110.hz.saw.filter(:lowpass, cutoff: 800)
       inner.spy(snapshot: true) { |x| got << x }
       out = inner * 0.5
       MB::Sound::Plan.install(out)
@@ -148,7 +148,7 @@ RSpec.describe('GraphNode inspection protocol') do
       sess = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, sleep: false))
       seen = []
       clip = MB::Sound.seq(c4, e4).n8.loop
-      syn = clip.stream.spy { |e, at| seen << [e.type, at.frame, at.to_s] }.synth { |v| v.hz.ramp * v.amp_env }
+      syn = clip.stream.spy { |e, at| seen << [e.type, at.frame, at.to_s] }.synth { |v| v.hz.saw * v.amp_env }
       sess.add(syn, name: :x)
       40.times { sess.process_buffer }
       expect(seen.first(4)).to eq([[:note_on, 0, '1:1'], [:note_off, 12000, '1:1.5'], [:note_on, 12000, '1:1.5'], [:note_off, 24000, '1:2']])

@@ -32,7 +32,7 @@ module MB
       # +curve: :linear+ knobs, in octaves (log) for +curve: :exp+ ones.
       #
       #     cut = GraphNode::Knob.new(:cut, 800, range: 100..8000, curve: :exp)
-      #     play 110.hz.ramp.lp4(cut)
+      #     play 110.hz.saw.lp4(cut)
       #     cut.ramp_to(3000, frames: 96000, frame: cut.next_frame)   # (Session#turn does this)
       class Knob
         include GraphNode

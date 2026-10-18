@@ -232,6 +232,11 @@ The maintainer's request: for each bug, a mechanism that rules out its whole cla
 | `show` beside the REPL and splits stole focus in REPL mode (found by the extended random walk) | focus pinned to the mode in `Tiles#tile` | keys going to a pane other than the focused one | adopted |
 | `ui.keys` raised NoMethodError under the band (round 3 item 8) | `UI::Facade` with `facade_spec.rb` calling every public Tiles/Band method in every mode | mode-dependent NoMethodErrors on `ui.x` | adopted |
 
+## Console width and fresh slow data (ux-fix-1, 2026-10-18)
+
+- Tiles gives the tiler column minimums: the console `REPL_MIN_COLS` (40), other panes `PANE_MIN_COLS` (12); `Viewports.shares` takes a short child's cells one at a time from the sibling furthest above its minimum, so neighbours give way evenly (`ui :studio` at 80x24 had a 12-column console).  density_spec checks every built-in tiled layout at 80x24.
+- `Follow#snapshot` gives every snapshot the Feed's latest Slow: a kept snapshot (no buffer since) showed old tracks and clips (TRACKS `bass  no clip` while `now` said `roll (playing)`).
+
 ## Open and later
 
 - Band at the top loses terminal scrollback for lines scrolled out of a region that doesn't start at row 1 in xterm; iTerm2 has "Save lines to scrollback when an app status bar is present"; Konsole to check.  `at: :bottom` keeps scrollback everywhere, so it is the default since ux-1 (maintainer, 2026-10-17: "so that scrolled lines go into the terminal's scrollback buffer").

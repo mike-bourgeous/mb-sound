@@ -65,7 +65,7 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
   it 'launches a cue to MAIN on the exact frame, the same player and graph carrying on' do
     s = new_session
     s.add(0.5.constant, name: :b)
-    s.cue_player(:b, 0.1.hz.ramp.at(0.5), start_time: 0) # rising from 0 for 5 s: a restart would show
+    s.cue_player(:b, 0.1.hz.saw.at(0.5), start_time: 0) # rising from 0 for 5 s: a restart would show
     run(s, 800)
     p0 = player(s, :"b/cue")
     s.launch_cue(:b, time: 1r)
@@ -88,7 +88,7 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
     results = [[800], [128], [7, 801, 33]].map { |sizes|
       s = new_session
       s.add(220.hz.sine.at(0.25), name: :a)
-      s.cue_player(:b, 330.hz.ramp.at(0.25), start_time: 1/4r)
+      s.cue_player(:b, 330.hz.saw.at(0.25), start_time: 1/4r)
       s.knob(:cue_mix, 0.0, range: 0.0..1.0)
       s.knob(:phones, 1.0, range: 0.0..2.0)
       s.launch_cue(:b, time: 1r, fade: 1/4r)
@@ -332,7 +332,7 @@ RSpec.describe(MB::Sound::Session::Cue, :aggregate_failures) do
   it 'replays cue, launch, pre-listen, and undo from a take bit for bit at any buffer size, CUE included' do
     s = new_session
     lines = {
-      0 => ['bg :a, 220.hz.triangle.at(0.2)', 'cue :b, 330.hz.ramp.at(0.2)'],
+      0 => ['bg :a, 220.hz.triangle.at(0.2)', 'cue :b, 330.hz.saw.at(0.2)'],
       30 => ['a2 = seq(A2, C3).n8.loop', 'b2 = seq(E3, G3).n8.loop', 'track(:k, q: 1) { |c| c.number * 0.002 * c.gate }', 'scene :s1, k: a2', 'scene :s2, k: b2', 'go :s1'],
       50 => ['launch :b, fade: 1.beat', 'cue :s2'],
       130 => ['launch :s2'],

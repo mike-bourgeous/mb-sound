@@ -344,13 +344,13 @@ module MB
         # scripts, MIDI files) ended, so renders stop after the input.
         #
         # Examples (bin/sound.rb):
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus                # mode I
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(:juno2)        # mode II
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(:juno12)       # I+II warble
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(:lush)         # I and II at once
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(:juno2, bbd: true)  # darker, hissy
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(mix: 0.3)      # 70% dry, 30% wet
-        #     bg :pad, 110.hz.ramp.at(-12.db).chorus(rate: 1.bar, depth: 1.5)  # tempo-synced sweep
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus                # mode I
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(:juno2)        # mode II
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(:juno12)       # I+II warble
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(:lush)         # I and II at once
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(:juno2, bbd: true)  # darker, hissy
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(mix: 0.3)      # 70% dry, 30% wet
+        #     bg :pad, 110.hz.saw.at(-12.db).chorus(rate: 1.bar, depth: 1.5)  # tempo-synced sweep
         def chorus(mode = :juno1, **options)
           MB::Sound::GraphNode::Chorus.build(self, mode, **options)
         end

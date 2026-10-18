@@ -88,7 +88,7 @@ module ToneReferenceCases
     }
   end
   CASES['complex_ramp_pm'] = -> {
-    out = render(330.hz.complex_ramp.pm(55.hz.at(0.3).radians).at(0.5))['main']
+    out = render(330.hz.complex_saw.pm(55.hz.at(0.3).radians).at(0.5))['main']
     { 'real' => out.real, 'imag' => out.imag }
   }
 
@@ -97,10 +97,10 @@ module ToneReferenceCases
     'phase_60deg' => -> { render(220.hz.sine.with_phase(1.0 / 6).at(0.5)) },
     'range' => -> { render(30.hz.triangle.at(-0.2..0.7)) },
     'negative_amp' => -> { render(440.hz.square.at(-0.3)) },
-    'slow_ramp' => -> { render(0.3.hz.ramp.at(0.5)) },
-    'negative_freq' => -> { render(-440.hz.ramp.at(0.5)) },
+    'slow_ramp' => -> { render(0.3.hz.saw.at(0.5)) },
+    'negative_freq' => -> { render(-440.hz.saw.at(0.5)) },
     'tone_new' => -> { render(S::Tone.new(wave_type: :triangle, frequency: 330, amplitude: 0.5)) },
-    'tone_bracket' => -> { render(S::Tone[220].ramp) },
+    'tone_bracket' => -> { render(S::Tone[220].saw) },
     'oscillator_direct' => -> { render(S::Tone.new(wave_type: :triangle, frequency: 330).atriangle.at(-0.5..0.5)) }, # was Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5)
 
     # Warps
@@ -110,13 +110,13 @@ module ToneReferenceCases
     'pwm_node' => -> { render(220.hz.pwm(30.hz.lfo.at(0.05..0.95)).square.at(0.5)) },
     'skew_triangle' => -> { render(440.hz.triangle.skew(0.1, pivot: 0).at(0.5)) }, # pivot: 0 since osc-env-1 (2026-10-12): the triangle warp as recorded
     'sine_pwm' => -> { render(220.hz.sine.pwm(0.2).at(0.5)) },
-    'ramp_pwm' => -> { render(330.hz.ramp.pwm(0.7).at(0.5)) },
+    'ramp_pwm' => -> { render(330.hz.saw.pwm(0.7).at(0.5)) },
     'parabola_pwm' => -> { render(330.hz.parabola.pwm(0.3).at(0.5)) },
 
     # Sync
-    'sync_ratio' => -> { render(110.hz.ramp.sync(ratio: 2.37).at(0.5)) },
-    'sync_ratio_node' => -> { render(110.hz.ramp.sync(ratio: 20.hz.lfo.at(1..5)).at(0.5)) },
-    'async_ratio' => -> { render(110.hz.aramp.sync(ratio: 2.37).at(0.5)) },
+    'sync_ratio' => -> { render(110.hz.saw.sync(ratio: 2.37).at(0.5)) },
+    'sync_ratio_node' => -> { render(110.hz.saw.sync(ratio: 20.hz.lfo.at(1..5)).at(0.5)) },
+    'async_ratio' => -> { render(110.hz.asaw.sync(ratio: 2.37).at(0.5)) },
     'softsync' => -> { render(110.hz.triangle.softsync(ratio: 1.7).at(0.5)) },
     'sync_pitch_master' => -> { render(330.hz.square.sync(110.hz).at(0.5)) },
     'sync_tone_master' => -> {
@@ -124,38 +124,38 @@ module ToneReferenceCases
       synced = 220.hz.pulse(0.3).sync(master).at(0.5)
       render(synced + master)
     },
-    'sync_trigger' => -> { render(220.hz.ramp.sync(triggers(250, 0, value: 0.6)).at(0.5)) },
+    'sync_trigger' => -> { render(220.hz.saw.sync(triggers(250, 0, value: 0.6)).at(0.5)) },
     'sync_pwm' => -> { render(220.hz.square.pwm(0.3).sync(ratio: 1.6).at(0.5)) },
 
     # Modulation
     'fm' => -> { render(220.hz.sine.fm(110.hz.sine.at(300)).at(0.5)) },
-    'fm_index' => -> { render(220.hz.ramp.fm(110.hz, 300).at(0.5)) },
-    'fm_through_zero' => -> { render(200.hz.ramp.fm(50.hz.at(600)).at(0.5)) },
+    'fm_index' => -> { render(220.hz.saw.fm(110.hz, 300).at(0.5)) },
+    'fm_through_zero' => -> { render(200.hz.saw.fm(50.hz.at(600)).at(0.5)) },
     'fm_stack' => -> { render(200.hz.triangle.fm(600.hz.at(500)).fm(300.hz.at(200)).at(0.5)) },
     'log_fm' => -> { render(220.hz.sine.log_fm(55.hz.sine.at(2)).at(0.5)) },
     'pm' => -> { render(220.hz.sine.pm(330.hz.sine.at(2).radians).at(0.5)) },
     'pm_index' => -> { render(220.hz.square.pm(330.hz, 1.5.radians).at(0.5)) },
     'pm_chain' => -> { render(110.hz.triangle.pm(220.hz.sine.pm(440.hz.sine.at(1).radians).at(2).radians).at(0.5)) },
-    'freq_node' => -> { render(steps(100, 200, 300, 450).tone.ramp.at(0.5)) },
+    'freq_node' => -> { render(steps(100, 200, 300, 450).tone.saw.at(0.5)) },
 
     # LFOs (band-limiting fades in from 15 to 30 Hz)
-    'lfo_ramp_5' => -> { render(5.hz.ramp.lfo, total: 2000) },
+    'lfo_ramp_5' => -> { render(5.hz.saw.lfo, total: 2000) },
     'lfo_square_20' => -> { render(20.hz.square.lfo.at(0..1), total: 2000) },
-    'lfo_ramp_100' => -> { render(100.hz.ramp.lfo) },
-    'lfo_sweep' => -> { render(5.hz.lfo.at(5..60).tone.ramp.lfo, total: 2000) },
+    'lfo_ramp_100' => -> { render(100.hz.saw.lfo) },
+    'lfo_sweep' => -> { render(5.hz.lfo.at(5..60).tone.saw.lfo, total: 2000) },
 
     # Resets
-    'reset' => -> { render(1001.3.hz.ramp.reset(triggers(173, 37, 80, value: 0.25)).at(0.5)) },
+    'reset' => -> { render(1001.3.hz.saw.reset(triggers(173, 37, 80, value: 0.25)).at(0.5)) },
     'reset_edges' => -> { render(997.hz.square.reset(triggers(128, 0, 127)).at(0.5), sizes: [128, 64, 64, 1, 127]) },
     'reset_to' => -> { render(440.hz.triangle.reset(triggers(300, 50), to: 0.25).at(0.5)) },
-    'reset_to_node' => -> { render(440.hz.ramp.reset(triggers(300, 50, 210), to: steps(150, 0.5, 2.0).radians).at(0.5)) },
+    'reset_to_node' => -> { render(440.hz.saw.reset(triggers(300, 50, 210), to: steps(150, 0.5, 2.0).radians).at(0.5)) },
     'reset_random' => -> { render(330.hz.saw.reset(triggers(200, 20, 120), to: :random).at(0.5)) },
-    'reset_fm_pm' => -> { render(500.hz.ramp.fm(70.hz.at(80)).pm(30.hz.at(0.5).radians).reset(triggers(256, 11, 130)).at(0.5)) },
+    'reset_fm_pm' => -> { render(500.hz.saw.fm(70.hz.at(80)).pm(30.hz.at(0.5).radians).reset(triggers(256, 11, 130)).at(0.5)) },
     'reset_pwm' => -> { render(300.hz.pwm(10.hz.lfo.at(0.2..0.8)).square.reset(triggers(400, 99, 333)).at(0.5)) },
-    'reset_naive' => -> { render(700.hz.aramp.reset(triggers(250, 60)).at(0.5)) },
+    'reset_naive' => -> { render(700.hz.asaw.reset(triggers(250, 60)).at(0.5)) },
     'reset_sine' => -> { render(1300.hz.sine.reset(triggers(222, 17)).at(0.5)) },
     'reset_complex' => -> {
-      out = render(330.hz.complex_ramp.reset(triggers(300, 77)).at(0.5))['main']
+      out = render(330.hz.complex_saw.reset(triggers(300, 77)).at(0.5))['main']
       { 'real' => out.real, 'imag' => out.imag }
     },
     'reset_lfo' => -> { render(25.hz.lfo.square.reset(triggers(400, 150), to: 0.125)) },
@@ -165,9 +165,9 @@ module ToneReferenceCases
     'free' => -> { render(220.hz.saw.free.at(0.5)) },
 
     # Ports
-    'tone_ports' => -> { render(1500.hz.ramp.fm(200.hz.at(300)).at(0.5), ports: [:wraps, :increment]) },
-    'tone_ports_reset' => -> { render(1500.hz.ramp.reset(triggers(256, 40, 200)).at(0.5), ports: [:wraps, :increment]) },
-    'tone_ports_negative' => -> { render(-1700.hz.ramp.at(0.5), ports: [:wraps]) },
+    'tone_ports' => -> { render(1500.hz.saw.fm(200.hz.at(300)).at(0.5), ports: [:wraps, :increment]) },
+    'tone_ports_reset' => -> { render(1500.hz.saw.reset(triggers(256, 40, 200)).at(0.5), ports: [:wraps, :increment]) },
+    'tone_ports_negative' => -> { render(-1700.hz.saw.at(0.5), ports: [:wraps]) },
     'phasor' => -> { render(1234.5.hz.phasor) },
     'phasor_phase' => -> { render(100.hz.phasor(phase: 0.25)) },
     'phasor_ports' => -> { render(S::Pitch.new(steps(64, 900, 3000)).phasor, ports: [:wraps, :increment]) },
@@ -176,14 +176,14 @@ module ToneReferenceCases
 
     # Noise (per-tone generators seeded from the root seed or seed:)
     'noise_root_seed' => -> { render(S.noise + 1.hz.gauss.noise.at(0.5)) },
-    'noise_seeded_blend' => -> { render(300.hz.ramp.fm(90.hz.at(200)).noise(0.5, seed: 4).at(0.5)) },
+    'noise_seeded_blend' => -> { render(300.hz.saw.fm(90.hz.at(200)).noise(0.5, seed: 4).at(0.5)) },
     'noise_phasor' => -> { render(400.hz.phasor.noise(0.01, seed: 5)) },
 
     # Sample rates, oversampling, channels
-    'rate_44100' => -> { render(1000.hz.ramp.at(0.5).at_rate(44100)) },
+    'rate_44100' => -> { render(1000.hz.saw.at(0.5).at_rate(44100)) },
     'rate_96000_fm' => -> { render(1000.hz.square.fm(300.hz.at(200)).at(0.5).at_rate(96000)) },
     'rate_noise_blend' => -> { render(440.hz.sine.noise(false).at(0.5).at_rate(96000)) },
-    'oversample' => -> { render(2000.hz.ramp.fm(3000.hz.at(4000)).at(0.5).oversample(4)) },
+    'oversample' => -> { render(2000.hz.saw.fm(3000.hz.at(4000)).at(0.5).oversample(4)) },
     'channels' => -> {
       l, r = S.channels(110.constant, 165.constant).tone
       { 'left' => render(l)['main'], 'right' => render(r)['main'] }
@@ -191,16 +191,16 @@ module ToneReferenceCases
     'notes' => -> { render(S::A4.triangle.at(0.5) + S::Cs5.square.at(0.3)) },
     'tuning_480' => -> {
       S.tuning b4: 480
-      render(S::B4.ramp.at(0.5))
+      render(S::B4.saw.at(0.5))
     },
 
     # Tempo LFOs (1920 BPM: a bar is 6000 frames, an n128 is 47 Hz)
     'tempo_lfo' => -> {
-      session(bpm: 1920, buffers: 40) { |s, _t, i| s.add(1.bar.lfo.ramp) if i == 0 }
+      session(bpm: 1920, buffers: 40) { |s, _t, i| s.add(1.bar.lfo.saw) if i == 0 }
     },
     'tempo_lfo_changes' => -> {
       session(bpm: 1920, buffers: 60) { |s, t, i|
-        s.add(1.beat.lfo.square.at(0.2..1) * 220.hz.ramp.at(0.5)) if i == 0
+        s.add(1.beat.lfo.square.at(0.2..1) * 220.hz.saw.at(0.5)) if i == 0
         t.bpm = 1500 if i == 13
         t.seek(3/8r) if i == 29
         t.seek(1/3r) if i == 44
@@ -208,7 +208,7 @@ module ToneReferenceCases
     },
     'tempo_audio_rate_seek' => -> {
       session(bpm: 1920, buffers: 30) { |s, t, i|
-        s.add(1.n128.hz.ramp.at(0.5) + 1.n64.hz.square.with_phase(1.0.radians).at(0.3)) if i == 0
+        s.add(1.n128.hz.saw.at(0.5) + 1.n64.hz.square.with_phase(1.0.radians).at(0.3)) if i == 0
         t.seek(1/7r) if i == 9
         t.seek(5/9r) if i == 21
       }
@@ -216,14 +216,14 @@ module ToneReferenceCases
     'tempo_late_start' => -> {
       session(bpm: 1920, buffers: 30) { |s, _t, i|
         s.add(0.constant) if i == 0
-        s.add(1.bar.lfo.ramp.with_phase(0.25), at: :beat) if i == 3
+        s.add(1.bar.lfo.saw.with_phase(0.25), at: :beat) if i == 3
       }
     },
     'tempo_pause_freewheel' => -> {
       session(bpm: 1920, buffers: 40) { |s, _t, i|
         if i == 0
           s.add(0.constant.until(480 * 3 / 48000.0))
-          s.master { |mix| mix + 1.bar.lfo.ramp.at(0.5) + (2.beats.lfo.triangle.freewheel * 0.25) }
+          s.master { |mix| mix + 1.bar.lfo.saw.at(0.5) + (2.beats.lfo.triangle.freewheel * 0.25) }
         end
         s.add(0.constant) if i == 20
       }
@@ -233,7 +233,7 @@ module ToneReferenceCases
         if i == 0
           p = 1.beat.hz
           p.freewheel
-          s.add(p.ramp.lfo.at(0.5) + p.phasor * 0.25)
+          s.add(p.saw.lfo.at(0.5) + p.phasor * 0.25)
         end
         t.seek(1/5r) if i == 11
       }
@@ -246,7 +246,7 @@ module ToneReferenceCases
     },
     'tempo_lfo_reset' => -> {
       session(bpm: 1920, buffers: 30) { |s, t, i|
-        s.add(1.bar.lfo.ramp.reset(triggers(1000, 300))) if i == 0
+        s.add(1.bar.lfo.saw.reset(triggers(1000, 300))) if i == 0
         t.seek(1/4r) if i == 15
       }
     },
@@ -256,7 +256,7 @@ module ToneReferenceCases
       session(bpm: 960, buffers: 60) { |s, _t, i|
         if i == 0
           bass = S.seq(S::C2, S::G1, S.rest, S::C3).n8.loop
-          s.add(bass.tone.ramp.at(0.5) * bass.env)
+          s.add(bass.tone.saw.at(0.5) * bass.env)
         end
       }
     },
@@ -275,7 +275,7 @@ module ToneReferenceCases
         if i == 0
           clip = S.seq(S::A2, S::E3, S::D3).n8.loop
           n = clip.notes
-          s.add(n.hz.ramp.at(0.3) + n.hz.transpose(12).square.free.at(0.2) + n.hz.triangle.rnd(seed: 4).at(0.2) + n.hz.sine.lfo.at(0.1))
+          s.add(n.hz.saw.at(0.3) + n.hz.transpose(12).square.free.at(0.2) + n.hz.triangle.rnd(seed: 4).at(0.2) + n.hz.sine.lfo.at(0.1))
         end
       }
     },

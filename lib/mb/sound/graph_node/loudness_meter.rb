@@ -16,7 +16,7 @@ module MB
       # Created with GraphNode#loudness_meter (alias #lufs_meter).
       #
       # Examples (bin/sound.rb):
-      #     m = 110.hz.ramp.filter(:lowpass, cutoff: 800).at(-12.db).loudness_meter
+      #     m = 110.hz.saw.filter(:lowpass, cutoff: 800).at(-12.db).loudness_meter
       #     bg m
       #     m.momentary     # => -21.3 (LUFS)
       #     m.to_s          # => "M -21.3  S -21.3  I -21.3 LUFS  LRA 0.0 LU  TP -12.0 dBTP"

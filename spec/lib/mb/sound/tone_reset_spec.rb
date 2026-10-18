@@ -46,7 +46,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         end
 
         it 'puts a naive oscillator at the target phase on the reset sample' do
-          o = 1001.3.hz.aramp.reset(input(triggers(100, 37)), to: 0.25)
+          o = 1001.3.hz.asaw.reset(input(triggers(100, 37)), to: 0.25)
           result = o.public_send(method, 100)
 
           expect(result[36]).not_to be_within(0.1).of(0.5)
@@ -148,7 +148,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       targets[0...50] = 0.25
       targets[50..] = 0.5
 
-      o = 100.hz.aramp.reset(input(triggers(100, 20, 70)), to: input(targets))
+      o = 100.hz.asaw.reset(input(triggers(100, 20, 70)), to: input(targets))
       result = o.sample(100)
 
       expect(result[20]).to be_within(1e-6).of(0.5)
@@ -199,7 +199,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     end
 
     it 'gives sync pulses (the wraps port) at reset samples' do
-      o = 100.hz.aramp.reset(input(triggers(100, 30)), to: 0.5)
+      o = 100.hz.asaw.reset(input(triggers(100, 30)), to: 0.5)
       wraps = o.wraps
       o.sample(100)
       pulses = wraps.sample(100)
@@ -219,66 +219,66 @@ RSpec.describe('Tone reset inputs, free and random phases') do
   describe MB::Sound::Tone do
     describe '#reset' do
       it 'returns self and passes the input to the oscillator' do
-        t = 100.hz.ramp
+        t = 100.hz.saw
         expect(t.reset(input(triggers(10, 3)))).to equal(t)
         expect(t.reset_input).not_to be_nil
       end
 
       it 'cannot be added once the tone is playing' do
-        t = 100.hz.aramp
+        t = 100.hz.asaw
         t.sample(10)
         expect { t.reset(input(triggers(10, 4)), to: 0.25) }.to raise_error(FrozenError, /already playing/)
       end
 
       it 'takes a phase in cycles, like #with_phase' do
-        result = 100.hz.aramp.reset(input(triggers(100, 50)), to: 0.25).sample(100)
-        expect(result[50]).to be_within(1e-6).of(100.hz.aramp.with_phase(0.25).sample(1)[0])
+        result = 100.hz.asaw.reset(input(triggers(100, 50)), to: 0.25).sample(100)
+        expect(result[50]).to be_within(1e-6).of(100.hz.asaw.with_phase(0.25).sample(1)[0])
       end
 
       it 'goes to the starting phase from #with_phase by default' do
-        result = 100.hz.aramp.with_phase(0.125).reset(input(triggers(100, 50))).sample(100)
+        result = 100.hz.asaw.with_phase(0.125).reset(input(triggers(100, 50))).sample(100)
         expect(result[50]).to be_within(1e-6).of(0.25)
       end
 
       it 'can be removed with nil' do
-        t = 100.hz.ramp.reset(input(triggers(100, 50))).reset(nil)
+        t = 100.hz.saw.reset(input(triggers(100, 50))).reset(nil)
         expect(t.reset_input).to be_nil
-        expect(t.sample(100)).to eq(100.hz.ramp.sample(100))
+        expect(t.sample(100)).to eq(100.hz.saw.sample(100))
       end
 
       it 'reads a frozen shared trigger without changing it', :check_shared do
         trig = input(triggers(800, 100, 400), repeat: true)
-        a = 100.hz.ramp.reset(trig)
-        b = 200.hz.ramp.reset(trig)
+        a = 100.hz.saw.reset(trig)
+        b = 200.hz.saw.reset(trig)
         expect { 3.times { a.sample(800); b.sample(800) } }.not_to raise_error
       end
 
       it 'refuses sync' do
-        expect { 100.hz.ramp.sync(ratio: 2).reset(input(triggers(10, 1))) }.to raise_error(ArgumentError, /sync/)
-        expect { 100.hz.ramp.reset(input(triggers(10, 1))).sync(ratio: 2) }.to raise_error(ArgumentError, /reset/)
+        expect { 100.hz.saw.sync(ratio: 2).reset(input(triggers(10, 1))) }.to raise_error(ArgumentError, /sync/)
+        expect { 100.hz.saw.reset(input(triggers(10, 1))).sync(ratio: 2) }.to raise_error(ArgumentError, /reset/)
       end
 
       it 'makes a free tone not free, with a warning (the last call wins)' do
         t = nil
-        expect { t = 100.hz.ramp.free.reset(input(triggers(10, 1))) }.to output(/reset overrides free/).to_stderr
+        expect { t = 100.hz.saw.free.reset(input(triggers(10, 1))) }.to output(/reset overrides free/).to_stderr
         expect(t.free?).to eq(false)
         expect(t.reset_input).not_to be_nil
       end
 
       it 'is removed by #free, with a warning (the last call wins)' do
-        t = 100.hz.aramp.reset(input(triggers(100, 50)), to: 1.0.radians)
+        t = 100.hz.asaw.reset(input(triggers(100, 50)), to: 1.0.radians)
         expect { t.free }.to output(/free overrides reset/).to_stderr
         expect(t.free?).to eq(true)
         expect(t.reset_input).to be_nil
-        expect(t.sample(100)).to eq(100.hz.aramp.sample(100))
+        expect(t.sample(100)).to eq(100.hz.asaw.sample(100))
       end
 
       it 'does not warn without a conflict' do
-        expect { 100.hz.ramp.reset(input(triggers(10, 1))).rnd.free(false) }.not_to output.to_stderr
+        expect { 100.hz.saw.reset(input(triggers(10, 1))).rnd.free(false) }.not_to output.to_stderr
       end
 
       it 'rejects other targets' do
-        expect { 100.hz.ramp.reset(input(triggers(10, 1)), to: 'x') }.to raise_error(ArgumentError)
+        expect { 100.hz.saw.reset(input(triggers(10, 1)), to: 'x') }.to raise_error(ArgumentError)
       end
 
       it 'is available on Pitch' do
@@ -290,7 +290,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       context 'with to: :random' do
         def random_resets(seed)
           MB::Sound.seed(seed)
-          t = 100.hz.aramp.reset(input(triggers(1000, 100, 400, 700)), to: :random)
+          t = 100.hz.asaw.reset(input(triggers(1000, 100, 400, 700)), to: :random)
           r = t.sample(1000)
           [r[100], r[400], r[700]]
         end
@@ -308,33 +308,33 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         it 'differs between tones' do
           MB::Sound.seed(3)
           trig = triggers(200, 100)
-          a = 100.hz.aramp.reset(input(trig), to: :random).sample(200)[100]
-          b = 100.hz.aramp.reset(input(trig), to: :random).sample(200)[100]
+          a = 100.hz.asaw.reset(input(trig), to: :random).sample(200)[100]
+          b = 100.hz.asaw.reset(input(trig), to: :random).sample(200)[100]
           expect(a).not_to eq(b)
         end
 
         it 'is the same as #rnd' do
           MB::Sound.seed(9)
-          a = 100.hz.aramp.reset(input(triggers(300, 100, 200)), to: :random).sample(300)
+          a = 100.hz.asaw.reset(input(triggers(300, 100, 200)), to: :random).sample(300)
           MB::Sound.seed(9)
-          b = 100.hz.aramp.reset(input(triggers(300, 100, 200))).rnd.sample(300)
+          b = 100.hz.asaw.reset(input(triggers(300, 100, 200))).rnd.sample(300)
           expect(a).to eq(b)
         end
 
         it 'replaces #rnd with a fixed target, with a warning (the last call wins)' do
           t = nil
-          expect { t = 100.hz.aramp.rnd.reset(input(triggers(100, 50)), to: 0.25) }.to output(/overrides rnd/).to_stderr
+          expect { t = 100.hz.asaw.rnd.reset(input(triggers(100, 50)), to: 0.25) }.to output(/overrides rnd/).to_stderr
           expect(t.random_phase?).to eq(false)
           expect(t.sample(100)[50]).to be_within(1e-6).of(0.5)
         end
 
         it 'is replaced by #rnd after a fixed target, with a warning (the last call wins)' do
           MB::Sound.seed(9)
-          a = 100.hz.aramp.reset(input(triggers(300, 100, 200))).rnd.sample(300)
+          a = 100.hz.asaw.reset(input(triggers(300, 100, 200))).rnd.sample(300)
 
           MB::Sound.seed(9)
           t = nil
-          expect { t = 100.hz.aramp.reset(input(triggers(300, 100, 200)), to: 1.0.radians).rnd }.to output(/rnd overrides reset\(to:/).to_stderr
+          expect { t = 100.hz.asaw.reset(input(triggers(300, 100, 200)), to: 1.0.radians).rnd }.to output(/rnd overrides reset\(to:/).to_stderr
           expect(t.reset_to).to be_nil
           expect(t.sample(300)).to eq(a)
         end
@@ -343,7 +343,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
     describe '#free' do
       it 'marks the tone as never reset' do
-        t = 100.hz.ramp
+        t = 100.hz.saw
         expect(t.free?).to eq(false)
         expect(t.free).to equal(t)
         expect(t.free?).to eq(true)
@@ -359,18 +359,18 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     describe '#random_phase' do
       it 'starts free-running tones at a random phase from the root seed' do
         MB::Sound.seed(11)
-        a = 3.times.map { 100.hz.aramp.free.rnd.sample(1)[0] }
+        a = 3.times.map { 100.hz.asaw.free.rnd.sample(1)[0] }
         MB::Sound.seed(11)
-        b = 3.times.map { 100.hz.aramp.free.rnd.sample(1)[0] }
+        b = 3.times.map { 100.hz.asaw.free.rnd.sample(1)[0] }
 
         expect(a).to eq(b)
         expect(a.uniq.length).to eq(3)
       end
 
       it 'takes an explicit seed' do
-        a = 100.hz.aramp.rnd(seed: 5).sample(1)[0]
-        b = 100.hz.aramp.random_phase(seed: 5).sample(1)[0]
-        c = 100.hz.aramp.rnd(seed: 6).sample(1)[0]
+        a = 100.hz.asaw.rnd(seed: 5).sample(1)[0]
+        b = 100.hz.asaw.random_phase(seed: 5).sample(1)[0]
+        c = 100.hz.asaw.rnd(seed: 6).sample(1)[0]
         expect(a).to eq(b)
         expect(c).not_to eq(a)
       end
@@ -383,21 +383,21 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       end
 
       it 'can be reseeded with #seed=' do
-        a = 100.hz.aramp.rnd(seed: 5).sample(1)[0]
-        t = 100.hz.aramp.rnd(seed: 1)
+        a = 100.hz.asaw.rnd(seed: 5).sample(1)[0]
+        t = 100.hz.asaw.rnd(seed: 1)
         t.seed = 5
         expect(t.sample(1)[0]).to eq(a)
       end
 
       it 'gives each reset a new random phase' do
-        t = 100.hz.aramp.rnd(seed: 1).reset(input(triggers(1, 0), repeat: true))
+        t = 100.hz.asaw.rnd(seed: 1).reset(input(triggers(1, 0), repeat: true))
         values = 3.times.map { t.sample(1)[0] }
         expect(values.uniq.length).to eq(3)
       end
 
       it 'keeps a random offset for tempo-locked tones' do
         tempo = MB::Sound::Sequence::TempoNode.new(1.beat, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
-        t = MB::Sound::Pitch.new(tempo).aramp.rnd(seed: 1)
+        t = MB::Sound::Pitch.new(tempo).asaw.rnd(seed: 1)
         start = t.phi
         t.sample(10)
         tempo.start_at(0) # back to the start of a beat

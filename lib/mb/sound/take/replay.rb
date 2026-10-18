@@ -22,7 +22,7 @@ module MB
       # by the session's inputs (Session::MidiInput) replays on the same
       # timeline positions (see #midi).
       # Oscillators accumulate their phase per buffer, so tones differ
-      # between buffer sizes by about 1e-12 (naive shapes like aramp can
+      # between buffer sizes by about 1e-12 (naive shapes like asaw can
       # move an edge by a sample).
       class Replay
         Line = Struct.new(:issued, :lands, :code, :epoch, :choices, keyword_init: true)

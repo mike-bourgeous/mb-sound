@@ -268,7 +268,7 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
   describe 'bounce' do
     it 'renders a graph or a block at a private tempo to the exact length' do
       bpm = MB::Sound.transport.bpm
-      rec = MB::Sound.bounce(1.bar, bpm: 150) { 100.hz.ramp.at(0.5) }
+      rec = MB::Sound.bounce(1.bar, bpm: 150) { 100.hz.saw.at(0.5) }
       expect(rec.length).to eq((48000 * 60 / 150.0 * 4).round)
       expect(rec.bpm).to eq(150)
       expect(rec.peak).to be_within(0.05).of(0.5)
@@ -292,7 +292,7 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       out = MB::Sound::NullOutput.new(channels: 1, sleep: false)
       MB::Sound.render(out, seconds: 0.01, channels: 1) {
         MB::Sound.bpm 72
-        rec = MB::Sound.bounce(1.bar) { 100.hz.ramp.at(0.5) }
+        rec = MB::Sound.bounce(1.bar) { 100.hz.saw.at(0.5) }
         size = MB::Sound::Length.samples(1.n16)
       }
       expect(rec.bpm).to eq(72)
@@ -309,7 +309,7 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
         MB::Sound.at_bar(1) {
           MB::Sound.bpm 90
           read = MB::Sound.bpm
-          rec = MB::Sound.bounce(1.beat) { 100.hz.ramp }
+          rec = MB::Sound.bounce(1.beat) { 100.hz.saw }
         }
       }
       2.times { session.process_buffer(800) }

@@ -482,6 +482,7 @@ module MB
 
           c.source.write(input)
           t = MB::U.clock_now
+          gc = GC.stat(:time)
           results = {}
           data = c.nodes.map { |n|
             d = (results[n.__id__] ||= n.sample(count))
@@ -491,7 +492,7 @@ module MB
           }
           elapsed = MB::U.clock_now - t
           c.cpu = (c.cpu || 0.0) + elapsed if @ui_feed
-          check_master_speed(c, elapsed, count)
+          check_master_speed(c, Session.without_gc(elapsed, gc), count)
           data
 
         rescue => e

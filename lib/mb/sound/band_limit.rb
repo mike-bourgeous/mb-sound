@@ -14,7 +14,7 @@ module MB
     # too.  The correction slightly softens the top octave (about -5 dB at
     # 20 kHz for a 4 kHz saw), the usual PolyBLEP trade-off.
     #
-    # Tone's ramp/saw, square, and triangle are band-limited; aramp/asaw,
+    # Tone's ramp/saw, square, and triangle are band-limited; asaw/asaw,
     # asquare, and atriangle are the naive (aliased) versions.  Tone#lfo
     # fades the correction in with frequency (LFO_FADE), so slow LFOs keep
     # exact edges (a delay time that jumps should jump) while an LFO pushed

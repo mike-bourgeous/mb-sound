@@ -270,8 +270,8 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
 
   describe 'unsupported settings' do
     it 'raises for other shapes' do
-      expect { 100.hz.ramp.fm_feedback(1) }.to raise_error(ArgumentError, /Only sines/)
-      expect { 100.hz.fm_feedback(1).ramp.sample(10) }.to raise_error(ArgumentError, /Only sines/)
+      expect { 100.hz.saw.fm_feedback(1) }.to raise_error(ArgumentError, /Only sines/)
+      expect { 100.hz.fm_feedback(1).saw.sample(10) }.to raise_error(ArgumentError, /Only sines/)
     end
 
     it 'raises with sync, pwm, or noise' do

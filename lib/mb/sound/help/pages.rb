@@ -3,7 +3,20 @@ module MB
     module Help
       # Shared printing for help pages: Pry shows the page's text instead of
       # an object dump, and pages stay values (`t = help :knobs; t.try`).
+      #
+      # Every page's #to_s is plain text when $stdout may not be colored
+      # (a pipe, a log, NO_COLOR, TERM=dumb; see ColorPolicy), so `puts
+      # help(:turn)` and `now.to_s` read cleanly in captured output.
       module Page
+        # Prepended to each class that includes Page.
+        module PlainOutput
+          def to_s = ColorPolicy.for_output(super)
+        end
+
+        def self.included(base)
+          base.prepend(PlainOutput)
+        end
+
         def inspect = to_s
         def pretty_print(q) = q.text(to_s)
       end
@@ -271,13 +284,30 @@ module MB
           @index = index
         end
 
+        # Other public names of +entry+'s method in its owner.
+        def method_aliases(entry)
+          owner = entry.owner
+          own = ->(name) {
+            m = owner.instance_method(name)
+            m = m.super_method while m && m.owner != owner # (past the recorders prepended to the DSL)
+            m&.original_name
+          }
+          target = own.(entry.name)
+          (owner.public_instance_methods(false) - [entry.name]).select { |m| own.(m) == target }.sort
+        rescue StandardError
+          []
+        end
+
         def to_s
           d = Doc.new
           @entries.each do |e|
             real = e.alias? ? @index.find_all(e.original).find { |x| x.owner == e.owner } || e : e
             where = real.surface == 'console' ? 'console' : "#{real.surface == 'GraphNode DSL' ? 'node' : real.surface} method"
-            d.title(real.signature, "#{where}, #{real.owner.name.sub('MB::Sound::', '')}")
-            d.note("#{e.name} is an alias of #{e.original}.") if e.alias?
+            # The official name heads the page with its aliases (ux-fix-1
+            # item 15: `help :saw` headed `ramp` with no word of saw)
+            aliases = method_aliases(real)
+            d.title("#{real.signature}#{"  (alias #{aliases.join(', ')})" unless aliases.empty?}", "#{where}, #{real.owner.name.sub('MB::Sound::', '')}")
+            d.note("#{e.name} is an alias of #{e.original}; graphs print it back as #{e.original} (ruby, to_ruby).") if e.alias?
             text = real.comment.strip
             text = '(no doc comment)' if text.empty?
             comment_blocks(text).each do |kind, block|

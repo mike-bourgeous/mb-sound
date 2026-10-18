@@ -128,6 +128,20 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound).to have_received(:visualize)
     end
 
+    # ux-fix-1 item 7: a Braille scope per frame flooded pty logs
+    it 'plots by default only to an animating terminal (not a pipe, TERM=dumb, or NO_COLOR)' do
+      tty = StringIO.new
+      def tty.tty? = true
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'TERM' => 'xterm' })).to eq(true)
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'TERM' => 'dumb' })).to eq(false)
+      expect(MB::Sound::ColorPolicy.animate?(tty, env: { 'NO_COLOR' => '1' })).to eq(false)
+      expect(MB::Sound::ColorPolicy.animate?(StringIO.new, env: {})).to eq(false)
+
+      allow(MB::Sound).to receive(:visualize)
+      expect { MB::Sound.play(440.hz.sine.until(0.05)) }.to output(/Playing/).to_stderr # $stdout is a pipe here
+      expect(MB::Sound).not_to have_received(:visualize)
+    end
+
     it 'plots into the terminal UI\'s scope pane while one is up, writing nothing over its screen (ux-1 bug 3)' do
       restored = 0
       screen = double('screen')
@@ -345,6 +359,12 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.stop(fade: 0)).to have_attributes(kind: :stop, name: :b)
         expect(MB::Sound.stop(fade: 0).name).to eq(:a)
         expect(MB::Sound.stop).to eq([])
+      end
+
+      it 'lists what plays and suggests a close name for a player that is not playing (ux-fix-1)' do
+        MB::Sound.bg(:bass, 220.hz.sine)
+        expect { expect(MB::Sound.stop(:bas, fade: 0)).to eq([]) }.to output(/No background player :bas is playing \(playing: :bass\)\nDid you mean\?  :bass/).to_stderr
+        MB::Sound.stop(:all, fade: 0)
       end
 
       it 'stops named players' do
@@ -781,7 +801,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop
-      seconds = MB::Sound.render(filename, bass.tone.ramp.at(1) * bass.env * 0.5, bars: 2)
+      seconds = MB::Sound.render(filename, bass.tone.saw.at(1) * bass.env * 0.5, bars: 2)
       expect(seconds).to eq(4)
 
       data = MB::Sound.read(filename)

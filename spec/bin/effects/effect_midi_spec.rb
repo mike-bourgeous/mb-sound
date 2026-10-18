@@ -41,7 +41,7 @@ RSpec.describe('effect scripts with MIDI control', :aggregate_failures) do
   it 'connects its MIDI input to a port given with --midi' do
     keyboard = MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_fx_keys', nil, 'out')
     text = flanger('spec/test_data/arp_a7.flac', '-m', 'mbspec_fx_keys')
-    expect(text).to match(/MIDI control enabled\e\[0m \(mbspec_fx_keys:out\)/)
+    expect(text).to match(/MIDI control enabled \(mbspec_fx_keys:out\)/)
   ensure
     keyboard&.close
   end

@@ -40,7 +40,7 @@ RSpec.describe('Tone#phasor', :aggregate_failures) do
     it 'is a phasor' do
       expect(100.hz.phasor.phasor?).to eq(true)
       expect(100.hz.phasor.wave_type).to eq(:phasor)
-      expect(100.hz.ramp.phasor?).to eq(false)
+      expect(100.hz.saw.phasor?).to eq(false)
     end
 
     it 'has no amplitude' do

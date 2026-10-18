@@ -191,9 +191,12 @@ module MB
         #
         # +measure+ is what the target measured (:integrated, or :loudest:
         # +loudest+ is then the loudest +loudest_bars+-bar window's LUFS;
-        # see Mastering::MEASURES).
+        # see Mastering::MEASURES).  +drive+ (Decibels) is the trim the
+        # first pass used (the preset's drive).
         Result = Data.define(:preset, :trim, :target, :ceiling, :integrated, :short_term_max, :range, :true_peak, :side, :side_hz,
-                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars) do
+                             :first_pass, :runs, :held, :codec_peaks, :measure, :loudest, :loudest_bars, :drive) do
+          def initialize(drive: nil, **rest) = super(drive: drive, **rest)
+
           # The loudness the target was reached with (integrated, or the
           # loudest window's).
           def measured
@@ -219,8 +222,14 @@ module MB
 
           def to_s
             lines = []
-            lines << format('mastering %s: %s (trim %+.2f dB; first pass %.2f LUFS, %d chain runs)',
-                            preset.inspect, pass? ? 'pass' : 'FAIL', trim.db_value, first_pass, runs)
+            # The trim is the gain into the chain, where the limiters turn
+            # most of it into peak control: say how it relates to the first
+            # pass, so +23.6 dB for 3.5 LU more doesn't read as wrong
+            # (ux-fix-1 item 22)
+            first = drive ? format("the first pass's drive %+.2f dB gave %.2f LUFS", drive.db_value, first_pass) : format('first pass %.2f LUFS', first_pass)
+            change = drive ? format('; %+.2f dB more trim for %+.2f LU (the chain compresses and limits)', trim.db_value - drive.db_value, measured - first_pass) : ''
+            lines << format('mastering %s: %s (trim %+.2f dB into the chain; %s%s; %d chain runs)',
+                            preset.inspect, pass? ? 'pass' : 'FAIL', trim.db_value, first, change, runs)
             target_text = measure == :loudest ? format('loudest %d bars %.2f LUFS, target %.1f', loudest_bars, loudest, target.lufs) : format('target %.1f', target.lufs)
             lines << format('  loudness %.2f LUFS (%s%s), short-term max %.1f, LRA %.1f LU, PLR %.1f LU',
                             integrated, target_text, held ? format(', held by the %.1f dBTP ceiling: no limiter', ceiling.db_value) : '',
@@ -280,7 +289,8 @@ module MB
           }
           eval = ->(db, peak = !limited) { measure(output.(db), session.sample_rate, true_peak: peak, loudest: window) }
 
-          x0 = presets.last.drive.db_value
+          drive = presets.last.drive
+          x0 = drive.db_value
           f0 = first
           x1 = (x0 + (target.lufs - f0)).clamp(x0 - RANGE, x0 + RANGE)
           f1, tp = eval.(x1)
@@ -322,7 +332,8 @@ module MB
             preset: presets.last.name, trim: x1.db, target: target, ceiling: ceiling,
             integrated: r.integrated, short_term_max: r.short_term_max, range: r.range, true_peak: r.true_peak,
             side: side, side_hz: hz, first_pass: first, runs: runs, held: held, codec_peaks: nil,
-            measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil
+            measure: mode, loudest: window ? loudest_of(a, window) : nil, loudest_bars: mode == :loudest ? bars : nil,
+            drive: drive
           )
         end
 

@@ -453,7 +453,7 @@ RSpec.describe(MB::Sound::Notes) do
         expect(v.hz.saw.free.key_sync?).to eq(false)
         expect(v.hz.saw.free.reset_input).to eq(nil)
         expect(v.hz.free.reset_input).to eq(nil)
-        expect(v.hz.ramp.lfo.reset_input).to eq(nil)
+        expect(v.hz.saw.lfo.reset_input).to eq(nil)
         expect(v.hz.lfo.reset_input).to eq(nil)
         expect(v.hz.saw.sync(ratio: 2).reset_input).to eq(nil) # no error from reset + sync
         expect(v.hz.saw.lfo.key_sync?).to eq(false)

@@ -71,7 +71,7 @@ module MB
 
       # Panes that commands open, not layouts (so no built-in layout shows
       # them): name => the command.
-      ON_DEMAND_PANES = { message: 'ui.message n' }.freeze
+      ON_DEMAND_PANES = { message: 'ui.message n', page: 'help (a page while the tiled screen is up), ui.page false closes it' }.freeze
 
       # The set's panes, shown by `ui :session` (and buses in :studio's
       # tabs) rather than on the :wall, which shows every other pane.

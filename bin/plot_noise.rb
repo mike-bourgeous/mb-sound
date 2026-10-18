@@ -26,7 +26,7 @@
 #     $0                                   # every shape, in the terminal
 #     $0 -g                                # every shape at once as an inline image
 #     $0 --only gauss,sine,white --print   # statistics only
-#     $0 --only none -e '1.hz.ramp.noise + 1.hz.ramp.noise'   # two uniforms: a triangle
+#     $0 --only none -e '1.hz.saw.noise + 1.hz.saw.noise'   # two uniforms: a triangle
 #     $0 --only none -G -e 'noise.filter(500.hz.lowpass)'     # filtered uniform noise turns Gaussian
 #     $0 --only none '1.hz.sine.noise * 1.hz.sine.noise' '1.hz.wavetable(:basic, scan: 0.5).noise'
 #
@@ -103,7 +103,7 @@ MB::Sound.script(
 
   # name => [description, source maker, theory maker (data -> theory or nil)]
   shapes = {
-    'uniform' => ['1.hz.ramp.noise', -> { 1.hz.ramp.noise }, ->(_) { UNIFORM }],
+    'uniform' => ['1.hz.saw.noise', -> { 1.hz.saw.noise }, ->(_) { UNIFORM }],
     'gauss' => ['1.hz.gauss.noise', -> { 1.hz.gauss.noise }, ->(d) { gaussian(d) }],
     'sine' => ['1.hz.sine.noise', -> { 1.hz.sine.noise }, ->(_) { ARCSINE }],
     'triangle' => ['1.hz.triangle.noise', -> { 1.hz.triangle.noise }, ->(_) { UNIFORM }],
@@ -119,7 +119,7 @@ MB::Sound.script(
       ->(_) { ideal[name] },
     ]
   end
-  shapes['noise'] = ['MB::Sound.noise (2000.hz.ramp.noise)', -> { MB::Sound.noise }, ->(_) { UNIFORM }]
+  shapes['noise'] = ['MB::Sound.noise (2000.hz.saw.noise)', -> { MB::Sound.noise }, ->(_) { UNIFORM }]
   %w[white pink brown].each do |color|
     shapes[color] = ["MB::Sound::Noise.spectral_#{color}_noise (one inverse FFT)", -> { spectral(color, p.samples) }, ->(d) { gaussian(d) }]
   end

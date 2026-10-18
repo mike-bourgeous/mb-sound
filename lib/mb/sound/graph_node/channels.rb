@@ -14,7 +14,7 @@ module MB
       # played, rendered, or used in a master chain like any node.
       #
       # Example (bin/sound.rb):
-      #     pad = stereo(110.hz.ramp.at(0.3), 110.5.hz.ramp.at(0.3))
+      #     pad = stereo(110.hz.saw.at(0.3), 110.5.hz.saw.at(0.3))
       #     l, r = pad
       #     bg pad
       #
@@ -175,7 +175,7 @@ module MB
         # a graph node.
         #
         # Example (bin/sound.rb):
-        #     bg stereo(220.hz.ramp.at(0.2), 221.hz.ramp.at(0.2)).width(1.5)
+        #     bg stereo(220.hz.saw.at(0.2), 221.hz.saw.at(0.2)).width(1.5)
         def width(amount)
           require_stereo('width')
           mixed(ChannelMixer::Width.new(@outputs, amount: amount))
@@ -217,7 +217,7 @@ module MB
         # channels raise an error.
         #
         # Example (bin/sound.rb):
-        #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).pan(2.bars.lfo)
+        #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).pan(2.bars.lfo)
         def pan(position = 0, law: :equal_power)
           return @outputs[0].pan(position, law: law) if channel_count == 1
           raise ArgumentError, "Can only pan bundles with 1 or 2 channels (got #{channel_count})" unless channel_count == 2
@@ -233,7 +233,7 @@ module MB
         # other side stays at full level.
         #
         # Example (bin/sound.rb):
-        #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).balance(-0.3)
+        #     bg stereo(220.hz.saw.at(0.2), 330.hz.saw.at(0.2)).balance(-0.3)
         def balance(position = 0)
           require_stereo('balance')
           mixed(ChannelMixer::Balance.new(@outputs, position: position))
@@ -278,8 +278,21 @@ module MB
           "#{graph_node_name || 'Channels'}(#{channel_count}: #{@outputs.map(&:to_s).join(', ')})"
         end
 
+        # `#<Channels 2: code>` (see GraphNode::Inspect).
         def inspect
-          "#<#{self.class.name.rpartition('::').last} #{channel_count} channels>"
+          code = Inspect.code_of(self)
+          head = "#<#{self.class.name.rpartition('::').last} #{channel_count} channels"
+          return "#{head}>" if code.nil? || code.empty?
+
+          Inspect.cap("#{head}: #{code}>")
+        end
+
+        def inspect_full
+          Kernel.instance_method(:inspect).bind_call(self)
+        end
+
+        def pretty_print(q)
+          q.text(inspect)
         end
 
         # A short label for graph visualizations (see Traversable#graphviz).

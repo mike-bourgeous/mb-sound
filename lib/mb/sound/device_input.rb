@@ -93,10 +93,12 @@ module MB
           end
         end
 
-        @capture ||= FastAudio::Capture.new(
-          backends, DeviceOutput.device_index(device, backends: backends, kind: :capture), DeviceOutput.client_name,
-          channels, requested_rate, device_rate, period, queue, quality, test_pattern
-        )
+        @capture ||= DeviceOutput.opening(kind: :input) {
+          FastAudio::Capture.new(
+            backends, DeviceOutput.device_index(device, backends: backends, kind: :capture), DeviceOutput.client_name,
+            channels, requested_rate, device_rate, period, queue, quality, test_pattern
+          )
+        }
 
         @sample_rate = @capture.sample_rate.to_f
         @device_rate = @capture.device_rate.to_f

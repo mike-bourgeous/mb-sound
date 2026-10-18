@@ -274,7 +274,7 @@ RSpec.describe MB::Sound::Help do
     it "flow: uses its own scene names and won't start over a playing form" do
       session = new_session
       MB::Sound::Session.with_context(session: session) do
-        MB::Sound.track(:drums, q: 1) { |c| c.tone.ramp * c.gate }
+        MB::Sound.track(:drums, q: 1) { |c| c.tone.saw * c.gate }
         MB::Sound.scene(:intro, drums: MB::Sound.seq(MB::Sound::C3).n4.loop)
         MB::Sound.scene(:outro, drums: MB::Sound.seq(MB::Sound::C2).n4.loop)
         mine = session.arrangement.scenes.slice(:intro, :outro)
@@ -525,6 +525,23 @@ RSpec.describe MB::Sound::Help do
         expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: bad)).to be_nil
         expect(out.string).to include('Level check skipped')
       end
+
+      # ux-fix-1 item 20: the instructions printed before the error
+      it 'says only that it skipped when there is no sound card' do
+        none = Object.new.tap { |o|
+          def o.prepare = raise(MB::Sound::DeviceOutput::Unavailable, 'No audio output device (Failed to open backend device).  bin/audio_check.rb --list shows devices')
+          def o.start(_) = nil
+          def o.stop = nil
+        }
+        out = StringIO.new
+        expect(MB::Sound::Help.first_level_check(input: tty, out: out, output_type: :device, player: none)).to be_nil
+        expect(MB::U.remove_ansi(out.string)).to eq("Level check skipped: No audio output device (Failed to open backend device).  bin/audio_check.rb --list shows devices; help.level runs it later\n")
+      end
+
+      it 'answers lesson commands when no lesson runs' do
+        list = MB::Sound::Help::LessonList.new
+        expect { expect(list.run).to equal(list) }.to output(/lesson\.run: no lesson is running; `lesson :name` starts one/).to_stdout
+      end
     end
   end
 
@@ -608,6 +625,8 @@ RSpec.describe MB::Sound::Help do
 
     it 'wraps at most 100 columns and prints plain under NO_COLOR or to a pipe' do
       allow(MB::U).to receive(:width).and_return(200)
+      expect(MB::Sound.help(:ui).to_s).not_to include("\e[") # $stdout is a pipe here
+      allow($stdout).to receive(:tty?).and_return(true)
       t = MB::Sound.help(:ui).to_s
       expect(text(t).lines.map { |l| l.chomp.length }.max).to be <= 100
       expect(MB::Sound::Help.for_output(t, StringIO.new)).not_to include("\e[")
@@ -623,7 +642,7 @@ RSpec.describe MB::Sound::Help do
     it 'lists the sheet footer one command per line, lessons near the top, and sections in the headings' do
       lines = text(MB::Sound.help).lines.map(&:chomp)
       expect(lines[1]).to start_with('Learn: lesson :set')
-      foot = lines.drop(lines.index('More help') + 1).reject(&:empty?)
+      foot = lines.drop(lines.index('More help') + 1).reject(&:empty?).take_while { |l| !l.start_with?('(') }
       expect(foot.length).to eq(MB::Sound::Help::Sheet::FOOTER.length)
       foot.each { |l| expect(l).to match(/\A  \S+( \S+)? +\S/) }
       expect(lines.join("\n")).to include('Perform help :perform')
@@ -633,6 +652,45 @@ RSpec.describe MB::Sound::Help do
       t = text(MB::Sound.help(:perform))
       expect(t).to include('On the sheet', 'Knobs and snapshots  help :knobs', 'lesson :knobs', 'Also on the sheet')
       expect(text(MB::Sound.help.perform)).to eq(t)
+    end
+
+    # ux-fix-1 item 16: help :render was 147 lines, the sheet 71 with its top scrolled away
+    # ux-fix-1 item 16 (maintainer: "Help pages load in less pager and/or
+    # as ui overlay when ui is up"): pages are whole; Help.show picks where
+    it 'shows whole pages: the page pane when tiles are up, the pager in a terminal, else plain text' do
+      page = MB::Sound.help(:render)
+      expect(text(page).lines.length).to be > 100
+
+      out = StringIO.new
+      MB::Sound::Help.show(page, out, double('pry'))
+      expect(out.string).to eq("#{MB::U.remove_ansi(page.to_s)}\n") # (a pipe: all of it, plain)
+
+      tty = StringIO.new
+      def tty.tty? = true
+      pager = double('pager')
+      expect(Pry::Pager).to receive(:new).and_return(pager)
+      expect(pager).to receive(:page).with(a_string_including('render(filename'))
+      MB::Sound::Help.show(page, tty, double('pry'))
+      expect(tty.string).to eq('')
+
+      body = page.to_s # (the page reads the UI's state; only the screen is stubbed below)
+      screen = double('tiles')
+      allow(MB::Sound::UI).to receive(:screen).and_return(screen)
+      expect(screen).to receive(:page).with(a_string_including('render(filename'), title: nil)
+      MB::Sound::Help.show(body, out, nil)
+    end
+
+    it 'wraps the sheet footer to 40 columns' do
+      allow(MB::U).to receive(:width).and_return(40)
+      expect(text(MB::Sound.help).lines.drop_while { |l| !l.start_with?('More help') }.map { |l| l.chomp.length }.max).to be <= 40
+    end
+
+    # ux-fix-1 item 15: saw is official; ramp and sawtooth are aliases
+    it 'heads a method page with its official name and aliases' do
+      t = text(MB::Sound.help(:ramp))
+      expect(t.lines.first).to start_with('saw  (alias ramp, sawtooth)')
+      expect(t).to include('ramp is an alias of saw; graphs print it back as saw')
+      expect(text(MB::Sound.help(:turn)).lines.first).to include('(alias move)')
     end
 
     it 'points method pages to the lessons that use them' do
@@ -680,7 +738,7 @@ RSpec.describe MB::Sound::Help do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.instance_exec do
           knob :n_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
-          track(:n_bass, q: 1) { |c| c.tone.ramp.lp4(knob(:n_cut)) * c.amp_env }
+          track(:n_bass, q: 1) { |c| c.tone.saw.lp4(knob(:n_cut)) * c.amp_env }
           scene :intro, n_bass: seq(MB::Sound::A1, rest).n8.loop
           scene :verse, n_bass: seq(MB::Sound::A1, MB::Sound::A2).n8.loop
           go :intro

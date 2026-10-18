@@ -93,7 +93,7 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       pre = {}
       inners = {}
       r = plan_compare(sizes: [64, 1, 300]) { |c|
-        inner = 220.hz.ramp * src.new(seed: 1) # (exact; fast sines differ within -124 dB)
+        inner = 220.hz.saw * src.new(seed: 1) # (exact; fast sines differ within -124 dB)
         inners[c.engine] = inner
         seen[c.engine] = []
         pre[c.engine] = []
@@ -112,9 +112,9 @@ RSpec.describe(MB::Sound::Plan::Installation) do
 
     it 'calls a tapped node\'s spies once per block in check mode (from the unfused reference)' do
       seen = []
-      inner = 220.hz.ramp * src.new(seed: 1)
+      inner = 220.hz.saw * src.new(seed: 1)
       inner.spy { |v| seen << v.length }
-      g = inner * 2 + 440.hz.ramp
+      g = inner * 2 + 440.hz.saw
       inst = MB::Sound::Plan.install(g, check: :raise)
       [10, 20, 30].each { |n| g.sample(n) }
       expect(seen).to eq([10, 20, 30])
@@ -175,7 +175,7 @@ RSpec.describe(MB::Sound::Plan::Installation) do
     it 'passes for a correct plan' do
       plan_compare(check: :raise) {
         trig = src.new(kind: :impulses, at: [3, 100, 1000])
-        (220.hz.ramp.reset(trig) * src.new(seed: 1) + 1.constant * 330.hz.complex_sine.pm(src.new(seed: 2) * 1).real) * 0.5
+        (220.hz.saw.reset(trig) * src.new(seed: 1) + 1.constant * 330.hz.complex_sine.pm(src.new(seed: 2) * 1).real) * 0.5
       }
     end
 
@@ -253,7 +253,7 @@ RSpec.describe(MB::Sound::Plan::Installation) do
         s = MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3.n8, MB::Sound::G3, MB::Sound::C4.n2).n4.loop, voices: 3) { |v|
           env = v.amp_env(0.01, 0.1, 0.5, 0.1)
           mod = v.hz.transpose(12).sine.at(1)
-          env * v.hz.complex_sine.pm(mod * v.fm_env(0, 0.2, 0.2, 0.1) * 2).real * 0.3 + env * v.hz.ramp * 0.1
+          env * v.hz.complex_sine.pm(mod * v.fm_env(0, 0.2, 0.2, 0.1) * 2).real * 0.3 + env * v.hz.saw * 0.1
         }
         [s, Array.new(40) { |i| s.sample([128, 1, 333, 512][i % 4]).dup }]
       }

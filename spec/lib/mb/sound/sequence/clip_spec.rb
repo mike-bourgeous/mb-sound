@@ -363,7 +363,7 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       expect(clip.tone).to be_a(MB::Sound::Notes::NotePitch)
       expect(render(clip.freq(transport: transport), 1600)[0]).to be_within(1e-3).of(MB::Sound::C3.frequency)
       expect(render(clip.period(transport: transport), 1600)[0]).to be_within(1e-6).of(1.0 / MB::Sound::C3.frequency)
-      expect(render(clip.tone(transport: transport).ramp.at(1), 4800).abs.max).to be > 0.9
+      expect(render(clip.tone(transport: transport).saw.at(1), 4800).abs.max).to be > 0.9
     end
 
     it 'has envelopes with Envelope options that end after a non-looping clip' do
@@ -386,7 +386,7 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     end
 
     it 'keeps a key-synced tone playing through the release of an envelope made separately' do
-      g = clip.tone(transport: transport).ramp.at(1) * clip.env(0.001, 0.01, 1, 0.1, transport: transport)
+      g = clip.tone(transport: transport).saw.at(1) * clip.env(0.001, 0.01, 1, 0.1, transport: transport)
       data = render(g, 96000)
       expect(data[36000 + 2400].abs).to be > 0
       expect(data.length).to be_between(40800, 40800 + 1600)

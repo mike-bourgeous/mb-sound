@@ -35,7 +35,7 @@ module MB
       end
       example 'a pattern on the next bar' do
         bass = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
-        bg :try, bass.tone.ramp.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
+        bg :try, bass.tone.saw.at(-12.db).lp4(600, resonance: 0.4) * bass.amp_env
       end
       example 'play a clip on the default patch' do
         play seq(A3, C4, E4, A4, E4, C4, A3.n4).n8, gain: -14.db
@@ -108,10 +108,10 @@ module MB
     Help.topic :unison, 'Unison and supersaws', group: :sound do
       about <<~TEXT
         Three spellings, the same sound bit for bit:
-        `110.hz.unison(5, spread: 0.5) { |p| p.ramp }` (the block form, any
-        oscillator per copy), `110.hz.unison(5, spread: 0.5).ramp` (shape
+        `110.hz.unison(5, spread: 0.5) { |p| p.saw }` (the block form, any
+        oscillator per copy), `110.hz.unison(5, spread: 0.5).saw` (shape
         methods on a blockless unison; used as a signal it is saws), and
-        `110.hz.ramp.unison(5, spread: 0.5)` (a tone made again on every
+        `110.hz.saw.unison(5, spread: 0.5)` (a tone made again on every
         copy).  In synth voices: `v.hz.saw.unison(5) * v.amp_env`.
         `detune:`, `spread:` (0..1, stereo above 0), `mix:` (side copies),
         `swarm` for gliding copies.
@@ -152,7 +152,7 @@ module MB
       note :filters
       see :knobs
       example 'a swept four-pole (one bar up, one bar down: the length is per step)' do
-        bg :try, 55.hz.ramp.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
+        bg :try, 55.hz.saw.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
       end
     end
 
@@ -355,7 +355,7 @@ module MB
         bg :try, brk.chop(:k, T, :h, :g, :s, T, [:g, 2], :k, T, :k, :h, T, :s, T, [:s, 3], brk[:s].rev).loop.transpose(3).sampler(brk).at(-14.db)
       end
       example 'a resampled bass, looped' do
-        bass = 55.hz.ramp.lp4(700, resonance: 0.3).bounce(1.beat, root: A1).looped(0.1..0.4, mode: :ping_pong)
+        bass = 55.hz.saw.lp4(700, resonance: 0.3).bounce(1.beat, root: A1).looped(0.1..0.4, mode: :ping_pong)
         bg :try, seq(A1, C2, E1, G1).n4.loop.sampler(bass).at(-12.db).until(2.bars)
       end
     end
@@ -473,19 +473,19 @@ module MB
       note :granular
       see :sampler, :random
       example 'a frozen pad' do
-        pad = bounce(1.bar) { (220.hz.ramp + 277.2.hz.ramp + 330.hz.ramp).lp4(1800) * 0.3 }
+        pad = bounce(1.bar) { (220.hz.saw + 277.2.hz.saw + 330.hz.saw).lp4(1800) * 0.3 }
         bg :try, pad.grains(position: 0.5, size: 150.ms, density: 30, spread: 0.05, pitch: [0, 12], pan_spread: 0.8).at(-16.db)
       end
       example 'a 4x spectral stretch' do
-        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.ramp.lp4(1500) * c.amp_env } }
+        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(4, mode: :spectral).node.at(-12.db)
       end
       example 'Paulstretch phases in the vocoder (randomize: 1)' do
-        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.ramp.lp4(1500) * c.amp_env } }
+        riff = bounce(1.bar) { seq(A3, C4, E4, G4).n8.loop.then { |c| c.tone.saw.lp4(1500) * c.amp_env } }
         bg :try, riff.stretch(8, mode: :spectral, randomize: 1).node.at(-12.db)
       end
       example "a voice Paulstretched the original's way" do
-        voice = bounce(1.bar) { seq(A3.n4, C4.n4, E4.n4, D4.n4).legato(1).then { |c| c.tone.ramp.formant(:a, :o) * c.amp_env * 0.5 } }
+        voice = bounce(1.bar) { seq(A3.n4, C4.n4, E4.n4, D4.n4).legato(1).then { |c| c.tone.saw.formant(:a, :o) * c.amp_env * 0.5 } }
         bg :try, voice.stretch(8, mode: :paul, overlap: 2, shape: :paul, link: false).node.at(-10.db)
       end
     end
@@ -507,7 +507,8 @@ module MB
     Help.topic :sequences, 'Clips and sequences', group: :time do
       about <<~TEXT
         Immutable clips in exact whole notes: `seq(C4, E4, G4).n8`,
-        `grid('x...')`; a clip is a MIDI source (`clip.tone`, `clip.env`,
+        `seq([C3, E3, G3], chord(:min7, root: :d)).n2` (chord steps),
+        `grid('x...')` (sixteenths; `grid(8, 'x.x.')`); a clip is a MIDI source (`clip.tone`, `clip.env`,
         `clip.synth`) and has transforms (transpose, swing, chance, ...).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
@@ -569,7 +570,7 @@ module MB
       note :tempo_sync, :numbers_lengths_phases
       see :schedule
       example 'a tempo-locked wobble' do
-        bg :try, 55.hz.ramp.at(-16.db).lp4(400 + 1.beat.hz.lfo.triangle * 300 + 300).until(2.bars)
+        bg :try, 55.hz.saw.at(-16.db).lp4(400 + 1.beat.hz.lfo.triangle * 300 + 300).until(2.bars)
       end
     end
 
@@ -613,14 +614,14 @@ module MB
       note :arrangement
       see :flow, :knobs, :now
       example 'two scenes' do
-        track(:try_bass, q: 1) { |c| c.tone.ramp.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
+        track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
         scene :try_a, try_bass: seq(A1, rest, A1, A2).n8.loop
         scene :try_b, try_bass: seq(F1, rest, F1, F2).n8.loop
         go :try_a
         go :try_b, in: 1.bar
       end
       example 'launch and tweak a clip' do
-        track(:try_bass, q: 1) { |c| c.tone.ramp.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
+        track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
         bg :try_bass, seq(A1, rest, A1, A2).n8.loop.named(:try_riff)
         tweak :try_bass, transpose: 12
         launch :try_bass, :try_riff, in: 1.bar
@@ -723,12 +724,12 @@ module MB
       see :sets, :now
       example 'a filter knob' do
         knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
-        bg :try, 55.hz.ramp.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
+        bg :try, 55.hz.saw.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
         turn :try_cut, 4000, over: 2.bars
       end
       example 'a gesture in keyframes' do
         knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
-        bg :try, 55.hz.ramp.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
+        bg :try, 55.hz.saw.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
         turn :try_cut, 0 => 400, 1.n4 => 3000, 1.n2 => 900, 1.bar => 2400
       end
     end
@@ -789,8 +790,9 @@ module MB
         nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
         like any track, and it never reaches the mix, stems, or CUE
         (`shape: env(0, 0.08)`, or a block: closed hats as the key; also
-        `pump`).  `turn :"pump/level", 0` turns the pump off (its level
-        knob; scenes take `"pump/level": 0`), or `stop :pump`.  In a kit,
+        `pump`).  `turn :pump, 0` turns the pump off (its on/off level,
+        knob :"pump/level"; scenes and sections take `pump: 0`, `pump: 1`),
+        or `stop :pump`.  In a kit,
         `voice :trigger, silent: true` plays a row only for
         `duck(:drums, only: :trigger)`.
       TEXT
@@ -1007,7 +1009,8 @@ module MB
 
     Help.topic :presets, 'Saving graphs and sets', group: :keep do
       about <<~TEXT
-        Every graph prints itself back as Ruby (`ruby node`); `save` writes a
+        Every graph prints itself back as Ruby (`ruby node`; aliases print
+        as their official names: `saw` as `ramp`); `save` writes a
         graph document (or the whole set), `preset` loads one with new
         inputs and params.  mb-sound comes with presets too (`presets`
         lists them): drum & bass, jungle, ambient, and funk instruments,

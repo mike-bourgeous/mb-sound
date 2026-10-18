@@ -121,7 +121,7 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'takes the frequency (only) of a Tone or Pitch' do
-        n = MB::Sound::Note.new(hz.hz.ramp.at(-3.db))
+        n = MB::Sound::Note.new(hz.hz.saw.at(-3.db))
         expect(n).to be_a(MB::Sound::Pitch)
         expect(n.frequency.round(4)).to eq(hz.round(4))
         expect(MB::Sound::Note.new(hz.hz).frequency.round(4)).to eq(hz.round(4))

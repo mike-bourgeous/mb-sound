@@ -4,7 +4,7 @@ module MB
       # Oscillator methods for a unison given without a block (see
       # Pitch#unison): each makes the unison of that oscillator on every
       # copy, the same as the block form with the same seed, so
-      # `110.hz.unison(5).ramp` is `110.hz.unison(5) { |p| p.ramp }` and
+      # `110.hz.unison(5).saw` is `110.hz.unison(5) { |p| p.saw }` and
       # `v.hz.unison(7, spread: 1).square.pwm(0.3).at(0.5)` is
       # `v.hz.unison(7, spread: 1) { |p| p.square.pwm(0.3).at(0.5) }` (bit
       # for bit).  The calls chain (each returns a new pending unison with
@@ -15,8 +15,8 @@ module MB
         WAVES = [
           :sine, :sin, :triangle, :square, :ramp, :saw, :sawtooth, :drumramp, :envramp, :gauss, :parabola,
           :atriangle, :asquare, :aramp, :asaw, :asawtooth,
-          :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
-          :acomplex_square, :acomplex_triangle, :acomplex_ramp,
+          :complex_sine, :complex_square, :complex_triangle, :complex_ramp, :complex_saw,
+          :acomplex_square, :acomplex_triangle, :acomplex_ramp, :acomplex_saw,
         ].freeze
 
         # Pitch's other oscillator shortcuts and Tone settings, each added
@@ -29,12 +29,22 @@ module MB
         # The methods are defined on each including class itself (as its
         # own methods), so the recipe recorder wraps them like the DSL
         # surface of Pitch and Tone (see GraphNode::Recipe::Surface): a
-        # graph prints as it was written, `110.hz.unison(5).ramp`.
+        # graph prints as it was written, `110.hz.unison(5).saw`.
         def self.included(klass)
           (WAVES + OSCILLATORS).each do |name|
+            # Tone's aliases stay aliases (ramp is saw), so recipes print
+            # the official name (Recipe.official_name)
+            official = Tone.method_defined?(name) ? Tone.instance_method(name).original_name : name
+            if official != name && (WAVES + OSCILLATORS).include?(official)
+              next # (aliased below, after the official one is defined)
+            end
             klass.define_method(name) do |*args, **kwargs, &block|
               @pending.then_call(name, args, kwargs, block)
             end
+          end
+          (WAVES + OSCILLATORS).each do |name|
+            official = Tone.method_defined?(name) ? Tone.instance_method(name).original_name : name
+            klass.send(:alias_method, name, official) if official != name && (WAVES + OSCILLATORS).include?(official)
           end
 
           # After an oscillator method: the copies' level (Tone#at, so the
@@ -101,7 +111,7 @@ module MB
         # The unison, built once: saws without a chain, else the chain's
         # oscillator on each copy (the block form's samples).  The calls
         # made building it aren't recorded: the built unison takes the
-        # recipe of the stand-in that made it (`110.hz.unison(5).ramp`).
+        # recipe of the stand-in that made it (`110.hz.unison(5).saw`).
         def built
           @built ||= GraphNode::Recipe.quietly {
             if @chain.empty?

@@ -94,6 +94,18 @@ module MB
         MB::Sound::FFMPEGInput.new(filename, resample: resample, **kwargs)
       end
 
+      # Raised for an output file that exists, unless overwrite: says to
+      # replace it: says how (ux-fix-1 item 20: renders in a loop failed
+      # with only "File x.flac already exists").  A FileExistsError.
+      class FileExists < MB::Util::FileMethods::FileExistsError
+        def initialize(filename)
+          super(filename)
+          @filename = filename
+        end
+
+        def to_s = "#{@filename} exists; overwrite: true replaces it (scripts: -f)"
+      end
+
       # Opens the given file as an output stream with a :write method.  The
       # number of +:channels+ must be provided.  Sample rate defaults to 48k.
       # Existing files will not be overwritten, and an error will be raised,
@@ -103,6 +115,9 @@ module MB
       # See MB::Sound::FFMPEGOutput.
       # See MB::Util::FileMethods#prevent_overwrite.
       def file_output(filename, sample_rate: 48000, channels:, overwrite: false, **kwargs)
+        if overwrite == false && File.exist?(filename)
+          raise FileExists.new(filename)
+        end
         MB::U.prevent_overwrite(filename, prompt: overwrite == :prompt) unless overwrite == true
 
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)

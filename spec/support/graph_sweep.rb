@@ -17,7 +17,7 @@ module GraphSweep
 
     # An audio-rate source (a band-limited saw)
     def sig(f = 110)
-      f.hz.ramp.at(0.5)
+      f.hz.saw.at(0.5)
     end
 
     # A modulated control input from lo to hi
@@ -152,16 +152,16 @@ module GraphSweep
     [
       # Oscillators and Tone options
       ['sine', ->(c) { 440.hz.sine }],
-      ['naive shapes', ->(c) { 220.hz.asquare + 330.hz.atriangle + 110.hz.aramp }],
-      ['band-limited shapes', ->(c) { 220.hz.square + 330.hz.triangle.pwm(c.mod(0.1, 0.9)) + 110.hz.ramp.fm(c.mod(-50, 50, 3)) }],
-      ['complex shapes', ->(c) { (220.hz.complex_ramp.pm(c.mod(-0.5, 0.5, 30)) + 220.hz.complex_square.pwm(0.3) + 330.hz.complex_triangle).real }],
+      ['naive shapes', ->(c) { 220.hz.asquare + 330.hz.atriangle + 110.hz.asaw }],
+      ['band-limited shapes', ->(c) { 220.hz.square + 330.hz.triangle.pwm(c.mod(0.1, 0.9)) + 110.hz.saw.fm(c.mod(-50, 50, 3)) }],
+      ['complex shapes', ->(c) { (220.hz.complex_saw.pm(c.mod(-0.5, 0.5, 30)) + 220.hz.complex_square.pwm(0.3) + 330.hz.complex_triangle).real }],
       ['phasor', ->(c) { 100.hz.phasor }],
-      ['sync and softsync', ->(c) { 200.hz.ramp.sync(ratio: c.mod(1.2, 3)) + 150.hz.square.softsync(ratio: 2.3) }],
+      ['sync and softsync', ->(c) { 200.hz.saw.sync(ratio: c.mod(1.2, 3)) + 150.hz.square.softsync(ratio: 2.3) }],
       ['sync to master tone', ->(c) { 300.hz.triangle.sync(97.hz.phasor) }],
       ['feedback sine', ->(c) { 220.hz.sine.fm_feedback(c.mod(0, 2.5), gain: c.mod(0.3, 1, 2)) }],
-      ['tone gain node', ->(c) { 330.hz.ramp.gain(c.mod(0, 1)) }],
-      ['tone reset clean', ->(c) { 180.hz.ramp.reset(c.trigger, clean: true) + 90.hz.square.reset(c.trigger, to: :random) }],
-      ['noise', ->(c) { c.s.noise(seed: 3) + 220.hz.ramp.noise(0.3, seed: 4) }],
+      ['tone gain node', ->(c) { 330.hz.saw.gain(c.mod(0, 1)) }],
+      ['tone reset clean', ->(c) { 180.hz.saw.reset(c.trigger, clean: true) + 90.hz.square.reset(c.trigger, to: :random) }],
+      ['noise', ->(c) { c.s.noise(seed: 3) + 220.hz.saw.noise(0.3, seed: 4) }],
       ['wavetable', ->(c) { 220.hz.wavetable(MB::Sound::Wavetable[:basic], scan: c.mod(0, 1, 2)) }],
       ['wavetable sync pwm', ->(c) { 220.hz.wavetable(MB::Sound::Wavetable[:saw]).sync(ratio: 1.7).pwm(0.3) }],
       ['wavetable sample mode reset', ->(c) {
@@ -170,15 +170,15 @@ module GraphSweep
       }],
       ['phase_table and waveshape', ->(c) { 50.hz.phasor.phase_table(MB::Sound::Wavetable[:saw], scan: 0.3) + c.sig.waveshape(MB::Sound::Wavetable[:sine]) }],
       ['harmonics (HarmonicTable)', ->(c) { 110.hz.harmonics([1, c.mod(0, 1), 0.3, 0.2], update: 64) }],
-      ['unison', ->(c) { 220.hz.unison(5, detune: c.mod(0.05, 0.3, 1)) { |p, _i| p.ramp } }],
+      ['unison', ->(c) { 220.hz.unison(5, detune: c.mod(0.05, 0.3, 1)) { |p, _i| p.saw } }],
       ['unison spread stereo', ->(c) { 220.hz.unison(4, spread: 1) { |p, _i| p.square } }],
       ['unison blockless', ->(c) { 220.hz.unison(3) * 1 }],
       ['unison blockless shape stereo', ->(c) { 220.hz.unison(4, spread: 1).square.pwm(0.3).filter(:lowpass, cutoff: 2000) }],
       ['tone unison', ->(c) { 220.hz.triangle.at(0.5).unison(3, detune: c.mod(0.05, 0.3, 1)) }],
-      ['swarm', ->(c) { c.notes.hz.swarm(4, scatter: 1.oct) { |p, _i| p.ramp } }],
-      ['transpose node (SemitoneShift)', ->(c) { 220.hz.transpose(c.mod(-12, 12, 2)).ramp }],
-      ['vibrato', ->(c) { 220.hz.vibrato(5, depth: 0.5).ramp }],
-      ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.ramp + 2.bars.lfo.square }],
+      ['swarm', ->(c) { c.notes.hz.swarm(4, scatter: 1.oct) { |p, _i| p.saw } }],
+      ['transpose node (SemitoneShift)', ->(c) { 220.hz.transpose(c.mod(-12, 12, 2)).saw }],
+      ['vibrato', ->(c) { 220.hz.vibrato(5, depth: 0.5).saw }],
+      ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.saw + 2.bars.lfo.square }],
       ['tempo delay', ->(c) { c.sig.delay(1.n32) }],
 
       # Arithmetic and routing
@@ -350,11 +350,11 @@ module GraphSweep
       }],
       ['notes envelopes and voice helpers', ->(c) {
         n = c.notes
-        n.hz.ramp.lp4(n.cutoff(800, env: n.filt_env), resonance: n.reso(0.5)) * n.amp_env + n.hz.glide(0.01).square.filter(:lowpass, cutoff: 900, quality: n.quality(2)) * n.fm_env(gm: true)
+        n.hz.saw.lp4(n.cutoff(800, env: n.filt_env), resonance: n.reso(0.5)) * n.amp_env + n.hz.glide(0.01).square.filter(:lowpass, cutoff: 900, quality: n.quality(2)) * n.fm_env(gm: true)
       }],
       ['notes lfo and fade-in', ->(c) { c.notes.lfo(5, delay: 0.002) + c.notes.lfo(3, shape: :noise) + c.notes.hz.vibrato(5).sine }],
-      ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
-      ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.ramp * v.env).pan(0.3) } }],
+      ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
+      ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.saw * v.env).pan(0.3) } }],
       ['drums (Kit, Voice)', ->(c) { c.s.tr808(c.s.grid(16, bd: 'x.x.', snare: '.x..', hat: 'xxxx')) }],
       # Kit builder (Drums::Machine, Hit layers, Repeats bursts, Flams,
       # ChokeGate) and the TR-909 (sampled hats through SamplerVoice)
@@ -376,7 +376,7 @@ module GraphSweep
       # tones, sample and hold, tempo params)
       ['synth lane groups (lane-major filters)', ->(c) {
         c.clip.synth(voices: 3, spares: 1) { |v, _i|
-          saw = v.hz.ramp * v.amp_env(0.001, 0.002, 0.5, 0.002)
+          saw = v.hz.saw * v.amp_env(0.001, 0.002, 0.5, 0.002)
           saw.filter(:lowpass, cutoff: v.cutoff(1000), quality: 2) + saw.lp4(v.cutoff(1500), resonance: 0.4) * 0.5 +
             saw.diode(v.cutoff(700), resonance: 0.6, drive: 1.5) * 0.3 + saw.filter(:highpass, cutoff: v.cutoff(300), quality: 1, structure: :biquad) * 0.2
         }

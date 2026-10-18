@@ -327,7 +327,7 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(built.length).to eq(6) # a1 and b1 once each
 
       # A redefined patch is warmed again
-      set.track(:c) { |c| built << c; c.tone.ramp }
+      set.track(:c) { |c| built << c; c.tone.saw }
       expect(set.warm_up.keys).to eq([:c])
     end
 
@@ -335,8 +335,8 @@ RSpec.describe(MB::Sound::Arrangement) do
       lfo = 2.hz.lfo
       before_lfo = lfo.sample(10).dup
       cut = within { session.knob(:cut, 500, range: 100..5000, curve: :exp) }
-      set.track(:shared) { |c| c.tone.ramp * lfo }
-      set.track(:knobbed) { |c| c.tone.ramp.filter(:lowpass, cutoff: within_knob(:cut)) }
+      set.track(:shared) { |c| c.tone.saw * lfo }
+      set.track(:knobbed) { |c| c.tone.saw.filter(:lowpass, cutoff: within_knob(:cut)) }
       set.scene(:five, shared: a1, knobbed: b1)
 
       result = set.warm_up(:shared, :knobbed)
@@ -361,7 +361,7 @@ RSpec.describe(MB::Sound::Arrangement) do
         s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
         a = s.arrangement
         MB::Sound.seed(7)
-        a.track(:n) { |c| MB::Sound.synth(c, voices: 2) { |v| (v.hz.ramp.rnd + MB::Sound.noise * 0.1) * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+        a.track(:n) { |c| MB::Sound.synth(c, voices: 2) { |v| (v.hz.saw.rnd + MB::Sound.noise * 0.1) * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
         a.scene(:x, n: MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop)
         a.scene(:y, n: MB::Sound.seq(MB::Sound::G3).n8.loop)
         a.warm_up if warm
@@ -388,7 +388,7 @@ RSpec.describe(MB::Sound::Arrangement) do
 
     it 'says how many tracks were only built' do
       lfo = 2.hz.lfo
-      set.track(:shared) { |c| c.tone.ramp * lfo }
+      set.track(:shared) { |c| c.tone.saw * lfo }
       set.scene(:three, shared: a1)
       expect { within { set.play_form(MB::Sound::Form.build { three 1 }, warm_up: true) } }.to output(
         /Warmed up 3 tracks in \d+\.\d s \(1 only built, reaching nodes made outside their patch; skip with warm_up: false\)/

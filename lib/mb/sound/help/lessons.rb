@@ -355,6 +355,18 @@ module MB
         include Page
         include Text
 
+        # A lesson's commands (lesson.run, .next, ...) when no lesson is
+        # running (ux-fix-1 item 20: `lesson.run` after a finished lesson
+        # was a NoMethodError): says so, then lists the lessons.
+        %i[run next back hint quit].each do |verb|
+          define_method(verb) do
+            done = LessonRunner.runs.values.select { |r| r.state == :done && r.session.equal?(Session.existing) }.map { |r| r.lesson.name }
+            why = done.empty? ? 'no lesson is running' : "lesson #{done.map(&:inspect).join(', ')} #{done.length == 1 ? 'is' : 'are'} done"
+            puts c(:dim, "lesson.#{verb}: #{why}; `lesson :name` starts one:")
+            self
+          end
+        end
+
         def to_s
           out = [c(:title, 'lessons') + c(:dim, '  lesson :name starts one (or resumes it in this console); from: 3 starts at step 3')]
           LESSONS.each_value do |l|

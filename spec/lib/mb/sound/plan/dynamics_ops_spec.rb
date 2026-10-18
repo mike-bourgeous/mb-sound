@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
   it 'matches node times (an LFO attack, seconds scaled to samples) and a Duration release (tempo)' do
     r = plan_compare {
       x = src.new(seed: 4, scale: 0.9) * 1
-      x.compress(threshold: -24.db, attack: 0.0005.constant + 300.hz.aramp.at(0..0.002), release: 1.n64) * 1
+      x.compress(threshold: -24.db, attack: 0.0005.constant + 300.hz.asaw.at(0..0.002), release: 1.n64) * 1
     }
     expect(dyn_ops(r).length).to eq(1)
     expect(dyn_ops(r).first.times.grep(MB::Sound::Plan::Value).length).to eq(2)
@@ -58,8 +58,8 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
 
   it 'stays unfused for several channels and for limiters, saying why' do
     text = MB::Sound::Plan.explain(
-      (MB::Sound::GraphNode::Channels.new([220.hz.ramp * 1, 330.hz.ramp * 1]).compress * 1).outputs +
-      [(220.hz.ramp * 1).limit * 1]
+      (MB::Sound::GraphNode::Channels.new([220.hz.saw * 1, 330.hz.saw * 1]).compress * 1).outputs +
+      [(220.hz.saw * 1).limit * 1]
     )
     expect(text).to include('2-channel Dynamics', 'lookahead limiter')
   end

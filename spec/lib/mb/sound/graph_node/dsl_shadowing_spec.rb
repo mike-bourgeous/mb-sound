@@ -70,14 +70,14 @@ RSpec.describe('GraphNode DSL shadowing', :aggregate_failures) do
 
   describe 'chains that used to hit a reader' do
     it 'adds a filter after a four-pole filter' do
-      node = 220.hz.ramp.lp4(800).filter(:highpass, cutoff: 100)
+      node = 220.hz.saw.lp4(800).filter(:highpass, cutoff: 100)
       expect(node).to respond_to(:sample)
       expect(node.sample(64).length).to eq(64)
-      expect(220.hz.ramp.lp4(800).kernel_filter).to be_a(MB::Sound::Filter::FourPole)
+      expect(220.hz.saw.lp4(800).kernel_filter).to be_a(MB::Sound::Filter::FourPole)
     end
 
     it 'adds a reverb after one reverb output' do
-      a, b = 220.hz.ramp, 330.hz.ramp
+      a, b = 220.hz.saw, 330.hz.saw
       node = [a, b].reverb(:hall).outputs[0].reverb(:plate)
       expect(node).to be_a(MB::Sound::GraphNode::Reverb)
       expect(node.outputs[0].sample(64).length).to eq(64)
@@ -85,17 +85,17 @@ RSpec.describe('GraphNode DSL shadowing', :aggregate_failures) do
 
     it 'reaches the stereo width method from a Tone and a Formant' do
       expect { 220.hz.sine.width(0.5) }.to raise_error(ArgumentError, /width needs a multichannel node/)
-      expect { 220.hz.ramp.formant(:a).width(0.5) }.to raise_error(ArgumentError, /width needs a multichannel node/)
+      expect { 220.hz.saw.formant(:a).width(0.5) }.to raise_error(ArgumentError, /width needs a multichannel node/)
       expect(100.hz.pwm(0.2).square.pwm_width).to eq(0.2)
     end
 
     it 'tells sync from softsync with soft_sync?' do
-      expect(100.hz.ramp.softsync(ratio: 2).soft_sync?).to eq(true)
-      expect(100.hz.ramp.sync(ratio: 2).soft_sync?).to eq(false)
+      expect(100.hz.saw.softsync(ratio: 2).soft_sync?).to eq(true)
+      expect(100.hz.saw.sync(ratio: 2).soft_sync?).to eq(false)
     end
 
     it 'splits a Tee branch again' do
-      a, b = 220.hz.ramp.tee(2)[0].tee(2)
+      a, b = 220.hz.saw.tee(2)[0].tee(2)
       expect(a).to be_a(MB::Sound::GraphNode::Tee::Branch)
       expect(a.owner_tee).to equal(b.owner_tee)
       expect(a.sample(16)).to eq(b.sample(16))
@@ -109,7 +109,7 @@ RSpec.describe('GraphNode DSL shadowing', :aggregate_failures) do
     end
 
     it 'delays a multitap tap again and reads silence as seconds' do
-      taps = 220.hz.ramp.multitap(0.001, 0.002)
+      taps = 220.hz.saw.multitap(0.001, 0.002)
       node = taps[0].delay(0.001)
       expect(node).to respond_to(:sample)
       expect(node.sample(64).length).to eq(64)

@@ -38,6 +38,15 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
     SpecBuffers.join(out)
   end
 
+  # ux-fix-1 item 11: unknown names list what there is and suggest
+  it 'lists knobs and suggests close names for an unknown knob' do
+    session = MB::Sound::Session.new(realtime: false)
+    session.knob(:cut, 800, range: 100..8000)
+    expect { session.knob!(:cutt) }.to raise_error(ArgumentError, /No knob :cutt \(knobs: :cut; `knob :cutt, value, range: lo..hi` makes one\)\nDid you mean\?  :cut/)
+  ensure
+    session&.close
+  end
+
   describe 'Spec' do
     it 'checks and normalizes its options' do
       s = described_class::Spec.new(name: :cut, default: 800, range: 100..8000, curve: :exponential, unit: 'Hz', cc: 74)
@@ -65,7 +74,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(cs.curve).to eq(:exponential)
       expect(cs.value(cs.default)).to be_within(30).of(800)
 
-      map = MB::Sound::MIDI::ControlMap.new(110.hz.ramp.lp4(k))
+      map = MB::Sound::MIDI::ControlMap.new(110.hz.saw.lp4(k))
       expect(map.numbers).to eq([74])
       expect(map.to_acid_xml(name: 'knobs')).to include('cut')
     end
@@ -147,7 +156,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
         g = 220.hz.saw.lp4(MB::Sound.knob(:cut), resonance: MB::Sound.knob(:res)) * MB::Sound.knob(:cut).get_sampler
         text = g.to_ruby
         expect(text).not_to include('input')
-        expect(text).to eq('220.hz.ramp.lp4(knob(:cut), resonance: knob(:res)) * knob(:cut)')
+        expect(text).to eq('220.hz.saw.lp4(knob(:cut), resonance: knob(:res)) * knob(:cut)')
       end
     end
 
@@ -187,7 +196,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
         s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
         s.knob(:x, 0, smooth: 0)
         s.turn(:x, 1, over: 8.beats)
-        syn = within(s) { clip.().synth(voices: 2) { |v| (v.hz.aramp * 0.001 + MB::Sound.knob(:x)) * v.env(0.001, 0.05, 0, 0.05) } }
+        syn = within(s) { clip.().synth(voices: 2) { |v| (v.hz.asaw * 0.001 + MB::Sound.knob(:x)) * v.env(0.001, 0.05, 0, 0.05) } }
         s.add(syn, name: :a, start_time: 1/5r)
         data = render(s, 192_000, size)
         expect(syn.skippable_lanes).not_to be_empty
@@ -308,7 +317,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       MB::Sound::Plan.check = :raise
       begin
         k = session.knob(:cut, 800, range: 100..8000, curve: :exp)
-        g = 110.hz.ramp.filter(:lowpass, cutoff: k, quality: 2) * 0.5
+        g = 110.hz.saw.filter(:lowpass, cutoff: k, quality: 2) * 0.5
         expect(MB::Sound::Plan.explain(g)).to match(/1 planned region.*param 0: GraphNode::Knob::Reader.*\(800\)/m)
         session.add(g, name: :x, on: :now)
         session.turn(:cut, 4000, over: 1.beat)
@@ -324,7 +333,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       MB::Sound::Plan.check = :raise
       begin
         k = session.knob(:rel, 0.05, range: 0.001..0.5)
-        g = (110.hz.ramp * 0.9).compress(threshold: -20.db, release: k) * 0.5
+        g = (110.hz.saw * 0.9).compress(threshold: -20.db, release: k) * 0.5
         expect(MB::Sound::Plan.explain(g)).to match(/1 planned region.*param 0: GraphNode::Knob::Reader.*dynamics\(/m)
         session.add(g, name: :x, on: :now)
         session.turn(:rel, 0.2, over: 1.beat)
@@ -374,7 +383,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
     end
 
     it 'stays strict outside live mode (scripts, specs), naming the knob' do
-      expect { session.knob(:shape) }.to raise_error(ArgumentError, /No knob :shape; define it with `knob :shape, value, range: lo..hi`/)
+      expect { session.knob(:shape) }.to raise_error(ArgumentError, /No knob :shape \(no knobs yet; `knob :shape, value, range: lo..hi` makes one\)/)
     end
   end
 

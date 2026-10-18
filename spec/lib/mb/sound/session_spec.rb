@@ -31,11 +31,11 @@ RSpec.describe(MB::Sound::Session) do
       session.add(220.hz.saw.lp4(800).until(2.bars), name: :pad)
       session.add(220.hz.saw.ringdown.until(1.5), name: :saw)
       expect(session.players[:pad]).to match(%r{\Alp4/id=\d+ until 2 bars -- lp4\(800})
-      expect(session.players[:saw]).to match(%r{\ATone/id=\d+ ringdown until 1.5s -- ramp})
+      expect(session.players[:saw]).to match(%r{\ATone/id=\d+ ringdown until 1.5s -- saw})
     end
 
     it "sets graphs at another rate to the session's rate" do
-      tone = 1000.hz.ramp.at_rate(44100)
+      tone = 1000.hz.saw.at_rate(44100)
       session.add(tone)
       expect(tone.sample_rate).to eq(48000)
 
@@ -603,6 +603,16 @@ RSpec.describe(MB::Sound::Session) do
 
     it 'ignores a single spike just after the warm-up' do
       session.add(sleepy(0.1) { |call| call == 7 })
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
+    # ux-fix-1 item 21: GC pauses landed in whichever player allocated
+    it 'leaves garbage collection out of a player\'s load' do
+      session.add(sleepy(0.02) { true })
+      gc = 0
+      allow(GC).to receive(:stat).and_call_original
+      allow(GC).to receive(:stat).with(:time) { gc += 20 } # every read "spends" 20 ms collecting
       expect(session).not_to receive(:warn)
       16.times { session.process_buffer }
     end

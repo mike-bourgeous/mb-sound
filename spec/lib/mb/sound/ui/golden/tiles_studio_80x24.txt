@@ -1,24 +1,24 @@
 ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns│drop 1 ████▌    5/8  → break 21:1
-TRACKS                        3 │            │ meters   knobs   cpu   buses
-● drums  beat_a                 │            │L ██████████████████████▌     -8.1
-● bass   bass_a                 │            │R ██████████████████████▍     -8.4
-● lead   rec →21:1              │            │S -14.2 LUFS  TP -0.6
-● pad    stopping chords        │            │RMS -18.0 -18.2
-                                │            │
-                                │            │
-                                │            │
-                                │            │
-                                │            │
-                                │            │
-                                │            │
-                                │            │
-                                ├──────── 6 ─┤
-                                │            │
-─ QUEUED ─────────────────── 7 ─┤            │
-17:3   knob :cut                │            │
-18:1   mute :pad                │            │
-                                │            │
-                                │            │
-                                │            │
-                                │            │
+TRACKS           3 │                                        │ meters   knobs   c
+● drums  beat_a    │                                        │L █████████▌   -8.1
+● bass   bass_a    │                                        │R █████████▌   -8.4
+● lead   rec →21:1 │                                        │S -14.2 LUFS  TP -…
+● pad    stopping …│                                        │RMS -18.0 -18.2
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   ├─ SCOPE ──────────────────────────── 6 ─┤
+                   │                                        │
+─ QUEUED ────── 7 ─┤                                        │
+17:3   knob :cut   │                                        │
+18:1   mute :pad   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
+                   │                                        │
  PLAY  repl                                                              ▶ 17:3

@@ -7,7 +7,7 @@ module MB
     #
     # Example (bin/sound.rb):
     #     bass_a = seq(A1, A1, rest, A2, A1, rest, G1, E1).n8.loop
-    #     track(:bass, q: 1) { |c| c.tone.ramp.lp4(600, resonance: 0.4) * c.amp_env }
+    #     track(:bass, q: 1) { |c| c.tone.saw.lp4(600, resonance: 0.4) * c.amp_env }
     #     track :pad, 220.hz.triangle.at(-18.db)
     #     scene :intro, pad: :on
     #     scene :verse, pad: :on, bass: bass_a

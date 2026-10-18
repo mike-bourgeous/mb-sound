@@ -42,7 +42,7 @@ RSpec.describe('UI painter timing', :aggregate_failures) do
     slow = slowdown
 
     # Six detuned saws through four-pole filters: a few percent of real time
-    graph = 6.times.map { |i| (55 * (i + 2)).hz.ramp.at(-24.db).lp4(800 + 300 * i, resonance: 0.3) }.reduce(:+)
+    graph = 6.times.map { |i| (55 * (i + 2)).hz.saw.at(-24.db).lp4(800 + 300 * i, resonance: 0.3) }.reduce(:+)
     session.add(graph, name: :saws)
     Thread.pass until session.running?
 

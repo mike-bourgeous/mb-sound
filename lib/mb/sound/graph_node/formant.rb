@@ -32,8 +32,8 @@ module MB
       # the input or any parameter node ends.  A plan boundary.
       #
       # Examples (bin/sound.rb):
-      #     play 110.hz.ramp.formant(:a)
-      #     play 110.hz.ramp.formant(:a, :e, :i, :o, :u, morph: 0.2.hz.lfo.at(0..1))
+      #     play 110.hz.saw.formant(:a)
+      #     play 110.hz.saw.formant(:a, :e, :i, :o, :u, morph: 0.2.hz.lfo.at(0..1))
       #     play 110.hz.pulse(0.1).formant(:o, :a, morph: 2.hz.lfo.at(0..1), voice: :soprano, width: 0.5)
       class Formant
         include GraphNode

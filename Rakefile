@@ -253,8 +253,11 @@ begin
         # process that execs a skipped program leaves truncated XML, which
         # MemcheckTruncatedXml above cleans up.
         # jackd: the MIDI specs' dummy JACK server (spec/support/jack_dummy.rb),
-        # started through setpriv.
-        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git,*jackd*,*setpriv*',
+        # started through setpriv.  df: JackDummy#shm_free runs `df -Pk
+        # /dev/shm` while another JACK server is running (e.g. a soak), and
+        # coreutils df always loses 144 bytes (definitely lost, realloc in
+        # df; ux-fix-1, 2026-10-18: not ours, not gdb's libraries).
+        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git,*jackd*,*setpriv*,*/df',
         # Forked children that don't exec (fork_script) would repeat the
         # parent's leak report, so only exec'd programs report.
         '--child-silent-after-fork=yes',

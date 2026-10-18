@@ -16,7 +16,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
 
       expect(histogram.values.max.to_f / histogram.values.min).to be_between(0.75, 1.33)
 
-      diff = 2000.hz.ramp.sample(48000).diff
+      diff = 2000.hz.saw.sample(48000).diff
       expect(diff.mean).to be_within(0.01).of(0)
 
       diff_hist = {}
@@ -131,7 +131,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
     # rounded differently); the phase now wraps every sample.
     {
       'MB::Sound.noise' => -> { MB::Sound.noise(seed: 4) },
-      'a noise blend' => -> { 440.hz.ramp.noise(0.3, seed: 4) },
+      'a noise blend' => -> { 440.hz.saw.noise(0.3, seed: 4) },
       'FM noise' => -> { (100.hz.sine.at(50) + 300).tone.noise(seed: 4) },
       'wavetable noise' => -> { 220.hz.wavetable(:basic, scan: 0.4).noise(0.01, seed: 4) },
     }.each do |name, make|
@@ -155,10 +155,10 @@ RSpec.describe(MB::Sound::GenerationMethods) do
     end
 
     [
-      ['uniform noise', -> { 2000.hz.ramp.noise(seed: 1) }],
+      ['uniform noise', -> { 2000.hz.saw.noise(seed: 1) }],
       ['gauss noise', -> { 1.hz.gauss.noise(seed: 2) }],
       ['blended noise', -> { 200.hz.sine.noise(0.00001, seed: 3) }],
-      ['frequency-modulated noise', -> { 300.hz.ramp.fm(90.hz.at(200)).noise(0.5, seed: 4) }],
+      ['frequency-modulated noise', -> { 300.hz.saw.fm(90.hz.at(200)).noise(0.5, seed: 4) }],
       ['a noise phasor', -> { 400.hz.phasor.noise(0.01, seed: 5) }],
     ].each do |name, make|
       it "gives identical C and Ruby samples for #{name}" do

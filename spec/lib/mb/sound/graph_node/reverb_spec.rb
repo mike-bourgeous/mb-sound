@@ -96,7 +96,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'keeps the loop time in seconds at other sample rates' do
-      rev = 100.hz.ramp.reverb(:room)
+      rev = 100.hz.saw.reverb(:room)
       at48 = rev.feedback_delays
       rev.sample_rate = 96000
       expect(rev.feedback_delays.zip(at48).map { |a, b| a - 2 * b }).to all(be_between(-1, 1))
@@ -105,12 +105,12 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'gives the classic presets loops of their taps plus 1024 samples at 48 kHz (:hall compact since 2026-10-10)' do
       [:room, :stadium, :space, :default].each do |preset|
-        rev = 100.hz.ramp.reverb(preset)
+        rev = 100.hz.saw.reverb(preset)
         taps = rev.network.kernel_config[:tap]
         expect(rev.feedback_delays.zip(taps).map { |l, t| l - t }).to all(eq(1024)), preset.inspect
       end
 
-      rev = 100.hz.ramp.reverb(:hall)
+      rev = 100.hz.saw.reverb(:hall)
       expect(rev.feedback_delays).to eq(rev.network.kernel_config[:tap].map(&:round))
     end
   end

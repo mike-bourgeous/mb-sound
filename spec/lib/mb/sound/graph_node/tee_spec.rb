@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
   end
 
   it 'makes its CircularBuffer and readers only when it first leaves lockstep' do
-    t = MB::Sound::GraphNode::Tee.new(157.hz.ramp, 3)
+    t = MB::Sound::GraphNode::Tee.new(157.hz.saw, 3)
     a, b, c = t.branches
     3.times { [a, b, c].each { |x| x.sample(64) } }
     expect(t.instance_variable_get(:@cbuf)).to be_nil

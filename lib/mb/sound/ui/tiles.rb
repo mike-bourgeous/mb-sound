@@ -166,8 +166,17 @@ module MB
           @density = nil
           @rows, @cols = @fixed_size || [24, 80]
           @tiler = Viewports::Tiler.new(layout, @cols, @rows - 1)
-          # Panes' declared minimum heights (UI::Pane#min_height)
-          @tiler.mins = ->(name, axis) { axis == :rows ? @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil) : nil }
+          # Panes' declared minimum heights (UI::Pane#min_height), and widths:
+          # the console keeps REPL_MIN_COLS (ux-fix-1: `ui :studio` at 80x24
+          # left it 12 columns between fixed-width panes, which give way
+          # down to PANE_MIN_COLS)
+          @tiler.mins = ->(name, axis) {
+            if axis == :rows
+              @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil)
+            else
+              name == :repl ? REPL_MIN_COLS : PANE_MIN_COLS
+            end
+          }
           @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
                                       repl_keys: play_keys || (repl == :none ? nil : Keys.repl_keymap))
           @router.add_keymap(NAV_EXTRA)
@@ -514,6 +523,31 @@ module MB
           self
         end
 
+        # Shows +text+ (a help page; see Help.show) in the page pane: split
+        # off the console's slot below it (the console keeps
+        # REPL_MIN_ROWS), focused and scrolling with its own keys (UI::
+        # Panes::Page: j k, PgUp PgDn, g G), q closing it and going back to
+        # the console.  `ui.page false` closes it.  Returns self.
+        def page(text = nil, title: nil)
+          if text.nil? || text == false
+            @page_close&.call
+            @page_close = nil
+            @full = true
+            return self
+          end
+          @panes[:page].show(text, title: title) if @panes[:page].respond_to?(:show)
+          unless @page_close
+            repl = @tiler.rects[:repl] || @tiler.rects.values.max_by(&:area)
+            rows = [(repl ? repl.h : @rows) - REPL_MIN_ROWS - 1, 3].max
+            temp = nil
+            tile { |t| temp = t.open_temporary(:page, rows, keep: t.layout.panes - [:repl], fallback: :repl) }
+            @page_close = temp && -> { tile { |t| t.close_temporary(temp) } }
+          end
+          enter(:page) if @tiler.layout.panes.include?(:page)
+          @full = true
+          self
+        end
+
         # Undoes the last layout change (split, close, resize, ...; 100 steps).
         def undo = tile(&:undo)
 
@@ -695,6 +729,11 @@ module MB
 
         # The REPL pane's smallest height.
         REPL_MIN_ROWS = 4
+
+        # The console's narrowest width, taken from fixed-width panes beside
+        # it when the terminal is narrow (they keep PANE_MIN_COLS).
+        REPL_MIN_COLS = 40
+        PANE_MIN_COLS = 12
 
         # Panes temporary panes never take their rows from.
         TEMPORARY_KEEP = %i[repl keyboard].freeze
@@ -1266,6 +1305,10 @@ module MB
               ran = true
             when String
               flash(x, :key)
+            when :close
+              # (a pane asking to be closed: the page pane's q)
+              page(false) if name == :page
+              act(Input::Action.of(:mode, :repl)) if @host
             end
           end
           pane = @panes[name]

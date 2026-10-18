@@ -1,7 +1,7 @@
 require 'zlib'
 
 RSpec.describe(MB::Sound::Plot::Image) do
-  let(:chart) { MB::Sound::Plot.waveform(200.hz.ramp.sample(4800), title: 'saw') }
+  let(:chart) { MB::Sound::Plot.waveform(200.hz.saw.sample(4800), title: 'saw') }
 
   it 'renders a PNG of the requested size' do
     png = chart.to_png(width: 320, height: 180)

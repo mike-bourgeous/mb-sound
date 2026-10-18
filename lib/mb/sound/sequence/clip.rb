@@ -16,7 +16,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     riff = seq(C3, Ds3, G3, As3).n8 | seq(G3.n4, rest.n4)
-      #     play riff.loop.tone.ramp.at(1) * riff.loop.env(0.005, 0.1, 0.5, 0.1)
+      #     play riff.loop.tone.saw.at(1) * riff.loop.env(0.005, 0.1, 0.5, 0.1)
       class Clip
         include Enumerable
         include Named
@@ -889,7 +889,7 @@ module MB
         end
 
         # A Pitch following this clip's notes (a Notes::NotePitch, like
-        # `v.hz` in a synth voice): chain a wave type (`clip.hz.ramp`,
+        # `v.hz` in a synth voice): chain a wave type (`clip.hz.saw`,
         # `clip.tone.square.at(0.5)`) or `.transpose(7)`.  Its oscillators
         # reset their phase at each note (key sync) unless they are #free.
         # Used directly as a signal, it plays a sine, like any Pitch.
@@ -976,7 +976,7 @@ module MB
         # Example (bin/sound.rb):
         #     chords = seq(A2, F2, C3, G2).n1.legato(0.95).loop
         #     bg :pad, chords.synth(voices: 3) { |v|
-        #       (v.hz.ramp.at(1) + v.hz.transpose(7).ramp.at(0.7)) * v.env(0.6, 1.0, 0.8, 2.5) * 0.3
+        #       (v.hz.saw.at(1) + v.hz.transpose(7).saw.at(0.7)) * v.env(0.6, 1.0, 0.8, 2.5) * 0.3
         #     }
         def synth(voices: 2, **options, &block)
           raise ArgumentError, 'Pass a block that builds a graph for one voice' unless block

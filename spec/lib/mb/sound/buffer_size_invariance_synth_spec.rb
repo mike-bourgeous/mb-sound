@@ -90,7 +90,7 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
         v.hz.saw.sync(ratio: 1.7).filter(:lowpass, cutoff: 3000, quality: 1) * v.amp_env(0.001, 0.1, 0.5, 0.05) +
           MB::Sound.noise.ease(:smooth) * v.env(0.001, 0.03, 0, 0.02) * 0.2
       },
-      'free LFO and controllers' => ->(v) { v.hz.aramp * v.amp_env(0.001, 0.1, 0.5, 0.05) * (1 + 3.hz.lfo * 0.5) * (1 + v.mod) },
+      'free LFO and controllers' => ->(v) { v.hz.asaw * v.amp_env(0.001, 0.1, 0.5, 0.05) * (1 + 3.hz.lfo * 0.5) * (1 + v.mod) },
     }
 
     [true, false].each do |lanes|

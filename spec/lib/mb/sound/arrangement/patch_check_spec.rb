@@ -24,6 +24,20 @@ RSpec.describe(MB::Sound::Arrangement::PatchCheck) do
   end
 
   describe 'track' do
+    # ux-fix-1 item 13: the scene was accepted, then go failed without why
+    it 'refuses a scene naming a track whose definition failed, saying why' do
+      s = new_session
+      in_session(s) do
+        expect { MB::Sound.track(:x) { |c| c.tone.saw.lp4(nosuch) } }.to raise_error(error)
+        expect { MB::Sound.scene(:a, x: MB::Sound.seq(MB::Sound::C4).loop) }
+          .to raise_error(ArgumentError, /\AScene :a names :x, which isn't a track: track :x wasn't defined: its patch raised NameError at .*patch_check_spec\.rb:\d+; fix the track/)
+        MB::Sound.track(:x) { |c| c.tone.saw }
+        expect(MB::Sound.scene(:a, x: MB::Sound.seq(MB::Sound::C4).loop)).to eq(:a)
+        MB::Sound.scene(:b, xx: MB::Sound.seq(MB::Sound::C4).loop)
+        expect { MB::Sound.go(:b) }.to raise_error(ArgumentError, /Scene :b names :xx, which is not a track or knob \(tracks: :x\)\nDid you mean\?  :x/)
+      end
+    end
+
     it 'raises for a patch that fails to build, naming the track and the line, and stores nothing' do
       s = new_session
       line = __LINE__ + 2

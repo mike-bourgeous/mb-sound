@@ -12,12 +12,12 @@ module MB
     # plus decay, at least 0.1 s), and end (see Envelope).
     #
     # Examples:
-    #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1)
-    #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1, curve: :swell, hold: 2)
-    #     play 220.hz.ramp * amp_env(0.002, 1, 0, 1)
-    #     play 220.hz.ramp.filter(:lowpass, cutoff: 150.constant * filter_env(0.005, 0.5, depth: 5), quality: 6)
+    #     play 220.hz.saw * adsr(0.01, 0.3, 0.5, 1)
+    #     play 220.hz.saw * adsr(0.01, 0.3, 0.5, 1, curve: :swell, hold: 2)
+    #     play 220.hz.saw * amp_env(0.002, 1, 0, 1)
+    #     play 220.hz.saw.filter(:lowpass, cutoff: 150.constant * filter_env(0.005, 0.5, depth: 5), quality: 6)
     #     play 220.hz.pm(440.hz.at(0.5) * fm_env(0.002, 2)) * amp_env(0.002, 2, 0.2, 1)
-    #     play (120.hz.ramp * adsr(gate: 2.hz.lfo.square.at(0..1))).filter(1200.hz.lowpass)
+    #     play (120.hz.saw * adsr(gate: 2.hz.lfo.square.at(0..1))).filter(1200.hz.lowpass)
     module EnvelopeMethods
       # A generic envelope with :analog curves ([12, 60, 60] dB) and velocity
       # sensitivity 0..1 (the peak is the velocity).
@@ -58,7 +58,7 @@ module MB
       # sample), and velocity sensitivity 0.5..1 (linear) scaling the depth.
       #
       # Example:
-      #     play 110.hz.ramp.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
+      #     play 110.hz.saw.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
       def filter_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
         MB::Sound::Envelope.preset(:filter_env, attack, decay, sustain, release, **options)
       end
@@ -71,7 +71,7 @@ module MB
       # scaling (+:t1v+, +:tk+) need +:velocity+ and +:key+ nodes;
       # Notes#sq80_env wires them to the notes.
       #
-      #     play 220.hz.ramp * sq80_env(l1: 63, l2: 30, l3: 45, t1: 20, t2: 24, t3: 30, t4: 32)
+      #     play 220.hz.saw * sq80_env(l1: 63, l2: 30, l3: 45, t1: 20, t2: 24, t3: 30, t4: 32)
       def sq80_env(**options)
         known = SQ80.method(:env_options).parameters.map(&:last)
         env_opts = options.slice(*known)

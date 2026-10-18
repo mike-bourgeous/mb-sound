@@ -13,12 +13,12 @@ RSpec.describe(MB::Sound::GraphNode::TimeLimit, :aggregate_failures) do
       expect(node).to be_a(described_class)
       expect(node.sample(12)).to eq(Numo::SFloat.ones(10))
 
-      graph = 220.hz.ramp.at(0.5).for(2.bars)
+      graph = 220.hz.saw.at(0.5).for(2.bars)
       code = graph.to_ruby
       expect(code).to include('.until(2.bars)')
       expect(code).not_to include('.for(')
 
-      text = MB::Sound::GraphIO.dump(220.hz.ramp.for(0.01))
+      text = MB::Sound::GraphIO.dump(220.hz.saw.for(0.01))
       expect(text).to include('.until(0.01)')
       expect(text).not_to include('.for(')
       loaded = MB::Sound::GraphIO.load(text)
@@ -26,7 +26,7 @@ RSpec.describe(MB::Sound::GraphNode::TimeLimit, :aggregate_failures) do
       expect(loaded.sample(800)).to eq(nil)
 
       # a document written with the alias loads too
-      expect(MB::Sound::GraphIO.load('220.hz.ramp.for(0.01)').sample(800).length).to eq(480)
+      expect(MB::Sound::GraphIO.load('220.hz.saw.for(0.01)').sample(800).length).to eq(480)
     end
 
     it 'rounds the length to the nearest sample' do
@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::GraphNode::TimeLimit, :aggregate_failures) do
     end
 
     it 'ends sums and products' do
-      graph = 100.hz.ramp.until(0.1) * 0.5
+      graph = 100.hz.saw.until(0.1) * 0.5
       total = 0
       while (buf = graph.sample(800))
         total += buf.length

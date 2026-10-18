@@ -1,3 +1,5 @@
+require_relative 'inspect'
+
 module MB
   module Sound
     module GraphNode
@@ -5,6 +7,8 @@ module MB
       # include this if they want to have #sources, #graph, #graph_edges, and
       # similar methods.
       module Traversable
+        include Inspect # one-line #inspect (ux-fix-1)
+
         # Overridden by users of this mixin to return the inputs to the current
         # object.  For example, a Mixer will return a list of objects that are
         # added together by that mixer, as well as any constant DC offset

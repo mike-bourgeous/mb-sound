@@ -3,6 +3,19 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
   after { sessions.each(&:close) }
 
+  # ux-fix-1 item 22: "trim +23.62 dB; first pass -12.05 LUFS" read as a
+  # wrong number for a 3.5 LU change
+  it "relates a targeted render's trim to the first pass's drive" do
+    r = MB::Sound::Mastering::Targeting::Result.new(
+      preset: :club, trim: 23.62.db, target: MB::Sound::Loudness.target(-8.5), ceiling: -1.db, integrated: -8.5, short_term_max: -7.0,
+      range: 3.0, true_peak: -1.0, side: -40.0, side_hz: 120, first_pass: -12.05, runs: 6, held: false, codec_peaks: nil,
+      measure: :integrated, loudest: nil, loudest_bars: nil, drive: 11.5.db
+    )
+    expect(r.to_s.lines.first.chomp).to match(
+      /\Amastering :club: \w+ \(trim \+23\.62 dB into the chain; the first pass's drive \+11\.50 dB gave -12\.05 LUFS; \+12\.12 dB more trim for \+3\.55 LU \(the chain compresses and limits\); 6 chain runs\)\z/
+    )
+  end
+
   def session(**opts)
     MB::Sound::Session.new(
       master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
@@ -30,8 +43,8 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
   # A stereo test mix: a chord and a kick-like pulse.
   def test_mix(level: 0.3)
     MB::Sound.with_seed(4) {
-      l = 110.hz.ramp.at(level) + 165.hz.saw.rnd.at(level * 0.6) + 55.hz.sine.at(level * 2) * 2.hz.aramp.abs
-      r = 138.6.hz.ramp.rnd.at(level) + 220.hz.triangle.at(level * 0.6) + 55.hz.sine.at(level * 2) * 2.hz.aramp.abs
+      l = 110.hz.saw.at(level) + 165.hz.saw.rnd.at(level * 0.6) + 55.hz.sine.at(level * 2) * 2.hz.asaw.abs
+      r = 138.6.hz.saw.rnd.at(level) + 220.hz.triangle.at(level * 0.6) + 55.hz.sine.at(level * 2) * 2.hz.asaw.abs
       MB::Sound::GraphNode::Channels.new([l, r])
     }
   end
@@ -200,7 +213,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
 
     it 'shows the rider gain in master_info' do
       s = session
-      s.add([110.hz.ramp.at(0.1), 110.hz.ramp.at(0.1)])
+      s.add([110.hz.saw.at(0.1), 110.hz.saw.at(0.1)])
       s.master(:club, ride: true)
       60.times { s.process_buffer }
       expect(s.master_info).to match(/\Amaster: :club, ride: true \(ride \+\d+\.\d dB\)\z/)
@@ -283,7 +296,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
         MB::Sound.render(a, bars: 2, overwrite: true) {
           MB::Sound.knob :air, 20, range: 20..2000, curve: :exp
           MB::Sound.master(:club, lufs: -12) { |mix| mix.filter(:highpass, cutoff: MB::Sound.knob(:air)) }
-          MB::Sound.bg :a, MB::Sound::GraphNode::Channels.new([110.hz.ramp.at(0.3), 82.5.hz.saw.at(0.3)])
+          MB::Sound.bg :a, MB::Sound::GraphNode::Channels.new([110.hz.saw.at(0.3), 82.5.hz.saw.at(0.3)])
           MB::Sound.at_bar(2) { MB::Sound.turn :air, 1500, over: 1 }
         }
       }.to output(/mastering :club: pass/).to_stdout
@@ -305,7 +318,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
         MB::Sound.render(a, from: 2, bars: 1, overwrite: true) {
           MB::Sound.master :streaming
           # (a loud first bar that the file leaves out, then a quiet one)
-          MB::Sound.bg :loud, 110.hz.ramp.at(0.5).until(1.bar)
+          MB::Sound.bg :loud, 110.hz.saw.at(0.5).until(1.bar)
           MB::Sound.at_bar(2) { MB::Sound.bg :quiet, 220.hz.triangle.at(0.03) }
         }
       }.to output(/mastering :streaming: pass/).to_stdout
@@ -313,15 +326,15 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'refuses a block that plays graphs built outside it' do
-      g = 220.hz.ramp.at(0.2)
+      g = 220.hz.saw.at(0.2)
       expect {
         MB::Sound.render(tmp_path('x.flac'), bars: 1) { MB::Sound.master :quiet; MB::Sound.bg :a, g }
       }.to raise_error(ArgumentError, /built outside it/)
     end
 
     it 'refuses master: for prebuilt sounds unless loudness: false' do
-      expect { MB::Sound.render(tmp_path('x.flac'), 220.hz.ramp, seconds: 0.1, master: :club) }.to raise_error(ArgumentError, /runs twice/)
-      MB::Sound.render(tmp_path('y.flac'), 220.hz.ramp.at(0.1), seconds: 0.1, master: :club, loudness: false)
+      expect { MB::Sound.render(tmp_path('x.flac'), 220.hz.saw, seconds: 0.1, master: :club) }.to raise_error(ArgumentError, /runs twice/)
+      MB::Sound.render(tmp_path('y.flac'), 220.hz.saw.at(0.1), seconds: 0.1, master: :club, loudness: false)
       expect(MB::Sound.read(tmp_path('y.flac'))[0].length).to eq(4800)
     end
   end

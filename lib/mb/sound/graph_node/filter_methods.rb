@@ -41,22 +41,22 @@ module MB
         #
         # Example:
         #     # Simple low-pass filter at 1200Hz center frequency
-        #     MB::Sound.play 500.hz.ramp.filter(1200.hz)
+        #     MB::Sound.play 500.hz.saw.filter(1200.hz)
         #
         #     # Low-pass filter with center frequency sweeping between 500 and 1000 Hz
-        #     MB::Sound.play 500.hz.ramp.filter(cutoff: 0.2.hz.at(500), quality: 4)
+        #     MB::Sound.play 500.hz.saw.filter(cutoff: 0.2.hz.at(500), quality: 4)
         #
         #     # High-pass filter controlled by envelopes
-        #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
+        #     MB::Sound.play 500.hz.saw.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
         #
         #     # A peaking EQ whose boost swells and fades
-        #     MB::Sound.play 110.hz.ramp.filter(:peak, cutoff: 900, quality: 3, gain: 0.25.hz.lfo.at(0.25..6))
+        #     MB::Sound.play 110.hz.saw.filter(:peak, cutoff: 900, quality: 3, gain: 0.25.hz.lfo.at(0.25..6))
         #
         #     # The old direct form biquad (thumps on fast dives, e.g. drums)
-        #     MB::Sound.play 220.hz.ramp.filter(:lowpass, cutoff: 0.5.hz.lfo.square.at(20..4000), structure: :biquad)
+        #     MB::Sound.play 220.hz.saw.filter(:lowpass, cutoff: 0.5.hz.lfo.square.at(20..4000), structure: :biquad)
         #
         #     # CEM3379-style 4-pole lowpass (see #lp4); takes resonance: 0..1
-        #     MB::Sound.play 110.hz.ramp.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.47)
+        #     MB::Sound.play 110.hz.saw.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.47)
         #
         # TODO: support SampleWrapper inputs argument
         def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, structure: nil, in_place: false)
@@ -191,18 +191,18 @@ module MB
         # Notes#reso follows CC 71 (resonance) like Notes#quality.
         #
         # Examples:
-        #     play 110.hz.ramp.lp4(800, resonance: 0.4)
-        #     play 55.hz.ramp.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.68, drive: 3)
+        #     play 110.hz.saw.lp4(800, resonance: 0.4)
+        #     play 55.hz.saw.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.68, drive: 3)
         #     # A synth voice (v from synth_script or midi.synth)
         #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.33) * v.amp_env
         #     # Resonance on CC 71, centered on 0.6
         #     v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.6)) * v.amp_env
         #     # MS-20-style clipped resonance on the 2-pole tap
-        #     play 110.hz.ramp.lp4(0.2.hz.lfo.at(200..3000), resonance: 0.9, mode: :lp2, drive_mode: :feedback, drive: 2) * 0.3
+        #     play 110.hz.saw.lp4(0.2.hz.lfo.at(200..3000), resonance: 0.9, mode: :lp2, drive_mode: :feedback, drive: 2) * 0.3
         #     # Self-oscillating sine at the cutoff
         #     play 0.constant.lp4(440, resonance: 1, self_oscillate: true)
         #     # Emphasis swept through the onset (0.9): ringing, then a growing whistle
-        #     play 110.hz.ramp.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
+        #     play 110.hz.saw.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
         def lp4(
           cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
           resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, tuning: :musical
@@ -263,7 +263,7 @@ module MB
         # +width+ scales the bandwidths (below 1 is more resonant).
         # Level-normalized by default (see Formant).  Alias #vowel.
         #
-        #     play 110.hz.ramp.formant(:a)
+        #     play 110.hz.saw.formant(:a)
         #     play 110.hz.pulse(0.1).formant(:a, :e, :i, :o, :u, morph: 0.25.hz.lfo.at(0..1))
         #     v.hz.saw.formant(:o, :a, morph: v.mod_wheel, shift: (v.number - 60) * 0.3)
         def formant(*vowels, voice: Formant::DEFAULT_VOICE, morph: 0, shift: 0, width: 1, normalize: true)
@@ -279,10 +279,10 @@ module MB
         #
         # Example:
         #     # Reduce second harmonic (or first if you count from zero)
-        #     100.hz.ramp.peq(200.hz => -6.db)
+        #     100.hz.saw.peq(200.hz => -6.db)
         #
         #     # Cut mids
-        #     100.hz.ramp.peq(500.hz => [-10.db, 4])
+        #     100.hz.saw.peq(500.hz => [-10.db, 4])
         #
         # +structure:+ is :svf (default) or :biquad (see FILTER_STRUCTURES;
         # the static responses are the same).  Ruby passes a Hash without
@@ -354,7 +354,7 @@ module MB
         #
         # Example:
         #     # Filter pinging bell ringing
-        #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9)
+        #     play 0.5.hz.saw.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9)
         #
         #     # MIDI controlled
         #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)

@@ -3,8 +3,8 @@
 graph 4,
   name: "funk_talkbox",
   kind: :synth,
-  saved: "2026-10-18T07:25:45Z",
-  mb_sound: "0.12.0.usegit (7ffa245e)",
+  saved: "2026-10-18T16:06:47Z",
+  mb_sound: "0.12.0.usegit (617c024b)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :talkbox from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :talkbox, dub: 0.0, keep: 0.82 }
@@ -13,7 +13,7 @@ inputs midi: :notes
 synth(midi, voices: 1) { |v|
   f = v.hz.glide(0.045).vibrato(5.2, depth: 0.25, delay: 0.25)
   buzz = f.transpose(-12)
-  sig = buzz.ramp * 0.6 + buzz.pulse(0.2) * 0.5
+  sig = buzz.saw * 0.6 + buzz.pulse(0.2) * 0.5
   src = sig + sig.filter(:highpass, cutoff: 1800, quality: 0.7) * 0.7
   open = v.lfo(1.n8, shape: :triangle, unipolar: true, phase: 0.75)
   drift = v.lfo(4.bars, shape: :triangle, unipolar: true, phase: 0.75)

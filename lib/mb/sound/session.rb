@@ -849,6 +849,22 @@ module MB
         @thread
       end
 
+      # A one-line summary (ux-fix-1): the default #inspect printed every
+      # player's graph with its buffers.  #inspect_full is the old dump.
+      def inspect
+        mode = @realtime ? 'realtime' : 'render'
+        count = @players&.size.to_i
+        "#<Session #{mode}, #{count} player#{count == 1 ? '' : 's'}, #{MB::M.sigformat(@transport&.bpm.to_f)} bpm>"
+      end
+
+      def inspect_full
+        Kernel.instance_method(:inspect).bind_call(self)
+      end
+
+      def pretty_print(q)
+        q.text(inspect)
+      end
+
       # True if this Session plays in real time through its output (a
       # render thread paced by the output), false for renders driven by
       # #process_buffer.
@@ -1430,6 +1446,7 @@ module MB
         # player's first frame (see GraphNode::Knob#clock_frame and
         # #player_frame)
         t = MB::U.clock_now
+        gc = GC.stat(:time)
         begin
           @knob_frame = base + offset if @knob_frame
           @player_frame = base + offset
@@ -1440,7 +1457,7 @@ module MB
         end
         elapsed = MB::U.clock_now - t
         p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
-        check_speed(p, elapsed, frames)
+        check_speed(p, Session.without_gc(elapsed, gc), frames)
         read_while_asleep(p, asleep_after) # the rest of the buffer after a mute ramp
         p.read_to = base + offset + frames + asleep_after
 
@@ -1556,6 +1573,16 @@ module MB
           p.slow_warned = true
           warn "Player #{p.name.inspect} (#{p.description}) is taking #{(100 * load).round}% of its audio buffer time; it may cause dropouts"
         end
+      end
+
+      # +elapsed+ seconds minus the garbage collection since GC.stat(:time)
+      # was +gc+ (ms): the slow-player warnings judge a player by its own
+      # work.  A GC pause lands in whichever player allocates when it
+      # starts (ux-fix-1 item 21: one 13-23 ms pause in a 16.7 ms buffer was
+      # most of a 10-buffer average on the slower Mac), so it named players
+      # that weren't slow.
+      def self.without_gc(elapsed, gc)
+        [elapsed - (GC.stat(:time) - gc) / 1000.0, 0.0].max
       end
 
       # Buffers to ignore when a player or chain starts (resamplers and other

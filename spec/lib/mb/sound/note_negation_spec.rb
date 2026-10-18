@@ -36,7 +36,7 @@ RSpec.describe('Negating Notes, Steps, and nodes (audit for Note#!)') do
     expect((!MB::Sound::C4).accented?).to eq(true)
     expect(!(!MB::Sound::C4)).to be_a(MB::Sound::Sequence::Seq::Step)
     expect(!440.hz).to eq(false)
-    expect(!440.hz.ramp).to eq(false)
+    expect(!440.hz.saw).to eq(false)
     expect(!MB::Sound.seq(MB::Sound::C4)).to eq(false)
   end
 
@@ -48,12 +48,12 @@ RSpec.describe('Negating Notes, Steps, and nodes (audit for Note#!)') do
     end
 
     it 'syncs a tone to a Note master' do
-      t = 220.hz.ramp.sync(MB::Sound::A2)
+      t = 220.hz.saw.sync(MB::Sound::A2)
       expect(t.sample(256).abs.max).to be > 0.1
     end
 
     it 'uses a Note as a filter cutoff' do
-      sig = 220.hz.ramp.lp4(MB::Sound::C6, resonance: 0.3)
+      sig = 220.hz.saw.lp4(MB::Sound::C6, resonance: 0.3)
       expect(sig.sample(256).abs.max).to be > 0.01
     end
 

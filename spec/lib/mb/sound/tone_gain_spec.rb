@@ -15,17 +15,17 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
 
   {
     'a sine' => -> { 220.hz.sine },
-    'a band-limited ramp with #at' => -> { 220.hz.ramp.at(0.3) },
-    'a ramp with an offset range' => -> { 110.hz.ramp.at(0.2..0.9) },
+    'a band-limited ramp with #at' => -> { 220.hz.saw.at(0.3) },
+    'a ramp with an offset range' => -> { 110.hz.saw.at(0.2..0.9) },
     'a pulse with pwm' => -> { 330.hz.pwm(0.3).square },
     'a complex sine' => -> { 220.hz.complex_sine },
-    'a complex ramp (BLIT)' => -> { 220.hz.complex_ramp },
+    'a complex ramp (BLIT)' => -> { 220.hz.complex_saw },
     'a synced square' => -> { 150.hz.square.sync(ratio: 2.3) },
     'a feedback sine' => -> { 220.hz.fm_feedback(1.5) },
     'a wavetable' => -> { 220.hz.wavetable(:saw, scan: 0.5) },
     'a tone with resets and FM' => -> {
       t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(6000).tap { |a| a[[50, 700, 3000]] = 1 }])
-      200.hz.ramp.fm(5.hz.lfo.at(20)).reset(t)
+      200.hz.saw.fm(5.hz.lfo.at(20)).reset(t)
     },
   }.each do |name, make|
     it "equals tone * gain bit for bit for #{name}, and C equals Ruby" do
@@ -49,12 +49,12 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
   end
 
   it 'equals tone * number for a constant gain' do
-    expect(collect(220.hz.ramp.gain(0.3), [1000])).to eq(collect(220.hz.ramp * 0.3, [1000]))
-    expect(collect(220.hz.ramp.amp(-2), [1000])).to eq(collect(220.hz.ramp * -2, [1000]))
+    expect(collect(220.hz.saw.gain(0.3), [1000])).to eq(collect(220.hz.saw * 0.3, [1000]))
+    expect(collect(220.hz.saw.amp(-2), [1000])).to eq(collect(220.hz.saw * -2, [1000]))
   end
 
   it 'leaves the output unchanged without a gain (and with gain(nil))' do
-    expect(collect(220.hz.ramp.gain(0.5).gain(nil), [1000])).to eq(collect(220.hz.ramp, [1000]))
+    expect(collect(220.hz.saw.gain(0.5).gain(nil), [1000])).to eq(collect(220.hz.saw, [1000]))
   end
 
   it 'ends the tone when the gain ends' do
@@ -83,10 +83,10 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
 
   describe '#at with a node' do
     it 'sets the output gain, the same samples as tone * node, and returns the tone' do
-      t = 220.hz.ramp.at(0.3)
+      t = 220.hz.saw.at(0.3)
       expect(t.at(env)).to equal(t)
       expect(t.output_gain).to be_a(MB::Sound::GraphNode)
-      expect(collect(220.hz.ramp.at(0.3).at(env))).to eq(collect(220.hz.ramp.at(0.3) * env))
+      expect(collect(220.hz.saw.at(0.3).at(env))).to eq(collect(220.hz.saw.at(0.3) * env))
       expect(collect(220.hz.at(env))).to eq(collect(220.hz.sine * env))
     end
 
@@ -96,20 +96,20 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
     end
 
     it 'merges with a numeric gain into one gain input, within float32 rounding of tone.gain(g) * node' do
-      a = 220.hz.ramp.gain(0.5).at(env)
+      a = 220.hz.saw.gain(0.5).at(env)
       expect(a).to be_a(MB::Sound::Tone)
       expect(a.output_gain).to be_a(MB::Sound::GraphNode)
       x = collect(a)
-      y = collect(220.hz.ramp.gain(0.5) * env)
+      y = collect(220.hz.saw.gain(0.5) * env)
       expect(x.length).to eq(y.length)
       expect(ulps(x, y)).to be < 2.4e-7
     end
 
     it 'keeps a biased range: (wave * amp + offset) * gain * node' do
-      a = 110.hz.ramp.at(0.2..0.9).gain(0.37).at(env)
+      a = 110.hz.saw.at(0.2..0.9).gain(0.37).at(env)
       expect(a).to be_a(MB::Sound::Tone)
       x = collect(a)
-      y = collect(110.hz.ramp.at(0.2..0.9) * 0.37 * env)
+      y = collect(110.hz.saw.at(0.2..0.9) * 0.37 * env)
       expect(ulps(x, y)).to be < 2.4e-7
       # The offset is scaled too: the output at a sustain of 0.5 averages
       # 0.55 * 0.37 * 0.5, not 0.37 * 0.5 * ramp + 0.55
@@ -123,17 +123,17 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
     end
 
     it 'raises (live_error) when the gain is already a node, and multiplies after the tone live' do
-      expect { 220.hz.ramp.gain(env).at(env) }.to raise_error(ArgumentError, /already has a gain node/)
+      expect { 220.hz.saw.gain(env).at(env) }.to raise_error(ArgumentError, /already has a gain node/)
       allow(MB::Sound).to receive(:live?).and_return(true)
       b = nil
-      expect { b = 220.hz.ramp.gain(env).at(env) }.to output(/already has a gain node/).to_stderr
+      expect { b = 220.hz.saw.gain(env).at(env) }.to output(/already has a gain node/).to_stderr
       expect(b).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(collect(b)).to eq(collect(220.hz.ramp.gain(env) * env))
+      expect(collect(b)).to eq(collect(220.hz.saw.gain(env) * env))
     end
 
     it 'multiplies after phasors and playing tones instead of failing' do
       expect(100.hz.phasor.at(env)).to be_a(MB::Sound::GraphNode::Multiplier)
-      t = 220.hz.ramp
+      t = 220.hz.saw
       t.sample(10)
       expect(t.at(env)).to be_a(MB::Sound::GraphNode::Multiplier)
       expect(t.output_gain).to be_nil
@@ -141,17 +141,17 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
 
     it 'prints back as .at(node) and round trips through a graph document' do
       MB::Sound.seed(1)
-      g = 220.hz.ramp.at(0.3).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
-      expect(g.to_ruby).to include("220.hz.ramp.at(0.3).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
+      g = 220.hz.saw.at(0.3).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
+      expect(g.to_ruby).to include("220.hz.saw.at(0.3).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
       loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'at'))
       expect(loaded).to be_a(MB::Sound::Tone)
-      expect(collect(loaded)).to eq(collect(220.hz.ramp.at(0.3) * env))
+      expect(collect(loaded)).to eq(collect(220.hz.saw.at(0.3) * env))
 
-      merged = 110.hz.ramp.at(0.2..0.9).gain(0.37).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
+      merged = 110.hz.saw.at(0.2..0.9).gain(0.37).at(MB::Sound.adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))
       text = merged.to_ruby
-      expect(text).to include("110.hz.ramp.at(0.2..0.9).gain(0.37).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
+      expect(text).to include("110.hz.saw.at(0.2..0.9).gain(0.37).at(adsr(0.01, 0.05, 0.5, 0.02, hold: 0.08))")
       loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(merged, name: 'at'))
-      expect(collect(loaded)).to eq(collect(110.hz.ramp.at(0.2..0.9).gain(0.37).at(env)))
+      expect(collect(loaded)).to eq(collect(110.hz.saw.at(0.2..0.9).gain(0.37).at(env)))
     end
   end
 

@@ -50,8 +50,8 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
     end
 
     it 'matches the Ruby mirror with constant and moving settings' do
-      one = 110.hz.ramp.formant(:a)
-      three = 110.hz.ramp.formant(:a, :i, :u, voice: :soprano)
+      one = 110.hz.saw.formant(:a)
+      three = 110.hz.saw.formant(:a, :i, :u, voice: :soprano)
       x = noise(1500)
       compare(1500, x, one, 0.0, 0.0, 1.0)
       compare(1500, x, one, noise(1500), noise(1500, 24), noise(1500, 1, 1), normalize: false)
@@ -61,13 +61,13 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
     end
 
     it 'matches the Ruby mirror for edge-case settings' do
-      node = 110.hz.ramp.formant(:a, :o)
+      node = 110.hz.saw.formant(:a, :o)
       odd = Numo::SFloat.cast([Float::NAN, -1, 2, 0, 0.5, 1, Float::INFINITY] * 30)
       compare(odd.length, noise(odd.length), node, odd, odd * 50, odd)
     end
 
     it 'raises for bad arguments' do
-      node = 110.hz.ramp.formant(:a)
+      node = 110.hz.saw.formant(:a)
       t = node.instance_variable_get(:@tables)
       out = Numo::SFloat.zeros(4)
       st = Numo::DFloat.zeros(10)
@@ -80,7 +80,7 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
   end
 
   it 'has resonant peaks at the vowel formants' do
-    node = 110.hz.ramp.formant(:a, voice: :bass, normalize: false)
+    node = 110.hz.saw.formant(:a, voice: :bass, normalize: false)
     f = klass::VOICES[:bass][:a]
     found = peaks(node, f)
     expect(found.first).to be_within(10).of(600)
@@ -91,10 +91,10 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
   end
 
   it 'keeps a saw near its input level when normalized' do
-    ref = rms(110.hz.ramp.sample(48000))
+    ref = rms(110.hz.saw.sample(48000))
     klass::VOICES.each_key do |voice|
       klass::VOWELS.each do |v|
-        out = rms(110.hz.ramp.formant(v, voice: voice).sample(48000))
+        out = rms(110.hz.saw.formant(v, voice: voice).sample(48000))
         expect((out / ref).to_db).to be_within(6).of(0), "#{voice} #{v}"
       end
     end
@@ -108,48 +108,48 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
   end
 
   it 'plays one vowel exactly at the ends of a morph' do
-    a = collect(110.hz.ramp.formant(:a), 4800)
-    o = collect(110.hz.ramp.formant(:o), 4800)
-    expect(collect(110.hz.ramp.formant(:a, :o, morph: 0), 4800)).to eq(a)
-    expect(collect(110.hz.ramp.formant(:a, :o, morph: 1), 4800)).to eq(o)
-    expect(collect(110.hz.ramp.formant(:a, :o, morph: 5), 4800)).to eq(o)
-    expect(collect(110.hz.ramp.formant(:a, :e, :o, morph: 1), 4800)).to eq(o)
+    a = collect(110.hz.saw.formant(:a), 4800)
+    o = collect(110.hz.saw.formant(:o), 4800)
+    expect(collect(110.hz.saw.formant(:a, :o, morph: 0), 4800)).to eq(a)
+    expect(collect(110.hz.saw.formant(:a, :o, morph: 1), 4800)).to eq(o)
+    expect(collect(110.hz.saw.formant(:a, :o, morph: 5), 4800)).to eq(o)
+    expect(collect(110.hz.saw.formant(:a, :e, :o, morph: 1), 4800)).to eq(o)
   end
 
   it 'moves its formants by the shift, keeping the Q' do
-    up = 110.hz.ramp.formant(:a, voice: :bass, shift: 12, normalize: false)
+    up = 110.hz.saw.formant(:a, voice: :bass, shift: 12, normalize: false)
     f = klass::VOICES[:bass][:a].map { |hz, db, bw| [hz * 2, db, bw * 2] }
     expect(peaks(up, f).first).to be_within(20).of(1200)
 
-    a = collect(110.hz.ramp.formant(:a, shift: 7.semitones), 2000)
-    b = collect(110.hz.ramp.formant(:a, shift: 7), 2000)
+    a = collect(110.hz.saw.formant(:a, shift: 7.semitones), 2000)
+    b = collect(110.hz.saw.formant(:a, shift: 7), 2000)
     expect(a).to eq(b)
 
     # The shift moves the sound: a 12-semitone shift is the same filter at
     # twice the frequencies (within float32 rounding of the coefficients)
-    c = collect(110.hz.ramp.formant(:a, shift: 12), 2000)
-    expect(c).not_to eq(collect(110.hz.ramp.formant(:a), 2000))
+    c = collect(110.hz.saw.formant(:a, shift: 12), 2000)
+    expect(c).not_to eq(collect(110.hz.saw.formant(:a), 2000))
   end
 
   it 'gives the same output at any buffer size with moving settings' do
-    make = -> { 110.hz.ramp.formant(:a, :e, :i, morph: 0.5.hz.lfo.at(0..1), shift: 0.3.hz.lfo.at(-5..5), width: 0.2.hz.lfo.at(0.5..1.5)) }
+    make = -> { 110.hz.saw.formant(:a, :e, :i, morph: 0.5.hz.lfo.at(0..1), shift: 0.3.hz.lfo.at(-5..5), width: 0.2.hz.lfo.at(0.5..1.5)) }
     expect(collect(make.(), 9600, [1, 7, 128, 33])).to eq(collect(make.(), 9600, 800))
   end
 
   it 'takes custom vowels as five triples' do
     custom = [[500, 0.db, 50], [1500, -6.db, 80], [2500, -12.db, 100], [3500, -20.db, 120], [4500, -30.db, 150]]
-    node = 110.hz.ramp.formant(custom, :a)
+    node = 110.hz.saw.formant(custom, :a)
     expect(node.table.length).to eq(2)
     expect(collect(node, 1000).abs.max).to be > 0.05
 
     # Levels are Decibels (exact) or linear gains; bare negatives raise
     linear = [[500, 1, 50], [1500, 0.5, 80], [2500, 0.25, 100], [3500, 0.1, 120], [4500, 0.03, 150]]
-    expect(110.hz.ramp.formant(linear, normalize: false).table[0].map { |f| f[1] }).to eq(linear.map { |f| 20 * Math.log10(f[1]) })
-    expect { 110.hz.ramp.formant([[500, 0, 50], [1500, -6, 80], [2500, -12, 100], [3500, -20, 120], [4500, -30, 150]]) }.to raise_error(ArgumentError, /formant level/)
+    expect(110.hz.saw.formant(linear, normalize: false).table[0].map { |f| f[1] }).to eq(linear.map { |f| 20 * Math.log10(f[1]) })
+    expect { 110.hz.saw.formant([[500, 0, 50], [1500, -6, 80], [2500, -12, 100], [3500, -20, 120], [4500, -30, 150]]) }.to raise_error(ArgumentError, /formant level/)
   end
 
   it 'runs per channel on bundles' do
-    out = MB::Sound.stereo(110.hz.ramp, 165.hz.ramp).formant(:a, :o, morph: MB::Sound.channels(0.2, 0.8))
+    out = MB::Sound.stereo(110.hz.saw, 165.hz.saw).formant(:a, :o, morph: MB::Sound.channels(0.2, 0.8))
     expect(out).to be_a(MB::Sound::GraphNode::Channels)
     expect(out.outputs.map(&:morph)).to eq([0.2, 0.8])
   end
@@ -159,22 +159,22 @@ RSpec.describe(MB::Sound::GraphNode::Formant, :aggregate_failures) do
     expect(collect(input.formant(:a), 5000).length).to eq(1000)
 
     morph = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(300)])
-    expect(collect(110.hz.ramp.formant(:a, :e, morph: morph), 5000).length).to eq(300)
+    expect(collect(110.hz.saw.formant(:a, :e, morph: morph), 5000).length).to eq(300)
   end
 
   it 'rejects bad arguments with helpful messages' do
-    expect { 110.hz.ramp.formant(:x) }.to raise_error(ArgumentError, /Unknown vowel/)
-    expect { 110.hz.ramp.formant(:a, voice: :baritone) }.to raise_error(ArgumentError, /Unknown voice/)
-    expect { 110.hz.ramp.formant([[1, 2]]) }.to raise_error(ArgumentError, /five/)
-    expect { 110.hz.ramp.formant(:a, width: 0) }.to raise_error(ArgumentError, /width/)
-    expect { 110.hz.ramp.formant(:a, morph: :x) }.to raise_error(ArgumentError, /morph/)
+    expect { 110.hz.saw.formant(:x) }.to raise_error(ArgumentError, /Unknown vowel/)
+    expect { 110.hz.saw.formant(:a, voice: :baritone) }.to raise_error(ArgumentError, /Unknown voice/)
+    expect { 110.hz.saw.formant([[1, 2]]) }.to raise_error(ArgumentError, /five/)
+    expect { 110.hz.saw.formant(:a, width: 0) }.to raise_error(ArgumentError, /width/)
+    expect { 110.hz.saw.formant(:a, morph: :x) }.to raise_error(ArgumentError, /morph/)
   end
 
   it 'has the alias vowel, prints itself back as Ruby, and describes itself' do
-    a = collect(110.hz.ramp.vowel(:e), 1000)
-    expect(collect(110.hz.ramp.formant(:e), 1000)).to eq(a)
+    a = collect(110.hz.saw.vowel(:e), 1000)
+    expect(collect(110.hz.saw.formant(:e), 1000)).to eq(a)
 
-    node = 110.hz.ramp.formant(:a, :o, morph: 0.25, voice: :bass, width: 0.8)
+    node = 110.hz.saw.formant(:a, :o, morph: 0.25, voice: :bass, width: 0.8)
     expect(node.to_ruby).to include('formant(:a, :o, morph: 0.25, voice: :bass, width: 0.8)')
     expect(node.to_s).to eq('Formant a>o (bass)')
   end

@@ -74,14 +74,14 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
 
     it 'leaves nodes without ports unchanged' do
       expect(100.hz.phasor.ports).to eq({})
-      expect(321.hz.ramp.sample(800)).to eq(321.hz.ramp.sample(800))
+      expect(321.hz.saw.sample(800)).to eq(321.hz.saw.sample(800))
     end
   end
 
   describe 'Tone ports' do
     it 'gives sync pulses from the phase, not the phase modulation' do
-      plain = 1001.3.hz.ramp.wraps.sample(200)
-      modulated = 1001.3.hz.ramp.pm(50.hz.at(2)).wraps.sample(200)
+      plain = 1001.3.hz.saw.wraps.sample(200)
+      modulated = 1001.3.hz.saw.pm(50.hz.at(2)).wraps.sample(200)
       expect(modulated).to eq(plain)
     end
 
@@ -98,11 +98,11 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
       expect(info.map { |i| i[:name] }).to eq([:out, :wraps, :increment])
       expect(info.drop(1).map { |i| i[:description] }).to all(be_a(String))
       expect(info.drop(1).map { |i| i[:type] }).to all(eq(:control))
-      expect(100.hz.ramp.port_info[:out].map { |i| i[:name] }).to eq([:out, :wraps, :increment])
+      expect(100.hz.saw.port_info[:out].map { |i| i[:name] }).to eq([:out, :wraps, :increment])
     end
 
     it 'lists ports in use' do
-      t = 100.hz.ramp
+      t = 100.hz.saw
       t.wraps
       expect(t.ports.keys).to eq([:wraps])
     end
@@ -117,7 +117,7 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
     end
 
     it 'lists inputs' do
-      expect(100.hz.ramp.inputs.keys).to include(:frequency)
+      expect(100.hz.saw.inputs.keys).to include(:frequency)
     end
   end
 end

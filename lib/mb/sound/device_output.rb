@@ -54,6 +54,34 @@ module MB
     #     out.write([left, right])
     #     out.close
     class DeviceOutput
+      # Raised when no sound card could be opened (ux-fix-1): one line that
+      # says what to do instead of miniaudio's error and a wall of ALSA
+      # messages.  A FastAudio::Error, so code rescuing that still works.
+      class Unavailable < FastAudio::Error
+        # Builds the message from the FastAudio::Error +error+ (+kind+ is
+        # :output or :input).
+        def self.from(error, kind: :output)
+          reason = error.message.sub(/\ACould not open audio device(?: at \d+ Hz)?: /, '')
+          help = if kind == :input
+                   'bin/audio_check.rb --list shows devices; scripts read a file instead (script.rb in.flac -o out.flac)'
+                 else
+                   "bin/audio_check.rb --list shows devices; OUTPUT_TYPE=null plays silently, and render 'x.flac', graph, seconds: 4 writes a file"
+                 end
+          new("No audio #{kind} device (#{reason}).  #{help}")
+        end
+      end
+
+      # Runs the block (a FastAudio device open) with stderr captured (see
+      # Internal.quiet_stderr), raising Unavailable if it fails.  +kind+ is
+      # :output or :input.
+      def self.opening(kind: :output)
+        Internal.quiet_stderr(FastAudio::Error) { yield }
+      rescue Unavailable
+        raise
+      rescue FastAudio::Error => e
+        raise Unavailable.from(e, kind: kind)
+      end
+
       # Latency profiles: frames per write (the block size Session renders),
       # the sound card period in frames (nil for miniaudio's low-latency
       # default, 10 ms), and seconds queued ahead of the sound card (at least
@@ -250,11 +278,13 @@ module MB
           end
         end
 
-        @playback ||= FastAudio::Playback.new(
-          backends, self.class.device_index(device, backends: backends), self.class.client_name,
-          channels, @device_channels, requested_rate, device_rate, period, queue, capture,
-          quality, set_device_rate, max_queue
-        )
+        @playback ||= self.class.opening(kind: :output) {
+          FastAudio::Playback.new(
+            backends, self.class.device_index(device, backends: backends), self.class.client_name,
+            channels, @device_channels, requested_rate, device_rate, period, queue, capture,
+            quality, set_device_rate, max_queue
+          )
+        }
         @underruns_seen = 0
         @last_write = nil
         @base_queue = @playback.queue_limit

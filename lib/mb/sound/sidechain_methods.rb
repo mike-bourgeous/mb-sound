@@ -16,7 +16,7 @@ module MB
     #     sidechain(:hats, hat_line) { |c| tr808(c) }         # a sounding patch, never heard
     #     bass.compress(sidechain: :pump, threshold: -30.db)
     #     master { |mix| mix.duck(:pump, amount: -3.db) }
-    #     turn :"pump/level", 0                               # the pump off (its level knob)
+    #     turn :pump, 0                                       # the pump off (its on/off level)
     #     sidechains                                          # lists them
     #
     # A trigger track is an Arrangement track (Session::Buses#route with
@@ -27,10 +27,12 @@ module MB
     # `bus(:pump)`, `compress(sidechain: :pump)`) hear it on the exact
     # sample at any buffer size, after its fades and before its mute, like
     # any sidechain source, times its level knob :"pump/level" (0..1; see
-    # Session::Buses#trigger_level_name): `turn :"pump/level", 0` stops
-    # the pump, journaled and undoable, and scenes and sections take
-    # `"pump/level": 0`.  Mute doesn't (readers hear sources before their
-    # mute), so `mute :pump` prints a hint.
+    # Session::Buses#trigger_level_name), which the track's name stands for
+    # where a knob is meant (Session::Knobs#control_name): `turn :pump, 0`
+    # stops the pump, journaled and undoable, and scenes and sections take
+    # `pump: 0` (a number: the level; a clip: the line) and `pump: 1`.
+    # Mute doesn't (readers hear sources before their mute), so `mute
+    # :pump` prints a hint.
     module SidechainMethods
       # Shape names for #sidechain's +shape:+ besides envelopes.
       SHAPES = [:gate, :impulse].freeze
@@ -113,7 +115,7 @@ module MB
         keys = names.flatten.select { |n| n.is_a?(Symbol) && s.trigger_track?(n) }
         return nil if keys.empty?
         n = keys.first
-        "#{keys.map(&:inspect).join(', ')} #{keys.length == 1 ? 'is a trigger track' : 'are trigger tracks'}: mute doesn't stop a pump (ducks read it before its mute); turn #{s.trigger_level_name(n).inspect}, 0 or stop #{n.inspect}"
+        "#{keys.map(&:inspect).join(', ')} #{keys.length == 1 ? 'is a trigger track' : 'are trigger tracks'}: mute doesn't stop a pump (ducks read it before its mute); turn #{n.inspect}, 0 (its on/off level) or stop #{n.inspect}"
       end
 
       # The patch block for +shape+ (see #sidechain).

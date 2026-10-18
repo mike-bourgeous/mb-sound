@@ -59,7 +59,9 @@ module MB
       # else, with suggestions.
       def self.section_options(name, options)
         unknown = options.keys - SECTION_OPTIONS
-        knob_names = Session.current.knobs.keys + Arrangement::KEY_VALUES
+        # (knob names, and names standing for a control: a trigger track's
+        # level, `drop 8, pump: 0`; Session::Knobs#control_name)
+        knob_names = Session.current.control_names + Arrangement::KEY_VALUES
         knobs = options.slice(*(unknown & knob_names))
         unknown -= knob_names
         unless unknown.empty?

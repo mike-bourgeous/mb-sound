@@ -62,9 +62,14 @@ module MB
             return if pb && !pb.ended? && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
             return if markers[target]
 
-            names = markers.to_h.keys
-            names += pb.form.sections.keys + pb.form.labels.keys if pb
-            raise ArgumentError, "No section, label, or marker #{target.inspect} (markers: #{markers.to_h.keys.map(&:inspect).join(', ')})#{Form.suggest(target, names.uniq)}"
+            form = pb&.form
+            sections = form ? form.sections.keys + form.labels.keys : []
+            names = (sections + markers.to_h.keys).uniq
+            known = []
+            known << "sections and labels: #{sections.uniq.map(&:inspect).join(', ')}" unless sections.empty?
+            known << "markers: #{markers.to_h.keys.map(&:inspect).join(', ')}" unless markers.to_h.empty?
+            known << 'none yet' if known.empty?
+            raise ArgumentError, "No section, label, or marker #{target.inspect} (#{known.join('; ')})#{Form.suggest(target, names)}"
           end
 
           raise ArgumentError, "Bar must be a number of at least 1 (got #{target.inspect})" unless target.is_a?(Numeric) && target >= 1

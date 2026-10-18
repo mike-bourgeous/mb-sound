@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::Plot::SVG) do
   let(:chart) {
     MB::Sound::Plot.chart(title: 'Saw & <square>') {
       x :time, sample_rate: 48000
-      line 110.hz.ramp.sample(4800), label: 'saw'
+      line 110.hz.saw.sample(4800), label: 'saw'
       line 110.hz.square.sample(4800), label: 'square'
     }
   }

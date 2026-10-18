@@ -109,7 +109,7 @@ module MB
           left = groups.flat_map { |_, pairs| pairs.map { |cmd, _| cmd.length } }.max.to_i
           groups.each do |head, pairs|
             heading(head) if head
-            rows(pairs.map { |cmd, what| [Text.code(cmd).then { |t| Text.pad(t, left) }, what] }, indent: indent, max_label: left, dim: true)
+            rows(pairs.map { |cmd, what| [Text.code(cmd).then { |t| Text.pad(t, left) }, what] }, indent: indent, max_label: left, dim: true, wrap: true)
           end
           self
         end
@@ -174,11 +174,10 @@ module MB
         end
       end
 
-      # +text+ as it should print to +io+: plain under NO_COLOR or when
-      # +io+ isn't a terminal.
+      # +text+ as it should print to +io+: plain under NO_COLOR, TERM=dumb,
+      # or when +io+ isn't a terminal (see ColorPolicy).
       def self.for_output(text, io = $stdout)
-        color = ENV['NO_COLOR'].to_s.empty? && io.respond_to?(:tty?) && io.tty?
-        color ? text : MB::U.remove_ansi(text)
+        ColorPolicy.color?(io) ? text : MB::U.remove_ansi(text)
       end
     end
   end

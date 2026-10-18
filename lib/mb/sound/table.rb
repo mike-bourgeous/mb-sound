@@ -84,9 +84,9 @@ module MB
       def inspect = to_s
       def pretty_print(q) = q.text(to_s)
 
-      # True when +io+ is a terminal and NO_COLOR is unset.
+      # True when +io+ may be colored (see ColorPolicy).
       def self.color?(io = $stdout)
-        ENV['NO_COLOR'].to_s.empty? && io.respond_to?(:tty?) && io.tty?
+        ColorPolicy.color?(io)
       end
 
       private

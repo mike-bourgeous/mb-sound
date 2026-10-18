@@ -125,7 +125,7 @@ module MB
         # +base_dir+ is where relative file names point for text documents.
         #
         #     GraphIO.load('presets/dark_hall.mbg.rb', inputs: { input: mic }, params: { mix: 0.6 })
-        #     GraphIO.load(220.hz.ramp.softclip.to_ruby)
+        #     GraphIO.load(220.hz.saw.softclip.to_ruby)
         #
         # A set document (kind: :set, see SetWriter) loads into +session+
         # (the current one by default) and returns its Document.
@@ -649,7 +649,7 @@ module MB
       # returns the registered block without one.
       #
       #     fold = named_proc(:fold) { |buf| (buf * 3).sin }
-      #     220.hz.ramp.proc(&fold)
+      #     220.hz.saw.proc(&fold)
       def named_proc(name, &block)
         name = name.to_sym
         if block

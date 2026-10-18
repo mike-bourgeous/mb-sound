@@ -151,6 +151,12 @@ module MB
         end
       end
 
+      # Raised for inputs that can't work (a missing file, -o without an
+      # input file, a --from section the song doesn't have), checked before
+      # anything is built: ScriptingMethods prints the message as one line
+      # and exits with status 2 (ux-fix-1).
+      class InputError < ArgumentError; end
+
       # Parameter values given to script blocks, with a method per parameter.
       class Values
         def initialize(values)
@@ -308,6 +314,7 @@ module MB
       # repeats, with --repeat), the effect keeps playing until its output
       # has been quiet for Session::TAIL_QUIET_SECONDS.
       def run_effect(&block)
+        check_inputs
         path = @options[:input]
         channels = @options[:channels]
         input = if path && @options[:repeat]
@@ -355,6 +362,7 @@ module MB
       #
       # MB::Sound.synth(midi) { |v| ... } is the same as midi.synth.
       def run_synth(&block)
+        check_inputs
         notes = @synth_notes = synth_midi
         @params.midi_source = -> { notes }
         result = block.arity == 1 ? block.call(notes) : block.call(notes, @params)
@@ -528,6 +536,9 @@ module MB
         begin
           live_notes(input)
         rescue StandardError => e
+          if input && !File.exist?(input) && !@options[:ui]
+            raise InputError, "no file #{input.inspect} and no MIDI port named that (#{e.message.lines.first&.strip})"
+          end
           raise unless @options[:ui]
           # --ui without a MIDI device: the screen's keyboard plays the
           # synth (its notes go to the session's default MIDI input)
@@ -710,6 +721,33 @@ module MB
 
         @params = Values.new(values)
         @params.descriptions = @declared.to_h { |p| [p.name, p.description] }
+      end
+
+      # Checks input files before anything is built (see InputError; called
+      # first by #run_effect and #run_synth).
+      def check_inputs
+        name = File.basename(@script.to_s)
+        input = @options[:input]
+        case @kind
+        when :effect
+          if input && !File.exist?(input)
+            raise InputError, "no file #{input.inspect}"
+          elsif input && !File.readable?(input)
+            raise InputError, "#{input.inspect} is not readable"
+          elsif @options[:output] && input.nil? && ENV['INPUT_TYPE'].to_s.empty?
+            raise InputError, "-o writes a file from an input file: give one (#{name} in.flac -o out.flac)"
+          end
+
+        when :synth
+          if input && !File.exist?(input) && (input.downcase.end_with?('.mid', '.midi') || input.include?('/'))
+            raise InputError, "no file #{input.inspect} (MIDI files end in .mid; other names are MIDI ports)"
+          end
+        end
+
+        midi = @options[:midi]
+        if midi && midi.downcase.end_with?('.mid', '.midi') && !File.exist?(midi)
+          raise InputError, "no MIDI file #{midi.inspect}"
+        end
       end
 
       # Assigns positional filenames to input and output by script kind.

@@ -14,6 +14,10 @@ module MB
     # but starts with fresh state (no tails from before; the form plays on
     # from the section as a seek would).
     module RenderWindow
+      # A render window edge the song doesn't have (scripts print it as one
+      # line; see ScriptingMethods).
+      class TargetError < ArgumentError; end
+
       # An output that drops what is written until #open!, so a render's
       # pre-roll isn't written (everything else goes to the wrapped output).
       class Gate
@@ -78,11 +82,11 @@ module MB
         if target.is_a?(Symbol)
           session.send(:check_seek_target, target)
         elsif !(target.is_a?(Numeric) && target >= 1)
-          raise ArgumentError, "#{what} is a section, label, or marker name, or a bar number from 1 (got #{target.inspect})"
+          raise TargetError, "#{what} is a section, label, or marker name, or a bar number from 1 (got #{target.inspect})"
         end
       rescue ArgumentError => e
         raise e if e.message.start_with?(what.to_s)
-        raise ArgumentError, "#{what} #{e.message.sub(/\A./, &:downcase)}"
+        raise TargetError, "#{what} #{e.message.sub(/\A./, &:downcase)}"
       end
 
       # The timeline position (whole notes) of +target+ at or after +after+
@@ -106,7 +110,7 @@ module MB
       # Session).  Raises if the song ends or +limit+ frames pass first.
       # Returns the frames of that buffer before +from+'s frame (the Gate
       # drops them).
-      def preroll(session, from, buffer_size:, limit:)
+      def preroll(session, from, buffer_size:, limit:, progress: nil)
         transport = session.transport
         rate = session.output.sample_rate
         start = transport.position
@@ -135,6 +139,7 @@ module MB
 
           session.process_buffer(count)
           frames += count
+          progress&.update(:preroll, target: from)
         end
       end
 

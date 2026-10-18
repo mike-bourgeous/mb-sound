@@ -53,7 +53,7 @@ RSpec.describe(MB::Sound::Session::Master) do
     it 'gives the same samples either way without a master chain' do
       a = MB::Sound::Session.new(master_gain: -7.db, master_gain_post: true, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), buffer_size: 800, realtime: false, raise_errors: true)
       b = MB::Sound::Session.new(master_gain: -7.db, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), buffer_size: 800, realtime: false, raise_errors: true)
-      [a, b].each { |s| s.add([MB::Sound.with_seed(3) { 220.hz.ramp.rnd }, 330.hz.triangle * 0.7]) }
+      [a, b].each { |s| s.add([MB::Sound.with_seed(3) { 220.hz.saw.rnd }, 330.hz.triangle * 0.7]) }
       5.times { expect(a.process_buffer.map(&:to_a)).to eq(b.process_buffer.map(&:to_a)) }
     ensure
       a&.close

@@ -76,6 +76,34 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
     end
   end
 
+  # ux-fix-1 (maintainer: help pages "as ui overlay when ui is up"): the
+  # page pane under the console, scrolled with its keys, q closes it
+  it 'shows a help page in a temporary page pane under the console, scrolls it, and q gives the layout back' do
+    tiles = tiles_capture(:studio, 40, 120)
+    before = tiles.tiler.layout
+    text = (1..80).map { |i| "line #{i} of the page" }.join("\n")
+    tiles.page(text, title: 'help :render')
+    expect(tiles.tiler.layout.panes).to include(:page)
+    expect(tiles.tiler.rects[:repl].h).to be >= MB::Sound::UI::Tiles::REPL_MIN_ROWS
+    tiles.refresh(0.0)
+    expect(tiles.to_text).to include('line 1 of the page', 'help :render  lines 1-')
+    tiles.send(:pane_action, :page, :scroll, :bottom)
+    tiles.refresh(1.0)
+    expect(tiles.to_text).to include('line 80 of the page')
+    tiles.send(:pane_action, :page, :close)
+    expect(tiles.tiler.layout.panes).not_to include(:page)
+    expect(tiles.tiler.layout.root).to eq(before.root)
+  end
+
+  # ux-fix-1 item 8: `ui :studio` at 80x24 left the console 12 columns
+  it 'keeps the console at least REPL_MIN_COLS wide in every built-in tiled layout at 80x24' do
+    min = MB::Sound::UI::Tiles::REPL_MIN_COLS
+    MB::Sound::UI.tile_layouts.each_key do |layout|
+      r = tiles_capture(layout, 24, 80).tiler.rects[:repl]
+      expect(r.w).to be >= min, "#{layout}: #{r.w} columns"
+    end
+  end
+
   after do
     @capture&.stop
     @capture_term&.close

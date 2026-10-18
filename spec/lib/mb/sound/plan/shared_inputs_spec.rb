@@ -71,7 +71,7 @@ RSpec.describe(MB::Sound::Plan::SharedInputs) do
       MB::Sound.seed(0)
       MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v|
         a = (v.freq * 1.01).tone.sine.reset(v.trigger).filter(:lowpass, cutoff: 3000) * v.env(0, 0.2, 0, 0.1)
-        b = v.freq.tone.ramp.reset(v.trigger) * v.amp_env(0, 0.3, 0, 0.1)
+        b = v.freq.tone.saw.reset(v.trigger) * v.amp_env(0, 0.3, 0, 0.1)
         a * 0.3 + b * 0.2
       }
     }

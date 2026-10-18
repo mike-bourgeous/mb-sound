@@ -23,7 +23,7 @@ module MB::Sound
         bass_b = bass_a.transpose(5).named(:bass_b)
         lead = events([0r, 1/8r, 69, 0.8], [3/8r, 1/8r, 72, 0.6], length: 1r/2, loop: true).named(:lead_1)
         track(:bass) { |clip|
-          v = clip.synth(voices: 1) { |n| n.hz.ramp.lp4(knob(:cut), resonance: 0.3) * n.amp_env(0.003, 0.2, 0.4, 0.1) }
+          v = clip.synth(voices: 1) { |n| n.hz.saw.lp4(knob(:cut), resonance: 0.3) * n.amp_env(0.003, 0.2, 0.4, 0.1) }
           v * 0.5
         }
         track(:lead, lead: 0.5.attack) { |c| c.synth(voices: 2) { |v| v.hz.saw.at(-12.db) * v.amp_env(0.05, 0.1, 0.6, 0.3) }.delay(3.n16, feedback: 0.3, wet: 0.3) }
@@ -105,7 +105,7 @@ RSpec.describe('set documents', :aggregate_failures) do
       }
       track(:bass) { |clip|
         v = clip.synth(voices: 1) { |n|
-          n.hz.ramp.lp4(cut, resonance: 0.3) * n.amp_env(0.003, 0.2, 0.4, 0.1)
+          n.hz.saw.lp4(cut, resonance: 0.3) * n.amp_env(0.003, 0.2, 0.4, 0.1)
         }
         v * 0.5
       }
@@ -295,7 +295,7 @@ RSpec.describe('set documents', :aggregate_failures) do
   it 'saves scene blocks of set commands, and refuses other blocks and goto Procs' do
     a = session
     within(a) {
-      MB::Sound.track(:drone) { |c| c.tone.ramp }
+      MB::Sound.track(:drone) { |c| c.tone.saw }
       MB::Sound.scene(:gap) { MB::Sound.meter 2, 4 }
       MB::Sound.scene(:lift, others: :keep) { |_t|
         MB::Sound.bg :riser, MB::Sound.noise.at(0.12), fade: 0
@@ -353,7 +353,7 @@ RSpec.describe('set documents', :aggregate_failures) do
       bpm 120
       riff = seq(A2, C3).n8.loop
       track(:keys) { |clip|
-        hit = clip.synth(voices: 1) { |v| v.hz.ramp * v.amp_env(0.001, 0.05, 0, 0.01) }
+        hit = clip.synth(voices: 1) { |v| v.hz.saw * v.amp_env(0.001, 0.05, 0, 0.01) }
         110.hz.sine.at(0.1) + hit
       }
       track :pad, 55.hz.triangle.at(0.1) + 82.5.hz.triangle.at(0.1)
@@ -385,7 +385,7 @@ RSpec.describe('set documents', :aggregate_failures) do
   end
 
   it 'loads only set commands and assignments' do
-    expect { io.load(%(graph 1, kind: :set\n220.hz.ramp), session: session) }.to raise_error(io::LoadError, /:2: a set document holds set commands/)
+    expect { io.load(%(graph 1, kind: :set\n220.hz.saw), session: session) }.to raise_error(io::LoadError, /:2: a set document holds set commands/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block holds assignments and the commands meter, bpm, turn/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { play 220.hz }), session: session) }.to raise_error(io::LoadError, /a scene block holds/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { bg(:x, 1.constant) { 2 } }), session: session) }.to raise_error(io::LoadError, /without blocks/)

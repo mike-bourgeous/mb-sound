@@ -19,6 +19,13 @@ $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'
 
+# No color into pipes and logs, or under NO_COLOR or TERM=dumb: one decision
+# for every part of the console (MB::Sound::ColorPolicy)
+unless MB::Sound::ColorPolicy.color?($stdout)
+  Pry.config.color = false
+  MB::Sound::ColorPolicy.strip_output!
+end
+
 # Live mode: mistakes that raise in scripts only warn here, so a live set keeps
 # playing (see MB::Sound::LiveMethods)
 MB::Sound.live = true
@@ -106,14 +113,11 @@ Pry.start(
     -> (obj, nest, pry) { MB::Sound::UI::Prompt.main(obj, nest, pry) },
     -> (obj, nest, pry) { MB::Sound::UI::Prompt.continuation(pry.eval_string) },
   ]),
+  # Typos and errors raised on purpose print as one line with suggestions;
+  # likely bugs keep a backtrace without Pry's frames (see
+  # MB::Sound::ErrorFormat; `wtf?` shows the last full backtrace)
   exception_handler: ->(output, exception, _pry) {
-    output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
-
-    # color_trace prints #message; since Ruby 3.3 did_you_mean's "Did you
-    # mean?" suggestions are only in #detailed_message (after the message's
-    # lines)
-    hint = exception.detailed_message(highlight: false).lines.drop(exception.message.lines.count).join.strip
-    output.puts("\e[33m#{hint}\e[0m") unless hint.empty?
+    output.puts(MB::Sound::ErrorFormat.console(exception, color: MB::Sound::ColorPolicy.color?(output)))
   },
   load_pry_byebug: false,
   driver: PryByebugWorkaround

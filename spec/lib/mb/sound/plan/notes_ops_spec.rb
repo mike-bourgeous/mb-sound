@@ -260,7 +260,7 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
 
     it 'matches parameter nodes with node bases, without GM controllers, and without key tracking' do
       compare { |v|
-        sig = v.hz.ramp
+        sig = v.hz.saw
         c = v.cutoff(v.velocity * 2000 + 300, env: false, keytrack: 0, gm: false)
         sig.filter(:bandpass, cutoff: c, quality: v.quality(v.velocity * 3 + 0.5, gm: false)).lp4(900, resonance: v.reso(v.velocity, gm: false)) * v.env
       }

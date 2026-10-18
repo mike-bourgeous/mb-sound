@@ -90,6 +90,8 @@ module MB
         @playback = nil
         @arms = {} # (Recording: name => Arm)
         @patch_checked = nil # (PatchCheck: patch => clips checked)
+        @failed_tracks = {} # track name => why its last definition failed (see #track, #scene)
+        @last_patch_error = nil # (PatchCheck#report_patch_error)
         @demo_document = nil
         @slots = {} # (ClipMatrix: name => clips)
         @launch_clips = {} # (ClipMatrix: journal seq => clip)
@@ -214,7 +216,7 @@ module MB
       # drummer's backbeat: `nudge: 6.ms`).  Both apply to clip-driven
       # graphs (MIDI::ClipSource#ahead).
       #
-      #     track(:bass, q: 1) { |c| c.tone.ramp.lp4(800) * c.amp_env }
+      #     track(:bass, q: 1) { |c| c.tone.saw.lp4(800) * c.amp_env }
       #     track :pad, pad_graph
       #     track(:pad, lead: :attack) { |c| c.synth { |v| v.hz.saw * v.amp_env(1.5, 1, 0.8, 2) } }
       #     track(:swell, lead: :attack, lead_max: 2) { |c| c.synth { |v| v.hz.saw * v.amp_env(4, 1, 0.8, 2) } }
@@ -254,7 +256,14 @@ module MB
         clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
         graph = Sequence::Clocked.apply(graph, clock) if graph && clock
         # Built once now, so a broken patch fails here (see PatchCheck)
-        check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip }) or return nil
+        begin
+          ok = check_patch(name, patch, @mutex.synchronize { @tracks[name]&.clip })
+        rescue PatchCheck::PatchError => e
+          note_failed_track(name, e)
+          raise
+        end
+        return note_failed_track(name, @last_patch_error) unless ok
+        @mutex.synchronize { @failed_tracks.delete(name) }
         raise ArgumentError, "A trigger track's sound goes only to its readers (duck(#{name.inspect})); it takes no to: or send:" if trigger && (to || send)
         return nil unless @session.names.claim(name, :track)
         if trigger || @session.trigger_track?(name)
@@ -318,9 +327,14 @@ module MB
             next
           end
           kind = @session.names.kind(k)
-          if kind == :knob
+          if kind == :knob || control_value?(k, v)
             check_knob_value(name, k, v) or return nil
             next
+          end
+          if kind.nil? && (why = @mutex.synchronize { @failed_tracks[k] })
+            # (ux-fix-1: the scene was accepted, then `go` failed without
+            # saying why)
+            return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{k.inspect}, which isn't a track: #{why}; fix the track, then define the scene"))
           end
           next if kind.nil? || kind == :track
           MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect}: #{k.inspect} is a #{kind}, not a track or knob")) or return nil
@@ -344,6 +358,19 @@ module MB
         name
       end
 
+      # Remembers that track +name+'s definition failed with +error+ (a
+      # PatchError), so scenes naming it say why (see #scene, #go).
+      # Returns nil.
+      def note_failed_track(name, error)
+        return nil if error.nil?
+
+        why = "track #{name.inspect} wasn't defined: its patch raised #{error.original&.class&.name || 'an error'}"
+        where = error.message[/ \(at ([^,]+),/, 1]
+        why += " at #{where}" if where
+        @mutex.synchronize { @failed_tracks[name] = why unless @tracks.key?(name) }
+        nil
+      end
+
       # Launches the scene +name+: each track that should change does, at
       # its launch point (+on:+, +in:+, +at:+ for every track if given (see
       # LaunchPoint), else the track's +q:+, the scene's, or the set's
@@ -360,10 +387,16 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, _| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
-          return MB::Sound.live_error(ArgumentError.new("Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}"))
+          why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
+          names = tracks.keys
+          hint = unknown.length == 1 ? Form.suggest(unknown.first, names) : ''
+          return MB::Sound.live_error(ArgumentError.new(
+            "Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}" \
+            "#{" (#{why.join('; ')})" unless why.empty?}#{" (tracks: #{names.map(&:inspect).join(', ')})" if why.empty? && !names.empty?}#{hint}"
+          ))
         end
 
         _, changes = @session.command("go #{name.inspect}") {
@@ -378,7 +411,8 @@ module MB
           end
 
           tracks.each_value do |tr|
-            value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
+            # (a trigger track given a number: its level turns, the line plays on)
+            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
             stop = sc.others == :cut ? :cut : :ring
             set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
@@ -596,6 +630,16 @@ module MB
         return change_key_value(name, value, time) if KEY_VALUES.include?(name)
         v, options = knob_value(value)
         @session.turn(name, v, start_time: time, **options)
+      end
+
+      # True if scene or section value +value+ for +name+ turns the
+      # primary control of +name+'s owner (Session::Knobs#control_name:
+      # `pump: 0` is the trigger track :pump's on/off level) rather than
+      # giving the track a clip: a number, or [number, over: ...].
+      def control_value?(name, value)
+        return false unless @session.primary_control(name)
+        v = value.is_a?(Array) ? value[0] : value
+        v.is_a?(Numeric)
       end
 
       # Splits a scene's knob value into the value and turn options.

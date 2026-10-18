@@ -23,7 +23,9 @@ module MB
         # One step of a Seq.  +value+ is nil for a rest.  +length+ is nil if
         # unset.  +legato+ is the fraction of the step the note sounds for (nil
         # for all of it).  +clip+ is set for a nested Clip that plays in place
-        # of a single note.
+        # of a single note.  +chord+ holds every value of a stacked step (an
+        # Array or a Generative::Chord given to MB::Sound#seq, ux-fix-1:
+        # `seq([C3, E3, G3], chord(:min7, root: :d)).n2`), +value+ its first.
         #
         # Note marks (see MB::Sound::Sequence::NoteMarks for Notes):
         # +accented+ is true for an accented note (#accent, `!C4`: velocity
@@ -34,7 +36,7 @@ module MB
         # previous note one more step (MB::Sound::Tie).  Marks return new
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
-        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, :flam, keyword_init: true) do
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, :pitch, :flam, :chord, keyword_init: true) do
           # #pitch and #flam below replace the members' readers (and read them
           # without an argument).
           remove_method :pitch, :flam
@@ -152,7 +154,10 @@ module MB
           # lower).
           def oct(octaves)
             semitones = Interval.octave_semitones(octaves)
-            marked(value: value && Sequence.transpose_value(value, semitones), clip: clip&.transpose(semitones))
+            marked(
+              value: value && Sequence.transpose_value(value, semitones), clip: clip&.transpose(semitones),
+              chord: chord&.map { |v| Sequence.transpose_value(v, semitones) }
+            )
           end
 
           # Returns a one-step Seq of this step (see NoteMethods for #n8,
@@ -180,6 +185,15 @@ module MB
           when Clip
             Step.new(clip: item, length: item.length)
 
+          when Array, MB::Sound::Generative::Chord
+            # A chord: every value sounds for the step
+            values = (item.is_a?(Array) ? item : item.notes).map { |v|
+              raise ArgumentError, "A chord step holds notes or numbers (got #{v.inspect} in #{item.inspect})" unless v.is_a?(Numeric) || v.is_a?(MB::Sound::Pitch)
+              step(v).value
+            }
+            raise ArgumentError, 'A chord step needs at least one note (nil is a rest)' if values.empty?
+            Step.new(value: values.first, chord: values.freeze, velocity: DEFAULT_VELOCITY)
+
           when MB::Sound::Note
             # detuned_number keeps cents (e.g. 'A4+20'); whole notes stay Integers
             Step.new(value: item.detune == 0 ? item.number : item.detuned_number, velocity: DEFAULT_VELOCITY)
@@ -198,7 +212,7 @@ module MB
             raise ArgumentError, 'Cannot sequence false; `!A1.n8` is `!(A1.n8)`: write `(!A1).n8`, `A1.acc.n8`, or `A1.n8.acc`'
 
           else
-            raise ArgumentError, "Cannot sequence #{item.inspect}; use Notes (e.g. C4), numbers, nil for a rest, or other clips"
+            raise ArgumentError, "Cannot sequence #{item.inspect}; use Notes (e.g. C4), numbers, nil for a rest, other clips, or an Array of notes for a chord ([C3, E3, G3])"
           end
         end
 
@@ -207,13 +221,21 @@ module MB
         # long: it sounds until +last+ × the step's legato before the end, or
         # into the next step for a +slide+ (true for SLIDE_LEGATO, or a
         # legato fraction).
-        def self.note_event(step, start, total, last, slide)
+        def self.note_event(step, start, total, last, slide, value: step.value)
           legato = slide ? (slide == true ? SLIDE_LEGATO : slide) : (step.legato || 1)
           Event.new(
-            start: start, length: total - last + last * legato, value: step.value, velocity: step.velocity,
+            start: start, length: total - last + last * legato, value: value, velocity: step.velocity,
             probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil,
             condition: step.condition, fill_mark: step.fill_mark, pitch: step[:pitch], flam: step[:flam]
           )
+        end
+
+        # The Events of a note +step+ (see .note_event): one per value of a
+        # chord step.
+        def self.note_events(step, *rest)
+          return [note_event(step, *rest)] unless step.chord
+
+          step.chord.map { |v| note_event(step, *rest, value: v) }
         end
 
         # The Steps in this sequence.
@@ -239,7 +261,7 @@ module MB
                 held[4] ||= s.slid
               end
             else
-              events << Seq.note_event(*held) if held
+              events.concat(Seq.note_events(*held)) if held
               held = nil
               if s.clip
                 events.concat(s.clip.events.map { |e| e.with(start: e.start + t) })
@@ -249,7 +271,7 @@ module MB
             end
             t += len
           end
-          events << Seq.note_event(*held) if held
+          events.concat(Seq.note_events(*held)) if held
 
           super(events, length: t, seed: seed, loop: loop, align: align)
         end
@@ -336,9 +358,15 @@ module MB
               raise ArgumentError, "Pitch-marked hits (sampler chops) move by semitones; #{self} can't move by degrees of #{steps.scale}" unless semitones
               s.to_h.merge(pitch: s[:pitch] + Interval.semitones(semitones).to_f)
             elsif semitones
-              s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(step, **scale_kwargs))
+              s.to_h.merge(
+                value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(step, **scale_kwargs),
+                chord: s.chord&.map { |v| Sequence.transpose_value(v, semitones) }
+              )
             else
-              s.to_h.merge(value: s.value && steps.apply_value(s.value), clip: s.clip&.transpose(step, **scale_kwargs))
+              s.to_h.merge(
+                value: s.value && steps.apply_value(s.value), clip: s.clip&.transpose(step, **scale_kwargs),
+                chord: s.chord&.map { |v| steps.apply_value(v) }
+              )
             end
           }
         end
@@ -378,7 +406,7 @@ module MB
           steps = @steps.dup
           notes.each_with_index do |slot, idx|
             src = @steps[notes[order[idx]]]
-            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition, fill_mark: src.fill_mark, flam: src[:flam]))
+            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, chord: src.chord, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition, fill_mark: src.fill_mark, flam: src[:flam]))
           end
 
           Seq.new(steps, seed: @seed, loop: @loop, align: @align)

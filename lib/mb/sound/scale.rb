@@ -50,8 +50,13 @@ module MB
         whole_tone: [0, 2, 4, 6, 8, 10],
         diminished: [0, 2, 3, 5, 6, 8, 9, 11], # whole-half octatonic
         half_whole: [0, 1, 3, 4, 6, 7, 9, 10], # half-whole octatonic (dominant diminished)
+        # Japanese pentatonics (yo is the ambient genre template's key)
+        yo: [0, 2, 5, 7, 9],
+        in: [0, 1, 5, 7, 8],
         hirajoshi: [0, 2, 3, 7, 8],
         in_sen: [0, 1, 5, 7, 10],
+        iwato: [0, 1, 5, 6, 10],
+        kumoi: [0, 2, 3, 7, 9],
         augmented: [0, 3, 4, 7, 8, 11],
         major_triad: [0, 4, 7],
         minor_triad: [0, 3, 7],
@@ -68,6 +73,8 @@ module MB
         octatonic: :diminished,
         whole_half: :diminished,
         whole: :whole_tone,
+        insen: :in_sen,
+        miyako_bushi: :in,
       }.freeze
 
       # The pitch class (semitones above C) of each note letter.

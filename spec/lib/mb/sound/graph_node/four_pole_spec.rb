@@ -1,5 +1,5 @@
 RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
-  let(:saw) { 110.hz.ramp }
+  let(:saw) { 110.hz.saw }
 
   def filtered(fc, r, input, **opts)
     f = MB::Sound::Filter::FourPole.new(**opts)
@@ -8,33 +8,33 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
 
   describe 'GraphNode#lp4' do
     it 'gives the same samples as the filter object' do
-      input = 110.hz.ramp.sample(1000).dup
-      node = 110.hz.ramp.lp4(800, resonance: 0.6)
+      input = 110.hz.saw.sample(1000).dup
+      node = 110.hz.saw.lp4(800, resonance: 0.6)
       expect(node.sample(1000)).to eq(filtered(800.0, 0.6, input))
     end
 
     it 'reads cutoff and resonance nodes per sample' do
       cutoff = 3.hz.lfo.at(200..4000)
       res = 2.hz.lfo.at(0..1)
-      node = 110.hz.ramp.lp4(cutoff, resonance: res, drive: 2, mode: :bp2)
+      node = 110.hz.saw.lp4(cutoff, resonance: res, drive: 2, mode: :bp2)
       expect(node.sources.keys).to eq([:input, :cutoff, :resonance])
 
       out = node.sample(800)
-      input = 110.hz.ramp.sample(800).dup
+      input = 110.hz.saw.sample(800).dup
       fc = 3.hz.lfo.at(200..4000).sample(800).dup
       rr = 2.hz.lfo.at(0..1).sample(800).dup
       expect(out).to eq(filtered(fc, rr, input, drive: 2, mode: :bp2))
     end
 
     it 'works at audio rate (filter FM)' do
-      node = 110.hz.ramp.lp4(220.hz.at(1000) + 1500, resonance: 0.5)
+      node = 110.hz.saw.lp4(220.hz.at(1000) + 1500, resonance: 0.5)
       out = node.sample(4800)
       expect(out.isfinite.all?).to eq(true)
       expect(out.abs.max).to be > 0.1
     end
 
     it 'takes a Pitch as the cutoff frequency' do
-      node = 110.hz.ramp.lp4(800.hz, resonance: 0.3)
+      node = 110.hz.saw.lp4(800.hz, resonance: 0.3)
       expect(node.cutoff).to eq(800.0)
       expect(node.kernel_filter.cutoff).to eq(800.0)
     end
@@ -53,12 +53,12 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     end
 
     it 'does not modify a shared input buffer' do
-      src = 110.hz.ramp
+      src = 110.hz.saw
       a = src.lp4(500, resonance: 0.5)
       b = src * 1
       x = a.sample(800).dup
       y = b.sample(800).dup
-      expect(y).to eq(110.hz.ramp.sample(800))
+      expect(y).to eq(110.hz.saw.sample(800))
       expect(x).to eq(filtered(500.0, 0.5, y))
     end
 
@@ -78,7 +78,7 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     end
 
     it 'works per channel on bundles' do
-      out = MB::Sound.stereo(110.hz.ramp, 165.hz.ramp).lp4(MB::Sound.channels(500, 900), resonance: 0.5)
+      out = MB::Sound.stereo(110.hz.saw, 165.hz.saw).lp4(MB::Sound.channels(500, 900), resonance: 0.5)
       expect(out).to be_a(MB::Sound::GraphNode::Channels)
       expect(out.map { |c| c.kernel_filter.cutoff }).to eq([500.0, 900.0])
     end
@@ -158,7 +158,7 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
       f = MB::Sound::Filter::FourPole.new(cutoff: 700, resonance: 0.4)
       node = saw.filter(f)
       expect(node).to be_a(MB::Sound::GraphNode::FourPole)
-      expect(node.sample(800)).to eq(filtered(700.0, 0.4, 110.hz.ramp.sample(800).dup))
+      expect(node.sample(800)).to eq(filtered(700.0, 0.4, 110.hz.saw.sample(800).dup))
     end
   end
 end

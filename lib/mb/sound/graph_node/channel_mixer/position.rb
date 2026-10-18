@@ -18,8 +18,8 @@ module MB
         # Created with GraphNode#place (alias #position).
         #
         # Examples (bin/sound.rb):
-        #     bg 220.hz.ramp.at(0.3).place(x: -1, y: -1)              # rear left
-        #     bg 220.hz.ramp.at(0.3).place(x: 2.hz.lfo, y: 0.3.hz.lfo)  # circling
+        #     bg 220.hz.saw.at(0.3).place(x: -1, y: -1)              # rear left
+        #     bg 220.hz.saw.at(0.3).place(x: 2.hz.lfo, y: 0.3.hz.lfo)  # circling
         class Position < ChannelMixer
           channels 1 => 2
           param :x, default: 0, range: -1..1

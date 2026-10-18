@@ -104,6 +104,14 @@ module MB
         class SessionPlayer
           def initialize(session = Session.current)
             @session = session
+            @old_trim = nil
+          end
+
+          # Opens the sound card (raises DeviceOutput::Unavailable without
+          # one) before anything is printed.
+          def prepare
+            @session.output
+            self
           end
 
           def start(db)

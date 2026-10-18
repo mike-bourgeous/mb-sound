@@ -7,6 +7,26 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
   end
 
   describe 'the shipped templates' do
+    # ux-fix-1 (maintainer: "follow the pump"): bus ducks keyed by :sidechain
+    it "keys dnb's :hall duck from the template's sidechain: the kick, or the pump" do
+      bundle = MB::Sound.stereo(1.constant, 1.constant)
+      expect(genre[:dnb].bus_chain(:hall, bundle).to_ruby).to include('.duck(:drums, only: :kick, amount: -6.db, release: 1.n8)')
+      pumped = genre[:dnb].with { sidechain :pump, :pump }
+      expect(pumped.bus_chain(:hall, MB::Sound.stereo(1.constant, 1.constant)).to_ruby).to include('.duck(:pump, amount: -6.db, release: 1.n8)')
+    end
+
+    # ux-fix-1 item 3: :ambient's key was :yo, which wasn't a scale
+    it "builds every template's key as a scale" do
+      genre.names.each do |name|
+        t = MB::Sound.genre(name)
+        next unless t.key
+
+        expect { t.scale }.not_to raise_error, "#{name}: #{t.key.inspect}"
+        expect(t.scale).to be_a(MB::Sound::Scale)
+      end
+      expect(MB::Sound.genre(:ambient).scale.notes(MB::Sound::D4..MB::Sound::C5).map(&:name)).to eq(%w[D4 E4 G4 A4 B4])
+    end
+
     it 'lists the panel genres and the stubs' do
       expect(genre.names).to include(:dnb, :jungle, :ambient, :funk, :house, :techno)
     end

@@ -1,3 +1,5 @@
+require 'tempfile'
+
 module MB
   module Sound
     # Library plumbing that used to be console commands (MB::Sound extended
@@ -12,13 +14,83 @@ module MB
     module Internal
       module_function
 
+      # Added to an error raised inside .quiet_stderr: the text C libraries
+      # printed to stderr meanwhile.
+      module CapturedStderr
+        attr_accessor :captured_stderr
+
+        # The captured lines, stripped, without repeats, joined with "; ".
+        def stderr_summary
+          captured_stderr.to_s.lines.map(&:strip).reject(&:empty?).uniq.join('; ')
+        end
+      end
+
+      # Runs the block with $stdout going nowhere (e.g. a render's second
+      # pass, whose blocks print what the first pass printed).  Returns the
+      # block's value.
+      def without_stdout
+        saved = $stdout
+        File.open(File::NULL, 'w') do |null|
+          $stdout = null
+          yield
+        ensure
+          $stdout = saved
+        end
+      end
+
+      # Runs the block with the process's stderr (file descriptor 2)
+      # captured, since C libraries (ALSA, RtMidi, miniaudio) print their
+      # errors there: an error of one of +error_classes+ (default
+      # StandardError) raised by the block is raised again extended with
+      # CapturedStderr (#captured_stderr holds the text), so the caller can
+      # print one line instead of a wall of ALSA messages (no sound card:
+      # 35 lines per attempt, ux-review-1); on success the text is printed
+      # after all.  Other threads' output to stderr in the meantime is held
+      # until the block returns.
+      def quiet_stderr(*error_classes)
+        error_classes = [StandardError] if error_classes.empty?
+        $stderr.flush
+        STDERR.flush
+        saved = STDERR.dup
+        Tempfile.create('mb_sound_stderr') do |f|
+          error = nil
+          begin
+            STDERR.reopen(f)
+            result = yield
+          rescue *error_classes => e
+            error = e
+          ensure
+            STDERR.flush
+            STDERR.reopen(saved)
+            saved.close
+          end
+
+          f.rewind
+          text = f.read
+          if error
+            error.extend(CapturedStderr)
+            error.captured_stderr = text
+            raise error
+          end
+
+          STDERR.write(text) unless text.empty?
+          result
+        end
+      end
+
       # Where +error+ came from in the user's code ("(pry):3",
       # "songs/x.rb:12"): its first backtrace frame outside mb-sound's lib/
       # and installed gems, or nil (a failing patch's line, for messages
       # that name it: the UI's capture and swap, Arrangement#capture).
       def error_origin(error)
+        location_outside(error.backtrace_locations || [])
+      end
+
+      # The first of +locations+ (Thread::Backtrace::Location) outside
+      # mb-sound's lib/ and installed gems, as "path:line", or nil.
+      def location_outside(locations)
         lib = File.expand_path('..', __dir__)
-        loc = (error.backtrace_locations || []).find do |l|
+        loc = locations.find do |l|
           path = l.absolute_path || l.path.to_s
           !path.start_with?(lib) && !path.include?('/gems/') && !path.start_with?('<internal')
         end
@@ -26,6 +98,23 @@ module MB
         path = (loc.absolute_path || loc.path).to_s.delete_prefix("#{Dir.pwd}/")
         "#{path}:#{loc.lineno}"
       end
+
+      # Warns +message+ once per line of user code calling into mb-sound
+      # (the first caller outside lib/), as "path:line: warning: message"
+      # (ux-fix-1: `at(-20)` and `delay(96)`, valid but usually typos; also
+      # deprecated keywords).  +key+ separates kinds of warning.  Returns
+      # true if it warned.
+      def warn_once_per_site(key, message)
+        site = location_outside(caller_locations(1) || []) || '(unknown)'
+        first = WARNED_LOCK.synchronize {
+          @warned_sites ||= {}
+          @warned_sites.key?([key, site]) ? false : (@warned_sites[[key, site]] = true)
+        }
+        warn "#{site}: warning: #{message}" if first
+        first
+      end
+
+      WARNED_LOCK = Mutex.new
 
       # Returns true if the given Array looks like a (possibly nested)
       # numeric array, false if it's not an array or contains non-numeric

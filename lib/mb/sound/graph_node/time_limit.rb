@@ -18,8 +18,8 @@ module MB
       # Created with GraphNode#until.
       #
       # Example (bin/sound.rb):
-      #     play 220.hz.ramp.at(-6.db).until(2)
-      #     bg 220.hz.ramp.at(-6.db).until(2.bars)   # starts and ends on a bar
+      #     play 220.hz.saw.at(-6.db).until(2)
+      #     bg 220.hz.saw.at(-6.db).until(2.bars)   # starts and ends on a bar
       #     # A triangle cut off mid-cycle, then 0.2 s for the filter to ring
       #     play 50.hz.triangle.until(3).and_then(silence(0.2)).filter(:lowpass, cutoff: 400, quality: 25)
       class TimeLimit

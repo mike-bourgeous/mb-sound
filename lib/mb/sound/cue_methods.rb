@@ -7,7 +7,7 @@ module MB
     #
     # Example (bin/sound.rb, with CUE_OUTPUT=ports and a 4-channel output,
     # or `cue_output :split` on 2 channels):
-    #     cue :acid, seq(A1, A2, C2, A1).n16.loop.tone.ramp.lp4(900) * 0.3   # in the phones only
+    #     cue :acid, seq(A1, A2, C2, A1).n16.loop.tone.saw.lp4(900) * 0.3   # in the phones only
     #     launch :acid, on: :bar         # to MAIN on the next bar: same graph, no restart
     #     cue :bass, bass_b              # a track's patch on another clip, on CUE
     #     launch :bass, fade: 1.beat     # at the track's q:, crossfading the old clip out

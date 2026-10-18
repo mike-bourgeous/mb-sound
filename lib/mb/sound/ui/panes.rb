@@ -284,6 +284,73 @@ module MB
           MESSAGE_ROLES = Messages::ROLES
         end
 
+        # A page of text to read while the tiled screen is up (help pages:
+        # Help.show opens them here through UI::Tiles#page; ux-fix-1):
+        # scrolled with its own keys, q closes it.
+        class Page < Pane
+          mode_keys do
+            group 'Page'
+            on [:up, 'k'], :scroll, -1, help: 'scroll up, down a line', label: 'Up Down j k'
+            on [:down, 'j'], :scroll, 1, help: 'scroll up, down a line', label: 'Up Down j k'
+            on [:page_up, 'b'], :scroll, :page_up, help: 'scroll a page up, down', label: 'PgUp PgDn b Space'
+            on [:page_down, ' '], :scroll, :page_down, help: 'scroll a page up, down', label: 'PgUp PgDn b Space'
+            on [:home, 'g'], :scroll, :top, help: 'top, bottom', label: 'Home End g G'
+            on [:end, 'G'], :scroll, :bottom, help: 'top, bottom', label: 'Home End g G'
+            on 'q', :close, help: 'close the page (back to the console)'
+          end
+
+          keys do
+            group 'Page'
+            doc 'Enter', 'scroll the page (q closes it, Esc back to NAV)'
+          end
+
+          # The text's lines, and the first line shown.
+          attr_reader :lines, :offset
+
+          def initialize
+            super(:page, rate: 4, height: 20, width: 80, title: 'page', min_height: 3, description: 'a help page to scroll while the tiled screen is up (help opens it; q closes it)')
+            @lines = [].freeze
+            @offset = 0
+            @rows = 1
+            @label = nil
+          end
+
+          # Shows +text+ from its top; +title+ is the status line's label.
+          def show(text, title: nil)
+            @lines = text.to_s.lines.map(&:chomp).freeze
+            @offset = 0
+            @label = title
+            self
+          end
+
+          def draw_body(c, _s, state)
+            @rows = [c.h - 1, 1].max
+            @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
+            @lines[@offset, @rows].to_a.each_with_index do |l, y|
+              c.text(0, y, c.fit(l, c.w), :text)
+            end
+            last = [@offset + @rows, @lines.length].min
+            status = "#{@label ? "#{@label}  " : ''}lines #{@offset + 1}-#{last} of #{@lines.length}  " \
+                     "#{state[:mode] ? 'j k PgUp PgDn g G, q closes' : 'Enter scrolls, q closes'}"
+            c.text(0, c.h - 1, c.fit(status, c.w), :dim)
+          end
+
+          def key_scroll(_state, by)
+            page = [@rows - 1, 1].max
+            @offset = case by
+                      when :page_up then @offset - page
+                      when :page_down then @offset + page
+                      when :top then 0
+                      when :bottom then @lines.length
+                      else @offset + by
+                      end
+            @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
+            nil
+          end
+
+          def key_close(_state) = :close
+        end
+
         # CPU per part: render load, then each player, bus, and master
         # chain by its share of the audio time.
         class CPU < Pane

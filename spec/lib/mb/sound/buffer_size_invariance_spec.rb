@@ -20,8 +20,8 @@ RSpec.describe 'Buffer size invariance' do
         expect_invariant(-> { f.hz.asquare.pwm(0.25) }, seconds: 0.5)
       end
 
-      it "aramp and gauss at #{f} Hz stay within -150 dB" do
-        expect_invariant(-> { f.hz.aramp }, seconds: 0.5, tolerance: -150.db)
+      it "asaw and gauss at #{f} Hz stay within -150 dB" do
+        expect_invariant(-> { f.hz.asaw }, seconds: 0.5, tolerance: -150.db)
         expect_invariant(-> { f.hz.gauss }, seconds: 0.5, tolerance: -150.db)
       end
     end
@@ -204,7 +204,7 @@ RSpec.describe 'Buffer size invariance' do
     sound = -> { Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) } }
     tones = {
       'naive sine' => -> { fm.().sine },
-      'naive ramp' => -> { fm.().aramp },
+      'naive ramp' => -> { fm.().asaw },
       'phasor' => -> { fm.().phasor },
       'PolyBLEP saw' => -> { fm.().saw },
       'PolyBLEP square, pwm' => -> { fm.().square.pwm(0.3) },
@@ -216,7 +216,7 @@ RSpec.describe 'Buffer size invariance' do
       'PolyBLEP triangle, skew signal' => -> { fm.().triangle.skew(2.hz.lfo.at(0.2..0.8)) },
       'PolyBLEP square, pivot signal' => -> { fm.().square.pwm(0.3, pivot: 1.5.hz.lfo.at(0..0.5)) },
       'cycle wavetable, pwm signal' => -> { fm.().wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
-      'BLIT complex ramp' => -> { fm.().complex_ramp },
+      'BLIT complex ramp' => -> { fm.().complex_saw },
       'feedback sine' => -> { fm.().sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { fm.().wavetable(cycle.()) },
       'sample wavetable (looped)' => -> { fm.().wavetable(MB::Sound::Wavetable.from_samples(sound.(), mode: :sample, root: 200, loop: 1000...4000)) },
@@ -242,7 +242,7 @@ RSpec.describe 'Buffer size invariance' do
       'naive sine' => ->(f) { f.tone.sine },
       'PolyBLEP saw' => ->(f) { f.tone.saw },
       'PolyBLEP square with a width signal' => ->(f) { f.tone.square.pwm(MB::Sound.noise.at(0.1..0.9)) },
-      'BLIT complex ramp' => ->(f) { f.tone.complex_ramp },
+      'BLIT complex ramp' => ->(f) { f.tone.complex_saw },
       'cycle wavetable' => ->(f) { f.tone.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
     }.each do |name, make|
       it "gives the Ruby mirror's samples for a #{name} with wild frequencies" do
@@ -281,12 +281,12 @@ RSpec.describe 'Buffer size invariance' do
     sound = -> { Numo::SFloat.new(4800).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / 48000) } }
     tones = {
       'naive sine' => -> { 220.3.hz.sine },
-      'naive ramp' => -> { 220.3.hz.aramp },
+      'naive ramp' => -> { 220.3.hz.asaw },
       'phasor' => -> { 3.3.hz.phasor },
       'LFO' => -> { 0.31.hz.lfo },
       'PolyBLEP saw' => -> { 220.3.hz.saw },
       'PolyBLEP square, pwm signal' => -> { 220.3.hz.square.pwm(3.hz.lfo.at(0.2..0.8)) },
-      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_saw },
       'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.2) },
       'cycle wavetable' => -> { 220.3.hz.wavetable(cycle.()) },
       'cycle wavetable, pwm signal' => -> { 220.3.hz.wavetable(cycle.()).pwm(3.hz.lfo.at(0.2..0.8)) },
@@ -310,7 +310,7 @@ RSpec.describe 'Buffer size invariance' do
     {
       'naive sine' => -> { 220.3.hz.sine },
       'PolyBLEP square' => -> { 220.3.hz.square.pwm(0.3) },
-      'BLIT complex ramp' => -> { 220.3.hz.complex_ramp },
+      'BLIT complex ramp' => -> { 220.3.hz.complex_saw },
       'cycle wavetable' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5], size: 64)) },
       'feedback sine' => -> { 220.3.hz.sine.fm_feedback(0.3) },
       'cycle wavetable, width signal' => -> { 220.3.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], size: 64)).pwm(MB::Sound.noise.at(0.1..0.9)) },

@@ -81,24 +81,24 @@ RSpec.describe('graph document bundles', :aggregate_failures) do
   end
 
   it 'checks asset lines' do
-    expect { io.load(%{asset "a.flac", sha256: "xyz"\n220.hz.ramp}) }.to raise_error(io::LoadError, /64 hex digits/)
-    expect { io.load(%{asset :a\n220.hz.ramp}) }.to raise_error(io::LoadError, /asset takes a file name/)
+    expect { io.load(%{asset "a.flac", sha256: "xyz"\n220.hz.saw}) }.to raise_error(io::LoadError, /64 hex digits/)
+    expect { io.load(%{asset :a\n220.hz.saw}) }.to raise_error(io::LoadError, /asset takes a file name/)
   end
 
   it 'makes bundles on request, refuses them with bundle: false, and replaces plain documents' do
-    plain = io.save(:ramp, 220.hz.ramp)
+    plain = io.save(:ramp, 220.hz.saw)
     expect(plain).to eq(File.join(presets, 'ramp.mbg.rb'))
-    bundled = io.save(:ramp, 220.hz.ramp, bundle: true)
+    bundled = io.save(:ramp, 220.hz.saw, bundle: true)
     expect(bundled).to eq(File.join(presets, 'ramp.mbg/ramp.mbg.rb'))
     expect(File.exist?(plain)).to eq(false)
-    expect(io.save(:ramp, 220.hz.ramp)).to eq(plain)
+    expect(io.save(:ramp, 220.hz.saw)).to eq(plain)
     expect(File.exist?(File.join(presets, 'ramp.mbg'))).to eq(false)
 
     expect { io.save(:tables, graph, bundle: false) }.to raise_error(io::DumpError, /reads files \(.*mine.flac.*\), which only a bundle can hold/)
 
     FileUtils.mkdir_p(File.join(presets, 'mine.mbg'))
     File.write(File.join(presets, 'mine.mbg/notes.txt'), 'mine')
-    expect { io.save(:mine, 220.hz.ramp, bundle: true) }.to raise_error(io::DumpError, /holds other files \(notes.txt\)/)
+    expect { io.save(:mine, 220.hz.saw, bundle: true) }.to raise_error(io::DumpError, /holds other files \(notes.txt\)/)
     expect(File.read(File.join(presets, 'mine.mbg/notes.txt'))).to eq('mine')
   end
 

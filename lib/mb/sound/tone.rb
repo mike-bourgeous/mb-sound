@@ -655,22 +655,24 @@ module MB
         set_wave(:square, false)
       end
 
-      # Changes the waveform type to a band-limited ramp (sawtooth; see
-      # BandLimit; #aramp is the naive, aliased version).
-      def ramp
+      # Changes the waveform type to a band-limited sawtooth (a rising
+      # ramp; see BandLimit; #asaw is the naive, aliased version).  Graphs
+      # print it as saw (the official name since ux-fix-1, 2026-10-18;
+      # ramp and sawtooth are aliases).
+      def saw
         set_wave(:ramp, true)
       end
-      alias saw ramp
-      alias sawtooth ramp
+      alias ramp saw
+      alias sawtooth saw
 
-      # Changes the waveform type to a naive (aliased) ramp, whose jump
+      # Changes the waveform type to a naive (aliased) sawtooth, whose jump
       # aliases audibly at high pitches (the classic digital grit); see
-      # #ramp.
-      def aramp
+      # #saw.  Aliases #aramp, #asawtooth.
+      def asaw
         set_wave(:ramp, false)
       end
-      alias asaw aramp
-      alias asawtooth aramp
+      alias aramp asaw
+      alias asawtooth asaw
 
       # Makes this tone output its phase in cycles (0 <= phase < 1) instead
       # of a waveform: a phase accumulator for driving wavetables or other
@@ -711,7 +713,7 @@ module MB
       # (frame k at k / (N - 1) + any whole number of periods; negative
       # scans wrap the same way).  A steady ramp or LFO then morphs at a
       # constant rate through every frame in a loop, without a jump at the
-      # end or a duplicated first frame; e.g. `scan: 0.1.hz.ramp.lfo.at(0..8.0 / 7)`
+      # end or a duplicated first frame; e.g. `scan: 0.1.hz.saw.lfo.at(0..8.0 / 7)`
       # loops an 8-frame table seamlessly (a phasor times N / (N - 1) too).
       #
       # Band-limited tables pick their levels from this tone's motion per
@@ -943,7 +945,7 @@ module MB
       #     play C3.saw.sync(C2)
       #
       # Synced tones are band-limited with minBLEP (BandLimit, FastSynth.
-      # oscillate_sync), clean even at high ratios; aramp etc. give naive
+      # oscillate_sync), clean even at high ratios; asaw etc. give naive
       # sync.  A synced tone can't also have phase modulation or a reset
       # input.  Only ramp, square, triangle, sine, and parabola can be
       # synced.  See #softsync.
@@ -1045,23 +1047,26 @@ module MB
       # with #clean, warps, resets, and timeline jumps without phase
       # modulation go through the synced table kernel, where warp corners
       # and jumps are exact per harmonic (see #clean_table?).  Complex sines take a warp,
-      # sync, and resets the same way.  The naive versions (acomplex_ramp,
+      # sync, and resets the same way.  The naive versions (acomplex_saw,
       # ...) alias and clip their imaginary parts.
       #
       # Examples (bin/sound.rb; the imaginary part is the real part's
       # Hilbert transform until something warps or modulates it):
-      #     play 110.hz.complex_ramp.pm(220.hz.sine.at(0.11)).real * -12.db
+      #     play 110.hz.complex_saw.pm(220.hz.sine.at(0.11)).real * -12.db
       #     play 110.hz.complex_square.pwm(0.2.hz.lfo.at(0.2..0.8)).real * -12.db
-      #     play 110.hz.complex_ramp.sync(ratio: 0.3.hz.lfo.at(1..3)).real * -12.db
-      def complex_ramp
+      #     play 110.hz.complex_saw.sync(ratio: 0.3.hz.lfo.at(1..3)).real * -12.db
+      def complex_saw
         set_wave(:complex_ramp, true)
       end
+      alias complex_ramp complex_saw
 
-      # The naive (aliased) version of #complex_ramp, which also has energy at
-      # negative frequencies; see BandLimit.blit_ruby.
-      def acomplex_ramp
+      # The naive (aliased) version of #complex_saw, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.  Alias
+      # #acomplex_ramp.
+      def acomplex_saw
         set_wave(:complex_ramp, false)
       end
+      alias acomplex_ramp acomplex_saw
 
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.
@@ -1143,6 +1148,7 @@ module MB
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
+        GraphNode::ArithmeticMethods.check_at(amplitude) unless @in_or_at
 
         configure do
           @musical_time = durations == 2
@@ -1174,7 +1180,7 @@ module MB
       # used together.
       #
       #     play 220.hz.saw.gain(adsr(0.01, 0.3, 0.5, 0.4, hold: 1))
-      #     v.hz.ramp.at(0.5).gain(v.amp_env)          # in a synth voice
+      #     v.hz.saw.at(0.5).gain(v.amp_env)          # in a synth voice
       def gain(gain)
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no gain; scale it with arithmetic' if phasor?
         unless gain.nil? || gain.is_a?(Numeric) || gain.respond_to?(:sample)
@@ -1597,7 +1603,7 @@ module MB
       # #pwm(w, clean: true).  Off by default (user's choice, 2026-10-08:
       # predictable cost for key-synced voices).
       #
-      #     play 700.hz.ramp.reset(200.hz.lfo.wraps, clean: true).at(-12.db)   # as clean as sync
+      #     play 700.hz.saw.reset(200.hz.lfo.wraps, clean: true).at(-12.db)   # as clean as sync
       #     play 110.hz.wavetable(:saw).pwm(0.3, clean: true).at(-12.db)        # exact warp corners
       #     midi.synth { |v| v.hz.saw.clean * v.amp_env }                       # key-synced voices
       def clean(enabled = true)
@@ -1686,7 +1692,7 @@ module MB
       # Sequence::Duration#lfo).
       #
       # Example:
-      #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
+      #     play 220.hz.saw.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
       def lfo
         configure { @lfo = true }
         or_at(1)
@@ -3143,9 +3149,15 @@ module MB
         end
       end
 
-      # The wave type as written in the DSL (e.g. :aramp for a naive ramp).
+      # DSL names of wave types that differ from them (the sawtooth's wave
+      # type is :ramp; its DSL name is saw).
+      WAVE_DSL_NAMES = { ramp: :saw, complex_ramp: :complex_saw }.freeze
+
+      # The wave type as written in the DSL (e.g. :asaw for a naive
+      # sawtooth).
       def wave_name
-        !@band_limit && (BandLimit::WAVES + BandLimit::COMPLEX_WAVES).include?(@wave_type) ? :"a#{@wave_type}" : @wave_type
+        name = WAVE_DSL_NAMES.fetch(@wave_type, @wave_type)
+        !@band_limit && (BandLimit::WAVES + BandLimit::COMPLEX_WAVES).include?(@wave_type) ? :"a#{name}" : name
       end
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.
