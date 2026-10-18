@@ -24,8 +24,8 @@ module MB
       PATCHES = [
         Patch.new(
           :classic,
-          'The voice as first built (bin/synths/sq80_voice.rb): a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave down into a driven four-pole; 32nd-note filter chop and poly pressure flutter.',
-          {}
+          'The voice as first built (bin/synths/sq80_voice.rb), two octaves down: a formant wave, a SYNTH 3-style wave a few cents up, and a blipped PRIME an octave below them into a driven four-pole; 32nd-note filter chop and poly pressure flutter.',
+          { transpose: -24, level: 2.81 }
         ),
         Patch.new(
           :flutter_pad,
@@ -43,10 +43,10 @@ module MB
           :chop,
           'Rhythm from the chop envelope: a dark, resonant filter opened in 32nd notes while keys are held, restarting with each note, so chords stagger.',
           {
-            cutoff: 260, reso: 0.65, chop: 3.0, flutter: 0,
+            transpose: -12, cutoff: 260, reso: 0.65, chop: 3.0, flutter: 0,
             env2: { l2: 20, l3: 10 },
             env4: { l3: 58, t4: 20 },
-            level: 1.17,
+            level: 1.39,
           }
         ),
         Patch.new(
@@ -64,13 +64,13 @@ module MB
           :prime_bass,
           'A bass: PRIME an octave down and SYNTH 3 without vibrato, input drive, a snappy filter envelope that velocity opens.',
           {
-            voices: 2, cutoff: 220, reso: 0.5, drive_mode: :input, drive: 3.0, chop: 0, flutter: 0,
+            voices: 2, transpose: 12, cutoff: 220, reso: 0.5, drive_mode: :input, drive: 3.0, chop: 0, flutter: 0,
             osc1: { level: 0.15 }, osc2: { semitones: 0.04, level: 0.4, vibrato: false }, osc3: { level: 0.55, env1: false },
             env2: { t1: 0, t1v: 0, l2: 20, l3: 6, t2: 18, t3: 24 },
             filter: { env2: 3.5, velocity: 1.0 },
             env4: { t1: 0, l2: 58, l3: 50, t4: 12 },
             lfo1: { depth: 0 },
-            level: 4.94,
+            level: 5.52,
           }
         ),
         Patch.new(

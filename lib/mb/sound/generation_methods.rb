@@ -96,6 +96,20 @@ module MB
           end
         }
       end
+
+      # A scan wavetable from a list of frame sources (see Wavetable.of):
+      # library table names, harmonic amplitudes, functions of phase,
+      # tables, and sample arrays, one frame each, so a scan morphs through
+      # them in order.  Prints itself back as this call (graph documents
+      # save it; functions of phase need trust: :code to load unless they
+      # use only arithmetic and Math on their phase).
+      #
+      #     t = wavetable_of(:sine, :saw, [1, 0.5, 0.33], ->(p) { Math.sin(2 * Math::PI * p) ** 3 }, normalize: :loudness)
+      #     knob :shape, 0, range: 0..1
+      #     bg 110.hz.wavetable(t, scan: knob(:shape)).at(-18.db)   # turn :shape to morph
+      def wavetable_of(*sources, size: 2048, normalize: :peak, align: true, mips: :default, interpolation: nil, name: nil)
+        MB::Sound::Wavetable.of(*sources, size: size, normalize: normalize, align: align, mips: mips, interpolation: interpolation, name: name)
+      end
     end
   end
 end

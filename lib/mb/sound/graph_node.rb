@@ -497,3 +497,4 @@ require_relative 'graph_node/dynamics'
 
 # Generates per-channel DSL methods, so it must load after every *Methods module
 require_relative 'graph_node/channel_dispatch'
+require_relative 'graph_node/ring_hint'

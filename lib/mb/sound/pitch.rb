@@ -292,7 +292,15 @@ module MB
         :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
         :acomplex_square, :acomplex_triangle, :acomplex_ramp,
       ].each do |wave|
-        define_method(wave) { tone.public_send(wave) }
+        # Tone's aliases stay aliases here (saw is ramp), so recipes print
+        # the official name (Recipe.official_name)
+        official = Tone.instance_method(wave).original_name
+        if official == wave
+          define_method(wave) { tone.public_send(wave) }
+        else
+          define_method(official) { tone.public_send(official) } unless method_defined?(official)
+          alias_method wave, official
+        end
       end
 
       # Shortcuts for a sine Tone at this pitch (see Tone#at, #with_phase,
@@ -300,7 +308,7 @@ module MB
       # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
       def gain(gain) = tone.gain(gain)
-      def amp(gain) = tone.gain(gain)
+      alias amp gain
       def with_phase(phase) = tone.with_phase(phase)
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
@@ -314,7 +322,7 @@ module MB
       def wraps = signal.wraps
       def increment = signal.increment
       def pwm(width, dc: false, pivot: nil) = tone.pwm(width, dc: dc, pivot: pivot)
-      def skew(width, dc: false, pivot: nil) = tone.skew(width, dc: dc, pivot: pivot)
+      alias skew pwm
       def pulse(width = 0.5, dc: false) = tone.pulse(width, dc: dc)
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true, seed: nil) = tone.noise(blend, seed: seed)

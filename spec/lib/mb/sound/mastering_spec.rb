@@ -100,7 +100,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'lists the presets from the console' do
-      expect { expect(MB::Sound.masters).to eq(described_class.names) }.to output(/:club .*-8\.5 LUFS, -0\.5 dBTP/).to_stdout
+      expect { expect(MB::Sound.masters).to eq(described_class.names) }.to output(/:club .*-8\.5 LUFS \(loudest 16 bars\), -0\.5 dBTP/).to_stdout
       expect(MB::Sound.masters(:vinyl).notes).to match(/RIAA/)
     end
   end
@@ -218,7 +218,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(s.master_info).to start_with('master: ')
       chain = s.instance_variable_get(:@master_chains).last
       expect(chain.mastering.map(&:name)).to eq([:club])
-      expect(chain.mastering[0].options).to eq(mono: 120, lufs: -8, clip: false)
+      expect(chain.mastering[0].options).to eq(mono: 120, loudest_bars: 16, lufs: -8, clip: false) # (techno: one 16-bar phrase)
     end
 
     it 'refuses options without a preset' do

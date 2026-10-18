@@ -104,9 +104,13 @@ module MB
         # Example (bin/sound.rb):
         #     play 220.hz.ramp.at(-6.db).until(2)
         #     bg 220.hz.ramp.at(-6.db).until(2.bars)
+        #
+        # Alias #for (`220.hz.ramp.for(2.bars)`); recipes and graph documents
+        # print the official name, #until (Recipe.official_name).
         def until(length)
           MB::Sound::GraphNode::TimeLimit.new(self, length)
         end
+        alias for until
 
         # Returns a gate (GraphNode::Sounding) that is 1 while this node makes
         # sound (above -90 dB), stays open for +hold+ after it falls silent,

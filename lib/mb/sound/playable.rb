@@ -8,14 +8,15 @@ module MB
     # Accepted (see Playable.graph):
     # - GraphNodes, channel bundles, and inputs (their channels; a Pitch
     #   plays as a sine, an Envelope on its own as the level of a soft
-    #   triangle)
+    #   triangle plus pink noise)
     # - Arrays: one channel or sound per element (numbers make one channel)
     # - Numo::NArray audio (48 kHz; one channel, or an Array of channels)
     # - Strings: sound files, MIDI files (the default patch), .sfz and .sf2
     #   instruments (a demo phrase)
     # - Sample (once, stereo kept), Sample::Slices (the slices in order,
     #   with gaps), Sampler::Instrument and SF2 fonts (a demo phrase)
-    # - Clips and grids (the default patch, or a TR-808 for a grid), Notes,
+    # - Clips and grids (the default patch, or a TR-909 for a grid; a TR-808
+    #   for grids naming 808-only voices), Notes,
     #   MIDI Streams (the default patch), Drums::Machine designs (each
     #   voice once), Wavetables (one note)
     # - Symbols naming a saved preset (a synth preset plays a demo phrase)
@@ -62,8 +63,10 @@ module MB
           sound
 
         when Envelope
-          wrap(220.hz.triangle.at(0.5) * sound, "#{sound} on a 220 Hz triangle", nil,
-            'an envelope plays as the level of a triangle; multiply it into your own sound: `220.hz.saw * env`')
+          # Some noise makes the envelope's shape easier to hear (maintainer,
+          # 2026-10-17 Bench)
+          wrap((220.hz.triangle.at(0.4) + MB::Sound.noise(:pink).at(0.5)) * sound, "#{sound} on a 220 Hz triangle with pink noise", nil,
+            'an envelope plays as the level of a triangle and some noise; multiply it into your own sound: `220.hz.saw * env`')
 
         when GraphNode, GraphNode::MultiOutput
           Graph.new(nodes: sound.outputs, description: describe(sound), ends: nil, note: nil)
@@ -98,9 +101,15 @@ module MB
           ends = !sound.rows.values.any?(&:looping?)
           if (m = sound.instrument)
             wrap(m.kit(sound), "#{label(m)}: #{sound}", ends, nil)
+          elsif tr909_rows?(sound)
+            # The TR-909 (maintainer, 2026-10-17 Bench: "909 might be a
+            # better default"); grids naming voices only the 808 has
+            # (cowbell, congas, ...) play there
+            wrap(MB::Sound.tr909(sound), "tr909: #{sound}", ends,
+              'a grid plays on a TR-909; choose a kit with `tr808(beat)`, or `beat.played_by(Drums::TR808)`')
           else
             wrap(MB::Sound.tr808(sound), "tr808: #{sound}", ends,
-              'a grid plays on a TR-808; choose a kit with `tr909(beat)`, or `beat.played_by(Drums::TR909)`')
+              'a grid plays on a TR-808 (it names voices the TR-909 lacks); choose a kit with `beat.played_by(kit_design)`')
           end
 
         when Sequence::Clip
@@ -322,6 +331,12 @@ module MB
 
       # A short name for an instrument: a drum machine module's last name
       # part (tr909), else its #to_s.
+      # True if every row of grid +kit+ names a TR-909 voice (see #graph).
+      def tr909_rows?(kit)
+        m = Drums::TR909.machine
+        kit.each.all? { |row, clip| m.voice_name(row) || m.voice_name(clip.values.first) }
+      end
+
       def label(inst)
         inst.is_a?(Module) ? inst.name.split('::').last.downcase : inst.to_s
       end

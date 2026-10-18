@@ -25,6 +25,7 @@ require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/cue'
 require_relative 'session/monitor_trim'
+require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
 require_relative 'session/ui_feed'
@@ -83,6 +84,7 @@ module MB
       include AudioRecording
       include Stems
       include MonitorTrim
+      include SafetyLimiter
       include UIFeed
       include Buses # it extends Strip, Undo, and Seeks through super
       include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
@@ -289,7 +291,10 @@ module MB
       #                           and #fade_out).
       # +:monitor+ - If true, the output hears the monitor trim (see
       #              MonitorTrim; by default when +:realtime+).
-      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil)
+      # +:safety_limiter+ - If true, the output goes through a transparent
+      #                     -1 dBFS limiter while no master chain is set
+      #                     (see SafetyLimiter; by default when +:realtime+).
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil, safety_limiter: nil)
         @transport = transport
         @tuning = tuning
         self.master_gain = master_gain
@@ -328,6 +333,7 @@ module MB
         init_midi_in
         init_audio_recording
         init_monitor(monitor.nil? ? realtime : monitor)
+        init_safety_limiter(safety_limiter.nil? ? realtime : safety_limiter)
         init_buses
         init_cue(cue_output)
         @names = Names.new
@@ -937,8 +943,9 @@ module MB
         # Post-chain master gain (pre-chain is in #render_span)
         mix = mix.map { |c| c * @master_gain } if @master_gain_post && @master_gain != 1
 
-        # The monitor trim reaches only the output (see MonitorTrim)
-        output.write(monitored(cue_frame(mix, count))) # with CUE (see Cue)
+        # The safety limiter (without a master chain) and the monitor trim
+        # reach only the output (see SafetyLimiter, MonitorTrim)
+        output.write(monitored(cue_frame(safety_limited(mix), count))) # with CUE (see Cue)
         record_mix(mix, @frame - count)
         call_taps(mix)
         @ui_feed&.publish(self, mix, count, @load)

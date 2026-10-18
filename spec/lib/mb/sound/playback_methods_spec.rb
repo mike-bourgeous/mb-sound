@@ -82,7 +82,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       out.written.clear
       MB::Sound.master_gain(1)
       play_quietly(1.constant.until(0.01))
-      expect(out.channel(0).max).to be_within(1e-6).of(1)
+      # (full scale meets the live output's safety limiter: no master chain)
+      expect(out.channel(0).max).to be_within(1e-6).of(MB::Sound::Session::SafetyLimiter::SAFETY_CEILING.to_f)
     end
 
     it 'scales by gain:' do
@@ -291,6 +292,32 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players[:b]).to match(/starts at bar 2/)
       end
 
+      it 'says once in the console how to end a ringing sum with an input that never ends' do
+        allow(MB::Sound).to receive(:live?).and_return(true)
+        MB::Sound::GraphNode::RingHint.enabled = true
+        hit = 330.hz.triangle * MB::Sound.adsr(0.001, 0.05, 0, 0.01)
+        expect {
+          MB::Sound.bg(:a, 110.hz.sine + hit)
+        }.to output(/rings until all of its inputs end, and one never ends.*Ctrl-C.*\.ring\(:first\)/).to_stderr
+        expect { MB::Sound.bg(:b, 110.hz.sine + hit) }.not_to output.to_stderr # once
+        expect(MB::Sound::GraphNode::RingHint.enabled).to eq(false)
+      end
+
+      it 'gives no ringing-sum hint for sums that end, never end anyway, or end with their first input, nor in scripts' do
+        allow(MB::Sound).to receive(:live?).and_return(true)
+        MB::Sound::GraphNode::RingHint.enabled = true
+        hit = -> { 330.hz.triangle * MB::Sound.adsr(0.001, 0.05, 0, 0.01) }
+        expect {
+          MB::Sound.bg(:a, (110.hz.sine + hit.()).ring(:first))
+          MB::Sound.bg(:b, 110.hz.sine + 220.hz.sine)
+          MB::Sound.bg(:c, (110.hz.sine + hit.()) * MB::Sound.adsr(0.01, 0.1, 0, 0.1))
+          MB::Sound.bg(:d, hit.() + 0.1)
+        }.not_to output.to_stderr
+        allow(MB::Sound).to receive(:live?).and_return(false)
+        expect { MB::Sound.bg(:e, 110.hz.sine + hit.()) }.not_to output.to_stderr
+        expect(MB::Sound::GraphNode::RingHint.enabled).to eq(true)
+      end
+
       it 'returns right away' do
         t = MB::U.clock_now
         MB::Sound.bg(440.hz.sine)
@@ -412,14 +439,15 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'sets, shows, and removes master effects' do
-      expect(MB::Sound.master).to eq('bypass')
+      # (the default Session is realtime: its live output has the safety limiter)
+      expect(MB::Sound.master).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set)')
       expect(MB::Sound.master { |mix| mix.softclip }.data[:description]).to start_with('master:')
       expect(MB::Sound.master).to start_with('master:')
       expect(MB::Sound::Session.default.master_active?).to eq(true)
       MB::Sound.master(nil)
       deadline = MB::U.clock_now + 2
-      sleep 0.01 until MB::Sound.master == 'bypass' || MB::U.clock_now > deadline
-      expect(MB::Sound.master).to eq('bypass')
+      sleep 0.01 until MB::Sound.master.start_with?('bypass') || MB::U.clock_now > deadline
+      expect(MB::Sound.master).to start_with('bypass (live output: a safety limiter')
     end
 
     it 'is also available as master_fx' do
@@ -618,6 +646,16 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
           expect(MB::Sound.render(out, 0.1.constant)).to eq(0.5)
         }.to output(/after 0.5 seconds; pass bars: or seconds:/).to_stderr
         expect(out.frames_written).to eq(24000)
+      end
+
+      it 'names .ring(:first) when a ringing sum with an input that never ends reaches MAX_RENDER_SECONDS' do
+        hit = 330.hz.triangle * MB::Sound.adsr(0.001, 0.05, 0, 0.01)
+        expect {
+          expect(MB::Sound.render(out, 110.hz.sine.at(0.1) + hit)).to eq(0.5)
+        }.to output(/after 0.5 seconds; pass bars: or seconds:.*\n.*never ends.*\.ring\(:first\)/).to_stderr
+        expect {
+          MB::Sound.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), (110.hz.sine.at(0.1) + hit).ring(:first))
+        }.not_to output.to_stderr
       end
 
       it 'always reaches the end bar and its tail with bars:, past MAX_RENDER_SECONDS' do

@@ -210,7 +210,7 @@ RSpec.describe('UI round 4 feed') do
       expect(info.loop).to eq(true)
       expect(info.length).to eq(3/8r)
       expect(info.events.map { |e| [e.start, e.length, e.note, e.marks] }).to eq([[0r, 1/8r, 36, []], [1/8r, 1/4r, 40, [:accent]]])
-      expect(info.ruby).to eq('seq(C2, E2.n4.acc).n8.loop')
+      expect(info.ruby).to eq('seq(C2, E2.n4.accent).n8.loop') # (acc prints as its official name)
       expect(info.range).to eq(36..40)
 
       kit = lane(:drums).slots[0]

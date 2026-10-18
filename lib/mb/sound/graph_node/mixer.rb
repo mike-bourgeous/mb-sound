@@ -91,6 +91,11 @@ module MB
         end
 
         def initialize(summands, sample_rate: nil, stop_early: nil)
+          # Ending with the first input because of the ring mode (not an
+          # explicit stop_early:): recipes print it as .ring(:first), see
+          # #ring_implied?
+          @ring_implied = stop_early.nil? && Mixer.ring_mode != :all
+          @implied_ring_call = nil
           stop_early = Mixer.ring_mode != :all if stop_early.nil?
           @constant = 0
           @ended = nil # summands that have ended, without stop_early
@@ -141,10 +146,25 @@ module MB
           @stop_early
         end
 
+        # True if this sum ends with its first input only because it was made
+        # where sums end that way (Mixer.with_ring(:first), Session#ring,
+        # graph documents before format 4), and that matters: it has two or
+        # more inputs that can end (constants and knobs can't).  Recipes
+        # print it as `.ring(:first)` (Recipe.note_implied_ring), so a saved
+        # copy keeps the ending.
+        def ring_implied?
+          @ring_implied && @stop_early && summands.count { |s| !(s.is_a?(Constant) || s.is_a?(Knob) || s.is_a?(Knob::Reader)) } >= 2
+        end
+
+        # Internal (Recipe.note_implied_ring): the `.ring(:first)` call
+        # recorded for #ring_implied?, or nil.
+        attr_accessor :implied_ring_call
+
         # Internal (see GraphNode#ring): ends with the first input to end
         # (true) or with the last (false).
         def stop_early=(stop)
           @stop_early = !!stop
+          @ring_implied = false
           @ended = nil
           @live = nil
           Plan.changed(self)

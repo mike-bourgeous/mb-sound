@@ -71,7 +71,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       invs = recipe.call_of(s).invocations
       expect(invs.length).to eq(3)
       expect(invs.map { |i| i.args[1] }).to eq([0, 1, 2])
-      expect(invs.map { |i| i.locals[:base] }.map { |b| recipe.call_of(b, nil)&.name }).to all(eq(:saw))
+      expect(invs.map { |i| i.locals[:base] }.map { |b| recipe.call_of(b, nil)&.name }).to all(eq(:ramp))
       expect(invs[0].result).to be_a(MB::Sound::GraphNode::Multiplier)
     end
 
@@ -187,10 +187,10 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       recipe.enabled = true
     end
 
-    it 'records aliases under the name the code used, sharing one recorder' do
+    it 'records aliases under the official name, keeping the name the code used, sharing one recorder' do
       expect(MB::Sound::Pitch.instance_method(:additive)).to eq(MB::Sound::Pitch.instance_method(:harmonics))
       x = 110.hz.additive([1, 0.5])
-      expect(recipe.call_of(x).name).to eq(:additive)
+      expect(recipe.call_of(x)).to have_attributes(name: :harmonics, written: :additive)
     end
 
     describe 'surface guard' do
@@ -243,7 +243,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     it 'prints chains as written, with units' do
       g = 220.hz.ramp.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db
       expect(g.to_ruby).to eq('220.hz.ramp.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db')
-      expect(MB::Sound::A3.saw.delay(1.n16.dotted).to_ruby).to eq('A3.saw.delay(1.n16.dotted)')
+      expect(MB::Sound::A3.saw.delay(1.n16.dotted).to_ruby).to eq('A3.ramp.delay(1.n16.dotted)')
       expect(110.hz.ramp.delay(3.n16).delay(1.n8.triplet).delay(2.bars).to_ruby).to eq('110.hz.ramp.delay(3.n16).delay(1.n8.triplet).delay(2.bars)')
       expect(220.hz.transpose(1.oct).ramp.delay(96.samples).to_ruby).to eq('220.hz.transpose(1.oct).ramp.delay(96.samples)')
     end
@@ -333,8 +333,8 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       recipe.enabled = true
       code = MB::Sound::GraphNode::Recipe::RubyWriter.new(notes.hz.saw * notes.amp_env).to_s
       expect(code).to start_with("# inputs: midi\n")
-      expect(code).to end_with('midi.hz.saw * midi.amp_env')
-      expect((notes.hz.saw * notes.gate).to_ruby(inputs: { keys: notes })).to eq("# inputs: keys\nkeys.hz.saw * keys.gate")
+      expect(code).to end_with('midi.hz.ramp * midi.amp_env')
+      expect((notes.hz.saw * notes.gate).to_ruby(inputs: { keys: notes })).to eq("# inputs: keys\nkeys.hz.ramp * keys.gate")
 
       # Notes made by user code print as their constructor
       n2 = MB::Sound::Notes.new(midi_path)

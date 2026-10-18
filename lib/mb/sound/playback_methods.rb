@@ -17,12 +17,12 @@ module MB
       #
       # Anything playable plays (see Playable.graph), each in a useful way:
       # - graphs and bundles (oscillators play until Ctrl-C), Pitches and
-      #   Notes as sines, an Envelope as the level of a soft triangle
+      #   Notes as sines, an Envelope as the level of a soft triangle plus pink noise
       # - sound files, Numo arrays (48 kHz), Arrays (one channel each)
       # - a Sample once (stereo kept); Slices one by one with gaps
       # - an Instrument, an SFZ or SF2 file or font: a demo phrase
       # - a Clip, Notes, a MIDI file or Stream on a soft saw (loops play
-      #   until Ctrl-C); a grid on a TR-808; a kit design's voices once
+      #   until Ctrl-C); a grid on a TR-909 (a TR-808 for 808-only voices); a kit design's voices once
       # - a Wavetable as one note; a preset's Symbol (synth presets play a
       #   demo phrase); a genre template (`genre(:dnb)`, or `play :dnb`):
       #   about a minute of its form (set up in the background Session)
@@ -39,7 +39,7 @@ module MB
       #     play 220.hz.triangle.at(-20.db)               # until Ctrl-C
       #     play Sample['sounds/drums.flac']              # once, then back to the prompt
       #     play seq(C4, E4, G4, C5).n8                   # a clip on the default patch
-      #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-808
+      #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-909
       #     play sf2('GeneralUser.sf2')                   # a demo phrase
       #     play riff, clock: 138.75.bpm                 # on a clock (see #bg)
       def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
@@ -163,6 +163,12 @@ module MB
         rescue Playable::Unplayable => e
           return MB::Sound.live_error(e)
         end
+
+        # A ringing sum with an input that never ends (`drone + hit`): say
+        # once in the console how to end it with its first input
+        # (GraphNode::RingHint; scripts end their graphs themselves, e.g.
+        # effect scripts after their input rings down)
+        GraphNode::RingHint.notice(playable.nodes) if playable.ends.nil? && MB::Sound.live?
 
         # Graph documents' knobs join the session (Session#add does this
         # too); those with a controller get live MIDI input
@@ -356,7 +362,7 @@ module MB
           out = session.output
           return :low if out.respond_to?(:profile) && out.profile == :low
 
-          unless session.idle? && session.master_info == 'bypass'
+          unless session.idle? && session.master_bypassed?
             warn 'Live MIDI: `latency :low` lowers the latency once players and master effects are stopped' unless quiet
             return nil
           end
@@ -880,6 +886,7 @@ module MB
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
 
         if capture.nil? || capture.targeted.empty?
+          warn first[:peak_warning] if first[:peak_warning]
           normalize_render(filename, loudness, peak) if loudness
           if kwargs[:report] && MixReport.last
             MixReport.last.codec_peaks = Mastering.codec_peaks(filename) if filename.is_a?(String)
@@ -1086,11 +1093,18 @@ module MB
         end
 
         if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
-          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+          hint = GraphNode::RingHint.message(sounds.select { |s| s.respond_to?(:sample) || s.is_a?(GraphNode::Channels) })
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)#{"\n#{hint}" if hint}"
         end
 
         if peak_meter && (message = peak_meter.warning(filename, session.master_gain))
-          warn message
+          # A targeted render's first pass isn't the file it writes: its
+          # warning waits until #render knows whether a second pass follows
+          if mastering[:capture]
+            mastering[:peak_warning] = message
+          else
+            warn message
+          end
         end
 
         if meter

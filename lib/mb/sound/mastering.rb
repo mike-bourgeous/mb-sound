@@ -88,6 +88,18 @@ module MB
           }
         end
 
+        # What a render's target measures: :integrated (the default) or
+        # :loudest (see MEASURES).
+        def measure
+          options.fetch(:measure) { DEFINITIONS.dig(name, :defaults, :measure) || :integrated }
+        end
+
+        # The window of +measure: :loudest+ in bars (LOUDEST_BARS unless
+        # given).
+        def loudest_bars
+          options[:loudest_bars] || LOUDEST_BARS
+        end
+
         # True if renders measure and set the trim (not with a fixed
         # +drive+ or a rider).
         def targeted?
@@ -111,7 +123,7 @@ module MB
           tp = format('%.1f dBTP', ceiling.db_value)
           chain = steps.map(&:first).join(' -> ')
           drive_text = fixed ? ", drive #{format('%+.1f', drive.db_value)} dB" : ''
-          "#{name}: #{format('%.1f', target.lufs)} LUFS, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}; #{chain}"
+          "#{name}: #{format('%.1f', target.lufs)} LUFS#{measure == :loudest ? " (loudest #{loudest_bars} bars)" : ''}, #{tp}#{limiter ? '' : ' (no limiter)'}#{drive_text}#{ride ? ', riding' : ''}; #{chain}"
         end
 
         def to_s
@@ -128,7 +140,7 @@ module MB
       DEFINITIONS = {
         club: {
           title: 'Club: loud, low crest, mono lows',
-          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false, air: :static },
+          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false, air: :static, measure: :loudest },
           notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), the top ' \
                  'octave above 18 kHz rolled off (lossy encoders cut it anyway, and their decoded peaks grow less; air: :dynamic, :band, false), a fast ' \
                  'limiter 2 dB over the ceiling for transients, then a true-peak limiter at -0.5 dBTP; -8.5 LUFS ' \
@@ -169,7 +181,19 @@ module MB
       }.freeze
 
       # Options every preset takes (see .preset).
-      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess].freeze
+      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess measure loudest_bars].freeze
+
+      # What a render's target measures (+measure:+): the song's integrated
+      # loudness, or that of its loudest +loudest_bars:+ bars (windows
+      # starting on bar lines; see Mastering::Targeting), so quieter
+      # sections keep their distance from the drops instead of coming up
+      # to fill the integrated target.  :club measures :loudest (the
+      # maintainer's decision, 2026-10-18).
+      MEASURES = %i[integrated loudest].freeze
+
+      # The default window (bars) of +measure: :loudest+ (genre templates
+      # set their own from their phrase lengths: Genre::Mix#loudest_bars).
+      LOUDEST_BARS = 16
 
       # Rider settings for `ride: true` (see GraphNode::Rider; +range+ and
       # times as there).
@@ -205,7 +229,12 @@ module MB
         # - +mono:+ Hz below which the low end is mono, or false;
         # - +glue:+ false to skip the glue compressor;
         # - +clip:+ (:club) false to skip the soft clipper;
-        # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false.
+        # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false;
+        # - +measure:+ :loudest to reach the target with the loudest
+        #   +loudest_bars:+ bars (LOUDEST_BARS by default; windows on bar
+        #   lines) rather than the whole song (renders; see MEASURES), or
+        #   :integrated (the default except for :club);
+        # - +loudest_bars:+ the window of measure: :loudest, in bars.
         def preset(name, **options)
           if name.is_a?(Preset)
             return name if options.empty?
@@ -223,6 +252,12 @@ module MB
           end
           if options.key?(:platform) && options.key?(:lufs)
             raise ArgumentError, 'Pass lufs: or platform:, not both'
+          end
+          if options.key?(:measure) && !MEASURES.include?(options[:measure])
+            raise ArgumentError, "measure: is #{MEASURES.map(&:inspect).join(' or ')} (got #{options[:measure].inspect})"
+          end
+          if options.key?(:loudest_bars) && !(options[:loudest_bars].is_a?(Integer) && options[:loudest_bars] > 0)
+            raise ArgumentError, "loudest_bars: is a number of bars, a positive Integer (got #{options[:loudest_bars].inspect})"
           end
 
           o = definition[:defaults].merge(options)

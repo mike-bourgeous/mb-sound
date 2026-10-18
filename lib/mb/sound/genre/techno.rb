@@ -109,6 +109,7 @@ module MB
       loudness(-9..-7)
       true_peak(-0.5.db)
       mono_below 120 # club systems
+      loudest_bars 16 # the club master's loudest-part window: one phrase
       # (the club mastering preset with its two limiters, no clipper:
       # mastering-2, 2026-10-17, maintainer on the Bench: "The IMD on some
       # of the stabs is noticeable in the clipping variant")

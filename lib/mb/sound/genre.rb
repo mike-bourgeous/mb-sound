@@ -71,10 +71,13 @@ module MB
       # the low end stays mono (+mono_below+, Hz), the +master+ chain as an
       # Array of steps [preset or GraphNode method name, args, params]
       # applied in order (empty for none), and the master bus +gain+ (nil to
-      # keep the Session's).
-      Mix = Data.define(:loudness, :true_peak, :mono_below, :master, :gain) do
-        def initialize(loudness: nil, true_peak: nil, mono_below: nil, master: [], gain: nil)
-          super(loudness: loudness, true_peak: true_peak, mono_below: mono_below, master: master.dup.freeze, gain: gain)
+      # keep the Session's).  +loudest_bars+ is the window, in bars, of a
+      # mastering preset that targets the loudest part (`measure:
+      # :loudest`, the :club default; Mastering::LOUDEST_BARS when nil),
+      # from the genre's phrase lengths.
+      Mix = Data.define(:loudness, :true_peak, :mono_below, :master, :gain, :loudest_bars) do
+        def initialize(loudness: nil, true_peak: nil, mono_below: nil, master: [], gain: nil, loudest_bars: nil)
+          super(loudness: loudness, true_peak: true_peak, mono_below: mono_below, master: master.dup.freeze, gain: gain, loudest_bars: loudest_bars)
         end
 
         # A one-line summary (e.g. "-8..-6 LUFS, -0.5 dBTP, mono below 120 Hz,
@@ -408,6 +411,12 @@ module MB
               chain[i] = [name, args, { mono: mono }.merge(params)]
               mono = nil
             end
+            # The template's loudest-part window (phrase length)
+            if mix.loudest_bars && (i = chain.index { |n, _a, _p| Mastering.preset?(n) })
+              name, args, params = chain[i]
+              chain = chain.dup
+              chain[i] = [name, args, { loudest_bars: mix.loudest_bars }.merge(params)]
+            end
             MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
           end
           template = self
@@ -450,6 +459,7 @@ module MB
           l << call.(:loudness, mix.loudness) if mix.loudness
           l << call.(:true_peak, mix.true_peak) if mix.true_peak
           l << call.(:mono_below, mix.mono_below) if mix.mono_below
+          l << call.(:loudest_bars, mix.loudest_bars) if mix.loudest_bars
           mix.master.each { |n, a, o|
             l << "  master #{[n.inspect, *a.map { |v| Genre.ruby(v) }, (Genre.kwargs(o) unless o.empty?)].compact.join(', ')}"
           }
@@ -678,6 +688,13 @@ module MB
         def master(name, *args, **params)
           return @mix[:master] = [] if name.nil?
           @mix[:master] = [*@mix[:master], [name, args.freeze, params.freeze].freeze]
+        end
+
+        # The window, in bars, of a mastering preset that targets the loudest
+        # part (`measure: :loudest`, the :club default): the genre's phrase
+        # length (Mastering::LOUDEST_BARS, 16, when not given).
+        def loudest_bars(bars)
+          @mix[:loudest_bars] = bars
         end
 
         # The master bus gain (e.g. `master_gain 0.db`).

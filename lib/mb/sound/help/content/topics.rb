@@ -19,14 +19,15 @@ module MB
         player on a shared timeline; `play` is the foreground version
         (waits until the sound ends; Ctrl-C to stop).  Commands return
         journal entries that say where they land.  Sounds end through
-        envelopes, clips, `until`, or `stop`.  `play`, `bg`, and `render`
+        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
-        a soft saw), grids (a TR-808), instruments and SF2/SFZ files (a
+        a soft saw), grids (a TR-909, or a TR-808 for its own voices like
+        cowbell), envelopes (on a triangle with noise), instruments and SF2/SFZ files (a
         demo phrase), wavetables (one note), and presets by name.
       TEXT
       commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up
-      dsl :at, :until, :and_then
+      dsl :at, :until, :for, :and_then
       note :method_modules
       see :sets, :now, :files
       example 'a quiet triangle that stops itself' do
@@ -42,8 +43,8 @@ module MB
       example 'play two seconds of a drum file as a Sample', bars: 1 do
         play Sample['sounds/drums.flac'].trim(...2.seconds), gain: -8.db
       end
-      example 'play a grid on a TR-808' do
-        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -12.db
+      example 'play a grid on a TR-909' do
+        play grid(16, kick: 'X...x...', snare: '....x...', hat: 'x.x.x.x.'), gain: -13.db
       end
     end
 
@@ -79,6 +80,31 @@ module MB
       end
     end
 
+    Help.topic :wavetables, 'Wavetables and shape morphs', group: :sound do
+      about <<~TEXT
+        `pitch.wavetable(t, scan: x)` plays a table, morphing through its
+        frames as `scan` moves 0..1 (a number, an LFO, a knob).  Library
+        tables: `Wavetable[:basic]` (sine, triangle, saw, square),
+        `:organ`, `:pulses`, ... (`Wavetable.names`).  `wavetable_of`
+        builds a scan table from a list of frames: table names, harmonic
+        amplitudes (`[1, 0.5, 0.33]`), functions of the phase in cycles
+        (`->(p) { ... }`), tables, and sample arrays (`normalize: :peak`
+        by default, `:loudness` for even levels); it saves and prints as
+        the call.  Turn a knob to change the shape while it plays:
+        `110.hz.wavetable(t, scan: knob(:shape))`.
+      TEXT
+      commands :wavetable_of
+      dsl :wavetable, :harmonics
+      note :oscillators
+      see :tones, :knobs
+      example 'a shape morph on a knob' do
+        knob :try_shape, 0, range: 0..1
+        t = wavetable_of(:sine, [1, 0.5, 0.33, 0.25], :saw, ->(p) { Math.sin(2 * Math::PI * p)**3 }, normalize: :loudness)
+        bg :try, 110.hz.wavetable(t, scan: knob(:try_shape)).at(-22.db).until(2.bars)
+        turn :try_shape, 1, over: 2.bars
+      end
+    end
+
     Help.topic :unison, 'Unison and supersaws', group: :sound do
       about <<~TEXT
         Three spellings, the same sound bit for bit:
@@ -102,7 +128,11 @@ module MB
       about <<~TEXT
         Envelopes land exactly on their targets at whole samples; curves
         are signed dB (+60 falls like a 60 dB exponential).  Without a gate
-        they are one-shots.
+        they are one-shots.  `tween(values, step)` moves through keyframes
+        with `step` between each two (not the whole length):
+        `tween([100.hz, 5000.hz, 100.hz], 2.bars)` takes 4 bars to come
+        back down, then (looping) takes 2 more back to its first value;
+        `tween([100.hz, 5000.hz], 2.bars)` is up and down in 4 bars.
       TEXT
       commands :adsr, :env, :amp_env, :filter_env, :fm_env, :sq80_env, :tween, :bounce_hits
       dsl :smooth, :ease
@@ -121,8 +151,8 @@ module MB
       dsl :filter, :lp4, :diode, :peq, :formant, :smooth
       note :filters
       see :knobs
-      example 'a swept four-pole' do
-        bg :try, 55.hz.ramp.at(-16.db).lp4(tween([200.hz, 4000.hz, 200.hz], 2.bars), resonance: 0.6).until(2.bars)
+      example 'a swept four-pole (one bar up, one bar down: the length is per step)' do
+        bg :try, 55.hz.ramp.at(-16.db).lp4(tween([200.hz, 4000.hz], 1.bar), resonance: 0.6).until(2.bars)
       end
     end
 
@@ -252,14 +282,14 @@ module MB
         pressure sets its own sample-and-hold filter flutter).  It takes
         any MIDI source (none: live `midi`), a patch, and settings, as in
         `sq80(clip, :chop)` or `sq80(:glass, cutoff: 900)`.  Patches:
-        :classic (the defaults), :flutter_pad, :chop, :vox_lead,
+        :classic (the defaults, two octaves down), :flutter_pad, :chop, :vox_lead,
         :prime_bass, :glass (`sq80_patches` lists them).  Settings:
         voices, cutoff (Hz), reso (0..1), drive_mode (:feedback or
         :input), drive, chop, flutter, second_release, osc1..osc3 (wave,
         semitones, level, vibrato, env1), env1, env2, env4 (sq80_env panel
         values), lfo1 (rate in Hz, depth in semitones, delay, wheel,
         pressure), filter (env2, key, velocity, aftertouch, in octaves),
-        level; Hash settings change only the keys given
+        transpose (semitones, every oscillator), level; Hash settings change only the keys given
         (`env4: { t4: 50 }`).  Each patch is a preset too
         (`preset :sq80_glass, midi: midi`), and the shell plays them with
         bin/synths/sq80_voice.rb -p glass.
@@ -675,7 +705,9 @@ module MB
       about <<~TEXT
         Named values that graphs read (`knob(:cut)`) and you turn, with
         ramps, launch points, MIDI learn, snapshots, and crossfades.  Turns
-        are journaled and undoable.
+        are journaled and undoable.  Read a knob before defining it and it
+        starts at 0.5 of 0..1 (with a note); `knob :cut, 800, range:
+        100..8000` later sets it up, and whatever reads it keeps reading.
 
         Keyframes move a knob through values over time: `turn :space, 0 =>
         0.3, 1.n8 => 0.5, 1.n4 => 0.62` (a monotone cubic through them in
@@ -726,7 +758,13 @@ module MB
         live, `ride: true` rides the gain toward it.  `masters` lists them,
         `master(:club) { |mix| fx }` puts your effects first, and
         `render 'x.flac', master: :streaming { song }` or a song's
-        `--master club` masters any song.
+        `--master club` masters any song.  `:club` reaches its target with
+        the loudest 16 bars (`loudest_bars:`; windows on bar lines) instead
+        of the whole song, so breakdowns stay under the drops; `measure:
+        :integrated` targets the whole song.
+        Without a master chain the live output (not renders or recordings)
+        ends in a transparent safety limiter at -1 dBFS; `master` says so,
+        and any chain or preset replaces it.
       TEXT
       commands :masters, :master, :render
       dsl :master, :ride

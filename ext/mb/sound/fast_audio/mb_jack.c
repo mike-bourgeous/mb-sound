@@ -374,6 +374,60 @@ int mb_jack_is_open(void)
 	return client != NULL && client_pid == getpid() && !atomic_load(&client_lost);
 }
 
+// How long mb_jack_open keeps trying (ns) when a server it reached before
+// doesn't answer or a new client can't activate: a starved machine
+// stalls the server for a moment (live_source_spec's JACK group under
+// parallel specs, 2026-10-18: "Could not activate the JACK client" on the
+// reopen after a starved attempt; reproduced by stopping jackd for 0.3 s
+// during a reopen).
+#define MB_JACK_OPEN_RETRY_NS 3000000000LL
+
+// Set once a client opened in this process (a server answered).
+static int ever_opened;
+
+static long long open_now_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+// One attempt of mb_jack_open: the client, or NULL with *error set.
+static jack_client_t *open_attempt(const char *name, const char **error)
+{
+	quiet(1);
+	int status = 0;
+	jack_client_t *c = jack.client_open(name, JACK_NO_START_SERVER, &status);
+	quiet(0);
+	if (c == NULL) {
+		*error = "Could not connect to a JACK server (is jackd or PipeWire running?)";
+		return NULL;
+	}
+
+	atomic_store(&client_lost, 0);
+	atomic_store(&active, NULL);
+	atomic_store(&cycles_skipped, 0);
+	atomic_store(&cycles_repeated, 0);
+	have_prev_frame = 0; // no process thread yet
+	atomic_store(&stall_us, 0); // a new client starts unstalled
+	stall_count = 0;
+	atomic_store(&frame_log_on, 0); // and unlogged
+	atomic_store(&frame_log_len, 0);
+	if (jack.set_process_callback(c, process, NULL) != 0) {
+		jack.client_close(c);
+		*error = "Could not set the JACK process callback";
+		return NULL;
+	}
+	jack.on_shutdown(c, on_shutdown, NULL);
+	if (jack.activate(c) != 0) {
+		jack.client_close(c);
+		*error = "Could not activate the JACK client";
+		return NULL;
+	}
+
+	return c;
+}
+
 const char *mb_jack_open(const char *name)
 {
 	if (mb_jack_load()) {
@@ -389,35 +443,27 @@ const char *mb_jack_open(const char *name)
 		return atomic_load(&client_lost) ? "The JACK server closed the connection" : NULL;
 	}
 
-	quiet(1);
-	int status = 0;
-	jack_client_t *c = jack.client_open(name, JACK_NO_START_SERVER, &status);
-	quiet(0);
-	if (c == NULL) {
-		return "Could not connect to a JACK server (is jackd or PipeWire running?)";
-	}
-
-	atomic_store(&client_lost, 0);
-	atomic_store(&active, NULL);
-	atomic_store(&cycles_skipped, 0);
-	atomic_store(&cycles_repeated, 0);
-	have_prev_frame = 0; // no process thread yet
-	atomic_store(&stall_us, 0); // a new client starts unstalled
-	stall_count = 0;
-	atomic_store(&frame_log_on, 0); // and unlogged
-	atomic_store(&frame_log_len, 0);
-	if (jack.set_process_callback(c, process, NULL) != 0) {
-		jack.client_close(c);
-		return "Could not set the JACK process callback";
-	}
-	jack.on_shutdown(c, on_shutdown, NULL);
-	if (jack.activate(c) != 0) {
-		jack.client_close(c);
-		return "Could not activate the JACK client";
+	// A server that answered before (or one that answers but can't
+	// activate the client yet) gets MB_JACK_OPEN_RETRY_NS to recover, with
+	// growing pauses; without one, a missing server fails at once (so
+	// backends without JACK fall through quickly)
+	const char *error = NULL;
+	long long deadline = open_now_ns() + MB_JACK_OPEN_RETRY_NS;
+	long pause_ns = 20000000L;
+	jack_client_t *c;
+	while ((c = open_attempt(name, &error)) == NULL) {
+		int reachable = ever_opened || strcmp(error, "Could not activate the JACK client") == 0;
+		if (!reachable || open_now_ns() + pause_ns > deadline) {
+			return error;
+		}
+		struct timespec ts = { 0, pause_ns };
+		nanosleep(&ts, NULL);
+		pause_ns = pause_ns * 2 > 250000000L ? 250000000L : pause_ns * 2;
 	}
 
 	client = c;
 	client_pid = getpid();
+	ever_opened = 1;
 	return NULL;
 }
 

@@ -269,23 +269,41 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     # pause) made an adaptive output warn "Audio dropout: raising the
     # output queue" and grow its limit mid-measurement (spec:parallel,
     # 2026-10-18; reproduced with an 80 ms stall).  With a fixed queue the
-    # same stall is one underrun, and the bounds below still hold (median
-    # 2176 of 2400, 5 instant writes).
+    # same stall is one underrun.
+    #
+    # The property is measured per write from the device's own counters,
+    # not from wall-clock time (omnibus9, 2026-10-18): a write that found
+    # no room must return only after the device played more, and writes
+    # that found room (catching up after the writer was late) may return
+    # at once.  Counting writes under 1 ms as "instant" failed under load
+    # (11 of 50 with 4 spec processes): after a stall every catch-up write
+    # is instant, and a full-queue write whose device callback was due
+    # within 1 ms waited less than that (measured: 0.43 ms).  The stall
+    # below makes that case part of every run (an 80 ms writer stall,
+    # longer than the 50 ms queue).
     o = device_output(profile: :default, adaptive: false)
     data = [Numo::SFloat.zeros(o.buffer_size)] * 2
     20.times { o.write(data) } # fill the queue
 
     depths = []
-    instant = 0
-    50.times do
-      t = MB::U.clock_now
+    unpaced = []
+    full = 0
+    50.times do |i|
+      sleep 0.08 if i == 25 # a stalled writer (load, a GC pause)
+      before = o.stats
+      no_room = before[:queued] + o.buffer_size > o.queue_limit
       o.write(data)
-      instant += 1 if MB::U.clock_now - t < 0.001
-      depths << o.stats[:queued]
+      after = o.stats
+      if no_room
+        full += 1
+        unpaced << i unless after[:frames_played] > before[:frames_played]
+      end
+      depths << after[:queued]
     end
 
+    expect(unpaced).to eq([])
+    expect(full).to be >= 30 # (most writes find the queue full: no bursts)
     expect(depths.sort[depths.length / 2]).to be >= o.queue_limit - o.buffer_size
-    expect(instant).to be < 10
   end
 
   it 'never queues less than two buffers' do

@@ -583,6 +583,42 @@ module MB
         end
         alias lufs integrated
 
+        # The gated integrated loudness (LUFS) of the loudest window of
+        # +seconds+ (a drop, not the song): BS.1770's gating applied to the
+        # 400 ms blocks inside each window, windows starting every +hop+
+        # seconds; the whole integrated loudness if the audio is shorter
+        # than one window.  Mastering presets with `measure: :loudest`
+        # target it (Mastering::Targeting).
+        def loudest(seconds, hop: 1.0)
+          blocks = windows(MOMENTARY_SEGMENTS, STEP_SEGMENTS, lead: false)
+          step = STEP_SEGMENTS * SEGMENT
+          w = [((seconds - MOMENTARY_SEGMENTS * SEGMENT) / step).round + 1, 1].max
+          return integrated if blocks.length <= w
+
+          h = [(hop / step).round, 1].max
+          (0..(blocks.length - w)).step(h).map { |i| Loudness.gate(blocks[i...(i + w)])[0] }.max
+        end
+
+        # The gated integrated loudness (LUFS) of the loudest of +ranges+
+        # ([start, end] in seconds from the start, e.g. 16-bar windows
+        # starting on bar lines): BS.1770's gating applied to the 400 ms
+        # blocks that lie inside each range.  The whole integrated loudness
+        # if no range holds a block.
+        def loudest_in(ranges)
+          blocks = windows(MOMENTARY_SEGMENTS, STEP_SEGMENTS, lead: false)
+          step = STEP_SEGMENTS * SEGMENT
+          len = MOMENTARY_SEGMENTS * SEGMENT
+          values = ranges.filter_map { |a, b|
+            first = (a / step - 1e-9).ceil
+            last = ((b - len) / step + 1e-9).floor
+            first = 0 if first < 0
+            last = blocks.length - 1 if last > blocks.length - 1
+            next if last < first
+            Loudness.gate(blocks[first..last])[0]
+          }
+          values.empty? ? integrated : values.max
+        end
+
         # Loudness range (LU) so far, as if followed by 1.5 s of silence
         # (see #result).
         def range
