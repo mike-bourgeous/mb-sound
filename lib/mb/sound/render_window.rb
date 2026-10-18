@@ -77,12 +77,14 @@ module MB
       # Raises unless +target+ can be a render window edge on +session+
       # (after the song's block ran): a bar number (from 1), or a section or
       # label of the song form playing, or a marker (as for Session#seek;
-      # with suggestions for misspelled names).
-      def check_target(session, target, what)
+      # with suggestions for misspelled names).  +form+ is a Form about to
+      # play, checked instead of the one playing (ScriptRunner checks
+      # --from/--to that way before the form's warm-up).
+      def check_target(session, target, what, form: nil)
         if target.is_a?(Symbol)
-          session.send(:check_seek_target, target)
+          session.send(:check_seek_target, target, form: form)
         elsif !(target.is_a?(Numeric) && target >= 1)
-          raise TargetError, "#{what} is a section, label, or marker name, or a bar number from 1 (got #{target.inspect})"
+          raise TargetError, "#{what} is a section, label, or marker name, or a bar number from 1 (got #{target.is_a?(Rational) && target.denominator == 1 ? target.to_i : target.inspect})"
         end
       rescue ArgumentError => e
         raise e if e.message.start_with?(what.to_s)

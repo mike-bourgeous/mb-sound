@@ -55,14 +55,17 @@ module MB
         end
 
         # Raises unless +target+ can be sought now (it is resolved again when
-        # the seek lands).
-        def check_seek_target(target)
+        # the seek lands).  +form+ checks section and label names against a
+        # Form about to play instead of the one playing (see
+        # Arrangement#before_form).
+        def check_seek_target(target, form: nil)
           if target.is_a?(Symbol)
             pb = arrangement.playback
-            return if pb && !pb.ended? && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
+            playing = form || (pb.form if pb && !pb.ended?)
+            return if playing && (playing.sections.key?(target) || playing.labels.key?(target))
             return if markers[target]
 
-            form = pb&.form
+            form ||= pb&.form
             sections = form ? form.sections.keys + form.labels.keys : []
             names = (sections + markers.to_h.keys).uniq
             known = []

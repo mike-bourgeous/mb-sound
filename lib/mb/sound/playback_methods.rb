@@ -1156,9 +1156,18 @@ module MB
 
         frames.to_f / rate
 
+      rescue StandardError
+        failed = true
+        raise
       ensure
         session&.stems&.close(session.frame)
         session&.close
+        # An error before the first frame (a --from the song lacks, a patch
+        # that raises) leaves no empty file behind (ux-fix-2)
+        if failed && filename.is_a?(String) && (frames.nil? || frames == 0)
+          output.close if session.nil? && output.respond_to?(:close)
+          File.delete(filename) if File.file?(filename)
+        end
       end
 
       # Replaces the background session's output (see Session.use_output),

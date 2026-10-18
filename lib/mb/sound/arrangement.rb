@@ -97,6 +97,24 @@ module MB
         @launch_clips = {} # (ClipMatrix: journal seq => clip)
         @tweaks = {}.compare_by_identity # (ClipMatrix: tweak version => its root, mark, transforms)
         @versions = {} # (ClipMatrix: version root => last version made)
+        @form_checks = [] # (#before_form: Procs called with each Form #play_form starts)
+      end
+
+      # Calls +block+ with each Form #play_form is about to start, before
+      # its warm-up and before anything changes; an exception from the block
+      # stops it there.  ScriptRunner checks --from/--to this way, so a
+      # misspelled section is one line before a 2 s warm-up (ux-fix-2).
+      # Returns +block+ (for #remove_before_form).
+      def before_form(&block)
+        raise ArgumentError, 'Pass a block that checks the form' unless block
+        @mutex.synchronize { @form_checks << block }
+        block
+      end
+
+      # Removes a block added with #before_form.
+      def remove_before_form(block)
+        @mutex.synchronize { @form_checks.delete(block) }
+        nil
       end
 
       # Sections declared outside a form with #section (a Hash from name to
@@ -144,6 +162,7 @@ module MB
       def play_form(form, at: nil, on: nil, in: nil, seed: nil, warm_up: :auto)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
+        @mutex.synchronize { @form_checks.dup }.each { |check| check.call(form) }
 
         # Compile the tracks' builds before the first scene change needs them
         raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
