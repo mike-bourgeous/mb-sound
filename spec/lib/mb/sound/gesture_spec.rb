@@ -120,7 +120,7 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
           out << s.process_buffer(n)[0].dup
           done += n
         end
-        out.reduce(:concatenate)
+        SpecBuffers.join(out)
       end
       expect(runs[1]).to eq(runs[0])
       expect(runs[2]).to eq(runs[0])

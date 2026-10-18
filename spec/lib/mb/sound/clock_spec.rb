@@ -27,7 +27,7 @@ RSpec.describe(MB::Sound::Clock) do
       out << session.process_buffer(n)[0].dup
       done += n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def hits(data, min = 1e-9)
@@ -148,7 +148,7 @@ RSpec.describe(MB::Sound::Clock) do
         lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: s) { take.line(code, b) } }
         out << s.process_buffer[0].dup
       end
-      live = out.reduce(:concatenate)
+      live = SpecBuffers.join(out)
 
       by = strikes(live)
       PERIODS.each do |name, period|
@@ -168,7 +168,7 @@ RSpec.describe(MB::Sound::Clock) do
       r = MB::Sound::Take::Replay.last
       replayed = []
       r.render(MB::Sound::NullOutput.new(channels: 1, sleep: false), buffer_sizes: [367, 368], tail: 0, max_seconds: 90) { |mix| replayed << mix[0].dup }
-      replayed = replayed.reduce(:concatenate)[0...live.length]
+      replayed = SpecBuffers.join(replayed)[0...live.length]
       expect(replayed.length).to eq(live.length)
       expect((replayed - live).abs.max).to eq(0)
     end
