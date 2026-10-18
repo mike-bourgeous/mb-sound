@@ -37,6 +37,22 @@ RSpec.describe(MB::Sound::Jack, :aggregate_failures) do
       MB::Sound::FastAudio.jack_ports("^#{client}:", nil, 0).map { |n| n.delete_prefix("#{client}:") }.sort
     end
 
+    it 'reopens the shared client while the server stalls for a moment (a starved machine)' do
+      MB::Sound::Jack.open
+      MB::Sound::Jack.close
+      pid = JackDummy.instance_variable_get(:@pid)
+      # Stopped from another process: the open below holds the GVL
+      stopper = Process.spawn('sh', '-c', "kill -STOP #{pid}; sleep 0.3; kill -CONT #{pid}")
+      sleep 0.05
+      t = MB::U.clock_now
+      expect { MB::Sound::Jack.open }.not_to raise_error # (failed at once before omnibus9)
+      expect(MB::U.clock_now - t).to be_between(0.1, 3)
+      expect(MB::Sound::Jack.open?).to eq(true)
+    ensure
+      Process.wait(stopper) if stopper
+      Process.kill(:CONT, pid) rescue nil if pid
+    end
+
     it 'puts outputs, inputs, and MIDI ports on one client, added at any time' do
       out = open(MB::Sound::DeviceOutput.new(channels: 2))
       expect(out.backend).to eq(:jack)

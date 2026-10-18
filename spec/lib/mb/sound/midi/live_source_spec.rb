@@ -464,8 +464,12 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
         kept_up = notes == (40..51).to_a && out.underruns == 1 && src.late_events == 0
         return result if kept_up || attempt == 2
 
-        warn "\nJACK delivered notes #{notes}, #{out.underruns} underruns, #{src.late_events} late " \
-          "(attempt #{attempt + 1}); retrying"
+        # Recorded, not warned (warnings fail examples; spec/support/
+        # warning_guard.rb): the example's metadata keeps every retry, and
+        # the formatter's output shows it
+        note = "JACK delivered notes #{notes}, #{out.underruns} underruns, #{src.late_events} late (attempt #{attempt + 1}); retrying"
+        (RSpec.current_example.metadata[:jack_retries] ||= []) << note
+        RSpec.current_example.reporter.message(note)
         @opened.reverse_each(&:close)
         @opened.clear
         MB::Sound::Jack.close
