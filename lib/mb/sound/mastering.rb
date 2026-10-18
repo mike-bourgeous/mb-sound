@@ -88,6 +88,12 @@ module MB
           }
         end
 
+        # What a render's target measures: :integrated (the default) or
+        # :loudest (see MEASURES).
+        def measure
+          options.fetch(:measure, :integrated)
+        end
+
         # True if renders measure and set the trim (not with a fixed
         # +drive+ or a rider).
         def targeted?
@@ -169,7 +175,17 @@ module MB
       }.freeze
 
       # Options every preset takes (see .preset).
-      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess].freeze
+      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess measure].freeze
+
+      # What a render's target measures (+measure:+): the song's integrated
+      # loudness, or that of its loudest LOUDEST_BARS (see
+      # Loudness::Analyzer#loudest), so quieter sections keep their
+      # distance from the drops instead of coming up to fill the
+      # integrated target.
+      MEASURES = %i[integrated loudest].freeze
+
+      # The window (bars at the render's tempo) +measure: :loudest+ reads.
+      LOUDEST_BARS = 8
 
       # Rider settings for `ride: true` (see GraphNode::Rider; +range+ and
       # times as there).
@@ -205,7 +221,10 @@ module MB
         # - +mono:+ Hz below which the low end is mono, or false;
         # - +glue:+ false to skip the glue compressor;
         # - +clip:+ (:club) false to skip the soft clipper;
-        # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false.
+        # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false;
+        # - +measure:+ :loudest to reach the target with the loudest
+        #   LOUDEST_BARS bars rather than the whole song (renders; see
+        #   MEASURES), :integrated (the default).
         def preset(name, **options)
           if name.is_a?(Preset)
             return name if options.empty?
@@ -223,6 +242,9 @@ module MB
           end
           if options.key?(:platform) && options.key?(:lufs)
             raise ArgumentError, 'Pass lufs: or platform:, not both'
+          end
+          if options.key?(:measure) && !MEASURES.include?(options[:measure])
+            raise ArgumentError, "measure: is #{MEASURES.map(&:inspect).join(' or ')} (got #{options[:measure].inspect})"
           end
 
           o = definition[:defaults].merge(options)

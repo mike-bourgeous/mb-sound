@@ -256,6 +256,41 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(MB::Sound.read(b)).to eq(MB::Sound.read(a))
     end
 
+    it 'reaches the target with the loudest 8 bars, leaving a quiet part where the mix put it, with measure: :loudest' do
+      # 8 quiet bars (keys alone), then 8 loud ones (keys and drums); at 240 BPM a bar is 1 s
+      song = -> {
+        MB::Sound.bpm 240
+        MB::Sound.master :club, measure: :loudest
+        c = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::B3).n8.loop
+        MB::Sound.bg :keys, c.synth(voices: 4) { |v| v.hz.saw.rnd * v.env }.at(0.1)
+        MB::Sound.at_bar(9) { MB::Sound.bg :drums, MB::Sound.tr808(MB::Sound.grid(16, kick: 'x.x.x.x.x.x.x.x.', snare: '....x.......x...').loop) }
+      }
+      a = tmp_path('loudest.flac')
+      MB::Sound.seed(5)
+      expect { MB::Sound.render(a, bars: 16, overwrite: true, &song) }.to output(/mastering :club: pass.*\n.*loudest 8 bars -8\.5\d LUFS, target -8\.5/).to_stdout
+      result = described_class::Targeting.last
+      expect(result).to have_attributes(measure: :loudest)
+      expect(result.loudest).to be_within(0.01).of(-8.5)
+      expect(result.integrated).to be < -9 # the quiet half pulls the song down
+
+      data = MB::Sound.read(a)
+      part = ->(from, to) {
+        an = MB::Sound::Loudness::Analyzer.new(channels: data.length, true_peak: false)
+        an.process(data.map { |ch| ch[(from * 48000)...(to * 48000)] })
+        an.integrated
+      }
+      expect(part.(9, 16)).to be_within(0.5).of(-8.5)
+      expect(part.(1, 7)).to be < part.(9, 16) - 3
+    ensure
+      MB::Sound.bpm 120
+    end
+
+    it 'rejects unknown measures' do
+      expect { described_class.preset(:club, measure: :peak) }.to raise_error(ArgumentError, /measure: is :integrated or :loudest/)
+      expect(described_class.preset(:club).measure).to eq(:integrated)
+      expect(described_class.preset(:club, measure: :loudest).call_ruby).to eq(':club, measure: :loudest')
+    end
+
     it 'takes a loudness override, keeps stems, and renders once with loudness: false' do
       a = tmp_path('a.flac')
       render_song(a, loudness: -13, stems: tmp_path('stems_a'), &song)
