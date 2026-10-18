@@ -3,11 +3,11 @@ RSpec.describe('bin/songs/tunnel_vision.rb') do
 
   after { MB::Sound.rewind }
 
-  it "masters with Kez's chain (:hot) at -8.5 LUFS on the quieter quarter of the bars by default" do
+  it "masters with Kez's chain (:hot) at -9.0 LUFS on the quieter quarter of the bars by default" do
     MB::Sound.render(tmp_path('m.flac'), bars: 0.1) { MB::Sound.tunnel_vision }
     result = MB::Sound::Mastering::Targeting.last
     expect(result).to have_attributes(preset: :hot, measure: :bars, percentile: 0.25)
-    expect(result.target.lufs).to eq(-8.5)
+    expect(result.target.lufs).to eq(-9.0)
   end
 
   it 'has a 112-bar DJ-friendly form with a snare roll every 16 bars' do

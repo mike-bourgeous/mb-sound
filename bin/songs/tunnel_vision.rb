@@ -20,15 +20,15 @@
 # true-peak limiter at -0.5 dBTP; the maintainer's omnibus9 Bench pick,
 # 2026-10-18: "I like the direction but now the breakdown is too quiet"),
 # its drive found by the render so the quieter quarter of the bars
-# reaches -8.5 LUFS (`measure: :bars`, bench-fixes-1: the bars' loudness
+# reaches -9.0 LUFS (`measure: :bars`, bench-fixes-1: the bars' loudness
 # distribution, so the breakdown comes up while the clipper holds the
-# drops).  Kez's fixed drive (11 dB) is --dnb-master; the club preset
+# drops; -9.0 the maintainer's pick over -8.5).  Kez's fixed drive (11 dB) is --dnb-master; the club preset
 # (two limiters, on the loudest 16 bars) is --master club.
 #
-# Sections (integrated LUFS of each, measured 2026-10-18): :hot at -8.5
-# on the bars' 25th percentile (drive +12.9 dB): drop -5.8, breakdown
-# -7.7 (-1.9 LU), drop2 -6.2, song -6.8 (--lufs -9: drive +12.4 dB, drop
-# -6.0, breakdown -8.2, song -7.0); Kez's master (drive 11): drop
+# Sections (integrated LUFS of each, measured 2026-10-18): :hot at -9.0
+# on the bars' 25th percentile (drive +12.4 dB): drop -6.0, breakdown
+# -8.2 (-2.2 LU), drop2 -6.3, song -7.0 (--lufs -8.5: drive +12.9 dB,
+# drop -5.8, breakdown -7.7, song -6.8); Kez's master (drive 11): drop
 # -6.5, breakdown -9.5 (-3.0 LU), drop2 -6.6, song -7.6; the club master
 # at -8.5 on the loudest 16 bars: drop -9.6, breakdown -13.2 (-3.6 LU),
 # drop2 -8.5, song -10.25; at -8.5 integrated: drop -8.7, breakdown -8.2
@@ -70,7 +70,7 @@
 #     bin/songs/tunnel_vision.rb --stems stems/ tv.flac
 #     bin/songs/tunnel_vision.rb --dnb-master tv.flac  # Kez's own master at his drive (11 dB)
 #     bin/songs/tunnel_vision.rb --dnb-master -D 8 -C -1 tv.flac   # gentler
-#     bin/songs/tunnel_vision.rb --lufs -9 tv.flac      # the quieter bars at -9 (a quieter breakdown)
+#     bin/songs/tunnel_vision.rb --lufs -8.5 tv.flac    # the quieter bars at -8.5 (a louder breakdown, harder drops)
 #     bin/songs/tunnel_vision.rb --master club tv.flac  # the club master (two limiters) on the loudest 16 bars
 #     bin/songs/tunnel_vision.rb --no-buses tv.flac   # Kez's original ambience (no buses)
 #
@@ -101,10 +101,10 @@ module MB::Sound
   TV_CEILING = -0.5
   # The master preset, its target (LUFS), and what it measures
   # (bench-fixes-1: Kez's chain as :hot, its drive set so the quieter
-  # quarter of the bars reaches -8.5 LUFS; see the header and
+  # quarter of the bars reaches -9.0 LUFS; see the header and
   # Mastering::MEASURES)
   TV_MASTER = :hot
-  TV_LUFS = -8.5
+  TV_LUFS = -9.0
   TV_MEASURE = :bars
 
   # The :hall bus's return gain in dB (buses): its reverb is wet only and
