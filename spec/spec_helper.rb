@@ -50,6 +50,9 @@ end
 SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 
 require_relative 'support/spec_tmp'
+require_relative 'support/spec_buffers'
+require_relative 'support/buffer_size_helpers'
+require_relative 'support/smoke_runs'
 require_relative 'support/warning_guard_hooks' # after spec_tmp, before subprocess_coverage
 require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
 require_relative 'support/fork_script' # after subprocess_coverage

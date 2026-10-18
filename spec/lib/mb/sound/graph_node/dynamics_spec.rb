@@ -425,7 +425,7 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
     after { session.close }
 
     def run(frames)
-      Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+      Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
     end
 
     it 'limits the mix with the latency of the lookahead plus the true-peak delay' do

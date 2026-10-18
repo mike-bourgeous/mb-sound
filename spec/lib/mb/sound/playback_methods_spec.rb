@@ -840,7 +840,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       def record(out)
         data = []
         allow(out).to receive(:write).and_wrap_original { |m, d| data << d[0].dup; m.call(d) }
-        -> { data.reduce(:concatenate) }
+        -> { SpecBuffers.join(data) }
       end
 
       # Bar 2's frame at 112 BPM in a bars: render with something playing

@@ -19,7 +19,7 @@ RSpec.describe('Delays ringing out after their input ends') do
     end
     raise 'The node never ended' if bufs.length == limit
 
-    bufs.reduce(:concatenate)
+    SpecBuffers.join(bufs)
   end
 
   # Checks that +out+ is what the never-ending graph from the block (its
@@ -27,7 +27,7 @@ RSpec.describe('Delays ringing out after their input ends') do
   # have played after +out+ ends is below -90 dB.
   def expect_quiet_cut(out, tolerance: 0)
     ref = yield
-    data = Array.new((out.length + 3 * 48000) / 800 + 1) { ref.sample(800).dup }.reduce(:concatenate)
+    data = SpecBuffers.join(Array.new((out.length + 3 * 48000) / 800 + 1) { ref.sample(800).dup })
     expect((data[0...out.length] - out).abs.max).to be <= tolerance
     expect(data[out.length..].abs.max).to be < MB::Sound::RingOut::THRESHOLD
   end
@@ -96,7 +96,7 @@ RSpec.describe('Delays ringing out after their input ends') do
       out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
       session = MB::Sound::Session.new(master_gain: 1, output: out, buffer_size: 800, realtime: false, raise_errors: true)
       session.add(pluck.delay(1.n8.dotted, feedback: 0.5))
-      data = Array.new(60) { session.process_buffer[0].dup }.reduce(:concatenate)
+      data = SpecBuffers.join(Array.new(60) { session.process_buffer[0].dup })
       expect(data[0...18000].abs.max).to eq(0)
       expect(data[18000...36000].abs.max).to be > 0.9
       expect(data[36000..].abs.max).to be_between(0.4, 0.6)
@@ -137,8 +137,8 @@ RSpec.describe('Delays ringing out after their input ends') do
         lo << a.dup
         ro << b.dup
       end
-      lo = lo.reduce(:concatenate)
-      ro = ro.reduce(:concatenate)
+      lo = SpecBuffers.join(lo)
+      ro = SpecBuffers.join(ro)
 
       expect(lo.length).to eq(source_length + 12000 + margin)
       expect(ro.length).to eq(lo.length)

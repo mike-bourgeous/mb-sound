@@ -1,0 +1,37 @@
+# Time budgets for rake spec:parallel (spec/parallel_specs.rb,
+# #check_budgets; test-speed-2, 2026-10-18).  Times are as measured in the
+# parallel run (the runner's PARALLEL=12 on a 16-core machine): a file's
+# examples together, and each example.  A file or example over its budget
+# fails the run; make it faster (see CLAUDE.md, Testing: condition waits
+# instead of quiet periods, short renders, one-sample buffers only over
+# what they prove, SpecBuffers.join) or give its file an entry here with
+# the time it needs and why (MB_SOUND_SPEC_BUDGET=report only lists them,
+# for a loaded machine).
+default:
+  file: 15
+  example: 6
+files:
+  spec/lib/mb/sound/buffer_size_invariance_spec.rb:
+    file: 45
+    example: 10
+    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example
+  spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb:
+    file: 35
+    example: 8
+    reason: lane allocation and sampler chops at one-sample buffers (1.1 s each); runner 25 s
+  spec/lib/mb/sound/help_spec.rb:
+    file: 30
+    example: 12
+    reason: every help example played and measured; the drum-file example builds sample tables for a 30 s file (8.6 s on the runner)
+  spec/lib/mb/sound/ui/tiles_spec.rb:
+    file: 25
+    reason: many real Tiles screens with a Pry REPL on a pty, each started and waited for; runner 18 s
+  spec/lib/mb/sound/take_spec.rb:
+    file: 25
+    reason: live performances of 960 buffers replayed at several buffer sizes; runner 16.5 s
+  spec/bin/songs/night_bus_capture_spec.rb:
+    example: 12
+    reason: renders 15 bars of the night bus jam with captures and learn (8.5 s on the runner)
+  spec/lib/mb/sound/graph_io_bundles_spec.rb:
+    example: 11
+    reason: saves and loads a file-reading synth bundle three times; each lane reads its tables through ffprobe and ffmpeg (7.7 s on the runner)

@@ -164,7 +164,7 @@ RSpec.describe(MB::Sound::SQ80Methods) do
     it 'glides between its random steps instead of jumping (no zipper on the cutoff)' do
       v = pressure_notes
       lfo = MB::Sound::SQ80::Voice.send(:flutter_lfo, v)
-      out = Array.new(60) { lfo.sample(800).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(Array.new(60) { lfo.sample(800).dup })
       steps = (out[1..] - out[0...-1]).abs
       expect(out.max - out.min).to be > 0.5 # it still flutters
       # A raw S&H step is up to 2 per sample; the 12 Hz glide moves at most

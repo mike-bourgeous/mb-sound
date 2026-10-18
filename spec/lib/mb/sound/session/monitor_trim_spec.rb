@@ -28,7 +28,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
       def initialize = @buffers = []
       def write(bufs) = @buffers << bufs.map(&:dup)
       def close = nil
-      def channel(c) = @buffers.map { |b| b[c] }.reduce(:concatenate)
+      def channel(c) = SpecBuffers.join(@buffers.map { |b| b[c] })
     }
   }
 
@@ -60,7 +60,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     s.add_tap { |mix| tapped << mix[0].dup }
     s.add(100.hz.sine.at(-20.db), name: :tone, on: :now)
     s.record_audio('unused.flac', output: keep)
-    mix = Array.new(30) { s.process_buffer(800)[0].dup }.reduce(:concatenate)
+    mix = SpecBuffers.join(Array.new(30) { s.process_buffer(800)[0].dup })
     s.stop_recording
     s.process_buffer(800)
     s.recordings.first.wait
@@ -68,7 +68,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     expect(peak(mix)).to be_within(0.05).of(-20)
     expect(peak(out.channel(0)[0...mix.length])).to be_within(0.05).of(-14)
     expect(out.channel(0)[0...mix.length]).to eq(mix * 6.db)
-    expect(peak(tapped.reduce(:concatenate))).to be_within(0.05).of(-20)
+    expect(peak(SpecBuffers.join(tapped))).to be_within(0.05).of(-20)
     expect(peak(keep.channel(0))).to be_within(0.05).of(-20)
   end
 
@@ -78,7 +78,7 @@ RSpec.describe(MB::Sound::Session::MonitorTrim) do
     s = new_session(output: out, monitor: true)
     s.master { |l, r| [l.limit(ceiling: -6.db, true_peak: false), r.limit(ceiling: -6.db, true_peak: false)] }
     s.add(100.hz.square, name: :loud, on: :now)
-    mix = Array.new(60) { s.process_buffer(800)[0].dup }.reduce(:concatenate)
+    mix = SpecBuffers.join(Array.new(60) { s.process_buffer(800)[0].dup })
     tail = 24000...mix.length
     expect(peak(mix[tail])).to be_within(0.2).of(-6)
     expect(peak(out.channel(0)[tail])).to be_within(0.2).of(-3)

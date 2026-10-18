@@ -30,7 +30,7 @@ RSpec.describe(MB::Sound::Notes) do
       yield b if block_given?
       nodes.each { |k, n| out[k] << n.sample(buffer).dup }
     end
-    out.transform_values { |l| l.reduce(:concatenate) }
+    out.transform_values { |l| SpecBuffers.join(l) }
   end
 
   # Notes nodes for +clip+ by name, and the Notes instance.
@@ -145,7 +145,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'puts events on exact samples at any sample rate' do
       v = MB::Sound::Notes.new(MIDIListSource.new(ev.note_on(60, time: 1/3r), ev.cc(1, 0, time: 10r)), sample_rate: 44100)
       t = v.trigger
-      out = 11.times.map { t.sample(1470).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(11.times.map { t.sample(1470).dup })
       expect(out.ne(0).where.to_a).to eq([14700])
     end
 
@@ -154,10 +154,10 @@ RSpec.describe(MB::Sound::Notes) do
       # (each trigger held: Notes memoizes nodes through WeakRefs, so a
       # node fetched again after GC would be a new one)
       vt = v.trigger
-      a = 8.times.map { vt.sample(1000).dup }.reduce(:concatenate)
+      a = SpecBuffers.join(8.times.map { vt.sample(1000).dup })
       w = notes_for(ev.note_on(60, time: 1/7r))
       wt = w.trigger
-      b = 20.times.map { wt.sample(400).dup }.reduce(:concatenate)
+      b = SpecBuffers.join(20.times.map { wt.sample(400).dup })
       expect(a.ne(0).where.to_a).to eq([6857])
       expect(b.ne(0).where.to_a).to eq([6857])
     end
@@ -278,7 +278,7 @@ RSpec.describe(MB::Sound::Notes) do
   describe 'envelopes' do
     # Renders +env+ for +buffers+ buffers of 480 samples.
     def render_env(env, buffers = 80)
-      buffers.times.map { env.sample(480).dup }.reduce(:concatenate)
+      SpecBuffers.join(buffers.times.map { env.sample(480).dup })
     end
 
     def notes_with(*events)
@@ -440,8 +440,8 @@ RSpec.describe(MB::Sound::Notes) do
       expect(keyed).to be_a(MB::Sound::Notes::KeyedTone)
       expect(keyed.key_sync?).to eq(true)
       free = notes_for(ev.note_on(69, 1.0), ev.bend(1.0, time: 1/100r), ev.note_on(57, 1.0, time: 1/5r + 1/96000r)).hz.sine.free
-      a = 30.times.map { keyed.sample(480).dup }.reduce(:concatenate)
-      b = 30.times.map { free.sample(480).dup }.reduce(:concatenate)
+      a = SpecBuffers.join(30.times.map { keyed.sample(480).dup })
+      b = SpecBuffers.join(30.times.map { free.sample(480).dup })
       reset = 9600 # the sample containing 0.2 s + half a sample
       expect(a[0...reset].to_a).to eq(b[0...reset].to_a)
       expect((a[reset...reset + 200] - b[reset...reset + 200]).abs.max).to be > 0.1
@@ -491,7 +491,7 @@ RSpec.describe(MB::Sound::Notes) do
       expect(c.env).to be_a(MB::Sound::Notes::NoteEnvelope)
       expect(c.env.octaves).to eq(2)
       expect(v.envelopes).to include(c.env)
-      out = 60.times.map { c.sample(480).dup }.reduce(:concatenate) # past the 0.4 s decay
+      out = SpecBuffers.join(60.times.map { c.sample(480).dup }) # past the 0.4 s decay
       expect(out.max).to be_within(1).of(800) # peak: base x 2 ** 2 at full velocity
       expect(out[-1]).to be_within(5).of(200 * 2 ** (2 * 0.3))
       expect(c.gm?).to eq(true)
@@ -518,7 +518,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'works in a filter', :check_shared do
       v = notes_for(ev.note_on(48, 1.0), ev.note_off(48, time: 1/2r), ev.cc(99, 0, time: 10r))
       sig = v.hz.saw.filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(3)) * v.amp_env
-      out = 30.times.map { sig.sample(800).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(30.times.map { sig.sample(800).dup })
       expect(out.abs.max).to be_between(0.1, 2)
     end
   end
@@ -558,7 +558,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'drives a 4-pole filter in synth voices', :check_shared do
       clip = MB::Sound.seq(MB::Sound::A2.n4, MB::Sound::A2.n4)
       synth = clip.synth(voices: 2) { |v| v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.7)) * v.amp_env }
-      out = 20.times.map { synth.sample(800).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(20.times.map { synth.sample(800).dup })
       expect(out.isfinite.all?).to eq(true)
       expect(out.abs.max).to be_between(0.05, 4)
     end
@@ -567,7 +567,7 @@ RSpec.describe(MB::Sound::Notes) do
       levels = [0, 64, 127].map { |raw|
         v = notes_for(ev.note_on(69, 1.0), ev.cc_raw(71, raw), ev.cc(99, 0, time: 10r))
         sig = v.hz.sine.lp4(440, resonance: v.reso(0.5))
-        60.times.map { sig.sample(800).dup }.reduce(:concatenate)[-4800..].abs.max
+        SpecBuffers.join(60.times.map { sig.sample(800).dup })[-4800..].abs.max
       }
       # (the analytic gain at the cutoff; the peak stands 14.5 and 36.9 dB
       # over the passband at resonance 0.5 and 1)
@@ -583,7 +583,7 @@ RSpec.describe(MB::Sound::Notes) do
     # Returns the min and max of +freq+ in semitones from A4 over 1 s,
     # after +skip+ buffers of 480.
     def swing(freq, skip: 0)
-      out = 100.times.map { freq.sample(480).dup }.reduce(:concatenate)[skip * 480..]
+      out = SpecBuffers.join(100.times.map { freq.sample(480).dup })[skip * 480..]
       st = (out / 440).to_a.map { |f| 12 * Math.log2(f) }
       [st.min, st.max]
     end
@@ -600,7 +600,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'runs at CC 76 and scales with CC 77' do
       v = notes_for(ev.note_on(69), ev.cc_raw(1, 127), ev.cc_raw(77, 127), ev.cc_raw(76, 0))
       f = v.hz.vibrato.freq
-      out = 100.times.map { f.sample(480).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(100.times.map { f.sample(480).dup })
       st = (out / 440).to_a.map { |x| 12 * Math.log2(x) }
       expect(st.max).to be_within(0.01).of(1)
       crossings = st.each_cons(2).count { |a, b| a < 0 && b >= 0 }
@@ -610,7 +610,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'fades in after each note-on with CC 78' do
       v = notes_for(ev.note_on(69), ev.cc_raw(1, 127), ev.cc_raw(78, 127))
       f = v.hz.vibrato.freq
-      out = 100.times.map { f.sample(480).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(100.times.map { f.sample(480).dup })
       st = (out / 440).to_a.map { |x| 12 * Math.log2(x) }
       expect(st[0...4800].map(&:abs).max).to be < 0.06 # 0.1 s into a 2 s fade
       expect(st[24000..].map(&:abs).max).to be_between(0.1, 0.3)
@@ -637,7 +637,7 @@ RSpec.describe(MB::Sound::Notes) do
     def glide_numbers(*events, time: 0.05, legato: false, buffers: 60)
       v = notes_for(*events)
       g = MB::Sound::Notes::Glide.new(v.stream, time: time, legato: legato, notes: v)
-      buffers.times.map { g.sample(480).dup }.reduce(:concatenate)
+      SpecBuffers.join(buffers.times.map { g.sample(480).dup })
     end
 
     let(:gap) { [ev.note_on(60), ev.note_off(60, time: 1/10r), ev.note_on(72, time: 2/10r)] }
@@ -692,7 +692,7 @@ RSpec.describe(MB::Sound::Notes) do
       events = [ev.note_on(60, time: 1/10r), ev.note_off(60, time: 2/10r), ev.note_on(72, time: 3/10r)]
       v = notes_for(*events)
       g = MB::Sound::Notes::Glide.new(v.stream, time: 0.05, from: MB::Sound::A4, notes: v)
-      n = 80.times.map { g.sample(480).dup }.reduce(:concatenate)
+      n = SpecBuffers.join(80.times.map { g.sample(480).dup })
       expect(n[0...4800].to_a.uniq).to eq([69])
       expect(n[4800 + 1199]).to be_within(1e-3).of(64.5)
       expect(n[4800 + 2400]).to eq(60)
@@ -701,7 +701,7 @@ RSpec.describe(MB::Sound::Notes) do
 
       # Pitches, note numbers, and time 0 (holds, then jumps)
       g = MB::Sound::Notes::Glide.new(notes_for(*events).stream, time: 0, from: 48, notes: v)
-      n = 20.times.map { g.sample(480).dup }.reduce(:concatenate)
+      n = SpecBuffers.join(20.times.map { g.sample(480).dup })
       expect(n[4799]).to eq(48)
       expect(n[4800]).to eq(60)
 
@@ -728,7 +728,7 @@ RSpec.describe(MB::Sound::Notes) do
     it 'glides the frequency of a pitch' do
       v = notes_for(*gap)
       f = v.hz.glide(50.ms).freq
-      out = 60.times.map { f.sample(480).dup }.reduce(:concatenate)
+      out = SpecBuffers.join(60.times.map { f.sample(480).dup })
       expect(out[9600 + 1199]).to be_within(0.05).of(MB::Sound.tuning.frequency_of(66))
       expect(v.hz.glide(:gm, legato: true).settings[:glide]).to eq([:gm, true])
     end

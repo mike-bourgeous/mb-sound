@@ -14,7 +14,7 @@ RSpec.describe('console command results') do
   end
 
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   describe '#stop and #outro' do
@@ -138,7 +138,7 @@ RSpec.describe('console command results') do
         lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
         live << session.process_buffer[0].dup
       end
-      live = live.reduce(:concatenate)
+      live = SpecBuffers.join(live)
       expect(live[149 * 800]).to eq(0.25)
       expect(live[201 * 800]).to eq(0.125)
       expect(live[-1]).to eq(0.125) # the at_bar(3) block was cancelled
@@ -148,7 +148,7 @@ RSpec.describe('console command results') do
       load path
       out = []
       MB::Sound::Take::Replay.last.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: [800], tail: 0) { |mix| out << mix[0].dup }
-      out = out.reduce(:concatenate)
+      out = SpecBuffers.join(out)
       # (The timeline pauses between the panic and the next bg, so the
       # replay plays b right after the panic: compare what played)
       expect(out[0]).to eq(0.25)

@@ -24,7 +24,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       outs.each_with_index { |o, i| chunks[i] << o.sample(n).dup }
       done += n
     end
-    chunks.map { |c| c.reduce(:concatenate) }
+    chunks.map { |c| SpecBuffers.join(c) }
   end
 
   # A stereo test mix: a chord and a kick-like pulse.

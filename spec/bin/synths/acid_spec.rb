@@ -11,7 +11,7 @@ RSpec.describe('bin/synths/acid.rb') do
       bufs << b.dup
       total += b.length
     end
-    bufs.reduce(:concatenate)[0...count]
+    SpecBuffers.join(bufs)[0...count]
   end
 
   def rms(data)

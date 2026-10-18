@@ -107,7 +107,7 @@ RSpec.describe(MB::Sound::Playable) do
       env = MB::Sound.adsr(0.01, 0.05, 0, 0.01)
       g = described_class.graph(env)
       expect(g.description).to match(/triangle with pink noise/)
-      out = Array.new(10) { g.nodes[0].sample(800)&.dup }.compact.reduce(:concatenate)
+      out = SpecBuffers.join(Array.new(10) { g.nodes[0].sample(800)&.dup }.compact)
       expect(out.abs.max).to be_between(0.2, 1.0)
       expect(g.nodes[0].graph(include_tees: false).count { |n| n.is_a?(MB::Sound::Tone) }).to eq(2) # the triangle and the noise
     end

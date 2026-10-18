@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::Session::Undo) do
   end
 
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   def changes(data)

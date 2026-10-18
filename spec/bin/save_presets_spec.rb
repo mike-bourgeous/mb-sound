@@ -112,7 +112,7 @@ RSpec.describe('bin/save_presets.rb') do
           f = MB::Sound::Session.with_context(session: s) { build.call(s) }
           MB::Sound::Session.with_context(session: s) { MB::Sound.play_form(f, warm_up: false) }
           bar = (s.transport.bar_length / s.transport.whole_notes_per_second * 48000).round
-          out = (0...(bar * 12 / 800)).map { s.process_buffer(800)[0].dup }.reduce(:concatenate)
+          out = SpecBuffers.join((0...(bar * 12 / 800)).map { s.process_buffer(800)[0].dup })
           [s.arrangement.tracks.keys, s.arrangement.scenes.keys, s.knobs.keys, out]
         ensure
           s.close

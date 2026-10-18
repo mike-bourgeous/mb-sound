@@ -24,10 +24,10 @@ RSpec.describe(MB::Sound::GraphNode::CurveShaper) do
           next if edges == :none && curve.form.nil?
 
           node = CS.new(MB::Sound::ArrayInput.new(data: [signal]), curve: curve, input: -1..1, output: -1..1, edges: edges, symmetric: sym)
-          c = 3.times.map { node.sample(400).dup }.reduce(:concatenate)
+          c = SpecBuffers.join(3.times.map { node.sample(400).dup })
           params = node.instance_variable_get(:@params)
           state = [0.0, 0.0, 0.0, 0]
-          r = signal.to_a.each_slice(400).map { |s| CS.shape_ruby(Numo::SFloat.cast(s), params, sym, state) }.reduce(:concatenate)
+          r = SpecBuffers.join(signal.to_a.each_slice(400).map { |s| CS.shape_ruby(Numo::SFloat.cast(s), params, sym, state) })
           expect(c).to eq(r), "#{name} #{edges} #{sym}"
         end
       end

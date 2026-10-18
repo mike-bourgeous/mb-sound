@@ -25,14 +25,14 @@ RSpec.describe(MB::Sound::Session::SafetyLimiter, :aggregate_failures) do
   # The written output and the returned mix of +buffers+ buffers.
   def run(s, buffers)
     mixes = Array.new(buffers) { s.process_buffer.map(&:dup) }
-    [output.written.last(buffers).transpose.map { |c| c.reduce(:concatenate) }, mixes.transpose.map { |c| c.reduce(:concatenate) }]
+    [output.written.last(buffers).transpose.map { |c| SpecBuffers.join(c) }, mixes.transpose.map { |c| SpecBuffers.join(c) }]
   end
 
   let(:ceiling) { described_class::SAFETY_CEILING.to_f }
 
   it 'is on by default for realtime Sessions only' do
     expect(session.safety_limiter).to eq(false)
-    rt = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: true).tap { |s| sessions << s }
+    rt = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), realtime: true).tap { |s| sessions << s }
     expect(rt.safety_limiter).to eq(true)
     expect(rt.master_info).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set)')
   end

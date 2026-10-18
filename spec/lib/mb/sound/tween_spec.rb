@@ -1,7 +1,7 @@
 RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
   # +seconds+ of +node+ as a DFloat, in buffers of 480.
   def take(node, seconds)
-    (seconds * 100).round.times.map { node.sample(480).dup }.reduce(:concatenate).cast_to(Numo::DFloat)
+    SpecBuffers.join((seconds * 100).round.times.map { node.sample(480).dup }).cast_to(Numo::DFloat)
   end
 
   before { MB::Sound.bpm(120) }
@@ -20,7 +20,7 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
         150.times { out << session.process_buffer[0].dup }
       }
       session.close
-      data = out.reduce(:concatenate)[24000..]
+      data = SpecBuffers.join(out)[24000..]
       expect(data[0]).to be < 0.001
       expect(data[24000]).to be_within(0.01).of(0.156) # smoothstep at 1/4 of the bar
       expect(data[48000]).to be_within(0.01).of(0.5)
@@ -39,7 +39,7 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
         out << session.process_buffer[0].dup while out.sum(&:length) < pre + bars * 96000
       }
       session.close
-      out.reduce(:concatenate).cast_to(Numo::DFloat)
+      SpecBuffers.join(out).cast_to(Numo::DFloat)
     end
 
     [800, 367, 128].each do |bs|

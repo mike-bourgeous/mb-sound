@@ -253,7 +253,7 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
       echo = s.echo(1.n16, 1)
       gate = MB::Sound::Notes.new(echo, sustain: false).gate
       session.add(gate)
-      data = Array.new(60) { session.process_buffer[0].dup }.reduce(:concatenate)
+      data = SpecBuffers.join(Array.new(60) { session.process_buffer[0].dup })
       expect(echo.source.transport).to equal(session_transport)
       edges = data.to_a.each_with_index.select { |v, i| i > 0 && v != data[i - 1] }.map(&:last)
       expect(edges).to eq([2400, 12000, 14400]) # 1/16 at 60 BPM = 0.25 s

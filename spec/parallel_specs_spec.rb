@@ -111,6 +111,63 @@ RSpec.describe(ParallelSpecs) do
     expect(output).not_to include('small')
   end
 
+  describe 'time budgets' do
+    let(:budgets) { tmp_path('budgets.yml') }
+
+    def budget_report(examples, yaml, env: nil)
+      File.write(budgets, yaml)
+      write_json(0, examples)
+      old = ENV['MB_SOUND_SPEC_BUDGET']
+      ENV['MB_SOUND_SPEC_BUDGET'] = env
+      result = nil
+      output = capture_stdout { result = ParallelSpecs.report([examples.map { |e| e['file_path'].delete_prefix('./') }.uniq], [status], 1.5, out_dir: out_dir, times_path: times_path, budgets_path: budgets) }
+      [result, output]
+    ensure
+      ENV['MB_SOUND_SPEC_BUDGET'] = old
+    end
+
+    let(:yaml) { "default:\n  file: 2\n  example: 1\n" }
+
+    it 'passes files and examples within the default budgets' do
+      ok, output = budget_report([example('spec/a_spec.rb', 0.9), example('spec/a_spec.rb', 0.9)], yaml)
+      expect(ok).to eq(true)
+      expect(output).not_to include('time budget')
+    end
+
+    it 'fails on a file or an example over its budget, listing them' do
+      ok, output = budget_report([example('spec/a_spec.rb', 1.5), example('spec/a_spec.rb', 0.9)], yaml)
+      expect(ok).to eq(false)
+      expect(output).to include('Over their time budgets')
+      expect(output).to match(%r{2\.40 s >   2\.0 s  spec/a_spec\.rb$})
+      expect(output).to match(%r{1\.50 s >   1\.0 s  spec/a_spec\.rb:3 spec/a_spec\.rb works})
+    end
+
+    it "takes a file's own budget with a reason, and refuses one without" do
+      own = yaml + "files:\n  spec/a_spec.rb:\n    file: 5\n    example: 2\n    reason: renders a whole song twice\n"
+      ok, _ = budget_report([example('spec/a_spec.rb', 1.5), example('spec/a_spec.rb', 0.9)], own)
+      expect(ok).to eq(true)
+
+      ok, output = budget_report([example('spec/a_spec.rb', 0.5)], yaml + "files:\n  spec/a_spec.rb:\n    file: 5\n")
+      expect(ok).to eq(false)
+      expect(output).to include('Time budgets without a reason').and include('spec/a_spec.rb')
+    end
+
+    it 'only lists them with MB_SOUND_SPEC_BUDGET=report' do
+      ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'report')
+      expect(ok).to eq(true)
+      expect(output).to include('not failing')
+    end
+
+    it 'has a reason for every entry of the real budgets' do
+      data = YAML.safe_load_file(ParallelSpecs::BUDGETS_PATH)
+      expect(data.fetch('default').keys.sort).to eq(%w[example file])
+      (data['files'] || {}).each do |file, e|
+        expect(File.exist?(File.join(ParallelSpecs::ROOT, file))).to eq(true), "#{file} is gone; remove its budget"
+        expect(e['reason'].to_s.strip.length).to be >= 10, "#{file} needs a reason"
+      end
+    end
+  end
+
   it 'makes rake spec:parallel exit nonzero when a process crashes' do
     rakefile = File.read(File.expand_path('../Rakefile', __dir__))
     expect(rakefile).to match(/ok = ParallelSpecs\.run\(.*\n\s*abort .* unless ok/)
