@@ -404,18 +404,30 @@ module MB
       # Session#seek).  Sounds already playing jump with it.  Returns the
       # journal entry.
       #
-      # +target+ is a bar number counting from 1 (fractions are allowed,
-      # e.g. 2.5; through the meter map, see Sequence::Transport#meter), a
-      # section or label of the song form playing (see FormMethods#flow;
-      # the form plays on from there, see Form::Playback#seek_now), or a
-      # marker (see FormMethods#marker and #markers).
+      # +target+ is any position spelling (maintainer, 2026-10-18; see
+      # Session::Seeks#seek_position): a bar number counting from 1
+      # (fractions are allowed, e.g. 2.5; through the meter map, see
+      # Sequence::Transport#meter), with +beat+ a quarter-note beat in it
+      # (`seek 11, 2`), or `bar(12)` / `bar(12, beat: 3)`; a length from the
+      # start of the timeline (`12.bars` is the start of bar 13, `43.n16`,
+      # `32.seconds` at the current tempo); a section or label of the song
+      # form playing (see FormMethods#flow; the form plays on from there,
+      # see Form::Playback#seek_now), or a marker (see FormMethods#marker
+      # and #markers).
       #
       #     seek 17                 # bar 17, now
+      #     seek 11, 2              # bar 11, beat 2
+      #     seek bar(9, beat: 3)
+      #     seek 32.seconds         # 32 s from the start (bar 17 at 120 BPM in 4/4)
       #     seek :top, on: :bar     # the form's label :top at the next bar line
       #     seek :drop, in: 2.beats
-      def seek(target, at: nil, on: nil, in: nil)
+      def seek(target, beat = nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
-        session_command(nil, label: "seek #{target.inspect}", kind: :seek) { |session, time|
+        if beat
+          return MB::Sound.live_error(ArgumentError.new("seek #{target.inspect}, #{beat.inspect}: a beat goes with a bar number (seek 11, 2)")) unless target.is_a?(Numeric)
+          target = LaunchPoint::Bar.new(bar: target, beat: beat)
+        end
+        session_command(nil, label: "seek #{Session::Seeks.seek_text(target)}", kind: :seek) { |session, time|
           session.seek(target, at: point, start_time: point.given? ? nil : time)
         }
       end

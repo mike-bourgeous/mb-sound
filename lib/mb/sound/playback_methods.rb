@@ -42,8 +42,10 @@ module MB
       #     play grid(16, kick: 'x...x...', hat: '..x...x.')   # a TR-909
       #     play sf2('GeneralUser.sf2')                   # a demo phrase
       #     play riff, clock: 138.75.bpm                 # on a clock (see #bg)
-      def play(sound, gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
+      #     play                                          # no sound: starts the transport (see TransportMethods#start)
+      def play(sound = (no_sound = true), gain: nil, plot: nil, graphical: false, spectrum: false, quiet: false, fade: nil, at: nil, on: nil, in: nil, clock: nil)
         point = LaunchPoint.of(binding) or return nil
+        return start(at: point) if no_sound
         sound = Sequence::Clocked.apply(sound, clock) if clock
         foreground = Session.context.nil? && Session.current.realtime?
 
@@ -207,6 +209,7 @@ module MB
           if names.empty?
             [session.remove_last(fade: fade, time: time, ring: ring)].compact
           elsif names == [:all]
+            end_flow(session, time, 'stop :all')
             session.remove(fade: fade, time: time, ring: ring)
           else
             session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
@@ -229,9 +232,10 @@ module MB
 
       # Ends everything playing in the background, fading out over four bars
       # by default (+:fade+ sets the number of bars), starting now or at a
-      # launch point (`outro on: 4`, `outro at: bar(33)`).  Also available as
-      # #fadeout.  Returns the journal entries, as #stop.  See #stop, and
-      # #panic to stop everything right away.
+      # launch point (`outro on: 4`, `outro at: bar(33)`).  A flow playing
+      # ends at the same point (no section begins after it; as `stop
+      # :all`).  Also available as #fadeout.  Returns the journal entries,
+      # as #stop.  See #stop, and #panic to stop everything right away.
       def outro(fade: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         stop(:all, fade: fade, at: point)
@@ -254,7 +258,17 @@ module MB
       #
       # Returns the journal entries of the stops and of the cancelled
       # changes (one entry, or an Array; see #stop).
-      def panic
+      #
+      # Panic is immediate: a launch point (+at:+, +on:+, +in:+) is an
+      # error naming the timed ends (outro, finish).
+      def panic(at: nil, on: nil, in: nil)
+        given = { at: at, on: on, in: binding.local_variable_get(:in) }.compact
+        unless given.empty?
+          spelled = given.map { |k, v| "#{k}: #{Form.ruby_value(v) rescue v.inspect}" }.join(', ')
+          return MB::Sound.live_error(ArgumentError.new(
+            "panic is immediate (no launch points); for a timed end: outro #{spelled} (fades out and ends the flow), or finish (the flow's ending next)"
+          ))
+        end
         cancelled = []
         disarmed = []
         message = nil
@@ -280,6 +294,16 @@ module MB
 
         entries = [*stopped, *cancelled]
         entries.length == 1 ? entries.first : entries
+      end
+
+      # Ends the flow playing in +session+ (if any) at +time+ (whole notes,
+      # nil for now), for +what+ (`stop :all`, an outro; see
+      # Form::Playback#end_at), saying so outside scheduled blocks.
+      private def end_flow(session, time, what)
+        pb = session.arrangement.playback
+        return unless pb && !pb.ended?
+        at = pb.end_at(time || session.now)
+        puts "\e[2m#{what}: the flow ends at #{at} too\e[0m" unless Session.context&.[](:batch)
       end
 
       # The one line #panic prints: players stopped, changes cancelled, and

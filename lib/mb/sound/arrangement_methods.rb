@@ -60,10 +60,26 @@ module MB
 
       # Launches a scene at its launch point (+on:+, +in:+, or +at:+
       # overrides it; see LaunchPoint and Arrangement#go).  Returns the journal entry, which says where it
-      # lands.  Also available as #launch_scene.
-      def go(name, at: nil, on: nil, in: nil, fade: nil)
+      # lands.  Also available as #launch_scene.  With no name, starts
+      # playback (see TransportMethods#start).
+      #
+      # Typed at the console while a flow plays, the scene takes over: the
+      # flow ends where the scene lands (no later section replaces it;
+      # maintainer, 2026-10-18: "I tried `go :outro` but other scenes took
+      # over afterward"), and it says so.  `start` plays the flow again;
+      # goto, practice, and skip steer the flow instead.
+      def go(name = nil, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
-        Session.current.arrangement.go(name, at: point, fade: fade)
+        return start(at: point) if name.nil?
+
+        arr = Session.current.arrangement
+        pb = arr.playback
+        entry = arr.go(name, at: point, fade: fade)
+        if pb && !pb.ended? && Session.context&.[](:time).nil? && entry.respond_to?(:lands) && entry.lands
+          at = pb.end_at(entry.lands.pos)
+          puts "\e[2mgo #{name.inspect}: the flow ends at #{at}; you're driving (start plays the flow again; goto/practice/skip steer it instead)\e[0m"
+        end
+        entry
       end
       alias launch_scene go
 

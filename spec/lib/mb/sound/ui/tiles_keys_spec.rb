@@ -337,4 +337,24 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@keyboard.clip.to_ruby).to eq('seq(F3).n8.loop')
     expect(@term.wait_for('swap: seq(F3).n8.loop loops into :lead')).to eq(true), @term.text
   end
+  it 'plays the loaded flow with Space in NAV (the transport toggle), as a take line' do
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false,
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:sp) { |c| c.tone.sine.at(-30.db) * c.amp_env }
+      MB::Sound.scene(:sp_a, sp: MB::Sound.seq(MB::Sound::C4).loop)
+      MB::Sound.flow(play: false) { sp_a 2 }
+    end
+    session = @session
+    out = Object.new
+    out.define_singleton_method(:target_session) { session }
+    %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
+    start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.write(' ')
+    expect(wait_until { @session.arrangement.playback }).to be_truthy, @term.text
+    expect(@term.wait_for(/started at 1:1; flow sp_a/)).to eq(true), @term.text
+    expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('pause')
+  end
 end

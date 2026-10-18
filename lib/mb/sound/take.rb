@@ -40,6 +40,11 @@ module MB
       # with one of these words are kept in the script as comments.
       FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
 
+      # A `play` line with no sound (only launch points): the transport's
+      # start (TransportMethods#start), which replays, unlike foreground
+      # plays.
+      TRANSPORT_PLAY = /\A\s*play\s*(\(\s*\)|\(?\s*(at|on|in):[^\n]*)?\s*\z/
+
       class << self
         # The console's take, created when first needed.
         def current
@@ -452,6 +457,7 @@ module MB
       private
 
       def foreground?(code)
+        return false if code.to_s.match?(TRANSPORT_PLAY) # (`play` alone starts the transport: replays need it)
         FOREGROUND.include?(code.to_s[/\A\s*([a-z_]+[!?]?)/, 1])
       end
 

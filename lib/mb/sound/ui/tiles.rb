@@ -1033,6 +1033,16 @@ module MB
           when :redraw then @full = true
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
             @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
+          when :pause # (a script screen's own pause, else the console's transport toggle: start or pause, a take line)
+            if @on_action
+              @on_action.call(a)
+            else
+              run_safely {
+                s = keys_session || Session.current
+                st = UI.run_line(TransportMethods.toggle_line(s), s)
+                flash(st.to_s, :dim) if st.is_a?(TransportMethods::Status)
+              }
+            end
           when :keys then keys
           when :enter then enter
           when :jump then jump(a.args[0])

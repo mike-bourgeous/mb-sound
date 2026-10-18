@@ -33,6 +33,7 @@ module MB
         # launch point +at+ (now by default), or at +start_time+ (whole
         # notes) when +at+ gives none.  Returns the Change.
         def seek(target, at: nil, start_time: nil)
+          target = LengthTarget.new(target) if target.is_a?(Sequence::Duration) || target.is_a?(MB::Sound::Length)
           check_seek_target(target)
           point = at || LaunchPoint::NONE
           time = start_time && !point.given? ? start_time.to_r : launch_time(point, [], default: :now)
@@ -52,6 +53,52 @@ module MB
           return :timeline if c.kind == :seek
           return Knobs::KnobSubject.new(c.subject) if knob_change?(c)
           c.subject
+        end
+
+        # A seek target given as a length (`12.bars`, `32.seconds`), which
+        # journal entries print as written.
+        LengthTarget = Data.define(:length) do
+          def inspect = Seeks.seek_text(length)
+          def to_s = inspect
+        end
+
+        # How a seek target prints in a journal label (`bar(11, beat: 2)`,
+        # `12.bars`).
+        def self.seek_text(target)
+          case target
+          when LengthTarget then seek_text(target.length)
+          when LaunchPoint::Bar then target.beat == 1 ? "bar(#{target.bar})" : "bar(#{target.bar}, beat: #{target.beat})"
+          when Sequence::Duration then (Form.ruby_value(target) rescue target.inspect)
+          when MB::Sound::Length::Seconds, MB::Sound::Length::Samples
+            v = target.fixed? ? target.to_f : nil
+            v = v.to_i if v.is_a?(Float) && v == v.to_i
+            v.is_a?(Numeric) ? "#{v}.#{target.is_a?(MB::Sound::Length::Seconds) ? 'seconds' : 'samples'}" : target.inspect
+          else target.inspect
+          end
+        end
+
+        # The timeline position (whole notes) of a seek +target+ that isn't
+        # a name, through ArgTypes.classify: a bar number (:number, a
+        # :ratio) counting from 1 or a LaunchPoint::Bar (`bar(12, beat:
+        # 2)`), or a length from the start of the timeline (:duration;
+        # :seconds and :samples at the current tempo): `12.bars` is the
+        # start of bar 13, as a counter starting at 0 reads.  Raises for
+        # anything else, listing the spellings.
+        def seek_position(target)
+          target = target.length if target.is_a?(LengthTarget)
+          case target
+          when LaunchPoint::Bar
+            return target.whole_notes(@transport)
+          end
+
+          case ArgTypes.classify(target)
+          when :number, :ratio
+            return @transport.bar_position(target) if target >= 1
+          when :duration, :seconds, :samples
+            pos = target.to_whole_notes(sample_rate: output_open? ? sample_rate : 48000, transport: @transport).to_r
+            return pos if pos >= 0
+          end
+          raise ArgumentError, "seek takes a bar (17, 2.5, seek 11, 2, bar(12, beat: 3)), a length from the start (12.bars = bar 13, 43.n16, 32.seconds), or a section, label, or marker name (got #{ArgTypes.describe_value(target)})"
         end
 
         # Raises unless +target+ can be sought now (it is resolved again when
@@ -75,7 +122,8 @@ module MB
             raise ArgumentError, "No section, label, or marker #{target.inspect} (#{known.join('; ')})#{Form.suggest(target, names)}"
           end
 
-          raise ArgumentError, "Bar must be a number of at least 1 (got #{target.inspect})" unless target.is_a?(Numeric) && target >= 1
+          seek_position(target)
+          nil
         end
 
         # Moves the timeline to +target+ (the action of a :seek change).
@@ -89,7 +137,7 @@ module MB
             if target.is_a?(Symbol) && pb && !pb.ended? && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
               pb.seek_now(target)
             else
-              pos = target.is_a?(Symbol) ? markers.position(target) : @transport.bar_position(target)
+              pos = target.is_a?(Symbol) ? markers.position(target) : seek_position(target)
               raise ArgumentError, "No marker #{target.inspect}" if pos.nil?
               @transport.seek(pos)
             end

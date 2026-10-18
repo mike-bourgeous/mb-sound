@@ -26,6 +26,7 @@ module MB
           on 'e', :jump, :meters, help: 'into: REPL i, KEYS k, tracks t, meters e', label: ''
           doc 'a b ...', "a pane's letter (by its number in NAV)"
           group 'Modes'
+          on ' ', :pause, help: 'play / pause (starts the flow if nothing played yet)', label: 'Space'
           on 'm', :messages, help: 'messages (warnings) pane, again: away'
           on 'f', :show_fps, help: 'frame rate on the status line'
           on '?', :key_help, help: 'this help (a key listed here closes it and acts)'

@@ -633,8 +633,12 @@ module MB
         `flow do intro 4; verse 8; ... end` plays sections (scenes of the
         same name) with labels, gotos, and picks decided at commit points;
         perform it with loop!, onward, goto, skip, finish, practice, seek.
+        `flow` alone shows it (where it is, what comes next, how to end
+        it); `start` (or `play`, `go` with nothing) plays the loaded flow
+        and `pause` (NAV Space) toggles.  `outro in: 4.bars` and `stop
+        :all` end the flow too; a scene you `go` to during it takes over.
       TEXT
-      commands :flow, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
+      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
       note :arrangement
       see :sets
       example 'a tiny song form' do

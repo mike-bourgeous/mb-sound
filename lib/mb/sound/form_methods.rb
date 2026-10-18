@@ -31,11 +31,23 @@ module MB
       # tracks' warm-up before a form starts in an idle realtime session
       # (see Arrangement#warm_up).  Returns the Form (its inspect prints the
       # block back).  Without a block, returns the form playing
-      # (Form::Playback; its inspect says where it is and what comes next).
-      # Also available as #form.
+      # (Form::Playback; the console shows where it is, its sections with
+      # the one playing in brackets, what comes next, and how to steer and
+      # end it), else the loaded flow (`demo`'s, or the last one built; the
+      # Form, printed as its block, after a line saying `start` plays it),
+      # else nil.  Also available as #form.
       def flow(play: true, seed: nil, warm_up: :auto, at: nil, on: nil, in: nil, &block)
         arrangement = Session.current.arrangement
-        return arrangement.playback unless block
+        unless block
+          pb = arrangement.playback
+          return pb if pb && !pb.ended?
+          if (f = TransportMethods.loaded_flow(arrangement))
+            puts "\e[2mflow (not playing#{pb ? ': it ended' : ''}; start or play plays it):\e[0m" unless Session.context&.[](:time)
+            return f
+          end
+          puts "\e[2mno flow yet: flow do intro 8; verse 8 end builds and plays one (help :flow)\e[0m" unless Session.context&.[](:time)
+          return pb
+        end
 
         point = LaunchPoint.of(binding) or return nil
         f = arrangement.build_form(&block)
