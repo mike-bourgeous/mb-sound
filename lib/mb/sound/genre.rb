@@ -396,10 +396,19 @@ module MB
         end
 
         # The chain of template bus +name+ on +input+ (the bus's input, a
-        # bundle).
+        # bundle).  A step keyed by :sidechain (`[:duck, :sidechain, {
+        # amount: -6.db }]`) reads the template's sidechain, as roles'
+        # duck: amounts do: `duck(:drums, only: :kick)`, or the trigger
+        # track with `sidechain :pump, :pump` (ux-fix-1: the maintainer's
+        # "follow the pump" for dnb's :hall).
         def bus_chain(name, input)
           b = buses.fetch(name) { raise ArgumentError, "No bus #{name.inspect} in genre #{self.name.inspect}#{Form.suggest(name, buses.keys)}" }
-          Genre.master_chain(input, b.steps, knobs.keys)
+          steps = b.steps.map { |n, args, params|
+            next [n, args, params] unless args.first == :sidechain
+            raise ArgumentError, "bus #{name.inspect}: #{n} :sidechain, but genre #{self.name.inspect} has no sidechain" unless sidechain
+            [n, [sidechain[0], *args.drop(1)], sidechain[1] ? { only: sidechain[1] }.merge(params) : params]
+          }
+          Genre.master_chain(input, steps, knobs.keys)
         end
 
         # Sets the template up on the current Session: tempo, meter, launch

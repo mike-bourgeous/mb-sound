@@ -245,6 +245,19 @@ smooth_gesture :space                                       # the last recorded 
 - **Rule: takes reproduce what was heard; exports read like music.**  A racks-pane gesture (`Session#preview_turn` steps) commits as ONE console line, `Session#gesture_line`'s fitted keyframes (printed in the REPL and saved in the take as typed), but its journal entry keeps the raw steps (`data[:raw]`, with `:epoch` and `:pos`); `Take#gestures` saves them (`r.gestures [[name, epoch, pos, steps], ...]`) and a replay plays them at the gesture's time (`Session::Gestures#replayed_gesture`, looked up with the time the take gives the action), bit for bit (knob_gesture_spec at 800 and 367/368).  Knob moves are performance state, not graph structure, so graph and set documents still save knob values (above); the fitted line is the export.
 - **Smoothing on purpose**: `smooth_gesture(name = nil)` (console and Session) marks the last recorded gesture (of that knob) smoothed: the take drops its raw steps, so replays play the line as printed (the fitted curve).  One undo step (an undo extra, `Gestures::Smoothed#restore_undo_state`).
 
+## Names that stand for controls (ux-fix-1, 2026-10-18)
+
+Maintainer on `turn :pump, 0` for a trigger track: "Context; look at conceptually neighboring architectural patterns in the code and make sure this is handled cleanly."  One rule, `Session::Knobs#control_name`: a Symbol where a knob is meant resolves through its owner's kind in the shared namespace (`Session::Names`):
+
+| the name is | it stands for |
+|---|---|
+| a knob (`:cut`, a rack macro `:"dub/space"`, a send level's hidden knob) | that knob |
+| a rack knob group (`:"dub/space"` once two instances play) | every instance's knob (`turn` turns them all; `Racks#group_members`) |
+| an owner with a primary control (`#primary_control`): a trigger track | that control: its on/off level `:"pump/level"` |
+| anything else | itself (errors list the knobs and suggest) |
+
+Every command taking knob names resolves through it or `#knob!`: `turn`/`move`, `snap knobs:`, `recall only:/except:`, `xfade`, `learn`, `bind_cc` (`cc:`), and scene and section values (`Arrangement#control_value?`: on a name with a primary control, a number or `[number, over: ...]` turns the control and leaves the track playing, `pump: 0`; a clip still gives the track its line).  Sections accept `Session#control_names`.  Only trigger tracks have a primary control so far: a bus's or a player's level is a mix decision (`feed`, `master_gain`, faders), not one control, and a send level is a (player, bus) pair, so neither gets a short name.  The pump's level stays on/off (0..1 fades, no depth knob): the duck's own parameters are what get automated.
+
 ## Leading the beat and nudges (`Arrangement#track`, `MIDI::ClipSource#ahead`)
 
 Maintainer, 2026-10-11 ("yes" for phase 3): "Slow pads sometimes need to lead the beat because of their slow attack."

@@ -116,10 +116,47 @@ module MB
           k
         end
 
-        # The knob named +name+, raising with suggestions if there is none.
+        # The name of the control +name+ stands for (ux-fix-1, the one
+        # resolution rule; design/notes/arrangement.md "Names that stand for
+        # controls"): a name resolves through its owner's kind in the
+        # shared namespace (Session::Names): a knob's name is the knob; a
+        # rack knob group's name stands for every instance's knob (#turn
+        # turns them all; Session::Racks#group_members); any other owner
+        # with a primary control (#primary_control: a trigger track's on/off
+        # level, :"pump/level") stands for that control.  Every command
+        # taking knob names (turn, snap knobs:, recall only:/except:, xfade,
+        # learn, bind_cc, scene and section values) resolves through here
+        # or #knob!.  Other values pass through.
+        def control_name(name)
+          return name unless name.is_a?(Symbol)
+          return name if @knob_lock.synchronize { @knobs.key?(name) }
+          primary_control(name) || name
+        end
+
+        # The knob name of the primary control of +name+'s owner (see
+        # #control_name), or nil: a trigger track's on/off level
+        # (Buses#trigger_level_name).  Other owners have none yet: a
+        # bus's or player's level is a mix decision (feed, master_gain),
+        # not one control.
+        def primary_control(name)
+          return nil unless name.is_a?(Symbol) && @names.kind(name) == :track && trigger_track?(name)
+          level = trigger_level_name(name)
+          @knob_lock.synchronize { @knobs.key?(level) } ? level : nil
+        end
+
+        # Names that stand for controls (#control_name): the knobs and the
+        # owners with a primary control (scenes and sections take both).
+        def control_names
+          names = @knob_lock.synchronize { @knobs.keys }
+          names + @names.to_h.keys.select { |n| primary_control(n) }
+        end
+
+        # The knob named +name+ (or the control it stands for: see
+        # #control_name), raising with suggestions if there is none.
         def knob!(name)
           return name.knob if name.is_a?(GraphNode::Knob::Reader)
           return name if name.is_a?(GraphNode::Knob)
+          name = control_name(name)
           @knob_lock.synchronize { @knobs[name] } or raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name, define: true)}"
         end
 
@@ -309,6 +346,7 @@ module MB
         # :step, or a Curve name per segment; see MB::Sound::Gesture).  A
         # racks-pane gesture's line (#gesture_line) is this form.
         def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, start_time: nil, **keys)
+          name = control_name(name)
           if name.is_a?(Symbol) && (members = racks.group_members(name))
             offset = binding.local_variable_get(:in)
             return members.map { |k| turn(k.name, value, at: at, on: on, in: offset, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: start_time, **keys) }
@@ -701,7 +739,7 @@ module MB
         def filter_knob_names(names, only, except)
           match = ->(n, list) {
             Array(list).any? { |x|
-              x = x.to_sym
+              x = control_name(x.to_sym)
               n == x || (n.to_s.include?('/') && n.to_s.split('/').last == x.to_s)
             }
           }

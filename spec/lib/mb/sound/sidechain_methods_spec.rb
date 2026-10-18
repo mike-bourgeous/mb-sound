@@ -184,10 +184,34 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       expect(session.knobs).to be_empty # (the other sessions' knobs)
     end
 
+    # ux-fix-1 (maintainer: "Context"): the track's name stands for its
+    # on/off level wherever a knob is meant (Session::Knobs#control_name)
+    it 'turn on and off by the track\'s own name in turn, scenes, sections, snapshots, and learn' do
+      run(3 * 96000) { |ss|
+        MB::Sound.sidechain(:pump, line, on: :now)
+        ss.add(MB::Sound.bus(:pump), name: :probe, on: :now)
+        expect(ss.control_name(:pump)).to eq(:"pump/level")
+        MB::Sound.scene(:half, pump: 0.5)
+        MB::Sound.at_bar(2) { MB::Sound.turn(:pump, 0) }
+        MB::Sound.at_bar(3) { MB::Sound.go(:half) }
+      }.then { |data|
+        expect(data[0]).to eq(0.75)
+        expect(data[96000 + 960...192000].abs.max).to eq(0)
+        expect(data[192000 + 2400]).to eq(0.375) # (the line played on: the scene turned only its level)
+      }
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.snap(:off, knobs: [:pump])
+        session.process_buffer
+        expect(session.snapshots[:off].keys).to eq([:"pump/level"])
+        expect(session.knob!(:pump).name).to eq(:"pump/level")
+        expect(MB::Sound::Form.section_options(:drop, pump: 0)).to eq([{}, { pump: 0 }])
+      end
+    end
+
     it 'print a hint on mute (mute doesn\'t stop a pump) pointing to the level knob and stop' do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.sidechain(:pump, line)
-        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*turn :"pump\/level", 0 or stop :pump/).to_stdout
+        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*turn :pump, 0 \(its on\/off level\) or stop :pump/).to_stdout
         expect { MB::Sound.unmute(:pump) }.not_to output.to_stdout
       end
     end

@@ -327,7 +327,7 @@ module MB
             next
           end
           kind = @session.names.kind(k)
-          if kind == :knob
+          if kind == :knob || control_value?(k, v)
             check_knob_value(name, k, v) or return nil
             next
           end
@@ -387,7 +387,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("No scene #{name.inspect}#{known.empty? ? '' : " (scenes: #{known.map(&:inspect).join(', ')})"}"))
         end
 
-        knob_values = sc.values.select { |k, _| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob }
+        knob_values = sc.values.select { |k, v| KEY_VALUES.include?(k) || @session.names.kind(k) == :knob || control_value?(k, v) }
         unknown = sc.values.keys - tracks.keys - knob_values.keys
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
@@ -411,7 +411,8 @@ module MB
           end
 
           tracks.each_value do |tr|
-            value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
+            # (a trigger track given a number: its level turns, the line plays on)
+            value = knob_values.key?(tr.name) ? :keep : sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
             stop = sc.others == :cut ? :cut : :ring
             set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
@@ -629,6 +630,16 @@ module MB
         return change_key_value(name, value, time) if KEY_VALUES.include?(name)
         v, options = knob_value(value)
         @session.turn(name, v, start_time: time, **options)
+      end
+
+      # True if scene or section value +value+ for +name+ turns the
+      # primary control of +name+'s owner (Session::Knobs#control_name:
+      # `pump: 0` is the trigger track :pump's on/off level) rather than
+      # giving the track a clip: a number, or [number, over: ...].
+      def control_value?(name, value)
+        return false unless @session.primary_control(name)
+        v = value.is_a?(Array) ? value[0] : value
+        v.is_a?(Numeric)
       end
 
       # Splits a scene's knob value into the value and turn options.

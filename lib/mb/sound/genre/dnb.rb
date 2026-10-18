@@ -84,9 +84,10 @@ module MB
 
       sidechain :drums, only: :kick
       # The hall: highpassed so the kick's body stays out, wet only, ducked
-      # by the kick (Tunnel Vision's :hall bus without its tail lift)
+      # by the sidechain (the kick; the pump with `sidechain :pump, :pump`)
+      # (Tunnel Vision's :hall bus without its tail lift)
       bus :hall, [:filter, :highpass, { cutoff: 250, quality: 0.7 }], [:reverb, :hall, { mix: 1 }], [:at, 12.db],
-          [:duck, :drums, { only: :kick, amount: -6.db, release: 1.n8 }]
+          [:duck, :sidechain, { amount: -6.db, release: 1.n8 }]
 
       scene :intro, drums: :intro, pad: :chords, cut: 250, air: 20
       scene :build, drums: :build, bass: :riff, cut: [2500, { from: 250, over: 8, curve: :smooth }]
