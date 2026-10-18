@@ -110,7 +110,7 @@ module MB
       # Session).  Raises if the song ends or +limit+ frames pass first.
       # Returns the frames of that buffer before +from+'s frame (the Gate
       # drops them).
-      def preroll(session, from, buffer_size:, limit:)
+      def preroll(session, from, buffer_size:, limit:, progress: nil)
         transport = session.transport
         rate = session.output.sample_rate
         start = transport.position
@@ -139,6 +139,7 @@ module MB
 
           session.process_buffer(count)
           frames += count
+          progress&.update(:preroll, target: from)
         end
       end
 

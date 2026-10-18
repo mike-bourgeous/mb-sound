@@ -25,6 +25,19 @@ module MB
         end
       end
 
+      # Runs the block with $stdout going nowhere (e.g. a render's second
+      # pass, whose blocks print what the first pass printed).  Returns the
+      # block's value.
+      def without_stdout
+        saved = $stdout
+        File.open(File::NULL, 'w') do |null|
+          $stdout = null
+          yield
+        ensure
+          $stdout = saved
+        end
+      end
+
       # Runs the block with the process's stderr (file descriptor 2)
       # captured, since C libraries (ALSA, RtMidi, miniaudio) print their
       # errors there: an error of one of +error_classes+ (default

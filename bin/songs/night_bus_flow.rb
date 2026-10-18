@@ -349,6 +349,8 @@ module MB::Sound
   # printed as it runs, at the bar where it was typed).
   def self.last_stop_performance(seed: 1)
     say = ->(bar, line) { puts format("\e[2mbar %-5s\e[0m \e[36m›\e[0m %s", bar, line) }
+    # The bar a marker block runs at (sections land wherever the form is)
+    here = -> { session = Session.current; session.transport.bar_at(session.now).floor }
 
     say[1, 'flow do ... end   # the form starts']
     last_stop_form(seed: seed)
@@ -357,8 +359,8 @@ module MB::Sound
     at_bar(17) { say[17, 'turn :cut, 1300, over: 4, curve: :smooth   # open the far hook on the repeat']; turn :cut, 1300, over: 4, curve: :smooth }
     at_bar(21) { say[21, 'onward']; onward }
     at_marker(:pickup) {
-      say['pickup', "flow   # => #{Session.current.arrangement.playback}"]
-      say['pickup', 'snap :drop   # the drop\'s knobs']
+      say[here.(), "flow   # => #{Session.current.arrangement.playback}"]
+      say[here.(), 'snap :drop   # the drop\'s knobs']
       snap :drop
       session = Session.current
       bar = session.transport.bar_at(session.now).floor + 7
@@ -374,7 +376,7 @@ module MB::Sound
       }
     }
     at_marker(:outro) {
-      say['outro', 'xfade :drop, :dark, :morph; turn :morph, 1, over: 8   # back to the dark']
+      say[here.(), 'xfade :drop, :dark, :morph; turn :morph, 1, over: 8   # back to the dark']
       xfade :drop, :dark, :morph
       turn :morph, 1, over: 8
     }

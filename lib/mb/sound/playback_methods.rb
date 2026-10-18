@@ -884,6 +884,7 @@ module MB
         capture = targeting ? Mastering::Targeting::Capture.new : nil
         first = { override: override, capture: capture, defer_report: true }
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
+        return seconds if first[:interrupted]
 
         if capture.nil? || capture.targeted.empty?
           warn first[:peak_warning] if first[:peak_warning]
@@ -902,7 +903,11 @@ module MB
 
         Internal.restore_rng(rng.dup, seed)
         second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true }
-        seconds = render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
+        # The second pass replays the first exactly: what the song's blocks
+        # print (scheduled-command logs) was printed by the first already
+        seconds = Internal.without_stdout {
+          render_session(filename, *sounds, mastering: second, **kwargs.merge(overwrite: true), &block)
+        }
         # Decoded peaks for streaming masters and reports (see Mastering::CodecPeaks)
         if filename.is_a?(String) && (kwargs[:report] || result.preset == :streaming)
           result = result.with(codec_peaks: Mastering.codec_peaks(filename))
@@ -1023,6 +1028,9 @@ module MB
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
+        progress = RenderProgress.new(session, label: filename.is_a?(String) ? File.basename(filename) : 'output')
+        interrupted = false
+
         # A render window (see RenderWindow): play up to +from+ without
         # writing it (or seek there), then count bars: from there, or end
         # where +to+ starts
@@ -1036,7 +1044,15 @@ module MB
           session.stems&.origin = Float::INFINITY
           if preroll
             limit = ((max_seconds || MAX_RENDER_SECONDS) * rate).round
-            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit)
+            unless mastering[:check] # (once, not again in a targeted render's second pass)
+              known = RenderWindow.position(session, from, 0)
+              span = known ? "bars 1-#{transport.bar_at(known).ceil - 1}" : "the song up to #{from.inspect}"
+              if known.nil? || transport.bar_at(known) - 1 > RenderProgress::LONG_PREROLL_BARS
+                progress.notice("\e[2mrender: playing #{span} unheard first, so #{from.inspect} starts as it would in the song " \
+                                "(preroll: false, or a script's --seek, starts there fresh and sooner)\e[0m")
+              end
+            end
+            skip = RenderWindow.preroll(session, from, buffer_size: buffer_size, limit: limit, progress: progress)
             from_pos = RenderWindow.position(session, from, 0)
           else
             from_pos = RenderWindow.seek(session, from)
@@ -1073,18 +1089,29 @@ module MB
             session.schedule_waiting?(repeating: bounded ? true : false, before: end_time&.call)
         }
         session.advance_idle = true
-        until frames_left.call <= 0 || (session.idle? && !waiting.call)
-          count = MB::M.min(buffer_size, frames_left.call)
-          session.process_buffer(count)
-          frames += count - skip
-          skip = 0
+        begin
+          until frames_left.call <= 0 || (session.idle? && !waiting.call)
+            count = MB::M.min(buffer_size, frames_left.call)
+            session.process_buffer(count)
+            frames += count - skip
+            skip = 0
+            progress.update(:render, frames: frames)
+          end
+        rescue Interrupt
+          # Ctrl-C: keep what was written (a valid, shorter file)
+          interrupted = true
         end
+        progress.clear
         # Tails ring out on a paused timeline, as before
         session.advance_idle = false
 
-        if frames_left.call > 0
+        if interrupted
+          mastering[:interrupted] = true
+          where = filename.is_a?(String) ? "#{filename} keeps" : 'the output got'
+          warn "render stopped at #{progress.clock(frames.to_f / rate)} (Ctrl-C): #{where} the #{(frames.to_f / rate).round(1)} seconds rendered so far"
+        elsif frames_left.call > 0
           frames += render_tail(session, frames_left.call, buffer_size)
-        elsif tail && (bars || seconds || to)
+        elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing and let the
           # master effects ring out
           session.remove(fade: 0)
@@ -1092,7 +1119,7 @@ module MB
           frames += render_tail(session, max_seconds ? (max_seconds * rate).round - frames : Float::INFINITY, buffer_size)
         end
 
-        if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
+        if !interrupted && bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
           hint = GraphNode::RingHint.message(sounds.select { |s| s.respond_to?(:sample) || s.is_a?(GraphNode::Channels) })
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)#{"\n#{hint}" if hint}"
         end
