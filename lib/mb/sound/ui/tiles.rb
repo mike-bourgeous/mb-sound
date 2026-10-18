@@ -225,6 +225,11 @@ module MB
             @host = Input::ReplHost.new(rows: r.h, cols: r.w, mode: @repl_mode, scrollback: @scrollback, ambiguous_width: @ambiguous,
                                         target: @context || TOPLEVEL_BINDING, pry: @pry_opts)
             @host.start
+            # A Pry of our own (:thread) reads through the global Reline,
+            # whose Ctrl-]/F2 bindings (ConsoleKeys) act on the screen that
+            # owns the reading thread: this one, not a new one on the real
+            # terminal (Ctrl-] relayed while hidden reaches Reline)
+            @host.thread[:mb_sound_ui_tiles] = self if @host.thread
           end
           @active = true
           @stopping = false
@@ -303,6 +308,15 @@ module MB
           # Reline redraws its prompt and line on the terminal, at its size
           rows, cols = @term.size
           @host.resize(rows, cols, force: true)
+          self
+        end
+
+        # Ctrl-] or F2 read by the Reline of this screen's own Pry thread
+        # (ConsoleKeys.switch; :thread mode): back from hidden, then NAV
+        # (or KEYS).  Returns self.
+        def console_switch(what)
+          show_again if hidden?
+          what == :keys ? keys : (@router.mode = :nav)
           self
         end
 
