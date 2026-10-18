@@ -637,6 +637,14 @@ RSpec.describe MB::Sound::Help do
       expect(text(MB::Sound.help.perform)).to eq(t)
     end
 
+    # ux-fix-1 item 15: the sheet teaches saw, graphs print ramp
+    it 'heads a method page with its official name and aliases' do
+      t = text(MB::Sound.help(:saw))
+      expect(t.lines.first).to start_with('ramp  (alias saw, sawtooth)')
+      expect(t).to include('saw is an alias of ramp; graphs print it back as ramp')
+      expect(text(MB::Sound.help(:turn)).lines.first).to include('(alias move)')
+    end
+
     it 'points method pages to the lessons that use them' do
       expect(text(MB::Sound.help(:turn))).to match(/Learn it in: lesson :knobs \(step \d+ of \d+\)/)
       expect(MB::Sound::Help.lessons_using([:capture]).map(&:first)).to include(:record)

@@ -996,7 +996,8 @@ module MB
 
     Help.topic :presets, 'Saving graphs and sets', group: :keep do
       about <<~TEXT
-        Every graph prints itself back as Ruby (`ruby node`); `save` writes a
+        Every graph prints itself back as Ruby (`ruby node`; aliases print
+        as their official names: `saw` as `ramp`); `save` writes a
         graph document (or the whole set), `preset` loads one with new
         inputs and params.  mb-sound comes with presets too (`presets`
         lists them): drum & bass, jungle, ambient, and funk instruments,
