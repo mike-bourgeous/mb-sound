@@ -129,7 +129,7 @@ RSpec.describe('bin/synths/funk.rb') do
     expect(rms_db(seconds(hard, 0, 0.1))).to be > rms_db(seconds(soft, 0, 0.1)) + 9
     # (the saw's lowpass opens with velocity, but the sine body dominates:
     # the power at 300 Hz-3 kHz stays about 1.4%; above 3 kHz it goes from
-    # 0.014% at velocity 0.3 to 0.063% at 1.0 with lp4's edge tuning, from
+    # 0.014% at velocity 0.3 to 0.063% at 1.0 with lp4's musical tuning, from
     # 0.013% to 0.043% with the hardware tuning)
     expect(band_share(seconds(hard, 0, 0.1), 3000, 12000)).to be > band_share(seconds(soft, 0, 0.1), 3000, 12000) * 2
   end

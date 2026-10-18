@@ -9,7 +9,7 @@ RSpec.describe(MB::Sound::SQ80Methods) do
 
   # The voice as bin/synths/sq80_voice.rb built it before sq80-lib-1
   # (2026-10-17), kept as the reference the library's defaults must match
-  # sample for sample.  Both use lp4's default tuning (the edge tuning since
+  # sample for sample.  Both use lp4's default tuning (the musical tuning since
   # filters-1, 2026-10-17; the voice was written for the hardware tuning),
   # so they change together.
   def original_voice(midi, voices: 8, cutoff: 500, reso: 0.4, drive_mode: :feedback, drive: 1.5, chop: 1.5, flutter: 1.0, second_release: false)

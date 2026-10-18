@@ -24,8 +24,8 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     FP::MODES.each do |mode, mix|
       [[0.0, 0], [1.5, 0], [0.0, 1], [1.5, 1]].each do |drive, tuned|
-        # (the edge tuning's table for this tap; the diode's mix gets lp4's)
-        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, :edge)
+        # (the musical tuning's table for this tap; the diode's mix gets lp4's)
+        tuning = tuned == 0 ? 0 : FP::Tuning.number(mode == :diode ? :lp4 : mode, :musical)
         it "give identical samples for #{mode} with modulated parameters#{drive > 0 ? ' and drive' : ''}, tuning #{tuning}" do
           s1 = [0.0] * 4
           s2 = [0.0] * 4
@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
     end
 
     [[1, 0, 0], [1, 1, 0], [1, 2, 1], [3, 0, 0], [3, 2, 0]].each do |curve, drive_mode, clip|
-      it "give identical samples with a constant cutoff and a moving resonance, edge tuning, curve #{curve}, drive mode #{drive_mode}" do
+      it "give identical samples with a constant cutoff and a moving resonance, musical tuning, curve #{curve}, drive mode #{drive_mode}" do
         # (a resonance change alone recomputes the stages' frequency)
         s1 = [0.0] * 4
         s2 = [0.0] * 4

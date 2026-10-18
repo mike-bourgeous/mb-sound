@@ -4,8 +4,8 @@ module MB
   module Sound
     class Filter
       class FourPole
-        # The analysis behind the four-pole's and diode ladder's edge tuning
-        # (+tuning: :edge+; see FourPole::Tuning): the analog responses of
+        # The analysis behind the four-pole's and diode ladder's musical tuning
+        # (+tuning: :musical+; see FourPole::Tuning): the analog responses of
         # every output tap, their resonant peaks and -6 dB edges, and the
         # target cutoff scale that FourPole::Tuning's tables interpolate.
         # Slow (numeric searches); loaded only by the table generator
@@ -35,7 +35,7 @@ module MB
           DIODE_EDGE_K = 901.0 / 49
           DIODE_W180 = Math.sqrt(10.0 / 7.0)
 
-          # The edge tuning's edge level without resonance (dB re the
+          # The musical tuning's edge level without resonance (dB re the
           # passband): -6 dB (half amplitude; the maintainer's pick from the
           # Bench A/B, 2026-10-17, over the -3 dB point).
           EDGE_DB = 20 * Math.log10(0.5)
@@ -128,7 +128,7 @@ module MB
             t * t * (3 - 2 * t)
           end
 
-          # The edge tuning's target: the frequency (hardware units) that
+          # The musical tuning's target: the frequency (hardware units) that
           # the cutoff should mean for +mode+ at +x+.  Bandpasses: the
           # peak.  Without resonance, lowpasses and highpasses: the -6 dB
           # edge (EDGE_DB).  As the resonant peak grows from 0 to PEAK_DB
@@ -157,7 +157,7 @@ module MB
             1.0 / target(mode, x)
           end
 
-          # The response of +mode+ at +x+ with the edge tuning at +w+
+          # The response of +mode+ at +x+ with the musical tuning at +w+
           # (units of the cutoff), in dB.
           def self.tuned_db(mode, x, w, m = scale(mode, x))
             db(mode, x, w / m)

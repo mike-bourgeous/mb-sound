@@ -150,7 +150,7 @@ module MB
         # e.g. Notes#cutoff); +resonance+ is 0..1 (a number or node).  Both
         # are read per sample, so audio-rate filter FM works.
         #
-        # The cutoff means the same at every resonance (+tuning: :edge+, the
+        # The cutoff means the same at every resonance (+tuning: :musical+, the
         # default since 2026-10-17; Filter::FourPole::Tuning): without
         # resonance the filter is 6 dB down there, and once the resonant
         # peak stands 6 dB over the passband (resonance 0.29 up) the peak is
@@ -205,7 +205,7 @@ module MB
         #     play 110.hz.ramp.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
         def lp4(
           cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
-          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, tuning: :edge
+          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, tuning: :musical
         )
           raise ArgumentError, 'Give lp4 resonance: or quality:, not both' if resonance && quality
 
@@ -214,7 +214,7 @@ module MB
             resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip, normalize: normalize,
             tuning: tuning, sample_rate: sample_rate
           )
-          # Edge tuning: each filter's own gain q at the cutoff.  Hardware
+          # Musical tuning: each filter's own gain q at the cutoff.  Hardware
           # tuning: the normalized diode ladder takes lp4's knob for a Q (same
           # settings, similar sound)
           diode = mode == :diode && (tuning != :hardware || !normalize)
@@ -234,7 +234,7 @@ module MB
         # about 6, 8, 11, and 16 dB/octave over the first four octaves above
         # the cutoff, against lp4's 11, 18, 22, 24) and a peak that narrows
         # and squelches as the resonance rises.  Its cutoff means what lp4's
-        # does (+tuning: :edge+: -6 dB there without resonance, the peak on
+        # does (+tuning: :musical+: -6 dB there without resonance, the peak on
         # it from resonance 0.41 up).  +normalize: true+ (default) matches
         # its bass and saturation to lp4's (the same DC gain at every
         # resonance, self-oscillation at lp4's level); with

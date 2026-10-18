@@ -2,7 +2,7 @@ module MB
   module Sound
     class Filter
       class FourPole < Filter
-        # The edge tuning (+tuning: :edge+, the default since 2026-10-17,
+        # The musical tuning (+tuning: :musical+, the default since 2026-10-17,
         # maintainer: "the goal for me is not fidelity to hardware, it's
         # playability and consistency"): the cutoff means the same thing at
         # every resonance and for every output tap.

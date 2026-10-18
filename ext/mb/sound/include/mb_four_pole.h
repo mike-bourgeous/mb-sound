@@ -268,7 +268,7 @@ static inline double dl_loop_gain(double r, int curve, double k_max)
 	}
 }
 
-// The edge tuning's cutoff scale (+tuning+ 1..FP_TUNING_COUNT for the modes
+// The musical tuning's cutoff scale (+tuning+ 1..FP_TUNING_COUNT for the modes
 // lp4, lp2, bp2, bp4, hp2, hp4, diode; 0, the hardware tuning, gives 1) for
 // x, the loop gain over the oscillation edge's (lp4 k / 4, the diode ladder
 // k / DL_EDGE_K): the factor by which the filter's frequency is raised
@@ -302,7 +302,7 @@ static inline double fp_tuning_scale(int tuning, double x)
 	return y0 + f * (d0 + f * (c2 + f * c3));
 }
 
-// The diode ladder's edge tuning number (fp_tuning_scale; the last of the
+// The diode ladder's musical tuning number (fp_tuning_scale; the last of the
 // tuned modes lp4, lp2, bp2, bp4, hp2, hp4, diode).
 #define FP_TUNING_DIODE 7
 

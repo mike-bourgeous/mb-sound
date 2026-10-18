@@ -74,7 +74,7 @@
  * +drive_mode+ 0 (input), 1 (stages), or 2
  * (feedback); +clip+ 0 (soft) or 1 (hard), for the feedback mode.
  * +tuning+ 0 is the hardware tuning (the cutoff is the frequency the
- * filter would oscillate at), 1..6 the edge tuning for the output taps lp4,
+ * filter would oscillate at), 1..6 the musical tuning for the output taps lp4,
  * lp2, bp2, bp4, hp2, hp4 (fp_tuning_scale in mb_four_pole.h).
  */
 static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
@@ -99,7 +99,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	int clip = argc > 11 ? NUM2INT(argv[11]) : FP_CLIP_SOFT;
 	int tuning = argc > 12 ? NUM2INT(argv[12]) : 0;
 	if (!fp_tuning_valid(tuning, 0)) {
-		rb_raise(rb_eArgError, "Four-pole tuning must be 0 (hardware) or 1..6 (edge, by output tap)");
+		rb_raise(rb_eArgError, "Four-pole tuning must be 0 (hardware) or 1..6 (musical, by output tap)");
 	}
 	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
 		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
@@ -498,7 +498,7 @@ static VALUE ruby_formant(VALUE self, VALUE out, VALUE x, VALUE tables, VALUE mo
  * by DL_SCALE here.  +drive_mode+ 0 (input) or 2 (feedback).  +normalize+
  * 1 matches the compensation and saturation to lp4's (and, with the
  * hardware tuning, the cutoff to lp4's hardware tuning); +tuning+ 0 is the
- * hardware tuning, FP_TUNING_DIODE (7) the edge tuning.
+ * hardware tuning, FP_TUNING_DIODE (7) the musical tuning.
  */
 static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 {
@@ -522,7 +522,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	int normalize = argc > 11 ? NUM2INT(argv[11]) : 1;
 	int tuning = argc > 12 ? NUM2INT(argv[12]) : 0;
 	if (!fp_tuning_valid(tuning, 1)) {
-		rb_raise(rb_eArgError, "Diode ladder tuning must be 0 (hardware) or 7 (edge)");
+		rb_raise(rb_eArgError, "Diode ladder tuning must be 0 (hardware) or 7 (musical)");
 	}
 	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
 		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
@@ -610,7 +610,7 @@ static VALUE ruby_diode_headroom(VALUE self, VALUE k)
 	return rb_float_new(dl_headroom(NUM2DBL(k)));
 }
 
-// Exposes the edge tuning's cutoff scale for specs (fp_tuning_scale).
+// Exposes the musical tuning's cutoff scale for specs (fp_tuning_scale).
 static VALUE ruby_tuning_scale(VALUE self, VALUE tuning, VALUE x)
 {
 	return rb_float_new(fp_tuning_scale(NUM2INT(tuning), NUM2DBL(x)));

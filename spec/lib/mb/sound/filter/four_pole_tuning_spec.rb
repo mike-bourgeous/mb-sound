@@ -31,11 +31,11 @@ RSpec.describe(MB::Sound::Filter::FourPole::Tuning) do
 
   def cents(a, b) = 1200 * Math.log2(a / b)
 
-  describe 'the default edge tuning' do
+  describe 'the default musical tuning' do
     it 'is the default for every mode' do
-      expect(fp.new.tuning).to eq(:edge)
-      expect(fp.new(mode: :diode).tuning).to eq(:edge)
-      expect(110.hz.ramp.lp4(800).kernel_filter.tuning).to eq(:edge)
+      expect(fp.new.tuning).to eq(:musical)
+      expect(fp.new(mode: :diode).tuning).to eq(:musical)
+      expect(110.hz.ramp.lp4(800).kernel_filter.tuning).to eq(:musical)
       expect(110.hz.ramp.lp4(800, tuning: :hardware).kernel_filter.tuning).to eq(:hardware)
       expect { fp.new(tuning: :peak) }.to raise_error(ArgumentError, /tuning/)
     end
@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::Filter::FourPole::Tuning) do
 
     it 'self-oscillates at the cutoff like the hardware tuning' do
       [[:lp4, :input], [:lp4, :feedback], [:lp2, :input], [:diode, :input], [:diode, :feedback]].each do |mode, dm|
-        outs = [:edge, :hardware].map do |t|
+        outs = [:musical, :hardware].map do |t|
           f = fp.new(mode: mode, cutoff: 440, resonance: 1, self_oscillate: true, drive_mode: dm, tuning: t)
           f.process(Numo::SFloat.zeros(48000))
         end

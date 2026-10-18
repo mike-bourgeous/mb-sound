@@ -237,7 +237,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
 
       clip = MB::Sound.seq(MB::Sound::F3).n2
       # Clipping a stab lowpassed at 240 Hz (its -3 dB point at the patch's
-      # resonance 0.25 is 326 Hz with lp4's edge tuning, like the hardware
+      # resonance 0.25 is 326 Hz with lp4's musical tuning, like the hardware
       # tuning's 300 Hz) makes harmonics above 1 kHz: the heavy drive (the
       # Reese's) has 6 dB more there than the default (8.5)
       high_share = ->(drive) {
