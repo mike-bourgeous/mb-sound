@@ -1,6 +1,6 @@
 module MB
   module Sound
-    # Console methods for key tracks (see design/notes/dynamics.md, "Key
+    # Console methods for trigger tracks (see design/notes/dynamics.md, "Key
     # tracks"): a sidechain line that duckers and compressors read but
     # nobody hears.  MB::Sound extends itself with this module.
     #
@@ -18,8 +18,8 @@ module MB
     #     master { |mix| mix.duck(:pump, amount: -3.db) }
     #     sidechains                                          # lists them
     #
-    # A key track is an Arrangement track (Session::Buses#route with
-    # +key: true+): scenes give it clips, `launch`, `swap`, `stop`, undo,
+    # A trigger track is an Arrangement track (Session::Buses#route with
+    # +trigger: true+): scenes give it clips, `launch`, `swap`, `stop`, undo,
     # takes, and set documents treat it like any track, and it shares the
     # track namespace.  Its sound goes nowhere: not the master, buses,
     # sends, stems, CUE, or recordings of the mix; readers (`duck(:pump)`,
@@ -34,7 +34,7 @@ module MB
       # method that wires the envelope to the clip's notes).
       ENVELOPES = [:env, :amp_env, :fm_env, :filter_env].freeze
 
-      # Defines key track +name+ (see the module comment) and, given a
+      # Defines trigger track +name+ (see the module comment) and, given a
       # +source+ (a Clip, Seq, or grid Kit), plays it there like `bg :name,
       # clip` (at the track's +q:+ or the launch point +on:+/+in:+/+at:+;
       # returns that journal entry, else the name).
@@ -54,42 +54,42 @@ module MB
       #
       # +q:+, +fade:+, and +nudge:+ are as for tracks (a nudge moves the
       # key: `nudge: -5.ms` ducks just before the beat).  Also available as
-      # #key_track (`key` is the session key).
+      # #trigger_track (`key` is the session key).
       def sidechain(name, source = nil, shape: nil, q: nil, fade: nil, nudge: nil, at: nil, on: nil, in: nil, &patch)
         point = LaunchPoint.of(binding) or return nil
-        raise ArgumentError, 'Give a key track a shape: or a patch block, not both' if patch && shape
-        raise ArgumentError, "Key track names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+        raise ArgumentError, 'Give a trigger track a shape: or a patch block, not both' if patch && shape
+        raise ArgumentError, "Trigger track names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
 
-        patch ||= SidechainMethods.key_patch(shape)
+        patch ||= SidechainMethods.trigger_patch(shape)
         arr = Session.current.arrangement
-        arr.track(name, q: q, fade: fade, nudge: nudge, key: true, &patch) or return nil
+        arr.track(name, q: q, fade: fade, nudge: nudge, trigger: true, &patch) or return nil
         return name if source.nil?
         arr.play(name, source, at: point, fade: fade)
       end
-      alias key_track sidechain
+      alias trigger_track sidechain
 
-      # Lists the key tracks: name => "q:1 pump (playing) read by pad, bass".
+      # Lists the trigger tracks: name => "q:1 pump (playing) read by pad, bass".
       def sidechains
         s = Session.current
         info = s.arrangement.track_info
         readers = s.bus_readers_of
-        s.key_tracks.to_h { |n|
+        s.trigger_tracks.to_h { |n|
           r = readers[n]
           [n, "#{info[n]}#{r && !r.empty? ? " read by #{r.join(', ')}" : ' (nothing reads it)'}"]
         }
       end
-      alias key_tracks sidechains
+      alias trigger_tracks sidechains
 
       # The patch block for +shape+ (see #sidechain).
-      def self.key_patch(shape)
+      def self.trigger_patch(shape)
         case shape
         when nil, :gate
           proc { |clip|
-            n = SidechainMethods.key_clip(clip).notes
+            n = SidechainMethods.trigger_clip(clip).notes
             n.gate * n.velocity
           }
         when :impulse, :impulses
-          proc { |clip| SidechainMethods.key_clip(clip).trigger }
+          proc { |clip| SidechainMethods.trigger_clip(clip).trigger }
         when Envelope
           call = GraphNode::Recipe.record_of(shape)
           rec = call&.call
@@ -100,14 +100,14 @@ module MB
             raise ArgumentError, "shape: is played by each key note; its envelope takes no gate:, trigger:, velocity:, or choke: of its own"
           end
           name, args, kwargs = rec.name, rec.args, rec.kwargs
-          proc { |clip| SidechainMethods.key_clip(clip).public_send(name, *args, **kwargs) }
+          proc { |clip| SidechainMethods.trigger_clip(clip).public_send(name, *args, **kwargs) }
         else
           raise ArgumentError, "shape: is :gate, :impulse, or an envelope such as env(0, 0.08) (got #{shape.inspect}); a patch block builds anything else"
         end
       end
 
       # A grid Kit's rows stacked into one clip; Clips as they are.
-      def self.key_clip(clip)
+      def self.trigger_clip(clip)
         clip.is_a?(Sequence::Kit) ? clip.to_clip : clip
       end
     end

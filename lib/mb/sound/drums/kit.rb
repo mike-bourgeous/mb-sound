@@ -23,7 +23,7 @@ module MB
         # its source, nil if given) describe the clips it can take in a
         # swap (see #plays_clip?).
         # +:flams+ is true if the kit plays flam marks (see Drums.flams?).
-        # +:silent+ names voices that play but aren't mixed (key voices that
+        # +:silent+ names voices that play but aren't mixed (trigger voices that
         # sidechains read; see Machine::Builder#voice).
         def initialize(voices, machine:, clip_notes: nil, velocity_curve: nil, flams: false, silent: [], sample_rate: 48000)
           raise ArgumentError, 'A drum kit needs at least one voice' if voices.empty?

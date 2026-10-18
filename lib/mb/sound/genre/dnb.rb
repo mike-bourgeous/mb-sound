@@ -112,7 +112,7 @@ module MB
       tip 'The two-step: kick on 1 and on the "and" of 3, snares on 2 and 4, ghost snares between; a snare-roll fill at the end of every 16 tells the crowd something is coming.'
       tip 'Keep the sub a separate clean mono sine below about 100-120 Hz and highpass the Reese above it, so phase wobble never cancels the low end; duck both under the kick.'
       tip 'Tension: a filter build (turn :cut), a riser, and a one-bar pull-up of near silence before the drop; the second drop is a variation (a switch-up bass), not a copy.'
-      tip 'For a steady pump that ignores the drum pattern (the hats-only breakdown too), key the ducks from a line nobody hears: genre(:dnb) { sidechain :pump, :pump } plays the two-step as a key track under every scene.'
+      tip 'For a steady pump that ignores the drum pattern (the hats-only breakdown too), key the ducks from a line nobody hears: genre(:dnb) { sidechain :pump, :pump } plays the two-step as a trigger track under every scene.'
       tip 'Club masters are loud (drops around -6 LUFS short-term, crest factor 6-8 dB): glue, softclip, then a true-peak limiter (clip, then limit).  Balance the parts first: if the limiter holds the whole drop down, the mix shifts when a part stops (turn the drive up only once the balance holds).'
     end
   end

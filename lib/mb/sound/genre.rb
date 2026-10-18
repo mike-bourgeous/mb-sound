@@ -335,17 +335,17 @@ module MB
             v = material(v) if v.is_a?(Symbol) && !Genre::SCENE_LITERALS.include?(v)
             [k, k == sidechain&.first ? keyed_kit(v) : v]
           }
-          # A key track (`sidechain :pump, clip`) plays its line under every
+          # A trigger track (`sidechain :pump, clip`) plays its line under every
           # scene that doesn't name it (a scene stops what it doesn't name)
-          if (k = key_track) && !values.key?(k) && values[:others] != :keep
+          if (k = trigger_track) && !values.key?(k) && values[:others] != :keep
             out[k] = material(sidechain[2])
           end
           out
         end
 
-        # The key track's name when the sidechain is a key line
+        # The trigger track's name when the sidechain is a trigger line
         # (`sidechain :pump, clip`; see Builder#sidechain), else nil.
-        def key_track
+        def trigger_track
           sidechain && sidechain[2] ? sidechain[0] : nil
         end
 
@@ -433,7 +433,7 @@ module MB
           end
           template = self
           Genre.bus_order(buses).each { |n| MB::Sound.bus(n, to: buses[n].to || :master) { |sig| template.bus_chain(n, sig) } }
-          MB::Sound.sidechain(key_track, shape: sidechain[3]) if key_track
+          MB::Sound.sidechain(trigger_track, shape: sidechain[3]) if trigger_track
           roles.each { |n, r|
             MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.send unless r.send.empty?)) { |c| template.patch(n, c) }
           }
@@ -669,10 +669,10 @@ module MB
 
         # What roles' duck: amounts key from: a track (a role's name) and,
         # with +only:+, the node of that name inside its graph (a drum voice
-        # like :kick, or a silent key row), as `duck(:drums, only: :kick)`
+        # like :kick, or a silent trigger row), as `duck(:drums, only: :kick)`
         # reads it.
         #
-        # With a +line+ (a clip, or a clip name), a key track instead
+        # With a +line+ (a clip, or a clip name), a trigger track instead
         # (SidechainMethods#sidechain): #setup makes track +track+, heard
         # only by the ducks, playing the line under every scene that
         # doesn't name it (`scene :breakdown, pump: :off` rests it; a
@@ -686,14 +686,14 @@ module MB
         def sidechain(track, line = nil, only: nil, shape: nil)
           raise ArgumentError, "sidechain names a track (got #{track.inspect})" unless track.is_a?(Symbol)
           raise ArgumentError, "only: names a node in the track (got #{only.inspect})" unless only.nil? || only.is_a?(Symbol)
-          raise ArgumentError, 'A key line (sidechain :pump, clip) is its own track; only: is for reading a node in a role\'s track' if line && only
-          raise ArgumentError, 'shape: is for a key line (sidechain :pump, clip, shape: :impulse)' if shape && !line
+          raise ArgumentError, 'A trigger line (sidechain :pump, clip) is its own track; only: is for reading a node in a role\'s track' if line && only
+          raise ArgumentError, 'shape: is for a trigger line (sidechain :pump, clip, shape: :impulse)' if shape && !line
           unless shape.nil? || SidechainMethods::SHAPES.include?(shape)
-            raise ArgumentError, "A template key line's shape: is #{SidechainMethods::SHAPES.map(&:inspect).join(' or ')} (got #{shape.inspect})"
+            raise ArgumentError, "A template trigger line's shape: is #{SidechainMethods::SHAPES.map(&:inspect).join(' or ')} (got #{shape.inspect})"
           end
           if line && !line.is_a?(Symbol)
             unless line.is_a?(Sequence::Clip) || line.is_a?(Sequence::Kit)
-              raise ArgumentError, "A key line is a clip or a clip name (got #{line.inspect})"
+              raise ArgumentError, "A trigger line is a clip or a clip name (got #{line.inspect})"
             end
             @clips[track] = line
             line = track
@@ -806,7 +806,7 @@ module MB
           t.scenes.each do |s, values|
             values.each do |k, v|
               next if SCENE_OPTIONS.include?(k) || t.knobs.key?(k)
-              unless t.roles.key?(k) || k == t.key_track
+              unless t.roles.key?(k) || k == t.trigger_track
                 raise ArgumentError, "#{where}: scene #{s.inspect} names #{k.inspect}, which is neither a role nor a knob#{Form.suggest(k, t.roles.keys + t.knobs.keys)}"
               end
               next unless v.is_a?(Symbol) && !SCENE_LITERALS.include?(v)
@@ -819,12 +819,12 @@ module MB
             scene = sec.scene || sec.name
             raise ArgumentError, "#{where}: form section #{sec.name.inspect} has no scene #{scene.inspect}#{Form.suggest(scene, t.scenes.keys)}" unless t.scenes.key?(scene)
           end
-          if (k = t.key_track)
+          if (k = t.trigger_track)
             if t.roles.key?(k) || t.knobs.key?(k) || t.buses.key?(k)
-              raise ArgumentError, "#{where}: key track #{k.inspect} is named like a #{t.roles.key?(k) ? 'role' : t.knobs.key?(k) ? 'knob' : 'bus'} (tracks, buses, and knobs share names)"
+              raise ArgumentError, "#{where}: trigger track #{k.inspect} is named like a #{t.roles.key?(k) ? 'role' : t.knobs.key?(k) ? 'knob' : 'bus'} (tracks, buses, and knobs share names)"
             end
             line = t.sidechain[2]
-            raise ArgumentError, "#{where}: key line #{line.inspect} is no clip or kit#{Form.suggest(line, t.kits.keys + t.clips.keys)}" unless t.kits.key?(line) || t.clips.key?(line)
+            raise ArgumentError, "#{where}: trigger line #{line.inspect} is no clip or kit#{Form.suggest(line, t.kits.keys + t.clips.keys)}" unless t.kits.key?(line) || t.clips.key?(line)
           elsif t.sidechain && !t.roles.key?(t.sidechain[0])
             raise ArgumentError, "#{where}: sidechain #{t.sidechain[0].inspect} must be a role's track#{Form.suggest(t.sidechain[0], t.roles.keys)}"
           end

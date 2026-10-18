@@ -784,13 +784,13 @@ module MB
         kind of bus for reverbs, groups, and returns alike.  They ring out on their own,
         sleeping when quiet.  `duck(:drums, only: :kick)` and `bus(:drums)`
         read a bus or track by name on the exact sample.  Buses mute and
-        solo like tracks (a solo keeps the buses it feeds).  A key track
+        solo like tracks (a solo keeps the buses it feeds).  A trigger track
         (`sidechain :pump, grid(16, 'x...x...').loop`) is a sidechain line
         nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
         like any track, and it never reaches the mix, stems, or CUE
         (`shape: env(0, 0.08)`, or a block: closed hats as the key).  In a
-        kit, `voice :key, silent: true` plays a row only for
-        `duck(:drums, only: :key)`.
+        kit, `voice :trigger, silent: true` plays a row only for
+        `duck(:drums, only: :trigger)`.
       TEXT
       commands :bus, :buses, :feed, :routes, :sidechain, :sidechains
       dsl :duck, :compress
@@ -805,7 +805,7 @@ module MB
         bg :try_drums, grid(16, kick: 'x...x...x...x...').loop
         bg :try, 110.hz.saw.at(-24.db).lp4(900).duck(:try_drums, only: :kick).until(1.bar)
       end
-      example 'duck a pad by a key track nobody hears' do
+      example 'duck a pad by a trigger track nobody hears' do
         sidechain :try_pump, grid(16, 'x...x...x...x.x.').loop
         bg :try, 110.hz.saw.at(-14.db).lp4(900).duck(:try_pump, amount: -12.db).until(1.bar)
       end

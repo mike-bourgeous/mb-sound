@@ -56,9 +56,9 @@ module MB
 
         # A player name's routing: +to+ is the bus its main out feeds (nil
         # for the master), +sends+ a Hash from bus name to the send's level
-        # knob (a GraphNode::Knob), +key+ true for a key track (a sidechain
+        # knob (a GraphNode::Knob), +trigger+ true for a trigger track (a sidechain
         # line: heard by readers only, never mixed; see #route).
-        Route = Struct.new(:to, :sends, :key, keyword_init: true)
+        Route = Struct.new(:to, :sends, :trigger, keyword_init: true)
 
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
@@ -159,19 +159,19 @@ module MB
               v = v.knob if v.is_a?(GraphNode::Knob::Reader)
               knobs.key(v) || v
             }
-            r.key ? { to: nil, send: {}, key: true } : { to: r.to, send: sends }
+            r.trigger ? { to: nil, send: {}, trigger: true } : { to: r.to, send: sends }
           }
         end
 
-        # True if player name +name+ is a key track (see #route's +key:+;
-        # an armed key track's monitor is one too).
-        def key_track?(name)
-          @mutex.synchronize { route_of(name)&.key } || false
+        # True if player name +name+ is a trigger track (see #route's +trigger:+;
+        # an armed trigger track's monitor is one too).
+        def trigger_track?(name)
+          @mutex.synchronize { route_of(name)&.trigger } || false
         end
 
-        # The key track names (see #route).
-        def key_tracks
-          @mutex.synchronize { @routes.select { |_, r| r.key }.keys }
+        # The trigger track names (see #route).
+        def trigger_tracks
+          @mutex.synchronize { @routes.select { |_, r| r.trigger }.keys }
         end
 
         # Who reads each source: source name => the names of the players,
@@ -210,20 +210,20 @@ module MB
         # `bg` definitions set it); see #feed to change a send while
         # playing.  Returns the name.
         #
-        # +key: true+ makes +name+ a key track (SidechainMethods#sidechain;
+        # +trigger: true+ makes +name+ a trigger track (SidechainMethods#sidechain;
         # design/notes/dynamics.md): its sound goes nowhere (not the master,
         # buses, sends, stems, CUE, or meters) and only readers hear it
         # (`duck(:pump)`, `bus(:pump)`, `compress(sidechain: :pump)`), so a
-        # line of impulses or a muted hat pattern can key a ducker.  A key
-        # route takes no to: or send:; +key: false+ makes it an ordinary
+        # line of impulses or a muted hat pattern can key a ducker.  A trigger
+        # route takes no to: or send:; +trigger: false+ makes it an ordinary
         # route again (to the master).
-        def route(name, to: :keep, send: nil, key: nil)
+        def route(name, to: :keep, send: nil, trigger: nil)
           raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.is_a?(Symbol) || name.is_a?(Integer)
           raise ArgumentError, "send: takes a Hash from bus name to level (got #{send.inspect})" unless send.nil? || send.is_a?(Hash)
-          raise ArgumentError, "key: is true or false (got #{key.inspect})" unless [nil, true, false].include?(key)
-          was_key = key_track?(name)
-          if (key || (key.nil? && was_key)) && (!(to == :keep || to.nil?) || send&.any?)
-            raise ArgumentError, "#{name.inspect} is a key track: its sound goes only to readers (duck(#{name.inspect})), so it takes no to: or send:"
+          raise ArgumentError, "trigger: is true or false (got #{trigger.inspect})" unless [nil, true, false].include?(trigger)
+          was_trigger = trigger_track?(name)
+          if (trigger || (trigger.nil? && was_trigger)) && (!(to == :keep || to.nil?) || send&.any?)
+            raise ArgumentError, "#{name.inspect} is a trigger track: its sound goes only to readers (duck(#{name.inspect})), so it takes no to: or send:"
           end
           unless to == :keep
             to = nil if to == :master
@@ -238,12 +238,12 @@ module MB
           dropped = nil
           @mutex.synchronize {
             old = @routes[name]
-            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, key: old&.key || false)
+            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false)
             r.to = to unless to == :keep
             r.sends = knobs if knobs
-            unless key.nil?
-              r.key = key
-              if key
+            unless trigger.nil?
+              r.trigger = trigger
+              if trigger
                 dropped = r.sends.values
                 r.to = nil
                 r.sends = {}
@@ -251,7 +251,7 @@ module MB
             end
             @routes[name] = r
             @bus_order = nil
-            @key_routes = @routes.each_value.any?(&:key)
+            @trigger_routes = @routes.each_value.any?(&:trigger)
           }
           drop_send_knobs(dropped) if dropped && !dropped.empty?
 
@@ -270,7 +270,7 @@ module MB
         # level } } (levels as linear gains, or "knob(:x)" for follows).
         def routes
           @mutex.synchronize { @routes.dup }.transform_values { |r|
-            next { to: nil, key: true } if r.key
+            next { to: nil, trigger: true } if r.trigger
             { to: r.to || :master, send: r.sends.transform_values { |k| send_level_value(k) } }
           }
         end
@@ -287,8 +287,8 @@ module MB
           raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.is_a?(Symbol) || name.is_a?(Integer)
           check_bus_name(bus, 'feed')
           check_send_level(value)
-          if key_track?(name)
-            raise ArgumentError, "#{name.inspect} is a key track (heard only by readers such as duck(#{name.inspect})); it has no sends"
+          if trigger_track?(name)
+            raise ArgumentError, "#{name.inspect} is a trigger track (heard only by readers such as duck(#{name.inspect})); it has no sends"
           end
           raise ArgumentError, 'from: needs over: (a ramp)' if from && !over
           raise ArgumentError, "from: must be a gain of 0 or more (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real? && from >= 0)
@@ -365,7 +365,7 @@ module MB
           @buses = {}
           @bus_defs = {}
           @routes = {}
-          @key_routes = false
+          @trigger_routes = false
           @bus_order = nil
           @bus_readers = Hash.new { |h, k| h[k] = ::Set.new }
           @bus_only = Hash.new { |h, k| h[k] = ::Set.new }
@@ -388,7 +388,7 @@ module MB
         # True if anything needs the routed render (buses, or graphs that
         # read players or buses).
         def routed?
-          !@buses.empty? || !@bus_readers.empty? || @key_routes
+          !@buses.empty? || !@bus_readers.empty? || @trigger_routes
         end
 
         # Raises unless +name+ is a bus.
@@ -677,8 +677,8 @@ module MB
           prepare_stem_shadows(players, to) if parts
           items.each do |_, kind, _, x|
             if kind == 0
-              if parts && route_of(x.name)&.key
-                render_player(x, mix, from, to, per_sample, count) # (a key track: no stem)
+              if parts && route_of(x.name)&.trigger
+                render_player(x, mix, from, to, per_sample, count) # (a trigger track: no stem)
               elsif parts
                 own = Array.new(@channels) { Numo::SFloat.zeros(count) }
                 stem = Array.new(@channels) { Numo::SFloat.zeros(count) }
@@ -722,7 +722,7 @@ module MB
         # stem is the track as heard before the master chain.
         def deliver_player(p, data, ramp, mix, stem, offset, frames, fade: ramp)
           route = route_of(p.name)
-          return deliver_key(p, data, offset, frames, fade) if route&.key
+          return deliver_trigger(p, data, offset, frames, fade) if route&.trigger
           main_bus = route&.to && bus_input(route.to)
           dest = main_bus || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
@@ -761,10 +761,10 @@ module MB
           end
         end
 
-        # A key track's buffer (see #route's +key:+) goes only to its
+        # A trigger track's buffer (see #route's +trigger:+) goes only to its
         # readers' signal (after its fades, before its mute, like any
         # player's): no mix, bus, send, stem, or meter.
-        def deliver_key(p, data, offset, frames, fade)
+        def deliver_trigger(p, data, offset, frames, fade)
           return unless bus_tapped?(p.name)
           tap = bus_signal_buffer(p.name)
           tap.each_with_index do |t, c|

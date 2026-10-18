@@ -336,7 +336,7 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
-  it 'replays key tracks (sidechain lines), their scenes, launches, stops, and undo bit for bit' do
+  it 'replays trigger tracks (sidechain lines), their scenes, launches, stops, and undo bit for bit' do
     lines = {
       0 => [
         'a = grid(16, "x...x...x...x.x.").loop',

@@ -238,10 +238,10 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect { MB::Sound::Genre.build_patch(:no_such_patch_x, clip) }.to raise_error(ArgumentError, /No preset or method/)
     end
 
-    it 'keys the ducks from a key line instead (dnb\'s ghost-kick pump option): a key track under every scene' do
+    it 'keys the ducks from a trigger line instead (dnb\'s ghost-kick pump option): a trigger track under every scene' do
       t = genre[:dnb].with { sidechain :pump, :pump }
       expect(t.sidechain).to eq([:pump, nil, :pump, nil])
-      expect(t.key_track).to eq(:pump)
+      expect(t.trigger_track).to eq(:pump)
       expect(in_sound(t.to_ruby)).to eq(t)
       expect(t.to_ruby).to include('  sidechain :pump, :pump')
       t.scenes.each do |name, values|
@@ -265,17 +265,17 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
                                  transport: MB::Sound::Sequence::Transport.new(bpm: 120))
       MB::Sound::Session.with_context(session: s) do
         t.short.setup
-        expect(s.key_tracks).to eq([:pump])
-        expect(s.arrangement.tracks[:pump].key).to eq(true)
+        expect(s.trigger_tracks).to eq([:pump])
+        expect(s.arrangement.tracks[:pump].trigger).to eq(true)
         expect(s.arrangement.scenes[:drop].values[:pump]).to equal(t.clips[:pump])
       end
     ensure
       s&.close
     end
 
-    it 'checks key lines: names unlike roles, knobs, and buses, and lines that are clips' do
-      expect { genre[:dnb].with { sidechain :bass, :pump } }.to raise_error(ArgumentError, /key track :bass is named like a role/)
-      expect { genre[:dnb].with { sidechain :pump, :nope } }.to raise_error(ArgumentError, /key line :nope is no clip/)
+    it 'checks trigger lines: names unlike roles, knobs, and buses, and lines that are clips' do
+      expect { genre[:dnb].with { sidechain :bass, :pump } }.to raise_error(ArgumentError, /trigger track :bass is named like a role/)
+      expect { genre[:dnb].with { sidechain :pump, :nope } }.to raise_error(ArgumentError, /trigger line :nope is no clip/)
       expect { genre[:dnb].with { sidechain :pump, :pump, shape: :wobble } }.to raise_error(ArgumentError, /shape:/)
       expect { genre[:dnb].with { sidechain :pump, :pump, only: :kick } }.to raise_error(ArgumentError, /only:/)
     end

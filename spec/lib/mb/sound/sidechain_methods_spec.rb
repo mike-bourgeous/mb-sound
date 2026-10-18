@@ -36,12 +36,12 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     (1...data.length).select { |i| data[i - 1] >= level && data[i] < level }
   end
 
-  describe 'key tracks' do
+  describe 'trigger tracks' do
     it 'are heard by readers only: nothing reaches the mix' do
       data = run(48000) { MB::Sound.sidechain(:pump, line, on: :now) }
       expect(data.abs.max).to eq(0)
-      expect(session.key_tracks).to eq([:pump])
-      expect(session.routes[:pump]).to eq({ to: nil, key: true })
+      expect(session.trigger_tracks).to eq([:pump])
+      expect(session.routes[:pump]).to eq({ to: nil, trigger: true })
     end
 
     it 'duck a part on the exact note-on samples, the same at any buffer size' do
@@ -113,25 +113,25 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       MB::Sound::Session.with_context(session: session) do
         session.bus(:verb) { |sig| sig }
         MB::Sound.sidechain(:pump)
-        expect { session.route(:pump, send: { verb: 0.5 }) }.to raise_error(ArgumentError, /key track/)
-        expect { session.route(:pump, to: :verb) }.to raise_error(ArgumentError, /key track/)
-        expect { session.feed(:pump, :verb, 0.5) }.to raise_error(ArgumentError, /key track/)
-        expect { MB::Sound.cue(:pump, line) }.to raise_error(ArgumentError, /key track/)
-        expect { MB::Sound.track(:x, key: true, send: { verb: 0.5 }) { |c| c.gate } }.to raise_error(ArgumentError, /key track/)
+        expect { session.route(:pump, send: { verb: 0.5 }) }.to raise_error(ArgumentError, /trigger track/)
+        expect { session.route(:pump, to: :verb) }.to raise_error(ArgumentError, /trigger track/)
+        expect { session.feed(:pump, :verb, 0.5) }.to raise_error(ArgumentError, /trigger track/)
+        expect { MB::Sound.cue(:pump, line) }.to raise_error(ArgumentError, /trigger track/)
+        expect { MB::Sound.track(:x, trigger: true, send: { verb: 0.5 }) { |c| c.gate } }.to raise_error(ArgumentError, /trigger track/)
         expect { MB::Sound.sidechain(:p2, shape: :impulse) { |c| c.gate } }.to raise_error(ArgumentError, /not both/)
         expect { MB::Sound.sidechain(:p2, shape: :boom) }.to raise_error(ArgumentError, /shape:/)
         expect { MB::Sound.sidechain(:p2, shape: MB::Sound.adsr(0, 0.1)) }.to raise_error(ArgumentError, /shape:/)
       end
     end
 
-    it 'share the track namespace and become ordinary tracks again when redefined without key:' do
+    it 'share the track namespace and become ordinary tracks again when redefined without trigger:' do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.knob(:cut, 0.5)
         expect { MB::Sound.sidechain(:cut) }.to raise_error(ArgumentError, /already a knob/)
         MB::Sound.sidechain(:pump)
-        expect(MB::Sound.tracks[:pump]).to include('(key, stopped)')
+        expect(MB::Sound.tracks[:pump]).to include('(trigger, stopped)')
         MB::Sound.track(:pump) { |c| c.gate * 0.5 }
-        expect(session.key_track?(:pump)).to eq(false)
+        expect(session.trigger_track?(:pump)).to eq(false)
       end
       data = run(800) { MB::Sound.bg(:pump, line, on: :now) }
       expect(data.max).to eq(0.5)
@@ -168,7 +168,7 @@ RSpec.describe(MB::Sound::SidechainMethods) do
         MB::Sound.sidechain(:pump, line)
         session.add(1.constant.duck(:pump), name: :pad)
         session.process_buffer(800)
-        expect(MB::Sound.sidechains[:pump]).to match(/key.*read by pad/)
+        expect(MB::Sound.sidechains[:pump]).to match(/trigger.*read by pad/)
       end
     end
 
@@ -177,15 +177,15 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       b = new_session
       text = MB::Sound::Session.with_context(session: a) {
         MB::Sound.sidechain(:pump, q: 1)
-        MB::Sound.sidechain(:env_key, shape: MB::Sound.env(0, 0.08))
+        MB::Sound.sidechain(:env_trigger, shape: MB::Sound.env(0, 0.08))
         MB::Sound.sidechain(:hats, nudge: -5.ms) { |c| MB::Sound.tr808(c) }
-        MB::Sound.scene(:x, pump: line, env_key: line, hats: MB::Sound.grid(16, closed_hat: 'xxxx').loop)
+        MB::Sound.scene(:x, pump: line, env_trigger: line, hats: MB::Sound.grid(16, closed_hat: 'xxxx').loop)
         MB::Sound::GraphIO.dump(a.arrangement, name: 'keys')
       }
       expect(text).to include("sidechain(:pump, q: 1) { |clip|\n  n = clip.notes\n  n.gate * n.velocity\n}")
-      expect(text).to include('sidechain(:env_key) { |clip|', 'clip.env(0, 0.08)', 'sidechain(:hats, nudge: (-5).ms) { |c|')
+      expect(text).to include('sidechain(:env_trigger) { |clip|', 'clip.env(0, 0.08)', 'sidechain(:hats, nudge: (-5).ms) { |c|')
       MB::Sound::GraphIO.load(text, session: b)
-      expect(b.key_tracks).to eq([:pump, :env_key, :hats])
+      expect(b.trigger_tracks).to eq([:pump, :env_trigger, :hats])
       expect(b.route_definitions).to eq(a.route_definitions)
       again = MB::Sound::GraphIO.dump(b.arrangement, name: 'keys')
       expect(again.sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
@@ -199,30 +199,30 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     let(:machine) {
       MB::Sound.kit {
         tr909 :kick
-        voice :key, silent: true
+        voice :trigger, silent: true
         voice(:ghost, silent: true) { |h| h.body(55, decay: 0.3) }
       }
     }
 
     it 'play for sidechains but never reach the kit mix or separate outputs' do
-      src = machine.grid(16, kick: 'x...', key: '..x.', ghost: 'x...').loop
+      src = machine.grid(16, kick: 'x...', trigger: '..x.', ghost: 'x...').loop
       k = machine.kit(src, seed: 5)
       plain = machine.kit(machine.grid(16, kick: 'x...').loop, seed: 5)
       a = SpecBuffers.join(8.times.map { k.sample(800).dup })
       b = SpecBuffers.join(8.times.map { plain.sample(800).dup })
       expect(a).to eq(b)
-      expect(k.silent).to eq([:key, :ghost])
-      expect(machine.silent_names).to eq([:key, :ghost])
+      expect(k.silent).to eq([:trigger, :ghost])
+      expect(machine.silent_names).to eq([:trigger, :ghost])
       expect(machine.kit(src, outputs: :separate).names).to eq([:kick])
     end
 
-    it 'key duck(:drums, only: :key) with a 30 ms pulse per hit on the exact sample at any buffer size' do
-      src = machine.grid(16, kick: 'x...', key: '..x.').loop
+    it 'key duck(:drums, only: :trigger) with a 30 ms pulse per hit on the exact sample at any buffer size' do
+      src = machine.grid(16, kick: 'x...', trigger: '..x.').loop
       results = [[800], [7, 128, 333], [1]].map { |sizes|
         s = new_session
         d = run(48000, sizes, s: s) { |ss|
           ss.add(machine.kit(src, seed: 5), name: :drums, on: :now)
-          ss.add(MB::Sound.bus(:drums, only: :key) * 1000, name: :probe, on: :now)
+          ss.add(MB::Sound.bus(:drums, only: :trigger) * 1000, name: :probe, on: :now)
         }
         s.close
         d
@@ -230,11 +230,11 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       results.each { |d| expect(d).to eq(results[0]) }
     end
 
-    it 'without a block is a linear key pulse at the hit velocity' do
-      src = machine.grid(16, key: '..X.').loop
+    it 'without a block is a linear trigger pulse at the hit velocity' do
+      src = machine.grid(16, trigger: '..X.').loop
       probe = run(24000) { |s|
         s.add(machine.kit(src, seed: 5), name: :drums, on: :now)
-        s.add(MB::Sound.bus(:drums, only: :key), name: :probe, on: :now)
+        s.add(MB::Sound.bus(:drums, only: :trigger), name: :probe, on: :now)
       }
       expect(probe[0...12000].abs.max).to eq(0)
       expect(probe[12000]).to be_within(1e-6).of(1)

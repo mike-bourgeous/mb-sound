@@ -36,7 +36,7 @@ module MB
         # pulse at the hit's velocity, falling linearly to 0, long enough
         # that a duck with a 1 ms attack follows it (a one-sample impulse
         # barely moves it; see Builder#voice).
-        KEY_PULSE = 0.03
+        TRIGGER_PULSE = 0.03
 
         # Knobs every voice takes besides its own (see #kit).
         COMMON_KNOBS = [:accent, :velocity_curve, :flam].freeze
@@ -151,7 +151,7 @@ module MB
         end
 
         # The names of the silent voices (see Builder#voice): played, read
-        # by sidechains (`duck(:drums, only: :key)`), never mixed.
+        # by sidechains (`duck(:drums, only: :trigger)`), never mixed.
         def silent_names
           @voices.each_value.select(&:silent).map(&:name)
         end
@@ -405,19 +405,19 @@ module MB
         # Given a Sample instead of a block, the voice plays it (knobs
         # +tune+ in semitones and +decay+, nil for the sample's own).
         #
-        # +silent: true+ makes a key voice: it plays (a sidechain reads it,
-        # `duck(:drums, only: :key)`) but is never mixed into the kit, so a
-        # line of closed hats or a dedicated key row can pump the bass
-        # without being heard.  Without a block it plays a key pulse per
-        # hit (Machine::KEY_PULSE: the hit's velocity falling linearly to 0
+        # +silent: true+ makes a trigger voice: it plays (a sidechain reads it,
+        # `duck(:drums, only: :trigger)`) but is never mixed into the kit, so a
+        # line of closed hats or a dedicated trigger row can pump the bass
+        # without being heard.  Without a block it plays a trigger pulse per
+        # hit (Machine::TRIGGER_PULSE: the hit's velocity falling linearly to 0
         # over 30 ms, so a duck with a 1 ms attack follows it); it has no
         # GM note unless given +gm:+ (grid rows and kit grids name it).
         #
-        #     voice :key, silent: true
+        #     voice :trigger, silent: true
         #     voice(:ghost, silent: true) { |h| h.body(55, decay: 0.3) }
         def voice(name, sample = nil, gm: nil, as: [], silent: false, **defaults, &block)
           if silent && block.nil? && sample.nil?
-            block = proc { |h| h.env(Machine::KEY_PULSE, attack: 0, curve: 0) }
+            block = proc { |h| h.env(Machine::TRIGGER_PULSE, attack: 0, curve: 0) }
           end
           if sample
             raise ArgumentError, "Give the #{name} a sample or a block, not both" if block
