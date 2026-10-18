@@ -896,7 +896,9 @@ module MB
         rng = Internal.root_rng.dup
         seed = Internal.root_seed
         capture = targeting ? Mastering::Targeting::Capture.new : nil
-        first = { override: override, capture: capture, defer_report: true }
+        # Both passes show render progress: label them (ux-fix-2; the line
+        # seemed to restart for no reason)
+        first = { override: override, capture: capture, defer_report: true, pass: (override && targeting ? 'pass 1/2, measuring' : nil) }
         seconds = render_session(filename, *sounds, mastering: first, **kwargs, &block)
         return seconds if first[:interrupted]
 
@@ -916,7 +918,7 @@ module MB
         Mastering::Targeting.last = result
 
         Internal.restore_rng(rng.dup, seed)
-        second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true }
+        second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true, pass: 'pass 2/2, mastered' }
         # The second pass replays the first exactly: what the song's blocks
         # print (scheduled-command logs) was printed by the first already
         seconds = Internal.without_stdout {
@@ -1042,7 +1044,9 @@ module MB
         sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
-        progress = RenderProgress.new(session, label: filename.is_a?(String) ? File.basename(filename) : 'output')
+        label = filename.is_a?(String) ? File.basename(filename) : 'output'
+        label = "#{label} (#{mastering[:pass]})" if mastering[:pass]
+        progress = RenderProgress.new(session, label: label)
         interrupted = false
 
         # A render window (see RenderWindow): play up to +from+ without
