@@ -33,11 +33,14 @@ RSpec.describe 'Buffer size invariance' do
   end
 
   # Expects the same samples at every size in +sizes+ as at 800.
-  def expect_invariant(make, seconds: 2.1, sizes: SIZES, tolerance: 0)
+  # +one_sample_seconds+ shortens the one-sample-buffer render ([1], about
+  # 70 us per buffer for a small Synth: 3 s took 12 s) to its first
+  # seconds, compared against the start of the reference.
+  def expect_invariant(make, seconds: 2.1, sizes: SIZES, tolerance: 0, one_sample_seconds: nil)
     ref, node = render_sizes(make, [800], seconds)
     expect(ref.abs.max).to be > 0.01
     sizes.each do |s|
-      out, _ = render_sizes(make, s, seconds)
+      out, _ = render_sizes(make, s, s == [1] && one_sample_seconds ? [one_sample_seconds, seconds].min : seconds)
       r = ref[0...out.length]
       if tolerance == 0
         diff = (out - r).ne(0).where.to_a
@@ -205,9 +208,12 @@ RSpec.describe 'Buffer size invariance' do
         n = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.notes
         (n.hz.saw * n.amp_env(0.01, 0.1, 0.5, 0.3)).filter(:lowpass, cutoff: 200 + 2000 * n.filter_env(0.01, 0.05, 0.2, 0.02), quality: 8)
       }],
+      # (no one-sample buffers here: the next case is this one with lowpass
+      # filters added in the lanes, and runs them; each [1] run of these
+      # costs about 5 s)
       'a Synth into a resonant lowpass' => [39_200, -> {
         lp.(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4).n8.synth(voices: 4) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05) })
-      }],
+      }, false],
       'a Synth with resonant filters in its lanes' => [44_800, -> {
         lp.(MB::Sound.seq(MB::Sound::C3, MB::Sound::E4, MB::Sound::G4).n8.synth(voices: 4) { |v|
           (v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05)).filter(:lowpass, cutoff: 300, quality: 20)
@@ -216,11 +222,11 @@ RSpec.describe 'Buffer size invariance' do
       'a Synth with a 1 s tail' => [75_200, -> {
         lp.(MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8, voices: 2, tail: 1) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05) })
       }],
-    }.each do |what, (length, make)|
+    }.each do |what, (length, make, one_sample)|
       it "ends #{what} on the same sample at any buffer size" do
         ref = until_end(make, [800])
         expect(ref.length).to eq(length)
-        [[367, 368], [64], [1031], [1]].each do |s|
+        [[367, 368], [64], [1031], *([[1]] unless one_sample == false)].each do |s|
           out = until_end(make, s)
           expect(out.length).to eq(length), "at buffer sizes #{s}"
           # (planned :fast sines differ within -100 dB at other block sizes)
@@ -235,7 +241,8 @@ RSpec.describe 'Buffer size invariance' do
 
     it 'gives the same chop samples at any buffer size (one truncating voice, declick tails, reverse, pitch)' do
       brk = rec.slices(16)
-      expect_invariant(-> { brk.chop(0, 3, [5, 2], MB::Sound::Tie, brk[7].rev, 1, MB::Sound::Rest, [2, -3]).loop.sampler(brk) }, sizes: [[367, 368], [64], [1031], [1]])
+      expect_invariant(-> { brk.chop(0, 3, [5, 2], MB::Sound::Tie, brk[7].rev, 1, MB::Sound::Rest, [2, -3]).loop.sampler(brk) }, sizes: [[367, 368], [64], [1031], [1]],
+                       one_sample_seconds: 1.1) # (one-sample buffers through the 1 s pattern into its second pass)
     end
 
     it 'gives the same samples for looping polyphonic voices with bends' do
@@ -528,7 +535,10 @@ RSpec.describe 'Buffer size invariance' do
           MB::Sound.seed(3)
           notes.synth(voices: 3, retrigger: retrigger, exact_lanes: true) { |v| v.hz.sine.free * v.amp_env(0.001, 0.02, 0, 0.012) }
         }
-        expect_invariant(make, seconds: 3, sizes: [[367, 368], [1], [1031], [64]])
+        # (one-sample buffers over the first 1.1 s: two passes of the
+        # 0.53 s pattern, each humanized differently; the other sizes run
+        # all 3 s, about six passes)
+        expect_invariant(make, seconds: 3, sizes: [[367, 368], [1], [1031], [64]], one_sample_seconds: 1.1)
       end
     end
 
