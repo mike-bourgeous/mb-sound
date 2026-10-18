@@ -34,7 +34,7 @@ module MB
       # Keys of `keys` work in the mode too.  `jump 'a'` gives the kind a
       # NAV jump letter (focus it and enter its mode, as Enter would; shown
       # beside its number in NAV), which Keys.check_jumps keeps clear of
-      # NAV's and the Ctrl-W window keys.
+      # NAV's keys and each other.
       #
       #     class Matrix < Pane
       #       jump 'a'

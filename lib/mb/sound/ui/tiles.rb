@@ -824,7 +824,7 @@ module MB
         end
 
         # Jumps to pane +name+ (a pane name or kind; NAV's jump letters: i
-        # the REPL, K the keyboard, t tracks, e meters, and any a pane kind
+        # the REPL, k the keyboard, t tracks, e meters, and any a pane kind
         # declares): focuses it (a tab of it comes forward) and goes in as
         # #enter does.  A pane not on screen is named in a flash with how to
         # show it (the keyboard is put in, as KEYS does).

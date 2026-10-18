@@ -30,8 +30,8 @@ module MB
         #   before, gone into (twice: back); Ctrl-] stays in NAV; Esc goes
         #   back; an unbound key opens the ? overlay over :once (a key
         #   there closes it and acts once; Esc goes back).  An action that
-        #   changes the mode itself (Enter, a jump, Esc's NAV binding is
-        #   not reached, :, /) keeps the mode it chose.
+        #   changes the mode itself (Enter, a jump, :, /, ?) keeps the mode
+        #   it chose.
         # - :line (the palette and search prompts): keys edit a one-line
         #   input (LineInput); Enter submits, Esc cancels.
         # - :grab (a pane that takes the keyboard, like the virtual piano):
