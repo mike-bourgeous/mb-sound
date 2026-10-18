@@ -131,7 +131,9 @@ RSpec.describe(MB::Sound::Scale) do
 
   it 'is available as MB::Sound.scale' do
     expect(MB::Sound.scale(:minor, :a)[2].name).to eq('C5')
-    expect(MB::Sound.scale).to equal(MB::Sound::Scale::CHROMATIC)
+    # Bare scale is the session key's scale (C major by default; midi-consol-2)
+    expect(MB::Sound.scale).to eq(MB::Sound::Scale[:major, :c])
+    expect(MB::Sound.scale(nil, :c)).to equal(MB::Sound::Scale::CHROMATIC).or eq(MB::Sound::Scale[:chromatic, :c])
   end
 
   it 'has a readable to_s' do
