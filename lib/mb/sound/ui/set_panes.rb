@@ -380,8 +380,8 @@ module MB
         # gesture: the knob moves live with each key (heard as you hold),
         # and when the keys stop the gesture becomes one console line from
         # the Session (`turn :"bass/dub/space", 0.42` for one press, else
-        # `turn :"bass/dub/space", steps: [[0, 0.32], [4800, 0.34], ...]`),
-        # journaled at its first step.
+        # its fitted keyframes, `turn :"bass/dub/space", 0 => 0.32, 1.n4 =>
+        # 0.48`), journaled at its first step with the raw steps takes replay.
         #
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
