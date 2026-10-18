@@ -153,7 +153,7 @@ RSpec.describe('UI round 4 feed') do
 
     before do
       MB::Sound::Session.with_context(session: s) do
-        arr.track(:bass) { |c| c.tone.ramp.at(0.1) * c.amp_env }
+        arr.track(:bass) { |c| c.tone.saw.at(0.1) * c.amp_env }
         arr.track(:drums) { |k| MB::Sound.tr808(k).at(0.1) }
         arr.scene(:one, bass: riff_a, drums: beat)
         arr.scene(:two, bass: riff_b)

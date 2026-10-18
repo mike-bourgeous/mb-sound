@@ -18,7 +18,7 @@ RSpec.describe('script runner scripts', :smoke) do
     FileUtils.mkdir_p(out_dir)
     # (-12 dB: effect scripts play at 0 dB, and dry + wet (flanger, ping
     # pong) went over full scale with 0.5, which renders warn about)
-    MB::Sound.write(infile, [220.hz.ramp.at(0.25).sample(4800), 330.hz.ramp.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
+    MB::Sound.write(infile, [220.hz.saw.at(0.25).sample(4800), 330.hz.saw.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
     # Longest first (the full drums_808 render, the granular song)
     keys = SmokeRuns.selected_keys
     first = keys.select { |k| k.include?('full') || k.include?('granular') }

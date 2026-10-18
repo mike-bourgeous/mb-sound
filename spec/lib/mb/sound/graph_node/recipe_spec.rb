@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
   describe 'recording' do
     it 'records only the outermost call' do
-      f = 220.hz.ramp.filter(:lowpass, cutoff: 800, quality: 2)
+      f = 220.hz.saw.filter(:lowpass, cutoff: 800, quality: 2)
       call = recipe.call_of(f)
       expect(call.name).to eq(:filter)
       expect(call.kwargs).to eq(cutoff: 800, quality: 2)
@@ -50,10 +50,10 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'appends calls returning their receiver to the configuration list' do
-      t = 220.hz.ramp
+      t = 220.hz.saw
       t2 = t.at(0.5).named('x')
       expect(t2).to equal(t)
-      expect(recipe.call_of(t).name).to eq(:ramp)
+      expect(recipe.call_of(t).name).to eq(:saw)
       expect(recipe.config_of(t).map(&:name)).to eq([:at, :named])
     end
 
@@ -71,7 +71,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       invs = recipe.call_of(s).invocations
       expect(invs.length).to eq(3)
       expect(invs.map { |i| i.args[1] }).to eq([0, 1, 2])
-      expect(invs.map { |i| i.locals[:base] }.map { |b| recipe.call_of(b, nil)&.name }).to all(eq(:ramp))
+      expect(invs.map { |i| i.locals[:base] }.map { |b| recipe.call_of(b, nil)&.name }).to all(eq(:saw))
       expect(invs[0].result).to be_a(MB::Sound::GraphNode::Multiplier)
     end
 
@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         build = -> {
           MB::Sound.seed(5)
           MB::Sound.synth(midi_path, voices: 2, spares: 1) { |v, i|
-            osc = v.hz.ramp.filter(:lowpass, cutoff: 500 + 100 * i)
+            osc = v.hz.saw.filter(:lowpass, cutoff: 500 + 100 * i)
             env = v.amp_env(0.01, 0.1, 0.5, 0.2)
             wet = osc.feedback { |fb, input| inner = fb.delay(2.ms) * 0.3; input + inner }
             wet * env
@@ -125,7 +125,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         expect(loop_names.(framed).flatten).to include(:inner)
 
         code = framed.to_ruby
-        expect(code).to include('osc = v.hz.ramp', 'wet = osc.feedback { |fb, input|', 'inner = fb.delay(2.ms) * 0.3')
+        expect(code).to include('osc = v.hz.saw', 'wet = osc.feedback { |fb, input|', 'inner = fb.delay(2.ms) * 0.3')
         expect(code).to eq(traced.to_ruby.gsub('input = v.hz', 'osc = v.hz').gsub('input.feedback', 'osc.feedback'))
       end
 
@@ -142,16 +142,16 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
     it 'keeps the arity and parameters of wrapped build blocks' do
       seen = nil
-      220.hz.ramp.feedback { |fb| seen = fb; fb.delay(1.ms) * 0.5 }
+      220.hz.saw.feedback { |fb| seen = fb; fb.delay(1.ms) * 0.5 }
       expect(seen).to be_a(MB::Sound::GraphNode)
       inv = nil
-      220.hz.ramp.feedback { |fb, input| inv = [fb, input]; input + fb.delay(1.ms) * 0.5 }
+      220.hz.saw.feedback { |fb, input| inv = [fb, input]; input + fb.delay(1.ms) * 0.5 }
       expect(inv.compact.length).to eq(2)
     end
 
     it 'leaves runtime blocks unwrapped' do
       blk = proc { |buf| buf * 0.5 }
-      node = 220.hz.ramp.proc(&blk)
+      node = 220.hz.saw.proc(&blk)
       call = recipe.call_of(node)
       expect(call.block_kind).to eq(:runtime)
       expect(call.block).to equal(blk)
@@ -159,10 +159,10 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'records .new from user code only' do
-      m = MB::Sound::GraphNode::Mixer.new([220.hz.ramp, 330.hz.ramp])
+      m = MB::Sound::GraphNode::Mixer.new([220.hz.saw, 330.hz.saw])
       expect(recipe.call_of(m).name).to eq(:new)
       # x + y makes a Mixer inside the library
-      sum = 220.hz.ramp + 330.hz.ramp
+      sum = 220.hz.saw + 330.hz.saw
       expect(recipe.call_of(sum).name).to eq(:+)
     end
 
@@ -173,7 +173,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'notes the channels of recorded bundles as element access' do
-      b = MB::Sound.stereo(220.hz.ramp, 330.hz.ramp).reverb(:room)
+      b = MB::Sound.stereo(220.hz.saw, 330.hz.saw).reverb(:room)
       l, r = b
       expect([l, r].map { |x| recipe.call_of(x).name }).to eq([:[], :[]])
       expect([l, r].map { |x| recipe.call_of(x).args }).to eq([[0], [1]])
@@ -181,7 +181,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
     it 'records nothing while turned off' do
       recipe.enabled = false
-      x = 220.hz.ramp.softclip
+      x = 220.hz.saw.softclip
       expect(recipe.record_of(x)).to be_nil
     ensure
       recipe.enabled = true
@@ -241,11 +241,11 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
   describe 'printing' do
     it 'prints chains as written, with units' do
-      g = 220.hz.ramp.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db
-      expect(g.to_ruby).to eq('220.hz.ramp.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db')
-      expect(MB::Sound::A3.saw.delay(1.n16.dotted).to_ruby).to eq('A3.ramp.delay(1.n16.dotted)')
-      expect(110.hz.ramp.delay(3.n16).delay(1.n8.triplet).delay(2.bars).to_ruby).to eq('110.hz.ramp.delay(3.n16).delay(1.n8.triplet).delay(2.bars)')
-      expect(220.hz.transpose(1.oct).ramp.delay(96.samples).to_ruby).to eq('220.hz.transpose(1.oct).ramp.delay(96.samples)')
+      g = 220.hz.saw.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db
+      expect(g.to_ruby).to eq('220.hz.saw.filter(:lowpass, cutoff: 800, quality: 2).delay(250.ms).softclip * -6.db')
+      expect(MB::Sound::A3.saw.delay(1.n16.dotted).to_ruby).to eq('A3.saw.delay(1.n16.dotted)')
+      expect(110.hz.saw.delay(3.n16).delay(1.n8.triplet).delay(2.bars).to_ruby).to eq('110.hz.saw.delay(3.n16).delay(1.n8.triplet).delay(2.bars)')
+      expect(220.hz.transpose(1.oct).saw.delay(96.samples).to_ruby).to eq('220.hz.transpose(1.oct).saw.delay(96.samples)')
     end
 
     it 'prints notes of octave -1 as Note.new(n), marks included (Fs-1 would be Fs minus 1)' do
@@ -264,21 +264,21 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'gives shared nodes variables' do
-      sig = 110.hz.ramp.softclip
+      sig = 110.hz.saw.softclip
       g = sig + sig.delay(100.ms) * 0.5
-      expect(g.to_ruby).to eq("fx = 110.hz.ramp.softclip\nfx + fx.delay(100.ms) * 0.5")
+      expect(g.to_ruby).to eq("fx = 110.hz.saw.softclip\nfx + fx.delay(100.ms) * 0.5")
     end
 
     it 'names variables after .named names, else roles, with numeric suffixes' do
-      a = 110.hz.ramp.named('Bass Osc')
-      b = 220.hz.ramp
+      a = 110.hz.saw.named('Bass Osc')
+      b = 220.hz.saw
       l = 0.5.hz.lfo
       g = a * l + b * l + a * b + b
-      expect(g.to_ruby).to eq("bass_osc = 110.hz.ramp.named(\"Bass Osc\")\nosc = 220.hz.ramp\nlfo = 0.5.hz.lfo\nbass_osc * lfo + osc * lfo + bass_osc * osc + osc")
+      expect(g.to_ruby).to eq("bass_osc = 110.hz.saw.named(\"Bass Osc\")\nosc = 220.hz.saw\nlfo = 0.5.hz.lfo\nbass_osc * lfo + osc * lfo + bass_osc * osc + osc")
 
       e = MB::Sound.adsr(0.01, 0.1, 0.5, 0.2)
-      s1 = 110.hz.ramp.softclip
-      s2 = 220.hz.ramp.softclip
+      s1 = 110.hz.saw.softclip
+      s2 = 220.hz.saw.softclip
       g = (s1 * e + s2 * e) * s1 * s2
       expect(g.to_ruby.lines.map { |x| x.split(' = ').first }.first(3)).to eq(%w[env fx fx2])
     end
@@ -303,8 +303,8 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'prints feedback blocks with their parameter names' do
-      g = 220.hz.ramp.feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }
-      expect(g.to_ruby).to eq("220.hz.ramp.feedback { |fb, input|\n  input + fb.delay(5.ms) * 0.8\n}")
+      g = 220.hz.saw.feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }
+      expect(g.to_ruby).to eq("220.hz.saw.feedback { |fb, input|\n  input + fb.delay(5.ms) * 0.8\n}")
     end
 
     it 'prints runtime blocks as their source' do
@@ -333,8 +333,8 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
       recipe.enabled = true
       code = MB::Sound::GraphNode::Recipe::RubyWriter.new(notes.hz.saw * notes.amp_env).to_s
       expect(code).to start_with("# inputs: midi\n")
-      expect(code).to end_with('midi.hz.ramp * midi.amp_env')
-      expect((notes.hz.saw * notes.gate).to_ruby(inputs: { keys: notes })).to eq("# inputs: keys\nkeys.hz.ramp * keys.gate")
+      expect(code).to end_with('midi.hz.saw * midi.amp_env')
+      expect((notes.hz.saw * notes.gate).to_ruby(inputs: { keys: notes })).to eq("# inputs: keys\nkeys.hz.saw * keys.gate")
 
       # Notes made by user code print as their constructor
       n2 = MB::Sound::Notes.new(midi_path)
@@ -359,8 +359,8 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'prints with the console ruby command' do
-      expect { MB::Sound.ruby(220.hz.ramp.softclip) }.to output("220.hz.ramp.softclip\n").to_stdout
-      expect { MB::Sound.ruby([220.hz.ramp, 330.hz.sine]) }.to output("[220.hz.ramp, 330.hz.sine]\n").to_stdout
+      expect { MB::Sound.ruby(220.hz.saw.softclip) }.to output("220.hz.saw.softclip\n").to_stdout
+      expect { MB::Sound.ruby([220.hz.saw, 330.hz.sine]) }.to output("[220.hz.saw, 330.hz.sine]\n").to_stdout
     end
   end
 
@@ -369,7 +369,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     it 'rebuilds a shared filter and delay chain' do
       round_trip {
         lfo = 0.3.hz.lfo.at(200..2000)
-        sig = 110.hz.ramp.filter(:lowpass, cutoff: lfo, quality: 4).softclip
+        sig = 110.hz.saw.filter(:lowpass, cutoff: lfo, quality: 4).softclip
         (sig + sig.delay(250.ms) * 0.5).named('out')
       }
     end
@@ -393,12 +393,12 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
     end
 
     it 'rebuilds a stereo bundle through per-channel calls' do
-      code = round_trip { MB::Sound.stereo(220.hz.ramp, 330.hz.square).filter(:lowpass, cutoff: 1200, quality: 2).softclip }
-      expect(code).to eq('stereo(220.hz.ramp, 330.hz.square).filter(:lowpass, cutoff: 1200, quality: 2).softclip')
+      code = round_trip { MB::Sound.stereo(220.hz.saw, 330.hz.square).filter(:lowpass, cutoff: 1200, quality: 2).softclip }
+      expect(code).to eq('stereo(220.hz.saw, 330.hz.square).filter(:lowpass, cutoff: 1200, quality: 2).softclip')
     end
 
     it 'rebuilds per_channel and per_voice values' do
-      round_trip { 110.hz.ramp.stereo.filter(:lowpass, cutoff: MB::Sound.per_channel(500..900)).delay(MB::Sound.per_channel(10.ms, 13.ms)) }
+      round_trip { 110.hz.saw.stereo.filter(:lowpass, cutoff: MB::Sound.per_channel(500..900)).delay(MB::Sound.per_channel(10.ms, 13.ms)) }
       round_trip(inputs: -> { { midi: MB::Sound::Notes.new(midi_path) } }) { |i|
         MB::Sound.synth(i[:midi], voices: 3) { |v| (v.hz.transpose(MB::Sound.per_voice(-0.1..0.1)).saw * v.amp_env).pan(MB::Sound.per_voice(-0.5, 0.5)) }
       }
@@ -425,9 +425,9 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
     it 'rebuilds unisons, swarms, chorus hiss, and 808 noise from one printed seed each' do
       cases = {
-        unison: proc { 220.hz.unison(5, detune: 0.2) { |p, _i| p.ramp.noise(0.1) } },
-        swarm: proc { 220.hz.swarm(4, chord: [0, 4, 7], glide: nil, drift: 0.1) { |p, _i| p.ramp } },
-        chorus: proc { 110.hz.ramp.at(0.5).chorus(:juno1, hiss: -40.db) },
+        unison: proc { 220.hz.unison(5, detune: 0.2) { |p, _i| p.saw.noise(0.1) } },
+        swarm: proc { 220.hz.swarm(4, chord: [0, 4, 7], glide: nil, drift: 0.1) { |p, _i| p.saw } },
+        chorus: proc { 110.hz.saw.at(0.5).chorus(:juno1, hiss: -40.db) },
         tr808: proc { MB::Sound.tr808(MB::Sound.grid(16, snare: 'x.x.', maracas: 'xxxx', clap: '..x.')) },
       }
       cases.each do |name, build|
@@ -462,7 +462,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
 
     it 'rebuilds delay insert pipelines' do
       code = round_trip {
-        220.hz.ramp.delay(30.ms, feedback: 0.5) { |d|
+        220.hz.saw.delay(30.ms, feedback: 0.5) { |d|
           d.fb { |fb| fb.filter(3000.hz.lowpass).softclip }
           d.wet { |wet| wet.filter(5000.hz.lowpass) }
         }

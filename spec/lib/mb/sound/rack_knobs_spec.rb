@@ -306,7 +306,7 @@ RSpec.describe('rack knobs') do
         cut = s.knob(:cut, 800, range: 100..8000, curve: :exp)
         sig.filter(:lowpass, cutoff: cut.mod(0.5.hz.lfo, depth: 0.1)) * s.knob(:space, 0.3) + sig * s.knob(:space)
       }
-      g = 220.hz.ramp.then(&r)
+      g = 220.hz.saw.then(&r)
       text = g.to_ruby
       expect(text).to include('knob(:cut, 800, range: 100..8000, curve: :exp).mod(0.5.hz.lfo, depth: 0.1)')
       expect(text).to include('knob(:space, 0.3)')

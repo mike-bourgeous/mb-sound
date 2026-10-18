@@ -16,10 +16,10 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
   describe 'oscillator methods' do
     it 'make a new full-scale Tone each time' do
       p = 220.hz
-      a = p.ramp
+      a = p.saw
       b = p.triangle.at(0.5)
       expect(a).to be_a(MB::Sound::Tone)
-      expect(a).not_to equal(p.ramp)
+      expect(a).not_to equal(p.saw)
       expect(a.wave_type).to eq(:ramp)
       expect(b.wave_type).to eq(:triangle)
       expect(p.tone.wave_type).to eq(:sine)
@@ -71,9 +71,9 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
     it 'gives delays and envelopes the same samples as a plain seconds length' do
       take = ->(n) { SpecBuffers.join(3.times.map { n.sample(500)&.dup }.compact) } # the envelope ends
       [
-        ->(l) { 100.hz.ramp.delay(l, smoothing: false) },
+        ->(l) { 100.hz.saw.delay(l, smoothing: false) },
         ->(l) { MB::Sound.adsr(0, 0, 1, 0, hold: l) * 1 },
-        ->(l) { (100.hz.ramp * 0.1).feedback { |fb, i| i + fb.delay(l) * 0.5 } },
+        ->(l) { (100.hz.saw * 0.1).feedback { |fb, i| i + fb.delay(l) * 0.5 } },
       ].each do |make|
         expect(take.(make.(220.hz.period))).to eq(take.(make.(220.hz.period.to_f.seconds)))
       end

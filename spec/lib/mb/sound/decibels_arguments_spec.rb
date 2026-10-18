@@ -53,12 +53,12 @@ RSpec.describe('dB-valued arguments', :aggregate_failures) do
 
   describe 'filter gains' do
     it 'reads peq and biquad gains as Decibels exactly, bare numbers as linear' do
-      exact = 220.hz.ramp.peq(1000.hz => -7.db).sample(800)
-      linear = 220.hz.ramp.peq(1000.hz => (-7).db.to_f).sample(800)
+      exact = 220.hz.saw.peq(1000.hz => -7.db).sample(800)
+      linear = 220.hz.saw.peq(1000.hz => (-7).db.to_f).sample(800)
       expect((exact - linear).abs.max).to be < 1e-6 # (to_db of the gain is within an ulp of -7)
-      expect { 220.hz.ramp.peq(1000.hz => -7) }.to raise_error(ArgumentError, /gain: -7/)
-      expect { 220.hz.ramp.filter(:peak, cutoff: 900, gain: -6) }.to raise_error(ArgumentError, /gain: -6/)
-      expect { 220.hz.ramp.filter(:peak, cutoff: 900, gain: -6, structure: :biquad) }.to raise_error(ArgumentError, /gain: -6/)
+      expect { 220.hz.saw.peq(1000.hz => -7) }.to raise_error(ArgumentError, /gain: -7/)
+      expect { 220.hz.saw.filter(:peak, cutoff: 900, gain: -6) }.to raise_error(ArgumentError, /gain: -6/)
+      expect { 220.hz.saw.filter(:peak, cutoff: 900, gain: -6, structure: :biquad) }.to raise_error(ArgumentError, /gain: -6/)
     end
 
     it 'keeps db_gain: (named in dB) as dB, and takes Decibels there exactly' do
@@ -127,7 +127,7 @@ RSpec.describe('dB-valued arguments', :aggregate_failures) do
         mix + tr808(grid(16, kick: 'X.x.').loop, accent: 8, snare: { accent: 3 }, more_cowbell: 4)
       DOC
       g = nil
-      expect { g = MB::Sound::GraphIO.load(old, inputs: { input: 220.hz.ramp }) }.to output(/\A[^\n]*format 2 document: bare dB values[^\n]*\n\z/).to_stderr
+      expect { g = MB::Sound::GraphIO.load(old, inputs: { input: 220.hz.saw }) }.to output(/\A[^\n]*format 2 document: bare dB values[^\n]*\n\z/).to_stderr
       code = g.to_ruby
       expect(code).to include('duck: -12.db', 'hiss: -60.db', '[500, 0.db, 50], [1500, -6.db, 80]', 'accent: 8.db', 'snare: { accent: 3.db }', 'more_cowbell: 4.db')
     end

@@ -190,7 +190,7 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
       r = plan_compare { |c|
         c.before_block(5) { MB::Sound.tuning(b4: 480) }
         c.before_block(9) { MB::Sound.tuning.reset }
-        MB::Sound.tuning.freq(src.new(seed: 1, scale: 12, offset: 60) * 1).tone.sine * MB::Sound::C4.freq.tone.ramp
+        MB::Sound.tuning.freq(src.new(seed: 1, scale: 12, offset: 60) * 1).tone.sine * MB::Sound::C4.freq.tone.saw
       }
       expect(plan_op_names(r)).to include(:NoteFreq)
     ensure
@@ -288,7 +288,7 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
     end
 
     it 'matches a one-sided clip and a softclip of a planned tone' do
-      plan_compare { (220.hz.ramp * 1.5).clip(nil, 0.5) + (330.hz.sine.at(2) * src.new(seed: 3)).softclip }
+      plan_compare { (220.hz.saw * 1.5).clip(nil, 0.5) + (330.hz.sine.at(2) * src.new(seed: 3)).softclip }
     end
 
     it 'leaves a shaper of complex input unfused' do
@@ -329,7 +329,7 @@ RSpec.describe(MB::Sound::Plan::Fold) do
 
   it 'keeps running the folded factor\'s ops, so their nodes\' state advances as unfused (checked per block)' do
     r = plan_compare(check: :raise) {
-      tone = 123.hz.ramp.pm(src.new(seed: 1) * 0.5)
+      tone = 123.hz.saw.pm(src.new(seed: 1) * 0.5)
       tone * 0 + 77.hz.sine * 0.5
     }
     expect(folds(r).length).to eq(1)

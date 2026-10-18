@@ -234,10 +234,10 @@ RSpec.describe MB::Sound::Tone do
       end
 
       it 'matches the analytic signal for a complex ramp wave (approximately)' do
-        oscil = 240.hz.acomplex_ramp.at(1)
+        oscil = 240.hz.acomplex_saw.at(1)
         result = oscil.send(method, 1600)
 
-        base = MB::Sound.analytic_signal(120.hz.aramp.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
+        base = MB::Sound.analytic_signal(120.hz.asaw.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
         target = Numo::SComplex.cast(base)[6400...8000]
 
         expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))
@@ -297,7 +297,7 @@ RSpec.describe MB::Sound::Tone do
 
   describe '#state' do
     it 'holds everything that changes from sample to sample' do
-      make = -> { 1001.hz.ramp.fm(70.hz.at(80)).reset(MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(173).tap { |t| t[37] = 1 }], repeat: true)).at(0.5) }
+      make = -> { 1001.hz.saw.fm(70.hz.at(80)).reset(MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(173).tap { |t| t[37] = 1 }], repeat: true)).at(0.5) }
       a = make.call
       a.sample(150)
 

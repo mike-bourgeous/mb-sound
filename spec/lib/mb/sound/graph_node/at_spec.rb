@@ -7,15 +7,15 @@ RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
     line = __LINE__ + 3
     result = nil
     expect {
-      2.times { 220.hz.ramp.at(-20); result = 220.hz.ramp.lp4(800).at(-20) }
+      2.times { 220.hz.saw.at(-20); result = 220.hz.saw.lp4(800).at(-20) }
     }.to output(/\A\S*#{Regexp.escape(File.basename(__FILE__))}:#{line}: warning: at\(-20\) multiplies by -20 \(\+26 dB, inverted\); for a level write at\(-20\.db\), for a range at\(-20\.\.20\)\n\z/).to_stderr
-    expect { 220.hz.ramp.at(-1); 220.hz.ramp.at(-20.db); 220.hz.ramp.lp4(800).at(-0.5); 220.hz.ramp.at(-3..3) }.not_to output.to_stderr
+    expect { 220.hz.saw.at(-1); 220.hz.saw.at(-20.db); 220.hz.saw.lp4(800).at(-0.5); 220.hz.saw.at(-3..3) }.not_to output.to_stderr
     expect(result).to be_a(MB::Sound::GraphNode::Multiplier)
   end
 
   it 'warns once per line for a plain-number delay over 10 seconds' do
-    expect { 2.times { 220.hz.ramp.delay(96) } }.to output(/warning: delay\(96\) is 96 seconds \(plain numbers are seconds\); for samples write delay\(96\.samples\), for milliseconds delay\(96\.ms\)\n\z/).to_stderr
-    expect { 220.hz.ramp.delay(2); 220.hz.ramp.delay(96.samples) }.not_to output.to_stderr
+    expect { 2.times { 220.hz.saw.delay(96) } }.to output(/warning: delay\(96\) is 96 seconds \(plain numbers are seconds\); for samples write delay\(96\.samples\), for milliseconds delay\(96\.ms\)\n\z/).to_stderr
+    expect { 220.hz.saw.delay(2); 220.hz.saw.delay(96.samples) }.not_to output.to_stderr
   end
 
   let(:src) { PlanSpecHelpers::Source }
@@ -50,8 +50,8 @@ RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
   end
 
   it 'matches Tone#at for a full-scale signal' do
-    tone = 110.hz.ramp.at(200..600)
-    node = (110.hz.ramp * 1).at(200..600)
+    tone = 110.hz.saw.at(200..600)
+    node = (110.hz.saw * 1).at(200..600)
     expect(node).not_to be_a(MB::Sound::Tone)
     # Tones output float32, rounded after their own scale and offset
     expect((node.sample(800) - tone.sample(800)).abs.max).to be < 1e-4
@@ -61,27 +61,27 @@ RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
     env = MB::Sound.adsr(0, 0.01, 1, 0.1, hold: 1).at(0.5)
     expect(env.sample(4800).max).to be_within(1e-6).of(0.5)
 
-    expect { 220.hz.ramp.lp4(800).at(-20.db) }.not_to raise_error
+    expect { 220.hz.saw.lp4(800).at(-20.db) }.not_to raise_error
   end
 
   it 'keeps Tone#at for numbers and Ranges (inside the oscillator)' do
-    expect(220.hz.ramp.at(0.5)).to be_a(MB::Sound::Tone)
-    expect(220.hz.ramp.at(0..1)).to be_a(MB::Sound::Tone)
+    expect(220.hz.saw.at(0.5)).to be_a(MB::Sound::Tone)
+    expect(220.hz.saw.at(0..1)).to be_a(MB::Sound::Tone)
     expect(220.hz.at(0.5)).to be_a(MB::Sound::Tone)
   end
 
   it "makes a node a Tone's output gain (the same samples as tone * node)" do
-    a = 220.hz.ramp.at(input(values))
+    a = 220.hz.saw.at(input(values))
     expect(a).to be_a(MB::Sound::Tone)
     expect(a.output_gain).to be_a(MB::Sound::GraphNode)
-    ref = 220.hz.ramp.sample(5).dup
+    ref = 220.hz.saw.sample(5).dup
     expect(a.sample(5).to_a).to eq((ref * Numo::SFloat.cast(values)).to_a)
   end
 
   it 'merges with a Tone\'s numeric gain into one gain input' do
-    a = 220.hz.ramp.gain(0.5).at(input(values))
+    a = 220.hz.saw.gain(0.5).at(input(values))
     expect(a).to be_a(MB::Sound::Tone)
-    ref = (220.hz.ramp * 0.5).sample(5).dup
+    ref = (220.hz.saw * 0.5).sample(5).dup
     expect(a.sample(5).to_a).to eq((ref * Numo::SFloat.cast(values)).to_a)
   end
 
@@ -121,10 +121,10 @@ RSpec.describe(MB::Sound::GraphNode::ArithmeticMethods, '#at') do
 
   context 'recipes and graph documents' do
     [
-      ['220.hz.ramp.lp4(800).at(0.1)', -> { 220.hz.ramp.lp4(800).at(0.1) }],
-      ['220.hz.ramp.lp4(800).at(0.25..0.75)', -> { 220.hz.ramp.lp4(800).at(0.25..0.75) }],
-      ['220.hz.ramp.at(3.hz.lfo)', -> { 220.hz.ramp.at(3.hz.lfo) }],
-      ['stereo(220.hz.ramp.lp4(800), 330.hz.ramp.lp4(900)).at(0..1)', -> { MB::Sound.stereo(220.hz.ramp.lp4(800), 330.hz.ramp.lp4(900)).at(0..1) }],
+      ['220.hz.saw.lp4(800).at(0.1)', -> { 220.hz.saw.lp4(800).at(0.1) }],
+      ['220.hz.saw.lp4(800).at(0.25..0.75)', -> { 220.hz.saw.lp4(800).at(0.25..0.75) }],
+      ['220.hz.saw.at(3.hz.lfo)', -> { 220.hz.saw.at(3.hz.lfo) }],
+      ['stereo(220.hz.saw.lp4(800), 330.hz.saw.lp4(900)).at(0..1)', -> { MB::Sound.stereo(220.hz.saw.lp4(800), 330.hz.saw.lp4(900)).at(0..1) }],
       ['adsr(0.01, 0.2, 0.5, 0.3).at(0.5)', -> { MB::Sound.adsr(0.01, 0.2, 0.5, 0.3).at(0.5) }],
     ].each do |(text, build)|
       it "prints #{text} back and loads it bit-identically" do

@@ -38,14 +38,14 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
 
   describe 'GraphNode#chorus' do
     it 'turns a mono node into a stereo bundle' do
-      c = 220.hz.ramp.chorus
+      c = 220.hz.saw.chorus
       expect(c).to be_a(MB::Sound::GraphNode::Channels)
       expect(c.channel_count).to eq(2)
       expect(c.outputs.map(&:graph_node_name)).to eq(['Juno chorus L', 'Juno chorus R'])
     end
 
     it 'choruses a stereo bundle as one (not per channel)' do
-      c = MB::Sound.stereo(220.hz.ramp, 330.hz.ramp).chorus(:juno2)
+      c = MB::Sound.stereo(220.hz.saw, 330.hz.saw).chorus(:juno2)
       expect(c.channel_count).to eq(2)
     end
 
@@ -133,7 +133,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
 
     it 'accepts a tempo-synced rate' do
-      c = 220.hz.ramp.chorus(rate: 1.bar)
+      c = 220.hz.saw.chorus(rate: 1.bar)
       expect(render(c, 0.1).map { |o| o.abs.max }).to all(be > 0.5)
     end
   end
@@ -162,20 +162,20 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
 
   describe 'determinism' do
     it 'renders the same samples twice' do
-      a = render(220.hz.ramp.chorus(:juno2), 0.5)
-      b = render(220.hz.ramp.chorus(:juno2), 0.5)
+      a = render(220.hz.saw.chorus(:juno2), 0.5)
+      b = render(220.hz.saw.chorus(:juno2), 0.5)
       expect(a).to eq(b)
     end
 
     it 'repeats BBD hiss from the root seed and from seed:' do
       MB::Sound.seed(3)
-      a = render(220.hz.ramp.chorus(bbd: true), 0.2)
+      a = render(220.hz.saw.chorus(bbd: true), 0.2)
       MB::Sound.seed(3)
-      b = render(220.hz.ramp.chorus(bbd: true), 0.2)
+      b = render(220.hz.saw.chorus(bbd: true), 0.2)
       expect(a).to eq(b)
 
-      c = render(220.hz.ramp.chorus(bbd: true, seed: 7), 0.2)
-      d = render(220.hz.ramp.chorus(bbd: true, seed: 7), 0.2)
+      c = render(220.hz.saw.chorus(bbd: true, seed: 7), 0.2)
+      d = render(220.hz.saw.chorus(bbd: true, seed: 7), 0.2)
       expect(c).to eq(d)
       expect(c).not_to eq(a)
     end
@@ -188,7 +188,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
   end
 
   describe 'mix:' do
-    let(:input) { -> { 220.hz.ramp.at(0.5) } }
+    let(:input) { -> { 220.hz.saw.at(0.5) } }
 
     def same(a, b, tol = 1e-6)
       a.zip(b).each { |x, y| expect((x - y).abs.max).to be < tol }
@@ -251,14 +251,14 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
 
     it 'has the aliases :juno3 and :stacked' do
-      a = render(220.hz.ramp.chorus(:lush), 0.1)
-      expect(render(220.hz.ramp.chorus(:juno3), 0.1)).to eq(a)
-      expect(render(220.hz.ramp.chorus(:stacked), 0.1)).to eq(a)
+      a = render(220.hz.saw.chorus(:lush), 0.1)
+      expect(render(220.hz.saw.chorus(:juno3), 0.1)).to eq(a)
+      expect(render(220.hz.saw.chorus(:stacked), 0.1)).to eq(a)
     end
 
     it 'no longer accepts :juno_both, keeping :juno_i_ii' do
       expect { 220.hz.chorus(:juno_both) }.to raise_error(ArgumentError, /Unknown/)
-      expect(render(220.hz.ramp.chorus(:juno_i_ii), 0.1)).to eq(render(220.hz.ramp.chorus(:juno12), 0.1))
+      expect(render(220.hz.saw.chorus(:juno_i_ii), 0.1)).to eq(render(220.hz.saw.chorus(:juno12), 0.1))
     end
 
     it 'takes one rate per LFO, or a number keeping their ratio' do
@@ -346,7 +346,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
 
   describe 'shared buffers', :check_shared do
     it 'does not modify an input shared with other branches' do
-      sig = 220.hz.ramp
+      sig = 220.hz.saw
       c = sig.chorus(bbd: true)
       other = sig * 2
       expect {
@@ -358,8 +358,8 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
 
     it 'does not modify a shared stereo input' do
-      l = 220.hz.ramp
-      r = 330.hz.ramp
+      l = 220.hz.saw
+      r = 330.hz.saw
       c = MB::Sound.stereo(l, r).chorus(dry: 0.5.constant, wet: 0.7)
       others = [l * 1, r * 1]
       expect {

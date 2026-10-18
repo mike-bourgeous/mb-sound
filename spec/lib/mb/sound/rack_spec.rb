@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::Rack) do
   describe 'constructors' do
     it 'fixes the main input type and kind' do
       expect(s.mrack { it }.kind).to eq(:note_fx)
-      expect(s.irack { it.synth { |v| v.hz.ramp } }.kind).to eq(:instrument)
+      expect(s.irack { it.synth { |v| v.hz.saw } }.kind).to eq(:instrument)
       expect(s.arack { it }.kind).to eq(:effect)
       expect(s.lrack { it }.kind).to eq(:listener)
       expect(s.modrack { it }.kind).to eq(:modulator)
@@ -42,7 +42,7 @@ RSpec.describe(MB::Sound::Rack) do
       expect(r.name).to be_nil
       expect(r.signature).to eq('audio(sig) + audio(side) -> ?')
       expect(s.mrack { it }.input.name).to eq(:stream)
-      expect(s.irack { |keys| keys.synth { |v| v.hz.ramp } }.signature).to eq('notes(keys) -> audio')
+      expect(s.irack { |keys| keys.synth { |v| v.hz.saw } }.signature).to eq('notes(keys) -> audio')
     end
 
     it 'needs a block with an input parameter' do
@@ -71,7 +71,7 @@ RSpec.describe(MB::Sound::Rack) do
 
     it 'builds a fresh subgraph for each application' do
       r = s.arack { it.softclip }
-      sig = 110.hz.ramp
+      sig = 110.hz.saw
       a = r.(sig)
       b = r.(sig)
       expect(a).not_to equal(b)
@@ -79,31 +79,31 @@ RSpec.describe(MB::Sound::Rack) do
     end
 
     it 'puts no node at a port (the block gets the value itself)' do
-      sig = 110.hz.ramp
+      sig = 110.hz.saw
       expect(s.arack { it }.(sig)).to equal(sig)
     end
 
     it 'sounds like the graph it builds' do
       r = s.arack { it.softclip.filter(:lowpass, cutoff: 900) }
-      a = r.(110.hz.ramp)
-      b = 110.hz.ramp.softclip.filter(:lowpass, cutoff: 900)
+      a = r.(110.hz.saw)
+      b = 110.hz.saw.softclip.filter(:lowpass, cutoff: 900)
       expect(a.sample(800)).to eq(b.sample(800))
     end
 
     it 'checks the output type when given' do
       expect { s.irack { it.transpose(1) }.(clip) }.to raise_error(TypeError, /should output audio/)
-      expect { s.mrack(out: :notes) { it.synth { |v| v.hz.ramp } }.(clip) }.to raise_error(TypeError, /should output notes/)
-      expect { s.lrack { it.softclip }.(110.hz.ramp) }.not_to raise_error
+      expect { s.mrack(out: :notes) { it.synth { |v| v.hz.saw } }.(clip) }.to raise_error(TypeError, /should output notes/)
+      expect { s.lrack { it.softclip }.(110.hz.saw) }.not_to raise_error
     end
 
     it 'checks the input type' do
       expect { s.arack { it }.(clip) }.to raise_error(TypeError, /wants audio.*through \.synth/)
-      expect { s.mrack { it }.(110.hz.ramp) }.to raise_error(TypeError, /wants notes/)
+      expect { s.mrack { it }.(110.hz.saw) }.to raise_error(TypeError, /wants notes/)
     end
 
     it 'explains wrong-domain methods on a port value' do
       expect { s.mrack { it.lowpass(800) }.(clip) }.to raise_error(NoMethodError, /stream is a notes port.*\.synth makes audio/)
-      expect { s.arack { |sig| sig.arp(:up) }.(110.hz.ramp) }.to raise_error(NoMethodError, /sig is an audio port.*arp is a note transform/)
+      expect { s.arack { |sig| sig.arp(:up) }.(110.hz.saw) }.to raise_error(NoMethodError, /sig is an audio port.*arp is a note transform/)
     end
   end
 
@@ -111,16 +111,16 @@ RSpec.describe(MB::Sound::Rack) do
     let(:dub) { s.arack(side: :audio) { |sig, side:| sig * side } }
 
     it 'binds with #with and at the call' do
-      x = 110.hz.ramp
+      x = 110.hz.saw
       y = 3.hz.lfo
       out = x.then(&dub.with(side: y))
       expect(out).to be_a(MB::Sound::GraphNode::Multiplier)
-      ref = 110.hz.ramp * 3.hz.lfo
-      expect(dub.(110.hz.ramp, side: 3.hz.lfo).sample(800)).to eq(ref.sample(800))
+      ref = 110.hz.saw * 3.hz.lfo
+      expect(dub.(110.hz.saw, side: 3.hz.lfo).sample(800)).to eq(ref.sample(800))
     end
 
     it 'raises for an unbound required port' do
-      expect { dub.(110.hz.ramp) }.to raise_error(ArgumentError, /needs port side: \(audio\)/)
+      expect { dub.(110.hz.saw) }.to raise_error(ArgumentError, /needs port side: \(audio\)/)
     end
 
     it 'makes ports with block defaults optional' do
@@ -151,7 +151,7 @@ RSpec.describe(MB::Sound::Rack) do
 
     it 'takes notes ports' do
       r = s.arack(keys: :notes) { |sig, keys:| sig * keys.gate }
-      out = 110.hz.ramp.then(&r.with(keys: clip))
+      out = 110.hz.saw.then(&r.with(keys: clip))
       expect(out.graph.any? { |n| n.is_a?(MB::Sound::Notes::Gate) }).to eq(true)
     end
   end
@@ -188,7 +188,7 @@ RSpec.describe(MB::Sound::Rack) do
     end
 
     it 'checks types across the joint' do
-      inst = s.irack { it.synth { |v| v.hz.ramp } }
+      inst = s.irack { it.synth { |v| v.hz.saw } }
       expect { inst >> s.mrack { it } }.to raise_error(TypeError, /outputs audio but anonymous mrack takes notes/)
       expect { inst >> s.arack { it.softclip } }.not_to raise_error
     end
@@ -201,7 +201,7 @@ RSpec.describe(MB::Sound::Rack) do
       expect(session.names.kind(:dub)).to eq(:rack)
       expect(s.racks[:dub]).to eq('effect audio(sig) + audio(side) -> ?, not used yet')
 
-      sig = 110.hz.ramp.then(&s.rack(:dub).with(side: 3.hz.lfo))
+      sig = 110.hz.saw.then(&s.rack(:dub).with(side: 3.hz.lfo))
       session.add(sig, name: :bass)
       expect(s.racks[:dub]).to eq('effect audio(sig) + audio(side) -> audio, 1 use (in :bass)')
     end
@@ -225,22 +225,22 @@ RSpec.describe(MB::Sound::Rack) do
 
   describe 'recipes and graph documents' do
     it 'prints an application as src.then(&rack)' do
-      g = 110.hz.ramp.then(&s.arack { it.softclip }) * 0.5
-      expect(g.to_ruby).to eq("(110.hz.ramp.then(&arack { |sig|\n  sig.softclip\n}) * 0.5)").or eq("110.hz.ramp.then(&arack { |sig|\n  sig.softclip\n}) * 0.5")
+      g = 110.hz.saw.then(&s.arack { it.softclip }) * 0.5
+      expect(g.to_ruby).to eq("(110.hz.saw.then(&arack { |sig|\n  sig.softclip\n}) * 0.5)").or eq("110.hz.saw.then(&arack { |sig|\n  sig.softclip\n}) * 0.5")
     end
 
     it 'prints a named rack by name and bound ports with with' do
       s.arack(:dub, side: :audio) { |sig, side:| sig * side }
-      g = 110.hz.ramp.then(&s.rack(:dub).with(side: 3.hz.lfo))
-      expect(g.to_ruby).to eq('110.hz.ramp.then(&rack(:dub).with(side: 3.hz.lfo))')
+      g = 110.hz.saw.then(&s.rack(:dub).with(side: 3.hz.lfo))
+      expect(g.to_ruby).to eq('110.hz.saw.then(&rack(:dub).with(side: 3.hz.lfo))')
     end
 
     it 'round-trips anonymous racks through graph documents, bit for bit' do
       graphs = [
-        -> { 110.hz.ramp.then(&s.arack { it.softclip.filter(:lowpass, cutoff: 900) }) * 0.5 },
-        -> { 110.hz.ramp.then(&s.arack(side: :audio) { |sig, side:| sig.softclip * side }.with(side: 3.hz.lfo)) },
-        -> { 110.hz.ramp.then(&s.arack(depth: :control) { |sig, depth: 0.5| sig * depth }) },
-        -> { clip.then(&s.irack { |stream| stream.synth { |v| v.hz.ramp * v.amp_env } }) },
+        -> { 110.hz.saw.then(&s.arack { it.softclip.filter(:lowpass, cutoff: 900) }) * 0.5 },
+        -> { 110.hz.saw.then(&s.arack(side: :audio) { |sig, side:| sig.softclip * side }.with(side: 3.hz.lfo)) },
+        -> { 110.hz.saw.then(&s.arack(depth: :control) { |sig, depth: 0.5| sig * depth }) },
+        -> { clip.then(&s.irack { |stream| stream.synth { |v| v.hz.saw * v.amp_env } }) },
       ]
       graphs.each do |make|
         MB::Sound.seed(1)

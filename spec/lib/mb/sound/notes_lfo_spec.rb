@@ -178,7 +178,7 @@ RSpec.describe(MB::Sound::GraphNode::SampleHold) do
   end
 
   it 'decimates with #sah' do
-    out = 997.hz.ramp.sah(2000.hz.lfo.asquare).sample(4800)
+    out = 997.hz.saw.sah(2000.hz.lfo.asquare).sample(4800)
     expect(out.to_a.chunk_while { |a, b| a == b }.map(&:length).uniq.sort).to eq([24])
   end
 end

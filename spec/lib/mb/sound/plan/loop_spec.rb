@@ -219,7 +219,7 @@ RSpec.describe(MB::Sound::Plan::Loop) do
     end
 
     it 'blends smoothly through the threshold (no jumps in a sweep)' do
-      out = render(-> { 200.hz.sine.at(0.2).feedback { |fb, input| input + fb.delay(0.25.hz.lfo.ramp.at(30..3).samples, smoothing: false) * 0.3 } }, [128], 96000)
+      out = render(-> { 200.hz.sine.at(0.2).feedback { |fb, input| input + fb.delay(0.25.hz.lfo.saw.at(30..3).samples, smoothing: false) * 0.3 } }, [128], 96000)
       steps = out.each_cons(2).map { |a, b| (a - b).abs }
       expect(steps.max).to be < 0.1
     end

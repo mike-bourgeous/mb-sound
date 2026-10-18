@@ -143,7 +143,7 @@ RSpec.describe(MB::Sound::Sequence::Clip, 'playback') do
 
   it 'works in a synth graph' do
     bass = (MB::Sound::C2.n8 | MB::Sound::G1.n8).loop
-    graph = bass.tone(transport: transport).ramp.at(1).filter(:lowpass, cutoff: 1000, quality: 2) * bass.env(0.005, 0.1, 0.5, 0.05, transport: transport)
+    graph = bass.tone(transport: transport).saw.at(1).filter(:lowpass, cutoff: 1000, quality: 2) * bass.env(0.005, 0.1, 0.5, 0.05, transport: transport)
     data = render(graph, max: 48000)
     expect(data.length).to eq(48000)
     expect(data.abs.max).to be_between(0.1, 2)

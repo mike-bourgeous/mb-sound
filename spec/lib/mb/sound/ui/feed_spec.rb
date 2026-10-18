@@ -59,7 +59,7 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
     session.ui_feed = feed
     session.master { |mix| mix.softclip }
     session.bus(:verb) { |sig| sig * 0.5 }
-    session.add(110.hz.ramp.at(-20.db), name: :saw)
+    session.add(110.hz.saw.at(-20.db), name: :saw)
     session.route(:saw, send: { verb: -6.db })
     feed.take
     4.times { session.process_buffer }
@@ -169,7 +169,7 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
       session.knob(:cut, 800, range: 100..8000, curve: :exp, unit: 'Hz')
       arr = session.arrangement
       clip = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n4.loop.named(:bass_a)
-      arr.track(:bass) { |c| c.tone.ramp.at(-20.db) * c.amp_env }
+      arr.track(:bass) { |c| c.tone.saw.at(-20.db) * c.amp_env }
       arr.scene(:drop, bass: clip)
       MB::Sound::Session.with_context(session: session) { arr.go(:drop, in: 1) }
 

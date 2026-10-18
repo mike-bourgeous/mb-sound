@@ -35,8 +35,8 @@ RSpec.describe(MB::Sound::Filter::FourPole::Tuning) do
     it 'is the default for every mode' do
       expect(fp.new.tuning).to eq(:musical)
       expect(fp.new(mode: :diode).tuning).to eq(:musical)
-      expect(110.hz.ramp.lp4(800).kernel_filter.tuning).to eq(:musical)
-      expect(110.hz.ramp.lp4(800, tuning: :hardware).kernel_filter.tuning).to eq(:hardware)
+      expect(110.hz.saw.lp4(800).kernel_filter.tuning).to eq(:musical)
+      expect(110.hz.saw.lp4(800, tuning: :hardware).kernel_filter.tuning).to eq(:hardware)
       expect { fp.new(tuning: :peak) }.to raise_error(ArgumentError, /tuning/)
     end
 
@@ -178,11 +178,11 @@ RSpec.describe(MB::Sound::Filter::FourPole::Tuning) do
     end
 
     it 'gives each filter its own resonance for the same gain in the DSL' do
-      lp = 110.hz.ramp.lp4(800, quality: 4)
-      d = 110.hz.ramp.diode(800, quality: 4)
+      lp = 110.hz.saw.lp4(800, quality: 4)
+      d = 110.hz.saw.diode(800, quality: 4)
       expect(lp.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4))
       expect(d.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true))
-      hw = 110.hz.ramp.diode(800, quality: 4, tuning: :hardware)
+      hw = 110.hz.saw.diode(800, quality: 4, tuning: :hardware)
       expect(hw.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, tuning: :hardware))
     end
   end

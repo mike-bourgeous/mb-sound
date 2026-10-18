@@ -176,7 +176,7 @@ RSpec.describe(MB::Sound::BandLimit) do
         tone = 100.hz.send(name)
         expect(tone.wave_type).to eq(wave)
         expect(tone.band_limited?).to eq(false), name.to_s
-        expect(tone.to_s).to include(name.to_s.sub(/saw(tooth)?\z/, 'ramp'))
+        expect(tone.to_s).to include(name.to_s.sub(/(ramp|sawtooth)\z/, 'saw')) # (the DSL name; ramp is an alias)
       end
     end
 
@@ -545,10 +545,10 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
 
     it 'has naive versions named acomplex_*' do
-      [:acomplex_ramp, :acomplex_square, :acomplex_triangle].each do |name|
+      [:acomplex_ramp, :acomplex_saw, :acomplex_square, :acomplex_triangle].each do |name|
         tone = 100.hz.send(name)
         expect(tone.blit?).to eq(false)
-        expect(tone.to_s).to include(name.to_s)
+        expect(tone.to_s).to include(name.to_s.sub('ramp', 'saw'))
       end
     end
 

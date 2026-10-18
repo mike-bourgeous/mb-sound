@@ -22,7 +22,7 @@ RSpec.describe(MB::Sound::Plot::Presets) do
   end
 
   it 'charts spectrograms with a dB colorbar scale and note names' do
-    c = MB::Sound::Plot.spectrogram(Numo::DFloat.cast(440.hz.ramp.sample(9600)), fft: 512)
+    c = MB::Sound::Plot.spectrogram(Numo::DFloat.cast(440.hz.saw.sample(9600)), fft: 512)
     expect(c.heatmap.z_scale).to be_a(MB::Sound::Plot::Scale::DB)
     expect(c.coord.y).to be_a(MB::Sound::Plot::Scale::Frequency)
     expect(c.coord.y.secondary_ticks.map(&:label)).to include('C5')

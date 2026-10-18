@@ -72,7 +72,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'produces branches that yield duplicate copies of the incoming data' do
-      a, b, c = 5000.hz.ramp.at(2..3).tee(3)
+      a, b, c = 5000.hz.saw.at(2..3).tee(3)
       expect(a.sample(1)[0].round(4)).to eq(2.5)
       expect(b.sample(1)[0].round(4)).to eq(2.5)
       expect(c.sample(1)[0].round(4)).to eq(2.5)
@@ -456,16 +456,16 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
 
       it 'uses a state-variable filter by default for types and Cookbook filters' do
-        expect(400.hz.ramp.filter(:lowpass, cutoff: 500).base_filter).to be_a(MB::Sound::Filter::SVF)
-        expect(400.hz.ramp.filter(400.hz.lowpass(quality: 5)).base_filter).to be_a(MB::Sound::Filter::SVF)
-        expect(400.hz.ramp.filter(800).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(400.hz.saw.filter(:lowpass, cutoff: 500).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(400.hz.saw.filter(400.hz.lowpass(quality: 5)).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(400.hz.saw.filter(800).base_filter).to be_a(MB::Sound::Filter::SVF)
         expect(MB::Sound::GraphNode::FilterMethods::DEFAULT_FILTER_STRUCTURE).to eq(:svf)
       end
 
       it 'uses the cookbook biquad with structure: :biquad' do
-        f = 400.hz.ramp.filter(:lowpass, cutoff: 500, structure: :biquad)
+        f = 400.hz.saw.filter(:lowpass, cutoff: 500, structure: :biquad)
         expect(f.base_filter).to be_a(MB::Sound::Filter::Cookbook)
-        f = 400.hz.ramp.filter(400.hz.lowpass(quality: 5), structure: :biquad)
+        f = 400.hz.saw.filter(400.hz.lowpass(quality: 5), structure: :biquad)
         expect(f.base_filter).to be_a(MB::Sound::Filter::Cookbook)
       end
 
@@ -484,7 +484,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         peak = ->(structure) {
           MB::Sound.rewind
           cutoff = MB::Sound.tween([3400, 700], 1.bar, curve: :elastic, overshoot: 0.35, cycles: 3)
-          f = 110.hz.ramp.at(0.5).filter(:lowpass, cutoff: cutoff, quality: 3, structure: structure)
+          f = 110.hz.saw.at(0.5).filter(:lowpass, cutoff: cutoff, quality: 3, structure: structure)
           200.times.map { f.sample(480).abs.max }.max
         }
         expect(peak.(nil)).to be < 1.2
@@ -495,21 +495,21 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       it 'takes a gain node with the SVF only' do
         gain = 0.25.hz.lfo.at(0.25..6)
-        f = 110.hz.ramp.filter(:peak, cutoff: 900, quality: 3, gain: gain)
+        f = 110.hz.saw.filter(:peak, cutoff: 900, quality: 3, gain: gain)
         expect(f.sources[:gain]).to be_a(MB::Sound::GraphNode)
         expect(f.sample(4800).isfinite.all?).to eq(true)
-        expect { 110.hz.ramp.filter(:peak, cutoff: 900, gain: 0.5.constant, structure: :biquad) }.to raise_error(ArgumentError, /gain/)
+        expect { 110.hz.saw.filter(:peak, cutoff: 900, gain: 0.5.constant, structure: :biquad) }.to raise_error(ArgumentError, /gain/)
       end
 
       it 'raises for unknown structures and filters without a structure' do
-        expect { 110.hz.ramp.filter(:lowpass, cutoff: 900, structure: :ladder) }.to raise_error(ArgumentError, /structure/)
-        expect { 110.hz.ramp.filter(:lp4, cutoff: 900, structure: :biquad) }.to raise_error(ArgumentError, /structure/)
-        expect { 110.hz.ramp.filter(MB::Sound::Filter::Gain.new(2, sample_rate: 48000), structure: :biquad) }.to raise_error(ArgumentError, /structure/)
-        expect { 110.hz.ramp.filter(:bogus, cutoff: 900) }.to raise_error(ArgumentError, /type/)
+        expect { 110.hz.saw.filter(:lowpass, cutoff: 900, structure: :ladder) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.saw.filter(:lp4, cutoff: 900, structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.saw.filter(MB::Sound::Filter::Gain.new(2, sample_rate: 48000), structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.saw.filter(:bogus, cutoff: 900) }.to raise_error(ArgumentError, /type/)
       end
 
       it 'passes structure: through channel bundles' do
-        b = MB::Sound.stereo(110.hz.ramp, 220.hz.ramp).filter(:lowpass, cutoff: 500, structure: :biquad)
+        b = MB::Sound.stereo(110.hz.saw, 220.hz.saw).filter(:lowpass, cutoff: 500, structure: :biquad)
         expect(b.outputs.map { |o| o.base_filter.class }).to eq([MB::Sound::Filter::Cookbook] * 2)
       end
     end
@@ -699,7 +699,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       it 'keeps a node read outside the region at its rate (built in either order)' do
         [true, false].each do |region_first|
-          x = 220.hz.ramp
+          x = 220.hz.saw
           if region_first
             a = (x * 0.5).oversample(2)
             b = x * 0.5
@@ -718,7 +718,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
 
       it 'runs nodes read only inside the region at the higher rate' do
-        x = 220.hz.ramp
+        x = 220.hz.saw
         y = x * 0.5
         a = (y + y * 0.25).oversample(2) # y has two branches, both inside
         a.sample(800)
@@ -727,8 +727,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
 
       it 'moves a node read only by regions of the same rate (per-channel oversample of a bundle)' do
-        q = 110.hz.ramp
-        l, r = MB::Sound.stereo(220.hz.ramp + q, 330.hz.ramp + q).oversample(2).outputs
+        q = 110.hz.saw
+        l, r = MB::Sound.stereo(220.hz.saw + q, 330.hz.saw + q).oversample(2).outputs
         l.sample(800)
         r.sample(800)
         expect(q.sample_rate).to eq(96000)
@@ -736,9 +736,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
 
       it 'multiplies the rates of nested regions' do
-        x = 220.hz.ramp
+        x = 220.hz.saw
         inner = (x * 0.5).oversample(3)
-        outer = (inner + 110.hz.ramp).oversample(2)
+        outer = (inner + 110.hz.saw).oversample(2)
         outer.sample(800)
         expect(x.sample_rate).to eq(288000)
         expect(inner.sample_rate).to eq(96000)
@@ -747,7 +747,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       it 'gives two oversample regions a shared Constant at their own rate (tape_delay with one Constant per param)' do
         build = ->(shared) {
           c = 0.7.constant
-          [220.hz.ramp, 330.hz.ramp].map { |ch|
+          [220.hz.saw, 330.hz.saw].map { |ch|
             inp = ch.resample(mode: :libsamplerate_fastest)
             k = shared ? c : 0.7.constant
             # The shared Constant first, so the product takes its rate
@@ -900,7 +900,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   end
 
   context 'graph introspection' do
-    let(:a) { 50.hz.ramp.named('a') }
+    let(:a) { 50.hz.saw.named('a') }
     let(:b) { 3.hz.at(120..650).named('b') }
     let(:c) { (b * 0.01).named('c') }
     let(:d) { a.filter(:lowpass, cutoff: b, quality: c).named('d') }

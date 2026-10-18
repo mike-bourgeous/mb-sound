@@ -117,7 +117,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
 
     [:equal_power, :linear, :minus_4_5db].each do |law|
       it "pans a moving position in C exactly as the Numo gains and mix (#{law})" do
-        make = -> { MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.ramp, position: 3.hz.lfo.at(-1.2..1.2), law: law) }
+        make = -> { MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.saw, position: 3.hz.lfo.at(-1.2..1.2), law: law) }
         fast = make.call
         slow = make.call
         slow.define_singleton_method(:mix_params) { |_values, _data| nil }
@@ -140,11 +140,11 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
         (GC.stat(:total_allocated_objects) - before) / 100.0
       }
 
-      input = 330.hz.ramp
+      input = 330.hz.saw
       position = 3.hz.lfo
       sources = per_buffer.call { input.sample(128); position.sample(128) }
 
-      l, r = MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.ramp, position: 3.hz.lfo).outputs
+      l, r = MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.saw, position: 3.hz.lfo).outputs
       panned = per_buffer.call { l.sample(128); r.sample(128) }
 
       # The mixer used to add about 30 objects per buffer

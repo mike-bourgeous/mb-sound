@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::RenderProgress) do
     expect {
       MB::Sound.render(path, bars: 1, master: :club) {
         MB::Sound.at_bar(1) { puts 'the drop' }
-        MB::Sound.bg 110.hz.ramp.at(-12.db)
+        MB::Sound.bg 110.hz.saw.at(-12.db)
       }
     }.to output(/\A(?:(?!the drop).)*the drop\n(?:(?!the drop).)*\z/m).to_stdout
   end
@@ -48,19 +48,19 @@ RSpec.describe(MB::Sound::RenderProgress) do
   it 'mentions the faster seek before a long pre-roll, and draws no progress into a pipe' do
     path = tmp_path('late.flac')
     expect {
-      MB::Sound.render(path, from: 12, bars: 1, loudness: false) { MB::Sound.bg 110.hz.ramp.at(-12.db) }
+      MB::Sound.render(path, from: 12, bars: 1, loudness: false) { MB::Sound.bg 110.hz.saw.at(-12.db) }
     }.to output(/\A\S*render: playing bars 1-11 unheard first.*preroll: false.*\n\z/).to_stderr
   end
 
   # ux-fix-1 item 20
   it 'says how to replace an existing file, and prints what it rendered at the console' do
     path = tmp_path('again.flac')
-    MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05)
-    expect { MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05) }
+    MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05)
+    expect { MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05) }
       .to raise_error(MB::Util::FileMethods::FileExistsError, "#{path} exists; overwrite: true replaces it (scripts: -f)")
     old = MB::Sound.live?
     MB::Sound.live = true
-    expect { MB::Sound.render(path, 220.hz.ramp.at(-20.db), seconds: 0.05, overwrite: true) }.to output("rendered 0.05 s to #{path}\n").to_stdout
+    expect { MB::Sound.render(path, 220.hz.saw.at(-20.db), seconds: 0.05, overwrite: true) }.to output("rendered 0.05 s to #{path}\n").to_stdout
   ensure
     MB::Sound.live = old
   end

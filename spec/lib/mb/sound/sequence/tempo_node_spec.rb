@@ -61,7 +61,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'locks its phase to the timeline through tempo changes and seeks' do
-      session.add(1.bar.lfo.ramp)
+      session.add(1.bar.lfo.saw)
       data = run(192000)
       # The ramp jumps on sample 48000 (half a bar), not one sample late
       expect([0, 24000, 47999, 48000, 96000, 120000].map { |i| data[i].round(3) }).to eq([0, 0.5, 1, -1, 0, 0.5])
@@ -77,13 +77,13 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     it 'starts in phase with the timeline wherever the graph starts' do
       session.add(0.constant)
       run(4000)
-      session.add(1.bar.lfo.ramp, at: :beat) # starts a quarter of the way through the bar
+      session.add(1.bar.lfo.saw, at: :beat) # starts a quarter of the way through the bar
       data = run(24000)
       expect(data[24000 - 4000].round(3)).to eq(0.5)
     end
 
     it 'adds the phase offset from with_phase' do
-      session.add(1.bar.lfo.ramp.with_phase(0.25))
+      session.add(1.bar.lfo.saw.with_phase(0.25))
       expect(run(800)[0].round(3)).to eq(0.5)
     end
 
@@ -95,7 +95,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'follows the render transport' do
-      MB::Sound.render(tmp_path('tempo_lfo_spec.flac'), 1.bar.lfo.ramp, seconds: 1, bpm: 240, overwrite: true, gain: 1)
+      MB::Sound.render(tmp_path('tempo_lfo_spec.flac'), 1.bar.lfo.saw, seconds: 1, bpm: 240, overwrite: true, gain: 1)
       data = MB::Sound.read(tmp_path('tempo_lfo_spec.flac'))[0]
       expect(data[12000]).to be_within(0.01).of(0.5) # a bar is one second at 240 BPM
     end
@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
   describe 'pauses' do
     it 'freezes an LFO in a master chain while the timeline is paused, then resyncs' do
       session.add(0.constant.until(800 / 48000.0))
-      session.master { |mix| mix + 1.bar.lfo.ramp }
+      session.master { |mix| mix + 1.bar.lfo.saw }
       run(1600) # the player ends and the timeline pauses at 800 frames
       frozen = run(4800)
       expect(frozen.to_a.uniq.length).to eq(1)
@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'lets a freewheeling LFO keep running while paused' do
-      session.master { |mix| mix + 1.bar.lfo.ramp.freewheel }
+      session.master { |mix| mix + 1.bar.lfo.saw.freewheel }
       data = run(4800)
       expect(data[4799]).to be > data[0]
     end
@@ -160,11 +160,11 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
 
     it 'are inputs of the tones that follow the timeline' do
       p = MB::Sound::Pitch.new(tempo)
-      t = p.ramp
+      t = p.saw
       expect(t.timeline).to equal(tempo)
       expect(t.sources.keys).to include(:timeline_jumps, :timeline_phase)
       expect(t.graph).to include(tempo)
-      expect(2.hz.ramp.timeline).to be_nil
+      expect(2.hz.saw.timeline).to be_nil
     end
 
     it 'gives the same samples in C and Ruby across a jump' do
@@ -179,7 +179,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'freewheels the tempo node from a tone without searching the graph' do
-      t = MB::Sound::Pitch.new(tempo).ramp
+      t = MB::Sound::Pitch.new(tempo).saw
       expect(t).not_to receive(:graph)
       t.freewheel
       expect(tempo.freewheel?).to eq(true)

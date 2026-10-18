@@ -10,7 +10,7 @@ RSpec.describe(MB::Sound::Take) do
   # The performance: console lines typed after the given number of
   # 800-frame buffers (a few land mid-bar, as typing does).
   def performance(tones:)
-    voice = tones ? 'c.tone.ramp.lp4(900, resonance: 0.3) * c.amp_env * 0.3' : 'c.number * 0.01'
+    voice = tones ? 'c.tone.saw.lp4(900, resonance: 0.3) * c.amp_env * 0.3' : 'c.number * 0.01'
     pad = tones ? '220.hz.triangle * 0.1' : '0.1.constant'
     {
       0 => [
@@ -182,7 +182,7 @@ RSpec.describe(MB::Sound::Take) do
         'knob :p, 0.9',
         'knob :style, 0',
         'riff = seq(C4, Db4, D4, Eb4, E4, F4, Gb4, G4, A4, B4, C5).n16.loop',
-        'bg :keys, riff.chance(knob(:p)).stream.lock(knob(:style).choose(:mash, :play)).swing(2.bars.lfo.at(0.5..0.6)).synth { |v| v.hz.ramp.at(0.2) * v.amp_env }, at: :now',
+        'bg :keys, riff.chance(knob(:p)).stream.lock(knob(:style).choose(:mash, :play)).swing(2.bars.lfo.at(0.5..0.6)).synth { |v| v.hz.saw.at(0.2) * v.amp_env }, at: :now',
       ],
       97 => ['mode :lydian, on: :bar'],
       151 => ['turn :p, 0.3, over: 1'],

@@ -801,7 +801,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop
-      seconds = MB::Sound.render(filename, bass.tone.ramp.at(1) * bass.env * 0.5, bars: 2)
+      seconds = MB::Sound.render(filename, bass.tone.saw.at(1) * bass.env * 0.5, bars: 2)
       expect(seconds).to eq(4)
 
       data = MB::Sound.read(filename)

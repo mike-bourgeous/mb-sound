@@ -757,7 +757,7 @@ RSpec.describe(MB::Sound::Synth) do
     # A patch whose output is exactly the same with skipping (naive
     # oscillator reset to a fixed phase, no filter state).
     let(:exact_patch) {
-      ->(v, _i) { v.hz.aramp * v.amp_env(0.002, 0.01, 0.5, 0.01, curve: :linear) * (1 + v.mod) * v.velocity }
+      ->(v, _i) { v.hz.asaw * v.amp_env(0.002, 0.01, 0.5, 0.01, curve: :linear) * (1 + v.mod) * v.velocity }
     }
 
     def run(synth, buffers, size = 480)

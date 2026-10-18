@@ -4,7 +4,7 @@ RSpec.describe(MB::Sound::Session::Stems) do
   # Two named parts (one starting late and ending early) and an unnamed one
   def song
     MB::Sound.bpm 120
-    MB::Sound.bg :bass, 110.hz.ramp * 0.2, fade: 0
+    MB::Sound.bg :bass, 110.hz.saw * 0.2, fade: 0
     MB::Sound.bg :keys, (330.hz.triangle * 0.1).until(0.5.bars), fade: 0, at: MB::Sound.bar(2)
     MB::Sound.bg 880.hz.sine * 0.05, fade: 0
   end

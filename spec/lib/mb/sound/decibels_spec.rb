@@ -71,15 +71,15 @@ RSpec.describe(MB::Sound::Decibels, :aggregate_failures) do
   end
 
   it 'gives graph nodes the same samples as its Float gain' do
-    expect((220.hz.ramp * -20.db).sample(256)).to eq((220.hz.ramp * 0.1).sample(256))
-    expect(220.hz.ramp.at(-6.db).sample(256)).to eq(220.hz.ramp.at(gain).sample(256))
+    expect((220.hz.saw * -20.db).sample(256)).to eq((220.hz.saw * 0.1).sample(256))
+    expect(220.hz.saw.at(-6.db).sample(256)).to eq(220.hz.saw.at(gain).sample(256))
     expect((1.constant * -6.db).sample(4)).to eq(Numo::SFloat.zeros(4).fill(gain))
   end
 
   it 'prints back as k.db in graph export and loads back in graph documents' do
-    g = 220.hz.ramp.at(-6.db) * -6.5.db * (13r / 2).db
+    g = 220.hz.saw.at(-6.db) * -6.5.db * (13r / 2).db
     code = g.to_ruby
-    expect(code).to eq('220.hz.ramp.at(-6.db) * -6.5.db * (13r/2).db')
+    expect(code).to eq('220.hz.saw.at(-6.db) * -6.5.db * (13r/2).db')
 
     h = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g, name: 'db'))
     expect(h.to_ruby).to eq(code)

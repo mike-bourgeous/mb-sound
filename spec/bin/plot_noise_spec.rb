@@ -58,7 +58,7 @@ RSpec.describe('bin/plot_noise.rb') do
   end
 
   it 'adds expressions, with a fitted Gaussian on request' do
-    text = run('--print', '-n', '50000', '--only', 'none', '-G', '-e', '1.hz.ramp.noise + 1.hz.ramp.noise', '1.hz.sine.noise.at(0.5)')
+    text = run('--print', '-n', '50000', '--only', 'none', '-G', '-e', '1.hz.saw.noise + 1.hz.saw.noise', '1.hz.sine.noise.at(0.5)')
     _, sigma, min, max, _, kurt, tv = row(text, 'expr 1')
     expect(sigma).to be_within(0.02).of(Math.sqrt(2.0 / 3)) # two uniforms: a triangular distribution
     expect(min).to be_between(-2, -1.5) # the tails (P(< -1.5) = 1/32) reach toward -2..2
@@ -76,7 +76,7 @@ RSpec.describe('bin/plot_noise.rb') do
 
   it 'plots densities with the theory in the terminal' do
     text = run('--only', 'sine,uniform', '-n', '20000', '-b', '40', env: { 'PLOT_WIDTH' => '80', 'PLOT_HEIGHT' => '20' }, real: true)
-    expect(text).to include('sine: 1.hz.sine.noise', 'uniform: 1.hz.ramp.noise', 'estimate', 'arcsine')
+    expect(text).to include('sine: 1.hz.sine.noise', 'uniform: 1.hz.saw.noise', 'estimate', 'arcsine')
     expect(text.lines.count { |l| l.match?(/└[─┬┴]{20,}/) }).to eq(2) # two plots, each with an x axis
   end
 

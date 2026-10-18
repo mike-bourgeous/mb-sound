@@ -16,15 +16,15 @@ RSpec.describe('Multiplier and Mixer fast paths') do
   end
 
   it 'gives the same products' do
-    compare { 220.hz.ramp * 330.hz.sine * 0.5.hz.lfo.at(0..1) * 0.7 }
+    compare { 220.hz.saw * 330.hz.sine * 0.5.hz.lfo.at(0..1) * 0.7 }
   end
 
   it 'gives the same sums with gains of 1 and others' do
-    compare { 220.hz.ramp + 330.hz.sine * 0.25 + 0.5.hz.lfo - 3 }
+    compare { 220.hz.saw + 330.hz.sine * 0.25 + 0.5.hz.lfo - 3 }
   end
 
   it 'gives the same results for odd buffer sizes' do
-    compare(count: 33) { (220.hz.ramp + 330.hz.sine) * 110.hz.triangle }
+    compare(count: 33) { (220.hz.saw + 330.hz.sine) * 110.hz.triangle }
   end
 
   it 'falls back for complex inputs and gains' do
@@ -32,7 +32,7 @@ RSpec.describe('Multiplier and Mixer fast paths') do
   end
 
   it 'gives the same results for real inputs into a complex buffer' do
-    compare { (220.hz.complex_sine * 330.hz.sine) * 110.hz.sine * 55.hz.ramp + 330.hz.sine }
+    compare { (220.hz.complex_sine * 330.hz.sine) * 110.hz.sine * 55.hz.saw + 330.hz.sine }
   end
 
   it 'falls back for double-precision inputs' do
@@ -62,11 +62,11 @@ RSpec.describe('Multiplier and Mixer fast paths') do
   end
 
   it 'gives the same results from the C kernels and their Numo mirrors' do
-    compare_kernels { (220.hz.ramp + 330.hz.sine * 0.25 + 0.5.hz.lfo - 3) * 110.hz.triangle * 0.7 }
+    compare_kernels { (220.hz.saw + 330.hz.sine * 0.25 + 0.5.hz.lfo - 3) * 110.hz.triangle * 0.7 }
   end
 
   it 'gives the same complex results from the C kernels and their Numo mirrors' do
-    compare_kernels(count: 33) { 220.hz.complex_sine * 330.hz.sine * (0.5 - 0.25i) + 110.hz.complex_ramp * 0.3 + 55.hz.sine }
+    compare_kernels(count: 33) { 220.hz.complex_sine * 330.hz.sine * (0.5 - 0.25i) + 110.hz.complex_saw * 0.3 + 55.hz.sine }
   end
 
   it 'falls back to Numo for inputs the kernels decline' do
@@ -89,7 +89,7 @@ RSpec.describe('Multiplier and Mixer fast paths') do
   end
 
   it 'uses the fast path for full buffers of the same type' do
-    node = 220.hz.ramp * 330.hz.sine
+    node = 220.hz.saw * 330.hz.sine
     expect(node).to receive(:arithmetic_combine).never
     node.sample(800)
   end

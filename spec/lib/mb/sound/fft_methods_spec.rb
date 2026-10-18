@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:ramp_input) {
-        tone = Numo::DFloat.cast(4000.hz.ramp.at(1).sample(48))
+        tone = Numo::DFloat.cast(4000.hz.saw.at(1).sample(48))
         n.times do
           tone = Numo::DFloat.cast([tone] * 48)
         end

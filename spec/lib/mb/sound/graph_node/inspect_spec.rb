@@ -7,28 +7,28 @@ RSpec.describe(MB::Sound::GraphNode::Inspect) do
   limit = MB::Sound::GraphNode::Inspect::INSPECT_LIMIT
 
   it 'prints a node as its type and the Ruby that builds it' do
-    node = 261.63.hz.ramp.delay(0.125, feedback: 0.4)
-    expect(node.inspect).to match(/\A#<SampleWrapper 261\.63\.hz\.ramp\.delay\(0\.125, feedback: 0\.4\)>\z/)
+    node = 261.63.hz.saw.delay(0.125, feedback: 0.4)
+    expect(node.inspect).to match(/\A#<SampleWrapper 261\.63\.hz\.saw\.delay\(0\.125, feedback: 0\.4\)>\z/)
   end
 
   it 'prints the same line through pp (Pry uses it)' do
-    node = 220.hz.ramp.lp4(800)
+    node = 220.hz.saw.lp4(800)
     expect(PP.pp(node, +'').chomp).to eq(node.inspect)
   end
 
   it 'keeps the old dump in #inspect_full' do
-    expect(220.hz.ramp.inspect_full).to include('@')
+    expect(220.hz.saw.inspect_full).to include('@')
   end
 
   it 'caps long graphs at the limit' do
-    node = (1..40).map { |i| (100 + i).hz.ramp }.sum
+    node = (1..40).map { |i| (100 + i).hz.saw }.sum
     expect(node.inspect.length).to be <= limit
     expect(node.inspect).to end_with('...>')
   end
 
   it 'joins multi-line code onto one line' do
-    s = MB::Sound.seq(MB::Sound::C4).n8.synth { |v| v.tone.ramp * v.env }
-    expect(s.inspect).to eq('#<Synth seq(C4).n8.synth { |v| v.hz.ramp * v.env }>')
+    s = MB::Sound.seq(MB::Sound::C4).n8.synth { |v| v.tone.saw * v.env }
+    expect(s.inspect).to eq('#<Synth seq(C4).n8.synth { |v| v.hz.saw * v.env }>')
   end
 
   it 'summarizes Notes and Sessions' do

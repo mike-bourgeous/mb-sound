@@ -42,13 +42,13 @@ RSpec.describe('GraphNode typed ports (#port_info)') do
   end
 
   it 'keeps #sources and #inputs as before' do
-    f = 110.hz.ramp.filter(:lowpass, cutoff: 800)
+    f = 110.hz.saw.filter(:lowpass, cutoff: 800)
     expect(f.inputs).to eq(f.sources)
     expect(f.sources).to be_a(Hash)
   end
 
   it 'types a filter input as audio and its cutoff as a control parameter' do
-    f = 110.hz.ramp.filter(:lowpass, cutoff: 3.hz.lfo.at(200..900))
+    f = 110.hz.saw.filter(:lowpass, cutoff: 3.hz.lfo.at(200..900))
     ins = f.graph.flat_map { |n| n.respond_to?(:port_info) ? n.port_info[:in] : [] }
     cutoff = ins.find { |e| e[:name] == :cutoff }
     input = ins.find { |e| e[:name] == :input && e[:role] == :main && e[:type] == :audio }
@@ -57,7 +57,7 @@ RSpec.describe('GraphNode typed ports (#port_info)') do
   end
 
   it 'marks sidechains as side inputs' do
-    c = 110.hz.ramp.compress(sidechain: 2.hz.ramp)
+    c = 110.hz.saw.compress(sidechain: 2.hz.saw)
     ins = c.graph.flat_map { |n| n.respond_to?(:port_info) ? n.port_info[:in] : [] }
     side = ins.select { |e| e[:role] == :side }
     expect(side).not_to be_empty
@@ -78,13 +78,13 @@ RSpec.describe('GraphNode typed ports (#port_info)') do
 
   it 'lists feedback edges with the feedback role' do
     a = 1.constant
-    b = 110.hz.ramp
+    b = 110.hz.saw
     b.with_feedback(fb: a)
     expect(b.port_info[:in].last).to include(name: :fb, role: :feedback, type: :control, source: a)
   end
 
   it 'lists a multi-output node once per output' do
-    st = MB::Sound.stereo(110.hz.ramp, 220.hz.ramp)
+    st = MB::Sound.stereo(110.hz.saw, 220.hz.saw)
     expect(st.port_info[:out].map { |o| o[:name] }).to eq([:out_1, :out_2])
   end
 

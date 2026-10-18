@@ -4,9 +4,9 @@
 RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   # ux-fix-1 item 19: `fb.lp4(2000)` said "no loop lowering for MB::Sound::Plan::Op::FourPole"
   it 'names lp4 and the SVF to use instead when a loop has a four-pole filter' do
-    expect { 261.63.hz.ramp.delay(0.25, feedback: 0.5) { |fb| fb.lp4(2000) } }
+    expect { 261.63.hz.saw.delay(0.25, feedback: 0.5) { |fb| fb.lp4(2000) } }
       .to raise_error(MB::Sound::Plan::Unsupported, /\Alp4 and diode \(four-pole ladders\) can't run inside a feedback loop yet; use \.filter\(:lowpass, cutoff: 2000\) \(an SVF\), which can/)
-    expect { 261.63.hz.ramp.feedback { |fb, x| x + fb.delay(0.01).filter(:lowpass, cutoff: 1000, structure: :biquad) * 0.5 } }
+    expect { 261.63.hz.saw.feedback { |fb, x| x + fb.delay(0.01).filter(:lowpass, cutoff: 1000, structure: :biquad) * 0.5 } }
       .to raise_error(MB::Sound::Plan::Unsupported, /\Astructure: :biquad filters can't run inside a feedback loop; leave structure: out/)
   end
 
@@ -278,7 +278,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   end
 
   describe 'fallback' do
-    let(:fm_loop) { -> { 220.hz.ramp.at(0.3).feedback { |fb, input| input + 110.hz.pm(fb.delay(2.ms) * 2).at(0.5) } } }
+    let(:fm_loop) { -> { 220.hz.saw.at(0.3).feedback { |fb, input| input + 110.hz.pm(fb.delay(2.ms) * 2).at(0.5) } } }
 
     it 'raises in scripts for a node without loop ops' do
       expect { fm_loop.call }.to raise_error(MB::Sound::Plan::Unsupported, /oscillator.*live mode it runs as a block graph/)
@@ -306,10 +306,10 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
 
       it 'runs a loop without a delay one sample at a time (the same samples as the op loop)' do
         l = nil
-        expect { l = 220.hz.ramp.at(0.3).feedback { |fb, input| (input + (fb - input) * 0.95).proc { |v| v } } }.to output.to_stderr
+        expect { l = 220.hz.saw.at(0.3).feedback { |fb, input| (input + (fb - input) * 0.95).proc { |v| v } } }.to output.to_stderr
         expect(l.instance_variable_get(:@fallback).block).to eq(1)
         MB::Sound.live = false
-        ref = 220.hz.ramp.at(0.3).feedback { |fb, input| input + (fb - input) * 0.95 }
+        ref = 220.hz.saw.at(0.3).feedback { |fb, input| input + (fb - input) * 0.95 }
         expect(Array.new(10) { l.sample(64).to_a }.flatten).to eq(Array.new(10) { ref.sample(64).to_a }.flatten)
       end
 

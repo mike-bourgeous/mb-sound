@@ -87,11 +87,11 @@ RSpec.describe('unison spellings') do
 
   it 'prints each spelling the way it was written, and the printed Ruby rebuilds the same samples' do
     cases = {
-      -> { 110.hz.unison(5).ramp * 0.5 } => '110.hz.unison(5).ramp * 0.5',
+      -> { 110.hz.unison(5).ramp * 0.5 } => '110.hz.unison(5).saw * 0.5', # (aliases print as saw, the official name)
       -> { 110.hz.unison(5, spread: 1).square.pwm(0.3).at(0.5) } => '110.hz.unison(5, spread: 1).square.pwm(0.3).at(0.5)',
       -> { 110.hz.square.pwm(0.3).unison(5) * 0.5 } => '110.hz.square.pwm(0.3).unison(5) * 0.5',
       -> { 110.hz.unison(5) * 0.5 } => '110.hz.unison(5) * 0.5',
-      -> { 110.hz.unison(3) { |p| p.ramp } * 0.5 } => "110.hz.unison(3) { |p|\n  p.ramp\n} * 0.5",
+      -> { 110.hz.unison(3) { |p| p.ramp } * 0.5 } => "110.hz.unison(3) { |p|\n  p.saw\n} * 0.5",
     }
     cases.each do |build, text|
       MB::Sound.seed(3)

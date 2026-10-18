@@ -17,7 +17,7 @@ RSpec.describe(MB::Sound::Structure, :aggregate_failures) do
   # A saw bass changing notes every bar.
   def self.bass_line
     b = MB::Sound.seq(MB::Sound::E2, MB::Sound::G2, MB::Sound::A2, MB::Sound::D2).n1.loop(align: :launch).notes
-    b.hz.ramp * b.amp_env(0.005, 0.4, 0.5, 0.1) * 0.25
+    b.hz.saw * b.amp_env(0.005, 0.4, 0.5, 0.1) * 0.25
   end
 
   # Plays the groove with a 2/4 bar of claps at bar +gap+ (the night bus's

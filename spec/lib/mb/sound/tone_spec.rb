@@ -114,7 +114,7 @@ RSpec.describe MB::Sound::Tone do
 
   describe 'configuration' do
     it 'is fixed once the tone plays' do
-      t = 220.hz.ramp.at(0.5)
+      t = 220.hz.saw.at(0.5)
       t.sample(10)
       [
         -> { t.at(0.2) }, -> { t.square }, -> { t.with_phase(1) }, -> { t.fm(110.hz) },
@@ -126,13 +126,13 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'warns and keeps the tone unchanged in live mode' do
-      t = 220.hz.ramp.at(0.5)
+      t = 220.hz.saw.at(0.5)
       before = t.sample(100).dup
       MB::Sound.live = true
       expect { expect(t.at(0.1)).to equal(t) }.to output(/FrozenError.*already playing.*live mode: ignored/).to_stderr
       expect { t.square }.to output(/live mode/).to_stderr
 
-      u = 220.hz.ramp.at(0.5)
+      u = 220.hz.saw.at(0.5)
       u.sample(100)
       expect(t.sample(100)).to eq(u.sample(100))
       expect(before.length).to eq(100)
@@ -141,7 +141,7 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'still accepts or_at and sample rate changes after playing starts' do
-      t = 220.hz.ramp.at(0.5)
+      t = 220.hz.saw.at(0.5)
       t.sample(10)
       expect(t.or_at(1).range).to eq(-0.5..0.5)
       expect { t.at_rate(96000) }.not_to raise_error
@@ -149,7 +149,7 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'picks up changes made after the state was inspected' do
-      t = 220.hz.ramp
+      t = 220.hz.saw
       expect(t.phi).to eq(0)
       t.with_phase(0.25)
       expect(t.phi).to eq(0.25)

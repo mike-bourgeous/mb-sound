@@ -86,17 +86,17 @@ RSpec.describe('rack documents') do
       expect(io.parse(text)).to be_rack
       expect(without_saved(io.dump(r))).to eq(without_saved(text))
 
-      a = 220.hz.ramp.then(&dub.with(side: 110.hz.sine))
-      b = 220.hz.ramp.then(&r.with(side: 110.hz.sine))
+      a = 220.hz.saw.then(&dub.with(side: 110.hz.sine))
+      b = 220.hz.saw.then(&r.with(side: 110.hz.sine))
       expect(b.sample(9600)).to eq(a.sample(9600))
     end
 
     it 'applies the rack when the inputs are given' do
       text = io.dump(dub)
-      g = io.load(text, inputs: { sig: 220.hz.ramp, side: 110.hz.sine, depth: 0.25 })
-      want = 220.hz.ramp.then(&dub.with(side: 110.hz.sine, depth: 0.25))
+      g = io.load(text, inputs: { sig: 220.hz.saw, side: 110.hz.sine, depth: 0.25 })
+      want = 220.hz.saw.then(&dub.with(side: 110.hz.sine, depth: 0.25))
       expect(g.sample(4800)).to eq(want.sample(4800))
-      expect { io.load(text, inputs: { sig: 220.hz.ramp }) }.to raise_error(io::LoadError, /missing input side/)
+      expect { io.load(text, inputs: { sig: 220.hz.saw }) }.to raise_error(io::LoadError, /missing input side/)
       expect { io.load(text, inputs: { sig: 1.constant, side: 1.constant, sid: 2 }) }.to raise_error(io::LoadError, /no input sid/)
     end
 
@@ -128,17 +128,17 @@ RSpec.describe('rack documents') do
 
   describe 'graphs using named racks' do
     it 'carry the rack definitions, so they load where the rack is not defined' do
-      g = 220.hz.ramp.then(&dub.with(side: 110.hz.sine))
+      g = 220.hz.saw.then(&dub.with(side: 110.hz.sine))
       text = io.dump(g, name: 'song')
       expect(text).to include("arack(:dub, side: :audio, depth: :control) { |sig, side:, depth: 0.5|\n")
       expect(text).to include('knob(:space, 0.3)')
-      expect(text).to match(/^220\.hz\.ramp\.then\(&rack\(:dub\)\.with\(side: 110\.hz\.sine\)\.using\(seed: drawn_seed\(\d+\)\)\)\n/)
+      expect(text).to match(/^220\.hz\.saw\.then\(&rack\(:dub\)\.with\(side: 110\.hz\.sine\)\.using\(seed: drawn_seed\(\d+\)\)\)\n/)
 
       other = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false))
       begin
         loaded = MB::Sound::Session.with_context(session: other) { io.load(text) }
         expect(other.racks[:dub]).to be_a(MB::Sound::Rack)
-        expect(loaded.sample(9600)).to eq(220.hz.ramp.then(&dub.with(side: 110.hz.sine)).sample(9600))
+        expect(loaded.sample(9600)).to eq(220.hz.saw.then(&dub.with(side: 110.hz.sine)).sample(9600))
         again = MB::Sound::Session.with_context(session: other) { io.dump(loaded, name: 'song') }
         expect(without_saved(again)).to eq(without_saved(text))
       ensure
@@ -156,7 +156,7 @@ RSpec.describe('rack documents') do
         texture = s.noise.at(0.05) + s.drift(3, range: -0.1..0.1) + 110.hz.unison(3, detune: 10.cents) { |p, _| p.saw.rnd }.at(0.1)
         (sig + texture).filter(:lowpass, cutoff: s.knob(:tone, 2000, range: 200..8000, curve: :exp)) * s.knob(:level, 0.5)
       }
-      g = 220.hz.ramp.at(0.2).then(&wobbly) + 330.hz.ramp.at(0.2).then(&wobbly)
+      g = 220.hz.saw.at(0.2).then(&wobbly) + 330.hz.saw.at(0.2).then(&wobbly)
       s.bg(:pad, g, fade: 0)
       session.process_buffer(800)
       s.turn(:"wobbly/level", 0.8, smooth: 0)
@@ -315,7 +315,7 @@ RSpec.describe('rack documents') do
         expect(r).to be_a(MB::Sound::Rack)
         expect(s.rack(:dubby)).to equal(r)
 
-        g = s.preset(:dubby, sig: 220.hz.ramp, side: 0.constant)
+        g = s.preset(:dubby, sig: 220.hz.saw, side: 0.constant)
         expect(g).to be_a(MB::Sound::GraphNode)
         expect(session.knobs.keys).to include(:"dubby/space")
         expect { s.preset(:dubby, side: 0.constant) }.to raise_error(ArgumentError, /main input sig/)

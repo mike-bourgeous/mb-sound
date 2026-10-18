@@ -41,7 +41,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     end
 
     it 'turns a Tone into a wavetable tone' do
-      t = 220.hz.ramp.at(0.5).wavetable(:square)
+      t = 220.hz.saw.at(0.5).wavetable(:square)
       expect(t.wave_type).to eq(:wavetable)
       expect(t.amplitude).to eq(0.5)
     end
@@ -133,7 +133,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
         [(pow * freqs).sum / pow.sum / f, data.abs.max]
       }
       table = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.wavetable(:saw).sync(ratio: 2.37) } }
-      ramp = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.ramp.sync(ratio: 2.37) } }
+      ramp = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.saw.sync(ratio: 2.37) } }
       table.each { |_, peak| expect(peak).to be < 1.3 }
       13.times { |i| expect(table[i][0] / ramp[i][0]).to be_between(0.88, 1.02) } # the table stops at 20 kHz
       12.times { |i| expect((table[i + 1][0] / table[i][0]) / (ramp[i + 1][0] / ramp[i][0])).to be_within(0.025).of(1) }
@@ -199,7 +199,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     it 'plays the library saw at the RMS level of a PolyBLEP ramp, with Gibbs peaks' do
       [55, 880].each do |f|
         t = f.hz.wavetable(:saw)
-        r = f.hz.ramp
+        r = f.hz.saw
         a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
         b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
         expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.2).of(0)
@@ -209,8 +209,8 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
 
     it 'aliases far less than naive and PolyBLEP ramps' do
       table = aliasing_db(1001) { |p| p.wavetable(:saw) }
-      naive = aliasing_db(1001) { |p| p.aramp }
-      blep = aliasing_db(1001) { |p| p.ramp }
+      naive = aliasing_db(1001) { |p| p.asaw }
+      blep = aliasing_db(1001) { |p| p.saw }
       expect(table).to be < -100
       expect(table).to be < blep - 20
       expect(naive).to be > -50
@@ -263,7 +263,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     end
 
     it 'keeps a steady level through a sweep across levels' do
-      sweep = 2.hz.ramp.lfo.at(0..1)
+      sweep = 2.hz.saw.lfo.at(0..1)
       freq = (sweep * 6).proc { |v| 2**v * 100 } # 100 Hz to 6.4 kHz
       tone = freq.tone.wavetable(:sine)
       data = Numo::NArray.concatenate(Array.new(30) { tone.sample(800).dup })

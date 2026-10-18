@@ -327,7 +327,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     o = device_output(capture: 48000)
     transport = MB::Sound::Sequence::Transport.new
     session = MB::Sound::Session.new(master_gain: 1, output: o, transport: transport, buffer_size: 800, realtime: false, raise_errors: true)
-    session.add(110.hz.ramp.at(0.5), name: :saw)
+    session.add(110.hz.saw.at(0.5), name: :saw)
 
     rendered = Array.new(20) { session.process_buffer.map(&:dup) }
     wait_until { o.stats[:queued] == 0 }

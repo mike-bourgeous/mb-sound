@@ -15,7 +15,7 @@ RSpec.describe('MB::Sound::Plan stream restarts') do
   def make
     src = MB::Sound::MIDI::FileSource.new('spec/test_data/c2_sustain.mid')
     n = MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(src))
-    [n.hz.ramp.pm(n.env * 2) * n.amp_env(0.01, 0.1, 0.5, 0.5), src]
+    [n.hz.saw.pm(n.env * 2) * n.amp_env(0.01, 0.1, 0.5, 0.5), src]
   end
 
   # Renders with +jump+ (called with the source) once the stream has ended,

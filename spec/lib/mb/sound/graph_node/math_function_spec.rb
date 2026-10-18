@@ -36,6 +36,6 @@ RSpec.describe(MB::Sound::GraphNode::MathFunction, :aggregate_failures) do
   end
 
   it 'prints back as Ruby' do
-    expect((1.hz.aramp.at(0..4) * 0.9999).floor.to_ruby).to include('.floor')
+    expect((1.hz.asaw.at(0..4) * 0.9999).floor.to_ruby).to include('.floor')
   end
 end

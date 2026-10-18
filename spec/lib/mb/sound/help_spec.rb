@@ -275,7 +275,7 @@ RSpec.describe MB::Sound::Help do
     it "flow: uses its own scene names and won't start over a playing form" do
       session = new_session
       MB::Sound::Session.with_context(session: session) do
-        MB::Sound.track(:drums, q: 1) { |c| c.tone.ramp * c.gate }
+        MB::Sound.track(:drums, q: 1) { |c| c.tone.saw * c.gate }
         MB::Sound.scene(:intro, drums: MB::Sound.seq(MB::Sound::C3).n4.loop)
         MB::Sound.scene(:outro, drums: MB::Sound.seq(MB::Sound::C2).n4.loop)
         mine = session.arrangement.scenes.slice(:intro, :outro)
@@ -669,11 +669,11 @@ RSpec.describe MB::Sound::Help do
       expect(text(MB::Sound.help).lines.drop_while { |l| !l.start_with?('More help') }.map { |l| l.chomp.length }.max).to be <= 40
     end
 
-    # ux-fix-1 item 15: the sheet teaches saw, graphs print ramp
+    # ux-fix-1 item 15: saw is official; ramp and sawtooth are aliases
     it 'heads a method page with its official name and aliases' do
-      t = text(MB::Sound.help(:saw))
-      expect(t.lines.first).to start_with('ramp  (alias saw, sawtooth)')
-      expect(t).to include('saw is an alias of ramp; graphs print it back as ramp')
+      t = text(MB::Sound.help(:ramp))
+      expect(t.lines.first).to start_with('saw  (alias ramp, sawtooth)')
+      expect(t).to include('ramp is an alias of saw; graphs print it back as saw')
       expect(text(MB::Sound.help(:turn)).lines.first).to include('(alias move)')
     end
 
@@ -722,7 +722,7 @@ RSpec.describe MB::Sound::Help do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.instance_exec do
           knob :n_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
-          track(:n_bass, q: 1) { |c| c.tone.ramp.lp4(knob(:n_cut)) * c.amp_env }
+          track(:n_bass, q: 1) { |c| c.tone.saw.lp4(knob(:n_cut)) * c.amp_env }
           scene :intro, n_bass: seq(MB::Sound::A1, rest).n8.loop
           scene :verse, n_bass: seq(MB::Sound::A1, MB::Sound::A2).n8.loop
           go :intro

@@ -177,7 +177,7 @@ RSpec.describe(MB::Sound::FastPlan) do
           -> { list.held!.fill(0, [n / 3, 1].max, 1.0 / 3).glide([n / 3, 1].max, n, 40.0, 52.5, 3, 97, 0.4).fill(n, n + 5, 9) },
           -> { list.held!.glide(0, n, 60.0, 48.0, 0, 50, 0).buffer(n / 2, n, buf) },
           -> { list.impulses!.impulse(0, 0.5).impulse(n - 1, 1.0 / 7).impulse(n + 3, 2) },
-          -> { list.held!.ramp(0, [n / 2, 1].max, 3, 7).ramp([n / 2, 1].max, n, 100, 1001) },
+          -> { list.held!.saw(0, [n / 2, 1].max, 3, 7).saw([n / 2, 1].max, n, 100, 1001) },
         ]
         cases.each do |make|
           make.call

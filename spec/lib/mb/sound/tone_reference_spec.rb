@@ -50,7 +50,7 @@ RSpec.describe('Tone null-test reference') do
     # 2026-10-08: complex shapes with phase modulation, warps, or sync play
     # from complex wavetables (Tone#complex_table?) instead of the naive
     # closed forms
-    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_ramp); 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
+    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_saw); 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     # Fix 2026-10-08: a band-limited (PolyBLEP) tone's first sample is
     # corrected as if the tone had always run, so a square or pulse starting
     # on its edge at phase 0 plays the edge's midpoint (0), not +1; only

@@ -57,7 +57,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     it 'integrates to 1 for uniform noise' do
-      _, d = MB::Sound.density(1.hz.ramp.noise.sample(48000), bins: 20, range: -1..1)
+      _, d = MB::Sound.density(1.hz.saw.noise.sample(48000), bins: 20, range: -1..1)
       expect(d.sum * 0.1).to be_within(1e-9).of(1)
       expect(d).to all_be_within(0.05).of_array(Numo::DFloat.new(20).fill(0.5))
     end
@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     it 'takes curves as arguments (labels and title inferred) or by name (ux-1 item 31)' do
       chart = MB::Sound.overlay_chart(Numo::DFloat[0, 1, 0.5], [3, 2, 1])
       expect(chart.title).to eq('1 vs 2')
-      named = MB::Sound.overlay_chart(saw: 110.hz.ramp, square: 110.hz.square, samples: 100)
+      named = MB::Sound.overlay_chart(saw: 110.hz.saw, square: 110.hz.square, samples: 100)
       expect(named.title).to eq('saw vs square')
       expect(MB::Sound.overlay_chart(Numo::DFloat[-1, 1]).title).to eq('1')
       expect { MB::Sound.overlay_chart }.to raise_error(ArgumentError, /overlay a, b/)
@@ -219,7 +219,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     context 'with multiple sounds' do
-      let(:output) { MB::Sound.plot([123.hz.sine, 123.hz.ramp, 123.hz.triangle, 123.hz.gauss]) }
+      let(:output) { MB::Sound.plot([123.hz.sine, 123.hz.saw, 123.hz.triangle, 123.hz.gauss]) }
 
       it 'can plot an array of different sounds in a 2x2 grid' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*[^\e]\[/m)
@@ -259,7 +259,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
   end
 
   describe '#spectrogram' do
-    let(:output) { MB::Sound.spectrogram(440.hz.ramp, seconds: 0.5, fft: 1024) }
+    let(:output) { MB::Sound.spectrogram(440.hz.saw, seconds: 0.5, fft: 1024) }
 
     it 'shades a spectrogram with a colorbar when there is no color' do
       check_size(lines)

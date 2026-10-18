@@ -70,7 +70,7 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
         expect(ui.prompt_status).to be_nil # playing, but nothing a command set
 
         arr = session.arrangement
-        arr.track(:lead) { |c| c.tone.ramp * c.amp_env }
+        arr.track(:lead) { |c| c.tone.saw * c.amp_env }
         arr.scene(:drop, s: :keep)
         arr.go(:drop, at: :now) rescue nil
         session.process_buffer
@@ -95,7 +95,7 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       session.knob(:cut, 800, range: 100..8000)
       session.knob(:crush, 0.5)
       arr = session.arrangement
-      arr.track(:bass) { |c| c.tone.ramp * c.amp_env }
+      arr.track(:bass) { |c| c.tone.saw * c.amp_env }
       arr.scene(:drop, bass: MB::Sound.seq(MB::Sound::A2).n4.loop)
       arr.scene(:dub, bass: nil)
 

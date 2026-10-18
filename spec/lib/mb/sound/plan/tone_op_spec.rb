@@ -56,9 +56,9 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
 
     it 'matches #at with a node, which becomes the gain inside the tone op' do
-      r = plan_compare { fm(1).tone.ramp.at(0.5).at(src.new(seed: 5)) * 1 }
+      r = plan_compare { fm(1).tone.saw.at(0.5).at(src.new(seed: 5)) * 1 }
       expect(r.program.to_s).to match(/gain: v\d+/)
-      r = plan_compare { fm(2).tone.ramp.at(0.2..0.9).gain(0.37).at(src.new(seed: 6)) * 1 }
+      r = plan_compare { fm(2).tone.saw.at(0.2..0.9).gain(0.37).at(src.new(seed: 6)) * 1 }
       expect(r.program.to_s).to match(/gain: v\d+/)
     end
 
@@ -116,7 +116,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
         w = src.new(seed: 3, scale: 0.4, offset: 0.5)
         trig = src.new(kind: :impulses, at: (0..8000).step(53).to_a)
         fm(1, 700).tone.triangle.skew(w) + fm(2, 500).tone.atriangle.skew(0.9) +
-          fm(3, 300).tone.sine.pwm(0.2, pivot: 0.3) + fm(4, 400).tone.ramp.pwm(w, pivot: -0.4, dc: true) +
+          fm(3, 300).tone.sine.pwm(0.2, pivot: 0.3) + fm(4, 400).tone.saw.pwm(w, pivot: -0.4, dc: true) +
           fm(5, 900).tone.square.pwm(0.3, pivot: 0.1).reset(trig, to: 0.2) +
           fm(6, 200).tone.triangle.skew(0.8, pivot: 0)
       }
@@ -140,7 +140,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
 
     it 'matches a tone whose first sample is a reset' do
-      plan_compare(sizes: [1, 64, 3, 128]) { 1000.hz.ramp.reset(src.new(kind: :impulses, at: [0, 1, 65])) * 1 }
+      plan_compare(sizes: [1, 64, 3, 128]) { 1000.hz.saw.reset(src.new(kind: :impulses, at: [0, 1, 65])) * 1 }
     end
   end
 
@@ -195,7 +195,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
       tone = 300.hz.wavetable(:saw)
       expect(tone.plan_unsupported_reason).to be_nil
       expect(300.hz.wavetable(:saw).clean.reset(src.new(kind: :impulses, at: [5])).plan_unsupported_reason).to match(/clean/)
-      expect(300.hz.complex_ramp.pm(0.1).plan_unsupported_reason).to match(/complex shape/)
+      expect(300.hz.complex_saw.pm(0.1).plan_unsupported_reason).to match(/complex shape/)
       expect(300.hz.wavetable(samples).plan_unsupported_reason).to match(/sample-mode/)
     end
   end
@@ -246,7 +246,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
 
     it 'keeps complex sines, noise, and other shapes exact' do
-      r = plan_compare(ruby_tolerance: 1e-6) { fm(1).tone.ramp * 1 + fm(2).tone.atriangle + fm(3).tone.complex_sine.real + fm(1).tone.sine.noise(0.2) }
+      r = plan_compare(ruby_tolerance: 1e-6) { fm(1).tone.saw * 1 + fm(2).tone.atriangle + fm(3).tone.complex_sine.real + fm(1).tone.sine.noise(0.2) }
       expect(r.program).to be_exact
     end
 

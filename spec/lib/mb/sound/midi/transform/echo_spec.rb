@@ -281,7 +281,7 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
       n = MB::Sound::Notes.new(one_note).echo(1/4r, 2, pitch: 12)
       expect(n).to be_a(MB::Sound::Notes)
       expect(n.sustain?).to eq(true)
-      syn = n.synth(voices: 4) { |v| v.hz.ramp * v.amp_env(0.001, 0.1, 0, 0.05) }
+      syn = n.synth(voices: 4) { |v| v.hz.saw * v.amp_env(0.001, 0.1, 0, 0.05) }
       peaks = 40.times.map { syn.sample(1200).abs.max }
       expect(peaks[0]).to be > 0.1
       expect(peaks[10..12].max).to be > 0.1 # the first echo at 0.25 s (buffer 10)

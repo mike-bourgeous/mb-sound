@@ -19,12 +19,12 @@ module MB::Sound
         -> { seq(!A1, ~C2, Rest, C3.n4, Tie, G2.chance(0.5), ~!E2.every(2, from: 2), A1.fill(:big), (!A1).n8, A1.slide(1.1).acc).n16.loop.tone },
         'seq(!A1, ~C2, Rest, C3.n4, Tie, G2.chance(0.5), ~!E2.every(2, from: 2), A1.fill(:big), (!A1).n8, (!A1).slide(11r/10)).n16.loop',
       ],
-      'acid' => [-> { acid(A1, !C2, ~A2, R, A1.up).loop.tone.ramp }, 'acid(A1, !C2, ~A2, Rest, A1.up).loop'],
+      'acid' => [-> { acid(A1, !C2, ~A2, R, A1.up).loop.tone.saw }, 'acid(A1, !C2, ~A2, Rest, A1.up).loop'],
       'operators' => [-> { c = seq(C4, E4, G4).n16; ((c | c.transpose(7)) & seq(C3).n2).reverse.loop.tone }, '((clip | clip.transpose(7)) & seq(C3).n2).reverse.loop'],
       'feel' => [-> { seq(C4, E4, G4, C5).n16.swing.quantize(8, amount: 0.5).humanize(0.01, vary: true).shuffle.loop.tone }, '.humanize(0.01, vary: true)'],
       'generators' => [-> { (euclid(3, 8, C2) | melody(scale(:minor, :a), 8, seed: 3)).loop.tone }, 'euclid(3, 8, C2) | melody(scale(:minor, A4), 8, seed: 3)'],
       'kit rows' => [
-        -> { k = grid(16, kick: 'x...x...', hat: 'x.x.x.x.').loop.named(:beat); 50.hz.sine * k[:kick].env(0, 0.2, 0, 0.05) + 3000.hz.ramp * k[:hat].env(0, 0.03, 0, 0.02) },
+        -> { k = grid(16, kick: 'x...x...', hat: 'x.x.x.x.').loop.named(:beat); 50.hz.sine * k[:kick].env(0, 0.2, 0, 0.05) + 3000.hz.saw * k[:hat].env(0, 0.03, 0, 0.02) },
         'beat = grid(16, kick: "x...x...", hat: "x.x.x.x.").loop.named(:beat)',
       ],
       'kit fills into tr808' => [
@@ -80,7 +80,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
       e.(1/4r, :note_on, 67, 0.5), e.(3/8r, :note_off, 67, 0.0),
       e.(1/2r, :note_on, 64, 0.5),
     ], from: 0, length: 1).named(:lead_1)
-    graph = clip.tone.ramp
+    graph = clip.tone.saw
     doc = io.dump(graph)
     expect(doc).to include(<<~RUBY.chomp)
       events(
@@ -88,7 +88,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
         [1r/4, 1r/8, 67, 0.5],
         [1r/2, 31r/64, 64, 0.5],
         length: 1r, loop: true, performed: true
-      ).named(:lead_1).hz.ramp
+      ).named(:lead_1).hz.saw
     RUBY
     loaded = io.load(doc)
     expect(RecipeHelpers.max_diff(render(graph), render(loaded))).to eq(0)
@@ -185,7 +185,7 @@ RSpec.describe('graph documents with clips', :aggregate_failures) do
 
     it 'takes drawn_seed only as a seed: value' do
       expect { io.load("graph 2
-220.hz.ramp.at(drawn_seed(3))") }.to raise_error(io::LoadError, /drawn_seed\(n\) goes only in seed:/)
+220.hz.saw.at(drawn_seed(3))") }.to raise_error(io::LoadError, /drawn_seed\(n\) goes only in seed:/)
       expect { io.load("graph 2
 noise(seed: drawn_seed(1.5))") }.to raise_error(io::LoadError, /drawn_seed takes an Integer/)
     end

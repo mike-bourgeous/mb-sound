@@ -253,7 +253,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     broken_line = __LINE__ + 2
     MB::Sound::Session.with_context(session: @session) do
       MB::Sound.track(:l_bass, q: 1) { |c| c.equal?(MB::Sound::Arrangement::PatchCheck.probe) ? c.number : c.synth { |v| v.nosuch_patch_method } } # (passes the definition check)
-      MB::Sound.track(:lead, q: 1) { |c| c.synth { |v| v.hz.ramp * v.amp_env } }
+      MB::Sound.track(:lead, q: 1) { |c| c.synth { |v| v.hz.saw * v.amp_env } }
       expect { MB::Sound.arm(:l_bass) }.to output(/l_bass can't monitor/).to_stdout # (live: at the prompt; see Arrangement::PatchCheck)
       MB::Sound.arm(:lead)
     end
@@ -307,7 +307,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     keyboard = MB::Sound::UI::Keyboard.new(out: MB::Sound::UI::Keyboard::Link.new(session: @session, patch: nil), off_mode: :tap)
     keyboard.out.attach # (so arm doesn't warn about missing live MIDI where there is none)
     MB::Sound::Session.with_context(session: @session) do
-      MB::Sound.track(:lead, q: 1) { |c| c.synth(voices: 2) { |v| v.hz.ramp * v.amp_env } }
+      MB::Sound.track(:lead, q: 1) { |c| c.synth(voices: 2) { |v| v.hz.saw * v.amp_env } }
       MB::Sound.arm(:lead)
     end
     start(keyboard: keyboard)

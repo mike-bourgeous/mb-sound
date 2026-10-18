@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::Plot::Text) do
   end
 
   it 'uses Braille, block, sextant, and eighth-block characters' do
-    wave = plot.waveform(100.hz.ramp.sample(4800))
+    wave = plot.waveform(100.hz.saw.sample(4800))
     expect(wave.to_s(width: 60, height: 12, look: :scope, color: :none)).to match(/[⠁-⣿]/)
     expect(wave.to_s(width: 60, height: 12, look: :blocks, color: :none)).to match(/[▀▄█]/)
     expect(wave.to_s(width: 60, height: 12, look: :mosaic, color: :none)).to match(/[\u{1fb00}-\u{1fb3b}▌▐]/)
@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::Plot::Text) do
   end
 
   it 'adds a note-name row under frequency axes' do
-    text = plot.spectrum(440.hz.ramp.sample(4096)).to_s(width: 100, height: 20, color: :none)
+    text = plot.spectrum(440.hz.saw.sample(4096)).to_s(width: 100, height: 20, color: :none)
     expect(text.lines.last).to include('C3', 'C5')
     expect(text).to include('frequency (Hz)', '1k')
   end

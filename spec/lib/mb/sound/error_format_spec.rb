@@ -52,13 +52,13 @@ RSpec.describe(MB::Sound::ErrorFormat) do
 
   describe '.unknown_keyword' do
     it 'suggests keywords for every recorded DSL method' do
-      expect { 261.63.hz.ramp.lp4(800, resonanse: 0.3) }.to raise_error(ArgumentError, /\Alp4: unknown keyword: :resonanse\nDid you mean\?  resonance:/)
-      expect { 261.63.hz.ramp.delay(0.1, feedbak: 0.3) }.to raise_error(ArgumentError, /delay: unknown keyword: :feedbak\nDid you mean\?  feedback:/)
-      expect { 261.63.hz.ramp.lp4(800, zzzzzz: 1) }.to raise_error(ArgumentError, /lp4: unknown keyword: :zzzzzz \(lp4 takes .*resonance:/)
+      expect { 261.63.hz.saw.lp4(800, resonanse: 0.3) }.to raise_error(ArgumentError, /\Alp4: unknown keyword: :resonanse\nDid you mean\?  resonance:/)
+      expect { 261.63.hz.saw.delay(0.1, feedbak: 0.3) }.to raise_error(ArgumentError, /delay: unknown keyword: :feedbak\nDid you mean\?  feedback:/)
+      expect { 261.63.hz.saw.lp4(800, zzzzzz: 1) }.to raise_error(ArgumentError, /lp4: unknown keyword: :zzzzzz \(lp4 takes .*resonance:/)
     end
 
     it 'leaves other ArgumentErrors alone' do
-      expect { 261.63.hz.ramp.lp4 }.to raise_error(ArgumentError, /wrong number of arguments/)
+      expect { 261.63.hz.saw.lp4 }.to raise_error(ArgumentError, /wrong number of arguments/)
     end
   end
 

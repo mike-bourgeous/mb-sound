@@ -20,7 +20,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       base = v.hz.glide(50.ms)
       mod = v.cc(1, range: 1.0..2.0)
       e = v.fm_env(0, 1, 0.5, 0.3) * base.transpose(12).sine.pm(mod * base.sine)
-      saw = v.amp_env * base.ramp.pm(e * mod + v.bend) * 0.1
+      saw = v.amp_env * base.saw.pm(e * mod + v.bend) * 0.1
       out = saw.filter(:lowpass, cutoff: v.cutoff(800), quality: 2) +
         saw.lp4(v.cutoff(1200), resonance: v.reso(0.4)) * 0.5 +
         saw.diode(v.cutoff(700), resonance: v.reso(0.6), drive: 1.5) * 0.3 +
@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound.seed(0)
       MB::Sound.synth('spec/test_data/dense_modulated.mid', voices: 3, spares: 1) { |v|
         f = v.freq
-        (f.tone.ramp * v.amp_env).proc { |x| x } * 0.1 + (f / 1000.constant).delay(0.001) * 0.01
+        (f.tone.saw * v.amp_env).proc { |x| x } * 0.1 + (f / 1000.constant).delay(0.001) * 0.01
       }
     }
     s = build.(true)
@@ -210,7 +210,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       MB::Sound::Plan.lanes = lanes
       MB::Sound.seed(0)
       lfo = 0.3.hz.lfo.sine.at(600..2400)
-      chans = [110, 165].map { |f| f.hz.ramp.pm(src_wave(f) * 0.2).filter(:lowpass, cutoff: lfo, quality: 2).lp4(1500, resonance: 0.3) * 0.4 }
+      chans = [110, 165].map { |f| f.hz.saw.pm(src_wave(f) * 0.2).filter(:lowpass, cutoff: lfo, quality: 2).lp4(1500, resonance: 0.3) * 0.4 }
       chans << 55.hz.sine * 0.3
       MB::Sound::GraphNode::Channels.new(chans)
     end
@@ -390,8 +390,8 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       n = (1.hz.noise.at(0.1) * 0.5).filter(:lowpass, cutoff: 800, quality: 2)
       m = 2.hz.lfo.at(0.2..0.4)
       b = MB::Sound::GraphNode::Channels.new([
-        (220.hz.ramp * m + n).softclip(0.6),
-        (330.hz.ramp * (m * 0.5) + n * -1 * 0.5).softclip(0.6),
+        (220.hz.saw * m + n).softclip(0.6),
+        (330.hz.saw * (m * 0.5) + n * -1 * 0.5).softclip(0.6),
       ])
       [b, MB::Sound::Plan.install(b)]
     end
@@ -422,7 +422,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     it "doesn't pad gains on complex values (x * 1 isn't exact for complex infinities)" do
       prog = ->(g) { MB::Sound::Plan::ScaleMatch.core(MB::Sound::Plan::Installation.new([g], engine: :c, check: nil).build.regions[0].compile(start: false)) }
       c = 220.hz.complex_sine
-      _, sites = prog.((c * 2).real + 1.hz.ramp)
+      _, sites = prog.((c * 2).real + 1.hz.saw)
       expect(sites).to be_empty
     end
   end
