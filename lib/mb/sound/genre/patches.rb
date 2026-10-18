@@ -87,17 +87,31 @@ module MB
           (input + MB::Sound.channels(*noises) * gate).ring(:first)
         end
 
-        # A house bass (Munro's "one saw with a tempo-set decay"): one saw
-        # voice through a four-pole lowpass at +cutoff+ Hz opened +env+
-        # octaves by a short filter envelope, a plucked level with no
-        # sustain (+decay+ a length: an eighth note by default, so it
-        # follows the tempo), a little velocity, and a soft clip.  Mono.
-        # (genre-fixes, 2026-10-18: the house template's bass.)
-        def house_bass(source, cutoff: 240, env: 2.5, resonance: 0.35, decay: 1.n8, level: 1.0)
+        # A house bass, half way between Munro's "one saw with a tempo-set
+        # decay" (genre-fixes) and the funk_bass preset the house stub
+        # played before it (the maintainer on the genre-fixes Bench: "Before
+        # bass is better; maybe go half way between the two";
+        # bench-fixes-1, 2026-10-18).  One voice: a saw through a four-pole
+        # lowpass at +cutoff+ Hz opened +env+ octaves by a filter envelope
+        # (+filter_decay+ s down to +filter_sustain+), plus a sine +body+ at
+        # the note's pitch (relative to the saw), a level envelope decaying
+        # over +decay+ (a length: a dotted eighth by default, so it follows
+        # the tempo) to +sustain+, a little velocity, and a soft clip.
+        # Half way, setting by setting (funk_bass -> Munro): body 1.45 ->
+        # 0 (the sine against the saw), decay 0.5 s -> an eighth note,
+        # sustain 0.55 -> 0, filter decay 0.18 -> 0.06 s, its sustain 0.15
+        # -> 0, resonance 0.25 -> 0.35, cutoff 160 Hz + 1400 Hz of envelope
+        # -> 240 Hz opening 2.5 octaves.  `body: 0, decay: 1.n8, sustain: 0,
+        # filter_decay: 0.06, filter_sustain: 0, resonance: 0.35, cutoff:
+        # 240` is genre-fixes' bass.  Mono.
+        def house_bass(source, cutoff: 200, env: 2.5, resonance: 0.3, body: 0.7, decay: 1.n8.dotted, sustain: 0.25,
+                       filter_decay: 0.12, filter_sustain: 0.08, level: 1.0)
           MB::Sound.synth(source, voices: 1) { |v|
-            fenv = v.env(0.001, 0.06, 0, 0.04, gm: false)
-            amp = v.env(0.002, decay, 0, 0.04, gm: false) * (v.velocity * 0.4 + 0.6)
-            (v.hz.saw.lp4(2 ** (fenv * env) * cutoff, resonance: resonance) * amp).softclip(0.7, 0.97)
+            fenv = v.env(0.001, filter_decay, filter_sustain, 0.04, gm: false)
+            amp = v.env(0.002, decay, sustain, 0.04, gm: false) * (v.velocity * 0.4 + 0.6)
+            saw = v.hz.saw.lp4(2 ** (fenv * env) * cutoff, resonance: resonance)
+            tone = body == 0 ? saw : saw + v.hz.sine * body
+            (tone * amp).softclip(0.7, 0.97)
           } * level
         end
 

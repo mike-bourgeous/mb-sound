@@ -64,8 +64,12 @@ module MB
       clip :stab, seq(R, R, F3, R, R, R, R, R).n8.bake(chord(0, 3, 7)).loop(align: :launch)
       # A 303 line for peak2 (accents !, slides ~)
       clip :acid, seq(F2, F2, !F3, F2, R, Ab2, ~C3, F2, !Eb3, F2, R, F2, ~G2, Ab2, !F3, R).n16.loop(align: :launch)
-      # Detroit strings: Fm9, then Dbmaj7, 16 bars each (once a phrase)
-      clip :strings, (0...5).map { |i| seq([F2, C3, Eb3, G3, Ab3][i], *[T] * 15, [Db2, Ab2, C3, F3, Ab3][i], *[T] * 15).n1 }.reduce(:&).legato(0.99).loop(align: :launch)
+      # Detroit strings: Fm9, then Dbmaj7, 16 bars each (once a phrase),
+      # four voices above the acid line (bench-fixes-1: five voices from F2
+      # on the SQ-80 flutter pad, its PRIME an octave lower, piled up under
+      # the 303 as "an additive organ from hell", the maintainer on the
+      # genre-fixes Bench)
+      clip :strings, (0...4).map { |i| seq([F3, Ab3, C4, G4][i], *[T] * 15, [Db3, F3, Ab3, C4][i], *[T] * 15).n1 }.reduce(:&).legato(0.99).loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
       knob :cut, 400, range: 150..6000, curve: :exp, unit: 'Hz' # the stab's lowpass
@@ -81,16 +85,20 @@ module MB
       # drums-3.  The heavy one: `role :stab, :stab, params: { cutoff: :cut,
       # drive: 1 }`)
       role :stab, :stab, params: { cutoff: :cut }, level: -9.db, send: { echo: :space }, about: 'a detuned stab opening over the phrase, a dotted-eighth echo'
-      role :acid, :acid, level: -12.db, duck: -4.db, about: 'a 303 line for the second peak'
-      role :strings, :sq80_flutter_pad, level: -14.db, about: 'a Detroit string chord, once a phrase'
+      role :acid, :acid, level: -9.db, duck: -3.db, about: 'a 303 line for the second peak'
+      role :strings, :jungle_pad, level: -4.db, about: 'a Detroit string chord, once a phrase, under the acid'
       role :noise, :riser, params: { bars: 8, from: 300, to: 6000, level: 0.15 }, fade: 1/8r, about: 'a filtered noise swell into the peak'
 
       sidechain :drums, only: :kick
       # The rumble bus (Munro: "the kick's reverb/sub tail ducked by the
       # kick itself"): only the lows of the drums, through a dark room,
       # ducked by the kick so the tail fills the gaps between kicks
-      bus :rumble, [:filter, :lowpass, { cutoff: 160, quality: 0.7 }], [:reverb, :hall, { mix: 1 }],
-          [:filter, :lowpass, { cutoff: 120, quality: 0.7 }], [:at, 6.db], [:duck, :drums, { only: :kick, amount: -18.db, release: 1.n8 }]
+      # (bench-fixes-1, the maintainer: "Rumble needs to be a bit louder,
+      # have a very gentle rolloff": one gentle 12 dB/octave lowpass at 250
+      # Hz before the room instead of 160 and 120 Hz around it, 24 dB/octave
+      # together; the return as loud as before below 100 Hz, more above)
+      bus :rumble, [:filter, :lowpass, { cutoff: 250, quality: 0.5 }], [:reverb, :hall, { mix: 1 }],
+          [:at, 9.db], [:duck, :drums, { only: :kick, amount: -18.db, release: 1.n8 }]
       bus :echo, [:filter, :highpass, { cutoff: 300, quality: 0.7 }], [:delay, 1.n8.dotted, { feedback: 0.4 }]
 
       scene :intro, drums: :intro, cut: 400
