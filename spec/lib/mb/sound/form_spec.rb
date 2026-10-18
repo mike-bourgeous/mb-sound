@@ -764,6 +764,26 @@ RSpec.describe(MB::Sound::Form) do
       expect(set.playback.ended?).to eq(true) # (c is the last section: the flow ends after it, as written)
     end
 
+    it 'seeks forward first, else the nearest section behind, and picks one with section:' do
+      setup_scenes(:a, :b)
+      flow { a 1; b 1, scene: :a; a2 1, scene: :b; b2 1, scene: :a }
+      pb = set.playback
+      expect(pb.sections_for_scene(:a)).to eq(%i[a b b2])
+      expect(pb.section_for_scene(:a)).to eq(:b) # (forward from a)
+      run(bar + bar / 4) # (in b; a pass begins up to half a bar early)
+      expect(pb.section).to eq(:b)
+      expect(pb.section_for_scene(:a)).to eq(:b2) # (forward)
+      expect(pb.section_for_scene(:b)).to eq(:a2)
+      run(2 * bar) # (in b2: nothing forward plays :b, the nearest behind is a2)
+      expect(pb.section).to eq(:b2)
+      expect(pb.section_for_scene(:b)).to eq(:a2)
+      expect(pb.section_for_scene(:a)).to eq(:b2)
+      expect { within { MB::Sound.go(:a, section: :a2) } }.to raise_error(ArgumentError, /sections playing :a: :a, :b, :b2/)
+      e = nil
+      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks to its section :a .*also :b, :b2: go :a, section: :b/).to_stdout
+      expect(e.kind).to eq(:seek)
+    end
+
     it 'ends the flow where a scene typed during it lands when no section plays it, and says so' do
       setup_scenes(:a, :b, :c)
       flow { a 2; b 2 }

@@ -303,15 +303,22 @@ module MB
           @session.stamp(@end_at)
         end
 
-        # The section that plays scene +scene+ next: the first in the play
-        # order (played straight through) after the current one, wrapping
-        # around, whose scene is +scene+; nil if no section plays it.
+        # The section that plays scene +scene+ for `go` (maintainer,
+        # 2026-10-18: "Always forward if present, nearest back if not"): the
+        # first section after the current one in the play order (played
+        # straight through) whose scene is +scene+, else the nearest one at
+        # or before it; nil if no section plays it.  (`go :drop, section:
+        # :drop2` picks one by name.)
         def section_for_scene(scene)
           steps = @form.steps.map(&:first)
-          names = steps.select { |n| (s = @form.sections[n]) && scene_of(s) == scene }
-          return nil if names.empty?
+          plays = ->(n) { (s = @form.sections[n]) && scene_of(s) == scene }
           i = steps.index(@section) || -1
-          (steps[(i + 1)..] + steps[0..i]).find { |n| names.include?(n) }
+          steps[(i + 1)..].find(&plays) || steps[0..i].reverse.find(&plays)
+        end
+
+        # The sections whose scene is +scene+ (play order, each once).
+        def sections_for_scene(scene)
+          @form.steps.map(&:first).uniq.select { |n| (s = @form.sections[n]) && scene_of(s) == scene }
         end
 
         # Where #end_at ends the form (whole notes), or nil.
@@ -359,7 +366,7 @@ module MB
           if @ended
             lines << '  start (or play) plays it again from the start'
           else
-            lines << '  steer: loop!  onward  goto :name  skip  practice :name  go :scene (seeks to the section playing it)'
+            lines << '  steer: loop!  onward  goto :name  skip  practice :name  go :scene (seeks to the next section playing it; section: picks one)'
             lines << '  end:   finish (the ending next)  outro in: 4.bars (fades out, ends the flow)  stop :all'
           end
           lines.join("\n")

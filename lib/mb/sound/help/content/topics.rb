@@ -637,7 +637,8 @@ module MB
         it); `start` (or `play`, `go` with nothing) plays the loaded flow
         and `pause` (NAV Space) toggles.  `outro in: 4.bars` and `stop
         :all` end the flow too; `go :scene` during it seeks the flow to
-        the next section playing that scene (a scene no section plays
+        the next section playing that scene (else the nearest behind;
+        `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
       commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter

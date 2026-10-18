@@ -1,3 +1,5 @@
+require_relative '../../../../support/ui_helpers'
+
 RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
   let(:vt) { MB::Sound::UI::VT.new(5, 10) }
   let(:cells) { MB::Sound::Plot::Text::Cells }
@@ -156,5 +158,34 @@ RSpec.describe(MB::Sound::UI::VT, :aggregate_failures) do
     expect(v.scrollback.length).to eq(9960)
     expect(v.lines.last.rstrip).to eq("line 10000 #{'x' * 60}")
     expect(elapsed).to be < 2.0 # ~0.15 s on the Mac container
+  end
+  # ui-api-1 (maintainer, 2026-10-18: `ui :off` lost color: "The history
+  # text copied from the panel to the terminal")
+  it 'gives a row back as text with SGR for its styles, changing only where the style does' do
+    vt = MB::Sound::UI::VT.new(3, 40)
+    vt.feed("plain \e[1;31mbold red\e[0m mid \e[38;5;208mor\e[48;2;1;2;3mange\e[0m   \r\n")
+    vt.feed("no style at all\r\n")
+    row = vt.line_at(vt.dropped + vt.scrollback.length)
+    expect(row.to_sgr).to eq("plain \e[0;1;31mbold red\e[0m mid \e[0;38;5;208mor\e[0;38;5;208;48;2;1;2;3mange\e[0m")
+    expect(row.to_s).to eq('plain bold red mid orange')
+    expect(vt.line_at(vt.dropped + vt.scrollback.length + 1).to_sgr).to eq('no style at all')
+    # (what the terminal shows from it is the VT's own row again)
+    vt2 = MB::Sound::UI::VT.new(3, 40)
+    vt2.feed(row.to_sgr)
+    r2 = vt2.line_at(vt2.dropped + vt2.scrollback.length)
+    expect((0...row.length).map { |c| [r2.char(c), r2.fg_at(c), r2.bg_at(c), r2.attr_at(c)] }).to eq((0...row.length).map { |c| [row.char(c), row.fg_at(c), row.bg_at(c), row.attr_at(c)] })
+  end
+
+  it 'copies the REPL pane\'s colored lines out of the tiles with their colors (UI::Switch)' do
+    @tiles, @term = ui_tiles(:tiles)
+    expect(@term.wait_for('t> ')).to eq(true)
+    @tiles.host.vt.feed("\e[32mgreen\e[0m and plain\r\n") # (colored console output, as the pane holds it)
+    lines = MB::Sound::UI::Switch.repl_lines(@tiles, color: true)
+    expect(lines.join("\n")).to include("\e[0;32mgreen\e[0m and plain")
+    expect(MB::Sound::UI::Switch.repl_lines(@tiles, color: false).join("\n")).to include("green and plain")
+    expect(MB::Sound::UI::Switch.repl_lines(@tiles, color: false).join).not_to include("\e[")
+  ensure
+    @tiles&.stop
+    @term&.close
   end
 end

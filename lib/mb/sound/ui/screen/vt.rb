@@ -158,6 +158,29 @@ module MB
             t = @text.delete("\0")
             strip ? t.rstrip : t
           end
+
+          # The row as text with SGR sequences for its colors and
+          # attributes (a new sequence only where the style changes, a reset
+          # at the end; trailing unstyled spaces cut), for copying the REPL
+          # pane's lines back to the normal screen (maintainer, 2026-10-18:
+          # the history copied out of the tiles lost its color).
+          def to_sgr
+            return to_s if plain?
+            last = @text.length - 1
+            last -= 1 while last >= 0 && @text[last] == ' ' && @bg[last].nil? && (@attr[last] & (REVERSE | UNDERLINE)) == 0
+            out = +''
+            cur = [nil, nil, 0]
+            (0..last).each do |c|
+              ch = @text[c]
+              next if ch == "\0"
+              style = [@fg[c], @bg[c], @attr[c]]
+              out << VT.sgr_for(*style) if style != cur
+              cur = style
+              out << ch
+            end
+            out << "\e[0m" if cur != [nil, nil, 0]
+            out
+          end
         end
 
         attr_reader :rows, :cols, :row, :col, :scrollback, :title
@@ -914,6 +937,28 @@ module MB
             end
             k += 1
           end
+        end
+
+        # The SGR sequence that sets exactly +fg+, +bg+ (packed colors, nil
+        # for the default), and +attr+ (BOLD | DIM ...), from a reset.
+        def self.sgr_for(fg, bg, attr)
+          codes = [0]
+          SGR_BASIC.each { |code, bit| codes << code if attr & bit != 0 }
+          codes.concat(color_codes(fg, 30, 90, 38)) if fg
+          codes.concat(color_codes(bg, 40, 100, 48)) if bg
+          "\e[#{codes.join(';')}m"
+        end
+
+        # SGR codes for packed color +c+ (base 30/40, bright 90/100,
+        # extended 38/48).
+        def self.color_codes(c, base, bright, ext)
+          if c & INDEXED != 0
+            n = c & 255
+            return [base + n] if n < 8
+            return [bright + n - 8] if n < 16
+            return [ext, 5, n]
+          end
+          [ext, 2, (c >> 16) & 255, (c >> 8) & 255, c & 255]
         end
 
         # [packed color, codes used] for 38/48's arguments at +k+.

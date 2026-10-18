@@ -66,23 +66,36 @@ module MB
       # Typed at the console while a flow plays, `go` seeks within the flow
       # (maintainer, 2026-10-18: "Seek within the flow"; `go :outro` used
       # to land and then the flow's next scenes took over): the flow jumps
-      # to the next section that plays the scene (Form::Playback
-      # #section_for_scene), a :seek change at the scene's launch point,
-      # and plays on from there.  When no section plays it, the scene
-      # launches and the flow ends where it lands ("you're driving";
+      # to the section that plays the scene (Form::Playback
+      # #section_for_scene: the next one forward, else the nearest behind),
+      # a :seek change at the scene's launch point, and plays on from
+      # there.  +section:+ picks the section by name when several play the
+      # scene (`go :drop, section: :drop2`).  When no section plays it, the
+      # scene launches and the flow ends where it lands ("you're driving";
       # `start` plays the flow again), and it says so.
-      def go(name = nil, at: nil, on: nil, in: nil, fade: nil)
+      def go(name = nil, section: nil, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
         return start(at: point) if name.nil?
 
         arr = Session.current.arrangement
         pb = arr.playback
         console = pb && !pb.ended? && Session.context&.[](:time).nil?
-        if console && (section = pb.section_for_scene(name))
+        if section
+          return MB::Sound.live_error(ArgumentError.new("go #{name.inspect}, section: #{section.inspect}: no flow is playing")) unless pb && !pb.ended?
+          choices = pb.sections_for_scene(name)
+          unless choices.include?(section)
+            return MB::Sound.live_error(ArgumentError.new(
+              "go #{name.inspect}, section: #{section.inspect}: sections playing #{name.inspect}: #{choices.empty? ? 'none' : choices.map(&:inspect).join(', ')}#{Form.suggest(section, choices)}"
+            ))
+          end
+        end
+        if console && (section ||= pb.section_for_scene(name))
           sc = arr.scenes[name]
           point = LaunchPoint.on(sc&.q || arr.quant || :bar) unless point.given?
           entry = seek(section, at: point)
-          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there\e[0m" if entry
+          others = pb.sections_for_scene(name) - [section]
+          also = others.empty? ? '' : "; also #{others.map(&:inspect).join(', ')}: go #{name.inspect}, section: #{others.first.inspect}"
+          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there#{also}\e[0m" if entry
           return entry
         end
 
