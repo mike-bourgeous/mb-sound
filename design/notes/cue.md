@@ -5,7 +5,7 @@ Branch cue-1 (2026-10-18).  The maintainer picked "CUE/MAIN staging now" from th
 ## API
 
 ```ruby
-cue :acid, acid_line.tone.ramp.lp4(800) * 0.4   # plays on CUE (player :"acid/cue"), MAIN untouched
+cue :acid, acid_line.tone.saw.lp4(800) * 0.4   # plays on CUE (player :"acid/cue"), MAIN untouched
 cue :bass, bass_b                               # a track: its patch on the clip, on CUE
 cue :lead                                       # a track not playing: its patch on its clip, on CUE
 cue :drums                                      # a player already on MAIN: pre-listen (PFL), MAIN untouched

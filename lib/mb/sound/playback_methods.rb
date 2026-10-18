@@ -125,7 +125,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3, C2, rest, As1, G1).n16.loop
-      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
+      #     bg :bass, bass.tone.saw.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
       #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
       #     bpm 140
       #     stop       # stops the last one started (player 1)
@@ -516,7 +516,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
-      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 400 + bass.env * 3000, quality: 4) * bass.env
+      #     bg :bass, bass.tone.saw.at(1).filter(:lowpass, cutoff: 400 + bass.env * 3000, quality: 4) * bass.env
       #     swap :bass, seq(C2, Eb2, G2, Bb2).n16.loop
       #     swap :bass, bass                         # back to the first bass line
       #
@@ -847,8 +847,8 @@ module MB
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
-      #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      #     render '/tmp/bass_spotify.flac', bass.tone.ramp.at(1) * bass.env, bars: 4, loudness: :spotify
+      #     render '/tmp/bass.flac', bass.tone.saw.at(1) * bass.env * 0.5, bars: 4
+      #     render '/tmp/bass_spotify.flac', bass.tone.saw.at(1) * bass.env, bars: 4, loudness: :spotify
       #
       # Mastering presets (see #master and Mastering): a render whose
       # block sets one (`master :club`), or given +master:+ (a preset name,

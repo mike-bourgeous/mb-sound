@@ -121,9 +121,9 @@ module MB
         # Bit crushing is #aquantize.  Aliases
         # #crush_rate, #srr (sample-rate reduction).
         #
-        #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900)
+        #     play 110.hz.saw.lp4(1500, resonance: 0.8).decimate(2900)
         #     play 220.hz.square.decimate(0.2.hz.lfo.at(500..6000), jitter: 0.2)
-        #     play 110.hz.ramp.lp4(1500, resonance: 0.8).decimate(2900, mix: 0.4)   # 40% crushed
+        #     play 110.hz.saw.lp4(1500, resonance: 0.8).decimate(2900, mix: 0.4)   # 40% crushed
         #     play 220.hz.triangle.decimate(4000, interpolation: :linear)            # grit, less ringing
         #
         # +interpolation+ :linear joins the held samples with straight lines

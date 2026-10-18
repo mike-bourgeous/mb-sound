@@ -8,9 +8,9 @@ module MB
       # MB::Sound::GraphNode#filter method to create a sample wrapper.
       #
       # Example:
-      #     500.hz.lowpass.wrap(123.hz.ramp)
+      #     500.hz.lowpass.wrap(123.hz.saw)
       #     # or
-      #     123.hz.ramp.filter(500.hz.lowpass)
+      #     123.hz.saw.filter(500.hz.lowpass)
       class SampleWrapper
         extend Forwardable
         include MB::Sound::GraphNode

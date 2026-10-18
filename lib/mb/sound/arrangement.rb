@@ -216,7 +216,7 @@ module MB
       # drummer's backbeat: `nudge: 6.ms`).  Both apply to clip-driven
       # graphs (MIDI::ClipSource#ahead).
       #
-      #     track(:bass, q: 1) { |c| c.tone.ramp.lp4(800) * c.amp_env }
+      #     track(:bass, q: 1) { |c| c.tone.saw.lp4(800) * c.amp_env }
       #     track :pad, pad_graph
       #     track(:pad, lead: :attack) { |c| c.synth { |v| v.hz.saw * v.amp_env(1.5, 1, 0.8, 2) } }
       #     track(:swell, lead: :attack, lead_max: 2) { |c| c.synth { |v| v.hz.saw * v.amp_env(4, 1, 0.8, 2) } }

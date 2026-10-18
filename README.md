@@ -83,14 +83,14 @@ play (
   (
     (
       D4.triangle *
-      4.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      4.hz.saw.at(1..0).filter(100.hz.lowpass) *
       0.125.hz.triangle
     ) + (
       (D2.triangle + noise.at(-46.db)) *
-      2.hz.ramp.at(1..0).filter(100.hz.lowpass)
+      2.hz.saw.at(1..0).filter(100.hz.lowpass)
     ) + (
       D1.square.filter(1000.hz.lowpass(quality: 4)) *
-      0.5.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      0.5.hz.saw.at(1..0).filter(100.hz.lowpass) *
       (1/32.0).hz.triangle
     )
   ) * 4
@@ -101,16 +101,16 @@ square_lfo = 0.6.hz.square.at(0.5..6.5).smooth(0.15)
 play 0.5 * (400.hz.triangle.at(10) + square_lfo).clip(-0.2, 0.2).filter(50.hz.highpass)
 
 # Saving a tone to an audio file
-write('/tmp/ramp.flac', D3.ramp * adsr(0.2, 0.2, 0.1, 0.4), overwrite: true)
+write('/tmp/ramp.flac', D3.saw * adsr(0.2, 0.2, 0.1, 0.4), overwrite: true)
 play '/tmp/ramp.flac'
 
 # Some hi-hat rhythms
 # (ramps in dB, converted to gains with 10 ** (dB / 20))
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (1.25.hz.ramp.with_phase(0.5).at(0..-60) / 20) + 10 ** (2.5.hz.ramp.at(-10..-70) / 20))
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (5.hz.ramp.with_phase(0.5).at(0..-60) / 20) + 10 ** (5.hz.ramp.at(-10..-70) / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (1.25.hz.saw.with_phase(0.5).at(0..-60) / 20) + 10 ** (2.5.hz.saw.at(-10..-70) / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (5.hz.saw.with_phase(0.5).at(0..-60) / 20) + 10 ** (5.hz.saw.at(-10..-70) / 20))
 
 # Heavily distorted synth kick
-play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip
+play (2.5.hz.saw.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.saw.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip
 
 # Thick bass
 play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * amp_env(0.01, 0.1, 0.15, 0.1, curve: :dx)).filter(:lowpass, cutoff: 85.constant * filter_env(0.01, 0.1, 0.5, 0.1, depth: 4.5), quality: 3) * 8.db).softclip(0.1, 1)
@@ -123,7 +123,7 @@ play synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(800), qua
 
 # Oversampling (this tells all graph nodes before .oversample to run at 4x
 # their previous sample rate)
-play 123.hz.ramp.at(1)
+play 123.hz.saw.at(1)
   .pm(61.5.hz.triangle.at(0.32).adsr(0.05, 1.5, 0.7, 1, curve: 10)) # PM depth in cycles
   .adsr(0.2, 0.5, 0.75, 1, curve: 20)
   .filter(:lowpass, cutoff: 100 + 3200 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 9)
@@ -131,7 +131,7 @@ play 123.hz.ramp.at(1)
   .oversample(4)
 
 # Quantization/decimation
-play 123.hz.ramp.at(1)
+play 123.hz.saw.at(1)
   .pm(61.5.hz.triangle.at(0.32).adsr(0.05, 1.5, 0.7, 1, curve: 10)) # PM depth in cycles
   .adsr(0.2, 0.5, 0.75, 1, curve: 20)
   .filter(:lowpass, cutoff: 100 + 1600 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 0.7)
@@ -158,7 +158,7 @@ def note(tone, seconds) = tone.adsr(0.005, 0.05, 0.8, 0.05, hold: seconds)
   play note(133.hz.triangle.at(-6.db), 0.25)
   play note(150.hz.triangle.at(-6.db), 0.25)
   play note(100.hz.triangle.at(-6.db), 0.25)
-  play note(200.hz.ramp.at(-9.db), 1.6)
+  play note(200.hz.saw.at(-9.db), 1.6)
 end
 ```
 
@@ -207,13 +207,13 @@ play 123.hz.fm(369.hz.at(1000))
 The graph DSL makes it very easy to incorporate MIDI into sound generation:
 
 ```ruby
-play (midi.hz.ramp.at(-6.db) * midi.amp_env).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
+play (midi.hz.saw.at(-6.db) * midi.amp_env).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
 
 # Polyphonic, with a voice per note
-play synth(voices: 6) { |v| v.hz.ramp.at(-6.db).filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(4)) * v.amp_env }
+play synth(voices: 6) { |v| v.hz.saw.at(-6.db).filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(4)) * v.amp_env }
 
 # The same from a MIDI file
-play midi_file('spec/test_data/c_major.mid').synth(voices: 6) { |v| v.hz.ramp.at(-6.db) * v.amp_env }
+play midi_file('spec/test_data/c_major.mid').synth(voices: 6) { |v| v.hz.saw.at(-6.db) * v.amp_env }
 ```
 
 `midi` and `midi_file(name)` are `MB::Sound::Notes` (`lib/mb/sound/notes.rb`):
@@ -247,8 +247,8 @@ You can convert between feet and meters:
 Filters delay and/or change the volume of different frequencies.
 
 ```ruby
-tone = 432.hz.ramp
-filtered = 432.hz.ramp.filter(1500.hz.lowpass(quality: 0.25))
+tone = 432.hz.saw
+filtered = 432.hz.saw.filter(1500.hz.lowpass(quality: 0.25))
 
 # Compare the unfiltered and filtered tones
 plot [tone, filtered], samples: 48000*3/432.0
@@ -322,7 +322,7 @@ Braille lines by default, with other looks (`PLOT_LOOK=blocks`, `mosaic`,
 images in iTerm2, kitty, and Konsole (`plot ..., graphical: true`).
 
 ```ruby
-plot 100.hz.ramp
+plot 100.hz.saw
 ```
 
 ```
@@ -345,9 +345,9 @@ plot 100.hz.ramp
 ```
 
 ```ruby
-spectrum 100.hz.ramp
+spectrum 100.hz.saw
 # or
-plot 100.hz.ramp, spectrum: true
+plot 100.hz.saw, spectrum: true
 ```
 
 ```
@@ -403,7 +403,7 @@ returned), and save them as SVG, PNG, or text:
 ```ruby
 c = chart(title: 'Saw and square') {
   x :time, sample_rate: 48000
-  line 110.hz.ramp.sample(4800), label: 'saw'
+  line 110.hz.saw.sample(4800), label: 'saw'
   line 110.hz.square.sample(4800), label: 'square'
 }
 c.save('waveforms.svg', theme: :studio)

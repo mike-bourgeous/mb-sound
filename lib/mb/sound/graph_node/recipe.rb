@@ -133,7 +133,7 @@ module MB
         # Aliases are recorded under their official name (the method they
         # alias, found through Ruby's method table: .official_name), so
         # recipes and saved documents print `.until(2)` for `.for(2)`,
-        # `.feedback` for `.fb`, `.ramp` for `.saw` (maintainer, 2026-10-17
+        # `.feedback` for `.fb`, `.saw` for `.ramp` (saw official since ux-fix-1; maintainer, 2026-10-17
         # and omnibus9's merge review, 2026-10-18: saved files use the
         # official name).  Old documents still load: their names are
         # public methods.  These aliases keep the spelling the code used,
@@ -597,8 +597,8 @@ module MB
           # random seeds drawn (seed: N), so noise and random phases rebuild
           # the same whatever the root seed.
           #
-          #     220.hz.ramp.filter(:lowpass, cutoff: 800).softclip.to_ruby
-          #     # => "220.hz.ramp.filter(:lowpass, cutoff: 800).softclip"
+          #     220.hz.saw.filter(:lowpass, cutoff: 800).softclip.to_ruby
+          #     # => "220.hz.saw.filter(:lowpass, cutoff: 800).softclip"
           def to_ruby(inputs: {}, seeds: false)
             RubyWriter.new(self, inputs: inputs, seeds: seeds).to_s
           end
@@ -620,7 +620,7 @@ module MB
       # Array of nodes) again (see GraphNode#to_ruby).  Returns nil.
       #
       # Example (bin/sound.rb):
-      #     s = 220.hz.ramp.filter(:lowpass, cutoff: 800).softclip
+      #     s = 220.hz.saw.filter(:lowpass, cutoff: 800).softclip
       #     ruby s
       def ruby(graph, inputs: {}, seeds: false)
         puts GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: seeds).to_s

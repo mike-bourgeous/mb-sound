@@ -128,7 +128,7 @@ module MB
         # Channels#loudness_meter).
         #
         # Example (bin/sound.rb):
-        #     m = 220.hz.ramp.at(-20.db).loudness_meter
+        #     m = 220.hz.saw.at(-20.db).loudness_meter
         #     bg m
         #     m.short_term   # => LUFS of the last 3 s
         def loudness_meter(weights: nil, true_peak: true)

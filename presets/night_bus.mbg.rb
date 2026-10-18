@@ -3,8 +3,8 @@
 graph 4,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-18T07:25:47Z",
-  mb_sound: "0.12.0.usegit (7ffa245e)",
+  saved: "2026-10-18T16:06:49Z",
+  mb_sound: "0.12.0.usegit (617c024b)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, 700.0, range: 200.0..6000.0, curve: :exp, unit: "Hz"
@@ -54,7 +54,7 @@ track(:bass) { |clip|
     freq = n.freq * (bump * 0.45 + 1)
     fenv = n.env(0.001, 0.06, 0, 0.04, gm: false)
     amp = n.env(0.001, 0.2, 0, 0.05, gm: false) * (n.velocity * 0.4 + 0.6)
-    saw = freq.tone.ramp.lp4(2 ** (fenv * 2.5) * 240, resonance: 0.35)
+    saw = freq.tone.saw.lp4(2 ** (fenv * 2.5) * 240, resonance: 0.35)
     ((saw + freq.tone * 0.6) * amp).softclip(0.7, 0.97)
   } * 1.4
 }
@@ -171,7 +171,7 @@ track(:pad, lead: 0.5.attack) { |clip|
     bloom = v.filter_env(0.8999999999999999, 2.0, 0.43, 2, depth: 1.584962500721156, curve: [6, 0, -6], shape: :s)
     sig = v.hz
     sig2 = sig.transpose(7)
-    ((sig.ramp.at(0.5) + sig.transpose(0.07).ramp.at(0.5) + (sig2.ramp.at(0.5) + sig2.transpose(0.07).ramp.at(0.5)) * 0.7) * swell * 0.35).filter(:lowpass, cutoff: v.cutoff(450.0, env: bloom, keytrack: 0), quality: 0.9)
+    ((sig.saw.at(0.5) + sig.transpose(0.07).saw.at(0.5) + (sig2.saw.at(0.5) + sig2.transpose(0.07).saw.at(0.5)) * 0.7) * swell * 0.35).filter(:lowpass, cutoff: v.cutoff(450.0, env: bloom, keytrack: 0), quality: 0.9)
   }.softclip(0.4, 0.9)
   stereo(fx, fx.delay(0.012)) * 0.25
 }

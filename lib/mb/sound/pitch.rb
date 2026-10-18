@@ -21,7 +21,7 @@ module MB
     #
     # Examples (bin/sound.rb):
     #     play 440.hz                       # a sine at 440 Hz
-    #     play 220.hz.ramp.at(0.5)          # a sawtooth
+    #     play 220.hz.saw.at(0.5)          # a sawtooth
     #     play C4.triangle.at(-6.db)        # a note in the session tuning
     #     filter(noise, 1000.hz.lowpass)    # a filter at the pitch's frequency
     class Pitch
@@ -196,9 +196,9 @@ module MB
       # and a tone's own #unison (Tone#unison, made again on every copy
       # from its recipe):
       #
-      #     play 110.hz.unison(5, spread: 0.5) { |p| p.ramp }.at(-12.db)
-      #     play 110.hz.unison(5, spread: 0.5).ramp.at(-12.db)
-      #     play 110.hz.ramp.unison(5, spread: 0.5).at(-12.db)
+      #     play 110.hz.unison(5, spread: 0.5) { |p| p.saw }.at(-12.db)
+      #     play 110.hz.unison(5, spread: 0.5).saw.at(-12.db)
+      #     play 110.hz.saw.unison(5, spread: 0.5).at(-12.db)
       #     midi.synth(voices: 4) { |v| v.hz.square.pwm(0.3).unison(5) * v.amp_env }
       def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :exact, &block)
         options = { detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, detune_mode: detune_mode }
@@ -289,8 +289,8 @@ module MB
       [
         :sine, :sin, :triangle, :square, :ramp, :saw, :sawtooth, :drumramp, :envramp, :gauss, :parabola,
         :atriangle, :asquare, :aramp, :asaw, :asawtooth,
-        :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
-        :acomplex_square, :acomplex_triangle, :acomplex_ramp,
+        :complex_sine, :complex_square, :complex_triangle, :complex_ramp, :complex_saw,
+        :acomplex_square, :acomplex_triangle, :acomplex_ramp, :acomplex_saw,
       ].each do |wave|
         # Tone's aliases stay aliases here (saw is ramp), so recipes print
         # the official name (Recipe.official_name)

@@ -102,10 +102,10 @@ module MB
         # envelope instead (see #adsr).
         #
         # Example (bin/sound.rb):
-        #     play 220.hz.ramp.at(-6.db).until(2)
-        #     bg 220.hz.ramp.at(-6.db).until(2.bars)
+        #     play 220.hz.saw.at(-6.db).until(2)
+        #     bg 220.hz.saw.at(-6.db).until(2.bars)
         #
-        # Alias #for (`220.hz.ramp.for(2.bars)`); recipes and graph documents
+        # Alias #for (`220.hz.saw.for(2.bars)`); recipes and graph documents
         # print the official name, #until (Recipe.official_name).
         def until(length)
           MB::Sound::GraphNode::TimeLimit.new(self, length)

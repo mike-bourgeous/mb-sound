@@ -12,7 +12,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     graph = midi_file('spec/test_data/all_notes.mid') { |midi|
-      #       midi.hz.ramp.filter(:lowpass, cutoff: midi.freq + 100) * midi.gate
+      #       midi.hz.saw.filter(:lowpass, cutoff: midi.freq + 100) * midi.gate
       #     }
       #     play graph
       #     play midi_file('spec/test_data/c_major.mid').synth { |v| v.hz.square * v.amp_env }

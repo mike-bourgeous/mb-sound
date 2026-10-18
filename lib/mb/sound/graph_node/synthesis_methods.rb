@@ -25,7 +25,7 @@ module MB
         # options (e.g. +:curve+, default :analog) go to Envelope#initialize.
         #
         # Example:
-        #     play 220.hz.ramp.adsr(0.005, 0.3, 0.4, 1, curve: :snappy)
+        #     play 220.hz.saw.adsr(0.005, 0.3, 0.4, 1, curve: :snappy)
         def adsr(attack = nil, decay = nil, sustain = nil, release = nil, **options)
           self * MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end

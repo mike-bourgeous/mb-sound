@@ -39,8 +39,8 @@ module MB
       # when the input or the rate node ends.
       #
       # Examples (bin/sound.rb):
-      #     play 110.hz.ramp.lp4(1200, resonance: 0.7).decimate(3000)
-      #     play 110.hz.ramp.decimate(0.3.hz.lfo.at(800..8000))               # a swept crush
+      #     play 110.hz.saw.lp4(1200, resonance: 0.7).decimate(3000)
+      #     play 110.hz.saw.decimate(0.3.hz.lfo.at(800..8000))               # a swept crush
       #     midi.synth { |v| v.hz.saw.decimate(v.freq * 5.5).at(v.amp_env) }  # key-tracked
       class Decimator
         include GraphNode

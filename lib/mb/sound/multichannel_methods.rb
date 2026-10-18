@@ -9,7 +9,7 @@ module MB
       #
       # Examples (bin/sound.rb):
       #     play channels(220.hz.at(0.2), 330.hz.at(0.2), 440.hz.at(0.2))  # Ctrl-C stops
-      #     bg 220.hz.ramp.at(0.3).delay(channels(0.010, 0.013))   # mono in, stereo out
+      #     bg 220.hz.saw.at(0.3).delay(channels(0.010, 0.013))   # mono in, stereo out
       def channels(*items)
         items = items[0] if items.length == 1 && items[0].is_a?(Array)
         nodes = items.count { |i| i.is_a?(GraphNode) || i.is_a?(GraphNode::MultiOutput) }
@@ -35,7 +35,7 @@ module MB
       # DSL call (see GraphNode::ChannelSpread).
       #
       # Example (bin/sound.rb):
-      #     bg 110.hz.ramp.at(0.3).stereo.filter(:lowpass, cutoff: spread(500..900))
+      #     bg 110.hz.saw.at(0.3).stereo.filter(:lowpass, cutoff: spread(500..900))
       def spread(range)
         GraphNode::ChannelSpread.new(range)
       end
@@ -47,8 +47,8 @@ module MB
       # MidiMethods#per_voice.
       #
       # Examples (bin/sound.rb):
-      #     bg 110.hz.ramp.at(0.3).stereo.filter(:lowpass, cutoff: per_channel(500..900))
-      #     bg 220.hz.ramp.at(0.3).delay(per_channel(10.ms, 13.ms))   # mono in, stereo out
+      #     bg 110.hz.saw.at(0.3).stereo.filter(:lowpass, cutoff: per_channel(500..900))
+      #     bg 220.hz.saw.at(0.3).delay(per_channel(10.ms, 13.ms))   # mono in, stereo out
       def per_channel(*items)
         items = items[0] if items.length == 1 && items[0].is_a?(Array)
         return spread(items[0]) if items.length == 1 && items[0].is_a?(Range)

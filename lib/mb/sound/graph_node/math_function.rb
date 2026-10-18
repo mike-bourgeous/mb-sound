@@ -10,7 +10,7 @@ module MB
       # plan layer fuses it (Plan::Op::Unary) on real signals.
       #
       # Example (a stepped ramp: 4 steps per second, 0, 1/3, 2/3, 1):
-      #     (1.hz.aramp.at(0..4) * 0.9999).floor / 3
+      #     (1.hz.asaw.at(0..4) * 0.9999).floor / 3
       class MathFunction < UnaryFunction
         include SampleRateHelper
 

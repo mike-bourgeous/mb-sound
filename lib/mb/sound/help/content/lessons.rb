@@ -22,7 +22,7 @@ module MB
           A track is a named player that remembers its patch (a block from a
           clip to a graph) and its launch quantization q: (bars).
         TEXT
-        type { track(:l_bass, q: 1) { |c| c.tone.ramp.at(-10.db).lp4(500, resonance: 0.4) * c.amp_env } }
+        type { track(:l_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.4) * c.amp_env } }
         check('a track named :l_bass') { tracks.key?(:l_bass) }
       end
 
@@ -139,7 +139,7 @@ module MB
 
       step 'Use it in a graph' do
         say '`knob(:l_cut)` reads the knob anywhere a node goes; every graph reading it hears the same frames.'
-        type { bg :l_drone, 55.hz.ramp.at(-14.db).lp4(knob(:l_cut), resonance: 0.5) }
+        type { bg :l_drone, 55.hz.saw.at(-14.db).lp4(knob(:l_cut), resonance: 0.5) }
         check('a player :l_drone') { players.key?(:l_drone) }
       end
 

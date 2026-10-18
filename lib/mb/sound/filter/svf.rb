@@ -29,7 +29,7 @@ module MB
       #     f = MB::Sound::Filter::SVF.new(:lowpass, 48000, 1000, quality: 2)
       #     f.process(MB::Sound.noise.sample(4800))
       #     # In a graph (cutoff and quality may be nodes):
-      #     play 110.hz.ramp.filter(:lowpass, cutoff: 0.5.hz.lfo.at(200..3000), quality: 4)
+      #     play 110.hz.saw.filter(:lowpass, cutoff: 0.5.hz.lfo.at(200..3000), quality: 4)
       class SVF < Filter
         # Filter types, in the kernel's order (Cookbook::FILTER_TYPES, which
         # has the same order).

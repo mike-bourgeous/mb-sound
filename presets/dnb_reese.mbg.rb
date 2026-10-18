@@ -3,8 +3,8 @@
 graph 4,
   name: "dnb_reese",
   kind: :synth,
-  saved: "2026-10-18T07:25:39Z",
-  mb_sound: "0.12.0.usegit (7ffa245e)",
+  saved: "2026-10-18T16:06:41Z",
+  mb_sound: "0.12.0.usegit (617c024b)",
   from: "bin/synths/dnb.rb",
   description: "Drum & bass patch :reese from bin/synths/dnb.rb, first made by Kez Volta, a fictional modern EDM / UK drum & bass producer-DJ, for the song \"Tunnel Vision\" (bin/songs/tunnel_vision.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-edm).",
   options: { patch: :reese, grit: 0.25, echo: 0.4 }
@@ -14,7 +14,7 @@ param :cutoff, 2400.0, range: 150.0..8000.0, description: "Reese lowpass center 
 synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |v|
   pitch = v.hz.glide(0.035, legato: true)
   saws = pitch.unison(6, detune: 0.32, spread: 0.5) { |p, _i|
-    p.ramp
+    p.saw
   }
   lfo = 2 ** v.lfo(2.bars, shape: :sine, depth: 0.8)
   amp = v.env(0.004, 0.25, 0.85, 0.06, gm: false).legato

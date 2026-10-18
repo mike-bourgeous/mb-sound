@@ -62,8 +62,8 @@ module MB
         # take, or anything else) go through MB::Sound.live_error, returning
         # this node unchanged in live mode.
         #
-        #     play 220.hz.ramp.lp4(800).at(-20.db)
-        #     220.hz.ramp.filter(:lowpass, cutoff: 3.hz.lfo.lp4(10).at(400..2000))
+        #     play 220.hz.saw.lp4(800).at(-20.db)
+        #     220.hz.saw.filter(:lowpass, cutoff: 3.hz.lfo.lp4(10).at(400..2000))
         #     adsr(0.01, 0.2, 0.5, 0.3).at(0.5)
         def at(amplitude)
           case amplitude

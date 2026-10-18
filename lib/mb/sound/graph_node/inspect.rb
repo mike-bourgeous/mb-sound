@@ -6,7 +6,7 @@ module MB
       # at INSPECT_LIMIT characters, e.g.
       #
       #     C4.saw.delay(1.n8, feedback: 0.4)
-      #     # => #<SampleWrapper C4.ramp.delay(1.n8, feedback: 0.4)>
+      #     # => #<SampleWrapper C4.saw.delay(1.n8, feedback: 0.4)>
       #
       # Ruby's default #inspect printed every instance variable, sample
       # buffers included: 2,000,000 characters for one delay, which Pry

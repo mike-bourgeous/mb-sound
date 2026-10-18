@@ -8,7 +8,7 @@ module MB
     # Example (bin/sound.rb):
     #     knob :cut, 800, range: 100..8000, curve: :exp, unit: 'Hz'
     #     knob :space, 0.2
-    #     bg :bass, 55.hz.ramp.lp4(knob(:cut), resonance: knob(:space) * 0.8).at(-12.db)
+    #     bg :bass, 55.hz.saw.lp4(knob(:cut), resonance: knob(:space) * 0.8).at(-12.db)
     #     turn :cut, 3000                          # now, with a 5 ms glide
     #     turn :cut, 400, over: 2.bars, curve: :smooth, on: :bar
     #     turn :cut, tween([400, 8000, 600], 8.bars)   # follow a node until turned again
@@ -27,7 +27,7 @@ module MB
       # live input, see #learn), +takeover:+ (:pickup or :jump), +smooth:+
       # (the glide of turns without +over:+, 5 ms by default; 0 for
       # jumps).  Returns the knob, a GraphNode to use anywhere a graph takes
-      # a node: `110.hz.ramp.lp4(knob(:cut))`.  Knob names share a
+      # a node: `110.hz.saw.lp4(knob(:cut))`.  Knob names share a
       # namespace with tracks and mute groups.
       #
       # Inside a rack's block (arack, irack, ...), a knob with a default

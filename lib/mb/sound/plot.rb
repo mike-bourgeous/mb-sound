@@ -25,7 +25,7 @@ module MB
     #
     # Example (also MB::Sound.chart in the console):
     #
-    #     wave = 110.hz.ramp.sample(4800)
+    #     wave = 110.hz.saw.sample(4800)
     #     MB::Sound::Plot.chart(title: 'Saw') {
     #       x :time, sample_rate: 48000
     #       line wave, label: 'saw'

@@ -204,7 +204,7 @@ Maintainer, 2026-10-10: `turn` for knobs with `move` as an alias; tracks, groups
 
 ```ruby
 knob :cut, 800, range: 100..8000, curve: :exp, unit: 'Hz'   # define (again: new options, same value and readers)
-bg :bass, bass.tone.ramp.lp4(knob(:cut))                     # a GraphNode anywhere a node goes
+bg :bass, bass.tone.saw.lp4(knob(:cut))                     # a GraphNode anywhere a node goes
 turn :cut, 3000                          # now, with a 5 ms glide (smooth: 0 for an exact jump)
 turn :cut, 400, over: 2.bars, curve: :smooth, on: :bar      # ramps: bars, Durations, Lengths; any Curve
 turn :cut, 2600, from: 900, over: 8      # jump to 900, then ramp

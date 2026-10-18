@@ -110,14 +110,14 @@ module MB
     # or segments).  ADSR is the list [[1, a], [s, d], [0, r]], sample for
     # sample.  See also EnvelopeMethods#sq80_env and MB::Sound::SQ80.
     #
-    #     play 220.hz.ramp * env([[1, 0.01], [0.3, 0.2], [0.8, 1.5], [0, 0.5]], release_at: 3, hold: 3)
+    #     play 220.hz.saw * env([[1, 0.01], [0.3, 0.2], [0.8, 1.5], [0, 0.5]], release_at: 3, hold: 3)
     #     wobble = env([[1, 0.005], [0, 0.1, 0], [1, 0.1, 0], [0, 0.2]], release_at: 3, loop: 1, gate: g)
     #
     # Example:
-    #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1, curve: :snappy)
-    #     play 110.hz.ramp.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
+    #     play 220.hz.saw * adsr(0.01, 0.3, 0.5, 1, curve: :snappy)
+    #     play 110.hz.saw.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
     #     play 200.hz.fm(400.hz.at(800) * fm_env(0, 1)) * amp_env(0.001, 1, 0, 0.5)
-    #     play 110.hz.ramp * adsr(1, 0.5, 0.6, 1, curve: :smooth, hold: 2)
+    #     play 110.hz.saw * adsr(1, 0.5, 0.6, 1, curve: :smooth, hold: 2)
     #
     # See bin/plot_envelope.rb to plot envelopes and curves.
     class Envelope

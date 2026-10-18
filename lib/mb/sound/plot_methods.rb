@@ -23,7 +23,7 @@ module MB
       # Plot::ChartBuilder): returns a Plot::Chart, which shows itself when
       # the console prints it, and has #show, #to_s, #to_svg, #save.
       #
-      #     chart { x :time, sample_rate: 48000; line 110.hz.ramp.sample(4800), label: 'saw' }
+      #     chart { x :time, sample_rate: 48000; line 110.hz.saw.sample(4800), label: 'saw' }
       #     chart(title: 'Saw') { |c| c.line wave }.save('saw.svg')
       def chart(**kwargs, &block)
         Plot.chart(**kwargs, &block)
