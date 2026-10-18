@@ -1,12 +1,12 @@
 require_relative '../../../../support/ui_helpers'
 
 # Round 4's panes (ux-r4-panes): the clip matrix and its keys, the clip
-# detail, racks with macros to turn, buses with meters, the keyboard
+# detail, racks with knobs to turn, buses with meters, the keyboard
 # lighting MIDI input.  Panes draw from ui_fake_snapshot (feed contract
 # data); keys return console lines (PaneKeys::Run) the screen runs.
 RSpec.describe('UI round 4 panes', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
-  let(:snap) { ui_fake_snapshot(macros: true) }
+  let(:snap) { ui_fake_snapshot(rack_knobs: true) }
 
   def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 8)
     grid = MB::Sound::Plot::Text::Cells.new(w, h)
@@ -93,7 +93,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
   end
 
   describe 'racks' do
-    it 'draws each instance with its kind, typed ports, latency, and macros as knob rows' do
+    it 'draws each instance with its kind, typed ports, latency, and knobs as rows' do
       lines = draw(:racks, snap, w: 50)
       expect(lines[0]).to eq('bass/dub  effect  lat 72 smp')
       expect(lines[1]).to eq('  in sig:audio side:audio?  out audio')
@@ -102,7 +102,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(draw(:racks, ui_fake_snapshot.with(slow: ui_fake_slow.with(racks: [].freeze)))[0]).to start_with('no racks')
     end
 
-    it 'picks macros and turns them by position steps (Shift: fine) as turn lines, from the value it just set' do
+    it 'picks knobs and turns them by position steps (Shift: fine) as turn lines, from the value it just set' do
       st = { title_in_rule: true, mode: true }
       draw(:racks, snap, st)
       expect(key(:racks, st, :turn, 0.02)).to eq(ui::PaneKeys::Run['turn :"bass/dub/space", 0.62', 'bass/dub/space 0.62'])
@@ -114,7 +114,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
       expect(key(:racks, st, :reset).code).to eq('turn :"bass/dub/tone", 2400')
       key(:racks, st, :pick, 5) # (clamped)
       expect(key(:racks, st, :turn, 1.0).code).to eq('turn :"bass/dub/tone", 8000')
-      expect(key(:racks, { snap: ui_fake_snapshot }, :turn, 0.1)).to include('no macro')
+      expect(key(:racks, { snap: ui_fake_snapshot }, :turn, 0.1)).to include('no knob')
     end
   end
 
@@ -181,7 +181,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
 
     def run(r) = ui.run_line(r.code, @session)
 
-    it 'launches, tweaks, goes to scenes, stops, and turns macros from pane keys, journaled and undoable, the matrix following' do
+    it 'launches, tweaks, goes to scenes, stops, and turns rack knobs from pane keys, journaled and undoable, the matrix following' do
       MB::Sound::Session.with_context(session: @session) do
         arr = @session.arrangement
         bass_a = MB::Sound.seq(MB::Sound::C2, MB::Sound::G2).n8.loop.named(:bass_a)
@@ -192,7 +192,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
         @session.bus(:verb) { |sig| sig * 0.5 }
         @session.route(:bass, send: { verb: 0.5 })
         MB::Sound.instance_eval do
-          arack(:dub) { |sig| sig * macro(:space, 0.35) }
+          arack(:dub) { |sig| sig * knob(:space, 0.35) }
           bg :drone, 110.hz.saw.at(-30.db).then(&rack(:dub))
         end
 
@@ -224,7 +224,7 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
         kinds = @session.journal.changes.map(&:kind)
         expect(kinds).to include(:scene, :stop)
 
-        # Racks: the macro, turned
+        # Racks: the knob, turned
         rk = { title_in_rule: true, mode: true }
         lines = draw(:racks, s, rk, w: 50)
         expect(lines.join("\n")).to include('dub', 'space')

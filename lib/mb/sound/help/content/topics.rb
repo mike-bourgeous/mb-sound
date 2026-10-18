@@ -745,19 +745,19 @@ module MB
         :audio do |sig, side:|`), bound with `with` (bus, track, and knob
         names work as values).  `>>` chains racks; note streams merge with
         `+`.  Named racks list in `racks` and print with `rack(:x).to_ruby`.
-        `macro :space, 0.3` inside a rack block is a knob scoped to the rack
+        `knob :space, 0.3` inside a rack block is a knob scoped to the rack
         (`turn :"dub/space", 0.6`; per player, `:"bass/dub/space"`, when the
         rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
-        `:space`, `follow: :space` maps it onto the macro's range, and
+        `:space`, `follow: :space` maps it onto this knob's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
         and `recall :"dub/wide", only: [:space]` keep variations.  `help
-        rack(:dub)` shows ports, macros, and latency.  `save :dub,
+        rack(:dub)` shows ports, knobs, and latency.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
         session's asks, or takes `racks: :session`, `:saved`, or `:rename`.
       TEXT
-      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack, :macro
+      commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
       note :racks
       see :buses, :midi, :presets
       example 'a note rack: an anonymous value' do
@@ -1009,12 +1009,12 @@ module MB
         track, a column per scene, then each track's other slots; ▶ plays,
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
-        macros, buses with meters.  Focus a pane in NAV (its number, or a
+        knobs, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked macro (Shift: fine).
+        u undo; in racks Left/Right turn the picked knob (Shift: fine).
         Every key runs one console line, printed in the console: journaled,
         undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT

@@ -51,7 +51,7 @@ module MB
       # sig: :audio, side: :audio`; `inputs :midi` still loads, as notes,
       # other names as audio), `outputs :audio`, and rack documents (`graph
       # 4, kind: :effect, rack: :arack`, whose knob lines are the rack's
-      # macros); graphs using named racks carry their definitions.
+      # knobs); graphs using named racks carry their definitions.
       FORMAT = 4
 
       # The file extension of graph documents.
@@ -624,7 +624,7 @@ module MB
             extra = []
             extra << "rack #{doc.kind}" if doc&.rack?
             extra << "inputs: #{doc.inputs.map { |i| doc.input_types[i] ? "#{i} (#{doc.input_types[i]})" : i }.join(', ')}" if doc && !doc.inputs.empty?
-            extra << "macros: #{doc.params.keys.join(', ')}" if doc&.rack? && !doc.params.empty?
+            extra << "knobs: #{doc.params.keys.join(', ')}" if doc&.rack? && !doc.params.empty?
             extra << "params: #{doc.param_values.map { |k, v| "#{k} #{v}" }.join(', ')}" if doc && !doc.params.empty? && !doc.rack?
             puts "  #{n}#{"  (#{extra.join('; ')})" unless extra.empty?}"
           end

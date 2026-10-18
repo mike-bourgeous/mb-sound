@@ -1,6 +1,6 @@
 # Rack documents and graph document format 4 (racks R2,
 # design/notes/racks.md and graph_io.md): typed inputs, outputs, racks
-# saved and loaded as Racks with their macros, and graphs carrying the
+# saved and loaded as Racks with their knobs, and graphs carrying the
 # definitions of the named racks they use.
 RSpec.describe('rack documents') do
   let(:s) { MB::Sound }
@@ -25,14 +25,14 @@ RSpec.describe('rack documents') do
 
   let(:dub) {
     s.arack(:dub, side: :audio, depth: :control) { |sig, side:, depth: 0.5|
-      space = s.macro(:space, 0.3)
-      cut = s.macro(:cut, 800, range: 100..8000, curve: :exp, description: 'Tone')
+      space = s.knob(:space, 0.3)
+      cut = s.knob(:cut, 800, range: 100..8000, curve: :exp, description: 'Tone')
       sig.filter(:lowpass, cutoff: cut.mod(0.5.hz.lfo, depth: 0.1)).delay(0.1, feedback: space * 0.5, wet: space) * depth + side
     }
   }
 
   describe 'saving a rack' do
-    it 'writes typed inputs, outputs, the kind, and the macros as knob lines' do
+    it 'writes typed inputs, outputs, the kind, and the knobs as knob lines' do
       text = io.dump(dub)
       expect(text).to start_with('# mb-sound rack document')
       expect(text).to match(/^graph 4, name: "dub", kind: :effect, rack: :arack, saved: /)
@@ -43,7 +43,7 @@ RSpec.describe('rack documents') do
 
     it 'saves every kind' do
       {
-        s.irack(:keys) { |stream| stream.synth { |v| v.hz.triangle * v.amp_env * s.macro(:level, 0.5) } } => [:instrument, :irack, 'stream: :notes'],
+        s.irack(:keys) { |stream| stream.synth { |v| v.hz.triangle * v.amp_env * s.knob(:level, 0.5) } } => [:instrument, :irack, 'stream: :notes'],
         s.mrack(:up) { it.transpose(12) } => [:note_fx, :mrack, 'stream: :notes'],
         s.lrack(:lvl) { |sig| sig.abs.filter(:lowpass, cutoff: 10) } => [:listener, :lrack, 'sig: :audio'],
         s.modrack(:wb) { |ctl| ctl * 0.5 + 0.5 } => [:modulator, :modrack, 'ctl: :control'],
@@ -58,14 +58,14 @@ RSpec.describe('rack documents') do
     end
 
     it 'keeps share: and follow: on knob lines' do
-      r = s.arack(:sh) { |sig| sig * s.macro(:wet, 0.5, share: true) * s.macro(:amt, 2, range: 1..4, follow: :morph) }
+      r = s.arack(:sh) { |sig| sig * s.knob(:wet, 0.5, share: true) * s.knob(:amt, 2, range: 1..4, follow: :morph) }
       text = io.dump(r)
       expect(text).to include("knob :wet, 0.5, share: true\nknob :amt, 2.0, range: 1.0..4.0, follow: :morph\n")
       loaded = io.load(text)
       s.knob(:morph, 1)
       s.bg(:a, 1.constant.then(&loaded))
       expect(session.knobs.keys).to contain_exactly(:morph, :wet, :"sh/amt")
-      expect(session.knobs[:"sh/amt"].macro.follow).to eq(:morph)
+      expect(session.knobs[:"sh/amt"].rack_knob.follow).to eq(:morph)
     end
 
     it 'refuses share: in graph documents that are not racks' do
@@ -100,7 +100,7 @@ RSpec.describe('rack documents') do
       expect { io.load(text, inputs: { sig: 1.constant, side: 1.constant, sid: 2 }) }.to raise_error(io::LoadError, /no input sid/)
     end
 
-    it 'makes macros for each application, named like any rack\'s' do
+    it 'makes knobs for each application, named like any rack\'s' do
       r = io.load(io.dump(dub))
       s.bg(:bass, 1.constant.then(&r.with(side: 0.constant)))
       expect(session.knobs.keys).to contain_exactly(:"dub/space", :"dub/cut")
@@ -131,7 +131,7 @@ RSpec.describe('rack documents') do
       g = 220.hz.ramp.then(&dub.with(side: 110.hz.sine))
       text = io.dump(g, name: 'song')
       expect(text).to include("arack(:dub, side: :audio, depth: :control) { |sig, side:, depth: 0.5|\n")
-      expect(text).to include('macro(:space, 0.3)')
+      expect(text).to include('knob(:space, 0.3)')
       expect(text).to match(/^220\.hz\.ramp\.then\(&rack\(:dub\)\.with\(side: 110\.hz\.sine\)\.using\(seed: drawn_seed\(\d+\)\)\)\n/)
 
       other = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false))
@@ -146,7 +146,7 @@ RSpec.describe('rack documents') do
       end
     end
 
-    it 'reloads each instance exactly: its seed and its macros\' current values' do
+    it 'reloads each instance exactly: its seed and its knobs\' current values' do
       def new_session
         MB::Sound::Session.new(master_gain: 1, realtime: false, channels: 1, buffer_size: 800, raise_errors: true,
           output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 800))
@@ -154,7 +154,7 @@ RSpec.describe('rack documents') do
 
       wobbly = s.arack(:wobbly) { |sig|
         texture = s.noise.at(0.05) + s.drift(3, range: -0.1..0.1) + 110.hz.unison(3, detune: 10.cents) { |p, _| p.saw.rnd }.at(0.1)
-        (sig + texture).filter(:lowpass, cutoff: s.macro(:tone, 2000, range: 200..8000, curve: :exp)) * s.macro(:level, 0.5)
+        (sig + texture).filter(:lowpass, cutoff: s.knob(:tone, 2000, range: 200..8000, curve: :exp)) * s.knob(:level, 0.5)
       }
       g = 220.hz.ramp.at(0.2).then(&wobbly) + 330.hz.ramp.at(0.2).then(&wobbly)
       s.bg(:pad, g, fade: 0)
@@ -163,7 +163,7 @@ RSpec.describe('rack documents') do
       s.turn(:"wobbly/tone", 900, smooth: 0)
       session.process_buffer(800)
       text = io.dump(g, name: 'pad')
-      expect(text).to include("arack(:wobbly) { |sig|\n").and include('macro(:level, 0.5)')
+      expect(text).to include("arack(:wobbly) { |sig|\n").and include('knob(:level, 0.5)')
       uses = text.scan(/rack\(:wobbly\)\.using\(seed: drawn_seed\((\d+)\), tone: 900, level: 0\.8\)/)
       expect(uses.length).to eq(2)
       expect(uses.uniq.length).to eq(2) # (each instance its own seed)
@@ -184,7 +184,7 @@ RSpec.describe('rack documents') do
         fresh.close
       end
 
-      # seeds: :fresh leaves the drawn seeds out (new texture), keeping the macros
+      # seeds: :fresh leaves the drawn seeds out (new texture), keeping the knobs
       again = io.load(text, seeds: :fresh)
       expect(io.dump(again, name: 'pad')).to include('rack(:wobbly).using(seed: drawn_seed(')
     end
@@ -295,7 +295,7 @@ RSpec.describe('rack documents') do
       end
 
       it 'finds rack(:name) among the presets when nothing defines it' do
-        io.save(:halve, s.arack(:halve) { |sig| sig * s.macro(:amount, 0.5) })
+        io.save(:halve, s.arack(:halve) { |sig| sig * s.knob(:amount, 0.5) })
         other = MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 1, sleep: false))
         begin
           g = MB::Sound::Session.with_context(session: other) { io.load("graph 4\n4.constant.then(&rack(:halve))") }
@@ -309,7 +309,7 @@ RSpec.describe('rack documents') do
 
       it 'gives the Rack from preset, defined in the session, or applies it' do
         expect { s.save(:dubby, dub) }.to output(/Saved dubby/).to_stdout
-        expect { s.presets }.to output(/dubby  \(rack effect; inputs: sig \(audio\), side \(audio\), depth \(control\); macros: space, cut\)/).to_stdout
+        expect { s.presets }.to output(/dubby  \(rack effect; inputs: sig \(audio\), side \(audio\), depth \(control\); knobs: space, cut\)/).to_stdout
 
         r = s.preset(:dubby)
         expect(r).to be_a(MB::Sound::Rack)

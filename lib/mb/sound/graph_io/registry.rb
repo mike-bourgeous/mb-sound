@@ -86,7 +86,7 @@ module MB
           'MB::Sound::Sequence::Clip' => %i[then],
           'MB::Sound::MIDI::Stream' => %i[then],
           'MB::Sound::Rack' => %i[with >> << using],
-          # A rack's macros with modulation around them (racks R2)
+          # A rack's knobs with modulation around them (racks R2)
           'MB::Sound::GraphNode::Knob' => %i[mod choose],
         }.freeze
 
@@ -121,8 +121,9 @@ module MB
         KEEP_NAME = Set[:sfz, :sf2].freeze
 
         # Top-level names besides the recorded MB::Sound methods (scale:
-        # Scale values for transforms such as Clip#ghost_chords).
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :macro, :cc, :modes] | MB::Sound::Rack::CONSTRUCTORS).freeze
+        # Scale values for transforms such as Clip#ghost_chords; knob: a
+        # rack's own knobs, inside rack blocks only, see Loader).
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :scale, :tones, :weights, :harmony, :knob, :cc, :modes] | MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
         # code) rather than run while sampling.

@@ -205,7 +205,7 @@ module MB
           # The set at a glance (ux-1 r3 item 32): where it is and what comes,
           # what landed, the clips, buses and sends, MIDI, around the console
           # (ux-r4: the clip matrix and the clip under its cursor below the
-          # console, racks with their macros at the left)
+          # console, racks with their knobs at the left)
           session: Viewports.layout(:session, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             pane :lane, height: 4

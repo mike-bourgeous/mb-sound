@@ -8,7 +8,7 @@
 # ambient.rb, funk.rb, named for their genres) were the first, then
 # bin/synths/electric_pianos.rb, then the SQ-80 voice's patches
 # (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
-# named racks from bin/songs/rack_demo.rb, saved with their macros); each
+# named racks from bin/songs/rack_demo.rb, saved with their knobs); each
 # document's description says where it came from (the scripts'
 # <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
@@ -98,7 +98,7 @@ module MB::Sound
   LIBRARY_PRESET_RACKS = {
     dub_echo: ['bin/songs/rack_demo.rb', :rack_demo_dub,
                'Rack :dub_echo from bin/songs/rack_demo.rb (racks-r2, 2026-10-17): dub echoes of the input, ' \
-               'macro :space (echo level and feedback) and :tone (the echoes\' lowpass, swinging slowly around the knob)'],
+               'knob :space (echo level and feedback) and :tone (the echoes\' lowpass, swinging slowly around the knob)'],
   }.freeze
 
   # Set presets (`demo`, ux-r3 item 26): { name => [script, setup method,

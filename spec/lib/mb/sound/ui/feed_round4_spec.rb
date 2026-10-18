@@ -285,16 +285,16 @@ RSpec.describe('UI round 4 feed') do
     end
   end
 
-  it 'lists rack instances in the poll, with their macro knobs' do
+  it 'lists rack instances in the poll, with their knobs' do
     s = new_session(channels: 1)
     poll = MB::Sound::UI::Poll.new(s)
     MB::Sound::Session.with_context(session: s) do
-      dub = MB::Sound.arack(:dub_feed) { |sig| sig * MB::Sound.macro(:space, 0.3) }
+      dub = MB::Sound.arack(:dub_feed) { |sig| sig * MB::Sound.knob(:space, 0.3) }
       s.add(0.1.constant.then(&dub), name: :pad, on: :now)
       slow, knobs = poll.call
       info = slow.racks.find { |r| r.name == :dub_feed }
       expect(info).not_to be_nil
-      expect(info.macros).to eq([:"dub_feed/space"])
+      expect(info.knobs).to eq([:"dub_feed/space"])
       expect(knobs.map(&:first)).to include(:"dub_feed/space")
     end
   ensure

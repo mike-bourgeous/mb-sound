@@ -5,7 +5,7 @@ module MB
     module GraphIO
       # Writes rack documents (GraphIO.dump of a MB::Sound::Rack; racks R2,
       # proposal 2.8): a graph document whose inputs are the rack's ports,
-      # whose knob lines are its macros, and whose body is the rack's block
+      # whose knob lines are its knobs, and whose body is the rack's block
       # as the recorder prints it, built once on stand-ins for the ports
       # (Rack#build_on_stand_ins).
       #
@@ -17,7 +17,7 @@ module MB
       #     sig.duck(side).delay(3.n16, feedback: space * 0.6, wet: space)
       #
       # GraphIO.load gives the Rack back (each application makes its own
-      # macros from the knob lines), or applies it when inputs are given.
+      # knobs from the knob lines), or applies it when inputs are given.
       class RackWriter
         def initialize(rack, name: nil, from: nil, meta: {}, assets: nil)
           raise DumpError.new("#{rack.label} is composed (>>); save its parts") if rack.composed?
@@ -32,15 +32,15 @@ module MB
 
         def to_s
           result, stand, app = @rack.build_on_stand_ins
-          macros = app.macros
-          knob_nodes = macros.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s }
+          rack_knobs = app.knobs
+          knob_nodes = rack_knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s }
           inputs = stand.transform_keys(&:to_s)
           # (no seeds: each application of a rack draws its own)
           writer = GraphNode::Recipe::RubyWriter.new(result, inputs: inputs, seeds: false, knob_nodes: knob_nodes, assets: @assets, define_racks: true)
           body = writer.to_s
           problems = writer.problems.dup
-          if (clash = macros.keys.find { |n| stand.key?(n) })
-            problems << "macro #{clash.inspect} has the name of a port"
+          if (clash = rack_knobs.keys.find { |n| stand.key?(n) })
+            problems << "knob #{clash.inspect} has the name of a port"
           end
           unless problems.empty?
             raise DumpError.new("can't save this rack yet: #{problems.uniq.join('; ')}", problems: problems.uniq, code: body)
@@ -68,7 +68,7 @@ module MB
           @rack.ports.each_value { |p| types[p.name] = p.required ? p.type : [p.type, defaults[p.name]] }
           header << GraphIO.inputs_line(types)
           header << "outputs #{out.inspect}" if out
-          macros.each do |n, k|
+          rack_knobs.each do |n, k|
             header << "knob #{GraphNode::Recipe::RubyWriter.knob_args(k, writer.method(:literal), name: n).join(', ')}"
           end
           (@assets&.entries || []).each do |e|

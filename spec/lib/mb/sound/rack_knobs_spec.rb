@@ -1,7 +1,7 @@
-# Rack macros (racks R2, design/notes/racks.md): knobs scoped to a rack,
+# Rack knobs (racks R2, design/notes/racks.md): knobs scoped to a rack,
 # named by path, shared or followed on request, with rack snapshots and
 # baseline-plus-modulation.
-RSpec.describe('rack macros') do
+RSpec.describe('rack knobs') do
   let(:s) { MB::Sound }
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:session) {
@@ -27,35 +27,46 @@ RSpec.describe('rack macros') do
   end
 
   def level_rack(name = :lvl)
-    s.arack(name) { |sig| sig * s.macro(:level, 0.5) }
+    s.arack(name) { |sig| sig * s.knob(:level, 0.5) }
   end
 
-  describe 'macro' do
+  describe 'knob in a rack' do
     it 'is a knob made inside a rack block' do
       k = nil
-      s.arack { |sig| k = s.macro(:space, 0.3, range: 0..2); sig * k }.(1.constant)
+      s.arack { |sig| k = s.knob(:space, 0.3, range: 0..2); sig * k }.(1.constant)
       expect(k).to be_a(MB::Sound::GraphNode::Knob)
       expect(k.value).to eq(0.3)
       expect(k.range).to eq(0.0..2.0)
-      expect(k.macro.macro).to eq(:space)
+      expect(k.rack_knob.knob).to eq(:space)
       expect(k.session).to be_nil
     end
 
-    it 'raises outside a rack block, pointing at knob' do
-      expect { s.macro(:space, 0.3) }.to raise_error(ArgumentError, /inside a rack.*knob :space/)
+    it "makes a Session knob outside a rack block, and refuses the rack-only options there" do
+      k = s.knob(:space_outside, 0.3)
+      expect(k.rack_knob).to be_nil
+      expect(s::Session.current.knobs).to include(:space_outside)
+      expect { s.knob(:space2, 0.3, share: true) }.to raise_error(ArgumentError, /inside a rack's block/)
+    end
+
+    it "reads a Session knob inside a rack block when the rack has no knob of that name" do
+      s.knob(:outer_cut, 800, range: 100..8000)
+      got = nil
+      s.arack { |sig| got = s.knob(:outer_cut); sig }.(1.constant)
+      expect(got.rack_knob).to be_nil
+      expect(got.name).to eq(:outer_cut)
     end
 
     it 'reads the same knob when asked again by name or with the same definition' do
       ks = []
-      s.arack { |sig| ks << s.macro(:a, 0.5) << s.macro(:a) << s.macro(:a, 0.5); sig }.(1.constant)
+      s.arack { |sig| ks << s.knob(:a, 0.5) << s.knob(:a) << s.knob(:a, 0.5); sig }.(1.constant)
       expect(ks.uniq(&:object_id).length).to eq(1)
-      expect { s.arack { |sig| s.macro(:a, 0.5); s.macro(:a, 0.7); sig }.(1.constant) }.to raise_error(ArgumentError, /twice, differently/)
-      expect { s.arack { |sig| s.macro(:a); sig }.(1.constant) }.to raise_error(ArgumentError, /give it a default/)
+      expect { s.arack { |sig| s.knob(:a, 0.5); s.knob(:a, 0.7); sig }.(1.constant) }.to raise_error(ArgumentError, /twice, differently/)
+      expect { s.arack { |sig| s.knob(:a); sig }.(1.constant) }.to raise_error(ArgumentError, /give it a default/)
     end
 
     it 'makes new knobs for each application' do
       ks = []
-      r = s.arack { |sig| ks << s.macro(:a, 0.5); sig }
+      r = s.arack { |sig| ks << s.knob(:a, 0.5); sig }
       r.(1.constant)
       r.(1.constant)
       expect(ks[0]).not_to equal(ks[1])
@@ -67,8 +78,8 @@ RSpec.describe('rack macros') do
       s.bg(:bass, 1.constant.then(&level_rack))
       expect(session.knobs.keys).to eq([:"lvl/level"])
       expect(session.names.kind(:"lvl/level")).to eq(:knob)
-      expect(s.racks[:lvl]).to include('macros level 0.5 (0..1)')
-      expect(level_rack(:lvl).macros).to eq([:"lvl/level"])
+      expect(s.racks[:lvl]).to include('knobs level 0.5 (0..1)')
+      expect(level_rack(:lvl).knobs).to eq([:"lvl/level"])
     end
 
     it 'turns like a knob, on exact frames' do
@@ -85,7 +96,7 @@ RSpec.describe('rack macros') do
       s.turn(:"lvl/level", 0.8, smooth: 0)
       s.bg(:keys, 2.constant.then(&r))
       expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
-      expect(session.names.kind(:"lvl/level")).to eq(:macro_group)
+      expect(session.names.kind(:"lvl/level")).to eq(:knob_group)
       render(800)
       expect(session.knobs[:"bass/lvl/level"].value).to eq(0.8)
       expect(session.knobs[:"keys/lvl/level"].value).to eq(0.5)
@@ -94,7 +105,7 @@ RSpec.describe('rack macros') do
       s.bg(:bass, 3.constant.then(&r))
       expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
       expect(session.knobs[:"bass/lvl/level"].value).to eq(0.8)
-      expect(r.macros).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
+      expect(r.knobs).to contain_exactly(:"bass/lvl/level", :"keys/lvl/level")
     end
 
     it 'turns every instance by the short name once they are per instance' do
@@ -144,14 +155,14 @@ RSpec.describe('rack macros') do
       expect(session.knobs.keys).to contain_exactly(:"bass/lvl/level", :"bass/lvl.2/level", :"keys/lvl/level")
     end
 
-    it "scopes an anonymous rack's macros to the player" do
-      s.bg(:pad, 1.constant.then(&s.arack { |sig| sig * s.macro(:level, 0.5) }))
+    it "scopes an anonymous rack's knobs to the player" do
+      s.bg(:pad, 1.constant.then(&s.arack { |sig| sig * s.knob(:level, 0.5) }))
       expect(session.knobs.keys).to eq([:"pad/level"])
     end
 
     it 'takes the rack\'s new range when the same instance plays again' do
-      s.bg(:bass, 1.constant.then(&s.arack(:lvl) { |sig| sig * s.macro(:level, 0.5) }))
-      s.bg(:bass, 1.constant.then(&s.arack(:lvl) { |sig| sig * s.macro(:level, 0.5, range: 0..4) }))
+      s.bg(:bass, 1.constant.then(&s.arack(:lvl) { |sig| sig * s.knob(:level, 0.5) }))
+      s.bg(:bass, 1.constant.then(&s.arack(:lvl) { |sig| sig * s.knob(:level, 0.5, range: 0..4) }))
       expect(session.knobs[:"lvl/level"].range).to eq(0.0..4.0)
     end
   end
@@ -159,7 +170,7 @@ RSpec.describe('rack macros') do
   describe 'sharing' do
     it 'joins the session knob of its own name with share: true' do
       cut = s.knob(:cut, 0.25)
-      s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.macro(:cut, 0.5, share: true) }), fade: 0)
+      s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.knob(:cut, 0.5, share: true) }), fade: 0)
       expect(session.knobs.keys).to eq([:cut])
       expect(render(800)[-1]).to eq(0.25)
       s.turn(:cut, 0.75, smooth: 0)
@@ -168,40 +179,40 @@ RSpec.describe('rack macros') do
     end
 
     it 'makes the session knob when there is none' do
-      s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.macro(:wet, 0.5, share: true) }))
+      s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.knob(:wet, 0.5, share: true) }))
       expect(session.knobs.keys).to eq([:wet])
     end
 
     it 'raises for a shared knob with another range' do
       s.knob(:cut, 0.25)
       expect {
-        s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.macro(:cut, 50, range: 0..100, share: true) }))
+        s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.knob(:cut, 50, range: 0..100, share: true) }))
       }.to raise_error(ArgumentError, /doesn't match/)
     end
 
     it 'follows a session knob through its own range and curve with follow:' do
       s.knob(:morph, 0.5)
-      s.bg(:a, 1.constant.then(&s.arack(:f) { |sig| sig * s.macro(:amt, 2, range: 1..4, follow: :morph) }), fade: 0)
+      s.bg(:a, 1.constant.then(&s.arack(:f) { |sig| sig * s.knob(:amt, 2, range: 1..4, follow: :morph) }), fade: 0)
       expect(render(800)[-1]).to be_within(1e-6).of(2.5)
       s.turn(:morph, 1, smooth: 0)
       expect(render(800)[-1]).to be_within(1e-6).of(4)
 
-      s.bg(:b, 1.constant.then(&s.arack(:g) { |sig| sig * s.macro(:cut, 100, range: 100..1600, curve: :exp, follow: :morph) }), fade: 0, on: :now)
+      s.bg(:b, 1.constant.then(&s.arack(:g) { |sig| sig * s.knob(:cut, 100, range: 100..1600, curve: :exp, follow: :morph) }), fade: 0, on: :now)
       s.turn(:morph, 0.5, smooth: 0)
       expect(render(800)[-1]).to be_within(1e-3).of(2.5 + 400)
     end
 
     it 'raises for follow: of a missing knob and for share: with follow:' do
       expect {
-        s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.macro(:amt, 2, range: 1..4, follow: :nope) }))
+        s.bg(:a, 1.constant.then(&s.arack { |sig| sig * s.knob(:amt, 2, range: 1..4, follow: :nope) }))
       }.to raise_error(ArgumentError, /follows knob :nope/)
-      expect { s.arack { |sig| s.macro(:a, 0.5, share: true, follow: :x); sig }.(1.constant) }.to raise_error(ArgumentError, /don't go together/)
+      expect { s.arack { |sig| s.knob(:a, 0.5, share: true, follow: :x); sig }.(1.constant) }.to raise_error(ArgumentError, /don't go together/)
     end
   end
 
   describe 'snapshots' do
-    it 'snaps only the rack\'s macros and recalls them, in part' do
-      r = s.arack(:dub) { |sig| sig * s.macro(:space, 0.3) + s.macro(:tone, 0.2) }
+    it 'snaps only the rack\'s knobs and recalls them, in part' do
+      r = s.arack(:dub) { |sig| sig * s.knob(:space, 0.3) + s.knob(:tone, 0.2) }
       s.knob(:other, 0.1)
       s.bg(:bass, 1.constant.then(&r))
       r.snap(:wide)
@@ -224,7 +235,7 @@ RSpec.describe('rack macros') do
       expect { s.recall(:"dub/wide", only: [:spice]) }.to raise_error(ArgumentError, /spice/)
     end
 
-    it 'keeps snapshot values when macros become per instance' do
+    it 'keeps snapshot values when knobs become per instance' do
       r = level_rack
       s.bg(:bass, 1.constant.then(&r))
       r.snap(:a)
@@ -249,7 +260,7 @@ RSpec.describe('rack macros') do
     end
 
     it 'follows the knob as it turns' do
-      s.bg(:a, s.arack(:m) { |sig| sig * s.macro(:lvl, 0.5).mod(0.constant, depth: 0.1) }.(1.constant), fade: 0)
+      s.bg(:a, s.arack(:m) { |sig| sig * s.knob(:lvl, 0.5).mod(0.constant, depth: 0.1) }.(1.constant), fade: 0)
       expect(render(800)[-1]).to be_within(1e-6).of(0.5)
       s.turn(:"m/lvl", 0.75, smooth: 0)
       expect(render(800)[-1]).to be_within(1e-6).of(0.75)
@@ -257,22 +268,22 @@ RSpec.describe('rack macros') do
   end
 
   describe 'rack info' do
-    let(:dub) { s.arack(:dub, side: :audio) { |sig, side:| sig.compress(lookahead: 5.ms).delay(0.1, wet: s.macro(:space, 0.3)) + side } }
+    let(:dub) { s.arack(:dub, side: :audio) { |sig, side:| sig.compress(lookahead: 5.ms).delay(0.1, wet: s.knob(:space, 0.3)) + side } }
 
-    it 'gives frozen RackInfo per instance with ports, latency, and macro knobs' do
+    it 'gives frozen RackInfo per instance with ports, latency, and knobs' do
       info = session.racks.tap { dub }.rack_info[:dub]
       expect(info.length).to eq(1)
       expect(info[0].path).to be_nil
       expect(info[0].latency).to eq(240)
       expect(info[0].ports.map { |p| [p[:name], p[:type], p[:role]] }).to eq([[:sig, :audio, :main], [:side, :audio, :side]])
-      expect(info[0].macros).to eq([:space])
+      expect(info[0].knobs).to eq([:space])
 
       s.bg(:bass, 1.constant.then(&dub.with(side: 0.constant)))
       s.bg(:keys, 1.constant.then(&dub.with(side: 0.constant)))
       all = session.racks.rack_info
       expect(Ractor.shareable?(all)).to eq(true)
       expect(all[:dub].map(&:path)).to eq([:"bass/dub", :"keys/dub"])
-      expect(all[:dub].map(&:macros)).to eq([[:"bass/dub/space"], [:"keys/dub/space"]])
+      expect(all[:dub].map(&:knobs)).to eq([[:"bass/dub/space"], [:"keys/dub/space"]])
       expect(all[:dub][0].signature).to eq('audio(sig) + audio(side) -> audio')
     end
 
@@ -290,20 +301,20 @@ RSpec.describe('rack macros') do
   end
 
   describe 'printing' do
-    it 'prints macros inside the rack block and round-trips through graph documents' do
+    it 'prints knobs inside the rack block and round-trips through graph documents' do
       r = s.arack { |sig|
-        cut = s.macro(:cut, 800, range: 100..8000, curve: :exp)
-        sig.filter(:lowpass, cutoff: cut.mod(0.5.hz.lfo, depth: 0.1)) * s.macro(:space, 0.3) + sig * s.macro(:space)
+        cut = s.knob(:cut, 800, range: 100..8000, curve: :exp)
+        sig.filter(:lowpass, cutoff: cut.mod(0.5.hz.lfo, depth: 0.1)) * s.knob(:space, 0.3) + sig * s.knob(:space)
       }
       g = 220.hz.ramp.then(&r)
       text = g.to_ruby
-      expect(text).to include('macro(:cut, 800, range: 100..8000, curve: :exp).mod(0.5.hz.lfo, depth: 0.1)')
-      expect(text).to include('macro(:space, 0.3)')
+      expect(text).to include('knob(:cut, 800, range: 100..8000, curve: :exp).mod(0.5.hz.lfo, depth: 0.1)')
+      expect(text).to include('knob(:space, 0.3)')
 
-      doc = s::GraphIO.dump(g, name: 'macro_test')
+      doc = s::GraphIO.dump(g, name: 'rack_knob_test')
       expect(doc).not_to match(/^knob /)
       g2 = s::GraphIO.load(doc)
-      expect(s::GraphIO.dump(g2, name: 'macro_test').sub(/saved: "[^"]*"/, '')).to eq(doc.sub(/saved: "[^"]*"/, ''))
+      expect(s::GraphIO.dump(g2, name: 'rack_knob_test').sub(/saved: "[^"]*"/, '')).to eq(doc.sub(/saved: "[^"]*"/, ''))
       expect(g2.sample(4800)).to eq(g.sample(4800))
     end
   end

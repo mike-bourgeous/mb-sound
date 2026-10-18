@@ -325,11 +325,11 @@ module MB
 
         # Racks (ux-r4 item 12): a block per rack instance: its path (or
         # name), kind, signature, typed ports in and out, latency, and its
-        # macros as knob rows with ranges.  In the pane's mode (NAV Enter)
-        # Up/Down pick a macro and Left/Right turn it (Shift: fine), each
+        # knobs as knob rows with ranges.  In the pane's mode (NAV Enter)
+        # Up/Down pick a knob and Left/Right turn it (Shift: fine), each
         # turn a `turn :"bass/dub/space", 0.42` console line.
         #
-        # Data: Snapshot#racks (Rack::RackInfo per instance), macro values
+        # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
         class Racks < Pane
           jump 'r'
@@ -344,33 +344,33 @@ module MB
 
           mode_keys do
             group 'Racks'
-            on [:up, 'k'], :pick, -1, help: 'previous macro', label: 'Up Down j k'
-            on [:down, 'j'], :pick, 1, help: 'next macro', label: 'Up Down j k'
-            on [:right, 'l'], :turn, STEP, help: 'turn the macro up', label: 'Right l'
-            on [:left, 'h'], :turn, -STEP, help: 'turn the macro down', label: 'Left h'
+            on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
+            on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down j k'
+            on [:right, 'l'], :turn, STEP, help: 'turn the knob up', label: 'Right l'
+            on [:left, 'h'], :turn, -STEP, help: 'turn the knob down', label: 'Left h'
             on [:right, :shift], :turn, FINE, help: 'turn up, fine'
             on [:left, :shift], :turn, -FINE, help: 'turn down, fine'
             on ['L'], :turn, FINE, help: 'turn up, fine'
             on ['H'], :turn, -FINE, help: 'turn down, fine'
-            on '0', :reset, help: "the macro's default"
+            on '0', :reset, help: "the knob's default"
           end
 
           keys do
             group 'Racks'
-            doc 'Enter', 'pick and turn macros (Esc back to NAV)'
+            doc 'Enter', 'pick and turn knobs (Esc back to NAV)'
           end
 
           def priority = :list
 
           def initialize = super(:racks, rate: 10, height: 10, width: 44, title: 'racks', min_height: 3,
-                                         description: 'rack instances: kind, typed ports, latency, macros as knobs to turn')
+                                         description: 'rack instances: kind, typed ports, latency, knobs to turn')
 
-          # The turnable macros of +racks+ in pane order: [[knob name,
-          # macro, RackInfo], ...] (only instances playing have knobs).
-          def self.macros(racks, knobs)
+          # The turnable knobs of +racks+ in pane order: [[knob name,
+          # knob, RackInfo], ...] (only instances playing have knobs).
+          def self.knobs(racks, knobs)
             names = knobs.to_h { |k| [k.name, k] }
             racks.flat_map { |r|
-              r.macros.filter_map { |kn| names[kn] && [kn, kn.to_s.split('/').last.to_sym, r] }
+              r.knobs.filter_map { |kn| names[kn] && [kn, kn.to_s.split('/').last.to_sym, r] }
             }
           end
 
@@ -382,7 +382,7 @@ module MB
               return
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
-            list = Racks.macros(racks, s.knobs)
+            list = Racks.knobs(racks, s.knobs)
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
             picked = pick && list[pick][0]
             y = 0
@@ -398,14 +398,14 @@ module MB
               out = r.signature.to_s.split('->').last.to_s.strip
               c.line(y, ['  in ', :dim], [ins.join(' '), :text], ['  out ', :dim], [out, :text])
               y += 1
-              r.macros.each do |kn|
+              r.knobs.each do |kn|
                 break if y >= c.h
                 k = knobs[kn]
-                macro = kn.to_s.split('/').last
-                spec = k&.spec || r.macro_specs[macro.to_sym]
+                short = kn.to_s.split('/').last
+                spec = k&.spec || r.knob_specs[short.to_sym]
                 value = pending(state, kn) || k&.value || spec&.default
                 sel = state[:mode] && kn == picked
-                x = c.run(0, y, "  #{c.fit(macro, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
+                x = c.run(0, y, "  #{c.fit(short, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
                 range = spec ? " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}" : ''
                 vtext = "#{Panes.fmt(value)}#{spec&.unit ? " #{spec.unit}" : ''}"
                 mw = [c.w - x - vtext.length - range.length - 2, 3].max
@@ -423,7 +423,7 @@ module MB
           end
 
           def key_turn(state, step)
-            cell = picked(state) or return 'no macro to turn (racks playing with macros have knobs)'
+            cell = picked(state) or return 'no knob to turn (racks with knobs show them while they play)'
             kn, k = cell
             v = pending(state, kn) || k.value
             nv = k.spec.clamp(k.spec.value((k.spec.position(v) + step).clamp(0.0, 1.0)))
@@ -431,7 +431,7 @@ module MB
           end
 
           def key_reset(state)
-            cell = picked(state) or return 'no macro'
+            cell = picked(state) or return 'no knob'
             kn, k = cell
             set(state, kn, k.spec.default)
           end
@@ -451,7 +451,7 @@ module MB
 
           def picked(state)
             s = state[:snap] or return nil
-            list = Racks.macros(s.racks || [], s.knobs)
+            list = Racks.knobs(s.racks || [], s.knobs)
             return nil if list.empty?
             kn = list[state[:pick].to_i.clamp(0, list.length - 1)][0]
             [kn, s.knobs.find { |k| k.name == kn }]
