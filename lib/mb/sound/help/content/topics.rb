@@ -1014,7 +1014,8 @@ module MB
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked knob (Shift: fine).
+        u undo; in racks Left/Right turn the picked knob (Shift: fine;
+        a held key is one `turn ..., over:` line when you let go).
         Every key runs one console line, printed in the console: journaled,
         undoable, in your take.  `ui :mixer` shows buses beside the master.
       TEXT

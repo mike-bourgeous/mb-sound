@@ -45,6 +45,13 @@ module MB
       #       end
       #       def key_move(state, dx, dy) = ...
       #     end
+      #
+      # Keys that make one line per gesture (a held arrow turning a knob:
+      # UI::TurnGesture) return nothing until the gesture ends; the screen
+      # asks such panes `key_wait(state)` (seconds until a line is due, or
+      # nil) and `key_tick(state)` (the line or lines due, or nil), and
+      # tells them `lines_ran(state)` after running what a key or tick
+      # returned.  A key_ method may return several Runs as an Array.
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)

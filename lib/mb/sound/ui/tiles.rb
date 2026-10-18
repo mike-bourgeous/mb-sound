@@ -1229,8 +1229,37 @@ module MB
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
           r = pane.key_action(action, @states[name], *args)
-          r.is_a?(PaneKeys::Run) ? run_pane_line(r) : (flash(r, :key) if r.is_a?(String))
+          pane_result(name, r)
+        end
+
+        # What a pane key or tick returned: Runs (one or an Array) run as
+        # console lines (then the pane's #lines_ran), a String flashes.
+        def pane_result(name, r)
+          runs = Array(r).grep(PaneKeys::Run)
+          if runs.empty?
+            flash(r, :key) if r.is_a?(String)
+          else
+            runs.each { |run| run_pane_line(run) }
+            pane = @panes[name]
+            pane.lines_ran(@states[name]) if pane.respond_to?(:lines_ran)
+          end
           @full = true
+        end
+
+        # Seconds until a pane on screen has a line due (UI::PaneKeys
+        # key_wait: a gesture ending), or nil.
+        def pane_wait
+          @tiler.layout.panes.filter_map { |n| (p = @panes[n]).respond_to?(:key_wait) ? p.key_wait(@states[n]) : nil }.min
+        end
+
+        # Runs the lines panes on screen have due (key_tick).
+        def tick_panes
+          @tiler.layout.panes.each do |n|
+            p = @panes[n]
+            next unless p.respond_to?(:key_tick) && p.respond_to?(:key_wait) && p.key_wait(@states[n])
+            r = p.key_tick(@states[n])
+            pane_result(n, r) if r
+          end
         end
 
         # Runs a pane key's console line (PaneKeys::Run) through UI.run_line
@@ -1426,7 +1455,7 @@ module MB
           io = @term.input
           now = @clock.call
           mono = mono_now
-          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), timeout].compact
+          waits = [@decoder.pending? ? @decoder.esc_timeout : nil, @router.wait(mono), @keyboard.wait(mono), @input_lock.synchronize { pane_wait }, timeout].compact
           wait = waits.min
           wait = 0.25 if wait.nil? && !timeout.nil?
           ready = io.wait_readable(wait.nil? ? 0.5 : wait)
@@ -1443,6 +1472,7 @@ module MB
             end
           @input_lock.synchronize { @router.tick(Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
           events.each { |e| handle(e) }
+          @input_lock.synchronize { tick_panes } # (gestures whose keys stopped: their lines)
           (@painter&.wakeup rescue nil) if @keyboard.tick(mono_now)
           (@painter&.wakeup rescue nil) unless events.empty?
           now

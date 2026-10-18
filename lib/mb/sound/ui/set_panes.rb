@@ -326,8 +326,12 @@ module MB
         # Racks (ux-r4 item 12): a block per rack instance: its path (or
         # name), kind, signature, typed ports in and out, latency, and its
         # knobs as knob rows with ranges.  In the pane's mode (NAV Enter)
-        # Up/Down pick a knob and Left/Right turn it (Shift: fine), each
-        # turn a `turn :"bass/dub/space", 0.42` console line.
+        # Up/Down pick a knob and Left/Right turn it (Shift: fine).  Keys
+        # within TurnGesture::GAP of each other (a held arrow) are one
+        # gesture and one console line when they stop, `turn
+        # :"bass/dub/space", 0.62, over: 0.84.seconds` (a single press:
+        # `turn :"bass/dub/space", 0.42`); the row previews the target
+        # meanwhile (value -> target, a mark on the meter).
         #
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
@@ -338,16 +342,23 @@ module MB
           STEP = 0.02
           FINE = 0.002
 
-          # Seconds a turned value is used over the snapshot's (keys faster
-          # than the snapshot's knob values catch up).
+          # Seconds a turned value is used over the snapshot's after its
+          # line ran (and its ramp ended), until the snapshot catches up.
           PENDING = 0.6
+
+          class << self
+            # The gestures' clock (monotonic seconds; specs set their own).
+            attr_writer :clock
+
+            def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+          end
 
           mode_keys do
             group 'Racks'
             on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
             on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down j k'
-            on [:right, 'l'], :turn, STEP, help: 'turn the knob up', label: 'Right l'
-            on [:left, 'h'], :turn, -STEP, help: 'turn the knob down', label: 'Left h'
+            on [:right, 'l'], :turn, STEP, help: 'turn the knob up (held: one turn line, over the time held)', label: 'Right l'
+            on [:left, 'h'], :turn, -STEP, help: 'turn the knob down (held: one turn line, over the time held)', label: 'Left h'
             on [:right, :shift], :turn, FINE, help: 'turn up, fine'
             on [:left, :shift], :turn, -FINE, help: 'turn down, fine'
             on ['L'], :turn, FINE, help: 'turn up, fine'
@@ -404,13 +415,21 @@ module MB
                 short = kn.to_s.split('/').last
                 spec = k&.spec || r.knob_specs[short.to_sym]
                 value = pending(state, kn) || k&.value || spec&.default
+                g = state[:gesture]
+                target = g&.turning? && g.knob == kn ? g.value : nil
                 sel = state[:mode] && kn == picked
                 x = c.run(0, y, "  #{c.fit(short, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
                 range = spec ? " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}" : ''
-                vtext = "#{Panes.fmt(value)}#{spec&.unit ? " #{spec.unit}" : ''}"
+                vtext = "#{Panes.fmt(value)}#{target ? " → #{Panes.fmt(target)}" : ''}#{spec&.unit ? " #{spec.unit}" : ''}"
                 mw = [c.w - x - vtext.length - range.length - 2, 3].max
-                x = c.meter(spec ? spec.position(value).to_f : 0.0, width: mw, x: x + 1, y: y, role: k ? :key : :dim)
-                x = c.text(x + 1, y, vtext, :text)
+                mx = x + 1
+                x = c.meter(spec ? spec.position(value).to_f : 0.0, width: mw, x: mx, y: y, role: k ? :key : :dim)
+                if target && spec
+                  # (where the gesture is heading: its line runs when the keys stop)
+                  tx = mx + (spec.position(target).to_f.clamp(0.0, 1.0) * (mw - 1)).round
+                  c.text(tx, y, '│', :queued)
+                end
+                x = c.text(x + 1, y, vtext, target ? :queued : :text)
                 c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
                 y += 1
               end
@@ -418,35 +437,69 @@ module MB
           end
 
           def key_pick(state, d)
+            out = flush(state)
             state[:pick] = state[:pick].to_i + d
-            nil
+            out
           end
 
+          # A turn key: starts or extends the gesture on the picked knob
+          # (another knob's gesture goes out first); its line comes from
+          # #tick when the keys stop (or #flush).
           def key_turn(state, step)
             cell = picked(state) or return 'no knob to turn (racks with knobs show them while they play)'
             kn, k = cell
-            v = pending(state, kn) || k.value
+            now = Racks.clock.call
+            g = (state[:gesture] ||= TurnGesture.new)
+            out = g.turning? && g.knob != kn ? flush(state) : nil
+            v = g.turning? ? g.value : (pending(state, kn) || k.value)
             nv = k.spec.clamp(k.spec.value((k.spec.position(v) + step).clamp(0.0, 1.0)))
-            set(state, kn, nv)
+            g.step(kn, v, nv, now)
+            out || "#{kn} → #{TurnGesture.number(nv)} (the line when the keys stop)"
           end
 
           def key_reset(state)
             cell = picked(state) or return 'no knob'
             kn, k = cell
-            set(state, kn, k.spec.default)
+            [*flush(state), set(state, kn, k.spec.default)]
+          end
+
+          # Time passes (the screen calls it while #key_wait says so): the
+          # gesture's line once its keys stopped, else nil.
+          def key_tick(state)
+            g = state[:gesture] or return nil
+            run = g.tick(Racks.clock.call)
+            remember(state, g) if run
+            run
+          end
+
+          # Seconds until #key_tick has a line, or nil.
+          def key_wait(state) = state[:gesture]&.wait(Racks.clock.call)
+
+          # The screen ran the lines a key or #tick returned.
+          def lines_ran(state)
+            state[:gesture]&.ran
           end
 
           private
 
-          def set(state, kn, value)
-            (state[:pending] ||= {})[kn] = [value, MB::U.clock_now]
-            PaneKeys::Run["turn #{kn.inspect}, #{Racks.number(value)}", "#{kn} #{Racks.number(value)}"]
+          # The gesture's line now (another key), as an Array (empty
+          # without one).
+          def flush(state)
+            g = state[:gesture] or return []
+            run = g.flush(Racks.clock.call) or return []
+            remember(state, g)
+            [run]
           end
 
-          # A value to 4 significant figures, as Ruby.
-          def self.number(v)
-            v = v.to_f
-            v == v.round ? v.round.to_s : MB::M.sigfigs(v, 4).to_s
+          # The gesture's target stands in for the knob until its ramp
+          # (over: the gesture's length) ends and the snapshot catches up.
+          def remember(state, g)
+            (state[:pending] ||= {})[g.knob] = [g.value, Racks.clock.call + (g.last - g.started)]
+          end
+
+          def set(state, kn, value)
+            (state[:pending] ||= {})[kn] = [value, Racks.clock.call]
+            TurnGesture.line(kn, value, 0)
           end
 
           def picked(state)
@@ -459,7 +512,7 @@ module MB
 
           def pending(state, kn)
             v, at = state[:pending]&.[](kn)
-            v if at && MB::U.clock_now - at < PENDING
+            v if at && Racks.clock.call - at < PENDING
           end
         end
       end
