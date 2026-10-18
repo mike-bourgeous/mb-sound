@@ -2,51 +2,53 @@ module MB
   module Sound
     module UI
       # A knob turn made of held-key repeats (ux-r4b item 3, maintainer
-      # 2026-10-18): presses of a turn key within GAP seconds of each
-      # other are one gesture, which becomes ONE console line when it
-      # ends (`turn :"bass/dub/space", 0.62, over: 0.84.seconds`): one
-      # journal entry, one undo step, one take line.  Meanwhile the pane
-      # previews where the knob is heading (#value); the knob itself moves
-      # when the line runs, over the gesture's length, so what plays live
-      # is what the take replays.
+      # 2026-10-18): a held arrow is a live sweep you hear while you hold
+      # it, and ONE console line when it ends (one journal entry, one undo
+      # step, one take line), and the take replays exactly what was heard.
+      #
+      # Each key returns a PaneKeys::Preview (the screen moves the knob
+      # with Session#preview_turn: unjournaled, at the next frame to
+      # render, recorded as a step of the Session's live gesture); when
+      # the keys stop (GAP) or another key comes, a PaneKeys::Commit (the
+      # screen runs Session#gesture_line: `turn :"bass/dub/space", steps:
+      # [[0, 0.32], [24000, 0.34], ...]`, which the take lands at the
+      # gesture's first frame, and whose undo restores the value from
+      # before it).
       #
       # An explicit state machine (STATES, EVENTS, every pair declared in
       # TRANSITIONS; turn_gesture_spec walks them):
       # - :idle: no gesture.
       # - :turning: a gesture on #knob, from #from to #value, started at
       #   #started, last key at #last.
-      # - :committing: the gesture's line was handed to the screen (#emit
-      #   returned it); #ran (the screen ran it) goes back to :idle.
+      # - :committing: the Commit was handed to the screen; #ran (the
+      #   screen ran its line) goes back to :idle.
       #
       # Events: :step (a turn key on the same knob; on another knob the
       # pane flushes first), :tick (time passes, the gap not over), :quiet
-      # (GAP seconds since the last key), :flush (another key of the pane,
-      # or the pane wants the line now), :ran.
+      # (GAP seconds since the last key), :flush (another key of the pane),
+      # :ran.
       class TurnGesture
         # Seconds between presses that keep a gesture going: longer than a
         # terminal's autorepeat interval (30-50 ms) and most initial
         # repeat delays (250-600 ms).
         GAP = 0.6
 
-        # Gestures shorter than this are a tap: a plain turn, no over:.
-        TAP = 0.05
-
         STATES = %i[idle turning committing].freeze
         EVENTS = %i[step tick quiet flush ran].freeze
 
         # [state, event] => [next state, action, what it does].
         TRANSITIONS = {
-          [:idle, :step] => [:turning, :start, 'a gesture starts at the knob\'s value'],
+          [:idle, :step] => [:turning, :start, 'a gesture starts at the knob\'s value: the first preview'],
           [:idle, :tick] => [:idle, nil, 'nothing waits'],
           [:idle, :quiet] => [:idle, nil, 'nothing waits'],
           [:idle, :flush] => [:idle, nil, 'no gesture to commit'],
           [:idle, :ran] => [:idle, nil, 'not this gesture\'s line'],
-          [:turning, :step] => [:turning, :more, 'the gesture goes on (a new target, a later last key)'],
+          [:turning, :step] => [:turning, :more, 'the gesture goes on: a preview (a new value, a later last key)'],
           [:turning, :tick] => [:turning, nil, 'the knob may still turn'],
-          [:turning, :quiet] => [:committing, :emit, 'the keys stopped: the line goes out'],
-          [:turning, :flush] => [:committing, :emit, 'another key: the line goes out now'],
+          [:turning, :quiet] => [:committing, :emit, 'the keys stopped: the Commit goes out'],
+          [:turning, :flush] => [:committing, :emit, 'another key: the Commit goes out now'],
           [:turning, :ran] => [:turning, nil, 'not this gesture\'s line'],
-          [:committing, :step] => [:turning, :start, 'a new gesture (the last line is out)'],
+          [:committing, :step] => [:turning, :start, 'a new gesture (the last Commit is out)'],
           [:committing, :tick] => [:committing, nil, 'the screen runs the line'],
           [:committing, :quiet] => [:committing, nil, 'the screen runs the line'],
           [:committing, :flush] => [:committing, nil, 'the line is out already'],
@@ -58,45 +60,32 @@ module MB
         def initialize
           @state = :idle
           @knob = @from = @value = @started = @last = nil
-          @line = nil
         end
 
         def turning? = @state == :turning
 
-        # A turn key: knob +knob+ (its name) heading to +value+, from
-        # +from+ (where it was, for a new gesture), at +now+.
+        # A turn key: knob +knob+ (its name) to +value+, from +from+ (where
+        # it was, for a new gesture), at +now+.  Returns the Preview.
         def step(knob, from, value, now)
           raise ArgumentError, "a gesture on #{@knob.inspect} got a step on #{knob.inspect} (flush first)" if turning? && knob != @knob
           event(:step, now, knob: knob, from: from, value: value)
         end
 
-        # Time passes: the line (PaneKeys::Run) once GAP has gone by
-        # since the last key, else nil.
+        # Time passes: the PaneKeys::Commit once GAP has gone by since the
+        # last key, else nil.
         def tick(now)
           event(turning? && now - @last >= GAP - 1e-9 ? :quiet : :tick, now)
         end
 
-        # The line now (another key), or nil without a gesture.
+        # The Commit now (another key), or nil without a gesture.
         def flush(now) = event(:flush, now)
 
-        # The screen ran the line.
+        # The screen ran the Commit's line.
         def ran(now = nil) = event(:ran, now)
 
-        # Seconds until #tick has a line, or nil.
+        # Seconds until #tick has a Commit, or nil.
         def wait(now)
           turning? ? [@last + GAP - now, 0].max : nil
-        end
-
-        # The console line for a gesture on +knob+ from a start at
-        # +started+ to the last key at +last+, to +value+.
-        def self.line(knob, value, seconds)
-          v = number(value)
-          if seconds < TAP
-            PaneKeys::Run["turn #{knob.inspect}, #{v}", "#{knob} #{v}"]
-          else
-            s = format('%.2f', seconds).sub(/0+\z/, '').sub(/\.\z/, '.0')
-            PaneKeys::Run["turn #{knob.inspect}, #{v}, over: #{s}.seconds", "#{knob} #{v} over #{s} s"]
-          end
         end
 
         # A value to 4 significant figures, as Ruby.
@@ -128,21 +117,21 @@ module MB
           @from = from
           @value = value
           @started = @last = now
-          nil
+          PaneKeys::Preview[knob, value]
         end
 
         def more(now, value:, **)
           @value = value
           @last = now
-          nil
+          PaneKeys::Preview[knob, value]
         end
 
         def emit(_now, **)
-          @line = TurnGesture.line(@knob, @value, @last - @started)
+          PaneKeys::Commit[@knob, "#{@knob} #{TurnGesture.number(@value)}#{@last > @started ? format(' (%.2f s held)', @last - @started) : ''}"]
         end
 
         def clear(*, **)
-          @knob = @from = @value = @started = @last = @line = nil
+          @knob = @from = @value = @started = @last = nil
         end
       end
     end

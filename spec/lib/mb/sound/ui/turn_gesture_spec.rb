@@ -44,24 +44,26 @@ RSpec.describe(MB::Sound::UI::TurnGesture, :aggregate_failures) do
       why = "#{state} + #{event}"
       # (a tick in :idle or :committing is the same event as :quiet there)
       expect(x.state).to eq(to), why
-      if action == :emit
-        expect(out).to be_a(MB::Sound::UI::PaneKeys::Run), why
-      else
-        expect(out).to be_nil, why
+      case action
+      when :emit then expect(out).to be_a(MB::Sound::UI::PaneKeys::Commit), why
+      when :start, :more then expect(out).to be_a(MB::Sound::UI::PaneKeys::Preview), why
+      else expect(out).to be_nil, why
       end
     end
   end
 
-  it 'makes a tap a plain turn and a hold a turn over its length' do
-    g.step(:"dub/space", 0.3, 0.32, 5.0)
+  it 'previews every key and commits once, when the keys stop or another key comes' do
+    expect(g.step(:"dub/space", 0.3, 0.32, 5.0)).to eq(MB::Sound::UI::PaneKeys::Preview[:"dub/space", 0.32])
     expect(g.wait(5.0)).to be_within(1e-9).of(gap)
     expect(g.tick(5.0 + gap / 2)).to be_nil
-    expect(g.tick(5.0 + gap).code).to eq('turn :"dub/space", 0.32')
+    c = g.tick(5.0 + gap)
+    expect(c).to be_a(MB::Sound::UI::PaneKeys::Commit)
+    expect(c.knob).to eq(:"dub/space")
     g.ran
     g.step(:"dub/space", 0.32, 0.34, 6.0)
-    g.step(:"dub/space", 0.34, 0.5, 7.25)
+    expect(g.step(:"dub/space", 0.34, 0.5, 7.25).value).to eq(0.5)
     expect(g.from).to eq(0.32)
-    expect(g.flush(7.3).code).to eq('turn :"dub/space", 0.5, over: 1.25.seconds')
+    expect(g.flush(7.3).note).to eq('dub/space 0.5 (1.25 s held)')
     expect { described_class.new.tap { |x| x.step(:a, 0, 1, 0) }.step(:b, 0, 1, 0.1) }.to raise_error(ArgumentError, /flush first/)
   end
 
@@ -81,7 +83,7 @@ RSpec.describe(MB::Sound::UI::TurnGesture, :aggregate_failures) do
             when :flush then x.flush(now)
             when :ran then x.ran
             end
-      lines += 1 if out
+      lines += 1 if out.is_a?(MB::Sound::UI::PaneKeys::Commit)
       why = path.last(10).join(' ')
       expect(described_class::STATES).to include(x.state)
       expect(x.knob.nil?).to eq(x.state == :idle), why

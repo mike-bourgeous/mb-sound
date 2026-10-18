@@ -1232,17 +1232,39 @@ module MB
           pane_result(name, r)
         end
 
-        # What a pane key or tick returned: Runs (one or an Array) run as
-        # console lines (then the pane's #lines_ran), a String flashes.
+        # What a pane key or tick returned (one or an Array, in order):
+        # Runs run as console lines, a Preview moves a knob live
+        # (Session#preview_turn, unjournaled: a held key's gesture), a
+        # Commit runs the gesture's line from the Session
+        # (Session#gesture_line); then the pane's #lines_ran.  A String
+        # flashes.
         def pane_result(name, r)
-          runs = Array(r).grep(PaneKeys::Run)
-          if runs.empty?
-            flash(r, :key) if r.is_a?(String)
-          else
-            runs.each { |run| run_pane_line(run) }
-            pane = @panes[name]
-            pane.lines_ran(@states[name]) if pane.respond_to?(:lines_ran)
+          ran = false
+          Array(r).each do |x|
+            case x
+            when PaneKeys::Run
+              run_pane_line(x)
+              ran = true
+            when PaneKeys::Preview
+              s = @session || Session.existing
+              next flash('no session to turn knobs in', :warn) unless s
+              begin
+                v = s.preview_turn(x.knob, x.value)
+                flash("#{x.knob} #{GraphNode::Knob.number(v)}  (held: one line when you let go)", :key)
+              rescue ArgumentError => e
+                flash("#{e.class}: #{e.message}", :bad)
+              end
+            when PaneKeys::Commit
+              s = @session || Session.existing
+              code = s&.gesture_line(x.knob)
+              run_pane_line(PaneKeys::Run[code, x.note]) if code
+              ran = true
+            when String
+              flash(x, :key)
+            end
           end
+          pane = @panes[name]
+          pane.lines_ran(@states[name]) if ran && pane.respond_to?(:lines_ran)
           @full = true
         end
 

@@ -90,6 +90,12 @@ module MB
           take, line = Thread.current[:mb_sound_take_line]
           return unless line && take.session_ok?(session)
           land = change.lands&.pos
+          if change.entry&.data&.[](:gesture)
+            # A live gesture's turn (a held key; Session::Knobs#preview_turn)
+            # played from its first step, so the replay lands it there
+            line.lands << change.time
+            return
+          end
           # A change for a time already past lands now, but its action
           # sees its own time (a lead: track starting before the beat)
           line.lands << (land && change.time && change.time < land ? [land, change.time] : (land || change.time))

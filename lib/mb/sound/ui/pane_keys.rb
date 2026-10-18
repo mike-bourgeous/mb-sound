@@ -49,9 +49,11 @@ module MB
       # Keys that make one line per gesture (a held arrow turning a knob:
       # UI::TurnGesture) return nothing until the gesture ends; the screen
       # asks such panes `key_wait(state)` (seconds until a line is due, or
-      # nil) and `key_tick(state)` (the line or lines due, or nil), and
-      # tells them `lines_ran(state)` after running what a key or tick
-      # returned.  A key_ method may return several Runs as an Array.
+      # nil) and `key_tick(state)` (what is due, or nil), and tells them
+      # `lines_ran(state)` after running what a key or tick returned.  A
+      # key_ method may return several results as an Array: Runs, a
+      # Preview (a live unjournaled knob move), a Commit (a gesture's
+      # line, from the Session).
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
@@ -106,6 +108,21 @@ module MB
         # calling the Session (command_bus_spec).
         Run = Data.define(:code, :note) do
           def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
+        end
+
+        # A live, unjournaled knob move a pane key asks for (a step of a
+        # held-key gesture; UI::TurnGesture): the screen calls
+        # Session#preview_turn.  A Commit follows.
+        Preview = Data.define(:knob, :value) do
+          def self.[](knob, value) = new(knob: knob, value: value)
+        end
+
+        # The end of a held-key gesture on +knob+: the screen runs
+        # Session#gesture_line as the gesture's one console line (journaled
+        # at its first step, one undo step, one take line); +note+ for the
+        # status line.
+        Commit = Data.define(:knob, :note) do
+          def self.[](knob, note = nil) = new(knob: knob, note: note&.freeze)
         end
 
         # The pane's keymap (its kind's), or nil.

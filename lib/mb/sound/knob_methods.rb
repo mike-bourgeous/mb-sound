@@ -60,12 +60,16 @@ module MB
       # +curve:+ (from where it is, or +from:+ a value), or following a node
       # or another knob's name until it is turned again.  Returns the change's journal entry.  Also available
       # as #move.
-      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil)
+      #
+      # +steps:+ ([[frames, value], ...], frames after the first step) is a
+      # held key's gesture from the racks pane, as the pane writes it (see
+      # Session::Knobs#gesture_line): each step a turn on its frame.
+      def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, steps: nil)
         point = LaunchPoint.of(binding) or return nil
         name = knob_name(name)
         group = Session.current.racks.knob_group?(name) # (every instance's knob; see Session::Knobs#turn)
         session_command(name, label: "turn #{name.inspect}", kind: :turn, all: group) { |session, time|
-          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time)
+          session.turn(name, value, at: point, over: over, curve: curve, from: from, follow: follow, smooth: smooth, start_time: point.given? ? nil : time, steps: steps)
         }
       end
       alias move turn
