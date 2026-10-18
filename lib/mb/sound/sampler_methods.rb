@@ -84,6 +84,38 @@ module MB
         cap
       end
 
+      # Breaks that ship with mb-sound: name => [file under mb-sound's
+      # presets/ (GraphIO.library_presets_dir), what it is].  Synthesized
+      # by the library (no records; safe to share).
+      BREAKS = {
+        jungle: [
+          'jungle_breaks.mbg/assets/jungle_record.flac',
+          'two bars of a funk break on a tuned-up TR-808, pressed at 138.75 BPM through a small room, ' \
+          '12-bit (Nev Ashdown\'s record for "Memory Card", bin/synths/jungle.rb .jungle_record)',
+        ],
+      }.freeze
+
+      # A break that ships with mb-sound (see BREAKS): a Sample with its
+      # tempo, to slice and chop (`breakbeat(:jungle).slices(32)`, then
+      # `brk.chop(:k, T, [:s, 2], brk[:s].rev)`).  Prints as
+      # `breakbeat(:jungle)` in graphs and documents.
+      #
+      #     brk = breakbeat.slices(32).name(k: 0..1, s: 4..5)
+      #     play brk.chop(:k, T, :s, T).transpose(3).loop
+      def breakbeat(name = :jungle)
+        file, = BREAKS.fetch(name) {
+          raise ArgumentError, "No break #{name.inspect} (breaks: #{BREAKS.keys.map(&:inspect).join(', ')})#{Form.suggest(name, BREAKS.keys)}"
+        }
+        Sample[File.join(GraphIO.library_presets_dir, file)]
+      end
+
+      # The BREAKS name of the file at +path+ (nil for other files), for
+      # printing samples as `breakbeat(:name)`.
+      def self.breakbeat_name(path)
+        full = File.expand_path(path.to_s)
+        BREAKS.find { |_, (file, _)| File.expand_path(file, GraphIO.library_presets_dir) == full }&.first
+      end
+
       # An SFZ instrument (Sampler::Instrument) from +path+ (see
       # Sampler::SFZ), its voices reading tables at level spacing +mips+
       # (:octave by default, the lighter one for big sets).

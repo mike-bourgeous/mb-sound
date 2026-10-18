@@ -113,6 +113,7 @@ module MB
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
               resample_to_sample: 'alias of bounce', capture_audio: 'live capture (performance, not graph structure)',
               loops: 'lists loop files (a listing; samples print through their lineage)',
+              breakbeat: 'returns a Sample (prints as breakbeat(:name) through its file)',
             },
             'GenerativeMethods' => {
               tones: 'a Weights value (prints through its own recipe)', weights: 'a Weights value (prints through its own recipe)',
