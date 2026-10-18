@@ -294,6 +294,9 @@ module UIHelpers
     require 'pry'
     opts[:keyboard] ||= MB::Sound::UI::Keyboard.new(out: NullKeyboardOut.new)
     term = FakeTerminal.new(rows, cols)
+    # (Reline's history is per process: earlier examples' lines would be
+    # what Up recalls after a recalled line)
+    Reline::HISTORY.clear if defined?(Reline::HISTORY)
     prompt = Pry::Prompt.new('ui-spec', 'ui spec', [proc { 't> ' }, proc { 't* ' }])
     tiles = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: term.slave, output: term.slave, repl: :thread,
                           pry: { prompt: prompt, color: false, correct_indent: false }, probe: false, **opts)
