@@ -65,6 +65,7 @@ require_relative 'sound/form_methods'
 require_relative 'sound/knob_methods'
 require_relative 'sound/key_methods'
 require_relative 'sound/bus_methods'
+require_relative 'sound/cue_methods'
 require_relative 'sound/rack'
 require_relative 'sound/rack_methods'
 require_relative 'sound/record_methods'
@@ -106,6 +107,7 @@ module MB
     extend KnobMethods
     extend KeyMethods
     extend BusMethods
+    extend CueMethods # after ArrangementMethods (its #launch calls super)
     extend RackMethods
     extend RecordMethods
     extend MultichannelMethods
@@ -197,6 +199,7 @@ require_relative 'sound/arrangement/recording'
 require_relative 'sound/arrangement/patch_check'
 require_relative 'sound/arrangement/clip_matrix'
 require_relative 'sound/arrangement'
+require_relative 'sound/arrangement/cue'
 require_relative 'sound/form'
 
 require_relative 'sound/plot_output'
