@@ -733,6 +733,9 @@ module MB
         `--master club` masters any song.  `measure: :loudest` reaches the
         target with the loudest 8 bars instead of the whole song, so
         breakdowns stay under the drops (`master :club, measure: :loudest`).
+        Without a master chain the live output (not renders or recordings)
+        ends in a transparent safety limiter at -1 dBFS; `master` says so,
+        and any chain or preset replaces it.
       TEXT
       commands :masters, :master, :render
       dsl :master, :ride

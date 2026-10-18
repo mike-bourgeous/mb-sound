@@ -82,7 +82,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       out.written.clear
       MB::Sound.master_gain(1)
       play_quietly(1.constant.until(0.01))
-      expect(out.channel(0).max).to be_within(1e-6).of(1)
+      # (full scale meets the live output's safety limiter: no master chain)
+      expect(out.channel(0).max).to be_within(1e-6).of(MB::Sound::Session::SafetyLimiter::SAFETY_CEILING.to_f)
     end
 
     it 'scales by gain:' do
@@ -434,14 +435,15 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'sets, shows, and removes master effects' do
-      expect(MB::Sound.master).to eq('bypass')
+      # (the default Session is realtime: its live output has the safety limiter)
+      expect(MB::Sound.master).to eq('bypass (live output: a safety limiter at -1 dBFS until a master chain is set)')
       expect(MB::Sound.master { |mix| mix.softclip }.data[:description]).to start_with('master:')
       expect(MB::Sound.master).to start_with('master:')
       expect(MB::Sound::Session.default.master_active?).to eq(true)
       MB::Sound.master(nil)
       deadline = MB::U.clock_now + 2
-      sleep 0.01 until MB::Sound.master == 'bypass' || MB::U.clock_now > deadline
-      expect(MB::Sound.master).to eq('bypass')
+      sleep 0.01 until MB::Sound.master.start_with?('bypass') || MB::U.clock_now > deadline
+      expect(MB::Sound.master).to start_with('bypass (live output: a safety limiter')
     end
 
     it 'is also available as master_fx' do

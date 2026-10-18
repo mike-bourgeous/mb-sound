@@ -155,7 +155,10 @@ module MB
 
           @mutex.synchronize {
             chain = @master_chains&.last
-            next 'bypass' if chain.nil?
+            # The live output's safety limiter (see SafetyLimiter)
+            safety = @safety_limiter ? ' (live output: a safety limiter at -1 dBFS until a master chain is set)' : ''
+            next "bypass#{safety}" if chain.nil?
+            next "#{chain.description}#{safety}" if chain.bypass? && (chain.started || chain.start <= @transport.position)
             next "#{chain.description}#{rider_info(chain)}" if chain.started
             next "#{chain.description} (starting)" if chain.start <= @transport.position
             "#{chain.description} (starts at bar #{bar_of(chain.start)})"
