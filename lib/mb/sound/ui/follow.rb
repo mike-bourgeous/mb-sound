@@ -62,11 +62,18 @@ module MB
         end
 
         # The latest snapshot (nil without a Session; a still transport
-        # before its first buffer).
+        # before its first buffer), with the latest Poll's slow data: a
+        # snapshot carries the slow data of when the render thread built
+        # it, and a kept one (no new buffer since) kept old tracks and
+        # clips (ux-fix-1 item 18: TRACKS said `bass  no clip` while `now`
+        # said `roll (playing)`).
         def snapshot
           return @source.call if @source
           return nil unless @attached
-          @last = @feed.take || @last || Snapshot.fake(slow: @feed.slow)
+          snap = @feed.take || @last || Snapshot.fake(slow: @feed.slow)
+          slow = @feed.slow
+          snap = snap.with(slow: slow) unless snap.slow.equal?(slow)
+          @last = snap
         end
 
       end

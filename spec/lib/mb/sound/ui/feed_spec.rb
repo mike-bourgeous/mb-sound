@@ -13,6 +13,19 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
     MB::Sound.rewind
   end
 
+  # ux-fix-1 item 18: TRACKS showed a kept snapshot's old clip names
+  it "gives screens the latest Poll's tracks even on a kept snapshot" do
+    screen = Class.new { include MB::Sound::UI::Follow; def initialize(feed) = (@feed = feed; @source = nil; @attached = true; @last = nil) }.new(feed)
+    session.ui_feed = feed
+    session.process_buffer
+    first = screen.send(:snapshot)
+    track = MB::Sound::UI::TrackInfo.new(name: :bass, q: '1', clip: 'roll', armed: false)
+    feed.slow = MB::Sound::UI::Slow.empty.with(tracks: [track].freeze)
+    kept = screen.send(:snapshot) # (no buffer since: the same snapshot)
+    expect(kept.seq).to eq(first.seq)
+    expect(kept.tracks.map(&:clip)).to eq(['roll'])
+  end
+
   it 'publishes a snapshot after a buffer only when the last one was taken' do
     session.ui_feed = feed
     session.add(220.hz.triangle.at(-12.db), name: :tri)
