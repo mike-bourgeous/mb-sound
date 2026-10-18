@@ -355,6 +355,27 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(session.knob(:cut)).to equal(k)
       expect { session.knob(:nope) }.to raise_error(ArgumentError, /No knob :nope/)
     end
+
+    it 'defines a knob read before its definition in live mode, then gives it its spec without losing readers' do
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      k = nil
+      expect { k = session.knob(:shape) }.to output(/knob :shape wasn't defined: made it 0.5 of 0.0..1.0 for now; `knob :shape, value, range: lo..hi`/).to_stderr
+      expect(k).to have_attributes(implicit: true, range: 0.0..1.0)
+      expect(session.knob_info[:shape]).to include('implicit')
+      session.add(k * 1, on: :now)
+      expect(render(session, 800).to_a.last).to eq(0.5)
+
+      expect(session.knob(:shape, 800, range: 100..8000, curve: :exp)).to equal(k)
+      expect(k).to have_attributes(implicit: false, range: 100.0..8000.0)
+      expect(session.knob_info[:shape]).not_to include('implicit')
+      out = render(session, 4800)
+      expect(out[-1]).to be_within(1e-3).of(800) # the reader follows (after the declick)
+      expect { session.knob(:shape) }.not_to output.to_stderr
+    end
+
+    it 'stays strict outside live mode (scripts, specs), naming the knob' do
+      expect { session.knob(:shape) }.to raise_error(ArgumentError, /No knob :shape; define it with `knob :shape, value, range: lo..hi`/)
+    end
   end
 
   describe 'graph documents in a Session' do

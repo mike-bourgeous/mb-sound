@@ -198,6 +198,8 @@ Phase 2: `bin/songs/night_bus_flow.rb` ("Night Bus: Last Stop", 126 BPM tech hou
 
 ## Knobs (`lib/mb/sound/graph_node/knob.rb`, `session/knobs.rb`, console `KnobMethods`; phase 3, K6)
 
+- Implicit knobs (omnibus9, 2026-10-18; the maintainer's ux-r4 note 5): in live mode (`MB::Sound.live?`) `Session#knob(name)` for an undefined name defines it (`Knobs#implicit_knob`: `IMPLICIT_DEFAULT` 0.5 of `IMPLICIT_RANGE` 0..1, `GraphNode::Knob#implicit`, `knob_info` says so, a one-line note); a later `knob :x, value, range:, curve:` respecs it as a new knob would (the placeholder range doesn't carry over) and moves it to the new default, keeping its readers.  Scripts and specs stay strict (the ArgumentError naming the knob and how to define it, which patch checks report).  The default doesn't come from the reader's context (a `knob(:x)` call can't see where its reader goes).
+
 Maintainer, 2026-10-10: `turn` for knobs with `move` as an alias; tracks, groups, and knobs share one namespace (collisions through `live_error`).
 
 ```ruby

@@ -374,7 +374,12 @@ module MB
           @node_type_name = 'Knob'
           @self_reader = nil
           @decisions = {} # timeline position => value decided there (see ValueAt)
+          @implicit = false
         end
+
+        # True for a knob a live graph read before it was defined
+        # (Session::Knobs#knob: 0.5 of 0..1 until `knob :x, ...` defines it).
+        attr_accessor :implicit
 
         # Changes the Spec (keeping the value and anything in progress),
         # e.g. when a knob is defined again.  +options+ as for Spec.

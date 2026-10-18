@@ -57,11 +57,20 @@ module MB
           if existing
             options = spec.dup
             options[:default] = default unless default.nil?
-            existing.respec(**options) unless options.empty?
+            unless options.empty?
+              # An implicit knob (below) defined at last: its readers keep
+              # reading it, and it moves to the new default
+              was_implicit = existing.implicit
+              existing.implicit = false
+              # (as a new knob: the implicit 0..1 range doesn't carry over)
+              existing.respec(**(was_implicit ? { range: nil, curve: :linear }.merge(options) : options))
+              existing.set(existing.spec.default, frame: @frame) if was_implicit && !existing.spec.default.nil?
+            end
             return existing
           end
 
           if default.nil? && spec.empty?
+            return implicit_knob(name) if MB::Sound.live?
             raise ArgumentError, "No knob #{name.inspect}#{knob_suggestion(name)}; define it with `knob #{name.inspect}, value, range: lo..hi`"
           end
 
@@ -73,6 +82,34 @@ module MB
             k = GraphNode::Knob.new(name, default, session: self, sample_rate: rate, frame: @frame, **spec)
             @knob_lock.synchronize { @knobs[name] = k }
           }
+          k
+        end
+
+        # The default of a knob read before it was defined (live; see
+        # #implicit_knob).
+        IMPLICIT_DEFAULT = 0.5
+
+        # The range of a knob read before it was defined.
+        IMPLICIT_RANGE = 0.0..1.0
+
+        # Live mode (MB::Sound.live?), a graph reading knob +name+ before it
+        # was defined defines it (omnibus9; the maintainer's ux-r4 note 5):
+        # IMPLICIT_DEFAULT of IMPLICIT_RANGE, flagged GraphNode::Knob#implicit
+        # (knob_info says so), with a one-line note.  A later `knob :x, ...`
+        # gives it its range, curve, and default without losing its readers.
+        # Scripts and specs stay strict (#knob raises with a hint).
+        def implicit_knob(name)
+          return nil unless @names.claim(name, :knob)
+
+          rate = output_open? ? sample_rate : 48000
+          k = nil
+          @render_lock.synchronize {
+            k = GraphNode::Knob.new(name, IMPLICIT_DEFAULT, session: self, sample_rate: rate, frame: @frame, range: IMPLICIT_RANGE)
+            k.implicit = true
+            @knob_lock.synchronize { @knobs[name] = k }
+          }
+          warn "knob #{name.inspect} wasn't defined: made it #{IMPLICIT_DEFAULT} of #{IMPLICIT_RANGE} for now; " \
+            "`knob #{name.inspect}, value, range: lo..hi` sets it (what reads it keeps reading it)#{knob_suggestion(name)}"
           k
         end
 
@@ -478,6 +515,7 @@ module MB
             parts << 'learning' if k.learning?
             parts << "-> #{GraphNode::Knob.number(MB::M.sigfigs(k.target, 4))}" if k.mode == :ramp
             parts << "following #{k.instance_variable_get(:@segment).label}" if k.mode == :follow
+            parts << '(implicit: read before it was defined)' if k.implicit
             parts.join(' ')
           }
         end

@@ -693,7 +693,9 @@ module MB
       about <<~TEXT
         Named values that graphs read (`knob(:cut)`) and you turn, with
         ramps, launch points, MIDI learn, snapshots, and crossfades.  Turns
-        are journaled and undoable.
+        are journaled and undoable.  Read a knob before defining it and it
+        starts at 0.5 of 0..1 (with a note); `knob :cut, 800, range:
+        100..8000` later sets it up, and whatever reads it keeps reading.
       TEXT
       commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn
       note :arrangement
