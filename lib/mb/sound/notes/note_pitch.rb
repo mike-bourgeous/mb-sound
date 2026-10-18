@@ -79,9 +79,9 @@ module MB
       end
 
       # A Pitch whose frequency follows a Notes instance (Notes#hz, alias
-      # #tone and #pitch): the held note number plus pitch bend through the
-      # session Tuning.  Oscillators made from it (#tone, #saw, #square, ...)
-      # are KeyedTones that reset their phase at every note-on (except :add
+      # #tone and #pitch): the held note number plus its pitch mark, if any
+      # (Notes#pitch_mark), plus pitch bend through the session Tuning.
+      # Oscillators made from it (#tone, #saw, #square, ...) are KeyedTones that reset their phase at every note-on (except :add
       # re-strikes of a sounding voice; see Notes#key_trigger), unless they
       # are #free or #lfo.
       #
@@ -247,13 +247,13 @@ module MB
         # The note number node (see #build_freq): Notes#number, or a
         # Notes::Glide.
         def number_node
-          return @notes.number unless @settings[:glide]
+          return @notes.number(marks: true) unless @settings[:glide]
 
           time, legato, from, overshoot, shape, cycles = @settings[:glide]
           @notes.send(:memo, [:glide, @settings[:glide], @sample_rate]) {
             Glide.new(
               @notes.note_stream, time: time, legato: legato, from: from, overshoot: shape ? overshoot : overshoot || 0, shape: shape, cycles: cycles,
-              notes: @notes, sample_rate: @sample_rate
+              notes: @notes, sample_rate: @sample_rate, marks: true
             )
           }
         end

@@ -150,8 +150,9 @@ module MB
         attr_reader :scale_lock
 
         # Locks the keys to +scale+ (a Scale, e.g. `scale(:dorian, :d)`, or
-        # nil to unlock; ux-r3 item 44), in ScaleLock's :degrees mode (each
-        # white key the next degree) unless the lock given is a ScaleLock.
+        # nil to unlock; ux-r3 item 44), in ScaleLock's :mash mode (each
+        # white key the next degree, black keys silent) unless the lock
+        # given is a ScaleLock.
         def scale=(scale)
           @lock.synchronize do
             @scale_lock = scale.nil? || scale.is_a?(ScaleLock) ? scale : ScaleLock.new(scale)

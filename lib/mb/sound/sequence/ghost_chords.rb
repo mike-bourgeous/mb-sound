@@ -24,8 +24,10 @@ module MB
         # - scale degrees counted from 1 like Roman numerals (1 = i, 4 = iv,
         #   7 = VII in A minor; Scale#chord counts from 0, so ghost chord n
         #   is Scale#chord(n - 1)), built in +scale+ (a Scale, a name like
-        #   :minor, or an Array of offsets, with +root+) from every other
-        #   scale note: +size+ 3 for triads, 4 for seventh chords;
+        #   :minor, or an Array of offsets, with +root+; by default the
+        #   session key's scale, `key :a, :minor`, read when the chords are
+        #   built) from every other scale note: +size+ 3 for triads, 4 for
+        #   seventh chords;
         # - Arrays of Notes or note numbers, used as given (`[A3, C4, E4]`);
         # - nil (or Rest): no snapping during that span.
         #
@@ -56,7 +58,7 @@ module MB
         # MIDI::Stream#ghost_chords does the same on a stream, with chords
         # following the timeline's bars; on a generator clip every cycle
         # snaps to its place in the progression.
-        def ghost_chords(*chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil)
+        def ghost_chords(*chords, per: nil, scale: nil, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil)
           sc, classes = Clip.ghost_setup(chords, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie)
           span = per.nil? ? Sequence.current_transport.bar_length.to_r : Duration.whole_notes(per)
           short = passing.nil? ? nil : Duration.whole_notes(passing)
@@ -100,9 +102,13 @@ module MB
           raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
           raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
 
-          # A scale name without a root is on the session key's root (C
-          # until `key` changes it; midi-consol-2)
-          root = Sequence.current_transport.key.root if root.nil? && !scale.nil? && !scale.is_a?(Scale)
+          # No scale: the session key's scale when the chords are built (C
+          # major until `key` changes it; maintainer decision 2026-10-18;
+          # :minor before), on +root+ if given.  A scale name without a root is
+          # on the session key's root (midi-consol-2).
+          transport = Sequence.current_transport
+          scale = transport.key.scale(transport: transport) if scale.nil?
+          root = transport.key.root if root.nil? && !scale.is_a?(Scale)
           sc = Scale[scale, root]
           sc = Clip.harmonic_scale(sc) if harmonic
           [sc, chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }]

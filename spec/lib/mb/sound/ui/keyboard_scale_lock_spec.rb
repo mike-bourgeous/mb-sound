@@ -20,6 +20,7 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
 
   it 'fits the scale to the keys (play mode): D dorian with D on every C, passing notes on black keys' do
     kb.scale = MB::Sound.scale(:dorian, :d)
+    kb.scale_mode = :play
     sc = MB::Sound.scale(:dorian, :d)
     # z is C3: D3, then each white key the next degree
     expect(play('zxcvbnm,')).to eq([50, 52, 53, 55, 57, 59, 60, 62])
@@ -28,13 +29,14 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     # (C#: D-E, Eb; D#: E-F and A#: B-C, half steps, silent; F#: G-A, Ab;
     # G#: A-B, Bb)
     expect(play('sdghj')).to eq([51, 56, 58])
-    expect(kb.view.scale).to eq('D dorian')
+    expect(kb.view.scale).to eq('D dorian (play)')
   end
 
-  it 'walks degrees of pentatonic scales in mash mode, one degree per white key' do
+  it 'walks degrees of pentatonic scales in mash mode (the default), one degree per white key' do
     sc = MB::Sound.scale(:minor_pentatonic, :a)
     kb.scale = sc
-    kb.scale_mode = :mash
+    expect(kb.scale_lock.mode).to eq(:mash)
+    expect(kb.view.scale).to eq('A minor_pentatonic')
     notes = play('zxcvbnm')
     expect(notes).to eq(notes.sort)
     expect(notes.each_cons(2).map { |a, b| sc.degree(b)[0] - sc.degree(a)[0] }.uniq).to eq([1])
@@ -90,6 +92,6 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     expect { kb.scale = :dorian }.to raise_error(ArgumentError, /needs a Scale/)
     expect { kb.scale_mode = :snap }.to raise_error(ArgumentError, /Lock a scale first/)
     kb.scale = MB::Sound.scale(:minor, :a)
-    expect { kb.scale_mode = :wander }.to raise_error(ArgumentError, /modes are :play, :mash, :along/)
+    expect { kb.scale_mode = :wander }.to raise_error(ArgumentError, /modes are :mash, :play, :along/)
   end
 end

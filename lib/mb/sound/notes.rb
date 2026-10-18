@@ -362,7 +362,11 @@ module MB
 
       # The note number of the newest held note, held after release (a
       # Notes::Number), starting at the source's first note (or C4).
-      def number
+      #
+      # +marks: true+ adds each note's pitch mark (see #pitch_mark) to its
+      # number, as #freq and `v.hz` do.
+      def number(marks: false)
+        return memo(:marked_number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate, marks: true) } if marks
         memo(:number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
       alias note_number number
@@ -374,8 +378,8 @@ module MB
 
       # The pitch mark (semitones) of the latest note-on, 0 without one (a
       # Notes::PitchMark; see Seq::Step#pitch): the per-note pitch of
-      # sampler chop hits, which SamplerVoice reads at each note-on.  Other
-      # voices may use it too: `v.hz.transpose(v.pitch_mark).saw`.
+      # sampler chop hits, which SamplerVoice reads at each note-on.  #freq
+      # and `v.hz` already include it.
       def pitch_mark
         memo(:pitch_mark) { PitchMark.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
@@ -406,8 +410,16 @@ module MB
       # The frequency in Hz of #number plus pitch bend (MIDI::Event#bend_semitones,
       # with the stream's bend range) through the session Tuning (a
       # Notes::Frequency).
-      def freq
-        memo(:freq) { Frequency.new(number, offsets: [bend_semitones], sample_rate: @sample_rate) }
+      #
+      # Each note's pitch mark (#pitch_mark: cents-scale notes locked with
+      # `micro: :mark`, chop hits) is part of its frequency (maintainer
+      # decision 2026-10-18; notes without marks are unchanged), so marked
+      # notes sound the same in voices and samplers and still export as
+      # bends.  +marks: false+ leaves the marks out (samplers add them
+      # themselves at each note-on; a voice can read #pitch_mark itself).
+      def freq(marks: true)
+        return memo(:freq_unmarked) { Frequency.new(number, offsets: [bend_semitones], sample_rate: @sample_rate) } unless marks
+        memo(:freq) { Frequency.new(number(marks: true), offsets: [bend_semitones], sample_rate: @sample_rate) }
       end
       alias frequency freq
 

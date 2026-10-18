@@ -174,6 +174,27 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect(m[30000]).to eq(-1.5)
     end
 
+    it 'are part of v.hz and v.freq (glides and mono note returns too), and leave unmarked notes unchanged' do
+      s = MB::Sound
+      marked = s.seq(s::C4.pitch(0.5), s::D4, s::E4.pitch(-1.5)).n8
+      plain = s.seq(60.5, s::D4, 62.5).n8
+      freq = ->(clip, &b) { n = clip.notes; take(b.call(n), 72000) }
+      expect(freq.(marked) { |n| n.freq }).to eq(freq.(plain) { |n| n.freq })
+      expect(freq.(marked) { |n| n.hz.transpose(7).freq }).to eq(freq.(plain) { |n| n.hz.transpose(7).freq })
+      expect(freq.(marked) { |n| n.hz.glide(0.05).freq }).to eq(freq.(plain) { |n| n.hz.glide(0.05).freq })
+      expect(freq.(marked) { |n| n.freq(marks: false) }).to eq(freq.(s.seq(s::C4, s::D4, s::E4).n8) { |n| n.freq })
+      expect(freq.(marked) { |n| n.number }.to_a.uniq).to eq([60, 62, 64])
+      expect(freq.(marked) { |n| n.number(marks: true) }.to_a.uniq).to eq([60.5, 62, 62.5])
+
+      # An older held note uncovered by a release keeps its mark
+      held = MB::Sound::MIDI::Stream.new(MIDIListSource.new(
+        MB::Sound::MIDI::Event.note_on(60, pitch: 0.25, time: 0r), MB::Sound::MIDI::Event.note_on(64, time: 1/8r),
+        MB::Sound::MIDI::Event.note_off(64, time: 1/4r), MB::Sound::MIDI::Event.note_off(60, time: 1/2r)
+      ))
+      n = take(MB::Sound::Notes.new(held).number(marks: true), 18000)
+      expect([n[0], n[9000], n[15000]]).to eq([60.25, 64, 60.25])
+    end
+
     it 'pitch keyboard slices played live with bend, and split keyboards play the last slice above the split' do
       rec = MB::Sound::Sample[Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| Math.sin(i * 0.05) })]
       brk = rec.slices(4)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Post-merge checks for mb-sound: clean compile, full suite, smoke suite,
-# memcheck status; FULLMC=1 also runs the full memcheck.  Output files go in
+# memcheck status; FULLMC=1 also runs the full memcheck (only when the maintainer
+# asks: full runs are manual since 2026-10-18).  Output files go in
 # $OUT (default: a new temp dir), so results can be grepped instead of rerun.
 # Usage: .claude/skills/post-merge/postmerge_tests.sh [checkout dir]
 set -uo pipefail

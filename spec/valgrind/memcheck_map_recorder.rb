@@ -10,7 +10,9 @@
 # recorded for the current spec file (set by context and example hooks;
 # calls at load time are attributed through the caller's location).
 # Specs under spec/ext/ also map to the extension their name starts with,
-# for calls made in subprocesses.
+# for calls made in subprocesses.  A run of every memcheck spec also
+# records the ext/ structure (MemcheckSelection.structure) the map is
+# current for.
 require_relative 'memcheck_selection'
 
 module MemcheckMapRecorder
@@ -85,11 +87,18 @@ module MemcheckMapRecorder
       end
       specs.select! { |s, _| list.include?(s) }
 
+      # The ext/ structure is recorded only by a run of every memcheck spec
+      # (`rake memcheck:map`), since it vouches for the whole map.
+      missing = list - @seen.to_a
+      structure = missing.empty? ? MemcheckSelection.structure : map['structure']
+      $stderr.puts "MEMCHECK_MAP: ext/ structure not updated (#{missing.length} memcheck spec files didn't run)" unless missing.empty?
+
       out = {
-        'about' => 'Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.',
+        'about' => 'Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.',
         'generated' => Time.now.utc.strftime('%Y-%m-%d'),
         'specs' => specs.sort.to_h,
-      }
+        'structure' => structure,
+      }.compact
       File.write(file, JSON.pretty_generate(out) + "\n")
       $stderr.puts "MEMCHECK_MAP: wrote #{MemcheckSelection::MAP_PATH} (#{(@seen | @calls.keys).count { |s| list.include?(s) }} spec files recorded, #{specs.length} in the map)"
     end

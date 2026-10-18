@@ -1,6 +1,6 @@
 {
-  "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-16",
+  "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
+  "generated": "2026-10-18",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -135,6 +135,11 @@
     "spec/ext/mb/sound/fast_loop_spec.rb": {
       "fast_loop": [
         "FastLoop.run"
+      ]
+    },
+    "spec/ext/mb/sound/fast_loudness_spec.rb": {
+      "fast_loudness": [
+        "FastLoudness.peak_sumsq"
       ]
     },
     "spec/ext/mb/sound/fast_midi_spec.rb": {
@@ -532,12 +537,14 @@
     },
     "spec/lib/mb/sound/filter/four_pole_spec.rb": {
       "fast_filter": [
+        "FastFilter.diode_ladder",
         "FastFilter.four_pole",
         "FastFilter.resonance_curve",
         "FastFilter.secant",
         "FastFilter.self_osc_gain",
         "FastFilter.tan",
-        "FastFilter.tanh"
+        "FastFilter.tanh",
+        "FastFilter.tuning_scale"
       ],
       "fast_sound": [
         "FastSound.oscillate"
@@ -1396,8 +1403,7 @@
         "FastArithmetic.copy",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
-        "FastArithmetic.power",
-        "FastArithmetic.product"
+        "FastArithmetic.power"
       ],
       "fast_clip": [
         "FastClip.shape"
@@ -1528,6 +1534,562 @@
         "FastWavetable.harmonic_spectra",
         "FastWavetable.shape"
       ]
+    }
+  },
+  "structure": {
+    "fast_arithmetic": {
+      "dir": "ext/mb/sound/fast_arithmetic",
+      "sources": [
+        "fast_arithmetic.c"
+      ],
+      "modules": [
+        "FastArithmetic"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_arithmetic.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_audio": {
+      "dir": "ext/mb/sound/fast_audio",
+      "sources": [
+        "fast_audio.c",
+        "mb_jack.c",
+        "mb_jack.h",
+        "mb_miniaudio.h",
+        "miniaudio.h",
+        "miniaudio_impl.c"
+      ],
+      "modules": [
+        "FastAudio"
+      ],
+      "includes": [
+        "ext/mb/sound/fast_audio/mb_jack.h",
+        "ext/mb/sound/fast_audio/mb_miniaudio.h",
+        "ext/mb/sound/fast_audio/miniaudio.h"
+      ],
+      "depend": {
+        "fast_audio.o": [
+          "ext/mb/sound/fast_audio/fast_audio.c",
+          "ext/mb/sound/fast_audio/mb_jack.h",
+          "ext/mb/sound/fast_audio/mb_miniaudio.h",
+          "ext/mb/sound/fast_audio/miniaudio.h"
+        ],
+        "mb_jack.o": [
+          "ext/mb/sound/fast_audio/mb_jack.c",
+          "ext/mb/sound/fast_audio/mb_jack.h"
+        ],
+        "miniaudio_impl.o": [
+          "ext/mb/sound/fast_audio/mb_miniaudio.h",
+          "ext/mb/sound/fast_audio/miniaudio.h",
+          "ext/mb/sound/fast_audio/miniaudio_impl.c"
+        ]
+      }
+    },
+    "fast_clip": {
+      "dir": "ext/mb/sound/fast_clip",
+      "sources": [
+        "fast_clip.c"
+      ],
+      "modules": [
+        "FastClip"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_clip_shape.h",
+        "ext/mb/sound/include/mb_curve_lookup.h",
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_clip.o": [
+          "ext/mb/sound/include/mb_clip_shape.h",
+          "ext/mb/sound/include/mb_curve_lookup.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_control": {
+      "dir": "ext/mb/sound/fast_control",
+      "sources": [
+        "fast_control.c"
+      ],
+      "modules": [
+        "FastControl"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_smooth.h"
+      ],
+      "depend": {
+        "fast_control.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_smooth.h"
+        ]
+      }
+    },
+    "fast_delay": {
+      "dir": "ext/mb/sound/fast_delay",
+      "sources": [
+        "fast_delay.c"
+      ],
+      "modules": [
+        "FastDelay"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_delay_interp.h"
+      ],
+      "depend": {
+        "fast_delay.o": [
+          "ext/mb/sound/include/mb_delay_interp.h"
+        ]
+      }
+    },
+    "fast_dynamics": {
+      "dir": "ext/mb/sound/fast_dynamics",
+      "sources": [
+        "fast_dynamics.c"
+      ],
+      "modules": [
+        "FastDynamics"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_dynamics.h",
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_dynamics.o": [
+          "ext/mb/sound/include/mb_dynamics.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_envelope": {
+      "dir": "ext/mb/sound/fast_envelope",
+      "sources": [
+        "fast_envelope.c"
+      ],
+      "modules": [
+        "FastEnvelope"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_envelope.h",
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_envelope.o": [
+          "ext/mb/sound/include/mb_envelope.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_filter": {
+      "dir": "ext/mb/sound/fast_filter",
+      "sources": [
+        "fast_filter.c"
+      ],
+      "modules": [
+        "FastFilter"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_four_pole.h",
+        "ext/mb/sound/include/mb_four_pole_tuning.h",
+        "ext/mb/sound/include/mb_svf.h"
+      ],
+      "depend": {
+        "fast_filter.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_four_pole.h",
+          "ext/mb/sound/include/mb_four_pole_tuning.h",
+          "ext/mb/sound/include/mb_svf.h"
+        ]
+      }
+    },
+    "fast_generative": {
+      "dir": "ext/mb/sound/fast_generative",
+      "sources": [
+        "fast_generative.c"
+      ],
+      "modules": [
+        "FastGenerative"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_lofi": {
+      "dir": "ext/mb/sound/fast_lofi",
+      "sources": [
+        "fast_lofi.c"
+      ],
+      "modules": [
+        "FastLofi"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_lofi.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_loop": {
+      "dir": "ext/mb/sound/fast_loop",
+      "sources": [
+        "fast_loop.c",
+        "loop_pitch.c",
+        "loop_pitch.h"
+      ],
+      "modules": [
+        "FastLoop"
+      ],
+      "includes": [
+        "ext/mb/sound/fast_loop/loop_pitch.h",
+        "ext/mb/sound/include/mb_clip_shape.h",
+        "ext/mb/sound/include/mb_delay_interp.h",
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_svf.h"
+      ],
+      "depend": {
+        "fast_loop.o": [
+          "ext/mb/sound/fast_loop/loop_pitch.h",
+          "ext/mb/sound/include/mb_clip_shape.h",
+          "ext/mb/sound/include/mb_delay_interp.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_svf.h"
+        ],
+        "loop_pitch.o": [
+          "ext/mb/sound/fast_loop/loop_pitch.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_svf.h"
+        ]
+      }
+    },
+    "fast_loudness": {
+      "dir": "ext/mb/sound/fast_loudness",
+      "sources": [
+        "fast_loudness.c"
+      ],
+      "modules": [
+        "FastLoudness"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_midi": {
+      "dir": "ext/mb/sound/fast_midi",
+      "sources": [
+        "RtMidi.cpp",
+        "RtMidi.h",
+        "fast_midi.c",
+        "rtmidi_build.cpp",
+        "rtmidi_build.h",
+        "rtmidi_c.cpp",
+        "rtmidi_c.h"
+      ],
+      "modules": [
+        "FastMIDI"
+      ],
+      "includes": [
+        "ext/mb/sound/fast_midi/RtMidi.cpp",
+        "ext/mb/sound/fast_midi/RtMidi.h",
+        "ext/mb/sound/fast_midi/rtmidi_build.h",
+        "ext/mb/sound/fast_midi/rtmidi_c.h"
+      ],
+      "depend": {
+        "RtMidi.o": [
+          "ext/mb/sound/fast_midi/RtMidi.cpp",
+          "ext/mb/sound/fast_midi/RtMidi.h"
+        ],
+        "fast_midi.o": [
+          "ext/mb/sound/fast_midi/fast_midi.c",
+          "ext/mb/sound/fast_midi/rtmidi_build.h",
+          "ext/mb/sound/fast_midi/rtmidi_c.h"
+        ],
+        "rtmidi_build.o": [
+          "ext/mb/sound/fast_midi/RtMidi.cpp",
+          "ext/mb/sound/fast_midi/RtMidi.h",
+          "ext/mb/sound/fast_midi/rtmidi_build.cpp",
+          "ext/mb/sound/fast_midi/rtmidi_build.h",
+          "ext/mb/sound/fast_midi/rtmidi_c.h"
+        ],
+        "rtmidi_c.o": [
+          "ext/mb/sound/fast_midi/RtMidi.h",
+          "ext/mb/sound/fast_midi/rtmidi_c.cpp",
+          "ext/mb/sound/fast_midi/rtmidi_c.h"
+        ]
+      }
+    },
+    "fast_plan": {
+      "dir": "ext/mb/sound/fast_plan",
+      "sources": [
+        "fast_plan.c",
+        "plan_biquad.c",
+        "plan_dynamics.c",
+        "plan_filters.c",
+        "plan_filters.h",
+        "plan_wavetable.c"
+      ],
+      "modules": [
+        "FastPlan"
+      ],
+      "includes": [
+        "ext/mb/sound/fast_plan/plan_filters.h",
+        "ext/mb/sound/include/mb_biquad.h",
+        "ext/mb/sound/include/mb_bl_osc.h",
+        "ext/mb/sound/include/mb_clip_shape.h",
+        "ext/mb/sound/include/mb_dynamics.h",
+        "ext/mb/sound/include/mb_envelope.h",
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_four_pole.h",
+        "ext/mb/sound/include/mb_four_pole_tuning.h",
+        "ext/mb/sound/include/mb_osc_shapes.h",
+        "ext/mb/sound/include/mb_phase.h",
+        "ext/mb/sound/include/mb_smooth.h",
+        "ext/mb/sound/include/mb_svf.h",
+        "ext/mb/sound/include/mb_vec_exp2.h",
+        "ext/mb/sound/include/mb_vec_sine.h",
+        "ext/mb/sound/include/mb_wavetable.h"
+      ],
+      "depend": {
+        "fast_plan.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_bl_osc.h",
+          "ext/mb/sound/include/mb_clip_shape.h",
+          "ext/mb/sound/include/mb_envelope.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_osc_shapes.h",
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_smooth.h",
+          "ext/mb/sound/include/mb_vec_exp2.h",
+          "ext/mb/sound/include/mb_vec_sine.h"
+        ],
+        "plan_biquad.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_biquad.h"
+        ],
+        "plan_dynamics.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_dynamics.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ],
+        "plan_filters.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_four_pole.h",
+          "ext/mb/sound/include/mb_four_pole_tuning.h",
+          "ext/mb/sound/include/mb_svf.h"
+        ],
+        "plan_wavetable.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_wavetable.h"
+        ]
+      }
+    },
+    "fast_recipe": {
+      "dir": "ext/mb/sound/fast_recipe",
+      "sources": [
+        "fast_recipe.c"
+      ],
+      "modules": [
+        "FastRecipe"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_resample": {
+      "dir": "ext/mb/sound/fast_resample",
+      "sources": [
+        "fast_resample.c"
+      ],
+      "modules": [
+        "FastResample"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_resonator": {
+      "dir": "ext/mb/sound/fast_resonator",
+      "sources": [
+        "fast_resonator.c"
+      ],
+      "modules": [
+        "FastResonator"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_resonator.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_reverb": {
+      "dir": "ext/mb/sound/fast_reverb",
+      "sources": [
+        "fast_reverb.c"
+      ],
+      "modules": [
+        "FastReverb"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_reverb.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_sampler": {
+      "dir": "ext/mb/sound/fast_sampler",
+      "sources": [
+        "fast_sampler.c",
+        "granular.c",
+        "granular.h"
+      ],
+      "modules": [
+        "FastSampler"
+      ],
+      "includes": [
+        "ext/mb/sound/fast_sampler/granular.h",
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_phase.h",
+        "ext/mb/sound/include/mb_wavetable.h"
+      ],
+      "depend": {
+        "fast_sampler.o": [
+          "ext/mb/sound/fast_sampler/granular.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_wavetable.h"
+        ],
+        "granular.o": [
+          "ext/mb/sound/fast_sampler/granular.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_wavetable.h"
+        ]
+      }
+    },
+    "fast_sound": {
+      "dir": "ext/mb/fast_sound",
+      "sources": [
+        "fast_sound.c"
+      ],
+      "modules": [
+        "FastSound"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_biquad.h",
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_osc_shapes.h",
+        "ext/mb/sound/include/mb_phase.h"
+      ],
+      "depend": {
+        "fast_sound.o": [
+          "ext/mb/sound/include/mb_biquad.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_osc_shapes.h",
+          "ext/mb/sound/include/mb_phase.h"
+        ]
+      }
+    },
+    "fast_synth": {
+      "dir": "ext/mb/sound/fast_synth",
+      "sources": [
+        "fast_synth.c"
+      ],
+      "modules": [
+        "FastSynth"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_bl_osc.h",
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_phase.h"
+      ],
+      "depend": {
+        "fast_synth.o": [
+          "ext/mb/sound/include/mb_bl_osc.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_phase.h"
+        ]
+      }
+    },
+    "fast_texture": {
+      "dir": "ext/mb/sound/fast_texture",
+      "sources": [
+        "fast_texture.c"
+      ],
+      "modules": [
+        "FastTexture"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_curve_lookup.h",
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_texture.o": [
+          "ext/mb/sound/include/mb_curve_lookup.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_ui": {
+      "dir": "ext/mb/sound/fast_ui",
+      "sources": [
+        "fast_ui.c",
+        "gvl_probe.c"
+      ],
+      "modules": [
+        "FastUI"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_unison": {
+      "dir": "ext/mb/sound/fast_unison",
+      "sources": [
+        "fast_unison.c"
+      ],
+      "modules": [
+        "FastUnison"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h"
+      ],
+      "depend": {
+        "fast_unison.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h"
+        ]
+      }
+    },
+    "fast_wavetable": {
+      "dir": "ext/mb/sound/fast_wavetable",
+      "sources": [
+        "fast_wavetable.c"
+      ],
+      "modules": [
+        "FastWavetable"
+      ],
+      "includes": [
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_phase.h",
+        "ext/mb/sound/include/mb_wavetable.h"
+      ],
+      "depend": {
+        "fast_wavetable.o": [
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_wavetable.h"
+        ]
+      }
     }
   }
 }

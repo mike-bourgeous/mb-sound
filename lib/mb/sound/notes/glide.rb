@@ -79,8 +79,8 @@ module MB
           MB::Sound::Curve.back_k(overshoot)
         end
 
-        def initialize(stream, time:, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil, resume: false, notes: nil, sample_rate: 48000)
-          super(stream, notes: notes, sample_rate: sample_rate)
+        def initialize(stream, time:, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil, resume: false, notes: nil, sample_rate: 48000, marks: false)
+          super(stream, notes: notes, sample_rate: sample_rate, marks: marks)
 
           @resume = !!resume
 
@@ -237,7 +237,7 @@ module MB
         end
 
         def note_on(event)
-          target = number_of(event.note)
+          target = marked_number(event)
           legato = @stack.length > 1 || event.legato?
           from = @from_note
           @from_note = nil
@@ -252,14 +252,14 @@ module MB
         end
 
         def uncovered(entry)
-          glide_to(number_of(entry.note), current, enabled?)
+          glide_to(marked_number(entry), current, enabled?)
         end
 
         def chase(event)
           @had_note = true
           @from_note = nil
           @from_offset = nil
-          glide_to(number_of(event.note), nil, false)
+          glide_to(marked_number(event), nil, false)
         end
 
         # A note starting right at a content jump (e.g. a tween's first
@@ -277,7 +277,7 @@ module MB
         def chase_item(c)
           return super unless @resume && c.previous && enabled?
 
-          start = number_of(c.previous.note)
+          start = marked_number(c.previous)
           @from_offset = nil
           if c.starts
             # The note-on follows at the same time and glides from +start+
@@ -285,7 +285,7 @@ module MB
           else
             @from_note = nil
             @had_note = true
-            glide_to(number_of(c.event.note), start, true)
+            glide_to(marked_number(c.event), start, true)
             if @gliding
               @position = (c.elapsed * @sample_rate).round
               @gliding = false if @position >= @length
