@@ -700,6 +700,7 @@ module MB
           end
           @sidechain = (line ? [track, only, line, shape] : [track, only]).freeze
         end
+        alias pump sidechain
 
         # Target integrated loudness in LUFS (a number or a Range).
         def loudness(lufs)
@@ -760,7 +761,7 @@ module MB
 
         BUILDER_METHODS = [
           :like, :title, :about, :tempo, :meter, :phrases, :key, :flow, :form, :kit, :clip, :role, :knob,
-          :scene, :layers, :bus, :sidechain, :loudness, :true_peak, :mono_below, :master, :master_gain, :tip, :without,
+          :scene, :layers, :bus, :sidechain, :pump, :loudness, :true_peak, :mono_below, :master, :master_gain, :tip, :without,
         ].freeze
 
         def method_missing(name, *args, **kwargs, &block)

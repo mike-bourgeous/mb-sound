@@ -351,8 +351,11 @@ RSpec.describe(MB::Sound::Take) do
       97 => ['go :two'],
       151 => ['bg :pump, a'],
       200 => ['undo'],
+      230 => ['turn :"pump/level", 0.4, over: 1.beat'],
+      245 => ['undo'],
+      250 => ['turn :"pump/level", 0'],
       260 => ['stop :pump'],
-      330 => ['sidechain :pump, b, on: :beat, shape: :impulse'],
+      330 => ['sidechain :pump, b, on: :beat, shape: :impulse', 'turn :"pump/level", 1'],
     }
     b = MB::Sound::Take.console_binding
     out = []

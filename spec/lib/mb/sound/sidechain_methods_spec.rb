@@ -163,6 +163,53 @@ RSpec.describe(MB::Sound::SidechainMethods) do
       expect(Dir.children(dir).sort).to eq(['pad.flac'])
     end
 
+    it 'turn down and off with their level knob, on exact frames at any buffer size, from scenes too' do
+      results = [[800], [7, 128, 333], [367, 368]].map { |sizes|
+        s = new_session
+        d = run(3 * 96000, sizes, s: s) { |ss|
+          MB::Sound.sidechain(:pump, line, on: :now)
+          ss.add(MB::Sound.bus(:pump), name: :probe, on: :now)
+          MB::Sound.scene(:quiet, pump: line, "pump/level": 0.5)
+          MB::Sound.at_bar(2) { MB::Sound.turn(:"pump/level", 0) }
+          MB::Sound.at_bar(3) { MB::Sound.go(:quiet) }
+        }
+        s.close
+        d
+      }
+      results.each { |d| expect(d).to eq(results[0]) }
+      data = results[0]
+      expect(data[0]).to eq(0.75)
+      expect(data[96000 + 960...192000].abs.max).to eq(0) # (after the turn's 5 ms glide)
+      expect(data[192000 + 2400]).to eq(0.375)
+      expect(session.knobs).to be_empty # (the other sessions' knobs)
+    end
+
+    it 'print a hint on mute (mute doesn\'t stop a pump) pointing to the level knob and stop' do
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.sidechain(:pump, line)
+        expect { MB::Sound.mute(:pump) }.to output(/trigger track: .*turn :"pump\/level", 0 or stop :pump/).to_stdout
+        expect { MB::Sound.unmute(:pump) }.not_to output.to_stdout
+      end
+    end
+
+    it 'warn once per call site when a duck with an attack reads an impulse trigger' do
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.sidechain(:pump, line, shape: :impulse)
+        expect {
+          2.times { 1.constant.duck(:pump) }
+        }.to output(/sidechain_methods_spec.rb:\d+: warning: duck\(:pump\) reads :pump's one-sample impulses with attack: 0.001/).to_stderr
+        expect { 1.constant.duck(:pump, attack: 0) }.not_to output.to_stderr
+        MB::Sound.sidechain(:gated, line)
+        expect { 1.constant.duck(:gated) }.not_to output.to_stderr
+      end
+    end
+
+    it 'have the aliases pump, trigger_track, trigger_line, and pumps, trigger_tracks, trigger_lines' do
+      %i[pump trigger_track trigger_line].each { |a| expect(MB::Sound.method(a)).to eq(MB::Sound.method(:sidechain)) }
+      %i[pumps trigger_tracks trigger_lines].each { |a| expect(MB::Sound.method(a)).to eq(MB::Sound.method(:sidechains)) }
+      expect(MB::Sound.genre(:dnb) { pump :pump, :pump }.trigger_track).to eq(:pump)
+    end
+
     it 'list with sidechains: what reads each one' do
       MB::Sound::Session.with_context(session: session) do
         MB::Sound.sidechain(:pump, line)

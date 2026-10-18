@@ -113,6 +113,7 @@ module MB
       # change's journal entry (an Array for several names).
       def mute(*names, at: nil, on: nil, in: nil, fade: nil)
         point = LaunchPoint.of(binding) or return nil
+        (hint = SidechainMethods.mute_hint(names)) && puts(hint) # (trigger tracks: their level knob)
         strip_command(:mute, names, point, fade: fade)
       end
 

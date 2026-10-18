@@ -58,7 +58,7 @@ Measured on master-ai b6b06139 (mono, 120 bpm, 128/801/7, 800, and 7-frame buffe
 
 ## Trigger tracks (duck-keys, 2026-10-18)
 
-A trigger route (`route(name, trigger: true)`, made by `sidechain :pump, clip` or `track(..., trigger: true)`) is a player name whose sound goes only to its readers: no main out, sends, stems, CUE, or meters; `to:`/`send:`/`feed` raise.  Readers read it like any source (before its mute; it keeps rendering while read), and any trigger route turns on the routed render.  `Session#trigger_tracks`, `#trigger_track?`, `#bus_readers_of` (source => reader names, for `sidechains`).  Details and measurements in dynamics.md ("Trigger tracks").
+A trigger route (`route(name, trigger: true)`, made by `sidechain :pump, clip` or `track(..., trigger: true)`) is a player name whose sound goes only to its readers: no main out, sends, stems, CUE, or meters; `to:`/`send:`/`feed` raise.  Readers read it like any source (before its mute; it keeps rendering while read), and any trigger route turns on the routed render.  Its level is the Session knob `:"name/level"` (`#trigger_level_name`), applied in `#deliver_trigger`.  `Session#trigger_tracks`, `#trigger_track?`, `#bus_readers_of` (source => reader names, for `sidechains`).  Details and measurements in dynamics.md ("Trigger tracks").
 
 ## Later
 

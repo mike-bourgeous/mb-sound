@@ -243,6 +243,7 @@ module MB
                  detector: :peak, rms: 0.01, link: true, lookahead: 0, only: nil)
           raise ArgumentError, 'duck needs a sidechain node (e.g. the kick)' if sidechain.nil?
           raise ArgumentError, 'only: picks a node inside a bus or track named by a Symbol (duck(:drums, only: :kick))' if only && !sidechain.is_a?(Symbol)
+          SidechainMethods.check_impulse_duck(sidechain, attack) if sidechain.is_a?(Symbol) && only.nil?
           sidechain = BusTap.from(sidechain, only: only) if sidechain.is_a?(Symbol)
           a = -Decibels.reduction_db(amount, 'amount')
           t = DynamicsMethods.level_db(threshold, 'threshold')

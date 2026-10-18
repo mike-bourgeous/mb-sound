@@ -788,8 +788,10 @@ module MB
         (`sidechain :pump, grid(16, 'x...x...').loop`) is a sidechain line
         nobody hears: `duck(:pump)` reads it, scenes and `launch` play it
         like any track, and it never reaches the mix, stems, or CUE
-        (`shape: env(0, 0.08)`, or a block: closed hats as the key).  In a
-        kit, `voice :trigger, silent: true` plays a row only for
+        (`shape: env(0, 0.08)`, or a block: closed hats as the key; also
+        `pump`).  `turn :"pump/level", 0` turns the pump off (its level
+        knob; scenes take `"pump/level": 0`), or `stop :pump`.  In a kit,
+        `voice :trigger, silent: true` plays a row only for
         `duck(:drums, only: :trigger)`.
       TEXT
       commands :bus, :buses, :feed, :routes, :sidechain, :sidechains

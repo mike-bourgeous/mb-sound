@@ -58,7 +58,8 @@ module MB
         # for the master), +sends+ a Hash from bus name to the send's level
         # knob (a GraphNode::Knob), +trigger+ true for a trigger track (a sidechain
         # line: heard by readers only, never mixed; see #route).
-        Route = Struct.new(:to, :sends, :trigger, keyword_init: true)
+        # +level+ is a trigger track's level knob (see #trigger_level_name).
+        Route = Struct.new(:to, :sends, :trigger, :level, keyword_init: true)
 
         # Undo subjects: a bus's chain, and one send of a player name.
         BusSubject = Data.define(:name)
@@ -169,6 +170,25 @@ module MB
           @mutex.synchronize { route_of(name)&.trigger } || false
         end
 
+        # The name of trigger track +name+'s level knob: :"pump/level" (0..1,
+        # default 1; see #route).  `turn :"pump/level", 0` stops the pump
+        # (journaled, undoable, exact in takes); scenes and sections take
+        # `"pump/level": 0` like any knob value.
+        def trigger_level_name(name)
+          :"#{name}/level"
+        end
+
+        # The shape a trigger track was defined with (SidechainMethods
+        # #sidechain's +shape:+; nil for a patch block), for warnings.
+        def trigger_shape(name)
+          @mutex.synchronize { @trigger_shapes[name] }
+        end
+
+        # Records trigger track +name+'s +shape+ (see #trigger_shape).
+        def note_trigger_shape(name, shape)
+          @mutex.synchronize { @trigger_shapes[name] = shape }
+        end
+
         # The trigger track names (see #route).
         def trigger_tracks
           @mutex.synchronize { @routes.select { |_, r| r.trigger }.keys }
@@ -236,13 +256,17 @@ module MB
 
           old = nil
           dropped = nil
+          # A trigger track's level: a Session knob (turn, scenes, sections,
+          # undo, and takes as for any knob), made before the routes lock
+          level_knob = trigger ? (knob(trigger_level_name(name), 1.0, range: 0.0..1.0) or return nil) : nil
           @mutex.synchronize {
             old = @routes[name]
-            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false)
+            r = Route.new(to: old&.to, sends: (old&.sends || {}).dup, trigger: old&.trigger || false, level: old&.level)
             r.to = to unless to == :keep
             r.sends = knobs if knobs
             unless trigger.nil?
               r.trigger = trigger
+              r.level = trigger ? level_knob : nil
               if trigger
                 dropped = r.sends.values
                 r.to = nil
@@ -366,6 +390,7 @@ module MB
           @bus_defs = {}
           @routes = {}
           @trigger_routes = false
+          @trigger_shapes = {}
           @bus_order = nil
           @bus_readers = Hash.new { |h, k| h[k] = ::Set.new }
           @bus_only = Hash.new { |h, k| h[k] = ::Set.new }
@@ -722,7 +747,7 @@ module MB
         # stem is the track as heard before the master chain.
         def deliver_player(p, data, ramp, mix, stem, offset, frames, fade: ramp)
           route = route_of(p.name)
-          return deliver_trigger(p, data, offset, frames, fade) if route&.trigger
+          return deliver_trigger(p, route, data, offset, frames, fade) if route&.trigger
           main_bus = route&.to && bus_input(route.to)
           dest = main_bus || mix
           tap = bus_tapped?(p.name) ? bus_signal_buffer(p.name) : nil
@@ -762,18 +787,23 @@ module MB
         end
 
         # A trigger track's buffer (see #route's +trigger:+) goes only to its
-        # readers' signal (after its fades, before its mute, like any
-        # player's): no mix, bus, send, stem, or meter.
-        def deliver_trigger(p, data, offset, frames, fade)
+        # readers' signal (after its fades and times its level knob, before
+        # its mute, like any player's): no mix, bus, send, stem, or meter.
+        def deliver_trigger(p, route, data, offset, frames, fade)
           return unless bus_tapped?(p.name)
           tap = bus_signal_buffer(p.name)
+          level = route.level&.read(@frame + offset, frames)
+          unless level.nil? || (level.is_a?(Numeric) && level == 1)
+            fade = fade ? fade[0...frames] * level : level
+          end
           tap.each_with_index do |t, c|
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
             raw = d[0...len]
-            t[offset...(offset + len)].inplace + (fade ? raw * fade[0...len] : raw)
+            g = fade.is_a?(Numeric) ? fade : fade && fade[0...len]
+            t[offset...(offset + len)].inplace + (g.nil? ? raw : raw * g)
           end
         end
 
