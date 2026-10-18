@@ -22,21 +22,47 @@ module MB
       # gain, written in dB; nil for none), preset +params+ (numbers, or
       # Symbols naming template knobs: the preset's param reads the knob), a knob
       # name whose value drives a lowpass on the output (+filter+), a ducking
-      # +amount+ keyed by the template's pulse kick (+duck+), the track's
-      # launch quantization +q+ and launch +fade+, and a few words +about+ it.
-      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about) do
-        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil)
+      # +amount+ keyed by the template's sidechain (+duck+: the kick voice
+      # of the drums track, read through the Session's buses), the track's
+      # launch quantization +q+ and launch +fade+, a few words +about+ it,
+      # the template bus its main out feeds (+to+, nil for the master), and
+      # its +send+ levels to template buses ({ bus => gain or knob name }).
+      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about, :to, :send) do
+        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil, to: nil, send: {})
           raise ArgumentError, "A role's patch is a preset or method name (got #{patch.inspect})" unless patch.is_a?(Symbol)
           unless params.is_a?(Hash) && params.values.all? { |v| v.is_a?(Numeric) || v.is_a?(Symbol) }
             raise ArgumentError, "params: must be a Hash of numbers or knob names (got #{params.inspect})"
           end
           raise ArgumentError, "filter: names a knob (got #{filter.inspect})" unless filter.nil? || filter.is_a?(Symbol)
-          super(patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade, about: about&.dup&.freeze)
+          raise ArgumentError, "to: names a template bus (got #{to.inspect})" unless to.nil? || to.is_a?(Symbol)
+          unless send.is_a?(Hash) && send.all? { |k, v| k.is_a?(Symbol) && ((v.is_a?(Numeric) && v.real? && v >= 0) || v.is_a?(Symbol)) }
+            raise ArgumentError, "send: must be a Hash from bus name to a gain (-12.db) or a knob name (got #{send.inspect})"
+          end
+          super(
+            patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade,
+            about: about&.dup&.freeze, to: to, send: send.dup.freeze
+          )
         end
 
         # The keyword options that rebuild this role (for Template#to_ruby).
         def options
-          to_h.except(:patch).reject { |k, v| v.nil? || (k == :params && v.empty?) }
+          to_h.except(:patch).reject { |k, v| v.nil? || (%i[params send].include?(k) && v.empty?) }
+        end
+      end
+
+      # A template bus (see Session::Buses): its effect chain as +steps+
+      # [preset or GraphNode method name, args, params] like Mix#master's
+      # (none: a plain group), and the bus its output feeds (+to+, nil for
+      # the master).
+      Bus = Data.define(:steps, :to) do
+        def initialize(steps: [], to: nil)
+          raise ArgumentError, "A bus's to: names another bus (got #{to.inspect})" unless to.nil? || to.is_a?(Symbol)
+          super(steps: steps.dup.freeze, to: to)
+        end
+
+        # The steps as the builder writes them: [name, *args, params].
+        def step_ruby
+          steps.map { |n, a, o| Genre.ruby([n, *a, *([o] unless o.empty?)]) }
         end
       end
 
@@ -93,11 +119,6 @@ module MB
           lines
         end
       end
-
-      # The ghost kick that keys roles' duck: (Template#pulse_kick): a short
-      # 808 kick ("Tunnel Vision"'s; the default 2.4 s decay would hold the
-      # ducking down between kicks).
-      PULSE_KICK = { tune: 54, decay: 0.38, tone: 0.62, sigh: 0.9 }.freeze
 
       # Scene keys that are scene options rather than tracks or knobs.
       SCENE_OPTIONS = [:q, :fade, :others].freeze
@@ -162,7 +183,8 @@ module MB
           when Array
             "[#{value.map { |v| ruby(v) }.join(', ')}]"
           when Sequence::Duration
-            Form.ruby_value(value)
+            text = Form.ruby_value(value)
+            text.start_with?('MB::') ? GraphNode::Recipe::RubyWriter.new(nil).literal(value) : text # (1.n8)
           else
             value.inspect
           end
@@ -177,13 +199,13 @@ module MB
         # other MIDI source): a preset's graph (with +params+), else the
         # Genre::Patches or MB::Sound method of that name called with the
         # source.
-        def build_patch(patch, source, params = {})
+        def build_patch(patch, source, params = {}, knob_names = nil)
           if GraphIO.find_preset(patch)
             MB::Sound.preset(patch, midi: source, **params) # (knob names bind there; see GraphIO's Loader)
           elsif Patches.respond_to?(patch)
-            Patches.public_send(patch, source, **knob_params(params))
+            Patches.public_send(patch, source, **knob_params(params, knob_names))
           elsif MB::Sound.respond_to?(patch)
-            MB::Sound.public_send(patch, source, **knob_params(params))
+            MB::Sound.public_send(patch, source, **knob_params(params, knob_names))
           else
             names = GraphIO.presets.values.flatten
             raise ArgumentError, "No preset or method #{patch.inspect} for a genre role#{Form.suggest(patch, names)}"
@@ -191,9 +213,11 @@ module MB
         end
 
         # +params+ with Symbol values replaced by those knobs' nodes (for
-        # methods; presets take knob names themselves).
-        def knob_params(params)
-          params.transform_values { |v| v.is_a?(Symbol) ? MB::Sound.knob(v) : v }
+        # methods; presets take knob names themselves): every Symbol, or
+        # only those in +knob_names+ if given (so `only: :kick` stays a
+        # name).
+        def knob_params(params, knob_names = nil)
+          params.transform_values { |v| v.is_a?(Symbol) && (knob_names.nil? || knob_names.include?(v)) ? MB::Sound.knob(v) : v }
         end
 
         # Side (L - R) power below +frequency+ Hz relative to mid (L + R)
@@ -215,17 +239,34 @@ module MB
         # [name, args, params]: each a mastering preset (:club, :streaming,
         # :quiet, :vinyl; see Mastering, params its options), else an
         # effect preset with an :input, else a GraphNode method of that
-        # name.
-        def master_chain(mix, steps)
+        # name.  Template buses' chains (Bus#steps) are built the same way.
+        # Symbol params name knobs (all of them, or those in +knob_names+).
+        def master_chain(mix, steps, knob_names = nil)
           steps.reduce(mix) { |m, (name, args, params)|
             if Mastering.preset?(name)
               m.master(name, *args, **params)
             elsif GraphIO.find_preset(name)
               MB::Sound.preset(name, input: m, **params)
             else
-              m.public_send(name, *args, **knob_params(params))
+              m.public_send(name, *args, **knob_params(params, knob_names))
             end
           }
+        end
+
+        # +buses+ (name => Bus) in an order where every bus comes after the
+        # bus its output feeds (Session#bus checks that the destination
+        # exists).
+        def bus_order(buses)
+          done = {}
+          visit = ->(n, path) {
+            next if done[n]
+            raise ArgumentError, "Template buses feed each other in a loop (#{(path + [n]).join(' -> ')})" if path.include?(n)
+            to = buses[n]&.to
+            visit.(to, path + [n]) if to && buses.key?(to)
+            done[n] = true
+          }
+          buses.each_key { |n| visit.(n, []) }
+          done.keys
         end
 
         # A copy of +form+ with every plain-number section, fill, and phrase
@@ -248,7 +289,7 @@ module MB
       # value; #with (or Genre.template with +base:+) makes changed copies.
       Template = Data.define(
         :name, :title, :about, :tempo, :tempo_range, :meter, :phrases, :key, :form,
-        :kits, :clips, :roles, :scenes, :knobs, :pulse, :mix, :tips
+        :kits, :clips, :roles, :scenes, :knobs, :buses, :sidechain, :mix, :tips
       ) do
         # Data#with, plus an optional builder block applied on top:
         # `t.with(tempo: 170) { role :bass, :jungle_reese }`.
@@ -284,8 +325,20 @@ module MB
           values = scenes.fetch(name) { raise ArgumentError, "No scene #{name.inspect} in genre #{self.name.inspect}#{Form.suggest(name, scenes.keys)}" }
           values.to_h { |k, v|
             next [k, v] if Genre::SCENE_OPTIONS.include?(k) || knobs.key?(k)
-            [k, v.is_a?(Symbol) && !Genre::SCENE_LITERALS.include?(v) ? material(v) : v]
+            v = material(v) if v.is_a?(Symbol) && !Genre::SCENE_LITERALS.include?(v)
+            [k, k == sidechain&.first ? keyed_kit(v) : v]
           }
+        end
+
+        # +kit+ with an empty row for the sidechain's node (sidechain[1])
+        # if it has none, so the drums track always has the voice that
+        # roles' ducks read (a hats-only breakdown kit keeps a silent kick
+        # voice: no "no node named :kick" warning, and the ducks rest).
+        # Other values pass through.
+        def keyed_kit(kit)
+          row = sidechain&.last
+          return kit unless row && kit.is_a?(Sequence::Kit) && !kit.rows.key?(row)
+          Sequence::Kit.new(kit.rows.merge(row => MB::Sound.grid(16, row => '.' * 16)[row].loop(align: :launch)))
         end
 
         # The Kit or Clip named +name+.
@@ -308,27 +361,30 @@ module MB
         end
 
         # The graph for role +name+ playing +source+: the patch, a lowpass
-        # driven by the role's filter knob, its level, and ducking under the
-        # pulse kick.
+        # driven by the role's filter knob, its level, and ducking keyed by
+        # the sidechain (`duck(:drums, only: :kick)`: the drums track's kick
+        # voice itself, read by the Session's buses on the exact sample, so
+        # only real kicks duck; Session::Buses, design/notes/buses.md).
         def patch(name, source)
           r = roles.fetch(name) { raise ArgumentError, "No role #{name.inspect} in genre #{self.name.inspect}#{Form.suggest(name, roles.keys)}" }
-          node = Genre.build_patch(r.patch, source, r.params)
+          node = Genre.build_patch(r.patch, source, r.params, knobs.keys)
           node = node.filter(:lowpass, cutoff: MB::Sound.knob(r.filter), quality: 0.7) if r.filter
           node = node * r.level if r.level
-          node = node.duck(pulse_kick, amount: r.duck, release: 1.n16) if r.duck
+          node = node.duck(sidechain[0], **(sidechain[1] ? { only: sidechain[1] } : {}), amount: r.duck, release: 1.n16) if r.duck
           node
         end
 
-        # A ghost kick for ducking: the pulse kit's kick row on a tr808 with
-        # a short kick (Genre::PULSE_KICK), never heard.
-        def pulse_kick
-          raise ArgumentError, "Genre #{name.inspect} has no pulse: kit for duck:" unless pulse
-          MB::Sound.tr808(Sequence::Kit.new({ kick: kits.fetch(pulse)[:kick] }), kick: Genre::PULSE_KICK)
+        # The chain of template bus +name+ on +input+ (the bus's input, a
+        # bundle).
+        def bus_chain(name, input)
+          b = buses.fetch(name) { raise ArgumentError, "No bus #{name.inspect} in genre #{self.name.inspect}#{Form.suggest(name, buses.keys)}" }
+          Genre.master_chain(input, b.steps, knobs.keys)
         end
 
         # Sets the template up on the current Session: tempo, meter, launch
-        # quantization (1 bar), knobs, the master chain and gain, a track per
-        # role (built with #patch), and the scenes.  Returns self.
+        # quantization (1 bar), knobs, the master chain and gain, the buses,
+        # a track per role (built with #patch, routed with its to: and
+        # send:), and the scenes.  Returns self.
         def setup
           MB::Sound.bpm(tempo)
           MB::Sound.transport.bar_length = bar_length unless meter == [4, 4]
@@ -349,7 +405,10 @@ module MB
             MB::Sound.master { |m| Genre.master_chain(mono ? m.mono_below(mono) : m, chain) }
           end
           template = self
-          roles.each { |n, r| MB::Sound.track(n, q: r.q, fade: r.fade) { |c| template.patch(n, c) } }
+          Genre.bus_order(buses).each { |n| MB::Sound.bus(n, to: buses[n].to || :master) { |sig| template.bus_chain(n, sig) } }
+          roles.each { |n, r|
+            MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.send unless r.send.empty?)) { |c| template.patch(n, c) }
+          }
           scenes.each_key { |s| MB::Sound.scene(s, **scene(s)) }
           self
         end
@@ -379,7 +438,8 @@ module MB
             l << "  role #{n.inspect}, #{r.patch.inspect}#{", #{Genre.kwargs(opts)}" unless opts.empty?}"
           }
           scenes.each { |n, v| l << "  scene #{n.inspect}#{", #{Genre.kwargs(v)}" unless v.empty?}" }
-          l << "  pulse #{pulse.inspect}" if pulse
+          buses.each { |n, b| l << "  bus #{[n.inspect, *b.step_ruby, *("to: #{b.to.inspect}" if b.to)].join(', ')}" }
+          l << "  sidechain #{sidechain[0].inspect}#{", only: #{sidechain[1].inspect}" if sidechain[1]}" if sidechain
           call = ->(m, v) { text = Genre.ruby(v); text.start_with?('-') ? "  #{m}(#{text})" : "  #{m} #{text}" } # (-1 alone warns)
           l << call.(:loudness, mix.loudness) if mix.loudness
           l << call.(:true_peak, mix.true_peak) if mix.true_peak
@@ -414,6 +474,7 @@ module MB
                    "(#{Genre.ruby(bars)} bars, #{(secs / 60).floor}:#{format('%02d', secs.round % 60)})"
           lines << "  roles: #{roles.map { |n, r| "#{n} (#{r.patch}#{", #{r.level.to_db.round(1)} dB" if r.level}#{', ducked' if r.duck})" }.join(', ')}"
           lines << "  kits: #{kits.keys.join(', ')}" unless kits.empty?
+          lines << "  buses: #{buses.map { |n, b| "#{n}#{" (to #{b.to})" if b.to}" }.join(', ')}" unless buses.empty?
           lines << "  mix: #{mix.summary}" unless mix.summary.empty?
           lines << "  #{tips.length} tips (.tips): #{tips.first}" unless tips.empty?
           lines.join("\n")
@@ -452,6 +513,8 @@ module MB
           @roles = {}
           @scenes = {}
           @knobs = {}
+          @buses = {}
+          @sidechain = nil
           @mix = {}
           @tips = []
           like(base) if base
@@ -463,9 +526,9 @@ module MB
         def like(template)
           t = template.is_a?(Template) ? template : Genre[template]
           @title ||= t.title
-          @about, @tempo, @tempo_range, @meter, @phrases, @key, @form, @pulse =
-            t.about, t.tempo, t.tempo_range, t.meter, t.phrases, t.key, t.form, t.pulse
-          @kits, @clips, @roles, @scenes, @knobs = t.kits.dup, t.clips.dup, t.roles.dup, t.scenes.dup, t.knobs.dup
+          @about, @tempo, @tempo_range, @meter, @phrases, @key, @form, @sidechain =
+            t.about, t.tempo, t.tempo_range, t.meter, t.phrases, t.key, t.form, t.sidechain
+          @kits, @clips, @roles, @scenes, @knobs, @buses = t.kits.dup, t.clips.dup, t.roles.dup, t.scenes.dup, t.knobs.dup, t.buses.dup
           @mix = t.mix.to_h.compact
           @tips = t.tips.dup
           nil
@@ -555,9 +618,33 @@ module MB
           end
         end
 
-        # The kit whose kick row keys roles' duck: (a ghost kick).
-        def pulse(kit_name)
-          @pulse = kit_name
+        # A bus (Session::Buses) with its effect chain as steps, each an
+        # Array [preset or GraphNode method name, *args, params] (like
+        # #master's: `bus :hall, [:reverb, :hall, { mix: 1 }]`; none for a
+        # plain group), feeding +to+ (another bus; the master by default).
+        # Roles reach it with `to:` (all of their sound) or `send:` (a
+        # level).  `bus :hall, nil` removes one.
+        def bus(name, *steps, to: nil)
+          raise ArgumentError, "Bus names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+          return @buses.delete(name) && nil if steps == [nil]
+          list = steps.map { |st|
+            unless st.is_a?(Array) && st[0].is_a?(Symbol)
+              raise ArgumentError, "bus #{name.inspect}: each step is [method or preset name, *args, params] (got #{st.inspect})"
+            end
+            params = st.length > 1 && st[-1].is_a?(Hash) ? st[-1] : nil
+            args = params ? st[1...-1] : st[1..]
+            [st[0], args.freeze, (params || {}).freeze].freeze
+          }
+          @buses[name] = Bus.new(steps: list, to: to)
+        end
+
+        # What roles' duck: amounts key from: a track (a role's name) and,
+        # with +only:+, the node of that name inside its graph (a drum voice
+        # like :kick), as `duck(:drums, only: :kick)` reads it.
+        def sidechain(track, only: nil)
+          raise ArgumentError, "sidechain names a role's track (got #{track.inspect})" unless track.is_a?(Symbol)
+          raise ArgumentError, "only: names a node in the track (got #{only.inspect})" unless only.nil? || only.is_a?(Symbol)
+          @sidechain = [track, only].freeze
         end
 
         # Target integrated loudness in LUFS (a number or a Range).
@@ -599,19 +686,20 @@ module MB
 
         # Removes parts by name: `without roles: [:pluck], scenes: [:pullup]`.
         # Removed roles leave the scenes too.
-        def without(roles: [], kits: [], clips: [], scenes: [], knobs: [])
+        def without(roles: [], kits: [], clips: [], scenes: [], knobs: [], buses: [])
           roles.each { |n| @roles.delete(n) }
           @scenes = @scenes.transform_values { |v| v.except(*roles).freeze } unless roles.empty?
           kits.each { |n| @kits.delete(n) }
           clips.each { |n| @clips.delete(n) }
           scenes.each { |n| @scenes.delete(n) }
           knobs.each { |n| @knobs.delete(n) }
+          buses.each { |n| @buses.delete(n) }
           nil
         end
 
         BUILDER_METHODS = [
           :like, :title, :about, :tempo, :meter, :phrases, :key, :flow, :form, :kit, :clip, :role, :knob,
-          :scene, :layers, :pulse, :loudness, :true_peak, :mono_below, :master, :master_gain, :tip, :without,
+          :scene, :layers, :bus, :sidechain, :loudness, :true_peak, :mono_below, :master, :master_gain, :tip, :without,
         ].freeze
 
         def method_missing(name, *args, **kwargs, &block)
@@ -635,7 +723,8 @@ module MB
             name: @name, title: (@title || @name.to_s).dup.freeze, about: @about&.dup&.freeze,
             tempo: @tempo, tempo_range: @tempo_range, meter: @meter.dup.freeze, phrases: @phrases.dup.freeze,
             key: @key&.dup&.freeze, form: @form, kits: @kits.dup.freeze, clips: @clips.dup.freeze,
-            roles: @roles.dup.freeze, scenes: @scenes.dup.freeze, knobs: @knobs.dup.freeze, pulse: @pulse,
+            roles: @roles.dup.freeze, scenes: @scenes.dup.freeze, knobs: @knobs.dup.freeze,
+            buses: @buses.dup.freeze, sidechain: @sidechain,
             mix: Mix.new(**@mix), tips: @tips.dup.freeze
           )
           __check__(t)
@@ -645,7 +734,8 @@ module MB
         private
 
         # Raises for scenes naming unknown roles, kits, or clips, form
-        # sections without a scene, a missing pulse kit, a role filter that
+        # sections without a scene, a missing sidechain track, buses and
+        # routes that name no bus (or loop), a role filter that
         # isn't a knob, or a tempo outside its range.
         def __check__(t)
           where = "Genre #{t.name.inspect}"
@@ -666,11 +756,29 @@ module MB
             scene = sec.scene || sec.name
             raise ArgumentError, "#{where}: form section #{sec.name.inspect} has no scene #{scene.inspect}#{Form.suggest(scene, t.scenes.keys)}" unless t.scenes.key?(scene)
           end
-          if t.pulse && !(t.kits.key?(t.pulse) && t.kits[t.pulse].rows.key?(:kick))
-            raise ArgumentError, "#{where}: pulse #{t.pulse.inspect} must be a kit with a kick row"
+          if t.sidechain && !t.roles.key?(t.sidechain[0])
+            raise ArgumentError, "#{where}: sidechain #{t.sidechain[0].inspect} must be a role's track#{Form.suggest(t.sidechain[0], t.roles.keys)}"
           end
-          if t.roles.any? { |_, r| r.duck } && !t.pulse
-            raise ArgumentError, "#{where}: roles duck under the pulse kick, but there is no pulse"
+          if t.roles.any? { |_, r| r.duck } && !t.sidechain
+            raise ArgumentError, "#{where}: roles duck, but there is no sidechain (sidechain :drums, only: :kick)"
+          end
+          t.buses.each do |n, b|
+            if t.roles.key?(n) || t.knobs.key?(n)
+              raise ArgumentError, "#{where}: bus #{n.inspect} is named like a #{t.roles.key?(n) ? 'role' : 'knob'} (tracks, buses, and knobs share names)"
+            end
+            next unless b.to
+            raise ArgumentError, "#{where}: bus #{n.inspect} feeds #{b.to.inspect}, which is no bus#{Form.suggest(b.to, t.buses.keys)}" unless t.buses.key?(b.to)
+          end
+          Genre.bus_order(t.buses) # (raises for loops)
+          t.roles.each do |n, r|
+            [*([r.to] if r.to), *r.send.keys].each do |b|
+              next if t.buses.key?(b)
+              raise ArgumentError, "#{where}: role #{n.inspect} routes to #{b.inspect}, which is no bus#{Form.suggest(b, t.buses.keys)}"
+            end
+            r.send.each_value do |v|
+              next unless v.is_a?(Symbol) && !t.knobs.key?(v)
+              raise ArgumentError, "#{where}: role #{n.inspect} sends at #{v.inspect}, which is no knob#{Form.suggest(v, t.knobs.keys)}"
+            end
           end
           t.roles.each do |n, r|
             r.params.each do |k, v|

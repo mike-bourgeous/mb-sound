@@ -121,7 +121,7 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect { build { tempo 120; flow { a 1 }; role :bass, :tr808; scene :a, bass: :nope } }.to raise_error(ArgumentError, /no kit or clip/)
       expect { build { tempo 120; flow { a 1; b 1 }; scene :a } }.to raise_error(ArgumentError, /section :b has no scene/)
       expect { build { tempo 200, range: 100..140; flow { a 1 }; scene :a } }.to raise_error(ArgumentError, /outside its range/)
-      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, duck: -6.db } }.to raise_error(ArgumentError, /no pulse/)
+      expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, duck: -6.db } }.to raise_error(ArgumentError, /no sidechain/)
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, filter: :cut } }.to raise_error(ArgumentError, /no knob/)
       expect { build { flow { a 1 }; scene :a } }.to raise_error(ArgumentError, /needs a tempo/)
       expect { build { tempo 120; flow { a 1 }; scene :a; role :x, :tr808, params: { cutoff: :cutt } } }.to raise_error(ArgumentError, /param cutoff: names :cutt, which is no knob/)
@@ -185,22 +185,22 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(master.to_ruby).to include('mono_below(120).compress(')
     end
 
-    it 'filters, levels, and ducks a role under the pulse kick' do
+    it 'filters, levels, and ducks a role under the drums track\'s kick voice' do
       t = genre[:dnb]
       clip = t.clips[:riff]
       MB::Sound.knob(:cut, 2400, range: 150..8000, curve: :exp)
       node = t.patch(:sub, clip)
-      expect(node.to_ruby).to include('duck(').and include('kick: { tune: 54')
+      expect(node.to_ruby).to include('duck(:drums, only: :kick, amount: -12.db')
       expect { t.patch(:nope, clip) }.to raise_error(ArgumentError, /No role :nope/)
       expect { MB::Sound::Genre.build_patch(:no_such_patch_x, clip) }.to raise_error(ArgumentError, /No preset or method/)
     end
 
-    it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked under the pulse kick' do
+    it 'rolls the techno bass between the kicks: a short sub with a noise tick, ducked by the kick voice' do
       t = genre[:techno]
       expect(t.roles[:bass].patch).to eq(:roller)
       expect(t.roles[:bass].duck).to eq(-4.db)
       expect(t.roles[:bass].level).to eq(2.db)
-      expect(t.pulse).to eq(:peak)
+      expect(t.sidechain).to eq([:drums, :kick])
       MB::Sound.knob(:cut, 400, range: 150..6000, curve: :exp)
 
       # The roller alone: stereo, its tick above 1 kHz, its low end mono
@@ -221,6 +221,9 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
         p2 = tmp_path("roller_#{tt.equal?(t) ? 'duck' : 'plain'}.flac")
         MB::Sound.render(p2, bars: 1, tail: false) do
           MB::Sound.bpm 132
+          # (the drums play muted: a source something reads keeps feeding it)
+          MB::Sound.bg :drums, tt.patch(:drums, tt.kits[:peak]), fade: 0
+          MB::Sound.mute :drums
           MB::Sound.bg :bass, tt.patch(:bass, tt.clips[:bass]), fade: 0
         end
         x = MB::Sound.read(p2)[0]
