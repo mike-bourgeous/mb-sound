@@ -62,6 +62,8 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/wind_chimes.rb' => ['--bars', '0.5', '-G', '2', '-s', '3'],
     'bin/songs/wavetable_song.rb' => ['--bars', '0.5'],
     'bin/stereo_graph_example.rb' => ['--bars', '0.5'],
+    'bin/midi/moving_params.rb' => ['--bars', '0.5', '-e', 'knob_arp'],
+    'bin/midi/key_lock.rb' => ['--bars', '0.5', '-s', 'chord', '-k', 'a,minor'],
     'bin/synths/fifth_pad.rb' => ['--bars', '0.5'],
   }.freeze
 

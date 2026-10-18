@@ -229,6 +229,17 @@ module MB
             @knob.control_specs
           end
 
+          # The knob's value at a timeline position (see Knob::ValueAt), so
+          # a reader works as a MIDI::Param too.
+          def value_at(pos = nil, frame: nil, transport: nil, stream: nil)
+            @knob.value_at(pos, frame: frame)
+          end
+
+          # See Knob::ValueAt#choose.
+          def choose(*choices)
+            @knob.choose(*choices)
+          end
+
           # Plan layer: a param read every block (Plan::Op::Param), a fill
           # while the knob holds still.
           include Plan::Describable
@@ -362,6 +373,7 @@ module MB
           @lock = Mutex.new
           @node_type_name = 'Knob'
           @self_reader = nil
+          @decisions = {} # timeline position => value decided there (see ValueAt)
         end
 
         # Changes the Spec (keeping the value and anything in progress),

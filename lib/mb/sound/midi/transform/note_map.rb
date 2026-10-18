@@ -33,6 +33,7 @@ module MB
             when :note_off then note_off(e)
             when :poly_pressure then poly_pressure(e)
             else
+              @reading.observe(e) if e.type == :cc
               other = map_other(e)
               schedule(other) if other
             end
@@ -217,6 +218,59 @@ module MB
           def map_on(e)
             return [[e, 0r]] unless e.note.is_a?(Numeric)
             [[e.with_note(Transpose.whole(@scale.snap(e.note, @direction))), 0r]]
+          end
+        end
+
+        # Transposes each note by a step read at its note-on from a param
+        # (MIDI::Param: `midi.transpose(seq(0, -4, 3, -2).n1.loop)`,
+        # `transpose(knob(:shift))`); its note-off and poly pressure follow
+        # the note, so a step that changes while a key is held never leaves
+        # a note hanging.  Steps are scale degrees of +:scale+ (semitones by
+        # default; fractions are cents only in the chromatic scale), or
+        # Intervals; nil (a clip before its first note) is 0.
+        class MovingTranspose < NoteMap
+          def initialize(parent, step, scale: nil, root: nil, **options)
+            super(parent, **options)
+            @step = Param.wrap(step, 'Transpose step')
+            @scale = scale.is_a?(Scale) && root.nil? ? scale : Scale[scale, root]
+            @node_type_name = @scale.chromatic? ? "transpose(#{Param.label(step)})" : "transpose(#{Param.label(step)}, scale: #{@scale})"
+          end
+
+          private
+
+          def map_on(e)
+            return [[e, 0r]] unless e.note.is_a?(Numeric)
+
+            step = param_at(@step, e.time) || 0
+            step = step.number if step.respond_to?(:number) && !step.is_a?(Numeric) # (a clip of notes: semitones from C-1)
+            step = step.round if step.is_a?(Float) && !@scale.chromatic?
+            [[e.with_note(Transpose.whole(Steps.new(step, scale: @scale).apply(e.note))), 0r]]
+          end
+        end
+
+        # Maps each note through a MIDI::Lock map (Stream#degrees,
+        # Stream#snap without a fixed scale or with :chord, Stream#lock)
+        # read at the note's timeline position; note-offs and poly
+        # pressure follow the note as it was mapped, so a held note keeps
+        # its pitch when the key or chord changes.  Silent keys (nil) play
+        # nothing.
+        class Locked < NoteMap
+          # Options that go to the transform, not the map (Stream#lock).
+          OPTIONS = [:overlap, :jump, :transport, :length].freeze
+
+          attr_reader :map
+
+          def initialize(parent, map, **options)
+            super(parent, **options)
+            @map = map
+            @node_type_name = map.to_s
+          end
+
+          private
+
+          def map_on(e)
+            out = @map.event(e, timeline_at(e.time), transport: transport, stream: @reading)
+            out ? [[out, 0r]] : []
           end
         end
 

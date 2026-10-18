@@ -755,6 +755,92 @@ module MB
       see :record
     end
 
+    Help.topic :key, 'The session key and modes', group: :time do
+      about <<~TEXT
+        The session has a key: `key :ab` sets the root (also 'F#', a Note
+        like Ab2, or 0..11), `mode :phrygian` the scale (any scale name),
+        `key :d, :dorian` both, and bare `key` / `mode` read them back.
+        Changes take launch points (`mode :lydian, on: :bar`), work in
+        scheduled blocks, scenes (`scene :drop, key: [:a, :minor]`), and
+        sections (`drop 8, key: :d, mode: :dorian`), and are undoable.
+        `scale(:dorian)` without a root uses the key's root; bare `scale`
+        is the key's scale; `degrees`, `snap`, and `lock` follow the key
+        as it changes.  `mode knob(:dark)` walks the modes from Lydian to
+        Locrian, one note at a time (`modes(:dorian..:phrygian, by:
+        knob(:dark))` for part of the walk).
+      TEXT
+      commands :key, :mode, :modes, :scale
+      dsl :degrees, :snap, :lock
+      note :midi
+      see :lock, :params, :sequences
+      example 'a riff that follows the key' do
+        key :d, :dorian
+        riff = seq(C4, D4, E4, G4, A4, G4, E4, D4).n8.loop
+        bg :try, riff.stream.lock(:play).synth(voices: 4) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+        mode :lydian, on: 2
+      end
+    end
+
+    Help.topic :lock, 'Keyboard locks: play in key', group: :perform do
+      about <<~TEXT
+        `lock :play` maps live MIDI and the virtual keyboard into the
+        session key: the root on every C, black keys passing notes between
+        their neighbours.  `lock :mash` makes every white key the next
+        scale degree and silences black keys (mash anything), `lock
+        :along` snaps each key to the nearest scale note, `lock :chord`
+        plays the current chord's tones (`from:` a clip of chords or
+        degrees like [1, 6, 4, 5]; `extend: :above` stacks 7ths and 9ths
+        above the chord, `bass: :root_fifth` below it), `lock :off`.
+        Keywords override one option (`lock :chord, extend: true`), and
+        streams take the same styles: `riff.stream.lock(:mash)`,
+        `midi.degrees(:minor_pentatonic, layout: :fit)`, `midi.snap(:chord,
+        from: chords)`.  A knob can pick the style: `lock
+        knob(:style).choose(:mash, :play, :chord)`.
+      TEXT
+      commands :lock, :key
+      dsl :degrees, :snap
+      note :midi
+      see :key, :midi, :ui
+      example 'the same keys in three locks' do
+        key :a, :minor
+        keys = seq(48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59).n16.loop
+        voice = proc { |v| v.hz.triangle * v.env(0.003, 0.15, 0.2, 0.1) }
+        bg :try, keys.stream.lock(:mash).synth(voices: 4, &voice).at(-14.db)
+        bg :try2, keys.stream.lock(:chord, from: [1, 6]).transpose(12).synth(voices: 4, &voice).at(-20.db)
+      end
+    end
+
+    Help.topic :params, 'Parameters that move', group: :perform do
+      about <<~TEXT
+        MIDI transforms read moving parameters at each decision (each
+        note-on, arp step, or bar): `cc(1, 0.5..0.7)` (a controller on the
+        transform's own input, else the session's MIDI input), knobs
+        (`knob(:swing)`, `knob(:rate).choose(8, 16, 32)`), tempo LFOs
+        (`4.bars.lfo.at(0.5..0.66)`), clips (`transpose(seq(0, 5, -2,
+        3).n1.loop)`: a step per bar), and arithmetic on them (`0.5 +
+        cc(1) * 0.2`), all printing back as Ruby.  humanize, quantize,
+        swing, chance, transpose, every, arp rates, and ratchets take them,
+        on streams and clips.  A knob read ahead (a generator's next cycle)
+        answers what is known when it is asked, including turns queued with
+        launch points; takes record those answers so replays match.
+      TEXT
+      commands :cc, :knob, :modes
+      dsl :swing, :humanize, :chance, :transpose, :arp, :ratchet, :every, :quantize
+      note :midi
+      see :knobs, :key, :sequences
+      example 'swing that breathes and a transpose by a clip' do
+        riff = seq(A3, C4, E4, G4, A4, G4, E4, C4).n16.loop
+        steps = seq(0, 5, -2, 3).n1.loop
+        bg :try, riff.stream.swing(4.bars.lfo.triangle.at(0.5..0.68)).transpose(steps).synth(voices: 4) { |v| v.hz.triangle * v.env(0.003, 0.2, 0.2, 0.1) }.at(-14.db)
+      end
+      example 'an arp whose rate a knob picks' do
+        knob :try_rate, 0
+        chords = (seq(A3, F3).n1 & seq(C4, A3).n1 & seq(E4, C4).n1).loop
+        bg :try, chords.stream.arp(:up, knob(:try_rate).choose(8, 16, 32)).synth(voices: 4) { |v| v.hz.triangle * v.env(0.003, 0.1, 0.2, 0.05) }.at(-14.db)
+        turn :try_rate, 1, over: 2
+      end
+    end
+
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`

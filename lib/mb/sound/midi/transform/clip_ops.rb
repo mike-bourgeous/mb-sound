@@ -60,41 +60,82 @@ module MB
         # Strikes each note up to +count+ times, +rate+ apart, while it is
         # held (see Stream#ratchet).
         class Ratchet < NoteMap
+          # The most hits a count param may ask for.
+          MAX_COUNT = 64
+
           def initialize(parent, count, rate:, velocity: nil, **options)
             super(parent, **options)
-            @count = Sequence::Clip.check_ratchet_count(count)
+            @count = Param.wrap(count, 'Ratchet count')
+            @count = Sequence::Clip.check_ratchet_count(count) unless Param.param?(@count)
             raise ArgumentError, "A stream's ratchet needs rate: (a note's length isn't known at its note-on), e.g. ratchet(#{count}, rate: 1.n32)" if rate.nil?
-            raise ArgumentError, "Ratchet rate must be a positive length (got #{rate.inspect})" unless seconds_of(rate) > 0
-            @rate = rate
+            @rate = Param.wrap(rate, 'Ratchet rate')
+            unless Param.param?(@rate)
+              raise ArgumentError, "Ratchet rate must be a positive length (got #{rate.inspect})" unless seconds_of(rate) > 0
+            end
             @velocity = velocity
-            @node_type_name = "ratchet(#{count}, rate: #{rate}#{", velocity: #{velocity}" if velocity})"
+            @node_type_name = "ratchet(#{Param.label(count)}, rate: #{Param.label(rate)}#{", velocity: #{velocity}" if velocity})"
           end
 
           private
 
           def map_on(e)
-            step = seconds_of(@rate)
-            Array.new(@count) { |i|
-              v = Sequence::Clip.ratchet_velocity(e.velocity, @velocity, i, @count)
-              [v == e.velocity ? e : e.with_velocity(MB::M.clamp(v.to_f, 0.0, 1.0)), step * i]
+            delays, _steps = hits(e)
+            count = delays.length
+            delays.each_with_index.map { |delay, i|
+              v = Sequence::Clip.ratchet_velocity(e.velocity, @velocity, i, count)
+              [v == e.velocity ? e : e.with_velocity(MB::M.clamp(v.to_f, 0.0, 1.0)), delay]
             }
           end
 
+          # [delays, steps] of the hits of played note +e+: each hit's delay
+          # from the note-on and its step to the next hit (Rational
+          # seconds).  Params are read per step: the count at the note-on,
+          # the rate at each hit (a moving rate spaces the hits as it
+          # goes).
+          def hits(e)
+            count = @count
+            if Param.param?(count)
+              count = param_at(count, e.time).to_f.round.clamp(1, MAX_COUNT)
+            end
+
+            unless Param.param?(@rate)
+              step = seconds_of(@rate)
+              return [Array.new(count) { |i| step * i }, Array.new(count, step)]
+            end
+
+            delays = []
+            steps = []
+            t = 0r
+            count.times do
+              step = seconds_of(rate_value(param_at(@rate, e.time + t)))
+              step = seconds_of(1/32r) if step <= 0
+              delays << t
+              steps << step
+              t += step
+            end
+            [delays, steps]
+          end
+
+          # A rate param's value as a length: Durations and Lengths as they
+          # are, numbers as note divisions (16 = 1.n16, rounded) when 1 or
+          # more, else seconds.
+          def rate_value(v)
+            return v unless v.is_a?(Numeric)
+            v >= 1 ? Sequence::Duration.new(Rational(1, v.round)) : v
+          end
+
           def note_on(e)
-            step = seconds_of(@rate)
             whole = e.length_hint && seconds_of(e.length_hint)
-            last = @count - 1
+            delays, steps = hits(e)
+            last = delays.length - 1
             chain = map_on(e).each_with_index.map { |(out, delay), i|
-              # Every hit but the last lasts a step; the last, the rest of
-              # the note if its length is known
+              step = steps[i]
               hint = i < last ? step : nil
               hint = hint ? MB::M.min(hint, whole - delay) : whole - delay if whole && whole > delay
               out = out.at(e.time + delay).with_length_hint(hint)
-              [out.note, out.channel, schedule_on(out), delay, e.time]
+              [out.note, out.channel, schedule_on(out), delay, e.time, step]
             }
-            # Every hit but the last ends where the next starts; the last
-            # (and any hit sounding at the note-off) ends with the key
-            chain[0...-1].each do |note, channel, id, delay, on_time|
+            chain[0...-1].each do |note, channel, id, delay, on_time, step|
               schedule_off(Event.note_off(note, channel: channel, time: on_time + delay + step), id)
             end
             (@chains[[e.channel, e.note]] ||= []) << chain
@@ -109,12 +150,10 @@ module MB
 
             chain.each do |note, channel, id, delay, on_time|
               if delay > 0 && on_time + delay >= e.time
-                # A hit after the key came up never plays
                 @queue.reject! { |q| q[4] == id }
                 @pending.delete(id)
                 @early_off.delete(id)
               else
-                # The ledger drops this for hits already ended
                 schedule_off(Event.note_off(note, e.velocity, channel: channel, time: e.time), id)
               end
             end
@@ -125,9 +164,6 @@ module MB
           end
         end
 
-        # Moves notes to the nearest tones of a silent chord progression
-        # that follows the timeline (see Stream#ghost_chords and
-        # Sequence::Clip#ghost_chords, whose rules it shares).
         class GhostChords < NoteMap
           def initialize(parent, chords, per: nil, scale: :minor, root: nil, size: 3, harmonic: false, tie: :contour, passing: nil, **options)
             super(parent, **options)

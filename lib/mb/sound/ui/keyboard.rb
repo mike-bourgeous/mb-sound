@@ -163,7 +163,8 @@ module MB
         # The locked scale (a Scale), or nil.
         def scale = @scale_lock&.scale
 
-        # Sets the scale lock's mode (:degrees or :snap; see ScaleLock).
+        # Sets the scale lock's mode (a lock style, :play, :mash, :along, or
+        # :chord; :degrees and :snap name :play and :along; see ScaleLock).
         def scale_mode=(mode)
           raise ArgumentError, 'Lock a scale first (ui.keyboard.scale = scale(:dorian, :d))' unless @scale_lock
           self.scale = ScaleLock.new(@scale_lock.scale, mode: mode)
@@ -464,7 +465,7 @@ module MB
         def note_key(k, semis, vel, now)
           ch = KEYS.key(semis)
           note = note_for(semis)
-          return true if note > 127
+          return true if note.nil? || note > 127 # (a silent key of the scale lock, or off the top)
 
           mode = resolved_mode
           if mode == :release

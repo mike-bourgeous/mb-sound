@@ -8,6 +8,7 @@ module MB
         # Creates a mixer that adds this node's #sample output to +other+ (a
         # numeric constant or another GraphNode).
         def +(other)
+          return MIDI::Param::Expr.new(:+, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
           Mixer.new([self, other], sample_rate: self.sample_rate)
         end
@@ -15,6 +16,7 @@ module MB
         # Creates a mixer that subtracts +other+ (a numeric constant or another
         # GraphNode) from this node's #sample output.
         def -(other)
+          return MIDI::Param::Expr.new(:-, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
         end
 
@@ -48,6 +50,7 @@ module MB
         # Creates a multiplier that multiplies +other+ (a numeric constant or
         # another GraphNode) by this node's #sample output.
         def *(other)
+          return MIDI::Param::Expr.new(:*, self, other) if other.is_a?(MIDI::Param::Base) # (a knob combined with cc(1): a param)
           Multiplier.new([self, other], sample_rate: self.sample_rate)
         end
 

@@ -44,10 +44,15 @@ module MB
         # and read by clips with fill marks.
         attr_reader :fills
 
+        # A key change in the key map (see #key_at): from timeline position
+        # +pos+ (whole notes) the session key is +key+ (a MusicalKey).
+        KeyEntry = Data.define(:pos, :key)
+
         def initialize(bpm: 120, bar_length: 1)
           @position = 0r
           @generation = 0
           @fills = FillMap.new
+          @keys = [KeyEntry.new(pos: -Float::INFINITY, key: MusicalKey.default)].freeze
           self.bpm = bpm
           self.bar_length = bar_length
         end
@@ -189,10 +194,54 @@ module MB
         # Jumps the timeline to +whole_notes+ from the start.  Background
         # players jump with it on their next buffer.  See
         # SequenceMethods#seek for seeking by bar number.
+        #
+        # The key in effect stays: the key map collapses to it (a key set
+        # live isn't undone by jumping back before it; sections that set a
+        # key set it again as they play).
         def seek(whole_notes)
+          current = key_at(@position)
+          @keys = [KeyEntry.new(pos: -Float::INFINITY, key: current)].freeze unless @keys.length == 1 && @keys[0].key == current
           @position = whole_notes.to_r
           @generation += 1
           self
+        end
+
+        # The session key (a MusicalKey) at the current position, or at
+        # timeline position +pos+.
+        def key(pos = nil)
+          key_at(pos || @position)
+        end
+
+        # The key in effect at timeline position +pos+ (whole notes),
+        # through the key map (see #key_change).
+        def key_at(pos)
+          list = @keys
+          return list[0].key if list.length == 1
+          pos = pos.to_r
+          (list.reverse_each.find { |e| e.pos <= pos } || list.first).key
+        end
+
+        # The key map: KeyEntry rows, earliest first (frozen).
+        def keys
+          @keys
+        end
+
+        # Changes the key to +key+ (a MusicalKey) from timeline position +at+
+        # (now by default), forgetting key changes at or after it (like
+        # #meter).  The Session's `key`/`mode` commands call this when their
+        # journaled change lands.  Returns the KeyEntry.
+        def key_change(key, at: nil)
+          raise ArgumentError, "Expected a MusicalKey (got #{key.inspect})" unless key.is_a?(MusicalKey)
+          at = at.nil? ? @position : at.to_r
+          entry = KeyEntry.new(pos: at, key: key)
+          @keys = (@keys.reject { |e| e.pos >= at } + [entry]).freeze
+          entry
+        end
+
+        # Sets the key everywhere (the key map holds only +key+): for a
+        # fresh timeline (spec setup, a take replay's start).
+        def reset_key(key = MusicalKey.default)
+          @keys = [KeyEntry.new(pos: -Float::INFINITY, key: key)].freeze
         end
 
         # Jumps the timeline back to the start.

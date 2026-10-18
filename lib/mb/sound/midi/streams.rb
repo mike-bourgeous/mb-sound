@@ -4,6 +4,8 @@
 require_relative 'event'
 require_relative 'control_spec'
 require_relative 'control_map'
+require_relative 'param'
+require_relative 'lock'
 require_relative 'source'
 require_relative 'file_source'
 require_relative 'clip_source'

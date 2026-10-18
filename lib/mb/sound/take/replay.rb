@@ -54,13 +54,14 @@ module MB
         # +:replace_declick+ likewise (see Session#replace_declick): takes
         # saved before 2026-10-17 don't give it, and switched replacements
         # with a hard cut, so they replay exactly.
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], ends: nil, ends_epoch: 0, seconds: nil)
-          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
           @seconds = seconds
           @lines = []
           @midi = {}
+          @decisions = []
           yield self if block_given?
           self.class.last = self
         end
@@ -86,6 +87,20 @@ module MB
           self
         end
 
+        # Adds decisions made during the take by params read ahead of time
+        # (knobs read for a future position: [name, epoch, pos, value]
+        # rows; see Session::Decisions), answered again instead of decided
+        # anew.
+        def decisions(rows)
+          @decisions.concat(rows.map { |name, epoch, pos, value| [name, epoch, pos.to_r, value] })
+          self
+        end
+
+        # The recorded decisions (see #decisions).
+        def decision_rows
+          @decisions
+        end
+
         # The recorded MIDI (a Hash from input name to rows; see #midi).
         def midi_events
           @midi
@@ -97,6 +112,10 @@ module MB
           t = session.transport
           t.bar_length = @start[:bar_length]
           (@start[:meters] || []).each { |pos, len| t.meter(len, at: pos) }
+          # The session key the take started in (takes saved before
+          # midi-consol-2 start in C major, the only key there was)
+          root, mode = @start[:key] || ['C', :major]
+          t.reset_key(MusicalKey.default.with_root(root).with_mode(mode))
           t.bpm = @start[:bpm]
           session.master_gain = @start[:master_gain]
           session.master_gain_post = !!@start[:master_gain_post]
@@ -111,6 +130,7 @@ module MB
           # MIDI plays from the take, never from live input
           session.replay_midi!(@base_epoch)
           @midi.each { |name, rows| session.midi_in(name).replay(rows, base_epoch: @base_epoch) }
+          session.replay_decisions!(@decisions, base_epoch: @base_epoch) unless @decisions.empty?
           @lines.each_with_index do |l, i|
             eval_at = [l.issued, *l.lands.map { |t| Array(t).first }].min
             session.schedule(eval_at, description: "take line #{i + 1}", epoch: @base_epoch + l.epoch.to_i, owner: :take, exact: true) do

@@ -100,6 +100,9 @@ module MB
           raise ArgumentError, "Tie must be one of #{GHOST_TIES.map(&:inspect).join(', ')} (got #{tie.inspect})" unless GHOST_TIES.include?(tie)
           raise ArgumentError, "Chord size must be a positive Integer (got #{size.inspect})" unless size.is_a?(Integer) && size > 0
 
+          # A scale name without a root is on the session key's root (C
+          # until `key` changes it; midi-consol-2)
+          root = Sequence.current_transport.key.root if root.nil? && !scale.nil? && !scale.is_a?(Scale)
           sc = Scale[scale, root]
           sc = Clip.harmonic_scale(sc) if harmonic
           [sc, chords.map { |c| Clip.ghost_chord_classes(c, sc, size) }]

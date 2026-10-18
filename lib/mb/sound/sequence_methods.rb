@@ -64,12 +64,18 @@ module MB
       # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
       # as :minor or :dorian (Scale.names), or an Array of offsets in
       # semitones, with a +root+ (a Note, note number, or name like :a).
-      # Degrees of the chromatic scale (the default) are semitones.
+      # A pure value: without a +root+, the root is the session key's root
+      # (see KeyMethods#key) as it is now, and bare `scale` is the session
+      # key's Scale.
       #
       #     scale(:minor, :a)[2]          # => C5 (degree 0 is A4)
       #     scale(:dorian, D3).chord(0)   # => [50, 53, 57]
+      #     key :d; scale(:dorian)        # D dorian
+      #     scale                         # the session key's scale
       def scale(intervals = nil, root = nil)
-        Scale[intervals, root]
+        session_key = Session.existing&.then { |s| s.transport.key(s.now) } || Sequence.current_transport.key
+        return session_key.scale if intervals.nil? && root.nil?
+        Scale[intervals, root.nil? && !intervals.is_a?(Scale) ? session_key.root : root]
       end
 
       # Returns a Euclidean rhythm (Sequence::Generators.euclid_pattern):

@@ -314,7 +314,13 @@ module MB
         #
         #     stream.transpose(12)
         #     stream.transpose(2, scale: :minor, root: :a)   # up a diatonic third
-        def transpose(step, scale: nil, root: nil)
+        def transpose(step, scale: nil, root: nil, **options)
+          if Param.param?(step)
+            # A moving step (a knob, cc, clip, ...) read at each note-on;
+            # note-offs follow their notes (Transform::MovingTranspose)
+            return Stream.new(Transform::MovingTranspose.new(self, step, scale: scale, root: root, **options))
+          end
+          raise ArgumentError, "unknown keywords: #{options.keys.map(&:inspect).join(', ')}" unless options.empty?
           Stream.new(Transform::Transpose.new(self, step, scale: scale, root: root))
         end
 
@@ -377,6 +383,25 @@ module MB
         # Port type of the output (see GraphNode::Traversable#port_type).
         def port_type
           :notes
+        end
+
+        # MIDI controllers read by the moving parameters (MIDI::Param, e.g.
+        # `cc(1)`) of the transforms making this stream, up through every
+        # stream they read (see MIDI::ControlMap).
+        def param_control_specs
+          seen = {}.compare_by_identity
+          todo = [self]
+          specs = []
+          until todo.empty?
+            st = todo.pop
+            next if seen[st]
+            seen[st] = true
+            src = st.source
+            next unless src.is_a?(Transform)
+            specs.concat(src.param_control_specs)
+            src.sources.each_value { |v| todo << v if v.is_a?(Stream) }
+          end
+          specs.uniq
         end
 
         def sources

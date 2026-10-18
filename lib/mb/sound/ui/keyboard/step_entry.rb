@@ -185,7 +185,7 @@ module MB
 
           def note(semis, accent, now)
             n = @keyboard.note_for(semis)
-            return if n > 127
+            return if n.nil? || n > 127
 
             last = @steps.last
             held = @keyboard.releases? && @down.any? { |k, _| LOWER.key?(k) }

@@ -68,6 +68,7 @@ module MB
             @sounding = {} # [channel, note] => Array of ids (oldest first)
             @pending = {}  # id => true for note-ons not sent yet
             @early_off = {} # id => true for note-offs that came before their note-on
+            @reading = Param::Reading.new # what params listening to the input have seen (see MIDI::Param)
           end
 
           # True once the input has ended and every queued event has been
@@ -98,6 +99,14 @@ module MB
           # send events (seconds), for #music_end.  Override.
           def tail_seconds
             0
+          end
+
+          # The value of +x+ (a MIDI::Param or a plain value) at stream time
+          # +time+: params are read at the timeline position there, with
+          # what this transform has seen on its input (see MIDI::Param).
+          def param_at(x, time)
+            return x unless x.respond_to?(:value_at)
+            x.value_at(timeline_at(time), transport: transport, stream: @reading)
           end
 
           # Unlike stateless transforms, this runs every read (queued events

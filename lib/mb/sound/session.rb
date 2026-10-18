@@ -16,6 +16,8 @@ require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
 require_relative 'session/knobs'
+require_relative 'session/decisions'
+require_relative 'session/key_changes'
 require_relative 'session/midi_in'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
@@ -70,6 +72,8 @@ module MB
       include Seeks
       include GraphView
       include Knobs
+      include Decisions
+      include KeyChanges
       include MidiIn
       include AudioRecording
       include Stems
@@ -311,6 +315,7 @@ module MB
         init_strip
         init_undo
         init_knobs
+        init_decisions
         init_midi_in
         init_audio_recording
         init_monitor(monitor.nil? ? realtime : monitor)
@@ -322,6 +327,7 @@ module MB
         # Set later, in varying orders (here so every Session has one
         # instance variable layout; see GraphNode::IvarPreset)
         @exact_lanes = nil
+        @input_lock = nil
         @ring = nil
         @stems = nil
         @master_block = nil

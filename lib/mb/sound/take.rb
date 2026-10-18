@@ -117,6 +117,17 @@ module MB
         @start_epoch = (@session || Session.default).epoch
         @start_frame = (@session || Session.default).frame
         @midi_from = (@session || Session.default).midi_log_length
+        @decisions_from = (@session || Session.default).decision_log_length
+      end
+
+      # Decisions made during the take by params read ahead of time (see
+      # Session::Decisions): [name, epoch, pos, value] rows, epochs counted
+      # from the take's start.
+      def decisions
+        session.decision_log(@decisions_from).filter_map { |d|
+          next if d.epoch < @start_epoch
+          [d.name, d.epoch - @start_epoch, d.pos, d.value]
+        }
       end
 
       # The MIDI the session's inputs read since the take started (see
@@ -276,6 +287,12 @@ module MB
           rows.each { |epoch, pos, bytes| out << "    [#{epoch}, #{ruby_value(pos)}, #{bytes.inspect}],\n" }
           out << "  ]#{name.nil? ? '' : ", input: #{name.inspect}"}\n"
         end
+        rows = decisions
+        unless rows.empty?
+          out << "  r.decisions [\n"
+          rows.each { |name, epoch, pos, value| out << "    [#{name.inspect}, #{epoch}, #{ruby_value(pos)}, #{ruby_value(value)}],\n" }
+          out << "  ]\n"
+        end
         lines.each do |l|
           if l.skipped
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
@@ -294,6 +311,7 @@ module MB
         lines = @mutex.synchronize { @lines.reject(&:skipped) }
         Replay.new(**@start.except(:time), ends: session.transport.position, ends_epoch: session.epoch - @start_epoch, seconds: length_seconds) do |r|
           midi.each { |name, rows| r.midi(rows, input: name) }
+          r.decisions(decisions)
           lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code, epoch: l.epoch.to_i, choices: l.choices.to_a.dup) }
         end
       end
@@ -349,6 +367,7 @@ module MB
           bpm: s.transport.bpm,
           bar_length: s.transport.bar_length(0),
           meters: s.transport.meters.drop(1).map { |m| [m.pos, m.bar_length] },
+          key: s.transport.key.then { |k| [k.spelling, k.mode] },
           master_gain: s.master_gain,
           master_gain_post: s.master_gain_post?,
           fade_in: s.fade_in,

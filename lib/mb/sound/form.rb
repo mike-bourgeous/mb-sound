@@ -59,7 +59,7 @@ module MB
       # else, with suggestions.
       def self.section_options(name, options)
         unknown = options.keys - SECTION_OPTIONS
-        knob_names = Session.current.knobs.keys
+        knob_names = Session.current.knobs.keys + Arrangement::KEY_VALUES
         knobs = options.slice(*(unknown & knob_names))
         unknown -= knob_names
         unless unknown.empty?

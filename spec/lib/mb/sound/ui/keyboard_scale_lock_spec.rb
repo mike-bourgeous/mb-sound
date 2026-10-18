@@ -18,29 +18,51 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     log.dup.tap { log.clear }
   end
 
-  it 'walks the scale on the white keys (degrees mode): D dorian from z' do
+  it 'fits the scale to the keys (play mode): D dorian with D on every C, passing notes on black keys' do
     kb.scale = MB::Sound.scale(:dorian, :d)
-    # z is C3; the first D dorian note at or above it is C3 (D dorian has C)
-    expect(play('zxcvbnm,')).to eq([48, 50, 52, 53, 55, 57, 59, 60].map { |n| MB::Sound.scale(:dorian, :d).snap(n, :up) })
-    expect(play('zxcvbnm,').all? { |n| MB::Sound.scale(:dorian, :d).include?(n) }).to eq(true)
-    # Every key, black ones too, is in the scale
-    expect(play(MB::Sound::UI::Keyboard::KEYS.keys.join).all? { |n| MB::Sound.scale(:dorian, :d).include?(n) }).to eq(true)
+    sc = MB::Sound.scale(:dorian, :d)
+    # z is C3: D3, then each white key the next degree
+    expect(play('zxcvbnm,')).to eq([50, 52, 53, 55, 57, 59, 60, 62])
+    expect(play('zxcvbnm,').all? { |n| sc.include?(n) }).to eq(true)
+    # Black keys: the note between the scale notes of their neighbours
+    # (C#: D-E, Eb; D#: E-F and A#: B-C, half steps, silent; F#: G-A, Ab;
+    # G#: A-B, Bb)
+    expect(play('sdghj')).to eq([51, 56, 58])
     expect(kb.view.scale).to eq('D dorian')
   end
 
-  it 'walks degrees of pentatonic scales too, one degree per white key' do
+  it 'walks degrees of pentatonic scales in mash mode, one degree per white key' do
     sc = MB::Sound.scale(:minor_pentatonic, :a)
     kb.scale = sc
+    kb.scale_mode = :mash
     notes = play('zxcvbnm')
     expect(notes).to eq(notes.sort)
     expect(notes.each_cons(2).map { |a, b| sc.degree(b)[0] - sc.degree(a)[0] }.uniq).to eq([1])
+    expect(play('sd')).to eq([]) # black keys are silent
   end
 
-  it 'snaps each key to the nearest scale note in snap mode, keeping the layout' do
+  it 'snaps each key to the nearest scale note in along mode (also :snap), keeping the layout' do
     kb.scale = MB::Sound.scale(:major, :c)
     kb.scale_mode = :snap
     expect(play('zsxdc')).to eq([48, 48, 50, 50, 52]) # C, C#->C (ties go down), D, D#->D, E
-    expect(kb.view.scale).to eq('C major (snap)')
+    expect(kb.view.scale).to eq('C major (along)')
+  end
+
+  it 'gives the same notes as the same keys on an external keyboard through stream.lock' do
+    sc = MB::Sound.scale(:minor_pentatonic, :e)
+    keys = MB::Sound::UI::Keyboard::KEYS
+    [:play, :mash, :along].each do |mode|
+      kb = MB::Sound::UI::Keyboard.new(out: out, clock: -> { 0.0 }, tempo: -> { 2.0 }, off_mode: :tap)
+      kb.scale = sc
+      kb.scale_mode = mode
+      t = 0.0
+      keys.keys.sort_by { |c| keys[c] }.each { |c| kb.key(key.of(c), t += 1) }
+      computer = log.dup.tap { log.clear }
+      ev = MB::Sound::MIDI::Event
+      raw = keys.values.sort.each_with_index.flat_map { |semis, i| [ev.note_on(48 + semis, time: i / 8r), ev.note_off(48 + semis, time: i / 8r + 1/16r)] }
+      external = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*raw)).lock(mode, scale: sc).reader.next(30r).select(&:note_on?).map(&:note)
+      expect(computer).to eq(external), "#{mode}: #{computer} vs #{external}"
+    end
   end
 
   it 'cycles scales and roots with PageUp and PageDown, and unlocks after the last scale' do
@@ -59,7 +81,7 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     kb.scale = MB::Sound.scale(:minor, :a)
     kb.entry = :step
     t = 0.0
-    %w[z s x].each { |c| kb.key(key.of(c), t += 1) }
+    %w[z x c].each { |c| kb.key(key.of(c), t += 1) }
     notes = kb.step.clip.events.map(&:value)
     expect(notes.all? { |n| MB::Sound.scale(:minor, :a).include?(n) }).to eq(true)
   end
@@ -68,6 +90,6 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     expect { kb.scale = :dorian }.to raise_error(ArgumentError, /needs a Scale/)
     expect { kb.scale_mode = :snap }.to raise_error(ArgumentError, /Lock a scale first/)
     kb.scale = MB::Sound.scale(:minor, :a)
-    expect { kb.scale_mode = :wander }.to raise_error(ArgumentError, /modes are :degrees, :snap/)
+    expect { kb.scale_mode = :wander }.to raise_error(ArgumentError, /modes are :play, :mash, :along/)
   end
 end

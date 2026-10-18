@@ -30,6 +30,7 @@ module MB
           :select, :reject, :velocities, :map_notes, :vel, :rechannel, :to_channel,
           :note_length, :len, :shift, :rotate, :through,
           :swing, :chance, :maybe, :every, :legato, :ratchet, :ghost_chords,
+          :degrees, :lock,
         ].freeze
 
         # Transforms that Sequence::Clip mirrors, returning Streams of the
@@ -37,7 +38,7 @@ module MB
         # whose echoes ring past loop points; `clip.bake(echo(...))` is a
         # Clip).  Clip has its own #transpose and editing methods.
         CLIP_TRANSFORMS = [
-          :echo, :arp, :strum, :chord, :snap, :through,
+          :echo, :arp, :strum, :chord, :snap, :through, :degrees, :lock,
         ].freeze
 
         # Returns a stream that repeats each note +count+ times, +delay+
@@ -235,11 +236,65 @@ module MB
 
         # Moves notes into a scale: +scale+ a Scale, name, or Array of
         # offsets, with +root+; +:direction+ :nearest (ties down), :down,
-        # or :up.
+        # or :up.  Without a scale (or a mode name without a root, or a
+        # param giving one) the scale follows the session key (`key :d,
+        # :dorian`) at each note.
+        #
+        # With :chord, every key plays the nearest tone of the current
+        # chord instead (MIDI::Lock::Chord): +from:+ a clip of chords, a
+        # chord(...) value, chord degrees counted from 1 like ghost_chords
+        # (`[1, 4, 5, 1]`, one per +per:+, a bar by default, in the session
+        # key), or a param giving one (nil: the key's tonic triad);
+        # +extend:+ false (chord tones only), :above (stacked thirds above
+        # the chord's top note), or true (extensions everywhere); +avoid:+
+        # (true) skips avoid notes; +bass: :root_fifth+ below the chord.
         #
         #     midi.snap(:minor_pentatonic, :a)
-        def snap(scale, root = nil, direction: :nearest, **options)
+        #     midi.snap                         # the session key
+        #     midi.snap(:chord, from: chords)   # the chord playing in a clip
+        #     midi.snap(:chord, from: [1, 6, 4, 5], extend: :above, bass: :root_fifth)
+        def snap(scale = nil, root = nil, direction: :nearest, from: nil, extend: false, avoid: true, bass: nil, per: nil, micro: :note, **options)
+          if scale == :chord
+            map = Lock::Chord.new(from: from, extend: extend, avoid: avoid, bass: bass, per: per, micro: micro)
+            return Stream.new(Transform::Locked.new(self, map, **options))
+          end
+          if root.nil? && (scale.nil? || scale.is_a?(Symbol) || scale.is_a?(String) || Param.param?(scale))
+            return Stream.new(Transform::Locked.new(self, Lock::ScaleSnap.new(scale, direction: direction, micro: micro), **options))
+          end
           Stream.new(Transform::Snap.new(self, scale, root: root, direction: direction, **options))
+        end
+
+        # Scale degrees on the keys (MIDI::Lock::Degrees): white keys walk
+        # the degrees of +scale+ (the session key by default, a mode name on
+        # the key's root, a Scale, or a param giving one).  +layout+ :flow
+        # (each white key the next degree from the root on middle C; best
+        # for mashing and exotic scales) or :fit (the root on every C; 8-12
+        # note scales take black keys too); +black+ :passing (the note
+        # between the neighbouring degrees: the middle of a whole step, just
+        # below the upper note of wider gaps, silent for half steps, the
+        # cents midpoint in cents scales), :silent, or :lower.
+        #
+        #     midi.degrees                       # the session key, flowing
+        #     midi.degrees(:minor_pentatonic, layout: :fit)
+        #     midi.degrees(scale(:dorian, :d), black: :silent)
+        def degrees(scale = nil, layout: :flow, black: :passing, micro: :note, **options)
+          Stream.new(Transform::Locked.new(self, Lock::Degrees.new(scale, layout: layout, black: black, micro: micro), **options))
+        end
+
+        # The scale or chord lock by intent (MIDI::Lock::Style): :mash
+        # (degrees flowing, black keys silent), :play (degrees fitted to the
+        # octave, black keys passing notes), :along (nearest scale note),
+        # :chord (chord tones, extend :above), :off; keyword overrides
+        # (`lock(:chord, extend: true)`, `lock(:play, scale: :lydian)`).
+        # The style may be a param (`knob(:style).choose(:mash, :play)`).
+        # The console's `lock` (KeyMethods#lock) does the same for live
+        # MIDI and the virtual keyboard.
+        #
+        #     keys.lock(:play)
+        #     midi.lock(:chord, from: chords, bass: :root_fifth)
+        def lock(style = :play, **options)
+          transform = options.slice(*Transform::Locked::OPTIONS)
+          Stream.new(Transform::Locked.new(self, Lock::Style[style, **options.except(*Transform::Locked::OPTIONS)], **transform))
         end
 
         # Keeps only the notes whose note-on Event the block accepts (their

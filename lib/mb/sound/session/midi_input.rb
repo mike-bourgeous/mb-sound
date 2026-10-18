@@ -73,6 +73,25 @@ module MB
           @bends = nil
           @detached_frame = 0
           @extras = {}.compare_by_identity
+          @cc_old = {} # [channel or nil, cc] => raw value of controllers dropped from the history
+          @live_lock = nil # the Session's input lock while it maps (see #locked)
+        end
+
+        # The raw value (0..127) of controller +number+ (on 0-based
+        # +channel+, or any) at or before timeline position +pos+ in the
+        # current epoch (or from an earlier pass), or nil if it hasn't
+        # moved: what MIDI::Param::CC falls back to.
+        def cc_at(number, pos, channel: nil)
+          @lock.synchronize {
+            ep = @session.epoch
+            @history.reverse_each do |st|
+              e = st.event
+              next unless e.type == :cc && e.note == number && (channel.nil? || e.channel == channel)
+              next if st.epoch == ep && st.pos > pos
+              return e.raw
+            end
+            @cc_old[[channel, number]]
+          }
         end
 
         # Adds +stream+ (a MIDI::Stream, or anything MIDI::Stream.for
@@ -244,7 +263,25 @@ module MB
               out << Stamped.new(frame: frame + off, pos: from + off * per_sample, epoch: epoch, event: e.at(Rational(frame + off, rate)))
             }
           end
-          list.length > 1 ? out.sort_by.with_index { |st, i| [st.frame, i] } : out
+          out = out.sort_by.with_index { |st, i| [st.frame, i] } if list.length > 1
+          locked(out)
+        end
+
+        # +stamped+ through the Session's input lock (`lock :play`; see
+        # MIDI::Lock::Live), each note at its own timeline position.  Takes
+        # log the locked events, so replays don't lock them again.
+        def locked(stamped)
+          style = @session.input_lock
+          if style.nil?
+            @live_lock = nil if @live_lock && !@live_lock.holding?
+            return stamped if @live_lock.nil?
+          end
+          return stamped if stamped.empty?
+
+          @live_lock ||= MIDI::Lock::Live.new(style)
+          @live_lock.style = style || MIDI::Lock::Style.new(:off)
+          t = @session.transport
+          stamped.flat_map { |st| @live_lock.process(st.event, st.pos, transport: t).map { |e| st.with(event: e) } }
         end
 
         # Reads the added sources for a span and drops their events (while a
@@ -278,7 +315,11 @@ module MB
           limit = pos - HISTORY
           drop = @history.index { |s| s.pos >= limit && s.epoch == @session.epoch } || @history.length
           drop = MB::M.max(drop, @history.length - HISTORY_LIMIT)
-          @history.shift(drop) if drop > 0
+          return unless drop > 0
+          @history.shift(drop).each do |st|
+            e = st.event
+            @cc_old[[nil, e.note]] = @cc_old[[e.channel, e.note]] = e.raw if e.type == :cc
+          end
         end
 
         # Journals controller gestures (see GESTURE_GAP): a :cc entry for

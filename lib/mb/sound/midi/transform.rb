@@ -73,12 +73,35 @@ module MB
         end
 
         def sources
-          { input: @parent }
+          nodes = param_nodes
+          return { input: @parent } if nodes.empty?
+          { input: @parent, **nodes.each_with_index.to_h { |n, i| [:"param_#{i + 1}", n] } }
+        end
+
+        # The graph nodes read by this transform's moving parameters (see
+        # MIDI::Param::Base#nodes).
+        def param_nodes
+          instance_variables.flat_map { |iv|
+            v = instance_variable_get(iv)
+            if v.is_a?(Param::Base) then v.nodes
+            elsif v.is_a?(Lock::Style) || v.is_a?(Lock::Map) then Lock.param_nodes(v)
+            else []
+            end
+          }.uniq
         end
 
         # True if the parent stream is fed from a real-time input.
         def realtime_input?
           @parent.realtime_input?
+        end
+
+        # MIDI controllers this transform's own moving parameters read (see
+        # MIDI::Param and Stream#param_control_specs).
+        def param_control_specs
+          instance_variables.flat_map { |iv|
+            v = instance_variable_get(iv)
+            v.is_a?(Param::Base) ? v.control_specs : []
+          }
         end
 
         def to_s

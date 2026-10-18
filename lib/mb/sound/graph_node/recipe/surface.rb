@@ -62,7 +62,7 @@ module MB
             },
             'MB::Sound::Sequence::Clip' => {
               reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values],
+              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values value_at],
             },
             'MB::Sound::Sequence::Seq' => {
               reason: 'readers',
@@ -107,6 +107,7 @@ module MB
               midi: 'live MIDI input (printed as an input)',
               midi_stream: 'a MIDI::Stream for live input', close_midi: 'closes live input',
               per_voice: 'returns a plain value for the current lane (lanes that differ print with per_voice)',
+              cc: 'a MIDI::Param value (prints through its own recipe)',
             },
             'SamplerMethods' => {
               bounce: 'returns a Sample (samples print as bundle assets or through their lineage)',
