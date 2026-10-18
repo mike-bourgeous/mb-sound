@@ -46,8 +46,10 @@ module MB
       # (2026-10-17) marks two changes made together: sums ring until every
       # input ends (omnibus8, GraphNode#ring; graphs of older documents are
       # built with sums ending with their first input, as they were saved,
-      # GraphNode::Mixer.with_ring(:first); set documents' track patches,
-      # built when they launch, ring), and typed inputs (racks R2: `inputs
+      # GraphNode::Mixer.with_ring(:first); set documents' graphs and track
+      # patches too, also when patches build later at launch (omnibus9),
+      # and their recipes print .ring(:first), so saving them again as
+      # format 4 keeps the ending), and typed inputs (racks R2: `inputs
       # sig: :audio, side: :audio`; `inputs :midi` still loads, as notes,
       # other names as audio), `outputs :audio`, and rack documents (`graph
       # 4, kind: :effect, rack: :arack`, whose knob lines are the rack's

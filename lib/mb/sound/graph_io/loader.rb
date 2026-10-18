@@ -345,15 +345,21 @@ module MB
             bind_params
             fresh_limits!
             scope = Scope.new
-            body.each do |s|
-              if s.is_a?(Prism::LocalVariableWriteNode)
-                eval_node(s, scope)
-              elsif s.is_a?(Prism::CallNode) && s.receiver.nil? && SET_COMMANDS.include?(s.name)
-                set_command(s, scope)
-              else
-                raise error(s, "a set document holds set commands (#{SET_COMMANDS.join(', ')}) and assignments")
+            # Graphs built here (graph tracks, clips' sums) keep the
+            # first-input endings of documents before format 4 (patches:
+            # see #build_proc)
+            run = -> {
+              body.each do |s|
+                if s.is_a?(Prism::LocalVariableWriteNode)
+                  eval_node(s, scope)
+                elsif s.is_a?(Prism::CallNode) && s.receiver.nil? && SET_COMMANDS.include?(s.name)
+                  set_command(s, scope)
+                else
+                  raise error(s, "a set document holds set commands (#{SET_COMMANDS.join(', ')}) and assignments")
+                end
               end
-            end
+            }
+            @old_ring ? GraphNode::Mixer.with_ring(:first, &run) : run.call
           end
           @document.knob_nodes = @knob_nodes
           @document.session = @session
@@ -726,6 +732,12 @@ module MB
         end
 
         public
+
+        # True for documents before format 4, whose sums end with their
+        # first input (see GraphIO::FORMAT).
+        def old_ring?
+          @old_ring
+        end
 
         # A scene block: a proc that runs the block's statements when the
         # scene launches (assignments, and SCENE_COMMANDS with values and
@@ -1159,7 +1171,14 @@ module MB
             unknown = kw.keys - kws.map(&:first)
             raise ArgumentError, "unknown keyword#{'s' if unknown.length > 1}: #{unknown.map(&:inspect).join(', ')}" unless unknown.empty?
             last = scope
-            loader.walk_block(b.body, scope)
+            # Blocks of documents before format 4 (set patches built when a
+            # track launches, synth lanes built later) keep their sums'
+            # first-input endings like the document's graph (see #load)
+            if loader.old_ring?
+              GraphNode::Mixer.with_ring(:first) { loader.walk_block(b.body, scope) }
+            else
+              loader.walk_block(b.body, scope)
+            end
           end
           params = names.map { |n| [:opt, n] }
           params << [:rest, rest] if rest

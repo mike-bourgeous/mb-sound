@@ -284,7 +284,32 @@ module MB
 
             call.seq = next_seq
             note(receiver, call, result)
+            note_implied_ring(result, call) if result.is_a?(Mixer)
             result
+          end
+
+          # A sum made where sums end with their first input (see
+          # Mixer#ring_implied?) prints as `(a + b).ring(:first)`, so
+          # documents saved from it keep the ending; sums directly inside
+          # it drop theirs (ring applies to them too: `(a + b + c)
+          # .ring(:first)`).  An explicit #ring replaces it.
+          def note_implied_ring(mixer, call)
+            rec = record_of(mixer)
+            if call.name == :ring
+              rec&.config&.delete(mixer.implied_ring_call) if mixer.implied_ring_call
+              mixer.implied_ring_call = nil
+              return
+            end
+            return unless rec && rec.call.equal?(call) && mixer.ring_implied?
+
+            ring = Call.new(mixer, :ring, [:first], {}, nil, nil, nil, call.scope, next_seq, nil, nil)
+            (rec.config ||= []) << ring
+            mixer.implied_ring_call = ring
+            mixer.summands.each do |s|
+              next unless s.is_a?(Mixer) && s.implied_ring_call
+              record_of(s)&.config&.delete(s.implied_ring_call)
+              s.implied_ring_call = nil
+            end
           end
 
           # Records +call+ on +result+ (see the module description).

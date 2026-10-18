@@ -306,6 +306,44 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect { io.dump(a.arrangement) }.to raise_error(io::DumpError, /goto Proc/)
   end
 
+  it 'builds patches of sets saved before format 4 with first-input sum endings, and saves them as .ring(:first)' do
+    # A format 3 set: its sums ended with their first input when it was saved
+    old = <<~RUBY
+      graph 3, name: "old", kind: :set
+      bpm 120
+      riff = seq(A2, C3).n8.loop
+      track(:keys) { |clip|
+        hit = clip.synth(voices: 1) { |v| v.hz.ramp * v.amp_env(0.001, 0.05, 0, 0.01) }
+        110.hz.sine.at(0.1) + hit
+      }
+      track :pad, 55.hz.triangle.at(0.1) + 82.5.hz.triangle.at(0.1)
+      scene :a, keys: riff
+    RUBY
+
+    s = session
+    io.load(old, session: s)
+    graph = within(s) { s.arrangement.tracks[:keys].patch.call(s.arrangement.scenes[:a].values[:keys]) }
+    expect(graph).to be_a(MB::Sound::GraphNode::Mixer)
+    expect(graph).to be_stop_early
+
+    # Saved again as format 4: the sum says how it ends
+    text = io.dump(s.arrangement, name: 'old')
+    expect(text).to include('graph 4, name: "old", kind: :set')
+    expect(text).to include('(110.hz.sine.at(0.1) + hit).ring(:first)')
+    expect(text).to include('track :pad, (55.hz.triangle.at(0.1) + 82.5.hz.triangle.at(0.1)).ring(:first)')
+
+    c = session
+    io.load(text, session: c)
+    again = within(c) { c.arrangement.tracks[:keys].patch.call(c.arrangement.scenes[:a].values[:keys]) }
+    expect(again).to be_stop_early
+
+    # The same text as format 4 rings
+    s4 = session
+    io.load(old.sub('graph 3', 'graph 4'), session: s4)
+    ringing = within(s4) { s4.arrangement.tracks[:keys].patch.call(s4.arrangement.scenes[:a].values[:keys]) }
+    expect(ringing).not_to be_stop_early
+  end
+
   it 'loads only set commands and assignments' do
     expect { io.load(%(graph 1, kind: :set\n220.hz.ramp), session: session) }.to raise_error(io::LoadError, /:2: a set document holds set commands/)
     expect { io.load(%(graph 1, kind: :set\nscene(:a) { |t| 1 }), session: session) }.to raise_error(io::LoadError, /:2: a scene block holds assignments and the commands meter, bpm, turn/)
