@@ -15,6 +15,14 @@
 #   graph traversals, Session#add; exclusive milliseconds and call
 #   counts), GC time, and YJIT compile time, and the slowest render
 #   buffers with each player's time (* marks a player's first buffer).
+#
+# Every buffer also gets the render thread's own CPU time (wall time
+# above it is time the thread waited, e.g. for the GVL while the scheduler
+# thread built a scene) and its time outside the players (changes
+# landing, catch-up and sleep bookkeeping, master and bus chains: the
+# Session's own work), with the buffers that spent most outside the
+# players listed apart (how ux-fix-2 found scene-change work on the
+# render thread; omnibus10).
 # - realtime (-R): played in a realtime Session on an emulated sound card
 #   (a 48 kHz clock draining a queue of --latency ms; writes wait while it
 #   is full, like DeviceOutput), with blocks on the scheduler thread as
@@ -50,6 +58,9 @@ module SceneProfile
     attr_accessor :landed
 
     def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    # This thread's CPU seconds.
+    def cpu = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
 
     def yjit
       return {} unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
@@ -114,11 +125,12 @@ module SceneProfile
   # Times scheduled blocks and records their phases.
   module SchedulerHook
     def run(entry, time, deadline)
-      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), y0: SceneProfile.yjit, t0: SceneProfile.clock }
+      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), y0: SceneProfile.yjit, t0: SceneProfile.clock, c0: SceneProfile.cpu }
       SceneProfile.blocks << b
       SceneProfile.recording(b[:id]) { super }
     ensure
       b[:secs] = SceneProfile.clock - b[:t0]
+      b[:cpu] = SceneProfile.cpu - b[:c0]
       b[:gc] = GC.stat(:time) - b[:gc0]
       b[:yjit] = SceneProfile.ydelta(b[:y0], SceneProfile.yjit)
       b[:slack] = ((time - @transport.position) / @transport.whole_notes_per_second).to_f
@@ -137,13 +149,18 @@ module SceneProfile
       gc0 = GC.stat(:time)
       y0 = SceneProfile.yjit
       t0 = SceneProfile.clock
+      c0 = SceneProfile.cpu
       r = super
       # Offline, scheduled blocks run inside the buffer (realtime, on the
       # scheduler thread)
-      inline = output.instance_of?(CountingOutput) ? SceneProfile.blocks[nb..].sum { |b| b[:secs] || 0 } : 0
+      offline = output.instance_of?(CountingOutput)
+      inline = offline ? SceneProfile.blocks[nb..].sum { |b| b[:secs] || 0 } : 0
+      inline_cpu = offline ? SceneProfile.blocks[nb..].sum { |b| b[:cpu] || 0 } : 0
       secs = SceneProfile.clock - t0 - inline - output.write_secs
+      cpu = SceneProfile.cpu - c0 - inline_cpu - output.write_cpu
       SceneProfile.buffers << {
-        secs: secs, gc: GC.stat(:time) - gc0, yjit: SceneProfile.ydelta(y0, SceneProfile.yjit), landed: SceneProfile.landed,
+        secs: secs, cpu: cpu, other: secs - @scene_players.sum { |_, v| v },
+        gc: GC.stat(:time) - gc0, yjit: SceneProfile.ydelta(y0, SceneProfile.yjit), landed: SceneProfile.landed,
         players: @scene_players, bar: transport.bar_at(transport.position).to_f,
       }
       r
@@ -177,6 +194,7 @@ module SceneProfile
 
     def write(_data) = nil
     def write_secs = 0
+    def write_cpu = 0
     def close; end
     def closed? = false
   end
@@ -185,7 +203,7 @@ module SceneProfile
   # while more than +latency+ seconds are queued (like DeviceOutput) and
   # counts underruns (the queue running dry).
   class EmuOutput < CountingOutput
-    attr_reader :underruns, :write_secs, :min_level, :latency
+    attr_reader :underruns, :write_secs, :write_cpu, :min_level, :latency
 
     def initialize(buffer_size, latency, transport)
       super(buffer_size)
@@ -196,10 +214,12 @@ module SceneProfile
       @underruns = []
       @min_level = Float::INFINITY
       @write_secs = 0
+      @write_cpu = 0
     end
 
     def write(data)
       w0 = SceneProfile.clock
+      c0 = SceneProfile.cpu
       if @t0
         level = @frames / @sample_rate - (w0 - @t0)
         if level < 0
@@ -216,6 +236,7 @@ module SceneProfile
       level = @frames / @sample_rate - (SceneProfile.clock - @t0)
       sleep(level - @latency) if level > @latency
       @write_secs = SceneProfile.clock - w0
+      @write_cpu = SceneProfile.cpu - c0
     end
   end
 
@@ -272,10 +293,15 @@ module SceneProfile
 
     def report_buffers(top, buffer)
       return if @buffers.empty?
-      times = @buffers.map { |b| b[:secs] }.sort
-      pct = ->(q) { times[(q * (times.length - 1)).round] }
+      stats = ->(key) {
+        t = @buffers.map { |b| b[key] }.sort
+        [t.sum / t.length, t[(0.99 * (t.length - 1)).round], t.last]
+      }
+      mean, p99, max = stats.(:secs)
       puts format('render buffers: %d, mean %s ms, p99 %s ms, max %s ms (a buffer is %.2f ms)',
-        times.length, ms(times.sum / times.length), ms(pct[0.99]), ms(times.last), buffer * 1000.0 / 48000)
+        @buffers.length, ms(mean), ms(p99), ms(max), buffer * 1000.0 / 48000)
+      puts format('  render thread CPU: mean %s ms, p99 %s ms, max %s ms (wall above CPU: waiting, e.g. for the GVL)', *stats.(:cpu).map { |v| ms(v) })
+      puts format('  outside the players (changes, catch-up, master and bus chains): mean %s ms, p99 %s ms, max %s ms', *stats.(:other).map { |v| ms(v) })
       landing = @buffers.select { |b| b[:landed] > 0 }
       unless landing.empty?
         puts format('  where changes landed: %d buffers, mean %s ms, max %s ms', landing.length, ms(landing.sum { |b| b[:secs] } / landing.length), ms(landing.map { |b| b[:secs] }.max))
@@ -284,7 +310,12 @@ module SceneProfile
       @buffers.sort_by { |b| -b[:secs] }.first(top).each do |b|
         players = b[:players].sort_by { |_, v| -v }.first(4).map { |n, v| "#{n} #{ms(v)}" }.join(', ')
         extra = [("GC #{b[:gc]} ms" if b[:gc] > 0), yjit_text(b[:yjit]).then { |t| t.empty? || b[:yjit][:compile_time_ns] < 1e6 ? nil : t }, ("#{b[:landed]} change#{b[:landed] == 1 ? "" : "s"} landed" if b[:landed] > 0)].compact.join('; ')
-        puts format('    bar %6.2f %7s ms%s  %s', b[:bar], ms(b[:secs]), extra.empty? ? '' : " (#{extra})", players)
+        puts format('    bar %6.2f %7s ms (CPU %s, outside players %s)%s  %s', b[:bar], ms(b[:secs]), ms(b[:cpu]), ms(b[:other]), extra.empty? ? '' : " (#{extra})", players)
+      end
+      puts '  most time outside the players:'
+      @buffers.sort_by { |b| -b[:other] }.first(top).each do |b|
+        puts format('    bar %6.2f %7s ms outside players of %s ms (CPU %s)%s', b[:bar], ms(b[:other]), ms(b[:secs]), ms(b[:cpu]),
+                    b[:landed] > 0 ? " (#{b[:landed]} change#{b[:landed] == 1 ? '' : 's'} landed)" : '')
       end
     end
   end
