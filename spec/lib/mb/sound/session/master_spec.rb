@@ -9,7 +9,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
   # Renders +frames+ frames (in 800-frame buffers) and returns both channels.
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+    Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
   end
 
   def chains
@@ -29,7 +29,7 @@ RSpec.describe(MB::Sound::Session::Master) do
     after { gained.close }
 
     def run_gained(frames)
-      Array.new(frames / 800) { gained.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
+      Array.new(frames / 800) { gained.process_buffer.map(&:dup) }.transpose.map { |c| SpecBuffers.join(c) }
     end
 
     it 'applies the gain before the chain by default, so a clipper keeps its ceiling' do
@@ -380,7 +380,7 @@ RSpec.describe(MB::Sound::Session::Master) do
         out << s.process_buffer(n)[0].dup
         frames -= n
       end
-      out.reduce(:concatenate)
+      SpecBuffers.join(out)
     end
 
     # The LFO's first +frames+ samples.

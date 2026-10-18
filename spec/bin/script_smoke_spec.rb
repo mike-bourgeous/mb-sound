@@ -7,6 +7,26 @@ require 'shellwords'
 # real processes; --help runs in a fork of the spec process (see ForkScript)
 # for scripts that also render here, saving ~0.7 s of startup each.
 RSpec.describe('script runner scripts', :smoke) do
+  # The real-process renders run a few at a time (see SmokeRuns), started
+  # before the examples, each checked by its own example
+  runs = SmokeRuns.new(File.join(SpecTmp::ROOT, 'smoke_runs'))
+  out_dir = File.join(SpecTmp::ROOT, 'smoke_out')
+  infile = File.join(out_dir, 'smoke_effect_input.flac')
+  shared_env = { 'MB_SOUND_CHECK_SHARED' => '1' } # (as the around hook below sets for the forks)
+
+  before(:context) do
+    FileUtils.mkdir_p(out_dir)
+    # (-12 dB: effect scripts play at 0 dB, and dry + wet (flanger, ping
+    # pong) went over full scale with 0.5, which renders warn about)
+    MB::Sound.write(infile, [220.hz.ramp.at(0.25).sample(4800), 330.hz.ramp.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
+    # Longest first (the full drums_808 render, the granular song)
+    keys = SmokeRuns.selected_keys
+    first = keys.select { |k| k.include?('full') || k.include?('granular') }
+    runs.start(first + (keys - first))
+  end
+
+  after(:context) { runs.stop }
+
   # Scripts here check that no node modifies a buffer a Tee shares among
   # its branches (see GraphNode::Tee.shared_check), raising if one does
   around(:each) do |example|
@@ -79,11 +99,11 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/effects/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
   }.freeze
 
-  let(:infile) { tmp_path('smoke_effect_input.flac') }
-
   effects.each do |script, args|
     describe script do
-      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
+      outfile = File.join(out_dir, "smoke_#{File.basename(script, '.rb')}.flac")
+      key = "#{script} render"
+      runs.add(key, "#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape}", env: shared_env)
 
       it 'prints its header and options with --help' do
         # Forked (see ForkScript); the render below is a real process run
@@ -93,13 +113,9 @@ RSpec.describe('script runner scripts', :smoke) do
         expect(text).to include(header, '--output', '--input-channels', '--repeat')
       end
 
-      it 'processes a short file, ringing out after it ends' do
-        # (-12 dB: effect scripts play at 0 dB, and dry + wet (flanger, ping
-        # pong) went over full scale with 0.5, which renders warn about)
-        MB::Sound.write(infile, [220.hz.ramp.at(0.25).sample(4800), 330.hz.ramp.at(0.25).sample(4800)], sample_rate: 48000, overwrite: true)
-
-        text = `#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape} 2>&1`
-        expect($?).to be_success, text
+      it 'processes a short file, ringing out after it ends', smoke_run: key do
+        text, status = runs.take(key)
+        expect(status).to be_success, text
         expect(text).to include("to #{outfile}")
 
         data = MB::Sound.read(outfile)
@@ -143,7 +159,9 @@ RSpec.describe('script runner scripts', :smoke) do
 
   synths.each do |script, args|
     describe script do
-      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
+      outfile = File.join(out_dir, "smoke_#{File.basename(script, '.rb')}.flac")
+      key = "#{script} render"
+      runs.add(key, "#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape}", env: shared_env)
 
       it 'prints its header and options with --help' do
         # Forked (see ForkScript); the render below is a real process run
@@ -153,9 +171,9 @@ RSpec.describe('script runner scripts', :smoke) do
         expect(text).to include(header, '--output', '--input MIDI')
       end
 
-      it 'plays a MIDI file into an audio file' do
-        text = `#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape} 2>&1`
-        expect($?).to be_success, text
+      it 'plays a MIDI file into an audio file', smoke_run: key do
+        text, status = runs.take(key)
+        expect(status).to be_success, text
         expect(text).to include("to #{outfile}")
 
         # Notes ring out after the last MIDI event, then the runner stops after
@@ -183,17 +201,20 @@ RSpec.describe('script runner scripts', :smoke) do
 
   general.each do |script|
     describe script do
-      it 'prints its header and options with --help' do
-        if real_run_elsewhere.(script)
+      real = !real_run_elsewhere.(script)
+      key = "#{script} --help"
+      runs.add(key, "#{script.shellescape} --help", env: shared_env) if real
+
+      it 'prints its header and options with --help', smoke_run: (key if real) do
+        if real
+          # A real process run: this is the only run of the script in specs
+          text, status = runs.take(key)
+        else
           # Forked (see ForkScript); the script's own spec runs it as a
           # real process
           text, status = fork_script(script, '--help')
-          expect(status).to be_success, text
-        else
-          # A real process run: this is the only run of the script in specs
-          text = `#{script.shellescape} --help 2>&1`
-          expect($?).to be_success, text
         end
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, "Options for #{File.basename(script)}", '--help')
       end
@@ -202,7 +223,11 @@ RSpec.describe('script runner scripts', :smoke) do
 
   songs.each do |script, args|
     describe script do
-      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
+      outfile = File.join(out_dir, "smoke_#{File.basename(script, '.rb')}.flac")
+      key = "#{script} render"
+      # (Loop Church records the master bus with rec_audio)
+      env = script == 'bin/songs/loop_church.rb' ? { 'LOOP_CHURCH_AUDIO' => File.join(out_dir, 'rec_audio.flac') } : {}
+      runs.add(key, "#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape}", env: shared_env.merge(env))
 
       it 'prints its header and options with --help' do
         # Forked (see ForkScript); the render below is a real process run
@@ -212,11 +237,9 @@ RSpec.describe('script runner scripts', :smoke) do
         expect(text).to include(header, '--output', '--bars')
       end
 
-      it 'renders a short file' do
-        # (Loop Church records the master bus with rec_audio)
-        env = script == 'bin/songs/loop_church.rb' ? "LOOP_CHURCH_AUDIO=#{tmp_path('rec_audio.flac').shellescape} " : ''
-        text = `#{env}#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
-        expect($?).to be_success, text
+      it 'renders a short file', smoke_run: key do
+        text, status = runs.take(key)
+        expect(status).to be_success, text
         expect(text).to include("to #{outfile}")
 
         data = MB::Sound.read(outfile)
@@ -231,10 +254,12 @@ RSpec.describe('script runner scripts', :smoke) do
   # crash clip at bar 13 crashed every full render, "trigger has 685
   # samples, not 800").  About 10 s.
   describe 'bin/songs/drums_808.rb (full length)' do
-    it 'renders to its end and tail' do
-      outfile = tmp_path('smoke_drums_808_full.flac')
-      text = `bin/songs/drums_808.rb -q -f #{outfile.shellescape} 2>&1`
-      expect($?).to be_success, text
+    outfile = File.join(out_dir, 'smoke_drums_808_full.flac')
+    runs.add('drums_808 full render', "bin/songs/drums_808.rb -q -f #{outfile.shellescape}", env: shared_env)
+
+    it 'renders to its end and tail', smoke_run: 'drums_808 full render' do
+      text, status = runs.take('drums_808 full render')
+      expect(status).to be_success, text
 
       data = MB::Sound.read(outfile)
       expect(data[0].length).to be >= (48000 * 60 * 4 * 16 / 112.0).floor # 16 bars at 112 BPM

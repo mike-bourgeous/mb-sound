@@ -887,7 +887,7 @@ module MB
 
       # Sets the octaves of a cutoff multiplier envelope (see #initialize).
       def octaves=(depth)
-        depth = depth.to_octaves if depth.respond_to?(:to_octaves) # TODO: Interval (branch interval)
+        depth = depth.to_octaves if depth.respond_to?(:to_octaves)
         depth = nil if depth == 0
         @octaves = depth.respond_to?(:sample) ? depth.get_sampler : depth&.to_f
         changed!

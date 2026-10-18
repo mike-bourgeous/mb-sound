@@ -41,7 +41,7 @@ RSpec.describe(MB::Sound::GraphNode::GraphNodeArrayMixin) do
       l, r = [0.5.constant.until(0.05), 0.constant.until(0.05)].reverb(:hall, dry: 0)
       # Both outputs sampled in turn, as a multi-output node expects
       bufs = Array.new(20) { [l, r].map { |c| c.sample(800)&.dup } }
-      data = bufs.transpose.map { |c| c.compact.reduce(:concatenate) }
+      data = bufs.transpose.map { |c| SpecBuffers.join(c.compact) }
       expect(data[1].abs.max).to be > 0.001
     end
 

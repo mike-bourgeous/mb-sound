@@ -20,7 +20,7 @@ RSpec.describe(MB::Sound::Notes, 'poly pressure') do
 
   # Samples +node+ +buffers+ times; returns the concatenated output.
   def run(node, buffers:, buffer: 480)
-    buffers.times.map { node.sample(buffer).dup }.reduce(:concatenate)
+    SpecBuffers.join(buffers.times.map { node.sample(buffer).dup })
   end
 
   # Value at +seconds+.
@@ -66,8 +66,8 @@ RSpec.describe(MB::Sound::Notes, 'poly pressure') do
       p_out = []
       a_out = []
       9.times { p_out << poly.sample(480).dup; a_out << after.sample(480).dup }
-      p_out = p_out.reduce(:concatenate)
-      a_out = a_out.reduce(:concatenate)
+      p_out = SpecBuffers.join(p_out)
+      a_out = SpecBuffers.join(a_out)
       expect(at(p_out, 0.015)).to eq(0)
       expect(at(a_out, 0.015)).to be_within(1e-6).of(50 / 127.0)
       expect(at(a_out, 0.025)).to be_within(1e-6).of(100 / 127.0)
@@ -86,7 +86,7 @@ RSpec.describe(MB::Sound::Notes, 'poly pressure') do
         raw(0.02, 0xA0, 60, 100), # not held: goes nowhere
       )
       synth = MB::Sound::Synth.new(events, voices: 3, spares: 0, skip_idle: false) { |v| v.poly_pressure }
-      lanes = 6.times.map { synth.sample_individual(480).map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+      lanes = 6.times.map { synth.sample_individual(480).map(&:dup) }.transpose.map { |l| SpecBuffers.join(l) }
       values = ->(t) { lanes.map { |l| at(l, t).round(4) }.sort }
       expect(values.(0.005)).to eq([0, 0, 0])
       expect(values.(0.015)).to eq([0, (64 / 127.0).round(4), 1.0].sort)
@@ -119,7 +119,7 @@ RSpec.describe(MB::Sound::Notes, 'poly pressure') do
       # spec/test_data/poly_chord.mid (make_poly_chord.rb), 120 BPM: over
       # the first two bars C4 presses in, E4 later, and G4 pulses
       synth = MB::Sound::Synth.new('spec/test_data/poly_chord.mid', voices: 4, skip_idle: false) { |v| v.poly_pressure }
-      lanes = 340.times.map { synth.sample_individual(480).map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+      lanes = 340.times.map { synth.sample_individual(480).map(&:dup) }.transpose.map { |l| SpecBuffers.join(l) }
       values = ->(t) { lanes.map { |l| at(l, t) }.sort }
       expect(values.(1.5).count { |v| v > 0 }).to eq(2)    # C4 and G4, not E4
       expect(values.(1.5)[-2]).to be_within(0.03).of(0.57) # G4

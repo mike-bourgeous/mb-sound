@@ -28,21 +28,21 @@ RSpec.describe('Session knob gestures', :aggregate_failures) do
     60.times do |i|
       steps.fetch(i, []).each { |v| session.preview_turn(:g, v) }
       if i == 45
-        before = out.reduce(:concatenate)
+        before = SpecBuffers.join(out)
         expect(session.journal.changes.count { |e| e.kind == :turn }).to eq(0)
         code = session.gesture_line(:g)
-        expect(code).to eq('turn :g, 0 => 0.32, 800.samples => 0.36, 1600.samples => 0.38, 1.n12 => 0.5')
+        expect(code).to eq('turn :g, 0 => 0.32, (1r/60).seconds => 0.36, (1r/30).seconds => 0.38, (1r/6).seconds => 0.5') # (one unit per line: a key off the grid prints them all in seconds)
         line.(code)
       end
       out << session.process_buffer[0].dup
     end
-    [out.reduce(:concatenate), t, before]
+    [SpecBuffers.join(out), t, before]
   end
 
   def replay(r, sizes)
     out = []
     r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: sizes, tail: 0) { |mix| out << mix[0].dup }
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   it 'moves the knob in the audio while held, journals one turn at its first step, and replays bit for bit at two buffer sizes' do

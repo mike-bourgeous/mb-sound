@@ -49,11 +49,21 @@ RSpec.describe('MB::Sound::FastRecipe', :aggregate_failures) do
     end
 
     it 'survives the GC running at every allocation' do
-      blk = proc { |x| y = x + 1; GC.stress = true; b = fast.frame_binding(RubyVM::InstructionSequence.of(blk)); GC.stress = false; [b, y] }
-      b, y = blk.call(1)
-      expect(b.local_variable_get(:y)).to eq(y)
-    ensure
-      GC.stress = false
+      # In a small process of its own (only the extension loaded): under
+      # GC.stress every allocation runs a full GC, which over the spec
+      # process's heap took 5-28 s for the same few allocations
+      # (test-speed-2)
+      so = File.expand_path('../../../../lib/mb/sound/fast_recipe.so', __dir__)
+      code = <<~RUBY
+        require ARGV[0]
+        blk = proc { |x| y = x + 1; GC.stress = true; b = MB::Sound::FastRecipe.frame_binding(RubyVM::InstructionSequence.of(blk)); GC.stress = false; [b, y] }
+        b, y = blk.call(1)
+        p(b.local_variable_get(:y) == y && y == 2)
+      RUBY
+      out = `ruby -e #{code.shellescape} #{so.shellescape} 2>&1`
+
+      expect($?).to be_success, out
+      expect(out.lines.last.to_s.strip).to eq('true'), out
     end
   end
 end

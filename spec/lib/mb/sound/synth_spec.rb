@@ -13,9 +13,9 @@ RSpec.describe(MB::Sound::Synth) do
   def render(synth, buffers:, buffer: 480, individual: false)
     if individual
       data = buffers.times.map { synth.sample_individual(buffer).map { |d| d&.dup || Numo::SFloat.zeros(buffer) } }
-      data.transpose.map { |l| l.reduce(:concatenate) }
+      data.transpose.map { |l| SpecBuffers.join(l) }
     else
-      buffers.times.map { synth.sample(buffer).dup }.reduce(:concatenate)
+      SpecBuffers.join(buffers.times.map { synth.sample(buffer).dup })
     end
   end
 
@@ -82,7 +82,7 @@ RSpec.describe(MB::Sound::Synth) do
         out = s.sample_individual(480).map { |d| d&.dup || Numo::SFloat.zeros(480) }
         active << s.allocator.active_count
         out
-      }.transpose.map { |l| l.reduce(:concatenate) }
+      }.transpose.map { |l| SpecBuffers.join(l) }
 
       expect(active.max).to eq(2)
       expect(peak(lanes[0], 0.5, 0.61)).to be > 0.1  # the first note still rings in its release
@@ -127,12 +127,12 @@ RSpec.describe(MB::Sound::Synth) do
       }
       quiet_at = skipped_at = nil
       # 800-sample buffers, the idle skipping grid (Synth::SKIP_GRID)
-      data = 180.times.map { |i|
+      data = SpecBuffers.join(180.times.map { |i|
         b = s.sample(800).dup
         quiet_at ||= i if s.quiet_lanes == [0]
         skipped_at ||= i if s.skipped_lanes == [0]
         b
-      }.reduce(:concatenate)
+      })
 
       buf_peak = ->(i) { data[(i * 800)...((i + 1) * 800)].abs.max }
       expect(buf_peak.(quiet_at)).to be <= -90.db
@@ -162,7 +162,7 @@ RSpec.describe(MB::Sound::Synth) do
       first = s.sample_individual(480).map(&:dup)
       expect(s.notes[0].idle?).to eq(false) # held, with no envelope
       expect(s.notes[1].idle?).to eq(true)
-      lanes = [first, *19.times.map { s.sample_individual(480).map(&:dup) }].transpose.map { |l| l.reduce(:concatenate) }
+      lanes = [first, *19.times.map { s.sample_individual(480).map(&:dup) }].transpose.map { |l| SpecBuffers.join(l) }
       expect(s.notes[0].idle?).to eq(true) # the choke ended it
       expect(peak(lanes[0], 0, 0.1)).to eq(1)
       expect(peak(lanes[0], 0.11, 0.2)).to eq(0) # the gate dropped at the choke
@@ -258,7 +258,7 @@ RSpec.describe(MB::Sound::Synth) do
         synth = described_class.new(source(*events), voices: 2, spares: 1, retrigger: mode) { |v|
           MB::Sound.stereo(free ? v.hz.sine.free : v.hz.sine, v.amp_env(0.001, 2, 0, 1, curve: :linear))
         }
-        70.times.map { synth.sample_individual(480)[1].map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+        70.times.map { synth.sample_individual(480)[1].map(&:dup) }.transpose.map { |l| SpecBuffers.join(l) }
       end
 
       # A sine at 48's frequency starting at sample +start+, for samples
@@ -300,7 +300,7 @@ RSpec.describe(MB::Sound::Synth) do
         synth = described_class.new(source(*events), voices: 1, mono: false, spares: 0, retrigger: :add, skip_idle: false) { |v|
           MB::Sound.stereo(v.hz.sine, v.amp_env(0.001, 0.01, 0, 0.01, curve: :linear))
         }
-        tone, env = 70.times.map { synth.sample_individual(480)[0].map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+        tone, env = 70.times.map { synth.sample_individual(480)[0].map(&:dup) }.transpose.map { |l| SpecBuffers.join(l) }
         expect(env[(restrike - 4800)...restrike].abs.max).to eq(0)
         later = (restrike + 40)...(restrike + 4800)
         expect((tone[later] - sine_from(restrike, later)).abs.max).to be < 1e-3
@@ -604,7 +604,7 @@ RSpec.describe(MB::Sound::Synth) do
         out << b.dup
         ended_at ||= out.length if s.ended?
       end
-      data = out.reduce(:concatenate)
+      data = SpecBuffers.join(out)
 
       # The ping rings for a while after the file's last event, and the synth
       # ends on the first grid point (SKIP_GRID) a whole grid cell after the
@@ -622,7 +622,7 @@ RSpec.describe(MB::Sound::Synth) do
       while (b = s2.sample(480)) && again.length < 1000
         again << b.dup
       end
-      expect(again.reduce(:concatenate)).to eq(data)
+      expect(SpecBuffers.join(again)).to eq(data)
     end
 
     it 'with exact_lanes, ends at the grid point after the last loud grid cell' do
@@ -640,7 +640,7 @@ RSpec.describe(MB::Sound::Synth) do
         while (b = s.sample(size)) && out.length < 2000
           out << b.dup
         end
-        data = out.reduce(:concatenate)
+        data = SpecBuffers.join(out)
         loud = (0...(data.length / grid)).select { |i| c = data[(i * grid)...((i + 1) * grid)]; (c.max - c.min) * 0.5 > quiet }.last
         expect(out.length).to eq(((loud + 2) * grid / size.to_f).ceil)
         data
@@ -657,7 +657,7 @@ RSpec.describe(MB::Sound::Synth) do
       while (b = s.sample(480)) && out.length < 2000
         out << b.dup
       end
-      data = out.reduce(:concatenate)
+      data = SpecBuffers.join(out)
 
       # The envelope is idle at 0.07 s, but the filter rings much longer
       # (it was cut there, the envelope ending the lane's graph)
@@ -688,7 +688,7 @@ RSpec.describe(MB::Sound::Synth) do
         out << b.dup
       end
       expect(out.length).to be_within(1).of(2 + 50) # the note, then 0.5 s of silence
-      expect(out[3..].reduce(:concatenate).abs.max).to eq(0)
+      expect(SpecBuffers.join(out[3..]).abs.max).to eq(0)
       expect(s.ended?).to eq(true)
     end
 
@@ -731,7 +731,7 @@ RSpec.describe(MB::Sound::Synth) do
           break if b.nil?
           out << b.dup
         end
-        out.reduce(:concatenate)
+        SpecBuffers.join(out)
       }
       expect(runs[0].abs.max).to be > 0.1
       expect(runs[0].length).to be > 0.3 * 48000
@@ -763,7 +763,7 @@ RSpec.describe(MB::Sound::Synth) do
     def run(synth, buffers, size = 480)
       skipped = []
       out = buffers.times.map { b = synth.sample(size).dup; skipped << synth.skipped_lanes; b }
-      [out.reduce(:concatenate), skipped]
+      [SpecBuffers.join(out), skipped]
     end
 
     it 'skips idle silent lanes, wakes them for events, and gives the same samples for an exactly resettable patch' do
@@ -876,7 +876,7 @@ RSpec.describe(MB::Sound::Synth) do
       skipped = []
       out = 180.times.map { b = s.sample(480).dup; skipped << s.skipped_lanes; outside.sample(480); b }
       expect(skipped[100]).to eq([0])
-      expect(out.reduce(:concatenate)[(1.5 * 48000).round..].abs.max).to be > 0.1
+      expect(SpecBuffers.join(out)[(1.5 * 48000).round..].abs.max).to be > 0.1
     end
   end
 

@@ -16,8 +16,12 @@ module MB
     module Jack
       class << self
         # Opens the shared client (named DeviceOutput.client_name) if needed,
-        # raising FastAudio::Error if no JACK server answers.
+        # raising FastAudio::Error if no JACK server answers.  The client
+        # closes at exit (ExitClose, after the Sessions and outputs using
+        # it): a process that exited with it open stalled a --sync server
+        # for 5 s (ten client timeouts), every other client with it.
         def open
+          ExitClose.register(self)
           FastAudio.jack_open(DeviceOutput.client_name)
         end
 

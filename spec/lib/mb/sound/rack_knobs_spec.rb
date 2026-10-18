@@ -23,7 +23,7 @@ RSpec.describe('rack knobs') do
       out << session.process_buffer(n)[0].dup
       done += n
     end
-    out.reduce(:concatenate)
+    SpecBuffers.join(out)
   end
 
   def level_rack(name = :lvl)

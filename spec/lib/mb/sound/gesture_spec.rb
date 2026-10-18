@@ -36,10 +36,14 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
   end
 
   describe '.fit' do
-    it 'keeps every step within the tolerance of the knob range, in the knob scale' do
+    it 'keeps every step within the tolerance of the knob range, in the knob scale (1e-3 by default, 1e-4 when asked)' do
+      expect(described_class::TOLERANCE).to eq(1e-3)
       gestures.each do |steps|
         g = described_class.fit(steps, spec)
         expect(max_error(g, steps)).to be <= described_class::TOLERANCE + 1e-12
+        fine = described_class.fit(steps, spec, tolerance: 1e-4)
+        expect(max_error(fine, steps)).to be <= 1e-4 + 1e-12
+        expect(fine.keys.length).to be >= g.keys.length
         expect(g.keys.first).to eq(steps.first)
         expect(g.keys.last).to eq(steps.last)
         expect(g.keys.length).to be <= steps.length
@@ -86,7 +90,15 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
       g = described_class.new([[0, 0.3], [12000, 0.5], [24000, 0.62]])
       expect(g.to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0 => 0.3, 1.n8 => 0.5, 1.n4 => 0.62')
       g = described_class.new([[0, 0.3], [480, 0.5]], curve: :linear)
-      expect(g.to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0 => 0.3, 480.samples => 0.5, curve: :linear')
+      expect(g.to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0 => 0.3, 10.ms => 0.5, curve: :linear')
+      # One unit per line: a key off the grid prints every time in ms, else in exact seconds
+      g = described_class.new([[0, 0.3], [480, 0.5], [12000, 0.62]])
+      expect(g.to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0 => 0.3, 10.ms => 0.5, 250.ms => 0.62')
+      g = described_class.new([[0, 0.3], [800, 0.5], [12000, 0.62]])
+      line = g.to_ruby(:space, per_sample: per_sample)
+      expect(line).to eq('turn :space, 0 => 0.3, (1r/60).seconds => 0.5, (1r/4).seconds => 0.62')
+      keys = MB::Sound::Take.console_binding.eval("{ #{line.delete_prefix('turn :space, ')} }")
+      expect(described_class.from_hash(keys, per_sample: per_sample, rate: 48000).keys).to eq(g.keys)
       expect(described_class.new([[0, 0.42]]).to_ruby(:space, per_sample: per_sample)).to eq('turn :space, 0.42')
     end
   end
@@ -108,7 +120,7 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
           out << s.process_buffer(n)[0].dup
           done += n
         end
-        out.reduce(:concatenate)
+        SpecBuffers.join(out)
       end
       expect(runs[1]).to eq(runs[0])
       expect(runs[2]).to eq(runs[0])
@@ -182,7 +194,7 @@ RSpec.describe(MB::Sound::Gesture, :aggregate_failures) do
       s.preview_turn(:mode, 0.5)
       s.process_buffer
       s.preview_turn(:mode, 0.9)
-      expect(s.gesture_line(:mode)).to eq('turn :mode, 0 => 0.2, 800.samples => 0.5, 1600.samples => 0.9, curve: :step')
+      expect(s.gesture_line(:mode)).to eq('turn :mode, 0 => 0.2, (1r/60).seconds => 0.5, (1r/30).seconds => 0.9, curve: :step')
     end
   end
 end

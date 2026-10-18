@@ -4,9 +4,9 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     if node.channel_count > 1
       out = node.outputs.map { [] }
       buffers.times { node.outputs.each_with_index { |o, i| out[i] << o.sample(buffer).dup } }
-      out.map { |l| l.reduce(:concatenate) }
+      out.map { |l| SpecBuffers.join(l) }
     else
-      buffers.times.map { node.sample(buffer).dup }.reduce(:concatenate)
+      SpecBuffers.join(buffers.times.map { node.sample(buffer).dup })
     end
   end
 
@@ -273,7 +273,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     def copy_freqs(det, buffers: 20, buffer: 480)
       out = det.outputs.map { [] }
       buffers.times { det.outputs.each_with_index { |o, i| out[i] << o.sample(buffer).cast_to(Numo::DFloat) } }
-      out.map { |l| l.reduce(:concatenate) }
+      out.map { |l| SpecBuffers.join(l) }
     end
 
     def cents(a, b)
@@ -435,7 +435,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     end
 
     def render_synth(s)
-      30.times.map { s.sample(480).dup }.reduce(:concatenate)
+      SpecBuffers.join(30.times.map { s.sample(480).dup })
     end
 
     it 'keeps key sync, with random phases at each note' do

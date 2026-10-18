@@ -62,11 +62,8 @@ module MB
     # TODO: Standardize a way to modify an existing graph, e.g. to inject a
     # tee, filter, or tap.
     #
-    # TODO: Standardize a way to detect controls on a node and their data types
-    # and ranges.  E.g. maybe a #controls method that returns a map from method
-    # name to an array of ranges (or, lol, a ClassyHash array schema)
-    #
-    # TODO: In-line method to create a meter?
+    # Controls and their types: see Traversable#port_info and #param_info
+    # (racks R1); meters: DebugMethods#loudness_meter.
     #
     # TODO: Document methods that nodes must implement or override
     module GraphNode

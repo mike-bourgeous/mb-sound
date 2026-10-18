@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
 
   # Renders +frames+ frames and returns channel 0.
   def run(frames)
-    Array.new(frames / 800) { session.process_buffer[0].dup }.reduce(:concatenate)
+    SpecBuffers.join(Array.new(frames / 800) { session.process_buffer[0].dup })
   end
 
   # Returns [sample index, value] for each change in +data+.

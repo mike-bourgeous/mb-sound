@@ -101,12 +101,23 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(out.sounding).to be_empty
   end
 
+  # The REPL's last prompt line ("t> 40 + 2"), without the panes beside it.
+  def prompt_line = @term.lines.reverse.find { |l| l.match?(/\At[>*] /) }&.split("\u2502")&.first&.rstrip
+
+  # Waits for the REPL's last prompt line to read +text+ (true when it does).
+  def wait_prompt(text) = wait_until { prompt_line == text }
+
   # Up at the REPL prompt recalls +line+ (then clears the prompt again).
+  # FIXME(test-speed-2): this matches the whole screen, where the line typed
+  # earlier still shows, so it passes before Up does anything; checking the
+  # prompt line (wait_prompt) instead found other examples' lines in the
+  # history (Reline's history is per process) and the second, kitty Up
+  # after Ctrl-U not recalling.  Recorded for a fix round.
   def expect_history(line)
     @term.write("\e[A")
     expect(@term.wait_for(/t> #{Regexp.escape(line)}/)).to eq(true), @term.text
     @term.write("\x15") # Ctrl-U: an empty line again
-    @term.settle(quiet: 0.1)
+    expect(wait_prompt('t>')).to eq(true), @term.text
   end
 
   # Ctrl-] and back with +key+ (i or Enter): the REPL, not KEYS.
@@ -164,9 +175,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
         expect_history('40 + 2')
         # What a terminal that kept the kitty flags would send still recalls
         @term.write("\e[1;1:1A")
-        expect(@term.wait_for(/t> 40 \+ 2/)).to eq(true), "#{how_in}/#{how_out}: #{@term.text}"
+        expect(@term.wait_for(/t> 40 \+ 2/)).to eq(true), "#{how_in}/#{how_out}: #{@term.text}" # (see expect_history)
         @term.write("\x15")
-        @term.settle(quiet: 0.1)
+        expect(wait_prompt('t>')).to eq(true), "#{how_in}/#{how_out}: #{@term.text}"
       end
     end
 
@@ -195,7 +206,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
       path << name
       key = key.call if key.respond_to?(:call)
       @term.write(key) if key
-      @term.settle(quiet: 0.05)
+      @term.read_and_settle
       expect(@tiles.mode_problems).to eq([]), "#{path.join(' ')}: #{@tiles.mode_problems.inspect}"
     end
     # Back to the REPL from wherever the walk ended

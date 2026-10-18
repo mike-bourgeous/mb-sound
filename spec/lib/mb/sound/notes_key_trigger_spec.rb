@@ -27,7 +27,7 @@ RSpec.describe(MB::Sound::Notes::KeyTrigger, :check_shared) do
       env = v.amp_env(0.001, 1, 0.5, 0.05).retrigger(mode)
       tone = kind == :keyed ? v.hz.sine : v.hz.sine.free
       graph = env_first ? env * tone : tone * env
-      [buffers.times.map { graph.sample(buffer).dup }.reduce(:concatenate), v]
+      [SpecBuffers.join(buffers.times.map { graph.sample(buffer).dup }), v]
     }
     [out[0][0], out[1][0], out[0][1]]
   end
@@ -72,8 +72,8 @@ RSpec.describe(MB::Sound::Notes::KeyTrigger, :check_shared) do
       k << key.sample(480).dup
       env.sample(480)
     end
-    t = t.reduce(:concatenate)
-    k = k.reduce(:concatenate)
+    t = SpecBuffers.join(t)
+    k = SpecBuffers.join(k)
     expect(t.to_a.each_index.select { |i| t[i] > 0 }).to eq([0, restrike, fresh])
     expect(k.to_a.each_index.select { |i| k[i] > 0 }).to eq([0, fresh])
     expect(k[0]).to eq(1.0)
@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::Notes::KeyTrigger, :check_shared) do
     v = notes_for(*events)
     trig = v.trigger
     key = v.key_trigger
-    out = 100.times.map { [trig.sample(480).dup, key.sample(480).dup] }.transpose.map { |l| l.reduce(:concatenate) }
+    out = 100.times.map { [trig.sample(480).dup, key.sample(480).dup] }.transpose.map { |l| SpecBuffers.join(l) }
     expect(out[1].to_a).to eq(out[0].to_a)
   end
 
@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::Notes::KeyTrigger, :check_shared) do
     v = notes_for(*events)
     env = v.amp_env(0.001, 1, 0.5, 0.05).retrigger(:add)
     graph = v.hz.sine.reset(v.trigger) * env
-    keyed = 100.times.map { graph.sample(480).dup }.reduce(:concatenate)
+    keyed = SpecBuffers.join(100.times.map { graph.sample(480).dup })
     free = render(:add)[1]
     expect((keyed[restrike...restrike + 200] - free[restrike...restrike + 200]).abs.max).to be > 0.1
   end

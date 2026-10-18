@@ -5,9 +5,9 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
     if node.channel_count > 1
       out = node.outputs.map { [] }
       buffers.times { node.outputs.each_with_index { |o, i| out[i] << o.sample(buffer).dup } }
-      out.map { |l| l.reduce(:concatenate) }
+      out.map { |l| SpecBuffers.join(l) }
     else
-      buffers.times.map { node.sample(buffer).dup }.reduce(:concatenate)
+      SpecBuffers.join(buffers.times.map { node.sample(buffer).dup })
     end
   end
 
@@ -205,7 +205,7 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       freqs = seen.map(&:freq)
       out = freqs.map { [] }
       30.times { freqs.each_with_index { |f, i| out[i] << f.sample(480).dup } }
-      out = out.map { |l| l.reduce(:concatenate).cast_to(Numo::DFloat) }
+      out = out.map { |l| SpecBuffers.join(l).cast_to(Numo::DFloat) }
 
       # Before the second note: A3 detuned by fraction × 20 cents
       [-1, -0.5, 0, 0.5, 1].each_with_index do |a, i|
@@ -231,7 +231,7 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       f = seen.map(&:freq)
       out = f.map { [] }
       10.times { f.each_with_index { |x, i| out[i] << x.sample(480).dup } }
-      out = out.map { |l| l.reduce(:concatenate).cast_to(Numo::DFloat) }
+      out = out.map { |l| SpecBuffers.join(l).cast_to(Numo::DFloat) }
       expect(out[0][-1]).to be_within(0.05).of(440 * 2 ** (-0.2 / 12))           # full bend up an octave
       expect(out[1].max / out[1].min).to be > 2 ** (0.8 / 12)                     # vibrato ±50 cents on 2 st of bend
       expect(out[2][-1]).to be_within(0.05).of(220 * 2 ** ((12 + 2 + 0.2) / 12)) # +12 from the node, 2 st bend
@@ -353,7 +353,7 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       f = seen.map(&:freq)
       out = f.map { [] }
       30.times { f.each_with_index { |x, i| out[i] << x.sample(480).dup } }
-      out = out.map { |l| l.reduce(:concatenate).cast_to(Numo::DFloat) }
+      out = out.map { |l| SpecBuffers.join(l).cast_to(Numo::DFloat) }
       starts = out.map { |o| o[0] }
       expect(starts.uniq.length).to eq(6)
       expect(starts.map { |s| 12 * Math.log2(s / MB::Sound.tuning.frequency_of(50)) }).to all(be_between(-12.01, 24.01))

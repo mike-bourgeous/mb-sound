@@ -88,7 +88,7 @@ Round 2 measured (renders in /app/tmp/listening/genre-1/r2/, side below the freq
 
 - Done in genre-fixes: buses and the kick-voice sidechain (above).  Open: `only:` on a bus name (a node in any track routed into the bus), so `track(:kick, to: :drums)` + `duck(:drums, only: :kick)` works with a separate kick track; a template `t.long` (Kaede) and per-section crash/fill marks (Munro's crash on new phrases).
 - Done: `tr909` drums for `:house`/`:techno` (drums-2, a7090b95); jungle's break role is the sliced-break sampler preset `jungle_breaks` (6207c07a, 2026-10-13).  Still for the record: tempo-per-clip (the panel's D).
-- Mastering is deferred (maintainer, 2026-10-14: "We can defer any further mastering work"): the mastering questions (dnb target, a house master variant, techno loudness) wait in the db-master-1 addendum until the maintainer says go.
+- Mastering: no longer deferred; mastering-1/2 (2761e83a) built the presets and the Bench picks (dnb/techno `master :club`, house `clip: true`; below and master_effects.md).
 - Clipping taste (maintainer, 2026-10-13, drums-2): "generally don't want too much clipping (more audible than pumping)"; ask again if listening tests don't settle a softclip choice.
 - Template-driven generation (picks between variations per section, `ghost_chords` over the key's progression), and section-level knob values once forms take them without a Session.
 - A second persona panel uses these templates as starting points (`research/persona-panel-round2.md`).

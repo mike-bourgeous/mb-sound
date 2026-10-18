@@ -9,7 +9,7 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
   def glide_out(buffers: 6, **opts)
     n = notes_for(ev.note_on(60, 100, time: 0r), ev.note_on(72, 100, time: 0.01r))
     g = MB::Sound::Notes::Glide.new(n.note_stream, notes: n, **opts)
-    buffers.times.map { g.sample(480).dup }.reduce(:concatenate).cast_to(Numo::DFloat)
+    SpecBuffers.join(buffers.times.map { g.sample(480).dup }).cast_to(Numo::DFloat)
   end
 
   it 'follows the curve from the old note to the new one' do
@@ -45,7 +45,7 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
   it 'glides a Notes pitch with a shape' do
     n = notes_for(ev.note_on(60, 100, time: 0r), ev.note_on(72, 100, time: 0.01r))
     f = n.hz.glide(20.ms, shape: :elastic).freq
-    out = 6.times.map { f.sample(480).dup }.reduce(:concatenate)
+    out = SpecBuffers.join(6.times.map { f.sample(480).dup })
     expect(out.max).to be > MB::Sound::Note.new(72).frequency * 1.05
     expect(out[-1]).to be_within(0.01).of(MB::Sound::Note.new(72).frequency)
   end

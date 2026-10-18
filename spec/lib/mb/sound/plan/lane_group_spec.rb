@@ -354,7 +354,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
         skipped = []
         out = 150.times.map { b = s.sample(800).dup; skipped << s.skipped_lanes.dup; b }
         [
-          out.reduce(:concatenate), taps.reduce(:concatenate), s.skippable_lanes, skipped,
+          SpecBuffers.join(out), SpecBuffers.join(taps), s.skippable_lanes, skipped,
           s.lane_groups.groups.map { |g| g.members.length }, s.shared_inputs.sources.length,
         ]
       }

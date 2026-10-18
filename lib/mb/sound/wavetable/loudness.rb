@@ -10,8 +10,9 @@ module MB
       # RMS and bass harmonics count less).  Computed from the spectra, so
       # it's exact and cheap (no rendering).
       #
-      # TODO: use the BS.1770 loudness tool from the lufs branch once it lands
-      # (this is a simple internal K weighting at 48 kHz).
+      # This is a simple internal K weighting at 48 kHz.  The full BS.1770
+      # meter (MB::Sound.loudness, fast_loudness) exists now, but it measures
+      # rendered audio; this spectral version stays exact without rendering.
       module Loudness
         module_function
 

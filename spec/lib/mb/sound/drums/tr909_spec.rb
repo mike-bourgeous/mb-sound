@@ -86,11 +86,11 @@ RSpec.describe(MB::Sound::Drums::TR909, :aggregate_failures) do
     spy = []
     session.add(session.bus_tap(:drums, only: :kick).spy { |d| spy << d.dup if d } * 0, name: :rd)
     60.times { session.process_buffer(800) }
-    kick = spy.reduce(:concatenate)
+    kick = SpecBuffers.join(spy)
 
     MB::Sound.seed(1)
     alone = MB::Sound.tr909(MB::Sound.grid(4, kick: 'x...', clap: '..x.').loop, outputs: :separate)[:kick]
-    expected = Array.new(60) { alone.sample(800).dup }.reduce(:concatenate)
+    expected = SpecBuffers.join(Array.new(60) { alone.sample(800).dup })
     expect(kick).to eq(expected)
     expect(kick.abs.max).to be > 0.1
   ensure
