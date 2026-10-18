@@ -179,8 +179,13 @@ module MB
       # unless +:shared+ is false.  An unshared output is always new and is
       # never returned to other callers, so the caller should close it (e.g.
       # for playing several sounds at once; see PlaybackMethods#bg).
-      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil, shared: true, profile: nil)
+      #
+      # +:cue+ is how many of the +:channels+ are CUE (headphones) channels,
+      # the last ones (see Session::Cue): `output(channels: 4, cue: 2)` is
+      # MAIN 1-2 and CUE 3-4, JACK ports out_1, out_2, cue_1, cue_2.
+      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil, shared: true, profile: nil, cue: 0)
         info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot, output_type: output_type, profile: profile}
+        info[:cue] = cue if cue != 0
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
@@ -230,7 +235,7 @@ module MB
           )
 
         when :device
-          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device, profile: profile)
+          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device, profile: profile, cue: cue)
 
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
