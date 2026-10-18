@@ -157,6 +157,10 @@ module MB
           return MB::Sound.live_error(e)
         end
 
+        # A ringing sum with an input that never ends (`drone + hit`): say
+        # once how to end it with its first input (GraphNode::RingHint)
+        GraphNode::RingHint.notice(playable.nodes) if playable.ends.nil?
+
         # Graph documents' knobs join the session (Session#add does this
         # too); those with a controller get live MIDI input
         s = Session.current
@@ -1079,7 +1083,8 @@ module MB
         end
 
         if bars.nil? && seconds.nil? && to.nil? && max_seconds.nil? && (!session.idle? || session.schedule_waiting?(repeating: false))
-          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)"
+          hint = GraphNode::RingHint.message(sounds.select { |s| s.respond_to?(:sample) || s.is_a?(GraphNode::Channels) })
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end (or blocks scheduled later)#{"\n#{hint}" if hint}"
         end
 
         if peak_meter && (message = peak_meter.warning(filename, session.master_gain))

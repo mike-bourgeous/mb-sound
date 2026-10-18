@@ -144,6 +144,9 @@ RSpec.configure do |config|
     # (failing it; see support/warning_guard.rb).  Off here; the Plan::Fold
     # specs turn it on to check it.
     MB::Sound::Plan.fold_warnings = false
+    # The same for the ringing-sum hint bg prints once per process
+    # (GraphNode::RingHint); its specs turn it on.
+    MB::Sound::GraphNode::RingHint.enabled = false
   end
 
   # rspec-expectations config goes here. You can use an alternate
