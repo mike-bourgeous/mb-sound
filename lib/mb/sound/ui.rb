@@ -143,7 +143,7 @@ module MB
         session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
-        wall: ['every pane at once, for big terminals', '200x60 and up'],
+        wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
       }.freeze
@@ -186,7 +186,7 @@ module MB
               rows(width: 46) { pane :tracks; pane :queue, height: 5; pane :meters, height: 6 }
             }
           },
-          # For big terminals (about 200x60 and up): every pane at once
+          # For big terminals (about 200x60 and up): the performance panes at once (the set panes: ui :session)
           wall: Viewports.layout(:wall, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             cols {

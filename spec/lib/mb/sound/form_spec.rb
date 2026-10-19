@@ -708,6 +708,129 @@ RSpec.describe(MB::Sound::Form) do
     end
   end
 
+  # The maintainer's 2026-10-18 API notes (ui-api-1)
+  describe 'transport start, pause, and ending a flow' do
+    it 'plays the loaded flow with start, play, or go with no arguments' do
+      setup_scenes(:a, :b)
+      expect { expect(within { MB::Sound.start }.state).to eq(:idle) }.not_to output.to_stdout
+      within { MB::Sound.flow(play: false) { a 1; b 1 } }
+      st = within { MB::Sound.play }
+      expect(st.state).to eq(:started)
+      expect(st.to_s).to start_with('started at 1:1; flow a b')
+      expect(within { MB::Sound.go }.state).to eq(:playing) # (already playing: says so)
+      expect(within { MB::Sound.pause }.to_s).to include('renders do not pause')
+      data = run_bars(3)
+      expect(changes(data)).to eq([[0, 48], [bar, 50]])
+      expect(set.playback.ended?).to eq(true)
+      expect(within { MB::Sound.start }.state).to eq(:started) # (again, from where the timeline is)
+    end
+
+    it 'shows the flow with no block: where it is, its sections, and how to end it' do
+      setup_scenes(:a, :b)
+      expect { expect(within { MB::Sound.flow }).to be_nil }.to output(/no flow yet/).to_stdout
+      flow { a 2; b 1 }
+      run_bars(1)
+      shown = within { MB::Sound.flow }.pretty_inspect
+      expect(shown).to start_with('flow ▶ a pass 1/1').and include('[a] · b').and include('end:   finish').and include('outro in: 4.bars')
+      run_bars(3)
+      f = nil
+      expect { f = within { MB::Sound.form } }.to output(/not playing: it ended; start or play plays it/).to_stdout
+      expect(f).to be_a(MB::Sound::Form)
+    end
+
+    it 'ends a playing flow with outro at the outro\'s launch point' do
+      setup_scenes(:a, :b)
+      flow { a 2; b 2 }
+      run(bar / 2)
+      expect { within { MB::Sound.outro(fade: 1, in: 1.bar) } }.to output(/outro|stop :all: the flow ends at 2:3 too/).to_stdout
+      data = run_bars(4)
+      expect(changes(data).map(&:last).uniq).not_to include(50) # (b never came in)
+      expect(set.playback.history).to eq([:a])
+      expect(set.playback.ended?).to eq(true)
+    end
+
+    it 'seeks the flow to the next section playing a scene typed during it (maintainer: "Seek within the flow")' do
+      setup_scenes(:a, :b, :c)
+      flow { a 2; b 2; c 2 }
+      run(bar / 2)
+      e = nil
+      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: the flow seeks to its section :c \(2:1\) and plays on/).to_stdout
+      expect(e.kind).to eq(:seek)
+      run(bar) # (to bar 2, where the seek lands: the timeline jumps to c at bar 5)
+      expect(transport.position).to be_within(1/100r).of(4 + 1/2r)
+      data = run_bars(3)
+      expect(changes(data).map(&:last)).to eq([52])
+      expect(set.playback.history).to eq([:a, :c])
+      expect(set.playback.ended?).to eq(true) # (c is the last section: the flow ends after it, as written)
+    end
+
+    it 'seeks forward first, else the nearest section behind, and picks one with section:' do
+      setup_scenes(:a, :b)
+      flow { a 1; b 1, scene: :a; a2 1, scene: :b; b2 1, scene: :a }
+      pb = set.playback
+      expect(pb.sections_for_scene(:a)).to eq(%i[a b b2])
+      expect(pb.section_for_scene(:a)).to eq(:b) # (forward from a)
+      run(bar + bar / 4) # (in b; a pass begins up to half a bar early)
+      expect(pb.section).to eq(:b)
+      expect(pb.section_for_scene(:a)).to eq(:b2) # (forward)
+      expect(pb.section_for_scene(:b)).to eq(:a2)
+      run(2 * bar) # (in b2: nothing forward plays :b, the nearest behind is a2)
+      expect(pb.section).to eq(:b2)
+      expect(pb.section_for_scene(:b)).to eq(:a2)
+      expect(pb.section_for_scene(:a)).to eq(:b2)
+      expect { within { MB::Sound.go(:a, section: :a2) } }.to raise_error(ArgumentError, /sections playing :a: :a, :b, :b2/)
+      e = nil
+      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks to its section :a .*also :b, :b2: go :a, section: :b/).to_stdout
+      expect(e.kind).to eq(:seek)
+    end
+
+    it 'ends the flow where a scene typed during it lands when no section plays it, and says so' do
+      setup_scenes(:a, :b, :c)
+      flow { a 2; b 2 }
+      run(bar / 2)
+      expect { within { MB::Sound.go :c, on: :bar } }.to output(/go :c: no section of the flow plays it, so the flow ends at 2:1; you're driving/).to_stdout
+      data = run_bars(4)
+      expect(changes(data).map(&:last)).to eq([48, 52])
+      expect(set.playback.history).to eq([:a])
+    end
+
+    it 'drops a next pass the scheduler began early when the flow ends before it' do
+      setup_scenes(:a, :b)
+      flow { a 1; b 1 }
+      run(bar - 800 * 4) # (scene builds run up to half a bar early: b's pass is under way)
+      expect(set.playback.history).to eq([:a, :b])
+      expect { within { MB::Sound.stop(:all, at: MB::Sound.bar(2)) } }.to output(/stop :all: the flow ends at 2:1 too/).to_stdout
+      data = run_bars(2)
+      expect(changes(data).map(&:last)).not_to include(50)
+      expect(set.playback.history).to eq([:a])
+    end
+
+    it 'says panic is immediate when given a launch point' do
+      expect { within { MB::Sound.panic(in: 4.bars) } }.to raise_error(ArgumentError, /panic is immediate.*outro in: 4\.bars.*finish/)
+    end
+  end
+
+  describe 'seek spellings' do
+    {
+      [17] => 16r, [2.5] => 1.5r, [11, 2] => 10 + 1/4r, ['bar(12)'] => 11r, ['bar(12, beat: 3)'] => 11 + 2/4r,
+      ['12.bars'] => 12r, ['43.n16'] => 43/16r, ['32.seconds'] => 16r, ['0.seconds'] => 0r,
+    }.each do |args, pos|
+      it "seeks #{args.map { |a| a.is_a?(String) ? a : a.inspect }.join(', ')} to #{pos}" do
+        args = args.map { |a| a.is_a?(String) ? MB::Sound.module_eval(a) : a }
+        e = within { MB::Sound.seek(*args) }
+        session.process_buffer
+        expect(transport.position).to be_within(1/9600r).of(pos)
+        expect(e.to_s).to start_with('seek')
+      end
+    end
+
+    it 'lists the spellings for anything else' do
+      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(0\)/)
+      expect { within { MB::Sound.seek(-1.seconds) } }.to raise_error(ArgumentError, /seek takes a bar/)
+      expect { within { MB::Sound.seek(:drop, 2) } }.to raise_error(ArgumentError, /a beat goes with a bar number/)
+    end
+  end
+
   describe 'console names' do
     names = %i[
       flow form play_form section define_section loop! loop_section onward unloop! continue_form goto goto_section
@@ -716,7 +839,9 @@ RSpec.describe(MB::Sound::Form) do
 
     it 'are FormMethods, not Kernel or Object methods, and not Pry commands' do
       require 'pry'
-      pry_commands = Pry::Commands.keys.map(&:to_s)
+      require 'mb/sound/help'
+      # (pry-byebug's finish is moved to pry-finish by Help.install_pry!)
+      pry_commands = Pry::Commands.keys.map(&:to_s) - MB::Sound::Help::PRY_RENAMES
       names.each do |n|
         expect(MB::Sound.method(n).owner).to eq(MB::Sound::FormMethods), "#{n} is defined by #{MB::Sound.method(n).owner}"
         expect(Object.new.respond_to?(n, true)).to eq(false), "#{n} is an Object method"

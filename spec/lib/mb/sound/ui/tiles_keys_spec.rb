@@ -62,7 +62,7 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     expect(@tiles.tiler.rects[:keyboard].h).to eq(8)
     expect(@keyboard.resolved_mode).to eq(:tap)
-    expect(@term.text).to include('tap (no key-up)')
+    expect(@term.text).to include('auto (tap) (no key-up)') # (:auto shown as itself, ui-api-1)
     @keyboard.off_mode = :hold # (notes that last until an exit)
 
     @term.type('zc')
@@ -336,5 +336,73 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(wait_until { lead_changes.call > before }).to eq(true), @term.text
     expect(@keyboard.clip.to_ruby).to eq('seq(F3).n8.loop')
     expect(@term.wait_for('swap: seq(F3).n8.loop loops into :lead')).to eq(true), @term.text
+  end
+  it 'plays the loaded flow with Space in NAV (the transport toggle), as a take line' do
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false,
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:sp) { |c| c.tone.sine.at(-30.db) * c.amp_env }
+      MB::Sound.scene(:sp_a, sp: MB::Sound.seq(MB::Sound::C4).loop)
+      MB::Sound.flow(play: false) { sp_a 2 }
+    end
+    session = @session
+    out = Object.new
+    out.define_singleton_method(:target_session) { session }
+    %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
+    start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.write(' ')
+    expect(wait_until { @session.arrangement.playback }).to be_truthy, @term.text
+    expect(@term.wait_for(/started at 1:1; flow sp_a/)).to eq(true), @term.text
+    expect(MB::Sound::TransportMethods.toggle_line(@session)).to eq('pause')
+  end
+  # Persona panel round 2 (2026-10-18): K16/N7 (NAV K in :studio said "K:
+  # not a NAV key"), K17 (no legend for step entry's lengths), M12 (step
+  # entry not driven end to end)
+  it 'opens KEYS with NAV K in :studio, and builds a step clip end to end with the length legend shown' do
+    @keyboard = MB::Sound::UI::Keyboard.new(out: out)
+    @tiles, @term = ui_tiles(:studio, rows: 40, cols: 120, keyboard: @keyboard)
+    expect(@term.wait_for('t> ')).to eq(true)
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    @term.type('K')
+    expect(wait_mode(@tiles, :grab)).to eq(true), @term.text
+    expect(@tiles.tiler.layout.panes).to include(:keyboard)
+    @term.write("\t") # Tab: step entry
+    expect(@term.wait_for(' STEP ')).to eq(true), @term.text
+    expect(@term.wait_for('1=n1 2=n2 3=n4 4=n8 5=n16 6=n32 7=n64')).to eq(true), @term.text
+    expect(@term.wait_for('next note n8')).to eq(true), @term.text
+    # (a length key sets the notes that follow; notes typed within
+    # StepEntry::CHORD of each other join as a chord, so pause between)
+    %w[z 2 x c 4 v].each do |ch|
+      @term.type(ch)
+      @term.read_and_settle
+      sleep MB::Sound::UI::Keyboard::StepEntry::CHORD + 0.02
+    end
+    expect(@term.text).to include('next note n8')
+    @term.write("\r")
+    expect(wait_until { @keyboard.clip }).to be_truthy, @term.text
+    expect(@keyboard.clip.to_ruby).to eq('seq(C3, D3.n2, E3.n2, F3).n8')
+    expect(@tiles.tiler.layout.zoom).to be_nil # (z was a note, not NAV's zoom)
+    expect(@tiles.mode_problems).to eq([])
+  end
+
+  it 'reads control characters given as Strings as their keys (Key.of("\\t") is Tab)' do
+    k = MB::Sound::UI::Input::Key
+    expect(k.of("\t").key).to eq(:tab)
+    expect(k.of("\r").key).to eq(:enter)
+    expect(k.of('z').key).to eq('z')
+    kb = MB::Sound::UI::Keyboard.new(out: out, clock: -> { 0.0 })
+    kb.key(k.of("\t"), 0.0)
+    expect(kb.entry).to eq(:step)
+  end
+
+  it 'gives the REPL half of a 120-column :session (at least 60 columns), 40 at 80' do
+    expect(MB::Sound::UI::Tiles.repl_min_cols(120)).to eq(60)
+    expect(MB::Sound::UI::Tiles.repl_min_cols(80)).to eq(40)
+    @tiles, @term = ui_tiles(:session, rows: 40, cols: 120)
+    expect(@term.wait_for('t> ')).to eq(true)
+    expect(@tiles.tiler.rects[:repl].w).to be >= 60
   end
 end

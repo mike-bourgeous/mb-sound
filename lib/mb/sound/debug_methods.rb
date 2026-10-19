@@ -11,9 +11,13 @@ module MB
       # not), ui.txt (`ui.list`: mode, layout, terminal size, panes; the
       # screen's stats, messages, and text), take.rb (the
       # take's replay script) and midi.txt (the last 500 MIDI events),
-      # threads.txt (every thread's backtrace).  Each part that fails says
-      # why in its file and the rest still write.  Returns the folder.
-      def debug_dump(dir = nil)
+      # threads.txt (every thread's backtrace), terminal.txt (the
+      # terminal's name from XTVERSION, its size, and the variables that
+      # describe it; see TerminalInfo), and with +exception+ (the console's
+      # crash dump, written by bin/sound.rb on an exception that ends it)
+      # exception.txt.  Each part that fails says why in its file and the
+      # rest still write.  Returns the folder.
+      def debug_dump(dir = nil, exception: nil)
         dir ||= File.join(File.expand_path('../../..', __dir__), 'tmp', 'debug', Time.now.strftime('%Y%m%d_%H%M%S'))
         FileUtils.mkdir_p(File.join(dir, 'graphs'))
         session = Session.existing
@@ -26,6 +30,10 @@ module MB
           File.write(File.join(dir, name), text.end_with?("\n") ? text : "#{text}\n")
         }
 
+        if exception
+          part.('exception.txt') { "#{exception.class}: #{exception.message}\n#{(exception.full_message(highlight: false) rescue exception.backtrace&.join("\n"))}" }
+        end
+        part.('terminal.txt') { TerminalInfo.report }
         part.('now.txt') { defined?(Help::Now) ? Help::Now.new.to_s.gsub(/\e\[[0-9;]*m/, '') : '(help not loaded: bin/sound.rb loads it)' }
         part.('players.txt') { session ? session.players.map { |n, d| "#{n.inspect}: #{d}" }.join("\n") : 'no session' }
         part.('changes.txt') { session ? session.journal.changes.map(&:to_s).join("\n") : 'no session' }

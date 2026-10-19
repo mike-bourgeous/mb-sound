@@ -27,7 +27,13 @@ module MB
             super(key: key, mods: mods.sort.freeze, bytes: bytes, type: type)
           end
 
+          # Control characters given as Strings and the key names they
+          # mean (`Key.of("\t")` is Tab: panel round 2, M12 drove step
+          # entry with "\t" and its keys went to notes).
+          CONTROL_NAMES = { "\t" => :tab, "\r" => :enter, "\n" => :enter, "\e" => :escape, "\x7f" => :backspace }.freeze
+
           def self.of(key, *mods, bytes: nil, type: :press)
+            key = CONTROL_NAMES.fetch(key, key) if key.is_a?(String)
             new(key: key, mods: mods, bytes: bytes, type: type)
           end
 

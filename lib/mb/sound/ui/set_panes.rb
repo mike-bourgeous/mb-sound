@@ -65,7 +65,7 @@ module MB
           # (UI::PaneRates: a list at its own rate, 10/s for the countdowns)
           def priority = :list
 
-          def initialize = super(:clips, rate: 10, height: 8, width: 60, title: 'clips', min_height: 3,
+          def initialize = super(:clips, rate: 10, height: 8, width: 60, title: 'clip matrix', min_height: 3,
                                          description: 'the clip matrix: tracks x scenes and slots, playing and queued with countdowns; launch and tweak from its keys')
 
           # The cell under the cursor as [LaneInfo, slot index, SceneInfo]
@@ -305,7 +305,7 @@ module MB
 
           def priority = :list
 
-          def initialize = super(:clip, rate: 4, height: 10, width: 50, title: 'clip', min_height: 3,
+          def initialize = super(:clip, rate: 4, height: 10, width: 50, title: 'clip detail', min_height: 3,
                                         description: 'the clip under the matrix cursor: length, loop, its Ruby, and a piano roll of its notes')
 
           def draw_body(c, s, _state)

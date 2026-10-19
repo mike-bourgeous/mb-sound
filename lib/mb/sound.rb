@@ -69,6 +69,7 @@ require_relative 'sound/generative_methods'
 require_relative 'sound/schedule_methods'
 require_relative 'sound/arrangement_methods'
 require_relative 'sound/form_methods'
+require_relative 'sound/transport_methods'
 require_relative 'sound/knob_methods'
 require_relative 'sound/clock_methods'
 require_relative 'sound/key_methods'
@@ -113,6 +114,7 @@ module MB
     extend ScheduleMethods
     extend ArrangementMethods
     extend FormMethods
+    extend TransportMethods
     extend KnobMethods
     extend ClockMethods
     extend KeyMethods
@@ -254,5 +256,6 @@ require_relative 'sound/genre'
 
 # The terminal UI (`ui`, `pane`, `layout`): a dashboard band above the console
 require_relative 'sound/ui'
+require_relative 'sound/terminal_info'
 require_relative 'sound/debug_methods'
 require_relative 'sound/table'

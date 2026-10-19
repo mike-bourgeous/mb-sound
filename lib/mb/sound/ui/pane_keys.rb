@@ -145,6 +145,25 @@ module MB
       end
 
       Pane.include(PaneKeys)
+
+      # Every pane is enterable (maintainer, 2026-10-18: "Every panel should
+      # be enterable; it's weird to be stuck in NAV on some panels but not
+      # others"): NAV Enter goes into any pane, Esc or Ctrl-] comes back.
+      # Panes without keys of their own get these: copy the pane's text,
+      # and scroll where the pane has more than it shows (#key_scroll).
+      Pane.mode_keys do
+        group 'Pane'
+        on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+        on [:up, :down, :page_up, :page_down], :scroll, 0, help: 'scroll (panes that have more than they show)', label: 'arrows PgUp PgDn'
+      end
+
+      class Pane
+        # Scrolls the pane (the view mode's arrows); panes with more than
+        # they show override it.
+        def key_scroll(_state, *_)
+          "#{name}: shows all it has (nothing to scroll)"
+        end
+      end
     end
   end
 end

@@ -92,6 +92,7 @@ module MB
           @ended = false
           @started = false
           @gen = 0
+          @end_at = nil # (#end_at: no section begins at or after it)
           check_form
         end
 
@@ -278,6 +279,53 @@ module MB
           }
         end
 
+        # Ends the form at timeline position +time+ (whole notes): no section
+        # begins at or after it (what is playing keeps playing; an outro or a
+        # stop :all at the same point fades or stops it).  Used by outro,
+        # stop :all, and a manual go while the flow plays (ui-api-1; the
+        # maintainer's `outro in: 2.bars` faded out, then the next section's
+        # scene came in).  A time now or earlier stops the form right away.
+        # Returns the Stamp where it ends.
+        def end_at(time)
+          time = time.to_r
+          return @session.stamp(time).tap { stop } if time <= @session.now
+          @lock.synchronize {
+            @end_at = @end_at ? [@end_at, time].min : time
+            if @pass_start && @pass_start >= @end_at
+              # The scheduler began the next pass ahead of its time (scene
+              # builds run early): it never plays
+              drop_pending_pass
+              @ended = true
+            elsif @commit_record && @fill_start && @fill_start >= @end_at
+              undo_commit # (a fill launched for after the end)
+            end
+          }
+          @session.stamp(@end_at)
+        end
+
+        # The section that plays scene +scene+ for `go` (maintainer,
+        # 2026-10-18: "Always forward if present, nearest back if not"): the
+        # first section after the current one in the play order (played
+        # straight through) whose scene is +scene+, else the nearest one at
+        # or before it; nil if no section plays it.  (`go :drop, section:
+        # :drop2` picks one by name.)
+        def section_for_scene(scene)
+          steps = @form.steps.map(&:first)
+          plays = ->(n) { (s = @form.sections[n]) && scene_of(s) == scene }
+          i = steps.index(@section) || -1
+          steps[(i + 1)..].find(&plays) || steps[0..i].reverse.find(&plays)
+        end
+
+        # The sections whose scene is +scene+ (play order, each once).
+        def sections_for_scene(scene)
+          @form.steps.map(&:first).uniq.select { |n| (s = @form.sections[n]) && scene_of(s) == scene }
+        end
+
+        # Where #end_at ends the form (whole notes), or nil.
+        def ends_at
+          @end_at
+        end
+
         # Stops the form: no more sections launch (what is playing keeps
         # playing).  Scheduled blocks are dropped.
         def stop
@@ -307,8 +355,25 @@ module MB
           "#<Form::Playback #{self}>"
         end
 
+        # The console's view (`flow` with no block): where the flow is, its
+        # sections in order with the one playing in brackets, and how to
+        # steer and end it.
+        def show
+          names = @form.steps.map { |name, times| "#{name}#{" x#{times}" if times != 1}" }
+          names = @form.steps.each_with_index.map { |(name, _), i| name == @section && !@ended ? "[#{names[i]}]" : names[i] }
+          lines = ["flow #{self}#{", ends at #{@session.stamp(@end_at)}" if @end_at && !@ended}"]
+          lines << "  #{names.join(' · ')}"
+          if @ended
+            lines << '  start (or play) plays it again from the start'
+          else
+            lines << '  steer: loop!  onward  goto :name  skip  practice :name  go :scene (seeks to the next section playing it; section: picks one)'
+            lines << '  end:   finish (the ending next)  outro in: 4.bars (fades out, ends the flow)  stop :all'
+          end
+          lines.join("\n")
+        end
+
         def pretty_print(q)
-          q.text(inspect)
+          q.text(show)
         end
 
         private
@@ -481,7 +546,7 @@ module MB
             @commit_time = @fill_start || @boundary
 
             gen = @gen
-            schedule(@commit_time, "#{name} commit") { commit if gen == @gen }
+            schedule(@commit_time, "#{name} commit") { commit if gen == @gen && !(@end_at && @commit_time >= @end_at) }
             boundary = @boundary
             schedule(boundary, "#{name} ends") { cross(boundary) if gen == @gen }
           }
@@ -620,6 +685,14 @@ module MB
 
         # At a boundary: the next pass, or the end.
         def cross(time)
+          if @end_at && time.to_r >= @end_at
+            @lock.synchronize {
+              @ended = true
+              @gen += 1
+            }
+            return
+          end
+
           nxt = @lock.synchronize {
             commit unless @committed
             @prev_snapshot = @section && pass_snapshot

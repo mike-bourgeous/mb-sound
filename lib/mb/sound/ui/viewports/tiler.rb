@@ -93,7 +93,7 @@ module MB
 
             left = @layout.panes - [name]
             change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(name, left), zoom: (@layout.zoom == name ? nil : @layout.zoom)) do |root|
-              edit(root, name) { [] }
+              remove_leaf(root, name)
             end
           end
 
@@ -237,10 +237,10 @@ module MB
           # minimum; else +fallback+ (when shown), else the largest of all.
           # The focus stays.  Not an undo step.  Returns a Temporary for
           # #close_temporary, or nil if +name+ is already shown.
-          def open_temporary(name, rows, keep: [], fallback: nil)
+          def open_temporary(name, rows, keep: [], fallback: nil, prefer: nil)
             return nil if @layout.panes.include?(name)
             before = @layout
-            target = temporary_target(rows, keep, fallback)
+            target = prefer && temporary_room?(prefer, rows) ? prefer : temporary_target(rows, keep, fallback)
             change(record: false) do |root|
               edit(root, target) do |leaf, parent_axis|
                 if parent_axis == :rows
@@ -267,7 +267,7 @@ module MB
             elsif @layout.panes.include?(temp.name) && @layout.panes.length > 1
               left = @layout.panes - [temp.name]
               change(focus: left.include?(@layout.focus) ? @layout.focus : neighbor_of(temp.name, left), zoom: (@layout.zoom == temp.name ? nil : @layout.zoom), record: false) do |root|
-                edit(root, temp.name) { [] }
+                remove_leaf(root, temp.name)
               end
             end
             self
@@ -324,6 +324,15 @@ module MB
 
           # The pane a temporary pane of +rows+ takes its rows from (see
           # #open_temporary).
+          # True if pane +name+ is shown, flexible, and has +rows+ to spare
+          # above its minimum (open_temporary's +prefer:+).
+          def temporary_room?(name, rows)
+            rect = rects[name] or return false
+            leaf = Viewports.find_leaf(@layout.root, name)
+            return false if leaf.nil? || !leaf.size.nil?
+            rect.h - rows - @layout.gap >= (leaf.min || @mins&.call(name, :rows) || 1)
+          end
+
           def temporary_target(rows, keep, fallback)
             r = rects
             fixed = {}
@@ -373,6 +382,27 @@ module MB
             axis = node.is_a?(Split) ? node.axis : :tabs
             kids = node.children.flat_map do |c|
               c.is_a?(Pane) && c.name == name ? block.call(c, axis) : [edit(c, name, &block)]
+            end
+            node.with(children: kids)
+          end
+
+          # +node+ without leaf +name+.  When every sibling left in its split
+          # has a fixed size, the neighbor before it (else after) becomes
+          # flexible and takes the space (maintainer, 2026-10-18: closing
+          # the :wall's messages pane left a lined grid where it was; "the
+          # other panels should expand to take the space"; undo brings the
+          # pane back in its slot).
+          def remove_leaf(node, name)
+            return node if node.is_a?(Pane)
+
+            i = node.children.index { |c| c.is_a?(Pane) && c.name == name }
+            return node.with(children: node.children.map { |c| remove_leaf(c, name) }) unless i
+
+            kids = node.children.dup
+            kids.delete_at(i)
+            if node.is_a?(Split) && !kids.empty? && kids.none? { |c| c.size.nil? }
+              j = i > 0 ? i - 1 : 0
+              kids[j] = kids[j].with(size: nil, weight: 1)
             end
             node.with(children: kids)
           end

@@ -105,11 +105,37 @@ module MB
         end
       end
 
-      # Sets up Pry for the console (bin/sound.rb): Pry's help command moves
-      # to pry-help, pages print as text, and lessons check each line.
+      # pry-byebug's stepping commands (only useful inside binding.pry, and
+      # `finish` typed at the console once ran pry-byebug's step-out, which
+      # emptied Pry's binding stack and ended the process at the next
+      # prompt; maintainer, 2026-10-18): always moved to pry-<name>.
+      BYEBUG_COMMANDS = %w[backtrace next step continue finish up down frame break].freeze
+
+      # Pry commands moved to pry-<name> even where no console method has
+      # their name today (Pry's play, reset, and hist edit and replay
+      # input, which surprises at a live console).
+      PRY_RENAMES = (%w[help play reset hist] + BYEBUG_COMMANDS).freeze
+
+      # Moves Pry commands out of the way of console commands: every name in
+      # PRY_RENAMES, and every other Pry command a console command's name
+      # (from the help index, aliases included) would run instead, becomes
+      # pry-<name> (`pry-help`, `pry-finish`).  Returns the moved names.
+      def self.rename_pry_collisions!(cmds)
+        names = PRY_RENAMES + index.console_methods.map { |m| m.name.to_s }
+        names.uniq.filter_map { |n|
+          c = cmds.find_command(n)
+          next unless c && c.match.is_a?(String) && c.match == n && !c.description.to_s.start_with?('mb-sound')
+          cmds.rename_command("pry-#{n}", n)
+          n
+        }
+      end
+
+      # Sets up Pry for the console (bin/sound.rb): Pry commands named like
+      # console commands move to pry-<name> (see .rename_pry_collisions!),
+      # pages print as text, and lessons check each line.
       def self.install_pry!
         cmds = Pry.config.commands
-        cmds.rename_command('pry-help', 'help') if cmds.valid_command?('help') && !cmds.valid_command?('pry-help')
+        rename_pry_collisions!(cmds)
         Pry.config.print = PagePrinter.new(Pry.config.print) unless Pry.config.print.is_a?(PagePrinter)
         install_commands(cmds)
         Pry.config.hooks.delete_hook(:after_eval, :mb_sound_lesson) if Pry.config.hooks.hook_exists?(:after_eval, :mb_sound_lesson)

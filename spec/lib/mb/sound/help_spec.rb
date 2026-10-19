@@ -849,6 +849,33 @@ RSpec.describe MB::Sound::Help do
     ensure
       config.print = old_print if old_print
     end
+
+    # Guard (ui-api-1; `finish` ran pry-byebug's step-out and crashed the
+    # console, 2026-10-18): no console command reaches a Pry command.
+    it "leaves no console command to a Pry or pry-byebug command" do
+      require 'pry'
+      require 'pry-byebug'
+      commands = Pry::CommandSet.new.import(Pry::Commands)
+      expect(commands.valid_command?('finish')).to eq(true) # (pry-byebug's, before the setup)
+      config = Pry.config
+      allow(config).to receive(:commands).and_return(commands)
+      allow(config).to receive(:hooks).and_return(Pry::Hooks.new)
+      old_print = config.print
+      MB::Sound::Help.install_pry!
+      MB::Sound::Help.install_pry! # (twice is the same)
+
+      names = index.console_methods.map { |m| m.name.to_s }.uniq
+      hits = names.filter_map { |n| c = commands.find_command(n) and n }
+      expect(hits.sort).to eq(%w[help lesson].select { |n| names.include?(n) }.sort)
+      hits.each { |n| expect(commands.find_command(n).description).to start_with('mb-sound'), n }
+      MB::Sound::Help::BYEBUG_COMMANDS.each do |n|
+        expect(commands.find_command(n)).to be_nil, n
+        expect(commands.valid_command?("pry-#{n}")).to eq(true), n
+      end
+      %w[pry-help pry-play pry-reset pry-hist].each { |n| expect(commands.valid_command?(n)).to eq(true), n }
+    ensure
+      config.print = old_print if old_print
+    end
   end
 
   describe 'coverage guard' do

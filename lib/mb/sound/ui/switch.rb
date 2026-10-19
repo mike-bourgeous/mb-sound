@@ -128,7 +128,7 @@ module MB
           # switch was typed at the prompt), else up to the line above it
           # (Reline draws the prompt and its line again).  Trailing spaces
           # are trimmed; blank lines after the last text are dropped.
-          def repl_lines(tiles, n = REPLAY_LINES)
+          def repl_lines(tiles, n = REPLAY_LINES, color: ColorPolicy.color?($stdout))
             vt = tiles&.host&.vt
             return [] unless vt
             # (what the console just wrote, the echo of the command typed
@@ -138,7 +138,7 @@ module MB
             last = vt.dropped + vt.scrollback.length + vt.row
             last -= 1 unless Thread.current.equal?(Thread.main)
             first = [vt.dropped, last - n + 1].max
-            lines = (first..last).map { |i| vt.line_at(i)&.to_s.to_s.rstrip }
+            lines = (first..last).map { |i| (r = vt.line_at(i)) ? (color ? r.to_sgr : r.to_s) : '' }
             lines.shift while lines.first&.empty?
             lines.pop while lines.last&.empty?
             lines

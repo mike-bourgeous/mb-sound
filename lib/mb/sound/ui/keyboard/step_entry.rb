@@ -28,6 +28,13 @@ module MB
           # Number keys and their note divisions.
           LENGTHS = { '1' => 1, '2' => 2, '3' => 4, '4' => 8, '5' => 16, '6' => 32, '7' => 64 }.freeze
 
+          # The length keys as one line for the pane: a length key sets the
+          # length of the notes that follow (until the next length key), as
+          # a DAW's step input does.
+          def self.legend
+            "#{LENGTHS.map { |k, d| "#{k}=n#{d}" }.join(' ')}  8 dot  9 trip: for the notes that follow"
+          end
+
           # Seconds within which notes join the last step as a chord.
           CHORD = 0.08
 
@@ -162,6 +169,7 @@ module MB
             when *LENGTHS.keys
               @div = LENGTHS[ch]
               @last_note_at = nil
+              @keyboard.say("next notes: #{length_label} (#{ch} = n#{@div})")
             when '8'
               @dotted = !@dotted
               @triplet = false

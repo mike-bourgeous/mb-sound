@@ -1107,6 +1107,7 @@ module MB
         name = @kind == :song ? :show : :play if name == :default
         layout = UI.show_layouts[name] || UI.layout_named(name)
         raise ArgumentError, "--ui #{name}: a band layout; use a tiled one (#{UI.show_layouts.keys.map(&:inspect).join(', ')}, ...)" unless layout.is_a?(UI::Viewports::Layout)
+        TerminalInfo.query! # (the terminal's name for debug_dump, before the screen reads the keys)
 
         session = Session.current
         waiter = Thread.new { MB::Sound.wait }

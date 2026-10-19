@@ -642,6 +642,34 @@ RSpec.describe(MB::Sound::Take) do
     ENV['HOME'] = old
   end
 
+  it 'saves to tmp/takes with take.save :tmp, even with a set home' do
+    expect(described_class.tmp_dir).to end_with('/tmp/takes')
+    allow(described_class).to receive(:tmp_dir).and_return(tmp_path('tmp_takes'))
+    take.home = tmp_path('sets')
+    path = nil
+    expect { path = take.save(:tmp) }.to output(/Saved the take to .*tmp_takes\/take_\d+_\d+\.rb/).to_stdout
+    expect(File.read(path)).to eq(take.to_ruby)
+    expect { take.save(:temp) }.to raise_error(ArgumentError, /:tmp/)
+  end
+
+  it 'autosaves to one file, keeping the newest AUTOSAVE_KEEP, and saves once more when stopped' do
+    dir = tmp_path('auto')
+    FileUtils.mkdir_p(dir)
+    12.times { |i| File.write(File.join(dir, "autosave_old#{i}.rb"), '').then { File.utime(Time.at(1000 + i), Time.at(1000 + i), File.join(dir, "autosave_old#{i}.rb")) } }
+    path = take.autosave!(every: 0.02, dir: dir)
+    expect(Dir[File.join(dir, 'autosave_*.rb')].length).to eq(described_class::AUTOSAVE_KEEP - 1)
+    expect(File.basename(path)).to match(/\Aautosave_\d+_\d+_\d+\.rb\z/)
+    deadline = MB::U.clock_now + 5
+    sleep 0.01 until File.exist?(path) || MB::U.clock_now > deadline
+    expect(File.read(path)).to eq(take.to_ruby)
+    File.delete(path)
+    take.stop_autosave
+    expect(File.read(path)).to eq(take.to_ruby)
+    expect(Thread.list.map(&:name)).not_to include('take autosave')
+  ensure
+    take.stop_autosave(save: false)
+  end
+
   it 'gives the user data directory per platform' do
     expect(described_class.data_dir).to end_with('mb-sound/takes')
   end

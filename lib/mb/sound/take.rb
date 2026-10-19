@@ -40,6 +40,11 @@ module MB
       # with one of these words are kept in the script as comments.
       FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks markers knobs snaps buses routes help now lesson monitor monitor_gain ls ui keys fg jobs debug_dump].freeze
 
+      # A `play` line with no sound (only launch points): the transport's
+      # start (TransportMethods#start), which replays, unlike foreground
+      # plays.
+      TRANSPORT_PLAY = /\A\s*play\s*(\(\s*\)|\(?\s*(at|on|in):[^\n]*)?\s*\z/
+
       class << self
         # The console's take, created when first needed.
         def current
@@ -54,7 +59,13 @@ module MB
 
         # Replaces the console's take with a fresh one.
         def restart
+          old = @current
           @current = new
+          if old&.autosave_path # (the new take autosaves in place of the old one, which saves once more)
+            old.stop_autosave
+            @current.autosave!
+          end
+          @current
         end
 
         # A fresh binding like the console's (Pry's binding in MB::Sound:
@@ -124,6 +135,8 @@ module MB
         @start_frame = (@session || Session.default).frame
         @midi_from = (@session || Session.default).midi_log_length
         @decisions_from = (@session || Session.default).decision_log_length
+        @autosave = nil # (the #autosave! thread)
+        @autosave_path = nil
       end
 
       # Decisions made during the take by params read ahead of time (see
@@ -348,9 +361,12 @@ module MB
 
       # Saves the replay script and prints where.  With no +path+, saves to
       # #home if set, else to the project's sets/ directory with +repo:
-      # true+, else to the user data directory (see .data_dir).  Returns
-      # the path.
+      # true+, else to the user data directory (see .data_dir).  +path+
+      # :tmp saves to mb-sound's tmp/takes/ (for debugging hand-offs;
+      # maintainer, 2026-10-18).  Returns the path.
       def save(path = nil, repo: false)
+        path = File.join(self.class.tmp_dir, "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb") if path == :tmp
+        raise ArgumentError, "take.save takes a path or :tmp (got #{path.inspect})" if path.is_a?(Symbol)
         path = File.expand_path(path.to_s) if path # `~/x.rb` is a home path, as in a shell
         path ||= File.join(home || (repo ? File.expand_path('../../../sets', __dir__) : self.class.data_dir), "take_#{Time.now.strftime('%Y%m%d_%H%M%S')}.rb")
         FileUtils.mkdir_p(File.dirname(path))
@@ -360,10 +376,64 @@ module MB
         path
       end
 
+      # How often the console's take saves itself (#autosave!), in seconds.
+      AUTOSAVE_SECONDS = 60
+
+      # How many autosaved takes .data_dir keeps (the oldest go first).
+      AUTOSAVE_KEEP = 10
+
+      # Saves the take every +every+ seconds (and once more by #stop_autosave)
+      # to one file in .data_dir, autosave_<start time>.rb, so a crash, even
+      # a native one, leaves the take (maintainer, 2026-10-18: the `finish`
+      # crash lost the session's take).  Keeps the newest AUTOSAVE_KEEP
+      # autosaves.  Started by bin/sound.rb.  Returns the path.
+      def autosave!(every: AUTOSAVE_SECONDS, dir: self.class.data_dir)
+        stop_autosave(save: false)
+        FileUtils.mkdir_p(dir)
+        @autosave_path = File.join(dir, "autosave_#{Time.now.strftime('%Y%m%d_%H%M%S')}_#{Process.pid}.rb")
+        Dir[File.join(dir, 'autosave_*.rb')].sort_by { |f| File.mtime(f) rescue Time.at(0) }.reverse.drop(AUTOSAVE_KEEP - 1).each { |f| File.delete(f) rescue nil }
+        path = @autosave_path
+        @autosave = Thread.new do
+          Thread.current.name = 'take autosave'
+          loop do
+            sleep every
+            write_autosave(path)
+          end
+        end
+        path
+      end
+
+      # The file #autosave! writes, or nil.
+      attr_reader :autosave_path
+
+      # Stops #autosave! (writing the take once more unless +save: false+).
+      def stop_autosave(save: true)
+        t = @autosave
+        @autosave = nil
+        t&.kill
+        t&.join(1)
+        write_autosave(@autosave_path) if save && @autosave_path
+        nil
+      end
+
+      private def write_autosave(path)
+        tmp = "#{path}.part"
+        File.write(tmp, to_ruby)
+        File.chmod(0o755, tmp)
+        File.rename(tmp, path)
+      rescue StandardError => e
+        warn "Take autosave to #{path} failed: #{e.class}: #{e.message}" if MB::Sound.live?
+      end
+
       # Starts a new take (the console's take, if this is it).  Returns the
       # new take.
       def restart
         equal?(self.class.current) ? self.class.restart : self.class.new(session: @session)
+      end
+
+      # mb-sound's tmp/takes/ (`take.save :tmp`).
+      def self.tmp_dir
+        File.expand_path('../../../tmp/takes', __dir__)
       end
 
       # The user data directory for takes: $XDG_DATA_HOME/mb-sound/takes
@@ -387,6 +457,7 @@ module MB
       private
 
       def foreground?(code)
+        return false if code.to_s.match?(TRANSPORT_PLAY) # (`play` alone starts the transport: replays need it)
         FOREGROUND.include?(code.to_s[/\A\s*([a-z_]+[!?]?)/, 1])
       end
 

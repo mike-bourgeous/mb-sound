@@ -37,6 +37,21 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
     end
   end
 
+  describe 'the note-off mode key' do
+    # (maintainer, 2026-10-18: "tap, legato, tap, release, hold, tap ... tap
+    # should not appear twice": :auto showed as its resolved :tap)
+    it 'names :auto as auto (resolved) and cycles each mode once, without :release where key-ups never come' do
+      kb.activate if kb.respond_to?(:activate)
+      seen = [kb.off_mode_label]
+      4.times { press('`', 0.0); seen << kb.off_mode_label }
+      expect(seen).to eq(['auto (tap)', 'hold', 'tap', 'legato', 'auto (tap)'])
+      expect(kb.cycle_modes).to eq(%i[auto hold tap legato])
+      kb.instance_variable_set(:@releases, true)
+      expect(kb.off_mode_label).to eq('auto (release)')
+      expect(kb.cycle_modes).to eq(described_class::OFF_MODES)
+    end
+  end
+
   describe 'rows' do
     it 'plays jack-keyboard rows from C3 (z) and C4 (q), with octave, velocity, and channel keys' do
       kb.releases = true
@@ -334,7 +349,7 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       pane = MB::Sound::UI::Panes::Keyboard.new(kb)
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
-      expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  release')
+      expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  auto (release)') # (:auto names itself, ui-api-1)
       # Scaled (3 columns per white key at 60 wide, 5 rows): letters in the
       # keys, black keys' on their lowest row, C names above the white ones
       expect(lines[3]).to eq(' s  d     g  h  j     l2 ;3    5  6  7     9  0     =')
@@ -354,8 +369,9 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       %w[z x].each_with_index { |k, i| press(k, 1.0 + i); press(k, 1.0 + i, type: :release) }
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
-      expect(lines[5]).to eq('len n8  steps 2  0.25 whole notes')
-      expect(lines[6]).to eq('seq(C3, D3).n8')
+      expect(lines[5]).to eq('next note n8  steps 2  0.25 whole notes')
+      expect(lines[6]).to start_with('1=n1 2=n2 3=n4') # (the length legend, panel round 2 K17)
+      expect(lines.join("\n")).to include('seq(C3, D3).n8')
     end
 
     it 'fills a zoomed pane by its sections: taller keys, the chord held, a roll of recent notes, the armed tracks (ux-1 r3 item 31)' do

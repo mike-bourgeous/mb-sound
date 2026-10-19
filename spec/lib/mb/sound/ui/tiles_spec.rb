@@ -271,7 +271,8 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
     start(fps: 20, source: -> { ui_fake_snapshot(t: MB::U.clock_now, seq: (MB::U.clock_now * 100).to_i, scope_phase: MB::U.clock_now) })
     expect(@tiles.target_fps).to eq(20)
     sleep 2.1
-    expect(@tiles.fps).to be_between(10, 21) # what was written, at most the target
+    expect(@tiles.fps).to be_between(17, 21) # the painter's refreshes, as the status line counts them (ui-api-1)
+    expect(@tiles.written_fps).to be_between(5, 21) # what was written, at most the target
     @tiles.target_fps = 30
     expect { @tiles.target_fps = 0 }.to raise_error(ArgumentError, /1 to 240/)
     @term.write("\x1d")
@@ -287,7 +288,7 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
 
   it 'tips ui :wall on a big terminal, and not on a small one (ux-1 round 2)' do
     start(rows: 60, cols: 200)
-    expect(@term.wait_for('ui :wall shows every pane')).to eq(true), @term.lines.last
+    expect(@term.wait_for('ui :wall shows the performance panes')).to eq(true), @term.lines.last
     @tiles.stop
     @term.close
     start(rows: 30, cols: 100)

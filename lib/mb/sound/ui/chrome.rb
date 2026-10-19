@@ -163,7 +163,11 @@ module MB
           end
           return unless f.title
           t = " #{f.title.to_s.upcase} "
-          return if t.length + 2 > right
+          if t.length + 2 > right # (cut with an ellipsis, as title rows are, rather than dropped)
+            room = right - 4
+            return if room < 3
+            t = " #{f.title.to_s.upcase[0, room - 1]}… "
+          end
           grid.put_run(x0 + r.x + 1, y, t, Plot::Text::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, Plot::Text::Cells::BOLD)
         end
 

@@ -158,6 +158,7 @@ module MB
           @midi_seen = nil
           @overlay = nil
           @messages_restore = nil
+          @messages_from = nil # (the pane NAV m left, when it focused the layout's messages pane)
           @message_close = nil
           @show_fps = false
           @rate_notes_at = nil
@@ -174,7 +175,7 @@ module MB
             if axis == :rows
               @panes[name]&.min_height || (name == :repl ? REPL_MIN_ROWS : nil)
             else
-              name == :repl ? REPL_MIN_COLS : PANE_MIN_COLS
+              name == :repl ? Tiles.repl_min_cols(@cols) : PANE_MIN_COLS
             end
           }
           @router = Input::Router.new(self, nav_esc: nav_esc, console: repl != :none, nav_once: nav_once,
@@ -251,7 +252,7 @@ module MB
           keys if @start_keys && @tiler.layout.panes.include?(:keyboard)
           # :wall stays opt-in (maintainer, 2026-10-17); big terminals get a tip
           if @host && @layout_name != :wall && @rows >= 60 && @cols >= 200
-            flash('a big terminal: ui :wall shows every pane at once', :dim)
+            flash('a big terminal: ui :wall shows the performance panes at once (ui :session: the set)', :dim)
           end
           if thread
             @painter = Thread.new { paint_loop }
@@ -307,6 +308,7 @@ module MB
           return self unless @active && @host # (a screen without a console has nothing to hide to)
 
           exit_keys
+          @router.mode = :nav if @router.mode == :pane # (a pane's mode ends with the tiles; every pane has one since ui-api-1)
           @lock.synchronize do
             @active = false
             @hidden = true
@@ -652,6 +654,18 @@ module MB
           m
         end
 
+        # Copies the text pane +name+ shows (its body, trailing spaces cut)
+        # to the system clipboard (OSC 52); a pane's view mode `y`.  Returns
+        # the text.
+        def copy_pane(name = @tiler.focus)
+          r = @tiler.rects[name] or return flash("#{name}: not on screen", :warn) && nil
+          lines = @lock.synchronize { @grid.to_text(:none) }.split("\n", -1)
+          text = lines[r.y, r.h].to_a.map { |l| l[r.x, r.w].to_s.rstrip }.join("\n").sub(/\n+\z/, '')
+          @term&.copy(text)
+          flash("copied #{text.length} characters of #{name} (OSC 52)", :ok)
+          text
+        end
+
         # Copies the search match's line (or the REPL pane's visible text)
         # to the system clipboard with OSC 52.  Returns the text.
         def copy
@@ -720,9 +734,9 @@ module MB
         # stays).  Returns a Proc that closes the slot again, putting the
         # split tree back exactly as it was if nothing else changed it
         # (ux-1 r3 item 30), or nil if nothing changed.
-        def plot_pane(kind, height: 10)
+        def plot_pane(kind, height: 10, prefer: nil)
           temp = nil
-          tile { |t| temp = t.open_temporary(kind, height, keep: TEMPORARY_KEEP, fallback: :repl) }
+          tile { |t| temp = t.open_temporary(kind, height, keep: TEMPORARY_KEEP, fallback: :repl, prefer: prefer) }
           return nil unless temp
           -> { tile { |t| t.close_temporary(temp) } }
         end
@@ -734,6 +748,15 @@ module MB
         # it when the terminal is narrow (they keep PANE_MIN_COLS).
         REPL_MIN_COLS = 40
         PANE_MIN_COLS = 12
+
+        # The console's narrowest width wanted on a wider terminal: half the
+        # columns, up to this (panel round 2, N10: `ui :session` at 120
+        # columns left the REPL 40 columns, wrapping results mid-word).
+        REPL_WANT_COLS = 60
+
+        # The REPL's minimum width on a +cols+-column terminal: half of it,
+        # from REPL_MIN_COLS up to REPL_WANT_COLS.
+        def self.repl_min_cols(cols) = (cols.to_i / 2).clamp(REPL_MIN_COLS, REPL_WANT_COLS)
 
         # Panes temporary panes never take their rows from.
         TEMPORARY_KEEP = %i[repl keyboard].freeze
@@ -795,18 +818,34 @@ module MB
           self
         end
 
-        # Shows the messages pane (warnings and live errors while the UI is
-        # up; see UI::Messages) in a slot below the REPL, or takes it away
-        # again (+on+ false).  Marks the messages read.
-        def messages(on = !@tiler.layout.panes.include?(:messages))
+        # The messages pane (warnings and live errors while the UI is up;
+        # see UI::Messages), NAV m.  When the layout has one, a focus
+        # toggle: focus goes to it, and again back to where it was (never
+        # moving or recreating it; maintainer, 2026-10-18: "If it's already
+        # there it should be a focus toggle", "I.e. part of the layout").
+        # Otherwise a temporary pane below the REPL (beside the commands
+        # that caused the warnings; the largest other pane when the REPL
+        # lacks the rows), and again: away, the layout back exactly.  +on+
+        # true opens or keeps it (new warnings), false takes a temporary
+        # one away.  Marks the messages read.
+        def messages(on = :toggle)
           UI.messages.mark_read
-          if on
-            @messages_restore ||= plot_pane(:messages, height: 8)
+          in_layout = @messages_restore.nil? && @tiler.layout.panes.include?(:messages)
+          if in_layout
+            return self if on == true || on == false
+            if @tiler.focus == :messages
+              back = @messages_from && @tiler.layout.panes.include?(@messages_from) ? @messages_from : (@tiler.layout.panes.include?(:repl) ? :repl : nil)
+              tile { |t| t.focus!(back) } if back
+              @messages_from = nil
+            else
+              @messages_from = @tiler.focus
+              tile { |t| t.focus!(:messages) }
+            end
+          elsif on == true || (on == :toggle && @messages_restore.nil?)
+            @messages_restore ||= plot_pane(:messages, height: 8, prefer: :repl)
           elsif @messages_restore
             @messages_restore.call
             @messages_restore = nil
-          else
-            close(:messages) if @tiler.layout.panes.include?(:messages)
           end
           self
         end
@@ -1033,6 +1072,16 @@ module MB
           when :redraw then @full = true
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
             @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
+          when :pause # (a script screen's own pause, else the console's transport toggle: start or pause, a take line)
+            if @on_action
+              @on_action.call(a)
+            else
+              run_safely {
+                s = keys_session || Session.current
+                st = UI.run_line(TransportMethods.toggle_line(s), s)
+                flash(st.to_s, :dim) if st.is_a?(TransportMethods::Status)
+              }
+            end
           when :keys then keys
           when :enter then enter
           when :jump then jump(a.args[0])
@@ -1270,6 +1319,7 @@ module MB
 
         # A pane keymap's action for the focused pane.
         def pane_action(name, action, *args)
+          return copy_pane(name) if action == :copy_text
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
           r = pane.key_action(action, @states[name], *args)

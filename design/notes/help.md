@@ -4,7 +4,7 @@ Console help for `bin/sound.rb` (branch help-1, 2026-10-13), built on the resear
 
 ## The maintainer's decisions (2026-10-13)
 
-1. Take over the `help` name; Pry's help moves to `pry-help` (as `play`/`reset`/`hist` already are).
+1. Take over the `help` name; Pry's help moves to `pry-help` (as `play`/`reset`/`hist` already are).  Since ui-api-1 (2026-10-18; `finish` ran pry-byebug's step-out, emptied Pry's binding stack, and ended the console) `Help.rename_pry_collisions!` (in `install_pry!`) moves every Pry command a console command's name would reach, plus `Help::PRY_RENAMES` (help, play, reset, hist, and all of pry-byebug's: backtrace next step continue finish up down frame break), to `pry-<name>`; a guard in help_spec checks every console method against Pry's and pry-byebug's commands.
 2. Welcome screen: "A few more lines but yes": a short welcome plus one random runnable `help.tip`.
 3. Guard spec: a new public console command with no help topic entry or module exemption fails CI (plumbing modules exempted as a whole with a reason).
 4. Lessons: "Start light but then a full vimtutor-like tutorial is warranted": phase 1 is the light framework (`:set`, `:knobs`, `:flow`, `:record`); the tutorial is designed in `help_tutorial.md`.
