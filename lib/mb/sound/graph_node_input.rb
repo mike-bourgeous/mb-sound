@@ -33,6 +33,7 @@ module MB
         @nodes = nodes.freeze
 
         @output = Array.new(@channels)
+        @data = Array.new(@nodes.length) # (reused by #read)
 
         @handled_spies = {}
       end
@@ -148,15 +149,18 @@ module MB
 
         min_length = count
         max_length = count
-        data = @nodes.map { |n|
-          n.sample(count).tap { |d|
-            if d
-              len = d.length
-              min_length = len if len < min_length
-              max_length = len if len > max_length
-            end
-          }
-        }
+        data = @data
+        i = 0
+        while i < @nodes.length
+          d = @nodes[i].sample(count)
+          if d
+            len = d.length
+            min_length = len if len < min_length
+            max_length = len if len > max_length
+          end
+          data[i] = d
+          i += 1
+        end
 
         return nil if data.all? { |d| d.nil? || d.empty? }
 
@@ -166,8 +170,10 @@ module MB
           }
         end
 
-        for idx in 0...@channels
+        idx = 0
+        while idx < @channels
           @output[idx] = data[idx % data.length]
+          idx += 1
         end
 
         call_spies(@output, :post)

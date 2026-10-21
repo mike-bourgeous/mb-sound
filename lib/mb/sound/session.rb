@@ -1044,7 +1044,17 @@ module MB
         @transport.advance(to - from) if moving
         end_clock_span(count, to - from, moving)
         # Pre-chain master gain (the default; see #master_gain_post?)
-        mix = mix.map { |c| c * @master_gain } if !@master_gain_post && @master_gain != 1
+        # (in place on this span's own mix buffers when the kernel takes
+        # them: the same float products as Numo's c * gain)
+        if !@master_gain_post && @master_gain != 1
+          g = @master_gain
+          i = 0
+          while i < mix.length
+            c = mix[i]
+            mix[i] = c * g unless FastArithmetic.scale(c, g)
+            i += 1
+          end
+        end
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
         end_cue_span(mix, count) # the phones mix (see Cue)

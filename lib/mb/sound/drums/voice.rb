@@ -100,6 +100,7 @@ module MB
         def initialize(graph, name:, machine:, inputs:, notes: [], knobs: {}, skip_idle: true, sample_rate: 48000, built: nil)
           @graph = graph.get_sampler
           @name = name
+          @bufs = []
           @machine = machine
           @inputs = inputs.map { |src, tap| [src.get_sampler, tap] }
           @notes = Array(notes).freeze
@@ -127,7 +128,10 @@ module MB
           # this one has been built
           setup_skipping(@skip_idle) if @skippable.nil?
 
-          bufs = @inputs.map { |src, tap|
+          # (one reused Array of the inputs' buffers)
+          bufs = @bufs
+          bufs.clear
+          @inputs.each { |src, tap|
             b = src.sample(count)
             b = zeros(count) if b.nil? || b.empty?
             # A source that ends inside this buffer (a one-shot clip whose
@@ -136,7 +140,7 @@ module MB
             # (fixes-14: drums_808's crash at the song's end)
             b = padded(b, count) if b.length < count
             tap.buffer = b
-            b
+            bufs << b
           }
 
           if @skippable
