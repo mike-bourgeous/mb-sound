@@ -238,6 +238,11 @@ module MB
           @phases = Loudness::TruePeak::MATRICES[:annex2]
           @history_length = @phases.shape[1] - 1
           @history = Array.new(channels) { Numo::DFloat.zeros(@history_length) }
+          # The native path's buffers (see .native): history plus the new
+          # samples, the widened samples, and the kernel's results
+          @ext = Array.new(channels)
+          @x = Array.new(channels)
+          @result = [0.0, 0.0, 0.0]
           @block_length = (@sample_rate * 0.1).round
           @block_energy = 0.0
           @block_frames = 0
@@ -251,26 +256,37 @@ module MB
           n = mix[0].length
           return if n == 0
 
-          @channels.times do |c|
+          c = 0
+          while c < @channels
             buf = mix[c] || mix[0]
-            x = Numo::DFloat.cast(buf)
-            x = x.dup if x.equal?(buf)
+            if MasterMeter.native && buf.is_a?(Numo::SFloat) && buf.contiguous?
+              # Allocation-free (FastLoudness.meter_block, the same values)
+              x = native_block(c, buf, n)
+              peak, sumsq, tp = @result
+            else
+              x = Numo::DFloat.cast(buf)
+              x = x.dup if x.equal?(buf)
 
-            peak = x.abs.max
+              peak = x.abs.max
+              sumsq = (x * x).sum
+
+              ext = history_of(c).concatenate(x)
+              tp = FastLoudness.true_peak(ext, n, @phases)
+              @history[c] = ext[-@history_length..].dup
+            end
             @peak[c] = peak if peak > @peak[c]
-            @sumsq[c] += (x * x).sum
-
-            ext = @history[c].concatenate(x)
-            tp = FastLoudness.true_peak(ext, n, @phases)
+            @sumsq[c] += sumsq
             @true_peak = tp if tp > @true_peak
-            @history[c] = ext[-@history_length..].dup
 
-            next if @weights[c] == 0
-            shelf, highpass = @filters[c]
-            y = shelf.process(x).inplace!
-            highpass.process(y)
-            y.not_inplace!
-            @block_energy += (y * y).sum * @weights[c]
+            if @weights[c] != 0
+              shelf, highpass = @filters[c]
+              x.inplace!
+              shelf.process(x)
+              highpass.process(x)
+              x.not_inplace!
+              @block_energy += FastLoudness.sum_squares(x) * @weights[c]
+            end
+            c += 1
           end
           @count += n
 
@@ -304,7 +320,38 @@ module MB
           levels
         end
 
+        class << self
+          # False to use the Numo path (the exact mirror of
+          # FastLoudness.meter_block) instead of the kernel.
+          attr_accessor :native
+        end
+        self.native = true
+
         private
+
+        # FastLoudness.meter_block for channel +c+ into its reused buffers
+        # (results in @result); returns the widened samples.
+        def native_block(c, buf, n)
+          ext = @ext[c]
+          if ext.nil? || ext.length != @history_length + n
+            old = ext ? ext[0...@history_length] : @history[c]
+            ext = @ext[c] = Numo::DFloat.zeros(@history_length + n)
+            ext[0...@history_length] = old
+            @x[c] = Numo::DFloat.zeros(n)
+          end
+          FastLoudness.meter_block(buf, ext, @x[c], @phases, @result)
+          @x[c]
+        end
+
+        # The Numo path's history of channel +c+ (from the native path's
+        # buffer if that ran last).
+        def history_of(c)
+          if (ext = @ext[c])
+            @history[c] = ext[0...@history_length].dup
+            @ext[c] = nil
+          end
+          @history[c]
+        end
 
         def reset_interval
           @peak = Array.new(@channels, 0.0)
@@ -335,10 +382,16 @@ module MB
           end
 
           first = MB::M.min(n, @length - @pos)
-          @rings.each_with_index do |r, c|
+          c = 0
+          while c < @rings.length
+            r = @rings[c]
             m = mix[c] || mix[0]
-            r[@pos...(@pos + first)] = m[0...first]
-            r[0...(n - first)] = m[first...n] if first < n
+            # (FastArithmetic.circular_write: the same copy without views)
+            unless MB::Sound::FastArithmetic.circular_write(r, m, @pos)
+              r[@pos...(@pos + first)] = m[0...first]
+              r[0...(n - first)] = m[first...n] if first < n
+            end
+            c += 1
           end
           @pos = (@pos + n) % @length
         end
