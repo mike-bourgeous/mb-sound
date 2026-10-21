@@ -403,6 +403,72 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       expect(edges).to eq([[1/8r, :off, 60], [1/8r, :on, 64], [1/4r, :off, 64]])
     end
 
+    # The edges code before alloc-1's cycle tables (computing every time),
+    # as the reference for the allocation-free version.
+    def reference_edges(clip, from, to, early)
+      clip.instance_exec do
+        next [] if @length <= 0 && @events.empty?
+
+        if @loop
+          first = MB::M.max((from / @length).floor - @lookback, 0)
+          last = (to / @length).floor + @lookahead
+        else
+          first = last = 0
+        end
+
+        out = []
+        (first..last).each do |cycle|
+          offset = cycle * @length
+          events_for(cycle).each_with_index do |e, idx|
+            next unless plays?(e, cycle, idx)
+
+            on = offset + e.start
+            off = on + e.length
+            if on < offset
+              if cycle == 0
+                next if off <= 0
+                on = 0r
+              elsif early && offset >= from && on < from && off > from
+                on = from
+              end
+            end
+            on_in = on >= from && on < to
+            off_in = off >= from && off < to
+            next unless on_in || off_in
+            out << [on, :on, e, cycle] if on_in
+            out << [off, :off, e, cycle] if off_in
+          end
+        end
+
+        out.sort_by { |time, type, _e, _c| [time, type == :off ? 0 : 1] }
+      end
+    end
+
+    it 'gives the same edges as computing every cycle anew (alloc-1 tables)' do
+      long = MB::Sound::Sequence::Clip.new([MB::Sound::Sequence::Event.new(start: 1/8r, length: 3/4r, value: 60, velocity: 1.0)], length: 1/4r, loop: true)
+      clips = [
+        (c4.n8 | e4.n8 | MB::Sound::Rest.n4).loop,
+        (c4.n8 | e4.n8).humanize(1/32r, vary: true, seed: 3).loop,
+        MB::Sound.grid(16, 'x?x?..x?x...?x.x').loop,
+        long,
+        c4.n8 | e4.n4,
+      ]
+      rng = Random.new(5)
+      clips.each do |c|
+        t = 0r
+        60.times do
+          step = Rational(rng.rand(1..7), [16, 48, 128].sample(random: rng))
+          early = rng.rand < 0.2
+          expect(c.edges(t, t + step, early: early)).to eq(reference_edges(c, t, t + step, early))
+          t += step
+        end
+        # Jumps backward and forward (seeks)
+        [3/2r, 1/7r, 5r, 0r].each do |j|
+          expect(c.edges(j, j + 1/3r, early: true)).to eq(reference_edges(c, j, j + 1/3r, true))
+        end
+      end
+    end
+
     it 'repeats looping clips' do
       c = (c4.n8 | e4.n8).loop
       ons = c.edges(0, 1).select { |_, type| type == :on }.map { |t, _, e, cycle| [t, e.value, cycle] }
