@@ -801,6 +801,12 @@ module MB
         self
       end
 
+      # The retrigger mode (see #retrigger), for the library's checks while
+      # sampling (not recorded by graph recipes, unlike #retrigger).
+      def retrigger_mode
+        @retrigger
+      end
+
       # Sets the retrigger mode (:restart, :add, or :zero; see the class
       # description).
       def retrigger=(mode)

@@ -40,14 +40,14 @@ module MB
               reason: 'readers, stream plumbing, and checks the Synth calls while sampling',
               names: %i[
                 control_specs control_stream controls envelopes level level_check quiet_check note_stream stream
-                frequency_for to_midi_stream register keys
+                frequency_for to_midi_stream register keys grid_end_frame
               ],
             },
             'MB::Sound::Envelope' => {
               reason: 'readers, state, and plumbing (the setters that chain are recorded)',
               names: %i[
                 at_rate attack attack_time choke decay decay_time gate hold kernel_config level level_of lift loop_node
-                names octaves preset_name release release_node release_time reset retrigger_peak sample_ruby segment_names
+                names octaves preset_name release release_node release_time reset retrigger_mode retrigger_peak sample_ruby segment_names
                 segments stage sustain sustain_level time trigger velocity velocity_high velocity_low velocity_peak
                 velocity_scale
               ],
@@ -62,7 +62,7 @@ module MB
             },
             'MB::Sound::Sequence::Clip' => {
               reason: 'event readers and lineage (clips print through their recipes)',
-              names: %i[each edges event_at events events_for length lineage rederive source stream value variations seed values value_at],
+              names: %i[each edges event_at event_before events events_for length lineage rederive source stream value variations seed values value_at],
             },
             'MB::Sound::Sequence::Seq' => {
               reason: 'readers',
