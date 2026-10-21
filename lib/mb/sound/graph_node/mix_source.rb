@@ -65,6 +65,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @outputs = Array.new(channels) { |i| Channel.new(self, i) }.freeze
           @data = Array.new(channels) { Numo::SFloat[] }
+          @copies = Array.new(channels) # (reused by #channel_data)
         end
 
         # A MixSource has no upstream nodes.
@@ -80,13 +81,17 @@ module MB
         end
 
         # For internal use by Channel#sample.  Returns a copy of one channel of
-        # the latest buffer.
+        # the latest buffer (in a buffer of its own, reused every span).
         def channel_data(index, count)
           d = @data[index]
           unless count == d.length
             raise ArgumentError, "A master effects chain asked for #{count} samples, but the mix buffer has #{d.length}; nodes that change the sample count (e.g. resample or oversample) can't be used here"
           end
-          d.dup
+          # A copy (nodes may work on it in place) in a buffer reused
+          # every span, like any node's #sample buffer
+          c = @copies[index]
+          return c if c && c.class == d.class && c.length == d.length && MB::Sound::FastArithmetic.copy(c, d)
+          @copies[index] = d.dup
         end
 
         # Raises an error unless +rate+ matches this mix's sample rate.
