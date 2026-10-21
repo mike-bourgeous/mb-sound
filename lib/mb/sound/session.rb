@@ -1498,6 +1498,8 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
+            # (FastArithmetic.add_at: the same float steps without views)
+            next if FastArithmetic.add_at(m, offset, d, len, ramp)
             d = d[0...len]
             d = d * ramp[0...len] if ramp
             m[offset...(offset + len)] = m[offset...(offset + len)] + d

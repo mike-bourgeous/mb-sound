@@ -496,7 +496,7 @@ module MB
               @uniform = false
             end
 
-            buf[from...to] = value
+            buf[from...to] = value unless FastArithmetic.fill_range(buf, from, to, value)
           end
 
           def steady_buffer(count)
