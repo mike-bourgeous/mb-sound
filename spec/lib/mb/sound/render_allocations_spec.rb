@@ -67,6 +67,6 @@ RSpec.describe('render-path allocations') do
     per_buffer = (GC.stat(:total_allocated_objects) - a0) / 750.0
 
     puts "\n\e[1mrender allocations: #{per_buffer.round(1)} objects per 128-frame buffer\e[0m" if ENV['ALLOC_REPORT']
-    expect(per_buffer).to be < 600
+    expect(per_buffer).to be < 400 # (263 at alloc-1; 438 before)
   end
 end
