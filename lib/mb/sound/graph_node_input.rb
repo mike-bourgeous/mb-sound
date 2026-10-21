@@ -94,7 +94,7 @@ module MB
       # TODO: combine with GraphNode#spy somehow
       def spy(handle: nil, interval: false, phase: :post, &block)
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1)]
+        @handled_spies[handle] << [block, interval, phase, MB::U.clock_now - (interval || 1)]
 
         self
       end
@@ -102,11 +102,11 @@ module MB
       # Used by #spy.
       # TODO: combine with GraphNode#call_spies somehow
       private def call_spies(data, phase)
-        now = Time.now
+        return if @handled_spies.empty?
+
+        now = MB::U.clock_now # (a Float: no Time per read)
 
         @handled_spies.each do |origin, spies|
-          info = origin ? " from #{origin}" : ''
-
           spies.each_with_index do |spy_info, idx|
             s, interval, spy_phase, last_time = spy_info
             next unless spy_phase == phase
@@ -117,6 +117,7 @@ module MB
                 spy_info[-1] = now
               end
             rescue => e
+              info = origin ? " from #{origin}" : ''
               warn "GraphNodeInput spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
             end
           end

@@ -282,9 +282,22 @@ RSpec.describe(MB::Sound::FastArithmetic) do
           expect(out.to_binary).to eq(expected.not_inplace!.to_binary)
         end
       end
+
+      it "raise #{cls} buffers to Float powers exactly like Numo's x ** e" do
+        a = make_input(cls, 129, 15).abs * 10
+        [a, a - 5, cls.new(129).fill(0)].each do |x|
+          [2.0, 0.37, -1.5, 1.0 / 3, 0.0, 1e-30].each do |e|
+            expected = x ** e
+            out = x.dup
+            expect(MB::Sound::FastArithmetic.power(out, e)).to equal(out)
+            expect(expected.class).to eq(cls)
+            expect(out.to_binary).to eq(expected.to_binary), "exponent #{e}"
+          end
+        end
+      end
     end
 
-    it 'return nil for complex buffers, promotions, scalar exponents, or frozen outputs' do
+    it 'return nil for complex buffers, promotions, Integer and Rational exponents, or frozen outputs' do
       out = Numo::SFloat[1, 2]
       expect(MB::Sound::FastArithmetic.divide(Numo::SComplex[1, 2], 2)).to be_nil
       expect(MB::Sound::FastArithmetic.divide(out, Numo::DFloat[1, 2])).to be_nil
@@ -292,6 +305,9 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       expect(MB::Sound::FastArithmetic.divide(out, 2i)).to be_nil
       expect(MB::Sound::FastArithmetic.divide(out.dup.freeze, 2)).to be_nil
       expect(MB::Sound::FastArithmetic.power(out, 2)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(out, 1/2r)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(Numo::SComplex[1, 2], 2.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(out.dup.freeze, 2.0)).to be_nil
       expect(MB::Sound::FastArithmetic.power(out, Numo::SFloat[1, 2, 3])).to be_nil
       expect(out.to_a).to eq([1, 2])
     end

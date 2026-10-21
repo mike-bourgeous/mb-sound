@@ -633,8 +633,9 @@ static VALUE ruby_divide(VALUE self, VALUE out, VALUE divisor)
  * Raises the real buffer +out+ in place to the powers in +exponent+ (a
  * contiguous NArray of the same type and length), as Numo's
  * out.inplace ** exponent does (numo's m_pow: C's double pow, rounded to
- * the buffer type).  Scalar exponents (Numo uses repeated multiplication
- * for Integers) and anything else return nil without writing.
+ * the buffer type), or to a Float exponent (cast to the buffer type, as
+ * Numo's out ** exponent does).  Integer exponents (Numo uses repeated
+ * multiplication) and anything else return nil without writing.
  */
 static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 {
@@ -644,6 +645,22 @@ static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 	}
 
 	size_t length = RNARRAY_SIZE(out);
+
+	// A Float exponent, cast to the buffer type as Numo casts it (Integer
+	// exponents take Numo's repeated multiplication, so they stay in Numo)
+	if (RB_FLOAT_TYPE_P(exponent)) {
+		char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+		double e = RFLOAT_VALUE(exponent);
+		if (ot == MB_ARITH_SF) {
+			float *o = (float *)outp;
+			float ef = (float)e;
+			for (size_t i = 0; i < length; i++) o[i] = pow(o[i], ef);
+		} else {
+			double *o = (double *)outp;
+			for (size_t i = 0; i < length; i++) o[i] = pow(o[i], e);
+		}
+		return out;
+	}
 
 	if (arith_type(exponent) != ot || !shape_ok(exponent, length)) {
 		return Qnil;
