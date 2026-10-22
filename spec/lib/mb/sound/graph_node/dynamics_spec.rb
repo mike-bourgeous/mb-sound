@@ -523,6 +523,26 @@ RSpec.describe(MB::Sound::GraphNode::Dynamics, :aggregate_failures) do
       expect(db(((l - r) / 2)[24000..].abs.max)).to be_within(0.1).of(0)
     end
 
+    it 'passes a mix whose lows are already mono sample for sample (no crossover phase on the mid; N16)' do
+      mono = ->() { 55.hz.sine * 0.6 + 110.hz.saw * 0.3 + 3000.hz.triangle * 0.1 }
+      [2, 4, 8].each do |order|
+        l, r = render(MB::Sound.stereo(mono.(), mono.()).mono_below(120, order: order), 9600)
+        ref = render(mono.(), 9600)[0]
+        expect(l).to eq(ref)
+        expect(r).to eq(ref)
+      end
+    end
+
+    it 'cuts the side by the crossover order' do
+      side = ->(order) {
+        l, r = render(MB::Sound.stereo(40.hz.sine, 40.hz.sine.with_phase(0.5)).mono_below(120, order: order), 48000)
+        db(((l - r) / 2)[24000..].abs.max)
+      }
+      expect(side.(4)).to be < side.(2) - 15
+      expect(side.(8)).to be < side.(4) - 25
+      expect { MB::Sound.stereo(1.constant, 1.constant).mono_below(120, order: 3) }.to raise_error(ArgumentError, /order/)
+    end
+
     it 'returns one-channel nodes unchanged and prints itself' do
       s = 100.hz.sine
       expect(s.mono_below(120)).to equal(s)

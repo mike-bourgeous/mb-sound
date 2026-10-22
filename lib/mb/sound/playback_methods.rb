@@ -942,7 +942,7 @@ module MB
         Mastering::Targeting.last = result
 
         Internal.restore_rng(rng.dup, seed)
-        second = { override: override, trim: result.trim.to_f, check: capture, defer_report: true, pass: 'pass 2/2, mastered' }
+        second = { override: override, trim: result.trims || result.trim.to_f, check: capture, defer_report: true, pass: 'pass 2/2, mastered' }
         # The second pass replays the first exactly: what the song's blocks
         # print (scheduled-command logs) was printed by the first already
         seconds = Internal.without_stdout {

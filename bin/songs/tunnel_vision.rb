@@ -72,6 +72,7 @@
 #     bin/songs/tunnel_vision.rb --dnb-master -D 8 -C -1 tv.flac   # gentler
 #     bin/songs/tunnel_vision.rb --lufs -8.5 tv.flac    # the quieter bars at -8.5 (a louder breakdown, harder drops)
 #     bin/songs/tunnel_vision.rb --master club tv.flac  # the club master (two limiters) on the loudest 16 bars
+#     bin/songs/tunnel_vision.rb --measure sections --lufs -6.5 -E 0.25 tv.flac  # a trim per section: drops at -6.5, the rest at 1/4 of their mix distance under them
 #     bin/songs/tunnel_vision.rb --no-buses tv.flac   # Kez's original ambience (no buses)
 #
 # Or in bin/sound.rb:
@@ -106,6 +107,9 @@ module MB::Sound
   TV_MASTER = :hot
   TV_LUFS = -9.0
   TV_MEASURE = :bars
+  # With --measure sections: the share of the mix's distance between
+  # sections the master keeps (Mastering::MEASURES)
+  TV_ENERGY = 0.4
 
   # The :hall bus's return gain in dB (buses): its reverb is wet only and
   # energy-normalized (about 20 dB under its input), so the return needs
@@ -222,7 +226,7 @@ module MB::Sound
   # as +measure+ (Mastering::MEASURES: :bars, the default, on the quieter
   # quarter of the bars; :loudest on the loudest 16 bars; :integrated on
   # the whole song).  +air+ is the club preset's air stage.
-  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, master: TV_MASTER, lufs: TV_LUFS, air: :static, measure: TV_MEASURE)
+  def self.tunnel_vision(drive: TV_DRIVE, ceiling: TV_CEILING, buses: true, hall: TV_HALL, lift: TV_LIFT, master: TV_MASTER, lufs: TV_LUFS, air: :static, measure: TV_MEASURE, energy: TV_ENERGY)
     c = tv_clips
     k = tv_kits
     bpm 174
@@ -238,6 +242,7 @@ module MB::Sound
     master_gain 1
     if master
       options = { lufs: lufs, measure: measure }
+      options[:energy] = energy if measure == :sections
       options[:air] = air if master == :club
       master(master, **options) { |mix| mix.filter(:highpass, cutoff: knob(:air), quality: 0.7) }
     else
@@ -314,12 +319,13 @@ module MB::Sound
       hall: [TV_HALL, Float, '-H', 'Return gain of the :hall bus in dB (with buses)', -20.0..40.0],
       lift: [TV_LIFT, Float, '-U', 'Upward lift of the hall tail in rests, 0..1, the lifted return 6 dB down (the :lift knob; with buses; 0 before patches-5)', 0.0..1.0],
       buses: [true, 'Shared reverb and echo buses, ducks by the drums\' kick (--no-buses: reverbs in each patch, a ghost kick)'],
-      measure: [TV_MEASURE, Symbol, 'What the target measures: bars (the quieter quarter of the bars), loudest (the loudest 16 bars), or integrated (the whole song)', %i[bars loudest integrated]],
+      measure: [TV_MEASURE, Symbol, 'What the target measures: bars (the quieter quarter of the bars), loudest (the loudest 16 bars), integrated (the whole song), or sections (a trim per section: the loudest at the target, the others at --energy of their distance under it in the mix)', %i[bars loudest integrated sections]],
+      energy: [TV_ENERGY, Float, '-E', 'With --measure sections: the share of the mix\'s section-to-section loudness the master keeps (1 keeps it, 0 brings every section to the target)', 0.0..1.0],
       air: [:static, Symbol, "The club master's air stage before its limiters", %i[static dynamic band none]],
       dnb_master: [false, "Kez's master at a fixed drive instead of a measured one (-D, -C)"],
     ) { |p|
       tunnel_vision(drive: p.drive, ceiling: p.ceiling, buses: p.buses, hall: p.hall, lift: p.lift, master: p.dnb_master ? nil : TV_MASTER,
-        air: p.air == :none ? false : p.air, measure: p.measure)
+        air: p.air == :none ? false : p.air, measure: p.measure, energy: p.energy)
       tunnel_vision_form
     }
   end

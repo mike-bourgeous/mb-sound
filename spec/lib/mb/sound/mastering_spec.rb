@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       vinyl = described_class.preset(:vinyl)
       expect(vinyl.limiter).to eq(false)
       expect(vinyl.ceiling.db_value).to eq(-1)
-      expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
+      expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
     end
 
     it 'takes options that change the chain' do
@@ -103,6 +103,27 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       p = described_class.preset(:club, lufs: -9, ceiling: -1.db, ride: { up: 5 })
       expect(p.call_ruby).to eq(':club, lufs: -9, ceiling: -1.db, ride: { up: 5 }')
       expect(MB::Sound.module_eval(p.to_ruby)).to eq(p)
+    end
+
+    it 'refuses options a preset would ignore (N14), and measure options without their measure' do
+      expect { described_class.preset(:streaming, clip: true) }.to raise_error(ArgumentError, /master :streaming would ignore clip: \(an option of :club and :vinyl\)/)
+      expect { described_class.preset(:vinyl, air: :static) }.to raise_error(ArgumentError, /would ignore air: \(an option of :club\)/)
+      expect { described_class.preset(:hot, de_ess: 7000) }.to raise_error(ArgumentError, /would ignore de_ess:/)
+      expect { described_class.preset(:club, percentile: 0.3) }.to raise_error(ArgumentError, /percentile: goes with measure: :bars/)
+      expect { described_class.preset(:hot, loudest_bars: 8) }.to raise_error(ArgumentError, /loudest_bars: goes with measure: :loudest/)
+      expect { described_class.preset(:club, energy: 0.5) }.to raise_error(ArgumentError, /energy: goes with measure: :sections/)
+      expect { described_class.preset(:club, measure: :sections, energy: 2) }.to raise_error(ArgumentError, /energy: is the share/)
+      expect(described_class.preset(:club, measure: :sections, energy: 0.4)).to have_attributes(energy: 0.4, measure_text: 'each section, energy 0.4')
+    end
+
+    it "gives :vinyl a soft clipper after the trim by default, and none with clip: false (M9, N12)" do
+      expect(described_class.preset(:vinyl).steps).to eq(described_class.preset(:vinyl, clip: true).steps)
+      expect(described_class.preset(:vinyl, clip: false).steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
+      v = described_class.preset(:vinyl, clip: true)
+      expect(v.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
+      limit = (-1 - described_class::VINYL_CLIP_MARGIN).db.to_f
+      expect(v.steps.last[1]).to eq([limit * 0.5, limit])
+      expect(v.limiter).to eq(false)
     end
 
     it 'explains unknown presets and options' do
@@ -287,6 +308,29 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       r = MB::Sound.loudness(a)
       expect(r.true_peak).to be <= -1 + 0.05
       expect(described_class::Targeting.last.held).to eq(r.integrated < -14 - 0.05)
+    end
+
+    it "reaches a peaky mix's target on :vinyl with clip: true, and reports the side before the chain" do
+      # A kick-led mix held by the -1 dBTP ceiling short of -8 LUFS
+      kicks = ->(clip) {
+        -> {
+          MB::Sound.master :vinyl, lufs: -8, clip: clip
+          MB::Sound.bg :drums, MB::Sound.tr808(MB::Sound.grid(16, kick: 'x...x...x...x...').loop)
+          MB::Sound.bg :keys, MB::Sound.stereo(220.hz.triangle.at(0.02), 330.hz.triangle.at(0.02))
+        }
+      }
+      a = tmp_path('vinyl_plain.flac')
+      render_song(a, &kicks.(false))
+      plain = MB::Sound.loudness(a)
+      expect(described_class::Targeting.last.held).to eq(true)
+      b = tmp_path('vinyl_clip.flac')
+      render_song(b, &kicks.(true))
+      r = MB::Sound.loudness(b)
+      result = described_class::Targeting.last
+      expect(r.true_peak).to be <= -1 + 0.05
+      expect(r.integrated).to be_within(0.05).of(-8)
+      expect(plain.integrated).to be < -8 - 2
+      expect(result.to_s).to match(/side below 150 Hz (-?\d+\.\d|-inf) dB in the mix, (-?\d+\.\d|-inf) dB mastered re mid/)
     end
 
     it 'stays exact with a block before the preset that reads a moving knob' do

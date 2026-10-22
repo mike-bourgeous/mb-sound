@@ -374,19 +374,35 @@ module MB
         end
         alias multiband bands
 
-        # Makes everything below +frequency+ (Hz or a Pitch) mono: a
-        # Linkwitz-Riley crossover (+order+ as for #bands) splits each
-        # channel, the low bands are averaged into one shared channel, and
-        # the highs stay as they were (untouched, the sum is the input
-        # through an allpass).  A mastering option for club systems and
-        # vinyl, not something headphone or ambient mixes usually want.
-        # One-channel nodes come back unchanged.
+        # Makes everything below +frequency+ (Hz or a Pitch) mono.  A stereo
+        # pair keeps its mid (L + R) / 2 untouched and highpasses its side
+        # (L - R) / 2 with the high half of a Linkwitz-Riley crossover
+        # (+order+ 2, 4, 8 as for #bands), so a mix whose lows are already
+        # mono passes sample for sample (decks-1, 2026-10-22: the crossover
+        # this used to split every channel with put the whole mix through
+        # its allpass, which turned kick + sub into taller peaks; Nev's N16
+        # measured 2.3 LU lost at a -1 dBTP ceiling on a mix with its side
+        # 77 dB under the mid).  Three or more channels still split each
+        # channel with #bands and average the low bands.  A mastering option
+        # for club systems and vinyl, not something headphone or ambient
+        # mixes usually want.  One-channel nodes come back unchanged.
         #
         # Example (bin/sound.rb):
         #     master { |mix| mix.mono_below(120).limit(ceiling: -1.db) }
         def mono_below(frequency, order: 4)
-          return self if outputs.length < 2
-          bands(frequency, order: order) { |lo, hi| [lo.mono, hi] }
+          chans = outputs
+          return self if chans.length < 2
+          return bands(frequency, order: order) { |lo, hi| [lo.mono, hi] } if chans.length > 2
+
+          dampings = Dynamics::Crossover::ORDERS.fetch(order) {
+            raise ArgumentError, "order: is #{Dynamics::Crossover::ORDERS.keys.join(', ')} (got #{order.inspect})"
+          }
+          # LR2 is one critically damped section (a first-order Butterworth
+          # squared), LR4 and LR8 each Butterworth section twice
+          dampings = order == 2 ? dampings : dampings + dampings
+          mid, side = Channels.new(chans).mid_side.outputs
+          dampings.each { |k| side = side.filter(:highpass, cutoff: frequency, quality: 1.0 / k) }
+          Channels.new([mid, side]).from_mid_side
         end
 
         # Presets for #squeeze: crossovers (Hz), depth (the parallel mix),

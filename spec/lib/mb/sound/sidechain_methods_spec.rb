@@ -45,16 +45,21 @@ RSpec.describe(MB::Sound::SidechainMethods) do
     end
 
     it 'duck a part on the exact note-on samples, the same at any buffer size' do
-      results = [[800], [7, 128, 333], [1], [367, 368]].map { |sizes|
+      # One-sample buffers only around the edges they prove (frames 0 and
+      # 24000: the duck from frame 0, the first fall; 96000 of them took
+      # about 6 s); the other sizes over the whole bar
+      ones = Array.new(32, 1)
+      edges = ones + [800] * 29 + [752] + ones # (frames 0..31, 23984..24015)
+      results = [[[800], 96000], [[7, 128, 333], 96000], [edges, edges.sum], [[367, 368], 96000]].map { |sizes, frames|
         s = new_session
-        data = run(96000, sizes, s: s) { |ss|
+        data = run(frames, sizes, s: s) { |ss|
           MB::Sound.sidechain(:pump, line, on: :now)
           ss.add(1.constant.duck(:pump, amount: -12.db), name: :pad, on: :now)
         }
         s.close
         data
       }
-      results.each { |d| expect(d).to eq(results[0]) }
+      results.each { |d| expect(d).to eq(results[0][0...d.length]) }
 
       data = results[0]
       expect(data.min).to be_within(1e-4).of(-12.db.to_f)
@@ -289,16 +294,22 @@ RSpec.describe(MB::Sound::SidechainMethods) do
 
     it 'key duck(:drums, only: :trigger) with a 30 ms pulse per hit on the exact sample at any buffer size' do
       src = machine.grid(16, kick: 'x...', trigger: '..x.').loop
-      results = [[800], [7, 128, 333], [1]].map { |sizes|
+      # One-sample buffers only around the first hit's edges (its start at
+      # frame 12000 and the 30 ms pulse's end; 48000 of them took about 6 s
+      # on the runner)
+      ones = Array.new(32, 1)
+      edges = [800] * 14 + [784] + ones + [800, 608] + ones # (frames 11984..12015, 13424..13455)
+      results = [[[800], 48000], [[7, 128, 333], 48000], [edges, edges.sum]].map { |sizes, frames|
         s = new_session
-        d = run(48000, sizes, s: s) { |ss|
+        d = run(frames, sizes, s: s) { |ss|
           ss.add(machine.kit(src, seed: 5), name: :drums, on: :now)
           ss.add(MB::Sound.bus(:drums, only: :trigger) * 1000, name: :probe, on: :now)
         }
         s.close
         d
       }
-      results.each { |d| expect(d).to eq(results[0]) }
+      expect(results[2][12000..].abs.max).to be > 0 # (the pulse is in the one-sample run)
+      results.each { |d| expect(d).to eq(results[0][0...d.length]) }
     end
 
     it 'without a block is a linear trigger pulse at the hit velocity' do

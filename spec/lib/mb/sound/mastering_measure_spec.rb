@@ -143,5 +143,57 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       MB::Sound.bpm 120
     end
 
+    it 'gives each section pass its own trim with measure: :sections, keeping energy x the mix distance, the same at any buffer size' do
+      song = ->(energy) {
+        -> {
+          MB::Sound.bpm 480
+          MB::Sound.master :hot, lufs: -12, measure: :sections, energy: energy
+          c = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::B3).n8.loop
+          MB::Sound.track(:keys) { |clip| clip.synth(voices: 4) { |v| v.hz.saw.rnd * v.env }.at(0.1) }
+          MB::Sound.track(:drums) { |k| MB::Sound.tr808(k) }
+          MB::Sound.scene :quiet, keys: c
+          MB::Sound.scene :loud, keys: c, drums: MB::Sound.grid(16, kick: 'x.x.x.x.x.x.x.x.', snare: '....x.......x...').loop
+          MB::Sound.flow { quiet 8; loud 8 }
+        }
+      }
+      render = ->(path, energy, size) {
+        MB::Sound.seed(5)
+        expect {
+          MB::Sound.render(path, bars: 16, overwrite: true, buffer_size: size, &song.(energy))
+        }.to output(/mastering :hot: pass.*\n.*loudest section -12\.0\d LUFS, target -12\.0, energy #{format('%.2f', energy)}/).to_stdout
+        described_class::Targeting.last
+      }
+
+      a = tmp_path('sections.flac')
+      result = render.(a, 0.4, 800)
+      quiet, loud = result.sections
+      expect(quiet).to include(label: 'quiet')
+      expect(loud).to include(label: 'loud')
+      expect(loud[:level]).to be_within(0.05).of(-12)
+      expect(quiet[:target]).to be_within(1e-9).of(-12 + 0.4 * (quiet[:mix] - loud[:mix]))
+      expect(quiet[:level]).to be_within(0.05).of(quiet[:target])
+      expect(quiet[:trim]).to be > loud[:trim] + 2
+      # The quieter section's trim rises from its first frame (bar 9 at 480
+      # BPM is frame 192000; ramps of a quarter note, 6000 frames)
+      expect(result.trims.points).to eq([[0, quiet[:trim]], [186000, quiet[:trim]], [192000, loud[:trim]]])
+      expect(result.to_s).to match(/sections \(mix LUFS -> target, mastered, trim\):\n    quiet .*\n    loud /)
+
+      # energy 0 would lift the quiet section 7.7 dB over the loud one's
+      # trim: held at SECTION_MAX_LIFT
+      c = tmp_path('sections_0.flac')
+      quiet0, loud0 = render.(c, 0.0, 800).sections
+      expect(quiet0[:trim]).to be_within(1e-9).of(loud0[:trim] + described_class::Targeting::SECTION_MAX_LIFT)
+      expect(quiet0[:level]).to be < quiet0[:target] - 0.5
+
+      b = tmp_path('sections_333.flac')
+      render.(b, 0.4, 333)
+      # (file lengths still depend on the buffer size by a sample: panel
+      # round 2's F8)
+      da, db = MB::Sound.read(a), MB::Sound.read(b)
+      n = [da[0].length, db[0].length].min
+      expect(db.map { |c| c[0...n] }).to eq(da.map { |c| c[0...n] })
+    ensure
+      MB::Sound.bpm 120
+    end
   end
 end

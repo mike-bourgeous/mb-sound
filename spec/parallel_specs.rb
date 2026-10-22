@@ -11,6 +11,8 @@
 require 'json'
 require 'yaml'
 require 'fileutils'
+require 'etc'
+require 'rbconfig'
 
 module ParallelSpecs
   ROOT = File.expand_path('..', __dir__)
@@ -18,6 +20,9 @@ module ParallelSpecs
   TIMES_PATH = File.join(ROOT, 'tmp', 'spec_file_times.json')
   # Time budgets per file and per example (see #check_budgets)
   BUDGETS_PATH = File.join(ROOT, 'spec', 'time_budgets.yml')
+  # Each host's speed at each parallelism (see #host_speed)
+  HOST_SPEED_PATH = File.join(ROOT, 'tmp', 'spec_host_speed.json')
+  HOST_SPEED_SCRIPT = File.join(ROOT, 'spec', 'host_speed_bench.rb')
 
   # Files slower than this (seconds) or examples slower than SLOW_EXAMPLE
   # are listed as slow after every run.
@@ -55,12 +60,69 @@ module ParallelSpecs
     groups.zip(loads).reject { |g, _| g.empty? }
   end
 
+  # This machine, for the host speed table: CPU model, hardware threads,
+  # and the number of spec processes.
+  def host_key(count)
+    cpu = File.foreach('/proc/cpuinfo').find { |l| l.start_with?('model name') }&.split(':', 2)&.last&.strip if File.readable?('/proc/cpuinfo')
+    "#{cpu || RUBY_PLATFORM} x#{Etc.nprocessors}, PARALLEL=#{count}"
+  end
+
+  # The seconds spec/host_speed_bench.rb takes on this machine with +count+
+  # copies running at once (the median copy), measured on the first
+  # spec:parallel run at that parallelism and kept in tmp/spec_host_speed.json
+  # (MB_SOUND_SPEC_CALIBRATE=1 measures again).  Time budgets scale by it
+  # over the reference machine's (#budget_scale; maintainer, 2026-10-21:
+  # "Set them relative to each machine's performance on first run maybe?").
+  # Returns nil if the workload fails.
+  def host_speed(count, path: HOST_SPEED_PATH)
+    key = host_key(count)
+    table = File.exist?(path) ? (JSON.parse(File.read(path)) rescue {}) : {}
+    return table[key] if table[key] && ENV['MB_SOUND_SPEC_CALIBRATE'] != '1'
+
+    readers = Array.new(count) do
+      r, w = IO.pipe
+      pid = Process.spawn(RbConfig.ruby, HOST_SPEED_SCRIPT, out: w, err: File::NULL, chdir: ROOT)
+      w.close
+      [pid, r]
+    end
+    times = readers.map { |pid, r|
+      out = r.read
+      r.close
+      Process.wait(pid)
+      $?.success? ? Float(out, exception: false) : nil
+    }
+    return nil if times.include?(nil)
+
+    seconds = times.sort[times.length / 2].round(4)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, JSON.pretty_generate(table.merge(key => seconds)) + "\n")
+    seconds
+  end
+
+  # How much slower than the reference machine this one is (never below 1):
+  # its host speed over the `reference:` seconds in spec/time_budgets.yml.
+  # Returns [scale, explanation].
+  def budget_scale(count, budgets_path: BUDGETS_PATH, speed_path: HOST_SPEED_PATH)
+    reference = (YAML.safe_load_file(budgets_path)['reference'] if File.exist?(budgets_path)) || {}
+    ref = reference['seconds'].to_f
+    return [1.0, nil] unless ref > 0
+
+    speed = host_speed(count, path: speed_path)
+    return [1.0, 'host speed: the workload failed; budgets unscaled'] unless speed
+
+    scale = [speed / ref, 1.0].max
+    [scale, format('host speed %.3f s (%s) vs the reference %.3f s (%s): budgets x%.2f',
+                   speed, host_key(count), ref, reference['machine'], scale)]
+  end
+
   # Runs the groups, returns true if every process passed.
   def run(count: 4, patterns: nil, extra_args: [])
     files = spec_files(patterns)
     groups = partition(files, count)
     FileUtils.rm_rf(OUT_DIR)
     FileUtils.mkdir_p(OUT_DIR)
+    scale, why = budget_scale(count)
+    puts "spec:parallel: #{why}" if why
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     puts "spec:parallel: #{files.length} files in #{groups.length} processes (expected #{groups.map { |_, l| l.round }.join(', ')} s; logs in #{OUT_DIR.delete_prefix("#{ROOT}/")})"
@@ -75,7 +137,7 @@ module ParallelSpecs
     statuses = pids.map { |pid| Process.wait2(pid).last }
     wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
-    report(groups.map(&:first), statuses, wall)
+    report(groups.map(&:first), statuses, wall, budget_scale: scale)
   end
 
   # Prints the summary of a run of +groups+ (lists of files), whose
@@ -84,7 +146,7 @@ module ParallelSpecs
   # (e.g. a segfault in a C library): it's listed with its signal, files, and
   # log, and the other processes' times are still written.  Returns true if
   # every process passed.
-  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH)
+  def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH, budget_scale: 1.0)
     examples = []
     crashed = []
     groups.each_index do |i|
@@ -115,7 +177,7 @@ module ParallelSpecs
 
     report_rss(groups.length, out_dir)
     report_transport(groups.length, out_dir)
-    within_budget = check_budgets(file_times, examples, budgets_path)
+    within_budget = check_budgets(file_times, examples, budgets_path, scale: budget_scale)
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
     report_warnings(groups.length, out_dir)
@@ -132,8 +194,10 @@ module ParallelSpecs
   # went over and returns false then, so a file that grew slow fails the
   # run until it is made faster or its entry says why it needs the time
   # (MB_SOUND_SPEC_BUDGET=report lists without failing: a loaded machine).
-  # Returns true when everything is within its budget.
-  def check_budgets(file_times, examples, path = BUDGETS_PATH)
+  # Budgets are in the reference machine's seconds, times +scale+ (this
+  # machine's #budget_scale).  Returns true when everything is within its
+  # budget.
+  def check_budgets(file_times, examples, path = BUDGETS_PATH, scale: 1.0)
     return true unless File.exist?(path)
 
     budgets = YAML.safe_load_file(path)
@@ -145,7 +209,7 @@ module ParallelSpecs
       return false
     end
 
-    budget = ->(file, kind) { (entries[file] || {}).fetch(kind, default.fetch(kind)) }
+    budget = ->(file, kind) { (entries[file] || {}).fetch(kind, default.fetch(kind)) * scale }
     over = []
     file_times.each do |f, t|
       b = budget.(f, 'file')
@@ -161,7 +225,8 @@ module ParallelSpecs
     return true if over.empty?
 
     report_only = ENV['MB_SOUND_SPEC_BUDGET'] == 'report'
-    puts "Over their time budgets (#{display_path(path)}#{report_only ? '; MB_SOUND_SPEC_BUDGET=report: not failing' : ''}):"
+    scaled = scale > 1 ? format('; scaled x%.2f for this machine', scale) : ''
+    puts "Over their time budgets (#{display_path(path)}#{scaled}#{report_only ? '; MB_SOUND_SPEC_BUDGET=report: not failing' : ''}):"
     over.each { |l| puts l }
     puts '  Make them faster (see CLAUDE.md, Testing), or give the file an entry with the time it needs and why.' unless report_only
     report_only

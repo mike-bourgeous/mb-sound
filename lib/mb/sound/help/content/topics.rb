@@ -772,7 +772,11 @@ module MB
         :integrated` targets the whole song, and `measure: :bars` (`:hot`'s
         default) the level the quieter quarter of the bars sit at
         (`percentile: 0.25`), so a clipping chain closes the gap from the
-        drops to the breakdown.
+        drops to the breakdown.  `measure: :sections` gives each section of
+        the song form its own trim: the loudest reaches the target, the
+        others keep `energy:` (0..1) of their distance under it in the mix.
+        `master :vinyl, clip: true` rounds off peaks so a kick-led mix can
+        reach its target; options a preset would ignore raise.
         Without a master chain the live output (not renders or recordings)
         ends in a transparent safety limiter at -1 dBFS; `master` says so,
         and any chain or preset replaces it.
