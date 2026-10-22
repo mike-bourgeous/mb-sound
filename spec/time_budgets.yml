@@ -7,14 +7,31 @@
 # what they prove, SpecBuffers.join) or give its file an entry here with
 # the time it needs and why (MB_SOUND_SPEC_BUDGET=report only lists them,
 # for a loaded machine).
+#
+# Budgets are in the reference machine's seconds.  Each machine scales them
+# by its own speed (omnibus11, 2026-10-22; maintainer: "Set them relative
+# to each machine's performance on first run maybe?  Sounds like they're
+# too strict to begin with."): on its first spec:parallel run at a given
+# PARALLEL, spec/host_speed_bench.rb runs in that many processes at once,
+# its median time goes to tmp/spec_host_speed.json (per CPU and PARALLEL;
+# MB_SOUND_SPEC_CALIBRATE=1 measures again), and budgets multiply by that
+# time over reference.seconds (never by less than 1).  The defaults were
+# loosened from 15 and 6 s at the same time.
+reference:
+  machine: AMD Ryzen 9 7950X (the Linux runner), PARALLEL=12
+  # An estimate until the runner measures its own (its first run prints
+  # "host speed ... s"): the Mac i9's 0.491 s at PARALLEL=2 over the
+  # suites' ratio, 1223.8 s of examples there against the runner's
+  # 608.9 s (ui-api-1-2), 2.01
+  seconds: 0.244
 default:
-  file: 15
-  example: 6
+  file: 20
+  example: 8
 files:
   spec/lib/mb/sound/buffer_size_invariance_spec.rb:
     file: 45
-    example: 10
-    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example
+    example: 12
+    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds)
   spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb:
     file: 35
     example: 8

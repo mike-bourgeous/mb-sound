@@ -114,13 +114,16 @@ RSpec.describe(ParallelSpecs) do
   describe 'time budgets' do
     let(:budgets) { tmp_path('budgets.yml') }
 
-    def budget_report(examples, yaml, env: nil)
+    def budget_report(examples, yaml, env: nil, scale: 1.0)
       File.write(budgets, yaml)
       write_json(0, examples)
       old = ENV['MB_SOUND_SPEC_BUDGET']
       ENV['MB_SOUND_SPEC_BUDGET'] = env
       result = nil
-      output = capture_stdout { result = ParallelSpecs.report([examples.map { |e| e['file_path'].delete_prefix('./') }.uniq], [status], 1.5, out_dir: out_dir, times_path: times_path, budgets_path: budgets) }
+      output = capture_stdout {
+        result = ParallelSpecs.report([examples.map { |e| e['file_path'].delete_prefix('./') }.uniq], [status], 1.5,
+                                      out_dir: out_dir, times_path: times_path, budgets_path: budgets, budget_scale: scale)
+      }
       [result, output]
     ensure
       ENV['MB_SOUND_SPEC_BUDGET'] = old
@@ -156,6 +159,41 @@ RSpec.describe(ParallelSpecs) do
       ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'report')
       expect(ok).to eq(true)
       expect(output).to include('not failing')
+    end
+
+    it "scales the budgets by the machine's speed" do
+      examples = [example('spec/a_spec.rb', 1.5), example('spec/a_spec.rb', 0.9)]
+      ok, output = budget_report(examples, yaml, scale: 2.0)
+      expect(ok).to eq(true)
+      expect(output).not_to include('time budget')
+
+      ok, output = budget_report(examples, yaml, scale: 1.2)
+      expect(ok).to eq(false)
+      expect(output).to include('scaled x1.20 for this machine')
+      expect(output).to match(%r{1\.50 s >   1\.2 s  spec/a_spec\.rb:3})
+    end
+
+    it "measures the machine's speed once per CPU and PARALLEL, relative to the reference, never below 1" do
+      speeds = tmp_path('speed.json')
+      File.write(budgets, yaml + "reference:\n  machine: the runner\n  seconds: 0.25\n")
+      File.write(speeds, JSON.generate(ParallelSpecs.host_key(3) => 0.5))
+      scale, why = ParallelSpecs.budget_scale(3, budgets_path: budgets, speed_path: speeds)
+      expect(scale).to eq(2.0)
+      expect(why).to include('host speed 0.500 s').and include('PARALLEL=3').and include('the runner').and include('budgets x2.00')
+
+      File.write(speeds, JSON.generate(ParallelSpecs.host_key(3) => 0.1))
+      expect(ParallelSpecs.budget_scale(3, budgets_path: budgets, speed_path: speeds)[0]).to eq(1.0)
+
+      File.write(budgets, yaml)
+      expect(ParallelSpecs.budget_scale(3, budgets_path: budgets, speed_path: speeds)).to eq([1.0, nil])
+      expect(ParallelSpecs.host_key(3)).to match(/ x\d+, PARALLEL=3\z/)
+    end
+
+    it 'has a reference speed in the real budgets' do
+      data = YAML.safe_load_file(ParallelSpecs::BUDGETS_PATH)
+      expect(data.dig('reference', 'seconds')).to be_a(Numeric).and be > 0
+      expect(data.dig('reference', 'machine')).to be_a(String)
+      expect(File.exist?(ParallelSpecs::HOST_SPEED_SCRIPT)).to eq(true)
     end
 
     it 'has a reason for every entry of the real budgets' do
