@@ -467,6 +467,7 @@ module MB
           c.capture&.add(@frame, input, data, ramp)
           out.each_with_index do |o, idx|
             d = data[idx]
+            next if d.length == count && (ramp.nil? || ramp.length == count) && FastArithmetic.add_at(o, 0, d, count, ramp)
             d = d * ramp if ramp
             o.inplace + d
           end

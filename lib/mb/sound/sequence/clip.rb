@@ -120,6 +120,8 @@ module MB
           @align = align
           @variations = variations.freeze
           @cycle_cache = {}
+          @edge_tables = {}
+          @cycle_hint = nil
 
           raise ArgumentError, 'A looping clip must have a positive length' if @loop && @length <= 0
           raise ArgumentError, "Clip alignment must be one of #{ALIGNMENTS.map(&:inspect).join(', ')} (got #{align.inspect})" unless ALIGNMENTS.include?(align)
@@ -621,46 +623,75 @@ module MB
         # events with fill marks (see #fill) are kept or dropped by it.
         # Without it, no fills play.
         def edges(from, to, early: false, fills: nil)
-          return [] if @length <= 0 && @events.empty?
+          return NO_EDGES if @length <= 0 && @events.empty?
 
           if @loop
-            first = MB::M.max((from / @length).floor - @lookback, 0)
-            last = (to / @length).floor + @lookahead
+            first = MB::M.max(cycle_of(from) - @lookback, 0)
+            last = cycle_of(to) + @lookahead
           else
             first = last = 0
           end
 
-          out = []
-          (first..last).each do |cycle|
-            offset = cycle * @length
-            events_for(cycle).each_with_index do |e, idx|
-              next unless plays?(e, cycle, idx)
+          # Allocation-free unless an edge lands in [from, to): each cycle's
+          # on and off times come from a cached table (EdgeTable), and
+          # cycles whose notes all end before +from+ or start at or after
+          # +to+ are skipped (an on time only ever moves later below).
+          out = nil
+          cycle = first
+          while cycle <= last
+            table = edge_table(cycle)
+            if table.hi >= from && table.lo < to
+              offset = table.offset
+              events = table.events
+              ons = table.ons
+              offs = table.offs
+              idx = 0
+              n = events.length
+              while idx < n
+                e = events[idx]
+                i = idx
+                idx += 1
+                next unless plays?(e, cycle, i)
 
-              on = offset + e.start
-              off = on + e.length
-              if on < offset
-                # An early note of this cycle
-                if cycle == 0
-                  next if off <= 0
-                  on = 0r
-                elsif early && offset >= from && on < from && off > from
-                  on = from
+                on = ons[i]
+                off = offs[i]
+                if on < offset
+                  # An early note of this cycle
+                  if cycle == 0
+                    next if off <= 0
+                    on = 0r
+                  elsif early && offset >= from && on < from && off > from
+                    on = from
+                  end
                 end
+                on_in = on >= from && on < to
+                off_in = off >= from && off < to
+                next unless on_in || off_in
+                # Fill marks are decided at the note-on, so both edges agree
+                next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
+                out ||= []
+                out << [on, :on, e, cycle] if on_in
+                out << [off, :off, e, cycle] if off_in
               end
-              on_in = on >= from && on < to
-              off_in = off >= from && off < to
-              next unless on_in || off_in
-              # Fill marks are decided at the note-on, so both edges agree
-              next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
-              out << [on, :on, e, cycle] if on_in
-              out << [off, :off, e, cycle] if off_in
             end
+            cycle += 1
           end
 
+          return NO_EDGES unless out
+          return out if out.length == 1
           out.sort_by { |time, type, _e, _c| [time, type == :off ? 0 : 1] }
         end
 
-        # Returns the event that most recently started at or before +position+
+        # What #edges returns when nothing lands in a span (frozen).
+        NO_EDGES = [].freeze
+
+        # A loop cycle's note times for #edges: +offset+ (the cycle's start),
+        # its +events+ (#events_for), each one's absolute +ons+ and +offs+
+        # (Rational whole notes), and the earliest on (+lo+) and latest off
+        # (+hi+) for skipping cycles that can't hold an edge.
+        EdgeTable = Data.define(:cycle, :offset, :events, :ons, :offs, :lo, :hi)
+
+                # Returns the event that most recently started at or before +position+
         # whole notes (wrapping around for looping clips), or nil if none has.
         # Used to set held values when playback jumps.  Probability is
         # ignored.
@@ -1060,6 +1091,35 @@ module MB
         end
 
         private
+
+        # The loop cycle holding clip position +position+ (whole notes):
+        # (position / length).floor, with the last answer's bounds kept so
+        # reads within one cycle allocate nothing.
+        def cycle_of(position)
+          hint = @cycle_hint
+          return hint[0] if hint && position >= hint[1] && position < hint[2]
+
+          cycle = (position / @length).floor
+          lo = cycle * @length
+          @cycle_hint = [cycle, lo, lo + @length].freeze
+          cycle
+        end
+
+        # The EdgeTable of loop +cycle+ (see #edges), cached for the last
+        # few cycles.
+        def edge_table(cycle)
+          table = @edge_tables[cycle]
+          return table if table
+
+          offset = cycle * @length
+          events = events_for(cycle)
+          ons = events.map { |e| offset + e.start }.freeze
+          offs = events.each_with_index.map { |e, i| ons[i] + e.length }.freeze
+          lo = ons.min || offset
+          hi = offs.max || offset - 1
+          @edge_tables.shift if @edge_tables.length >= 16
+          @edge_tables[cycle] = EdgeTable.new(cycle: cycle, offset: offset, events: events, ons: ons, offs: offs, lo: lo, hi: hi)
+        end
 
         # The glide time for #tween: +time+ as given (a Duration becomes a
         # tempo-following TempoNode), or by default each event's distance to

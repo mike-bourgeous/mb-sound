@@ -41,7 +41,9 @@
  * lines, CircularBuffer) without the Ranges and views; .wet_dry is
  * Filter::Delay's output mix, and .complex_part copies real or imaginary
  * parts out of complex buffers.  .pan is ChannelMixer::Pan with a moving
- * position (PanLaws.gains and the mix, in Numo's float steps).
+ * position (PanLaws.gains and the mix, in Numo's float steps).  .add_at
+ * adds a (ramped) buffer into part of another (Session's player mix), and
+ * .fill_range stores a number into part of a buffer (held note values).
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -631,8 +633,9 @@ static VALUE ruby_divide(VALUE self, VALUE out, VALUE divisor)
  * Raises the real buffer +out+ in place to the powers in +exponent+ (a
  * contiguous NArray of the same type and length), as Numo's
  * out.inplace ** exponent does (numo's m_pow: C's double pow, rounded to
- * the buffer type).  Scalar exponents (Numo uses repeated multiplication
- * for Integers) and anything else return nil without writing.
+ * the buffer type), or to a Float exponent (cast to the buffer type, as
+ * Numo's out ** exponent does).  Integer exponents (Numo uses repeated
+ * multiplication) and anything else return nil without writing.
  */
 static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 {
@@ -642,6 +645,23 @@ static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 	}
 
 	size_t length = RNARRAY_SIZE(out);
+
+	// A Float exponent, cast to the buffer type as Numo casts it (Integer
+	// exponents take Numo's repeated multiplication, so they stay in Numo)
+	if (RB_FLOAT_TYPE_P(exponent)) {
+		char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+		double e = RFLOAT_VALUE(exponent);
+		if (ot == MB_ARITH_SF) {
+			float *o = (float *)outp;
+			float ef = (float)e;
+			for (size_t i = 0; i < length; i++) o[i] = pow(o[i], ef);
+		} else {
+			double *o = (double *)outp;
+			for (size_t i = 0; i < length; i++) o[i] = pow(o[i], e);
+		}
+		return out;
+	}
+
 	if (arith_type(exponent) != ot || !shape_ok(exponent, length)) {
 		return Qnil;
 	}
@@ -1018,6 +1038,103 @@ static VALUE ruby_scale(VALUE self, VALUE out, VALUE gain)
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.add_at(out, offset, data, length, ramp) -> out or nil
+ *
+ * Adds the first +length+ values of +data+ (times the first +length+ of
+ * +ramp+, unless +ramp+ is nil) into +out+ from index +offset+, without
+ * allocating: the Numo mirror is
+ *     d = data[0...length]
+ *     d = d * ramp[0...length] if ramp
+ *     out[offset...(offset + length)] = out[offset...(offset + length)] + d
+ * (Session's player mix, drum kits, master chains), in float steps.  Only
+ * for SFloat +out+, +data+, and +ramp+ (contiguous 1D, +out+ writable,
+ * +data+ and +ramp+ at least +length+ long, +offset+ + +length+ within
+ * +out+, +length+ at least 1, as Numo needs); otherwise returns nil
+ * without touching +out+.
+ */
+static VALUE ruby_add_at(VALUE self, VALUE out, VALUE offset_v, VALUE data, VALUE length_v, VALUE ramp)
+{
+	if (!RB_INTEGER_TYPE_P(offset_v) || !RB_INTEGER_TYPE_P(length_v)) {
+		return Qnil;
+	}
+	if (arith_type(out) != MB_ARITH_SF || arith_type(data) != MB_ARITH_SF || !writable_contiguous(out)) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(data) != 1 || !RTEST(nary_check_contiguous(data))) {
+		return Qnil;
+	}
+	if (!NIL_P(ramp) && (arith_type(ramp) != MB_ARITH_SF || RNARRAY_NDIM(ramp) != 1 || !RTEST(nary_check_contiguous(ramp)))) {
+		return Qnil;
+	}
+
+	long offset = NUM2LONG(offset_v);
+	long length = NUM2LONG(length_v);
+	if (offset < 0 || length <= 0 || (size_t)(offset + length) > RNARRAY_SIZE(out) ||
+			(size_t)length > RNARRAY_SIZE(data) || (!NIL_P(ramp) && (size_t)length > RNARRAY_SIZE(ramp))) {
+		return Qnil;
+	}
+
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out)) + offset;
+	const float *x = (const float *)read_ptr(data);
+	if (NIL_P(ramp)) {
+		for (long i = 0; i < length; i++) {
+			o[i] = o[i] + x[i];
+		}
+	} else {
+		const float *r = (const float *)read_ptr(ramp);
+		for (long i = 0; i < length; i++) {
+			float t = x[i] * r[i];
+			o[i] = o[i] + t;
+		}
+	}
+
+	RB_GC_GUARD(data);
+	RB_GC_GUARD(ramp);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.fill_range(out, from, to, value) -> out or nil
+ *
+ * out[from...to] = value without allocating, for a real Numeric +value+
+ * and an SFloat or DFloat +out+ (contiguous 1D, writable, 0 <= from <= to
+ * <= its length); otherwise returns nil without touching +out+.  The value
+ * is cast as Numo's store casts it (a C double, then float for SFloat).
+ */
+static VALUE ruby_fill_range(VALUE self, VALUE out, VALUE from_v, VALUE to_v, VALUE value)
+{
+	enum mb_arith_type t = arith_type(out);
+	if ((t != MB_ARITH_SF && t != MB_ARITH_DF) || !writable_contiguous(out) ||
+			!RB_INTEGER_TYPE_P(from_v) || !RB_INTEGER_TYPE_P(to_v) ||
+			!(RB_FLOAT_TYPE_P(value) || RB_INTEGER_TYPE_P(value))) {
+		return Qnil;
+	}
+
+	long from = NUM2LONG(from_v);
+	long to = NUM2LONG(to_v);
+	if (from < 0 || to < from || (size_t)to > RNARRAY_SIZE(out)) {
+		return Qnil;
+	}
+
+	double v = NUM2DBL(value);
+	char *p = nary_get_pointer_for_write(out) + nary_get_offset(out);
+	if (t == MB_ARITH_SF) {
+		float *o = (float *)p;
+		float f = (float)v;
+		for (long i = from; i < to; i++) {
+			o[i] = f;
+		}
+	} else {
+		double *o = (double *)p;
+		for (long i = from; i < to; i++) {
+			o[i] = v;
+		}
+	}
+
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1036,4 +1153,6 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "wet_dry", ruby_wet_dry, 5);
 	rb_define_module_function(fast_arithmetic, "complex_part", ruby_complex_part, 3);
 	rb_define_module_function(fast_arithmetic, "pan", ruby_pan, 5);
+	rb_define_module_function(fast_arithmetic, "add_at", ruby_add_at, 5);
+	rb_define_module_function(fast_arithmetic, "fill_range", ruby_fill_range, 4);
 }

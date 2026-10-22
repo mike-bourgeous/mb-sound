@@ -1165,7 +1165,7 @@ module MB
 
       # True if +envelope+ adds re-strikes' energy (see #adding_at?).
       def add_envelope?(envelope)
-        envelope.respond_to?(:retrigger) && envelope.retrigger == :add
+        envelope.respond_to?(:retrigger_mode) && envelope.retrigger_mode == :add
       end
 
       # Returns the node cached under +key+, or makes one with the block and

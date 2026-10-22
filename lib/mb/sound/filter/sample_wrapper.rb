@@ -59,6 +59,7 @@ module MB
           # variable layout; see GraphNode::IvarPreset)
           @ringing = nil
           @frozen_copy = nil
+          @own_buf = nil
           @sampled_inputs = nil
 
           # TODO: detect and provide defaults for omitted inputs?
@@ -102,6 +103,12 @@ module MB
           if @in_place
             buf = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(buf) if buf.frozen? # a shared buffer (see Tee)
             buf.inplace!
+          elsif @base_filter.is_a?(SVF) && buf.is_a?(Numo::SFloat)
+            # SVFs filter an inplace SFloat in place: into a reused buffer
+            # of the wrapper's own, instead of a new output each buffer
+            # (the same values; the source's buffer stays untouched)
+            @own_buf = Numo::SFloat.zeros(buf.length) if @own_buf.nil? || @own_buf.length != buf.length
+            buf = MB::Sound::FastArithmetic.copy(@own_buf, buf)&.inplace! || buf
           end
           buf = SampleWrapper.call_filter(@base_filter, buf, @inputs, scratch: (@sampled_inputs ||= {}))
           buf&.not_inplace!

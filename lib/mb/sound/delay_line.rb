@@ -281,9 +281,11 @@ module MB
       # returns the delayed output (without the input).  The +delay+ is a
       # Numeric or an NArray with one delay per sample, as for #read, and
       # +feedback+ is a Numeric or an NArray with one gain per sample.
-      def feedback(data, delay, feedback, interpolation: :linear, state: nil)
+      # +:out+, if given, is a buffer of the line's type and the data's
+      # length to write the output into (every sample is written).
+      def feedback(data, delay, feedback, interpolation: :linear, state: nil, out: nil)
         @block_start = @write_offset
-        out = @buffer.class.zeros(data.length)
+        out = @buffer.class.zeros(data.length) unless out && out.class == @buffer.class && out.length == data.length
         @write_offset = MB::Sound::FastDelay.feedback(@buffer, @write_offset, data, out, real_delay(delay), feedback, mode(interpolation), SINC_KERNEL, state)
         out
       end

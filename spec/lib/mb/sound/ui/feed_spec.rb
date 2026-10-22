@@ -115,6 +115,34 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
       expect(m.take.peak[0]).to be_within(1e-6).of(quiet.abs.max.to_db)
     end
 
+    it 'reads the same with the allocation-free kernel as with Numo (alloc-1)' do
+      rng = Random.new(11)
+      sizes = [128, 128, 800, 37, 512, 128, 2048, 4800, 128, 6000]
+      bufs = sizes.map { |n| Array.new(2) { Numo::SFloat.new(n).rand(-1, 1) * rng.rand } }
+      results = [true, false, :mixed].map do |mode|
+        m = described_class.new(2, 48000)
+        bufs.each_with_index.map { |b, i|
+          described_class.native = mode == :mixed ? i.odd? : mode
+          m.process(b)
+          m.take.to_h
+        }
+      ensure
+        described_class.native = true
+      end
+      expect(results[0]).to eq(results[1])
+      expect(results[2]).to eq(results[1])
+      expect(results[1].last[:lufs_s]).to be_finite
+    end
+
+    it 'allocates only a few objects per buffer' do
+      m = described_class.new(2, 48000)
+      b = [Numo::SFloat.new(128).rand(-1, 1), Numo::SFloat.new(128).rand(-1, 1)]
+      20.times { m.process(b) }
+      a0 = GC.stat(:total_allocated_objects)
+      100.times { m.process(b) }
+      expect((GC.stat(:total_allocated_objects) - a0) / 100.0).to be < 12
+    end
+
     it 'reads -inf for silence' do
       m = described_class.new(1, 48000)
       m.process([Numo::SFloat.zeros(4800)])

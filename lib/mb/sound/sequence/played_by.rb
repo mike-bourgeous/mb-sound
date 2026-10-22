@@ -49,6 +49,7 @@ module MB
         def instrument!(instrument)
           @instrument = instrument
           @cycle_cache = {} if instance_variable_defined?(:@cycle_cache)
+          @edge_tables = {} if instance_variable_defined?(:@edge_tables)
         end
 
         # Methods never wrapped by .carry! (readers, and the methods above).
