@@ -4,6 +4,62 @@ require 'shellwords'
 
 task :default => :spec
 
+# Parallel extension builds (omnibus11, 2026-10-22).  `rake compile` builds
+# the extensions side by side, up to rake's thread pool (-j N; the default
+# is the CPU count + 3), each with one plain `make` (MAKE_JOBS=N adds make's
+# own -j; most extensions are one or two sources, so the gain is across
+# extensions).  rake-compiler runs extconf and make inside
+# `chdir(tmp_path) { sh ... }`, which changes the whole process's directory:
+# two extensions built at once (rake -m, or a multitask) raised "conflicting
+# chdir during another chdir block".  This module keeps that directory per
+# thread and hands it to each command as `sh(..., chdir:)` instead, so the
+# process never changes directory.  Each extension builds in its own
+# tmp/<platform>/<name>/<ruby>/ and installs its own lib/**/<name>.so.
+module ParallelExtensionBuild
+  def chdir(dir, *args, **opts, &block)
+    return super unless block
+
+    prev = Thread.current[:mb_ext_chdir]
+    Thread.current[:mb_ext_chdir] = File.expand_path(dir, prev || Dir.pwd)
+    rake_output_message "cd #{dir}" if verbose
+    begin
+      yield
+    ensure
+      Thread.current[:mb_ext_chdir] = prev
+    end
+  end
+  alias cd chdir
+
+  def sh(*cmd, &block)
+    dir = Thread.current[:mb_ext_chdir]
+    return super unless dir
+
+    opts = cmd.last.is_a?(Hash) ? cmd.pop.dup : {}
+    opts[:chdir] ||= dir
+    super(*cmd, opts, &block)
+  end
+
+  def cp(src, dest, **opts)
+    dir = Thread.current[:mb_ext_chdir]
+    return super unless dir
+
+    super(File.expand_path(src, dir), File.expand_path(dest, dir), **opts)
+  end
+
+  private
+
+  def make
+    jobs = ENV['MAKE_JOBS'].to_i
+    jobs > 1 ? "#{super} -j#{jobs}" : super
+  end
+end
+Rake::ExtensionTask.prepend(ParallelExtensionBuild)
+
+# The per-platform compile task (every extension's compile:<name>:<platform>
+# as a prerequisite) runs its prerequisites in rake's thread pool.  Defined
+# before the extension tasks, which add their prerequisites to it.
+multitask "compile:#{RUBY_PLATFORM}"
+
 Rake::ExtensionTask.new 'mb-fast_sound' do |ext|
   ext.name = 'fast_sound'
   ext.ext_dir = 'ext/mb/fast_sound'

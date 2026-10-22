@@ -17,7 +17,7 @@ mb-sound is a Ruby library for sound processing with a fluent DSL for building s
 
 ```bash
 bundle install                    # Install dependencies
-bundle exec rake compile          # Compile C extensions (required before running)
+bundle exec rake compile          # Compile C extensions (required before running; in parallel, -j N)
 bundle exec rspec                 # Run full test suite
 bundle exec rake spec:parallel    # the suite in PARALLEL=4 processes (~1.5 min), then its slowest files and examples
 bundle exec rspec spec/some_spec.rb        # Run a single test file
