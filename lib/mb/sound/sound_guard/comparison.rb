@@ -30,15 +30,15 @@ module MB
       class Comparison
         # Thresholds (calibrated 2026-10-22, guards-1; see sound_guards.md).
         THRESHOLDS = {
-          loudness: 0.3,
-          true_peak: 0.6,
-          loudness_curve: 0.75,
-          spectrum: 0.35,
-          spectral: 1.5,
-          centroid: 25.0,
-          envelope: 1.5,
+          loudness: 0.25,
+          true_peak: 0.5,
+          loudness_curve: 0.4,
+          spectrum: 0.1,
+          spectral: 0.25,
+          centroid: 8.0,
+          envelope: 0.5,
           onsets: 0.15,
-          width: 1.0,
+          width: 0.3,
           duration: 0.05,
         }.freeze
 

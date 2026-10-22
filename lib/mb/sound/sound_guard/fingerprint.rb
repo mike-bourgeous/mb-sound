@@ -23,7 +23,7 @@ module MB
       #            kHz, above), and per segment; L/R correlation.  nil for
       #            mono.
       #
-      # About 3 KB per second of audio as JSON (rounded to 0.01-0.1 dB).
+      # About 1 KB per second of audio as JSON (rounded to 0.01-0.1 dB).
       # Compare two with #compare (a Comparison).
       class Fingerprint
         # Bump when features change meaning; old fingerprints then need

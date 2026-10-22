@@ -52,7 +52,7 @@ end
 # Changes applied to the base render's samples
 POST = {
   noise_80: [:inaudible, ->(ch) {
-    rms = Math.sqrt(ch.sum { |c| (c.to_f * c).sum } / ch.sum(&:length))
+    rms = Math.sqrt(ch.sum { |c| (Numo::DFloat.cast(c)**2).sum } / ch.sum(&:length))
     Numo::NArray.srand(1)
     ch.map { |c| c + Numo::SFloat.new(c.length).rand_norm * rms * 10**(-80 / 20.0) }
   }],
@@ -89,7 +89,7 @@ rows.each do |r|
 end
 
 puts
-puts 'Per metric: largest inaudible distance, smallest audible distance among changed renders, threshold'
+puts 'Per metric: largest distance over the inaudible changes, and the threshold'
 summary = metrics.to_h { |m|
   inaudible = rows.select { |r| r[:kind] == :inaudible }.map { |r| r[:distances][m] }
   [m, { max_inaudible: inaudible.max, threshold: Comparison::THRESHOLDS[m] }]

@@ -14,7 +14,7 @@
 module MB::Sound
   SoundGuard.golden_set do
     # Ambient / generative
-    piece :ambient, 'bin/songs/genre_demo.rb', '-G', 'ambient', '-s', '30',
+    piece :ambient, 'bin/songs/genre_demo.rb', '-G', 'ambient', '-s', '20',
       genre: :ambient, covers: 'genre template: modal bowls on clocks in seconds, rain and wind through a :weather bus, sounding, reverb'
     piece :generative, 'bin/songs/generative_blur.rb', '-b', '8',
       genre: :generative, covers: 'generators (seeded dice), blurred harmony, a granular cloud with weighted pitch draws'
