@@ -472,6 +472,49 @@ namespace :plan do
   end
 end
 
+# Sound guards (design/notes/sound_guards.md): the golden set of approved
+# renders (golden/set.rb), compared by committed perceptual fingerprints.
+# Piece names are task arguments (golden:check[techno,dnb]) or PIECES=a,b;
+# PARALLEL=n renders at once (default 2); RUN=dir reuses a run's renders.
+namespace :golden do
+  golden_pieces = lambda do |names|
+    require_relative 'lib/mb/sound/sound_guard'
+    names = names.to_a + ENV['PIECES'].to_s.split(',')
+    set = MB::Sound::SoundGuard::GoldenSet.load(__dir__)
+    [set, set.select(names.map(&:strip).reject(&:empty?))]
+  end
+
+  desc 'Render the golden set (or the named pieces) and compare with the approved fingerprints; failures get a Bench set'
+  task :check do |_, args|
+    set, pieces = golden_pieces.(args.extras)
+    results = MB::Sound::SoundGuard::Runner.new(set).check(pieces, run_dir: ENV['RUN'])
+    bad = results.reject { |r| r.status == :pass }
+    abort "golden:check: #{bad.length} of #{results.length} not passing (#{bad.map { |r| "#{r.piece.name} #{r.status}" }.join(', ')})" unless bad.empty?
+  end
+
+  desc 'Render (or take from RUN=dir) and approve the named golden pieces (all when none named), writing their fingerprints'
+  task :approve do |_, args|
+    set, pieces = golden_pieces.(args.extras)
+    results = MB::Sound::SoundGuard::Runner.new(set).approve(pieces, run_dir: ENV['RUN'])
+    abort 'golden:approve: some pieces failed to render' unless results.all?(&:ok?)
+  end
+
+  desc 'Re-extract the committed fingerprints from the approved renders (after a fingerprint format change)'
+  task :refingerprint do |_, args|
+    set, pieces = golden_pieces.(args.extras)
+    MB::Sound::SoundGuard::Runner.new(set).refingerprint(pieces)
+  end
+
+  desc 'List the golden set'
+  task :list do
+    set, pieces = golden_pieces.([])
+    pieces.each do |p|
+      approved = File.exist?(set.fingerprint_path(p)) ? '' : ' (unapproved)'
+      puts format('%-14s %-12s %s%s', p.name, p.genre, p.shell_command, approved)
+    end
+  end
+end
+
 namespace :depend do
   desc "Check every extension's depend file against the headers its sources include"
   task :check do

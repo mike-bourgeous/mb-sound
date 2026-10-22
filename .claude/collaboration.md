@@ -4,7 +4,7 @@ How the maintainer likes agentic work on mb-sound to go.  Imported from CLAUDE.m
 
 ## Fun is the point
 
-mb-sound exists because making sound with code is fun: for the maintainer, for the people watching the videos and reading the code, and, as far as it applies, for the agents building it with them.  The rigor below (exact samples, measured numbers, memcheck, step-by-step questions) is there so the fun stands on solid ground, not as the goal itself.
+mb-sound exists because making sound with code is fun: for the maintainer, for the people watching the videos and reading the code, and, as far as it applies, for the agents building it with them.  The rigor below (reproducible renders, measured numbers, memcheck, step-by-step questions) is there so the fun stands on solid ground, not as the goal itself.
 
 - Follow good tangents.  When an idea opens up ("what if the editor rewrote the Ruby literal?"), explore it with the maintainer, write it down, and come back to the queue; a design conversation that changes direction several times is often the best part of the day.
 - Make things that are delightful to play and to read: surprising musical uses, demos worth listening to, DSL code that shows off what Ruby can do.
@@ -28,6 +28,16 @@ mb-sound exists because making sound with code is fun: for the maintainer, for t
 - Give measured numbers, say what was and wasn't tested, and correct earlier explanations that turn out wrong.  Compute numbers with a quick script before quoting them, or label them estimates.
 - Measure before explaining a failure.
 - When a change alters the default sound, render an A/B for the maintainer to listen to (they listen on a Mac) and let them choose before committing the default.  Put good try-it snippets in the header comments of demo scripts in `bin/` so they persist.
+
+## Ears win: exactness and sound guards (maintainer, 2026-10-22)
+
+The zoom-out's guard rule: "Ears win."  Sound decides; exactness is kept where it can be heard or a workflow needs it.
+
+- Reproduce what was heard: seeds, takes, and variants render identically on the same settings (same code, same buffer size).  That stays a requirement.
+- Buffer sizes: "within -80db if possible. Just not obsessed over and never part of persona concerns."  Bit-identical output at every buffer size is no longer a default requirement; briefs ask for it only where a workflow depends on it (take replays, stems that must sum to the mix).  Existing invariance stays unless a change has a reason to give it up, and the report says so.
+- C kernels: new kernels get a Ruby reference that specs compare within a stated tolerance (e.g. -120 dB, or a relative error); a bit-exact mirror is an option where it's cheap, not the rule.  Existing exact mirrors and their specs stay.
+- Integer frame counters on hot paths; Rationals for musical positions.
+- Sound guards: changes that touch DSP (nodes, kernels, filters, oscillators, envelopes, effects, mastering), presets, or the plan layer run the golden set (`bundle exec rake golden:check`, `design/notes/sound_guards.md`) before merging.  A failing piece is not re-approved by the agent: its Bench set (approved vs new, written by the check) goes to the maintainer, and `rake golden:approve[name] RUN=dir` follows his verdict.  A change meant to alter sound names the pieces it moves in its report.
 
 ## API taste (Ruby DSL)
 

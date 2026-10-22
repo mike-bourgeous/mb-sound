@@ -1,0 +1,2160 @@
+{
+  "calibrated": "2026-10-22T08:45:58Z",
+  "commit": "9c17e7af31",
+  "thresholds": {
+    "loudness": 0.25,
+    "true_peak": 0.5,
+    "loudness_curve": 0.4,
+    "spectrum": 0.1,
+    "spectral": 0.25,
+    "centroid": 8.0,
+    "envelope": 0.5,
+    "onsets": 0.15,
+    "width": 0.3,
+    "duration": 0.05
+  },
+  "rows": [
+    {
+      "piece": "ambient",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0154
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0032,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "ambient",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.28,
+        "true_peak": 0.0,
+        "loudness_curve": 0.4,
+        "spectrum": 2.6591,
+        "spectral": 2.0722,
+        "centroid": 19.7777,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.16,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.04,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.5315,
+        "spectral": 0.3592,
+        "centroid": 3.5556,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.02,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0009,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.01,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "generative",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.02,
+        "true_peak": 0.08,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0331,
+        "spectral": 0.0513,
+        "centroid": 2.4945,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.57,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.01,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0174,
+        "spectral": 0.0253,
+        "centroid": 1.1726,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.1,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0011,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "chimes",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0033
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0007,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "swarm",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0242,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.04,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 1.2146,
+        "spectral": 0.8139,
+        "centroid": 21.1662,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.01,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.4878,
+        "spectral": 0.3621,
+        "centroid": 8.1154,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "press_chop",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0033,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "grit",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.002
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0027,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "supersaw",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0113
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.2942,
+        "spectral": 0.3136,
+        "centroid": 16.1893,
+        "envelope": 0.2,
+        "onsets": 0.0,
+        "width": 0.55,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.1456,
+        "spectral": 0.1644,
+        "centroid": 9.0404,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.1,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0013,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "techno",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0242,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0009,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "wavetables",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0008,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "feedback",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0563,
+        "centroid": 0.0,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0134
+      }
+    },
+    {
+      "piece": "house",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0559,
+        "spectral": 0.1225,
+        "centroid": 0.0,
+        "envelope": 0.3,
+        "onsets": 0.0,
+        "width": 0.02,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0484,
+        "spectral": 0.0658,
+        "centroid": 3.3793,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0008,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "house",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0034
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.5,
+        "spectrum": 0.0791,
+        "spectral": 0.3336,
+        "centroid": 0.8979,
+        "envelope": 0.9,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.01,
+        "true_peak": 0.0,
+        "loudness_curve": 0.8,
+        "spectrum": 0.1873,
+        "spectral": 0.8847,
+        "centroid": 9.0005,
+        "envelope": 1.3,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0166
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0006,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "vocal_club",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0242,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0006,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "drums909",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.01,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.4337,
+        "spectral": 0.4525,
+        "centroid": 19.0633,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.78,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.5135,
+        "spectral": 0.5409,
+        "centroid": 23.7838,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.86,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.002,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tunnel_vision",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0174,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.014
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0551,
+        "spectral": 0.0743,
+        "centroid": 4.4018,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.1,
+        "spectrum": 0.1045,
+        "spectral": 0.1795,
+        "centroid": 14.0111,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0006,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "acid",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.04,
+        "true_peak": 0.26,
+        "loudness_curve": 0.1,
+        "spectrum": 1.8112,
+        "spectral": 2.0144,
+        "centroid": 114.7037,
+        "envelope": 0.2,
+        "onsets": 0.0,
+        "width": 0.32,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.02,
+        "true_peak": 0.12,
+        "loudness_curve": 0.1,
+        "spectrum": 0.8054,
+        "spectral": 0.8956,
+        "centroid": 47.207,
+        "envelope": 0.1,
+        "onsets": 0.0,
+        "width": 0.17,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0015,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "reese",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "rerender",
+      "kind": "inaudible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "buffer128",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "tuning_hw",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "cutoff_1_1",
+      "kind": "audible",
+      "identical": true,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "noise_80",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.0,
+        "true_peak": 0.0,
+        "loudness_curve": 0.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "gain_0_1",
+      "kind": "inaudible",
+      "identical": false,
+      "distances": {
+        "loudness": 0.1,
+        "true_peak": 0.1,
+        "loudness_curve": 0.1,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    },
+    {
+      "piece": "tine_keys",
+      "change": "gain_1",
+      "kind": "audible",
+      "identical": false,
+      "distances": {
+        "loudness": 1.0,
+        "true_peak": 1.0,
+        "loudness_curve": 1.0,
+        "spectrum": 0.0,
+        "spectral": 0.0,
+        "centroid": 0.0,
+        "envelope": 0.0,
+        "onsets": 0.0,
+        "width": 0.0,
+        "duration": 0.0
+      }
+    }
+  ]
+}
