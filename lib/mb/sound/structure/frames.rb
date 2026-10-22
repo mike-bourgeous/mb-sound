@@ -45,6 +45,9 @@ module MB
 
         attr_reader :sample_rate, :logmel, :mfcc, :chroma, :bass_chroma, :energy, :band_flux, :count
 
+        # The center frequency (Hz) of each of the N_MEL mel bands.
+        attr_reader :mel_centers
+
         # Computes the frame features of +mono+ (a Numo array) at
         # +sample_rate+.
         def initialize(mono, sample_rate: 48000)
