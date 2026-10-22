@@ -282,9 +282,22 @@ RSpec.describe(MB::Sound::FastArithmetic) do
           expect(out.to_binary).to eq(expected.not_inplace!.to_binary)
         end
       end
+
+      it "raise #{cls} buffers to Float powers exactly like Numo's x ** e" do
+        a = make_input(cls, 129, 15).abs * 10
+        [a, a - 5, cls.new(129).fill(0)].each do |x|
+          [2.0, 0.37, -1.5, 1.0 / 3, 0.0, 1e-30].each do |e|
+            expected = x ** e
+            out = x.dup
+            expect(MB::Sound::FastArithmetic.power(out, e)).to equal(out)
+            expect(expected.class).to eq(cls)
+            expect(out.to_binary).to eq(expected.to_binary), "exponent #{e}"
+          end
+        end
+      end
     end
 
-    it 'return nil for complex buffers, promotions, scalar exponents, or frozen outputs' do
+    it 'return nil for complex buffers, promotions, Integer and Rational exponents, or frozen outputs' do
       out = Numo::SFloat[1, 2]
       expect(MB::Sound::FastArithmetic.divide(Numo::SComplex[1, 2], 2)).to be_nil
       expect(MB::Sound::FastArithmetic.divide(out, Numo::DFloat[1, 2])).to be_nil
@@ -292,6 +305,9 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       expect(MB::Sound::FastArithmetic.divide(out, 2i)).to be_nil
       expect(MB::Sound::FastArithmetic.divide(out.dup.freeze, 2)).to be_nil
       expect(MB::Sound::FastArithmetic.power(out, 2)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(out, 1/2r)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(Numo::SComplex[1, 2], 2.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.power(out.dup.freeze, 2.0)).to be_nil
       expect(MB::Sound::FastArithmetic.power(out, Numo::SFloat[1, 2, 3])).to be_nil
       expect(out.to_a).to eq([1, 2])
     end
@@ -505,6 +521,86 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       expect(MB::Sound::FastArithmetic.scale(out.dup.freeze, 2)).to be_nil
       expect(MB::Sound::FastArithmetic.scale(Numo::SFloat.zeros(4, 4), 2)).to be_nil
       expect(same(out, copy)).to eq(true)
+    end
+  end
+
+  # Bit for bit, same type (alloc-1's kernels)
+  def bits_same(a, b)
+    a.class == b.class && a.to_binary == b.to_binary
+  end
+
+  describe '.add_at' do
+    let(:rng) { Random.new(7) }
+    let(:out) { Numo::SFloat.new(16).rand(-1, 1) }
+    let(:data) { Numo::SFloat.new(12).rand(-1, 1) }
+    let(:ramp) { Numo::SFloat.new(12).rand(0, 1) }
+
+    def mirror(out, offset, data, length, ramp)
+      o = out.dup
+      d = data[0...length]
+      d = d * ramp[0...length] if ramp
+      o[offset...(offset + length)] = o[offset...(offset + length)] + d
+      o
+    end
+
+    it 'adds a ramped part of a buffer into another exactly as Numo does' do
+      [[0, 12, nil], [3, 9, nil], [4, 12, ramp], [0, 5, ramp], [15, 1, nil]].each do |offset, length, r|
+        expected = mirror(out, offset, data, length, r)
+        o = out.dup
+        expect(MB::Sound::FastArithmetic.add_at(o, offset, data, length, r)).to equal(o)
+        expect(bits_same(o, expected)).to eq(true)
+      end
+    end
+
+    it 'reads views' do
+      big = Numo::SFloat.new(20).rand(-1, 1)
+      d = big[4...16]
+      expected = mirror(out, 2, d, 12, nil)
+      o = out.dup
+      expect(MB::Sound::FastArithmetic.add_at(o, 2, d, 12, nil)).to equal(o)
+      expect(bits_same(o, expected)).to eq(true)
+    end
+
+    it 'returns nil without touching the output for anything else' do
+      copy = out.dup
+      expect(MB::Sound::FastArithmetic.add_at(out, 8, data, 12, nil)).to be_nil # past the end
+      expect(MB::Sound::FastArithmetic.add_at(out, 0, data, 13, nil)).to be_nil # longer than the data
+      expect(MB::Sound::FastArithmetic.add_at(out, 0, data, 12, ramp[0...6])).to be_nil # short ramp
+      expect(MB::Sound::FastArithmetic.add_at(out, -1, data, 4, nil)).to be_nil
+      expect(MB::Sound::FastArithmetic.add_at(out, 0, data, 0, nil)).to be_nil # (Numo raises for data[0...0])
+      expect(MB::Sound::FastArithmetic.add_at(out, 0, data.cast_to(Numo::DFloat), 4, nil)).to be_nil
+      expect(MB::Sound::FastArithmetic.add_at(out, 0, data, 4, ramp.cast_to(Numo::DFloat))).to be_nil
+      expect(MB::Sound::FastArithmetic.add_at(out.cast_to(Numo::DFloat), 0, data, 4, nil)).to be_nil
+      expect(MB::Sound::FastArithmetic.add_at(out.dup.freeze, 0, data, 4, nil)).to be_nil
+      expect(MB::Sound::FastArithmetic.add_at(out, 0.0, data, 4, nil)).to be_nil
+      expect(bits_same(out, copy)).to eq(true)
+    end
+  end
+
+  describe '.fill_range' do
+    it 'stores a number into part of a buffer exactly as Numo does' do
+      [Numo::SFloat, Numo::DFloat].each do |t|
+        [[0, 16, 0.1], [3, 7, -2.5e-8], [5, 5, 1.0], [10, 16, 3]].each do |from, to, v|
+          out = t.new(16).rand
+          expected = out.dup
+          expected[from...to] = v
+          expect(MB::Sound::FastArithmetic.fill_range(out, from, to, v)).to equal(out)
+          expect(bits_same(out, expected)).to eq(true)
+        end
+      end
+    end
+
+    it 'returns nil without touching the buffer for anything else' do
+      out = Numo::SFloat.new(8).rand
+      copy = out.dup
+      expect(MB::Sound::FastArithmetic.fill_range(out, 0, 9, 1.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(out, 5, 4, 1.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(out, -1, 4, 1.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(out, 0, 4, Complex(1, 1))).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(out, 0, 4, 1r)).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(out.dup.freeze, 0, 4, 1.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.fill_range(Numo::SComplex.new(8), 0, 4, 1.0)).to be_nil
+      expect(bits_same(out, copy)).to eq(true)
     end
   end
 end

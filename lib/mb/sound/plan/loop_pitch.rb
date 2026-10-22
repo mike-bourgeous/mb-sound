@@ -238,8 +238,23 @@ module MB
             end
           end
 
+          # True if +a+ and +b+ hold the same Float bits element by element
+          # (as their pack('G') bytes, without the Strings for usual values).
           def same_floats?(a, b)
-            a.each_with_index.all? { |x, i| [x].pack('G') == [b[i]].pack('G') }
+            i = 0
+            n = a.length
+            while i < n
+              return false unless same_float?(a[i], b[i])
+              i += 1
+            end
+            true
+          end
+
+          def same_float?(x, y)
+            return [x].pack('G') == [y].pack('G') unless x.is_a?(Float) && y.is_a?(Float)
+            # (atan2 tells -0.0 from 0.0 without making Infinity Objects)
+            return x != 0.0 || Math.atan2(x, -1.0) == Math.atan2(y, -1.0) if x == y
+            x.nan? && y.nan? && [x].pack('G') == [y].pack('G')
           end
         end
       end

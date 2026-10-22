@@ -209,6 +209,8 @@ module MB
         # markers with note-offs for every sounding note.
         def balance(events)
           @sounding ||= {}
+          return events if events.empty? # (may be frozen: no Array per read)
+
           out = []
 
           events.each do |e|
