@@ -33,6 +33,7 @@ module MB
         @nodes = nodes.freeze
 
         @output = Array.new(@channels)
+        @data = Array.new(@nodes.length) # (reused by #read)
 
         @handled_spies = {}
       end
@@ -94,7 +95,7 @@ module MB
       # TODO: combine with GraphNode#spy somehow
       def spy(handle: nil, interval: false, phase: :post, &block)
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1)]
+        @handled_spies[handle] << [block, interval, phase, MB::U.clock_now - (interval || 1)]
 
         self
       end
@@ -102,11 +103,11 @@ module MB
       # Used by #spy.
       # TODO: combine with GraphNode#call_spies somehow
       private def call_spies(data, phase)
-        now = Time.now
+        return if @handled_spies.empty?
+
+        now = MB::U.clock_now # (a Float: no Time per read)
 
         @handled_spies.each do |origin, spies|
-          info = origin ? " from #{origin}" : ''
-
           spies.each_with_index do |spy_info, idx|
             s, interval, spy_phase, last_time = spy_info
             next unless spy_phase == phase
@@ -117,6 +118,7 @@ module MB
                 spy_info[-1] = now
               end
             rescue => e
+              info = origin ? " from #{origin}" : ''
               warn "GraphNodeInput spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
             end
           end
@@ -147,15 +149,18 @@ module MB
 
         min_length = count
         max_length = count
-        data = @nodes.map { |n|
-          n.sample(count).tap { |d|
-            if d
-              len = d.length
-              min_length = len if len < min_length
-              max_length = len if len > max_length
-            end
-          }
-        }
+        data = @data
+        i = 0
+        while i < @nodes.length
+          d = @nodes[i].sample(count)
+          if d
+            len = d.length
+            min_length = len if len < min_length
+            max_length = len if len > max_length
+          end
+          data[i] = d
+          i += 1
+        end
 
         return nil if data.all? { |d| d.nil? || d.empty? }
 
@@ -165,8 +170,10 @@ module MB
           }
         end
 
-        for idx in 0...@channels
+        idx = 0
+        while idx < @channels
           @output[idx] = data[idx % data.length]
+          idx += 1
         end
 
         call_spies(@output, :post)

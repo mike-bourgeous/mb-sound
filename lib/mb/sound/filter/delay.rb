@@ -89,6 +89,7 @@ module MB
           @ring_read = nil
           @ring_feedback = nil
           @result_buf = nil
+          @minmax = [0.0, 0.0] # (reused by #delay_buffer)
           @ring = nil
           @ring_zeros = nil
           @frozen_copy = nil
@@ -287,17 +288,22 @@ module MB
           dry = control_values(@dry, data.length)
           return nil if feedback.nil? || wet.nil? || dry.nil?
 
-          length = [data, feedback, wet, dry].map { |v| v.respond_to?(:length) ? v.length : data.length }.min
+          # (the shortest input, without Arrays)
+          length = data.length
+          length = feedback.length if feedback.respond_to?(:length) && feedback.length < length
+          length = wet.length if wet.respond_to?(:length) && wet.length < length
+          length = dry.length if dry.respond_to?(:length) && dry.length < length
           if length < data.length
             data = data[0...length]
             delays = delays[0...length] if delays.respond_to?(:length)
           end
 
-          complex = [data, feedback].any? { |v| v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex) || v.is_a?(Complex) }
+          complex = complex_value?(data) || complex_value?(feedback)
           @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
 
           if feedback && feedback != 0
-            delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state)
+            @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
+            delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state, out: @read_buf)
           else
             @line.write(data)
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
@@ -424,6 +430,11 @@ module MB
           value.to_db
         end
 
+        # True for complex buffers and numbers (see #process).
+        def complex_value?(v)
+          v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex) || v.is_a?(Complex)
+        end
+
         # Returns the delay in samples for each of +count+ samples (smoothed
         # if smoothing is on), a Numeric delay for every sample, or :end if
         # the delay time node ended.
@@ -442,7 +453,7 @@ module MB
             return :end if delays.nil?
 
             if settled
-              min, max = delays.minmax
+              min, max = MB::Sound::FastArithmetic.min_max(delays, @minmax) || delays.minmax
               return apply_loop_offset(min.to_f) if min == max && min == @filter.peek
             end
           else

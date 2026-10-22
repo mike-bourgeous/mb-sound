@@ -425,10 +425,15 @@ module MB
           c
         end
 
+        # What #items returns for a buffer without events (frozen).
+        NO_ITEMS = [].freeze
+
         # Returns [sample offset, Event or Chase] pairs for the buffer, with
         # the chase after the note-offs sent at the jump and before any
         # later events or note-ons.
         def items(events, chase, from, rate, count)
+          return NO_ITEMS if events.empty? && chase.nil?
+
           list = events.map { |e| [offset(e.time, from, rate, count), e] }
 
           if chase
@@ -496,7 +501,7 @@ module MB
               @uniform = false
             end
 
-            buf[from...to] = value
+            buf[from...to] = value unless FastArithmetic.fill_range(buf, from, to, value)
           end
 
           def steady_buffer(count)

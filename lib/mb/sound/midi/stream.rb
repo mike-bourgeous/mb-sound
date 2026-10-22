@@ -492,7 +492,7 @@ module MB
           return if events.empty?
 
           # Late events (from live sources) play where they arrived
-          events = events.map { |e| e.time < from ? e.at(from) : e }
+          events = events.map { |e| e.time < from ? e.at(from) : e } if events.any? { |e| e.time < from }
           events = events.each_with_index.sort_by { |e, idx| [e.time, idx] }.map(&:first) unless sorted?(events)
           events = events.map { |e| @bends.process(e) } if @bends
 
@@ -538,7 +538,12 @@ module MB
 
         # The earliest reader cursor, or nil if there are no readers.
         def min_cursor
-          @readers.keys.map(&:cursor).min
+          min = nil
+          @readers.each_key do |r|
+            c = r.cursor
+            min = c if min.nil? || c < min
+          end
+          min
         end
 
         # Drops events that every reader has passed.
@@ -547,7 +552,11 @@ module MB
 
           horizon = min_cursor || @read_to
           count = @log.bsearch_index { |e| e.time >= horizon } || @log.length
-          @log.shift(count) if count > 0
+          # (one at a time: Array#shift(n) returns a new Array)
+          while count > 0
+            @log.shift
+            count -= 1
+          end
         end
       end
     end

@@ -330,6 +330,7 @@ module MB
             split, swap_time = swap_point(from, to, time)
             if split
               out = split > from ? read_span(from, split) : []
+              out = out.dup if out.frozen? # (no edges: Stream::NO_EVENTS)
               @pending_swap = nil
               apply_swap(clip, swap_time, split)
               @generation = generation + 1
@@ -572,7 +573,8 @@ module MB
           end
           start = @flam_lead && @flam_start
 
-          out = @clip.edges(wn_from, wn_to, early: early, fills: fills).filter_map { |time, type, event, cycle|
+          found = @clip.edges(wn_from, wn_to, early: early, fills: fills)
+          out = found.empty? ? Stream::NO_EVENTS : found.filter_map { |time, type, event, cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
               next if start && event.flam && time >= start
