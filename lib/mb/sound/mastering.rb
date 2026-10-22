@@ -196,14 +196,15 @@ module MB
         },
         vinyl: {
           title: 'Vinyl: mono lows, tamed highs, no brickwall',
-          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 7000 },
+          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 7000, clip: true },
           notes: 'For a cutting engineer: mono below 150 Hz and a 25 Hz highpass (lateral bass is fine, vertical bass ' \
                  'throws the stylus), gentle glue, and a split-band de-esser above 7 kHz (3:1, only on the loudest sibilance), since the RIAA pre-emphasis ' \
                  'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
                  'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
                  'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).  ' \
-                 'clip: true rounds the peaks off with a soft clipper last (its limit 0.5 dB under the ceiling, the knee ' \
-                 '6 dB under that), so a 909 kick or a break reaches the target.',
+                 'A soft clipper last rounds the peaks off (its limit 0.5 dB under the ceiling, the knee 6 dB under that), so ' \
+                 'a 909 kick or a break reaches the target ("vinyl that clips first", on by default since 2026-10-22; ' \
+                 'clip: false for trim alone).',
           source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
                   'advice (mono lows, controlled sibilance, headroom), from memory',
         },
@@ -312,8 +313,9 @@ module MB
         # - +mono:+ Hz below which the low end is mono, or false;
         # - +glue:+ false to skip the glue compressor;
         # - +clip:+ (:club) true for a gentle soft clipper in place of the
-        #   fast limiter; (:vinyl) true for a soft clipper after the trim, so
-        #   peaky mixes reach the target with their peaks rounded off;
+        #   fast limiter; (:vinyl, true by default) a soft clipper after the trim,
+        #   so peaky mixes reach the target with their peaks rounded off (false
+        #   for trim alone);
         # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false;
         # - +measure:+ :loudest to reach the target with the loudest
         #   +loudest_bars:+ bars (LOUDEST_BARS by default; windows on bar

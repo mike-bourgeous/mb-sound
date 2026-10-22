@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       vinyl = described_class.preset(:vinyl)
       expect(vinyl.limiter).to eq(false)
       expect(vinyl.ceiling.db_value).to eq(-1)
-      expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
+      expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
     end
 
     it 'takes options that change the chain' do
@@ -116,7 +116,9 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(described_class.preset(:club, measure: :sections, energy: 0.4)).to have_attributes(energy: 0.4, measure_text: 'each section, energy 0.4')
     end
 
-    it "gives :vinyl a soft clipper after the trim with clip: true (M9, N12)" do
+    it "gives :vinyl a soft clipper after the trim by default, and none with clip: false (M9, N12)" do
+      expect(described_class.preset(:vinyl).steps).to eq(described_class.preset(:vinyl, clip: true).steps)
+      expect(described_class.preset(:vinyl, clip: false).steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
       v = described_class.preset(:vinyl, clip: true)
       expect(v.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
       limit = (-1 - described_class::VINYL_CLIP_MARGIN).db.to_f
