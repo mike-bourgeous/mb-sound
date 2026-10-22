@@ -52,14 +52,19 @@ module MB
         # (a render's first pass records it there; see Targeting).
         # +from_trim+ applies only the trim and the steps after it (to the
         # signal entering the trim).
-        def apply(mix, trim: nil, tap: nil, from_trim: false)
+        #
+        # +trim+ may be a Targeting::TrimCurve (measure: :sections), read
+        # at +session+'s frame.
+        def apply(mix, trim: nil, tap: nil, from_trim: false, session: nil)
           gain = trim || drive
           list = from_trim ? steps.drop_while { |st| st[0] != :trim } : steps
           list.reduce(mix) { |m, (method, args, kwargs)|
             case method
             when :trim
               m = tap.call(m) if tap
-              if ride
+              if gain.is_a?(Targeting::TrimCurve)
+                gain.apply(m, session: session || Session.current)
+              elsif ride
                 m.ride(target.lufs, start: gain, **ride)
               else
                 m * gain
@@ -106,12 +111,19 @@ module MB
           options.fetch(:percentile) { DEFINITIONS.dig(name, :defaults, :percentile) || BARS_PERCENTILE }
         end
 
+        # The share of the mix's section-to-section loudness differences
+        # +measure: :sections+ keeps (SECTION_ENERGY unless given).
+        def energy
+          options.fetch(:energy) { DEFINITIONS.dig(name, :defaults, :energy) || SECTION_ENERGY }.to_f
+        end
+
         # Words for what renders measure ("loudest 16 bars", "bars at the
         # 25th percentile"), or nil for :integrated.
         def measure_text
           case measure
           when :loudest then "loudest #{loudest_bars} bars"
           when :bars then "bars at the #{Mastering.ordinal((percentile * 100).round)} percentile"
+          when :sections then "each section, energy #{energy}"
           end
         end
 
@@ -189,7 +201,9 @@ module MB
                  'throws the stylus), gentle glue, and a split-band de-esser above 7 kHz (3:1, only on the loudest sibilance), since the RIAA pre-emphasis ' \
                  'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
                  'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
-                 'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).',
+                 'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).  ' \
+                 'clip: true rounds the peaks off with a soft clipper last (its limit 0.5 dB under the ceiling, the knee ' \
+                 '6 dB under that), so a 909 kick or a break reaches the target.',
           source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
                   'advice (mono lows, controlled sibilance, headroom), from memory',
         },
@@ -208,8 +222,13 @@ module MB
         },
       }.freeze
 
-      # Options every preset takes (see .preset).
-      OPTIONS = %i[lufs platform ceiling drive ride mono glue clip air de_ess measure loudest_bars percentile].freeze
+      # Options of .preset: every preset takes COMMON_OPTIONS, and some
+      # their own (PRESET_OPTIONS); an option a preset would ignore raises
+      # (decks-1, 2026-10-22; Nev's N14: `master(:vinyl, clip: true)` was
+      # accepted and did nothing).
+      COMMON_OPTIONS = %i[lufs platform ceiling drive ride mono glue measure loudest_bars percentile energy].freeze
+      PRESET_OPTIONS = { club: %i[clip air], vinyl: %i[clip de_ess] }.freeze
+      OPTIONS = (COMMON_OPTIONS + PRESET_OPTIONS.values.flatten).uniq.freeze
 
       # What a render's target measures (+measure:+): the song's integrated
       # loudness, or that of its loudest +loudest_bars:+ bars (windows
@@ -228,7 +247,25 @@ module MB
       # limits, the drops then gain less than the breakdown, so the spread
       # between them closes (Tunnel Vision on :hot: the breakdown 1.8 LU
       # under the drops instead of 3.0).
-      MEASURES = %i[integrated loudest bars].freeze
+      #
+      # :sections (decks-1, 2026-10-22; panel round 2 K22, the maintainer's
+      # Tunnel Vision notes): each pass of the song form's sections gets its
+      # own trim, ramped at section starts (Targeting.solve_sections): the
+      # loudest section reaches the target, and every other one the target
+      # plus +energy:+ (0..1, default 1) times its distance under the
+      # loudest in the mix, so energy 1 keeps the mix's curve (quieter
+      # sections come up by trim, never by the clipper) and less narrows it
+      # (0.4: a breakdown 6 LU under the drop in the mix lands 2.4 LU under).
+      MEASURES = %i[integrated loudest bars sections].freeze
+
+      # The default +energy:+ of +measure: :sections+.
+      SECTION_ENERGY = 1.0
+
+      # :vinyl's clip: true: the clipper's limit sits this many dB under
+      # the ceiling (true peaks between samples), and its knee starts at
+      # this share of the limit (-6 dB).
+      VINYL_CLIP_MARGIN = 0.5
+      VINYL_CLIP_KNEE = 0.5
 
       # The default +percentile:+ of +measure: :bars+.
       BARS_PERCENTILE = 0.25
@@ -274,7 +311,9 @@ module MB
         #   trim toward the target live;
         # - +mono:+ Hz below which the low end is mono, or false;
         # - +glue:+ false to skip the glue compressor;
-        # - +clip:+ (:club) false to skip the soft clipper;
+        # - +clip:+ (:club) true for a gentle soft clipper in place of the
+        #   fast limiter; (:vinyl) true for a soft clipper after the trim, so
+        #   peaky mixes reach the target with their peaks rounded off;
         # - +de_ess:+ (:vinyl) the de-esser's crossover (Hz), or false;
         # - +measure:+ :loudest to reach the target with the loudest
         #   +loudest_bars:+ bars (LOUDEST_BARS by default; windows on bar
@@ -283,7 +322,9 @@ module MB
         #   with the level +percentile:+ of the bars sit at or under (see
         #   MEASURES);
         # - +loudest_bars:+ the window of measure: :loudest, in bars;
-        # - +percentile:+ (0..1) the share of measure: :bars.
+        # - +percentile:+ (0..1) the share of measure: :bars;
+        # - +energy:+ (0..1) the share of the mix's section-to-section
+        #   loudness differences measure: :sections keeps (default 1).
         def preset(name, **options)
           if name.is_a?(Preset)
             return name if options.empty?
@@ -295,9 +336,15 @@ module MB
           unless definition
             raise ArgumentError, "Unknown mastering preset #{name.inspect} (presets: #{names.map(&:inspect).join(', ')})#{Form.suggest(key, names)}"
           end
+          accepted = COMMON_OPTIONS + PRESET_OPTIONS.fetch(key, [])
           unknown = options.keys - OPTIONS
           unless unknown.empty?
-            raise ArgumentError, "Unknown option#{unknown.length > 1 ? 's' : ''} #{unknown.map(&:inspect).join(', ')} for master #{key.inspect} (options: #{OPTIONS.join(', ')})#{Form.suggest(unknown[0], OPTIONS)}"
+            raise ArgumentError, "Unknown option#{unknown.length > 1 ? 's' : ''} #{unknown.map(&:inspect).join(', ')} for master #{key.inspect} (options: #{accepted.join(', ')})#{Form.suggest(unknown[0], accepted)}"
+          end
+          ignored = options.keys - accepted
+          unless ignored.empty?
+            owners = ignored.map { |o| "#{o}: (an option of #{PRESET_OPTIONS.select { |_, v| v.include?(o) }.keys.map(&:inspect).join(' and ')})" }
+            raise ArgumentError, "master #{key.inspect} would ignore #{owners.join(', ')} (its options: #{accepted.join(', ')})"
           end
           if options.key?(:platform) && options.key?(:lufs)
             raise ArgumentError, 'Pass lufs: or platform:, not both'
@@ -310,6 +357,19 @@ module MB
           end
           if options.key?(:percentile) && !(options[:percentile].is_a?(Numeric) && options[:percentile] >= 0 && options[:percentile] <= 1)
             raise ArgumentError, "percentile: is a share of bars from 0 to 1, e.g. 0.25 (got #{options[:percentile].inspect})"
+          end
+          measure = options.fetch(:measure) { definition[:defaults][:measure] || :integrated }
+          if options.key?(:loudest_bars) && measure != :loudest
+            raise ArgumentError, "loudest_bars: goes with measure: :loudest (master #{key.inspect} measures #{measure.inspect}); it would do nothing"
+          end
+          if options.key?(:percentile) && measure != :bars
+            raise ArgumentError, "percentile: goes with measure: :bars (master #{key.inspect} measures #{measure.inspect}); it would do nothing"
+          end
+          if options.key?(:energy)
+            unless options[:energy].is_a?(Numeric) && options[:energy] >= 0 && options[:energy] <= 1
+              raise ArgumentError, "energy: is the share of the mix's section-to-section loudness kept, 0 to 1 (got #{options[:energy].inspect})"
+            end
+            raise ArgumentError, "energy: goes with measure: :sections (master #{key.inspect} measures #{measure.inspect}); it would do nothing" if measure != :sections
           end
 
           o = definition[:defaults].merge(options)
@@ -506,6 +566,16 @@ module MB
             # first 5.5 kHz / -8 dB / 4:1 / 60 ms took 2.4 dB off the
             # treble's share of Memory Card, this 0.4 dB)
             steps << [:de_ess, [o[:de_ess]], { threshold: (target.lufs - 4).db, ratio: 3, knee: 6, attack: 0.001, release: 0.04 }]
+          end
+          # clip: true (decks-1, 2026-10-22; panel round 2 M9/N12: a 909
+          # kick or a break held the trim at the ceiling, -18 LUFS for a
+          # -14 target): a soft clipper last, its knee 6 dB under its limit
+          # and the limit 0.5 dB under the ceiling (true peaks between
+          # samples), so the trim can reach the target with the kick's
+          # peaks rounded off instead of holding the whole cut down
+          if o[:clip]
+            limit = (ceiling.db_value - VINYL_CLIP_MARGIN).db.to_f
+            steps << [:softclip, [limit * VINYL_CLIP_KNEE, limit], {}]
           end
           steps
         end

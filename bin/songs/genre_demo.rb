@@ -19,6 +19,7 @@
 #     bin/songs/genre_demo.rb -G funk -s 30 --show    # half a minute, printing the template first
 #     bin/songs/genre_demo.rb -G dnb --bpm 170        # another tempo
 #     bin/songs/genre_demo.rb -G techno -M club t.flac  # the club mastering preset instead of the template's chain
+#     bin/songs/genre_demo.rb -G house -M vinyl --clip h.flac  # vinyl, its soft clipper rounding off the 909 kick
 #     bin/songs/genre_demo.rb -G dnb -K pump.flac     # ducks keyed by the two-step :pump trigger track, not the kick
 #
 # Or in bin/sound.rb:
@@ -39,6 +40,7 @@ module MB::Sound
       seconds: [60.0, Float, '-s', 'About how long the short form plays (seconds)', 5.0..3600.0],
       show: [false, 'Print the template as Ruby first'],
       mastering: [:template, Symbol, '-M', "Master with a mastering preset instead of the template's chain (the template's mono_below and loudness range stay)", [:template, *Mastering.names]],
+      clip: [false, "With -M club or vinyl: the preset's clip: true (club: a soft clipper in place of the fast limiter; vinyl: a soft clipper after the trim, so peaky mixes reach the target)"],
       pump: [false, '-K', "Key the ducks from the template's :pump line, a trigger track nobody hears (dnb's ghost-kick pump), instead of its sidechain"],
     ) { |p|
       t = genre(p.genre)
@@ -48,8 +50,10 @@ module MB::Sound
       end
       unless p.mastering == :template
         preset = p.mastering
-        t = t.with { master nil; master preset }
+        options = p.clip ? { clip: true } : {}
+        t = t.with { master nil; master preset, **options }
       end
+      raise ArgumentError, '--clip goes with -M club or -M vinyl' if p.clip && !%i[club vinyl].include?(p.mastering)
       t = t.short(p.seconds) unless p.full
       puts t.to_ruby if p.show
       puts t.summary

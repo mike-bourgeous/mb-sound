@@ -141,9 +141,8 @@ module MB
           @origin = 0
           @rate = session.output.sample_rate.to_f
           @tracks = {}
-          @boundaries = [] # [frame, label]
-          @seen = nil
-          @passes = Hash.new(0)
+          @marks = SectionMarks.new(session)
+          @boundaries = @marks.boundaries # [frame, label]
           @section_meters = {}
           @mix = nil
           @mix_section = nil
@@ -222,30 +221,8 @@ module MB
           [data.map { |d| d[skip..] }, @origin]
         end
 
-        # Looks for a new section pass of the song form (known half a bar
-        # before it starts) and notes the frame where it starts in the span
-        # at +frame+ (the frame holding its position, where launches land).
         def note_sections(frame, count)
-          pb = @session.arrangement.playback
-          return unless pb && pb.section && pb.pass_start
-
-          key = [pb.section, pb.pass_start]
-          if key != @seen
-            @seen = key
-            @pending = key
-          end
-          return unless @pending
-
-          name, pos = @pending
-          t = @session.transport
-          per_sample = t.whole_notes_per_second / @rate.to_r
-          k = ((pos - t.position) / per_sample).floor
-          return if k >= count # (not in this span yet)
-
-          @pending = nil
-          @passes[name] += 1
-          label = @passes[name] == 1 ? name.to_s : "#{name} #{@passes[name]}"
-          @boundaries << [frame + [k, 0].max, label]
+          @marks.note(frame, count)
         end
 
         # Yields the pieces of +data+ (at +frame+) in each section pass,
@@ -268,6 +245,53 @@ module MB
 
         def section_meter(idx, name, channels)
           (@section_meters[idx] ||= {})[name] ||= Loudness::Analyzer.new(channels: channels, sample_rate: @rate, true_peak: false)
+        end
+      end
+
+      # The frames where each pass of the song form's sections starts in a
+      # render (a MixReport, a targeted master's per-section trims; see
+      # Mastering::Targeting), from the Session's form playback.
+      class SectionMarks
+        # [session frame, label] per section pass, in order ("drop",
+        # "drop 2" for its second pass, ...).
+        attr_reader :boundaries
+
+        def initialize(session)
+          @session = session
+          @rate = session.output.sample_rate.to_r
+          @boundaries = []
+          @seen = nil
+          @pending = nil
+          @passes = Hash.new(0)
+        end
+
+        # Looks for a new section pass of the song form (known half a bar
+        # before it starts) and notes the frame where it starts in the span
+        # at +frame+ of +count+ frames (the frame holding its position,
+        # where launches land).  +pos+ is the span's first position (the
+        # transport's, unless it has moved on: master chains render after
+        # the transport advanced).
+        def note(frame, count, pos: nil)
+          pb = @session.arrangement.playback
+          return unless pb && pb.section && pb.pass_start
+
+          key = [pb.section, pb.pass_start]
+          if key != @seen
+            @seen = key
+            @pending = key
+          end
+          return unless @pending
+
+          name, start = @pending
+          t = @session.transport
+          per_sample = t.whole_notes_per_second / @rate
+          k = ((start - (pos || t.position)) / per_sample).floor
+          return if k >= count # (not in this span yet)
+
+          @pending = nil
+          @passes[name] += 1
+          label = @passes[name] == 1 ? name.to_s : "#{name} #{@passes[name]}"
+          @boundaries << [frame + [k, 0].max, label]
         end
       end
 

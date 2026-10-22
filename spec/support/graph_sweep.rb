@@ -403,6 +403,7 @@ module GraphSweep
     'MB::Sound::DeviceInput' => 'sound card input; device_input_spec runs it',
     'MB::Sound::Mastering::Targeting::Tap' => "records a render's first pass at a preset's trim; mastering_spec's targeted renders run it",
     'MB::Sound::Mastering::Targeting::Tap::Output' => 'an output of Mastering::Targeting::Tap (see there)',
+    'MB::Sound::Mastering::Targeting::TrimCurve::Node' => "a measure: :sections render's per-section trim (reads Session#frame); mastering_measure_spec's sections render runs it",
     'MB::Sound::FFMPEGInput' => 'file input through ffmpeg (not traced by Valgrind)',
     'MB::Sound::IOInput' => 'base of FFMPEGInput',
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',

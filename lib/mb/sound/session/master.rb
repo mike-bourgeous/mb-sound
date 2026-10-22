@@ -464,7 +464,10 @@ module MB
           data = master_chain_output(c, input, count)
 
           ramp = master_ramp(c, count, c.ramp_from || 0)
-          c.capture&.add(@frame, input, data, ramp)
+          if c.capture
+            c.capture.add(@frame, input, data, ramp)
+            @mastering_capture&.note_sections(self, @frame, count, @span.pos)
+          end
           out.each_with_index do |o, idx|
             d = data[idx]
             d = d * ramp if ramp
