@@ -39,6 +39,7 @@ module MB
           @generations = nil
           @active = false
           @guarded = false
+          @windows = []
           @blocks = 0
         end
 
@@ -91,14 +92,22 @@ module MB
         def window(offset, count)
           return yield if !@active || @buffers.empty?
 
-          full = @buffers
+          outer = @buffers
           views = {}.compare_by_identity
-          full.each { |src, buf| views[src] = buf && (offset == 0 && buf.length == count ? buf : buf[offset...(offset + count)].freeze) }
+          outer.each { |src, buf| views[src] = buf && (offset == 0 && buf.length == count ? buf : buf[offset...(offset + count)].freeze) }
           @buffers = views
+          @windows << [outer, views]
+          # Replays #guard! left on branches hold the outer buffers: the
+          # lane reads this window's part of them instead (protos-1: a lane
+          # woken mid-block read a whole block's replay for its 600-sample
+          # piece)
+          swap_replays(outer, views) if @guarded
           begin
             yield
           ensure
-            @buffers = full
+            swap_replays(views, outer) if @guarded
+            @windows.pop
+            @buffers = outer
           end
         end
 
@@ -122,9 +131,25 @@ module MB
           return unless @active && !@guarded
 
           @guarded = true
+          # (whole-block buffers, so lanes read after this window get theirs;
+          # the open windows show their parts, see #window)
+          base = @windows.empty? ? @buffers : @windows[0][0]
           @sources.each_with_index do |src, i|
-            buf = @buffers[src]
+            buf = base[src]
             @branches[i].each { |b| b.replay = buf }
+          end
+          @windows.each { |outer, views| swap_replays(outer, views) }
+        end
+
+        # Replaces branch replays that are buffers of +from+ (source =>
+        # buffer) with the same source's buffer in +to+.
+        def swap_replays(from, to)
+          @sources.each_with_index do |src, i|
+            f = from[src]
+            next if f.nil?
+
+            t = to[src]
+            @branches[i].each { |b| b.replay = t if b.replay.equal?(f) }
           end
         end
 
