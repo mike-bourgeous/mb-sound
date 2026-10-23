@@ -37,8 +37,14 @@ module MB
         # The MIDI channel (0-based) given to the clip's events.
         attr_reader :channel
 
-        # The current clip position in whole notes (a Rational).
-        attr_reader :clip_position
+        # Read spans the clip's edges can't land in take a quiet path:
+        # integer frame counts against the next possible edge's frame
+        # (see #read_events).  Off only for specs comparing it with the
+        # full read (MIDI::ClipSource.quiet_reads = false).
+        class << self
+          attr_accessor :quiet_reads
+        end
+        self.quiet_reads = true
 
         def initialize(clip, channel: 0, transport: nil)
           raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Sequence::Clip)
@@ -78,6 +84,18 @@ module MB
           @clock_origin = nil
           @clock_scale = nil
           @clock_graph = nil
+          @quiet_frame = nil  # (quiet reads; see #read_events)
+          @quiet_rate = nil
+          @quiet_wnps = nil
+          @quiet_clip = nil
+          @lazy_from = nil
+        end
+
+        # The current clip position in whole notes (a Rational).
+        def clip_position
+          return @clip_position unless @lazy_from
+          # Quiet reads since stream time @lazy_from moved it at one tempo
+          @clip_position + (position - @lazy_from) * @quiet_wnps
         end
 
         # Puts the clip playing now on +clock+ unless it has a clock of its own (see
@@ -207,14 +225,15 @@ module MB
 
         # True once a non-looping clip has played to its end.
         def ended?
-          !@clip.looping? && @clip_position > @clip.length
+          # (quiet reads of a one-shot clip stop at its end: see #edges)
+          !@clip.looping? && !@lazy_from && @clip_position > @clip.length
         end
 
         # The stream time at which a non-looping clip ends (estimated at the
         # current tempo), or nil for looping clips.
         def music_end
           return nil if @clip.looping?
-          position + (@clip.length - @clip_position) / clip_wnps
+          position + (@clip.length - clip_position) / clip_wnps
         end
 
         def to_s
@@ -231,14 +250,15 @@ module MB
         # The clip event at the current clip position as a note-on (see
         # Source#chase).
         def chase_event
-          note_event(@clip.event_at(@clip_position), position)
+          note_event(@clip.event_at(clip_position), position)
         end
 
         # True if the clip event at the current clip position starts right
         # there (see Source::Chase#starts).
         def chase_starts_note?
-          e = @clip.event_at(@clip_position) or return false
-          phase = @clip.looping? && @clip.length > 0 ? @clip_position % @clip.length : @clip_position
+          pos = clip_position
+          e = @clip.event_at(pos) or return false
+          phase = @clip.looping? && @clip.length > 0 ? pos % @clip.length : pos
           e.start == phase
         end
 
@@ -247,12 +267,13 @@ module MB
         # +previous+ and the stream seconds since it started at the current
         # tempo as +elapsed+.
         def chase_at(time)
-          e = @clip.event_at(@clip_position) or return nil
+          pos = clip_position
+          e = @clip.event_at(pos) or return nil
           looping = @clip.looping? && @clip.length > 0
-          phase = looping ? @clip_position % @clip.length : @clip_position
+          phase = looping ? pos % @clip.length : pos
           since = phase - e.start
           since += @clip.length if since < 0 && looping
-          prev = @clip.event_before(@clip_position)
+          prev = @clip.event_before(pos)
           Chase.new(
             generation: @generation, time: time, event: note_event(e, time), starts: since == 0,
             previous: note_event(prev, time), elapsed: since / transport.whole_notes_per_second
@@ -266,7 +287,7 @@ module MB
 
         # Seeks to +time+ seconds into the clip at the current tempo.
         def seek_to(time)
-          @clip_position = time * transport.whole_notes_per_second
+          set_clip_position(time * transport.whole_notes_per_second)
         end
 
         # Starts at timeline position +time+ for a graph launched at
@@ -289,7 +310,7 @@ module MB
 
           @origin = clip_origin(@clip, @swap_anchor || timeline_launch || origin, origin)
           position = time - @origin
-          @clip_position = wrap_position(position)
+          set_clip_position(wrap_position(position))
           # Keep clip position + origin on the timeline when the position
           # wrapped (fill lookups and swap times add them; until omnibus5 a
           # launch a fraction of a sample after its first sample counted a
@@ -321,7 +342,35 @@ module MB
           position < 0 && @clip.launch_aligned? ? position % @clip.length : position
         end
 
+        # Sets the clip position (ending quiet reads; see #read_events).
+        def set_clip_position(pos)
+          @clip_position = pos
+          @lazy_from = nil
+          @quiet_frame = nil
+        end
+
         def read_events(from, to)
+          # Quiet reads: a read ending at or before the frame of the next
+          # possible edge (see #arm_quiet) returns nothing after comparing
+          # integer frames of its end (at the rate of the stream time's
+          # grid); the clip position catches up when it's next needed, at
+          # the same tempo.  A new tempo or clip, a jump, or a pending swap
+          # takes the full read.
+          if (q = @quiet_frame) && !@early && @pending_swap.nil? && @clip.equal?(@quiet_clip) &&
+              transport.whole_notes_per_second.equal?(@quiet_wnps)
+            r = @quiet_rate
+            d = to.denominator
+            if r % d == 0 && to.numerator * (r / d) <= q
+              @lazy_from ||= from
+              return Stream::NO_EVENTS
+            end
+          end
+          if @lazy_from
+            @clip_position += (from - @lazy_from) * @quiet_wnps
+            @lazy_from = nil
+          end
+          @quiet_frame = nil
+
           clock_resume(from) if @clip.clocking && @clock_anchor.nil?
           swap = @pending_swap
 
@@ -384,7 +433,7 @@ module MB
             @clock = nil
             @clock_anchor = nil
             @origin = clip_origin(clip, swap_time, swap_time)
-            @clip_position = swap_time - @origin
+            set_clip_position(swap_time - @origin)
           end
         end
 
@@ -401,6 +450,7 @@ module MB
         # steps at or after stream time +from+ (all if nil) are dropped, and reading
         # ahead starts again from the next read's position.
         def reset_flams(from = nil)
+          @quiet_frame = nil # (flams read ahead; see #arm_quiet)
           @flam_start = nil
           @flam_to = nil
           @flam_queue = from ? (@flam_queue || []).select { |_e, step| step < from } : []
@@ -491,7 +541,7 @@ module MB
               end
           end
 
-          @clip_position = c.position(rf, ctx) * @clock_scale - @clock_origin
+          set_clip_position(c.position(rf, ctx) * @clock_scale - @clock_origin)
           @clip_position %= @clip.length if @clip.looping? && @clip_position < 0 && @clip.length > 0
         end
 
@@ -548,11 +598,43 @@ module MB
           @clock.pieces(a, b, ctx).each do |r0, r1, pos0, step|
             t0 = r0 == a ? from.to_r : clock_stream_of(r0)
             t1 = r1 == b ? to.to_r : clock_stream_of(r1)
-            @clip_position = pos0 * @clock_scale - @clock_origin
+            set_clip_position(pos0 * @clock_scale - @clock_origin)
             @clip_position %= @clip.length if @clip.looping? && @clip_position < 0 && @clip.length > 0
             out.concat(edges(t0, t1, step * @clock_scale * rate))
           end
           out
+        end
+
+        # The sample rate whose frames quiet reads count (with the
+        # denominator of the read's end time, so reads on any rate's grid
+        # count whole frames; see #arm_quiet).
+        QUIET_BASE_RATE = 48000
+
+        # Arms quiet reads (see #read_events) after a full read ending at
+        # stream time +to+, clip position +wn+, at +wnps+ whole notes per
+        # second: finds the last frame, at a rate r on whose grid +to+
+        # lies, that a read can end on before the next possible edge or
+        # loop cycle (see Sequence::Clip#edge_horizon).  A read ending on
+        # frame F covers stream times before F / r, so an edge at time t
+        # is still ahead while F <= floor(t * r) (the frame it lands on,
+        # the same rule as Notes' sample offsets), and a cycle starting at
+        # time c is still unread while F <= ceil(c * r) - 1.
+        def arm_quiet(to, wn, wnps)
+          return unless wnps > 0
+          edge, cap = @clip.edge_horizon(wn)
+          return if edge.nil? && cap.nil?
+
+          r = QUIET_BASE_RATE.lcm(to.denominator)
+          q = edge && ((to + (edge - wn) / wnps) * r).floor
+          if cap
+            c = ((to + (cap - wn) / wnps) * r).ceil - 1
+            q = c if q.nil? || c < q
+          end
+
+          @quiet_frame = q
+          @quiet_rate = r
+          @quiet_wnps = wnps
+          @quiet_clip = @clip
         end
 
         # Converts the clip's edges for stream times [from, to) to Events and
@@ -574,6 +656,7 @@ module MB
           start = @flam_lead && @flam_start
 
           found = @clip.edges(wn_from, wn_to, early: early, fills: fills)
+          arm_quiet(to, wn_to, wnps) if @flam_lead.nil? && @clock.nil? && self.class.quiet_reads
           out = found.empty? ? Stream::NO_EVENTS : found.filter_map { |time, type, event, cycle|
             t = from + (time - wn_from) / wnps
             if type == :on

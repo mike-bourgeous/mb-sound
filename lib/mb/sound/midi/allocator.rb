@@ -340,6 +340,7 @@ module MB
 
           def read_events(from, to)
             @allocator.advance(to)
+            return Stream::NO_EVENTS if @queue.empty?
             count = @queue.bsearch_index { |e| e.time >= to } || @queue.length
             return Stream::NO_EVENTS if count == 0
 
@@ -572,7 +573,7 @@ module MB
         # Reads the input up to +to+ seconds and sends its events to the
         # lanes.  Called by lanes when they read.
         def advance(to)
-          return if to <= @read_to
+          return if to.equal?(@read_to) || to <= @read_to
 
           events = @input.events(@read_to, to)
           @read_to = to

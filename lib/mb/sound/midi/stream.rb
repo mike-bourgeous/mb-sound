@@ -186,7 +186,7 @@ module MB
           # Set while reading (here so every stream has one instance
           # variable layout; see GraphNode::IvarPreset)
           @last_from = @last_to = @last_events = nil
-          @advance_from = @advance_to = @advance_count = @advance_rate = @advance_step = nil
+          @advance_from = @advance_to = @advance_count = @advance_rate = @advance_step = @advance_forward = nil
           @graph_node_name = nil
           # Set by #spy
           @spies = nil
@@ -423,10 +423,14 @@ module MB
         # buffer, so the last result is shared instead of each reader
         # allocating its own Rational.
         def advance(time, count, sample_rate)
+          # (identity first: readers pass back the time this returned)
+          return @advance_to if time.equal?(@advance_from) && count.equal?(@advance_count) && sample_rate.equal?(@advance_rate)
+
           if count != @advance_count || sample_rate != @advance_rate
             @advance_count = count
             @advance_rate = sample_rate
             @advance_step = Rational(count) / sample_rate.to_r
+            @advance_forward = count >= 0
             @advance_from = nil
           end
 
@@ -440,31 +444,42 @@ module MB
 
         # Used by Reader#events.
         def read_for(reader, from, to)
-          raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
-          raise ArgumentError, "MIDI reader already read up to #{reader.cursor} (asked from #{from})" if from < reader.cursor
+          # A reader reading on from its cursor by the step #advance just
+          # gave (the usual read) passes the checks without comparing times
+          unless from.equal?(reader.cursor) && from.equal?(@advance_from) && to.equal?(@advance_to) && @advance_forward
+            raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
+            raise ArgumentError, "MIDI reader already read up to #{reader.cursor} (asked from #{from})" if from < reader.cursor
+          end
 
           # Readers asking for the range just read (e.g. the nodes of one
           # Notes instance, each reading the same buffer) share its events.
           # Still valid: later fills only add events at or after +to+, and
           # drops only remove events before the slowest reader's cursor.
-          if @last_events && @last_from == from && @last_to == to
+          if @last_events && ((from.equal?(@last_from) && to.equal?(@last_to)) || (@last_from == from && @last_to == to))
             reader.cursor = to
             return @last_events
           end
 
           fill(to)
 
-          start = @log.bsearch_index { |e| e.time >= from } || @log.length
-          stop = @log.bsearch_index { |e| e.time >= to } || @log.length
-          events = start == stop ? NO_EVENTS : @log[start...stop].freeze
+          log = @log
+          if log.empty? || log[0].time >= to
+            # Nothing logged before +to+, so nothing to read or drop (no
+            # reader is past it; drop's reader scan allocates)
+            events = NO_EVENTS
+            past = false
+          else
+            start = log.bsearch_index { |e| e.time >= from } || log.length
+            stop = log.bsearch_index { |e| e.time >= to } || log.length
+            events = start == stop ? NO_EVENTS : log[start...stop].freeze
+            past = true
+          end
           @last_from = from
           @last_to = to
           @last_events = events
 
           reader.cursor = to
-          # Nothing to drop while every logged event is at or after +to+ (no
-          # reader is past it); drop's reader scan allocates
-          drop unless @log.empty? || @log[0].time >= to
+          drop if past
           events
         end
 
@@ -483,7 +498,7 @@ module MB
 
         # Reads the source up to +to+ seconds.
         def fill(to)
-          return if to <= @read_to
+          return if to.equal?(@read_to) || to <= @read_to
 
           from = @read_to
           events = @source.read(from, to)

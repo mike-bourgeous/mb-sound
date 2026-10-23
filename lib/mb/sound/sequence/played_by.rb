@@ -53,7 +53,7 @@ module MB
         end
 
         # Methods never wrapped by .carry! (readers, and the methods above).
-        SKIP = [:instrument, :played_by, :source, :lineage, :named, :name, :each, :events, :rows, :[], :steps].freeze
+        SKIP = [:instrument, :played_by, :source, :lineage, :named, :name, :each, :events, :rows, :[], :steps, :edges, :edge_horizon].freeze
 
         # Wraps the public methods of +klass+ that may return a clip or grid
         # so their results keep this one's #instrument (see the module

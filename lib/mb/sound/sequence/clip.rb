@@ -685,6 +685,58 @@ module MB
         # What #edges returns when nothing lands in a span (frozen).
         NO_EDGES = [].freeze
 
+        # How far #edges can be sure nothing lands after clip position
+        # +pos+ (whole notes), for MIDI::ClipSource's quiet reads: returns
+        # [edge, cycle_start], where +edge+ is the earliest clip position at
+        # or after +pos+ where #edges could return an edge (a lower bound:
+        # chance, conditions, and fills may drop it; a one-shot clip's
+        # length counts as one, where it ends), or nil if none can come
+        # before +cycle_start+, the start of the loop cycle after +pos+'s
+        # (nil for a one-shot clip), where #edges first reads the next
+        # cycles' notes.  So #edges(pos, to) is empty for every +to+ up to
+        # +edge+ that is before +cycle_start+, and reads no cycle that
+        # #edges(..., pos) didn't.
+        #
+        # Returns nil if that can't be told without reading a cycle #edges
+        # hasn't read (call it right after #edges(..., pos)), or once a
+        # one-shot clip has played past its end.
+        def edge_horizon(pos)
+          if @loop
+            cycle = cycle_of(pos)
+            first = MB::M.max(cycle - @lookback, 0)
+            last = cycle + @lookahead
+            cap = (cycle + 1) * @length
+            best = nil
+          else
+            return nil if pos > @length
+            first = last = 0
+            cap = nil
+            best = @length
+          end
+
+          while first <= last
+            table = @edge_tables[first] or return nil
+            if table.hi >= pos
+              ons = table.ons
+              offs = table.offs
+              i = 0
+              n = ons.length
+              while i < n
+                on = ons[i]
+                on = 0r if first == 0 && on < 0 # (cycle 0's early notes play at 0)
+                best = on if on >= pos && (best.nil? || on < best)
+                off = offs[i]
+                best = off if off >= pos && (best.nil? || off < best)
+                i += 1
+              end
+            end
+            first += 1
+          end
+
+          best = nil if best && cap && best >= cap
+          [best, cap].freeze
+        end
+
         # A loop cycle's note times for #edges: +offset+ (the cycle's start),
         # its +events+ (#events_for), each one's absolute +ons+ and +offs+
         # (Rational whole notes), and the earliest on (+lo+) and latest off
