@@ -90,8 +90,9 @@ module MB
           lines << @mastering.to_s
         elsif @codec_peaks
           lines << ''
-          lines << "Decoded true peaks: #{@codec_peaks.map { |c, tp| format('%s %.2f', c, tp) }.join(', ')} dBTP"
-          overs = @codec_peaks.select { |_c, tp| tp > Mastering::Targeting::CODEC_LIMIT }
+          lines << "Decoded true peaks: #{Mastering::CodecPeaks.text(@codec_peaks)} dBTP"
+          Mastering::CodecPeaks.notes(@codec_peaks).each { |n| lines << "  #{n}" }
+          overs = Mastering::CodecPeaks.overs(@codec_peaks, Mastering::Targeting::CODEC_LIMIT)
           unless overs.empty?
             lines << format('  over %.1f dBTP: players clip them; lower the true-peak ceiling by about %.1f dB', Mastering::Targeting::CODEC_LIMIT, overs.values.max - Mastering::Targeting::CODEC_LIMIT + 0.1)
           end

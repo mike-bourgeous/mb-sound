@@ -363,7 +363,11 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
       MB::Sound::Sample::Riff.write(path, data, **chunks)
     end
 
-    before { @dir = tmp_path('lib') }
+    # Three fixed folders, so the names LoopInfo reads (the file and 3
+    # folders up) never reach the random temp directory names, whose
+    # suffixes once spelled the drum word "bd" ("folder 'bd'": a
+    # one-shot) and could hold a bare 60-200 tempo
+    before { @dir = tmp_path('lib/lib/lib') }
 
     def beats(n, bpm) = n * 60.0 / bpm
 
