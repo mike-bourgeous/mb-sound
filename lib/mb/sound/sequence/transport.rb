@@ -89,8 +89,7 @@ module MB
 
         # The Meter in effect at timeline position +pos+.
         def meter_at(pos)
-          pos = pos.to_r
-          @meters.reverse_each.find { |m| m.pos <= pos } || @meters.first
+          @meters[meter_index(pos.to_r)]
         end
 
         # The bar position of timeline position +pos+, counting from 1 (a
@@ -190,6 +189,21 @@ module MB
         def advance(whole_notes)
           @position += whole_notes
         end
+
+        # Moves the timeline forward by +whole_notes+, the span from +from+
+        # to +to+ that Session rendered: to +to+ itself while the position
+        # is still +from+ (the same value as #advance, without adding).
+        def advance_span(from, to, whole_notes)
+          @position = @position.equal?(from) ? to : @position + whole_notes
+        end
+
+        # The index in @meters of the Meter in effect at +pos+ (a Rational).
+        def meter_index(pos)
+          i = @meters.length - 1
+          i -= 1 while i > 0 && @meters[i].pos > pos
+          i
+        end
+        private :meter_index
 
         # Jumps the timeline to +whole_notes+ from the start.  Background
         # players jump with it on their next buffer.  See

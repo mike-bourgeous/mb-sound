@@ -296,6 +296,7 @@ module MB
       #                     (see SafetyLimiter; by default when +:realtime+).
       def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil, safety_limiter: nil)
         @transport = transport
+        @per_sample_cache = nil # (see #span_per_sample)
         @tuning = tuning
         self.master_gain = master_gain
         self.master_gain_post = master_gain_post
@@ -938,17 +939,21 @@ module MB
           while remaining > 0
             @scheduler.apply_timed_changes
             commit_due_seeks unless @changes.empty?
-            per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+            per_sample = span_per_sample
             # A take replay's lines run before the span whose time they were
             # typed in, like live lines typed between buffers, so a tempo
             # they set covers the whole span (see Scheduler::Entry#exact)
-            if @scheduler.dispatch_exact(@transport.position, @transport.position + remaining * per_sample)
+            from = @transport.position
+            to = from + remaining * per_sample
+            if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
-              per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+              per_sample = span_per_sample
+              to = nil
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
-            parts << render_span(n, per_sample)
+            # (the span's end, computed once when the span is the rest)
+            parts << render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
             remaining -= n
           end
           @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
@@ -975,9 +980,9 @@ module MB
       # blocks, changes landing in the span, players, and the master chain.
       # Advances the timeline and the frame counter.  Returns the mix.
       # Called with the render lock held.
-      def render_span(count, per_sample)
+      def render_span(count, per_sample, to = nil)
         from = @transport.position
-        to = from + count * per_sample
+        to ||= from + count * per_sample
         old_span = Thread.current[:mb_sound_span]
         @span.frame = @frame
         @span.pos = from
@@ -1041,8 +1046,11 @@ module MB
         read_kept_graphs(@frame + count)
 
         moving = playing || keep_time
-        @transport.advance(to - from) if moving
-        end_clock_span(count, to - from, moving)
+        if moving
+          whole_notes = to - from
+          @transport.advance_span(from, to, whole_notes)
+          end_clock_span(count, whole_notes, moving)
+        end
         # Pre-chain master gain (the default; see #master_gain_post?)
         # (in place on this span's own mix buffers when the kernel takes
         # them: the same float products as Numo's c * gain)
@@ -1067,6 +1075,17 @@ module MB
         Thread.current[:mb_sound_span] = old_span
       end
       private :render_span
+
+      # Whole notes per output sample at the transport's tempo (exact;
+      # kept until the tempo or the output rate changes).
+      def span_per_sample
+        wnps = @transport.whole_notes_per_second
+        rate = output.sample_rate
+        c = @per_sample_cache
+        return c[2] if c && c[0].equal?(wnps) && c[1] == rate
+        (@per_sample_cache = [wnps, rate, wnps / rate.to_r].freeze)[2]
+      end
+      private :span_per_sample
 
       # The span a Session is rendering on this thread (frame and timeline
       # position of its first sample, whole notes per sample, whether the
