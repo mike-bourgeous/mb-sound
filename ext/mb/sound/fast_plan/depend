@@ -3,3 +3,4 @@ plan_filters.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_sv
 plan_biquad.o: $(srcdir)/../include/mb_biquad.h $(srcdir)/plan_filters.h
 plan_wavetable.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_wavetable.h $(srcdir)/../include/mb_phase.h $(srcdir)/plan_filters.h
 plan_dynamics.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_dynamics.h $(srcdir)/plan_filters.h
+plan_lofi.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_decimate.h $(srcdir)/plan_filters.h
