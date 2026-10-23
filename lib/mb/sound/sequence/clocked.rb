@@ -109,7 +109,7 @@ module MB
         end
 
         # Methods never wrapped by .carry!.
-        SKIP = [:clocking, :clocked, :clock, :clocked_at, :at, :over, :%, :named, :name, :each, :events, :rows, :[], :steps, :source, :lineage].freeze
+        SKIP = [:clocking, :clocked, :clock, :clocked_at, :at, :over, :%, :named, :name, :each, :events, :rows, :[], :steps, :source, :lineage, :edges, :edge_horizon].freeze
 
         # Makes every public method of +klass+ returning a Clip keep this
         # clip's clock (unless the result has its own), like PlayedBy.
