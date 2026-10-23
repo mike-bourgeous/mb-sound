@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-18",
+  "generated": "2026-10-23",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -13,11 +13,13 @@
     },
     "spec/ext/mb/sound/fast_arithmetic_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.pan",
@@ -424,6 +426,9 @@
       ]
     },
     "spec/lib/mb/sound/device_output_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.add_at"
+      ],
       "fast_audio": [
         "FastAudio.devices",
         "FastAudio::Playback#backend",
@@ -452,6 +457,7 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
       "fast_envelope": [
@@ -460,6 +466,7 @@
     },
     "spec/lib/mb/sound/envelope_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
       "fast_envelope": [
@@ -578,13 +585,12 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
     "spec/lib/mb/sound/granular_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix"
       ],
@@ -613,6 +619,7 @@
     },
     "spec/lib/mb/sound/graph_node/decimator_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
       "fast_lofi": [
@@ -628,8 +635,10 @@
     },
     "spec/lib/mb/sound/graph_node/dynamics_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -637,6 +646,9 @@
         "FastDynamics.compand",
         "FastDynamics.crossover",
         "FastDynamics.limit"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
       ],
       "fast_loudness": [
         "FastLoudness.true_peak"
@@ -647,11 +659,16 @@
       "fast_sound": [
         "FastSound.matrix_mix",
         "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/feedback_loop_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product",
@@ -756,7 +773,8 @@
     "spec/lib/mb/sound/graph_node/resample_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
-        "FastArithmetic.circular_write"
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy"
       ],
       "fast_filter": [
         "FastFilter.svf"
@@ -845,11 +863,13 @@
     },
     "spec/lib/mb/sound/graph_sweep_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.pan",
@@ -1073,6 +1093,8 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1103,6 +1125,7 @@
     },
     "spec/lib/mb/sound/notes_smoothing_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -1136,6 +1159,39 @@
         "FastSound.number_to_freq",
         "FastSound.oscillate",
         "FastSound.smoothstep_buf"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/channel_mixer_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.pan",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.four_pole"
+      ],
+      "fast_plan": [
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_recipe": [
+        "FastRecipe.frame_binding"
+      ],
+      "fast_sound": [
+        "FastSound.matrix_mix",
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
@@ -1190,15 +1246,18 @@
     },
     "spec/lib/mb/sound/plan/installation_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
         "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
-        "FastArithmetic.product"
+        "FastArithmetic.product",
+        "FastArithmetic.scale"
       ],
       "fast_clip": [
         "FastClip.shape"
@@ -1223,9 +1282,11 @@
     },
     "spec/lib/mb/sound/plan/lane_group_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
@@ -1271,9 +1332,46 @@
         "FastSynth.oscillate_bl"
       ]
     },
+    "spec/lib/mb/sound/plan/lofi_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.four_pole"
+      ],
+      "fast_lofi": [
+        "FastLofi.decimate"
+      ],
+      "fast_plan": [
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.oscillate",
+        "FastWavetable.shape"
+      ]
+    },
     "spec/lib/mb/sound/plan/loop_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.divide",
+        "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -1298,6 +1396,8 @@
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.product"
@@ -1335,8 +1435,12 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
+        "FastArithmetic.power",
         "FastArithmetic.product"
       ],
       "fast_control": [
@@ -1344,6 +1448,12 @@
       ],
       "fast_envelope": [
         "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.four_pole"
+      ],
+      "fast_lofi": [
+        "FastLofi.decimate"
       ],
       "fast_plan": [
         "FastPlan.run",
@@ -1355,12 +1465,16 @@
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/plan/stream_restart_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
       "fast_envelope": [
@@ -1394,18 +1508,23 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
     },
     "spec/lib/mb/sound/sampler_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
-        "FastArithmetic.power"
+        "FastArithmetic.power",
+        "FastArithmetic.scale"
       ],
       "fast_clip": [
         "FastClip.shape"
@@ -1443,6 +1562,7 @@
     },
     "spec/lib/mb/sound/tone_feedback_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -1730,10 +1850,12 @@
         "FastLofi"
       ],
       "includes": [
+        "ext/mb/sound/include/mb_decimate.h",
         "ext/mb/sound/include/mb_ext_helpers.h"
       ],
       "depend": {
         "fast_lofi.o": [
+          "ext/mb/sound/include/mb_decimate.h",
           "ext/mb/sound/include/mb_ext_helpers.h"
         ]
       }
@@ -1833,6 +1955,7 @@
         "plan_dynamics.c",
         "plan_filters.c",
         "plan_filters.h",
+        "plan_lofi.c",
         "plan_wavetable.c"
       ],
       "modules": [
@@ -1843,6 +1966,7 @@
         "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_bl_osc.h",
         "ext/mb/sound/include/mb_clip_shape.h",
+        "ext/mb/sound/include/mb_decimate.h",
         "ext/mb/sound/include/mb_dynamics.h",
         "ext/mb/sound/include/mb_envelope.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
@@ -1884,6 +2008,11 @@
           "ext/mb/sound/include/mb_four_pole.h",
           "ext/mb/sound/include/mb_four_pole_tuning.h",
           "ext/mb/sound/include/mb_svf.h"
+        ],
+        "plan_lofi.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_decimate.h",
+          "ext/mb/sound/include/mb_ext_helpers.h"
         ],
         "plan_wavetable.o": [
           "ext/mb/sound/fast_plan/plan_filters.h",
