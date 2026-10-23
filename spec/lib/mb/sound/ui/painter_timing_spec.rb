@@ -6,7 +6,15 @@ require_relative '../../../../support/ui_helpers'
 # GVL waits (FastUI::GVLProbe) and the painter's CPU per refresh stay under
 # budgets scaled by this machine's speed right now: a calibration run of the
 # same painter, timed in the same process, so a slow or busy machine gets a
-# proportionally larger budget instead of a flaky failure.
+# proportionally larger budget instead of a flaky failure.  The
+# calibration runs before and after the measurement and the larger
+# slowdown counts, so load that comes or goes during the 2.5 s still
+# scales the budget; refreshes during which the GC ran are left out of the
+# painter's budget (omnibus12: in a suite process, whose heap earlier
+# specs grew, a GC pause took 30 ms of a refresh, failing "busy p99 30.3 ms"
+# at a slowdown of 1.35; the painter itself took ~1 ms), and the share of
+# refreshes with a GC is bounded instead, so a painter that starts
+# allocating heavily still fails.
 #
 # Measured on the Mac container (i9-9880H, no YJIT, 2026-10-15): full deck
 # redraw (calibration) 1.1-1.4 ms; render wait p99 0.18-0.29 ms, max 0.4; painter busy
@@ -39,7 +47,7 @@ RSpec.describe('UI painter timing', :aggregate_failures) do
   end
 
   it 'keeps the render thread waiting for the GVL well under a buffer' do
-    slow = slowdown
+    slow_before = slowdown
 
     # Six detuned saws through four-pole filters: a few percent of real time
     graph = 6.times.map { |i| (55 * (i + 2)).hz.saw.at(-24.db).lp4(800 + 300 * i, resonance: 0.3) }.reduce(:+)
@@ -52,13 +60,17 @@ RSpec.describe('UI painter timing', :aggregate_failures) do
     MB::Sound::FastUI::GVLProbe.start([session.render_thread, @band.thread])
     sleep 2.5
     MB::Sound::FastUI::GVLProbe.stop
+    stats = @band.stats
+    @band.stop
+    session.close # (the second calibration as quiet as the first)
+    slow = [slow_before, slowdown].max
 
     waits = MB::Sound::FastUI::GVLProbe.waits(0).sort
-    stats = @band.stats
     p99 = waits[((waits.length - 1) * 0.99).round] * 1000
-    busy = stats[:busy_cpu_ms][:p99]
-    report = "slowdown #{slow.round(2)}, #{waits.length} waits, p99 #{p99.round(3)} ms, max #{(waits[-1] * 1000).round(3)} ms; " \
-      "painter busy p99 #{busy} ms over #{stats[:frames]} refreshes; slowest #{stats[:slowest].first.inspect}"
+    busy = stats[:busy_no_gc_ms][:p99]
+    report = "slowdown #{slow.round(2)} (before #{slow_before.round(2)}), #{waits.length} waits, p99 #{p99.round(3)} ms, " \
+      "max #{(waits[-1] * 1000).round(3)} ms; painter busy p99 #{busy} ms without GC (#{stats[:busy_cpu_ms][:p99]} ms with) " \
+      "over #{stats[:frames]} refreshes, #{stats[:gc_frames]} with a GC; slowest #{stats[:slowest].first.inspect}"
 
     puts report if ENV["UI_TIMING_REPORT"] # the measured numbers
     expect(waits.length).to be > 300, report # it really ran (~470 buffers)
@@ -66,6 +78,8 @@ RSpec.describe('UI painter timing', :aggregate_failures) do
     expect(@band.feed.published).to be > 100, report
     expect(p99).to be < 2.0 * slow, report
     expect(busy).to be < 4.0 * slow, report
+    # (a refresh allocating a few kB shouldn't need a GC every few frames)
+    expect(stats[:gc_frames]).to be <= stats[:frames] / 10, report
     # Structural: every pane drawn was followed by Thread.pass
     expect(stats[:yields]).to be >= stats[:frames] * stats[:panes] * 0.99
   end

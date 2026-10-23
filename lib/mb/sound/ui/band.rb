@@ -153,6 +153,7 @@ module MB
 
         private def refresh_unlocked(now)
           cpu0 = thread_cpu
+          gc0 = GC.count
           @first_refresh ||= now
           parts = nil
           attach
@@ -226,7 +227,7 @@ module MB
           end
 
           cpu = thread_cpu - cpu0
-          @frames << [cpu, out&.bytesize || 0, drawn]
+          @frames << [cpu, out&.bytesize || 0, drawn, GC.count != gc0]
           @frames.shift if @frames.length > STATS
           note_slow(now, cpu, parts) if cpu > SLOW_PART
           out
@@ -241,7 +242,10 @@ module MB
         # Painter costs over the last frames: :frames, :cpu_ms (p50, p99,
         # max of the painter's CPU time per refresh, including frames with
         # nothing to draw), :busy_cpu_ms (the same over refreshes that drew
-        # a pane), :bytes (mean and max per written frame), :panes (mean
+        # a pane), :busy_no_gc_ms (the same over those without a garbage
+        # collection, whose pauses grow with the process's heap, not the
+        # painter's work), :gc_frames (refreshes during which the GC ran),
+        # :bytes (mean and max per written frame), :panes (mean
         # drawn per refresh), :yields (Thread.pass calls so far),
         # :slowest (the slowest refreshes: when (seconds after the first), CPU ms,
         # and the poll or panes that took over half a millisecond).
@@ -252,6 +256,8 @@ module MB
             frames: @frames.length,
             cpu_ms: UI.percentiles(@frames.map { |f| f[0] * 1000 }),
             busy_cpu_ms: UI.percentiles(busy.map { |f| f[0] * 1000 }),
+            busy_no_gc_ms: UI.percentiles(busy.reject { |f| f[3] }.map { |f| f[0] * 1000 }),
+            gc_frames: @frames.count { |f| f[3] },
             bytes: { mean: written.empty? ? 0 : written.sum / written.length, max: written.max || 0 },
             panes: @frames.empty? ? 0 : @frames.sum { |f| f[2] }.to_f / @frames.length,
             yields: @yields,
