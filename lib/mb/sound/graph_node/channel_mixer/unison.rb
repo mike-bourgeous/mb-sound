@@ -95,6 +95,26 @@ module MB
             [pairs.map(&:first), pairs.map(&:last)]
           end
 
+          # A moving spread (stereo, mix 1): each copy's equal-power gains
+          # at its slot times the spread (Plan::Op::PanGain), times the pan
+          # gain and the copy, summed in input order, as #plain_gains and
+          # #mix compute them.  A moving mix stays a boundary.
+          def plan_moving_reason
+            return 'a moving unison mix' unless @param_values[:mix].is_a?(Numeric) && @param_values[:mix] == 1
+            return 'a moving mono unison' unless @stereo
+
+            nil
+          end
+
+          def plan_describe_moving(p, terms)
+            spread = p[@param_values[:spread]]
+            Array.new(2) { |side|
+              terms.each_with_index.map { |t, i|
+                p.pan_gain(spread, :equal_power, side, scale: @slots[i]) * @pan_gain * t
+              }.reduce(:+)
+            }
+          end
+
           def to_s
             mix = params[:mix]
             "Unison #{@slots.length}x (#{@stereo ? 'stereo' : 'mono'}, gain #{MB::M.sigfigs(@gain, 3)}" +
