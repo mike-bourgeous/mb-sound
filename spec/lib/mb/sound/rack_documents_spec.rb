@@ -3,6 +3,10 @@
 # saved and loaded as Racks with their knobs, and graphs carrying the
 # definitions of the named racks they use.
 RSpec.describe('rack documents') do
+  # (knobs, racks, and players made here join the default Session; see
+  # spec/support/session_guard.rb)
+  after { MB::Sound::Session.existing&.close }
+
   let(:s) { MB::Sound }
   let(:io) { MB::Sound::GraphIO }
   let(:session) {
