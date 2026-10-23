@@ -1,4 +1,8 @@
 RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
+  # (knobs, racks, and players made here join the default Session; see
+  # spec/support/session_guard.rb)
+  after { MB::Sound::Session.existing&.close }
+
   let(:genre) { MB::Sound::Genre }
 
   # Evaluates +code+ inside MB::Sound, where note names resolve.

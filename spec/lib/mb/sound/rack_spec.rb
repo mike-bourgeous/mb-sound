@@ -2,6 +2,10 @@
 # constructors, typed ports, binding, composition, named racks, recipes, and
 # graph document round trips of anonymous racks.
 RSpec.describe(MB::Sound::Rack) do
+  # (knobs, racks, and players made here join the default Session; see
+  # spec/support/session_guard.rb)
+  after { MB::Sound::Session.existing&.close }
+
   let(:s) { MB::Sound }
   let(:clip) { s.seq(s::C4, s::E4, s::G4).n8.loop }
   let(:session) { MB::Sound::Session.new(realtime: false, output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, sleep: false)) }

@@ -21,4 +21,17 @@ RSpec.describe('spec hygiene') do
       expect(hits).to eq([]), "#{hits.join("\n")}\n#{why}; write #{instead}"
     end
   end
+
+  # omnibus12: set state left in the default Session reached later
+  # examples (support/session_guard.rb; spec_helper closes such a Session
+  # before every example)
+  it 'names set state a Session holds, for the default Session guard' do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), realtime: false)
+    expect(SessionGuard.leftovers(s)).to be_nil
+    s.arrangement.track(:lead) { |c| c.tone.triangle * c.amp_env }
+    s.arrangement.scene(:intro, lead: MB::Sound.seq(MB::Sound::C4).n4)
+    expect(SessionGuard.leftovers(s)).to eq('tracks :lead; scenes :intro; names :lead (track)')
+    s.close
+    expect(SessionGuard.leftovers(s)).to be_nil
+  end
 end

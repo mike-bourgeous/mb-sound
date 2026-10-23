@@ -197,6 +197,17 @@ module MB
           !!node.instance_variable_get(:@plan_observed)
         end
 
+        # True if +node+ is of a type plans can fuse in its current settings
+        # (a Describing node without a #plan_unsupported_reason, or an
+        # output of one, like a ChannelMixer's), whether or not plans are on
+        # or have run.  Synth uses it to decide which lanes may be skipped
+        # while idle without the plans changing that (see
+        # Synth#lane_fusable?).
+        def fusable_type?(node)
+          node = node.plan_owner if !node.is_a?(Describing) && node.respond_to?(:plan_owner)
+          node.is_a?(Describing) && node.plan_unsupported_reason.nil?
+        end
+
         # True if +node+ has spies (GraphNode#spy): inside a region it gets
         # an Op::Tap, so the spies see every buffer while it stays fused.
         def tapped?(node)

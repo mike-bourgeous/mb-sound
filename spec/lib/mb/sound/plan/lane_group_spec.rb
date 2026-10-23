@@ -124,12 +124,21 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(a).to eq(b)
   end
 
-  it 'still skips idle lanes with lane groups off' do
-    MB::Sound::Plan.lanes = false
-    MB::Sound.seed(0)
-    s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v| v.hz.saw.filter(:lowpass, cutoff: 1000) * v.amp_env }
-    expect(s.lane_groups).to be_nil
-    expect(s.skippable_lanes).not_to be_empty
+  # omnibus12: whether a lane may be skipped while idle depends only on its
+  # node types (Synth#lane_fusable?), never on the plans, since skipping
+  # changes the samples (a key-synced saw's reset step from a paused phase)
+  it 'never skips fusable lanes, with lane groups off or plans off too' do
+    old = MB::Sound::Plan.enabled
+    [[true, false], [false, true]].each do |enabled, lanes|
+      MB::Sound::Plan.enabled = enabled
+      MB::Sound::Plan.lanes = lanes
+      MB::Sound.seed(0)
+      s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v| v.hz.saw.filter(:lowpass, cutoff: 1000) * v.amp_env }
+      expect(s.lane_groups).to be_nil
+      expect(s.skippable_lanes).to be_empty
+    end
+  ensure
+    MB::Sound::Plan.enabled = old
   end
 
   it 'gives the same samples in check mode' do
@@ -329,7 +338,9 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     # paused); with the unread nodes every lane's band region grouped and
     # ran every buffer (max difference 0.81 at a peak of 0.54), and the
     # unread `mod * 2` stopped the controller's sharing.  Plans now treat
-    # those branches as absent (Installation#live_branches).
+    # those branches as absent (Installation#live_branches).  (Since
+    # omnibus12 fusable lanes are never skipped, so grouping no longer
+    # changes skipping either: both lanes group, spied or not.)
     it 'fuses, groups, shares, and skips as if unread voice nodes were not there' do
       ev = MB::Sound::MIDI::Event
       run = ->(extra) {
@@ -362,8 +373,9 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       a = run.(false)
       b = run.(true)
       expect(a[0].abs.max).to be > 0.3
-      expect(a[2]).to eq([0])
-      expect(a[3].flatten.length).to be > 100
+      expect(a[2]).to eq([])
+      expect(a[3].flatten).to be_empty
+      expect(a[4]).to eq([3]) # (two voices and a spare)
       expect(a[5]).to eq(1)
       expect(b[2..]).to eq(a[2..])
       expect(b[0]).to eq(a[0])

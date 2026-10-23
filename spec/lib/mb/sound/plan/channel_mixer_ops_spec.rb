@@ -117,7 +117,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
     end
 
     it 'ends with an input that ends, on the same block' do
-      r = plan_compare { |_c|
+      r = plan_compare(fallbacks: 1) { |_c|
         a = src.new(seed: 2, ends_at: 1000) * 0.5
         b = src.new(seed: 3) * 0.25
         m = MB::Sound::GraphNode::ChannelMixer::Unison.new([a, b], slots: [-1, 1], spread: 1, stereo: true)

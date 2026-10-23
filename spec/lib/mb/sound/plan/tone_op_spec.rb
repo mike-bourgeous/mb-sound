@@ -82,13 +82,16 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
 
     it 'keeps playing after its reset input ends' do
-      r = plan_compare { fm(1).tone.sine.reset(src.new(kind: :impulses, at: [10, 200], ends_at: 600)) * 1 }
-      # (the reset input's short last buffer shortens that block, as it does unplanned)
+      # (the reset input's short last buffer shortens that block, as it
+      # does unplanned; the block with a short read runs unfused)
+      r = plan_compare(fallbacks: 1) { fm(1).tone.sine.reset(src.new(kind: :impulses, at: [10, 200], ends_at: 600)) * 1 }
       expect(r.outputs[:c].last.length).to eq(r.sizes.last)
+      expect(r.unfused_blocks(:c)).to eq(1)
     end
 
     it 'ends when its frequency input ends' do
-      plan_compare(sizes: [100, 200, 300, 300]) { MB::Sound::Tone.new(frequency: src.new(seed: 1, scale: 50, offset: 200, ends_at: 450)) * 1 }
+      r = plan_compare(sizes: [100, 200, 300, 300], fallbacks: 1) { MB::Sound::Tone.new(frequency: src.new(seed: 1, scale: 50, offset: 200, ends_at: 450)) * 1 }
+      expect(r.unfused_blocks(:c)).to eq(1) # the short block
     end
   end
 

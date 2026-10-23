@@ -2,6 +2,10 @@
 # named by path, shared or followed on request, with rack snapshots and
 # baseline-plus-modulation.
 RSpec.describe('rack knobs') do
+  # (knobs, racks, and players made here join the default Session; see
+  # spec/support/session_guard.rb)
+  after { MB::Sound::Session.existing&.close }
+
   let(:s) { MB::Sound }
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:session) {

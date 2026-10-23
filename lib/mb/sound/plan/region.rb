@@ -536,13 +536,12 @@ module MB
 
         # Reads every boundary input and Constant for one block.  Returns
         # the sample count to run, :ended if a required input ended, :mismatch if a
-        # buffer doesn't fit the program, or :short if a Notes node ending
-        # on its grid gave a short buffer (the block runs unfused).
+        # buffer doesn't fit the program, or :short if an input gave a short
+        # buffer (the block runs unfused).
         def gather(count)
           min = count
           ended = false
           mismatch = false
-          short = false
           inputs = @inputs
           ops = @input_ops
           shared = @installation.shared&.buffers
@@ -612,11 +611,7 @@ module MB
                 # block itself
                 mismatch = true
               end
-              if buf.length < min
-                min = buf.length
-                src = Plan.origin(op.source)
-                short = true if src.respond_to?(:plan_ends_on_grid?) && src.plan_ends_on_grid?
-              end
+              min = buf.length if buf.length < min
               inputs[i] = buf
             end
 
@@ -634,14 +629,16 @@ module MB
             return :mismatch
           end
 
-          # A short input from a Notes envelope or note node ending its
-          # graph on its grid (#plan_ends_on_grid?): the block runs unfused,
-          # as the graph would run it (arithmetic samples its other inputs
-          # for the whole block and cuts the result), so the nodes keep the
-          # states the unfused graph gives them (fixes-13: with envelopes
-          # ending inside a block, a planned tone ran only up to the end,
-          # and check mode found its phase different)
-          return :short if short || (@ringing && min < count)
+          # A short input (one ending in this block): the block runs
+          # unfused, as the graph would run it (arithmetic samples its other
+          # inputs for the whole block and cuts the result), so the nodes
+          # keep the states the unfused graph gives them.  fixes-13 did this
+          # for Notes envelopes and note nodes ending their graphs on their
+          # grids (a planned tone ran only up to the end, and check mode
+          # found its phase different); omnibus12 for every input (the
+          # graph sweep's `noise * sig.until(t).sounding`: the noise tone
+          # advanced only up to the Sounding's end when planned)
+          return :short if min < count
 
           params = @params
           pops = @param_ops

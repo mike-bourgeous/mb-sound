@@ -63,6 +63,7 @@ require_relative 'support/render_window_song'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 require_relative 'support/transport_guard'
+require_relative 'support/session_guard'
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'
 require_relative 'support/patch_helpers'
@@ -129,8 +130,13 @@ RSpec.configure do |config|
     # read by the graph (midi_methods_spec's JACK example read nothing after
     # channels_spec's play), and the thread renders at real time in the
     # background for the rest of the run.  Each example starts without one.
+    # The same for a default Session holding set state (tracks, scenes,
+    # players, names, scheduled blocks; omnibus12: a song's tracks
+    # :lead and :hum showed in a later example's tracks pane): closed, so
+    # the next use makes a fresh one (support/session_guard.rb names the
+    # example that left it).
     default = MB::Sound::Session.existing
-    default.close if default&.running?
+    default.close if default && (default.running? || SessionGuard.leftovers(default))
     MB::Sound::Tuning.default.reset
     # The default transport starts every example at 0, 120 BPM, 4/4: a
     # Session made without its own transport moves it, and an example that

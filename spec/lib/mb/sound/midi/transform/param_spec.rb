@@ -1,4 +1,8 @@
 RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_transforms) do
+  # (knobs, racks, and players made here join the default Session; see
+  # spec/support/session_guard.rb)
+  after { MB::Sound::Session.existing&.close }
+
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
 
   # Sixteen notes, an eighth second (a 16th at 120 BPM) apart, a 32nd long.

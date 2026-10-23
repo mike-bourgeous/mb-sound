@@ -50,10 +50,11 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
   end
 
   it 'flushes a lookahead compressor\'s tail after its input ends (that block unfused)' do
-    r = plan_compare(fallbacks: 1, sizes: [100, 100, 100, 100, 100]) {
+    # (and the block where the input's buffer is short, as every short read)
+    r = plan_compare(fallbacks: 2, sizes: [100, 100, 100, 100, 100]) {
       (src.new(seed: 7, scale: 0.9, ends_at: 250) * 1).compress(threshold: -20.db, lookahead: 64.samples) * 0.5
     }
-    expect(r.unfused_blocks(:c)).to eq(1)
+    expect(r.unfused_blocks(:c)).to eq(2)
   end
 
   it 'stays unfused for several channels and for limiters, saying why' do

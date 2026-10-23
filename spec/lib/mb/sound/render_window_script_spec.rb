@@ -3,7 +3,12 @@
 RSpec.describe(MB::Sound::ScriptRunner, 'render windows') do
   include RenderWindowSong
 
-  after { MB::Sound.rewind }
+  after do
+    # (live runs set up the song's tracks and scenes in the default
+    # Session; see support/session_guard.rb)
+    MB::Sound::Session.existing&.close
+    MB::Sound.rewind
+  end
 
   it 'renders --from SECTION --to SECTION, and --from BAR with --bars' do
     out = tmp_path('song.flac')

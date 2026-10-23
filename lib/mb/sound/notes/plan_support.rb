@@ -75,13 +75,6 @@ module MB
           !last.nil? && last < @stream.advance(@reader.cursor, count, @sample_rate)
         end
 
-        # True: a short buffer from this node (its graph's end, on its grid;
-        # see #end_on_grid) makes a planned block reading it run unfused
-        # (see Plan::Region#gather).
-        def plan_ends_on_grid?
-          ends_graph?
-        end
-
         # One planned block: the node's #sample without the buffer (see
         # the class description).  A FeedGroup reads the events once for
         # all the nodes of a region on one stream.
@@ -606,13 +599,6 @@ module MB
       end
 
       class NoteEnvelope
-        # True: a short buffer from this envelope (its graph's end, on its
-        # grid; see #sample) makes a planned block reading it run unfused
-        # (see Plan::Region#gather).
-        def plan_ends_on_grid?
-          true
-        end
-
         # Notes envelopes' per-block bookkeeping (see #sample).
         def plan_feed(count)
           @start_time = @time
