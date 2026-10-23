@@ -341,7 +341,7 @@ module MB
 
           # The decoded peaks over -0.1 dBTP (players clip them), or {}.
           def codec_overs
-            (codec_peaks || {}).select { |_c, tp| tp > CODEC_LIMIT }
+            CodecPeaks.overs(codec_peaks, CODEC_LIMIT)
           end
 
           def to_s
@@ -377,8 +377,8 @@ module MB
               end
             end
             if codec_peaks
-              text = codec_peaks.map { |c, tp| format('%s %.2f', c, tp) }.join(', ')
-              lines << "  decoded true peaks: #{text} dBTP"
+              lines << "  decoded true peaks: #{CodecPeaks.text(codec_peaks)} dBTP"
+              CodecPeaks.notes(codec_peaks).each { |n| lines << "    #{n}" }
               unless codec_overs.empty?
                 worst = codec_overs.values.max
                 lines << format('  decoded peaks over %.1f dBTP clip in players: try ceiling: %.1f.db', CODEC_LIMIT, ceiling.db_value - (worst - CODEC_LIMIT) - 0.1)

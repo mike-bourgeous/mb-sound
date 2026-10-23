@@ -384,12 +384,57 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
   end
 
   describe '.codec_peaks' do
+    let(:codecs) { MB::Sound::Mastering::CodecPeaks }
+    let(:report_result) {
+      MB::Sound::Mastering::Targeting::Result.new(
+        preset: :streaming, trim: 3.db, target: MB::Sound::Loudness.target(-14), ceiling: -1.db, integrated: -14.0, short_term_max: -12.0,
+        range: 5.0, true_peak: -1.0, side: -40.0, side_hz: 120, first_pass: -17.0, runs: 3, held: false, codec_peaks: nil,
+        measure: :integrated, loudest: nil, loudest_bars: nil
+      )
+    }
+
     it 'measures decoded true peaks of lossy encodes' do
       data = run(test_mix(level: 0.6).master(:club), 48000, 800)
       peaks = described_class.codec_peaks(data, codecs: %i[mp3 aac])
       expect(peaks.keys).to eq(%i[mp3 aac])
-      expect(peaks.values).to all(be_between(-3, 3))
+      expect(peaks[:mp3]).to be_between(-3, 3)
+      expect(peaks[:aac]).to codecs.encoder_name(:aac) ? be_between(-3, 3) : be_nil
       expect { described_class.codec_peaks(data, codecs: [:wma]) }.to raise_error(ArgumentError, /Unknown codec :wma/)
+    end
+
+    # aac-peaks: a known answer checks the decode path (gain, rate,
+    # channels, alignment): a steady sine decodes at its own level
+    it 'reads a faded-in -6 dBFS sine at -6 dBTP after each codec' do
+      t = Numo::DFloat.new(96000).seq / 48000
+      ramp = 0.5 - 0.5 * Numo::NMath.cos((t / 0.1).clip(0, 1) * Math::PI)
+      x = Numo::SFloat.cast(Numo::NMath.sin(t * 2 * Math::PI * 997) * 0.5 * ramp * ramp.reverse)
+      peaks = described_class.codec_peaks([x, x * 0.5], codecs: %i[mp3 aac_ffmpeg opus vorbis])
+      expect(peaks.values).to all(be_within(0.2).of(-6.02))
+    end
+
+    context 'when ffmpeg has only its built-in AAC encoder' do
+      before { allow(codecs).to receive(:encoders).and_return(%w[aac libmp3lame].freeze) }
+
+      it 'leaves AAC unmeasured, out of the advice, and explained' do
+        expect(codecs.encoder_args(:aac)).to be_nil
+        peaks = codecs.measure([Numo::SFloat.zeros(4800)], codecs: %i[aac])
+        expect(peaks).to eq(aac: nil)
+
+        peaks = { mp3: 0.4, aac: nil }
+        expect(codecs.text(peaks)).to eq('mp3 0.40, aac n/a')
+        expect(codecs.overs(peaks, -0.1)).to eq(mp3: 0.4)
+        result = report_result.with(codec_peaks: peaks)
+        expect(result.codec_overs).to eq(mp3: 0.4)
+        expect(result.to_s).to include('decoded true peaks: mp3 0.40, aac n/a dBTP').and include('no libfdk_aac or aac_at')
+      end
+    end
+
+    it 'encodes AAC with libfdk_aac, else aac_at, never the built-in encoder' do
+      allow(codecs).to receive(:encoders).and_return(%w[aac aac_at libfdk_aac])
+      expect(codecs.encoder_args(:aac)).to eq(%w[-c:a libfdk_aac -b:a 256k])
+      allow(codecs).to receive(:encoders).and_return(%w[aac aac_at])
+      expect(codecs.encoder_name(:aac)).to eq('aac_at')
+      expect(codecs.encoder_name(:aac_ffmpeg)).to eq('aac')
     end
   end
 end
