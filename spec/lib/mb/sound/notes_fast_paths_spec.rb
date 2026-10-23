@@ -90,8 +90,12 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
     v = MB::Sound::Notes.new(src.call)
     w = MB::Sound::Notes.new(src.call)
     inputs = MB::Sound::Notes::EnvelopeInputs.new(w.stream, notes: w)
+    # (kept: Notes memoizes nodes through WeakRefs, so asking again after a
+    # GC made new nodes starting with nothing held)
+    nodes = [v.gate, v.trigger, v.velocity, v.choke]
     [128, 100, 300, 128, 64, 1000].each do |n|
-      expected = [v.gate, v.trigger, v.velocity, v.choke].map { |node| node.sample(n).dup }
+      GC.start if n == 300 # (a GC between buffers once failed the example)
+      expected = nodes.map { |node| node.sample(n).dup }
       got = [inputs.sample(n).dup] + [inputs.trigger, inputs.velocity, inputs.choke].map { |p| p.sample(n).dup }
       expect(got.map(&:to_a)).to eq(expected.map(&:to_a))
     end
