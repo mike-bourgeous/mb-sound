@@ -122,8 +122,9 @@ RSpec.describe(MB::Sound::Synth) do
 
     it 'counts lanes as quiet under -90 dB, but skips them only under -120 dB' do
       # A ping that decays through -90 dB and -120 dB a while apart
+      # (a Ruby block keeps the lane skippable; see Synth#lane_fusable?)
       s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/100r)), voices: 1, mono: false, spares: 0) { |v|
-        v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
+        v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30).proc { |x| x }
       }
       quiet_at = skipped_at = nil
       # 800-sample buffers, the idle skipping grid (Synth::SKIP_GRID)
@@ -740,7 +741,10 @@ RSpec.describe(MB::Sound::Synth) do
     end
 
     # Lanes grouped by the plan layer are computed every buffer (see
-    # Plan::LaneGroup), so these run without lane groups
+    # Plan::LaneGroup), so these run without lane groups, and lanes plans
+    # could fuse whole are never skipped (omnibus12; see
+    # Synth#lane_fusable?), so their patches end in a Ruby block
+    # (#skippable)
     around do |ex|
       old = MB::Sound::Plan.lanes
       MB::Sound::Plan.lanes = false
@@ -754,11 +758,18 @@ RSpec.describe(MB::Sound::Synth) do
        ev.cc_raw(1, 100, time: 0.3r), ev.note_on(55, time: 0.4r), ev.note_off(55, time: 0.45r), ev.note_on(60, time: 0.6r)]
     }
 
+    # +node+ through a Ruby block, which plans don't fuse, so the lane may
+    # be skipped while idle.
+    def skippable(node)
+      node.proc { |x| x }
+    end
+
     # A patch whose output is exactly the same with skipping (naive
     # oscillator reset to a fixed phase, no filter state).
     let(:exact_patch) {
-      ->(v, _i) { v.hz.asaw * v.amp_env(0.002, 0.01, 0.5, 0.01, curve: :linear) * (1 + v.mod) * v.velocity }
+      ->(v, _i) { skippable(v.hz.asaw * v.amp_env(0.002, 0.01, 0.5, 0.01, curve: :linear) * (1 + v.mod) * v.velocity) }
     }
+    let(:skipped_patch) { ->(v, i) { skippable(patch.(v, i)) } }
 
     def run(synth, buffers, size = 480)
       skipped = []
@@ -786,8 +797,8 @@ RSpec.describe(MB::Sound::Synth) do
     end
 
     it 'stays close to rendering every lane for a filtered band-limited patch' do
-      s1 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, &patch)
-      s2 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, skip_idle: false, &patch)
+      s1 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, &skipped_patch)
+      s2 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, skip_idle: false, &skipped_patch)
       out1, skipped = run(s1, 80)
       out2, _ = run(s2, 80)
       expect(skipped.flatten).not_to be_empty
@@ -856,7 +867,7 @@ RSpec.describe(MB::Sound::Synth) do
             _unread = band * 0.5 # never read
             _unread_env = env * 0.5
           end
-          band * env
+          skippable(band * env)
         }
         out, skipped = run(s, 80)
         expect(skipped.flatten).not_to be_empty
@@ -869,7 +880,7 @@ RSpec.describe(MB::Sound::Synth) do
     it 'keeps a branch read outside the synth in step, even one made after the synth' do
       lfo = 3.hz.lfo
       events = [ev.note_on(48), ev.note_off(48, time: 0.05r), ev.note_on(48, time: 1.5r), ev.note_off(48, time: 1.6r)]
-      s = described_class.new(source(*events), voices: 1, spares: 0) { |v| v.hz.saw * v.amp_env(0.002, 0.02, 0.5, 0.02) * lfo }
+      s = described_class.new(source(*events), voices: 1, spares: 0) { |v| skippable(v.hz.saw * v.amp_env(0.002, 0.02, 0.5, 0.02) * lfo) }
       outside = lfo * 1
       # The lane's branch overflowed (BranchBufferOverflow) on waking after
       # more than a second asleep while the outside branch read on

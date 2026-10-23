@@ -196,7 +196,8 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
         s = new_session(transport: MB::Sound::Sequence::Transport.new(bpm: 120))
         s.knob(:x, 0, smooth: 0)
         s.turn(:x, 1, over: 8.beats)
-        syn = within(s) { clip.().synth(voices: 2) { |v| (v.hz.asaw * 0.001 + MB::Sound.knob(:x)) * v.env(0.001, 0.05, 0, 0.05) } }
+        # (a Ruby block keeps the lanes skippable; see Synth#lane_fusable?)
+        syn = within(s) { clip.().synth(voices: 2) { |v| ((v.hz.asaw * 0.001 + MB::Sound.knob(:x)) * v.env(0.001, 0.05, 0, 0.05)).proc { |x| x } } }
         s.add(syn, name: :a, start_time: 1/5r)
         data = render(s, 192_000, size)
         expect(syn.skippable_lanes).not_to be_empty

@@ -235,11 +235,49 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
 
   describe 'Synth lanes' do
     it 'keeps skipped lanes in step without replanning (Notes::Node#advance)' do
-      s = MB::Sound::Synth.new(dense, voices: 3) { |v| v.hz.saw * v.amp_env(0.005, 0.05, 0.3, 0.05) }
+      # (a Ruby block keeps the lanes skippable: lanes plans could fuse
+      # whole are never skipped; see Synth#lane_fusable?)
+      s = MB::Sound::Synth.new(dense, voices: 3) { |v| (v.hz.saw * v.amp_env(0.005, 0.05, 0.3, 0.05)).proc { |x| x } }
+      expect(s.skippable_lanes).not_to be_empty
       plans = s.instance_variable_get(:@plans)
       200.times { s.sample(256) }
       excluded = plans.compact.flat_map { |i| i.excluded.keys }
       expect(excluded).to be_empty
+      expect(s.skipped_lanes.length + s.instance_variable_get(:@skipping).count(true)).to be > 0
+    end
+
+    # omnibus12 (protos-1's finding): planned key-synced voices differed
+    # from the unplanned synth around note-ons (-3 dB for ~27 samples on a
+    # plain `v.hz.saw * v.gate`): the lanes ran in a lane group, computed
+    # every buffer, while unplanned they slept while idle, so the reset
+    # step at the next note-on started from a running phase in one and a
+    # paused one in the other.  Lanes plans could fuse are now never
+    # skipped, planned or not.
+    {
+      'a KeyedTone times the gate' => ->(v, _i) { v.hz.saw * v.gate },
+      'key triggers next to :add envelopes' => ->(v, _i) { v.hz.square * v.env(0.005, 0.05, 0.4, 0.05, retrigger: :add) },
+      'a glide into a filter' => ->(v, _i) { v.hz.glide(30.ms).saw.lp4(900, resonance: 0.4) * v.amp_env(0.005, 0.05, 0.5, 0.05) },
+      'a key-synced wavetable and an LFO' => ->(v, _i) { v.hz.wavetable(:saw).pm(4.hz.lfo.at(0.1)) * v.gate },
+    }.each do |name, voice|
+      it "renders #{name} the same planned (lane groups) and unplanned, at every block size" do
+        sizes = PlanSpecHelpers.sizes_for(samples: 3 * 48000)
+        render = ->(enabled) do
+          old = [MB::Sound::Plan.enabled, MB::Sound::Plan.precision]
+          MB::Sound::Plan.enabled = enabled
+          MB::Sound::Plan.precision = :exact # (fast sines are within -124 dB)
+          MB::Sound.seed(0)
+          s = MB::Sound::Synth.new('spec/test_data/c_major.mid', voices: 3, &voice)
+          expect(s.lane_groups&.groups.to_a).not_to be_empty if enabled
+          expect(s.skippable_lanes).to be_empty
+          sizes.filter_map { |n| s.sample(n)&.dup }
+        ensure
+          MB::Sound::Plan.enabled, MB::Sound::Plan.precision = old
+        end
+        a = render.(true)
+        b = render.(false)
+        expect(a.sum(&:length)).to be > 48000
+        expect(a.map(&:to_a)).to eq(b.map(&:to_a))
+      end
     end
   end
 

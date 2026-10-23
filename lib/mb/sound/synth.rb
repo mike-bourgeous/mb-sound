@@ -669,21 +669,28 @@ module MB
         graphs = @lane_graphs
         sets = graphs.map { |g| g.to_h { |n| [n.__id__, true] } }
 
+        # Lanes whose nodes could all run in plan regions (#lane_fusable?)
+        # are never skipped, planned or not: lane groups compute every lane
+        # every buffer (user decision 2026-10-10), and skipping changes the
+        # output (paused oscillators; see above), so whether a lane may be
+        # skipped must not depend on what the plans did with it, or plans
+        # would change the samples (omnibus12: a key-synced
+        # `v.hz.saw * v.gate` voice in a lane group differed from the
+        # unplanned synth by up to -3 dB for ~27 samples at note-ons, its
+        # reset step starting from a running phase in one and a paused one
+        # in the other).  Decided once from the node types, not from the
+        # installed regions (which MB_SOUND_PLAN and rebuilds change).
         @skippable_base = graphs.each_with_index.map { |g, idx|
-          @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
+          @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) } &&
+            !lane_fusable?(graphs, sets, idx)
         }
 
-        # Lane groups compute every lane every buffer (user decision
-        # 2026-10-10), so the lanes are grouped only if that gives up no
-        # skipping of unfused work: each lane is never skipped anyway (it
-        # has long-memory nodes, or skipping is off) or runs all of its own
-        # nodes in plan regions.  Otherwise (e.g. unison oscillators outside
-        # the regions) the lanes run their regions alone and idle lanes are
-        # skipped as before.
+        # So lanes are grouped only if none of them may be skipped;
+        # otherwise (e.g. unison oscillators outside the regions) the lanes
+        # run their regions alone and idle lanes are skipped as before.
         # (Sub-lanes sleep inside lanes, which a lane group computing every
         # member would break)
-        if Plan.lanes && @plans.any? && @parts.all?(&:empty?) &&
-            graphs.each_index.all? { |idx| !@skippable_base[idx] || lane_planned?(graphs, sets, idx) }
+        if Plan.lanes && @plans.any? && @parts.all?(&:empty?) && @skippable_base.none?
           @lane_groups = Plan::LaneGroups.new(@plans)
         end
         update_skippable
@@ -769,19 +776,16 @@ module MB
       end
 
       # True if every graph node of lane +idx+'s graph (+graphs+, with the
-      # id sets +sets+; MIDI streams aren't graph nodes) other than Tees, the
-      # lane's own Notes nodes, and nodes shared with other lanes is
-      # computed in a plan region (an output of a planned multi-output node
-      # counts as computed there).
-      def lane_planned?(graphs, sets, idx)
+      # id sets +sets+; MIDI streams aren't graph nodes) other than Tees
+      # and nodes shared with other lanes is of a type plans can fuse in
+      # its current settings (Plan.fusable_type?), whether or not plans are
+      # on: such lanes are never skipped while idle (see
+      # #setup_idle_skipping).
+      def lane_fusable?(graphs, sets, idx)
         graphs[idx].all? { |n|
           !n.is_a?(GraphNode) || n.is_a?(GraphNode::Tee) || n.is_a?(GraphNode::Tee::Branch) ||
-            (n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx])) ||
             sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } ||
-            !n.instance_variable_get(:@plan_region).nil? || !n.instance_variable_get(:@plan_member).nil? ||
-            # (an output of a multi-output node computed in a region, e.g.
-            # a unison's ChannelMixer; see Plan::MultiDescribable)
-            (n.respond_to?(:plan_owner) && !n.plan_owner.instance_variable_get(:@plan_region).nil?)
+            Plan.fusable_type?(n)
         }
       end
 

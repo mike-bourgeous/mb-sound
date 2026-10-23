@@ -91,6 +91,11 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
           MB::Sound.noise.ease(:smooth) * v.env(0.001, 0.03, 0, 0.02) * 0.2
       },
       'free LFO and controllers' => ->(v) { v.hz.asaw * v.amp_env(0.001, 0.1, 0.5, 0.05) * (1 + 3.hz.lfo * 0.5) * (1 + v.mod) },
+      # Lanes plans could fuse whole are never skipped while idle
+      # (Synth#lane_fusable?); a Ruby block keeps this one skippable
+      'skipped noise (a Ruby block)' => ->(v) {
+        (MB::Sound.noise.filter(:highpass, cutoff: 5000, quality: 0.7) * v.env(0.001, 0.05, 0, 0.05)).proc { |x| x }
+      },
     }
 
     [true, false].each do |lanes|
@@ -190,7 +195,7 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
     it 'skips lanes in the invariance cases (so the cases test something)' do
       old = MB::Sound::Plan.lanes
       MB::Sound::Plan.lanes = false
-      s = clip.call.synth(voices: 2) { |v, _i| patches['noise'].(v) }
+      s = clip.call.synth(voices: 2) { |v, _i| patches['skipped noise (a Ruby block)'].(v) }
       count = 0
       100.times { s.sample(367); count += s.skipped_lanes.length }
       expect(count).to be > 50
