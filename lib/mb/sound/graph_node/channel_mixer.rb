@@ -76,6 +76,13 @@ module MB
           def to_s
             "#{@mixer} output #{@index + 1} of #{@mixer.outputs.length}"
           end
+
+          # The mixer, which the plan layer computes in a region of its own
+          # (see MB::Sound::Plan::MultiDescribable): this output is planned
+          # while the mixer is.
+          def plan_owner
+            @mixer
+          end
         end
 
         # Passes complex input through, and converts real input to an
@@ -203,6 +210,17 @@ module MB
           @value_list = nil
           @last_gains = nil
           @spare_output = nil
+          @own_output = nil
+
+          # Set by the plan layer (see MB::Sound::Plan::MultiDescribable;
+          # GraphNodes preset these through GraphNode::IvarPreset)
+          @plan_bypass = nil
+          @plan_installations = nil
+          @plan_member = nil
+          @plan_region = nil
+          @plan_observed = nil
+          @plan_handoff = nil
+          @plan_restart = nil
 
           setup(inputs, settings)
 
@@ -286,60 +304,16 @@ module MB
         end
         alias at_rate sample_rate=
 
-        # Called by Output#sample: samples the inputs and node parameters once
-        # per frame (the first time any output is sampled, or when an output
-        # is sampled again), mixes, and returns output +index+.
+        # Called by Output#sample: computes a frame of every output (the first
+        # time any output is sampled, or when an output is sampled again;
+        # see #plan_frame), and returns output +index+.
         def sample_internal(count, index)
           if @sampled.include?(index) || @output_data.nil?
             if @sampled.length != 0 && @sampled.length != @outputs.length
               warn "#{self} output #{index} sampled again before other outputs"
             end
             @sampled.clear
-
-            # Outputs are written into the output buffers of the frame
-            # before last (two sets alternate, so the last frame's buffers
-            # stay valid while a Tee shares them), so an input that is one
-            # of them (e.g. a direct feedback loop) is copied first.  The
-            # input and parameter lists are reused (no allocations per
-            # buffer when the lengths match).
-            data = (@data_list ||= Array.new(@inputs.length))
-            length = nil
-            ended = false
-            idx = 0
-            while idx < @inputs.length
-              d = @inputs[idx].sample(count)
-              d = d.dup if d && (@output_data&.any? { |o| o.equal?(d) } || @spare_output&.any? { |o| o.equal?(d) })
-              data[idx] = d
-              if d.nil?
-                ended = true
-              elsif length.nil? || d.length < length
-                length = d.length
-              end
-              idx += 1
-            end
-            return @output_data = nil if ended
-
-            values = (@value_list ||= {})
-            @param_values.each do |name, v|
-              v = v.sample(count) if v.respond_to?(:sample)
-              values[name] = v
-              if v.nil?
-                ended = true
-              elsif v.is_a?(Numo::NArray) && v.length < length
-                length = v.length
-              end
-            end
-            return @output_data = nil if ended
-
-            if data.any? { |d| d.length > length } || values.any? { |_, v| v.is_a?(Numo::NArray) && v.length > length }
-              data = data.map { |d| d.length > length ? d[0...length] : d }
-              values = values.transform_values { |v| v.is_a?(Numo::NArray) && v.length > length ? v[0...length] : v }
-            end
-
-            @output_data = (@gains.nil? && mix_params(values, data)) || begin
-              gains = @gains || (@last_gains = gains_for(**values))
-              mix(gains, data)
-            end
+            @output_data = plan_frame(count)
           end
 
           return nil if @output_data.nil?
@@ -349,6 +323,102 @@ module MB
           # A reused buffer, like most nodes return; it is overwritten two
           # frames later
           @output_data[index]
+        end
+
+        # Plan layer (see MB::Sound::Plan::MultiDescribable): a mixer with
+        # real number gains computes each output as a weighted sum of its
+        # inputs (Plan::Op::Mix, the steps of MB::FastSound.matrix_mix), in
+        # a region of its own with the nodes only it reads (a unison's
+        # oscillators and their pitch), copying out every output but the
+        # first (Plan::Op::Output).  Its Output nodes stay outside, read by
+        # other regions as boundary inputs.
+        include Plan::MultiDescribable
+
+        def plan_inputs
+          @inputs
+        end
+
+        def plan_unsupported_reason
+          return 'complex gains (an analytic input stage)' if @complex
+          return 'gains moving with node parameters' unless @fast_gains
+
+          nil
+        end
+
+        def plan_describe(p)
+          terms = @inputs.map { |inp| p[inp] }
+          rows, cols = @fast_gains.shape
+          Array.new(rows) { |j| p.mix(terms, Array.new(cols) { |k| @fast_gains[j, k] }) }
+        end
+
+        # One frame of every output (an Array of buffers, or nil once an
+        # input ended): from the plan region rooted here while it plans,
+        # else (unplanned, or the region running its nodes unfused) from
+        # this mixer's own code.
+        def plan_frame(count)
+          unless @plan_bypass
+            # A frame a lane group computed for this mixer's replaced region
+            # (see Plan::LaneGroup#hand_off)
+            if (handoff = @plan_handoff)
+              @plan_handoff = nil
+              buf = handoff[0].take_handoff(handoff[1], count)
+              return handoff[1].planned_frame(buf) unless buf.equal?(Plan::LaneGroup::NO_HANDOFF)
+            end
+
+            region = @plan_region
+            return region.sample_outputs(count) if region && !region.unfused
+          end
+
+          compute_frame(count)
+        end
+
+        # Samples the inputs and node parameters, and mixes them into new
+        # output buffers (an Array), or returns nil if an input ended.
+        def compute_frame(count)
+          # Outputs are written into the output buffers of the frame
+          # before last (two sets alternate, so the last frame's buffers
+          # stay valid while a Tee shares them), so an input that is one
+          # of them (e.g. a direct feedback loop) is copied first.  The
+          # input and parameter lists are reused (no allocations per
+          # buffer when the lengths match).
+          data = (@data_list ||= Array.new(@inputs.length))
+          length = nil
+          ended = false
+          idx = 0
+          while idx < @inputs.length
+            d = @inputs[idx].sample(count)
+            d = d.dup if d && (@own_output&.any? { |o| o.equal?(d) } || @spare_output&.any? { |o| o.equal?(d) })
+            data[idx] = d
+            if d.nil?
+              ended = true
+            elsif length.nil? || d.length < length
+              length = d.length
+            end
+            idx += 1
+          end
+          return nil if ended
+
+          values = (@value_list ||= {})
+          @param_values.each do |name, v|
+            v = v.sample(count) if v.respond_to?(:sample)
+            values[name] = v
+            if v.nil?
+              ended = true
+            elsif v.is_a?(Numo::NArray) && v.length < length
+              length = v.length
+            end
+          end
+          return nil if ended
+
+          if data.any? { |d| d.length > length } || values.any? { |_, v| v.is_a?(Numo::NArray) && v.length > length }
+            data = data.map { |d| d.length > length ? d[0...length] : d }
+            values = values.transform_values { |v| v.is_a?(Numo::NArray) && v.length > length ? v[0...length] : v }
+          end
+
+          (@gains.nil? && mix_params(values, data)) || begin
+            gains = @gains || (@last_gains = gains_for(**values))
+            mix(gains, data)
+          end
         end
 
         # A description with the mixing law, options, and parameters.
@@ -418,13 +488,13 @@ module MB
           if @fast_gains && data.all? { |d| d.is_a?(Numo::SFloat) }
             length = data.map(&:length).min
             data = data.map { |d| d.contiguous? ? d : d.dup }
-            # (into the buffers of the frame before last; see #sample_internal)
+            # (into the buffers of the frame before last; see #compute_frame)
             into = @spare_output
-            @spare_output = @output_data
+            @spare_output = @own_output
             if into.nil? || into.length != @fast_gains.shape[0] || into.any? { |o| !o.is_a?(Numo::SFloat) || o.length != length }
               into = Array.new(@fast_gains.shape[0]) { Numo::SFloat.zeros(length) }
             end
-            return MB::FastSound.matrix_mix(@fast_gains, data, into)
+            return @own_output = MB::FastSound.matrix_mix(@fast_gains, data, into)
           end
 
           real_out = @complex && @inputs.none? { |inp| inp.complex_input? }

@@ -179,7 +179,7 @@ module MB
           @status[idx] = :replacing
           inst = region.installation
           inst.rebuild if inst.stale?
-          @results[idx] = region.installed? ? region.sample_alone(count) : region.root.sample(count)
+          @results[idx] = region.installed? ? region.sample_alone(count) : region.root_sample(count)
           @status[idx] = :done
         end
 

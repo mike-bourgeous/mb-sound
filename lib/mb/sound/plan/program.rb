@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29, mix: 30 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -293,6 +293,8 @@ module MB
             when Op::Tap
               @objects << op.holder
               [OPCODES[:tap], reg(op.dst), reg(op.a), @objects.length - 1]
+            when Op::Mix
+              [OPCODES[:mix], reg(op.dst), op.terms.length, scalar(*op.weights), *op.terms.map { |t| reg(t) }]
             when Op::Unary
               [OPCODES[:unary], reg(op.dst), reg(op.a), op.function_id]
             when Op::Copy

@@ -108,6 +108,13 @@ module MB
           @check_before = nil
           @lane_group = nil
           @ringing = nil
+
+          # A multi-output root (see MultiDescribable): its other outputs'
+          # ops, the last frame its own code computed, and a reused frame
+          @multi = root.is_a?(MultiDescribable)
+          @extras = nil
+          @frame = nil
+          @frame_list = nil
         end
 
         # For internal use by Installation: adds a node to the region.
@@ -159,7 +166,12 @@ module MB
           @described = {}
           @boundaries = {}
           @consumers = {}
-          output = b.describe(@root)
+          if @multi
+            outputs = b.describe_outputs(@root)
+            output = outputs[0]
+          else
+            output = b.describe(@root)
+          end
           @described[@root] = output
           # Sums that ring past an input's end (GraphNode::Mixer without
           # stop_early): a block where a required input ends or gives a
@@ -168,6 +180,8 @@ module MB
           # The output is computed into the output buffer, so a boundary
           # input or param passed through is copied there
           output = b.copy(output) if output.op.is_a?(Op::Input) || output.op.is_a?(Op::Param)
+          # A multi-output root's other outputs are copied out (Op::Output)
+          outputs.drop(1).each_with_index { |v, k| b.output(v, k + 1) } if @multi
 
           @input_ops = b.inputs
           @param_ops = b.params
@@ -176,6 +190,8 @@ module MB
           @program = Program.new(ops: ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
           @program = ScaleMatch.pad(@program, @pads) if @pads
           @program.lower if @installation.engine == :c
+          @extras = @multi ? @program.ops.grep(Op::Output).sort_by(&:index).freeze : nil
+          @frame_list = @multi ? Array.new(@extras.length + 1) : nil
           @inputs = Array.new(@input_ops.length)
           @params = Array.new(@param_ops.length)
           @ended = Array.new(@input_ops.length, false)
@@ -258,6 +274,52 @@ module MB
           sample_alone(count)
         end
 
+        # Runs one block of a multi-output region (see MultiDescribable),
+        # returning every output's buffer (an Array reused each block), or
+        # nil once the region's graph ended: planned, the program's output
+        # and the Op::Output copies; unfused (a fallback, check mode's
+        # reference, a rebuild), the frame the root's own code computed.
+        def sample_outputs(count)
+          # Alternate the program's output buffer too (a lane group does it
+          # itself), as the outputs' readers may share the last frame
+          swap_out! unless @lane_group
+          out = sample(count)
+          frame = @frame
+          @frame = nil
+          return frame if frame && out && frame[0].equal?(out)
+          return nil if out.nil?
+
+          planned_frame(out)
+        end
+
+        # For internal use: the frame of a planned block whose program
+        # output is +out+ (see #sample_outputs).
+        def planned_frame(out)
+          return nil if out.nil?
+
+          list = @frame_list
+          list[0] = out
+          n = out.length
+          k = 0
+          while k < @extras.length
+            list[k + 1] = @extras[k].view(n)
+            k += 1
+          end
+          list
+        end
+
+        # Samples the root as unfused code would (or through the plan now
+        # installed on it, after a rebuild): its #sample, or for a
+        # multi-output root its #plan_frame, keeping the frame for
+        # #sample_outputs and returning output 0.
+        def root_sample(count)
+          return @root.sample(count) unless @multi
+
+          frame = @root.plan_frame(count)
+          @frame = frame
+          frame && frame[0]
+        end
+
         # Runs one block of this region by itself (see #sample).
         def sample_alone(count)
           n = prepare(count)
@@ -279,6 +341,7 @@ module MB
             @root.instance_variable_set(:@plan_handoff, nil)
             buf = handoff[0].take_handoff(handoff[1], count)
             unless buf.equal?(LaneGroup::NO_HANDOFF)
+              @frame = handoff[1].planned_frame(buf) if @multi
               @result = buf
               return :done
             end
@@ -286,7 +349,7 @@ module MB
 
           if @installation.stale?
             @installation.rebuild
-            @result = @root.sample(count)
+            @result = root_sample(count)
             return :done
           end
 
@@ -301,7 +364,7 @@ module MB
           end
 
           unless @program || compile
-            @result = @installation.stale? ? @root.sample(count) : run_unfused(count)
+            @result = @installation.stale? ? root_sample(count) : run_unfused(count)
             return :done
           end
           start_tones unless @started
@@ -677,10 +740,30 @@ module MB
           @unfused_blocks += 1
           @unfused = true
           @members.each { |m| m.instance_variable_set(:@plan_bypass, true) }
-          @root.sample(count)
+          root_sample(count)
         ensure
           @unfused = false
           @members.each { |m| m.instance_variable_set(:@plan_bypass, false) }
+        end
+
+        # Check mode's comparison of a planned block with the unfused
+        # +reference+: nil if they match, else what differs.
+        def compare_block(planned, reference)
+          if reference.length != planned.length
+            return "lengths differ (planned #{planned.length}, unfused #{reference.length})"
+          end
+
+          diff = (Numo::DComplex.cast(planned) - Numo::DComplex.cast(reference)).abs
+          nan_ok = planned.isnan.eq(reference.isnan).all?
+          finite = diff[~(diff.isnan)]
+          worst = finite.empty? ? 0.0 : finite.max # (every sample NaN on one side only: nan_ok reports it)
+          # Inexact ops (Plan.precision :fast) may differ by their
+          # tolerance, scaled by the output's level
+          limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max
+          return nil if nan_ok && worst <= limit
+
+          idx = diff.isnan.where.to_a.first || diff.max_index
+          "samples differ by up to #{worst} (first at #{idx}: planned #{planned[idx]}, unfused #{reference[idx]})"
         end
 
         # Check mode: runs the block planned, then unfused from the same
@@ -699,19 +782,20 @@ module MB
           problem = nil
           if reference.nil?
             problem = 'the unfused graph ended'
-          elsif reference.length != planned.length
-            problem = "lengths differ (planned #{planned.length}, unfused #{reference.length})"
           else
-            diff = (Numo::DComplex.cast(planned) - Numo::DComplex.cast(reference)).abs
-            nan_ok = planned.isnan.eq(reference.isnan).all?
-            finite = diff[~(diff.isnan)]
-            worst = finite.empty? ? 0.0 : finite.max # (every sample NaN on one side only: nan_ok reports it)
-            # Inexact ops (Plan.precision :fast) may differ by their
-            # tolerance, scaled by the output's level
-            limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max
-            if !nan_ok || worst > limit
-              idx = diff.isnan.where.to_a.first || diff.max_index
-              problem = "samples differ by up to #{worst} (first at #{idx}: planned #{planned[idx]}, unfused #{reference[idx]})"
+            problem = compare_block(planned, reference)
+          end
+
+          if problem.nil? && @multi
+            # The other outputs, against the frame the root computed
+            frame = @frame
+            @extras.each do |op|
+              ref = frame && frame[op.index]
+              problem = ref.nil? ? "output #{op.index} ended unfused" : compare_block(op.view(planned.length), ref)
+              if problem
+                problem = "output #{op.index}: #{problem}"
+                break
+              end
             end
           end
 
