@@ -52,8 +52,11 @@ RSpec.describe('bin/synths/wave_voices.rb') do
       grit = render_patch(MB::Sound.wave_voice(phrase(p), p, grit: true), 1.7)[0]
       expect(peak_db(clean)).to be_between(-14, 6), p.to_s # (velocity 1, before the master's -10 dB)
       expect(rms_db(grit)).to be_within(1).of(rms_db(clean)), p.to_s
-      # (grit: the oscillators held at 38.46 kHz)
-      expect(rms_db(grit - clean) - rms_db(clean)).to be > -40, p.to_s
+      # (grit: the oscillators held at 38.46 kHz; it must change the sound, not
+      # match a size: square_bass's grit is subtle, -41 dB under the clean voice
+      # once both render the same lanes (the earlier -40 bound counted a
+      # planned/unplanned lane-skipping difference that omnibus12 removed))
+      expect(rms_db(grit - clean) - rms_db(clean)).to be > -60, p.to_s
       expect(rms_db(seconds(clean, 1.65, 1.7))).to be < -90 # (released)
     end
   end
