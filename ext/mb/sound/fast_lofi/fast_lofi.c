@@ -41,24 +41,9 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
+#include "mb_decimate.h"
 
-#define DECIMATE_STATE_LENGTH 4
-
-// Phases this close below a whole cycle count as reaching it, so rates that
-// divide the sample rate hold exactly every N samples despite rounding.
-#define DECIMATE_EDGE 1e-9
-
-// The next uniform random number in 0...1 from the splitmix64 state *s (53
-// bits; the same generator as noise_random in mb_osc_shapes.h, mirrored by
-// MB::Sound::Tone.noise_random).
-static inline double lofi_random(uint64_t *s)
-{
-	uint64_t z = (*s += 0x9E3779B97F4A7C15ULL);
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-	z ^= z >> 31;
-	return (double)(z >> 11) * 0x1.0p-53;
-}
+#define DECIMATE_STATE_LENGTH MB_DECIMATE_STATE_LENGTH
 
 static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE state, VALUE rng, VALUE sample_rate, VALUE jitter_v, VALUE mode_v)
 {
@@ -98,42 +83,7 @@ static VALUE ruby_decimate(VALUE self, VALUE out, VALUE x, VALUE rate, VALUE sta
 	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
 	uint64_t *rp = (uint64_t *)(nary_get_pointer_for_write(rng) + nary_get_offset(rng));
 
-	double phase = st[0];
-	float held = (float)st[1];
-	double factor = st[2];
-	float prev = (float)st[3];
-
-	for (size_t i = 0; i < length; i++) {
-		if (phase >= 1.0 - DECIMATE_EDGE) {
-			phase -= mb_floor(phase + DECIMATE_EDGE);
-			prev = held;
-			held = (float)mb_signal_at(&xs, i);
-			if (jitter > 0) {
-				double u = lofi_random(rp);
-				double spread = jitter * (2.0 * u - 1.0);
-				factor = 1.0 + spread;
-			}
-		}
-		if (mode == 1) {
-			double t = phase < 1.0 ? phase : 1.0;
-			op[i] = (float)((double)prev + ((double)held - (double)prev) * t);
-		} else {
-			op[i] = held;
-		}
-
-		double inc = mb_signal_at(&rs, i) / fs;
-		if (!(inc > 0)) {
-			inc = 0;
-		} else if (inc > 1.0) {
-			inc = 1.0;
-		}
-		phase += inc * factor;
-	}
-
-	st[0] = phase;
-	st[1] = held;
-	st[2] = factor;
-	st[3] = prev;
+	mb_decimate(op, &xs, &rs, st, rp, fs, jitter, mode, length);
 
 	RB_GC_GUARD(x);
 	RB_GC_GUARD(rate);

@@ -176,6 +176,25 @@ module MB
           "Decimator #{r}#{j}"
         end
 
+        # Plan layer (see MB::Sound::Plan and Plan::Op::Decimate): the hold
+        # and the blend in C on this node's state, so a decimator inside a
+        # voice no longer splits it into two regions (plan-fusion-2).
+        include Plan::Describable
+
+        def plan_describe(p)
+          mix = @mix.is_a?(Numeric) ? (@mix == 1.0 ? nil : @mix) : @mix
+          p.decimate(self, p[@input], @rate, mix)
+        end
+
+        def plan_snapshot
+          [@state.to_a, @rng[0]]
+        end
+
+        def plan_restore(snapshot)
+          @state[0..] = snapshot[0]
+          @rng[0] = snapshot[1]
+        end
+
         # The exact Ruby mirror of MB::Sound::FastLofi.decimate (same
         # arguments and state; see ext/mb/sound/fast_lofi/fast_lofi.c): the
         # same double operations in the same order, inputs read as float32

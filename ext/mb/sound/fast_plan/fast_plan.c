@@ -97,6 +97,8 @@ enum {
 	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
 	OP_DYNAMICS,  // dst, a, object, sc, nside, side regs..., 5 time regs  dst = GraphNode::Dynamics (one channel) on a (see run_dynamics)
 	OP_MIX,       // dst, nterms, sc, term regs...  dst = 0 + sum of (float)sc[k] * term k (see run_mix; Plan::Op::Mix)
+	OP_DECIMATE,  // dst, a, rate, mix, object, sc  dst = GraphNode::Decimator on a (see run_decimate; Plan::Op::Decimate)
+	OP_PAN_GAIN,  // dst, a, law, side, sc       dst = one side's pan law gain for positions a (see run_pan_gain; Plan::Op::PanGain)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1056,6 +1058,12 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SAMPLE_HOLD:
 			len = 5;
 			break;
+		case OP_DECIMATE:
+			len = 7;
+			break;
+		case OP_PAN_GAIN:
+			len = 6;
+			break;
 		case OP_MIX:
 			if (pc + 4 > pw->nwords || op[2] < 1 || op[2] > 4096) rb_raise(rb_eArgError, "Bad plan mix op at word %zu", pc);
 			len = 4 + (size_t)op[2];
@@ -1308,6 +1316,71 @@ static void run_mix(const int32_t *op, size_t pc, const struct regs *R, long nre
 	}
 }
 
+// OP_DECIMATE: dst, a, rate, mix, object, sc: GraphNode::Decimator on the
+// real register a at the hold rate register (-1: the scalar sc[0]), then
+// blended with a by the mix register (-1: the scalar sc[1]) unless sc[2] is
+// 0 (a numeric mix of 1); object: the GraphNode::Decimator (see
+// mb_plan_decimate).
+static void run_decimate(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan decimators are real");
+	if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan decimator object at word %zu", pc);
+	if (op[6] < 0 || (size_t)op[6] + 3 > nscalars) rb_raise(rb_eArgError, "Bad plan decimator scalars at word %zu", pc);
+	if ((op[3] >= 0 && !R->p[op[3]]) || (op[4] >= 0 && !R->p[op[4]])) rb_raise(rb_eArgError, "A planned decimator's input is missing at word %zu", pc);
+	const double *s = sc + op[6];
+	struct mb_signal in, rate, mix;
+	op_signal(&in, R, nregs, op[2], 0.0, pc);
+	op_signal(&rate, R, nregs, op[3], s[0], pc);
+	op_signal(&mix, R, nregs, op[4], s[1], pc);
+	mb_plan_decimate(R->p[op[1]], &in, &rate, s[2] != 0 ? &mix : NULL, rb_ary_entry(objects, op[5]), n);
+}
+
+// OP_PAN_GAIN: dst, a, law, side, sc: one side's gain (side 0 left, 1
+// right) of a pan law for the real positions a, as FastArithmetic.pan and
+// Numo compute ChannelMixer::PanLaws on float32 buffers: the position (times
+// (float)sc[1] first when sc[0] is nonzero: a unison slot times its spread)
+// clipped to -1..1 (NaN stays NaN), then law 0 (:equal_power) (float)cos or
+// sin of (p + 1) * (float)(pi / 4); 1 (:linear) (1 - p) * 0.5 or (p + 1) *
+// 0.5; 2 (:minus_4_5db) those to the power (float)0.75; 3 (:balance) the
+// :equal_power cos or sin times (float)sqrt(2), clipped to 0..1.
+static void run_pan_gain(const int32_t *op, size_t pc, const struct regs *R, const double *sc, size_t nscalars, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan pan gains are real");
+	int law = op[3], side = op[4];
+	if (law < 0 || law > 3 || (side != 0 && side != 1)) rb_raise(rb_eArgError, "Bad plan pan law at word %zu", pc);
+	if (op[5] < 0 || (size_t)op[5] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan pan scalars at word %zu", pc);
+
+	float *D = R->p[op[1]];
+	const float *A = R->p[op[2]];
+	_Bool scaled = sc[op[5]] != 0;
+	const float scale = (float)sc[op[5] + 1];
+	const float quarter_pi = (float)(M_PI / 4);
+	const float half = 0.5f;
+	const float exponent = 0.75f;
+	const float root2 = (float)sqrt(2.0);
+
+	for (size_t i = 0; i < n; i++) {
+		float p = A[i];
+		if (scaled) p = scale * p;
+		if (p < -1.0f) p = -1.0f;
+		if (p > 1.0f) p = 1.0f;
+
+		float g;
+		if (law == 0 || law == 3) {
+			float angle = (p + 1.0f) * quarter_pi;
+			g = side == 0 ? (float)cos((double)angle) : (float)sin((double)angle);
+			if (law == 3) {
+				g = g * root2;
+				g = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g);
+			}
+		} else {
+			g = side == 0 ? (1.0f - p) * half : (p + 1.0f) * half;
+			if (law == 2) g = (float)pow((double)g, (double)exponent);
+		}
+		D[i] = g;
+	}
+}
+
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
 static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
 {
@@ -1509,6 +1582,14 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_MIX:
 			run_mix(op, pc, R, nregs, sc, nscalars, n);
+			break;
+
+		case OP_DECIMATE:
+			run_decimate(op, pc, R, nregs, sc, nscalars, objects, n);
+			break;
+
+		case OP_PAN_GAIN:
+			run_pan_gain(op, pc, R, sc, nscalars, n);
 			break;
 
 		case OP_TAP: {
@@ -1777,6 +1858,8 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("tap")), INT2NUM(OP_TAP));
 	rb_hash_aset(h, ID2SYM(rb_intern("dynamics")), INT2NUM(OP_DYNAMICS));
 	rb_hash_aset(h, ID2SYM(rb_intern("mix")), INT2NUM(OP_MIX));
+	rb_hash_aset(h, ID2SYM(rb_intern("decimate")), INT2NUM(OP_DECIMATE));
+	rb_hash_aset(h, ID2SYM(rb_intern("pan_gain")), INT2NUM(OP_PAN_GAIN));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

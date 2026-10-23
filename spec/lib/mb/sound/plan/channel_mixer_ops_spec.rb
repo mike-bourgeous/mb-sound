@@ -126,10 +126,29 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
       expect(r.outputs[:unfused].compact.sum(&:length)).to eq(1000)
     end
 
-    it 'leaves a unison with a moving spread unfused, with a reason' do
-      graph = MB::Sound.with_seed(5) { 220.hz.unison(3, detune: 0.2, spread: 0.3.hz.lfo.at(0..1)) { |p, _i| p.saw } }
+    it 'fuses a unison with a moving spread (Op::PanGain per copy, plan-fusion-2)' do
+      r = plan_compare { |_c|
+        l, rt = MB::Sound.with_seed(5) { 220.hz.unison(3, detune: 0.2, spread: 0.3.hz.lfo.at(0..1)) { |p, _i| p.saw } }.to_a
+        l + rt * 0.5
+      }
+      reg = mixer_region(r)
+      expect(reg).not_to be_nil
+      expect(reg.program.ops.count { |op| op.is_a?(MB::Sound::Plan::Op::PanGain) }).to eq(6)
+    end
+
+    it 'fuses a moving spread past full width and below zero (positions clipped), also in check mode' do
+      plan_compare(check: :raise) { |_c|
+        spread = src.new(kind: :steps, seed: 4, every: 70, scale: 1.5) * 1
+        m = MB::Sound::GraphNode::ChannelMixer::Unison.new([src.new(seed: 2) * 0.5, src.new(seed: 3) * 0.25, src.new(seed: 5) * 1],
+                                                            slots: [-1, 0.4, 0], spread: spread, stereo: true)
+        m.outputs[0] - m.outputs[1] * 0.5
+      }
+    end
+
+    it 'leaves a unison with a moving mix unfused, with a reason' do
+      graph = MB::Sound.with_seed(5) { 220.hz.unison(3, detune: 0.2, spread: 0.5, mix: 0.3.hz.lfo.at(0..1)) { |p, _i| p.saw } }
       text = MB::Sound::Plan.explain(graph.to_a[0] + graph.to_a[1])
-      expect(text).to include('gains moving with node parameters')
+      expect(text).to include('a moving unison mix')
     end
 
     it 'names the outputs as computed in the mixer region in Plan.explain' do
@@ -169,9 +188,34 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, 'plan ops') do
       expect(mixer_region(r)).not_to be_nil
     end
 
-    it 'leaves a moving pan unfused' do
-      text = MB::Sound::Plan.explain((src.new(seed: 1) * 0.5).pan(0.25.hz.lfo).to_a.reduce(:+))
-      expect(text).to include('gains moving with node parameters')
+    {
+      pan: ->(s, pos) { (s[0] * 0.5).pan(pos) },
+      pan_linear: ->(s, pos) { (s[0] * 0.5).pan(pos, law: :linear) },
+      pan_minus_4_5db: ->(s, pos) { (s[0] * 0.5).pan(pos, law: :minus_4_5db) },
+      balance: ->(s, pos) { s.balance(pos) },
+    }.each do |name, make|
+      it "matches a moving #{name} (Op::PanGain), positions beyond -1..1 included, also in check mode" do
+        r = plan_compare(check: :raise) { |_c|
+          pos = src.new(kind: :steps, seed: 6, every: 45, scale: 1.4) * 1
+          outs = make.call(stereo_input, pos).to_a
+          outs[0] + outs[1] * 0.5
+        }
+        expect(mixer_region(r).program.ops.count { |op| op.is_a?(MB::Sound::Plan::Op::PanGain) }).to eq(2)
+      end
+    end
+
+    it 'fuses an autopan LFO with the pan (the keys presets)' do
+      r = plan_compare { |_c| (src.new(seed: 1) * 0.5).pan(4.6.hz.lfo.at(0.22)).to_a.reduce(:+) }
+      expect(mixer_region(r).members.count { |m| m.is_a?(MB::Sound::Tone) }).to eq(1)
+    end
+
+    it 'runs moving pans with the Ruby mirror (PanLaws)' do
+      r = plan_compare(engines: [:ruby]) { |_c|
+        pos = src.new(kind: :steps, seed: 7, every: 30, scale: 1.2) * 1
+        (src.new(seed: 1) * 0.5).pan(pos, law: :minus_4_5db).to_a.reduce(:+) + stereo_input.balance(pos * 0.9).to_a.reduce(:+)
+      }
+      ops = r.regions(:ruby).flat_map { |reg| reg.program.ops }
+      expect(ops.count { |op| op.is_a?(MB::Sound::Plan::Op::PanGain) }).to eq(4)
     end
 
     it 'leaves complex gains unfused' do

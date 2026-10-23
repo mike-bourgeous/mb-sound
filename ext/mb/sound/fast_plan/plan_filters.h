@@ -80,4 +80,12 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 struct mb_signal;
 void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
 
+// OP_DECIMATE: FastLofi.decimate (plan_lofi.c, through mb_decimate.h) on
+// the real input +in+ into +d+ at the hold rate +rate+ (Hz), then, unless
+// +mix+ is NULL, GraphNode::Decimator.mix's float steps with +mix+ (a
+// register, or its scalar when it has no pointer); +obj+ is the
+// GraphNode::Decimator (its @state, @rng, @sample_rate, @jitter, and @mode
+// are read each block).  Raises on bad objects.
+void mb_plan_decimate(float *d, const struct mb_signal *in, const struct mb_signal *rate, const struct mb_signal *mix, VALUE obj, size_t n);
+
 #endif

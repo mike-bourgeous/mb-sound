@@ -60,6 +60,58 @@ module MB
           end
         end
 
+        # One side's gain of a pan law (GraphNode::ChannelMixer::PanLaws)
+        # for a moving position, as FastArithmetic.pan and Numo compute it
+        # on float32 buffers (fast_plan's OP_PAN_GAIN): the position
+        # (optionally scaled first: (float)scale * position, a unison slot
+        # times its spread) clipped to -1..1, then :equal_power cos or sin of
+        # (p + 1) * (float)(pi / 4), :linear (1 - p) * 0.5 or (p + 1) * 0.5,
+        # :minus_4_5db those to the (float)0.75 power, or :balance
+        # (PanLaws.balance) cos or sin of the angle times (float)sqrt(2),
+        # clipped to 0..1.  +side+ is 0 (left) or 1 (right).  Moving pans,
+        # balances, and unison spreads multiply their inputs by these
+        # (plan-fusion-2).  The mirror is PanLaws itself.
+        class PanGain < Base
+          # Law numbers (FastArithmetic.pan's, plus :balance).
+          LAWS = { equal_power: 0, linear: 1, minus_4_5db: 2, balance: 3 }.freeze
+
+          attr_reader :a, :law, :side, :scale
+
+          def initialize(dst, node, a, law, side, scale: nil)
+            super(dst, node)
+            raise Unsupported.new(node, 'a complex pan position') if a.complex?
+            raise Unsupported.new(node, 'a constant pan position') unless a.is_a?(Value)
+            raise ArgumentError, "Unknown pan law #{law.inspect}" unless LAWS.include?(law)
+            raise ArgumentError, 'The pan side must be 0 or 1' unless side == 0 || side == 1
+            raise ArgumentError, 'The pan scale must be a real number' unless scale.nil? || (scale.is_a?(Numeric) && scale.real?)
+
+            @a = a
+            @law = law
+            @side = side
+            @scale = scale
+          end
+
+          def law_id = LAWS.fetch(@law)
+
+          def operands = [@a]
+
+          def expression
+            pos = @scale ? "#{MB::M.sigfigs(@scale, 4)} * #{@a}" : @a.to_s
+            "pan_#{@side == 0 ? 'left' : 'right'}_#{@law}(#{pos})"
+          end
+
+          def opcode = :pan_gain
+
+          def run_ruby(env, count)
+            pos = env.fetch(@a)
+            pos = pos[0...count] if pos.length > count
+            pos = @scale * pos if @scale
+            laws = GraphNode::ChannelMixer::PanLaws
+            gains = @law == :balance ? laws.balance(pos) : laws.gains(@law, pos)
+            env[@dst] = Numo::SFloat.cast(gains[@side])
+          end
+        end
+
         # Output +index+ (1 and up) of a multi-output region (see
         # MultiDescribable): copies +a+ into a buffer the region hands out
         # with the program's own output (Region#sample_outputs).  Two buffers
@@ -110,6 +162,14 @@ module MB
             @holder[0][0...count] = buf.length > count ? buf[0...count] : buf
             env[@dst] = nil
           end
+        end
+      end
+
+      class Builder
+        # One side's gain (+side+ 0 left, 1 right) of pan law +law+ for the
+        # position +a+ (times +scale+ if given); see Op::PanGain.
+        def pan_gain(a, law, side, scale: nil)
+          emit(Op::PanGain.new(value(:real), node, self[a], law, side, scale: scale))
         end
       end
     end

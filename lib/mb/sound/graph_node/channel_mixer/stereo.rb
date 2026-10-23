@@ -17,6 +17,16 @@ module MB
             [[left], [right]]
           end
 
+          # A moving position: the law's gains (Plan::Op::PanGain) times the
+          # input, as FastArithmetic.pan computes them.
+          def plan_moving_reason = nil
+
+          def plan_describe_moving(p, terms)
+            pos = p[@param_values[:position]]
+            law = option(:law)
+            [p.pan_gain(pos, law, 0) * terms[0], p.pan_gain(pos, law, 1) * terms[0]]
+          end
+
           private
 
           # Law numbers for MB::Sound::FastArithmetic.pan.
@@ -59,6 +69,15 @@ module MB
           def gains_for(position:)
             left, right = PanLaws.balance(position)
             [[left, 0], [0, right]]
+          end
+
+          # A moving position: PanLaws.balance's gains (Plan::Op::PanGain)
+          # times each channel, as #mix computes them.
+          def plan_moving_reason = nil
+
+          def plan_describe_moving(p, terms)
+            pos = p[@param_values[:position]]
+            [p.pan_gain(pos, :balance, 0) * terms[0], p.pan_gain(pos, :balance, 1) * terms[1]]
           end
         end
 

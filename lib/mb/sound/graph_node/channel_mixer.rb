@@ -335,20 +335,36 @@ module MB
         include Plan::MultiDescribable
 
         def plan_inputs
-          @inputs
+          @inputs + @param_values.values.select { |v| v.respond_to?(:sample) }
         end
 
         def plan_unsupported_reason
           return 'complex gains (an analytic input stage)' if @complex
-          return 'gains moving with node parameters' unless @fast_gains
+          return nil if @fast_gains
 
-          nil
+          plan_moving_reason
         end
 
         def plan_describe(p)
           terms = @inputs.map { |inp| p[inp] }
+          return plan_describe_moving(p, terms) unless @fast_gains
+
           rows, cols = @fast_gains.shape
           Array.new(rows) { |j| p.mix(terms, Array.new(cols) { |k| @fast_gains[j, k] }) }
+        end
+
+        # nil if a subclass describes its gains moving with node parameters
+        # (#plan_describe_moving) in the current settings, else why not.
+        def plan_moving_reason
+          'gains moving with node parameters'
+        end
+
+        # The outputs' Values for gains moving with node parameters, from
+        # the inputs' Values +terms+ (subclasses whose #plan_moving_reason is
+        # nil: Pan, Balance, and Unison's spread; plan-fusion-2), computing
+        # exactly what #gains_for and #mix (or #mix_params) give.
+        def plan_describe_moving(p, terms)
+          raise Plan::Unsupported.new(self, plan_moving_reason)
         end
 
         # One frame of every output (an Array of buffers, or nil once an
