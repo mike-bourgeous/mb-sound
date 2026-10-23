@@ -153,6 +153,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/sq80_voice.rb' => ['-p', 'flutter_pad', '--cutoff', '700'],
     'bin/synths/stereo_graph_synth_example.rb' => [],
     'bin/synths/vocal_lead.rb' => ['-V', 'i,a,u', '-j', '0.2'],
+    'bin/synths/wave_voices.rb' => ['-p', 'square_bass', '--grit', '1'],
     'bin/synths/wavetable_bass.rb' => [],
     'bin/wavetable_pr_example.rb' => [],
   }.freeze

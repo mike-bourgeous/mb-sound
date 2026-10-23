@@ -8,7 +8,9 @@
 # ambient.rb, funk.rb, named for their genres) were the first, then
 # bin/synths/electric_pianos.rb, then the SQ-80 voice's patches
 # (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
-# named racks from bin/songs/rack_demo.rb, saved with their knobs); each
+# named racks from bin/songs/rack_demo.rb, saved with their knobs), then
+# the wave voices (bin/synths/wave_voices.rb, protos-1: the research-sq80
+# prototype patches, grit a param); each
 # document's description says where it came from (the scripts'
 # <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
@@ -25,6 +27,7 @@
 require 'bundler/setup'
 require 'fileutils'
 require 'mb-sound'
+require_relative 'synths/wave_voices' # (its patches' settings; guarded by main_script?)
 
 module MB::Sound
   # The library's preset sources: { name => [script, patch, extra args] }
@@ -63,6 +66,13 @@ module MB::Sound
     tine_crunch: ['bin/synths/electric_pianos.rb', :crunch, '--pickup', '0.5', '--amp', '4'],
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
   }.merge(
+    # The wave voices (protos-1, 2026-10-23: the research-sq80 prototype
+    # patches of 2026-10-06), with each patch's cutoff, resonance, and grit
+    # (0: clean) given so they save as params
+    WAVE_VOICES.keys.to_h { |n|
+      s = WAVE_VOICES.fetch(n)
+      [n, ['bin/synths/wave_voices.rb', n, '--cutoff', s[:cutoff].to_s, '--reso', s[:reso].to_s, '--grit', '0.0']]
+    },
     # The SQ-80 voice's patches (sq80-lib-1, 2026-10-17), with each patch's
     # cutoff, reso, chop, and flutter given so they save as params (zero
     # chop or flutter is off, baked in)

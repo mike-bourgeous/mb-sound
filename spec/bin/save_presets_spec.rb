@@ -32,9 +32,12 @@ RSpec.describe('bin/save_presets.rb') do
       doc = io.parse(file)
       expect(doc.inputs).to eq([:midi])
       expect(doc.kind).to eq(:synth)
+      wave = script.end_with?('wave_voices.rb')
       expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch))
       if script.end_with?('sq80_voice.rb')
         expect(doc.description).to include("from #{script}", 'sq80-lib-1')
+      elsif wave
+        expect(doc.description).to include("from #{script}", 'research-sq80 prototype', 'protos-1')
       else
         expect(doc.description).to include("from #{script}", 'persona panel experiment')
       end
@@ -49,7 +52,12 @@ RSpec.describe('bin/save_presets.rb') do
       }
 
       MB::Sound.seed(MB::Sound::Internal.default_seed) # as the script saw it
-      direct = MB::Sound.public_send("#{File.basename(script, '.rb')}_patch", midi.(), patch)
+      direct =
+        if wave
+          MB::Sound.wave_voice(midi.(), patch)
+        else
+          MB::Sound.public_send("#{File.basename(script, '.rb')}_patch", midi.(), patch)
+        end
       expected = render_buffers(direct, 40)
 
       loaded = io.load(file, inputs: { midi: midi.() })

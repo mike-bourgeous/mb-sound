@@ -118,6 +118,24 @@ RSpec.describe(MB::Sound::Plan::SharedInputs) do
     expect(a).to eq(b)
   end
 
+  it "hands a lane read in a window its part of a guarded block (protos-1: a whole block's replay for a 600-sample piece)" do
+    # A shared Constant (a preset param) read in every lane, a boundary
+    # (decimate) before the filter, and the stream's end running regions
+    # unfused (SharedInputs#guard!) while other lanes read pieces
+    make = -> {
+      MB::Sound.seed(0)
+      c = 150.constant.named('cutoff')
+      MB::Sound.synth('spec/test_data/c2_sustain.mid', voices: 2) { |v|
+        mix = v.hz.saw.decimate(38461.5)
+        mix.lp4(c * 2 ** (v.number / 40.0), resonance: 0.4) * v.env(0, 0.1, 0.5, 0.1)
+      }
+    }
+    blocks = [800] * 107 + [600] + [800] * 10
+    a = render(make.call, blocks)
+    expect(a.length).to be > 48000
+    expect(render(make.call, blocks, unshared: true)).to eq(a)
+  end
+
   it 'is off with plans off' do
     old = MB::Sound::Plan.enabled
     MB::Sound::Plan.enabled = false
