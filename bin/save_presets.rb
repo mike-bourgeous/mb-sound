@@ -10,7 +10,7 @@
 # (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
 # named racks from bin/songs/rack_demo.rb, saved with their knobs), then
 # the wave voices (bin/synths/wave_voices.rb, protos-1: the research-sq80
-# prototype patches, clean and grit); each
+# prototype patches, grit a param); each
 # document's description says where it came from (the scripts'
 # <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
@@ -67,13 +67,12 @@ module MB::Sound
     reed_piano: ['bin/synths/electric_pianos.rb', :reed, '--pickup', '1.0'],
   }.merge(
     # The wave voices (protos-1, 2026-10-23: the research-sq80 prototype
-    # patches of 2026-10-06), clean and grit, with each patch's cutoff and
-    # resonance given so they save as params
-    %i[digibrass organ_reso square_bass].flat_map { |n|
+    # patches of 2026-10-06), with each patch's cutoff, resonance, and grit
+    # (0: clean) given so they save as params
+    WAVE_VOICES.keys.to_h { |n|
       s = WAVE_VOICES.fetch(n)
-      args = ['--cutoff', s[:cutoff].to_s, '--reso', s[:reso].to_s]
-      [[n, ['bin/synths/wave_voices.rb', n, *args]], [:"#{n}_grit", ['bin/synths/wave_voices.rb', n, '--grit', *args]]]
-    }.to_h,
+      [n, ['bin/synths/wave_voices.rb', n, '--cutoff', s[:cutoff].to_s, '--reso', s[:reso].to_s, '--grit', '0.0']]
+    },
     # The SQ-80 voice's patches (sq80-lib-1, 2026-10-17), with each patch's
     # cutoff, reso, chop, and flutter given so they save as params (zero
     # chop or flutter is off, baked in)

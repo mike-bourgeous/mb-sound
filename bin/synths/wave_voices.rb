@@ -23,28 +23,33 @@
 #   square_bass  a plucked bass: a square plus a saw an octave down, the
 #                filter plucked 4 octaves by a fast envelope
 #
-# --grit plays the prototype's "DOC" oscillators instead: 256-sample tables
-# read without interpolation, 8-bit levels, held at the Ensoniq DOC's
-# 38,461.5 Hz, aliasing on purpose.  Each patch (and its grit version) is
-# also a preset: `preset :square_bass, midi: midi`, `:square_bass_grit`.
+# --grit (0..1, also each preset's grit param) blends in the prototype's
+# "DOC" grit: the oscillators held at the Ensoniq DOC's 38,461.5 Hz, aliasing
+# on purpose (1 is the prototype's grit; see WAVE_VOICE_DOC_RATE).  Each
+# patch is also a preset: `preset :square_bass, midi: midi, grit: 1`.
 #
 # Usage:
 #     bin/synths/wave_voices.rb                          # live MIDI, digibrass
-#     bin/synths/wave_voices.rb -p square_bass --grit song.mid bass.flac
+#     bin/synths/wave_voices.rb -p square_bass --grit 1 song.mid bass.flac
 #
 # Snippets (bin/sound.rb):
 #     bpm 100
 #     bg :bass, preset(:square_bass, midi: seq(A1, A1, R, A2, A1, R, G1, E1).n8.loop)
 #     bg :organ, preset(:organ_reso, midi: (seq(A3, F3, C4, G3).n2 & seq(C4, A3, E4, B3).n2 & seq(E4, C4, G4, D4).n2).loop)
 #     bg :brass, preset(:digibrass, midi: seq([A3, C4, E4].n8, R.n8, R.n4, [G3, C4, E4].n8, R.n8, [F3, A3, C4].n4).loop)
-#     bg :keys, preset(:organ_reso_grit, midi: midi)        # live keyboard
+#     bg :keys, preset(:organ_reso, midi: midi, grit: 1)    # live keyboard
 
 require 'bundler/setup'
 require 'mb-sound'
 
 module MB::Sound
   # The DOC's output rate in the ESQ-1 and SQ-80 (8 MHz / 208), where
-  # --grit holds its oscillators (38,461.54 Hz, rounded).
+  # --grit holds the oscillators (38,461.54 Hz, rounded).  The prototype's
+  # grit also read 256-sample 8-bit tables without interpolation, but
+  # measured after the filter the hold is all of it: the inharmonic floor
+  # of a held organ_reso A3 is -30.8 dB with those tables, -30.8 with the
+  # clean tables held (the prototype's -31.4, clean -62.7), so the voices
+  # keep their clean tables (protos-1).
   WAVE_VOICE_DOC_RATE = 38461.5
 
   # The prototype's bright "digital formant" wave: a 1/n slope with a bump
@@ -125,17 +130,17 @@ module MB::Sound
   }.freeze
 
   # A wavetable voice (see the header) playing +midi+ (Notes, a Clip, a
-  # MIDI file, or a Stream).  +grit+ uses the DOC-style oscillators;
+  # MIDI file, or a Stream).  +grit+ (0..1, or true/false) blends in the
+  # DOC-rate hold of the oscillators (a named Constant, a preset param);
   # +cutoff+ (Hz at C4) and +reso+ (0..1) default to the patch's and
   # become named Constants (preset params), as does +level+ when given.
-  def self.wave_voice(midi, patch = :digibrass, grit: false, cutoff: nil, reso: nil, voices: nil, level: nil)
+  def self.wave_voice(midi, patch = :digibrass, grit: 0.0, cutoff: nil, reso: nil, voices: nil, level: nil)
     s = WAVE_VOICES.fetch(patch) { raise ArgumentError, "Unknown wave voice #{patch.inspect} (#{WAVE_VOICES.keys.join(', ')})" }
     cutoff = (cutoff || s[:cutoff]).to_f.constant.named('cutoff')
     reso = (reso || s[:reso]).to_f.constant.named('reso')
     gain = level ? level.to_f.constant.named('level') : s[:level]
-    tables = s[:oscs].map { |o|
-      grit ? wavetable_of(o[:wave], size: 256, mips: false, interpolation: :none) : wavetable_of(o[:wave])
-    }
+    grit = { true => 1.0, false => 0.0 }.fetch(grit, grit).to_f.constant.named('grit')
+    tables = s[:oscs].map { |o| wavetable_of(o[:wave]) }
 
     synth(midi, voices: voices || s[:voices]) { |v|
       f = s[:vibrato] ? v.hz.vibrato(s[:vibrato][0], depth: s[:vibrato][1]) : v.hz
@@ -143,11 +148,10 @@ module MB::Sound
         p = o[:semitones] == 0 ? f : f.transpose(o[:semitones])
         osc = p.wavetable(tables[i])
         osc = osc.with_phase(o[:phase]) if o[:phase]
-        osc = osc.aquantize(1 / 127r) if grit
         osc * o[:level]
       }
       mix = oscs.reduce(:+)
-      mix = mix.decimate(WAVE_VOICE_DOC_RATE) if grit
+      mix = mix.decimate(WAVE_VOICE_DOC_RATE, mix: grit)
       if s[:attack]
         # 40 ms of lowpassed noise and a falling 1.8 kHz chirp at each note
         hiss = noise.filter(:lowpass, cutoff: 3300, quality: 0.5) * v.env(0, 0.04, 0, 0.04, curve: [0, 58, 58]).no_velocity
@@ -165,18 +169,18 @@ module MB::Sound
 
   # Where the patches came from, for preset descriptions (--save writes
   # it into the document): +what+ is the patch (a Symbol) or a phrase.
-  def self.wave_voices_description(what, grit: false)
+  def self.wave_voices_description(what)
     if what.is_a?(Symbol)
-      what = "Wave voice :#{what}#{' (grit: 8-bit 256-sample tables held at the DOC rate)' if grit}: #{WAVE_VOICES.fetch(what)[:description]}."
+      what = "Wave voice :#{what}: #{WAVE_VOICES.fetch(what)[:description]}; grit 0..1 holds the oscillators at the Ensoniq DOC's 38.46 kHz"
     end
     "#{what} (from bin/synths/wave_voices.rb: the research-sq80 prototype voice of 2026-10-06, rebuilt from library nodes in protos-1, 2026-10-23)"
   end
 
   if main_script?(__FILE__)
     synth_script(
-      description: ->(p) { wave_voices_description(p.patch, grit: p.grit) },
+      description: ->(p) { wave_voices_description(p.patch) },
       patch: [:digibrass, Symbol, '-p', 'Patch to play', WAVE_VOICES.keys],
-      grit: [false, '-G', 'DOC-style oscillators: 8-bit 256-sample tables, no interpolation, held at 38.46 kHz'],
+      grit: [0.0, Float, '-G', 'Grit 0..1: the oscillators held at the DOC\'s 38.46 kHz, aliasing (1: the prototype\'s grit)', 0.0..1.0],
       cutoff: [nil, Float, 'Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)', 20..10000],
       reso: [nil, Float, 'lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.64, square_bass 0.48)', 0.0..1.0],
       voices: [nil, Integer, 'Voices (default: the patch\'s)', 1..16],

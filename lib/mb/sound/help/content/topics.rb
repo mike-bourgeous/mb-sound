@@ -1034,8 +1034,8 @@ module MB
         and electric pianos: `:tine_piano` clean, `:tine_crunch` with its amp
         pushed (`amp: 1..8`), `:reed_piano`, the SQ-80 voice's patches
         (`:sq80_glass` and friends; see `help :sq80`), and three wavetable
-        voices: `:square_bass`, `:organ_reso`, `:digibrass` (each with a
-        `_grit` version: 8-bit tables, aliasing on purpose).
+        voices: `:square_bass`, `:organ_reso`, `:digibrass` (`grit: 1` holds
+        their oscillators at 38.46 kHz, aliasing on purpose).
       TEXT
       commands :ruby, :save, :preset, :presets, :set, :named_proc
       note :graph_io

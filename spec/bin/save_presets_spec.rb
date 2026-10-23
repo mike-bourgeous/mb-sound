@@ -26,15 +26,14 @@ RSpec.describe('bin/save_presets.rb') do
     expect(names.sort).to eq(MB::Sound.library_preset_names.sort)
   end
 
-  MB::Sound::LIBRARY_PRESET_PATCHES.each do |name, (script, patch, *extra)|
-    it "loads #{name} and plays it like #{File.basename(script)} -p #{patch}#{' --grit' if extra.include?('--grit')}" do
+  MB::Sound::LIBRARY_PRESET_PATCHES.each do |name, (script, patch, *_extra)|
+    it "loads #{name} and plays it like #{File.basename(script)} -p #{patch}" do
       file = MB::Sound.library_preset_file(io.library_presets_dir, name)
       doc = io.parse(file)
       expect(doc.inputs).to eq([:midi])
       expect(doc.kind).to eq(:synth)
       wave = script.end_with?('wave_voices.rb')
-      grit = { grit: extra.include?('--grit') }
-      expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch, **(wave ? grit : {})))
+      expect(doc.description).to eq(MB::Sound.public_send(:"#{File.basename(script, '.rb')}_description", patch))
       if script.end_with?('sq80_voice.rb')
         expect(doc.description).to include("from #{script}", 'sq80-lib-1')
       elsif wave
@@ -55,7 +54,7 @@ RSpec.describe('bin/save_presets.rb') do
       MB::Sound.seed(MB::Sound::Internal.default_seed) # as the script saw it
       direct =
         if wave
-          MB::Sound.wave_voice(midi.(), patch, **grit)
+          MB::Sound.wave_voice(midi.(), patch)
         else
           MB::Sound.public_send("#{File.basename(script, '.rb')}_patch", midi.(), patch)
         end

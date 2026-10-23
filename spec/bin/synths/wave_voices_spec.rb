@@ -52,7 +52,7 @@ RSpec.describe('bin/synths/wave_voices.rb') do
       grit = render_patch(MB::Sound.wave_voice(phrase(p), p, grit: true), 1.7)[0]
       expect(peak_db(clean)).to be_between(-14, 6), p.to_s # (velocity 1, before the master's -10 dB)
       expect(rms_db(grit)).to be_within(1).of(rms_db(clean)), p.to_s
-      # (the grit oscillators: 8-bit tables held at 38.46 kHz, not the clean mipmaps)
+      # (grit: the oscillators held at 38.46 kHz)
       expect(rms_db(grit - clean) - rms_db(clean)).to be > -40, p.to_s
       expect(rms_db(seconds(clean, 1.65, 1.7))).to be < -90 # (released)
     end
@@ -85,7 +85,7 @@ RSpec.describe('bin/synths/wave_voices.rb') do
       vin = MB::Sound::MIDI::VirtualInput.new(clock: -> { t })
       s.midi_in.add_source(MB::Sound::MIDI::LiveSource.new(vin, latency: 0.02))
       live = MB::Sound::Notes.new(s.midi_in.stream)
-      s.add(MB::Sound.preset(:organ_reso_grit, midi: live, session: false), name: :organ, on: :now)
+      s.add(MB::Sound.preset(:organ_reso, midi: live, session: false, grit: 1), name: :organ, on: :now)
       out = 45.times.map { |i|
         vin.note_on(60, 0.8) if i == 2
         vin.note_off(60) if i == 15
@@ -101,14 +101,13 @@ RSpec.describe('bin/synths/wave_voices.rb') do
     end
   end
 
-  it 'loads every preset to the same samples as the script, and follows the cutoff param' do
-    patches.product([false, true]).each do |p, grit|
-      name = :"#{p}#{'_grit' if grit}"
+  it 'loads every preset to the same samples as the script, and follows the grit and cutoff params' do
+    patches.product([0, 0.5, 1]).each do |p, grit|
       MB::Sound.seed(0)
       direct = render_patch(MB::Sound.wave_voice(phrase(p), p, grit: grit), 0.5)[0]
       MB::Sound.seed(0)
-      loaded = render_patch(MB::Sound.preset(name, midi: MB::Sound::Notes.new(phrase(p)), session: false), 0.5)[0]
-      expect(loaded).to eq(direct), name.to_s
+      loaded = render_patch(MB::Sound.preset(p, midi: MB::Sound::Notes.new(phrase(p)), session: false, grit: grit), 0.5)[0]
+      expect(loaded).to eq(direct), "#{p} grit #{grit}"
     end
 
     dark = render_patch(MB::Sound.preset(:square_bass, midi: MB::Sound::Notes.new(phrase(:square_bass)), session: false, cutoff: 60), 0.3)[0]
@@ -120,7 +119,7 @@ RSpec.describe('bin/synths/wave_voices.rb') do
     MB::Sound.seed(0)
     graph = MB::Sound.wave_voice(notes = MB::Sound::Notes.new(phrase(:digibrass)), :digibrass, grit: true)
     text = MB::Sound::GraphIO.dump(graph, inputs: { midi: notes })
-    expect(text).to include('wavetable_of(', 'tuning: :hardware', '.decimate(38461.5)', 'aquantize(1r/127)')
+    expect(text).to include('wavetable_of(', 'tuning: :hardware', '.decimate(38461.5, mix: grit)')
     ref = render_patch(graph, 0.5)[0]
     MB::Sound.seed(5)
     got = render_patch(MB::Sound::GraphIO.load(text, inputs: { midi: MB::Sound::Notes.new(phrase(:digibrass)) }), 0.5)[0]
