@@ -31,7 +31,7 @@ module MB
 
           case increment
           when Numeric
-            @increment = increment
+            @increment = increment.to_f # (Numo arrays divide by Floats, not Rationals)
             @increment = 0 unless @increment.finite? # clear NaN or Infinity
 
           when GraphNode

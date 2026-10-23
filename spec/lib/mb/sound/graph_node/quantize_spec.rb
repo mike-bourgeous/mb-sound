@@ -7,6 +7,11 @@ RSpec.describe(MB::Sound::GraphNode::Quantize, :aggregate_failures) do
     expect(data1.dup.aquantize(1).sample(6)).to eq(Numo::SFloat[0, 1, 1, 0, -1, -1])
   end
 
+  it 'takes a Rational increment (8-bit steps as 1r/127; protos-1)' do
+    expect(data1.dup.aquantize(1r / 4).sample(6)).to eq(Numo::SFloat[0.5, 0.5, 0.5, -0.5, -0.5, -0.5])
+    expect(data1.dup.aquantize(1r / 127).sample(6)).to eq(data1.dup.aquantize(1.0 / 127).sample(6))
+  end
+
   it 'does not matter if the quantization increment is negative' do
     expect(data1.dup.aquantize(-0.25).sample(6)).to eq(Numo::SFloat[0.5, 0.5, 0.5, -0.5, -0.5, -0.5])
     expect(data1.dup.aquantize(-1).sample(6)).to eq(Numo::SFloat[0, 1, 1, -0, -1, -1])
