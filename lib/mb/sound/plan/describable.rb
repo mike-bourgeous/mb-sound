@@ -1,37 +1,9 @@
 module MB
   module Sound
     module Plan
-      # The node side of the plan layer (see Plan's description): included
-      # by node classes that can describe their per-sample work as ops.
-      # Such a class defines #plan_describe(p) (see Builder) and, when they
-      # differ from these defaults, #plan_inputs, #plan_boundary_inputs,
-      # #plan_unsupported_reason, #plan_snapshot, and #plan_restore.
-      #
-      # Including it also prepends Planned, the hook that runs a region in
-      # place of the node's own #sample when the node is a region's root.
-      module Describable
-        # Prepends the Planned hook to +base+ and to every subclass (now and
-        # later), so a subclass's own #sample (e.g. Notes::NoteEnvelope's
-        # bookkeeping) never runs before a region it roots takes over.
-        def self.included(base)
-          base.prepend(Planned)
-          base.extend(Inherited)
-          stack = base.subclasses
-          until stack.empty?
-            c = stack.pop
-            c.prepend(Planned)
-            stack.concat(c.subclasses)
-          end
-        end
-
-        # Prepends Planned to subclasses as they are defined.
-        module Inherited
-          def inherited(sub)
-            super
-            sub.prepend(Planned)
-          end
-        end
-
+      # The protocol methods of describable nodes, with their defaults (see
+      # Describable and MultiDescribable).
+      module Describing
         # The handles (Tee branches) #plan_describe reads, for the region
         # finder.  By default every input in #sources that responds to
         # #sample.
@@ -67,6 +39,68 @@ module MB
         def plan_output_type
           :real
         end
+      end
+
+      # The node side of the plan layer (see Plan's description): included
+      # by node classes that can describe their per-sample work as ops.
+      # Such a class defines #plan_describe(p) (see Builder) and, when they
+      # differ from these defaults, #plan_inputs, #plan_boundary_inputs,
+      # #plan_unsupported_reason, #plan_snapshot, and #plan_restore.
+      #
+      # Including it also prepends Planned, the hook that runs a region in
+      # place of the node's own #sample when the node is a region's root.
+      module Describable
+        include Describing
+
+        # (The default protocol methods are in Describing, shared with
+        # MultiDescribable.)
+
+        # Prepends the Planned hook to +base+ and to every subclass (now and
+        # later), so a subclass's own #sample (e.g. Notes::NoteEnvelope's
+        # bookkeeping) never runs before a region it roots takes over.
+        def self.included(base)
+          base.prepend(Planned)
+          base.extend(Inherited)
+          stack = base.subclasses
+          until stack.empty?
+            c = stack.pop
+            c.prepend(Planned)
+            stack.concat(c.subclasses)
+          end
+        end
+
+        # Prepends Planned to subclasses as they are defined.
+        module Inherited
+          def inherited(sub)
+            super
+            sub.prepend(Planned)
+          end
+        end
+      end
+
+      # The plan protocol of a node with several outputs (a
+      # GraphNode::ChannelMixer, whose GraphNode::ChannelMixer::Output
+      # nodes are what other nodes read): #plan_describe returns an Array
+      # of Values, one per output, and the node roots a region of its own
+      # whose program computes every output (see Region): output 0 is the
+      # program's output, the others are copied out by Op::Output.  The
+      # region finder sees the node through its outputs' #sources (it has
+      # no #sample, so no Planned hook: Describable would give it one); its
+      # outputs stay plain nodes that other regions read as boundary inputs.
+      #
+      # The node itself decides when a new frame of all outputs is computed
+      # (the first output read in a frame, as GraphNode::ChannelMixer does),
+      # and computes it through #plan_frame: Region#sample_outputs while a
+      # region plans it, else its own unfused code.
+      #
+      #     def plan_frame(count)
+      #       region = @plan_region
+      #       return region.sample_outputs(count) if region && !@plan_bypass && !region.unfused
+      #
+      #       compute_frame(count) # one buffer per output, or nil once ended
+      #     end
+      module MultiDescribable
+        include Describing
       end
 
       # Prepended to describable node classes: a region's root runs the

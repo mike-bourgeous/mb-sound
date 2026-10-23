@@ -123,7 +123,7 @@ module MB
         # adds the Synth), so playing starts without compiling.
         def precompile
           others = @seen.each_key.filter_map { |n|
-            next unless n.is_a?(Describable)
+            next unless n.is_a?(Describing)
             owner = n.instance_variable_get(:@plan_region) || n.instance_variable_get(:@plan_member)
             owner&.installation unless owner&.installation.equal?(self)
           }.uniq
@@ -285,7 +285,7 @@ module MB
               lines << "  #{label}: #{fs.map { |f| "#{Plan.node_label(f.node)} (0 * #{f.folded})" }.first(8).join(', ')}#{fs.length > 8 ? ", ... (#{fs.length})" : ''}"
             end
           end
-          others = @order.select { |n| n.is_a?(GraphNode) && !n.is_a?(GraphNode::Tee::Branch) && !@region_of[n] }
+          others = @order.select { |n| (n.is_a?(GraphNode) || n.is_a?(MultiDescribable)) && !n.is_a?(GraphNode::Tee::Branch) && !@region_of[n] }
           unless others.empty?
             lines << 'Unfused nodes:'
             others.group_by { |n| candidate_reason(n) || 'its region was too small' }.each do |why, nodes|
@@ -298,7 +298,11 @@ module MB
         # nil if +node+ may be fused, else why not.
         def candidate_reason(node)
           return @excluded[node] if @excluded.key?(node)
-          return "not a planned node type (#{Plan.class_label(node)})" unless node.is_a?(Describable)
+          if !node.is_a?(Describing) && node.respond_to?(:plan_owner) && @region_of&.[](node.plan_owner)
+            # (A multi-output node's output: see MultiDescribable)
+            return "an output of #{Plan.node_label(node.plan_owner)} (computed in its region)"
+          end
+          return "not a planned node type (#{Plan.class_label(node)})" unless node.is_a?(Describing)
           return 'observed (Plan.observe)' if Plan.observed?(node)
 
           owner = node.instance_variable_get(:@plan_region) || node.instance_variable_get(:@plan_member)
@@ -358,7 +362,9 @@ module MB
           s = obj.respond_to?(:plan_sources) ? obj.plan_sources : obj.sources
           return [] unless s.respond_to?(:each_value)
 
-          s.each_value.select { |v| !v.is_a?(Numeric) && (v.respond_to?(:sample) || v.is_a?(GraphNode::Tee)) }
+          # (Multi-output nodes have no #sample of their own: their outputs
+          # read them; see MultiDescribable)
+          s.each_value.select { |v| !v.is_a?(Numeric) && (v.respond_to?(:sample) || v.is_a?(GraphNode::Tee) || v.is_a?(MultiDescribable)) }
         end
 
         # The readers of +node+ that aren't Tees or branches, each with the
@@ -399,7 +405,7 @@ module MB
         # True if +consumer+ may describe the node behind +handle+ inside
         # its own plan.
         def fusable_edge?(consumer, handle)
-          return false unless consumer.is_a?(Describable)
+          return false unless consumer.is_a?(Describing)
           return false if handle.is_a?(GraphNode::Tee::Branch) && handle.resampled?
 
           consumer.plan_inputs.any? { |h| h.equal?(handle) } && consumer.plan_boundary_inputs.none? { |h| h.equal?(handle) }

@@ -771,13 +771,17 @@ module MB
       # True if every graph node of lane +idx+'s graph (+graphs+, with the
       # id sets +sets+; MIDI streams aren't graph nodes) other than Tees, the
       # lane's own Notes nodes, and nodes shared with other lanes is
-      # computed in a plan region.
+      # computed in a plan region (an output of a planned multi-output node
+      # counts as computed there).
       def lane_planned?(graphs, sets, idx)
         graphs[idx].all? { |n|
           !n.is_a?(GraphNode) || n.is_a?(GraphNode::Tee) || n.is_a?(GraphNode::Tee::Branch) ||
             (n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx])) ||
             sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } ||
-            !n.instance_variable_get(:@plan_region).nil? || !n.instance_variable_get(:@plan_member).nil?
+            !n.instance_variable_get(:@plan_region).nil? || !n.instance_variable_get(:@plan_member).nil? ||
+            # (an output of a multi-output node computed in a region, e.g.
+            # a unison's ChannelMixer; see Plan::MultiDescribable)
+            (n.respond_to?(:plan_owner) && !n.plan_owner.instance_variable_get(:@plan_region).nil?)
         }
       end
 

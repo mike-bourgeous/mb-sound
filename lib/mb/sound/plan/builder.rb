@@ -67,6 +67,26 @@ module MB
           @node_stack.pop
         end
 
+        # Runs a multi-output node's #plan_describe (see MultiDescribable),
+        # returning one Value per output.
+        def describe_outputs(node)
+          @node_stack.push(node)
+          list = node.plan_describe(self)
+          unless list.is_a?(Array) && !list.empty?
+            raise Unsupported.new(node, "#plan_describe returned #{list.inspect} instead of an Array of Plan::Values")
+          end
+
+          list.map { |v|
+            v = const(v) if v.is_a?(Numeric)
+            v = fill(v) if v.is_a?(Const)
+            raise Unsupported.new(node, "#plan_describe returned #{v.inspect} instead of a Plan::Value") unless v.is_a?(Value)
+
+            v
+          }
+        ensure
+          @node_stack.pop
+        end
+
         # The Value (or Const) for +input+: a node handle (a Tee branch,
         # resolved by the region: described inside the plan or read as a
         # boundary input), a number (a Const), or a Value/Const (returned
@@ -222,6 +242,22 @@ module MB
             gate: gate && self[gate], trigger: trigger && self[trigger], velocity: velocity && self[velocity],
             choke: choke && self[choke], lift: lift && self[lift], octaves: octaves && self[octaves]
           ))
+        end
+
+        # The weighted sum 0 + w[0] a[0] + w[1] a[1] + ... of real Values
+        # +terms+ with real number weights (see Op::Mix).
+        def mix(terms, weights)
+          terms = terms.map { |t| self[t] }
+          terms = terms.map { |t| t.is_a?(Const) ? fill(t) : t }
+          raise Unsupported.new(node, 'a complex input') if terms.any?(&:complex?)
+
+          emit(Op::Mix.new(value(:real), node, terms, weights))
+        end
+
+        # Copies +a+ out as output +index+ of a multi-output region (see
+        # Op::Output and MultiDescribable).
+        def output(a, index)
+          emit(Op::Output.new(value(a.type), node, self[a], index))
         end
 
         # A copy of +a+ in a new register.

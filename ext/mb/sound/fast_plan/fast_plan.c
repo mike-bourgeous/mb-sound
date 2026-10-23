@@ -96,6 +96,7 @@ enum {
 	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
 	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
 	OP_DYNAMICS,  // dst, a, object, sc, nside, side regs..., 5 time regs  dst = GraphNode::Dynamics (one channel) on a (see run_dynamics)
+	OP_MIX,       // dst, nterms, sc, term regs...  dst = 0 + sum of (float)sc[k] * term k (see run_mix; Plan::Op::Mix)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1055,6 +1056,10 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_SAMPLE_HOLD:
 			len = 5;
 			break;
+		case OP_MIX:
+			if (pc + 4 > pw->nwords || op[2] < 1 || op[2] > 4096) rb_raise(rb_eArgError, "Bad plan mix op at word %zu", pc);
+			len = 4 + (size_t)op[2];
+			break;
 		case OP_DYNAMICS:
 			if (pc + 6 > pw->nwords || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
 			len = 6 + (size_t)op[5] + 5;
@@ -1078,7 +1083,7 @@ static void check_op(const int32_t *op, size_t pc, const struct regs *R, long nr
 	float *const *ptrs = R->p;
 	int d = op[1];
 	if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS) {
+	if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE && op[0] != OP_DYNAMICS && op[0] != OP_MIX) {
 		if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 	}
 	if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
@@ -1267,6 +1272,40 @@ static void run_dynamics(const int32_t *op, size_t pc, const struct regs *R, lon
 	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, op[6 + k], 0.0, pc);
 	for (long k = 0; k < 5; k++) op_signal(&tim[k], R, nregs, op[6 + nside + k], sc[op[4] + k], pc);
 	mb_plan_dynamics(R->p[op[1]], &in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
+}
+
+// OP_MIX: dst, nterms, sc, then nterms real registers: one output row of
+// MB::FastSound.matrix_mix (ChannelMixer with real number gains), with the
+// same float steps: dst starts at 0, then each term in order adds
+// (float)w * term, where w = sc[k] is skipped when 0 and adds or subtracts
+// the term without multiplying when 1 or -1.  (The register allocator
+// never gives dst a term's slot.)
+static void run_mix(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, size_t n)
+{
+	long nterms = op[2];
+	if (op[3] < 0 || (size_t)op[3] + (size_t)nterms > nscalars) rb_raise(rb_eArgError, "Bad plan mix scalars at word %zu", pc);
+	if (R->c[op[1]]) rb_raise(rb_eArgError, "Plan mixes are real");
+	for (long k = 0; k < nterms; k++) {
+		int r = op[4 + k];
+		if (r < 0 || r >= nregs || !R->p[r] || R->c[r] || r == op[1]) rb_raise(rb_eArgError, "Bad plan mix term at word %zu", pc);
+	}
+
+	float *D = R->p[op[1]];
+	memset(D, 0, n * sizeof(float));
+	for (long k = 0; k < nterms; k++) {
+		double c = sc[op[3] + k];
+		const float *x = R->p[op[4 + k]];
+		if (c == 0) {
+			continue;
+		} else if (c == 1) {
+			for (size_t i = 0; i < n; i++) D[i] += x[i];
+		} else if (c == -1) {
+			for (size_t i = 0; i < n; i++) D[i] -= x[i];
+		} else {
+			float cf = (float)c;
+			for (size_t i = 0; i < n; i++) D[i] += cf * x[i];
+		}
+	}
 }
 
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
@@ -1466,6 +1505,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		case OP_DYNAMICS:
 			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 			run_dynamics(op, pc, R, nregs, sc, nscalars, objects, n);
+			break;
+
+		case OP_MIX:
+			run_mix(op, pc, R, nregs, sc, nscalars, n);
 			break;
 
 		case OP_TAP: {
@@ -1733,6 +1776,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("unary")), INT2NUM(OP_UNARY));
 	rb_hash_aset(h, ID2SYM(rb_intern("tap")), INT2NUM(OP_TAP));
 	rb_hash_aset(h, ID2SYM(rb_intern("dynamics")), INT2NUM(OP_DYNAMICS));
+	rb_hash_aset(h, ID2SYM(rb_intern("mix")), INT2NUM(OP_MIX));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
