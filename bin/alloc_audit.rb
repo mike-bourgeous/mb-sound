@@ -25,10 +25,15 @@
 # (session/midi_input, midi/live_source, midi/virtual_input,
 # ui/keyboard), scheduler (session/scheduler), and render (the rest).
 #
+# --time measures time per buffer instead (no tracing, GC on): mean,
+# median, 90th/99th percentile, and worst #process_buffer time over the
+# window, against the buffer's real-time budget.
+#
 # Usage: bin/alloc_audit.rb [options]
 #     bin/alloc_audit.rb                    # 128 frames, 4 s warm-up, 24 s window
 #     bin/alloc_audit.rb -n 512 -w 8 --top 30 --json /tmp/a.json
 #     bin/alloc_audit.rb --ui
+#     bin/alloc_audit.rb --time             # microseconds per buffer
 #
 # Compare branches by running the same command in each worktree.  Run
 # without YJIT (`ruby bin/alloc_audit.rb`) to see Array#map callers instead
@@ -54,7 +59,7 @@ module MB::Sound
 
     Site = Struct.new(:file, :line, :klass, :method, :count, :bytes)
 
-    attr_reader :buffers, :total, :sites, :session
+    attr_reader :buffers, :total, :sites, :session, :times
 
     def initialize(buffer_size: 128, warm: 4.0, window: 24.0, seek: 21, chunk: 250, ui: false, quiet: true)
       @buffer_size = buffer_size
@@ -107,6 +112,44 @@ module MB::Sound
       self
     ensure
       @session&.close
+    end
+
+    # Times each buffer of the window (seconds per #process_buffer, GC
+    # on, nothing traced) into #times.
+    def run_times
+      setup
+      warm = (@warm * 48000 / @buffer_size).round
+      win = (@window * 48000 / @buffer_size).round
+      warm.times { step }
+      GC.start
+      @times = Array.new(win)
+      win.times do |i|
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        step
+        @times[i] = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      end
+      @buffers = win
+      self
+    ensure
+      @session&.close
+    end
+
+    # Mean, median, 90th and 99th percentile, and worst buffer time in
+    # microseconds (see #run_times).
+    def time_stats
+      t = @times.sort
+      us = ->(x) { x * 1e6 }
+      {
+        mean: us[t.sum / t.length], p50: us[t[t.length / 2]], p90: us[t[(t.length * 0.9).floor]],
+        p99: us[t[(t.length * 0.99).floor]], max: us[t[-1]], budget: @buffer_size * 1e6 / 48000,
+      }
+    end
+
+    def time_report(io = $stdout)
+      st = time_stats
+      io.puts format('%d-frame buffers, %d timed (%.1f s), YJIT %s%s', @buffer_size, @buffers, @buffers * @buffer_size / 48000.0, yjit? ? 'on' : 'off', @ui ? ', UI feed on' : '')
+      io.puts format('us/buffer: mean %.1f  p50 %.1f  p90 %.1f  p99 %.1f  max %.1f  (budget %.1f, mean %.1f%%)',
+        st[:mean], st[:p50], st[:p90], st[:p99], st[:max], st[:budget], 100 * st[:mean] / st[:budget])
     end
 
     # Objects and bytes per buffer by category, plus the hidden remainder.
@@ -222,6 +265,7 @@ if $0 == __FILE__
   opts = { buffer_size: 128, warm: 4.0, window: 24.0, seek: 21, ui: false }
   top = 25
   json = nil
+  time = false
   OptionParser.new do |o|
     o.banner = "Usage: #{$0} [options]"
     o.on('-n', '--buffer N', Integer, 'Buffer size (128)') { |v| opts[:buffer_size] = v }
@@ -230,10 +274,17 @@ if $0 == __FILE__
     o.on('-s', '--seek BAR', Integer, 'Bar to start from (21)') { |v| opts[:seek] = v }
     o.on('--ui', 'Attach a terminal UI feed (meters, scope)') { opts[:ui] = true }
     o.on('-t', '--top N', Integer, 'Sites to list (25)') { |v| top = v }
+    o.on('--time', 'Measure time per buffer instead of allocations') { time = true }
     o.on('--json PATH', 'Also write the results as JSON') { |v| json = v }
   end.parse!
 
-  audit = MB::Sound::AllocAudit.new(**opts).run
-  audit.report(top: top)
-  File.write(json, JSON.pretty_generate(audit.to_h)) if json
+  if time
+    audit = MB::Sound::AllocAudit.new(**opts).run_times
+    audit.time_report
+    File.write(json, JSON.pretty_generate(audit.time_stats)) if json
+  else
+    audit = MB::Sound::AllocAudit.new(**opts).run
+    audit.report(top: top)
+    File.write(json, JSON.pretty_generate(audit.to_h)) if json
+  end
 end
