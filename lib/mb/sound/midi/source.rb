@@ -86,16 +86,22 @@ module MB
         def read(from, to)
           from = from.to_r
           to = to.to_r
-          raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
+          if from.equal?(@position) # (reading on from the position: one comparison)
+            c = to <=> from
+            raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if c < 0
+            return [] if c == 0
+          else
+            raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
 
-          if from > position
-            read_events(position, from)
-            @position = from
-            @jump_pending = true
+            if from > position
+              read_events(position, from)
+              @position = from
+              @jump_pending = true
+            end
+
+            from = position
+            return [] if to <= from
           end
-
-          from = position
-          return [] if to <= from
 
           events = read_events(from, to)
           @position = to
