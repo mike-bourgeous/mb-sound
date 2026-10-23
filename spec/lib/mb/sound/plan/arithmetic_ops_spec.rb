@@ -299,8 +299,25 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
 
   describe 'ends and short reads' do
     it 'ends when a required input ends, after a short block' do
-      r = plan_compare(sizes: [100, 128, 128, 128]) { src.new(seed: 1, ends_at: 300) * src.new(seed: 2) * 2 }
+      r = plan_compare(sizes: [100, 128, 128, 128], fallbacks: 1) { src.new(seed: 1, ends_at: 300) * src.new(seed: 2) * 2 }
       expect(r.outputs[:c].map { |o| o&.length }).to eq([100, 128, 72, nil])
+      # The short block runs unfused, so the other input's node reads the
+      # whole block as unplanned (omnibus12; see Region#gather)
+      expect(r.unfused_blocks(:c)).to eq(1)
+    end
+
+    # omnibus12 (graph sweep's `noise * sig.until(t).sounding(...)` under
+    # MB_SOUND_PLAN_CHECK=1): the plan ran the tone only up to the other
+    # input's end, the unfused product samples it for the whole block
+    it 'keeps the states of the other inputs\' nodes as unfused when an input ends inside a block (check mode)' do
+      # (compared after the short block: at the next, ended, block the
+      # unfused product samples its first inputs before it finds the end,
+      # which nothing hears)
+      r = plan_compare(sizes: [100, 128, 128], fallbacks: 1, check: :raise) { 2000.hz.saw * 1 * src.new(seed: 1, ends_at: 300) }
+      expect(r.outputs[:c].map(&:length)).to eq([100, 128, 72])
+      tone = r.graphs[:c].graph.find { |n| n.is_a?(MB::Sound::Tone) }
+      ref = r.graphs[:unfused].graph.find { |n| n.is_a?(MB::Sound::Tone) }
+      expect(tone.plan_snapshot).to eq(ref.plan_snapshot)
     end
   end
 end
