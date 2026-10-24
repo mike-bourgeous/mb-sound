@@ -378,7 +378,7 @@ module MB
             rate = pane ? @rates.rate(PaneRates.priority_of(p.name, pane), pane.rate, p.opts[:rate]) : nil # (now: UI::PaneRates)
             PaneOnScreen.new(number: n && n + 1, name: p.name, kind: kind, title: pane&.title, rect: p.rect, focused: p.name == @tiler.focus,
                              zoomed: @tiler.layout.zoom == p.name, rate: rate,
-                             look: pane&.bytes? ? (@states[p.name][:look] || p.opts[:look] || @look) : nil, title_at: @chrome&.frames&.dig(p.name)&.at)
+                             look: pane&.plot? ? (@states[p.name][:look] || p.opts[:look] || @look) : nil, title_at: @chrome&.frames&.dig(p.name)&.at)
           end
         end
 
@@ -494,7 +494,7 @@ module MB
         #     ui.look :quad, pane: :spectrum
         def look(name = nil, pane: nil)
           pane ||= @tiler.focus
-          raise ArgumentError, "#{pane.inspect} isn't a plot pane (scope, spectrum): its look is fixed" unless @panes[pane]&.bytes?
+          raise ArgumentError, "#{pane.inspect} isn't a plot pane (scope, spectrum): its look is fixed" unless @panes[pane]&.plot?
           if name.nil?
             cycle = Panes::Scope::LOOK_CYCLE
             now = @states[pane][:look] || @tiler.layout.options_of(pane)[:look]
@@ -1777,7 +1777,6 @@ module MB
           end
 
           drawn = 0
-          bytes = +''
           items = @placed.filter_map do |p|
             next if p.tabs || p.name == :repl || !@panes[p.name]
             [p.name, p.name, @panes[p.name], p.opts[:rate], @drawn_at[p.name]]
@@ -1801,12 +1800,13 @@ module MB
             t0 = thread_cpu
             begin
               r = @chrome.frames[p.name]&.inner || p.rect
-              if pane.bytes?
-                b = pane.frame_bytes(pane.needs.empty? ? snap : heard_snap, @states[p.name], row: r.y + 1, col: r.x + 1, w: r.w, h: r.h, mode: @mode, look: p.opts[:look] || @look, full: full)
-                bytes << b if b
+              # Every pane draws into the one grid (plot panes too), so the
+              # overlays painted after the panes stay on top (ui-fix-3)
+              canvas = (@canvases[p.name] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
+              canvas.row = 0
+              if pane.plot?
+                pane.draw(canvas, pane.needs.empty? ? snap : heard_snap, @states[p.name], look: p.opts[:look] || @look)
               else
-                canvas = (@canvases[p.name] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
-                canvas.row = 0
                 pane.draw(canvas, pane.needs.empty? ? snap : heard_snap, @states[p.name])
               end
               @failures.delete(p.name)
@@ -1829,12 +1829,11 @@ module MB
 
           cells = @grid.frame(full ? nil : @shown, @mode, row: 1, col: 1, sync: false)
           cells = '' if cells == "\e[0m" || cells.empty?
-          bytes = '' if bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
           cursor = cursor_bytes
           out = nil
-          if !cells.empty? || !bytes.empty? || cursor != @last_cursor || full
-            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{bytes}#{cursor}\e[?2026l"
+          if !cells.empty? || cursor != @last_cursor || full
+            out = "\e[?2026h\e[?25l#{full ? "\e[0m\e[H\e[2J" : ''}#{cells}#{cursor}\e[?2026l"
             write(out)
             note_written(now, out.bytesize)
             @last_cursor = cursor
@@ -2035,7 +2034,6 @@ module MB
         def pane_failed(p, e)
           msg = "#{p.name}: #{e.class}: #{e.message}"
           @failures[p.name] = msg
-          return if @panes[p.name]&.bytes?
           r = p.rect
           c = Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs).clear
           c.puts ["#{p.name} failed: ", :bad], [e.message, :dim]

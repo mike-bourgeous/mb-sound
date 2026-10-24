@@ -5,8 +5,8 @@ require_relative '../../../../support/ui_helpers'
 # bytes (scroll region, save/restore cursor, synchronized output), diffed
 # frames replayed through UI::Screen, per-pane rates, and failing panes.
 RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
-  # The :band layout at 120 columns with ui_fake_snapshot (scope pane
-  # bytes not included: Band#to_text is the cell grid).
+  # The :band layout at 120 columns with ui_fake_snapshot, left of the
+  # scope's trace (the scope draws into the grid too since ui-fix-3).
   BAND_TEXT = <<~TEXT
     ▶ 17:3   128 bpm 4/4  load  31% ▃  xruns 0                  drop 1 ████▌    5/8  → break 21:1
     TRACKS                      QUEUED                   MASTER                      SCOPE
@@ -26,7 +26,12 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     band.start(thread: false)
     band.refresh(0.0)
     expect(band.height).to eq(8)
-    expect(rstripped(band.to_text)).to eq(rstripped(BAND_TEXT + "\n" + BAND_RULE))
+    text = band.to_text.lines.map(&:chomp)
+    scope_x = BAND_TEXT.lines[1].index('SCOPE')
+    expect(rstripped(text.map { |l| l[0, scope_x] }.join("\n"))).to eq(rstripped((BAND_TEXT.lines.map { |l| l.chomp[0, scope_x] } + ["", BAND_RULE[0, scope_x]]).join("\n")))
+    expect(text[1][scope_x..]).to start_with('SCOPE')
+    expect(text[2..5].map { |l| l[scope_x..] }.join).to match(/[⠁-⣿]/) # (its Braille trace, in the grid)
+    expect(text.last).to eq(BAND_RULE)
   end
 
   it 'draws the deck with knobs and CPU per part' do
@@ -129,13 +134,9 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     drawn = Hash.new(0)
     band.placed.each do |p|
       pane = p.pane
-      orig = pane.bytes? ? pane.method(:frame_bytes) : pane.method(:draw)
+      orig = pane.method(:draw)
       p.pane = pane.clone
-      if pane.bytes?
-        p.pane.define_singleton_method(:frame_bytes) { |*a, **k| drawn[pane.name] += 1; orig.call(*a, **k) }
-      else
-        p.pane.define_singleton_method(:draw) { |*a| drawn[pane.name] += 1; orig.call(*a) }
-      end
+      p.pane.define_singleton_method(:draw) { |*a, **k| drawn[pane.name] += 1; orig.call(*a, **k) }
     end
 
     allow(Thread).to receive(:pass).and_call_original

@@ -18,11 +18,13 @@ module MB
         attr_reader :width, :height
 
         # +look+, +color+, and +theme+ are as for Plot::Text.render (nil for
-        # the terminal's defaults).
-        def initialize(width:, height:, look: nil, color: nil, theme: nil)
+        # the terminal's defaults); +native+ the cells' class (NativeCells
+        # or Cells: the class of the grid #draw paints into).
+        def initialize(width:, height:, look: nil, color: nil, theme: nil, native: Plot.native)
           @width = width
           @height = height
-          @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme)
+          @frame = Text::Frame.new(width: width, height: height, look: look, color: color, theme: theme, native: native)
+          @shown = nil
         end
 
         # Draws +chart+ (a Chart or Figure) and returns its text: the lines
@@ -35,6 +37,20 @@ module MB
         # Draws +chart+ and returns its lines (see #redraw).
         def lines(chart)
           @frame.render(chart)
+        end
+
+        # Draws +chart+ into +grid+ (a screen's NativeCells or Cells, of the
+        # class given to the constructor) with its top left corner at
+        # 0-based cell (+x+, +y+), clipped to the grid.  Screens composite
+        # their plot panes this way, so whatever they draw over the panes
+        # afterwards (key overlays, badges) stays on top and only the
+        # screen's own changed-cell frame reaches the terminal (ui-fix-3).
+        # Returns +grid+.
+        #
+        #     live.draw(MB::Sound::Plot.waveform(buffer, range: -1.0..1.0), screen_grid, x: 10, y: 2)
+        def draw(chart, grid, x:, y:)
+          @frame.update(chart)
+          grid.blit(@frame.cells, x, y)
         end
 
         # Draws +chart+ and returns the terminal bytes that put it on the

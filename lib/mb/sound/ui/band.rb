@@ -181,7 +181,6 @@ module MB
 
           top = band_top
           drawn = 0
-          bytes = +''
           paint_chrome if full
           draw = panes_to_draw(@placed.map { |p| [p, p.pane.name, p.pane, nil, p.drawn_at] }, now, full, snap)
           @placed.each do |p|
@@ -192,13 +191,15 @@ module MB
             begin
               if r.h <= 0
                 nil
-              elsif p.pane.bytes?
-                b = p.pane.frame_bytes(p.pane.needs.empty? ? snap : heard_snap, p.state, row: top + r.y, col: 1 + r.x, w: r.w, h: r.h, mode: @mode, look: @look, full: full)
-                bytes << b if b
               else
+                # Every pane draws into the one grid, plot panes too (ui-fix-3)
                 canvas = (p.state[:canvas] ||= Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs))
                 canvas.row = 0
-                p.pane.draw(canvas, p.pane.needs.empty? ? snap : heard_snap, p.state)
+                if p.pane.plot?
+                  p.pane.draw(canvas, p.pane.needs.empty? ? snap : heard_snap, p.state, look: @look)
+                else
+                  p.pane.draw(canvas, p.pane.needs.empty? ? snap : heard_snap, p.state)
+                end
               end
               @failures.delete(p.pane.name)
             rescue => e
@@ -215,13 +216,12 @@ module MB
 
           cells = @grid.frame(full ? nil : @shown, @mode, row: top, col: 1, sync: false)
           cells = '' if cells == EMPTY_FRAMES[@mode]
-          bytes = '' if bytes.empty? || bytes.delete("\e[0m").empty?
           @shown.copy_from(@grid)
           region_cmd = reassert ? "\e[#{region[0]};#{region[1]}r" : ''
 
           out = nil
-          if !cells.empty? || !bytes.empty? || reassert
-            out = "\e[?2026h\e7#{region_cmd}#{cells}#{bytes}\e8\e[?2026l"
+          if !cells.empty? || reassert
+            out = "\e[?2026h\e7#{region_cmd}#{cells}\e8\e[?2026l"
             write(out)
             note_written(now, out.bytesize)
           end
@@ -270,7 +270,7 @@ module MB
           }
         end
 
-        # The band's text now (the cells, without the scope panes' bytes),
+        # The band's text now (every pane's cells, scopes included),
         # in color +mode+ (:none for plain text).
         def to_text(mode = :none)
           @grid.to_text(mode)
@@ -354,7 +354,7 @@ module MB
             f = @chrome.frames[p.pane.name]
             PaneOnScreen.new(number: nil, name: p.pane.name, kind: p.pane.class.name.split('::').last.downcase.to_sym, title: p.pane.title,
                              rect: Viewports::Rect.new(p.x, p.y, p.w, p.h), focused: false, zoomed: false, rate: @rates.rate(PaneRates.priority_of(p.pane.name, p.pane), p.pane.rate),
-                             look: p.pane.bytes? ? (p.state[:look] || @look) : nil, title_at: f&.at)
+                             look: p.pane.plot? ? (p.state[:look] || @look) : nil, title_at: f&.at)
           end
         end
 
@@ -406,7 +406,6 @@ module MB
           msg = "#{p.pane.name}: #{e.class}: #{e.message}"
           warn "UI pane #{msg}" unless @failures.key?(p.pane.name)
           @failures[p.pane.name] = msg
-          return if p.pane.bytes?
 
           r = p.state[:inner]
           c = Canvas.new(@grid, r.x, r.y, r.w, r.h, glyphs: @glyphs).clear

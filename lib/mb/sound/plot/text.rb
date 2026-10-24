@@ -68,10 +68,13 @@ module MB
           # The cells of the last frame drawn (Cells or NativeCells).
           attr_reader :cells
 
-          def initialize(width:, height:, look: nil, color: nil, theme: nil)
+          # +native+ picks the cells' class (NativeCells or Cells), e.g.
+          # to match a screen grid they are blitted into.
+          def initialize(width:, height:, look: nil, color: nil, theme: nil, native: Plot.native)
             @width = width
             @height = height
             @look, @color, @theme = Text.options(look, color, theme)
+            @native = native
             @layouts = 0
             @key = nil
           end
@@ -97,7 +100,7 @@ module MB
           private
 
           def new_cells
-            Plot.native ? NativeCells.new(@width, @height) : Cells.new(@width, @height)
+            @native ? NativeCells.new(@width, @height) : Cells.new(@width, @height)
           end
 
           # Lays out (or reuses the layout) and paints the marks into @cells
@@ -261,6 +264,30 @@ module MB
             @fg.replace(other.instance_variable_get(:@fg))
             @bg.replace(other.instance_variable_get(:@bg))
             @attr.replace(other.instance_variable_get(:@attr))
+            self
+          end
+
+          # Copies every cell of +other+ (Cells of any size) into these
+          # with its top left corner at 0-based (+x+, +y+), clipped.  The
+          # Ruby mirror of FastUI::Grid#blit.
+          def blit(other, x, y)
+            raise ArgumentError, "Can't blit #{other.class} into Cells" unless other.is_a?(Cells)
+
+            sx = x < 0 ? -x : 0
+            sy = y < 0 ? -y : 0
+            w = [other.width - sx, @width - (x + sx)].min
+            h = [other.height - sy, @height - (y + sy)].min
+            return self if w <= 0 || h <= 0
+
+            och, ofg, obg, oattr = %i[@ch @fg @bg @attr].map { |v| other.instance_variable_get(v) }
+            h.times do |r|
+              si = (sy + r) * other.width + sx
+              di = (y + sy + r) * @width + x + sx
+              @ch[di, w] = och[si, w]
+              @fg[di, w] = ofg[si, w]
+              @bg[di, w] = obg[si, w]
+              @attr[di, w] = oattr[si, w]
+            end
             self
           end
 

@@ -11,14 +11,14 @@ RSpec.describe('UI::Tiles relayout property', :aggregate_failures) do
     [@ta, @tb].each { |t| t&.close }
   end
 
-  # Text of each cell pane (not the REPL or the keyboard, not byte-writing
-  # panes) by name.
+  # Text of each cell pane (not the REPL or the keyboard, not plot panes,
+  # whose traces move) by name.
   def pane_texts(tiles)
     text = tiles.to_text.lines.map(&:chomp)
     tiles.tiler.placed.each_with_object({}) do |p, h|
       next if p.name.nil? || p.name == :repl || p.name == :keyboard || p.tabs # (the keyboard shows the mode)
       pane = MB::Sound::UI.panes[p.name]
-      next if pane&.bytes?
+      next if pane&.plot?
       r = p.rect
       h[p.name] = text[r.y, r.h].map { |l| l[r.x, r.w] }
     end

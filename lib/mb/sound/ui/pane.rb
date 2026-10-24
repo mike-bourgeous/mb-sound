@@ -95,9 +95,11 @@ module MB
           copy
         end
 
-        # True for panes that write their own terminal bytes (Plot::Live
-        # panes) instead of cells (see ScopePane).
-        def bytes?
+        # True for Plot::Live panes (scope, spectrum), whose look can change
+        # (`ui.look`) and whose #draw takes the screen's look as +look:+.
+        # Every pane, plot panes too, draws only into its Canvas: the
+        # screen's one grid, under the overlays (ui-fix-3).
+        def plot?
           false
         end
 
