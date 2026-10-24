@@ -98,6 +98,9 @@ module MB
         @tweaks = {}.compare_by_identity # (ClipMatrix: tweak version => its root, mark, transforms)
         @versions = {} # (ClipMatrix: version root => last version made)
         @form_checks = [] # (#before_form: Procs called with each Form #play_form starts)
+        @warmed = nil # (#warm_up: track name => clips warmed => patch)
+        @rehearsable = {} # (#warm_up: track name => its patch if every build played, else false)
+        @rehearsal = nil # (#warm_up: sections rehearsed)
       end
 
       # Calls +block+ with each Form #play_form is about to start, before
@@ -168,22 +171,17 @@ module MB
         raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
         if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle? && defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?)
           t0 = MB::U.clock_now
-          result = self.warm_up
-          if result && !result.empty?
+          result = self.warm_up(form: form)
+          sections = @rehearsal if result
+          if result && (!result.empty? || sections)
             built = result.count { |_, (_, how)| how == :built }
-            puts format("\e[2mWarmed up %d track%s in %.1f s (%sskip with warm_up: false)\e[0m",
-              result.length, result.length == 1 ? '' : 's', MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '')
+            puts format("\e[2mWarmed up %d track%s%s in %.1f s (%sskip with warm_up: false)\e[0m",
+              result.length, result.length == 1 ? '' : 's', sections ? " and #{sections} section#{sections == 1 ? '' : 's'}" : '',
+              MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '')
           end
         end
 
-        seed ||= MB::Sound.next_seed
-        pb = Form::Playback.new(self, form, seed: seed)
-        time = @session.send(:launch_time, point, [])
-        old = @mutex.synchronize { prev = @playback; @playback = pb; prev }
-        old&.stop
-        pb.start(time)
-        @session.ensure_running
-        pb
+        launch_form(form, point, seed || MB::Sound.next_seed)
       end
 
       # Sets the set-wide launch quantization (see the class comment).
@@ -550,10 +548,14 @@ module MB
       #
       # +tracks+ limits it to some track names.  Pairs of track and clip
       # already warmed are skipped unless +again+; +play: false+ only
-      # builds.  Returns a Hash of track name => [milliseconds, :played or
-      # :built].  Called by #play_form for a realtime session with YJIT
-      # (see #play_form's +warm_up:+); console: `warm_up(tracks: true)`.
-      def warm_up(*tracks, again: false, play: true)
+      # builds.  With a +form:+ (a Form), the tracks are built (twice, to
+      # find the self-contained ones) but not played on their own: #rehearse
+      # then plays the form's transitions with them (#rehearsal is the
+      # number of sections it played).  Returns a Hash of track name =>
+      # [milliseconds, :played or :built].  Called by #play_form for a
+      # realtime session with YJIT (see #play_form's +warm_up:+); console:
+      # `warm_up(tracks: true)`.
+      def warm_up(*tracks, again: false, play: true, form: nil)
         unless @session.idle?
           return MB::Sound.live_error(RuntimeError.new('warm_up builds the tracks before anything plays (a scene built meanwhile could draw other random seeds)'))
         end
@@ -575,37 +577,183 @@ module MB
 
             t0 = MB::U.clock_now
             how = clips.map { |c|
-              done = warm_build(tr, c, play: play)
+              done = warm_build(tr, c, play: play && !form, check: play)
               @mutex.synchronize { warmed[c] = tr.patch } if done
               done
             }
+            # (#rehearse plays only tracks whose every build was played)
+            @mutex.synchronize { @rehearsable[tr.name] = how.all?(:played) ? tr.patch : false } if play
             result[tr.name] = [((MB::U.clock_now - t0) * 1000).round(1), how.include?(:built) ? :built : :played]
           end
         end
+        @rehearsal = play && form ? rehearse(form) : nil
         result
+      end
+
+      # The number of sections the last #warm_up with a +form:+ rehearsed
+      # (see #rehearse), or nil.
+      attr_reader :rehearsal
+
+      # Each section #rehearse plays lasts the fewest quarter-note beats
+      # that hold this many buffers (at least one beat), so code that runs
+      # once a buffer is called often enough for YJIT to compile it.
+      REHEARSAL_BUFFERS = 48
+
+      # The most passes of a section #rehearse plays.
+      REHEARSAL_PASSES = 2
+
+      # Rehearses +form+'s transitions in a sandbox Session (see #warm_up)
+      # at the session's buffer size, so YJIT has compiled what a scene
+      # change runs (changes landing, swaps, fades, ring-outs, scheduled
+      # blocks, the form's own bookkeeping, players' first buffers, the
+      # master and bus chains) before the live form needs it.  Without it,
+      # each transition compiled 10-75 ms of new code on the render thread
+      # (memory_card at 128 frames: 435 ms in all; scene-jit-1).
+      #
+      # The sandbox gets the session's master chain, buses, routes, clocks,
+      # knobs, the tracks #warm_up played (tracks only built, or graph
+      # tracks, are left out of it and of the scenes), and the scenes,
+      # and plays a copy of the form straight through (gotos not taken,
+      # the first option of each pick), with every section a beat or two
+      # long (see REHEARSAL_BUFFERS) and at most REHEARSAL_PASSES passes,
+      # launching at the sections' starts.  Seeds are restored as by
+      # #warm_up; nothing changes in the session.  Only while the session
+      # is idle.  Returns the number of sections played, or nil if there
+      # was nothing to play (an error stops the rehearsal with a warning;
+      # the form plays anyway).
+      def rehearse(form = last_form)
+        return nil unless form
+        unless @session.idle?
+          return MB::Sound.live_error(RuntimeError.new('rehearse plays the form before anything plays (a scene built meanwhile could draw other random seeds)'))
+        end
+
+        names = @mutex.synchronize { @tracks.select { |n, tr| tr.patch? && @rehearsable[n].equal?(tr.patch) }.keys }
+        return nil if names.empty?
+
+        rehearse_names(form, names)
+      end
+
+      protected
+
+      # Starts +form+ at LaunchPoint +point+ with chance seed +seed+ (see
+      # #play_form, which warms up first).  Returns the Form::Playback.
+      def launch_form(form, point, seed)
+        pb = Form::Playback.new(self, form, seed: seed)
+        time = @session.send(:launch_time, point, [])
+        old = @mutex.synchronize { prev = @playback; @playback = pb; prev }
+        old&.stop
+        pb.start(time)
+        @session.ensure_running
+        pb
+      end
+
+      # Takes copies of +tracks+ (Track structs) and +scenes+ for a
+      # rehearsal sandbox's Arrangement (see #rehearse).
+      def adopt_rehearsal(tracks, scenes, quant)
+        tracks.each_key { |n| @session.names.claim(n, :track) }
+        @mutex.synchronize {
+          @tracks = tracks
+          @scenes = scenes
+          @quant = quant
+        }
       end
 
       private
 
+      # (#rehearse after its checks)
+      def rehearse_names(form, names)
+        box = nil
+        steps = nil
+        MB::Sound.with_seed(0) do
+          box = warm_sandbox
+          t = box.transport
+          beat = (1/4r / t.whole_notes_per_second * box.sample_rate).to_f
+          section = 1.beats * [(REHEARSAL_BUFFERS * box.buffer_size / beat).ceil, 1].max
+          short = rehearsal_form(form, section)
+          steps = short.steps.sum { |_, times| times }
+          Session.with_context(session: box) {
+            rehearsal_setup(box, names, section)
+            box.arrangement.launch_form(short, LaunchPoint::NONE, 0)
+          }
+          frames = ((steps + 1/2r) * section.to_r / t.whole_notes_per_second * box.sample_rate).to_f
+          (frames / box.buffer_size).ceil.times { box.process_buffer }
+        end
+        steps
+      rescue => e
+        warn "warm_up: the form's rehearsal stopped (#{e.class}: #{e.message})"
+        nil
+      ensure
+        box&.close
+      end
+
+      # A copy of +form+ for #rehearse: its straight order, every section
+      # +length+ long (a Duration; fills half that), at most
+      # REHEARSAL_PASSES passes.
+      def rehearsal_form(form, length)
+        half = Sequence::Duration.new(length.to_r / 2)
+        sections = form.sections.transform_values { |sec| sec.with(length: length, fill: sec.fill&.with(length: half)) }
+        order = form.steps.map { |name, times| Form::Play.new(name: name, times: [times, REHEARSAL_PASSES].min) }
+        fills = form.phrase_fills.map { |f| f.with(every: 1, length: half) }
+        Form.new(sections: sections, order: order, phrase_fills: fills)
+      end
+
+      # Gives sandbox +box+ (current) the session's master chain, buses,
+      # routes, and clocks, and the tracks named +names+ with the scenes
+      # (other tracks left out of them), launching on multiples of
+      # +length+ (a section's), for #rehearse.
+      def rehearsal_setup(box, names, length)
+        s = @session
+        box.master(s.master_preset, &s.master_block) if s.master_preset || s.master_block
+
+        defs = s.bus_definitions
+        until defs.empty?
+          ready = defs.select { |_, (_, to, _)| to == :master || box.bus_definitions.key?(to) }
+          break if ready.empty?
+          ready.each { |name, (block, to, desc)| box.bus(name, to: to, description: desc, &block) }
+          defs = defs.except(*ready.keys)
+        end
+
+        s.clocks.each do |name, c|
+          box.define_clock(name, c.base, speed: c.speed.is_a?(Numeric) || c.speed.is_a?(Symbol) ? c.speed : 1)
+        end
+
+        tracks = @mutex.synchronize { @tracks.slice(*names).transform_values { |tr| tr.dup.tap { |c| c.q = nil } } }
+        routes = s.routes
+        tracks.each_key do |n|
+          r = routes[n] or next
+          if r[:trigger]
+            box.route(n, trigger: true)
+          else
+            sends = r[:send].select { |b, v| v.is_a?(Numeric) && box.bus_definitions.key?(b) }
+            to = r[:to] == :master || box.bus_definitions.key?(r[:to]) ? r[:to] : :master
+            box.route(n, to: to, send: sends.empty? ? nil : sends)
+          end
+        end
+
+        others = @mutex.synchronize { @tracks.keys } - names
+        scenes = self.scenes.transform_values { |sc| sc.dup.tap { |c| c.values = sc.values.except(*others).freeze; c.q = nil } }
+        box.arrangement.adopt_rehearsal(tracks, scenes, length)
+      end
+
       # Builds +tr+'s patch with +clip+ in sandbox Sessions and plays it
       # there if it is self-contained (see #warm_up).  Returns :played,
       # :built, or nil if the patch raised.
-      def warm_build(tr, clip, play:)
+      def warm_build(tr, clip, play:, check: play)
         boxes = []
-        graphs = (play ? 2 : 1).times.map {
+        graphs = (check ? 2 : 1).times.map {
           box = warm_sandbox
           boxes << box
           Session.with_context(session: box) { tr.patch.call(clip) }
         }
 
-        played = play && (second = warm_nodes(graphs[1])) && warm_nodes(graphs[0]).each_key.none? { |n| second.include?(n) }
+        contained = check && (second = warm_nodes(graphs[1])) && warm_nodes(graphs[0]).each_key.none? { |n| second.include?(n) }
         box = boxes[0]
         box.add(graphs[0], on: :now)
-        if played
+        if play && contained
           bar = (box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate).to_f
           (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
         end
-        played ? :played : :built
+        contained ? :played : :built
       rescue => e
         warn "warm_up: track #{tr.name.inspect} with #{name_of(clip)} raised #{e.class}: #{e.message}"
         nil
