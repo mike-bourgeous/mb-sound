@@ -261,7 +261,7 @@ module MB::Sound
   end
 end
 
-if $0 == __FILE__
+if MB::Sound.main_script?(__FILE__) # (not $0 == __FILE__: SIMPLECOV=1 loads scripts by their full path)
   opts = { buffer_size: 128, warm: 4.0, window: 24.0, seek: 21, ui: false }
   top = 25
   json = nil
