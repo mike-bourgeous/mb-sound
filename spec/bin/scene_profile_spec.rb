@@ -18,11 +18,18 @@ RSpec.describe('bin/scene_profile.rb') do
     expect(text).to match(/^  render thread CPU: mean [\d.]+ ms, p99 [\d.]+ ms, max [\d.]+ ms/)
     expect(text).to match(/^  outside the players \(changes, catch-up, master and bus chains\): mean [\d.]+ ms/)
     expect(text).to match(/^  most time outside the players:\n    bar +[\d.]+ +[\d.]+ ms outside players of [\d.]+ ms \(CPU [\d.]+\)/)
+    # How many buffers would run a queue of that many ms dry, and why (scene-jit-1)
+    expect(text).to match(/^  buffers > 10 ms: \d+ \(\d+ compiling, \d+ with GC\); > 20 ms: .*; > 80 ms: \d+/)
+    if text.include?('YJIT on')
+      expect(text).to match(/^  YJIT compile on the render thread: \d+ ms in all, \d+ buffers over 1 ms, \d+ ms where changes landed; code GC \d+x/)
+      expect(text).to match(/^  GC from the song's start: \d+ minor, \d+ major/)
+    end
   end
 
   it 'plays a song on an emulated sound card with -R' do
-    text = `bin/scene_profile.rb -R -n 512 --bars 1 -t 2 bin/songs/small_talk.rb -- --seed 2 2>&1`
+    text = `bin/scene_profile.rb -R --band -n 512 --bars 1 -t 2 bin/songs/small_talk.rb -- --seed 2 2>&1`
     expect($?).to be_success, text
+    expect(text).not_to include('UI pane') # (the deck painted from the session, no pane failing)
 
     expect(text).to match(/small_talk\.rb: realtime, 512-frame buffers, emulated card with a 50 ms queue, 1 bars in [\d.]+ s/)
     expect(text).to match(/^underruns: \d+ \([\d.]+ ms of silence\)/)
