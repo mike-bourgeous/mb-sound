@@ -38,6 +38,10 @@ module MB
     #   range as one value (a Param::Ranged) wherever a declaration takes a
     #   default.
     #
+    # +clamp: false+ lets values leave the range ("sometimes going out of
+    # bounds is interesting"): defaults and checked values pass as they
+    # are, and the range still scales knobs, TUI controls, and MIDI.
+    #
     # Checks run where a value arrives (declaration, document load, #check
     # from `turn`), never per sample.  Out of range goes through
     # MB::Sound.live_error: an error in scripts and specs, a warning live
@@ -52,14 +56,14 @@ module MB
     #     Param.declare(:cutoff, (150.hz..8000.hz).at(2400.hz))      # the same
     #     Param.declare(:voices, 4)                                  # 1..32, stepped (NAMES)
     #     Param.declare(:mode, :tape, range: %i[tape bbd digital])   # an enum
-    class Param < Data.define(:name, :default, :range, :type, :curve, :unit, :description, :cc, :implied, :types, :keyword, :primary)
+    class Param < Data.define(:name, :default, :range, :type, :curve, :unit, :description, :cc, :implied, :types, :keyword, :primary, :clamp)
       # Canonical curve names, and the aliases each accepts (Knob's old
       # :lin/:exponential/:log, ControlSpec's :exponential, and :db for
       # dB-linear, which is :exp over gains).
       CURVES = {
         linear: :linear, lin: :linear,
         exp: :exp, exponential: :exp, log: :exp, db: :exp,
-        switch: :switch,
+        switch: :switch, enum: :switch,
       }.freeze
 
       # Types from values beyond ArgTypes': true/false, Strings, and
@@ -92,11 +96,12 @@ module MB
 
       # A default with its range: what `(lo..hi).at(default)` and
       # `default.in(lo..hi)` make.  Declarations unpack it; it checks the
-      # range and the default when made, so a mistake raises at the line
-      # that wrote it.
+      # range and the default's type when made, so a mistake raises at the
+      # line that wrote it (whether the default lies inside is the
+      # declaration's to check: `clamp: false` lets it leave the range).
       class Ranged < Data.define(:range, :default)
         def initialize(range:, default:)
-          Param.check_range!(nil, range, default)
+          Param.check_range!(nil, range, default, inside: false)
           super
         end
 
@@ -218,10 +223,11 @@ module MB
 
         # Checks +range+ (a Range, an Array of choices, or nil) and
         # +default+ for param +name+ (nil for a bare Ranged): endpoints of
-        # one type, going up, and the default of the range's type and
-        # inside it.  Raises Param::Error (a declaration mistake, never
-        # live-forgiven: it is in the code, not a performance).
-        def check_range!(name, range, default, description: nil)
+        # one type, going up, and the default of the range's type (raising
+        # Param::Error: mistakes in the code).  A default outside the
+        # range (when +inside+) goes through MB::Sound.live_error and is
+        # limited to it, unless +clamp+ is false.  Returns the default.
+        def check_range!(name, range, default, description: nil, inside: true, clamp: true)
           what = name ? "#{name}: " : ''
           case range
           when nil
@@ -243,7 +249,7 @@ module MB
               b = magnitude(hi)
               raise Error.new("#{what}#{literal(range)} must go up") unless b > a || (b == a && !range.exclude_end?)
             end
-            check_default!(name, range, type, default, description) unless default.nil?
+            return check_default!(name, range, type, default, description, inside && clamp) unless default.nil?
           when Array
             raise Error.new("#{what}a list of choices can't be empty") if range.empty?
             if !default.nil? && !range.include?(default)
@@ -255,6 +261,24 @@ module MB
           else
             raise Error.new("#{what}range: is a Range or an Array of choices (got #{range.inspect})")
           end
+          default
+        end
+
+        # +number+ (a base-unit number) as a value of +sample+'s type
+        # (2400.0 with a Pitch sample is 2400.hz); plain numbers as they
+        # are.
+        def retype(sample, number)
+          case sample
+          when MB::Sound::Pitch then number.hz
+          when MB::Sound::Length::Seconds then MB::Sound::Length::Seconds.new(number.to_f)
+          when MB::Sound::Length::Samples then MB::Sound::Length::Samples.new(number)
+          when MB::Sound::Decibels then MB::Sound::Decibels.new((20 * Math.log10(number.to_f)).round(9))
+          when MB::Sound::Sequence::Duration then MB::Sound::Sequence::Duration.rational(number.to_r)
+          when MB::Sound::Interval then number.to_f.semitones
+          when MB::Sound::Phase then number.to_f.cycles
+          when MB::Sound::Tempo then number.to_f.bpm
+          else number
+          end
         end
 
         # Words for a +type+ (ArgTypes' or EXTRA_TYPES).
@@ -264,7 +288,7 @@ module MB
 
         private
 
-        def check_default!(name, range, type, default, description)
+        def check_default!(name, range, type, default, description, inside_check)
           what = name ? "#{name}: " : ''
           dtype = type_of(default)
           if dtype != type
@@ -274,12 +298,18 @@ module MB
               hint
             )
           end
+          return default unless inside_check
           v = magnitude(default)
           lo = range.begin && magnitude(range.begin)
           hi = range.end && magnitude(range.end)
           inside = (lo.nil? || v >= lo) && (hi.nil? || (range.exclude_end? ? v < hi : v <= hi))
-          return if inside
-          raise Error.new("#{what}the default #{literal(default)} is outside #{literal(range)}#{" (#{description})" if description}")
+          return default if inside
+          limited = retype(default, v.clamp(lo || -Float::INFINITY, hi || Float::INFINITY))
+          MB::Sound.live_error(Error.new(
+            "#{what}the default #{literal(default)} is outside #{literal(range)}#{" (#{description})" if description}; " \
+            "limited to #{literal(limited)} (clamp: false lets it leave the range)"
+          ))
+          limited
         end
 
         def suggest_choice(value, choices)
@@ -295,12 +325,12 @@ module MB
             quality: [0.1..20.0, 'Filter quality (Q)', :exp],
             drive: [-24.db..36.db, 'Drive gain'],
             mix: [0.0..1.0, 'Dry/wet mix, 0 dry to 1 wet'],
-            detune: [0.cents..100.cents, 'Detune spread'],
+            detune: [0.cents..150.cents, 'Detune spread'],
             voices: [1..32, 'Voices'],
-            attack: [1.ms..10.seconds, 'Attack time'],
-            decay: [1.ms..30.seconds, 'Decay time'],
+            attack: [0.1.ms..10.seconds, 'Attack time', :exp],
+            decay: [0.1.ms..30.seconds, 'Decay time', :exp],
             sustain: [0.0..1.0, 'Sustain level'],
-            release: [1.ms..30.seconds, 'Release time'],
+            release: [0.1.ms..30.seconds, 'Release time', :exp],
             gain: [-60.db..12.db, 'Gain'],
             threshold: [-60.db..0.db, 'Threshold'],
             pan: [-1.0..1.0, 'Pan, -1 left to 1 right'],
@@ -318,7 +348,7 @@ module MB
 
       # Validates and fills in a declaration (see the class comment).
       # +default+ may be a Param::Ranged (then +range:+ must be nil).
-      def initialize(name:, default: nil, range: nil, type: nil, curve: nil, unit: nil, description: nil, cc: nil, implied: nil, types: nil, keyword: nil, primary: false)
+      def initialize(name:, default: nil, range: nil, type: nil, curve: nil, unit: nil, description: nil, cc: nil, implied: nil, types: nil, keyword: nil, primary: false, clamp: true)
         unless name.is_a?(Symbol)
           raise Error.new("Param names are Symbols (got #{name.inspect})")
         end
@@ -360,7 +390,8 @@ module MB
           end
         end
 
-        Param.check_range!(name, range, default, description: description)
+        raise Error.new("#{name}: clamp: is true or false (got #{clamp.inspect})") unless clamp == true || clamp == false
+        default = Param.check_range!(name, range, default, description: description, clamp: clamp)
 
         c = curve.nil? ? nil : CURVES[curve]
         if !curve.nil? && c.nil?
@@ -401,7 +432,8 @@ module MB
         super(
           name: name, default: default, range: range.frozen? ? range : range.dup.freeze, type: unit_type || :any, curve: c,
           unit: unit && String.new(unit).freeze, description: description && String.new(description).freeze, cc: cc, implied: implied,
-          types: Ractor.make_shareable(types.transform_values { |m| m.is_a?(String) ? String.new(m) : m }), keyword: keyword || name, primary: primary
+          types: Ractor.make_shareable(types.transform_values { |m| m.is_a?(String) ? String.new(m) : m }), keyword: keyword || name, primary: primary,
+          clamp: clamp
         )
       end
 
@@ -449,18 +481,7 @@ module MB
       # typed value: 2400.0 => 2400.hz for a frequency param declared with
       # a Pitch.  Plain-number params give the number back.
       def typed(number)
-        sample = default.nil? ? (range.is_a?(Range) ? (range.begin || range.end) : nil) : default
-        case sample
-        when MB::Sound::Note, MB::Sound::Pitch then number.hz
-        when MB::Sound::Length::Seconds then MB::Sound::Length::Seconds.new(number.to_f)
-        when MB::Sound::Length::Samples then MB::Sound::Length::Samples.new(number)
-        when MB::Sound::Decibels then MB::Sound::Decibels.new((20 * Math.log10(number.to_f)).round(9))
-        when MB::Sound::Sequence::Duration then MB::Sound::Sequence::Duration.rational(number.to_r)
-        when MB::Sound::Interval then number.to_f.semitones
-        when MB::Sound::Phase then number.to_f.cycles
-        when MB::Sound::Tempo then number.to_f.bpm
-        else number
-        end
+        Param.retype(default.nil? ? (range.is_a?(Range) ? (range.begin || range.end) : nil) : default, number)
       end
 
       # Checks +value+ (a typed value or a plain number in the base unit)
@@ -493,7 +514,7 @@ module MB
         end
         lo = range.begin && Param.magnitude(range.begin)
         hi = range.end && Param.magnitude(range.end)
-        return value if (lo.nil? || v >= lo) && (hi.nil? || v <= hi)
+        return value if !clamp || ((lo.nil? || v >= lo) && (hi.nil? || v <= hi))
 
         limited = v.clamp(lo || -Float::INFINITY, hi || Float::INFINITY)
         MB::Sound.live_error(Error.new(
@@ -519,32 +540,30 @@ module MB
 
       # The canonical declaration line: `param :cutoff,
       # (150.hz..8000.hz).at(2400.hz), description: "..."` (the range left
-      # out when the names table implies it).
-      def to_ruby(head = 'param')
-        value = if range && !implied && !default.nil?
-                  choices? ? "#{Param.literal(default)}, range: #{Param.literal(range)}" : "(#{Param.literal(range)}).at(#{Param.literal(default)})"
-                elsif range && !implied
-                  "nil, range: #{Param.literal(range)}"
-                else
-                  Param.literal(default)
-                end
-        "#{head} #{name.inspect}, #{value}#{extras_text}"
+      # out when the names table implies it), with +head+ ('param', or
+      # 'knob') and +value+ (the default unless given; a base-unit number
+      # prints typed as declared), values printed by +literal+
+      # (Param.literal unless given).
+      def to_ruby(head = 'param', value: default, literal: nil)
+        lit = literal || Param.method(:literal)
+        v = Param.type_of(value) == :number ? typed(value) : value
+        v = v.round if stepped? && v.is_a?(Float) && v == v.round
+        text = if range && !implied && !v.nil?
+                 choices? ? "#{lit.(v)}, range: #{lit.(range)}" : "(#{lit.(range)}).at(#{lit.(v)})"
+               elsif range && !implied
+                 "nil, range: #{lit.(range)}"
+               else
+                 lit.(v)
+               end
+        "#{head} #{name.inspect}, #{text}#{extras_text(lit)}"
       end
 
-      # The graph-document header line (format 4: `param :cutoff, 2400.0,
-      # range: 150.0..8000.0, description: "...", cc: 74, curve: :exp,
-      # unit: "Hz"`), with +value+ (the document's current value; the
-      # default unless given) and the fields given in +spec+ order.
-      # Matches what documents have always written.
+      # The graph-document header line (format 5, the canonical spelling:
+      # `param :cutoff, (150.0..8000.0).at(2400.0), description: "..."`)
+      # at +value+ (the document's current value, a base-unit number or a
+      # typed value; the default unless given).
       def document_line(value = default, writer: nil)
-        lit = writer ? writer.method(:literal) : Param.method(:literal)
-        parts = ["param #{name.inspect}, #{lit.(value)}"]
-        parts << "range: #{lit.(range)}" if range && !implied
-        parts << "description: #{lit.(description)}" if description
-        parts << "cc: #{cc}" if cc
-        parts << "curve: #{curve.inspect}" if curve != default_curve
-        parts << "unit: #{lit.(unit)}" if unit && unit != TYPE_UNITS[type]
-        parts.join(', ')
+        to_ruby('param', value: value, literal: writer&.method(:literal))
       end
 
       # One help line: "cutoff  2400.hz  20.hz..20000.hz exp  Filter
@@ -587,12 +606,13 @@ module MB
 
       private
 
-      def extras_text
+      def extras_text(lit = Param.method(:literal))
         parts = []
         parts << "curve: #{curve.inspect}" if curve != default_curve && !(implied && Param.name_entry(name)&.dig(:curve) == curve)
-        parts << "unit: #{unit.inspect}" if unit && unit != TYPE_UNITS[type]
+        parts << "unit: #{lit.(unit)}" if unit && unit != TYPE_UNITS[type]
         parts << "cc: #{cc}" if cc
-        parts << "description: #{description.inspect}" if description
+        parts << 'clamp: false' unless clamp
+        parts << "description: #{lit.(description)}" if description
         parts.empty? ? '' : ", #{parts.join(', ')}"
       end
 

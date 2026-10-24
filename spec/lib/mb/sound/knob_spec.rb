@@ -55,7 +55,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(s.default).to eq(800.0)
       expect(s.position(8000)).to be_within(1e-12).of(1)
       expect(s.value(s.position(800))).to be_within(1e-9).of(800)
-      expect(s.to_ruby).to eq("knob :cut, 800, range: 100..8000, curve: :exp, unit: \"Hz\", cc: 74")
+      expect(s.to_ruby).to eq("knob :cut, (100..8000).at(800), curve: :exp, unit: \"Hz\", cc: 74")
 
       expect { described_class::Spec.new(name: 'cut') }.to raise_error(ArgumentError, /Symbols/)
       expect { described_class::Spec.new(name: :x, range: 0..1, curve: :exp) }.to raise_error(ArgumentError, /include or cross 0/)
@@ -63,6 +63,10 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect { described_class::Spec.new(name: :x, takeover: :grab) }.to raise_error(ArgumentError, /Takeover/)
       expect { described_class::Spec.new(name: :x, default: 5) }.to raise_error(ArgumentError, /outside the default range 0\.\.1.*range: 0\.\.10/) # (ux-1 item 30)
       expect { described_class::Spec.new(name: :x, default: 5, range: 0..1) }.to raise_error(ArgumentError, /the default 5 is outside 0..1/) # (Param: checked where declared)
+      u = described_class::Spec.new(name: :x, default: 5.0, range: 0.0..1.0, clamp: false)
+      expect(u.default).to eq(5.0)
+      expect(u.clamp(-3)).to eq(-3.0)
+      expect(u.to_ruby).to eq('knob :x, (0.0..1.0).at(5.0), clamp: false')
       expect { described_class::Spec.new(name: :cut, default: 800, range: 100.hz..8000.hz) }.to raise_error(ArgumentError, /Did you mean\?  800.hz/)
     end
 
@@ -73,7 +77,7 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(s.curve).to eq(:exp)
       expect(s.unit).to eq('Hz')
       expect(s.param.type).to eq(:frequency)
-      expect(s.to_ruby).to eq('knob :cut, 2400.hz, range: 150.hz..8000.hz')
+      expect(s.to_ruby).to eq('knob :cut, (150.hz..8000.hz).at(2400.hz)')
       expect(s.respec(default: 3000.0).default).to eq(3000.0)
       expect(s.respec(smooth: 0).param).to eq(s.param)
 

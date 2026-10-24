@@ -55,6 +55,7 @@ RSpec.describe(MB::Sound::Param) do
       expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :log).curve).to eq(:exp)
       expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :db).curve).to eq(:exp)
       expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :lin).curve).to eq(:linear)
+      expect(described_class.declare(:on, true, curve: :enum).curve).to eq(:switch)
       expect(described_class::CURVES.values.uniq).to eq(%i[linear exp switch])
     end
 
@@ -67,7 +68,13 @@ RSpec.describe(MB::Sound::Param) do
       expect(described_class.declare(:voices, 4).stepped?).to eq(true)
       expect(described_class.declare(:reso, 0.3).range).to eq(0.0..1.0)
       expect(described_class.declare(:"dub/mix", 0.3).range).to eq(0.0..1.0)
-      expect(described_class.declare(:attack, 10.ms).range).to eq(1.ms..10.seconds)
+      expect(described_class.declare(:attack, 10.ms).range).to eq(0.1.ms..10.seconds)
+      expect(described_class.declare(:attack, 10.ms).curve).to eq(:exp)
+      expect(described_class.declare(:detune, 12.cents).range).to eq(0.cents..150.cents)
+      cs = described_class.declare(:release, 0.5.seconds).control_spec(number: 72)
+      expect(cs.curve).to eq(:exp) # (time names on MIDI CC map exponentially)
+      expect(cs.value(0)).to be_within(1e-12).of(0.0001)
+      expect(cs.value(127)).to be_within(1e-9).of(30.0)
     end
 
     it 'leaves plain numbers out of typed table entries unless type: says their unit' do
@@ -89,8 +96,23 @@ RSpec.describe(MB::Sound::Param) do
         expect(e.message).to match(/isn't a frequency/)
         expect(e.suggestions).to eq(['2400.hz'])
       }
-      expect { described_class.declare(:mix, 1.5) }.to raise_error(described_class::Error, /mix: the default 1.5 is outside 0.0..1.0/)
-      expect { (0.0..1.0).at(2.0) }.to raise_error(described_class::Error, /outside/)
+      expect { described_class.declare(:mix, 1.5) }.to raise_error(described_class::Error, /mix: the default 1.5 is outside 0.0..1.0; limited to 1.0 \(clamp: false lets it leave the range\)/)
+      expect { described_class.declare(:x, (0.0..1.0).at(2.0)) }.to raise_error(described_class::Error, /outside/)
+      expect((0.0..1.0).at(2.0).default).to eq(2.0) # (the declaration checks; clamp: false may allow it)
+      expect { (0.0..1.0).at(2.hz) }.to raise_error(described_class::Error, /isn't/)
+    end
+
+    it 'limits defaults outside their range live, and lets clamp: false params leave it' do
+      MB::Sound.live = true
+      p = nil
+      expect { p = described_class.declare(:cutoff, 9000.hz, range: 150.hz..8000.hz) }.to output(/limited to 8000.hz/).to_stderr
+      expect(p.default.frequency).to eq(8000.0)
+      MB::Sound.live = false
+      w = described_class.declare(:wild, 3.0, range: 0.0..1.0, clamp: false)
+      expect(w.default).to eq(3.0)
+      expect(w.check(-2.0)).to eq(-2.0)
+      expect(w.clamp).to eq(false)
+      expect { described_class.declare(:x, 1, clamp: :maybe) }.to raise_error(described_class::Error, /clamp/)
     end
 
     it 'checks range ends, curves, units, and choices' do
@@ -156,11 +178,14 @@ RSpec.describe(MB::Sound::Param) do
       expect(described_class.declare(:mode, :tape, range: %i[tape bbd]).to_ruby).to eq('param :mode, :tape, range: [:tape, :bbd]')
     end
 
-    it 'prints graph-document lines as documents have always written them' do
+    it 'prints graph-document lines (format 5) in the canonical spelling, typed as declared' do
       p = described_class.declare(:cutoff, 2400.0, range: 150.0..8000.0, description: 'Reese lowpass center in Hz', cc: 74)
-      expect(p.document_line).to eq('param :cutoff, 2400.0, range: 150.0..8000.0, description: "Reese lowpass center in Hz", cc: 74')
-      expect(p.document_line(3000.0)).to start_with('param :cutoff, 3000.0, ')
-      expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :exp, unit: 'Hz').document_line).to eq('param :x, 1.0, range: 0.1..10.0, curve: :exp, unit: "Hz"')
+      expect(p.document_line).to eq('param :cutoff, (150.0..8000.0).at(2400.0), cc: 74, description: "Reese lowpass center in Hz"')
+      expect(p.document_line(3000.0)).to start_with('param :cutoff, (150.0..8000.0).at(3000.0), ')
+      expect(described_class.declare(:x, 1.0, range: 0.1..10.0, curve: :exp, unit: 'Hz').document_line).to eq('param :x, (0.1..10.0).at(1.0), curve: :exp, unit: "Hz"')
+      t = described_class.declare(:cut, (150.hz..8000.hz).at(2400.hz))
+      expect(t.document_line(3000.0)).to eq('param :cut, (150.hz..8000.hz).at(3000.hz)')
+      expect(described_class.declare(:wild, (0.0..1.0).at(3.0), clamp: false).document_line).to eq('param :wild, (0.0..1.0).at(3.0), clamp: false')
     end
 
     it 'prints a help line' do

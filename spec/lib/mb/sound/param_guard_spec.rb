@@ -62,6 +62,19 @@ RSpec.describe('param declarations', :aggregate_failures) do
     expect(total[:documents]).to eq(total[:params])
   end
 
+  it 'covers the knobs written as literals in lib/ and bin/ (song blocks, genres, racks, help)' do
+    root = File.expand_path('../../../..', __dir__)
+    files = Dir.glob('{lib,bin}/**/*.rb', base: root).sort.map { |f| File.join(root, f) }
+    found = ParamGuard.source_knobs(files)
+    checked = found.select { |_, param, _| param }
+    expect(checked.length).to be >= 40
+    checked.each do |where, param, _|
+      problems, built = ParamGuard.check(param)
+      expect(problems).to eq([]), "#{where} #{param.name}: #{problems.join('; ')}"
+      expect(built[:knob]).to eq(true), "#{where}: no knob"
+    end
+  end
+
   it 'knows the names table it documents' do
     MB::Sound::Param.names.each do |name, entry|
       problems, built = ParamGuard.check(MB::Sound::Param.declare(name, entry[:range].begin))

@@ -312,7 +312,7 @@ RSpec.describe('rack knobs') do
       }
       g = 220.hz.saw.then(&r)
       text = g.to_ruby
-      expect(text).to include('knob(:cut, 800, range: 100..8000, curve: :exp).mod(0.5.hz.lfo, depth: 0.1)')
+      expect(text).to include('knob(:cut, (100..8000).at(800), curve: :exp).mod(0.5.hz.lfo, depth: 0.1)')
       expect(text).to include('knob(:space, 0.3)')
 
       doc = s::GraphIO.dump(g, name: 'rack_knob_test')

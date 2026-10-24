@@ -77,7 +77,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect(d.inputs).to eq([:input])
       expect(d.params.transform_values { |sp| sp.except(:param) }).to eq(drive: { value: 2.0, range: 1.0..10.0, description: 'Gain into the clipper', cc: 7 })
       expect(d.declarations[:drive]).to eq(MB::Sound::Param.declare(:drive, (1.0..10.0).at(2.0), description: 'Gain into the clipper', cc: 7))
-      expect(d.declarations[:drive].document_line).to eq('param :drive, 2.0, range: 1.0..10.0, description: "Gain into the clipper", cc: 7')
+      expect(d.declarations[:drive].document_line).to eq('param :drive, (1.0..10.0).at(2.0), cc: 7, description: "Gain into the clipper"')
 
       g = io.load(doc, inputs: { input: 0.25.constant }, params: { drive: 3 })
       expect(g.sample(64).to_a).to eq((0.25.constant * 3.constant).softclip.sample(64).to_a)
@@ -171,7 +171,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
 
     it 'saves knobs as knob lines and loads them back as one knob' do
       doc = io.dump(graph, name: 'k')
-      expect(doc).to include('knob :cut, 800.0, range: 50.0..4000.0, curve: :exp, unit: "Hz", cc: 74')
+      expect(doc).to include('knob :cut, (50..4000).at(800), curve: :exp, unit: "Hz", cc: 74')
       expect(doc).to include('filter(:lowpass, cutoff: cut, quality: 2).lp4(cut)')
       loaded = io.load(doc)
       d = io.document_of(loaded)
@@ -192,7 +192,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       loaded.sample(800)
       loaded.sample(800)
       expect(k.value).to be_within(1e-3).of(300)
-      expect(io.dump(loaded)).to include('knob :cut, 300')
+      expect(io.dump(loaded)).to include('knob :cut, (50..4000).at(300)')
     end
 
     it 'saves a moving knob at its current value with a comment' do
@@ -247,7 +247,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
     it 'prints params back as names and keeps them on a re-save' do
       g = io.load(doc, inputs: { input: 1.constant }, params: { rate: 2.5 })
       again = io.dump(g)
-      expect(again).to include("param :depth, 0.5, range: 0.0..1.0\nparam :rate, 2.5, range: 0.5..20.0")
+      expect(again).to include("param :depth, (0.0..1.0).at(0.5)\nparam :rate, (0.5..20.0).at(2.5)")
       expect(again).to include('input * (1 - depth * rate.tone.sine.lfo.at(0..1))')
       expect(again).to include('options: { voices: 4 }')
     end

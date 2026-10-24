@@ -248,7 +248,7 @@ module MB
             end
             rack_knobs.each do |n, spec|
               opts = spec.slice(*Document::KNOB_KEYS, *Document::RACK_KNOB_KEYS).except(:description)
-              b[n] = MB::Sound.knob(n, spec[:value], description: spec[:description], **opts)
+              b[n] = MB::Sound.knob(n, spec[:param] ? spec[:param].typed(spec[:value]) : spec[:value], description: spec[:description], **opts)
             end
             scope.bindings = b
             last = scope
@@ -530,16 +530,19 @@ module MB
               name, value = args
               raise error(node, 'param needs a name and a value (param :drive, 1.0)') unless name.is_a?(Symbol) && args.length == 2
               value, kwargs = unpack_ranged(node, name, value, kwargs)
-              raise error(node, "param #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
+              raise error(node, "param #{name} needs a number or a unit value like 2400.hz (got #{value.inspect})") unless header_number?(value)
               unknown = kwargs.keys - Document::PARAM_KEYS
               raise error(node, "unknown param option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{Document::PARAM_KEYS.join(', ')})") unless unknown.empty?
               raise error(node, "#{name} is declared twice") if @document.params.key?(name)
-              @document.params[name] = kwargs.merge(value: value, param: declaration(node, name, value, kwargs))
+              decl = declaration(node, name, value, kwargs)
+              # (the value as a number in its base unit: params bind as
+              # Constants; the Param keeps the typed declaration)
+              @document.params[name] = kwargs.merge(value: base_number(decl.default), param: decl)
             when :knob
               name, value = args
-              raise error(node, 'knob needs a name and a value (knob :cut, 800, range: 100..8000, curve: :exp)') unless name.is_a?(Symbol) && args.length == 2
+              raise error(node, 'knob needs a name and a value (knob :cut, (100.hz..8000.hz).at(800.hz))') unless name.is_a?(Symbol) && args.length == 2
               value, kwargs = unpack_ranged(node, name, value, kwargs)
-              raise error(node, "knob #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
+              raise error(node, "knob #{name} needs a number or a unit value like 2400.hz (got #{value.inspect})") unless header_number?(value)
               keys = Document::KNOB_KEYS + (@document.rack? ? Document::RACK_KNOB_KEYS : [])
               unknown = kwargs.keys - keys
               raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{keys.join(', ')}#{'; share: and follow: are for rack documents\' knobs' if (unknown & Document::RACK_KNOB_KEYS).any?})") unless unknown.empty?
@@ -549,7 +552,7 @@ module MB
               rescue ArgumentError => e
                 raise error(node, "knob #{name}: #{e.message}")
               end
-              @document.params[name] = kwargs.merge(value: value, knob: true, param: spec.param)
+              @document.params[name] = kwargs.merge(value: base_number(spec.param.default.nil? ? spec.default : spec.param.default), knob: true, param: spec.param)
             when :clock
               name, base = args
               raise error(node, 'clock needs a name and a tempo, ratio, or period (clock :tide, 31.1.seconds)') unless name.is_a?(Symbol) && args.length == 2
@@ -653,6 +656,10 @@ module MB
           @bound = {}
           @document.params.each do |name, spec|
             value = @overrides.fetch(name, spec[:value])
+            decl = spec[:param]
+            if decl && @overrides.key?(name) && header_number?(value) && !value.is_a?(Numeric) && MB::Sound::Param.type_of(value) == decl.type
+              value = MB::Sound::Param.magnitude(value) # (a typed override: 3000.hz for a frequency param)
+            end
             if (node = bound_param(name, value))
               # Bound to a node or a Session knob by the caller: every use
               # reads it (consumers branch it with get_sampler), and the
@@ -663,10 +670,10 @@ module MB
               next
             end
             raise LoadError.new("#{@label}: param #{name} needs a number, a graph node, or a knob name (got #{value.inspect})", path: @path) unless value.is_a?(Numeric) && value.real?
-            if @overrides.key?(name) && (decl = spec[:param])
+            if @overrides.key?(name) && decl
               # (a Param check: raises in scripts and specs; live, warns
               # and limits the value to the range)
-              value = decl.check(value, what: "#{@label}: param #{name}")
+              value = base_number(decl.check(value, what: "#{@label}: param #{name}"))
             end
             spec[:value] = value
             @knobs[name] = value
@@ -674,9 +681,21 @@ module MB
               # One GraphNode::Knob per knob line, read by every use (each
               # consumer gets its own Knob::Reader)
               opts = spec.slice(*Document::KNOB_KEYS)
-              @knob_nodes[name] = [set? ? session_knob(name, value, opts) : GraphNode::Knob.new(name, value, **opts)]
+              typed = decl ? decl.typed(value) : value
+              @knob_nodes[name] = [set? ? session_knob(name, typed, opts) : GraphNode::Knob.new(name, typed, **opts)]
             end
           end
+        end
+
+        # True for a header line's value: a real number or a unit value
+        # (format 5 documents write typed values: 2400.hz, -12.db).
+        def header_number?(v)
+          (v.is_a?(Numeric) && v.real?) || MB::Sound::Param::UNIT_TYPES.include?(MB::Sound::Param.type_of(v))
+        end
+
+        # +v+ as a number in its base unit (plain numbers as written).
+        def base_number(v)
+          v.is_a?(Numeric) && !v.is_a?(MB::Sound::Decibels) ? v : MB::Sound::Param.magnitude(v)
         end
 
         # A header line's value and keywords with a ranged default
