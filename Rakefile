@@ -419,6 +419,12 @@ namespace :spec do
     ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4), patterns: ENV['SPECS'].to_s.split)
     abort 'spec:parallel: failures' unless ok
   end
+
+  desc 'spec:parallel with the :slow tier included (SLOW=1; the suite before and after merges)'
+  task :full do
+    ENV['SLOW'] = '1'
+    Rake::Task['spec:parallel'].invoke
+  end
 end
 
 # The plan layer's full block-size sweep (user decision 2026-10-10: not run

@@ -17,7 +17,8 @@ require 'rbconfig'
 module ParallelSpecs
   ROOT = File.expand_path('..', __dir__)
   OUT_DIR = File.join(ROOT, 'tmp', 'parallel')
-  TIMES_PATH = File.join(ROOT, 'tmp', 'spec_file_times.json')
+  # (the slow tier, SLOW=1, keeps its own times: its files take longer)
+  TIMES_PATH = File.join(ROOT, 'tmp', ENV['SLOW'] == '1' ? 'spec_file_times_full.json' : 'spec_file_times.json')
   # Time budgets per file and per example (see #check_budgets)
   BUDGETS_PATH = File.join(ROOT, 'spec', 'time_budgets.yml')
   # Each host's speed at each parallelism (see #host_speed)

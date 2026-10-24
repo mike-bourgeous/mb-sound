@@ -49,6 +49,14 @@ end
 # paths under Valgrind) are left out.
 SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 
+# True when the slow tier runs too (SLOW=1, as `rake spec:full`, the
+# post-merge tests, and CI set; always under memcheck).  Examples tagged
+# :slow (exactness sweeps and long renders guarding rare regressions; each
+# file keeps a fast representative untagged) are skipped otherwise, so the
+# everyday run stays short (test-tiers-1, 2026-10-24).  A location filter
+# (file:line) still runs a :slow example by itself.
+SPEC_SLOW = ENV['SLOW'] == '1' || SPEC_MEMCHECK
+
 require_relative 'support/spec_tmp'
 require_relative 'support/spec_buffers'
 require_relative 'support/buffer_size_helpers'
@@ -113,6 +121,9 @@ RSpec.configure do |config|
   # script and take several minutes, so plain `rspec` skips them; run them
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
   config.filter_run_excluding smoke: true
+
+  # The slow tier (see SPEC_SLOW): `SLOW=1 bundle exec rspec` or `rake spec:full`
+  config.filter_run_excluding slow: true unless SPEC_SLOW
 
   # Under Valgrind, leave out examples whose C paths other examples cover
   # (see SPEC_MEMCHECK).
