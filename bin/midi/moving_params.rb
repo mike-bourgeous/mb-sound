@@ -78,7 +78,7 @@ module MB::Sound
       },
       knob_arp: -> {
         knob :rate, 0, range: 0..1
-        knob :hits, 0, range: 1..3
+        knob :hits, 1, range: 1..3
         chords = (seq(A3, F3, C4, G3).n1 & seq(C4, A3, E4, B3).n1 & seq(E4, C4, G4, D4).n1).legato(0.95).loop
         chords.stream
           .arp(:updown, knob(:rate).choose(8, 16, 32), octaves: 2, gate: 0.6)
