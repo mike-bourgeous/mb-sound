@@ -137,3 +137,7 @@ Phase 2 decisions (maintainer, 2026-10-10/11): files are a Prism-walked Ruby sub
 - Template variations (`per_voice`/`per_channel` exist; no `repeat`-style syntax for whole sub-graphs yet), knobs for script parameters baked into structure, `p.midi_cc` controls with MIDI open stay `midi.control(spec)` nodes (their cc spec isn't re-centered on a param override).
 - Per-channel collapse (tape_delay's per-channel lambda prints once per channel), structural lane differences unrolled per lane, state.
 - After phase 3: zip bundles, takes as `kind: :take` documents.
+
+## Params (param-1, 2026-10-24)
+
+`param` and `knob` header lines build `MB::Sound::Param`s at load (`design/notes/params.md`): a line whose default is outside its range, whose range ends mix types, or whose curve is unknown is a LoadError at its line; `spec[:param]` and `Document#declarations` hold them.  Lines also accept the canonical ranged spelling (`param :depth, (0.0..1.0).at(0.5)`, `knob :cut, 800.0.in(100.0..8000.0)`; Registry allows `Range#at` and `#in`), but documents still write format 4's `param :x, v, range: lo..hi` (`Param#document_line`, the same text), so the format didn't change.  Param overrides outside their range go through `Param#check` (raise in scripts and specs, limit with a warning live; was a warning).  A range saved high to low declares low to high and is kept as written.
