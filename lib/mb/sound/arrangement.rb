@@ -587,6 +587,10 @@ module MB
           end
         end
         @rehearsal = play && form ? rehearse(form) : nil
+        # The warm-up's garbage collected now, before anything plays, which
+        # also puts off the next major collection (they stop every thread,
+        # the render thread too)
+        GC.start if form && !result.empty?
         result
       end
 
@@ -594,9 +598,9 @@ module MB
       # (see #rehearse), or nil.
       attr_reader :rehearsal
 
-      # Each section #rehearse plays lasts the fewest quarter-note beats
-      # that hold this many buffers (at least one beat), so code that runs
-      # once a buffer is called often enough for YJIT to compile it.
+      # Each section #rehearse plays lasts the fewest sixteenth notes that
+      # hold this many buffers, so code that runs once a buffer is called
+      # often enough for YJIT to compile it (30 calls).
       REHEARSAL_BUFFERS = 48
 
       # The most passes of a section #rehearse plays.
@@ -614,9 +618,9 @@ module MB
       # knobs, the tracks #warm_up played (tracks only built, or graph
       # tracks, are left out of it and of the scenes), and the scenes,
       # and plays a copy of the form straight through (gotos not taken,
-      # the first option of each pick), with every section a beat or two
-      # long (see REHEARSAL_BUFFERS) and at most REHEARSAL_PASSES passes,
-      # launching at the sections' starts.  Seeds are restored as by
+      # the first option of each pick), with every section a few
+      # sixteenth notes long (see REHEARSAL_BUFFERS) and at most
+      # REHEARSAL_PASSES passes, launching at the sections' starts.  Seeds are restored as by
       # #warm_up; nothing changes in the session.  Only while the session
       # is idle.  Returns the number of sections played, or nil if there
       # was nothing to play (an error stops the rehearsal with a warning;
@@ -660,40 +664,57 @@ module MB
 
       private
 
-      # (#rehearse after its checks)
+      # (#rehearse after its checks) Plays the form's copy, then its first
+      # section again in a new sandbox: the song's start, where every
+      # track and the master chain start at once, compiled 30-60 ms more
+      # in the first live buffer after one pass (memory_card: 62 -> 24 ms
+      # at 512 frames for ~0.1 s more).  Returns the sections the first
+      # pass played, or nil after an error (warned).
       def rehearse_names(form, names)
-        box = nil
         steps = nil
         MB::Sound.with_seed(0) do
-          box = warm_sandbox
-          t = box.transport
-          beat = (1/4r / t.whole_notes_per_second * box.sample_rate).to_f
-          section = 1.beats * [(REHEARSAL_BUFFERS * box.buffer_size / beat).ceil, 1].max
-          short = rehearsal_form(form, section)
-          steps = short.steps.sum { |_, times| times }
-          Session.with_context(session: box) {
-            rehearsal_setup(box, names, section)
-            box.arrangement.launch_form(short, LaunchPoint::NONE, 0)
+          steps = rehearse_pass(names) { |section, bar_length| rehearsal_form(form, section, bar_length) }
+          first = form.steps.first[0]
+          rehearse_pass(names) { |section, bar_length|
+            rehearsal_form(Form.new(sections: form.sections, order: [Form::Play.new(name: first, times: 1)]), section, bar_length)
           }
-          frames = ((steps + 1/2r) * section.to_r / t.whole_notes_per_second * box.sample_rate).to_f
-          (frames / box.buffer_size).ceil.times { box.process_buffer }
         end
         steps
       rescue => e
         warn "warm_up: the form's rehearsal stopped (#{e.class}: #{e.message})"
         nil
+      end
+
+      # One rehearsal in a new sandbox: the block gets a section length
+      # (see REHEARSAL_BUFFERS) and the bar length, and returns the form
+      # to play.  Returns the number of sections played.
+      def rehearse_pass(names)
+        box = warm_sandbox
+        t = box.transport
+        n16 = (1/16r / t.whole_notes_per_second * box.sample_rate).to_f
+        section = 1.n16 * [(REHEARSAL_BUFFERS * box.buffer_size / n16).ceil, 1].max
+        short = yield(section, t.bar_length)
+        steps = short.steps.sum { |_, times| times }
+        Session.with_context(session: box) {
+          rehearsal_setup(box, names, section)
+          box.arrangement.launch_form(short, LaunchPoint::NONE, 0)
+        }
+        frames = ((steps + 1/2r) * section.to_r / t.whole_notes_per_second * box.sample_rate).to_f
+        (frames / box.buffer_size).ceil.times { box.process_buffer }
+        steps
       ensure
         box&.close
       end
 
       # A copy of +form+ for #rehearse: its straight order, every section
-      # +length+ long (a Duration; fills half that), at most
+      # +length+ long (a Duration; fills half that, phrase fills every
+      # other section, counting +bar_length+ whole notes a bar), at most
       # REHEARSAL_PASSES passes.
-      def rehearsal_form(form, length)
+      def rehearsal_form(form, length, bar_length)
         half = Sequence::Duration.new(length.to_r / 2)
         sections = form.sections.transform_values { |sec| sec.with(length: length, fill: sec.fill&.with(length: half)) }
         order = form.steps.map { |name, times| Form::Play.new(name: name, times: [times, REHEARSAL_PASSES].min) }
-        fills = form.phrase_fills.map { |f| f.with(every: 1, length: half) }
+        fills = form.phrase_fills.map { |f| f.with(every: 2 * length.to_r / bar_length, length: half) }
         Form.new(sections: sections, order: order, phrase_fills: fills)
       end
 
