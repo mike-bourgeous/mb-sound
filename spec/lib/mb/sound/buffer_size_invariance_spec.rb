@@ -100,7 +100,7 @@ RSpec.describe 'Buffer size invariance' do
       'a saw times a gate' => -> { n = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8.notes; n.hz.saw * n.gate },
     }.each do |what, make|
       it "ends #{what} on the same sample at any buffer size" do
-        sizes = [[800], [367, 368], [64], [1031], [1]]
+        sizes = [[800], *slow_tier([[367, 368], [64], [1031], [1]])]
         expect(lengths(make, sizes)).to eq([24_800] * sizes.length) # clip end 24000 (1/4 at 120 bpm)
         expect_invariant(make, seconds: 0.6, sizes: [[367, 368], [64], [1031], [7]])
       end
@@ -184,7 +184,7 @@ RSpec.describe 'Buffer size invariance' do
       it "ends #{what} on the same sample at any buffer size" do
         ref = until_end(make, [800])
         expect(ref.length).to eq(length)
-        [[367, 368], [64], [1031], *([[1]] unless one_sample == false)].each do |s|
+        slow_tier([[367, 368], [64], [1031], *([[1]] unless one_sample == false)]).each do |s|
           out = until_end(make, s)
           expect(out.length).to eq(length), "at buffer sizes #{s}"
           # (planned :fast sines differ within -100 dB at other block sizes)

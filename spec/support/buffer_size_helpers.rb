@@ -29,14 +29,17 @@ module BufferSizeHelpers
     MB::Sound.rewind
   end
 
-  # Expects the same samples at every size in +sizes+ as at 800.
+  include SlowTier
+
+  # Expects the same samples at every size in +sizes+ as at 800 (only the
+  # first size outside the slow tier, SLOW=1; see support/slow_tier.rb).
   # +one_sample_seconds+ shortens the one-sample-buffer render ([1], about
   # 70 us per buffer for a small Synth: 3 s took 12 s) to its first
   # seconds, compared against the start of the reference.
   def expect_invariant(make, seconds: 2.1, sizes: SIZES, tolerance: 0, one_sample_seconds: nil)
     ref, node = render_sizes(make, [800], seconds)
     expect(ref.abs.max).to be > 0.01
-    sizes.each do |s|
+    slow_tier(sizes).each do |s|
       out, _ = render_sizes(make, s, s == [1] && one_sample_seconds ? [one_sample_seconds, seconds].min : seconds)
       r = ref[0...out.length]
       if tolerance == 0

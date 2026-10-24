@@ -159,7 +159,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       ref = run(test_mix.ride(-12, down: 0.5, up: 1), 96000, 800)
       expect(ref.map { |c| c.abs.max }).to all(be > 0.1)
       # (one-sample buffers for the first 0.4 s: the first gain decisions)
-      { 1 => 19200, 7 => 40000, 128 => 96000, 4801 => 96000 }.each do |size, total|
+      slow_tier({ 4801 => 96000, 1 => 19200, 7 => 40000, 128 => 96000 }.to_a).each do |size, total|
         got = run(test_mix.ride(-12, down: 0.5, up: 1), total, size)
         expect(got.zip(ref).map { |a, b| (a - b[0...total]).abs.max }).to eq([0, 0]), "buffer size #{size}"
       end
@@ -283,6 +283,8 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       la = MB::Sound.loudness(a)
       expect(la.integrated).to be_within(0.02).of(-8.5)
       expect(la.true_peak).to be <= -0.4
+
+      next unless SPEC_SLOW # (another buffer size in the slow tier only, SLOW=1)
 
       b = tmp_path('b.flac')
       render_song(b, buffer_size: 128, &song)

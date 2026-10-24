@@ -3,7 +3,7 @@ RSpec.describe('bin/songs/night_bus_capture.rb') do
 
   after { MB::Sound.rewind }
 
-  it 'captures the riff at bar 7, records the answer into bar 13, and learns the filter knob' do
+  it 'captures the riff at bar 7, records the answer into bar 13, and learns the filter knob', :slow do
     session = nil
     path = tmp_path('capture.flac')
     out = StringIO.new

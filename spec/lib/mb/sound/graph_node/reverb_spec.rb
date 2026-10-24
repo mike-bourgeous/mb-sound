@@ -530,7 +530,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
           expect(out.map(&:length)).to eq([5300, 5300])
         end
 
-        it 'gives the same output at other buffer sizes' do
+        it 'gives the same output at other buffer sizes', :slow do
           build = -> { MB::Sound::GraphNode::Channels.new([noise.(5000, 1), noise.(9000, 2)]).reverb(:room, extra_time: 0.05) }
           a = render(build.(), 800)
           b = render(build.(), 333)
