@@ -340,7 +340,7 @@ module SceneProfile
     # shorter than a buffer's time runs dry there.
     THRESHOLDS = [10, 20, 50, 80].freeze
 
-    def report_distribution
+    def report_distribution(where)
       return if @buffers.empty?
       parts = THRESHOLDS.map { |ms|
         over = @buffers.select { |b| b[:secs] * 1000 > ms }
@@ -354,8 +354,8 @@ module SceneProfile
       busy = @buffers.count { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
       landing = @buffers.select { |b| b[:landed] > 0 }.sum { |b| b[:yjit][:compile_time_ns].to_i } / 1e6
       gcs = @buffers.sum { |b| b[:yjit][:code_gc_count].to_i }
-      puts format('  YJIT compile on the render thread: %.0f ms in all, %d buffers over 1 ms, %.0f ms where changes landed; code GC %dx',
-        total, busy, landing, gcs)
+      puts format('  YJIT compile %s: %.0f ms in all, %d buffers over 1 ms, %.0f ms where changes landed; code GC %dx',
+        where, total, busy, landing, gcs)
       if @gc
         gcb = @buffers.select { |b| b[:gc] > 10 }
         puts format('  GC from the song\'s start: %d minor, %d major, %d ms in all (warm-up included); buffers with over 10 ms of GC: %d%s',
@@ -386,7 +386,10 @@ module SceneProfile
       end
     end
 
-    def report_buffers(top, buffer)
+    # (+realtime+: the YJIT counters, process-wide, count every thread's
+    # compiling while a buffer rendered: the scheduler's, the painter's)
+    def report_buffers(top, buffer, realtime: false)
+      where = realtime ? 'while buffers rendered (any thread)' : 'on the render thread'
       return if @buffers.empty?
       stats = ->(key) {
         t = @buffers.map { |b| b[key] }.sort
@@ -397,7 +400,7 @@ module SceneProfile
         @buffers.length, ms(mean), ms(p99), ms(max), buffer * 1000.0 / 48000)
       puts format('  render thread CPU: mean %s ms, p99 %s ms, max %s ms (wall above CPU: waiting, e.g. for the GVL)', *stats.(:cpu).map { |v| ms(v) })
       puts format('  outside the players (changes, catch-up, master and bus chains): mean %s ms, p99 %s ms, max %s ms', *stats.(:other).map { |v| ms(v) })
-      report_distribution
+      report_distribution(where)
       landing = @buffers.select { |b| b[:landed] > 0 }
       unless landing.empty?
         puts format('  where changes landed: %d buffers, mean %s ms, max %s ms', landing.length, ms(landing.sum { |b| b[:secs] } / landing.length), ms(landing.map { |b| b[:secs] }.max))
@@ -412,7 +415,7 @@ module SceneProfile
       end
       compiling = @buffers.select { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
       unless compiling.empty?
-        puts '  most YJIT compile on the render thread:'
+        puts "  most YJIT compile #{where}:"
         compiling.sort_by { |b| -b[:yjit][:compile_time_ns] }.first(top).each do |b|
           puts format('    bar %6.2f %7s ms of %s ms%s', b[:bar], ms(b[:yjit][:compile_time_ns] / 1e9), ms(b[:secs]),
                       b[:landed] > 0 ? " (#{b[:landed]} change#{b[:landed] == 1 ? '' : 's'} landed)" : '')
@@ -496,9 +499,11 @@ if MB::Sound.main_script?(__FILE__)
         out.underrun_list.empty? ? '' : ", at bars #{out.underrun_list.first(10).map { |b, g| format('%.2f (%s ms)', b, SceneProfile.ms(g)) }.join(', ')}",
         out.min_level.finite? ? SceneProfile.ms(out.min_level) : '-')
       puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
+      warm = SceneProfile.phase_text(:warm_up, 6)
+      puts "  warm-up phases: #{warm}" unless warm.empty?
       SceneProfile.report_blocks(p.top, realtime: true)
       puts "late blocks: #{late.map { |l| format('%s %.0f ms late', l[:description], l[:late] * 1000) }.join(', ')}" unless late.empty?
-      SceneProfile.report_buffers(p.top, p.buffer)
+      SceneProfile.report_buffers(p.top, p.buffer, realtime: true)
     else
       out = SceneProfile::CountingOutput.new(p.buffer)
       t0 = SceneProfile.clock
@@ -518,6 +523,8 @@ if MB::Sound.main_script?(__FILE__)
         File.basename(song), p.buffer, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
       setup = SceneProfile.phase_text(:setup, 6)
       puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
+      warm = SceneProfile.phase_text(:warm_up, 6)
+      puts "  warm-up phases: #{warm}" unless warm.empty?
       puts "before the first buffer: #{setup}" unless setup.empty?
       SceneProfile.report_blocks(p.top, realtime: false)
       SceneProfile.report_buffers(p.top, p.buffer)
