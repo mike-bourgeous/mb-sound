@@ -477,6 +477,19 @@ RSpec.describe(MB::Sound::ScriptRunner) do
         expect(later).to eq(false)
       end
 
+      it "warms up the UI's painter before the song starts with --ui (scene-jit-1)" do
+        order = []
+        allow(MB::Sound::UI).to receive(:warm_up) { order << :ui_warm_up }
+        r = runner(:song, ['-q', '--ui', '--bars', '0.25'])
+        allow(r).to receive(:live_ui) { order << :live_ui }
+        r.run_song {
+          order << :song
+          MB::Sound.bpm 120
+          MB::Sound.bg(:tone, 220.hz.sine, fade: 0)
+        }
+        expect(order).to eq([:ui_warm_up, :song, :live_ui])
+      end
+
       it 'exits at the end of the song with --plot (the plot stops when the song has ended)' do
         plotted = 0
         allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { plotted += 1 }
