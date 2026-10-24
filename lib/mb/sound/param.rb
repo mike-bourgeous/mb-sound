@@ -158,6 +158,7 @@ module MB
           case v
           when nil then nil
           when true, false then :boolean
+          when Integer, Float then :number # (also before Notes and Clips load: ControlSpecs made at load)
           when String then :string
           else
             t = ArgTypes.classify(v)
@@ -362,7 +363,7 @@ module MB
               end
           c = :linear if c == :exp && !exp_range?(range)
         elsif c == :exp && range.is_a?(Range) && !exp_range?(range)
-          raise Error.new("#{name}: an exponential (or dB-linear) range can't touch or cross 0 (got #{Param.literal(range)})")
+          raise Error.new("#{name}: an exponential (or dB-linear) range can't include or cross 0 (got #{Param.literal(range)})")
         end
 
         unless unit.nil? || unit.is_a?(String)
@@ -389,7 +390,7 @@ module MB
         super(
           name: name, default: default, range: range.frozen? ? range : range.dup.freeze, type: unit_type || :any, curve: c,
           unit: unit&.dup&.freeze, description: description&.dup&.freeze, cc: cc, implied: implied,
-          types: types.frozen? ? types : types.dup.freeze, keyword: keyword || name, primary: primary
+          types: Ractor.make_shareable(types.transform_values { |m| m.is_a?(String) ? m.dup : m }), keyword: keyword || name, primary: primary
         )
       end
 

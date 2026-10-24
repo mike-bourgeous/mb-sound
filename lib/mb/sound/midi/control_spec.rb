@@ -13,7 +13,7 @@ module MB
       # control lists, and ACID XML (MIDI::ControlMap).
       #
       # Mapping (#value):
-      # - +curve+ :linear (default) or :exponential (geometric; the range
+      # - +curve+ :linear (default) or :exp (geometric, alias :exponential; the range
       #   must not include 0) or :switch (the range's end at 64 and up, its
       #   beginning below).
       # - Without a +center+, raw 0..127 spreads over the range.
@@ -28,8 +28,16 @@ module MB
       #     ControlSpec.new(number: 1, name: 'Modulation').value(127)   # => 1.0
       #     ControlSpec.bend(range: -2.0..2.0).value(16383)              # => 2.0
       #     ControlSpec.pressure.value(127)                               # => 1.0
-      class ControlSpec < Data.define(:type, :number, :name, :range, :default, :description, :center, :curve)
-        CURVES = [:linear, :exponential, :switch].freeze
+      #
+      # Every ControlSpec carries the MB::Sound::Param it was built from
+      # (#param: the mapped value's name, default, range, curve, and
+      # description, checked as every declaration is); .from_param builds
+      # one from a declaration (a knob's, a script's).  Curves use Param's
+      # names: canonical :linear, :exp, :switch, with :exponential (and
+      # :log, :db) accepted as aliases of :exp.
+      class ControlSpec < Data.define(:type, :number, :name, :range, :default, :description, :center, :curve, :param)
+        # Canonical curve names (see MB::Sound::Param::CURVES for aliases).
+        CURVES = [:linear, :exp, :switch].freeze
 
         # Controller types, with their raw value ranges, default names, and
         # MIDI status bytes (on channel 1).
@@ -39,6 +47,43 @@ module MB
           poly_pressure: { raw: 0..127, status: 0xa0, name: 'Poly Aftertouch', default: 0 },
           bend: { raw: 0..16383, status: 0xe0, name: 'Pitch Bend', default: 8192 },
         }.freeze
+
+        # A ControlSpec on controller +number+ (+type+ :cc unless given)
+        # for +param+ (an MB::Sound::Param): its range in the base unit
+        # (+range+ overrides it, e.g. a knob's default 0..1), curve, name,
+        # and description, with the raw default at +default_value+'s
+        # position (the param's default unless given).
+        def self.from_param(param, number: param.cc, type: :cc, range: nil, default_value: nil, name: nil, description: nil, center: nil)
+          r = range || param.magnitude_range || (0.0..1.0)
+          v = default_value || (param.default.nil? ? r.begin : MB::Sound::Param.magnitude(param.default))
+          info = TYPES.fetch(type)
+          top = info[:raw].end
+          lo = r.begin.to_f
+          hi = r.end.to_f
+          pos = param.curve == :exp ? Math.log(v.to_f / lo) / Math.log(hi / lo) : (v.to_f - lo) / (hi - lo)
+          raw = (pos * top).round.clamp(0, top)
+          new(
+            type: type, number: type == :cc ? number : nil, name: name || param.name.to_s, range: r, default: raw,
+            description: description || param.description, center: center, curve: param.curve, param: param
+          )
+        end
+
+        # The mapped value for +raw+ (see #value) of a spec with these
+        # fields.
+        def self.map(raw, lo, hi, top, center, curve)
+          mid = (top + 1) / 2
+          return raw >= mid ? hi : lo if curve == :switch
+
+          if center
+            c = raw < mid ? (raw - mid) / mid.to_f : (raw - mid) / (top - mid).to_f
+            far = c < 0 ? lo : hi
+            c = c.abs
+            curve == :exp ? center * (far / center) ** c : center + (far - center) * c
+          else
+            f = raw / top.to_f
+            curve == :exp ? lo * (hi / lo) ** f : lo + (hi - lo) * f
+          end
+        end
 
         # A pitch bend spec: -1..1 by default (MIDI::Event#value), centered
         # at raw 8192.  Pass +range+ in semitones (e.g. -2.0..2.0) for a
@@ -60,7 +105,7 @@ module MB
           new(type: :poly_pressure, range: range, name: name, description: description, **options)
         end
 
-        def initialize(type: :cc, number: nil, name: nil, range: 0.0..1.0, default: nil, description: nil, center: nil, curve: :linear)
+        def initialize(type: :cc, number: nil, name: nil, range: 0.0..1.0, default: nil, description: nil, center: nil, curve: :linear, param: nil)
           info = TYPES[type]
           raise ArgumentError, "Unknown controller type #{type.inspect} (#{TYPES.keys.join(', ')})" unless info
 
@@ -73,17 +118,30 @@ module MB
           default = info[:default] || 0 if default.nil?
           raw = info[:raw]
           raise ArgumentError, "Default must be a raw value #{raw} (got #{default.inspect})" unless default.is_a?(Integer) && raw.cover?(default)
-          raise ArgumentError, "Unknown curve #{curve.inspect} (#{CURVES.join(', ')})" unless CURVES.include?(curve)
+          c = MB::Sound::Param::CURVES[curve]
+          raise ArgumentError, "Unknown curve #{curve.inspect} (#{MB::Sound::Param::CURVES.keys.join(', ')})" unless c
           raise ArgumentError, "Range must be a Range of numbers (got #{range.inspect})" unless range.is_a?(Range) && range.begin.is_a?(Numeric) && range.end.is_a?(Numeric)
 
           range = range.begin.to_f..range.end.to_f
-          if curve == :exponential && (range.begin * range.end <= 0 || (center && center * range.begin <= 0))
+          if c == :exp && (range.begin * range.end <= 0 || (center && center * range.begin <= 0))
             raise ArgumentError, "An exponential range can't include or cross 0 (got #{range})"
           end
 
+          name = (name || info[:name] || "CC #{number}").freeze
+          center = center&.to_f
+          # The declaration of the mapped value (the same record knobs and
+          # script options use), at the default raw value's value
+          value = ControlSpec.map(default, range.begin, range.end, raw.end, center, c)
+          # (an inverted controller's range runs down; the Param's goes up)
+          span = range.begin <= range.end ? range : (range.end..range.begin)
+          param ||= MB::Sound::Param.new(
+            name: name.downcase.gsub(/[^a-z0-9]+/, '_').delete_suffix('_').to_sym, default: value.to_f.clamp(span.begin, span.end),
+            range: span, curve: c == :exp || c == :switch ? c : nil, description: description, cc: type == :cc ? number : nil
+          )
+
           super(
-            type: type, number: number, name: (name || info[:name] || "CC #{number}").freeze, range: range.freeze,
-            default: default, description: description&.freeze, center: center&.to_f, curve: curve
+            type: type, number: number, name: name, range: range.freeze,
+            default: default, description: description&.freeze, center: center, curve: c, param: param
           )
         end
 
@@ -113,21 +171,7 @@ module MB
         # Returns the value for a raw controller value (0 to #raw_max; see
         # the class description).
         def value(raw)
-          lo = range.begin
-          hi = range.end
-          top = raw_max
-          mid = (top + 1) / 2
-          return raw >= mid ? hi : lo if curve == :switch
-
-          if center
-            c = raw < mid ? (raw - mid) / mid.to_f : (raw - mid) / (top - mid).to_f
-            far = c < 0 ? lo : hi
-            c = c.abs
-            curve == :exponential ? center * (far / center) ** c : center + (far - center) * c
-          else
-            f = raw / top.to_f
-            curve == :exponential ? lo * (hi / lo) ** f : lo + (hi - lo) * f
-          end
+          ControlSpec.map(raw, range.begin, range.end, raw_max, center, curve)
         end
 
         # The value at the default raw value.

@@ -97,7 +97,7 @@ RSpec.describe(MB::Sound::Param) do
     it 'checks range ends, curves, units, and choices' do
       expect { P.declare(:x, 1.0, range: 2.0..1.0) }.to raise_error(P::Error, /must go up/)
       expect { P.declare(:x, 1.0, range: 0.1..10.0, curve: :exponentail) }.to raise_error(P::Error) { |e| expect(e.suggestions).to eq([':exponential']) }
-      expect { P.declare(:x, 0.5, range: 0.0..1.0, curve: :exp) }.to raise_error(P::Error, /can't touch or cross 0/)
+      expect { P.declare(:x, 0.5, range: 0.0..1.0, curve: :exp) }.to raise_error(P::Error, /can't include or cross 0/)
       expect { P.declare(:x, 2.hz, unit: 'Hz') }.to raise_error(P::Error, /carries its own unit/)
       expect { P.declare(:mode, :tap, range: %i[tape bbd]) }.to raise_error(P::Error) { |e| expect(e.suggestions).to eq([':tape']) }
       expect { P.declare(:x, 1, type: :frequncy) }.to raise_error(P::Error) { |e| expect(e.suggestions).to include(':frequency') }

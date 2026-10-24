@@ -203,7 +203,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
     end
 
     it 'checks knob lines' do
-      expect { io.load("knob :cut, 800, range: 0..4000, curve: :exp\n1.constant") }.to raise_error(io::LoadError, /range can't include 0/)
+      expect { io.load("knob :cut, 800, range: 0..4000, curve: :exp\n1.constant") }.to raise_error(io::LoadError, /range can't include or cross 0/)
       expect { io.load("knob :cut, 800, colour: 1\n1.constant") }.to raise_error(io::LoadError, /unknown knob option colour/)
       expect { io.load("param :cut, 1\nknob :cut, 800\n1.constant") }.to raise_error(io::LoadError, /declared twice/)
     end

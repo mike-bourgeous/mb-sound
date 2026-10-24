@@ -21,14 +21,29 @@ RSpec.describe('knob ranges', :aggregate_failures) do
     end
   end
 
-  it 'warns once per knob when a turn is limited to its range' do
+  it 'raises for a turn past the range outside live mode (Param checks), and live warns once per knob' do
     MB::Sound::Session.with_context(session: session) do
       MB::Sound.knob(:spec_gain, 0.5)
       MB::Sound.knob(:spec_cut, 800, range: 100..8000, curve: :exp)
+      expect { MB::Sound.turn(:spec_gain, 100) }.to raise_error(MB::Sound::Param::Error, /turn :spec_gain, 100: limited to 1 \(knob :spec_gain goes 0\.\.1; knob :spec_gain, 0\.5, range: 0\.\.100 widens it\)/)
+      live = MB::Sound.live?
+      MB::Sound.live = true
       expect { MB::Sound.turn(:spec_gain, 100) }.to output(/turn :spec_gain, 100: limited to 1 \(knob :spec_gain goes 0\.\.1; knob :spec_gain, 0\.5, range: 0\.\.100 widens it\)/).to_stderr
       expect { MB::Sound.turn(:spec_gain, 50) }.not_to output.to_stderr
       expect { MB::Sound.turn(:spec_cut, 12000) }.to output(/range: 100\.\.20000 widens it/).to_stderr
       expect { MB::Sound.turn(:spec_cut, 4000) }.not_to output.to_stderr
+    ensure
+      MB::Sound.live = live
+    end
+  end
+
+  it 'turns typed knobs with typed values' do
+    MB::Sound::Session.with_context(session: session) do
+      k = MB::Sound.knob(:spec_tone, 2400.hz, range: 150.hz..8000.hz)
+      MB::Sound.turn(:spec_tone, 3000.hz, smooth: 0)
+      session.process_buffer
+      expect(k.value).to eq(3000.0)
+      expect { MB::Sound.turn(:spec_tone, 9000.hz) }.to raise_error(MB::Sound::Param::Error, /limited to 8000/)
     end
   end
 end
