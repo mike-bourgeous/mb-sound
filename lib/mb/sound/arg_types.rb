@@ -123,22 +123,11 @@ module MB
         end
       end
 
-      # A typed parameter: +name+ (also its keyword unless +keyword+ says
-      # otherwise), +types+ ({ type => meaning in words }), its +default+
-      # (canonical forms leave defaults out), and whether it is the
-      # method's +primary+ argument (printed positionally).
-      Param = Data.define(:name, :types, :keyword, :default, :primary) do
-        def initialize(name:, types:, keyword: name, default: nil, primary: false)
-          bad = types.keys - ArgTypes.type_names
-          raise ArgumentError, "Unknown types #{bad.inspect} for #{name}" unless bad.empty?
-          super(name: name, types: types.freeze, keyword: keyword, default: default, primary: primary)
-        end
-
-        # True if this parameter takes values of +type+.
-        def takes?(type)
-          types.key?(type)
-        end
-      end
+      # A typed parameter is an MB::Sound::Param (lib/mb/sound/param.rb,
+      # which sets ArgTypes::Param): +name+ (also its keyword unless
+      # +keyword+ says otherwise), +types+ ({ type => meaning in words }),
+      # its +default+ (canonical forms leave defaults out), and whether it
+      # is the method's +primary+ argument (printed positionally).
 
       # The declared typed parameters of one method (see ArgTypes).
       class Signature
