@@ -144,7 +144,7 @@ module MB
           # The same definition again (how printed racks repeat a knob
           # used twice) reads the same knob
           same = begin
-            GraphNode::Knob::Spec.new(name: existing.name, default: default, **spec) == existing.spec &&
+            GraphNode::Knob::Spec.new(name: existing.name, default: default, description: description, **spec) == existing.spec &&
               existing.rack_knob.share == share && existing.rack_knob.follow == follow
           rescue ArgumentError
             false
@@ -163,7 +163,7 @@ module MB
         full = share ? name : (rack.name ? :"#{rack.name}/#{name}" : name)
         info = Rack::KnobInfo.new(rack: rack, knob: name, application: app, share: share, follow: follow, description: description)
         start = share || follow ? nil : app.start[name] # (a saved instance's value; see Rack#using)
-        k = GraphNode::Knob.new(full, default, rack_knob: info, initial: start, **spec)
+        k = GraphNode::Knob.new(full, default, rack_knob: info, initial: start, description: description, **spec)
         app.knobs[name] = k
       end
 

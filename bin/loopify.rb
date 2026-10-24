@@ -59,8 +59,8 @@ MB::Sound.script(
     lead_out = c[end_samples...lead_out_end]
     lead_out = fade(lead_out, false)
 
-    middle[0...lead_out.length].inplace + lead_out
-    middle[-lead_in.length...].inplace + lead_in
+    middle[0...lead_out.length] += lead_out
+    middle[-lead_in.length...] += lead_in
 
     # XXX for testing - lead_in.concatenate(middle).concatenate(lead_out)
     middle

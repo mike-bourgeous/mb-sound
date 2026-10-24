@@ -36,6 +36,26 @@ module MB
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
 
+        # The MB::Sound::Param of a `param` line named +name+ with +value+
+        # and header keywords +spec+ (range:, description:, cc:, curve:,
+        # unit:).  A range written high to low (an inverted controller's,
+        # saved by older scripts) declares the span low to high; documents
+        # keep it as written.
+        def self.declaration(name, value, spec)
+          opts = spec.slice(*PARAM_KEYS)
+          r = opts[:range]
+          if r.is_a?(Range) && r.begin.is_a?(Numeric) && r.end.is_a?(Numeric) && r.begin > r.end
+            opts[:range] = r.end..r.begin
+          end
+          MB::Sound::Param.declare(name, value, **opts)
+        end
+
+        # The declared params: { name => MB::Sound::Param } (param and knob
+        # lines alike).
+        def declarations
+          @params.to_h { |k, spec| [k, spec[:param] || Document.declaration(k, spec[:value], spec)] }
+        end
+
         # Clocks the graph's clips play on (`clock :tide, 31.1.seconds`,
         # time-automation): { name => { base:, speed: } }, defined in the
         # Session that plays the graph (Session::Clocks#adopt_clocks).
@@ -338,9 +358,11 @@ module MB
           GraphIO.graph_line(parts)
         end
 
+        # The `param` line: the MB::Sound::Param of +spec+ (a loaded line's,
+        # else declared here, which checks it) written at the current value.
         def param_line(writer, name, spec)
-          extras = spec.slice(*Document::PARAM_KEYS).compact.map { |k, v| "#{k}: #{writer.literal(v)}" }
-          ["param #{name.to_sym.inspect}, #{writer.literal(spec[:value])}", *extras].join(', ')
+          decl = spec[:param] || Document.declaration(name.to_sym, nil, spec)
+          decl.document_line(spec[:value], writer: writer)
         end
       end
     end

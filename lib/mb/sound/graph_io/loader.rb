@@ -374,6 +374,7 @@ module MB
           tree = parse
           @document = Document.new(path: @path)
           @document.read_comments(@comments)
+          fresh_limits! # (header values may call value methods: (0.0..1.0).at(0.5))
           read_header(tree.statements.body)
           @document
         end
@@ -528,25 +529,27 @@ module MB
             when :param
               name, value = args
               raise error(node, 'param needs a name and a value (param :drive, 1.0)') unless name.is_a?(Symbol) && args.length == 2
+              value, kwargs = unpack_ranged(node, name, value, kwargs)
               raise error(node, "param #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
               unknown = kwargs.keys - Document::PARAM_KEYS
               raise error(node, "unknown param option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{Document::PARAM_KEYS.join(', ')})") unless unknown.empty?
               raise error(node, "#{name} is declared twice") if @document.params.key?(name)
-              @document.params[name] = kwargs.merge(value: value)
+              @document.params[name] = kwargs.merge(value: value, param: declaration(node, name, value, kwargs))
             when :knob
               name, value = args
               raise error(node, 'knob needs a name and a value (knob :cut, 800, range: 100..8000, curve: :exp)') unless name.is_a?(Symbol) && args.length == 2
+              value, kwargs = unpack_ranged(node, name, value, kwargs)
               raise error(node, "knob #{name} needs a number (got #{value.inspect})") unless value.is_a?(Numeric) && value.real?
               keys = Document::KNOB_KEYS + (@document.rack? ? Document::RACK_KNOB_KEYS : [])
               unknown = kwargs.keys - keys
               raise error(node, "unknown knob option#{'s' if unknown.length > 1} #{unknown.join(', ')} (#{keys.join(', ')}#{'; share: and follow: are for rack documents\' knobs' if (unknown & Document::RACK_KNOB_KEYS).any?})") unless unknown.empty?
               raise error(node, "#{name} is declared twice") if @document.params.key?(name)
-              begin
-                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(:description, *Document::RACK_KNOB_KEYS))
+              spec = begin
+                GraphNode::Knob::Spec.new(name: name, default: value, **kwargs.except(*Document::RACK_KNOB_KEYS))
               rescue ArgumentError => e
                 raise error(node, "knob #{name}: #{e.message}")
               end
-              @document.params[name] = kwargs.merge(value: value, knob: true)
+              @document.params[name] = kwargs.merge(value: value, knob: true, param: spec.param)
             when :clock
               name, base = args
               raise error(node, 'clock needs a name and a tempo, ratio, or period (clock :tide, 31.1.seconds)') unless name.is_a?(Symbol) && args.length == 2
@@ -660,18 +663,41 @@ module MB
               next
             end
             raise LoadError.new("#{@label}: param #{name} needs a number, a graph node, or a knob name (got #{value.inspect})", path: @path) unless value.is_a?(Numeric) && value.real?
-            if (r = spec[:range]) && r.is_a?(Range) && @overrides.key?(name) && !range_cover?(r, value)
-              warn "#{@label}: param #{name} = #{value} is outside its range #{r}"
+            if @overrides.key?(name) && (decl = spec[:param])
+              # (a Param check: raises in scripts and specs; live, warns
+              # and limits the value to the range)
+              value = decl.check(value, what: "#{@label}: param #{name}")
             end
             spec[:value] = value
             @knobs[name] = value
             if spec[:knob]
               # One GraphNode::Knob per knob line, read by every use (each
               # consumer gets its own Knob::Reader)
-              opts = spec.slice(*Document::KNOB_KEYS).except(:description)
+              opts = spec.slice(*Document::KNOB_KEYS)
               @knob_nodes[name] = [set? ? session_knob(name, value, opts) : GraphNode::Knob.new(name, value, **opts)]
             end
           end
+        end
+
+        # A header line's value and keywords with a ranged default
+        # (`param :drive, (0.0..24.0).at(11.0)`, the canonical spelling,
+        # which documents accept but don't write yet) unpacked into
+        # value and range:.
+        def unpack_ranged(node, name, value, kwargs)
+          return [value, kwargs] unless value.is_a?(MB::Sound::Param::Ranged)
+          raise error(node, "#{name}: give the range once, in (lo..hi).at(value) or in range:") if kwargs.key?(:range)
+          [value.default, kwargs.merge(range: value.range)]
+        end
+
+        # The MB::Sound::Param of a `param` line (a LoadError at the line
+        # for a mistake: a value outside its range, mixed range ends, an
+        # unknown curve).  A range written high to low (an inverted
+        # controller's, saved by older scripts) declares the span low to
+        # high; the line keeps it as written.
+        def declaration(node, name, value, kwargs)
+          Document.declaration(name, value, kwargs)
+        rescue ArgumentError => e
+          raise error(node, "param #{name}: #{e.message.delete_prefix("#{name}: ")}")
         end
 
         # The node param +name+ is bound to when the caller's +value+ (never
@@ -925,11 +951,6 @@ module MB
           c
         end
 
-        def range_cover?(r, v)
-          lo, hi = [r.begin, r.end].minmax
-          v >= lo && v <= hi
-        end
-
         ### Evaluation
 
         def eval_node(node, scope)
@@ -1044,7 +1065,7 @@ module MB
             end
           else
             receiver = eval_node(node.receiver, scope)
-            if @header && !receiver.is_a?(Numeric)
+            if @header && !receiver.is_a?(Numeric) && !(receiver.is_a?(Range) && name == :at)
               raise error(node, "the header holds values only (#{name} isn't one)")
             end
             unless Registry.allowed?(receiver, name)

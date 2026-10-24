@@ -75,7 +75,9 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect(d.name).to eq('fuzz')
       expect(d.kind).to eq(:effect)
       expect(d.inputs).to eq([:input])
-      expect(d.params).to eq(drive: { value: 2.0, range: 1.0..10.0, description: 'Gain into the clipper', cc: 7 })
+      expect(d.params.transform_values { |sp| sp.except(:param) }).to eq(drive: { value: 2.0, range: 1.0..10.0, description: 'Gain into the clipper', cc: 7 })
+      expect(d.declarations[:drive]).to eq(MB::Sound::Param.declare(:drive, (1.0..10.0).at(2.0), description: 'Gain into the clipper', cc: 7))
+      expect(d.declarations[:drive].document_line).to eq('param :drive, 2.0, range: 1.0..10.0, description: "Gain into the clipper", cc: 7')
 
       g = io.load(doc, inputs: { input: 0.25.constant }, params: { drive: 3 })
       expect(g.sample(64).to_a).to eq((0.25.constant * 3.constant).softclip.sample(64).to_a)
@@ -260,11 +262,20 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       expect(io.parse(doc).description).to be_nil
     end
 
+    it 'reads the canonical ranged spelling in param and knob lines' do
+      d = io.parse("graph 4\nparam :depth, (0.0..1.0).at(0.5)\nknob :cut, 800.0.in(100.0..8000.0), curve: :exp\n1.constant")
+      expect(d.params[:depth][:range]).to eq(0.0..1.0)
+      expect(d.params[:cut][:range]).to eq(100.0..8000.0)
+      expect(d.declarations[:cut].curve).to eq(:exp)
+      expect_load_error("param :x, (0.0..1.0).at(0.5), range: 0.0..2.0\nx", 1, /give the range once/)
+      expect_load_error("param :x, 5.0, range: 0.0..1.0\nx", 1, /param x: the default 5.0 is outside 0.0..1.0/)
+    end
+
     it 'raises for unknown params, baked options, and non-numbers' do
       expect { io.load(doc, inputs: { input: 1.constant }, params: { dpeth: 1 }) }.to raise_error(io::LoadError, /no param dpeth \(did you mean depth/)
       expect { io.load(doc, inputs: { input: 1.constant }, params: { voices: 2 }) }.to raise_error(io::LoadError, /voices was baked into this patch/)
       expect { io.load(doc, inputs: { input: 1.constant }, params: { depth: 'x' }) }.to raise_error(io::LoadError, /needs a number/)
-      expect { io.load(doc, inputs: { input: 1.constant }, params: { depth: 2 }) }.to output(/outside its range/).to_stderr
+      expect { io.load(doc, inputs: { input: 1.constant }, params: { depth: 2 }) }.to raise_error(MB::Sound::Param::Error, /param depth: 2 is outside/)
       expect_load_error("param :x, 1\nx = 3.constant\nx", 2, /x is an input or param and can't be assigned/)
       expect_load_error("param :x, :y\nx", 1, /needs a number/)
       expect_load_error("param :x, 1, rnage: 1..2\nx", 1, /unknown param option rnage/)

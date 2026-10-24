@@ -73,6 +73,12 @@ module MB
       # Types whose default curve is :exp (frequencies and times).
       EXP_TYPES = %i[frequency seconds samples duration tempo decibels].freeze
 
+      # The names in the names table (Param.names), aliases included.
+      NAME_KEYS = %i[
+        cutoff frequency freq resonance reso quality q drive mix detune voices attack decay sustain release
+        gain threshold pan width rate depth feedback
+      ].freeze
+
       # Types a plain number can count in (`type: :frequency` with 2400.0).
       UNIT_TYPES = %i[frequency seconds samples duration decibels interval phase tempo ratio].freeze
 
@@ -148,8 +154,11 @@ module MB
         # :"dub/space" looks up :space), or nil.
         def name_entry(name)
           return nil unless name.is_a?(Symbol) || name.is_a?(String)
-          t = names
-          t[name.to_sym] || t[name.to_s.split('/').last.to_sym]
+          key = NAME_KEYS.include?(name.to_sym) ? name.to_sym : name.to_s.split('/').last.to_sym
+          # (checked first, so declarations made while mb-sound loads
+          # don't build the table before its unit classes exist)
+          return nil unless NAME_KEYS.include?(key)
+          names[key]
         end
 
         # The type of value +v+: an ArgTypes type, :boolean, :string, or
@@ -302,6 +311,7 @@ module MB
           }
           table = rows.to_h { |n, (range, desc, curve)| [n, { range: range, curve: curve, description: desc }.compact.freeze] }
           { reso: :resonance, freq: :frequency, q: :quality }.each { |a, n| table[a] = table[n] }
+          raise 'Param::NAME_KEYS is out of date' unless table.keys.sort == NAME_KEYS.sort
           table.freeze
         end
       end
@@ -326,6 +336,7 @@ module MB
         end
         vtype = Param.type_of(default) || (range.is_a?(Range) && Param.type_of(range.begin || range.end)) || (range.is_a?(Array) && Param.type_of(range.first)) || nil
         vtype = :number if vtype.nil? && type.nil? && range.is_a?(Range)
+        vtype ||= type if default.nil? && type && !UNIT_TYPES.include?(type) # (a nil default of a declared type)
         if type && vtype && vtype != type && !(vtype == :number && UNIT_TYPES.include?(type))
           raise Error.new("#{name}: type: #{type.inspect} doesn't match the default #{ArgTypes.describe_value(default)}")
         end
@@ -389,8 +400,8 @@ module MB
 
         super(
           name: name, default: default, range: range.frozen? ? range : range.dup.freeze, type: unit_type || :any, curve: c,
-          unit: unit&.dup&.freeze, description: description&.dup&.freeze, cc: cc, implied: implied,
-          types: Ractor.make_shareable(types.transform_values { |m| m.is_a?(String) ? m.dup : m }), keyword: keyword || name, primary: primary
+          unit: unit && String.new(unit).freeze, description: description && String.new(description).freeze, cc: cc, implied: implied,
+          types: Ractor.make_shareable(types.transform_values { |m| m.is_a?(String) ? String.new(m) : m }), keyword: keyword || name, primary: primary
         )
       end
 
@@ -486,8 +497,7 @@ module MB
 
         limited = v.clamp(lo || -Float::INFINITY, hi || Float::INFINITY)
         MB::Sound.live_error(Error.new(
-          "#{what || name}: #{Param.literal(value)} is outside #{Param.literal(range)}#{" (#{description})" if description}; limited to #{Param.literal(value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? limited : typed(limited))}",
-          [widen_hint(v)].compact
+          "#{what || name}: #{Param.literal(value)} is outside #{Param.literal(range)}#{" (#{description})" if description}; limited to #{Param.literal(value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? limited : typed(limited))}"
         ))
         value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? limited : typed(limited)
       end
@@ -593,16 +603,6 @@ module MB
         a * b > 0
       rescue Error
         false
-      end
-
-      # A wider range holding plain number +v+, for an out-of-range hint.
-      def widen_hint(v)
-        return nil unless range.is_a?(Range) && range.begin && range.end && type == :number
-        round = ->(x) { m = 10**Math.log10([x.abs, 1e-9].max).floor; (x.to_f / m).ceil * m }
-        lo = Param.magnitude(range.begin)
-        hi = Param.magnitude(range.end)
-        wider = v > hi ? "#{Param.literal(range.begin)}..#{Param.literal(round.(v))}" : "#{Param.literal(-round.(-v))}..#{Param.literal(range.end)}"
-        "range: #{wider}" if lo && hi
       end
     end
 

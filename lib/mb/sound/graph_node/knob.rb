@@ -58,16 +58,18 @@ module MB
         # or nil), +cc+ (a MIDI controller number, or nil), +takeover+
         # (:pickup or :jump), and +smooth+ (seconds over which a turn
         # without +over:+ glides, a declick; 0 for exact jumps).
+        # +description:+ goes into the Param (rack knobs and document knob
+        # lines have one).
         #
         # The default may be a typed value or a ranged default:
         # `Spec.new(name: :cut, default: (150.hz..8000.hz).at(2400.hz))`.
         class Spec < Data.define(:name, :default, :range, :curve, :unit, :cc, :takeover, :smooth, :param)
-          def initialize(name:, default: nil, range: nil, curve: nil, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS, param: nil)
+          def initialize(name:, default: nil, range: nil, curve: nil, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS, description: nil, param: nil)
             raise ArgumentError, "Knob names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
             if curve && !CURVES.key?(curve)
               raise ArgumentError, "Unknown knob curve #{curve.inspect} (#{CURVES.keys.map(&:inspect).join(', ')})"
             end
-            param ||= MB::Sound::Param.new(name: name, default: default, range: range, curve: curve, unit: unit, cc: cc)
+            param ||= MB::Sound::Param.new(name: name, default: default, range: range, curve: curve, unit: unit, cc: cc, description: description)
             raise ArgumentError, "Knob #{name.inspect} holds numbers, not #{MB::Sound::Param.describe_type(param.type)}" unless param.numeric? || (param.default.nil? && param.range.nil?)
             raise ArgumentError, "Knob #{name.inspect} needs a range with two ends (got #{param.range.inspect})" if param.range && !param.bounded?
             raise ArgumentError, "Takeover must be #{TAKEOVERS.map(&:inspect).join(' or ')} (got #{takeover.inspect})" unless TAKEOVERS.include?(takeover)
@@ -77,7 +79,7 @@ module MB
             hi = r.end
             raise ArgumentError, "Range must go up (got #{param.range.inspect})" unless hi > lo
             c = param.curve
-            raise ArgumentError, "Knob #{name.inspect} moves continuously; a :switch is a MIDI controller curve" if c == :switch
+            c = :linear if c == :switch # (a pedal's declaration as a knob: turned through its range)
 
             default = param.default.nil? ? lo : MB::Sound::Param.magnitude(param.default)
             raise ArgumentError, "Default must be a number (got #{default.inspect})" unless default.is_a?(Numeric) && default.real?
@@ -110,7 +112,7 @@ module MB
             keep = changes.slice(:takeover, :smooth)
             decl = changes.except(:takeover, :smooth)
             return Spec.new(**to_h.merge(keep)) if decl.empty?
-            fields = { default: default, range: range, curve: curve, unit: unit, cc: cc }
+            fields = { default: default, range: range, curve: curve, unit: unit, cc: cc, description: param.description }
             fields[:unit] = nil if typed? && !decl.key?(:unit)
             fields[:range] = nil if !decl.key?(:range) && param.range.nil?
             Spec.new(name: name, takeover: takeover, smooth: smooth, **fields.merge(decl))

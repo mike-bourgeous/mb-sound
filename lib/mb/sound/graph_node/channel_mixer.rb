@@ -14,7 +14,7 @@ module MB
       #
       #     class Pan < ChannelMixer
       #       channels 1 => 2
-      #       param :position, default: 0, range: -1..1
+      #       param :position, default: 0, range: -1.0..1.0
       #       option :law, default: :equal_power, values: PanLaws::LAWS
       #
       #       def gains_for(position:)
@@ -142,9 +142,10 @@ module MB
 
           # Declares a parameter: a number or graph node, given to #gains_for
           # by name.  +range+ documents (and checks, for numbers) the
-          # expected values.
+          # expected values.  Builds an MB::Sound::Param (the record every
+          # declaration form builds; checked where declared).
           def param(name, default:, range: nil)
-            own_params[name] = { default: default, range: range }.freeze
+            own_params[name] = MB::Sound::Param.declare(name, default, range: range)
           end
 
           # Declares an option: a fixed setting chosen when the mixer is
@@ -225,7 +226,7 @@ module MB
           setup(inputs, settings)
 
           self.class.params.each do |name, spec|
-            set_param(name, settings.key?(name) ? settings.delete(name) : spec[:default], spec[:range])
+            set_param(name, settings.key?(name) ? settings.delete(name) : spec.default, spec)
           end
           self.class.options.each do |name, spec|
             value = settings.key?(name) ? settings.delete(name) : spec[:default]
@@ -271,7 +272,7 @@ module MB
 
         # #params with the declared ranges (see Traversable#param_info).
         def param_info
-          params.to_h { |name, v| [name, Traversable.describe_param(v, self.class.params.dig(name, :range))] }.freeze
+          params.to_h { |name, v| [name, Traversable.describe_param(v, self.class.params[name]&.range)] }.freeze
         end
 
         # The current gain matrix (Arrays of rows; per-sample NArrays for
@@ -477,15 +478,14 @@ module MB
           set_param(name, value, nil)
         end
 
-        def set_param(name, value, range)
+        def set_param(name, value, decl)
           if value.respond_to?(:sample)
             node = value.get_sampler
             node.sample_rate = @sample_rate if node.respond_to?(:sample_rate=) && node.sample_rate != @sample_rate
             @param_values[name] = node
           elsif value.is_a?(Numeric)
-            if range && value.real? && !range.cover?(value)
-              raise ArgumentError, "#{name} must be in #{range} (got #{value})"
-            end
+            # (Param checks: raise in scripts and specs, live limit and warn)
+            value = decl.check(value) if decl && value.real?
             @param_values[name] = value
           else
             raise ArgumentError, "#{name} must be a number or a graph node (got #{value.inspect})"

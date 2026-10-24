@@ -717,6 +717,13 @@ module MB
         starts at 0.5 of 0..1 (with a note); `knob :cut, 800, range:
         100..8000` later sets it up, and whatever reads it keeps reading.
 
+        Values bring their units: `knob :cut, (150.hz..8000.hz).at(2400.hz)`
+        (or `2400.hz.in(150.hz..8000.hz)`) is in Hz and turns in octaves,
+        and `turn :cut, 3000.hz` works; -12.db knobs turn in dB.  Common
+        names bring a range: `knob :pan, 0` is -1..1, `knob :mix, 0.3`
+        0..1, `knob :cutoff, 800.hz` 20 Hz..20 kHz.  A turn past the
+        range is limited to it, with a warning.
+
         Keyframes move a knob through values over time: `turn :space, 0 =>
         0.3, 1.n8 => 0.5, 1.n4 => 0.62` (a monotone cubic through them in
         the knob's scale; `curve: :linear`, `:step`, or a Curve name).  A

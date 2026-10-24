@@ -9,7 +9,7 @@ module MB
         # Created with GraphNode#pan on a single-channel node.
         class Pan < ChannelMixer
           channels 1 => 2
-          param :position, default: 0, range: -1..1
+          param :position, default: 0, range: -1.0..1.0
           option :law, default: :equal_power, values: PanLaws::LAWS
 
           def gains_for(position:)
@@ -64,7 +64,7 @@ module MB
         # Created with Channels#balance (and Channels#pan on stereo bundles).
         class Balance < ChannelMixer
           channels 2 => 2
-          param :position, default: 0, range: -1..1
+          param :position, default: 0, range: -1.0..1.0
 
           def gains_for(position:)
             left, right = PanLaws.balance(position)
