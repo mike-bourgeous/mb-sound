@@ -169,6 +169,7 @@ module SceneProfile
       @scene_players = {}
       SceneProfile.landed = 0
       gc0 = GC.stat(:time)
+      majors = GC.stat(:major_gc_count)
       y0 = SceneProfile.yjit
       w0 = SceneProfile.wall
       t0 = SceneProfile.clock
@@ -187,6 +188,7 @@ module SceneProfile
       SceneProfile.buffers << {
         secs: secs, cpu: cpu, other: secs - @scene_players.sum { |_, v| v },
         gc: GC.stat(:time) - gc0, yjit: yd, landed: SceneProfile.landed,
+        major: (GC.latest_gc_info(:major_by) if GC.stat(:major_gc_count) != majors),
         players: @scene_players, bar: transport.bar_at(transport.position).to_f,
         jit: (SceneProfile.jit_log_since(w0) if yd[:compile_time_ns].to_i > 1_000_000),
       }
@@ -360,6 +362,8 @@ module SceneProfile
         gcb = @buffers.select { |b| b[:gc] > 10 }
         puts format('  GC from the song\'s start: %d minor, %d major, %d ms in all (warm-up included); buffers with over 10 ms of GC: %d%s',
           @gc[:minor_gc_count], @gc[:major_gc_count], @gc[:time], gcb.length, gcb.empty? ? '' : " (longest #{gcb.map { |b| b[:gc] }.max} ms)")
+        why = @buffers.filter_map { |b| b[:major] }.tally
+        puts "  major GCs started in buffers, by reason (GC.latest_gc_info :major_by): #{why.map { |k, v| "#{k} #{v}" }.join(', ')}" unless why.empty?
       end
       st = RubyVM::YJIT.runtime_stats
       kinds = st.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }
@@ -510,7 +514,9 @@ if MB::Sound.main_script?(__FILE__)
       gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time)
       begin
         $stdout = quiet
-        MB::Sound.render(out, bars: bars, buffer_size: p.buffer) {
+        # (loudness: false: one pass, as live; a mastered song's targeted
+        # render would play it twice, the first pass recording every buffer)
+        MB::Sound.render(out, bars: bars, buffer_size: p.buffer, loudness: false) {
           SceneProfile.recording(:setup) { runner.send(:arrange_song, &block) }
         }
       ensure
