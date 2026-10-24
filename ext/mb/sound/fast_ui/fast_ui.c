@@ -777,6 +777,42 @@ static VALUE grid_copy_from(VALUE self, VALUE other)
 	return self;
 }
 
+/*
+ * blit(other, x, y): copies every cell of +other+ (any size) into this grid
+ * with its top left corner at 0-based (+x+, +y+), clipped to this grid.
+ * Screens composite pane grids (Plot::Live) into their own this way, so
+ * what they draw afterwards (overlays) stays on top.
+ */
+static VALUE grid_blit(VALUE self, VALUE other, VALUE x_v, VALUE y_v)
+{
+	struct grid *g = get_grid(self);
+	struct grid *o = get_grid(other);
+	long x = NUM2LONG(x_v);
+	long y = NUM2LONG(y_v);
+	long sx = x < 0 ? -x : 0;
+	long sy = y < 0 ? -y : 0;
+	long w = o->width - sx;
+	long h = o->height - sy;
+	if (x + sx + w > g->width) {
+		w = g->width - (x + sx);
+	}
+	if (y + sy + h > g->height) {
+		h = g->height - (y + sy);
+	}
+	if (w <= 0 || h <= 0) {
+		return self;
+	}
+	for (long r = 0; r < h; r++) {
+		size_t si = (size_t)((sy + r) * o->width + sx);
+		size_t di = (size_t)((y + sy + r) * g->width + x + sx);
+		memmove(g->cp + di, o->cp + si, (size_t)w * sizeof(uint32_t));
+		memmove(g->fg + di, o->fg + si, (size_t)w * sizeof(int32_t));
+		memmove(g->bg + di, o->bg + si, (size_t)w * sizeof(int32_t));
+		memmove(g->attr + di, o->attr + si, (size_t)w);
+	}
+	return self;
+}
+
 static VALUE grid_clear(VALUE self)
 {
 	grid_clear_cells(get_grid(self));
@@ -1512,6 +1548,7 @@ void Init_fast_ui(void)
 	rb_define_method(cGrid, "put_run", grid_put_run, 6);
 	rb_define_method(cGrid, "char", grid_char, 2);
 	rb_define_method(cGrid, "copy_from", grid_copy_from, 1);
+	rb_define_method(cGrid, "blit", grid_blit, 3);
 	rb_define_method(cGrid, "clear", grid_clear, 0);
 	rb_define_method(cGrid, "compose", grid_compose, -1);
 	rb_define_method(cGrid, "lines", grid_lines, 1);

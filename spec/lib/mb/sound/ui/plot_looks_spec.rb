@@ -14,10 +14,13 @@ RSpec.describe('UI plot pane looks', :aggregate_failures) do
 
   it 'draws a short scope in Braille by default' do
     pane = ui::Panes::Scope.new
-    bytes = pane.frame_bytes(ui_fake_snapshot, {}, row: 1, col: 1, w: 40, h: 6, mode: :none, look: nil, full: true)
-    expect(bytes).to match(/[⠁-⣿]/)
-    quad = pane.frame_bytes(ui_fake_snapshot, {}, row: 1, col: 1, w: 40, h: 6, mode: :none, look: :quad, full: true)
-    expect(quad).not_to match(/[⠁-⣿]/)
+    text = ->(look) {
+      grid = MB::Sound::Plot::Text::NativeCells.new(40, 6)
+      pane.draw(ui::Canvas.new(grid, 0, 0, 40, 6), ui_fake_snapshot, {}, look: look)
+      grid.to_text(:none)
+    }
+    expect(text.(nil)).to match(/[⠁-⣿]/)
+    expect(text.(:quad)).not_to match(/[⠁-⣿]/)
   end
 
   it 'cycles the focused plot pane\'s look and keeps it in the layout' do

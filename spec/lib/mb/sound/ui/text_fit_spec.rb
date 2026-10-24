@@ -39,7 +39,7 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
   it 'ends every cut line of every text pane in an ellipsis' do
     snap = long_snapshot
     ui.panes.each_value do |pane|
-      next if pane.bytes? || %i[messages message keyboard page].include?(pane.name) # (page: its text is a help page, not snapshot names; density_spec)
+      next if pane.plot? || %i[messages message keyboard page].include?(pane.name) # (page: its text is a help page, not snapshot names; density_spec)
       rows = draw(pane, snap, 30, 6)
       cut = rows.select { |r| r.include?('LONGNAM') }
       expect(cut).not_to be_empty, "#{pane.name} shows no long name: #{rows.inspect}" unless %i[transport meters].include?(pane.name)

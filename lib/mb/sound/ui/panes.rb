@@ -396,8 +396,9 @@ module MB
         # A scope of the master mix through Plot::Live (look :auto by
         # default: Braille for short or wide panes, see .auto_look;
         # `ui look: :quad`, a layout's `pane :scope, look: :blocks`, or
-        # `ui.look` on the focused pane to change it).  Writes its own
-        # terminal bytes: only the cells that changed.
+        # `ui.look` on the focused pane to change it).  Draws its cells into
+        # the screen's grid like every pane (never its own terminal bytes,
+        # which would paint over overlays: ui-fix-3).
         class Scope < Pane
           # The looks `ui.look` cycles through, Braille first.
           LOOK_CYCLE = %i[scope quad blocks mosaic spark ascii].freeze
@@ -421,24 +422,29 @@ module MB
             @look = look
           end
 
-          def bytes?
+          def plot?
             true
           end
 
-          # Terminal bytes for the pane at screen (+row+, +col+), +w+ x +h+,
-          # in color +mode+ (nil if there is nothing to draw).
-          def frame_bytes(s, state, row:, col:, w:, h:, mode:, look:, full: false)
+          # Draws the plot into +c+'s rectangle of the screen grid, in the
+          # pane's own look, else +look+ (the layout's or the screen's; :auto
+          # by size).
+          def draw(c, s, state, look: nil)
+            w = c.w
+            h = c.h
+            return if w <= 0 || h <= 0
+            native = c.grid.is_a?(FastUI::Grid)
             live = state[:live]
             lk = @look || look || :auto
             lk = Scope.auto_look(w, h) if lk == :auto
-            if live.nil? || live.width != w || live.height != h || state[:mode] != mode || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, color: mode)
-              state[:mode] = mode
+            if live.nil? || live.width != w || live.height != h || state[:native] != native || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: w, height: h, look: lk, native: native)
+              state[:native] = native
               state[:look] = lk
             end
             data = s&.scope
             data = state[:silence] ||= [Numo::SFloat.zeros(256)] if data.nil? || data.empty?
-            live.frame(chart(data, s&.sample_rate || 48000), row: row, col: col, full: full, sync: false)
+            live.draw(chart(data, s&.sample_rate || 48000), c.grid, x: c.x, y: c.y)
           end
 
           private

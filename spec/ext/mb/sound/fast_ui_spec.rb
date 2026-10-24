@@ -244,6 +244,31 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       expect(g.lines(:ansi16).first).to start_with("\e[2;4;31;")
     end
 
+    it 'blits a smaller grid into a larger one at any offset, clipped, like Cells#blit (ui-fix-3)' do
+      rng = Random.new(31)
+      [[20, 7, 6, 3], [5, 2, 9, 4], [12, 6, 12, 6]].each do |w, h, sw, sh|
+        a = cells.new(w, h)
+        b = native.new(w, h)
+        edit_both(a, b, rng, w * h)
+        sa = cells.new(sw, sh)
+        sb = native.new(sw, sh)
+        [[0, 0], [w - 2, h - 1], [-3, -1], [-sw, 0], [w, 0], [2, 1], [rng.rand(-4..w), rng.rand(-2..h)]].each do |x, y|
+          edit_both(sa, sb, rng, sw * sh)
+          expect(a.blit(sa, x, y)).to equal(a)
+          expect(b.blit(sb, x, y)).to equal(b)
+          modes.each { |m| expect(b.lines(m)).to eq(a.lines(m)), "#{w}x#{h} <- #{sw}x#{sh} at #{x},#{y} #{m}" }
+        end
+      end
+      g = native.new(6, 2)
+      s = native.new(2, 1)
+      s.text(0, 0, 'ab')
+      g.blit(s, 5, 1)
+      g.blit(s, -1, 0)
+      expect(g.lines(:none)).to eq(['b     ', '     a'])
+      expect { cells.new(2, 2).blit(native.new(1, 1), 0, 0) }.to raise_error(ArgumentError)
+      expect { native.new(2, 2).blit(cells.new(1, 1), 0, 0) }.to raise_error(TypeError)
+    end
+
     it 'maps every color like Plot::Text::ANSI' do
       rng = Random.new(2)
       a = cells.new(64, 4)
