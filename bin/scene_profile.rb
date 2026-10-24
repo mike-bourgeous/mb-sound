@@ -32,6 +32,19 @@
 #
 # YJIT counters (compile time, invalidations) are shown with YJIT on (the
 # shebang turns it on; `ruby bin/scene_profile.rb` runs without it).
+# Every report has the buffers over 10/20/50/80 ms (an output queue
+# shorter than that runs dry there), YJIT compile per buffer and block
+# (new methods and basic blocks, invalidations, code GC), and GC counts
+# with the reasons for major GCs; with RUBYOPT=--yjit-log=quiet, the
+# slowest buffers also list what compiled in them ("blocks for new types
+# or shapes" are YJIT chain versions).  Offline renders play once with
+# loudness: false, as live (a mastered song's targeted render would play
+# it twice, recording every buffer).  -R --band also paints the terminal
+# UI's deck (to /dev/null) as a song's --ui does.  Container realtime
+# runs see outside stalls (on the Mac's Docker VM, ~0.3-0.8 s of 5-10x
+# slower CPU at the top of every wall-clock minute, scene-jit-1): check
+# underrun times against a probe process before blaming the code.
+#
 # Compare branches by running the same command in each worktree in
 # alternating order, while nothing else runs on the machine.
 #
@@ -42,6 +55,8 @@
 #     bin/scene_profile.rb -n 128 --bars 60 bin/songs/small_talk.rb -- --seed 2
 #     bin/scene_profile.rb -R -n 128 -l 20 --bars 60 bin/songs/night_bus_flow.rb
 #     bin/scene_profile.rb -w off bin/songs/night_bus_flow.rb   # without the form's warm-up
+#     bin/scene_profile.rb -R --band -n 512 -l 50 bin/songs/memory_card.rb -- --ui
+#     RUBYOPT=--yjit-log=quiet bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
 
 require 'bundler/setup'
 require 'mb-sound'
