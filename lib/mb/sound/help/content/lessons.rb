@@ -133,7 +133,7 @@ module MB
 
       step 'Make a knob' do
         say 'A knob is a named value with a range and a curve (:exp suits frequencies).'
-        type { knob :l_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz' }
+        type { knob :l_cut, (100.hz..8000.hz).at(400.hz) }
         check('a knob :l_cut') { knobs.key?(:l_cut) }
       end
 

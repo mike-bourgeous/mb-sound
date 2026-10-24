@@ -1,17 +1,17 @@
 # mb-sound set document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 4,
+graph 5,
   name: "tunnel_vision",
   kind: :set,
-  saved: "2026-10-18T19:27:42Z",
-  mb_sound: "0.12.0.usegit (77119678)",
+  saved: "2026-10-24T18:50:17Z",
+  mb_sound: "0.12.0.usegit (97de948a)",
   from: "bin/songs/tunnel_vision.rb",
   description: "Set :tunnel_vision from bin/songs/tunnel_vision.rb (\"Tunnel Vision\", Kez Volta's drum & bass at 174 BPM in F minor, the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, the basses ducked by the drums' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; its flow (play_form doc.form).  `demo :tunnel_vision` loads it."
-knob :cut, 2400.0, range: 150.0..8000.0, curve: :exp, unit: "Hz"
-knob :grit, 0.25
-knob :space, 0.4
-knob :air, 20.0, range: 20.0..400.0, curve: :exp, unit: "Hz"
-knob :lift, 1.0
+knob :cut, (150.hz..8000.hz).at(2400.hz)
+knob :grit, (0.0..1.0).at(0.25)
+knob :space, (0.0..1.0).at(0.4)
+knob :air, (20.hz..400.hz).at(20.hz)
+knob :lift, (0.0..1.0).at(1.0)
 
 bpm 174
 master_gain 1.0

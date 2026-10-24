@@ -6,7 +6,7 @@ module MB
     # extends itself with this module.
     #
     # Example (bin/sound.rb):
-    #     knob :cut, 800, range: 100..8000, curve: :exp, unit: 'Hz'
+    #     knob :cut, (100.hz..8000.hz).at(800.hz)
     #     knob :space, 0.2
     #     bg :bass, 55.hz.saw.lp4(knob(:cut), resonance: knob(:space) * 0.8).at(-12.db)
     #     turn :cut, 3000                          # now, with a 5 ms glide

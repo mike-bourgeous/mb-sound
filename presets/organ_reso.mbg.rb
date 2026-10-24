@@ -1,17 +1,17 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 4,
+graph 5,
   name: "organ_reso",
   kind: :synth,
-  saved: "2026-10-23T05:22:59Z",
-  mb_sound: "0.12.0.usegit (c51d07cc)",
+  saved: "2026-10-24T18:50:00Z",
+  mb_sound: "0.12.0.usegit (97de948a)",
   from: "bin/synths/wave_voices.rb",
   description: "Wave voice :organ_reso: Resonant organ for chords and comping: drawbar harmonics plus SYNTH 3 an octave up through a resonant, nearly closed 4-pole that blips open on each key; grit 0..1 holds the oscillators at the Ensoniq DOC's 38.46 kHz (from bin/synths/wave_voices.rb: the research-sq80 prototype voice of 2026-10-06, rebuilt from library nodes in protos-1, 2026-10-23)",
   options: { patch: :organ_reso, voices: nil }
 inputs midi: :notes
-param :grit, 0.0, range: 0.0..1.0, description: "Grit 0..1: the oscillators held at the DOC's 38.46 kHz, aliasing (1: the prototype's grit)"
-param :cutoff, 900.0, range: 20..10000, description: "Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)"
-param :reso, 0.6401, range: 0.0..1.0, description: "lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.64, square_bass 0.48)"
+param :grit, (0.0..1.0).at(0.0), description: "Grit 0..1: the oscillators held at the DOC's 38.46 kHz, aliasing (1: the prototype's grit)"
+param :cutoff, (20.0..10000.0).at(900.0), description: "Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)"
+param :reso, (0.0..1.0).at(0.6401), description: "lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.64, square_bass 0.48)"
 
 synth(midi, voices: 8) { |v|
   f = v.hz

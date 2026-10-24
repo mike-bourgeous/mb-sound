@@ -157,10 +157,10 @@ module MB::Sound
     bpm 60
     quant 1
 
-    knob :drizzle, 0.3, range: 0..1     # how hard it rains
-    knob :space, 0.5, range: 0..1       # the rooms' level
-    knob :wear, 0, range: 0..1          # how old the tape is
-    knob :ring, 1, range: 0..1          # how hard the bowls are struck (0: left to ring)
+    knob :drizzle, 0.3, range: 0.0..1.0     # how hard it rains
+    knob :space, 0.5, range: 0.0..1.0       # the rooms' level
+    knob :wear, 0.0, range: 0.0..1.0          # how old the tape is
+    knob :ring, 1.0, range: 0.0..1.0          # how hard the bowls are struck (0: left to ring)
 
     master_gain(-1.db) # quiet on purpose: about -18 LUFS (the usual -10 dB would be -27)
     master :quiet # -18 LUFS, a slow limiter as a safety, not a sound (mastering-2: the maintainer's Bench pick)

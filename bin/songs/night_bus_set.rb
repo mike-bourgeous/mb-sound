@@ -139,7 +139,7 @@ module MB::Sound
   if main_script?(__FILE__)
     song_script(
       bars: NIGHT_BUS_BARS,
-      cutoff: [1100, 'The pad\'s filter cutoff in Hz', '-c', Float, 200..8000],
+      cutoff: [1100, 'The pad\'s filter cutoff in Hz', '-c', Float, 200.0..8000.0],
     ) { |p| night_bus_set(perform: true, cutoff: p.cutoff) }
   end
 end
