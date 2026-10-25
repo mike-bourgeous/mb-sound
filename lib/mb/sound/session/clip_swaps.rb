@@ -112,6 +112,11 @@ module MB
         # stopped player, whose clips change when it resumes).  Returns the
         # number of clip sources that change.
         def swap_now(name, clips, time)
+          # (a later command may have removed the player before the swap
+          # landed, e.g. `forget` after a scene's swap was queued: nothing
+          # to swap; omnibus13, arm_state_spec's random walk, seed 9509)
+          return 0 unless swap_target?(name)
+
           @mutex.synchronize {
             _, _, nodes = swap_target(name)
             swaps = planned_swaps(name, nodes, clips)
