@@ -33,14 +33,12 @@ module RelationFuzz
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the code, 'reason'], ...] }: skipped, counted.
-  HARMONICS = [/sweep\("harmonics \(HarmonicTable\)"\)/, 'harmonics(update: 64) differs by up to 0.3 at other buffer sizes (test-tiers-1 report)'].freeze
   # :fast sines driving discrete decisions: decimate's hold instants move
   # by a sample (steps up to 0.02), and sah's LFO clock fires on other
   # samples, so its random draws differ (RMS -15 dB); :exact is identical
   FAST_DECISIONS = [/decimate\(\d+\.hz\.lfo|sweep\("sample_hold"\)|\.sah\(/, ':fast sines feeding discrete decisions (test-tiers-1 report)'].freeze
   KNOWN = {
     plan_fast: [FAST_DECISIONS],
-    buffer_size: [HARMONICS],
   }.freeze
 
   Expr = Struct.new(:kind, :args, :kids) do
