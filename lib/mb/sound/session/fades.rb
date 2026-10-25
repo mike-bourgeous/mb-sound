@@ -13,11 +13,29 @@ module MB
       module Fades
         # A linear gain ramp from +from+ to +to+ over +length+ frames,
         # starting at session frame +start+ (where the level is still
-        # +from+; it reaches +to+ at +start+ + +length+).
-        Ramp = Struct.new(:from, :to, :start, :length) do
+        # +from+; it reaches +to+ at +start+ + +length+).  +prev+ is the
+        # ramp it replaced (see Ramp.after), whose levels it keeps for the
+        # frames before +start+.
+        Ramp = Struct.new(:from, :to, :start, :length, :prev) do
+          # A ramp to +to+ over +length+ frames from session frame +frame+,
+          # replacing +old+ (a Ramp or nil; +level+ is the level without
+          # one): it starts from +old+'s level at +frame+, and frames
+          # before +frame+ keep +old+'s levels, so a ramp that lands inside
+          # a buffer leaves the frames before it as they were.  (Before
+          # fuzz-fixes-1 the new ramp's start level covered the whole
+          # buffer: a track fading in from a scene's fade: and stopped with
+          # a fade where the fade-in ended differed by buffer size, up to
+          # 0.003; the Session fuzzer's find.)
+          def self.after(old, level, to, frame, length)
+            return new(level, to, frame, length) if old.nil?
+
+            new(old.at(frame), to, frame, length, old)
+          end
+
           # The level at session frame +frame+.
           def at(frame)
             k = frame - start
+            return prev.at(frame) if k < 0 && prev
             return from if k <= 0
             return to if k >= length
             k * slope + from
@@ -42,7 +60,16 @@ module MB
             k = k.clip(0, length) if k0 < 0 || k0 + count > length
             # SFloat, since multiplying SFloat audio by a DFloat is ~20x
             # slower in Numo than casting first
-            Numo::SFloat.cast(k.inplace * slope + from)
+            out = Numo::SFloat.cast(k.inplace * slope + from)
+            if k0 < 0 && prev
+              n = MB::M.min(count, -k0)
+              out[0...n] = prev.levels(frame, n)
+            elsif prev
+              # (frames are read in order: the replaced ramp's levels are
+              # needed no more, and chains of replaced ramps don't grow)
+              self.prev = nil
+            end
+            out
           end
         end
 
@@ -123,7 +150,7 @@ module MB
         # still fading in fades out sooner).
         def start_fade_out(p, frame, bars, rate)
           level = fade_level(p, frame)
-          p.ramp = Ramp.new(level, 0.0, frame, MB::M.max((level * fade_frames(bars, rate)).round, 1))
+          p.ramp = Ramp.after(p.ramp, p.gain, 0.0, frame, MB::M.max((level * fade_frames(bars, rate)).round, 1))
           p.fading_out = true
         end
 

@@ -1155,8 +1155,7 @@ module MB
             target = audible_unlocked?(b.name) ? 1.0 : 0.0
             current = b.strip_ramp ? b.strip_ramp.to : b.strip_level
             next if current == target
-            level = b.strip_ramp ? b.strip_ramp.at(frame) : b.strip_level
-            b.strip_ramp = Fades::Ramp.new(level, target, frame, length)
+            b.strip_ramp = Fades::Ramp.after(b.strip_ramp, b.strip_level, target, frame, length)
           end
         end
 
