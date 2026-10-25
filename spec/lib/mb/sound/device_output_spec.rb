@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   DEVICE_OUTPUT_ENV = [
     'AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
     'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE', 'AUDIO_DEVICE_RATE', 'AUDIO_RESAMPLE', 'AUDIO_SET_DEVICE_RATE',
-    'AUDIO_ADAPTIVE'
+    'AUDIO_ADAPTIVE', 'AUDIO_CONCEAL'
   ]
 
   around(:each) do |ex|
@@ -467,6 +467,54 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
       @outputs << o
       expect(o).to be_a(MB::Sound::DeviceOutput)
       expect(o.channels).to eq(1)
+    end
+  end
+
+  describe 'underrun concealment' do
+    it 'plays silence by default for now, and takes :conceal or AUDIO_CONCEAL' do
+      expect(device_output.concealment[:mode]).to eq(:silence)
+      expect(device_output(conceal: :repeat).concealment[:mode]).to eq(:repeat)
+      ENV['AUDIO_CONCEAL'] = 'fixed:30'
+      c = device_output(conceal: :silence).concealment
+      expect(c.values_at(:mode, :fixed, :grain_min, :grain_max)).to eq([:repeat, true, 0.03, 0.03])
+    end
+
+    it 'fills a gap in the written audio, counted in stats, and not after end_stream' do
+      o = device_output(channels: 1, capture: 24000, adaptive: false, conceal: :repeat)
+      t = Numo::DFloat.new(4800).seq(1)
+      o.write([Numo::SFloat.cast(Numo::NMath.sin(t * 0.03) * 0.5)])
+      wait_until { o.stats[:concealed] >= 2400 }
+      expect(o.stats[:concealed_gaps]).to eq(1)
+      expect(o.underruns).to eq(1)
+
+      o.write([Numo::SFloat.zeros(10) + 0.1])
+      o.end_stream
+      wait_until { o.stats[:queued] == 0 }
+      gaps = o.stats[:concealed_gaps]
+      sleep 0.05
+      expect(o.stats[:concealed_gaps]).to eq(gaps)
+    end
+  end
+
+  describe MB::Sound::Concealment do
+    it 'reads names, grain ranges, Lengths, and AUDIO_CONCEAL-style strings' do
+      c = MB::Sound::Concealment
+      expect(c.settings(:repeat)).to eq(c::DEFAULTS)
+      expect(c.settings[:mode]).to eq(c::DEFAULT)
+      expect(c.settings(true)).to eq(c::DEFAULTS)
+      expect(c.settings(grain: 10.ms..40.ms).values_at(:grain_min, :grain_max)).to eq([0.01, 0.04])
+      expect(c.settings(mode: :fixed, grain: 128.samples)[:grain_min]).to eq(128 / 48000.0)
+      expect(c.settings('repeat:15-45').values_at(:grain_min, :grain_max)).to eq([0.015, 0.045])
+      expect(c.settings(false)[:mode]).to eq(:silence)
+      expect(c.settings(fade: nil)[:fade]).to be_nil
+    end
+
+    it 'raises for unknown or impossible settings' do
+      c = MB::Sound::Concealment
+      expect { c.settings(:loop) }.to raise_error(c::Error, /Unknown concealment :loop/)
+      expect { c.settings(grian: 0.02) }.to raise_error(c::Error, /Unknown concealment setting :grian/)
+      expect { c.settings(grain: 0.2) }.to raise_error(c::Error, /history must hold the longest grain/)
+      expect { c.settings(grain: 0.05..0.02) }.to raise_error(c::Error, /backwards/)
     end
   end
 end
