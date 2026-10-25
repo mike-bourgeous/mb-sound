@@ -133,9 +133,7 @@
       "fast_latency": [
         "FastLatency.bucket",
         "FastLatency.bucket_floor",
-        "FastLatency.mono_ns",
         "FastLatency.percentile",
-        "FastLatency.spin",
         "FastLatency.system_sample",
         "FastLatency::Probe#drain",
         "FastLatency::Probe#histogram",
@@ -476,6 +474,7 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
@@ -828,6 +827,7 @@
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
         "FastArithmetic.mix",
         "FastArithmetic.product",
         "FastArithmetic.wet_dry"
@@ -1312,9 +1312,6 @@
         "FastArithmetic.product",
         "FastArithmetic.wet_dry"
       ],
-      "fast_clip": [
-        "FastClip.shape"
-      ],
       "fast_control": [
         "FastControl.smooth"
       ],
@@ -1336,9 +1333,6 @@
       ],
       "fast_recipe": [
         "FastRecipe.frame_binding"
-      ],
-      "fast_resonator": [
-        "FastResonator.ping"
       ],
       "fast_sound": [
         "FastSound.cookbook",
@@ -1381,6 +1375,7 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1450,6 +1445,32 @@
       "fast_wavetable": [
         "FastWavetable.oscillate",
         "FastWavetable.shape"
+      ]
+    },
+    "spec/lib/mb/sound/plan/resonator_op_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.add_at",
+        "FastArithmetic.copy",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_resonator": [
+        "FastResonator.modes",
+        "FastResonator.ping"
       ]
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
@@ -1538,24 +1559,16 @@
         "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
-        "FastArithmetic.copy",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
-        "FastArithmetic.power",
         "FastArithmetic.scale"
-      ],
-      "fast_clip": [
-        "FastClip.shape"
       ],
       "fast_plan": [
         "FastPlan.run"
       ],
       "fast_recipe": [
         "FastRecipe.frame_binding"
-      ],
-      "fast_resonator": [
-        "FastResonator.ping"
       ],
       "fast_sampler": [
         "FastSampler.play"
@@ -1986,6 +1999,7 @@
         "plan_filters.c",
         "plan_filters.h",
         "plan_lofi.c",
+        "plan_resonator.c",
         "plan_wavetable.c"
       ],
       "modules": [
@@ -2004,6 +2018,7 @@
         "ext/mb/sound/include/mb_four_pole_tuning.h",
         "ext/mb/sound/include/mb_osc_shapes.h",
         "ext/mb/sound/include/mb_phase.h",
+        "ext/mb/sound/include/mb_resonator.h",
         "ext/mb/sound/include/mb_smooth.h",
         "ext/mb/sound/include/mb_svf.h",
         "ext/mb/sound/include/mb_vec_exp2.h",
@@ -2044,6 +2059,11 @@
           "ext/mb/sound/include/mb_decimate.h",
           "ext/mb/sound/include/mb_ext_helpers.h"
         ],
+        "plan_resonator.o": [
+          "ext/mb/sound/fast_plan/plan_filters.h",
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_resonator.h"
+        ],
         "plan_wavetable.o": [
           "ext/mb/sound/fast_plan/plan_filters.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
@@ -2083,11 +2103,13 @@
         "FastResonator"
       ],
       "includes": [
-        "ext/mb/sound/include/mb_ext_helpers.h"
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_resonator.h"
       ],
       "depend": {
         "fast_resonator.o": [
-          "ext/mb/sound/include/mb_ext_helpers.h"
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_resonator.h"
         ]
       }
     },
