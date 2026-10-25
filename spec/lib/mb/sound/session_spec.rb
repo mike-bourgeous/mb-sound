@@ -233,6 +233,27 @@ RSpec.describe(MB::Sound::Session) do
       expect(session).to be_idle
     end
 
+    # fuzz-fixes-1 (the Session fuzzer's find): a fade-out landing inside
+    # a buffer while a fade-in was still running replaced the fade-in's
+    # ramp for the whole buffer, so the frames before the stop got the
+    # fade-out's start level, differing by buffer size
+    it 'keeps a fade-in running up to a fade-out that lands inside a buffer, at any buffer size' do
+      data = [800, 128, 367].map { |size|
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), buffer_size: size, realtime: false, raise_errors: true)
+        s.add(1.constant, name: :drone, fade: 1/20r) # 4800 frames
+        s.remove(:drone, fade: 1/20r, time: 3000/96000r) # (frame 3000, inside 800's buffer 2400...3200)
+        bufs = []
+        bufs << s.process_buffer[0].dup while bufs.sum(&:length) < 9600
+        s.close
+        SpecBuffers.join(bufs)[0...9600]
+      }
+      expect(data[0][2900]).to be_within(1e-6).of(2900 / 4800.0)
+      expect(data[0][3000]).to be_within(1e-6).of(0.625)
+      expect(data[0][4500]).to be_within(1e-6).of(0.3125) # (fading out at a full fade's speed: 3000 frames from 0.625)
+      expect(data[1]).to eq(data[0])
+      expect(data[2]).to eq(data[0])
+    end
+
     it 'crossfades when replacing with a fade' do
       session.add(1.constant, name: :pad)
       run(4000)

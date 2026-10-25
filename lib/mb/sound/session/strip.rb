@@ -210,8 +210,7 @@ module MB
             current_target = p.strip_ramp ? p.strip_ramp.to : p.strip_level
             next if current_target == target
 
-            level = p.strip_ramp ? p.strip_ramp.at(frame) : p.strip_level
-            p.strip_ramp = Fades::Ramp.new(level, target, frame, length)
+            p.strip_ramp = Fades::Ramp.after(p.strip_ramp, p.strip_level, target, frame, length)
           end
         end
 

@@ -112,7 +112,7 @@ module MB
           pos = 0
           while pos < count
             if @countdown <= 0
-              rebuild(values, freq, @time + pos)
+              rebuild(values, freq, pos, @time + pos)
               @countdown = @update
             end
 
@@ -134,9 +134,9 @@ module MB
 
         private
 
-        # The current amplitudes of spectrum nodes (read every buffer, so
-        # they advance with the graph), or the numbers; :ended if a node
-        # ended.
+        # The amplitudes of spectrum nodes (read every buffer, so they
+        # advance with the graph: their buffers, read at each rebuild's
+        # sample) or the numbers; :ended if a node ended.
         def node_amplitudes(count)
           return nil unless @spectrum.is_a?(Array)
 
@@ -145,20 +145,27 @@ module MB
               data = a.sample(count)
               return :ended if data.nil? || data.empty?
 
-              data[-1].real.to_f
+              data
             else
               a.to_f
             end
           }
         end
 
-        # Builds the next table from the amplitudes now: frames [previous,
-        # current], harmonics limited to those below the alias ceiling at the
-        # highest frequency of +freq+ (and MAX_HARMONICS).  The current
-        # spectrum is kept whole, so harmonics come back if the pitch falls.
-        def rebuild(values, freq, time)
+        # Builds the next table from the amplitudes at sample +pos+ of this
+        # buffer (+time+ since the start): frames [previous, current],
+        # harmonics limited to those below the alias ceiling at the
+        # frequency there (and MAX_HARMONICS).  The current spectrum is kept
+        # whole, so harmonics come back if the pitch falls.
+        #
+        # Node amplitudes and the frequency are read at the rebuild's own
+        # sample (fuzz-fixes-1; before, the last sample of the buffer and the
+        # buffer's highest frequency), so the tables are the same at any
+        # buffer size.
+        def rebuild(values, freq, pos, time)
+          values = values&.map { |v| v.is_a?(Numo::NArray) ? v[[pos, v.length - 1].min].real.to_f : v }
           amps, phases = current_spectrum(values, time)
-          top = freq.is_a?(Numo::NArray) ? freq.abs.max.to_f : freq.to_f.abs
+          top = freq.is_a?(Numo::NArray) ? freq[[pos, freq.length - 1].min].abs.to_f : freq.to_f.abs
           # Harmonics that stay below the alias ceiling at the top frequency
           alias_limit = MAX_HARMONICS
           if top > 0

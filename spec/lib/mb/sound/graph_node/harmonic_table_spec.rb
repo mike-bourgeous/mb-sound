@@ -36,6 +36,30 @@ RSpec.describe(MB::Sound::GraphNode::HarmonicTable, aggregate_failures: true) do
     expect(node.sources.keys).to eq([:harmonic_2])
   end
 
+  # fuzz-fixes-1 (the relation fuzzer's find): node amplitudes were read at
+  # the last sample of the buffer holding a rebuild, and the alias limit at
+  # the buffer's highest frequency, so other buffer sizes built other
+  # tables (up to 0.3 apart at [367, 368] buffers)
+  it 'gives the same samples at any buffer size with moving amplitudes and pitch' do
+    make = -> {
+      MB::Sound::GraphNode::HarmonicTable.new(frequency: 3.hz.lfo.at(1000..9000), spectrum: [1, 7.hz.lfo.at(0..1), 0.3, 0.2] + [0.4] * 6, update: 64)
+    }
+    ref = collect(make.(), 6)
+    [[367, 368], [1], [7, 128]].each do |sizes|
+      node = make.()
+      bufs = []
+      n = 0
+      i = 0
+      while n < ref.length
+        c = [sizes[i % sizes.length], ref.length - n].min
+        bufs << node.sample(c).dup
+        n += c
+        i += 1
+      end
+      expect(Numo::NArray.concatenate(bufs)).to eq(ref), "buffers #{sizes}"
+    end
+  end
+
   it 'calls a callable with the time' do
     times = []
     node = 100.hz.harmonics(->(t) { times << t; [1] }, update: 480)

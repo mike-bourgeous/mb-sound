@@ -109,8 +109,7 @@ module MB
           p.keep = false
           ring.sources.each { |s| s.end_ring_out(time: start) }
           if p.fading_out || p.ramp
-            level = fade_level(p, @landing_frame || @frame)
-            p.ramp = Fades::Ramp.new(level, 1.0, @landing_frame || @frame, fade_frames(declick_bars, output.sample_rate.to_f))
+            p.ramp = Fades::Ramp.after(p.ramp, p.gain, 1.0, @landing_frame || @frame, fade_frames(declick_bars, output.sample_rate.to_f))
             p.fading_out = false
           end
           @order.delete(name)

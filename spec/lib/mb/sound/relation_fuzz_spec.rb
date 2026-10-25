@@ -35,6 +35,25 @@ RSpec.describe('relation fuzzing', :check_shared) do
     expect(failures).to eq([]), failures.map(&:to_s).join("\n\n")
   end
 
+  # fuzz-fixes-1: sample_hold of a complex source raised Complex#to_f's
+  # RangeError.  Every step the generator makes either takes a complex
+  # input (complex out, or real: filters, dynamics, decimate, and formant
+  # read the real part) or says it can't with a message naming complex
+  # data or real signals.
+  it 'gives every generated step a complex input a result or a clear error' do
+    complex = RelationFuzz::Expr.new(:complex, [], [])
+    results = RelationFuzz.every_unary(complex).map do |e|
+      code = RelationFuzz.code(e)
+      g = RelationFuzz.build(code)
+      outs = g.respond_to?(:outputs) ? g.outputs.to_a : [g]
+      [e.kind, outs.map { |o| o.sample(800).class }]
+    rescue ArgumentError => err
+      expect(err.message).to match(/complex|real/), "#{code}: #{err.message}"
+      [e.kind, :error]
+    end
+    expect(results.to_h.select { |_, v| v == :error }.keys).to contain_exactly(:clip, :feedback, :ease, :sample_hold)
+  end
+
   it 'shrinks a failing graph to the parts that fail' do
     big = RelationFuzz::Expr.new(:add, [], [
       RelationFuzz::Expr.new(:softclip, [], [RelationFuzz::Expr.new(:tone, [220, :square, nil], [])]),

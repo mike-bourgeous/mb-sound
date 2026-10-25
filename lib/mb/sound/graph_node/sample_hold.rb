@@ -66,6 +66,11 @@ module MB
         # the trigger's last sample; returns the output buffer (reused).
         # Also the Ruby mirror of the plan op (Plan::Op::SampleHold).
         def process(trig, data, n)
+          # (like Shaper's clip: a clear error rather than Complex#to_f's
+          # RangeError; fuzz-fixes-1)
+          raise ArgumentError, "sample_hold can't process complex data (the source; take .real, .imag, or .abs first)" if complex_data?(data)
+          raise ArgumentError, "sample_hold can't process complex data (the trigger; take .real, .imag, or .abs first)" if complex_data?(trig)
+
           @held ||= data ? data[0].to_f : draw
 
           # Rising edges: sample i > 0 after i - 1 <= 0.  Most buffers of a
@@ -95,6 +100,11 @@ module MB
 
           @buf
         end
+
+        def complex_data?(data)
+          data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
+        end
+        private :complex_data?
 
         def sources
           @source ? { input: @source, trigger: @trigger } : { trigger: @trigger }

@@ -177,6 +177,12 @@ RSpec.describe(MB::Sound::GraphNode::SampleHold) do
     expect(out.max).to be <= 3
   end
 
+  it 'says it takes real signals for a complex source or trigger (not a RangeError)' do
+    trig = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(100)])
+    expect { described_class.new(220.hz.saw.hilbert_iir, trig).sample(100) }.to raise_error(ArgumentError, /complex data \(the source/)
+    expect { described_class.new(220.hz.saw, 220.hz.saw.hilbert_iir).sample(100) }.to raise_error(ArgumentError, /complex data \(the trigger/)
+  end
+
   it 'decimates with #sah' do
     out = 997.hz.saw.sah(2000.hz.lfo.asquare).sample(4800)
     expect(out.to_a.chunk_while { |a, b| a == b }.map(&:length).uniq.sort).to eq([24])

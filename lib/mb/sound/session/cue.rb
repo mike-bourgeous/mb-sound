@@ -303,8 +303,7 @@ module MB
             [[:main_level, :main_ramp, main_t], [:cue_level, :cue_ramp, cue_t]].each do |lf, rf, target|
               current = l[rf] ? l[rf].to : l[lf]
               next if current == target
-              level = l[rf] ? l[rf].at(frame) : l[lf]
-              l[rf] = Fades::Ramp.new(level, target, frame, length)
+              l[rf] = Fades::Ramp.after(l[rf], l[lf], target, frame, length)
             end
           end
         end
