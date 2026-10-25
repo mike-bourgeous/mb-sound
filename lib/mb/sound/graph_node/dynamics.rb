@@ -311,6 +311,8 @@ module MB
           @plan_curve = nil # (set later; see GraphNode::IvarPreset)
           @params = nil
           @times_list = nil # (reused by #process)
+          @buffer_sets = nil # (Framed.next_buffers; set here, since Channels
+          @buffer_index = nil # subclasses get no IvarPreset)
 
           # Set by the plan layer (see MB::Sound::Plan::MultiDescribable),
           # nil here so instances keep one object shape
