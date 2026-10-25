@@ -21,7 +21,7 @@ bundle exec rake compile          # Compile C extensions (required before runnin
 bundle exec rspec                 # Run the test suite (without the :slow tier; SLOW=1 for everything)
 bundle exec rake spec:parallel    # the suite in parallel processes (PARALLEL=N; default half the CPUs, capped at 1.5 GB of available memory each), then its slowest files and examples
 bundle exec rake spec:full        # spec:parallel with the :slow tier (SLOW=1): the suite before and after merges
-bundle exec rake spec:quick       # everyday subset: the 95% covering set (spec/quick_map.json) + specs of units changed since master-ai (QUICK_DRY=1; Mac PARALLEL=8: 60 s vs 184 s)
+bundle exec rake spec:quick       # everyday subset: the 95% covering set (spec/quick_map.json) + specs of units changed since master-ai (QUICK_DRY=1; Mac, default 8 processes: 64 s vs 184 s)
 bundle exec rake spec:quick:map   # rerecord the covering set (the suite once with per-file coverage, +50% time)
 bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
