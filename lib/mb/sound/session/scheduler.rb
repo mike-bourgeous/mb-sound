@@ -414,6 +414,8 @@ module MB
         # time has come, in time order.  Called by Session at the start of
         # each buffer.
         def apply_timed_changes
+          return if @timed_changes.empty? # (most buffers: no Arrays; one queued meanwhile lands next buffer, as it would after the lock)
+
           due = @mutex.synchronize {
             now, @timed_changes = @timed_changes.partition { |time, _| time <= @transport.position }
             now
@@ -438,19 +440,20 @@ module MB
           horizon = playing ? to + lookahead_whole_notes : from
 
           due = @mutex.synchronize {
-            list = []
+            list = nil # (made only when something is due: most buffers)
             epoch = @session.epoch
-            @entries.values.each do |e|
+            @entries.each_value do |e|
               next if e.exact || (e.epoch && e.epoch != epoch)
               next unless e.status == :pending
               while e.time <= horizon
-                list << [e, e.time]
+                (list ||= []) << [e, e.time]
                 break e.status = :due unless e.period
                 e.time += e.period
               end
             end
             list
           }
+          return if due.nil?
 
           # The latest time blocks ran ahead for (any, and one-shot only),
           # for #waiting?
@@ -480,12 +483,15 @@ module MB
         def dispatch_exact(from, to)
           due = @mutex.synchronize {
             epoch = @session.epoch
-            list = @entries.values.select { |e| e.exact && e.status == :pending && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) }
-            list.each { |e| e.status = :due }
+            list = nil # (made only when something is due)
+            @entries.each_value { |e| (list ||= []) << e if e.exact && e.status == :pending && (e.epoch.nil? || e.epoch == epoch) && (e.time <= from || e.time < to) }
+            list&.each { |e| e.status = :due }
             list
           }
+          return false if due.nil?
+
           due.sort_by { |e| [e.time, e.id] }.each { |e| run(e, e.time, e.time > from ? e.time : nil) }
-          !due.empty?
+          true
         end
 
         # Queues +block+ to run on the scheduler thread between scheduled

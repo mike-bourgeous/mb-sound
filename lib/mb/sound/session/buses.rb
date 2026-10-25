@@ -50,7 +50,7 @@ module MB
         # whether the timeline moved last span (for its clips).
         Bus = Struct.new(
           :name, :to, :chains, :block, :input, :strip_level, :strip_ramp,
-          :asleep, :quiet_from, :wake_at, :playing, :frames, :out_bufs,
+          :asleep, :quiet_from, :wake_at, :playing, :frames, :out_bufs, :in_bufs,
           keyword_init: true
         )
 
@@ -557,7 +557,7 @@ module MB
           count = @bus_span_count
           bufs = @bus_signals[key]
           if bufs && bufs.length == channels && bufs[0].length == count
-            bufs.each { |b| b.fill(0) }
+            bufs.each { |b| BufferHelper.zero(b) }
           else
             bufs = @bus_signals[key] = Array.new(channels) { Numo::SFloat.zeros(count) }
           end
@@ -580,7 +580,20 @@ module MB
         # there is no such bus.
         def bus_input(name)
           b = @bus_span_buses[name] or return nil
-          b.input ||= Array.new(@channels) { Numo::SFloat.zeros(@bus_span_count) }
+          b.input ||= bus_input_buffers(b)
+        end
+
+        # Bus +b+'s input buffers for this span, zeroed: reused from span to
+        # span (Bus#in_bufs; the chains copy what they keep, see
+        # GraphNode::MixSource), while #input says whether anything was sent.
+        def bus_input_buffers(b)
+          n = @bus_span_count
+          bufs = b.in_bufs
+          if bufs.nil? || bufs.length != @channels || bufs[0].length != n
+            return b.in_bufs = Array.new(@channels) { Numo::SFloat.zeros(n) }
+          end
+          bufs.each { |x| BufferHelper.zero(x) }
+          bufs
         end
 
         # The routing of player name +name+ (an armed track's monitor uses
@@ -879,9 +892,7 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
-            raw = d[0...len]
-            g = fade.is_a?(Numeric) ? fade : fade && fade[0...len]
-            t[offset...(offset + len)].inplace + (g.nil? ? raw : raw * g)
+            acc_add(t, offset, d, len, fade, nil, 0) # (t[offset, len] += d[0, len] * fade)
           end
         end
 
