@@ -199,6 +199,48 @@ module MB
           "Resonator #{f}, decay #{@decay_source}"
         end
 
+        # Plan layer (see MB::Sound::Plan and Plan::Op::Resonator): the ping
+        # (and a ModalResonator's bank) in C on this node's state, so drum
+        # voices' bodies and struck textures fuse with what plays and
+        # follows them (fuse-more-1).  The ring out after the input ends
+        # runs unfused (#plan_tail?).
+        include Plan::Describable
+
+        def plan_describe(p)
+          freq = @freq.is_a?(Numeric) ? @freq : p[@freq]
+          src = @decay_source
+          decay =
+            if src.node?
+              v = p[src.node]
+              src.unit == :seconds ? v * @sample_rate : v
+            else
+              src.constant_samples(@sample_rate)
+            end
+          p.resonator(self, p[@input], freq, decay)
+        end
+
+        def plan_unsupported_reason
+          return 'ringing out after its input ended' if @input_ended || @rung_out
+
+          nil
+        end
+
+        # When the input ends the node rings out on its own (finding the
+        # exact end sample): the block runs unfused and the node stays
+        # unfused afterwards (see Plan::Region#prepare).
+        def plan_tail?
+          true
+        end
+
+        def plan_snapshot
+          [@state.to_a, @input_ended, @rung_out]
+        end
+
+        def plan_restore(snapshot)
+          state, @input_ended, @rung_out = snapshot
+          @state[0..] = state
+        end
+
         # The exact Ruby mirror of MB::Sound::FastResonator.ping (same
         # arguments; see that kernel): the same double operations in the same
         # order, so specs compare the two for equality.  Inputs are read as

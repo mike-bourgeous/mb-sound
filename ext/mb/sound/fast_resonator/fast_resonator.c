@@ -26,13 +26,11 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
+#include "mb_resonator.h"
 
-// ln(1000): the decay factor reaches -60 dB after +decay+ samples.
-#define RES_LN_1000 6.907755278982137
-
-// States smaller than this (in both parts) are flushed to zero so the
-// ringing ends instead of running into subnormal numbers.
-#define RES_FLUSH 1e-30
+// (The kernels are in mb_resonator.h, shared with the plan executor.)
+#define RES_MODES_MAX MB_RES_MODES_MAX
+#define RES_MODE_FIELDS MB_RES_MODE_FIELDS
 
 /*
  * call-seq:
@@ -57,12 +55,10 @@ static VALUE ruby_ping(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE dec
 
 	size_t n = RNARRAY_SHAPE(out)[0];
 
-	double x_scalar, f_scalar, d_scalar;
-	const float *x_ptr, *f_ptr, *d_ptr;
-	size_t x_step, f_step, d_step;
-	mb_read_signal_input(&input, n, "Input", &x_scalar, &x_ptr, &x_step);
-	mb_read_signal_input(&freq, n, "Frequency", &f_scalar, &f_ptr, &f_step);
-	mb_read_signal_input(&decay, n, "Decay", &d_scalar, &d_ptr, &d_step);
+	struct mb_signal xs, fsig, ds;
+	mb_signal_input(&input, n, "Input", &xs);
+	mb_signal_input(&freq, n, "Frequency", &fsig);
+	mb_signal_input(&decay, n, "Decay", &ds);
 
 	double fs = NUM2DBL(rate);
 	if (!(fs > 0)) {
@@ -73,42 +69,7 @@ static VALUE ruby_ping(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE dec
 
 	float *y = mb_sfloat_ptr(out);
 	double *z = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
-	double zr = z[0];
-	double zi = z[1];
-
-	// Coefficients are recomputed only when the frequency or decay changes
-	// (NAN never compares equal, so the first sample computes them).
-	double last_f = NAN, last_d = NAN;
-	double c = 0, s = 0;
-
-	for (size_t i = 0; i < n; i++) {
-		double x = x_ptr ? x_ptr[i * x_step] : x_scalar;
-		double f = f_ptr ? f_ptr[i * f_step] : f_scalar;
-		double d = d_ptr ? d_ptr[i * d_step] : d_scalar;
-
-		if (f != last_f || d != last_d) {
-			double w = 2.0 * M_PI * f / fs;
-			double r = d > 0 ? exp(-RES_LN_1000 / d) : 0.0;
-			c = r * cos(w);
-			s = r * sin(w);
-			last_f = f;
-			last_d = d;
-		}
-
-		double nr = c * zr - s * zi + x;
-		double ni = s * zr + c * zi;
-		if (fabs(nr) < RES_FLUSH && fabs(ni) < RES_FLUSH) {
-			nr = 0.0;
-			ni = 0.0;
-		}
-		zr = nr;
-		zi = ni;
-
-		y[i] = (float)(zi * cp + zr * sp);
-	}
-
-	z[0] = zr;
-	z[1] = zi;
+	mb_res_ping(y, &xs, &fsig, &ds, z, fs, cp, sp, n);
 
 	RB_GC_GUARD(input);
 	RB_GC_GUARD(freq);
@@ -118,17 +79,6 @@ static VALUE ruby_ping(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE dec
 
 	return out;
 }
-
-// The most modes a modal bank may have (coefficients live on the stack).
-#define RES_MODES_MAX 128
-
-// Values per mode in the mode table: ratio, offset (Hz), amplitude, decay
-// share.
-#define RES_MODE_FIELDS 4
-
-// Modes at or above this share of the sample rate are silent (they would
-// fold back below Nyquist), as are modes at or below 0 Hz.
-#define RES_MODE_CEILING 0.45
 
 /*
  * call-seq:
@@ -140,7 +90,7 @@ static VALUE ruby_ping(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE dec
  * freq * ratio + offset Hz, falling 60 dB in decay * share samples, all
  * pinged by the same +input+; the output is the sum of each mode's ring
  * (phase 0: Im z) times its amplitude, summed in double in mode order.
- * Modes at or above RES_MODE_CEILING of the sample rate, or at or below 0
+ * Modes at or above MB_RES_MODE_CEILING of the sample rate, or at or below 0
  * Hz, are silent.  +state+ is a contiguous DFloat of 2 values per mode
  * [zr0, zi0, zr1, zi1, ...], updated in place.  Coefficients are recomputed
  * only when the frequency or decay changes.  Exact Ruby mirror:
@@ -171,12 +121,10 @@ static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE de
 
 	size_t n = RNARRAY_SHAPE(out)[0];
 
-	double x_scalar, f_scalar, d_scalar;
-	const float *x_ptr, *f_ptr, *d_ptr;
-	size_t x_step, f_step, d_step;
-	mb_read_signal_input(&input, n, "Input", &x_scalar, &x_ptr, &x_step);
-	mb_read_signal_input(&freq, n, "Frequency", &f_scalar, &f_ptr, &f_step);
-	mb_read_signal_input(&decay, n, "Decay", &d_scalar, &d_ptr, &d_step);
+	struct mb_signal xs, fsig, ds;
+	mb_signal_input(&input, n, "Input", &xs);
+	mb_signal_input(&freq, n, "Frequency", &fsig);
+	mb_signal_input(&decay, n, "Decay", &ds);
 
 	double fs = NUM2DBL(rate);
 	if (!(fs > 0)) {
@@ -186,63 +134,7 @@ static VALUE ruby_modes(VALUE self, VALUE out, VALUE input, VALUE freq, VALUE de
 	const double *table = (const double *)(nary_get_pointer_for_read(modes) + nary_get_offset(modes));
 	float *y = mb_sfloat_ptr(out);
 	double *z = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
-
-	double coef[2 * RES_MODES_MAX];
-	double radius[RES_MODES_MAX];
-	double last_f = NAN, last_d = NAN;
-
-	for (size_t i = 0; i < n; i++) {
-		double x = x_ptr ? x_ptr[i * x_step] : x_scalar;
-		double f = f_ptr ? f_ptr[i * f_step] : f_scalar;
-		double d = d_ptr ? d_ptr[i * d_step] : d_scalar;
-
-		// Decay factors only when the decay changes (a gliding pitch
-		// recomputes only the rotations)
-		_Bool new_d = d != last_d;
-		if (new_d) {
-			for (size_t k = 0; k < m; k++) {
-				double dk = d * table[k * RES_MODE_FIELDS + 3];
-				radius[k] = dk > 0 ? exp(-RES_LN_1000 / dk) : 0.0;
-			}
-			last_d = d;
-		}
-
-		if (new_d || f != last_f) {
-			for (size_t k = 0; k < m; k++) {
-				const double *mode = table + k * RES_MODE_FIELDS;
-				double fk = f * mode[0] + mode[1];
-				double r = radius[k];
-				if (fk > 0 && fk < RES_MODE_CEILING * fs && r > 0) {
-					double w = 2.0 * M_PI * fk / fs;
-					coef[2 * k] = r * cos(w);
-					coef[2 * k + 1] = r * sin(w);
-				} else {
-					coef[2 * k] = 0.0;
-					coef[2 * k + 1] = 0.0;
-				}
-			}
-			last_f = f;
-		}
-
-		double sum = 0.0;
-		for (size_t k = 0; k < m; k++) {
-			double c = coef[2 * k];
-			double s = coef[2 * k + 1];
-			double zr = z[2 * k];
-			double zi = z[2 * k + 1];
-			double nr = c * zr - s * zi + x;
-			double ni = s * zr + c * zi;
-			if (fabs(nr) < RES_FLUSH && fabs(ni) < RES_FLUSH) {
-				nr = 0.0;
-				ni = 0.0;
-			}
-			z[2 * k] = nr;
-			z[2 * k + 1] = ni;
-			sum += table[k * RES_MODE_FIELDS + 2] * ni;
-		}
-
-		y[i] = (float)sum;
-	}
+	mb_res_modes(y, &xs, &fsig, &ds, table, m, z, fs, n);
 
 	RB_GC_GUARD(input);
 	RB_GC_GUARD(freq);

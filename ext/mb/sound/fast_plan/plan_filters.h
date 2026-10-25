@@ -88,4 +88,12 @@ void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_sign
 // are read each block).  Raises on bad objects.
 void mb_plan_decimate(float *d, const struct mb_signal *in, const struct mb_signal *rate, const struct mb_signal *mix, VALUE obj, size_t n);
 
+// OP_RESONATOR: FastResonator.ping (or .modes if +modal+; plan_resonator.c,
+// through mb_resonator.h) on the real input +in+ into +d+ at frequency
+// +freq+ (Hz) with decay +decay+ (samples to -60 dB); +obj+ is the
+// GraphNode::Resonator (its @state, @sample_rate, @cos_phase, @sin_phase,
+// and a ModalResonator's @table are read each block).  Raises on bad
+// objects.
+void mb_plan_resonator(float *d, const struct mb_signal *in, const struct mb_signal *freq, const struct mb_signal *decay, int modal, VALUE obj, size_t n);
+
 #endif

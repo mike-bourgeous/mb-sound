@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29, mix: 30, decimate: 31, pan_gain: 32 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26, unary: 27, tap: 28, dynamics: 29, mix: 30, decimate: 31, pan_gain: 32, resonator: 33 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -302,6 +302,11 @@ module MB
               cnum = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
               [OPCODES[:decimate], reg(op.dst), reg(op.a), value_reg(op.rate), op.mix ? value_reg(op.mix) : -1, @objects.length - 1,
                scalar(cnum.(op.rate), op.mix ? cnum.(op.mix) : 1.0, op.mix ? 1 : 0)]
+            when Op::Resonator
+              @objects << op.resonator
+              cnum = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
+              [OPCODES[:resonator], reg(op.dst), reg(op.a), value_reg(op.freq), value_reg(op.decay), @objects.length - 1,
+               scalar(cnum.(op.freq), cnum.(op.decay)), op.modal? ? 1 : 0]
             when Op::Unary
               [OPCODES[:unary], reg(op.dst), reg(op.a), op.function_id]
             when Op::Copy

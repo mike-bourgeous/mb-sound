@@ -99,6 +99,7 @@ enum {
 	OP_MIX,       // dst, nterms, sc, term regs...  dst = 0 + sum of (float)sc[k] * term k (see run_mix; Plan::Op::Mix)
 	OP_DECIMATE,  // dst, a, rate, mix, object, sc  dst = GraphNode::Decimator on a (see run_decimate; Plan::Op::Decimate)
 	OP_PAN_GAIN,  // dst, a, law, side, sc       dst = one side's pan law gain for positions a (see run_pan_gain; Plan::Op::PanGain)
+	OP_RESONATOR, // dst, a, freq, decay, object, sc, modal  dst = GraphNode::Resonator on a (see run_resonator; Plan::Op::Resonator)
 };
 
 // Functions of OP_UNARY (Plan::Op::Unary::FUNCTIONS)
@@ -1064,6 +1065,9 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_PAN_GAIN:
 			len = 6;
 			break;
+		case OP_RESONATOR:
+			len = 8;
+			break;
 		case OP_MIX:
 			if (pc + 4 > pw->nwords || op[2] < 1 || op[2] > 4096) rb_raise(rb_eArgError, "Bad plan mix op at word %zu", pc);
 			len = 4 + (size_t)op[2];
@@ -1335,6 +1339,26 @@ static void run_decimate(const int32_t *op, size_t pc, const struct regs *R, lon
 	mb_plan_decimate(R->p[op[1]], &in, &rate, s[2] != 0 ? &mix : NULL, rb_ary_entry(objects, op[5]), n);
 }
 
+// OP_RESONATOR: dst, a, freq, decay, object, sc, modal: GraphNode::Resonator
+// (or ModalResonator if modal is 1) on the real register a, at the frequency
+// register (-1: the scalar sc[0], Hz) with the decay register (-1: the
+// scalar sc[1], samples to -60 dB); object: the node (see
+// mb_plan_resonator).
+static void run_resonator(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan resonators are real");
+	if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan resonator object at word %zu", pc);
+	if (op[6] < 0 || (size_t)op[6] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan resonator scalars at word %zu", pc);
+	if (op[7] != 0 && op[7] != 1) rb_raise(rb_eArgError, "Bad plan resonator kind at word %zu", pc);
+	if ((op[3] >= 0 && !R->p[op[3]]) || (op[4] >= 0 && !R->p[op[4]])) rb_raise(rb_eArgError, "A planned resonator's input is missing at word %zu", pc);
+	const double *s = sc + op[6];
+	struct mb_signal in, freq, decay;
+	op_signal(&in, R, nregs, op[2], 0.0, pc);
+	op_signal(&freq, R, nregs, op[3], s[0], pc);
+	op_signal(&decay, R, nregs, op[4], s[1], pc);
+	mb_plan_resonator(R->p[op[1]], &in, &freq, &decay, op[7], rb_ary_entry(objects, op[5]), n);
+}
+
 // OP_PAN_GAIN: dst, a, law, side, sc: one side's gain (side 0 left, 1
 // right) of a pan law for the real positions a, as FastArithmetic.pan and
 // Numo compute ChannelMixer::PanLaws on float32 buffers: the position (times
@@ -1590,6 +1614,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 
 		case OP_PAN_GAIN:
 			run_pan_gain(op, pc, R, sc, nscalars, n);
+			break;
+
+		case OP_RESONATOR:
+			run_resonator(op, pc, R, nregs, sc, nscalars, objects, n);
 			break;
 
 		case OP_TAP: {
@@ -1860,6 +1888,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("mix")), INT2NUM(OP_MIX));
 	rb_hash_aset(h, ID2SYM(rb_intern("decimate")), INT2NUM(OP_DECIMATE));
 	rb_hash_aset(h, ID2SYM(rb_intern("pan_gain")), INT2NUM(OP_PAN_GAIN));
+	rb_hash_aset(h, ID2SYM(rb_intern("resonator")), INT2NUM(OP_RESONATOR));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
