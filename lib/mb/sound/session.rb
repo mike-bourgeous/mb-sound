@@ -1,6 +1,7 @@
 require 'monitor'
 
 require_relative 'launch_point'
+require_relative 'gc_quiet'
 
 require_relative 'session/journal'
 require_relative 'session/names'

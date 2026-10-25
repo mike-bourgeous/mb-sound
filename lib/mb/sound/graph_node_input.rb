@@ -54,14 +54,6 @@ module MB
         nil
       end
 
-      # Lets nodes that set up on their first buffer (#prime_render, e.g.
-      # Drums::Voice's skipping) do it now, on the thread that builds the
-      # graph (Session#add, before the graph can start; alloc-2).
-      def prime_nodes
-        graph(include_tees: true).each { |n| n.prime_render if !n.equal?(self) && n.respond_to?(:prime_render) }
-        nil
-      end
-
       # The [nodes, ids] #prime_node_set listed, if listed at +structure+.
       def primed_node_set(structure)
         s = @node_set

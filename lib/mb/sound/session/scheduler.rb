@@ -533,8 +533,12 @@ module MB
           old_deadline = Thread.current[:mb_sound_schedule_deadline]
           Thread.current[:mb_sound_schedule_deadline] = deadline && [@session, entry.description]
           begin
-            Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
-              entry.block.call
+            # (builds allocate in bursts: no major GC stopping the render
+            # thread meanwhile; see GCQuiet)
+            GCQuiet.during do
+              Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
+                entry.block.call
+              end
             end
           ensure
             Thread.current[:mb_sound_schedule_deadline] = old_deadline
@@ -547,8 +551,10 @@ module MB
             MB::Sound.live_error(LateBlock.new(message))
           else
             # The block's commands are one undo step (see Session#undo)
-            Session.with_context(session: @session, time: time, source: :schedule) do
-              @session.command(entry.description) { batch.each(&:call) }
+            GCQuiet.during do
+              Session.with_context(session: @session, time: time, source: :schedule) do
+                @session.command(entry.description) { batch.each(&:call) }
+              end
             end
           end
 
