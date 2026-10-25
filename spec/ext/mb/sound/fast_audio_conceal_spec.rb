@@ -2,6 +2,13 @@
 # on synthetic ring states against its Ruby reference, what it plays, and
 # the Playback device path on miniaudio's null backend.
 RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
+  # The C kernel and the Ruby reference run the same operations in the same
+  # order (float32 history and output, double arithmetic), so they agree to
+  # within float32 rounding; measured identical on x86-64 (GCC, no FMA
+  # contraction by default).  A compiler that contracts multiply-adds may
+  # differ by a rounding step, well under this tolerance.
+  def mirror_tolerance = 1e-6
+
   let(:rate) { 48000 }
   let(:conceal) { MB::Sound::Concealment }
 
@@ -41,7 +48,10 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       rr = r.process(real, frames, quiet: quiet)
       channels.times { |k| co[k] << cc[k]; ro[k] << rr[k] }
     end
-    expect(c.state).to eq(r.state)
+    cs = c.state
+    rs = r.state
+    expect(cs.except(:gain)).to eq(rs.except(:gain))
+    expect(cs[:gain]).to be_within(mirror_tolerance).of(rs[:gain])
     [co.map { |x| SpecBuffers.join(x) }, ro.map { |x| SpecBuffers.join(x) }, c]
   end
 
@@ -62,7 +72,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     }.each do |name, (spec, n, ch)|
       it "plays the same samples (#{name})" do
         co, ro, = run_both(conceal.settings(spec), stutter(n), channels: ch)
-        ch.times { |k| expect((co[k] - ro[k]).abs.max).to eq(0) }
+        ch.times { |k| expect((co[k] - ro[k]).abs.max).to be <= mirror_tolerance }
         expect(co[0].abs.max).to be > 0.3
       end
     end
@@ -70,13 +80,13 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     it 'plays the same samples at 44.1 kHz with one-frame pulls over a gap edge' do
       pulls = Array.new(60) { [128, 128, false] } + Array.new(40) { [0, 1, false] } + Array.new(30) { [1, 1, false] }
       co, ro, = run_both(conceal.settings(:repeat), pulls, rate: 44100)
-      2.times { |k| expect((co[k] - ro[k]).abs.max).to eq(0) }
+      2.times { |k| expect((co[k] - ro[k]).abs.max).to be <= mirror_tolerance }
     end
 
     it 'plays the same samples when the writer marked the end' do
       pulls = Array.new(40) { [256, 256, false] } + Array.new(3) { [0, 256, false] } + Array.new(10) { [0, 256, true] }
       co, ro, c = run_both(conceal.settings(:repeat), pulls)
-      2.times { |k| expect((co[k] - ro[k]).abs.max).to eq(0) }
+      2.times { |k| expect((co[k] - ro[k]).abs.max).to be <= mirror_tolerance }
       expect(c.state[:faded]).to eq(true)
     end
   end

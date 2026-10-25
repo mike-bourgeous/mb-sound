@@ -14,8 +14,9 @@ module MB
     # and [:concealed_gaps] count what was filled.
     #
     # Settings (DeviceOutput's +:conceal+, or AUDIO_CONCEAL):
-    #   :repeat  - the default (DEFAULTS)
-    #   :silence - silence while the queue is dry (the old behavior)
+    #   :silence - silence while the queue is dry (the old behavior; the
+    #              default for now, see DEFAULT)
+    #   :repeat  - grains (DEFAULTS)
     #   :fixed   - loop the latest grain (one fixed length; comparisons only:
     #              it buzzes at rate / length)
     #   { mode: :repeat, grain: 0.02..0.06, history: 0.12, fade: 1.0, ... }
@@ -43,17 +44,23 @@ module MB
 
       NAMES = %i[repeat silence fixed].freeze
 
+      # What DeviceOutput plays in an underrun without +:conceal+ or
+      # AUDIO_CONCEAL: silence until the maintainer picks a default from the
+      # listening set (audio-safety-1, 2026-10-25); :repeat is the candidate.
+      DEFAULT = :silence
+
       # Raised for unknown settings.
       class Error < ArgumentError; end
 
       # The settings Hash (every key of DEFAULTS) for +spec+ (nil for
-      # AUDIO_CONCEAL or :repeat; a name from NAMES; a String like
+      # AUDIO_CONCEAL or DEFAULT; true for :repeat; a name from NAMES; a String like
       # AUDIO_CONCEAL's; or a Hash of overrides, with +:grain+ a Range or one
       # length).
       def self.settings(spec = nil)
         spec = ENV['AUDIO_CONCEAL'] if spec.nil? && ENV['AUDIO_CONCEAL'] && !ENV['AUDIO_CONCEAL'].empty?
         spec = parse_string(spec) if spec.is_a?(String)
-        spec = :repeat if spec.nil? || spec == true
+        spec = DEFAULT if spec.nil?
+        spec = :repeat if spec == true
         spec = :silence if spec == false
         spec = { mode: spec } if spec.is_a?(Symbol)
         raise Error, "Concealment settings must be a name (#{NAMES.join(', ')}) or a Hash (got #{spec.inspect})" unless spec.is_a?(Hash)
