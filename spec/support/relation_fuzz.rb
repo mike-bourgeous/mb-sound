@@ -33,14 +33,13 @@ module RelationFuzz
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the code, 'reason'], ...] }: skipped, counted.
-  PAN_HOLD = [/\.pan\(.*\.sample_hold\(/, 'plans give a wrong right channel for a pan over a sum with an ending input, read per channel (test-tiers-1 report, 2026-10-25)'].freeze
   HARMONICS = [/sweep\("harmonics \(HarmonicTable\)"\)/, 'harmonics(update: 64) differs by up to 0.3 at other buffer sizes (test-tiers-1 report)'].freeze
   # :fast sines driving discrete decisions: decimate's hold instants move
   # by a sample (steps up to 0.02), and sah's LFO clock fires on other
   # samples, so its random draws differ (RMS -15 dB); :exact is identical
   FAST_DECISIONS = [/decimate\(\d+\.hz\.lfo|sweep\("sample_hold"\)|\.sah\(/, ':fast sines feeding discrete decisions (test-tiers-1 report)'].freeze
   KNOWN = {
-    plan_exact: [PAN_HOLD], plan_fast: [PAN_HOLD, FAST_DECISIONS], plan_check: [PAN_HOLD],
+    plan_fast: [FAST_DECISIONS],
     buffer_size: [HARMONICS],
   }.freeze
 
@@ -147,7 +146,10 @@ module RelationFuzz
       when 14 then [:pan, control(rng, -1, 1)]
       when 15 then rng.rand < 0.5 ? [:abs] : [:until, [0.011, 0.0313, 0.05][rng.rand(3)]]
       when 16 then [:period_delay, [110, 220, 331][rng.rand(3)]]
-      else [:sample_hold]
+      # (per-channel triggers on a stereo input: same-shape channel
+      # regions grouped over one pan's outputs; fuzz-fixes-1's lane group
+      # rebuild bug)
+      else [:sample_hold, kid.stereo? && rng.rand < 0.5]
       end
     # (a stereo bundle under a mono-only step: mix it down first)
     kid = Expr.new(:mixdown, [], [kid]) if kid.stereo? && %i[pan feedback].include?(op.first)
@@ -195,7 +197,9 @@ module RelationFuzz
     when :ease then "#{k[0]}.ease(#{a[0].inspect})"
     when :formant then "#{k[0]}.formant(#{a[0].inspect})"
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"
-    when :sample_hold then "#{k[0]}.sample_hold(seq(C4.n64, E4.n64).loop.notes.trigger)"
+    when :sample_hold
+      trig = 'seq(C4.n64, E4.n64).loop.notes.trigger'
+      "#{k[0]}.sample_hold(#{a[0] ? "stereo(#{trig}, #{trig})" : trig})"
     else raise ArgumentError, "unknown kind #{e.kind}"
     end
   end

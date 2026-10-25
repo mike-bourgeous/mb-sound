@@ -334,12 +334,18 @@ module MB
         # count to run, or :done with the block's result in #result (an
         # unfused block, a rebuilt installation's output, or nil once the
         # region's graph ended).
-        def prepare(count)
+        #
+        # +in_group+: called by a LaneGroup running the block for its
+        # members; returns :skip for a member its replaced region's group
+        # already delivered in this block (see LaneGroup#hand_off).
+        def prepare(count, in_group: false)
           # A block a lane group computed for this root's replaced region
           # (see LaneGroup#hand_off)
           if (handoff = @root.instance_variable_get(:@plan_handoff))
             @root.instance_variable_set(:@plan_handoff, nil)
-            buf = handoff[0].take_handoff(handoff[1], count)
+            buf = handoff[0].take_handoff(handoff[1], count, skip_ok: in_group)
+            return :skip if buf.equal?(LaneGroup::SKIP_BLOCK)
+
             unless buf.equal?(LaneGroup::NO_HANDOFF)
               @frame = handoff[1].planned_frame(buf) if @multi
               @result = buf

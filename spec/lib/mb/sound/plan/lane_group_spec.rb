@@ -382,6 +382,40 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       expect(b[1]).to eq(a[1])
     end
 
+    # fuzz-fixes-1 (the relation fuzzer's find): two same-shape per-channel
+    # regions read the outputs of one pan region.  In the first block the
+    # sum's ended input rebuilds the installation in the middle of the
+    # group's run, after the left channel was delivered; the right channel's
+    # read ran the new group, which computed the left channel's next block
+    # early, reading the pan's left output again, so the pan computed a new
+    # frame and the right channel got it a block early (off by 0.5 from
+    # sample 0, C and Ruby mirror alike).  The new group now leaves out
+    # members delivered in the block still in progress.
+    [:c, :ruby].each do |engine|
+      it "leaves a member delivered before a rebuild out of the new group's block (#{engine})" do
+        trig = -> { MB::Sound.seq(MB::Sound::C4.n64, MB::Sound::E4.n64).loop.notes.trigger }
+        build = -> {
+          MB::Sound.rewind
+          (220.hz.saw.at(0.5) + 0.1.constant.until(400.samples)).pan(0.076).sample_hold(MB::Sound.stereo(trig.(), trig.()))
+        }
+        old = [MB::Sound::Plan.engine, MB::Sound::Plan.enabled]
+        MB::Sound::Plan.lanes = true
+        MB::Sound::Plan.engine = engine
+        MB::Sound::Plan.enabled = false
+        ref = (g = build.(); 6.times.map { g.outputs.map { |o| o.sample(800).to_a } })
+        MB::Sound::Plan.enabled = true
+        g = build.()
+        inst = MB::Sound::Plan.install(g)
+        got = 6.times.map { g.outputs.map { |o| o.sample(800).to_a } }
+        expect(got[0][1][0]).to be_within(1e-6).of(0.1 * Math.sin(1.076 * Math::PI / 4))
+        expect(got).to eq(ref)
+        expect(inst.lane_groups.groups.sum(&:lane_runs)).to be > 0 if engine == :c
+      ensure
+        MB::Sound::Plan.engine, MB::Sound::Plan.enabled = old
+        MB::Sound.rewind
+      end
+    end
+
     it 'regroups after a rebuild' do
       b = make_bundle(true)
       inst = MB::Sound::Plan.install(b)

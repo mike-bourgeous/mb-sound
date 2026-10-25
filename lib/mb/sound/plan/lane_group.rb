@@ -117,19 +117,35 @@ module MB
         # computed it a second time, advancing noise and free-running
         # states twice (fixes-8: a lane's `band * 0.5` left unread made
         # its band a separate region).
+        #
+        # A member already delivered in a block still in progress (others
+        # not yet read) is marked too: a new group running that block for
+        # another member must leave it out (see #take_handoff), else it
+        # computed the member's next block early, reading a multi-output
+        # input one frame ahead of its other readers (fuzz-fixes-1: a pan's
+        # right channel read a frame late after a sum dropped its ended
+        # input).
         def hand_off(region)
           idx = @index[region]
-          return if idx.nil? || (!@running && @delivered[idx])
+          return if idx.nil? || (@delivered[idx] && !in_progress?)
 
           region.root.instance_variable_set(:@plan_handoff, [self, region])
         end
 
+        # What #take_handoff returns (with +skip_ok+) for a member already
+        # delivered in the block still in progress: its new region leaves
+        # this block out.
+        SKIP_BLOCK = Object.new.freeze
+
         # The block of replaced member +region+ for a +count+-sample read
         # (see #hand_off), or NO_HANDOFF if the group has none waiting for
-        # it.
-        def take_handoff(region, count)
+        # it.  With +skip_ok+ (a new lane group running the block for one
+        # of its other members), SKIP_BLOCK if the member was delivered in
+        # the block still in progress.
+        def take_handoff(region, count, skip_ok: false)
           idx = @index[region]
-          return NO_HANDOFF if idx.nil? || @delivered[idx] || @count != count
+          return NO_HANDOFF if idx.nil? || @count != count
+          return (skip_ok && in_progress? ? SKIP_BLOCK : NO_HANDOFF) if @delivered[idx]
 
           case @status[idx]
           when :done
@@ -140,6 +156,17 @@ module MB
           else
             NO_HANDOFF
           end
+        end
+
+        # True if the group's current block is in progress: running, or
+        # some member not yet delivered.
+        def in_progress?
+          @running || @delivered.any?(false)
+        end
+
+        # True while the group is running a block (#run).
+        def running?
+          @running
         end
 
         private
@@ -216,9 +243,15 @@ module MB
                 @results[i] = nil
               end
               unless status[i] # run already (asked for during the run)
-                n = r.prepare(count)
+                n = r.prepare(count, in_group: true)
                 unless status[i] # asked for while preparing (inside it)
-                  if n.is_a?(Integer)
+                  if n.equal?(:skip)
+                    # Delivered by its replaced region's group in this block
+                    # (see #hand_off): the next read runs the next block
+                    status[i] = :done
+                    @results[i] = nil
+                    @delivered[i] = true
+                  elsif n.is_a?(Integer)
                     status[i] = :ready
                     @n[i] = n
                     ready << i
