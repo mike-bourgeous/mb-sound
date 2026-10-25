@@ -108,6 +108,8 @@ module MB
             @sample_rate = @input.sample_rate.to_f
             @sampled = Array.new(@frequencies.length + 1, false)
             @frame = nil
+            @buffer_sets = nil # (Dynamics::Framed.next_buffers)
+            @buffer_index = nil
             build
 
             super(Array.new(@frequencies.length + 1) { |i| Band.new(owner: self, index: i) })

@@ -52,6 +52,8 @@ module MB
             @detectors = @link ? 1 : @inputs.length
             @sampled = Array.new(@inputs.length, false)
             @frame = nil
+            @buffer_sets = nil # (Framed.next_buffers)
+            @buffer_index = nil
             @ended = false
             @flushing = false
             @flushed = 0

@@ -344,12 +344,17 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
         expect(a.to_a.uniq).to eq(ref.sample(512).to_a.uniq)
       end
 
-      counts = [nodes, plain].map { |list|
+      count = ->(list) {
         GC.start
         before = GC.stat(:total_allocated_objects)
         20.times { list.each { |n| n.sample(512) } }
         GC.stat(:total_allocated_objects) - before
       }
+      # The first GC.start/GC.stat window of a process allocates a few
+      # objects inside Ruby's GC code, which whichever list goes first
+      # would count (this file alone failed by 3); measure after a warm-up
+      count.call(plain)
+      counts = [nodes, plain].map(&count)
       expect(counts[0]).to be_within(2).of(counts[1]) # 60 reads each; GC noise
     end
 
