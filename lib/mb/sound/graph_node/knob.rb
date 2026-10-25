@@ -2,8 +2,8 @@ module MB
   module Sound
     module GraphNode
       # A named value that a performer turns (contract K6 in
-      # design/notes/arrangement.md): `knob :cut, 800, range: 100..8000,
-      # curve: :exp` in the console, then `knob(:cut)` wherever a graph
+      # design/notes/arrangement.md): `knob :cut, (100.hz..8000.hz).at(800.hz)`
+      # in the console, then `knob(:cut)` wherever a graph
       # takes a number or a node, and `turn :cut, 3000, over: 2.bars` to move
       # it.  One object everywhere: its Spec is ControlSpec-shaped (name,
       # default, range, curve, unit, cc, takeover), plans read it as a param
@@ -38,48 +38,96 @@ module MB
         include GraphNode
 
         # How a knob's value relates to a 0..1 position (its scale for
-        # ramps, MIDI controllers, and snapshot crossfades).
-        CURVES = { linear: :linear, lin: :linear, exp: :exp, exponential: :exp, log: :exp }.freeze
+        # ramps, MIDI controllers, and snapshot crossfades): MB::Sound::Param's
+        # curve names (canonical :linear and :exp; :lin, :exponential, :log,
+        # and :db are aliases).
+        CURVES = MB::Sound::Param::CURVES.reject { |_, c| c == :switch }.freeze
 
         # How a MIDI controller takes over: :pickup waits until the
         # controller passes the knob's position (no jumps), :jump moves the
         # knob right away.
         TAKEOVERS = [:pickup, :jump].freeze
 
-        # The knob's description, shaped like MIDI::ControlSpec (contract
-        # K6): +name+ (a Symbol), +default+ (the starting value), +range+
-        # (a Range of Floats), +curve+ (:linear or :exp), +unit+ (a String
-        # for display, or nil), +cc+ (a MIDI controller number, or nil),
-        # +takeover+ (:pickup or :jump), and +smooth+ (seconds over which a
-        # turn without +over:+ glides, a declick; 0 for exact jumps).
-        class Spec < Data.define(:name, :default, :range, :curve, :unit, :cc, :takeover, :smooth)
-          def initialize(name:, default: nil, range: nil, curve: :linear, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS)
+        # The knob's description, built from an MB::Sound::Param (+param+,
+        # the declaration: typed values, names-table ranges, checks) and
+        # shaped like MIDI::ControlSpec (contract K6): +name+ (a Symbol),
+        # +default+ (the starting value as a plain number in the param's
+        # base unit: Hz for 2400.hz, seconds, the gain of -12.db), +range+
+        # (a Range of Floats in that unit; 0..1 when the declaration has
+        # none), +curve+ (:linear or :exp), +unit+ (a String for display,
+        # or nil), +cc+ (a MIDI controller number, or nil), +takeover+
+        # (:pickup or :jump), and +smooth+ (seconds over which a turn
+        # without +over:+ glides, a declick; 0 for exact jumps).
+        # +description:+ goes into the Param (rack knobs and document knob
+        # lines have one).  +clamp: false+ lets the knob's default, turns,
+        # follows, and modulation leave its range (the range still scales
+        # controllers and the TUI; "sometimes going out of bounds is
+        # interesting").
+        #
+        # The default may be a typed value or a ranged default:
+        # `Spec.new(name: :cut, default: (150.hz..8000.hz).at(2400.hz))`.
+        class Spec < Data.define(:name, :default, :range, :curve, :unit, :cc, :takeover, :smooth, :param)
+          def initialize(name:, default: nil, range: nil, curve: nil, unit: nil, cc: nil, takeover: :pickup, smooth: Session::Fades::DECLICK_SECONDS, description: nil, clamp: true, param: nil)
             raise ArgumentError, "Knob names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-            range_given = !range.nil?
-            range ||= 0.0..1.0
-            raise ArgumentError, "Range must be a Range of numbers (got #{range.inspect})" unless range.is_a?(Range) && range.begin.is_a?(Numeric) && range.end.is_a?(Numeric)
-            lo = range.begin.to_f
-            hi = range.end.to_f
-            raise ArgumentError, "Range must go up (got #{range.inspect})" unless hi > lo
-            c = CURVES[curve] or raise ArgumentError, "Unknown knob curve #{curve.inspect} (#{CURVES.keys.map(&:inspect).join(', ')})"
-            raise ArgumentError, "An exponential knob's range can't include 0 (got #{range.inspect})" if c == :exp && lo * hi <= 0
+            if curve && !CURVES.key?(curve)
+              raise ArgumentError, "Unknown knob curve #{curve.inspect} (#{CURVES.keys.map(&:inspect).join(', ')})"
+            end
+            param ||= MB::Sound::Param.new(name: name, default: default, range: range, curve: curve, unit: unit, cc: cc, description: description, clamp: clamp)
+            raise ArgumentError, "Knob #{name.inspect} holds numbers, not #{MB::Sound::Param.describe_type(param.type)}" unless param.numeric? || (param.default.nil? && param.range.nil?)
+            raise ArgumentError, "Knob #{name.inspect} needs a range with two ends (got #{param.range.inspect})" if param.range && !param.bounded?
             raise ArgumentError, "Takeover must be #{TAKEOVERS.map(&:inspect).join(' or ')} (got #{takeover.inspect})" unless TAKEOVERS.include?(takeover)
-            raise ArgumentError, "cc: must be 0..127 (got #{cc.inspect})" unless cc.nil? || (cc.is_a?(Integer) && cc.between?(0, 127))
 
-            default = lo if default.nil?
+            r = param.magnitude_range || (0.0..1.0)
+            lo = r.begin
+            hi = r.end
+            raise ArgumentError, "Range must go up (got #{param.range.inspect})" unless hi > lo
+            c = param.curve
+            c = :linear if c == :switch # (a pedal's declaration as a knob: turned through its range)
+
+            default = param.default.nil? ? lo : MB::Sound::Param.magnitude(param.default)
             raise ArgumentError, "Default must be a number (got #{default.inspect})" unless default.is_a?(Numeric) && default.real?
-            if !range_given && !default.to_f.between?(lo, hi)
+            if param.range.nil? && param.clamp && !default.to_f.between?(lo, hi)
               # (ux-1 item 30: `knob(:drive, 10)` was silently 1)
               MB::Sound.live_error(ArgumentError.new(
                 "Knob #{name.inspect} starts at #{Knob.number(default)}, outside the default range 0..1, so it would be limited to " \
                 "#{Knob.number(default.to_f.clamp(lo, hi))}; give it a range: knob #{name.inspect}, #{Knob.number(default)}, range: #{Spec.suggest_range(default)}"
               ))
             end
-            default = default.to_f.clamp(lo, hi)
+            default = param.clamp ? default.to_f.clamp(lo, hi) : default.to_f
             smooth = MB::Sound::Length.seconds(smooth).to_f
             raise ArgumentError, "smooth: must be 0 or more seconds (got #{smooth})" unless smooth >= 0
 
-            super(name: name, default: default, range: (lo..hi).freeze, curve: c, unit: unit&.to_s&.freeze, cc: cc, takeover: takeover, smooth: smooth)
+            unit = param.unit || (MB::Sound::Param::TYPE_UNITS[param.type] if param.type != :number)
+            super(name: name, default: default, range: (lo..hi).freeze, curve: c, unit: unit&.to_s&.freeze, cc: param.cc, takeover: takeover, smooth: smooth, param: param)
+          end
+
+          # True when the declaration was a typed value (2400.hz rather
+          # than 2400.0): #to_ruby prints it typed.
+          def typed?
+            v = param.default.nil? ? param.range&.begin : param.default
+            !v.nil? && !(v.is_a?(Numeric) && !v.is_a?(MB::Sound::Decibels))
+          end
+
+          # The same Spec with +changes+ (the knob's options: default:,
+          # range:, curve:, unit:, cc:, takeover:, smooth:): a new
+          # declaration when any of the param's fields change.
+          def respec(**changes)
+            keep = changes.slice(:takeover, :smooth)
+            decl = changes.except(:takeover, :smooth)
+            return Spec.new(**to_h.merge(keep)) if decl.empty?
+            fields = {
+              default: param.typed(default), range: param.implied ? nil : param.range, curve: param.curve == param.default_curve ? nil : param.curve,
+              unit: param.unit, cc: cc, description: param.description, clamp: param.clamp,
+            }
+            if decl.key?(:range) && !decl.key?(:default) && decl[:range].is_a?(Range) &&
+               MB::Sound::Param.type_of(decl[:range].begin || decl[:range].end) != MB::Sound::Param.type_of(fields[:default])
+              fields[:default] = default # (a plain range for a typed knob: its plain value)
+              fields[:unit] = unit unless decl.key?(:unit)
+            end
+            if decl.key?(:default) && !decl.key?(:range) && MB::Sound::Param.type_of(decl[:default]) == :number && typed?
+              decl = decl.merge(default: param.typed(decl[:default])) # (a plain number for a typed knob: in its base unit)
+            end
+            Spec.new(name: name, takeover: takeover, smooth: smooth, **fields.merge(decl))
           end
 
           # The 0..1 position of +value+ in the range (beyond 0..1 outside
@@ -119,32 +167,57 @@ module MB
             v >= 0 ? "0..#{Knob.number(mag)}" : "#{Knob.number(-mag)}..0"
           end
 
-          # +value+ limited to the range.
+          # +value+ limited to the range (as a Float as it is, for a knob
+          # declared with clamp: false).
           def clamp(value)
-            value.to_f.clamp(range.begin, range.end)
+            param.clamp ? value.to_f.clamp(range.begin, range.end) : value.to_f
           end
 
-          # A MIDI::ControlSpec for this knob's controller (for
-          # MIDI::ControlMap and ACID XML), or nil without a +cc+.
-          def to_control_spec
-            return nil if cc.nil?
-            raw = (position(default) * 127).round.clamp(0, 127)
-            MIDI::ControlSpec.new(
-              number: cc, name: name.to_s, range: range, default: raw, curve: curve == :exp ? :exponential : :linear,
+          # True unless the knob was declared with clamp: false.
+          def clamp?
+            param.clamp
+          end
+
+          # A MIDI::ControlSpec for this knob's controller +number+ (its
+          # +cc+ by default; for MIDI::ControlMap and ACID XML), or nil
+          # without one.
+          def to_control_spec(number = cc)
+            return nil if number.nil?
+            MIDI::ControlSpec.from_param(
+              param, number: number, range: range, default_value: default, name: name.to_s,
               description: "Knob #{name.inspect}#{unit ? " (#{unit})" : ''}"
             )
           end
 
-          # The console line that defines this knob.
-          def to_ruby
-            parts = [name.inspect, Knob.number(default)]
-            parts << "range: #{Knob.number(range.begin)}..#{Knob.number(range.end)}" unless range == (0.0..1.0)
-            parts << "curve: #{curve.inspect}" unless curve == :linear
-            parts << "unit: #{unit.inspect}" if unit
+          # The arguments that declare this knob at +value+ (its default
+          # unless given; a base-unit number), as text (+literal+ prints
+          # values; Param.literal unless given): the name (+name+ unless
+          # nil), the value typed as declared, in a ranged default when the
+          # declaration has a range (`(150.hz..8000.hz).at(2400.hz)`), and
+          # the options that differ from their defaults (+cc+ the knob's
+          # controller, learned or declared; the description when
+          # +description+).  The same spelling for the console, recipes,
+          # and graph documents (format 5).
+          def call_args(value: default, cc: self.cc, literal: nil, name: self.name, description: false)
+            lit = literal || MB::Sound::Param.method(:literal)
+            v = param.typed(value)
+            v = v.round if param.stepped? && v.is_a?(Float) && v == v.round
+            parts = [name.to_sym.inspect]
+            parts << (param.range && !param.implied ? "(#{lit.(param.range)}).at(#{lit.(v)})" : lit.(v))
+            parts << "curve: #{param.curve.inspect}" unless param.curve == param.default_curve || (param.implied && MB::Sound::Param.name_entry(param.name)&.dig(:curve) == param.curve)
+            parts << "unit: #{lit.(param.unit)}" if param.unit && param.unit != MB::Sound::Param::TYPE_UNITS[param.type]
             parts << "cc: #{cc}" if cc
             parts << "takeover: #{takeover.inspect}" unless takeover == :pickup
-            parts << "smooth: #{Knob.number(smooth)}" unless smooth == Session::Fades::DECLICK_SECONDS
-            "knob #{parts.join(', ')}"
+            parts << "smooth: #{lit.(smooth)}" unless smooth == Session::Fades::DECLICK_SECONDS
+            parts << 'clamp: false' unless param.clamp
+            parts << "description: #{lit.(param.description)}" if description && param.description
+            parts
+          end
+
+          # The console line that defines this knob (`knob :cut,
+          # (150.hz..8000.hz).at(2400.hz)`; see #call_args).
+          def to_ruby
+            "knob #{call_args.join(', ')}"
           end
 
           def to_s
@@ -385,7 +458,7 @@ module MB
         # Changes the Spec (keeping the value and anything in progress),
         # e.g. when a knob is defined again.  +options+ as for Spec.
         def respec(**options)
-          @spec = Spec.new(**@spec.to_h.merge(options))
+          @spec = @spec.respec(**options)
           @cc = @spec.cc if options.key?(:cc)
           self
         end
@@ -401,7 +474,7 @@ module MB
         # range.  Turning the knob moves the center of the modulation
         # instead of fighting it.
         #
-        #     cut = knob(:cut, 800, range: 100..8000, curve: :exp)
+        #     cut = knob(:cut, (100.hz..8000.hz).at(800.hz))
         #     sig.lp4(cut.mod(0.2.hz.lfo, depth: 0.2))   # +-20% of the range around the knob
         def mod(source, depth: 0.25)
           raise ArgumentError, "mod needs a graph node to modulate by (got #{source.inspect})" unless source.respond_to?(:sample)
@@ -416,7 +489,7 @@ module MB
                     else
                       base + source * (depth.to_f * (hi - lo))
                     end
-            moved.aclip(lo, hi)
+            @spec.clamp? ? moved.aclip(lo, hi) : moved
           }
         end
 
@@ -493,7 +566,7 @@ module MB
         # MIDI controllers this knob listens to (see MIDI::ControlMap): its
         # ControlSpec if it has a controller.
         def control_specs
-          s = (@cc == @spec.cc ? @spec : @spec.with(cc: @cc)).to_control_spec
+          s = @spec.to_control_spec(@cc)
           s ? [s] : []
         end
 
@@ -894,7 +967,7 @@ module MB
             buf = buf.concatenate(buf.class.new(n - buf.length).fill(last))
           end
           return seg.map.call(Numo::DFloat.cast(buf)) if seg.map
-          buf.clip(@spec.range.begin, @spec.range.end)
+          @spec.clamp? ? buf.clip(@spec.range.begin, @spec.range.end) : buf
         end
 
         # Reads controller events for frames [+frame+, +frame+ + +count+)

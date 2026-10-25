@@ -244,7 +244,7 @@ module MB
         # live keyboard's knobs move its own transforms), else on the
         # Session's default MIDI input (a clip's transforms steered from a
         # controller), else +default+ (a raw value, 0 by default), mapped
-        # onto +range+ with +curve+ (:linear, :exponential, or :switch; see
+        # onto +range+ with +curve+ (:linear, :exp, or :switch; see
         # ControlSpec#value).  +channel+ (0-based) listens to one channel
         # only.
         class CC < Base

@@ -1,10 +1,10 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 4,
+graph 5,
   name: "funk_clav",
   kind: :synth,
-  saved: "2026-10-17T17:18:16Z",
-  mb_sound: "0.12.0.usegit (47598381)",
+  saved: "2026-10-24T18:49:45Z",
+  mb_sound: "0.12.0.usegit (97de948a)",
   from: "bin/synths/funk.rb",
   description: "Funk patch :clav from bin/synths/funk.rb, first made by Tiko Marvell, a fictional funk / neo-soul live looper, for the set \"Loop Church\" (bin/songs/loop_church.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-looper).",
   options: { patch: :clav, dub: 0.0, keep: 0.82 }

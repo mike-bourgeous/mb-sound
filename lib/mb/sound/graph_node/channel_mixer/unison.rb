@@ -37,8 +37,8 @@ module MB
         #     ChannelMixer::Unison.new([a, b, c], centers: [1], mix: 0.3)
         class Unison < ChannelMixer
           channels :any => :any
-          param :spread, default: 0, range: 0..1
-          param :mix, default: 1, range: 0..2
+          param :spread, default: 0, range: 0.0..1.0
+          param :mix, default: 1, range: 0.0..2.0
 
           # Side copies play at weight mix ** MIX_EXPONENT (see the class
           # description): a dB-like knob, -12 dB at 0.5 and +12 dB at 2.

@@ -40,7 +40,7 @@ module MB
     end
 
     Help::Sheet.group :perform do
-      line { knob :cut, 800, range: 100..8000, curve: :exp }
+      line { knob :cut, (100.hz..8000.hz).at(800.hz) }
       line { turn :cut, 4000, over: 2.bars }
       line { snap :a; recall :a, over: 4.bars }
       line('next MIDI cc') { learn :cut }

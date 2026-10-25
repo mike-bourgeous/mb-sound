@@ -22,8 +22,8 @@ module MB
         #     bg 220.hz.saw.at(0.3).place(x: 2.hz.lfo, y: 0.3.hz.lfo)  # circling
         class Position < ChannelMixer
           channels 1 => 2
-          param :x, default: 0, range: -1..1
-          param :y, default: 1, range: -1..1
+          param :x, default: 0, range: -1.0..1.0
+          param :y, default: 1, range: -1.0..1.0
           option :law, default: :equal_power, values: PanLaws::LAWS
 
           def gains_for(x:, y:)

@@ -1,16 +1,16 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 4,
+graph 5,
   name: "reed_piano",
   kind: :synth,
-  saved: "2026-10-17T17:18:45Z",
-  mb_sound: "0.12.0.usegit (47598381)",
+  saved: "2026-10-24T18:49:56Z",
+  mb_sound: "0.12.0.usegit (97de948a)",
   from: "bin/synths/electric_pianos.rb",
   description: "Reed piano (Wurlitzer-style FM) from bin/synths/electric_pianos.rb, made in patches-2 (2026-10-13) as a closer-to-physical alternative to the jungle keys (jungle_keys_voice in bin/synths/jungle.rb, from the persona panel experiment).",
   options: { patch: :reed, amp: nil, tremolo: 0.3 }
 inputs midi: :notes
-param :bark, 1.0, range: 0.0..2.0, description: "Velocity-driven bark (FM index and pickup growl) scale"
-param :pickup, 1.0, range: 0.0..3.0, description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
+param :bark, (0.0..2.0).at(1.0), description: "Velocity-driven bark (FM index and pickup growl) scale"
+param :pickup, (0.0..3.0).at(1.0), description: "Pickup drive scale (follows velocity; the reed also grows on low keys; default tine 0.5, reed 1.0)"
 
 synth(midi, voices: 8, retrigger: :string) { |v|
   f = v.hz

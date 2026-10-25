@@ -198,6 +198,8 @@ module MB
           when Sequence::Duration
             text = Form.ruby_value(value)
             text.start_with?('MB::') ? GraphNode::Recipe::RubyWriter.new(nil).literal(value) : text # (1.n8)
+          when MB::Sound::Param::Ranged, MB::Sound::Pitch, MB::Sound::Length::Seconds, MB::Sound::Interval
+            MB::Sound::Param.literal(value) # ((150.hz..8000.hz).at(2400.hz))
           else
             value.inspect
           end
@@ -643,7 +645,7 @@ module MB
         end
 
         # A knob the scenes turn and roles' filter: options read (as
-        # MB::Sound.knob: `knob :cut, 2400, range: 150..8000, curve: :exp`).
+        # MB::Sound.knob: `knob :cut, (150.hz..8000.hz).at(2400.hz)`).
         def knob(name, default, **options)
           @knobs[name] = [default, options.freeze].freeze
         end

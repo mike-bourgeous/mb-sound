@@ -90,9 +90,9 @@ RSpec.describe('set documents', :aggregate_failures) do
     within(s) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
     text = io.dump(s.arrangement, name: 'demo')
     expect(text).to start_with('# mb-sound set document')
-    expect(text).to include('graph 4, name: "demo", kind: :set')
+    expect(text).to include('graph 5, name: "demo", kind: :set')
     expect(text).to include(<<~RUBY)
-      knob :cut, 900.0, range: 100.0..8000.0, curve: :exp, unit: "Hz"
+      knob :cut, (100..8000).at(900), curve: :exp, unit: "Hz"
 
       bpm 132
       master_gain 1.0
@@ -394,7 +394,7 @@ RSpec.describe('set documents', :aggregate_failures) do
 
     # Saved again as format 4: the sum says how it ends
     text = io.dump(s.arrangement, name: 'old')
-    expect(text).to include('graph 4, name: "old", kind: :set')
+    expect(text).to include('graph 5, name: "old", kind: :set')
     expect(text).to include('(110.hz.sine.at(0.1) + hit).ring(:first)')
     expect(text).to include('track :pad, (55.hz.triangle.at(0.1) + 82.5.hz.triangle.at(0.1)).ring(:first)')
 

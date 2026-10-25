@@ -268,10 +268,10 @@ module MB::Sound
     quant 1
 
     # Knobs (phase 3): named values the scenes, sections, and performer turn
-    knob :cut, 700, range: 200..6000, curve: :exp, unit: 'Hz' # the hook's lowpass
-    knob :space, 0.35, range: 0..1                           # the hook's delay send
-    knob :echo, 0.35, range: 0..0.85                         # the hook's delay feedback
-    knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'   # a master highpass (the breakdown's "cut")
+    knob :cut, (200.hz..6000.hz).at(700.hz) # the hook's lowpass
+    knob :space, 0.35, range: 0.0..1.0                           # the hook's delay send
+    knob :echo, 0.35, range: 0.0..0.85                        # the hook's delay feedback
+    knob :air, (20.hz..400.hz).at(20.hz)   # a master highpass (the breakdown's "cut")
     knob :morph, 0                                           # a crossfader between snapshots
 
     # (mastering-2: streaming at Apple Music's -16 LUFS, the maintainer's Bench pick)

@@ -55,3 +55,7 @@ Transforms work in event time, so a moving parameter answers "what is your value
 
 - Probabilistic blend between scales for keyboards (a note picks scale A or B by a knob, deterministic per note-on with counter-based dice keyed by the note); good for generators already (`Weights#blend`).
 - Per-degree staggered morph between any two scales (shared degrees stay; differing degrees switch at staggered thresholds with hysteresis), and ordering any set of scales by minimal pitch-set changes (a path where neighbours differ by few notes); `Knob#between(a, b)` calling a value's own `#blend`.
+
+## Params (param-1, 2026-10-24)
+
+`MIDI::ControlSpec` carries the `MB::Sound::Param` of its mapped value (`#param`; `design/notes/params.md`), and `ControlSpec.from_param(param, number:)` builds a spec from a declaration (knobs use it).  Curves are Param's canonical names: `:linear`, `:exp`, `:switch`, with `:exponential` (and `:log`, `:db`) accepted as aliases; `#curve` returns the canonical name.

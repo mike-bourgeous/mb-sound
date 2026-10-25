@@ -57,10 +57,10 @@ module MB
       # the drums' own kick
       clip :pump, grid(16, two_step).loop(align: :launch)
 
-      knob :cut, 2400, range: 150..8000, curve: :exp, unit: 'Hz'   # the Reese lowpass
-      knob :grit, 0.25, range: 0..1                                # the neuro crusher's wet share
-      knob :space, 0.4, range: 0..1                                # the pluck's delay send
-      knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'       # the master highpass
+      knob :cut, (150.hz..8000.hz).at(2400.hz)   # the Reese lowpass
+      knob :grit, 0.25, range: 0.0..1.0                                # the neuro crusher's wet share
+      knob :space, 0.4, range: 0.0..1.0                                # the pluck's delay send
+      knob :air, (20.hz..400.hz).at(20.hz)       # the master highpass
 
       # (levels and master drive rebalanced in patches-5, 2026-10-13, so the
       # master's limiter only catches peaks: the maintainer heard the mix

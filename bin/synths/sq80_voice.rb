@@ -96,7 +96,7 @@ module MB::Sound
       description: ->(p) { sq80_voice_description(p.patch) },
       patch: [:classic, Symbol, '-p', 'Patch to play (sq80_patches lists them)', SQ80.patch_names],
       voices: [nil, Integer, 'Voices (default: the patch\'s, 8 for classic)', 1..16],
-      cutoff: [nil, Float, 'Filter cutoff in Hz before modulation (classic 500)', 20..10000],
+      cutoff: [nil, Float, 'Filter cutoff in Hz before modulation (classic 500)', 20.0..10000.0],
       reso: [nil, Float, 'Resonance 0..1, CC 71 moves it (classic 0.4)', 0.0..1.0],
       drive_mode: [nil, Symbol, 'lp4 drive: feedback (soft-clipped resonance) or input (classic feedback)', [:feedback, :input]],
       drive: [nil, Float, 'lp4 drive amount (classic 1.5)', 0.1..10.0],

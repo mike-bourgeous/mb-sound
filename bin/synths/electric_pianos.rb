@@ -77,7 +77,7 @@
 #     bg :wurli, reed_piano_voice(seq(A3, C4, E4, G4).n8.vel(1.0).loop, tremolo: 0.2)
 #     bg :keys, tine_piano_voice(chords, drive: 1, level: 0.5)            # patches-2's hot amp
 #     bg :wurli, reed_piano_voice(chords, pickup: 1.5, pickup_key: 2)      # a dirtier reed, much grittier low down
-#     knob :amp, 1, range: 1..8; bg :keys, tine_piano_voice(chords, amp: knob(:amp))   # turn :amp, 6 for a crunchy suitcase
+#     knob :amp, 1.0, range: 1.0..8.0; bg :keys, tine_piano_voice(chords, amp: knob(:amp))   # turn :amp, 6 for a crunchy suitcase
 #     bg :keys, preset(:tine_crunch, midi: chords)                        # the crunchy extreme (amp 4); preset :tine_piano is clean
 
 require 'bundler/setup'

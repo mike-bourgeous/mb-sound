@@ -232,11 +232,11 @@ module MB::Sound
     bpm 174
     quant 1
 
-    knob :cut, 2400, range: 150..8000, curve: :exp, unit: 'Hz' # the Reese lowpass
-    knob :grit, 0.25, range: 0..1                              # the neuro crusher's wet share
-    knob :space, 0.4, range: 0..1                              # the pluck's delay send
-    knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'     # a master highpass
-    knob :lift, lift, range: 0..1                              # upward lift of the hall's tail in rests (buses)
+    knob :cut, (150.hz..8000.hz).at(2400.hz) # the Reese lowpass
+    knob :grit, 0.25, range: 0.0..1.0                              # the neuro crusher's wet share
+    knob :space, 0.4, range: 0.0..1.0                              # the pluck's delay send
+    knob :air, (20.hz..400.hz).at(20.hz)     # a master highpass
+    knob :lift, lift, range: 0.0..1.0                             # upward lift of the hall's tail in rests (buses)
 
     # A loud master: glue, then clip-then-limit, master bus at 0 dB.
     master_gain 1

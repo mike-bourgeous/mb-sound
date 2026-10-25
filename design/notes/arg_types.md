@@ -64,3 +64,7 @@ Decibels on clips are not in the table: clip velocities go through each patch's 
 | A preposition (`at`) means different things on different receivers; prose docs drift | one declared table per receiver, errors and help printed from it, a guard calling every row | docs and errors out of step with dispatch | adopted |
 | Recording an alias records the alias's name | aliases and prepositions call the canonical method unrecorded (they're outside the recorded surface: `Surface.mixin_surface` lists only `clocked`) | graphs printing several spellings of one call | adopted |
 | Tagging nodes with ivars would add shape variations | a weak identity table | `:performance` warnings from tags | adopted |
+
+## Params (param-1, 2026-10-24)
+
+`ArgTypes::Param` is `MB::Sound::Param` (`design/notes/params.md`), the one declaration record, widened with range, curve, unit, description, and cc; Signatures read the same `types`, `keyword`, `primary`, and `default` fields, and `types` defaults to the default's type.

@@ -55,7 +55,7 @@
 #     bg :drone, ambient_drone_voice(seq(D2.n1).loop) * 1.5
 #     bg :keys, ambient_koto_voice(seq(A4, R, R, D5, R, B4, R, R).n8.humanize(1.n64).loop, wear: 0.4)
 #     play 440.hz.square.then { |s| ambient_tape(s * 0.1, wear: 0.9) }   # the tape alone
-#     knob :spread, 0.7, range: 0..1; bg :gong, ambient_gong_voice(seq(D2.n1, R.n1, R.n1).loop, spread: knob(:spread))
+#     knob :spread, 0.7, range: 0.0..1.0; bg :gong, ambient_gong_voice(seq(D2.n1, R.n1, R.n1).loop, spread: knob(:spread))
 #     turn :spread, 1, over: 2      # widen the gong's shimmer while it rings (0 for mono)
 
 require 'bundler/setup'

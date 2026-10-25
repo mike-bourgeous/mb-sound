@@ -398,11 +398,11 @@ module MB::Sound
     bpm 125
     quant 1
 
-    knob :cut, 16000, range: 200..16000, curve: :exp, unit: 'Hz' # the talking bass's lowpass
-    knob :space, 0.3, range: 0..1                              # the chant's delay send
-    knob :echo, 0.3, range: 0..0.85                            # the chant's delay feedback
-    knob :air, 20, range: 20..400, curve: :exp, unit: 'Hz'     # a master highpass (the breakdown's "cut")
-    knob :sub, 1, range: 0..1                                  # the talking bass's sine sub (out in the tease)
+    knob :cut, (200.hz..16000.hz).at(16000.hz) # the talking bass's lowpass
+    knob :space, 0.3, range: 0.0..1.0                              # the chant's delay send
+    knob :echo, 0.3, range: 0.0..0.85                           # the chant's delay feedback
+    knob :air, (20.hz..400.hz).at(20.hz)     # a master highpass (the breakdown's "cut")
+    knob :sub, 1.0, range: 0.0..1.0                                  # the talking bass's sine sub (out in the tease)
 
     # A mastered track: the master bus at 0 dB, glue, a true-peak limiter
     master_gain 1

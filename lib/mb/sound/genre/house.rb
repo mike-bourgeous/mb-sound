@@ -69,7 +69,7 @@ module MB
       clip :strings, (0...5).map { |i| seq([A2, E3, G3, B3, C4][i], *[T] * 15, [F2, C3, E3, G3, A3][i], *[T] * 15).n1 }.reduce(:&).legato(0.99).loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
-      knob :cut, 8000, range: 200..12000, curve: :exp, unit: 'Hz' # the stabs' lowpass
+      knob :cut, (200.hz..12000.hz).at(8000.hz) # the stabs' lowpass
 
       role :drums, :tr909, level: -4.db, params: { shuffle: 2 }, about: 'the TR-909 with shuffle 2, the house kit'
       role :bass, :house_bass, level: -4.4.db, duck: -3.db, about: 'a saw with a sine body, a tempo-set decay, bouncing in octaves, ducked 3 dB by the kick'
