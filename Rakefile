@@ -419,11 +419,65 @@ namespace :memcheck do
 end
 
 namespace :spec do
-  desc 'Run the specs in PARALLEL (default 4) rspec processes, then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
+  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
   task :parallel do
     require_relative 'spec/parallel_specs'
-    ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4), patterns: ENV['SPECS'].to_s.split)
+    ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
     abort 'spec:parallel: failures' unless ok
+  end
+
+  desc 'The everyday subset: the 95% covering set, ALWAYS guards, and the specs of units changed since master-ai (spec/quick_selection.rb; QUICK_DRY=1 lists, BASE=ref)'
+  task :quick do
+    require_relative 'spec/parallel_specs'
+    require_relative 'spec/quick_selection'
+    sel = QuickSelection.select(base: ENV['BASE'])
+    QuickSelection.describe(sel, times: ParallelSpecs.known_times)
+    next if ENV['QUICK_DRY'] == '1'
+
+    ok = ParallelSpecs.run_default(patterns: sel.specs)
+    abort 'spec:quick: failures' unless ok
+  end
+
+  namespace :quick do
+    desc 'Record the covering set for spec:quick (spec/quick_map.json): the suite once with per-file coverage (+50% time), then a greedy set cover'
+    task :map do
+      require 'tmpdir'
+      require_relative 'spec/parallel_specs'
+      require_relative 'spec/quick_selection'
+      # The coverage run's own times are 50% slow: keep the times from before it
+      times_path = ParallelSpecs::TIMES_PATH
+      saved = File.exist?(times_path) ? File.read(times_path) : nil
+      times = ParallelSpecs.known_times
+      abort "spec:quick:map: no #{times_path}: run rake spec:parallel once first" if times.empty?
+
+      # QUICK_COV=dir keeps the coverage there (and reuses it if it has a run)
+      keep = ENV['QUICK_COV']
+      Dir.mktmpdir('quick-map') do |tmp|
+        dir = keep || tmp
+        if keep && Dir[File.join(keep, '*.json')].any?
+          puts "spec:quick:map: reusing the coverage in #{keep}"
+        else
+          FileUtils.mkdir_p(dir)
+          ENV['MB_SOUND_COVERAGE_PER_FILE'] = dir
+          ENV['MB_SOUND_SPEC_BUDGET'] = 'report' # (coverage makes examples slower than their budgets)
+          ok = ParallelSpecs.run_default
+          ENV.delete('MB_SOUND_COVERAGE_PER_FILE')
+          File.write(times_path, saved) if saved
+          abort 'spec:quick:map: failures in the coverage run (no map written)' unless ok
+        end
+
+        map = QuickSelection.build_map(dir, times)
+        File.write(QuickSelection::MAP_PATH, JSON.pretty_generate(map) + "\n")
+        puts format('spec:quick:map: %d spec files (%.0f s of %.0f s) reach %d%% of %d lib/ branches; wrote %s',
+                    map['cover'].length, map['seconds'], map['suite_seconds'], (100 * map['target']).round, map['branches'], QuickSelection::MAP_PATH)
+      end
+    end
+  end
+
+  desc 'spec:parallel with the :slow tier included (SLOW=1; the suite before and after merges)'
+  task :full do
+    ENV['SLOW'] = '1'
+    Rake::Task['spec:parallel'].invoke
   end
 end
 

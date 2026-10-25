@@ -208,6 +208,19 @@ RSpec.describe(ParallelSpecs) do
 
   it 'makes rake spec:parallel exit nonzero when a process crashes' do
     rakefile = File.read(File.expand_path('../Rakefile', __dir__))
-    expect(rakefile).to match(/ok = ParallelSpecs\.run\(.*\n\s*abort .* unless ok/)
+    expect(rakefile).to match(/ok = ParallelSpecs\.run(_default)?\b.*\n\s*abort .* unless ok/)
+  end
+
+  it 'defaults to half the CPUs, capped by available memory, and lets PARALLEL win' do
+    allow(Etc).to receive(:nprocessors).and_return(16)
+    allow(ParallelSpecs).to receive(:available_memory).and_return(30 * 1024**3)
+    expect(ParallelSpecs.default_count({}).first).to eq(8)
+    allow(ParallelSpecs).to receive(:available_memory).and_return(5 * 1024**3)
+    expect(ParallelSpecs.default_count({}).first).to eq(3)
+    allow(ParallelSpecs).to receive(:available_memory).and_return(nil)
+    expect(ParallelSpecs.default_count({}).first).to eq(8)
+    allow(Etc).to receive(:nprocessors).and_return(1)
+    expect(ParallelSpecs.default_count({}).first).to eq(1)
+    expect(ParallelSpecs.default_count({ 'PARALLEL' => '12' })).to eq([12, 'PARALLEL'])
   end
 end

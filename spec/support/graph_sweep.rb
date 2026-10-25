@@ -178,6 +178,11 @@ module GraphSweep
       ['swarm', ->(c) { c.notes.hz.swarm(4, scatter: 1.oct) { |p, _i| p.saw } }],
       ['transpose node (SemitoneShift)', ->(c) { 220.hz.transpose(c.mod(-12, 12, 2)).saw }],
       ['vibrato', ->(c) { 220.hz.vibrato(5, depth: 0.5).saw }],
+      # Tweens over keyframes, and note glides from a pitch (their Session
+      # launch fixes, c38bd284 and 47ba5931, need a Session: tween_spec)
+      ['tween and glide', ->(c) {
+        c.sig.filter(:lowpass, cutoff: c.s.tween([300.0, 3000.0, 600.0], 1.n64, curve: :smooth), quality: 2) + c.notes.hz.glide(0.002, from: 110.hz).square.at(0.3)
+      }],
       ['tempo tone (TempoNode)', ->(c) { 1.beat.hz.saw + 2.bars.lfo.square }],
       ['tempo delay', ->(c) { c.sig.delay(1.n32) }],
 

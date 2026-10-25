@@ -107,7 +107,8 @@ RSpec.describe('bin/save_presets.rb') do
   end
 
   MB::Sound::LIBRARY_PRESET_SETS.each do |name, (script, setup, form, form_options, _description)|
-    it "loads the #{name} set document and plays its flow like #{File.basename(script)}" do
+    # (the longer flows in the slow tier, SLOW=1; night_bus stays in the everyday run)
+    it "loads the #{name} set document and plays its flow like #{File.basename(script)}", slow: name != :night_bus do
       require File.expand_path("../../#{script}", __dir__)
       file = MB::Sound.library_preset_file(io.library_presets_dir, name)
       expect(io.parse(file).kind).to eq(:set)

@@ -187,7 +187,7 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
         expect { trigger_kit.kit(clip, flams: clip) }.to raise_error(ArgumentError, /flams/)
       end
 
-      it 'plays flams the same at any buffer size, wrapped only for sources with marks' do
+      it 'plays flams the same at any buffer size, wrapped only for sources with marks', :slow do
         g = MB::Sound.grid(16, kick: 'xfxF', snare: 'f..x').loop
         ref = collect(trigger_kit.kit(g, flam: 0.13), 1, 800)
         [1, 5, 367].each { |bs| expect(collect(trigger_kit.kit(g, flam: 0.13), 1, bs)).to eq(ref) }
@@ -300,7 +300,7 @@ RSpec.describe(MB::Sound::Drums::Machine, :aggregate_failures) do
       g = MB::Sound.grid(16, kick: 'X.x.x...', snare: '..x...X.', clap: 'x...', hh: 'x.x.x..x', oh: '.x...x..').loop
       ref = collect(m.kit(g, seed: 9), 1.2, 800)
       expect(ref.abs.max).to be > 0.5
-      [7, 367, 2048].each do |bs|
+      slow_tier([367, 7, 2048]).each do |bs|
         expect(collect(m.kit(g, seed: 9), 1.2, bs)).to eq(ref)
       end
     end

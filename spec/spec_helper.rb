@@ -1,3 +1,6 @@
+# Per-spec-file coverage for rake spec:quick:map (spec/support/per_file_coverage.rb)
+require_relative 'support/per_file_coverage' if ENV['MB_SOUND_COVERAGE_PER_FILE']
+
 require 'fileutils'
 
 # Ruby warnings fail the example that printed them (or the run, for
@@ -49,12 +52,22 @@ end
 # paths under Valgrind) are left out.
 SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 
+# True when the slow tier runs too (SLOW=1, as `rake spec:full`, the
+# post-merge tests, and CI set; always under memcheck).  Examples tagged
+# :slow (exactness sweeps and long renders guarding rare regressions; each
+# file keeps a fast representative untagged) are skipped otherwise, so the
+# everyday run stays short (test-tiers-1, 2026-10-24).  A location (file:line)
+# or -e filter still runs a :slow example by itself.
+SPEC_SLOW = ENV['SLOW'] == '1' || SPEC_MEMCHECK
+
 require_relative 'support/spec_tmp'
 require_relative 'support/spec_buffers'
+require_relative 'support/slow_tier'
 require_relative 'support/buffer_size_helpers'
 require_relative 'support/smoke_runs'
 require_relative 'support/warning_guard_hooks' # after spec_tmp, before subprocess_coverage
 require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
+PerFileCoverage.setup_subprocesses! if ENV['MB_SOUND_COVERAGE_PER_FILE'] # after warning_guard_hooks
 require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
 require_relative 'support/midi_list_source'
@@ -113,6 +126,10 @@ RSpec.configure do |config|
   # script and take several minutes, so plain `rspec` skips them; run them
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
   config.filter_run_excluding smoke: true
+
+  # The slow tier (see SPEC_SLOW): `SLOW=1 bundle exec rspec` or `rake spec:full`
+  config.filter_run_excluding slow: true unless SPEC_SLOW
+  config.include SlowTier # slow_tier(sizes): sweeps' extra sizes only under SLOW=1
 
   # Under Valgrind, leave out examples whose C paths other examples cover
   # (see SPEC_MEMCHECK).
