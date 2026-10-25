@@ -101,6 +101,7 @@ module MB
         @warmed = nil # (#warm_up: track name => clips warmed => patch)
         @rehearsable = {} # (#warm_up: track name => its patch if every build played, else false)
         @rehearsal = nil # (#warm_up: sections rehearsed)
+        @exercise_skipped = [] # (#warm_up: tracks whose exercise raised)
       end
 
       # Calls +block+ with each Form #play_form is about to start, before
@@ -175,9 +176,10 @@ module MB
           sections = @rehearsal if result
           if result && (!result.empty? || sections)
             built = result.count { |_, (_, how)| how == :built }
-            puts format("\e[2mWarmed up %d track%s%s in %.1f s (%sskip with warm_up: false)\e[0m",
+            skipped = @exercise_skipped.empty? ? '' : "skipped #{@exercise_skipped.join(', ')}; "
+            puts format("\e[2mWarmed up %d track%s%s in %.1f s (%s%sskip with warm_up: false)\e[0m",
               result.length, result.length == 1 ? '' : 's', sections ? " and #{sections} section#{sections == 1 ? '' : 's'}" : '',
-              MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '')
+              MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '', skipped)
           end
         end
 
@@ -567,6 +569,7 @@ module MB
         end
 
         @warmed ||= Hash.new { |h, k| h[k] = {}.compare_by_identity }
+        @exercise_skipped = []
         result = {}
         MB::Sound.with_seed(0) do
           chosen.each do |tr|
@@ -585,7 +588,9 @@ module MB
             @mutex.synchronize { @rehearsable[tr.name] = how.all?(:played) ? tr.patch : false } if play
             # The rehearsal's short sections never reach a voice's second
             # note: an exercise does (see #warm_exercise)
-            warm_exercise(tr, clips[0]) if play && form && how.all?(:played)
+            if play && form && how.all?(:played) && warm_exercise(tr, clips[0]) == false
+              @exercise_skipped << tr.name
+            end
             result[tr.name] = [((MB::U.clock_now - t0) * 1000).round(1), how.include?(:built) ? :built : :played]
           end
         end
@@ -600,6 +605,11 @@ module MB
       # The number of sections the last #warm_up with a +form:+ rehearsed
       # (see #rehearse), or nil.
       attr_reader :rehearsal
+
+      # The names of the tracks whose exercise the last #warm_up skipped
+      # because their patch raised on it (see #warm_exercise); #play_form's
+      # warm-up line names them.
+      attr_reader :exercise_skipped
 
       # Each section #rehearse plays lasts the fewest sixteenth notes that
       # hold this many buffers, so code that runs once a buffer is called
@@ -802,12 +812,13 @@ module MB
       # on the render thread live (memory_card's pad at 128 frames: 45 ms
       # in bar 2, phase jumps of reused voices; 18 ms in bar 3, stealing;
       # alloc-2).  Kits (a Sequence::Kit) and clips without notes are
-      # skipped, and a patch that can't take the exercise is skipped
-      # silently (it's only a warm-up).  Returns true if it played.
+      # skipped (nil), and a patch that can't take the exercise is skipped
+      # without a warning (false; it's only a warm-up, and #play_form's
+      # warm-up line names it).  Returns true if it played.
       def warm_exercise(tr, clip)
-        return false unless clip.is_a?(Sequence::Clip)
+        return nil unless clip.is_a?(Sequence::Clip)
         values = clip.values.first(EXERCISE_NOTES)
-        return false if values.empty?
+        return nil if values.empty?
 
         events = []
         EXERCISE_ROUNDS.times do |r|
