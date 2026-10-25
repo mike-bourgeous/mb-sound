@@ -41,10 +41,26 @@ module MB
         def sample(count)
           return nil if @circbuf.empty? && @current_sources.empty?
 
+          # The steady case: nothing buffered and the current source gives a
+          # whole SFloat buffer, which passes through as it is (the same
+          # samples, without the copies through the circular buffer, ~5 us
+          # per buffer in fuse-more-1's song profiles)
+          pending = false # (false: nothing read yet; nil is an ended source)
+          if @circbuf.empty?
+            pending = @current_sources[0].sample(count)
+            return pending if pending.is_a?(Numo::SFloat) && pending.length == count
+          end
+
           # TODO: Preserve depleted sources so node graphs can be reset or looped
           # TODO: Allow shuffling sources on each loop
           while @circbuf.length < count && @current_sources.any?
-            buf = @current_sources[0].sample(count)
+            if pending.equal?(false)
+              buf = @current_sources[0].sample(count)
+            else
+              # (the read above: an ended source, or a short or other buffer)
+              buf = pending
+              pending = false
+            end
 
             if buf.nil? || buf.empty?
               @current_node += 1
