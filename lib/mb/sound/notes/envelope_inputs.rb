@@ -113,7 +113,7 @@ module MB
         # the gate's uniform value, if any (see Node#render).
         def render(buf, items)
           count = buf.length
-          trig = writable(:trigger, count).fill(0)
+          trig = BufferHelper.zero(writable(:trigger, count))
           vel = writable(:velocity, count)
           chk = writable(:choke, count).fill(0)
 

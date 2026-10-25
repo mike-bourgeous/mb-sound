@@ -577,6 +577,73 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.accumulate' do
+    let(:out) { Numo::SFloat.new(16).rand(-1, 1) }
+    let(:data) { Numo::SFloat.new(12).rand(-1, 1) }
+    let(:ramp) { Numo::SFloat.new(12).rand(0, 1) }
+    let(:levels) { Numo::SFloat.new(16).rand(0, 2) }
+
+    def mirror(out, oo, data, doff, length, a, ao, b, bo)
+      o = out.dup
+      d = data[doff...(doff + length)]
+      d = d * (a.is_a?(Numeric) ? a : a[ao...(ao + length)]) if a
+      d = d * (b.is_a?(Numeric) ? b : b[bo...(bo + length)]) if b
+      o[oo...(oo + length)] = o[oo...(oo + length)] + d
+      o
+    end
+
+    it 'adds a part of a buffer times two factors into another exactly as Numo does' do
+      [
+        [0, 0, 12, nil, 0, nil, 0], [3, 2, 9, ramp, 0, nil, 0], [4, 0, 12, ramp, 0, 0.3, 0],
+        [1, 0, 5, ramp, 0, levels, 3], [0, 4, 8, nil, 0, levels, 7], [15, 11, 1, 2, 0, -0.7, 0],
+        [2, 0, 6, ramp, 6, 1, 0],
+      ].each do |args|
+        expected = mirror(out, *args.take(1), data, *args.drop(1))
+        o = out.dup
+        expect(MB::Sound::FastArithmetic.accumulate(o, args[0], data, *args.drop(1))).to equal(o)
+        expect(bits_same(o, expected)).to eq(true), args.inspect
+      end
+    end
+
+    it 'returns nil without touching the output for anything else' do
+      copy = out.dup
+      fa = MB::Sound::FastArithmetic
+      expect(fa.accumulate(out, 8, data, 0, 12, nil, 0, nil, 0)).to be_nil # past the end
+      expect(fa.accumulate(out, 0, data, 4, 9, nil, 0, nil, 0)).to be_nil # past the data
+      expect(fa.accumulate(out, 0, data, 0, 12, ramp, 1, nil, 0)).to be_nil # past the ramp
+      expect(fa.accumulate(out, 0, data, 0, 0, nil, 0, nil, 0)).to be_nil
+      expect(fa.accumulate(out, 0, data, 0, 4, 1r, 0, nil, 0)).to be_nil # a Rational factor
+      expect(fa.accumulate(out, 0, data, 0, 4, nil, 0, ramp.cast_to(Numo::DFloat), 0)).to be_nil
+      expect(fa.accumulate(out.dup.freeze, 0, data, 0, 4, nil, 0, nil, 0)).to be_nil
+      expect(fa.accumulate(out, 0, data.cast_to(Numo::DFloat), 0, 4, nil, 0, nil, 0)).to be_nil
+      expect(bits_same(out, copy)).to eq(true)
+    end
+  end
+
+  describe '.last_at_least' do
+    it "finds the last sample whose magnitude reaches the threshold, as Numo's abs.ge(t).where" do
+      x = Numo::SFloat[0, 0.5, -0.25, 1e-6, 0.89125094, -0.1, 0]
+      [[0, 7, 0.2], [0, 7, 0.3], [2, 4, 0.2], [0, 7, 2.0], [0, 7, 0.8912509381337456], [3, 0, 0.1]].each do |off, n, t|
+        idx = x[off...(off + n)].abs.ge(t).where
+        expect(MB::Sound::FastArithmetic.last_at_least(x, off, n, t)).to eq(idx.length > 0 ? idx[-1] : -1), [off, n, t].inspect
+      end
+      expect(MB::Sound::FastArithmetic.last_at_least(x, 5, 3, 0.1)).to be_nil
+      expect(MB::Sound::FastArithmetic.last_at_least(x.cast_to(Numo::DFloat), 0, 3, 0.1)).to be_nil
+    end
+  end
+
+  describe '.copy_range' do
+    it 'copies part of a buffer into part of another' do
+      out = Numo::SFloat.zeros(6)
+      src = Numo::SFloat[1, 2, 3, 4]
+      expect(MB::Sound::FastArithmetic.copy_range(out, 2, src, 1, 3)).to equal(out)
+      expect(out.to_a).to eq([0, 0, 2, 3, 4, 0])
+      expect(MB::Sound::FastArithmetic.copy_range(out, 4, src, 0, 3)).to be_nil
+      expect(MB::Sound::FastArithmetic.copy_range(out.dup.freeze, 0, src, 0, 1)).to be_nil
+      expect(out.to_a).to eq([0, 0, 2, 3, 4, 0])
+    end
+  end
+
   describe '.fill_range' do
     it 'stores a number into part of a buffer exactly as Numo does' do
       [Numo::SFloat, Numo::DFloat].each do |t|

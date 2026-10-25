@@ -346,17 +346,30 @@ module MB
         def setup_skipping(enabled)
           nodes = @graph.graph(include_tees: true)
           # Clip sources are read through Notes nodes, which stay in step
-          @skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
-          @busy = []
-          return unless @skippable
+          skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
+          unless skippable
+            @busy = []
+            @skippable = false
+            return
+          end
 
           @busy = nodes.select { |n| n.is_a?(GraphNode::SamplerVoice) || n.is_a?(Repeats) }
 
-          @set = nodes.to_h { |n| [n.__id__, true] }
-          @set[@graph.__id__] = true
+          set = nodes.to_h { |n| [n.__id__, true] }
+          set[@graph.__id__] = true
+          @set = set
           @tee_branches = nodes.select { |n| n.is_a?(GraphNode::Tee::Branch) }
           @notes_nodes = nodes.select { |n| n.is_a?(MB::Sound::Notes::Node) }
           @boundary_cache = nil
+          @skippable = true # (last: #sample sets up again until this is set)
+        end
+
+        # Finds what skipping needs (#setup_skipping) on the thread that
+        # builds the graph (Session#add), not in the render thread's first
+        # buffer (alloc-2).
+        def prime_render
+          setup_skipping(@skip_idle) if @skippable.nil?
+          nil
         end
 
         # What the voice reads while skipped (see #setup_skipping): its

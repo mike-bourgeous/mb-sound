@@ -542,7 +542,7 @@ module MB
 
           # Returns 0.0 if no event gave an impulse (see Node#render).
           def render(buf, items)
-            buf.fill(0)
+            BufferHelper.zero(buf)
             quiet = 0.0
             items.each do |off, item|
               next if item.is_a?(MIDI::Source::Chase)

@@ -607,6 +607,10 @@ module MB
       # reused and a finished source can end (-90 dB, like the master
       # effects tails of Session; see #quiet_lanes).
       QUIET = -90.db
+      # QUIET as a Float, for comparisons on the render path (a Float
+      # compared with a Decibels goes through #coerce, an Array each time;
+      # alloc-2).
+      QUIET_GAIN = QUIET.to_f
 
       # Level below which a lane's output counts as silent for idle lane
       # skipping (-120 dB; stricter than QUIET because skipping changes the
@@ -841,7 +845,7 @@ module MB
         hi = @cell_hi[idx]
         c = 0
         while c < lo.length
-          return false if (hi[c] - lo[c]) * 0.5 > QUIET
+          return false if (hi[c] - lo[c]) * 0.5 > QUIET_GAIN
           c += 1
         end
         true
@@ -856,7 +860,7 @@ module MB
           swing = sw if swing.nil? || sw > swing
         end
         @peaks[idx] = swing
-        @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
+        @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET_GAIN
       end
 
       # Marks lane +idx+ as ended (silent from now on).
@@ -1098,7 +1102,7 @@ module MB
           end
           @cell_fresh[idx] = true
           @peaks[idx] = swing
-          @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET
+          @quiet[idx] = @notes[idx].voice_idle? && swing <= QUIET_GAIN
           @quiet_pos[idx] = @allocator.lanes[idx].source.position
         end
       end
@@ -1418,9 +1422,9 @@ module MB
             next if b.empty?
 
             mn, mx = range_of(b)
-            next if mx <= QUIET && mn >= -QUIET
+            next if mx <= QUIET_GAIN && mn >= -QUIET_GAIN
 
-            loud = b.abs.gt(QUIET).where
+            loud = b.abs.gt(QUIET_GAIN).where
             next if loud.empty?
 
             e = from + loud[-1] + 1
@@ -1476,7 +1480,7 @@ module MB
           return out if MB::Sound::FastArithmetic.mix(out, 0, pairs)
         end
 
-        out.fill(0)
+        BufferHelper.zero(out)
         data.each do |d|
           next if d.nil?
           d = d[channel % d.length] if channel

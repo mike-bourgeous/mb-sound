@@ -45,7 +45,7 @@ module MB
           @work[h...(h + n)] = x
 
           @buf = Numo::SFloat.zeros(n) if @buf.nil? || @buf.length != n
-          @buf.fill(0)
+          BufferHelper.zero(@buf)
           @delays.each_with_index do |d, i|
             g = @gains[i]
             seg = @work[(h - d)...(h - d + n)]
