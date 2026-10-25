@@ -111,6 +111,50 @@ module MB
       end
       private_class_method :parse_string, :check
 
+      # Plays +audio+ (an Array of channels, or anything Playable through
+      # MB::Sound.read-style arrays) through the device thread's concealment
+      # with forced gaps, as a sound card would play it: +gaps+ are
+      # [start, length] pairs in seconds (of the input) where the writer is
+      # late by +length+, so the output is longer by the gaps (late audio is
+      # played, not dropped).  +period+ is the device's pull size.  Returns
+      # an Array of SFloat channels; for listening to settings, e.g.
+      #     play Concealment.simulate(read('x.flac'), gaps: [[1, 0.08]], conceal: :fixed)
+      def self.simulate(audio, gaps:, conceal: :repeat, rate: 48000, period: 128)
+        audio = Array(audio).map { |c| Numo::SFloat.cast(c) }
+        ch = audio.length
+        k = FastAudio::Concealer.new(ch, rate, settings(conceal))
+        gaps = gaps.map { |at, len| [(seconds(at) * rate).round, (seconds(len) * rate).round] }.sort
+        length = audio[0].length
+        out = []
+        pos = 0
+        until pos >= length && gaps.empty?
+          if gaps.any? && gaps[0][0] <= pos
+            left = gaps[0][1]
+            gaps.shift
+            while left > 0
+              n = [period, left].min
+              out << Numo::SFloat.from_binary(k.process('', n, false))
+              left -= n
+            end
+            next
+          end
+
+          n = [period, length - pos].min
+          n = [n, gaps[0][0] - pos].min if gaps.any?
+          m = Numo::SFloat.zeros(n, ch)
+          ch.times { |c| m[true, c] = audio[c][pos...(pos + n)] }
+          out << Numo::SFloat.from_binary(k.process(m.to_binary, n, false))
+          pos += n
+        end
+
+        joined = out.empty? ? Numo::SFloat[] : Numo::SFloat.zeros(out.sum(&:length)).tap { |j|
+          i = 0
+          out.each { |o| j[i...(i + o.length)] = o; i += o.length }
+        }
+        frames = joined.reshape(true, ch)
+        ch.times.map { |c| frames[true, c].dup }
+      end
+
       # The Ruby reference of mb_conceal.h, step for step (same splitmix64
       # draws, same recurrences, float32 history and output), for specs.
       # #process takes one device pull: the real frames the ring had (an
@@ -154,6 +198,7 @@ module MB
           @t0 = 0
           @avail = 0
           @gain = 0.0
+          @peak = 0.0
           @offset = Array.new(channels, 0.0)
           @cur = Grain.new(0, 0, 0)
           @nxt = Grain.new(0, 0, 0)
@@ -214,7 +259,12 @@ module MB
 
               frame(@x)
               @ch.times do |k|
-                out[i, k] = out[i, k] * @xs + @x[k] * @xc
+                r = out[i, k]
+                y = r * @xs + @x[k] * @xc
+                lim = r.abs > @peak ? r.abs : @peak
+                y = lim if y > lim
+                y = -lim if y < -lim
+                out[i, k] = y
               end
 
               @xc, @xs = rotate(@xc, @xs, @xcd, @xsd)
@@ -323,7 +373,10 @@ module MB
           @ch.times do |k|
             v = at(@cur.src + @cur.i, k)
             v = v * @sc + at(@nxt.src + @nxt.i, k) * @ss if @in_seam
-            out[k] = @gain * v + @offset[k]
+            y = @gain * v + @offset[k]
+            y = @peak if y > @peak
+            y = -@peak if y < -@peak
+            out[k] = y
             @offset[k] *= @offset_decay
           end
 
@@ -387,6 +440,13 @@ module MB
           @h_in = 0
           @ch.times do |k|
             @offset[k] = at(@t0 - 1, k) - at(@cur.src - 1, k)
+          end
+          @peak = 0.0
+          (@t0 - avail...@t0).each do |pos|
+            @ch.times do |k|
+              a = at(pos, k).abs
+              @peak = a if a > @peak
+            end
           end
           @gain = 1.0
           @faded = false

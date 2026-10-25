@@ -1845,6 +1845,81 @@ static VALUE concealer_state(VALUE self)
 	return h;
 }
 
+static uint64_t concealer_now_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+
+/*
+ * call-seq:
+ *   concealer.benchmark(frames, cycles) -> { steady:, entry:, concealing:, returning: }
+ *
+ * Times the kernel's pulls of +frames+ frames over +cycles+ cycles of a
+ * stutter (pulls of real audio, then a gap of four pulls, then real audio
+ * again), each a Hash of :mean_ns and :max_ns per pull: :steady pulls (all
+ * real, only the history copy), :entry (the first gap pull: the match
+ * search), :concealing (the rest of the gap), :returning (the first real
+ * pull after it: the crossfade back).  For measuring the device thread's
+ * added cost (design/notes/audio_io.md, "Underrun concealment").
+ */
+static VALUE concealer_benchmark(VALUE self, VALUE frames_value, VALUE cycles_value)
+{
+	struct concealer *k = get_concealer(self);
+	size_t frames = NUM2SIZET(frames_value);
+	long cycles = NUM2LONG(cycles_value);
+	size_t ch = k->c.ch;
+	if (frames < 1 || frames > 65536 || cycles < 1) {
+		rb_raise(rb_eArgError, "Need 1..65536 frames and at least one cycle");
+	}
+
+	float *buf = malloc(frames * ch * sizeof(float));
+	if (buf == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate the benchmark buffer");
+	}
+
+	// Pulls per cycle: enough real audio to finish the crossfade back and
+	// refill the history, then the gap
+	size_t real_pulls = (k->c.history + k->c.exit_frames) / frames + 2;
+	uint64_t sum[4] = { 0 }, max[4] = { 0 }, n[4] = { 0 };
+	uint64_t phase = 0;
+	for (long cy = 0; cy < cycles; cy++) {
+		for (size_t pull = 0; pull < real_pulls + 4; pull++) {
+			int gap = pull >= real_pulls;
+			int kind = gap ? (pull == real_pulls ? 1 : 2) : (pull == 0 && cy > 0 ? 3 : 0);
+			size_t count = gap ? 0 : frames;
+			for (size_t i = 0; i < count; i++, phase++) {
+				for (size_t c = 0; c < ch; c++) {
+					buf[i * ch + c] = (float)(0.5 * sin(phase * 0.0313 + c) + 0.2 * sin(phase * 0.1171));
+				}
+			}
+			memset(buf + count * ch, 0, (frames - count) * ch * sizeof(float));
+
+			uint64_t t0 = concealer_now_ns();
+			mb_conceal_process(&k->c, buf, frames, count, 0);
+			uint64_t dt = concealer_now_ns() - t0;
+			sum[kind] += dt;
+			n[kind]++;
+			if (dt > max[kind]) {
+				max[kind] = dt;
+			}
+		}
+	}
+	free(buf);
+
+	const char *names[4] = { "steady", "entry", "concealing", "returning" };
+	VALUE h = rb_hash_new();
+	for (int i = 0; i < 4; i++) {
+		VALUE r = rb_hash_new();
+		rb_hash_aset(r, ID2SYM(rb_intern("mean_ns")), DBL2NUM(n[i] ? (double)sum[i] / n[i] : 0.0));
+		rb_hash_aset(r, ID2SYM(rb_intern("max_ns")), ULL2NUM(max[i]));
+		rb_hash_aset(r, ID2SYM(rb_intern("pulls")), ULL2NUM(n[i]));
+		rb_hash_aset(h, ID2SYM(rb_intern(names[i])), r);
+	}
+	return h;
+}
+
 static void init_concealer(VALUE fast_audio)
 {
 	VALUE k = rb_define_class_under(fast_audio, "Concealer", rb_cObject);
@@ -1852,6 +1927,7 @@ static void init_concealer(VALUE fast_audio)
 	rb_define_method(k, "initialize", concealer_initialize, 3);
 	rb_define_method(k, "process", concealer_process, 3);
 	rb_define_method(k, "state", concealer_state, 0);
+	rb_define_method(k, "benchmark", concealer_benchmark, 2);
 }
 
 /* Capture ------------------------------------------------------------------ */

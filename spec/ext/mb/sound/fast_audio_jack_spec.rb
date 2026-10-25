@@ -64,6 +64,29 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     expect(played[start...(start + 2047), 1]).to eq(right[1..])
   end
 
+  it 'conceals an underrun on JACK and plays the late audio after it' do
+    settings = MB::Sound::Concealment.settings(:repeat)
+    p = fa::Playback.new(nil, -1, client, 1, 1, 48000, 0, 0, 2048, 24000, 2, false, 0, ['out_1'], settings).tap { |x| @opened << x }
+    t = Numo::DFloat.new(9600).seq(1)
+    a = Numo::SFloat.cast(Numo::NMath.sin(t * 0.031) * 0.5 + Numo::NMath.sin(t * 0.117) * 0.2)
+    b = Numo::SFloat.cast(Numo::NMath.sin(t * 0.05) * 0.4)[0...4800]
+    p.write([a[0...4800]])
+    wait_until { p.stats[:concealed] >= 2400 }
+    p.write([b])
+    wait_until { p.stats[:queued] == 0 && p.stats[:concealed_gaps] >= 2 }
+    p.end_stream
+    wait_until { p.captured.bytesize >= 24000 * 4 }
+
+    x = Numo::SFloat.from_binary(p.captured)
+    start = (0...x.length).find { |i| x[i] != 0 }
+    x = x[start..]
+    expect(x[0...4800]).to eq(a[0...4800])
+    expect(x[4800...7200].abs.max).to be > 0.3
+    found = (4800...(x.length - 4800)).find { |i| x[i + 300] == b[300] && x[(i + 300)...(i + 4800)] == b[300..] }
+    expect(found).not_to be_nil
+    expect(p.stats[:underruns]).to eq(2)
+  end
+
   it 'reports where each cycle starts, mapping queued frames to JACK frame times' do
     p = jack_playback(['out_1'], capture: 8192)
     wait_until { p.jack_clock }

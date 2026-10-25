@@ -19,6 +19,8 @@
  *   there is no fixed repetition period (a fixed grain buzzes at
  *   rate / length).  +fixed+ loops the latest grain_min frames instead, for
  *   comparisons.
+ * - Level: concealed samples are clipped at the history's peak (equal-power
+ *   seams of correlated grains, like two drum hits, can sum 3 dB over it).
  * - Decay: the concealed output falls 60 dB over +fade+ seconds (then
  *   silence), or over +quiet_fade+ once the writer marked the end of its
  *   audio (the gap is intended).
@@ -78,6 +80,7 @@ struct mb_conceal {
 	uint64_t t0; // history end when the gap began
 	size_t avail; // history frames grains may read, ending at t0
 	double gain;
+	double peak; // the history's peak: concealed samples never exceed it
 	double offset[MB_CONCEAL_MAX_CHANNELS];
 	struct mb_conceal_grain cur, nxt;
 	size_t h; // seam length from cur to nxt
@@ -245,7 +248,13 @@ static inline void mb_conceal_frame(struct mb_conceal *c, float *out)
 		if (c->in_seam) {
 			v = v * c->sc + (double)mb_conceal_at(c, c->nxt.src + c->nxt.i, k) * c->ss;
 		}
-		out[k] = (float)(c->gain * v + c->offset[k]);
+		double y = c->gain * v + c->offset[k];
+		if (y > c->peak) {
+			y = c->peak;
+		} else if (y < -c->peak) {
+			y = -c->peak;
+		}
+		out[k] = (float)y;
 		c->offset[k] *= c->offset_decay;
 	}
 
@@ -320,6 +329,18 @@ static inline int mb_conceal_enter(struct mb_conceal *c)
 	for (int k = 0; k < ch; k++) {
 		c->offset[k] = (double)mb_conceal_at(c, c->t0 - 1, k) - (double)mb_conceal_at(c, c->cur.src - 1, k);
 	}
+	// Equal-power seams of correlated grains (e.g. two drum hits) can
+	// sum to 3 dB over the history's peak; concealment never goes past it
+	double peak = 0;
+	for (uint64_t pos = c->t0 - avail; pos < c->t0; pos++) {
+		for (int k = 0; k < ch; k++) {
+			double a = fabs((double)mb_conceal_at(c, pos, k));
+			if (a > peak) {
+				peak = a;
+			}
+		}
+	}
+	c->peak = peak;
 	c->gain = 1;
 	c->faded = 0;
 	c->active = 1;
@@ -371,7 +392,16 @@ static inline size_t mb_conceal_process(struct mb_conceal *c, float *out, size_t
 			mb_conceal_frame(c, x);
 			float *o = out + i * ch;
 			for (size_t k = 0; k < ch; k++) {
-				o[k] = (float)((double)o[k] * c->xs + (double)x[k] * c->xc);
+				// (clipped like the grains, or at the real sample if louder)
+				double r = o[k];
+				double y = r * c->xs + (double)x[k] * c->xc;
+				double lim = fabs(r) > c->peak ? fabs(r) : c->peak;
+				if (y > lim) {
+					y = lim;
+				} else if (y < -lim) {
+					y = -lim;
+				}
+				o[k] = (float)y;
 			}
 
 			mb_conceal_rotate(&c->xc, &c->xs, c->xcd, c->xsd);
