@@ -34,7 +34,7 @@ MB::Sound.live = true
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check
 
-# Compile common node types before anything plays (YJIT is on via the shebang),
+# Compile common node types before anything plays (YJIT is on via the shebang and MB::Sound::JIT),
 # and the dashboard band's painter (`ui`)
 MB::Sound.warm_up
 MB::Sound::UI.warm_up

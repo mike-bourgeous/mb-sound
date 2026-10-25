@@ -27,7 +27,18 @@ module MB
     # YJIT, as before.
     module JIT
       # Calls before YJIT compiles a method or block (Ruby's default: 30).
-      CALL_THRESHOLD = 30
+      # Measured with bin/scene_profile.rb (Mac container, offline, two
+      # alternating rounds of memory_card, night_bus_flow, and tunnel_vision
+      # at 128 and 512 frames, against Ruby's 30 at boot; arrangement.md,
+      # "Call threshold"): YJIT compiling in the buffers where scene changes landed
+      # 22-32 -> 12-18 ms per song, on the render thread in all 87-156 ->
+      # 70-166 ms (mostly 15-30% less), worst buffers unchanged (bar 1,
+      # players' first buffers, GC, VM stalls); +1.0-1.5 MB of exec memory,
+      # +3 MB of YJIT metadata, 0-15 MB more peak RSS, MB::Sound.warm_up
+      # 0.47 -> 0.6 s, form warm-ups 0-0.6 s longer.  10 did about as well as
+      # 30; 2 a little better than 5, for +1.9-2.4 MB of exec memory and a 0.75 s
+      # MB::Sound.warm_up.
+      CALL_THRESHOLD = 5
 
       # Turns YJIT on as the environment asks (see the module comment).
       # Returns the threshold used, or nil when it left YJIT alone.
