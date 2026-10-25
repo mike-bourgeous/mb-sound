@@ -153,7 +153,18 @@ The maintainer: make "the allocation round" the next branch, "with a spec that s
 - Scene builds themselves: a Tone skips its cyclic-modulation walk until something has branched it (180 -> 63 traversals in "lift ends"); `Session#add` walks a new graph once for its preparations.
 - Found, not changed (plan layer, fuse-more-1 is working there): when a Mixer summand ends (`sample_ended` -> `Plan.changed`), the Synth's whole plan installation rebuilds on the render thread, 0.25-1.1 M objects in one buffer (fm_bass on dense_modulated.mid at the file's end).
 
-Before/after tables: measurement runs queued at handback (final.sh, tests.sh in /tmp/claude-0/alloc-2/); to be filled from them.
+Before/after (Mac container, offline `bin/scene_profile.rb`, master-ai with the old tool / master-ai with the fixed tool / alloc-2; other agents loading the VM):
+
+| song, frames | render-thread compile ms | bar 1 ms | worst landing ms | objects per buffer, mean (new tool -> branch) | warm-up s |
+|---|---|---|---|---|---|
+| memory_card 128 | 107 / 73 / 33 | 24.6 / 14.5 / 8.1 | 17.6 / 15.3 / 6.4 | 302 -> 197 | 3.3 / 3.6 / 6.1 |
+| memory_card 512 | 50 / 33 / 21 | | 14.6 / 13.7 / 7.4 | 335 -> 224 | 3.6 / 3.6 / 4.6 |
+| night_bus_flow 128 | 58 / 44 / 36 | 22.2 / 9.7 / 9.7 | 9.8 / 7.4 / 19.5 | 187 -> 132 | 5.3 / 5.3 / 7.8 |
+| night_bus_flow 512 | 52 / 30 / 25 | | 16.1 / 7.1 / 5.3 | 218 -> 162 | 5.7 / 5.7 / 7.5 |
+| tunnel_vision 128 | 103 / 69 / 55 | 55.8 / 43.0 / 32.9 | 12.9 / 15.0 / 7.4 | 1069 -> 359 | 5.1 / 5.1 / 5.7 |
+| tunnel_vision 512 | 71 / 43 / 42 | | 12.1 / 8.7 / 6.7 | 1136 -> 408 | 4.9 / 4.8 / 5.3 |
+
+The branch's memory_card 512 worst buffer (79.2 ms) is seven consecutive buffers at bars 30.97-31.02 with no compiling and no GC, every player slow in proportion: a VM stall, not the code.  The warm-up exercise adds 0.5-2.8 s.  Realtime `-R --band` (24 bars, the fixed tool -> branch): allocation while playing fell 12-60% (tunnel_vision 128: 426k -> 175k objects/s; memory_card 128 GC 544 -> 321 ms), but underrun counts stayed within noise (memory_card 128/20 ms 33 -> 32, tunnel_vision 128/20 34 -> 32), since in the container they line up with the VM's stalls (`latency_probe.md`); judge underruns natively.
 
 ## Song forms (`lib/mb/sound/form.rb`, `form/`, console `FormMethods`)
 
