@@ -471,9 +471,9 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   end
 
   describe 'underrun concealment' do
-    it 'plays silence by default for now, and takes :conceal or AUDIO_CONCEAL' do
-      expect(device_output.concealment[:mode]).to eq(:silence)
-      expect(device_output(conceal: :repeat).concealment[:mode]).to eq(:repeat)
+    it 'conceals with grains by default, and takes :conceal or AUDIO_CONCEAL' do
+      expect(device_output.concealment[:mode]).to eq(:repeat)
+      expect(device_output(conceal: :silence).concealment[:mode]).to eq(:silence)
       ENV['AUDIO_CONCEAL'] = 'fixed:30'
       c = device_output(conceal: :silence).concealment
       expect(c.values_at(:mode, :fixed, :grain_min, :grain_max)).to eq([:repeat, true, 0.03, 0.03])

@@ -14,18 +14,18 @@ module MB
     # and [:concealed_gaps] count what was filled.
     #
     # Settings (DeviceOutput's +:conceal+, or AUDIO_CONCEAL):
-    #   :silence - silence while the queue is dry (the old behavior; the
-    #              default for now, see DEFAULT)
-    #   :repeat  - grains (DEFAULTS)
+    #   :repeat  - grains (DEFAULTS; the default, see DEFAULT)
+    #   :silence - silence while the queue is dry (the old behavior)
     #   :fixed   - loop the latest grain (one fixed length; comparisons only:
     #              it buzzes at rate / length)
     #   { mode: :repeat, grain: 0.02..0.06, history: 0.12, fade: 1.0, ... }
     # AUDIO_CONCEAL is one of the names, optionally with a grain in ms
     # (`repeat:20-60`, `fixed:30`).  Times take seconds or Lengths (`20.ms`).
     module Concealment
-      # Seconds, except :seed.  :fade is the time to fall 60 dB (nil: no
-      # decay), :quiet_fade the same once the writer marked the end of its
-      # audio (DeviceOutput#end_stream), :return_fade the crossfade back to
+      # Seconds, except :seed.  :hold is the time at full level before the
+      # decay, :fade the time to fall 60 dB after it (nil: no decay),
+      # :quiet_fade the same (without the hold) once the writer marked the
+      # end of its audio (DeviceOutput#end_stream), :return_fade the crossfade back to
       # real audio, :match and :search the window and lag range compared when
       # choosing the first grain.
       DEFAULTS = {
@@ -34,6 +34,7 @@ module MB
         history: 0.12,
         grain_min: 0.02,
         grain_max: 0.06,
+        hold: 0.0,
         fade: 1.0,
         quiet_fade: 0.02,
         return_fade: 0.005,
@@ -45,9 +46,10 @@ module MB
       NAMES = %i[repeat silence fixed].freeze
 
       # What DeviceOutput plays in an underrun without +:conceal+ or
-      # AUDIO_CONCEAL: silence until the maintainer picks a default from the
-      # listening set (audio-safety-1, 2026-10-25); :repeat is the candidate.
-      DEFAULT = :silence
+      # AUDIO_CONCEAL: jittered grains (the maintainer's Bench verdict on
+      # audio-safety-1, 2026-10-25: they won for house, ambient, and acid).
+      # Specs counting frames through underruns pass conceal: :silence.
+      DEFAULT = :repeat
 
       # Raised for unknown settings.
       class Error < ArgumentError; end
@@ -114,6 +116,7 @@ module MB
         problems << ':match must be positive' unless s[:match] > 0
         problems << ':search must not be negative' unless s[:search] >= 0
         problems << ':fade must be positive or nil' unless s[:fade].nil? || s[:fade] > 0
+        problems << ':hold must not be negative' unless s[:hold] >= 0
         raise Error, "Bad concealment settings: #{problems.join('; ')}" unless problems.empty?
       end
       private_class_method :parse_string, :check
@@ -186,6 +189,9 @@ module MB
           @match_window = to_frames(s[:match], rate)
           @match_search = to_frames(s[:search], rate)
           @exit_frames = to_frames(s[:return_fade], rate)
+          @hold_frames = s[:hold].to_f > 0 ? (s[:hold] * rate).round : 0
+          @held = 0
+          @quiet = false
           fade = s[:fade].to_f
           @decay = fade > 0 ? 10.0**(-3.0 / (fade * rate)) : 1.0
           qf = s[:quiet_fade].to_f
@@ -243,6 +249,7 @@ module MB
           return split(out) unless @mode == :repeat
 
           @cur_decay = quiet ? @quiet_decay : @decay
+          @quiet = quiet ? true : false
 
           if count > 0
             push(out[0...count, true])
@@ -399,7 +406,11 @@ module MB
             end
           end
 
-          @gain *= @cur_decay
+          if @held < @hold_frames && !@quiet
+            @held += 1
+          else
+            @gain *= @cur_decay
+          end
           if @gain < @floor_gain
             @gain = 0.0
             @faded = true
@@ -456,6 +467,7 @@ module MB
             end
           end
           @gain = 1.0
+          @held = 0
           @faded = false
           @active = true
           @in_exit = false
