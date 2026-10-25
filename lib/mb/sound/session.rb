@@ -469,6 +469,7 @@ module MB
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
+        input.synths # (listed here, not on the render thread where it starts; see #align_grids)
         description = shorten(description || playable.description)
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
@@ -1555,10 +1556,14 @@ module MB
       # Session's frames (see Synth#align_grid), +frame+ being the player's
       # first frame.
       def align_grids(p, frame)
-        nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
-        nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.each do |n|
-          next unless n.is_a?(Synth)
-
+        synths =
+          if p.input.respond_to?(:synths)
+            p.input.synths
+          else
+            nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
+            nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.grep(Synth)
+          end
+        synths.each do |n|
           n.exact_lanes = true if @exact_lanes
           n.align_grid(frame)
         end

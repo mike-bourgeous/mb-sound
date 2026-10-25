@@ -36,6 +36,15 @@ module MB
         @data = Array.new(@nodes.length) # (reused by #read)
 
         @handled_spies = {}
+        @synths = nil
+      end
+
+      # The Synths anywhere in the graph (for Session#align_grids, which
+      # needs them on a player's first buffer; Session#add lists them
+      # first, on the building thread, so the render thread doesn't walk
+      # the graph where the player starts; alloc-2).
+      def synths
+        @synths ||= @nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.grep(MB::Sound::Synth).freeze
       end
 
       # Just describes the number of channels.
