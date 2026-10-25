@@ -380,10 +380,12 @@ RSpec.describe(MB::Sound::Arrangement) do
       within { set.play_form(MB::Sound::Form.build { one 1 }) }
     end
 
-    it 'runs when a form starts with warm_up: true, printing one line' do
+    it 'runs when a form starts with warm_up: true, rehearsing the form, printing one line' do
+      expect(set).to receive(:rehearse).and_call_original
       expect { within { set.play_form(MB::Sound::Form.build { one 1; two 1 }, warm_up: true) } }.to output(
-        /Warmed up 2 tracks in \d+\.\d s \(skip with warm_up: false\)/
+        /Warmed up 2 tracks and 2 sections in \d+\.\d s \(skip with warm_up: false\)/
       ).to_stdout
+      expect(set.rehearsal).to eq(2)
     end
 
     it 'says how many tracks were only built' do
@@ -391,7 +393,7 @@ RSpec.describe(MB::Sound::Arrangement) do
       set.track(:shared) { |c| c.tone.saw * lfo }
       set.scene(:three, shared: a1)
       expect { within { set.play_form(MB::Sound::Form.build { three 1 }, warm_up: true) } }.to output(
-        /Warmed up 3 tracks in \d+\.\d s \(1 only built, reaching nodes made outside their patch; skip with warm_up: false\)/
+        /Warmed up 3 tracks and 1 section in \d+\.\d s \(1 only built, reaching nodes made outside their patch; skip with warm_up: false\)/
       ).to_stdout
     end
 
@@ -401,5 +403,77 @@ RSpec.describe(MB::Sound::Arrangement) do
       within { MB::Sound.flow(warm_up: false) { one 1 } }
       expect { within { MB::Sound.flow(warm_up: :maybe) { one 1 } } }.to raise_error(ArgumentError, /warm_up: must be/)
     end
+  end
+
+  describe '#rehearse' do
+    it "plays the form's transitions in a sandbox, leaving the session, seeds, and knobs as they were" do
+      cut = within { session.knob(:cut, 500, range: 100..5000, curve: :exp) }
+      lfo = 2.hz.lfo
+      built = Hash.new(0)
+      played = Hash.new(0)
+      set.track(:c) { |c| built[:c] += 1; (c.number * within_knob(:cut)).proc { |b| played[:c] += 1; b } }
+      set.track(:shared) { |c| built[:shared] += 1; (c.tone.saw * lfo).proc { |b| played[:shared] += 1; b } }
+      set.scene(:three, c: a1, shared: b1, cut: 2000)
+      set.scene(:four, c: b1, a: a1, b: b1)
+      built.clear
+      within { session.master { |mix| mix.proc { |b| played[:master] += 1; b } } }
+      within { session.bus(:verb) { |sig| sig.proc { |b| played[:verb] += 1; b } } }
+      session.route(:c, send: { verb: 0.5 })
+      form = MB::Sound::Form.build { one 2; three 4, times: 3; four 8 }
+
+      MB::Sound.seed(42)
+      expected = MB::Sound.with_seed(42) { MB::Sound.next_seed }
+      before_lfo = 2.hz.lfo.sample(10).dup
+      journal = session.journal.changes.dup
+      set.warm_up(form: form)
+      expect(set.rehearsal).to eq(4) # one, three twice (at most), four
+      expect(built[:shared]).to eq(2) # built twice to find the shared node, never played
+      expect(played[:shared]).to eq(0)
+      expect(played[:c]).to be > 0
+      expect(played[:master]).to be > 0
+      expect(played[:verb]).to be > 0
+      expect(MB::Sound.next_seed).to eq(expected)
+      expect(lfo.sample(10)).to eq(before_lfo)
+      expect(cut.value).to eq(500)
+      expect(session.players).to be_empty
+      expect(session.journal.changes).to eq(journal)
+      expect(transport.position).to eq(0)
+      expect(set.playback).to be_nil
+    end
+
+    it 'warns and gives up when a scene block raises, leaving the form to play' do
+      set.scene(:bad) { raise 'nope' }
+      form = MB::Sound::Form.build { one 1; bad 1 }
+      expect { set.warm_up(form: form) }.to output(/warm_up: the form's rehearsal stopped \(RuntimeError: nope\)/).to_stderr
+      expect(set.rehearsal).to be_nil
+      expect(session.players).to be_empty
+    end
+
+    it 'refuses while something plays' do
+      within { set.go(:one) }
+      run(800)
+      expect { set.rehearse(MB::Sound::Form.build { one 1 }) }.to raise_error(RuntimeError, /before anything plays/)
+    end
+
+    it 'renders the same with and without it' do
+      render = ->(warm) {
+        s = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+        a = s.arrangement
+        MB::Sound.seed(7)
+        a.track(:n) { |c| MB::Sound.synth(c, voices: 2) { |v| (v.hz.saw.rnd + MB::Sound.noise * 0.1) * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+        a.scene(:x, n: MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop)
+        a.scene(:y, n: MB::Sound.seq(MB::Sound::G3).n8.loop)
+        form = MB::Sound::Form.build { x 1; y 1 }
+        a.warm_up(form: form) if warm
+        MB::Sound::Session.with_context(session: s) { a.play_form(form, warm_up: false) }
+        data = SpecBuffers.join(Array.new(240) { s.process_buffer[0].dup })
+        s.close
+        data
+      }
+      plain = render.(false)
+      expect(plain.abs.max).to be > 0.1
+      expect(render.(true)).to eq(plain)
+    end
+
   end
 end

@@ -488,6 +488,10 @@ module MB
           save_take
         else
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
+          # The screen's painter too, before the form starts (#live_ui runs
+          # once it plays, and a first warm-up there held the GVL while
+          # the first bars played; scene-jit-1)
+          UI.warm_up if @options[:ui]
           Session.current.exact_lanes = true if @options[:take]
           if @options.key?(:master)
             Session.current.mastering_override = mastering_option
@@ -1118,6 +1122,7 @@ module MB
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
           MB::Sound.warm_up(midi: @kind == :synth) # before the first write to the output (see WarmUpMethods)
+          UI.warm_up if @options[:ui] # (the screen's painter too; see #run_song)
           MB::Sound.bg(:script, graph, fade: 0)
           yield Session.current if block_given?
           live
