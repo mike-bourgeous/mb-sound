@@ -41,8 +41,8 @@ module MB
         end
 
         # Ruby ticker stalls by likely cause: Hash of cause => [count,
-        # total ms].  :system when a probe episode overlaps it (the probe
-        # saw the machine stall too), else :gc when that second had GC time,
+        # total ms].  :system when probe episodes overlapping it stalled at
+        # least a quarter as long (the probe saw the machine stall too), else :gc when that second had GC time,
         # else :yjit when YJIT compiled then, else :process (the GVL held by
         # another thread, or anything else in this process).
         def ruby_causes
@@ -338,9 +338,14 @@ module MB
         def cause_of(e, by_second)
           from = e[:wall_ns] - e[:late_ns] - 2_000_000
           to = e[:wall_ns] + 2_000_000
-          # (any probe episode at the same time: in a VM's memory stall the
-          # probe's short walk slows by less than Ruby's work does)
-          return :system if @episodes.any? { |x| x[:wall_ns] <= to && x[:wall_ns] + x[:duration_ns] >= from }
+          # (probe episodes at the same time, if their stalls add up to a
+          # quarter of Ruby's: in a VM's memory stall the probe's short walk
+          # slows by less than Ruby's work does, but a loaded machine's
+          # 20-50 ms episodes during a 300 ms GVL hold don't explain it;
+          # omnibus13: latency_probe_spec blamed a GVL hold on the system
+          # under a P8 suite)
+          stall = @episodes.sum { |x| x[:wall_ns] <= to && x[:wall_ns] + x[:duration_ns] >= from ? x[:stall_ns] : 0 }
+          return :system if stall > 0 && stall * 4 >= e[:late_ns]
 
           row = by_second[e[:wall_ns] / 1_000_000_000]
           return :gc if row && row[:gc_ms].to_f > 0
