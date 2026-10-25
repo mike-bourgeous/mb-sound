@@ -895,4 +895,46 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(t.sample(1)[0].abs).to be > 0.1 # not the jump to 0
     end
   end
+
+  describe '.sync_pulses' do
+    # FastSynth.sync_pulse_edges (alloc-2) against the Numo mirror
+    def both(phi, freq, count, prev)
+      p1 = prev.dup
+      p2 = prev.dup
+      phi2 = phi.is_a?(Array) ? phi.dup : phi
+      a = MB::Sound::BandLimit.sync_pulses(phi, freq, 1 / 48000.0, count, p1)
+      b = MB::Sound::BandLimit.sync_pulses_ruby(phi2, freq, 1 / 48000.0, count, p2)
+      [a, b, p1, p2]
+    end
+
+    it 'finds the same pulses in C as in Numo, for constant and moving frequencies' do
+      rng = Random.new(5)
+      sig = Numo::SFloat.new(300).rand(-3000, 9000)
+      sig[100..140] = -400
+      jumpy = Numo::SFloat.new(64).fill(2000)
+      [
+        [0.0, 2000.0, 300, [0.0, 0.0, 0]], [0.3, 440.0, 128, [0.29, 440.0 / 48000, 1]], [0.9, -700.0, 200, [0.95, -700.0 / 48000, 1]],
+        [0.1, sig, 300, [0.7, 0.01, 1]], [0.0, jumpy, 64, [0.5, 0.0, 1]], [0.999999999995, 12000.0, 7, [0.75, 0.25, 1]],
+        [rng.rand, rng.rand(20000.0), 1, [rng.rand, rng.rand / 4, 1]],
+      ].each do |phi, freq, n, prev|
+        a, b, p1, p2 = both(phi, freq, n, prev)
+        expect(a[0].to_binary).to eq(b[0].to_binary), [phi, freq.class, n].inspect
+        expect(a[1].to_binary).to eq(b[1].to_binary)
+        expect(p1).to eq(p2)
+        expect(a[0].abs.max).to be > 0 if n > 1
+      end
+    end
+
+    it 'gives the same sync ports from the C edges as from the Numo mirror' do
+      out = ->(native) {
+        allow(MB::Sound::FastSynth).to receive(:sync_pulse_edges).and_return(nil) unless native
+        m = 123.4.hz.saw
+        t = 471.hz.ramp.sync(m.wraps)
+        Array.new(5) { |i| t.sample([128, 7, 800, 1, 64][i]).dup }.map(&:to_a).flatten
+      }
+      a = out.(true)
+      b = out.(false)
+      expect(a).to eq(b)
+    end
+  end
 end

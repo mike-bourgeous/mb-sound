@@ -46,6 +46,21 @@ module MB
       def self.sync_pulses(phi, freq, advance, count, prev)
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
+        phases, incs = sync_phases(phi, freq, advance, count)
+        MB::Sound::FastSynth.sync_pulse_edges(phases, incs, prev, EPS) || sync_edges_ruby(phases, incs, prev, count)
+      end
+
+      # The Ruby mirror of .sync_pulses (FastSynth.sync_pulse_edges' Ruby
+      # half), for specs.
+      def self.sync_pulses_ruby(phi, freq, advance, count, prev)
+        return [Numo::SFloat[], Numo::SFloat[]] if count == 0
+
+        phases, incs = sync_phases(phi, freq, advance, count)
+        sync_edges_ruby(phases, incs, prev, count)
+      end
+
+      # The phases and increments (DFloats) .sync_pulses finds pulses in.
+      def self.sync_phases(phi, freq, advance, count)
         freq = Numo::DFloat.cast(Numo::SFloat.cast(freq.is_a?(Numo::SComplex) || freq.is_a?(Numo::DComplex) ? freq.real : freq)) if freq.is_a?(Numo::NArray)
         increments = freq * advance
 
@@ -69,7 +84,14 @@ module MB
           phases = steps + phi
           phases -= phases.floor
         end
+        incs = Numo::DFloat.cast(incs) unless incs.is_a?(Numo::DFloat)
 
+        [phases, incs]
+      end
+
+      # The edge part of .sync_pulses in Numo (see
+      # FastSynth.sync_pulse_edges, its C version).
+      def self.sync_edges_ruby(phases, incs, prev, count)
         # A phase within rounding of the wrap is on it (see .snap and
         # bl_snap in fast_synth.c): e.g. at 2000 Hz, 23/24 + 1/24 is just
         # below 1 in floating point

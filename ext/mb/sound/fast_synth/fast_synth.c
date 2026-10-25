@@ -1273,6 +1273,86 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 	return buffer;
 }
 
+/*
+ * call-seq: MB::Sound::FastSynth.sync_pulse_edges(phases, increments, prev, eps) -> [pulses, increments] or nil
+ *
+ * The edge part of BandLimit.sync_pulses (its Ruby mirror,
+ * BandLimit.sync_pulses_ruby, is compared with it in specs; alloc-2):
+ * snaps +phases+ (a DFloat, changed in place) within +eps+ of the wrap to
+ * 0, finds each sample's wrap pulse from the step before it (the first
+ * from +prev+ = [last phase, last increment, primed]), and updates +prev+.
+ * The same double operations as the Numo code (additions, subtractions,
+ * divisions, floor, comparisons: nothing a compiler could fuse).  Returns
+ * new SFloats of the pulses (clipped to -1..1) and +increments+ (a DFloat
+ * as long as +phases+), or nil for other arguments.
+ */
+static VALUE ruby_sync_pulse_edges(VALUE self, VALUE phases, VALUE incs, VALUE prev, VALUE eps_v)
+{
+	if (CLASS_OF(phases) != numo_cDFloat || CLASS_OF(incs) != numo_cDFloat || !RB_TYPE_P(prev, T_ARRAY) || RARRAY_LEN(prev) != 3) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(phases) != 1 || RNARRAY_NDIM(incs) != 1 || !RTEST(nary_check_contiguous(phases)) || !RTEST(nary_check_contiguous(incs))) {
+		return Qnil;
+	}
+	size_t n = RNARRAY_SIZE(phases);
+	if (n == 0 || RNARRAY_SIZE(incs) != n || OBJ_FROZEN(phases)) {
+		return Qnil;
+	}
+	VALUE pv = RARRAY_AREF(prev, 0), iv = RARRAY_AREF(prev, 1), mv = RARRAY_AREF(prev, 2);
+	if (!(RB_FLOAT_TYPE_P(pv) || RB_INTEGER_TYPE_P(pv)) || !(RB_FLOAT_TYPE_P(iv) || RB_INTEGER_TYPE_P(iv)) || !RB_INTEGER_TYPE_P(mv)) {
+		return Qnil;
+	}
+
+	double eps = NUM2DBL(eps_v);
+	double *ph = (double *)(nary_get_pointer_for_write(phases) + nary_get_offset(phases));
+	const double *inc = (const double *)(nary_get_pointer_for_read(incs) + nary_get_offset(incs));
+
+	VALUE pulses = rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	VALUE incs_out = rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	float *pu = (float *)(nary_get_pointer_for_write(pulses) + nary_get_offset(pulses));
+	float *io = (float *)(nary_get_pointer_for_write(incs_out) + nary_get_offset(incs_out));
+
+	for (size_t i = 0; i < n; i++) {
+		if (ph[i] < eps || ph[i] > 1.0 - eps) {
+			ph[i] = 0.0;
+		}
+	}
+
+	double prev_p = NUM2DBL(pv), prev_inc = NUM2DBL(iv);
+	for (size_t i = 0; i < n; i++) {
+		double before = i == 0 ? prev_p : ph[i - 1];
+		double before_inc = i == 0 ? prev_inc : inc[i - 1];
+		double reached = before + before_inc;
+		double pulse = 0.0;
+		if (before_inc > 0 && reached >= 1.0 - eps) {
+			pulse = (1.0 - before) / before_inc;
+		}
+		if (before_inc < 0 && before > 0 && reached <= eps) {
+			pulse = -(before / -before_inc);
+		}
+		double t = reached - ph[i] + 0.5;
+		if (fabs(t - floor(t) - 0.5) > 1e-6) {
+			pulse = 1.0;
+		}
+		if (i == 0 && NUM2LONG(mv) == 0) {
+			pulse = 0.0;
+		}
+		// Numo's clip(-1, 1)
+		if (pulse < -1.0) pulse = -1.0;
+		if (pulse > 1.0) pulse = 1.0;
+		pu[i] = (float)pulse;
+		io[i] = (float)inc[i];
+	}
+
+	rb_ary_store(prev, 0, DBL2NUM(ph[n - 1]));
+	rb_ary_store(prev, 1, DBL2NUM(inc[n - 1]));
+	rb_ary_store(prev, 2, INT2FIX(1));
+
+	RB_GC_GUARD(phases);
+	RB_GC_GUARD(incs);
+	return rb_assoc_new(pulses, incs_out);
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1292,4 +1372,5 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
 	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
+	rb_define_module_function(fast_synth, "sync_pulse_edges", ruby_sync_pulse_edges, 4);
 }
