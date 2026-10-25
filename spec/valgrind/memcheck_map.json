@@ -13,13 +13,16 @@
     },
     "spec/ext/mb/sound/fast_arithmetic_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.accumulate",
         "FastArithmetic.add_at",
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.copy",
+        "FastArithmetic.copy_range",
         "FastArithmetic.divide",
         "FastArithmetic.fill_range",
+        "FastArithmetic.last_at_least",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.pan",
@@ -304,7 +307,9 @@
         "FastSound.phasor"
       ],
       "fast_synth": [
-        "FastSynth.oscillate_sync"
+        "FastSynth.oscillate_sync",
+        "FastSynth.sync_pulse_edges",
+        "FastSynth.sync_running_phases"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -395,6 +400,7 @@
     },
     "spec/lib/mb/sound/band_limit_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
       "fast_sound": [
@@ -405,7 +411,9 @@
       "fast_synth": [
         "FastSynth.blit",
         "FastSynth.oscillate_bl",
-        "FastSynth.oscillate_sync"
+        "FastSynth.oscillate_sync",
+        "FastSynth.sync_pulse_edges",
+        "FastSynth.sync_running_phases"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -458,7 +466,8 @@
     },
     "spec/lib/mb/sound/device_output_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.add_at"
+        "FastArithmetic.add_at",
+        "FastArithmetic.fill_range"
       ],
       "fast_audio": [
         "FastAudio.devices",
@@ -607,6 +616,7 @@
     },
     "spec/lib/mb/sound/generation_methods_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix"
       ],
       "fast_sound": [
@@ -618,6 +628,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
@@ -672,6 +684,7 @@
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product"
       ],
@@ -828,6 +841,7 @@
     },
     "spec/lib/mb/sound/graph_node/resonator_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.fill_range",
         "FastArithmetic.product"
       ],
       "fast_resonator": [
@@ -843,6 +857,7 @@
         "FastArithmetic.circular_read",
         "FastArithmetic.circular_write",
         "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.mix",
         "FastArithmetic.product",
         "FastArithmetic.wet_dry"
@@ -887,6 +902,9 @@
       "fast_sound": [
         "FastSound.oscillate",
         "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -990,7 +1008,8 @@
         "FastSynth.blit",
         "FastSynth.feedback_sine",
         "FastSynth.oscillate_bl",
-        "FastSynth.oscillate_sync"
+        "FastSynth.oscillate_sync",
+        "FastSynth.sync_pulse_edges"
       ],
       "fast_texture": [
         "FastTexture.drift",
@@ -1467,6 +1486,7 @@
       "fast_arithmetic": [
         "FastArithmetic.add_at",
         "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
         "FastArithmetic.power",
@@ -1566,6 +1586,8 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1623,7 +1645,8 @@
         "FastSound.phasor"
       ],
       "fast_synth": [
-        "FastSynth.feedback_sine"
+        "FastSynth.feedback_sine",
+        "FastSynth.sync_pulse_edges"
       ]
     },
     "spec/lib/mb/sound/tone_gain_spec.rb": {
@@ -1643,7 +1666,8 @@
         "FastSynth.blit",
         "FastSynth.feedback_sine",
         "FastSynth.oscillate_bl",
-        "FastSynth.oscillate_sync"
+        "FastSynth.oscillate_sync",
+        "FastSynth.sync_pulse_edges"
       ],
       "fast_wavetable": [
         "FastWavetable.oscillate"
@@ -1687,7 +1711,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl",
-        "FastSynth.oscillate_sync"
+        "FastSynth.oscillate_sync",
+        "FastSynth.sync_pulse_edges",
+        "FastSynth.sync_running_phases"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
