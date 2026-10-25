@@ -61,6 +61,39 @@ module ParallelSpecs
     groups.zip(loads).reject { |g, _| g.empty? }
   end
 
+  # Available memory per spec process for #default_count: the largest
+  # process peaked near 1.1 GB on 2026-10-24 (most stay under 0.7 GB), so
+  # 1.5 GB of MemAvailable each leaves room for the rest of the machine.
+  MEMORY_PER_PROCESS = 1.5 * 1024**3
+
+  # The number of spec processes: PARALLEL when set, else half the CPUs
+  # (hyperthreads: example time grew 21% from 2 to 8 processes on the
+  # 8-core i9, where 8 was the knee), capped by available memory
+  # (maintainer, 2026-10-25).  Returns [count, reason].
+  def default_count(env = ENV)
+    return [Integer(env['PARALLEL']), 'PARALLEL'] if env['PARALLEL'] && !env['PARALLEL'].empty?
+
+    half = [Etc.nprocessors / 2, 1].max
+    avail = available_memory
+    by_ram = avail ? [(avail / MEMORY_PER_PROCESS).floor, 1].max : nil
+    count = by_ram ? [half, by_ram].min : half
+    ram = avail ? format('%.1f GB available -> at most %d', avail / 1024.0**3, by_ram) : 'memory unknown'
+    [count, "half of #{Etc.nprocessors} CPUs, #{ram}"]
+  end
+
+  # Bytes of available memory (Linux MemAvailable), or nil
+  def available_memory
+    kb = File.read('/proc/meminfo')[/^MemAvailable:\s+(\d+)/, 1] if File.readable?('/proc/meminfo')
+    kb && kb.to_i * 1024
+  end
+
+  # Runs #default_count's choice, printing it.
+  def run_default(patterns: nil, extra_args: [])
+    count, why = default_count
+    puts "spec:parallel: #{count} processes (#{why})"
+    run(count: count, patterns: patterns, extra_args: extra_args)
+  end
+
   # This machine, for the host speed table: CPU model, hardware threads,
   # and the number of spec processes.
   def host_key(count)

@@ -419,10 +419,10 @@ namespace :memcheck do
 end
 
 namespace :spec do
-  desc 'Run the specs in PARALLEL (default 4) rspec processes, then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
+  desc 'Run the specs in PARALLEL rspec processes (default: half the CPUs, capped by available memory), then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
   task :parallel do
     require_relative 'spec/parallel_specs'
-    ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4), patterns: ENV['SPECS'].to_s.split)
+    ok = ParallelSpecs.run_default(patterns: ENV['SPECS'].to_s.split)
     abort 'spec:parallel: failures' unless ok
   end
 
@@ -434,7 +434,7 @@ namespace :spec do
     QuickSelection.describe(sel, times: ParallelSpecs.known_times)
     next if ENV['QUICK_DRY'] == '1'
 
-    ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4), patterns: sel.specs)
+    ok = ParallelSpecs.run_default(patterns: sel.specs)
     abort 'spec:quick: failures' unless ok
   end
 
@@ -460,7 +460,7 @@ namespace :spec do
           FileUtils.mkdir_p(dir)
           ENV['MB_SOUND_COVERAGE_PER_FILE'] = dir
           ENV['MB_SOUND_SPEC_BUDGET'] = 'report' # (coverage makes examples slower than their budgets)
-          ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4))
+          ok = ParallelSpecs.run_default
           ENV.delete('MB_SOUND_COVERAGE_PER_FILE')
           File.write(times_path, saved) if saved
           abort 'spec:quick:map: failures in the coverage run (no map written)' unless ok
