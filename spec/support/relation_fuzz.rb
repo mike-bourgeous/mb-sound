@@ -154,6 +154,18 @@ module RelationFuzz
     Expr.new(op.first, op.drop(1), [kid])
   end
 
+  # One Expr of every unary step kind (with typical arguments) over +kid+,
+  # for checks that every step meets some input (complex values, ...).
+  def every_unary(kid)
+    c = [:const, 1000]
+    [
+      [:filter, :lowpass, c, [:const, 1]], [:lp4, c, 0.3], [:diode, c, 0.3], [:softclip], [:asoftclip], [:clip, 0.5],
+      [:quantize, 0.1], [:delay, [:const, 0.001], nil], [:delay, [:const, 0.001], 0.3], [:decimate, [:const, 4000]],
+      [:at, [:const, 0.5]], [:compress, -12, 4], [:feedback, 30, 0.5], [:ease, :smoothstep], [:formant, :a],
+      [:pan, [:const, 0.2]], [:abs], [:until, 0.011], [:period_delay, 110], [:sample_hold, false],
+    ].map { |op| Expr.new(op.first, op.drop(1), [kid]) }
+  end
+
   # --- printing -------------------------------------------------------
 
   def ctl(c)
@@ -175,6 +187,7 @@ module RelationFuzz
       cut = a[2] ? ".filter(:lowpass, cutoff: #{ctl(a[2])}, quality: 2)" : ''
       "seq(C4.n128, E4.n128, G4.n64, C5.n128).loop.synth(voices: #{a[1]}) { |v, _i| v.hz.#{a[0]}#{cut} * v.amp_env(0.001, 0.002, 0.5, 0.002) }"
     when :drums then "tr808(grid(32, bd: '#{a[0]}', snare: '#{a[1]}'))"
+    when :complex then '220.hz.saw.hilbert_iir' # (only in relation_fuzz_spec's complex input check)
     when :lfo_audio then "(#{ctl(a[0])} + 220.hz.triangle.at(0.5))"
     when :add then "(#{k[0]} + #{k[1]})"
     when :mul then "(#{k[0]} * #{k[1]})"
