@@ -3,6 +3,32 @@ RSpec.describe('bin/songs/night_bus_capture.rb') do
 
   after { MB::Sound.rewind }
 
+  # The everyday run's case: the first 7 bars (arm at bar 3, the riff
+  # captured at bar 7 and looping there)
+  it 'arms the keys at bar 3 and captures the riff at bar 7' do
+    session = nil
+    path = tmp_path('capture7.flac')
+    expect {
+      MB::Sound.render(path, bars: 7, loudness: false) do
+        MB::Sound.night_bus_capture
+        session = MB::Sound::Session.current
+      end
+    }.to output(/arm :keys.*capture :keys, 2/m).to_stdout
+
+    t = session.transport
+    landed = session.journal.changes.select { |e| e.status == :landed }
+    expect(landed.select { |e| e.kind == :arm && e.subject == :keys }.map { |e| t.bar_at(e.lands.pos) }).to eq([3])
+    expect(landed.select { |e| e.kind == :capture && e.subject == :keys }.map { |e| t.bar_at(e.lands.pos) }).to eq([7])
+    clip = session.arrangement.captures[:keys_1]
+    expect(clip.length).to eq(2r)
+    expect(clip.events.length).to eq(11)
+
+    data = MB::Sound.read(path)
+    bar = (240.0 / 126 * 48000).round
+    expect(data[0][(6 * bar)..].abs.max).to be > 0.05 # (bar 7, to the end)
+  end
+
+  # The whole performance (slow tier, SLOW=1)
   it 'captures the riff at bar 7, records the answer into bar 13, and learns the filter knob', :slow do
     session = nil
     path = tmp_path('capture.flac')
