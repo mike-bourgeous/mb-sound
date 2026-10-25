@@ -37,7 +37,7 @@ Decision (maintainer, 2026-10-13, "Decibels: option b, with full migration after
 
 **Channels**: every face takes a single node or a bundle and handles channels itself (excluded from ChannelDispatch, like `reverb`), returning a node for one channel, a bundle otherwise.
 
-**Plan layer** (optimizer-2, 2026-10-12): one-channel companders (compress, expand, noise_gate, duck, compand) are `Plan::Op::Dynamics`, running FastDynamics.compand's kernel (moved to `include/mb_dynamics.h`) on the node's own state; sidechains are boundary inputs, node times fuse; a lookahead node's tail after its input ends runs unfused.  Multichannel nodes (their channels share one kernel call), limiters, and crossover bands stay boundaries with reasons (`Plan.explain`).  See plan_layer.md.
+**Plan layer** (optimizer-2, 2026-10-12): one-channel companders (compress, expand, noise_gate, duck, compand) are `Plan::Op::Dynamics`, running FastDynamics.compand's kernel (moved to `include/mb_dynamics.h`) on the node's own state; sidechains are boundary inputs, node times fuse; a lookahead node's tail after its input ends runs unfused.  Since fuse-more-1 (2026-10-25) multichannel companders fuse too: one `Op::Dynamics` computes every channel in one kernel call (ops may compute several Values), the Dynamics rooting its region like a ChannelMixer (`Plan::MultiDescribable`); an input that ends replays the block unfused and leaves the node unfused (a channel ending first plays on as silence, a lookahead flushes).  Limiters and crossover bands stay boundaries with reasons (`Plan.explain`).  See plan_layer.md.
 
 **CPU budget**: the master chain at 800-sample stereo buffers should stay well under 1% of realtime per compressor or limiter (one log10 and one pow per sample per detector; the limiter's window loops are O(lookahead) per sample, ~72 compares and adds at 1.5 ms), and an OTT under about 3%.  Measurements below.
 
@@ -105,6 +105,6 @@ The reverb's own `duck:` has fixed times (DUCK_FALL 10 ms, DUCK_RISE 300 ms afte
 ## Later
 
 - Node-valued thresholds/ratios (the curve is fixed per node; times and the sidechain already take nodes); crossover frequencies as nodes.
-- Done: the plan-layer op for one-channel companders (`Op::Dynamics`, optimizer-2, 7dae731c; Plan layer above).  Multichannel dynamics, limiters, and crossover bands are still plan boundaries.
+- Done: the plan-layer op for one-channel companders (`Op::Dynamics`, optimizer-2, 7dae731c; Plan layer above), and for multichannel ones (fuse-more-1).  Limiters and crossover bands are still plan boundaries.
 - Mastering: done as presets in mastering-1/2 (2761e83a; `master :club`/`:streaming`/`:quiet`/`:vinyl`, targets, rider; master_effects.md), which ended the 2026-10-14 deferral.  Still open: whether a master limiter/softclip should be on by default (maintainer, 2026-10-13: reevaluate in the effects project).
 - Transient shaper (two envelope followers), de-esser (`bands` + `compress` with a sidechain highpass works today: `sig.bands(6000) { |lo, hi| [lo, hi.compress(threshold: -30.db, ratio: 6)] }`), program-dependent limiter release, metering nodes for gain reduction (the kernel could write the gain into a port).

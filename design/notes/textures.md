@@ -98,6 +98,8 @@ output moves from p1 to p2 over a step.
 
 ## Modal resonators (`GraphNode::ModalResonator < Resonator`, `FastResonator.modes`)
 
+Plan layer (fuse-more-1, 2026-10-25): `Resonator` and `ModalResonator` are `Plan::Op::Resonator` (FastResonator's `ping` and `modes` loops moved into `include/mb_resonator.h`, shared by fast_resonator and fast_plan's `plan_resonator.c`), bit for bit on the node's own state; frequency nodes are described, decay nodes scaled to samples by a Mul; when the input ends the node rings out unfused (`#plan_tail?`), finding its exact end as before.  So drum voices' bodies and struck textures fuse with what plays and follows them.
+
 `sig.resonate(preset, freq, decay:, beat:, spread:, normalize: true)`
 (preset and frequency in either order).  Every impulse rings all modes of a
 struck object: complex one-pole pings as `Resonator` (frequency and decay
