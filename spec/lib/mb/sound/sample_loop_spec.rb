@@ -287,7 +287,7 @@ RSpec.describe('loop files and the slice stretch', :aggregate_failures) do
     it 'plays the slice stretch at another tempo, the same at any buffer size' do
       MB::Sound.bpm(125)
       want = rec.stretch(0.8, mode: :slice).data(0)
-      [1, 7, 128, 800].each do |n|
+      [800, *slow_tier([7, 1, 128])].each do |n|
         f = rec.follow
         out = Numo::SFloat.zeros(want.length)
         i = 0

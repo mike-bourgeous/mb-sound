@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Renders every plot look and theme of MB::Sound::Plot on the same sounds.
 #
 # Writes a self-contained HTML gallery (terminal captures converted from

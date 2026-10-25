@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar demo of tweening curves (MB::Sound::Curve) at 96 BPM: glide
 # shapes, tweened automation, and curves as shapers.
 #

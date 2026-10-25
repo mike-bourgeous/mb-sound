@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Memory Card (Sunrise Mix)" by Skylark Junction: optimistic atmospheric jungle at 165 BPM.
 #
 # Skylark Junction is the act of Nev Ashdown, a fictional 90s jungle

@@ -36,6 +36,47 @@ module MB
         @data = Array.new(@nodes.length) # (reused by #read)
 
         @handled_spies = {}
+        @synths = nil
+        @node_set = nil
+      end
+
+      # Lists the graph's nodes (with Tees) for Session::Strip#graph_node_set
+      # on the thread that builds the graph (Session#add), so the render
+      # thread doesn't walk a new scene's graphs while they wait to land
+      # (alloc-2).  Kept as [structure, [nodes, ids]] for the
+      # GraphNode.structure_changes count it was listed at.
+      def prime_node_set(nodes = nil, structure = GraphNode.structure_changes)
+        nodes ||= graph(include_tees: true)
+        GraphNode.watch_structure(nodes)
+        ids = {}
+        nodes.each { |n| ids[n.__id__] = true }
+        @node_set = [structure, [nodes, ids]].freeze
+        nil
+      end
+
+      # The [nodes, ids] #prime_node_set listed, if listed at +structure+.
+      def primed_node_set(structure)
+        s = @node_set
+        s && s[0] == structure ? s[1] : nil
+      end
+
+      # The Synths anywhere in the graph (for Session#align_grids, which
+      # needs them on a player's first buffer; Session#add lists them
+      # first, on the building thread, so the render thread doesn't walk
+      # the graph where the player starts; alloc-2).
+      def synths
+        @synths ||= @nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.grep(MB::Sound::Synth).freeze
+      end
+
+      # Session#add's preparations on the building thread, from one walk of
+      # the graph: #synths, nodes' #prime_render (e.g. Drums::Voice), and #prime_node_set (alloc-2).
+      def prime
+        structure = GraphNode.structure_changes
+        nodes = graph(include_tees: true)
+        @synths ||= nodes.grep(MB::Sound::Synth).freeze
+        nodes.each { |n| n.prime_render if !n.equal?(self) && n.respond_to?(:prime_render) }
+        prime_node_set(nodes, structure)
+        nil
       end
 
       # Just describes the number of channels.

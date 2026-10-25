@@ -19,6 +19,43 @@ Late clients (2026-10-13, branch jack-flake-1): an asynchronous JACK server (jac
 
 Tools and threads: `bin/latency_probe.rb` (latency_probe.md) tells system stalls (VM, OS) from Ruby's (GVL, GC, YJIT) and lines a Session's underruns up with them; `bin/audio_check.rb` lists devices and measures latency, underruns, clock drift, write spacing, and queue range (`--busy` adds GVL contention).  A busy Ruby thread can starve the writer for a whole time slice (100 ms by default, longer than the queue; 131 underruns in 10 s on the user's Mac), so bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang (user's choice; 0 underruns measured; read only when Ruby starts, so `ruby bin/x.rb`, irb, and `fork_script` don't get it); a priority of -3 on the busy thread also works.  The Session render thread calls `FastAudio.boost_thread_priority` (user-interactive QoS on macOS via `pthread_set_qos_class_self_np`, no privileges; a no-op elsewhere).  `vis` shows each buffer when it reaches the speakers (now + `output.latency`).  `use_output(obj_or_type)` gives the background session another output (refuses while players run); `render` accepts an output object; `OUTPUT_TYPE=ffmpeg` is any live ffmpeg output (`OUTPUT_FORMAT`, default audiotoolbox on macOS and pulse elsewhere; `OUTPUT_CODEC`; `OUTPUT_DEVICE` as the name or URL; about 0.4 s latency), wrapped in `BackgroundOutput` (feeds paced silence so ffmpeg never runs dry; kept separate from FFMPEGOutput by choice).
 
+## Underrun concealment (audio-safety-1, 2026-10-25)
+
+Why: research-gvl-render (86ecf51c) recommended a safety net so a missed deadline isn't a click; the maintainer picked "repeat last grain", then (same day) changed it: a grain tied to the buffer size buzzes at its repetition rate (128 samples: 375-750 Hz), and any fixed grain buzzes at rate / length, so grains come from jittered positions in a longer history with jittered lengths, decaying over long gaps, with fixed-grain and fade-to-silence variants shown beside it.
+
+Default for now: **silence** (the old behavior; `Concealment::DEFAULT`), until the maintainer picks one from the listening set; `AUDIO_CONCEAL=repeat` / `conceal: :repeat` turns the grains on, and switching the default is one line.
+
+Design (`ext/mb/sound/fast_audio/mb_conceal.h`, run by `playback_pull` on miniaudio's device thread and JACK's process thread; Ruby reference `MB::Sound::Concealment::Reference`, compared within 1e-6 on the specs' synthetic ring states: same operations in the same order, measured identical on x86-64 GCC with fast_audio's unchanged flags):
+- Every real frame the device plays goes into a history ring (the last 120 ms, ring of twice that so the crossfade back can push frames without overwriting what grains read; allocated at open, at the device's rate).  Normal pulls only copy into it.
+- Entry (the pull the ring ran dry in): the first grain starts at the lag 20-30 ms back whose preceding 1 ms best matches the last 1 ms (least squares, early exit), and the remaining step is an offset decaying over 2 ms; no fade-in (the gap is already there).
+- Grains: lengths drawn from 20-60 ms and start positions from anywhere in the history (counter-based splitmix64 of a seed and the draw count, so the same events give the same samples); each crossfades into the next over an equal-power (sine/cosine) seam as long as min(rest of this grain, half the next) allows, so at most two grains sound and there is no fixed period.  Equal power rather than Hann amplitude because grains from random positions are uncorrelated on average (a Hann sum dips 3 dB mid-seam); correlated material (two kick hits) can sum 3 dB over, so concealed samples, and the crossfade back, are clipped at the history's peak (or the real sample's, if louder).
+- Decay: -60 dB over `fade:` (1 s) then zeros; once the writer marked the end of its audio (`Playback#end_stream`, `DeviceOutput#end_stream`, called by `Session#close` after its render thread stops) a gap starting there isn't concealed and a running concealment falls 60 dB over `quiet_fade:` (20 ms).
+- Return: when audio arrives, it fades in over 5 ms (equal power) while the grains continue and fade out; running dry again mid-return just continues the grains.  **Late audio is played, not dropped** (chosen over catching up): the ring's read position, `frames_played`, `jack_clock`, and underrun counting move exactly as before, so the Session clock, MIDI timing, adaptive queue, `bin/audio_check.rb`, and the latency probe's Session watch see the same numbers; the adaptive queue already absorbs the added latency.  Dropping late audio would desync `jack_clock`'s ring-to-JACK-frame map and lose notes' starts.
+- JACK cycles an asynchronous server runs twice (`playback_jack_process`'s repeat path) keep the first call's port buffers when it concealed or crossfaded, since the ring doesn't hold that audio.
+- Settings (`MB::Sound::Concealment.settings`): `DeviceOutput.new(conceal:)` / `AUDIO_CONCEAL` (`silence` the old behavior and the default for now, `repeat` the grains, `fixed` loops the latest grain for comparisons; `repeat:20-60` grain range in ms); a Hash overrides `grain:` (Range or one length; Lengths like `20.ms`, `128.samples`), `history:`, `fade:` (nil: no decay), `quiet_fade:`, `return_fade:`, `match:`, `search:`, `seed:`.  `Playback.new` without the 15th argument is silence.  `stats[:concealed]` (frames) and `[:concealed_gaps]`.
+- `MB::Sound::Concealment.simulate(audio, gaps: [[start, length], ...], conceal:)` runs the C kernel over audio with forced gaps as a device would play it (for listening; the Bench set uses it).  `FastAudio::Concealer` is the kernel without a device (`#process`, `#state`, `#benchmark`).
+
+Measured (Mac container, i9-9880H VM, 2026-10-25; `Concealer#benchmark`, stereo, means over 400 stutter cycles; maxima are VM noise, the silence baseline's own max was 61 us):
+
+| pull | silence (old) | repeat: steady | entry | concealing | returning |
+|---|---|---|---|---|---|
+| 128 frames (2.67 ms) | 0.03 us | 0.17 us | 38 us (1.4% of the period, once per gap) | 1.5 us | 3.1 us |
+| 512 frames | 0.03 us | 0.33 us | 39 us | 6.3 us | 5.2 us |
+| 1024 frames | 0.04 us | 0.76 us | 48 us | 12 us | 5.5 us |
+
+Worst case: the entry search (480 lags x 48 frames x channels) at ~40-50 us once per gap; concealing costs ~12 ns per stereo frame.  Repetition (a 0.7 s gap without decay; `comb` = power at harmonics of the fixed grain's period over halfway between, dB; `ac` = autocorrelation at that lag):
+
+| source | variant | comb at 750 Hz | comb at 66.7 Hz | ac@64 | ac@720 |
+|---|---|---|---|---|---|
+| noise | source | -0.6 | -1.7 | 0.00 | 0.00 |
+| noise | fixed 128 samples | line spectrum (inf) | - | 1.00 | 0.01 |
+| noise | fixed 30 ms | 22.7 | 35.6 | 0.06 | 0.98 |
+| noise | jittered | 0.3 | -1.6 | -0.02 | 0.01 |
+| house | source / jittered | 3.0 / 1.6 | 1.9 / -0.9 | 0.77 / 0.89 | 0.03 / -0.02 |
+| ambient | source / jittered | 2.1 / -0.7 | -11.3 / -2.5 | 0.48 / 0.48 | 0.15 / 0.13 |
+
+(fixed 128 samples is exactly periodic every 64 samples: 128-sample grains with 64-sample seams.)  Jittered grains keep the source's own figures; `spec/ext/mb/sound/fast_audio_conceal_spec.rb` checks the noise case.  Listening set `/app/tmp/listening/audio-safety-1/` (silence, 20 ms fade to silence, fixed 128 samples, fixed 30 ms, jittered; gaps of 10/30/80/330 ms).
+
 ## Monitor trim (help-1, 2026-10-13)
 
 `Session.monitor_gain` (console `monitor_gain`/`monitor`, set by `help.level`) is a live-only listening gain on what monitored Sessions (realtime by default) and foreground `play` write to the output, after the master chain, limiter, and master gain; renders, stems, `rec_audio`, taps, and takes never see it, and over-full-scale peaks it causes are clipped with a warning.  Details in `help.md` (`Session::MonitorTrim`, `lib/mb/sound/session/monitor_trim.rb`).

@@ -388,6 +388,33 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(set.rehearsal).to eq(2)
     end
 
+    # alloc-2: the rehearsal's short sections reach only a synth's first
+    # notes, so a form warm-up also plays each self-contained track alone
+    # with an exercise of its clip's notes (reused, re-struck, and stolen
+    # voices)
+    it "plays each self-contained track's exercise with a form, leaving the session and seeds alone" do
+      exercised = []
+      set.track(:c) { |c| exercised << c; MB::Sound.synth(c, voices: 2) { |v| v.hz.saw.rnd * v.amp_env(0.01, 0.1, 0.5, 0.1) } }
+      set.scene(:three, c: a1)
+      expect(set).to receive(:warm_exercise).at_least(:once).and_call_original
+      MB::Sound.seed(42)
+      expected = MB::Sound.with_seed(42) { MB::Sound.next_seed }
+      set.warm_up(:c, form: MB::Sound::Form.build { three 1 })
+
+      ex = exercised.max_by { |c| c.events.length } # (the rehearsal builds with a1 after it)
+      expect(ex).to be_a(MB::Sound::Sequence::Clip)
+      expect(ex.events.length).to eq(MB::Sound::Arrangement::EXERCISE_ROUNDS * a1.values.first(MB::Sound::Arrangement::EXERCISE_NOTES).length)
+      expect(ex.values).to eq(a1.values.first(MB::Sound::Arrangement::EXERCISE_NOTES))
+      expect(MB::Sound.next_seed).to eq(expected)
+      expect(session.players).to be_empty
+      expect(transport.position).to eq(0)
+
+      # A patch that can't take the exercise is skipped quietly
+      set.track(:picky) { |c| raise 'not this clip' if c.events.length > 4; c.tone.saw }
+      set.scene(:four, picky: a1)
+      expect { set.warm_up(:picky, form: MB::Sound::Form.build { four 1 }) }.not_to output.to_stderr
+    end
+
     it 'says how many tracks were only built' do
       lfo = 2.hz.lfo
       set.track(:shared) { |c| c.tone.saw * lfo }

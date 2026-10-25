@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A/B listening: plays before/after pairs of audio files, switching between them at the same position.
 #
 # Usage: $0 [options] DIR_OR_FILE [...]

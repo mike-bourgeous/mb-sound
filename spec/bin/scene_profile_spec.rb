@@ -26,7 +26,7 @@ RSpec.describe('bin/scene_profile.rb') do
     end
   end
 
-  it 'plays a song on an emulated sound card with -R' do
+  it 'plays a song on an emulated sound card with -R', :slow do
     text = `bin/scene_profile.rb -R --band -n 512 --bars 1 -t 2 bin/songs/small_talk.rb -- --seed 2 2>&1`
     expect($?).to be_success, text
     expect(text).not_to include('UI pane') # (the deck painted from the session, no pane failing)

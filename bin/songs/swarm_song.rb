@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar demo of swarms (Pitch#swarm): unison copies that glide between
 # notes each in their own time, so the cloud smears and re-forms at every
 # note, at 90 BPM.

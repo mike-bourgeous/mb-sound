@@ -58,7 +58,7 @@ module MB
 
         def sample(count)
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          @buf.fill(0)
+          BufferHelper.zero(@buf)
 
           any = false
           @samplers.each do |name, s|

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Checks live MIDI through RtMidi (MB::Sound::MIDI::Input/Output): prints the
 # MIDI APIs, which one scripts would use and why, which libjack this process
 # loaded, the audio backend scripts would use, and every API's sources and

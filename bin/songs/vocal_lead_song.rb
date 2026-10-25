@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar tech-house loop at 126 BPM: the vocal lead from
 # bin/synths/vocal_lead.rb (kick wavetable -> formant filter in parallel
 # with a resonant lp4 -> key-tracked sample-rate crusher -> delay and

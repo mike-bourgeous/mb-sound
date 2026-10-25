@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Even more cowbell: a kit-builder kit where every row is a cowbell.  The
 # kick is an 808 cowbell bounced to a sample and played two octaves down
 # (a dull clank) over a sub, the snare the same cowbell a fourth down with

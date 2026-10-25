@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar TR-808 demo: a groove whose long kick is tuned to a bass line,
 # accented hats and claps, a cowbell feature ("more cowbell"), a conga and
 # rimshot break with a tom fill, and everything together at the end.

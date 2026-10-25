@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SIMPLECOV: '1' # coverage is opt-in locally (see spec/spec_helper.rb)
+      SLOW: '1' # the :slow tier too (plain rspec skips it; see SPEC_SLOW in spec/spec_helper.rb)
     strategy:
       matrix:
         ruby-version: ['4.0']

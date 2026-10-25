@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # MIDI transforms with parameters that move (MIDI::Param, midi-consol-2):
 # a riff through humanize, swing, chance, transpose, arp, and ratchet whose
 # settings follow MIDI controllers, knobs, tempo LFOs, and clips, read once

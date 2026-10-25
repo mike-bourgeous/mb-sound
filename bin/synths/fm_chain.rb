@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # An experimental FM synthesizer that chains held notes: each new held note
 # frequency-modulates the note held before it, and only the first held note
 # is heard.  If only one note is held, it plays unmodulated.  Releasing a

@@ -159,7 +159,9 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
   def late_audio(stall:)
     name, go, recording = outside_client(2)
 
-    output = MB::Sound::DeviceOutput.new(channels: 1, device: 'none', backends: [:jack], adaptive: false).tap { |o| @opened << o }
+    # (conceal: :silence: the ramp checks count frames between nonzero
+    # samples, and concealment fills underruns with earlier ramp frames)
+    output = MB::Sound::DeviceOutput.new(channels: 1, device: 'none', backends: [:jack], adaptive: false, conceal: :silence).tap { |o| @opened << o }
     input = MB::Sound::DeviceInput.new(channels: 1, device: 'none', backends: [:jack]).tap { |i| @opened << i }
     expect(fa.jack_connect(output.jack_ports[0], "#{name}:in_1")).to eq(true)
     expect(fa.jack_connect("#{name}:out_1", input.jack_ports[0])).to eq(true)

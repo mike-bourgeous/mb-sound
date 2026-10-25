@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A generative ambient piece (the generative layer, phases G1 and G2; see
 # design/notes/generative.md and `help :generative`): every part is a
 # generator clip whose cycles are pure functions of a seed, so the piece

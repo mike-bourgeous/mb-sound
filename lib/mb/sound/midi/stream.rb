@@ -436,11 +436,30 @@ module MB
 
           unless @advance_from && @advance_from == time
             @advance_from = time
-            @advance_to = time + @advance_step
+            @advance_to = Stream.shared_advance(time, @advance_step)
           end
 
           @advance_to
         end
+
+        # +time+ + +step+, shared by every Stream advancing from the same
+        # time by the same step (a Session's streams all read from one time:
+        # 11-27 streams per buffer gave 11-27 equal Rationals; alloc-2).  Two
+        # entries, each a frozen [time, step, sum] replaced whole, so another
+        # thread's read never sees a half-written one.
+        def self.shared_advance(time, step)
+          a = @shared_a
+          return a[2] if a && a[0].eql?(time) && a[1].eql?(step)
+          b = @shared_b
+          return b[2] if b && b[0].eql?(time) && b[1].eql?(step)
+
+          sum = time + step
+          @shared_b = a
+          @shared_a = [time, step, sum].freeze
+          sum
+        end
+        @shared_a = nil
+        @shared_b = nil
 
         # Used by Reader#events.
         def read_for(reader, from, to)

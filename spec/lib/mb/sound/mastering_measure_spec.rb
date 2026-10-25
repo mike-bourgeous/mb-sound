@@ -185,13 +185,16 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       expect(quiet0[:trim]).to be_within(1e-9).of(loud0[:trim] + described_class::Targeting::SECTION_MAX_LIFT)
       expect(quiet0[:level]).to be < quiet0[:target] - 0.5
 
-      b = tmp_path('sections_333.flac')
-      render.(b, 0.4, 333)
-      # (file lengths still depend on the buffer size by a sample: panel
-      # round 2's F8)
-      da, db = MB::Sound.read(a), MB::Sound.read(b)
-      n = [da[0].length, db[0].length].min
-      expect(db.map { |c| c[0...n] }).to eq(da.map { |c| c[0...n] })
+      # (another buffer size in the slow tier only, SLOW=1)
+      if SPEC_SLOW
+        b = tmp_path('sections_333.flac')
+        render.(b, 0.4, 333)
+        # (file lengths still depend on the buffer size by a sample: panel
+        # round 2's F8)
+        da, db = MB::Sound.read(a), MB::Sound.read(b)
+        n = [da[0].length, db[0].length].min
+        expect(db.map { |c| c[0...n] }).to eq(da.map { |c| c[0...n] })
+      end
     ensure
       MB::Sound.bpm 120
     end

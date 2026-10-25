@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # An FM electric piano in the DX tradition: a "body" operator pair (1:1)
 # and a "tine" pair (a 14:1 modulator at a low index that dies away fast),
 # with velocity driving brightness and level, and a gentle stereo tremolo.

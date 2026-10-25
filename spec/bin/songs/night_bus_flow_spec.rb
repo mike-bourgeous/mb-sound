@@ -3,7 +3,7 @@ RSpec.describe('bin/songs/night_bus_flow.rb') do
 
   after { MB::Sound.rewind }
 
-  it 'performs the form through the first drop: loop!/onward, a riser fill, a 2/4 gap that rings out' do
+  it 'performs the form through the first drop: loop!/onward, a riser fill, a 2/4 gap that rings out', :slow do
     session = nil
     path = tmp_path('last_stop.flac')
     out = StringIO.new

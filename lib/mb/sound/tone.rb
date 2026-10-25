@@ -3194,9 +3194,13 @@ module MB
         # that already feeds this tone through another input (e.g. one
         # trigger, through a Tee, resetting both this tone and its vibrato
         # LFO) just adds a second path, which is fine.
+        # Only a node that read this tone through one of its branches can
+        # lead back to it (every consumer stores nodes through #get_sampler),
+        # so a tone nothing has branched yet skips the walk: building a
+        # voice set up its tones' inputs with one upstream walk each, the
+        # most graph traversals in a scene build (alloc-2)
         if src.respond_to?(:sources)
-          # O(n^2)ish if building a complex network of modulation?
-          if src.equal?(self) || src.graph(include_tees: true).any? { |n| n.equal?(self) }
+          if src.equal?(self) || (@internal_tee && src.graph(include_tees: true).any? { |n| n.equal?(self) })
             raise 'Cyclic modulation detected'
           end
         end

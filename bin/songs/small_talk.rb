@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Small Talk": a bass house track at 125 BPM in G minor, 89 bars (2:52
 # rendered), built around a talking bass: the vocal lead patch from
 # bin/synths/vocal_lead.rb (a kick drum as a wavetable -> a tenor formant

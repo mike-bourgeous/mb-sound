@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # 90s atmospheric jungle patches (a sliced-break sampler, sub, Reese,
 # electric piano keys, string pad, flute, ride and shaker), playable from MIDI.
 #

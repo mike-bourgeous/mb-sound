@@ -129,7 +129,7 @@ RSpec.describe(MB::Sound::Take) do
     load path
     saved = MB::Sound::Take::Replay.last
 
-    [[t.replay, [800]], [saved, [800]], [saved, [367, 368]], [saved, [64]]].each do |r, sizes|
+    [[t.replay, [800]], [saved, [800]], *slow_tier([[saved, [367, 368]], [saved, [64]]], keep: 0)].each do |r, sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -204,7 +204,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.to_ruby).to include('key: ["D", :dorian]').or include('key: ["C", :major]')
 
     r = t.replay
-    [[800], [367, 368], [64]].each do |sizes|
+    [[800], *slow_tier([[367, 368], [64]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -246,7 +246,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.entries.map(&:kind)).to include(:turn, :snap, :restore)
 
     r = t.replay
-    [[800], [367, 368], [64]].each do |sizes|
+    [[800], *slow_tier([[367, 368], [64]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -284,7 +284,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(session.arrangement.slots(:bass).map(&:name)).to eq([:riff_a, nil, :bass_slot1_v2, :bass_slot1_v3, :bass_slot1_v4])
 
     r = t.replay
-    [[800], [367, 368]].each do |sizes|
+    [[800], *slow_tier([[367, 368]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -328,7 +328,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.entries.map(&:kind)).to include(:bus, :send, :mute, :solo)
 
     r = t.replay
-    [[800], [367, 368], [64]].each do |sizes|
+    [[800], *slow_tier([[367, 368], [64]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -370,7 +370,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(live.max).to be_within(1e-6).of(0.1)
 
     r = t.replay
-    [[800], [367, 368], [64]].each do |sizes|
+    [[800], *slow_tier([[367, 368], [64]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -441,7 +441,7 @@ RSpec.describe(MB::Sound::Take) do
     expect(session.transport.meters.length).to eq(2)
 
     r = t.replay
-    [[800], [367, 368]].each do |sizes|
+    [[800], *slow_tier([[367, 368]], keep: 0)].each do |sizes|
       MB::Sound.seed(5)
       data = replay(r, sizes)
       diff = (data[0...live.length] - live).abs.max
@@ -493,7 +493,7 @@ RSpec.describe(MB::Sound::Take) do
       expect(File.read(path)).to match(/r\.line 0r, \[.*\[0r, -\d+\/\d+r\]/) if lead
       load path
       r = MB::Sound::Take::Replay.last
-      [[800], [367, 368]].each do |sizes|
+      [[800], *slow_tier([[367, 368]], keep: 0)].each do |sizes|
         MB::Sound.seed(5)
         data = replay(r, sizes)
         expect(data.length).to be >= live.length

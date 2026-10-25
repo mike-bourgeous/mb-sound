@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A TR-808-flavored drum kit played by MIDI (General MIDI drum notes).
 #
 # Notes: 36 kick, 37 rimshot, 38 snare, 39 clap, 42/44 closed hat, 46 open

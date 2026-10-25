@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Plays a demo song with the terminal UI's dashboard band on and measures its cost.
 #
 # The song is "Last Stop" (bin/songs/night_bus_flow.rb: a form with scenes,

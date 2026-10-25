@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar TR-909 house-into-techno groove: four-on-the-floor kick with
 # shuffled 16th hats, offbeat open hats and claps, a ride, a flammed snare
 # roll building into a crash, then a darker techno half with a long tuned

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Profiles the scene changes of a song script: how long each scheduled
 # block (a form section's scene launch, at_bar blocks) takes and where the
 # time goes, and how long each render buffer takes, especially where
@@ -35,9 +35,14 @@
 # Every report has the buffers over 10/20/50/80 ms (an output queue
 # shorter than that runs dry there), YJIT compile per buffer and block
 # (new methods and basic blocks, invalidations, code GC), and GC counts
-# with the reasons for major GCs; with RUBYOPT=--yjit-log=quiet, the
+# with the reasons for major GCs; with RUBYOPT='--yjit-disable
+# --yjit-log=quiet' (--yjit-disable keeps Ruby from starting YJIT itself,
+# which would fix Ruby's call threshold of 30 instead of MB::Sound::JIT's), the
 # slowest buffers also list what compiled in them ("blocks for new types
-# or shapes" are YJIT chain versions).  Offline renders play once with
+# or shapes" are YJIT chain versions; SCENE_PROFILE_JIT_TOP=N lists N
+# methods instead of 6).  The profiler's own hooks compile in the first
+# live buffers too (the sandboxes skip them), so read past
+# bin/scene_profile.rb lines there.  Offline renders play once with
 # loudness: false, as live (a mastered song's targeted render would play
 # it twice, recording every buffer).  -R --band also paints the terminal
 # UI's deck (to /dev/null) as a song's --ui does.  Container realtime
@@ -56,7 +61,8 @@
 #     bin/scene_profile.rb -R -n 128 -l 20 --bars 60 bin/songs/night_bus_flow.rb
 #     bin/scene_profile.rb -w off bin/songs/night_bus_flow.rb   # without the form's warm-up
 #     bin/scene_profile.rb -R --band -n 512 -l 50 bin/songs/memory_card.rb -- --ui
-#     RUBYOPT=--yjit-log=quiet bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
+#     RUBYOPT='--yjit-disable --yjit-log=quiet' bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
+#     MB_SOUND_YJIT_CALL_THRESHOLD=30 bin/scene_profile.rb -n 128 bin/songs/memory_card.rb  # Ruby's default threshold
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -70,7 +76,7 @@ module SceneProfile
 
   class << self
     attr_reader :phases, :blocks, :buffers
-    attr_accessor :landed
+    attr_accessor :landed, :players, :buffer_size, :realtime
 
     def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -155,7 +161,7 @@ module SceneProfile
       # (the form warm-up's rehearsal sandbox: timed as the warm-up)
       return super if Thread.current[:scene_profile]&.[](:key) == :warm_up
 
-      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), y0: SceneProfile.yjit, w0: SceneProfile.wall, t0: SceneProfile.clock, c0: SceneProfile.cpu }
+      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), a0: GC.stat(:total_allocated_objects), y0: SceneProfile.yjit, w0: SceneProfile.wall, t0: SceneProfile.clock, c0: SceneProfile.cpu }
       SceneProfile.blocks << b
       SceneProfile.recording(b[:id]) { super }
     ensure
@@ -168,6 +174,7 @@ module SceneProfile
       b[:secs] = SceneProfile.clock - b[:t0]
       b[:cpu] = SceneProfile.cpu - b[:c0]
       b[:gc] = GC.stat(:time) - b[:gc0]
+      b[:alloc] = GC.stat(:total_allocated_objects) - b[:a0]
       b[:yjit] = SceneProfile.ydelta(b[:y0], SceneProfile.yjit)
       b[:jit] = SceneProfile.jit_log_since(b[:w0]) if b[:yjit][:compile_time_ns].to_i > 1_000_000
       b[:slack] = ((time - @transport.position) / @transport.whole_notes_per_second).to_f
@@ -181,9 +188,14 @@ module SceneProfile
       return super unless output.is_a?(EmuOutput) || output.is_a?(CountingOutput)
 
       nb = SceneProfile.blocks.length
-      @scene_players = {}
+      # (in a module variable, not an instance variable of the Session: a
+      # variable only the profiled Session had changed its shape, and YJIT
+      # compiled new versions of the Session's code in the first live
+      # buffers; alloc-2)
+      SceneProfile.players = players = {}
       SceneProfile.landed = 0
       gc0 = GC.stat(:time)
+      a0 = GC.stat(:total_allocated_objects)
       majors = GC.stat(:major_gc_count)
       y0 = SceneProfile.yjit
       w0 = SceneProfile.wall
@@ -201,10 +213,13 @@ module SceneProfile
       # (offline, the scheduled blocks' own compiling is theirs)
       yd[:compile_time_ns] -= SceneProfile.blocks[nb..].sum { |b| b[:yjit]&.[](:compile_time_ns).to_i } if offline && yd[:compile_time_ns]
       SceneProfile.buffers << {
-        secs: secs, cpu: cpu, other: secs - @scene_players.sum { |_, v| v },
+        secs: secs, cpu: cpu, other: secs - players.sum { |_, v| v },
         gc: GC.stat(:time) - gc0, yjit: yd, landed: SceneProfile.landed,
+        # (objects allocated during the buffer, scheduled blocks run inline
+        # left out; realtime, other threads' allocations meanwhile count)
+        alloc: GC.stat(:total_allocated_objects) - a0 - (offline ? SceneProfile.blocks[nb..].sum { |b| b[:alloc] || 0 } : 0),
         major: (GC.latest_gc_info(:major_by) if GC.stat(:major_gc_count) != majors),
-        players: @scene_players, bar: transport.bar_at(transport.position).to_f,
+        players: players, bar: transport.bar_at(transport.position).to_f,
         jit: (SceneProfile.jit_log_since(w0) if yd[:compile_time_ns].to_i > 1_000_000),
       }
       r
@@ -222,7 +237,7 @@ module SceneProfile
       t0 = SceneProfile.clock
       super
     ensure
-      @scene_players["#{p.name}#{first ? '*' : ''}"] = SceneProfile.clock - t0 if @scene_players
+      SceneProfile.players["#{p.name}#{first ? '*' : ''}"] = SceneProfile.clock - t0 if SceneProfile.players
     end
   end
 
@@ -377,6 +392,15 @@ module SceneProfile
         gcb = @buffers.select { |b| b[:gc] > 10 }
         puts format('  GC from the song\'s start: %d minor, %d major, %d ms in all (warm-up included); buffers with over 10 ms of GC: %d%s',
           @gc[:minor_gc_count], @gc[:major_gc_count], @gc[:time], gcb.length, gcb.empty? ? '' : " (longest #{gcb.map { |b| b[:gc] }.max} ms)")
+        music = @buffers.length * (@buffer_size || 512) / 48000.0
+        puts format('  objects allocated from the song\'s start: %.2f M (every thread, warm-up included; %.0f k per second of the %.0f s rendered)',
+          @gc[:total_allocated_objects] / 1e6, @gc[:total_allocated_objects] / 1e3 / music, music) if @gc[:total_allocated_objects] && music > 0
+        al = @buffers.drop(@buffers.length / 8).map { |b| b[:alloc] }.compact.sort
+        unless al.empty?
+          puts format('  objects allocated in render buffers (after the first eighth): mean %.0f, p50 %d, p99 %d, max %d per buffer; %.0f k per second%s',
+            al.sum.to_f / al.length, al[al.length / 2], al[(al.length * 0.99).floor], al[-1], al.sum.to_f / al.length * 48000 / (@buffer_size || 512) / 1e3,
+            @buffers.first.key?(:players) && SceneProfile.realtime ? ' (with what other threads allocated meanwhile)' : '')
+        end
         why = @buffers.filter_map { |b| b[:major] }.tally
         puts "  major GCs started in buffers, by reason (GC.latest_gc_info :major_by): #{why.map { |k, v| "#{k} #{v}" }.join(', ')}" unless why.empty?
       end
@@ -384,6 +408,22 @@ module SceneProfile
       kinds = st.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }
       puts format('  YJIT at the end: %d methods compiled, %.1f MB of code (%.1f MB of exec memory used), invalidations %s',
         st[:compiled_iseq_count], (st[:inline_code_size] + st[:outlined_code_size]) / 1e6, st[:code_region_size] / 1e6, kinds.empty? ? 'none' : kinds.join(', '))
+      puts format('  YJIT memory: %.1f MB of metadata; process RSS %s', st[:yjit_alloc_size].to_i / 1e6, rss_text)
+    end
+
+    # Where YJIT's call threshold came from (Ruby fixes it when YJIT starts).
+    def threshold_text
+      t = MB::Sound::JIT.threshold
+      t ? "YJIT call threshold #{t} (MB::Sound::JIT)" : "YJIT started by Ruby's own options (call threshold 30 unless --yjit-call-threshold)"
+    end
+
+    # Current and peak resident memory from /proc (Linux), else ps.
+    def rss_text
+      status = File.read('/proc/self/status')
+      mb = ->(key) { status[/^#{key}:\s+(\d+) kB/, 1].to_i / 1024.0 }
+      format('%.0f MB (peak %.0f MB)', mb.('VmRSS'), mb.('VmHWM'))
+    rescue SystemCallError
+      format('%.0f MB', `ps -o rss= -p #{Process.pid}`.to_i / 1024.0)
     end
 
     def phase_text(key, top)
@@ -400,7 +440,7 @@ module SceneProfile
         puts format('  bar %6.2f %-18s %7s ms%s', b[:bar], b[:desc][0, 18], ms(b[:secs]), extra.empty? ? '' : " (#{extra})")
         phases = phase_text(b[:id], 6)
         puts "      #{phases}" unless phases.empty?
-        jit = jit_text(b[:jit], 6)
+        jit = jit_text(b[:jit], (ENV["SCENE_PROFILE_JIT_TOP"] || 6).to_i)
         puts "      #{jit}" if jit
       end
     end
@@ -429,7 +469,7 @@ module SceneProfile
         players = b[:players].sort_by { |_, v| -v }.first(4).map { |n, v| "#{n} #{ms(v)}" }.join(', ')
         extra = [("GC #{b[:gc]} ms" if b[:gc] > 0), yjit_text(b[:yjit]).then { |t| t.empty? || b[:yjit][:compile_time_ns] < 1e6 ? nil : t }, ("#{b[:landed]} change#{b[:landed] == 1 ? "" : "s"} landed" if b[:landed] > 0)].compact.join('; ')
         puts format('    bar %6.2f %7s ms (CPU %s, outside players %s)%s  %s', b[:bar], ms(b[:secs]), ms(b[:cpu]), ms(b[:other]), extra.empty? ? '' : " (#{extra})", players)
-        jit = jit_text(b[:jit], 6)
+        jit = jit_text(b[:jit], (ENV["SCENE_PROFILE_JIT_TOP"] || 6).to_i)
         puts "        #{jit}" if jit
       end
       compiling = @buffers.select { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
@@ -480,7 +520,24 @@ if MB::Sound.main_script?(__FILE__)
 
     bars = p.bars || (p.realtime ? [32, song_bars || 32].min : song_bars) or raise ArgumentError, "#{song} has no length; give --bars"
     yjit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
-    MB::Sound.warm_up # as live scripts do
+    startup = MB::Sound.warm_up # as live scripts do
+    SceneProfile.buffer_size = p.buffer
+    SceneProfile.realtime = p.realtime
+    # The profiler's own hooks run only for the profiled Session, so they
+    # compiled in its first buffers (half of bar 1's compiling at 128
+    # frames, counted as the song's; alloc-2): run them on a throwaway
+    # Session first, and forget what it recorded
+    begin
+      box = MB::Sound::Session.new(realtime: false, output: SceneProfile::CountingOutput.new(p.buffer), buffer_size: p.buffer, channels: 2,
+        transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      MB::Sound::Session.with_context(session: box) do
+        box.add(0.constant, on: :now)
+        60.times { box.process_buffer }
+      end
+    ensure
+      box&.close
+      SceneProfile.buffers.clear
+    end
     quiet = File.open(File::NULL, 'w')
 
     if p.realtime
@@ -496,27 +553,36 @@ if MB::Sound.main_script?(__FILE__)
           MB::Sound::UI.warm_up # (as ScriptRunner does before a song's --ui screen)
           band = MB::Sound::UI::Band.new(layout: MB::Sound::UI.layouts[:deck], io: quiet, size: [40, 160], session: session)
         end
-        gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time)
+        gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time, :total_allocated_objects)
         SceneProfile.recording(:setup) { runner.send(:arrange_song, &block) }
         band&.start
+        play0 = [GC.stat.slice(:total_allocated_objects, :minor_gc_count, :major_gc_count, :time), SceneProfile.clock]
         end_pos = session.transport.bar_position(bars + 1)
         sleep 0.05 until session.transport.position >= end_pos || (session.idle? && !session.schedule_due?)
+        play1 = [GC.stat.slice(:total_allocated_objects, :minor_gc_count, :major_gc_count, :time), SceneProfile.clock]
       ensure
         band&.stop
         $stdout = STDOUT
         late = session.late_blocks
         session.close
       end
-      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time).to_h { |k, v| [k, v - gc0[k]] } if gc0
+      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time, :total_allocated_objects).to_h { |k, v| [k, v - gc0[k]] } if gc0
       elapsed = SceneProfile.clock - t0
 
       puts format('%s: realtime, %d-frame buffers, emulated card with a %.0f ms queue, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, p.latency, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
+      puts format('MB::Sound.warm_up: %.2f s; %s', startup, SceneProfile.threshold_text) if startup
       gap = out.underrun_list.sum(&:last)
       puts format('underruns: %d (%s ms of silence)%s, smallest queue before a write %s ms',
         out.underrun_list.length, SceneProfile.ms(gap),
         out.underrun_list.empty? ? '' : ", at bars #{out.underrun_list.first(10).map { |b, g| format('%.2f (%s ms)', b, SceneProfile.ms(g)) }.join(', ')}",
         out.min_level.finite? ? SceneProfile.ms(out.min_level) : '-')
+      if play0 && play1
+        d = play1[0].to_h { |k, v| [k, v - play0[0][k]] }
+        secs = play1[1] - play0[1]
+        puts format('while playing (%.1f s, every thread): %.0f k objects allocated per second; GC %d minor, %d major, %d ms (%.1f%% of the time)',
+          secs, d[:total_allocated_objects] / 1e3 / secs, d[:minor_gc_count], d[:major_gc_count], d[:time], 100.0 * d[:time] / 1000 / secs)
+      end
       puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
       warm = SceneProfile.phase_text(:warm_up, 6)
       puts "  warm-up phases: #{warm}" unless warm.empty?
@@ -526,7 +592,7 @@ if MB::Sound.main_script?(__FILE__)
     else
       out = SceneProfile::CountingOutput.new(p.buffer)
       t0 = SceneProfile.clock
-      gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time)
+      gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time, :total_allocated_objects)
       begin
         $stdout = quiet
         # (loudness: false: one pass, as live; a mastered song's targeted
@@ -537,11 +603,12 @@ if MB::Sound.main_script?(__FILE__)
       ensure
         $stdout = STDOUT
       end
-      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time).to_h { |k, v| [k, v - gc0[k]] }
+      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time, :total_allocated_objects).to_h { |k, v| [k, v - gc0[k]] }
       elapsed = SceneProfile.clock - t0
 
       puts format('%s: offline render, %d-frame buffers, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
+      puts format('MB::Sound.warm_up: %.2f s; %s', startup, SceneProfile.threshold_text) if startup
       setup = SceneProfile.phase_text(:setup, 6)
       puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
       warm = SceneProfile.phase_text(:warm_up, 6)

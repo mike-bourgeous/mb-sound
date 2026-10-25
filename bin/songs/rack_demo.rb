@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Racks (design/notes/racks.md): reusable pieces of graph with typed ports,
 # applied like Procs.  8 bars at 112 BPM:
 #

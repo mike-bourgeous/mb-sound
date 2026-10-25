@@ -692,6 +692,8 @@ module MB
           @dry_groups = nil
           @output_bufs = nil
           @dry_bufs = nil
+          @partitions = {} # (reused groups for #update; see #partition_reused)
+          @dry_scaled = []
 
           @sample_rate = sample_rate.to_f
 
@@ -945,12 +947,14 @@ module MB
 
           @pipeline_output = wet
 
-          @output_groups = partition_outputs(@pipeline_output, @output_channels)
+          @output_groups = partition_reused(:wet, @pipeline_output, @output_channels)
 
           # (scales the dry input in place unless it's a frozen, shared
           # buffer, which is scaled into a reused buffer per channel)
-          @dry_output = dry.map.with_index { |c, idx| scale_dry(c, idx) }
-          @dry_groups = partition_outputs(@dry_output, @output_channels)
+          @dry_scaled.clear
+          dry.each_with_index { |c, idx| @dry_scaled << scale_dry(c, idx) }
+          @dry_output = @dry_scaled
+          @dry_groups = partition_reused(:dry, @dry_output, @output_channels)
         end
 
         # Output +index+'s wet group sum times the wet gain plus its dry group
@@ -1025,6 +1029,24 @@ module MB
           end
 
           [dry, wet]
+        end
+
+        # #partition_outputs of +list+ into Arrays reused from buffer to
+        # buffer (one set per +key+): the grouping depends only on the
+        # lengths, so it is planned once as indices (alloc-2).
+        def partition_reused(key, list, count)
+          plan, groups = @partitions[key]
+          if plan.nil? || plan[0] != list.length || plan[1] != count
+            idx = partition_outputs((0...list.length).to_a, count)
+            groups = idx.map { |g| Array.new(g.length) }
+            @partitions[key] = [[list.length, count, idx], groups]
+            plan = @partitions[key][0]
+          end
+          plan[2].each_with_index do |g, gi|
+            out = groups[gi]
+            g.each_with_index { |li, j| out[j] = list[li] }
+          end
+          groups
         end
 
         # For internal use.  Runs the network for +count+ samples,

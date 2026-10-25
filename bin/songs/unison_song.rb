@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # An 8-bar demo of unison oscillators (Pitch#unison): a 7-saw "supersaw" pad
 # spread across the stereo field and a 3-saw detuned bass, at 100 BPM.
 # Options switch the detune layout and the pad's spread for A/B listening,

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Counts the Ruby objects allocated per audio buffer in a live-like
 # performance, by category and by source line (the 2026-10-19 allocation
 # audit, kept as a tool; workbench research/alloc-audit/allocations-128.md).
@@ -261,7 +261,7 @@ module MB::Sound
   end
 end
 
-if $0 == __FILE__
+if MB::Sound.main_script?(__FILE__) # (not $0 == __FILE__: SIMPLECOV=1 loads scripts by their full path)
   opts = { buffer_size: 128, warm: 4.0, window: 24.0, seek: 21, ui: false }
   top = 25
   json = nil

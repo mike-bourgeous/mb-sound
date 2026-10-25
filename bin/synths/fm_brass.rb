@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A two-operator FM brass in the DX tradition: a 1:1 modulator with
 # operator self-feedback (Tone#fm_feedback) phase-modulating a sine carrier.
 # The feedback runs inside the modulator's loop after its envelope (the

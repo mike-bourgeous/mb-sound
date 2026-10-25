@@ -15,8 +15,10 @@ module MB
         end
 
         # The first +frames+ frames written (zeros past the end), one SFloat
-        # per channel.
-        def channels(frames = nil)
+        # per channel.  (Not #channels: a Session reads that as the
+        # output's channel count every buffer, and hstacking everything
+        # captured so far there made a bounce's render quadratic; alloc-2.)
+        def captured(frames = nil)
           @bufs.map { |list|
             d = list.empty? ? Numo::SFloat[] : Numo::SFloat.hstack(list)
             next d if frames.nil?

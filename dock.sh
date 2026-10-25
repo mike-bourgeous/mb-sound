@@ -78,8 +78,12 @@ else
 	# default 64 MB holds only one, so a second dummy server (another
 	# session's specs, a benchmark) died with SIGBUS (2026-10-14).  Applies
 	# when the container is created; an existing container keeps its size.
+	# --cap-add SYS_NICE: lets the render and latency probe threads get
+	# SCHED_FIFO/nice priority (maintainer's OK, 2026-10-25); also only for
+	# new containers.
 	docker run --name $APPNAME -it -p 3000:3000 \
 		--shm-size=512m \
+		--cap-add SYS_NICE \
 		"${mounts[@]}" \
 		-e CLAUDE_CONFIG_DIR=/claude \
 		$APPNAME /bin/bash

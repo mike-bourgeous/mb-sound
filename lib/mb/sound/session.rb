@@ -1,6 +1,7 @@
 require 'monitor'
 
 require_relative 'launch_point'
+require_relative 'gc_quiet'
 
 require_relative 'session/journal'
 require_relative 'session/names'
@@ -297,6 +298,7 @@ module MB
       def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, master_gain_post: false, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil, monitor: nil, cue_output: nil, safety_limiter: nil)
         @transport = transport
         @per_sample_cache = nil # (see #span_per_sample)
+        @span_mix_bufs = nil # (see #span_mix)
         @tuning = tuning
         self.master_gain = master_gain
         self.master_gain_post = master_gain_post
@@ -469,6 +471,11 @@ module MB
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
+        # The graph's Synths (see #align_grids), first-buffer setups (e.g.
+        # drum voices' skipping), and node set (see Strip#graph_node_set),
+        # from one walk here, on the thread that builds it, rather than by
+        # the render thread where it waits and starts
+        input.prime
         description = shorten(description || playable.description)
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
@@ -1027,7 +1034,7 @@ module MB
         # Graphs waiting to start keep in step with shared nodes (see Strip)
         catch_up_waiting(players)
 
-        mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
+        mix = span_mix(count)
         begin_cue_span(count)
         playing = !players.empty? || queued_start?
         routed = @routed_span = routed?
@@ -1065,6 +1072,9 @@ module MB
         end
         begin_bus_read(0) if routed # master chains reading buses or players
         mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
+        # (without a master chain the mix itself leaves the span: callers
+        # keep what #process_buffer returns, so it can't be the reused one)
+        mix = mix.map(&:dup) if mix.equal?(@span_mix_bufs)
         end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count
@@ -1075,6 +1085,19 @@ module MB
         Thread.current[:mb_sound_span] = old_span
       end
       private :render_span
+
+      # The span's mix buffers, zeroed: reused from span to span, since a
+      # master chain reads the mix and returns its own buffers (the mix
+      # leaves the span only without one; see #render_span; alloc-2).
+      def span_mix(count)
+        bufs = @span_mix_bufs
+        if bufs.nil? || bufs.length != @channels || bufs.any? { |b| b.length != count || b.frozen? || !b.is_a?(Numo::SFloat) }
+          return @span_mix_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) }
+        end
+        bufs.each { |b| BufferHelper.zero(b) }
+        bufs
+      end
+      private :span_mix
 
       # Whole notes per output sample at the transport's tempo (exact;
       # kept until the tempo or the output rate changes).
@@ -1111,6 +1134,7 @@ module MB
         ExitClose.unregister(self)
         @output.release_writer if @output.respond_to?(:release_writer) # (a virtual clock's; NullOutput)
         @thread&.join(5)
+        @output.end_stream if @output.respond_to?(:end_stream) # (DeviceOutput: no concealment of the end)
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
         @scheduler.close
@@ -1555,10 +1579,14 @@ module MB
       # Session's frames (see Synth#align_grid), +frame+ being the player's
       # first frame.
       def align_grids(p, frame)
-        nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
-        nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.each do |n|
-          next unless n.is_a?(Synth)
-
+        synths =
+          if p.input.respond_to?(:synths)
+            p.input.synths
+          else
+            nodes = p.input.respond_to?(:nodes) ? p.input.nodes : []
+            nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.grep(Synth)
+          end
+        synths.each do |n|
           n.exact_lanes = true if @exact_lanes
           n.align_grid(frame)
         end
