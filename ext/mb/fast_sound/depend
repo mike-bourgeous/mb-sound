@@ -1,1 +1,1 @@
-fast_sound.o: $(srcdir)/../sound/include/mb_ext_helpers.h $(srcdir)/../sound/include/mb_osc_shapes.h $(srcdir)/../sound/include/mb_phase.h $(srcdir)/../sound/include/mb_biquad.h
+fast_sound.o: $(srcdir)/../sound/include/mb_ext_helpers.h $(srcdir)/../sound/include/mb_osc_shapes.h $(srcdir)/../sound/include/mb_phase.h $(srcdir)/../sound/include/mb_biquad.h $(srcdir)/../sound/include/mb_vec_sine.h $(srcdir)/../sound/include/mb_vec_sine_osc.h $(srcdir)/../sound/include/mb_vec_exp2.h

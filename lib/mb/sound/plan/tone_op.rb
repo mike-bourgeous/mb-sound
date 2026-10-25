@@ -46,18 +46,12 @@ module MB
 
           attr_reader :tone, :frequency, :phase_mod, :width, :reset, :target, :gain, :scan, :kernel
 
-          # Waves with fast shapes in Plan.precision :fast (vectorized real
-          # sines; see Plan::VecSine).
+          # Waves with fast shapes at MB::Sound.precision :fast (vectorized
+          # real sines; see Plan::VecSine): the unfused Tone uses the same
+          # shapes then, so the op stays exact.
           FAST_WAVES = [:sine].freeze
 
-          # The largest difference from the Tone's own samples with fast
-          # shapes, relative to the tone's output range: the polynomial's
-          # error (about 5e-7, plus float32 rounding near full scale), and
-          # as much again for fast sines upstream in the same block (a
-          # modulator's error moves this tone's phase); -108 dB.
-          FAST_TOLERANCE = 4e-6
-
-          # True if this op uses fast shapes (see Plan.precision).
+          # True if this op uses fast shapes (see MB::Sound.precision).
           attr_reader :fast
 
           def initialize(dst, node, tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil, scan: nil)
@@ -84,16 +78,11 @@ module MB
             [@frequency, @phase_mod, @width, @reset, @target, @gain, @scan].grep(Value)
           end
 
+          # Exact at either precision: the unfused Tone computes the same
+          # shapes (FastSound.oscillate and #kernel_ruby follow
+          # MB::Sound.precision as the op does).
           def exact?
-            !@fast
-          end
-
-          # Relative to 1; the tone's output range scales it (see #at).
-          def tolerance
-            return 0.0 unless @fast
-
-            gain, _offset = @tone.send(:gain_and_offset)
-            FAST_TOLERANCE * [gain.abs, 1].max * (@gain.is_a?(Const) ? [@gain.value.abs, 1].max : 1)
+            true
           end
 
           def expression

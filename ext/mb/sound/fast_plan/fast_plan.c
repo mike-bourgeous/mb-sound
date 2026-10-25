@@ -53,6 +53,7 @@
 #include "mb_bl_osc.h"
 #include "mb_clip_shape.h"
 #include "mb_vec_sine.h"
+#include "mb_vec_sine_osc.h"
 #include "mb_envelope.h"
 #include "mb_smooth.h"
 #include "mb_vec_exp2.h"
@@ -347,66 +348,13 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 	}
 }
 
-// Plan.precision :fast's real sine (mb_vec_sine.h): the phase pass is the
-// naive kernel's (the same phases and state as naive_segment), each phase
-// plus pm (cycles) reduced to -0.5..0.5 cycles as a float, then the shape
-// pass's float polynomial, which the compiler vectorizes.  The Ruby mirror
-// is Plan::VecSine.shape_ruby on Tone#phases_ruby's phases.
+// MB::Sound.precision :fast's real sine: mb_vec_sine_oscillate (the same
+// function as FastSound.oscillate's fast sines, so planned and unplanned
+// samples are identical).
 static void vec_sine_segment(float *out, size_t length, const struct mb_signal *f, const struct mb_signal *p,
 		double adv, double g, double off, VALUE phase_state)
 {
-	double phi = NUM2DBL(rb_ary_entry(phase_state, 0));
-	double freq = f->scalar;
-	const float *freqptr = f->ptr;
-	size_t freqstep = f->step;
-	double pm = p->scalar;
-	const float *pmptr = p->ptr;
-	size_t pmstep = p->step;
-	float gf = (float)g, of = (float)off;
-	float x[MB_VEC_CHUNK];
-
-	_Bool constant = !freqptr;
-	if (!constant) {
-		phi = mb_wrap_phase(phi); // a running phase (see mb_phase.h)
-	}
-
-	// A constant frequency counts from its grid (see mb_phase.h)
-	struct mb_grid_phase grid = { NAN, NAN, NAN };
-	if (constant) {
-		mb_grid_phase_read(phase_state, &grid);
-		mb_grid_phase_start(&grid, phi, freq * adv);
-	}
-	for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
-		size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
-		for (size_t k = 0; k < m; k++) {
-			size_t i = start + k;
-			if (freqptr) {
-				freq = freqptr[i * freqstep];
-			}
-			if (pmptr) {
-				pm = pmptr[i * pmstep];
-			}
-
-			double ph;
-			if (constant) {
-				ph = mb_wrap(grid.base + grid.inc * grid.k, 1.0);
-				mb_grid_phase_next(&grid);
-			} else {
-				ph = phi;
-				phi = mb_wrap_phase(phi + freq * adv);
-			}
-			double r = ph + pm;
-			x[k] = mb_vec_reduce(r);
-		}
-		mb_vec_sine_shape(out + start, x, m, gf, of);
-	}
-
-	if (constant) {
-		rb_ary_store(phase_state, 0, rb_float_new(mb_grid_phase_now(&grid)));
-		mb_grid_phase_write(phase_state, &grid);
-	} else {
-		rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi, 1.0)));
-	}
+	mb_vec_sine_oscillate(out, length, f->scalar, f->ptr, f->step, p->scalar, p->ptr, p->step, adv, g, off, phase_state);
 }
 
 // FastSynth.oscillate_bl through mb_bl_oscillate on one segment, with the

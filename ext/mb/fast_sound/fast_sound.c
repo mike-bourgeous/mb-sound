@@ -4,6 +4,7 @@
  * (C)2021 Mike Bourgeous
  */
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <math.h>
 #include <complex.h>
@@ -16,6 +17,16 @@
 #include "mb_osc_shapes.h"
 #include "mb_phase.h"
 #include "mb_biquad.h"
+#include "mb_vec_sine.h"
+#include "mb_vec_sine_osc.h"
+#include "mb_vec_exp2.h"
+
+// MB::Sound.precision (FastSound.fast_math=): true (:fast, the default)
+// gives naive real sines without noise mb_vec_sine_osc.h's float
+// polynomial and note frequencies mb_vec_exp2.h's 2^x, the plan layer's
+// fast ops, so planned and unplanned graphs compute the same samples;
+// false (:exact) uses libm, as plans then do.
+static _Bool fast_math = 1;
 
 static ID sym_array_lookup;
 
@@ -810,6 +821,21 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 		phi = mb_wrap_phase(phi);
 	}
 
+	if (fast_math && wt == OSC_SINE && rndadv == 0 && !complex_buffer) {
+		// The plan layer's fast sine (the same function as its tone op)
+		mb_vec_sine_oscillate((float *)out, length, freq, freqptr, freqstep, pm, pmptr, pmstep, adv, g, off, state);
+
+		if (!was_inplace) {
+			UNSET_INPLACE(buffer);
+		}
+
+		RB_GC_GUARD(frequency);
+		RB_GC_GUARD(phase_mod);
+		RB_GC_GUARD(buffer);
+
+		return buffer;
+	}
+
 	// A constant frequency counts from its grid (see mb_phase.h)
 	struct mb_grid_phase grid = { NAN, NAN, NAN };
 	if (constant) {
@@ -1225,13 +1251,42 @@ VALUE ruby_number_to_freq(VALUE self, VALUE number, VALUE tune_note, VALUE tune_
 	size_t length = RNARRAY_SHAPE(number)[0];
 	float *float_ptr = (float *)(nary_get_pointer_for_write(number) + nary_get_offset(number));
 
-	for (size_t i = 0; i < length; i++) {
-		float_ptr[i] = num2freq(float_ptr[i], tnum, tfrq);
+	if (fast_math) {
+		// The plan layer's Op::NoteFreq at :fast (from a copy: the
+		// kernel's inputs and outputs may not overlap)
+		float a[MB_VEC_CHUNK];
+		for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
+			size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
+			memcpy(a, float_ptr + start, m * sizeof(float));
+			mb_vec_note_freq(float_ptr + start, a, m, tnum, tfrq);
+		}
+	} else {
+		for (size_t i = 0; i < length; i++) {
+			float_ptr[i] = num2freq(float_ptr[i], tnum, tfrq);
+		}
 	}
 
 	UNSET_INPLACE(number);
 
 	return number;
+}
+
+/*
+ * call-seq: MB::FastSound.fast_math = true or false
+ *
+ * Sets whether unfused naive real sines and note frequencies use the plan
+ * layer's fast math (see MB::Sound.precision, which calls this).
+ */
+static VALUE ruby_set_fast_math(VALUE self, VALUE v)
+{
+	fast_math = RTEST(v);
+	return v;
+}
+
+// MB::FastSound.fast_math? -> whether fast math is on (see .fast_math=).
+static VALUE ruby_fast_math_p(VALUE self)
+{
+	return fast_math ? Qtrue : Qfalse;
 }
 
 // Returns a pointer to the float data of +v+, which must be a contiguous 1D
@@ -1405,4 +1460,6 @@ void Init_fast_sound(void)
 
 	// Functions for converting between frequency and note number
 	rb_define_module_function(fast_sound, "number_to_freq", ruby_number_to_freq, 3);
+	rb_define_module_function(fast_sound, "fast_math=", ruby_set_fast_math, 1);
+	rb_define_module_function(fast_sound, "fast_math?", ruby_fast_math_p, 0);
 }

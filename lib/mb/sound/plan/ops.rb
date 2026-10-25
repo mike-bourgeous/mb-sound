@@ -250,25 +250,24 @@ module MB
         # FastArithmetic.power, C's double pow rounded to float32).
         class Pow < Binary
           # True when this op uses the vectorized 2^(b log2 a) (see
-          # Plan::VecExp2): Plan.precision :fast and a Constant base (a
-          # patch constant, so the per-block cost doesn't depend on the
-          # notes played).
+          # Plan::VecExp2): MB::Sound.precision :fast and a Constant or Knob
+          # base (a patch constant, so the per-block cost doesn't depend on
+          # the notes played), decided by the node as its unfused block
+          # decides (ProcNode#fast_power_base).
           attr_reader :fast
 
           def initialize(dst, node, a, b)
             super
-            @fast = Plan.precision == :fast && a.is_a?(Value) && (a.op.is_a?(Param) || a.op.is_a?(Fill))
+            @fast = Plan.precision == :fast && a.is_a?(Value) && !!(node.respond_to?(:fast_power_base) && node.fast_power_base)
           end
 
           def symbol = '**'
           def opcode = @fast ? :powf : :pow
 
+          # Exact at either precision: the unfused node raises the same way
+          # (GraphNode#**).
           def exact?
-            !@fast
-          end
-
-          def tolerance
-            @fast ? VecExp2::TOLERANCE : 0.0
+            true
           end
 
           def run_ruby(env, count)
@@ -354,8 +353,9 @@ module MB
         class NoteFreq < Base
           attr_reader :a, :tuning
 
-          # True when this op uses the vectorized 2^x (Plan.precision :fast;
-          # see Plan::VecExp2).
+          # True when this op uses the vectorized 2^x (MB::Sound.precision
+          # :fast; see Plan::VecExp2), as FastSound.number_to_freq does
+          # unfused then.
           attr_reader :fast
 
           def initialize(dst, node, a, tuning)
@@ -367,12 +367,9 @@ module MB
             @fast = Plan.precision == :fast
           end
 
+          # Exact at either precision (see #fast).
           def exact?
-            !@fast
-          end
-
-          def tolerance
-            @fast ? VecExp2::TOLERANCE : 0.0
+            true
           end
 
           def operands

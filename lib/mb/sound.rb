@@ -50,6 +50,7 @@ require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
 require_relative 'sound/fast_recipe'
 require_relative 'sound/fast_latency'
+require_relative 'sound/precision'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'

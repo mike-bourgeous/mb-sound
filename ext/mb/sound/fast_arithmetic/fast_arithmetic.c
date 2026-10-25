@@ -61,6 +61,7 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
+#include "mb_vec_exp2.h"
 
 enum mb_arith_type { MB_ARITH_NONE, MB_ARITH_SF, MB_ARITH_DF, MB_ARITH_SC, MB_ARITH_DC };
 
@@ -702,6 +703,48 @@ static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.power_fast(out, exponent) -> out or nil
+ *
+ * Like .power, for a single-precision +out+ holding a patch-constant base
+ * (a Constant or Knob raised to a signal): MB::Sound.precision :fast's
+ * 2^(b log2 a) (mb_vec_pow, the plan layer's Op::Pow with a Constant base),
+ * so unplanned graphs compute what plans compute.  +exponent+ is a
+ * contiguous SFloat of the same length or a Float (cast to float, as a
+ * plan fills it).  Returns nil without writing for anything else.
+ */
+static VALUE ruby_power_fast(VALUE self, VALUE out, VALUE exponent)
+{
+	if (writable_real(out) != MB_ARITH_SF) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	_Bool scalar = RB_FLOAT_TYPE_P(exponent);
+	if (!scalar && (arith_type(exponent) != MB_ARITH_SF || !shape_ok(exponent, length))) {
+		return Qnil;
+	}
+
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	const float *x = scalar ? NULL : (const float *)read_ptr(exponent);
+	float ef = scalar ? (float)RFLOAT_VALUE(exponent) : 0.0f;
+
+	// Copies of the bases (and a filled exponent): the kernel's inputs and
+	// output may not overlap
+	float a[MB_VEC_CHUNK], b[MB_VEC_CHUNK];
+	if (scalar) {
+		for (size_t i = 0; i < MB_VEC_CHUNK; i++) b[i] = ef;
+	}
+	for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
+		size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
+		memcpy(a, o + start, m * sizeof(float));
+		mb_vec_pow(o + start, a, scalar ? b : x + start, m);
+	}
+
+	RB_GC_GUARD(exponent);
+	return out;
+}
+
 // The element size of an arithmetic type.
 static size_t elem_size(enum mb_arith_type t)
 {
@@ -1321,6 +1364,7 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
 	rb_define_module_function(fast_arithmetic, "divide", ruby_divide, 2);
 	rb_define_module_function(fast_arithmetic, "power", ruby_power, 2);
+	rb_define_module_function(fast_arithmetic, "power_fast", ruby_power_fast, 2);
 	rb_define_module_function(fast_arithmetic, "circular_read", ruby_circular_read, 4);
 	rb_define_module_function(fast_arithmetic, "circular_write", ruby_circular_write, 3);
 	rb_define_module_function(fast_arithmetic, "wet_dry", ruby_wet_dry, 5);

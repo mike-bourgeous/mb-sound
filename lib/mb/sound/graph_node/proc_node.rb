@@ -71,6 +71,7 @@ module MB
           @operator = nil
           @plan_operator = nil
           @plan_tuning = nil
+          @fast_power_base = nil
         end
 
         # What GraphNode#make_source_name shows for this node when it isn't
@@ -112,6 +113,12 @@ module MB
 
         # The Tuning of a :note_freq ProcNode.
         attr_accessor :plan_tuning
+
+        # True for a '**' ProcNode whose base is a Constant or Knob (a patch
+        # constant): at MB::Sound.precision :fast it raises with the fast
+        # 2^(b log2 a) (FastArithmetic.power_fast), as its plan op does
+        # (Plan::Op::Pow#fast).
+        attr_accessor :fast_power_base
 
         def plan_describe(p)
           a = p[@source]

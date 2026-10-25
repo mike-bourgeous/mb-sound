@@ -1952,8 +1952,10 @@ module MB
         BUFFER_CLASS[@wave_type] == Numo::SComplex ? :complex : :real
       end
 
-      # For plans: true while Plan::Op::Tone's Ruby mirror runs a tone with
-      # fast shapes (Plan.precision = :fast; see Plan::VecSine).
+      # For plans: true or false while Plan::Op::Tone's Ruby mirror runs
+      # (the op's own choice of fast shapes, made when it compiled); nil
+      # otherwise, when naive real sines without noise follow
+      # MB::Sound.precision (see MB::Sound::Precision and Plan::VecSine).
       attr_accessor :plan_fast_shapes
 
       # For plans: starts the tone as its first #sample would.
@@ -2680,7 +2682,9 @@ module MB
           values = Numo::SFloat.cast(phases)
         else
           phases, increments = phases_ruby(freq_table, count)
-          values = if @plan_fast_shapes
+          fast = @plan_fast_shapes
+          fast = Precision.fast? && @wave_type == :sine && @random_advance == 0 && !out.is_a?(Numo::SComplex) if fast.nil?
+          values = if fast
                      MB::Sound::Plan::VecSine.shape_ruby(phases, phase_table, @gain, @offset)
                    else
                      Tone.shape_ruby(@wave_type, phases, increments, phase_table) * @gain + @offset
