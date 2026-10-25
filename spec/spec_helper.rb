@@ -53,8 +53,8 @@ SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 # post-merge tests, and CI set; always under memcheck).  Examples tagged
 # :slow (exactness sweeps and long renders guarding rare regressions; each
 # file keeps a fast representative untagged) are skipped otherwise, so the
-# everyday run stays short (test-tiers-1, 2026-10-24).  A location filter
-# (file:line) still runs a :slow example by itself.
+# everyday run stays short (test-tiers-1, 2026-10-24).  A location (file:line)
+# or -e filter still runs a :slow example by itself.
 SPEC_SLOW = ENV['SLOW'] == '1' || SPEC_MEMCHECK
 
 require_relative 'support/spec_tmp'
