@@ -37,6 +37,36 @@ module MB
 
         @handled_spies = {}
         @synths = nil
+        @node_set = nil
+      end
+
+      # Lists the graph's nodes (with Tees) for Session::Strip#graph_node_set
+      # on the thread that builds the graph (Session#add), so the render
+      # thread doesn't walk a new scene's graphs while they wait to land
+      # (alloc-2).  Kept as [structure, [nodes, ids]] for the
+      # GraphNode.structure_changes count it was listed at.
+      def prime_node_set
+        structure = GraphNode.structure_changes
+        nodes = graph(include_tees: true)
+        GraphNode.watch_structure(nodes)
+        ids = {}
+        nodes.each { |n| ids[n.__id__] = true }
+        @node_set = [structure, [nodes, ids]].freeze
+        nil
+      end
+
+      # Lets nodes that set up on their first buffer (#prime_render, e.g.
+      # Drums::Voice's skipping) do it now, on the thread that builds the
+      # graph (Session#add, before the graph can start; alloc-2).
+      def prime_nodes
+        graph(include_tees: true).each { |n| n.prime_render if !n.equal?(self) && n.respond_to?(:prime_render) }
+        nil
+      end
+
+      # The [nodes, ids] #prime_node_set listed, if listed at +structure+.
+      def primed_node_set(structure)
+        s = @node_set
+        s && s[0] == structure ? s[1] : nil
       end
 
       # The Synths anywhere in the graph (for Session#align_grids, which

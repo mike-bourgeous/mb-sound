@@ -307,6 +307,13 @@ module MB
           entry = @graph_node_sets[graph]
           return entry[1] if entry && entry[0] == structure
 
+          # (listed already where it was built; see GraphNodeInput#prime_node_set)
+          primed = graph.respond_to?(:primed_node_set) && graph.primed_node_set(structure)
+          if primed
+            @graph_node_sets[graph] = [structure, primed]
+            return primed
+          end
+
           nodes = graph.graph(include_tees: true)
           GraphNode.watch_structure(nodes)
           ids = {}
