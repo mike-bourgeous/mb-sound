@@ -150,7 +150,10 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
       expect(p.drain).to eq([])
     end
 
-    it 'keeps waking on time while a Ruby thread holds the GVL' do
+    # (Valgrind runs one thread at a time, so under memcheck a thread
+    # spinning in C starves the probe; the other Probe examples still run
+    # the probe thread's code there)
+    it 'keeps waking on time while a Ruby thread holds the GVL', memcheck_skip: 'Valgrind serializes threads; the other Probe examples run the probe loop' do
       p = probe
       p.start
       wait_until(timeout: 10) { p.stats[:ticks] > 10 }
