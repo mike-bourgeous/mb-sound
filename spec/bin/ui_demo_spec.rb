@@ -8,7 +8,9 @@ RSpec.describe('bin/ui_demo.rb') do
     expect(text).to match(/^  band on +n=\d+ +p50 [\d.]+ +p99 [\d.]+/)
     expect(text).to match(/^Painter per refresh: \d+ refreshes, CPU p50/)
     expect(text).to include('Underruns: n/a (NullOutput output)')
-    expect(text).to include('Captures: 2 in')
+    # Captures land on 1 s ticks of a 2.5 s run, so under load a slow first
+    # refresh can push the second past the end (seen twice on 2026-10-25)
+    expect(text).to match(/^Captures: [12] in /)
     ans = File.read(File.join(cap, 'band_000.ans'))
     expect(ans).to include('TRACKS').and include('MASTER')
     expect(File.read(File.join(cap, 'band_000.html'))).to include('<html')
