@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # The session key and keyboard locks (midi-consol-2): a phrase "mashed" on
 # every key, white and black, played through a lock style while the key
 # changes and a knob walks the mode from bright to dark.

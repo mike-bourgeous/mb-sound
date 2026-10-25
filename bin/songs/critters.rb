@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Critters": a house fly and a mouse loose around your head (textures-4,
 # 2026-10-15), a texture study for drift paths that drive a sound.  Two or
 # three drifts are a critter's position in meters (x right, y ahead, z up,

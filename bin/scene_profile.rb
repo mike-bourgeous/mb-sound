@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Profiles the scene changes of a song script: how long each scheduled
 # block (a form section's scene launch, at_bar blocks) takes and where the
 # time goes, and how long each render buffer takes, especially where
@@ -35,7 +35,9 @@
 # Every report has the buffers over 10/20/50/80 ms (an output queue
 # shorter than that runs dry there), YJIT compile per buffer and block
 # (new methods and basic blocks, invalidations, code GC), and GC counts
-# with the reasons for major GCs; with RUBYOPT=--yjit-log=quiet, the
+# with the reasons for major GCs; with RUBYOPT='--yjit-disable
+# --yjit-log=quiet' (--yjit-disable keeps Ruby from starting YJIT itself,
+# which would fix Ruby's call threshold of 30 instead of MB::Sound::JIT's), the
 # slowest buffers also list what compiled in them ("blocks for new types
 # or shapes" are YJIT chain versions).  Offline renders play once with
 # loudness: false, as live (a mastered song's targeted render would play
@@ -56,7 +58,8 @@
 #     bin/scene_profile.rb -R -n 128 -l 20 --bars 60 bin/songs/night_bus_flow.rb
 #     bin/scene_profile.rb -w off bin/songs/night_bus_flow.rb   # without the form's warm-up
 #     bin/scene_profile.rb -R --band -n 512 -l 50 bin/songs/memory_card.rb -- --ui
-#     RUBYOPT=--yjit-log=quiet bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
+#     RUBYOPT='--yjit-disable --yjit-log=quiet' bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
+#     MB_SOUND_YJIT_CALL_THRESHOLD=30 bin/scene_profile.rb -n 128 bin/songs/memory_card.rb  # Ruby's default threshold
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -384,6 +387,22 @@ module SceneProfile
       kinds = st.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }
       puts format('  YJIT at the end: %d methods compiled, %.1f MB of code (%.1f MB of exec memory used), invalidations %s',
         st[:compiled_iseq_count], (st[:inline_code_size] + st[:outlined_code_size]) / 1e6, st[:code_region_size] / 1e6, kinds.empty? ? 'none' : kinds.join(', '))
+      puts format('  YJIT memory: %.1f MB of metadata; process RSS %s', st[:yjit_alloc_size].to_i / 1e6, rss_text)
+    end
+
+    # Where YJIT's call threshold came from (Ruby fixes it when YJIT starts).
+    def threshold_text
+      t = MB::Sound::JIT.threshold
+      t ? "YJIT call threshold #{t} (MB::Sound::JIT)" : "YJIT started by Ruby's own options (call threshold 30 unless --yjit-call-threshold)"
+    end
+
+    # Current and peak resident memory from /proc (Linux), else ps.
+    def rss_text
+      status = File.read('/proc/self/status')
+      mb = ->(key) { status[/^#{key}:\s+(\d+) kB/, 1].to_i / 1024.0 }
+      format('%.0f MB (peak %.0f MB)', mb.('VmRSS'), mb.('VmHWM'))
+    rescue SystemCallError
+      format('%.0f MB', `ps -o rss= -p #{Process.pid}`.to_i / 1024.0)
     end
 
     def phase_text(key, top)
@@ -480,7 +499,7 @@ if MB::Sound.main_script?(__FILE__)
 
     bars = p.bars || (p.realtime ? [32, song_bars || 32].min : song_bars) or raise ArgumentError, "#{song} has no length; give --bars"
     yjit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
-    MB::Sound.warm_up # as live scripts do
+    startup = MB::Sound.warm_up # as live scripts do
     quiet = File.open(File::NULL, 'w')
 
     if p.realtime
@@ -512,6 +531,7 @@ if MB::Sound.main_script?(__FILE__)
 
       puts format('%s: realtime, %d-frame buffers, emulated card with a %.0f ms queue, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, p.latency, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
+      puts format('MB::Sound.warm_up: %.2f s; %s', startup, SceneProfile.threshold_text) if startup
       gap = out.underrun_list.sum(&:last)
       puts format('underruns: %d (%s ms of silence)%s, smallest queue before a write %s ms',
         out.underrun_list.length, SceneProfile.ms(gap),
@@ -542,6 +562,7 @@ if MB::Sound.main_script?(__FILE__)
 
       puts format('%s: offline render, %d-frame buffers, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
+      puts format('MB::Sound.warm_up: %.2f s; %s', startup, SceneProfile.threshold_text) if startup
       setup = SceneProfile.phase_text(:setup, 6)
       puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
       warm = SceneProfile.phase_text(:warm_up, 6)

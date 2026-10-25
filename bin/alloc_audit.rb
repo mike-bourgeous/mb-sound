@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Counts the Ruby objects allocated per audio buffer in a live-like
 # performance, by category and by source line (the 2026-10-19 allocation
 # audit, kept as a tool; workbench research/alloc-audit/allocations-128.md).

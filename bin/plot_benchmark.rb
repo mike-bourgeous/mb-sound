@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Measures MB::Sound::Plot frames for live UI panes: ms per frame and allocations.
 #
 # Each pane draws fresh data every frame, the way a live scope or spectrum
@@ -296,7 +296,8 @@ MB::Sound.script(
       tmp = File.join(Dir.tmpdir, "plot_benchmark_#{Process.pid}_#{m}.json")
       args = ['--panes', p.panes, '--looks', p.looks, '--colors', p.colors, '-n', p.frames.to_s, '--api', p.api.to_s, '-j', tmp]
       args << '--tty' if p.tty
-      env = { 'RUBY_YJIT_ENABLE' => m == 'on' ? '1' : '0' }
+      yjit = m == 'on' ? '1' : '0'
+      env = { 'RUBY_YJIT_ENABLE' => nil, 'MB_SOUND_YJIT' => yjit }
       ok = system(env, RbConfig.ruby, __FILE__, *args, out: File::NULL)
       abort "plot_benchmark: the YJIT #{m} run failed" unless ok
       rows.concat(JSON.parse(File.read(tmp), symbolize_names: true))

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Bouncing balls: a 40-bar percussion piece (100 BPM, about 1:36) built
 # from bounce rhythms, very loosely inspired by the ball-bounce
 # accelerandos of Aphex Twin's "Bucephalus Bouncing Ball" (no samples or

@@ -2,8 +2,9 @@ module MB
   module Sound
     # Warms up YJIT, Ruby's JIT compiler, before live playback.
     #
-    # With YJIT on (bin/ scripts enable it in their shebang), a method is
-    # compiled after it has been called a number of times.  Until then a
+    # With YJIT on (bin/ scripts ask for it in their shebang; see
+    # MB::Sound::JIT), a method is compiled after it has been called a number
+    # of times.  Until then a
     # graph runs about 20% slower than without the JIT (fm_bass at 128-sample
     # buffers: ~5.5 ms per buffer for the first ~100 buffers, then ~3 ms
     # instead of ~4.5 ms without YJIT).  Those slow first buffers could make

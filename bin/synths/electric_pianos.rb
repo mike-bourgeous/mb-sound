@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # FM electric pianos that aim at the physical instruments: a tine piano
 # (Rhodes-style) and a reed piano (Wurlitzer-style), playable from MIDI.
 #

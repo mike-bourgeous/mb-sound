@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # An SQ-80-flavored playable synth built from the library's general pieces.
 # The voice lives in the library (MB::Sound.sq80, SQ80::Voice; console
 # `help :sq80`); this script plays it and its patches (-p, `sq80_patches`

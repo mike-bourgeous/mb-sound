@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Plots the waveforms of MB::Sound::Tone and their spectra
 #
 # Usage: $0 [--imag] [-I] [-S FILE] [--width PX] [--height PX] [wave_type ...]

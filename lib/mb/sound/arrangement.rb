@@ -600,7 +600,8 @@ module MB
 
       # Each section #rehearse plays lasts the fewest sixteenth notes that
       # hold this many buffers, so code that runs once a buffer is called
-      # often enough for YJIT to compile it (30 calls).
+      # often enough for YJIT to compile it (MB::Sound::JIT::CALL_THRESHOLD calls;
+      # Ruby's default 30 with YJIT started by Ruby's own options).
       REHEARSAL_BUFFERS = 48
 
       # The most passes of a section #rehearse plays.

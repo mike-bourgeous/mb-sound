@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A Karplus-Strong plucked string synth: each note excites a feedback loop
 # whose delay is one period of the note (GraphNode#feedback), with the
 # classic two-sample average (and an optional lowpass) damping the string

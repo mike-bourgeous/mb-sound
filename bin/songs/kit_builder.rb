@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A drum machine of our own, built with the kit builder: a "junkyard"
 # kit of a hand-made kick, an FM can-snare, a tuned log drum that plays a
 # melody (its tune knob follows a clip), a reversed swell made from a

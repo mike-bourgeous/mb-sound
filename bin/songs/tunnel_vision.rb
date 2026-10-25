@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Tunnel Vision" by Kez Volta: a neuro-leaning drum & bass roller at 174 BPM in F minor.
 #
 # Kez Volta is a fictional producer-DJ written for the persona panel

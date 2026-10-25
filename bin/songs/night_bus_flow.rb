@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Night Bus: Last Stop": the Night Bus set grown into a song form (phase 2
 # of the arrangement tools; phase 1 is night_bus_set.rb).  A tech house
 # track at 126 BPM in A minor, about 89 bars, built as one strong loop and
