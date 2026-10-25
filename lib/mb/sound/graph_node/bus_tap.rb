@@ -48,8 +48,7 @@ module MB
             session = @owner.session
             @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
             if session.nil?
-              @buf.fill(0)
-              return @buf
+              return BufferHelper.zero(@buf)
             end
 
             serial = session.bus_read_serial
@@ -61,7 +60,7 @@ module MB
             data = session.bus_signal(@owner.source_name, @owner.only)
             d = data && data[@index % data.length]
             if d.nil? || @pos >= d.length
-              @buf.fill(0)
+              BufferHelper.zero(@buf)
             else
               n = MB::M.min(count, d.length - @pos)
               @buf[0...n] = d[@pos...(@pos + n)] unless FastArithmetic.copy_range(@buf, 0, d, @pos, n)

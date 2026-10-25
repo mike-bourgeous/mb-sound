@@ -139,7 +139,7 @@ module MB
 
         def sample(count)
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          return @buf.fill(0) if timeline_paused?
+          return BufferHelper.zero(@buf) if timeline_paused?
           return sample_clocked(count) if @clock
 
           @pos ||= 0r

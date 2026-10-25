@@ -1144,7 +1144,7 @@ module MB
           if bufs.nil? || bufs.length != @channels || bufs[0].length != n
             return b.out_bufs = Array.new(@channels) { Numo::SFloat.zeros(n) }
           end
-          bufs.each { |x| x.fill(0) }
+          bufs.each { |x| BufferHelper.zero(x) }
           bufs
         end
 

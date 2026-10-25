@@ -8,6 +8,14 @@ module MB
     # to call #setup_buffer from the constructor and #grow_buffer from the
     # GraphNode#sample method.
     module BufferHelper
+      # Zeroes +buf+ in place and returns it: FastArithmetic.fill_range for
+      # real buffers (Numo's #fill allocates three objects a call, and
+      # render paths zero buffers every buffer; alloc-2), else #fill.
+      def self.zero(buf)
+        FastArithmetic.fill_range(buf, 0, buf.length, 0) || buf.fill(0)
+        buf
+      end
+
       private
 
       # Creates or replaces a Numo:NArray buffer in @buf and @tmpbuf as needed,

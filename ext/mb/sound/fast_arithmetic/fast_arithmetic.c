@@ -534,6 +534,24 @@ static VALUE ruby_copy(VALUE self, VALUE out, VALUE src)
  * contiguous 1D SFloat or DFloat +buf+ with at least one value.  Returns
  * nil for anything else.
  */
+// Stores +v+ at +idx+ of Array +ary+, keeping the Float already there if
+// it has exactly the same bits: values that aren't flonums (-0.0, and
+// magnitudes beyond ~1e+-77) would otherwise be a new heap Float on every
+// call (a silent Synth lane's -0.0 twice a buffer; alloc-2).
+static void store_double(VALUE ary, long idx, double v)
+{
+	if (idx < RARRAY_LEN(ary)) {
+		VALUE old = RARRAY_AREF(ary, idx);
+		if (RB_FLOAT_TYPE_P(old)) {
+			double o = RFLOAT_VALUE(old);
+			if (memcmp(&o, &v, sizeof(double)) == 0) {
+				return;
+			}
+		}
+	}
+	rb_ary_store(ary, idx, DBL2NUM(v));
+}
+
 static VALUE ruby_min_max(VALUE self, VALUE buf, VALUE result)
 {
 	Check_Type(result, T_ARRAY);
@@ -561,8 +579,8 @@ static VALUE ruby_min_max(VALUE self, VALUE buf, VALUE result)
 		MB_MINMAX(double, x, n, >, hi);
 	}
 
-	rb_ary_store(result, 0, DBL2NUM(lo));
-	rb_ary_store(result, 1, DBL2NUM(hi));
+	store_double(result, 0, lo);
+	store_double(result, 1, hi);
 
 	RB_GC_GUARD(buf);
 	return result;

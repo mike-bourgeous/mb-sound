@@ -35,7 +35,7 @@ module MB
         def sample(count)
           if @ended
             @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-            return @buf.fill(0)
+            return BufferHelper.zero(@buf)
           end
 
           data = @source.sample(count)

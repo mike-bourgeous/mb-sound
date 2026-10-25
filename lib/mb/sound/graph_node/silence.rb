@@ -35,7 +35,7 @@ module MB
           count = @remaining if count > @remaining
           @remaining -= count
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          @buf.fill(0)
+          BufferHelper.zero(@buf)
         end
 
         # Changes the sample rate, keeping the remaining length in seconds (a

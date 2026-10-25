@@ -1094,7 +1094,7 @@ module MB
         if bufs.nil? || bufs.length != @channels || bufs.any? { |b| b.length != count || b.frozen? || !b.is_a?(Numo::SFloat) }
           return @span_mix_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) }
         end
-        bufs.each { |b| b.fill(0) }
+        bufs.each { |b| BufferHelper.zero(b) }
         bufs
       end
       private :span_mix
