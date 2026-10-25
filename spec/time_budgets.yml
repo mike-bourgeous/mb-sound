@@ -29,9 +29,9 @@ default:
   example: 8
 files:
   spec/lib/mb/sound/buffer_size_invariance_spec.rb:
-    file: 45
+    file: 50
     example: 12
-    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds)
+    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds); 2026-10-25 post-merge spec:full on the Mac at PARALLEL=8 under load 4.4 took 105.35 s = 45.2 reference seconds, over the old 45
   spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb:
     file: 35
     example: 8
