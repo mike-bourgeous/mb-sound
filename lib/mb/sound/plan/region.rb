@@ -83,6 +83,7 @@ module MB
           # GraphNode::IvarPreset)
           @installed = nil
           @described = nil
+          @non_tee = nil
           @boundaries = nil
           @consumers = nil
           @input_ops = nil
@@ -163,6 +164,7 @@ module MB
           return @program if @program
 
           b = Builder.new(method(:resolve))
+          @non_tee = []
           @described = {}
           @boundaries = {}
           @consumers = {}
@@ -173,6 +175,16 @@ module MB
             output = b.describe(@root)
           end
           @described[@root] = output
+          # Every consumer of an input that isn't a Tee branch at once, so
+          # the installation rebuilds once rather than once per consumer
+          # (omnibus13: a lane whose envelope inputs' streams ended found
+          # its 12 port readers one compile at a time, 72 rebuilds of a
+          # whole fm_bass lane set in one buffer, 0.25-0.55 M objects)
+          unless @non_tee.empty?
+            first, *rest = @non_tee
+            rest.each { |n, why| @installation.unsupported!(n, why) }
+            raise Unsupported.new(*first)
+          end
           # Sums that ring past an input's end (GraphNode::Mixer without
           # stop_early): a block where a required input ends or gives a
           # short buffer runs unfused, and the sum rebuilds without it
@@ -384,7 +396,15 @@ module MB
             while k < feeders.length
               f = feeders[k]
               if f.plan_finished?(count)
-                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its event stream is over', until_restart: true) }
+                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x|
+                  @installation.exclude(x, 'its event stream is over', until_restart: true)
+                  # Nodes reading it directly (not through a Tee) leave
+                  # with it, in the same rebuild (omnibus13: an
+                  # EnvelopeInputs' three Ports, found one region compile
+                  # at a time, rebuilt fm_bass's lanes 24-78 times in one
+                  # buffer)
+                  x.plan_direct_readers.each { |r| @installation.exclude(r, 'reads a node whose event stream is over', until_restart: true) } if x.respond_to?(:plan_direct_readers)
+                }
                 @result = run_unfused(count)
                 return :done
               end
@@ -530,7 +550,12 @@ module MB
             return op.dst
           end
 
-          raise Unsupported.new(consumer, "an input that isn't a Tee branch (#{Plan.node_label(node)})") unless handle.is_a?(GraphNode::Tee::Branch)
+          unless handle.is_a?(GraphNode::Tee::Branch)
+            # (noted, and read as a boundary so the description goes on;
+            # see #compile)
+            why = "an input that isn't a Tee branch (#{Plan.node_label(node)})"
+            @non_tee << [consumer, why] unless @non_tee.any? { |c, _| c.equal?(consumer) }
+          end
 
           type = @types[node] || Plan.output_type(node)
           reason = @installation.boundary_reason(node, force_boundary)

@@ -446,6 +446,12 @@ module MB
       class EnvelopeInputs
         PORTS = [nil, :trigger, :velocity, :choke].freeze
 
+        # The Ports, which read this node directly (not through a Tee), so
+        # plans exclude them with it (see Region#prepare).
+        def plan_direct_readers
+          [@trigger, @velocity, @choke]
+        end
+
         # One planned block: #render's four outputs as EventLists.
         def plan_feed_events(count, from, to, events, ended)
           chase = take_chase(to)
