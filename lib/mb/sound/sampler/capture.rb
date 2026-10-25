@@ -15,8 +15,12 @@ module MB
         end
 
         # The first +frames+ frames written (zeros past the end), one SFloat
-        # per channel.
-        def channels(frames = nil)
+        # per channel.  (Named #channels before fuzz-fixes-1, shadowing
+        # NullOutput#channels, the channel count: a Session asks for that
+        # every span (Cue#output_channel_count), so each bounce or render
+        # into a CaptureOutput joined every buffer so far on every buffer,
+        # quadratic in its length: 6.4 s took 2.2 s instead of 0.05 s.)
+        def captured(frames = nil)
           @bufs.map { |list|
             d = list.empty? ? Numo::SFloat[] : Numo::SFloat.hstack(list)
             next d if frames.nil?

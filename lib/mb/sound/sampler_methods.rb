@@ -39,7 +39,7 @@ module MB
         else
           render(out, *graphs, seconds: Rational(frames, 48000), bpm: bpm, channels: channels, gain: gain)
         end
-        Sample.new(out.channels(frames), root: root, bpm: bpm, name: name || 'bounce')
+        Sample.new(out.captured(frames), root: root, bpm: bpm, name: name || 'bounce')
       end
       alias resample_to_sample bounce
 

@@ -282,6 +282,16 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect { MB::Sound.bounce(100.hz.sine) }.to raise_error(ArgumentError, /length/)
     end
 
+    # fuzz-fixes-1: CaptureOutput#channels (the captured audio) shadowed
+    # NullOutput#channels (the count), which Sessions read every span, so
+    # bounces joined every buffer so far on every buffer (quadratic)
+    it 'keeps the capture output\'s channel count an Integer, so long bounces stay linear' do
+      out = MB::Sound::Sampler::CaptureOutput.new(channels: 2)
+      out.write([Numo::SFloat.ones(4), Numo::SFloat.zeros(4)])
+      expect(out.channels).to eq(2)
+      expect(out.captured(6).map(&:to_a)).to eq([[1, 1, 1, 1, 0, 0], [0] * 6])
+    end
+
     # granular-2 found bin/songs/granular_song.rb bouncing its sources at the
     # default transport's 120 BPM in renders, after the song's `bpm 72` had
     # set only the render's own transport (fixes-14)
