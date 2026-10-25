@@ -6,18 +6,19 @@ module MB
       #
       # Event times (wall-clock seconds since the epoch) closer together
       # than +merge+ seconds count once.  For each candidate period, the
-      # events' phases (time mod period) give a circular mean (the phase
-      # they cluster at) and its resultant length R (1: every event at the
-      # same phase; near 0: spread out), plus the coverage: the share of
-      # whole cycles in the run with an event near that phase.  The period
-      # with the best R x coverage wins if R and the Rayleigh test (p about
-      # exp(-n R^2)) say it isn't chance.  Phases are against the epoch, so
-      # periods that divide an hour read as wall-clock positions (":59.9 of
-      # each minute").
+      # densest phase window (5% of the period, at least a second wide)
+      # gives the phase the events cluster at and the share of events in
+      # it, plus the coverage: the share of whole cycles in the run with an
+      # event in the window.  The period with the best share x coverage
+      # wins if the window holds more events than chance would put there
+      # (a Poisson tail under uniform times).  Phases are against the epoch,
+      # so periods that divide an hour read as wall-clock positions
+      # (":59.9 of each minute").  A densest window rather than a circular
+      # mean, since a few stalls at other times pull a mean phase away.
       module Periodicity
         PERIODS = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1800, 3600].freeze
 
-        Result = Data.define(:period, :phase, :r, :coverage, :clusters, :cycles, :hits, :p_value) do
+        Result = Data.define(:period, :phase, :share, :coverage, :clusters, :cycles, :hits, :p_value) do
           # The phase as a wall-clock position: ":59.9" for minutes,
           # "4:59.9" in 5-minute cycles, else seconds into the cycle.
           def phase_label
@@ -26,8 +27,8 @@ module MB
 
           def to_s
             every = Periodicity.period_label(period)
-            format('stalls cluster at %s of each %s (R %.2f; in %d of %d %s)',
-              phase_label, every, r, hits, cycles, period == 60 ? 'minutes' : 'cycles')
+            format('stalls cluster at %s of each %s (%d%% of stall episodes; in %d of %d %s)',
+              phase_label, every, (100 * share).round, hits, cycles, period == 60 ? 'minutes' : 'cycles')
           end
         end
 
@@ -36,7 +37,7 @@ module MB
         # Detects the best period for +times+ (Floats, wall seconds) in a
         # run from +start+ to +stop+ (default the first and last times), or
         # returns nil.  +periods+ are candidates in seconds.
-        def detect(times, start: nil, stop: nil, periods: PERIODS, merge: 1.0, min_clusters: 4, min_r: 0.6, min_coverage: 0.4, max_p: 0.01)
+        def detect(times, start: nil, stop: nil, periods: PERIODS, merge: 1.0, min_clusters: 4, min_share: 0.3, min_coverage: 0.4, max_p: 0.001)
           clusters = merge_times(times.sort, merge)
           return nil if clusters.length < min_clusters
 
@@ -45,30 +46,27 @@ module MB
           span = stop - start
 
           candidates = periods.filter_map { |p|
-            next if span < 3 * p || p < 2 * merge
+            next if span < 3 * p || p < 4 * merge
 
             score(clusters, p, start, stop)
           }
-          good = candidates.select { |c| c.r >= min_r && c.coverage >= min_coverage && c.p_value <= max_p }
-          good.max_by { |c| [c.r * c.coverage, c.period] }
+          good = candidates.select { |c| c.share >= min_share && c.coverage >= min_coverage && c.p_value <= max_p }
+          good.max_by { |c| [c.share * c.coverage, c.period] }
         end
 
-        # The phase, R, and coverage of +clusters+ at period +p+.
+        # The densest phase window of +clusters+ at period +p+, its share of
+        # the events, and its coverage of the run's cycles.
         def score(clusters, p, start, stop)
-          sx = 0.0
-          sy = 0.0
-          clusters.each do |t|
-            a = 2 * Math::PI * (t % p) / p
-            sx += Math.cos(a)
-            sy += Math.sin(a)
-          end
-          n = clusters.length
-          r = Math.sqrt(sx * sx + sy * sy) / n
-          phase = (Math.atan2(sy, sx) / (2 * Math::PI) * p) % p
+          half = [0.025 * p, 0.5].max
+          phases = clusters.map { |t| t % p }
+          dist = ->(a, b) { d = (a - b).abs % p; d > p / 2.0 ? p - d : d }
 
-          # Cycles whose window around the phase lies inside the run, and
-          # how many of them hold an event within the window
-          window = [0.05 * p, 1.0].max
+          best = phases.max_by { |c| phases.count { |x| dist.(x, c) <= half } }
+          inside = phases.select { |x| dist.(x, best) <= half }
+          # (the window's center: the inside phases' mean, unwrapped around best)
+          phase = (inside.sum { |x| best + ((x - best + p / 2.0) % p) - p / 2.0 } / inside.length) % p
+          inside = phases.count { |x| dist.(x, phase) <= half }
+
           first = ((start - phase) / p).ceil
           last = ((stop - phase) / p).floor
           hits = 0
@@ -78,14 +76,29 @@ module MB
             hit_cycles = {}
             clusters.each do |t|
               k = ((t - phase) / p).round
-              hit_cycles[k] = true if k.between?(first, last) && (t - (phase + k * p)).abs <= window
+              hit_cycles[k] = true if k.between?(first, last) && (t - (phase + k * p)).abs <= half
             end
             hits = hit_cycles.length
           end
-          coverage = cycles > 0 ? hits.to_f / cycles : 0.0
-          p_value = Math.exp(-n * r * r)
 
-          Result.new(period: p, phase: phase, r: r, coverage: coverage, clusters: n, cycles: cycles, hits: hits, p_value: p_value)
+          n = clusters.length
+          Result.new(
+            period: p, phase: phase, share: inside.to_f / n, coverage: cycles > 0 ? hits.to_f / cycles : 0.0,
+            clusters: n, cycles: cycles, hits: hits, p_value: poisson_tail(inside, n * [2 * half / p, 1.0].min),
+          )
+        end
+
+        # P(X >= k) for a Poisson variable with mean +lambda+.
+        def poisson_tail(k, lambda)
+          return 1.0 if k <= 0
+
+          term = Math.exp(-lambda)
+          below = 0.0
+          k.times do |i|
+            below += term
+            term *= lambda / (i + 1)
+          end
+          [1.0 - below, 0.0].max
         end
 
         # Times with gaps of at most +merge+ seconds count as one, at the

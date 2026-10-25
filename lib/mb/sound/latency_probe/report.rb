@@ -41,8 +41,8 @@ module MB
         end
 
         # Ruby ticker stalls by likely cause: Hash of cause => [count,
-        # total ms].  :system when a probe episode covers it (the probe saw
-        # the machine stall too), else :gc when that second had GC time,
+        # total ms].  :system when a probe episode overlaps it (the probe
+        # saw the machine stall too), else :gc when that second had GC time,
         # else :yjit when YJIT compiled then, else :process (the GVL held by
         # another thread, or anything else in this process).
         def ruby_causes
@@ -186,18 +186,22 @@ module MB
           { time: time_figure, histogram: histogram_chart, phase: phase_chart }.compact
         end
 
-        # Writes report.txt and each plot as .svg, .png, and .txt into
-        # +dir+.  Returns a Hash of paths.
-        def save(dir)
+        # Writes report.txt and each plot in +formats+ (.svg, .png, .txt)
+        # into +dir+.  Returns a Hash of paths (the plots' first format).
+        def save(dir, formats: %w[svg png txt])
           paths = { report: File.join(dir, 'report.txt') }
           File.write(paths[:report], text)
           plots.each do |name, plot|
             base = File.join(dir, name.to_s)
             h = name == :time ? 1100 : 480
-            plot.save("#{base}.svg", width: 1200, height: h)
-            plot.save("#{base}.png", width: 1200, height: h)
-            plot.save("#{base}.txt", width: 110, height: name == :time ? 56 : 26)
-            paths[name] = "#{base}.svg"
+            formats.each do |f|
+              if f.to_s == 'txt'
+                plot.save("#{base}.txt", width: 110, height: name == :time ? 56 : 26)
+              else
+                plot.save("#{base}.#{f}", width: 1200, height: h)
+              end
+            end
+            paths[name] = "#{base}.#{formats.first}"
           end
           paths
         end
@@ -318,6 +322,8 @@ module MB
         def cause_of(e, by_second)
           from = e[:wall_ns] - e[:late_ns] - 2_000_000
           to = e[:wall_ns] + 2_000_000
+          # (any probe episode at the same time: in a VM's memory stall the
+          # probe's short walk slows by less than Ruby's work does)
           return :system if @episodes.any? { |x| x[:wall_ns] <= to && x[:wall_ns] + x[:duration_ns] >= from }
 
           row = by_second[e[:wall_ns] / 1_000_000_000]

@@ -97,6 +97,7 @@ MB::Sound.script(
   with_session: [false, 'Also run a realtime Session playing a quiet pad, and log its buffers and underruns'],
   flush: [10, Integer, 'Seconds between writes of the data files', 1..3600],
   status: [1.0, Float, 'Seconds between status lines', 0.1..3600.0],
+  formats: ['svg,png,txt', String, 'Plot formats to write (svg, png, txt)'],
   compare: [nil, String, 'Compare saved runs: --compare DIR1,DIR2 (prints and exits)'],
   quiet: [false, '-q', 'No status lines'],
 ) { |_args, p|
@@ -151,7 +152,7 @@ MB::Sound.script(
   ensure
     puts if tty && !p.quiet
     probe.stop
-    paths = probe.save
+    paths = probe.save(formats: p.formats.split(','))
     puts probe.report
     puts "Report and plots: #{paths.values.join(', ')}"
   end

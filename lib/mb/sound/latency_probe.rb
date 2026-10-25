@@ -317,8 +317,9 @@ module MB
 
       # Writes the report, plots (SVG, PNG, text), per-second CSV, events
       # CSV, and histograms JSON into +dir+ (default the probe's +dir+).
-      # Returns the Hash of written paths.
-      def save(dir = @dir)
+      # Plots go in +formats+ (svg, png, txt).  Returns the Hash of written
+      # paths.
+      def save(dir = @dir, formats: %w[svg png txt])
         raise ArgumentError, 'Pass a directory to save the latency report in' unless dir
 
         FileUtils.mkdir_p(dir)
@@ -327,13 +328,14 @@ module MB
           write_csv(File.join(dir, 'events.csv'), EVENT_COLUMNS, events.map { |e| event_row(e) })
         end
         write_meta(dir)
-        Report.new(self).save(dir)
+        Report.new(self).save(dir, formats: formats)
       end
 
-      # Stops, saves the report and plots in +dir+, and prints where.
-      def finish
+      # Stops, saves the report and plots (SVG and text: PNGs take a few
+      # seconds) in +dir+, and prints where.
+      def finish(formats: %w[svg txt])
         stop
-        paths = save
+        paths = save(formats: formats)
         $stderr.puts "Latency report: #{paths[:report]}"
         paths
       end
