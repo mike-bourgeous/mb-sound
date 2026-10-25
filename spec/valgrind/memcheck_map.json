@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-23",
+  "generated": "2026-10-25",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -129,6 +129,24 @@
         "FastGenerative.start"
       ]
     },
+    "spec/ext/mb/sound/fast_latency_spec.rb": {
+      "fast_latency": [
+        "FastLatency.bucket",
+        "FastLatency.bucket_floor",
+        "FastLatency.mono_ns",
+        "FastLatency.percentile",
+        "FastLatency.spin",
+        "FastLatency.system_sample",
+        "FastLatency::Probe#drain",
+        "FastLatency::Probe#histogram",
+        "FastLatency::Probe#initialize",
+        "FastLatency::Probe#running?",
+        "FastLatency::Probe#start",
+        "FastLatency::Probe#stats",
+        "FastLatency::Probe#stop",
+        "FastLatency::Probe#wait"
+      ]
+    },
     "spec/ext/mb/sound/fast_lofi_spec.rb": {
       "fast_lofi": [
         "FastLofi.decimate"
@@ -244,6 +262,7 @@
         "FastUI::GVLProbe.start",
         "FastUI::GVLProbe.stop",
         "FastUI::GVLProbe.waits",
+        "FastUI::Grid#blit",
         "FastUI::Grid#char",
         "FastUI::Grid#compose",
         "FastUI::Grid#copy_from",
@@ -1334,8 +1353,6 @@
     },
     "spec/lib/mb/sound/plan/lofi_ops_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.circular_read",
-        "FastArithmetic.circular_write",
         "FastArithmetic.divide",
         "FastArithmetic.fill_range",
         "FastArithmetic.min_max",
@@ -1429,6 +1446,10 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.oscillate",
+        "FastWavetable.shape"
       ]
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
@@ -1508,8 +1529,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1837,6 +1856,17 @@
       ],
       "modules": [
         "FastGenerative"
+      ],
+      "includes": [],
+      "depend": {}
+    },
+    "fast_latency": {
+      "dir": "ext/mb/sound/fast_latency",
+      "sources": [
+        "fast_latency.c"
+      ],
+      "modules": [
+        "FastLatency"
       ],
       "includes": [],
       "depend": {}
