@@ -57,6 +57,7 @@
 #     bin/scene_profile.rb -w off bin/songs/night_bus_flow.rb   # without the form's warm-up
 #     bin/scene_profile.rb -R --band -n 512 -l 50 bin/songs/memory_card.rb -- --ui
 #     RUBYOPT=--yjit-log=quiet bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
+#     MB_SOUND_YJIT_CALL_THRESHOLD=30 bin/scene_profile.rb -n 128 bin/songs/memory_card.rb  # Ruby's default threshold
 
 require 'bundler/setup'
 require 'mb-sound'
