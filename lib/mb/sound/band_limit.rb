@@ -55,12 +55,21 @@ module MB
       def self.sync_pulses_ruby(phi, freq, advance, count, prev)
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
+        @ruby_phases = true
         phases, incs = sync_phases(phi, freq, advance, count)
         sync_edges_ruby(phases, incs, prev, count)
+      ensure
+        @ruby_phases = false
       end
 
       # The phases and increments (DFloats) .sync_pulses finds pulses in.
       def self.sync_phases(phi, freq, advance, count)
+        # (a frequency signal in C when it can: FastSynth.sync_running_phases)
+        if freq.is_a?(Numo::SFloat) && freq.length == count && !@ruby_phases
+          r = MB::Sound::FastSynth.sync_running_phases(freq, advance, phi.is_a?(Array) ? phi[0].to_f : phi)
+          return r if r
+        end
+
         freq = Numo::DFloat.cast(Numo::SFloat.cast(freq.is_a?(Numo::SComplex) || freq.is_a?(Numo::DComplex) ? freq.real : freq)) if freq.is_a?(Numo::NArray)
         increments = freq * advance
 

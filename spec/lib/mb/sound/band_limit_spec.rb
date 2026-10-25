@@ -927,10 +927,16 @@ RSpec.describe(MB::Sound::BandLimit) do
 
     it 'gives the same sync ports from the C edges as from the Numo mirror' do
       out = ->(native) {
-        allow(MB::Sound::FastSynth).to receive(:sync_pulse_edges).and_return(nil) unless native
+        unless native
+          allow(MB::Sound::FastSynth).to receive(:sync_pulse_edges).and_return(nil)
+          allow(MB::Sound::FastSynth).to receive(:sync_running_phases).and_return(nil)
+        end
         m = 123.4.hz.saw
         t = 471.hz.ramp.sync(m.wraps)
-        Array.new(5) { |i| t.sample([128, 7, 800, 1, 64][i]).dup }.map(&:to_a).flatten
+        # (a master with a frequency signal: FastSynth.sync_running_phases)
+        m2 = MB::Sound::Tone.new(wave_type: :ramp, frequency: 3.hz.lfo.at(30) + 150)
+        t2 = 520.hz.ramp.sync(m2.wraps)
+        Array.new(5) { |i| n = [128, 7, 800, 1, 64][i]; [t.sample(n).dup, t2.sample(n).dup] }.flatten.map(&:to_a).flatten
       }
       a = out.(true)
       b = out.(false)

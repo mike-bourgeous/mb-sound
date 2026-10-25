@@ -1,8 +1,19 @@
-# Guards for allocation-free rendering (alloc-1, 2026-10-21; measure the
-# whole picture with bin/alloc_audit.rb).  Every object a buffer allocates
-# costs GC time on the render thread, so render paths shouldn't build
+require_relative '../../../support/allocation_budget'
+
+# Guards for allocation-free rendering (alloc-1, 2026-10-21; per-buffer
+# budgets since alloc-2, 2026-10-25; measure the whole picture with
+# bin/alloc_audit.rb).  Every object a buffer allocates costs GC time on
+# the render thread (a minor collection every second or two at these
+# rates, and allocation is what eventually starts a major one, which
+# stops the render thread for 45-80 ms), so render paths shouldn't build
 # throwaway objects: these specs fail when recipe recording runs while
-# sampling, or when a small fixed song's allocations per buffer grow.
+# sampling, or when a representative graph's steady-state allocation per
+# 128-frame buffer grows past its budget, naming the top allocators.
+#
+# Budgets are a little above what alloc-2 measured (in the comments; no
+# YJIT, as specs run).  When one fails: look at the named sites first
+# (reused buffers, cached Arrays, no per-buffer Hashes/Procs/Rationals;
+# see design/notes/graph_nodes.md), and raise a budget only with a reason.
 RSpec.describe('render-path allocations') do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, buffer_size: 128, sleep: false) }
@@ -33,6 +44,17 @@ RSpec.describe('render-path allocations') do
     ctx { buffers.times { session.process_buffer } }
   end
 
+  # Steady-state allocation per buffer of the session after +warm+
+  # buffers, checked against +objects+ and +bytes+ per buffer.
+  def expect_budget(objects:, bytes:, warm: 1500, buffers: 400)
+    render(warm)
+    m = ctx { AllocationBudget.measure(buffers: buffers) { session.process_buffer } }
+    puts "\n\e[1m#{RSpec.current_example.description}\e[0m\n#{m.report}" if ENV['ALLOC_REPORT']
+    expect(m.objects_per_buffer).to be <= objects, "over the budget of #{objects} objects per buffer:\n#{m.report}"
+    expect(m.bytes_per_buffer).to be <= bytes, "over the budget of #{bytes} bytes per buffer:\n#{m.report}"
+    m
+  end
+
   it 'records no graph recipe calls while sampling (swaps and seeks included)' do
     start_song
     render(50)
@@ -57,16 +79,45 @@ RSpec.describe('render-path allocations') do
     expect(calls.tally).to eq({})
   end
 
-  it 'allocates few objects per buffer in steady playback' do
-    start_song
-    render(1500)
+  describe 'budgets per 128-frame buffer' do
+    it 'a small song: synth, drum kit, filtered drone' do
+      start_song
+      expect_budget(objects: 1000, bytes: 1_000_000)
+    end
 
-    GC.start
-    a0 = GC.stat(:total_allocated_objects)
-    render(750)
-    per_buffer = (GC.stat(:total_allocated_objects) - a0) / 750.0
+    it 'a routed mix: a bus with a reverb, sends, a ducked bass, a master limiter' do
+      ctx do
+        MB::Sound.bus(:verb) { |sig| sig.reverb(:room, mix: 1) }
+        MB::Sound.sidechain(:pump, MB::Sound.grid(16, 'x...x...x...x...').loop)
+        MB::Sound.bg(:keys, MB::Sound.seq(MB::Sound::C4, MB::Sound::G4).n8.loop.synth(voices: 4) { |v| v.hz.triangle * v.amp_env(0.01, 0.1, 0.5, 0.1) }, send: { verb: -6.db })
+        MB::Sound.bg(:bass, (MB::Sound.seq(MB::Sound::C2).n4.loop.synth(voices: 1) { |v| v.hz.saw * v.amp_env }).duck(:pump), to: :verb)
+        MB::Sound.master { |mix| mix.limit }
+      end
+      expect_budget(objects: 1000, bytes: 1_000_000)
+    end
 
-    puts "\n\e[1mrender allocations: #{per_buffer.round(1)} objects per 128-frame buffer\e[0m" if ENV['ALLOC_REPORT']
-    expect(per_buffer).to be < 400 # (263 at alloc-1; 438 before)
+    it 'a modulated synth on dense_modulated.mid (8 busy voices, controllers and bend every 10 ms)' do
+      MB::Sound.seed(0)
+      ctx do
+        MB::Sound.bg(:fm, MB::Sound.synth('spec/test_data/dense_modulated.mid', voices: 8) { |v|
+          base = v.hz.glide(50.ms)
+          mod = v.cc(1, range: 1.0..2.0)
+          e = v.fm_env(0, 1, 0.5, 0.3) * base.transpose(12).sine.pm(mod * base.sine)
+          (v.amp_env * base.sine.pm(e * mod + v.bend) * 0.1).filter(:lowpass, cutoff: 2000 + 1000 * mod, quality: 2)
+        })
+      end
+      expect_budget(objects: 1000, bytes: 1_000_000, warm: 400, buffers: 300)
+    end
+
+    it 'a hard-synced lead through a delay (sync pulses, delay lines)' do
+      ctx do
+        lead = MB::Sound.seq(MB::Sound::A3, MB::Sound::C4, MB::Sound::E4).n8.loop.synth(voices: 2) { |v|
+          m = v.hz.saw
+          v.hz.transpose(7).ramp.sync(m.wraps) * v.amp_env(0.01, 0.2, 0.6, 0.2)
+        }
+        MB::Sound.bg(:lead, lead.delay(3.n16, feedback: 0.4, wet: 0.3))
+      end
+      expect_budget(objects: 1000, bytes: 1_000_000)
+    end
   end
 end

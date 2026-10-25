@@ -1353,6 +1353,49 @@ static VALUE ruby_sync_pulse_edges(VALUE self, VALUE phases, VALUE incs, VALUE p
 	return rb_assoc_new(pulses, incs_out);
 }
 
+/*
+ * call-seq: MB::Sound::FastSynth.sync_running_phases(freq, advance, phase) -> [phases, increments] or nil
+ *
+ * BandLimit.sync_phases for a frequency signal (an SFloat of Hz): the
+ * increments freq * advance (each value read as a float, then a double)
+ * and the kernels' running phase from +phase+ (mb_wrap_phase after each
+ * step), as new DFloats; nil for other arguments (the Ruby code runs).
+ * The increments are stored before the phases read them, so no compiler
+ * fuses the multiply and add (alloc-2).
+ */
+static VALUE ruby_sync_running_phases(VALUE self, VALUE freq, VALUE advance_v, VALUE phase_v)
+{
+	if (CLASS_OF(freq) != numo_cSFloat || RNARRAY_NDIM(freq) != 1 || !RTEST(nary_check_contiguous(freq))) {
+		return Qnil;
+	}
+	if (!(RB_FLOAT_TYPE_P(advance_v) || RB_INTEGER_TYPE_P(advance_v)) || !(RB_FLOAT_TYPE_P(phase_v) || RB_INTEGER_TYPE_P(phase_v))) {
+		return Qnil;
+	}
+	size_t n = RNARRAY_SIZE(freq);
+	if (n == 0) {
+		return Qnil;
+	}
+
+	double advance = NUM2DBL(advance_v);
+	VALUE phases = rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	VALUE incs = rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	const float *f = (const float *)(nary_get_pointer_for_read(freq) + nary_get_offset(freq));
+	double *ph = (double *)(nary_get_pointer_for_write(phases) + nary_get_offset(phases));
+	volatile double *inc = (double *)(nary_get_pointer_for_write(incs) + nary_get_offset(incs));
+
+	for (size_t i = 0; i < n; i++) {
+		inc[i] = (double)f[i] * advance;
+	}
+	double p = mb_wrap_phase(NUM2DBL(phase_v));
+	for (size_t i = 0; i < n; i++) {
+		ph[i] = p;
+		p = mb_wrap_phase(p + inc[i]);
+	}
+
+	RB_GC_GUARD(freq);
+	return rb_assoc_new(phases, incs);
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1373,4 +1416,5 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
 	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
 	rb_define_module_function(fast_synth, "sync_pulse_edges", ruby_sync_pulse_edges, 4);
+	rb_define_module_function(fast_synth, "sync_running_phases", ruby_sync_running_phases, 3);
 }
