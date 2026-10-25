@@ -207,6 +207,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.oscillate"
       ],
       "fast_synth": [
@@ -749,6 +750,7 @@
       ],
       "fast_sound": [
         "FastSound.cookbook",
+        "FastSound.fast_math=",
         "FastSound.oscillate",
         "FastSound.smoothstep_buf"
       ],
@@ -926,6 +928,7 @@
         "FastArithmetic.mix",
         "FastArithmetic.pan",
         "FastArithmetic.power",
+        "FastArithmetic.power_fast",
         "FastArithmetic.product",
         "FastArithmetic.scale",
         "FastArithmetic.wet_dry"
@@ -1198,6 +1201,7 @@
         "FastArithmetic.divide",
         "FastArithmetic.mix",
         "FastArithmetic.power",
+        "FastArithmetic.power_fast",
         "FastArithmetic.product"
       ],
       "fast_clip": [
@@ -1207,6 +1211,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.narray_log",
         "FastSound.narray_log10",
         "FastSound.narray_log2",
@@ -1243,6 +1248,7 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.matrix_mix",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
@@ -1295,6 +1301,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
     },
@@ -1327,6 +1334,7 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
@@ -1372,6 +1380,7 @@
       "fast_sound": [
         "FastSound.cookbook",
         "FastSound.dynamic_biquad",
+        "FastSound.fast_math=",
         "FastSound.matrix_mix",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
@@ -1406,6 +1415,7 @@
         "FastPlan.run_lanes"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq"
       ],
       "fast_wavetable": [
@@ -1471,6 +1481,7 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
@@ -1507,6 +1518,9 @@
       "fast_resonator": [
         "FastResonator.modes",
         "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.fast_math="
       ]
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
@@ -1541,6 +1555,7 @@
         "FastRecipe.frame_binding"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
@@ -1562,6 +1577,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.number_to_freq"
       ],
       "fast_synth": [
@@ -1579,6 +1595,7 @@
         "FastPlan.run"
       ],
       "fast_sound": [
+        "FastSound.fast_math=",
         "FastSound.oscillate",
         "FastSound.smoothstep_buf"
       ],
@@ -1742,11 +1759,15 @@
         "FastArithmetic"
       ],
       "includes": [
-        "ext/mb/sound/include/mb_ext_helpers.h"
+        "ext/mb/sound/include/mb_ext_helpers.h",
+        "ext/mb/sound/include/mb_vec_exp2.h",
+        "ext/mb/sound/include/mb_vec_sine.h"
       ],
       "depend": {
         "fast_arithmetic.o": [
-          "ext/mb/sound/include/mb_ext_helpers.h"
+          "ext/mb/sound/include/mb_ext_helpers.h",
+          "ext/mb/sound/include/mb_vec_exp2.h",
+          "ext/mb/sound/include/mb_vec_sine.h"
         ]
       }
     },
@@ -2068,6 +2089,7 @@
         "ext/mb/sound/include/mb_svf.h",
         "ext/mb/sound/include/mb_vec_exp2.h",
         "ext/mb/sound/include/mb_vec_sine.h",
+        "ext/mb/sound/include/mb_vec_sine_osc.h",
         "ext/mb/sound/include/mb_wavetable.h"
       ],
       "depend": {
@@ -2081,7 +2103,8 @@
           "ext/mb/sound/include/mb_phase.h",
           "ext/mb/sound/include/mb_smooth.h",
           "ext/mb/sound/include/mb_vec_exp2.h",
-          "ext/mb/sound/include/mb_vec_sine.h"
+          "ext/mb/sound/include/mb_vec_sine.h",
+          "ext/mb/sound/include/mb_vec_sine_osc.h"
         ],
         "plan_biquad.o": [
           "ext/mb/sound/fast_plan/plan_filters.h",
@@ -2218,14 +2241,20 @@
         "ext/mb/sound/include/mb_biquad.h",
         "ext/mb/sound/include/mb_ext_helpers.h",
         "ext/mb/sound/include/mb_osc_shapes.h",
-        "ext/mb/sound/include/mb_phase.h"
+        "ext/mb/sound/include/mb_phase.h",
+        "ext/mb/sound/include/mb_vec_exp2.h",
+        "ext/mb/sound/include/mb_vec_sine.h",
+        "ext/mb/sound/include/mb_vec_sine_osc.h"
       ],
       "depend": {
         "fast_sound.o": [
           "ext/mb/sound/include/mb_biquad.h",
           "ext/mb/sound/include/mb_ext_helpers.h",
           "ext/mb/sound/include/mb_osc_shapes.h",
-          "ext/mb/sound/include/mb_phase.h"
+          "ext/mb/sound/include/mb_phase.h",
+          "ext/mb/sound/include/mb_vec_exp2.h",
+          "ext/mb/sound/include/mb_vec_sine.h",
+          "ext/mb/sound/include/mb_vec_sine_osc.h"
         ]
       }
     },
