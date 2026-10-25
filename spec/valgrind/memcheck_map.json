@@ -29,6 +29,19 @@
         "FastArithmetic.wet_dry"
       ]
     },
+    "spec/ext/mb/sound/fast_audio_conceal_spec.rb": {
+      "fast_audio": [
+        "FastAudio::Concealer#initialize",
+        "FastAudio::Concealer#process",
+        "FastAudio::Concealer#state",
+        "FastAudio::Playback#captured",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#end_stream",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ]
+    },
     "spec/ext/mb/sound/fast_audio_jack_spec.rb": {
       "fast_audio": [
         "FastAudio.jack_close",
@@ -62,6 +75,7 @@
         "FastAudio::Playback#closed?",
         "FastAudio::Playback#device_name",
         "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#end_stream",
         "FastAudio::Playback#initialize",
         "FastAudio::Playback#jack_clock",
         "FastAudio::Playback#jack_ports",
@@ -133,9 +147,7 @@
       "fast_latency": [
         "FastLatency.bucket",
         "FastLatency.bucket_floor",
-        "FastLatency.mono_ns",
         "FastLatency.percentile",
-        "FastLatency.spin",
         "FastLatency.system_sample",
         "FastLatency::Probe#drain",
         "FastLatency::Probe#histogram",
@@ -456,6 +468,7 @@
         "FastAudio::Playback#closed?",
         "FastAudio::Playback#device_name",
         "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#end_stream",
         "FastAudio::Playback#initialize",
         "FastAudio::Playback#max_queue",
         "FastAudio::Playback#period",
@@ -898,6 +911,7 @@
         "FastArithmetic.wet_dry"
       ],
       "fast_clip": [
+        "FastClip.curve_lookup",
         "FastClip.shape",
         "FastClip.shape_curve"
       ],
@@ -1699,6 +1713,7 @@
       "dir": "ext/mb/sound/fast_audio",
       "sources": [
         "fast_audio.c",
+        "mb_conceal.h",
         "mb_jack.c",
         "mb_jack.h",
         "mb_miniaudio.h",
@@ -1709,6 +1724,7 @@
         "FastAudio"
       ],
       "includes": [
+        "ext/mb/sound/fast_audio/mb_conceal.h",
         "ext/mb/sound/fast_audio/mb_jack.h",
         "ext/mb/sound/fast_audio/mb_miniaudio.h",
         "ext/mb/sound/fast_audio/miniaudio.h"
@@ -1716,6 +1732,7 @@
       "depend": {
         "fast_audio.o": [
           "ext/mb/sound/fast_audio/fast_audio.c",
+          "ext/mb/sound/fast_audio/mb_conceal.h",
           "ext/mb/sound/fast_audio/mb_jack.h",
           "ext/mb/sound/fast_audio/mb_miniaudio.h",
           "ext/mb/sound/fast_audio/miniaudio.h"
