@@ -40,6 +40,7 @@
 
 #include "mb_miniaudio.h"
 #include "mb_jack.h"
+#include "mb_conceal.h"
 
 #define MAX_CHANNELS 64
 #define MAX_BACKENDS 16
@@ -529,6 +530,18 @@ struct playback {
 	_Atomic size_t max_callback; // most frames the device asked for at once
 	int starving; // callback only: the last callback ran out of audio
 
+	// Underrun concealment (mb_conceal.h; device thread only after open),
+	// its settings from Ruby, and counters copied out for #stats.
+	// quiet_pos is the write position the writer marked as the end of its
+	// audio (#end_stream; SIZE_MAX for none): a gap starting there is
+	// intended, so it isn't concealed.
+	struct mb_conceal conceal;
+	struct mb_conceal_settings conceal_settings;
+	_Atomic size_t quiet_pos;
+	_Atomic size_t concealed_frames;
+	_Atomic size_t concealed_gaps;
+	int conceal_touched; // the pull changed real audio or filled a gap
+
 	_Atomic int open;
 	_Atomic int stopped; // miniaudio stopped the device (e.g. unplugged)
 	pid_t pid; // the process that opened the device (it doesn't survive fork)
@@ -630,6 +643,7 @@ static void playback_free(void *ptr)
 	free(p->capture);
 	free(p->in_buf);
 	free(p->out_buf);
+	mb_conceal_free(&p->conceal);
 	if (p->src != NULL) {
 		src_delete(p->src);
 	}
@@ -702,6 +716,17 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 
 	playback_copy(p, out, rp, count, frames);
 
+	if (p->conceal.mode == MB_CONCEAL_REPEAT) {
+		int quiet = atomic_load_explicit(&p->quiet_pos, memory_order_relaxed) == wp;
+		int was_active = p->conceal.active;
+		size_t concealed = mb_conceal_process(&p->conceal, out, frames, count, quiet);
+		if (was_active || concealed) {
+			p->conceal_touched = 1;
+			atomic_store_explicit(&p->concealed_frames, p->conceal.frames, memory_order_relaxed);
+			atomic_store_explicit(&p->concealed_gaps, p->conceal.events, memory_order_relaxed);
+		}
+	}
+
 	if (count < frames) {
 		// Count each time the audio runs out, not every silent callback
 		// (audio shorter than one callback ran out too)
@@ -771,6 +796,12 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 	size_t start = 0, count = 0;
 	if (repeat) {
 		atomic_fetch_add_explicit(&p->jack_repeated, 1, memory_order_relaxed);
+		if (p->conceal_touched) {
+			// The first call concealed a gap or crossfaded out of one,
+			// which the ring doesn't hold; jackd2 keeps the output
+			// port's buffer as that call left it.
+			return;
+		}
 		start = atomic_load_explicit(&p->jack_read_pos, memory_order_relaxed);
 		count = atomic_load_explicit(&p->read_pos, memory_order_relaxed) - start;
 		if (count > nframes || count + p->max_queue > p->capacity) {
@@ -790,6 +821,7 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 		atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
 		atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
 		p->jack_cycled = 1;
+		p->conceal_touched = 0;
 	}
 
 	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
@@ -839,10 +871,60 @@ static VALUE playback_alloc(VALUE klass)
 	}
 
 	p->pid = getpid();
+	atomic_store(&p->quiet_pos, SIZE_MAX);
 	pthread_mutex_init(&p->lock, NULL);
 	pthread_cond_init(&p->space, NULL);
 
 	return TypedData_Wrap_Struct(klass, &playback_type, p);
+}
+
+static double conceal_number(VALUE hash, const char *key)
+{
+	VALUE v = rb_hash_lookup2(hash, ID2SYM(rb_intern(key)), Qundef);
+	if (v == Qundef) {
+		rb_raise(rb_eArgError, "Concealment settings need :%s", key);
+	}
+	return NIL_P(v) ? 0 : NUM2DBL(v);
+}
+
+// Reads concealment settings from a Hash with every key of
+// MB::Sound::Concealment::DEFAULTS (seconds; see mb_conceal.h), or nil for
+// silence (no concealment).
+static void conceal_settings_from(VALUE hash, struct mb_conceal_settings *s)
+{
+	memset(s, 0, sizeof(*s));
+	if (NIL_P(hash)) {
+		s->mode = MB_CONCEAL_SILENCE;
+		return;
+	}
+	Check_Type(hash, T_HASH);
+
+	VALUE mode = rb_hash_lookup2(hash, ID2SYM(rb_intern("mode")), Qnil);
+	if (mode == ID2SYM(rb_intern("repeat"))) {
+		s->mode = MB_CONCEAL_REPEAT;
+	} else if (mode == ID2SYM(rb_intern("silence"))) {
+		s->mode = MB_CONCEAL_SILENCE;
+	} else {
+		rb_raise(rb_eArgError, "Concealment mode must be :repeat or :silence (got %+"PRIsVALUE")", mode);
+	}
+
+	s->fixed = RTEST(rb_hash_lookup2(hash, ID2SYM(rb_intern("fixed")), Qfalse));
+	s->history = conceal_number(hash, "history");
+	s->grain_min = conceal_number(hash, "grain_min");
+	s->grain_max = conceal_number(hash, "grain_max");
+	s->fade = conceal_number(hash, "fade");
+	s->quiet_fade = conceal_number(hash, "quiet_fade");
+	s->return_fade = conceal_number(hash, "return_fade");
+	s->match = conceal_number(hash, "match");
+	s->search = conceal_number(hash, "search");
+	s->seed = NUM2ULL(rb_hash_lookup2(hash, ID2SYM(rb_intern("seed")), INT2FIX(0)));
+
+	if (s->mode == MB_CONCEAL_REPEAT) {
+		if (!(s->grain_min > 0 && s->grain_max >= s->grain_min && s->match > 0 && s->search >= 0 && s->return_fade > 0 &&
+				s->history >= s->grain_max + s->match && s->history <= 2.0 && s->return_fade <= s->history)) {
+			rb_raise(rb_eArgError, "Bad concealment settings (see MB::Sound::Concealment.settings)");
+		}
+	}
 }
 
 // Opens the device (with the context already initialized), raising on
@@ -960,6 +1042,11 @@ static void playback_setup_queue(struct playback *p, struct open_args *a)
 		rb_raise(rb_eNoMemError, "Could not allocate the audio queue");
 	}
 	p->capacity = capacity;
+
+	// Concealment history at the device's rate
+	if (mb_conceal_init(&p->conceal, &p->conceal_settings, p->out_channels, device_rate) != 0) {
+		rb_raise(rb_eNoMemError, "Could not allocate the underrun concealment history");
+	}
 }
 
 static VALUE playback_open_body(VALUE arg)
@@ -1041,13 +1128,17 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  * every JACK port of the process is on one JACK/PipeWire node; +backends+,
  * +device_index+, +device_rate+, +period+, and +allow_rate_change+ are
  * ignored, and the JACK server's rate and buffer size are the device's.
+ *
+ * +conceal+ is a Hash of underrun concealment settings (every key of
+ * MB::Sound::Concealment::DEFAULTS, in seconds; see mb_conceal.h), or nil
+ * for silence when the queue runs dry (the old behavior).
  */
 static VALUE playback_initialize(int argc, VALUE *argv, VALUE self)
 {
 	VALUE backends, device_index, client_name, in_channels, out_channels, sample_rate, device_rate,
 	      period, queue_frames, capture_frames, resample_quality, allow_rate_change, max_queue_frames,
-	      jack_ports;
-	rb_check_arity(argc, 13, 14);
+	      jack_ports, conceal;
+	rb_check_arity(argc, 13, 15);
 	backends = argv[0];
 	device_index = argv[1];
 	client_name = argv[2];
@@ -1062,6 +1153,7 @@ static VALUE playback_initialize(int argc, VALUE *argv, VALUE self)
 	allow_rate_change = argv[11];
 	max_queue_frames = argv[12];
 	jack_ports = argc > 13 ? argv[13] : Qnil;
+	conceal = argc > 14 ? argv[14] : Qnil;
 
 	struct playback *p;
 	TypedData_Get_Struct(self, struct playback, &playback_type, p);
@@ -1122,6 +1214,7 @@ static VALUE playback_initialize(int argc, VALUE *argv, VALUE self)
 	p->queue_limit = queue;
 	p->max_queue = max_queue;
 	p->starving = 1; // silence before the first write isn't an underrun
+	conceal_settings_from(conceal, &p->conceal_settings);
 
 	if (capture > 0) {
 		p->capture = calloc(capture * out_ch, sizeof(float));
@@ -1543,14 +1636,16 @@ static VALUE playback_set_queue_limit(VALUE self, VALUE frames)
 
 /*
  * call-seq:
- *   playback.stats -> { queued:, frames_written:, frames_played:, underruns:, max_callback:, repeated: }
+ *   playback.stats -> { queued:, frames_written:, frames_played:, underruns:, max_callback:, repeated:, concealed:, concealed_gaps: }
  *
  * :queued frames are waiting to play; :frames_played counts every frame the
  * device has played since opening, including silence (the device clock);
  * :underruns counts the times the queue ran out while the device needed
  * audio (once per gap, so a pause between sounds counts once); :repeated
  * counts JACK cycles an asynchronous server ran twice for this client
- * (#repeated), which played their period once.
+ * (#repeated), which played their period once; :concealed counts device
+ * frames filled by underrun concealment (including its faded tail) and
+ * :concealed_gaps the gaps it filled (see mb_conceal.h).
  */
 static VALUE playback_stats(VALUE self)
 {
@@ -1565,8 +1660,28 @@ static VALUE playback_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("underruns")), SIZET2NUM(atomic_load(&p->underruns)));
 	rb_hash_aset(h, ID2SYM(rb_intern("max_callback")), SIZET2NUM(atomic_load(&p->max_callback)));
 	rb_hash_aset(h, ID2SYM(rb_intern("repeated")), SIZET2NUM(atomic_load(&p->jack_repeated)));
+	rb_hash_aset(h, ID2SYM(rb_intern("concealed")), SIZET2NUM(atomic_load(&p->concealed_frames)));
+	rb_hash_aset(h, ID2SYM(rb_intern("concealed_gaps")), SIZET2NUM(atomic_load(&p->concealed_gaps)));
 
 	return h;
+}
+
+/*
+ * call-seq:
+ *   playback.end_stream -> frames_written
+ *
+ * Marks the audio written so far as the end of the stream: if the queue
+ * runs dry right after it (nothing more was written), the gap is intended
+ * and isn't concealed (a concealment already running fades out over the
+ * settings' :quiet_fade).  Writing more clears the mark.  Underruns are
+ * still counted.
+ */
+static VALUE playback_end_stream(VALUE self)
+{
+	struct playback *p = get_playback(self);
+	size_t wp = atomic_load(&p->write_pos);
+	atomic_store(&p->quiet_pos, wp);
+	return SIZET2NUM(wp);
 }
 
 /*
@@ -1595,6 +1710,148 @@ static VALUE playback_captured(VALUE self)
 
 	size_t length = atomic_load_explicit(&p->capture_length, memory_order_acquire);
 	return rb_str_new((const char *)p->capture, length * p->out_channels * sizeof(float));
+}
+
+/* Concealer (the concealment kernel without a device, for specs) ---------- */
+
+struct concealer {
+	struct mb_conceal c;
+	int ready;
+};
+
+static void concealer_free(void *ptr)
+{
+	struct concealer *k = ptr;
+	mb_conceal_free(&k->c);
+	free(k);
+}
+
+static size_t concealer_memsize(const void *ptr)
+{
+	const struct concealer *k = ptr;
+	return sizeof(*k) + k->c.cap * k->c.ch * sizeof(float);
+}
+
+static const rb_data_type_t concealer_type = {
+	.wrap_struct_name = "MB::Sound::FastAudio::Concealer",
+	.function = {
+		.dmark = NULL,
+		.dfree = concealer_free,
+		.dsize = concealer_memsize,
+	},
+	.flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static VALUE concealer_alloc(VALUE klass)
+{
+	struct concealer *k = calloc(1, sizeof(struct concealer));
+	if (k == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate a concealer");
+	}
+	return TypedData_Wrap_Struct(klass, &concealer_type, k);
+}
+
+static struct concealer *get_concealer(VALUE self)
+{
+	struct concealer *k;
+	TypedData_Get_Struct(self, struct concealer, &concealer_type, k);
+	if (!k->ready) {
+		rb_raise(cError, "Concealer was not initialized");
+	}
+	return k;
+}
+
+/*
+ * call-seq:
+ *   Concealer.new(channels, rate, settings)
+ *
+ * The device thread's underrun concealment (mb_conceal.h) on its own, for
+ * comparing with MB::Sound::Concealment::Reference.  +settings+ as for
+ * Playback.new.
+ */
+static VALUE concealer_initialize(VALUE self, VALUE channels, VALUE rate, VALUE settings)
+{
+	struct concealer *k;
+	TypedData_Get_Struct(self, struct concealer, &concealer_type, k);
+	if (k->ready) {
+		rb_raise(cError, "Concealer is already initialized");
+	}
+
+	int ch = NUM2INT(channels);
+	if (ch < 1 || ch > MB_CONCEAL_MAX_CHANNELS) {
+		rb_raise(rb_eArgError, "Channels must be 1..%d (got %d)", MB_CONCEAL_MAX_CHANNELS, ch);
+	}
+	double r = NUM2DBL(rate);
+	if (!(r >= 1000 && r <= 768000)) {
+		rb_raise(rb_eArgError, "Rate must be 1000..768000 (got %f)", r);
+	}
+
+	struct mb_conceal_settings s;
+	conceal_settings_from(settings, &s);
+	if (mb_conceal_init(&k->c, &s, ch, r) != 0) {
+		rb_raise(rb_eNoMemError, "Could not allocate the concealment history");
+	}
+	k->ready = 1;
+	return self;
+}
+
+/*
+ * call-seq:
+ *   concealer.process(real, frames, quiet) -> String
+ *
+ * One device pull: +real+ is a String of interleaved 32-bit floats (the
+ * frames the ring had, at most +frames+), and the result +frames+ frames
+ * as the device would play them.  +quiet+ as if the writer had called
+ * Playback#end_stream.
+ */
+static VALUE concealer_process(VALUE self, VALUE real, VALUE frames_value, VALUE quiet)
+{
+	struct concealer *k = get_concealer(self);
+	StringValue(real);
+	size_t ch = k->c.ch;
+	size_t bytes = RSTRING_LEN(real);
+	if (bytes % (ch * sizeof(float)) != 0) {
+		rb_raise(rb_eArgError, "Real audio must be whole frames of %zu floats", ch);
+	}
+	size_t count = bytes / (ch * sizeof(float));
+	size_t frames = NUM2SIZET(frames_value);
+	if (count > frames) {
+		rb_raise(rb_eArgError, "More real frames (%zu) than the pull (%zu)", count, frames);
+	}
+
+	VALUE out = rb_str_new(NULL, frames * ch * sizeof(float));
+	float *o = (float *)RSTRING_PTR(out);
+	memcpy(o, RSTRING_PTR(real), bytes);
+	memset(o + count * ch, 0, (frames - count) * ch * sizeof(float));
+	mb_conceal_process(&k->c, o, frames, count, RTEST(quiet));
+	return out;
+}
+
+/* The concealment state, for specs. */
+static VALUE concealer_state(VALUE self)
+{
+	struct concealer *k = get_concealer(self);
+	struct mb_conceal *c = &k->c;
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("active")), c->active ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("faded")), c->faded ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("returning")), c->in_exit ? Qtrue : Qfalse);
+	rb_hash_aset(h, ID2SYM(rb_intern("gain")), DBL2NUM(c->gain));
+	rb_hash_aset(h, ID2SYM(rb_intern("total")), ULL2NUM(c->total));
+	rb_hash_aset(h, ID2SYM(rb_intern("draws")), ULL2NUM(c->draws));
+	rb_hash_aset(h, ID2SYM(rb_intern("frames")), ULL2NUM(c->frames));
+	rb_hash_aset(h, ID2SYM(rb_intern("events")), ULL2NUM(c->events));
+	rb_hash_aset(h, ID2SYM(rb_intern("grain")), c->active ? rb_ary_new_from_args(3, ULL2NUM(c->t0 - c->cur.src), SIZET2NUM(c->cur.len), SIZET2NUM(c->cur.i)) : Qnil);
+	return h;
+}
+
+static void init_concealer(VALUE fast_audio)
+{
+	VALUE k = rb_define_class_under(fast_audio, "Concealer", rb_cObject);
+	rb_define_alloc_func(k, concealer_alloc);
+	rb_define_method(k, "initialize", concealer_initialize, 3);
+	rb_define_method(k, "process", concealer_process, 3);
+	rb_define_method(k, "state", concealer_state, 0);
 }
 
 /* Capture ------------------------------------------------------------------ */
@@ -3008,6 +3265,7 @@ void Init_fast_audio(void)
 	rb_define_method(playback, "max_queue", playback_max_queue, 0);
 	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
+	rb_define_method(playback, "end_stream", playback_end_stream, 0);
 	rb_define_method(playback, "close", playback_close, 0);
 	rb_define_method(playback, "closed?", playback_closed, 0);
 	rb_define_method(playback, "sample_rate", playback_sample_rate, 0);
@@ -3043,4 +3301,5 @@ void Init_fast_audio(void)
 	rb_define_method(capture, "repeated", capture_repeated, 0);
 
 	init_jack_midi(fast_audio);
+	init_concealer(fast_audio);
 }

@@ -36,6 +36,11 @@ module MB
     #                                  linear, zoh, or off (run at the card's
     #                                  rate; #sample_rate is then the card's)
     #   AUDIO_ADAPTIVE=0               don't grow the queue after dropouts
+    #   AUDIO_CONCEAL=repeat           what plays when the queue runs dry:
+    #                                  repeat (default: grains of the last
+    #                                  audio, see Concealment), silence (the
+    #                                  old behavior), fixed; a grain range in
+    #                                  ms may follow (repeat:20-60)
     #   AUDIO_SET_DEVICE_RATE=1        let CoreAudio switch the card's
     #                                  system-wide rate (macOS; changes it for
     #                                  every app, as in Audio MIDI Setup)
@@ -223,9 +228,15 @@ module MB
       # SHRINK_AFTER seconds without dropouts (e.g. after stalls while YJIT
       # compiles at startup), it shrinks back by a third at a time, down to
       # where it started (see also #reset_queue).
+      #
+      # +:conceal+ chooses what plays when the queue runs dry anyway (see
+      # Concealment.settings; AUDIO_CONCEAL wins): by default grains of the
+      # last audio played, crossfaded and fading out, instead of silence.
+      # Underruns are counted either way.
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
-        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0, cue: 0
+        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0, cue: 0,
+        conceal: nil
       )
         raise ArgumentError, 'Channels must be positive' if channels < 1
         raise ArgumentError, "cue: must be 0 to #{channels - 1} (got #{cue.inspect})" unless cue.is_a?(Integer) && cue >= 0 && (cue == 0 || cue < channels)
@@ -256,6 +267,7 @@ module MB
         }
         set_device_rate = ENV.key?('AUDIO_SET_DEVICE_RATE') ? ENV['AUDIO_SET_DEVICE_RATE'] == '1' : set_device_rate
         @adaptive = ENV.key?('AUDIO_ADAPTIVE') ? ENV['AUDIO_ADAPTIVE'] != '0' : adaptive
+        @concealment = Concealment.settings(ENV['AUDIO_CONCEAL'].to_s.empty? ? conceal : nil)
 
         # A mono output still opens two channels, so mono plays on both
         # speakers (and on both JACK playback ports).
@@ -273,7 +285,7 @@ module MB
             names += Jack.port_names('cue', cue) if cue > 0
             @playback = FastAudio::Playback.new(
               backends, -1, self.class.client_name, channels, @device_channels, requested_rate, 0, 0,
-              queue, capture, quality, false, max_queue, names
+              queue, capture, quality, false, max_queue, names, @concealment
             )
             @jack_connections = Jack.connect(@playback.jack_ports, device, output: true)
           rescue FastAudio::Error => e
@@ -287,7 +299,7 @@ module MB
           FastAudio::Playback.new(
             backends, self.class.device_index(device, backends: backends), self.class.client_name,
             channels, @device_channels, requested_rate, device_rate, period, queue, capture,
-            quality, set_device_rate, max_queue
+            quality, set_device_rate, max_queue, nil, @concealment
           )
         }
         @underruns_seen = 0
@@ -320,6 +332,18 @@ module MB
         adapt if @adaptive
         warn_repeats if !Jack.audio_repeats_reported && @playback.repeated != 0
         frames
+      end
+
+      # The underrun concealment settings (see +:conceal+ and Concealment).
+      attr_reader :concealment
+
+      # Marks everything written so far as the end of the audio: if the
+      # queue runs dry right after it, the silence is intended and isn't
+      # concealed (see Concealment).  Writing more clears the mark.  Session
+      # calls it before closing; call it when pausing writes on purpose.
+      def end_stream
+        @playback.end_stream
+        nil
       end
 
       # True if the queue grows after underruns (see +:adaptive+).
@@ -372,7 +396,8 @@ module MB
       # Statistics from the C extension: :queued, :frames_written,
       # :frames_played (the sound card's clock, including silence), and
       # :underruns (times the audio ran out while the sound card needed it,
-      # counted once per gap).
+      # counted once per gap), :concealed (frames filled by underrun
+      # concealment) and :concealed_gaps (see Concealment).
       def stats
         @playback.stats
       end
