@@ -82,7 +82,7 @@ RSpec.describe('render-path allocations') do
   describe 'budgets per 128-frame buffer' do
     it 'a small song: synth, drum kit, filtered drone' do
       start_song
-      expect_budget(objects: 1000, bytes: 1_000_000)
+      expect_budget(objects: 55, bytes: 5_000) # (alloc-2: 237 -> 42.7 objects, 3.2 kB)
     end
 
     it 'a routed mix: a bus with a reverb, sends, a ducked bass, a master limiter' do
@@ -93,7 +93,7 @@ RSpec.describe('render-path allocations') do
         MB::Sound.bg(:bass, (MB::Sound.seq(MB::Sound::C2).n4.loop.synth(voices: 1) { |v| v.hz.saw * v.amp_env }).duck(:pump), to: :verb)
         MB::Sound.master { |mix| mix.limit }
       end
-      expect_budget(objects: 1000, bytes: 1_000_000)
+      expect_budget(objects: 160, bytes: 9_000) # (alloc-2: 318 -> 126 objects, 6.2 kB)
     end
 
     it 'a modulated synth on dense_modulated.mid (8 busy voices, controllers and bend every 10 ms)' do
@@ -106,7 +106,7 @@ RSpec.describe('render-path allocations') do
           (v.amp_env * base.sine.pm(e * mod + v.bend) * 0.1).filter(:lowpass, cutoff: 2000 + 1000 * mod, quality: 2)
         })
       end
-      expect_budget(objects: 1000, bytes: 1_000_000, warm: 400, buffers: 300)
+      expect_budget(objects: 175, bytes: 13_000, warm: 400, buffers: 300) # (alloc-2: 462 -> 138.5 objects, 9.2 kB; MIDI events' Rationals lead)
     end
 
     it 'a hard-synced lead through a delay (sync pulses, delay lines)' do
@@ -117,7 +117,7 @@ RSpec.describe('render-path allocations') do
         }
         MB::Sound.bg(:lead, lead.delay(3.n16, feedback: 0.4, wet: 0.3))
       end
-      expect_budget(objects: 1000, bytes: 1_000_000)
+      expect_budget(objects: 135, bytes: 17_000) # (alloc-2: 204 -> 107 objects, 12.7 kB)
     end
   end
 end
