@@ -262,7 +262,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 0.5
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
@@ -299,7 +299,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 0.5
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
@@ -352,7 +352,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same tiny tails at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 1e30
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.1, sizes: [[367, 368], [1], [1031]])

@@ -119,11 +119,22 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
   it 'raises an error if one branch gets too far out of sync' do
     source = 1.constant
 
-    t1, t2 = source.tee
+    t1, t2 = source.tee; line = __LINE__
 
     expect(t1.sample(47999)).to eq(Numo::SFloat.zeros(47999).fill(1))
     expect(t1.sample(2)).to eq(Numo::SFloat[1,1])
-    expect { t2.sample(1) }.to raise_error(MB::Sound::GraphNode::Tee::BranchBufferOverflow)
+    # (the message names where each branch was made)
+    expect { t2.sample(1) }.to raise_error(MB::Sound::GraphNode::Tee::BranchBufferOverflow, /tee_spec\.rb:#{line}\b/)
+  end
+
+  it 'keeps where each branch was made as one frozen String of library and user frames' do
+    b = 1.constant.tee[0]; line = __LINE__
+    trace = b.creation_trace
+    expect(trace).to be_a(String).and be_frozen
+    lines = trace.lines(chomp: true)
+    expect(lines.grep(/tee_spec\.rb:#{line}\z/).length).to eq(1)
+    expect(lines.grep(/tee\.rb|ivar_preset|recipe/)).to be_empty # (plumbing left out)
+    expect(lines.length).to be <= 4 + 1 + 5
   end
 
   it 'returns nil if the source returns nil' do
@@ -288,9 +299,10 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
     it 'raises at the next buffer when in-place arithmetic changes a shared buffer', :check_shared do
       a, b = source.tee
       doubler = a.proc { |buf| buf.inplace * 2 }
+      line = __LINE__ - 2
       doubler.sample(100)
       b.sample(100)
-      expect { doubler.sample(100) }.to raise_error(MB::Sound::GraphNode::Tee::SharedBufferModified, /modified the buffer shared/)
+      expect { doubler.sample(100) }.to raise_error(MB::Sound::GraphNode::Tee::SharedBufferModified, /modified the buffer shared.*tee_spec\.rb:#{line}\b/m)
     end
 
     it 'warns and copies for each branch from then on with :warn' do

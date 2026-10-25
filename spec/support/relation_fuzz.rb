@@ -250,14 +250,20 @@ module RelationFuzz
     bufs.map { |b| b.empty? ? Numo::DFloat[] : Numo::DFloat.zeros(0).concatenate(*b) }
   end
 
-  def with_plan(enabled: true, precision: nil)
+  # Runs the block with plans on or off at +precision+ and plan check mode
+  # +check+ (nil by default, also under MB_SOUND_PLAN_CHECK=1: check mode's
+  # unfused rerun of every block changes what :fast regions compute, so the
+  # planned-vs-unplanned relations compare plain plans; :plan_check runs
+  # check mode itself, omnibus13).
+  def with_plan(enabled: true, precision: nil, check: nil)
     plan = MB::Sound::Plan
-    old = [plan.enabled, plan.precision]
+    old = [plan.enabled, plan.precision, plan.check]
     plan.enabled = enabled
     plan.precision = precision if precision
+    plan.check = check
     yield
   ensure
-    plan.enabled, plan.precision = old
+    plan.enabled, plan.precision, plan.check = old
   end
 
   def compare(ref, got, tolerance: 0, label: '')
@@ -313,7 +319,7 @@ module RelationFuzz
       end
       nil
     when :plan_check
-      with_plan(precision: :exact) {
+      with_plan(precision: :exact, check: :raise) {
         g = build(code)
         MB::Sound::Plan.install(g, check: :raise)
         render(g)

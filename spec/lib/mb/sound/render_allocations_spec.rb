@@ -80,6 +80,17 @@ RSpec.describe('render-path allocations') do
   end
 
   describe 'budgets per 128-frame buffer' do
+    # Plans without check mode, also under MB_SOUND_PLAN_CHECK=1: its
+    # unfused rerun and state snapshots of every block allocate on their
+    # own, and these budgets are for what a render allocates (omnibus13)
+    around do |ex|
+      old = MB::Sound::Plan.check
+      MB::Sound::Plan.check = nil
+      ex.run
+    ensure
+      MB::Sound::Plan.check = old
+    end
+
     it 'a small song: synth, drum kit, filtered drone' do
       start_song
       expect_budget(objects: 55, bytes: 5_000) # (master-ai before alloc-2: 87.9 objects, 4.5 kB; alloc-2: 42.7, 3.2 kB)
