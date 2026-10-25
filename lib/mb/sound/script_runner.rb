@@ -1129,7 +1129,18 @@ module MB
       # With --plot, #wait runs in a thread and the plot stops when it
       # returns (visualize only returned on Ctrl-C before, so --plot scripts
       # never exited); Ctrl-C during the plot still stops only the plot.
+      #
+      # With MB_SOUND_LATENCY_PROBE set (a directory, or 1 for one under
+      # tmp/latency_probe/), a LatencyProbe watches the session while the
+      # script plays and saves its report there at the end.
       def live
+        probe = LatencyProbe.from_env(Session.current, name: File.basename(@script.to_s, '.rb'))
+        live_playback
+      ensure
+        probe&.finish
+      end
+
+      def live_playback
         return live_ui(@options[:ui]) if @options[:ui]
 
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]
