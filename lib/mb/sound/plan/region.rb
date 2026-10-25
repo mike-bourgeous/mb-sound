@@ -803,7 +803,10 @@ module MB
               # Inexact ops' differences can reach state through the ops
               # after them (a fast sine modulating a frequency moves a
               # phase), within the same tolerance
-              next if !@program.exact? && Plan.states_close?(after[i], planned_states[i], STATE_TOLERANCE)
+              # (a node may say its state integrates such differences more,
+              # e.g. a resonator's ringing phase: #plan_state_tolerance)
+              tol = m.respond_to?(:plan_state_tolerance) ? m.plan_state_tolerance : STATE_TOLERANCE
+              next if !@program.exact? && Plan.states_close?(after[i], planned_states[i], tol)
               detail = planned_states[i].is_a?(Snapshot) && after[i].is_a?(Snapshot) ? planned_states[i].diff(after[i]) : "planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
               problem = "the state of #{Plan.node_label(m)} differs: #{detail}"
               break
