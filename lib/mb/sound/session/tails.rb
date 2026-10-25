@@ -9,7 +9,9 @@ module MB
       # stopped player) once its output has stayed below
       # Master::TAIL_THRESHOLD (-90 dB) for RING_QUIET_SECONDS, cut on the
       # exact sample where that quiet stretch ends (so the result is the
-      # same at any buffer size).  A tail still ringing after
+      # same at any buffer size; the graph is read in pieces ending there,
+      # so it sleeps having rendered exactly that far and a revived graph
+      # continues from the same state too, omnibus13).  A tail still ringing after
       # Master::MAX_TAIL_SECONDS fades out over Master::TAIL_FADE_SECONDS
       # from that exact sample.
       #

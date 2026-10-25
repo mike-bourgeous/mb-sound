@@ -1496,77 +1496,102 @@ module MB
         end
 
         routed = @routed_span
-        begin_bus_read(offset, p.name) if routed
-        # Knob readers and MIDI input taps in the graph read from this
-        # player's first frame (see GraphNode::Knob#clock_frame and
-        # #player_frame)
-        t = MB::U.clock_now
-        gc = GC.stat(:time)
-        begin
-          @knob_frame = base + offset if @knob_frame
-          @player_frame = base + offset
-          data = p.input.read(frames)
-        ensure
-          @knob_frame = base if @knob_frame
-          @player_frame = nil
-        end
-        elapsed = MB::U.clock_now - t
-        p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
-        check_speed(p, Session.without_gc(elapsed, gc), frames)
-        read_while_asleep(p, asleep_after) # the rest of the buffer after a mute ramp
-        p.read_to = base + offset + frames + asleep_after
-
-        if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
-          retire(p)
-          return
-        end
-
-        # A ringing tail stops on the sample where it has been quiet long
-        # enough, or fades out once it has rung too long
-        rung_out = false
-        if ringing && p.ring.stop_frame
-          cap_ring(p, base + offset + frames, rate)
-          keep = follow_ring(p, data, base + offset, frames, rate)
-          if keep < frames
-            rung_out = true
-            frames = keep
-            if frames == 0
+        # A ringing tail is read in pieces that end where its quiet stretch
+        # would: it sleeps having rendered exactly to that sample, so a
+        # revived graph (a scene relaunching the track) continues from the
+        # same state at any buffer size (omnibus13: kits revived after a
+        # ring-out differed by buffer size, SessionFuzz seed 1194)
+        quiet = ringing && p.ring.stop_frame ? (RING_QUIET_SECONDS * rate).round : nil
+        total = frames
+        loop do
+          frames = total
+          if quiet
+            ending = p.ring.quiet_from + quiet - base
+            if ending <= offset
               note_rung_out(p, base + offset, rate)
               return retire(p, keep: true)
             end
+            frames = ending - offset if ending < offset + frames
           end
-        end
+          last = frames == total
 
-        fade = fade_ramp(p, base + offset, frames)
-        strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
-        ramp = fade ? (strip ? fade * strip : fade) : strip
-        # The route: CUE gets its share, MAIN the rest (see Cue)
-        ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
-
-        if routed
-          deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
-        else
-          mix.each_with_index do |m, c|
-            d = data[c % data.length]
-            next if d.nil? || d.empty?
-            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            len = MB::M.min(d.length, frames)
-            # (FastArithmetic.add_at: the same float steps without views)
-            next if FastArithmetic.add_at(m, offset, d, len, ramp)
-            d = d[0...len]
-            d = d * ramp[0...len] if ramp
-            m[offset...(offset + len)] = m[offset...(offset + len)] + d
+          begin_bus_read(offset, p.name) if routed
+          # Knob readers and MIDI input taps in the graph read from this
+          # player's first frame (see GraphNode::Knob#clock_frame and
+          # #player_frame)
+          t = MB::U.clock_now
+          gc = GC.stat(:time)
+          begin
+            @knob_frame = base + offset if @knob_frame
+            @player_frame = base + offset
+            data = p.input.read(frames)
+          ensure
+            @knob_frame = base if @knob_frame
+            @player_frame = nil
           end
-        end
+          elapsed = MB::U.clock_now - t
+          p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
+          check_speed(p, Session.without_gc(elapsed, gc), frames)
+          read_while_asleep(p, asleep_after) if last # the rest of the buffer after a mute ramp
+          p.read_to = base + offset + frames + (last ? asleep_after : 0)
 
-        if rung_out
-          note_rung_out(p, base + offset + frames, rate)
-          return retire(p, keep: true)
-        end
+          if data.nil? || data.empty? || data.all? { |d| d.nil? || d.empty? }
+            retire(p)
+            return
+          end
 
-        # A short read means the graph ended
-        ended = data.any? { |d| d.nil? || d.length < frames }
-        finish_player(p, ended, base + offset + frames, to: to)
+          # A ringing tail stops on the sample where it has been quiet long
+          # enough, or fades out once it has rung too long
+          rung_out = false
+          if quiet
+            cap_ring(p, base + offset + frames, rate)
+            keep = follow_ring(p, data, base + offset, frames, rate)
+            if keep < frames || p.ring.quiet_from + quiet <= base + offset + frames
+              rung_out = true
+              frames = keep
+              if frames == 0
+                note_rung_out(p, base + offset, rate)
+                return retire(p, keep: true)
+              end
+            end
+          end
+
+          fade = fade_ramp(p, base + offset, frames)
+          strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
+          ramp = fade ? (strip ? fade * strip : fade) : strip
+          # The route: CUE gets its share, MAIN the rest (see Cue)
+          ramp = cue_route(p, data, ramp, offset, frames, base + offset) if p.cue
+
+          if routed
+            deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
+          else
+            mix.each_with_index do |m, c|
+              d = data[c % data.length]
+              next if d.nil? || d.empty?
+              d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+              len = MB::M.min(d.length, frames)
+              # (FastArithmetic.add_at: the same float steps without views)
+              next if FastArithmetic.add_at(m, offset, d, len, ramp)
+              d = d[0...len]
+              d = d * ramp[0...len] if ramp
+              m[offset...(offset + len)] = m[offset...(offset + len)] + d
+            end
+          end
+
+          if rung_out
+            note_rung_out(p, base + offset + frames, rate)
+            return retire(p, keep: true)
+          end
+
+          # A short read means the graph ended
+          ended = data.any? { |d| d.nil? || d.length < frames }
+          if last || ended
+            finish_player(p, ended, base + offset + frames, to: to)
+            break
+          end
+          offset += frames
+          total -= frames
+        end
 
       rescue => e
         p.read_to = nil # not kept in step (see Strip#read_kept_graphs)

@@ -51,7 +51,9 @@ module MB
       # to the jump.  Otherwise chased notes jump (see above).
       #
       # +time+ is seconds (a number or length), a graph node of seconds
-      # (read on the note-on's sample), or :gm: CC 5 (Notes#portamento_time,
+      # (read on the note-on's sample), :length (each note's own length:
+      # its MIDI::Event#length_hint, as clips give them; tweens with
+      # uneven steps), or :gm: CC 5 (Notes#portamento_time,
       # 2 ms..5 s) with CC 65 (portamento on/off, off by default as in GM2)
       # deciding whether notes glide; CC 84 glides regardless of CC 65.
       class Glide < Number
@@ -104,6 +106,8 @@ module MB
           @time = time
           @legato = !!legato
           @gm = time == :gm
+          @lengths = time == :length
+          @hint_seconds = nil
           @time_node = nil
           @gm_time = nil
           @gm_raw = nil
@@ -115,10 +119,12 @@ module MB
             @gm_time = GM_CONTROLS[:portamento_time]
             @gm_raw = @gm_time.default
             @gm_on = false
+          when :length
+            # (each note's MIDI::Event#length_hint: see glide_samples)
           when Numeric, Length
             @seconds = Length.seconds(time, sample_rate: @sample_rate).to_f
           else
-            raise ArgumentError, "Glide time must be seconds, a length, a node, or :gm (got #{time.inspect})" unless time.respond_to?(:sample)
+            raise ArgumentError, "Glide time must be seconds, a length, a node, :length, or :gm (got #{time.inspect})" unless time.respond_to?(:sample)
             @time_node = time.get_sampler
           end
 
@@ -248,6 +254,7 @@ module MB
 
           glide = from || (@had_note && enabled? && (legato || !@legato))
           @had_note = true
+          @hint_seconds = hint_seconds(event) if @lengths
           glide_to(target, from || current, glide)
         end
 
@@ -285,6 +292,9 @@ module MB
           else
             @from_note = nil
             @had_note = true
+            # (:length: the whole note's, from its start: the time it has
+            # played plus the length left)
+            @hint_seconds = hint_seconds(c.event, c.elapsed)
             glide_to(marked_number(c.event), start, true)
             if @gliding
               @position = (c.elapsed * @sample_rate).round
@@ -316,12 +326,32 @@ module MB
         def glide_samples
           seconds = if @gm
                       @gm_time.value(@gm_raw)
+                    elsif @lengths
+                      @hint_seconds || 0
+
                     elsif @time_node
                       @time_buf[MB::M.min(@segment_start, @time_buf.length - 1)]
                     else
                       @seconds
                     end
           (seconds.to_f * @sample_rate).round
+        end
+
+        # For time: :length, the seconds of +event+'s length hint (a
+        # Duration at the stream's tempo, or seconds; 0 without one) plus
+        # +elapsed+ seconds.
+        def hint_seconds(event, elapsed = 0)
+          return nil unless @lengths
+          hint = event.length_hint
+          secs = case hint
+                 when Sequence::Duration
+                   src = @stream.source
+                   tr = src.respond_to?(:transport) ? src.transport : Sequence.current_transport
+                   hint.whole_notes / tr.whole_notes_per_second
+                 when Numeric then hint
+                 else 0
+                 end
+          secs + elapsed.to_r
         end
 
         # Moves to note +target+, gliding from +start+ if +glide+ and the

@@ -1185,9 +1185,14 @@ module MB
             if gaps.values.uniq.length == 1
               TempoNode.new(Duration.new(gaps.values.first), mode: :seconds, transport: transport)
             else
-              # Each event's gap as a value, read when the event starts
-              gap_clip = Clip.new(@events.map { |e| e.with(value: gaps.fetch(e.start, gaps.values.last).to_f) }, length: @length, loop: @loop, seed: @seed, align: @align)
-              gap_clip.number(transport: transport) * TempoNode.new(Duration.new(1r), mode: :seconds, transport: transport)
+              # Each glide event's own length (its gap; MIDI::Event#length_hint),
+              # read with its note-on.  (A clip of gaps read as a second
+              # stream, as before omnibus13, switched to the next gap on
+              # the sample a launch chased the step before it from when the
+              # next step started between that sample and the next: an
+              # uneven tween launched there resumed a 1-beat step as if it
+              # were 3 beats long; SessionFuzz seed 116)
+              :length
             end
           else time
           end

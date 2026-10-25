@@ -508,6 +508,7 @@ module MB
       class Glide
         def plan_unsupported_reason
           return 'a glide time node (not planned yet)' if @time_node
+          return 'glide times from note lengths (not planned yet)' if @lengths
 
           super
         end
