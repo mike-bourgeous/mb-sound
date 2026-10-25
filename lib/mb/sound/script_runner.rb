@@ -488,6 +488,10 @@ module MB
           save_take
         else
           MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
+          # The screen's painter too, before the form starts (#live_ui runs
+          # once it plays, and a first warm-up there held the GVL while
+          # the first bars played; scene-jit-1)
+          UI.warm_up if @options[:ui]
           Session.current.exact_lanes = true if @options[:take]
           if @options.key?(:master)
             Session.current.mastering_override = mastering_option
@@ -1118,6 +1122,7 @@ module MB
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
           MB::Sound.warm_up(midi: @kind == :synth) # before the first write to the output (see WarmUpMethods)
+          UI.warm_up if @options[:ui] # (the screen's painter too; see #run_song)
           MB::Sound.bg(:script, graph, fade: 0)
           yield Session.current if block_given?
           live
@@ -1129,7 +1134,18 @@ module MB
       # With --plot, #wait runs in a thread and the plot stops when it
       # returns (visualize only returned on Ctrl-C before, so --plot scripts
       # never exited); Ctrl-C during the plot still stops only the plot.
+      #
+      # With MB_SOUND_LATENCY_PROBE set (a directory, or 1 for one under
+      # tmp/latency_probe/), a LatencyProbe watches the session while the
+      # script plays and saves its report there at the end.
       def live
+        probe = LatencyProbe.from_env(Session.current, name: File.basename(@script.to_s, '.rb'))
+        live_playback
+      ensure
+        probe&.finish
+      end
+
+      def live_playback
         return live_ui(@options[:ui]) if @options[:ui]
 
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]

@@ -32,6 +32,19 @@
 #
 # YJIT counters (compile time, invalidations) are shown with YJIT on (the
 # shebang turns it on; `ruby bin/scene_profile.rb` runs without it).
+# Every report has the buffers over 10/20/50/80 ms (an output queue
+# shorter than that runs dry there), YJIT compile per buffer and block
+# (new methods and basic blocks, invalidations, code GC), and GC counts
+# with the reasons for major GCs; with RUBYOPT=--yjit-log=quiet, the
+# slowest buffers also list what compiled in them ("blocks for new types
+# or shapes" are YJIT chain versions).  Offline renders play once with
+# loudness: false, as live (a mastered song's targeted render would play
+# it twice, recording every buffer).  -R --band also paints the terminal
+# UI's deck (to /dev/null) as a song's --ui does.  Container realtime
+# runs see outside stalls (on the Mac's Docker VM, ~0.3-0.8 s of 5-10x
+# slower CPU at the top of every wall-clock minute, scene-jit-1): check
+# underrun times against a probe process before blaming the code.
+#
 # Compare branches by running the same command in each worktree in
 # alternating order, while nothing else runs on the machine.
 #
@@ -42,6 +55,8 @@
 #     bin/scene_profile.rb -n 128 --bars 60 bin/songs/small_talk.rb -- --seed 2
 #     bin/scene_profile.rb -R -n 128 -l 20 --bars 60 bin/songs/night_bus_flow.rb
 #     bin/scene_profile.rb -w off bin/songs/night_bus_flow.rb   # without the form's warm-up
+#     bin/scene_profile.rb -R --band -n 512 -l 50 bin/songs/memory_card.rb -- --ui
+#     RUBYOPT=--yjit-log=quiet bin/scene_profile.rb -n 128 bin/songs/memory_card.rb
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -62,10 +77,22 @@ module SceneProfile
     # This thread's CPU seconds.
     def cpu = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
 
+    YJIT_KEYS = %i[compile_time_ns compiled_iseq_count compiled_block_count invalidation_count invalidate_everything code_gc_count inline_code_size outlined_code_size].freeze
+
     def yjit
       return {} unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
-      RubyVM::YJIT.runtime_stats.slice(:compile_time_ns, :invalidation_count, :invalidate_everything)
+      RubyVM::YJIT.runtime_stats.slice(*YJIT_KEYS)
     end
+
+    # The YJIT log's entries ([Time, "method@file:line (index: n)"], the
+    # last 1024) since wall-clock +t0+ (seconds), or nil without
+    # --yjit-log (see --jit-log).
+    def jit_log_since(t0)
+      log = RubyVM::YJIT.log if defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:log)
+      log&.select { |t, _| t.to_f >= t0 }&.map(&:last)
+    end
+
+    def wall = Process.clock_gettime(Process::CLOCK_REALTIME)
 
     def ydelta(a, b) = b.to_h { |k, v| [k, v - (a[k] || 0)] }
 
@@ -125,14 +152,24 @@ module SceneProfile
   # Times scheduled blocks and records their phases.
   module SchedulerHook
     def run(entry, time, deadline)
-      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), y0: SceneProfile.yjit, t0: SceneProfile.clock, c0: SceneProfile.cpu }
+      # (the form warm-up's rehearsal sandbox: timed as the warm-up)
+      return super if Thread.current[:scene_profile]&.[](:key) == :warm_up
+
+      b = { id: SceneProfile.blocks.length, desc: entry.description.delete_prefix('form: '), bar: @transport.bar_at(time).to_f, gc0: GC.stat(:time), y0: SceneProfile.yjit, w0: SceneProfile.wall, t0: SceneProfile.clock, c0: SceneProfile.cpu }
       SceneProfile.blocks << b
       SceneProfile.recording(b[:id]) { super }
     ensure
+      finish(b, time) if b
+    end
+
+    private
+
+    def finish(b, time)
       b[:secs] = SceneProfile.clock - b[:t0]
       b[:cpu] = SceneProfile.cpu - b[:c0]
       b[:gc] = GC.stat(:time) - b[:gc0]
       b[:yjit] = SceneProfile.ydelta(b[:y0], SceneProfile.yjit)
+      b[:jit] = SceneProfile.jit_log_since(b[:w0]) if b[:yjit][:compile_time_ns].to_i > 1_000_000
       b[:slack] = ((time - @transport.position) / @transport.whole_notes_per_second).to_f
     end
   end
@@ -147,7 +184,9 @@ module SceneProfile
       @scene_players = {}
       SceneProfile.landed = 0
       gc0 = GC.stat(:time)
+      majors = GC.stat(:major_gc_count)
       y0 = SceneProfile.yjit
+      w0 = SceneProfile.wall
       t0 = SceneProfile.clock
       c0 = SceneProfile.cpu
       r = super
@@ -158,10 +197,15 @@ module SceneProfile
       inline_cpu = offline ? SceneProfile.blocks[nb..].sum { |b| b[:cpu] || 0 } : 0
       secs = SceneProfile.clock - t0 - inline - output.write_secs
       cpu = SceneProfile.cpu - c0 - inline_cpu - output.write_cpu
+      yd = SceneProfile.ydelta(y0, SceneProfile.yjit)
+      # (offline, the scheduled blocks' own compiling is theirs)
+      yd[:compile_time_ns] -= SceneProfile.blocks[nb..].sum { |b| b[:yjit]&.[](:compile_time_ns).to_i } if offline && yd[:compile_time_ns]
       SceneProfile.buffers << {
         secs: secs, cpu: cpu, other: secs - @scene_players.sum { |_, v| v },
-        gc: GC.stat(:time) - gc0, yjit: SceneProfile.ydelta(y0, SceneProfile.yjit), landed: SceneProfile.landed,
+        gc: GC.stat(:time) - gc0, yjit: yd, landed: SceneProfile.landed,
+        major: (GC.latest_gc_info(:major_by) if GC.stat(:major_gc_count) != majors),
         players: @scene_players, bar: transport.bar_at(transport.position).to_f,
+        jit: (SceneProfile.jit_log_since(w0) if yd[:compile_time_ns].to_i > 1_000_000),
       }
       r
     end
@@ -203,7 +247,13 @@ module SceneProfile
   # while more than +latency+ seconds are queued (like DeviceOutput) and
   # counts underruns (the queue running dry).
   class EmuOutput < CountingOutput
-    attr_reader :underruns, :write_secs, :write_cpu, :min_level, :latency
+    attr_reader :write_secs, :write_cpu, :min_level, :latency
+
+    # Each underrun: [bar, seconds of silence].
+    attr_reader :underrun_list
+
+    # How many underruns (as DeviceOutput#underruns, which the UI shows).
+    def underruns = @underrun_list.length
 
     def initialize(buffer_size, latency, transport)
       super(buffer_size)
@@ -211,7 +261,7 @@ module SceneProfile
       @transport = transport
       @t0 = nil
       @frames = 0
-      @underruns = []
+      @underrun_list = []
       @min_level = Float::INFINITY
       @write_secs = 0
       @write_cpu = 0
@@ -223,7 +273,7 @@ module SceneProfile
       if @t0
         level = @frames / @sample_rate - (w0 - @t0)
         if level < 0
-          @underruns << [@transport.bar_at(@transport.position).to_f, -level]
+          @underrun_list << [@transport.bar_at(@transport.position).to_f, -level]
           @t0 = w0
           @frames = 0
         else
@@ -260,18 +310,80 @@ module SceneProfile
       SceneProfile.warmed = [result&.length || 0, SceneProfile.clock - t0] if result
       result
     end
+
+    def rehearse(*a, **k)
+      t0 = SceneProfile.clock
+      result = SceneProfile.recording(:warm_up) { super }
+      SceneProfile.rehearsed = [result, SceneProfile.clock - t0] if result
+      result
+    end
   end
 
   class << self
-    attr_accessor :form_warm_up, :warmed
+    attr_accessor :form_warm_up, :warmed, :rehearsed, :gc
+
+    # "8 tracks in 2.0 s" and the rehearsal's sections, for the reports.
+    def warm_up_text
+      text = format('%d tracks in %.1f s', *@warmed)
+      text += format(' (%d sections rehearsed in %.1f s of it)', *@rehearsed) if @rehearsed
+      text
+    end
 
     def ms(s) = format('%.1f', s * 1000)
 
     def yjit_text(y)
       return '' if y.nil? || y.empty?
       text = "YJIT compile #{(y[:compile_time_ns] / 1e6).round} ms"
+      text += " (#{y[:compiled_iseq_count]} new methods, #{y[:compiled_block_count]} blocks)" if y[:compiled_block_count].to_i > 0
+      text += ", #{y[:invalidation_count]} invalidations" if y[:invalidation_count].to_i > 0
       text += ", invalidated everything #{y[:invalidate_everything]}x" if y[:invalidate_everything].to_i > 0
+      text += ", code GC #{y[:code_gc_count]}x" if y[:code_gc_count].to_i > 0
       text
+    end
+
+    # The methods the YJIT log saw compiled in +entries+ (log lines), most
+    # blocks first: "name@file:line xN".
+    def jit_text(entries, top)
+      return nil unless entries&.any?
+      chained = entries.count { |e| e.include?('chain_depth') }
+      counts = entries.map { |e| e.sub(/ \(index: \d+(, chain_depth: \d+)?\)\z/, '').sub(%r{\A(.*@)(?:.*/)?(lib|bin|gems)/}, '\\1\\2/') }.tally
+      list = counts.sort_by { |_, c| -c }.first(top).map { |n, c| c > 1 ? "#{n} x#{c}" : n }
+      more = counts.length > top ? ", ... (#{counts.length} methods, #{entries.length} blocks)" : ''
+      chain = chained > 0 ? " [#{chained} blocks for new types or shapes]" : ''
+      "compiled: #{list.join(', ')}#{more}#{chain}"
+    end
+
+    # Buffer-time thresholds (ms) for the distribution: an output queue
+    # shorter than a buffer's time runs dry there.
+    THRESHOLDS = [10, 20, 50, 80].freeze
+
+    def report_distribution(where)
+      return if @buffers.empty?
+      parts = THRESHOLDS.map { |ms|
+        over = @buffers.select { |b| b[:secs] * 1000 > ms }
+        jit = over.count { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
+        gc = over.count { |b| b[:gc] > 1 }
+        "> #{ms} ms: #{over.length} (#{jit} compiling, #{gc} with GC)"
+      }
+      puts "  buffers #{parts.join('; ')}"
+      return unless @buffers.first[:yjit].key?(:compile_time_ns)
+      total = @buffers.sum { |b| b[:yjit][:compile_time_ns].to_i } / 1e6
+      busy = @buffers.count { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
+      landing = @buffers.select { |b| b[:landed] > 0 }.sum { |b| b[:yjit][:compile_time_ns].to_i } / 1e6
+      gcs = @buffers.sum { |b| b[:yjit][:code_gc_count].to_i }
+      puts format('  YJIT compile %s: %.0f ms in all, %d buffers over 1 ms, %.0f ms where changes landed; code GC %dx',
+        where, total, busy, landing, gcs)
+      if @gc
+        gcb = @buffers.select { |b| b[:gc] > 10 }
+        puts format('  GC from the song\'s start: %d minor, %d major, %d ms in all (warm-up included); buffers with over 10 ms of GC: %d%s',
+          @gc[:minor_gc_count], @gc[:major_gc_count], @gc[:time], gcb.length, gcb.empty? ? '' : " (longest #{gcb.map { |b| b[:gc] }.max} ms)")
+        why = @buffers.filter_map { |b| b[:major] }.tally
+        puts "  major GCs started in buffers, by reason (GC.latest_gc_info :major_by): #{why.map { |k, v| "#{k} #{v}" }.join(', ')}" unless why.empty?
+      end
+      st = RubyVM::YJIT.runtime_stats
+      kinds = st.select { |k, v| k.start_with?('invalidate_') && v.to_i > 0 }.map { |k, v| "#{k.to_s.delete_prefix('invalidate_')} #{v}" }
+      puts format('  YJIT at the end: %d methods compiled, %.1f MB of code (%.1f MB of exec memory used), invalidations %s',
+        st[:compiled_iseq_count], (st[:inline_code_size] + st[:outlined_code_size]) / 1e6, st[:code_region_size] / 1e6, kinds.empty? ? 'none' : kinds.join(', '))
     end
 
     def phase_text(key, top)
@@ -288,10 +400,15 @@ module SceneProfile
         puts format('  bar %6.2f %-18s %7s ms%s', b[:bar], b[:desc][0, 18], ms(b[:secs]), extra.empty? ? '' : " (#{extra})")
         phases = phase_text(b[:id], 6)
         puts "      #{phases}" unless phases.empty?
+        jit = jit_text(b[:jit], 6)
+        puts "      #{jit}" if jit
       end
     end
 
-    def report_buffers(top, buffer)
+    # (+realtime+: the YJIT counters, process-wide, count every thread's
+    # compiling while a buffer rendered: the scheduler's, the painter's)
+    def report_buffers(top, buffer, realtime: false)
+      where = realtime ? 'while buffers rendered (any thread)' : 'on the render thread'
       return if @buffers.empty?
       stats = ->(key) {
         t = @buffers.map { |b| b[key] }.sort
@@ -302,6 +419,7 @@ module SceneProfile
         @buffers.length, ms(mean), ms(p99), ms(max), buffer * 1000.0 / 48000)
       puts format('  render thread CPU: mean %s ms, p99 %s ms, max %s ms (wall above CPU: waiting, e.g. for the GVL)', *stats.(:cpu).map { |v| ms(v) })
       puts format('  outside the players (changes, catch-up, master and bus chains): mean %s ms, p99 %s ms, max %s ms', *stats.(:other).map { |v| ms(v) })
+      report_distribution(where)
       landing = @buffers.select { |b| b[:landed] > 0 }
       unless landing.empty?
         puts format('  where changes landed: %d buffers, mean %s ms, max %s ms', landing.length, ms(landing.sum { |b| b[:secs] } / landing.length), ms(landing.map { |b| b[:secs] }.max))
@@ -311,6 +429,18 @@ module SceneProfile
         players = b[:players].sort_by { |_, v| -v }.first(4).map { |n, v| "#{n} #{ms(v)}" }.join(', ')
         extra = [("GC #{b[:gc]} ms" if b[:gc] > 0), yjit_text(b[:yjit]).then { |t| t.empty? || b[:yjit][:compile_time_ns] < 1e6 ? nil : t }, ("#{b[:landed]} change#{b[:landed] == 1 ? "" : "s"} landed" if b[:landed] > 0)].compact.join('; ')
         puts format('    bar %6.2f %7s ms (CPU %s, outside players %s)%s  %s', b[:bar], ms(b[:secs]), ms(b[:cpu]), ms(b[:other]), extra.empty? ? '' : " (#{extra})", players)
+        jit = jit_text(b[:jit], 6)
+        puts "        #{jit}" if jit
+      end
+      compiling = @buffers.select { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
+      unless compiling.empty?
+        puts "  most YJIT compile #{where}:"
+        compiling.sort_by { |b| -b[:yjit][:compile_time_ns] }.first(top).each do |b|
+          puts format('    bar %6.2f %7s ms of %s ms%s', b[:bar], ms(b[:yjit][:compile_time_ns] / 1e9), ms(b[:secs]),
+                      b[:landed] > 0 ? " (#{b[:landed]} change#{b[:landed] == 1 ? '' : 's'} landed)" : '')
+          jit = jit_text(b[:jit], 4)
+          puts "        #{jit}" if jit
+        end
       end
       puts '  most time outside the players:'
       @buffers.sort_by { |b| -b[:other] }.first(top).each do |b|
@@ -330,6 +460,7 @@ if MB::Sound.main_script?(__FILE__)
     latency: [50.0, Float, '-l', 'The emulated card\'s queue in ms (realtime)', 1.0..1000.0],
     warm_up: ['on', String, '-w', 'The form\'s track warm-up (Arrangement#warm_up): on, off, or auto (what play_form does: realtime with YJIT only)', ['on', 'off', 'auto']],
     top: [8, Integer, '-t', 'How many blocks and buffers to list', 1..100],
+    band: [false, 'With -R, also paint the terminal UI\'s deck (to /dev/null, as with a song\'s --ui) while it plays'],
   ) { |args, p|
     song, *song_args = args
     raise ArgumentError, "No such song script: #{song}" unless File.file?(song)
@@ -358,46 +489,63 @@ if MB::Sound.main_script?(__FILE__)
       MB::Sound::Session.use_output(out)
       session = MB::Sound::Session.default
       t0 = SceneProfile.clock
+      band = nil
       begin
         $stdout = quiet
+        if p.band
+          MB::Sound::UI.warm_up # (as ScriptRunner does before a song's --ui screen)
+          band = MB::Sound::UI::Band.new(layout: MB::Sound::UI.layouts[:deck], io: quiet, size: [40, 160], session: session)
+        end
+        gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time)
         SceneProfile.recording(:setup) { runner.send(:arrange_song, &block) }
+        band&.start
         end_pos = session.transport.bar_position(bars + 1)
         sleep 0.05 until session.transport.position >= end_pos || (session.idle? && !session.schedule_due?)
       ensure
+        band&.stop
         $stdout = STDOUT
         late = session.late_blocks
         session.close
       end
+      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time).to_h { |k, v| [k, v - gc0[k]] } if gc0
       elapsed = SceneProfile.clock - t0
 
       puts format('%s: realtime, %d-frame buffers, emulated card with a %.0f ms queue, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, p.latency, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
-      gap = out.underruns.sum(&:last)
+      gap = out.underrun_list.sum(&:last)
       puts format('underruns: %d (%s ms of silence)%s, smallest queue before a write %s ms',
-        out.underruns.length, SceneProfile.ms(gap),
-        out.underruns.empty? ? '' : ", at bars #{out.underruns.first(10).map { |b, g| format('%.2f (%s ms)', b, SceneProfile.ms(g)) }.join(', ')}",
+        out.underrun_list.length, SceneProfile.ms(gap),
+        out.underrun_list.empty? ? '' : ", at bars #{out.underrun_list.first(10).map { |b, g| format('%.2f (%s ms)', b, SceneProfile.ms(g)) }.join(', ')}",
         out.min_level.finite? ? SceneProfile.ms(out.min_level) : '-')
-      puts format('form warm-up: %d tracks in %.1f s', *SceneProfile.warmed) if SceneProfile.warmed
+      puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
+      warm = SceneProfile.phase_text(:warm_up, 6)
+      puts "  warm-up phases: #{warm}" unless warm.empty?
       SceneProfile.report_blocks(p.top, realtime: true)
       puts "late blocks: #{late.map { |l| format('%s %.0f ms late', l[:description], l[:late] * 1000) }.join(', ')}" unless late.empty?
-      SceneProfile.report_buffers(p.top, p.buffer)
+      SceneProfile.report_buffers(p.top, p.buffer, realtime: true)
     else
       out = SceneProfile::CountingOutput.new(p.buffer)
       t0 = SceneProfile.clock
+      gc0 = GC.stat.slice(:minor_gc_count, :major_gc_count, :time)
       begin
         $stdout = quiet
-        MB::Sound.render(out, bars: bars, buffer_size: p.buffer) {
+        # (loudness: false: one pass, as live; a mastered song's targeted
+        # render would play it twice, the first pass recording every buffer)
+        MB::Sound.render(out, bars: bars, buffer_size: p.buffer, loudness: false) {
           SceneProfile.recording(:setup) { runner.send(:arrange_song, &block) }
         }
       ensure
         $stdout = STDOUT
       end
+      SceneProfile.gc = GC.stat.slice(:minor_gc_count, :major_gc_count, :time).to_h { |k, v| [k, v - gc0[k]] }
       elapsed = SceneProfile.clock - t0
 
       puts format('%s: offline render, %d-frame buffers, %d bars in %.1f s, YJIT %s, form warm-up %s',
         File.basename(song), p.buffer, bars, elapsed, yjit ? 'on' : 'off', p.warm_up)
       setup = SceneProfile.phase_text(:setup, 6)
-      puts format('form warm-up: %d tracks in %.1f s', *SceneProfile.warmed) if SceneProfile.warmed
+      puts "form warm-up: #{SceneProfile.warm_up_text}" if SceneProfile.warmed
+      warm = SceneProfile.phase_text(:warm_up, 6)
+      puts "  warm-up phases: #{warm}" unless warm.empty?
       puts "before the first buffer: #{setup}" unless setup.empty?
       SceneProfile.report_blocks(p.top, realtime: false)
       SceneProfile.report_buffers(p.top, p.buffer)
