@@ -361,6 +361,7 @@ module MB
           return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
           value = follow unless follow.nil?
           raise ArgumentError, "Turn #{k.name.inspect} to a number or a node (got nil)" if value.nil?
+          value = knob_value(k, value)
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
           raise ArgumentError, "from: must be a number (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real?)
@@ -665,18 +666,33 @@ module MB
           end
         end
 
-        # Warns once per knob when a turn goes past its range (the value
-        # is limited to it; ux-1 item 30: `turn :drive, 100` on a 0..1
-        # knob "doesn't apply any amplification", silently).
+        # A turn past a knob's range (ux-1 item 30: `turn :drive, 100` on a
+        # 0..1 knob "doesn't apply any amplification", silently): checked
+        # like every Param value (param-1), so it raises in scripts and
+        # specs (MB::Sound.live_error), and live it warns once per knob and
+        # the value is limited to the range.
         def warn_clamp(k, value)
           r = k.range
           return if value.between?(r.begin, r.end)
+          n = GraphNode::Knob.method(:number)
+          desc = k.spec.param.description
+          message = "turn #{k.name.inspect}, #{n.(value)}: limited to #{n.(value.to_f.clamp(r.begin, r.end))} (knob #{k.name.inspect} goes #{n.(r.begin)}..#{n.(r.end)}#{"; #{desc}" if desc}; " \
+                    "knob #{k.name.inspect}, #{n.(k.spec.default)}, range: #{widened(r, value)} widens it)"
+          MB::Sound.live_error(Param::Error.new(message)) unless MB::Sound.live?
           @clamp_warned ||= {}
           return if @clamp_warned[k.name]
           @clamp_warned[k.name] = true
-          n = GraphNode::Knob.method(:number)
-          warn "turn #{k.name.inspect}, #{n.(value)}: limited to #{n.(value.to_f.clamp(r.begin, r.end))} (knob #{k.name.inspect} goes #{n.(r.begin)}..#{n.(r.end)}; " \
-               "knob #{k.name.inspect}, #{n.(k.spec.default)}, range: #{widened(r, value)} widens it)"
+          warn message
+        end
+
+        # A typed turn value (3000.hz for a knob declared with 2400.hz, 
+        # -6.db for one declared in dB) as the knob's plain number; other
+        # values as they are.  (A Pitch is a value here, not a sine to
+        # follow, when the knob is a frequency.)
+        def knob_value(k, value)
+          t = Param.type_of(value)
+          return value if t.nil? || t == :number || t == :node || t == :name || t != k.spec.param.type
+          Param.magnitude(value).to_f
         end
 
         # +range+ widened to hold +value+, to a round number.

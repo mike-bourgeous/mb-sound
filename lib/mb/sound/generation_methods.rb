@@ -105,7 +105,7 @@ module MB
       # use only arithmetic and Math on their phase).
       #
       #     t = wavetable_of(:sine, :saw, [1, 0.5, 0.33], ->(p) { Math.sin(2 * Math::PI * p) ** 3 }, normalize: :loudness)
-      #     knob :shape, 0, range: 0..1
+      #     knob :shape, 0.0, range: 0.0..1.0
       #     bg 110.hz.wavetable(t, scan: knob(:shape)).at(-18.db)   # turn :shape to morph
       def wavetable_of(*sources, size: 2048, normalize: :peak, align: true, mips: :default, interpolation: nil, name: nil)
         MB::Sound::Wavetable.of(*sources, size: size, normalize: normalize, align: align, mips: mips, interpolation: interpolation, name: name)

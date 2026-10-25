@@ -46,12 +46,12 @@ module MB
       clip :stick, seq(D5, T, T).n1
       clip :weather, seq(R).n1.loop # (rain and wind ignore their notes)
 
-      knob :space, 0.5, range: 0..1   # the rooms' level (bowls, rin, gong, koto, harp)
-      knob :wear, 0.6, range: 0..1    # how old the tape is (koto, harp; 0.6 like the presets, textures-5)
-      knob :shimmer, -7, range: -12..7 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
-      knob :spread, 0.7, range: 0..1   # the gong's shimmer width (0 mono, 1 wide)
-      knob :drizzle, 0.4, range: 0..1  # how hard it rains (level and density feel)
-      knob :gust, 0.5, range: 0..1     # how hard the wind blows
+      knob :space, 0.5, range: 0.0..1.0   # the rooms' level (bowls, rin, gong, koto, harp)
+      knob :wear, 0.6, range: 0.0..1.0    # how old the tape is (koto, harp; 0.6 like the presets, textures-5)
+      knob :shimmer, -7.0, range: -12.0..7.0 # the gong's shimmer tuning in semitones (turn it while a stroke rings)
+      knob :spread, 0.7, range: 0.0..1.0   # the gong's shimmer width (0 mono, 1 wide)
+      knob :drizzle, 0.4, range: 0.0..1.0  # how hard it rains (level and density feel)
+      knob :gust, 0.5, range: 0.0..1.0     # how hard the wind blows
 
       role :drone, :ambient_drone, about: 'two sine generators drifting against each other on the root and fifth'
       role :bowls, :ambient_bowl, params: { space: :space }, about: 'singing bowl strikes, every partial a beating doublet'

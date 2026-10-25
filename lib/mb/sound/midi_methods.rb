@@ -133,7 +133,7 @@ module MB
       # transform's own input stream (a keyboard's knobs steer its own
       # notes), else on the Session's MIDI input (a clip's transforms
       # steered from a controller), else +default+ (a raw value 0..127),
-      # mapped onto +range+ with +curve+ (:linear, :exponential, :switch).
+      # mapped onto +range+ with +curve+ (:linear, :exp, :switch; MB::Sound::Param::CURVES has the aliases).
       # Read once per decision (each note-on, arp step, bar).  Combines with
       # numbers, knobs, and other params (`0.5 + cc(1) * 0.2`).
       #

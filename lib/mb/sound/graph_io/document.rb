@@ -21,11 +21,11 @@ module MB
 
         # Options of a param (MIDI::ControlSpec-shaped: range, description,
         # cc number, curve; unit is informational).
-        PARAM_KEYS = %i[range description cc curve unit].freeze
+        PARAM_KEYS = %i[range description cc curve unit clamp].freeze
 
         # Options of a knob (GraphNode::Knob::Spec, as the console's `knob`
         # command takes them, plus a description).
-        KNOB_KEYS = %i[range curve unit cc takeover smooth description].freeze
+        KNOB_KEYS = %i[range curve unit cc takeover smooth description clamp].freeze
 
         # Options only a rack document's knob lines (its knobs) take (see
         # MB::Sound::RackMethods#rack_knob).
@@ -35,6 +35,26 @@ module MB
         META_KEYS = %i[name kind saved mb_sound from options].freeze
 
         attr_accessor :format, :meta, :inputs, :params, :path, :knob_nodes, :input_objects
+
+        # The MB::Sound::Param of a `param` line named +name+ with +value+
+        # and header keywords +spec+ (range:, description:, cc:, curve:,
+        # unit:).  A range written high to low (an inverted controller's,
+        # saved by older scripts) declares the span low to high; documents
+        # keep it as written.
+        def self.declaration(name, value, spec)
+          opts = spec.slice(*PARAM_KEYS)
+          r = opts[:range]
+          if r.is_a?(Range) && r.begin.is_a?(Numeric) && r.end.is_a?(Numeric) && r.begin > r.end
+            opts[:range] = r.end..r.begin
+          end
+          MB::Sound::Param.declare(name, value, **opts)
+        end
+
+        # The declared params: { name => MB::Sound::Param } (param and knob
+        # lines alike).
+        def declarations
+          @params.to_h { |k, spec| [k, spec[:param] || Document.declaration(k, spec[:value], spec)] }
+        end
 
         # Clocks the graph's clips play on (`clock :tide, 31.1.seconds`,
         # time-automation): { name => { base:, speed: } }, defined in the
@@ -146,6 +166,8 @@ module MB
           if (b = @params[name][:bound])
             raise ArgumentError, "param #{name} was bound to #{b.is_a?(Symbol) ? "knob #{b.inspect} (turn #{b.inspect} instead)" : 'a node when loaded'}"
           end
+          # (a typed value, 3000.hz for a frequency param: its base-unit number)
+          value = MB::Sound::Param.magnitude(value) unless value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels)
           (@knob_nodes[name] || []).each { |c|
             c.is_a?(GraphNode::Knob) ? c.set(value, frame: c.next_frame) : c.constant = value
           }
@@ -298,15 +320,8 @@ module MB
             lines << "# #{knob.name.inspect} was #{what} when saved; documents keep knob values, so it holds #{GraphNode::Knob.number(value)}"
           end
           spec = knob.spec
-          parts = [knob.name.inspect, writer.literal(value)]
-          parts << "range: #{writer.literal(spec.range)}" unless spec.range == (0.0..1.0)
-          parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
-          parts << "unit: #{writer.literal(spec.unit)}" if spec.unit
-          cc = knob.cc
-          parts << "cc: #{cc}" if cc
-          parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
-          parts << "smooth: #{writer.literal(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
-          desc = @params.dig(knob.name, :description)
+          parts = spec.call_args(value: value, cc: knob.cc, literal: writer.method(:literal))
+          desc = @params.dig(knob.name, :description) || spec.param.description
           parts << "description: #{writer.literal(desc)}" if desc
           lines << "knob #{parts.join(', ')}"
         end
@@ -338,9 +353,11 @@ module MB
           GraphIO.graph_line(parts)
         end
 
+        # The `param` line: the MB::Sound::Param of +spec+ (a loaded line's,
+        # else declared here, which checks it) written at the current value.
         def param_line(writer, name, spec)
-          extras = spec.slice(*Document::PARAM_KEYS).compact.map { |k, v| "#{k}: #{writer.literal(v)}" }
-          ["param #{name.to_sym.inspect}, #{writer.literal(spec[:value])}", *extras].join(', ')
+          decl = spec[:param] || Document.declaration(name.to_sym, spec[:value], spec)
+          decl.document_line(spec[:value], writer: writer)
         end
       end
     end

@@ -36,6 +36,7 @@ module MB
       # picked with -p), returning a String or nil.
       def effect_script(input_channels: nil, live_channels: nil, profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
+        ScriptRunner.declared!(:effect, params, caller_locations(1, 1)[0]&.absolute_path)
         r = runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile, description: description)
         script_errors { r.run_effect(&block) }
       end
@@ -58,6 +59,7 @@ module MB
       #     MB::Sound.synth_script { |midi| midi.hz.square * midi.amp_env }   # mono
       def synth_script(profile: nil, description: nil, **params, &block)
         raise ArgumentError, 'Provide a block that turns the MIDI input into a node graph' unless block
+        ScriptRunner.declared!(:synth, params, caller_locations(1, 1)[0]&.absolute_path)
         r = runner(:synth, params, profile: profile, description: description)
         script_errors { r.run_synth(&block) }
       end
@@ -73,6 +75,7 @@ module MB
       def song_script(bars: nil, profile: nil, **params, &block)
         raise ArgumentError, 'Pass a block that arranges the song' unless block
         file = caller_locations(1, 1)[0]&.absolute_path || $0
+        ScriptRunner.declared!(:song, params, file)
         ScriptRunner.register_song(file, params, block)
         # Loaded by a take replay (ScriptRunner.replay_song): only register
         return nil if ScriptRunner.song_replay_file == File.expand_path(file)
@@ -89,7 +92,8 @@ module MB
       # Example:
       #     song_script(bars: 8) { my_song } if main_script?(__FILE__)
       def main_script?(file)
-        File.expand_path($0) == File.expand_path(file) || ScriptRunner.song_replay_file == File.expand_path(file)
+        f = File.expand_path(file)
+        File.expand_path($0) == f || ScriptRunner.song_replay_file == f || ScriptRunner.declaring_file == f
       end
 
       # Runs a general script (a utility, plot, file processor, benchmark,
@@ -105,6 +109,7 @@ module MB
       #     }
       def script(args: nil, **params, &block)
         raise ArgumentError, 'Pass a block that runs the script' unless block
+        ScriptRunner.declared!(:script, params, caller_locations(1, 1)[0]&.absolute_path)
         r = runner(:script, params, args: args)
         script_errors { r.run_script(&block) }
       end

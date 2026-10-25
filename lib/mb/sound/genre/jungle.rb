@@ -66,8 +66,8 @@ module MB
       ).loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
-      knob :brk, 16000, range: 200..16000, curve: :exp, unit: 'Hz'   # the break's lowpass
-      knob :space, 0.3, range: 0..1                                  # the lead's echo send
+      knob :brk, (200.hz..16000.hz).at(16000.hz)   # the break's lowpass
+      knob :space, 0.3, range: 0.0..1.0                                  # the lead's echo send
 
       role :breaks, :breaks, params: { cutoff: :brk }, about: 'the chopped break: slices of the shipped break on one voice, each hit cutting the last, 12-bit'
       role :perc, :jungle_perc, about: 'ride and shaker over the break'

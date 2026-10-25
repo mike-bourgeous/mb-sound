@@ -181,7 +181,7 @@ module MB::Sound
       description: ->(p) { wave_voices_description(p.patch) },
       patch: [:digibrass, Symbol, '-p', 'Patch to play', WAVE_VOICES.keys],
       grit: [0.0, Float, '-G', 'Grit 0..1: the oscillators held at the DOC\'s 38.46 kHz, aliasing (1: the prototype\'s grit)', 0.0..1.0],
-      cutoff: [nil, Float, 'Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)', 20..10000],
+      cutoff: [nil, Float, 'Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)', 20.0..10000.0],
       reso: [nil, Float, 'lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.64, square_bass 0.48)', 0.0..1.0],
       voices: [nil, Integer, 'Voices (default: the patch\'s)', 1..16],
     ) { |midi, p|

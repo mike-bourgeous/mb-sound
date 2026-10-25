@@ -41,7 +41,7 @@
 #     pad = bounce(1.bar) { (220.hz.ramp + 277.2.hz.ramp + 330.hz.ramp).lp4(1800) * 0.3 }
 #     bg :g, pad.grains(position: 0.5, size: 150.ms, density: 30) * -16.db              # frozen
 #     bg :g, pad.grains(scan: 0.1, size: 80.ms, density: 60, pan_spread: 1) * -16.db    # 10x slower, smeared
-#     knob :pos, 0.5, range: 0..1
+#     knob :pos, 0.5, range: 0.0..1.0
 #     bg :g, pad.grains(position: knob(:pos), size: 60.ms, density: 50) * -16.db       # scrub with turn :pos, 0.9, over: 2
 #     bg :g, pad.grains(pitch: [0, 12, 19], window: :expodec, density: 1.n16, jitter: 0) * -16.db   # rhythmic spray
 #     bg :g, pad.grains(size: 5.ms, density: 400, pitch_spread: 12, read: :drop) * -20.db           # lofi fizz

@@ -564,7 +564,7 @@ module MB
           # knob(:space, 0.3, range: ...) for rack knob +k+, with the value
           # it holds (a moving knob: where it is) and its options.
           def rack_knob_text(k)
-            "knob(#{Recipe::RubyWriter.knob_args(k, method(:knob_literal)).join(', ')})"
+            "knob(#{Recipe::RubyWriter.knob_args(k, method(:literal)).join(', ')})"
           end
 
           # A knob setting as text: numbers as Knob.number prints them (800,
@@ -583,15 +583,8 @@ module MB
           # share:/follow:/description: of a knob), as text, each value
           # printed by +literal+.
           def self.knob_args(k, literal, name: nil)
-            spec = k.spec
             value = k.moving? || k.target.nil? ? k.value : k.target
-            parts = [(name || (k.rack_knob ? k.rack_knob.knob : k.name)).to_sym.inspect, literal.(value)]
-            parts << "range: #{literal.(spec.range)}" unless spec.range == (0.0..1.0)
-            parts << "curve: #{spec.curve.inspect}" unless spec.curve == :linear
-            parts << "unit: #{literal.(spec.unit)}" if spec.unit
-            parts << "cc: #{k.cc}" if k.cc
-            parts << "takeover: #{spec.takeover.inspect}" unless spec.takeover == :pickup
-            parts << "smooth: #{literal.(spec.smooth)}" unless spec.smooth == Session::Fades::DECLICK_SECONDS
+            parts = k.spec.call_args(value: value, cc: k.cc, literal: literal, name: name || (k.rack_knob ? k.rack_knob.knob : k.name))
             if (m = k.rack_knob)
               parts << 'share: true' if m.share
               parts << "follow: #{m.follow.inspect}" if m.follow
@@ -1039,6 +1032,7 @@ module MB
             when MB::Sound::Curve then v.to_ruby || fixme("a Curve that doesn't print as Ruby (#{v})")
             when MB::Sound::MIDI::Transform::Spec then transform_spec_text(v, indent)
             when Proc then ((n = proc_name(v)) && "named_proc(#{n.inspect})") || Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
+            when MB::Sound::Param::Ranged then "(#{value(v.range, indent)}).at(#{value(v.default, indent)})"
             when Data
               fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
               "#{class_name(v.class)}.new(#{fields.join(', ')})"

@@ -51,7 +51,7 @@ module MB::Sound
   def self.rack_demo_dub(name = :dub)
     arack(name) { |sig|
       space = knob(:space, 0.35, description: 'Echo level and feedback 0..1')
-      tone = knob(:tone, 2400, range: 600..8000, curve: :exp, unit: 'Hz', description: 'Echo lowpass')
+      tone = knob(:tone, (600.hz..8000.hz).at(2400.hz), description: 'Echo lowpass')
       echoes = sig.delay(3.n16, feedback: space * 0.7, wet: space, dry: 0)
       sig + echoes.filter(:lowpass, cutoff: tone.mod(0.13.hz.lfo, depth: 0.15))
     }

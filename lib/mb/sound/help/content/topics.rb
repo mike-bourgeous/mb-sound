@@ -98,7 +98,7 @@ module MB
       note :oscillators
       see :tones, :knobs
       example 'a shape morph on a knob' do
-        knob :try_shape, 0, range: 0..1
+        knob :try_shape, 0.0, range: 0.0..1.0
         t = wavetable_of(:sine, [1, 0.5, 0.33, 0.25], :saw, ->(p) { Math.sin(2 * Math::PI * p)**3 }, normalize: :loudness)
         bg :try, 110.hz.wavetable(t, scan: knob(:try_shape)).at(-22.db).until(2.bars)
         turn :try_shape, 1, over: 2.bars
@@ -714,8 +714,19 @@ module MB
         Named values that graphs read (`knob(:cut)`) and you turn, with
         ramps, launch points, MIDI learn, snapshots, and crossfades.  Turns
         are journaled and undoable.  Read a knob before defining it and it
-        starts at 0.5 of 0..1 (with a note); `knob :cut, 800, range:
-        100..8000` later sets it up, and whatever reads it keeps reading.
+        starts at 0.5 of 0..1 (with a note); `knob :cut,
+        (100.hz..8000.hz).at(800.hz)` later sets it up, and whatever reads
+        it keeps reading.
+
+        Values bring their units: `knob :cut, (150.hz..8000.hz).at(2400.hz)`
+        (or `2400.hz.in(150.hz..8000.hz)`) is in Hz and turns in octaves,
+        and `turn :cut, 3000.hz` works; -12.db knobs turn in dB.  Common
+        names bring a range: `knob :pan, 0.0` is -1..1, `knob :mix, 0.3`
+        0..1, `knob :cutoff, 800.hz` 20 Hz..20 kHz.  A turn past the
+        range is limited to it, with a warning; `clamp: false` lets a knob
+        go out of bounds (the range still scales MIDI and the screen).
+        Float ranges are continuous, Integer ranges with Integer values
+        (1..8) click in steps.
 
         Keyframes move a knob through values over time: `turn :space, 0 =>
         0.3, 1.n8 => 0.5, 1.n4 => 0.62` (a monotone cubic through them in
@@ -730,12 +741,12 @@ module MB
       note :arrangement
       see :sets, :now
       example 'a filter knob' do
-        knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
+        knob :try_cut, (100.hz..8000.hz).at(400.hz)
         bg :try, 55.hz.saw.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
         turn :try_cut, 4000, over: 2.bars
       end
       example 'a gesture in keyframes' do
-        knob :try_cut, 400, range: 100..8000, curve: :exp, unit: 'Hz'
+        knob :try_cut, (100.hz..8000.hz).at(400.hz)
         bg :try, 55.hz.saw.at(-14.db).lp4(knob(:try_cut), resonance: 0.5)
         turn :try_cut, 0 => 400, 1.n4 => 3000, 1.n2 => 900, 1.bar => 2400
       end

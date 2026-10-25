@@ -80,8 +80,8 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
 
     it 'rejects unknown pan laws and out-of-range positions' do
       expect { 1.constant.pan(0, law: :sideways) }.to raise_error(ArgumentError, /law/)
-      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
-      expect { bundle.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
+      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /position: 2 is outside -1.0..1.0/)
+      expect { bundle.pan(2) }.to raise_error(ArgumentError, /position: 2 is outside -1.0..1.0/)
     end
 
     it 'pans with the linear and -4.5 dB laws' do

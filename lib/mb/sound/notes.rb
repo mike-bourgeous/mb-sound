@@ -70,7 +70,7 @@ module MB
         breath: { number: 2, name: 'Breath' },
         foot: { number: 4, name: 'Foot' },
         portamento_time: {
-          number: 5, name: 'Portamento Time', range: 0.002..5.0, curve: :exponential,
+          number: 5, name: 'Portamento Time', range: 0.002..5.0, curve: :exp,
           description: 'Glide time in seconds (NotePitch#glide(:gm))',
         },
         volume: { number: 7, name: 'Volume', default: 100 },
@@ -79,27 +79,27 @@ module MB
         expression: { number: 11, name: 'Expression', default: 127 },
         portamento: { number: 65, name: 'Portamento', curve: :switch, description: 'Glide on/off (NotePitch#glide(:gm))' },
         resonance: {
-          number: 71, name: 'Resonance', range: 0.5..4.0, center: 1, curve: :exponential, default: 64,
+          number: 71, name: 'Resonance', range: 0.5..4.0, center: 1, curve: :exp, default: 64,
           description: 'Filter quality multiplier (Notes#quality)',
         },
         release_time: {
-          number: 72, name: 'Release Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          number: 72, name: 'Release Time', range: 0.125..8.0, center: 1, curve: :exp, default: 64,
           description: 'Envelope release time multiplier (.gm)',
         },
         attack_time: {
-          number: 73, name: 'Attack Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          number: 73, name: 'Attack Time', range: 0.125..8.0, center: 1, curve: :exp, default: 64,
           description: 'Envelope attack time multiplier (.gm)',
         },
         brightness: {
-          number: 74, name: 'Brightness', range: 0.25..4.0, center: 1, curve: :exponential, default: 64,
+          number: 74, name: 'Brightness', range: 0.25..4.0, center: 1, curve: :exp, default: 64,
           description: 'Filter cutoff multiplier, +-2 octaves (Notes#cutoff)',
         },
         decay_time: {
-          number: 75, name: 'Decay Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          number: 75, name: 'Decay Time', range: 0.125..8.0, center: 1, curve: :exp, default: 64,
           description: 'Envelope decay time multiplier (.gm)',
         },
         vibrato_rate: {
-          number: 76, name: 'Vibrato Rate', range: 1.375..22.0, center: 5.5, curve: :exponential, default: 64,
+          number: 76, name: 'Vibrato Rate', range: 1.375..22.0, center: 5.5, curve: :exp, default: 64,
           description: 'Vibrato rate in Hz (NotePitch#vibrato)',
         },
         vibrato_depth: {

@@ -1,15 +1,15 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 4,
+graph 5,
   name: "jungle_flute",
   kind: :synth,
-  saved: "2026-10-17T17:17:03Z",
-  mb_sound: "0.12.0.usegit (47598381)",
+  saved: "2026-10-24T18:49:20Z",
+  mb_sound: "0.12.0.usegit (97de948a)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :flute from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
   options: { patch: :flute, cutoff: 16000.0 }
 inputs midi: :notes
-param :echo, 0.3, range: 0.0..1.0, description: "Flute echo send 0..1"
+param :echo, (0.0..1.0).at(0.3), description: "Flute echo send 0..1"
 
 (synth(midi, voices: 1, seed: drawn_seed(900450186894289455)) { |v|
   p = v.hz.glide(0.04, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)

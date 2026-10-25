@@ -53,8 +53,12 @@ module MB
       # sig: :audio, side: :audio`; `inputs :midi` still loads, as notes,
       # other names as audio), `outputs :audio`, and rack documents (`graph
       # 4, kind: :effect, rack: :arack`, whose knob lines are the rack's
-      # knobs); graphs using named racks carry their definitions.
-      FORMAT = 4
+      # knobs); graphs using named racks carry their definitions.  Format 5
+      # (param-1, 2026-10-24) writes `param` and `knob` lines as
+      # MB::Sound::Params print them: typed values (2400.hz, -12.db) and
+      # ranged defaults (`knob :cut, (150.hz..8000.hz).at(2400.hz)`), plus
+      # `clamp: false`; older documents' `range:` lines still load.
+      FORMAT = 5
 
       # The file extension of graph documents.
       EXTENSION = '.mbg.rb'

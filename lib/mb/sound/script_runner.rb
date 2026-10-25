@@ -117,14 +117,87 @@ module MB
         end
       end
 
+      # A ScriptRunner::Param for parameter +name+ declared with +spec+
+      # (see the class comment) in a +kind+ script (:effect, :synth,
+      # :song, :script).
+      def self.declare(kind, name, spec)
+        default, *extras = spec.is_a?(Array) ? spec : [spec]
+        param = Param.new(name.to_sym, default)
+
+        extras.each do |e|
+          case e
+          when /\A-[A-Za-z]\z/ then param.short = e
+          when String then param.description = e
+          when Class, Proc then param.type = e
+          when Range, Array then param.allowed = e
+          when :required then param.required = true
+          else raise ArgumentError, "Unknown #{e.inspect} in the declaration of parameter #{name}"
+          end
+        end
+
+        type = param.type.is_a?(Class) ? PARAM_TYPES[param.type] : nil
+        param.param = MB::Sound::Param.declare(
+          name.to_sym, param.default, range: param.allowed, description: param.description, type: param.default.nil? ? type : nil
+        )
+
+        if param.short && COMMON_SHORT_OPTIONS[kind].include?(param.short)
+          raise ArgumentError, "Parameter #{name} can't use #{param.short}, a common option for #{kind} scripts"
+        end
+        if kind == :song && COMMON_SONG_LONG_OPTIONS.include?(name.to_s)
+          raise ArgumentError, "Parameter #{name} can't be named like --#{name.to_s.tr('_', '-')}, a common option for song scripts"
+        end
+
+        param
+      end
+
+      # The script file being read for its declarations (see
+      # .declarations_of), or nil.
+      def self.declaring_file
+        Thread.current[:mb_sound_script_declarations]
+      end
+
+      # Called first by every ScriptingMethods helper (+kind+, the
+      # helper's +params+, the calling +file+): while .declarations_of
+      # reads +file+, ends the load with the declared ScriptRunner::Params.
+      def self.declared!(kind, params, file)
+        return unless declaring_file && file && File.expand_path(file) == declaring_file
+        throw :mb_sound_script_declarations, [kind, params.map { |n, sp| declare(kind, n, sp) }]
+      end
+
+      # Reads the parameter declarations of the bin/ script at +path+
+      # without running it (the param guard spec; run it in a fork, since
+      # loading defines the script's constants): loads the file with
+      # ScriptingMethods#main_script? true for it, and its *_script helper
+      # returns [kind, [ScriptRunner::Param, ...]] before doing anything
+      # else.  nil if the file calls no helper.
+      def self.declarations_of(path)
+        file = File.expand_path(path)
+        old = Thread.current[:mb_sound_script_declarations]
+        Thread.current[:mb_sound_script_declarations] = file
+        catch(:mb_sound_script_declarations) do
+          load file
+          nil
+        end
+      ensure
+        Thread.current[:mb_sound_script_declarations] = old
+      end
+
       # mb-sound's root directory (scripts in take lines are relative to it).
       ROOT = File.expand_path('../../..', __dir__)
 
       # Audio file extensions recognized in positional arguments.
       AUDIO_EXTENSIONS = /\.(flac|wav|mp3|ogg|mp4|m4a|opus|aiff?)\z/i
 
-      # A declared parameter (see the class comment).
-      Param = Struct.new(:name, :default, :description, :short, :type, :allowed, :required)
+      # A declared parameter (see the class comment): the command-line
+      # parts (+short+ option, +type+ for parsing, +required+) around
+      # +param+, the MB::Sound::Param every declaration form builds (name,
+      # default, description, and +allowed+ as its range; a parameter
+      # named like a common control takes the names table's range when
+      # none is given, e.g. mix: 0.0..1.0).
+      Param = Struct.new(:name, :default, :description, :short, :type, :allowed, :required, :param)
+
+      # The MB::Sound::Param types of the parsing classes.
+      PARAM_TYPES = { Integer => :number, Float => :number, Rational => :ratio, Symbol => :name, String => :string }.freeze
 
       # Short options used by every script of a kind, which parameters can't
       # use.
@@ -803,28 +876,7 @@ module MB
 
       # Creates a Param from a +spec+ given to #initialize.
       def declare(name, spec)
-        default, *extras = spec.is_a?(Array) ? spec : [spec]
-        param = Param.new(name.to_sym, default)
-
-        extras.each do |e|
-          case e
-          when /\A-[A-Za-z]\z/ then param.short = e
-          when String then param.description = e
-          when Class, Proc then param.type = e
-          when Range, Array then param.allowed = e
-          when :required then param.required = true
-          else raise ArgumentError, "Unknown #{e.inspect} in the declaration of parameter #{name}"
-          end
-        end
-
-        if param.short && COMMON_SHORT_OPTIONS[@kind].include?(param.short)
-          raise ArgumentError, "Parameter #{name} can't use #{param.short}, a common option for #{@kind} scripts"
-        end
-        if @kind == :song && COMMON_SONG_LONG_OPTIONS.include?(name.to_s)
-          raise ArgumentError, "Parameter #{name} can't be named like --#{name.to_s.tr('_', '-')}, a common option for song scripts"
-        end
-
-        param
+        ScriptRunner.declare(@kind, name, spec)
       end
 
       # Saves the script block's +result+ as a graph document (--save; see
@@ -931,7 +983,7 @@ module MB
       # The option help for +param+: its description, allowed values, and
       # default.
       def help_text(param)
-        allowed = "(#{allowed_text(param)})" if param.allowed
+        allowed = "(#{allowed_text(param)})" if param.param.range
         default = "(default #{param.default.inspect})" unless param.default.nil?
         default = '(required)' if param.required
         [param.description, allowed, default].compact.join(' ')
@@ -939,7 +991,8 @@ module MB
 
       # Describes +param+'s allowed values.
       def allowed_text(param)
-        param.allowed.is_a?(Range) ? "in #{param.allowed}" : "one of #{param.allowed.join(', ')}"
+        r = param.param.range
+        r.is_a?(Range) ? "in #{MB::Sound::Param.literal(r)}" : "one of #{r.join(', ')}"
       end
 
       # Converts a command-line String to +param+'s type (or its default's
@@ -950,6 +1003,9 @@ module MB
                 when Integer then str.include?('.') ? Float(str) : Integer(str)
                 when Float, Rational then Float(str)
                 when Symbol then str.to_sym
+                when MB::Sound::Decibels then Float(str).db
+                when MB::Sound::Pitch, MB::Sound::Length::Seconds, MB::Sound::Length::Samples, MB::Sound::Sequence::Duration, MB::Sound::Interval, MB::Sound::Phase
+                  param.param.typed(Float(str))
                 else
                   if param.type == Integer then Integer(str)
                   elsif param.type == Float then Float(str)
@@ -958,7 +1014,15 @@ module MB
                   end
                 end
 
-        if param.allowed && !(param.allowed.is_a?(Range) ? param.allowed.cover?(value) : param.allowed.include?(value))
+        r = param.param.range
+        inside = case r
+                 when nil then true
+                 when Range
+                   v = MB::Sound::Param.magnitude(value)
+                   (r.begin.nil? || v >= MB::Sound::Param.magnitude(r.begin)) && (r.end.nil? || (r.exclude_end? ? v < MB::Sound::Param.magnitude(r.end) : v <= MB::Sound::Param.magnitude(r.end)))
+                 else r.include?(value)
+                 end
+        unless inside
           raise UsageError.new("--#{option_name(param)} must be #{allowed_text(param)} (got #{str})", @parser.to_s)
         end
 

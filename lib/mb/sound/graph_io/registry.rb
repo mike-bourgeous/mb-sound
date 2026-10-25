@@ -36,7 +36,7 @@ module MB
         # Unit and value methods on numbers (mb-sound's Numeric mixins; not
         # mb-math's, which include factorial and choose).
         def self.numeric_modules
-          [MB::Sound::NumericSoundMixins, MB::Sound::Sequence::NumericDurations, MB::Sound::GraphNode::Constant::NumericConstantMethods]
+          [MB::Sound::NumericSoundMixins, MB::Sound::Sequence::NumericDurations, MB::Sound::GraphNode::Constant::NumericConstantMethods, MB::Sound::Param::ValueIn]
         end
 
         # Arithmetic on numbers and values.
@@ -45,6 +45,9 @@ module MB
         # Value readers and modifiers a document may call, by class name
         # (and its subclasses), beyond the recorded surface.
         VALUES = {
+          # Ranged defaults in header lines: (0.0..24.0).at(11.0), 2400.hz.in(...)
+          'MB::Sound::Param::RangeAt' => %i[at],
+          'MB::Sound::Param::ValueIn' => %i[in],
           'MB::Sound::Pitch' => %i[period period_samples],
           'MB::Sound::Tone' => %i[period period_samples],
           # (hz, lfo: tempo-synced pitches and LFOs, `1.bar.hz`)

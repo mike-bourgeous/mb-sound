@@ -87,6 +87,6 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer::Position, :aggregate_failures
     expect(100.hz.place(x: 0.5)).to be_a(MB::Sound::GraphNode::Channels)
     expect(100.hz.position(y: -1).outputs[0].original_source).to be_a(described_class)
     expect { MB::Sound.stereo(1.constant, 2.constant).place }.to raise_error(ArgumentError, /single-channel/)
-    expect { 100.hz.place(x: 2) }.to raise_error(ArgumentError, /-1..1/)
+    expect { 100.hz.place(x: 2) }.to raise_error(ArgumentError, /x: 2 is outside -1.0..1.0/)
   end
 end

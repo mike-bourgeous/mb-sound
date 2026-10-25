@@ -72,8 +72,8 @@ module MB
       clip :strings, (0...4).map { |i| seq([F3, Ab3, C4, G4][i], *[T] * 15, [Db3, F3, Ab3, C4][i], *[T] * 15).n1 }.reduce(:&).legato(0.99).loop(align: :launch)
       clip :bar, seq(R).n1.loop
 
-      knob :cut, 400, range: 150..6000, curve: :exp, unit: 'Hz' # the stab's lowpass
-      knob :space, 0.3, range: 0..1                             # the stab's echo send
+      knob :cut, (150.hz..6000.hz).at(400.hz) # the stab's lowpass
+      knob :space, 0.3, range: 0.0..1.0                             # the stab's echo send
 
       role :drums, :tr909, level: -4.db, send: { rumble: -3.db }, about: 'the TR-909, straight; its kick also feeds the rumble bus'
       # (the roller: a short sub with a noise tick in a small room, ducked
