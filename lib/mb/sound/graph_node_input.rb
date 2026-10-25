@@ -69,7 +69,7 @@ module MB
       end
 
       # Session#add's preparations on the building thread, from one walk of
-      # the graph: #synths, #prime_nodes, and #prime_node_set (alloc-2).
+      # the graph: #synths, nodes' #prime_render (e.g. Drums::Voice), and #prime_node_set (alloc-2).
       def prime
         structure = GraphNode.structure_changes
         nodes = graph(include_tees: true)
