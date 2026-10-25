@@ -44,6 +44,9 @@
  * position (PanLaws.gains and the mix, in Numo's float steps).  .add_at
  * adds a (ramped) buffer into part of another (Session's player mix), and
  * .fill_range stores a number into part of a buffer (held note values).
+ * .accumulate is add_at with offsets and two factors (bus deliveries and
+ * sends), .last_at_least finds a bus's last loud sample, and .copy_range
+ * copies part of a buffer into part of another (bus taps; alloc-2).
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -1135,6 +1138,158 @@ static VALUE ruby_fill_range(VALUE self, VALUE out, VALUE from_v, VALUE to_v, VA
 	return out;
 }
 
+// A factor of .accumulate: nil (none), a real Integer/Float (cast to float,
+// as Numo casts a scalar for an SFloat), or an SFloat read from +offset+.
+// Returns 0 if +f+ isn't one of those or is too short.
+static _Bool acc_factor(VALUE f, VALUE offset_v, long length, float *scalar, const float **vec)
+{
+	*vec = NULL;
+	*scalar = 1;
+	if (NIL_P(f)) {
+		return 1;
+	}
+	if (RB_INTEGER_TYPE_P(f) || RB_FLOAT_TYPE_P(f)) {
+		*scalar = (float)NUM2DBL(f);
+		return 2;
+	}
+	if (arith_type(f) != MB_ARITH_SF || RNARRAY_NDIM(f) != 1 || !RTEST(nary_check_contiguous(f)) || !RB_INTEGER_TYPE_P(offset_v)) {
+		return 0;
+	}
+	long off = NUM2LONG(offset_v);
+	if (off < 0 || (size_t)(off + length) > RNARRAY_SIZE(f)) {
+		return 0;
+	}
+	*vec = (const float *)read_ptr(f) + off;
+	return 3;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.accumulate(out, out_offset, data, data_offset, length, a, a_offset, b, b_offset) -> out or nil
+ *
+ * Adds +length+ values of +data+ from +data_offset+, each times factor
+ * +a+ and then factor +b+, into +out+ from +out_offset+, without
+ * allocating.  A factor is nil (skipped), a real Integer or Float (cast to
+ * float, as Numo casts a scalar), or an SFloat read from its offset.  The
+ * Numo mirror (Session::Buses' deliveries and bus outputs), in the same
+ * float steps:
+ *     d = data[data_offset, length]
+ *     d = d * a[a_offset, length] (or d * a)  if a
+ *     d = d * b[b_offset, length] (or d * b)  if b
+ *     out[out_offset, length].inplace + d
+ * Only for SFloat +out+ and +data+ (contiguous 1D, +out+ writable, ranges
+ * inside, +length+ at least 1); otherwise returns nil without writing.
+ */
+static VALUE ruby_accumulate(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 9) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 9)", argc);
+	}
+	VALUE out = argv[0], data = argv[2];
+	if (!RB_INTEGER_TYPE_P(argv[1]) || !RB_INTEGER_TYPE_P(argv[3]) || !RB_INTEGER_TYPE_P(argv[4])) {
+		return Qnil;
+	}
+	if (arith_type(out) != MB_ARITH_SF || arith_type(data) != MB_ARITH_SF || !writable_contiguous(out)) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(data) != 1 || !RTEST(nary_check_contiguous(data))) {
+		return Qnil;
+	}
+	long oo = NUM2LONG(argv[1]), doff = NUM2LONG(argv[3]), length = NUM2LONG(argv[4]);
+	if (oo < 0 || doff < 0 || length <= 0 || (size_t)(oo + length) > RNARRAY_SIZE(out) || (size_t)(doff + length) > RNARRAY_SIZE(data)) {
+		return Qnil;
+	}
+
+	float as, bs;
+	const float *av, *bv;
+	_Bool ak = acc_factor(argv[5], argv[6], length, &as, &av);
+	_Bool bk = acc_factor(argv[7], argv[8], length, &bs, &bv);
+	if (!ak || !bk) {
+		return Qnil;
+	}
+	_Bool use_a = !NIL_P(argv[5]), use_b = !NIL_P(argv[7]);
+
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out)) + oo;
+	const float *x = (const float *)read_ptr(data) + doff;
+	for (long i = 0; i < length; i++) {
+		float t = x[i];
+		if (use_a) {
+			t = t * (av ? av[i] : as);
+		}
+		if (use_b) {
+			t = t * (bv ? bv[i] : bs);
+		}
+		o[i] = o[i] + t;
+	}
+
+	RB_GC_GUARD(data);
+	RB_GC_GUARD(argv[5]);
+	RB_GC_GUARD(argv[7]);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.last_at_least(buf, offset, length, threshold) -> Integer or nil
+ *
+ * The index (counted from +offset+) of the last of +length+ values of an
+ * SFloat +buf+ from +offset+ whose absolute value is at least +threshold+
+ * (a Float, compared as Numo's buf.abs.ge(threshold) compares: cast to
+ * float), or -1 if none is; nil for anything else (the caller uses Numo).
+ */
+static VALUE ruby_last_at_least(VALUE self, VALUE buf, VALUE offset_v, VALUE length_v, VALUE threshold)
+{
+	if (!RB_INTEGER_TYPE_P(offset_v) || !RB_INTEGER_TYPE_P(length_v) || !(RB_FLOAT_TYPE_P(threshold) || RB_INTEGER_TYPE_P(threshold))) {
+		return Qnil;
+	}
+	if (arith_type(buf) != MB_ARITH_SF || RNARRAY_NDIM(buf) != 1 || !RTEST(nary_check_contiguous(buf))) {
+		return Qnil;
+	}
+	long off = NUM2LONG(offset_v), length = NUM2LONG(length_v);
+	if (off < 0 || length < 0 || (size_t)(off + length) > RNARRAY_SIZE(buf)) {
+		return Qnil;
+	}
+	float t = (float)NUM2DBL(threshold);
+	const float *x = (const float *)read_ptr(buf) + off;
+	for (long i = length - 1; i >= 0; i--) {
+		if (fabsf(x[i]) >= t) {
+			RB_GC_GUARD(buf);
+			return LONG2NUM(i);
+		}
+	}
+	RB_GC_GUARD(buf);
+	return LONG2NUM(-1);
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.copy_range(out, out_offset, src, src_offset, length) -> out or nil
+ *
+ * out[out_offset, length] = src[src_offset, length] without views, for
+ * SFloat +out+ and +src+ (contiguous 1D, +out+ writable, ranges inside,
+ * +length+ at least 0); otherwise returns nil without writing.
+ */
+static VALUE ruby_copy_range(VALUE self, VALUE out, VALUE oo_v, VALUE src, VALUE so_v, VALUE length_v)
+{
+	if (!RB_INTEGER_TYPE_P(oo_v) || !RB_INTEGER_TYPE_P(so_v) || !RB_INTEGER_TYPE_P(length_v)) {
+		return Qnil;
+	}
+	if (arith_type(out) != MB_ARITH_SF || arith_type(src) != MB_ARITH_SF || !writable_contiguous(out)) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(src) != 1 || !RTEST(nary_check_contiguous(src))) {
+		return Qnil;
+	}
+	long oo = NUM2LONG(oo_v), so = NUM2LONG(so_v), length = NUM2LONG(length_v);
+	if (oo < 0 || so < 0 || length < 0 || (size_t)(oo + length) > RNARRAY_SIZE(out) || (size_t)(so + length) > RNARRAY_SIZE(src)) {
+		return Qnil;
+	}
+	if (length > 0) {
+		float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out)) + oo;
+		const float *x = (const float *)read_ptr(src) + so;
+		memmove(o, x, (size_t)length * sizeof(float));
+	}
+	RB_GC_GUARD(src);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1155,4 +1310,7 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "pan", ruby_pan, 5);
 	rb_define_module_function(fast_arithmetic, "add_at", ruby_add_at, 5);
 	rb_define_module_function(fast_arithmetic, "fill_range", ruby_fill_range, 4);
+	rb_define_module_function(fast_arithmetic, "accumulate", ruby_accumulate, -1);
+	rb_define_module_function(fast_arithmetic, "last_at_least", ruby_last_at_least, 4);
+	rb_define_module_function(fast_arithmetic, "copy_range", ruby_copy_range, 5);
 }

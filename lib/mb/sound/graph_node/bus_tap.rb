@@ -64,8 +64,8 @@ module MB
               @buf.fill(0)
             else
               n = MB::M.min(count, d.length - @pos)
-              @buf[0...n] = d[@pos...(@pos + n)]
-              @buf[n..] = 0 if n < count
+              @buf[0...n] = d[@pos...(@pos + n)] unless FastArithmetic.copy_range(@buf, 0, d, @pos, n)
+              (FastArithmetic.fill_range(@buf, n, count, 0) || (@buf[n..] = 0)) if n < count
             end
             @pos += count
             @buf

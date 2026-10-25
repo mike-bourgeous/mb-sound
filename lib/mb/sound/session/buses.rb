@@ -50,7 +50,7 @@ module MB
         # whether the timeline moved last span (for its clips).
         Bus = Struct.new(
           :name, :to, :chains, :block, :input, :strip_level, :strip_ramp,
-          :asleep, :quiet_from, :wake_at, :playing, :frames,
+          :asleep, :quiet_from, :wake_at, :playing, :frames, :out_bufs,
           keyword_init: true
         )
 
@@ -771,6 +771,7 @@ module MB
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             len = MB::M.min(d.length, frames)
+            next if meter.nil? && deliver_fast(d, len, ramp, fade, m, stem&.[](c), tap&.[](c), sends, c, offset)
             raw = d[0...len]
             d = ramp ? raw * ramp[0...len] : raw
             r = offset...(offset + len)
@@ -784,6 +785,41 @@ module MB
               meter&.send_signal(p.name, bus, c, x, v.is_a?(Numeric) ? v : v[r])
             end
           end
+        end
+
+        # #deliver_player's additions for one channel without Numo views or
+        # temporaries (FastArithmetic.accumulate: the same float steps as
+        # its Numo code), for SFloat data, ramps, and send levels that are
+        # Floats, Integers, or SFloats.  Returns false (having added
+        # nothing) for anything else.
+        def deliver_fast(d, len, ramp, fade, m, stem, tap, sends, c, offset)
+          return false unless d.is_a?(Numo::SFloat) && acc_factor?(ramp) && acc_factor?(fade)
+          sends.each { |_, v, _, _| return false unless acc_factor?(v) }
+
+          acc_add(m, offset, d, len, ramp, nil, 0)
+          acc_add(stem, offset, d, len, ramp, nil, 0) if stem
+          acc_add(tap, offset, d, len, fade, nil, 0) if tap
+          sends.each do |input, v, shadow, _|
+            g = v.is_a?(Numeric) && v == 1 ? nil : v
+            acc_add(input[c], offset, d, len, ramp, g, offset)
+            acc_add(shadow[c], offset, d, len, ramp, g, offset) if shadow
+          end
+          true
+        end
+
+        def acc_factor?(f)
+          f.nil? || f.is_a?(Float) || f.is_a?(Integer) || f.is_a?(Numo::SFloat)
+        end
+
+        # out[offset, len] += d[0, len] * a[0, len] * b[b_offset, len]
+        # (factors nil, numbers, or SFloats), with Numo if the kernel can't.
+        def acc_add(out, offset, d, len, a, b, b_offset)
+          return if FastArithmetic.accumulate(out, offset, d, 0, len, a, 0, b, b_offset)
+
+          x = d[0...len]
+          x = x * (a.is_a?(Numeric) ? a : a[0...len]) if a
+          x = x * (b.is_a?(Numeric) ? b : b[b_offset...(b_offset + len)]) if b
+          out[offset...(offset + len)].inplace + x
         end
 
         # A trigger track's buffer (see #route's +trigger:+) goes only to its
@@ -880,12 +916,12 @@ module MB
             track_bus_quiet(b, input, out, p0, p1, frame)
 
             ramp = ramp_levels(b, :strip_level, :strip_ramp, frame + p0, p1 - p0)
-            r = p0...p1
+            n = p1 - p0
             out.each_with_index do |o, c|
-              tap[c][r].inplace + o if tap # (readers hear it before its mute)
-              o.inplace * ramp if ramp
-              dest[c][r].inplace + o
-              stem[c][r].inplace + o if stem
+              acc_add(tap[c], p0, o, n, nil, nil, 0) if tap # (readers hear it before its mute)
+              (FastArithmetic.scale(o, ramp) || o.inplace * ramp) if ramp
+              acc_add(dest[c], p0, o, n, nil, nil, 0)
+              acc_add(stem[c], p0, o, n, nil, nil, 0) if stem
               meter&.bus_output(b.name, c, o)
             end
             p0 = p1
@@ -1001,11 +1037,26 @@ module MB
         # in [+p0+, +p1+) of the span starting at session frame +frame+.
         def track_bus_quiet(b, input, out, p0, p1, frame)
           last = nil
-          [*(input ? input.map { |x| x[p0...p1] } : []), *out].each do |x|
-            idx = x.abs.ge(Master::TAIL_THRESHOLD).where
-            last = idx[-1] if idx.length > 0 && (last.nil? || idx[-1] > last)
+          input&.each do |x|
+            i = bus_last_loud(x, p0, p1 - p0)
+            last = i if i && (last.nil? || i > last)
+          end
+          out.each do |x|
+            i = bus_last_loud(x, 0, x.length)
+            last = i if i && (last.nil? || i > last)
           end
           b.quiet_from = MB::M.max(b.quiet_from, frame + p0 + last + 1) if last
+        end
+
+        # The index (from +p0+) of the last of +n+ samples of +x+ from +p0+
+        # at or above Master::TAIL_THRESHOLD, or nil.
+        def bus_last_loud(x, p0, n)
+          i = FastArithmetic.last_at_least(x, p0, n, Master::TAIL_THRESHOLD)
+          if i.nil?
+            idx = x[p0...(p0 + n)].abs.ge(Master::TAIL_THRESHOLD).where
+            return idx.length > 0 ? idx[-1] : nil
+          end
+          i < 0 ? nil : i
         end
 
         # Runs bus +b+'s chains over frames [+p0+, +p1+) of the span and
@@ -1013,8 +1064,15 @@ module MB
         def run_bus_chains(b, input, p0, p1, from, per_sample, rate)
           n = p1 - p0
           chains = @mutex.synchronize { b.chains.dup }
-          seg = input ? input.map { |x| x[p0...p1] } : Array.new(@channels) { Numo::SFloat.zeros(n) }
-          out = Array.new(@channels) { Numo::SFloat.zeros(n) }
+          seg =
+            if input.nil?
+              Array.new(@channels) { Numo::SFloat.zeros(n) }
+            elsif p0 == 0 && input.all? { |x| x.length == n }
+              input # (the whole span: no views)
+            else
+              input.map { |x| x[p0...p1] }
+            end
+          out = bus_out_buffers(b, n)
 
           if chains.empty?
             seg.each_with_index { |x, c| out[c].inplace + x }
@@ -1034,6 +1092,18 @@ module MB
             chains.each { |c| b.chains.delete(c) if master_chain_done?(c, b.chains) }
           }
           out
+        end
+
+        # Zeroed output buffers for a segment of +n+ frames of bus +b+,
+        # reused from segment to segment (#render_bus is done with them
+        # before the next; meters and stems copy what they keep).
+        def bus_out_buffers(b, n)
+          bufs = b.out_bufs
+          if bufs.nil? || bufs.length != @channels || bufs[0].length != n
+            return b.out_bufs = Array.new(@channels) { Numo::SFloat.zeros(n) }
+          end
+          bufs.each { |x| x.fill(0) }
+          bufs
         end
 
         # Reads the branches of shared nodes (see Strip#asleep_reads) of bus
