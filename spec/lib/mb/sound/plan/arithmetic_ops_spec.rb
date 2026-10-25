@@ -194,6 +194,16 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
       expect(pows.map(&:fast)).to all(eq(false))
     end
 
+    it 'matches a plain quantizer (aquantize) with numeric increments, and leaves a moving increment unfused' do
+      r = plan_compare {
+        x = src.new(seed: 1) * 1
+        x.aquantize(0.125) * 0.5 + x.aquantize(-0.3) * 0.25 + x.aquantize(1.0 / 3) + (x * 1).aquantize(0) * 0.1
+      }
+      expect(r.program.ops.grep(MB::Sound::Plan::Op::Unary).map(&:function)).to eq([:round] * 3)
+      expect((src.new(seed: 1) * 1).aquantize(src.new(seed: 2) * 1).plan_unsupported_reason).to eq('a moving increment')
+      plan_compare(engines: [:ruby]) { (src.new(seed: 3, scale: 4) * 1).aquantize(0.5) * 1 }
+    end
+
     it 'leaves a node raised to an Integer exponent unfused (Numo multiplies)' do
       g = (src.new(seed: 1) * 1) ** 2
       expect(g.plan_unsupported_reason).to match(/Integer exponent/)

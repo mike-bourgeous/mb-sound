@@ -468,7 +468,9 @@ module MB
           def run_ruby(env, count)
             a = env.fetch(@a)
             a = a[0...count] if a.length > count
-            env[@dst] = Numo::SFloat.cast(@node.apply(a))
+            # (UnaryFunction nodes apply their own function; others, e.g. a
+            # GraphNode::Quantize, describe rounds as Numo computes them)
+            env[@dst] = Numo::SFloat.cast(@node.respond_to?(:apply) ? @node.apply(a) : a.public_send(@function))
           end
         end
       end
