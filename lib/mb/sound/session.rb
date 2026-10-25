@@ -470,8 +470,11 @@ module MB
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
-        input.synths # (listed here, not on the render thread where it starts; see #align_grids)
-        input.prime_nodes # (first-buffer setup, likewise)
+        # The graph's Synths (see #align_grids), first-buffer setups (e.g.
+        # drum voices' skipping), and node set (see Strip#graph_node_set),
+        # from one walk here, on the thread that builds it, rather than by
+        # the render thread where it waits and starts
+        input.prime
         description = shorten(description || playable.description)
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
@@ -495,10 +498,6 @@ module MB
           }
           end_cue_at_start(name, time) # (see Cue)
         }
-        # Listed here (after bus taps and spies joined it) rather than by the
-        # render thread while the change waits to land (see
-        # Strip#graph_node_set)
-        input.prime_node_set
 
         if @realtime
           output # open here so output errors are raised to the caller

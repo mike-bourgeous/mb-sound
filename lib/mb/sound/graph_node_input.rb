@@ -45,9 +45,8 @@ module MB
       # thread doesn't walk a new scene's graphs while they wait to land
       # (alloc-2).  Kept as [structure, [nodes, ids]] for the
       # GraphNode.structure_changes count it was listed at.
-      def prime_node_set
-        structure = GraphNode.structure_changes
-        nodes = graph(include_tees: true)
+      def prime_node_set(nodes = nil, structure = GraphNode.structure_changes)
+        nodes ||= graph(include_tees: true)
         GraphNode.watch_structure(nodes)
         ids = {}
         nodes.each { |n| ids[n.__id__] = true }
@@ -75,6 +74,17 @@ module MB
       # the graph where the player starts; alloc-2).
       def synths
         @synths ||= @nodes.flat_map { |n| n.respond_to?(:graph) ? [n, *n.graph] : [n] }.uniq.grep(MB::Sound::Synth).freeze
+      end
+
+      # Session#add's preparations on the building thread, from one walk of
+      # the graph: #synths, #prime_nodes, and #prime_node_set (alloc-2).
+      def prime
+        structure = GraphNode.structure_changes
+        nodes = graph(include_tees: true)
+        @synths ||= nodes.grep(MB::Sound::Synth).freeze
+        nodes.each { |n| n.prime_render if !n.equal?(self) && n.respond_to?(:prime_render) }
+        prime_node_set(nodes, structure)
+        nil
       end
 
       # Just describes the number of channels.
