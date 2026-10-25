@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Measures container types for an oscillator's per-buffer state
 # (Tone/Oscillator consolidation, 2026-10-06), with and without YJIT.
 #
@@ -276,7 +276,7 @@ MB::Sound.script(
   { 'YJIT' => '1', 'interpreter' => '0' }.each do |mode, yjit|
     %w[stub real].each do |kernel|
       args = [RbConfig.ruby, __FILE__, '--child', kernel, '-n', p.buffers.to_s, '-r', p.rounds.to_s, '-b', p.buffer.to_s]
-      text = IO.popen({ 'RUBY_YJIT_ENABLE' => yjit }, args, &:read)
+      text = IO.popen({ 'RUBY_YJIT_ENABLE' => nil, 'MB_SOUND_YJIT' => yjit }, args, &:read)
       abort "Child failed: #{text}" unless $?.success?
       results[[mode, kernel]] = JSON.parse(text)
     end

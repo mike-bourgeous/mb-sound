@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar demo of band-limited wavetables (MB::Sound::Wavetable,
 # Tone#wavetable): a pad scanning slowly through the basic shapes, a
 # sampled piano (sample mode with a loop) restarting at each note, an arp

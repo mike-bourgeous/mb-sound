@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A TR-909-flavored drum kit played by MIDI (General MIDI drum notes).
 #
 # Notes: 35/36 kick, 37 rimshot, 38/40 snare, 39 clap, 41/43/45 low tom,

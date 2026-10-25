@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Saves (or checks) the presets that come with mb-sound, in presets/.
 #
 # Each instrument preset is a bin/synths/ script's patch saved with --save

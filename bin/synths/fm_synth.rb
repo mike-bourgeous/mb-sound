@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A plain FM synthesizer: each voice is a parabola wave frequency-modulated
 # by a sine at a multiple of the note.  The modulation wheel controls the
 # intensity of modulation.

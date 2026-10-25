@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Detects system stalls for as long as it runs (minutes to hours) with
 # MB::Sound::LatencyProbe: a C thread outside the GVL wakes every --period
 # and times a little memory-touching and CPU-only work, a Ruby thread does

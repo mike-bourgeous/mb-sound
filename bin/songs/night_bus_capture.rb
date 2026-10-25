@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Night Bus: Capture": a jam on the Night Bus tracks (night_bus_flow.rb)
 # showing MIDI recording (phase 4 of the arrangement tools).  A keyboard
 # player's hands (a scripted stand-in for live MIDI, slightly loose, with

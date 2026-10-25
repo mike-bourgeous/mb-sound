@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 21-bar ambient demo of granular synthesis and spectral time-stretching
 # at 72 BPM (design/notes/granular.md).  Every sound starts as a short
 # Sample made in the script; grains and stretches turn them into a piece

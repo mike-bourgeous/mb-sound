@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Tests assigning multiple parameters to a single MIDI message type: several
 # MB::Sound::Notes controller nodes with different ranges on the same pitch
 # bend and mod wheel, plus note number and velocity, printed live.  Prints

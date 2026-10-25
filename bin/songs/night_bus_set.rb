@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Night Bus": a live set sculpted in front of you, 48 bars at 124 BPM in A
 # minor.  The arrangement isn't written as a timeline: it is performed,
 # command by command, the way you would type it at the bin/sound.rb prompt

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Measures the loudness of audio files per ITU-R BS.1770-4 / EBU R 128:
 # integrated loudness (LUFS), short-term (3 s) and momentary (400 ms)
 # maxima, loudness range (LRA, EBU Tech 3342), and true peak (dBTP).

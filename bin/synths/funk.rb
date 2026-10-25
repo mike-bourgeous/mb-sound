@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A funk / neo-soul one-man-band looping rig (mouth drums, percussion,
 # bass, FM keys, clav, talkbox lead, choir, an audio looper), playable from
 # MIDI.

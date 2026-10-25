@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A 16-bar acid demo at 128 BPM: note marks in seqs (`!A1` accent, `~A1`
 # slide, `T` tie, `R` rest, `.up`/`.dn` octaves), Seq#acid's 303 playing,
 # and the diode ladder voice from bin/synths/acid.rb.

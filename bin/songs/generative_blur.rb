@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # Blur you can hear (the generative layer; design/notes/generative.md):
 # a blurred probability scale leaks a little weight to the semitones next
 # to its notes, so "wrong" notes sometimes win.  In a sparse melody that is

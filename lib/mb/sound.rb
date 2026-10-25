@@ -1,3 +1,7 @@
+# YJIT for bin/ scripts (MB_SOUND_YJIT=1 in their shebang), before the
+# library loads.
+require_relative 'sound/jit'
+
 require 'cmath'
 require 'numo/narray'
 

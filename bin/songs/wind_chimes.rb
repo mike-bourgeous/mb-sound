@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # "Wind Chimes": a texture study (textures-1, 2026-10-14) for dust, drift,
 # and the modal resonators.  About a minute and a half at 60 BPM (a bar is
 # four seconds), in D, on the yo pentatonic (D E G A B).  Everything is one

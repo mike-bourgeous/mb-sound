@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 MB_SOUND_YJIT=1 ruby
 # A short arrangement built purely from a genre template (see
 # MB::Sound::Genre and design/notes/genres.md): the template's tempo, knobs,
 # master chain, a track per role (its suggested preset), its scenes, and its
