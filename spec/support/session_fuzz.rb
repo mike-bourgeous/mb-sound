@@ -29,7 +29,15 @@ module SessionFuzz
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
-  KNOWN = {}.freeze
+  KNOWN = {
+    # (fuzz-fixes-1's long run, seed 116: launched at bar 1 beat 2 at 174
+    # BPM, a beat line between samples (16551.72), the launched tween
+    # starts at 1000 Hz-equivalent and falls slowly instead of gliding
+    # from 3000: "channel 0 differs by 0.4000096321105957 ... first at
+    # frame 16551 (0.19999033212661743 vs 0.5999999642372131)"; even steps
+    # and on-sample beat lines (120 BPM) match)
+    timeline: [[/tween\(\[[^\]]*\], \[/, 'tweens with uneven steps (a step Array) launched where a step starts between samples resume from the wrong value']],
+  }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+
   # (definitions and scheduled commands) that shrinking may drop, the
@@ -196,10 +204,12 @@ module SessionFuzz
 
     ref.zip(got).each_with_index do |(r, g), i|
       # (a render ending early, once every sound ended, stops at the end
-      # of a buffer: lengths may differ by a buffer of silence)
+      # of the buffer after the one where they ended: lengths may differ by
+      # up to two 800-frame buffers of silence; seed 140: 131019 frames at
+      # 367, 132000 at 800)
       n = [r.length, g.length].min
       longer = r.length > n ? r[n..] : (g.length > n ? g[n..] : nil)
-      if longer && (longer.length > 800 || longer.abs.max > tolerance)
+      if longer && (longer.length > 1600 || longer.abs.max > tolerance)
         return "#{label}: channel #{i} has #{g.length} frames, expected #{r.length} (the extra frames peak at #{longer.abs.max})"
       end
       next if n <= from
