@@ -309,6 +309,16 @@ module MB
           @flushed = 0
           @plan_curve = nil # (set later; see GraphNode::IvarPreset)
           @params = nil
+
+          # Set by the plan layer (see MB::Sound::Plan::MultiDescribable),
+          # nil here so instances keep one object shape
+          @plan_bypass = nil
+          @plan_installations = nil
+          @plan_member = nil
+          @plan_region = nil
+          @plan_observed = nil
+          @plan_handoff = nil
+          @plan_restart = nil
           reset_state
 
           super(@inputs.each_with_index.map { |input, idx| Output.new(owner: self, index: idx, input: input) })
