@@ -21,6 +21,7 @@ module MB
           @current_sources = nil
           @sample_rate = sample_rate
           @current_node = 0
+          @pass_buf = nil
           @node_count = 0
           @node_type_name = "NodeSequence(node=0)"
 
@@ -42,13 +43,22 @@ module MB
           return nil if @circbuf.empty? && @current_sources.empty?
 
           # The steady case: nothing buffered and the current source gives a
-          # whole SFloat buffer, which passes through as it is (the same
-          # samples, without the copies through the circular buffer, ~5 us
-          # per buffer in fuse-more-1's song profiles)
+          # whole SFloat buffer, copied once into a buffer of this node's own
+          # instead of written to and read from the circular buffer (the same
+          # samples; ~5 us per buffer in fuse-more-1's song profiles).  The
+          # source's buffer itself isn't passed through, even frozen: frozen
+          # means "don't modify", not "won't change" (a Tee's frozen frame
+          # is a view of its source's reused buffer, which changes when that
+          # source is sampled again), and a Tee reading this node keeps its
+          # frame until this node is sampled again (the smoke test's
+          # generative_blur caught a pass-through version).
           pending = false # (false: nothing read yet; nil is an ended source)
           if @circbuf.empty?
             pending = @current_sources[0].sample(count)
-            return pending if pending.is_a?(Numo::SFloat) && pending.length == count
+            if pending.is_a?(Numo::SFloat) && pending.length == count
+              @pass_buf = Numo::SFloat.zeros(count) if @pass_buf.nil? || @pass_buf.length != count
+              return @pass_buf if MB::Sound::FastArithmetic.copy(@pass_buf, pending)
+            end
           end
 
           # TODO: Preserve depleted sources so node graphs can be reset or looped
