@@ -17,7 +17,8 @@
 #     $0 --period 0.5ms --threshold 1ms --memory 256MB
 #     $0 --no-memory --no-cpu          # wake lateness only
 #     $0 -t 10m --with-session         # also a realtime Session playing a pad
-#     $0 --compare /tmp/a /tmp/b       # compare two saved runs
+#     $0 --compare /tmp/a,/tmp/b       # compare two saved runs
+#     $0 --report /tmp/a               # report and plot a saved (or crashed) run again
 #
 # Any live script can be probed too: MB_SOUND_LATENCY_PROBE=1 (or a
 # directory) bin/songs/memory_card.rb watches the song's Session and lines
@@ -59,14 +60,14 @@ def compare(dirs)
   metas = dirs.map { |d| JSON.parse(File.read(File.join(d, 'meta.json'))) }
   h = MB::Sound::LatencyProbe::Histogram
   puts format('%-16s %-10s %10s %10s %10s %10s %8s %8s %8s', 'series', 'run', 'p50 ms', 'p99 ms', 'p99.9 ms', 'max ms', '>=5 ms', '>=20 ms', '>=50 ms')
-  %w[late memory cpu stall ruby].each do |kind|
+  %w[late memory cpu stall ruby session].each do |kind|
     hists.each_with_index do |hist, i|
       pairs = hist[kind]
       next if pairs.nil? || pairs.empty?
 
       counts = Array.new(h::BUCKETS, 0)
       pairs.each { |floor, c| counts[h.bucket(floor)] += c }
-      hh = h.new(counts)
+      hh = h.new(counts, max: hist.dig('max', kind))
       puts format('%-16s %-10s %10.3f %10.3f %10.3f %10.3f %8d %8d %8d', kind, "run #{i + 1}",
         hh.percentile(0.5) / 1e6, hh.percentile(0.99) / 1e6, hh.percentile(0.999) / 1e6, hh.max_ns.to_f / 1e6,
         hh.count_at_least(5_000_000), hh.count_at_least(20_000_000), hh.count_at_least(50_000_000))
@@ -98,11 +99,22 @@ MB::Sound.script(
   flush: [10, Integer, 'Seconds between writes of the data files', 1..3600],
   status: [1.0, Float, 'Seconds between status lines', 0.1..3600.0],
   formats: ['svg,png,txt', String, 'Plot formats to write (svg, png, txt)'],
+  report: [nil, String, 'Write the report and plots again from a saved run DIR (e.g. after a crash), then exit'],
   compare: [nil, String, 'Compare saved runs: --compare DIR1,DIR2 (prints and exits)'],
   quiet: [false, '-q', 'No status lines'],
 ) { |_args, p|
   if p.compare
     compare(p.compare.split(','))
+    next
+  end
+
+  if p.report
+    raise MB::Sound::ScriptRunner::InputError, "No meta.json in #{p.report}" unless File.exist?(File.join(p.report, 'meta.json'))
+
+    saved = MB::Sound::LatencyProbe.load(p.report)
+    puts saved.report
+    paths = saved.save(formats: p.formats.split(','))
+    puts "Report and plots: #{paths.values.join(', ')}"
     next
   end
 

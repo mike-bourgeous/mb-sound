@@ -10,6 +10,7 @@ require_relative 'latency_probe/periodicity'
 require_relative 'latency_probe/system'
 require_relative 'latency_probe/ticker'
 require_relative 'latency_probe/report'
+require_relative 'latency_probe/saved'
 
 module MB
   module Sound
@@ -53,7 +54,7 @@ module MB
       ] + System::COLUMNS).freeze
       COLUMN_INDEX = COLUMNS.each_with_index.to_h.freeze
 
-      EVENT_COLUMNS = %w[source kind wall time stall_ms late_ms mem_ms cpu_ms duration_ms ticks detail].freeze
+      EVENT_COLUMNS = %w[source kind wall time stall_ms late_ms mem_ms cpu_ms duration_ms ticks over missed worst_wall cpu mem_thread_cpu_ms detail].freeze
 
       DEFAULTS = {
         period: 0.001,
@@ -84,6 +85,12 @@ module MB
       # Starts a probe (see #initialize for the options).
       def self.start(**opts)
         new(**opts).start
+      end
+
+      # A saved run (the files #save and the flushes write) for reports and
+      # plots after the fact, e.g. after a crash (Saved).
+      def self.load(dir)
+        Saved.new(dir)
       end
 
       # The directory for a run named +name+ under tmp/latency_probe/ in
@@ -239,6 +246,8 @@ module MB
         case kind
         when :ruby then @ticker ? @ticker.histogram : Histogram.new
         when :session then @session_hist
+        when :late then Histogram.new(@probe.histogram(kind), max: stats[:max_late_ns])
+        when :stall then Histogram.new(@probe.histogram(kind), max: stats[:max_stall_ns])
         else Histogram.new(@probe.histogram(kind))
         end
       end
@@ -595,7 +604,9 @@ module MB
       end
 
       def write_histograms(dir)
-        h = %i[late memory cpu stall ruby session].to_h { |k| [k, histogram(k).to_pairs] }
+        hists = %i[late memory cpu stall ruby session].to_h { |k| [k, histogram(k)] }
+        h = hists.transform_values(&:to_pairs)
+        h[:max] = hists.transform_values(&:max).compact
         File.write(File.join(dir, 'histograms.json'), JSON.generate(h) + "\n")
       end
 
@@ -621,15 +632,14 @@ module MB
         wall = e[:wall_ns] / 1e9
         detail =
           case e[:kind]
-          when :episode then format('ticks %d over %d missed %d cpu %d mem_thread_cpu_ms %.3f', e[:ticks], e[:over], e[:missed], e[:cpu], e[:mem_thread_cpu_ns].to_i / 1e6)
-          when :tick then format('cpu %d mem_thread_cpu_ms %.3f', e[:cpu], e[:mem_thread_cpu_ns].to_i / 1e6)
           when :session_slow then format('render_ms %.3f buffer_ms %.3f', e[:render_ns] / 1e6, e[:buffer_ns] / 1e6)
           when :session_gap then format('gap_ms %.3f buffer_ms %.3f', e[:gap_ns] / 1e6, e[:buffer_ns] / 1e6)
           when :underrun then "count #{e[:count]}"
           end
         [
           e[:source], e[:kind], wall.round(6), Report.clock(e[:wall_ns], date: true),
-          ms(e[:stall_ns]), ms(e[:late_ns]), ms(e[:mem_ns]), ms(e[:cpu_ns]), ms(e[:duration_ns]), e[:ticks], detail,
+          ms(e[:stall_ns]), ms(e[:late_ns]), ms(e[:mem_ns]), ms(e[:cpu_ns]), ms(e[:duration_ns]), e[:ticks],
+          e[:over], e[:missed], e[:worst_wall_ns] && (e[:worst_wall_ns] / 1e9).round(6), e[:cpu], ms(e[:mem_thread_cpu_ns]), detail,
         ]
       end
     end

@@ -67,13 +67,26 @@ module MB
           causes
         end
 
+        # Stall sizes (ms) the periodicity search tries, biggest first: a
+        # few hundred small episodes at random times would hide a dozen big
+        # ones on the minute.
+        PERIODICITY_TIERS = [20, 10, 5, 2, 0].freeze
+
+        # The repeating pattern among the probe's episodes as [result
+        # (Periodicity::Result), the smallest stall in ms it looked at], or
+        # nil: the first tier of PERIODICITY_TIERS (episodes at least that
+        # big) with a period.
         def periodicity
           return nil if @episodes.empty?
 
-          times = @episodes.map { |e| e[:worst_wall_ns] / 1e9 }
           start = @rows.first&.dig(:second)
           stop = @rows.last && @rows.last[:second] + 1
-          Periodicity.detect(times, start: start, stop: stop)
+          PERIODICITY_TIERS.each do |ms|
+            times = @episodes.select { |e| e[:stall_ns] >= ms * 1_000_000 }.map { |e| e[:worst_wall_ns] / 1e9 }
+            r = Periodicity.detect(times, start: start, stop: stop)
+            return [r, ms] if r
+          end
+          nil
         end
 
         def text
@@ -133,16 +146,19 @@ module MB
           end
           out << ''
 
-          per = periodicity
+          per, tier = periodicity
           if per
-            out << "Periodicity: #{per}."
+            out << "Periodicity: #{per}#{tier > 0 ? ", among the #{@episodes.count { |e| e[:stall_ns] >= tier * 1_000_000 }} episodes of at least #{tier} ms" : ''}."
           elsif @episodes.length >= 4
             out << 'Periodicity: none found among the probe episodes.'
           end
           if @rows.length > 120
-            flags = @rows.map { |r| r[:over].to_i > 0 || r[:ticks].to_i == 0 ? 1 : 0 }
+            # (seconds with a stall of at least the tier that found a
+            # period, else 5 ms)
+            limit = per && tier > 0 ? tier : 5
+            flags = @rows.map { |r| r[:stall_max_ms].to_f >= limit || (r[:ticks].to_i == 0 && r[:second] > @rows.first[:second]) ? 1 : 0 }
             lag, r = Periodicity.best_lag(flags, [600, @rows.length / 3].min)
-            out << format('Autocorrelation of seconds with stalls: best lag %d s (r %.2f)', lag, r) if lag && r > 0.2
+            out << format('Autocorrelation of seconds with stalls of %d ms or more: best lag %d s (r %.2f)', limit, lag, r) if lag && r > 0.2
           end
           out << ''
 

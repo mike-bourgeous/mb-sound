@@ -74,11 +74,13 @@ module MB
 
         attr_reader :counts, :max
 
-        def initialize(counts = nil)
+        # +counts+ per bucket (default empty), +max+ the exact largest value
+        # if known.
+        def initialize(counts = nil, max: nil)
           @counts = counts ? counts.dup : Array.new(BUCKETS, 0)
           raise ArgumentError, "Pass #{BUCKETS} bucket counts" unless @counts.length == BUCKETS
 
-          @max = nil
+          @max = max
         end
 
         # Counts one value in nanoseconds.

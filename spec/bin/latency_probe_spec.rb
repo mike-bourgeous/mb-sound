@@ -15,10 +15,17 @@ RSpec.describe('bin/latency_probe.rb') do
     end
     expect(File.readlines(File.join(dir, 'seconds.csv')).length).to be >= 2
 
-    text = `bin/latency_probe.rb --compare #{dir.shellescape},#{dir.shellescape} 2>&1`
-    expect($?).to be_success, text
+    # (forked: the run above is the real process)
+    text, status = fork_script('bin/latency_probe.rb', '--compare', "#{dir},#{dir}")
+    expect(status).to be_success, text
     expect(text).to match(/^stall\s+run 1\s+[\d.]+/)
     expect(text).to match(/^stall\s+run 2\s+[\d.]+/)
+
+    File.delete(File.join(dir, 'report.txt'))
+    text, status = fork_script('bin/latency_probe.rb', '--report', dir, '--formats', 'txt')
+    expect(status).to be_success, text
+    expect(text).to include('Percentiles (ms)')
+    expect(File.read(File.join(dir, 'report.txt'))).to match(/Session: \d+ buffers/)
   end
 
   it 'reads times and sizes with units, and explains bad ones' do

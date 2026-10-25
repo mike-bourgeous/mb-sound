@@ -178,6 +178,12 @@ RSpec.describe(MB::Sound::LatencyProbe, :aggregate_failures) do
     meta = JSON.parse(File.read(File.join(dir, 'meta.json')))
     expect(meta['probe']['priority']).to be_a(String)
     expect(JSON.parse(File.read(File.join(dir, 'histograms.json'))).keys).to include('stall', 'ruby', 'session')
+
+    # Read back (LatencyProbe.load): the same rows and tables
+    saved = described_class.load(dir)
+    expect(saved.seconds.map { |r| r[:second] }).to eq(probe.seconds.map { |r| r[:second] })
+    expect(saved.histogram(:stall).total).to eq(probe.histogram(:stall).total)
+    expect(saved.report.lines.grep(/^(stall \(probe\)|ruby ticker) /)).to eq(probe.report.lines.grep(/^(stall \(probe\)|ruby ticker) /))
   end
 
   it 'starts from MB_SOUND_LATENCY_PROBE and finishes with a report' do
