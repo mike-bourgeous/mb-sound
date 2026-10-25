@@ -173,7 +173,7 @@ module MB
             # the buffer already holds this value after the first time
             x = @values[const]
             unless @constant == x
-              @buf.fill(x)
+              BufferHelper.fill(@buf, x)
               @constant = x
             end
           else

@@ -44,7 +44,7 @@ module MB
             n = MB::M.min(count, @left)
             @left -= n
             @buf = Numo::SFloat.zeros(n) if @buf.length != n
-            @buf.fill(0)
+            BufferHelper.zero(@buf)
           end
 
           def sources

@@ -99,6 +99,65 @@ module MB
         "#{path}:#{loc.lineno}"
       end
 
+      # mb-sound's lib/mb/sound directory, for .creation_trace.
+      SOUND_LIB = File.expand_path('.', __dir__).freeze
+
+      # Library files .creation_trace always leaves out: plumbing every node
+      # passes through (constructors' ivar presets, recipe recorders,
+      # get_sampler), which says nothing about where a node came from.
+      TRACE_PLUMBING = %w[graph_node.rb graph_node/ivar_preset.rb graph_node/recipe.rb graph_node/recipe/surface.rb]
+        .map { |f| File.join(SOUND_LIB, f).freeze }.freeze
+
+      # Where a node or Tee branch is being made, for its error messages
+      # (Tee::Branch, ProcNode; omnibus13): one frozen String of
+      # "path:line" lines from the nearest +depth+ frames above the caller,
+      # the first +library+ in lib/mb/sound (which node and DSL method;
+      # plumbing and +skip+ files left out), then, past an "..." line for
+      # library frames left out, the first +outside+ frames outside it (the
+      # user's script or console line).  It keeps one object, shared by
+      # every call with the same frames (an interned String), where an
+      # Array of Locations kept 25 for the graph's life (~50k old objects
+      # per tunnel_vision run), and allocates about as much while it runs
+      # (the same caller_locations, the String, cached line numbers).
+      def creation_trace(skip: nil, library: 4, outside: 5, depth: 24)
+        s = String.new(capacity: 512)
+        lib = 0
+        out = 0
+        elided = false
+        caller_locations(2, depth)&.each do |l|
+          path = l.path
+          if path.start_with?(SOUND_LIB)
+            next if TRACE_PLUMBING.include?(path) || skip&.include?(path)
+            if lib >= library
+              elided = true
+              next
+            end
+            lib += 1
+          else
+            if elided
+              s << TRACE_ELIDED
+              elided = false
+            end
+            out += 1
+          end
+          s << path << TRACE_COLON << line_string(l.lineno) << TRACE_NEWLINE
+          break if out >= outside
+        end
+        s.chomp!
+        -s # (deduplicated: rebuilds of a patch share one String)
+      end
+
+      # Frozen decimal strings of line numbers, for .creation_trace (no
+      # String per frame).
+      LINE_STRINGS = Array.new(4096) { |i| i.to_s.freeze }.freeze
+      TRACE_ELIDED = "...\n".freeze
+      TRACE_COLON = ':'.freeze
+      TRACE_NEWLINE = "\n".freeze
+
+      def line_string(n)
+        LINE_STRINGS[n] || n.to_s
+      end
+
       # Warns +message+ once per line of user code calling into mb-sound
       # (the first caller outside lib/), as "path:line: warning: message"
       # (ux-fix-1: `at(-20)` and `delay(96)`, valid but usually typos; also

@@ -148,6 +148,19 @@ RSpec.describe(MB::Sound::LatencyProbe, :aggregate_failures) do
     expect(probe.report).to match(/Ruby ticker stalls over 20 ms: [1-9]/)
   end
 
+  it 'blames a Ruby stall on the system only when probe episodes then stalled a quarter as long' do
+    ms = 1_000_000
+    ruby = [{ wall_ns: 1000 * ms, late_ns: 300 * ms }]
+    report = ->(episodes) {
+      probe = double(seconds: [], episodes: episodes, ruby_events: ruby, session_events: [], stats: {}, options: {})
+      MB::Sound::LatencyProbe::Report.new(probe).ruby_causes.transform_values(&:first)
+    }
+    # (a loaded machine's short episodes during a GVL hold, omnibus13)
+    expect(report.([{ wall_ns: 800 * ms, duration_ns: 30 * ms, stall_ns: 25 * ms }, { wall_ns: 900 * ms, duration_ns: 40 * ms, stall_ns: 30 * ms }])).to eq(process: 1)
+    expect(report.([{ wall_ns: 750 * ms, duration_ns: 250 * ms, stall_ns: 280 * ms }])).to eq(system: 1)
+    expect(report.([{ wall_ns: 2000 * ms, duration_ns: 250 * ms, stall_ns: 280 * ms }])).to eq(process: 1)
+  end
+
   it 'logs a watched Session and writes data files, a report, and plots' do
     dir = tmp_path('latency')
     output = MB::Sound::NullOutput.new(channels: 1, sleep: false)

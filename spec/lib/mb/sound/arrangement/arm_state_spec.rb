@@ -127,8 +127,11 @@ RSpec.describe(MB::Sound::Arrangement::Arm) do
       'track(:y, q: 1) { |c| c.number * c.gate * 2 }',
     ].freeze
 
-    it 'keeps the invariant through random walks of commands (seed from RSpec)' do
-      rng = Random.new(RSpec.configuration.seed)
+    # (seeds that found bugs, walked every run: 9509, a scene's queued swap
+    # landing after `forget` removed the player, omnibus13)
+    [nil, 9509].each do |fixed|
+    it "keeps the invariant through random walks of commands (seed #{fixed || 'from RSpec'})" do
+      rng = Random.new(fixed || RSpec.configuration.seed)
       8.times do |walk|
         s = new_session
         b = MB::Sound::Take.console_binding
@@ -165,6 +168,7 @@ RSpec.describe(MB::Sound::Arrangement::Arm) do
           end
         end
       end
+    end
     end
   end
 end

@@ -10,6 +10,18 @@
 RSpec.describe 'Buffer size invariance' do
   include BufferSizeHelpers
 
+  # Parameters a node reads per sample, not once per buffer
+  # (render_path_guard_spec flags new per-buffer reads; omnibus13)
+  describe 'per-sample parameters' do
+    it 'switches a wavetable node\'s node-controlled wrap mode on its own sample' do
+      table = MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], size: 64)
+      make = -> {
+        MB::Sound::GraphNode::Wavetable.new(table: table, phase: 220.hz.ramp.at(0..1.5), sample_rate: 48000, wrap: 3.hz.lfo.at(0..1))
+      }
+      expect_invariant(make, seconds: 0.7, sizes: [[367, 368], [1031]])
+    end
+  end
+
   describe 'naive oscillators' do
     # 800 Hz is a 60-sample period and 540 Hz a jump every 800 samples:
     # phases accumulated with different rounding at different block sizes
@@ -262,7 +274,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 0.5
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
@@ -299,7 +311,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same samples at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 0.5
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.7, sizes: [[367, 368], [1], [1031]])
@@ -352,7 +364,7 @@ RSpec.describe 'Buffer size invariance' do
         it "gives the same tiny tails at any buffer size for a #{name} (#{planned ? 'planned' : 'unplanned'})" do
           build = -> {
             g = make.() * 1e30
-            MB::Sound::Plan.install(g) if planned
+            MB::Sound::Plan.install(g, check: nil) if planned # (check mode reruns blocks unfused: :fast regions differ)
             g
           }
           expect_invariant(build, seconds: 0.1, sizes: [[367, 368], [1], [1031]])

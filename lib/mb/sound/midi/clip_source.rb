@@ -274,8 +274,11 @@ module MB
           since = phase - e.start
           since += @clip.length if since < 0 && looping
           prev = @clip.event_before(pos)
+          # (the event's length from here as its length hint, like a
+          # note-on read partway through its note)
+          event = note_event(e, time)&.with_length_hint(Sequence::Duration.new(MB::M.max(e.length - since, 0r)))
           Chase.new(
-            generation: @generation, time: time, event: note_event(e, time), starts: since == 0,
+            generation: @generation, time: time, event: event, starts: since == 0,
             previous: note_event(prev, time), elapsed: since / transport.whole_notes_per_second
           )
         end

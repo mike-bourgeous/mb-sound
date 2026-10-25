@@ -30,21 +30,9 @@ module SessionFuzz
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
   KNOWN = {
-    # (fuzz-fixes-1's long run, seed 116: launched at bar 1 beat 2 at 174
-    # BPM, a beat line between samples (16551.72), the launched tween
-    # starts at 1000 Hz-equivalent and falls slowly instead of gliding
-    # from 3000: "channel 0 differs by 0.4000096321105957 ... first at
-    # frame 16551 (0.19999033212661743 vs 0.5999999642372131)"; even steps
-    # and on-sample beat lines (120 BPM) match)
-    # (fuzz-fixes-1's second long run, seed 1194: a tr808 track stopped
-    # with ring: true at bar 1 beat 2 and relaunched by `go :s1` at bar 3
-    # beat 2 (q: 1/2r, frame 257142) at 112 BPM differs by buffer size
-    # from the relaunch on, at 367, 128, 1000, and 801 alike: "channel 0
-    # differs by 0.23722109198570251 ... first at frame 257142"; a plain
-    # stop and relaunch matches.  Not investigated: perhaps the revived
-    # kit's state depends on where its ring-out was cut or slept)
-    buffer_size: [[/ring: true/, 'a ringing-out track revived by a relaunch differs by buffer size']],
-    timeline: [[/tween\(\[[^\]]*\], \[/, 'tweens with uneven steps (a step Array) launched where a step starts between samples resume from the wrong value']],
+    # (empty since omnibus13: seed 116's uneven-step tween launched where a
+    # step starts between samples, and seed 1194's tr808 revived after a
+    # ring-out, are fixed; session_fuzz_spec keeps their shrunk songs)
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+

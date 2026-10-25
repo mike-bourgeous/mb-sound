@@ -258,9 +258,13 @@ module ParallelSpecs
     end
     return true if over.empty?
 
-    report_only = ENV['MB_SOUND_SPEC_BUDGET'] == 'report'
+    # (plan check mode reruns every planned block unfused: budgets are
+    # for normal runs, so check-mode suites only list what went over)
+    check_mode = !ENV['MB_SOUND_PLAN_CHECK'].to_s.empty? && ENV['MB_SOUND_PLAN_CHECK'] != '0'
+    report_only = ENV['MB_SOUND_SPEC_BUDGET'] == 'report' || check_mode
     scaled = scale > 1 ? format('; scaled x%.2f for this machine', scale) : ''
-    puts "Over their time budgets (#{display_path(path)}#{scaled}#{report_only ? '; MB_SOUND_SPEC_BUDGET=report: not failing' : ''}):"
+    why = check_mode ? '; MB_SOUND_PLAN_CHECK: not failing' : '; MB_SOUND_SPEC_BUDGET=report: not failing'
+    puts "Over their time budgets (#{display_path(path)}#{scaled}#{report_only ? why : ''}):"
     over.each { |l| puts l }
     puts '  Make them faster (see CLAUDE.md, Testing), or give the file an entry with the time it needs and why.' unless report_only
     report_only

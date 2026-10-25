@@ -37,9 +37,9 @@ module MB
     #                                  rate; #sample_rate is then the card's)
     #   AUDIO_ADAPTIVE=0               don't grow the queue after dropouts
     #   AUDIO_CONCEAL=repeat           what plays when the queue runs dry:
-    #                                  silence (default for now), repeat
-    #                                  (grains of the last audio, see
-    #                                  Concealment), fixed; a grain range in
+    #                                  repeat (default: grains of the last
+    #                                  audio, see Concealment), silence,
+    #                                  fixed; a grain range in
     #                                  ms may follow (repeat:20-60)
     #   AUDIO_SET_DEVICE_RATE=1        let CoreAudio switch the card's
     #                                  system-wide rate (macOS; changes it for
@@ -230,9 +230,9 @@ module MB
       # where it started (see also #reset_queue).
       #
       # +:conceal+ chooses what plays when the queue runs dry anyway (see
-      # Concealment.settings; AUDIO_CONCEAL wins): silence by default for
-      # now (Concealment::DEFAULT), or with :repeat grains of the
-      # last audio played, crossfaded and fading out.
+      # Concealment.settings; AUDIO_CONCEAL wins): by default
+      # (Concealment::DEFAULT) :repeat grains of the last audio played,
+      # crossfaded and fading out, or :silence.
       # Underruns are counted either way.
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,

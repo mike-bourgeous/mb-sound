@@ -546,7 +546,9 @@ module MB
               @spy_session = span.session
               @spy_from = from
             end
-            rate = span.sample_rate
+            # (exact: a Float rate times a Rational time floors to the
+            # sample before an edge that lands on a whole sample)
+            rate = span.sample_rate.to_r
           end
 
           events.each do |e|

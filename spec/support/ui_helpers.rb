@@ -287,12 +287,30 @@ module UIHelpers
   # period: output never goes quiet while a pane animates, so
   # read_and_settle's 0.3 s cap ran out and late keys landed after the
   # spec moved on (tiles_keys_spec's walk under load, test-speed-3).
+  # Returns true, or a String saying what wasn't idle (callers expect true).
   def wait_input_idle(tiles, term, timeout: 5)
     reader = tiles.instance_variable_get(:@reader)
     decoder = tiles.instance_variable_get(:@decoder)
     lock = tiles.instance_variable_get(:@input_lock)
-    idle = -> { term.unread.zero? && !decoder.pending? && reader&.status == 'sleep' && !(lock.respond_to?(:mon_locked?) ? lock.mon_locked? : lock.locked?) }
-    wait_until(timeout: timeout) { idle.call && (sleep(0.005); idle.call) }
+    locked = -> { lock.respond_to?(:mon_locked?) ? lock.mon_locked? : lock.locked? }
+    idle = -> { term.unread.zero? && !decoder.pending? && reader&.status == 'sleep' && !locked.call }
+    return true if wait_until(timeout: timeout) { idle.call && (sleep(0.005); idle.call) }
+
+    # Not idle: what was still going on, so the failure says (omnibus13:
+    # tiles_keys_spec's walk timed out in 2 of 4 loaded suites without a
+    # reason; a dead reader thread shows its exception)
+    status = reader&.status
+    died = nil
+    if reader && !reader.alive?
+      begin
+        reader.value
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        died = "#{e.class}: #{e.message} (#{e.backtrace&.first(3)&.join(' < ')})"
+      end
+    end
+    "not idle after #{timeout} s: #{term.unread} bytes unread, decoder #{decoder.pending? ? 'pending' : 'clear'}, " \
+      "reader #{status.inspect}#{died ? " (#{died})" : ''}#{reader&.alive? && status != 'sleep' ? " at #{reader.backtrace&.first(4)&.join(' < ')}" : ''}, " \
+      "input lock #{locked.call ? 'held' : 'free'}"
   end
 
   # As #wait_until, with the block run under +tiles+' input lock (see

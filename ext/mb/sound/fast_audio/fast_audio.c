@@ -912,6 +912,7 @@ static void conceal_settings_from(VALUE hash, struct mb_conceal_settings *s)
 	s->history = conceal_number(hash, "history");
 	s->grain_min = conceal_number(hash, "grain_min");
 	s->grain_max = conceal_number(hash, "grain_max");
+	s->hold = conceal_number(hash, "hold");
 	s->fade = conceal_number(hash, "fade");
 	s->quiet_fade = conceal_number(hash, "quiet_fade");
 	s->return_fade = conceal_number(hash, "return_fade");
@@ -920,7 +921,7 @@ static void conceal_settings_from(VALUE hash, struct mb_conceal_settings *s)
 	s->seed = NUM2ULL(rb_hash_lookup2(hash, ID2SYM(rb_intern("seed")), INT2FIX(0)));
 
 	if (s->mode == MB_CONCEAL_REPEAT) {
-		if (!(s->grain_min > 0 && s->grain_max >= s->grain_min && s->match > 0 && s->search >= 0 && s->return_fade > 0 &&
+		if (!(s->grain_min > 0 && s->grain_max >= s->grain_min && s->match > 0 && s->search >= 0 && s->return_fade > 0 && s->hold >= 0 &&
 				s->history >= s->grain_max + s->match && s->history <= 2.0 && s->return_fade <= s->history)) {
 			rb_raise(rb_eArgError, "Bad concealment settings (see MB::Sound::Concealment.settings)");
 		}

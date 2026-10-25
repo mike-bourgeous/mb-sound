@@ -39,6 +39,26 @@ RSpec.describe('session fuzzing') do
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }
   end
 
+  # Shrunk songs of fixed finds (omnibus13), kept so they stay fixed
+  {
+    'an uneven-step tween launched where a step starts between samples (seed 116)' => [
+      :timeline, ['bpm 174'], ['at_bar(1, beat: 2) { bg :x1, tween([300.0, 3000.0, 800.0], [1.beat, 3.beats]) * 0.0002, on: :now }'], 2,
+    ],
+    'a tr808 track revived by a scene after ringing out (seed 1194)' => [
+      :buffer_size, ['bpm 112'], [
+        'track(:t1, q: 1/2r) { |kit| tr808(kit) * 0.5 }',
+        "scene :s1, t1: grid(16, kick: 'X..x..x.', hat: '.x.x.x.x', open_hat: '...x').loop, others: :keep",
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3, beat: 2) { go :s1 }',
+        'at_bar(1, beat: 2) { stop :t1, ring: true }',
+      ], 4,
+    ],
+  }.each do |name, (relation, header, lines, bars)|
+    it "holds #{relation} for #{name}" do
+      expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
+    end
+  end
+
   it 'shrinks a failing song to the lines that fail' do
     song = SessionFuzz::Song.new(
       header: ['bpm 120'],

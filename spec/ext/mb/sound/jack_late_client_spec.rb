@@ -214,12 +214,32 @@ RSpec.describe('JACK ports with a late client', :aggregate_failures) do
       sleep 0.05
       inputs.each { |i| i.instance_variable_get(:@input).stall(12000, 7) }
 
-      notes = nil
+      per_input = nil
       expect {
-        notes = send_notes(96) { inputs.flat_map(&:read_raw) }
+        per_input = Array.new(2) { [] }
+        send_notes(96) {
+          inputs.each_with_index.flat_map { |inp, k| inp.read_raw.each { |frame, bytes| per_input[k] << [bytes.getbyte(1), frame] } }
+        }
       }.to output(/\AJACK ran a cycle twice for MIDI input .*midi_in.*`jackd --sync`[^\n]*\n\z/m).to_stderr
       expect(inputs.sum { |i| i.instance_variable_get(:@input).repeated }).to be > 0
-      expect(notes.tally.values.max).to be <= 2 # once per input
+
+      # Once per input: a repeated cycle (the same frame time) is never
+      # queued twice.  A note again a whole number of periods later is a
+      # port buffer read again after a client missed a cycle (the sender,
+      # an RtMidi JACK client, kept its last period's events: under
+      # Valgrind it can miss cycles too; memcheck, 2026-10-25, a note read
+      # three times by two inputs), which no receiver can tell from a real
+      # repeat of the same bytes, so those are allowed (omnibus13).
+      period = fa.jack_info[:buffer_size]
+      per_input.each do |events|
+        events.group_by(&:first).each do |note, seen|
+          frames = seen.map(&:last)
+          expect(frames.uniq.length).to eq(frames.length), "note #{note} queued twice at the same frame: #{frames}"
+          frames.sort.each_cons(2) do |a, b|
+            expect((b - a) % period).to eq(0), "note #{note} again #{b - a} frames later (not a stale period): #{frames}"
+          end
+        end
+      end
     end
 
     it 'plays and records the audio of a repeated cycle once' do

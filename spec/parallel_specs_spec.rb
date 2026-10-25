@@ -114,11 +114,13 @@ RSpec.describe(ParallelSpecs) do
   describe 'time budgets' do
     let(:budgets) { tmp_path('budgets.yml') }
 
-    def budget_report(examples, yaml, env: nil, scale: 1.0)
+    def budget_report(examples, yaml, env: nil, scale: 1.0, check: nil)
       File.write(budgets, yaml)
       write_json(0, examples)
       old = ENV['MB_SOUND_SPEC_BUDGET']
+      old_check = ENV['MB_SOUND_PLAN_CHECK']
       ENV['MB_SOUND_SPEC_BUDGET'] = env
+      ENV['MB_SOUND_PLAN_CHECK'] = check
       result = nil
       output = capture_stdout {
         result = ParallelSpecs.report([examples.map { |e| e['file_path'].delete_prefix('./') }.uniq], [status], 1.5,
@@ -127,6 +129,7 @@ RSpec.describe(ParallelSpecs) do
       [result, output]
     ensure
       ENV['MB_SOUND_SPEC_BUDGET'] = old
+      ENV['MB_SOUND_PLAN_CHECK'] = old_check
     end
 
     let(:yaml) { "default:\n  file: 2\n  example: 1\n" }
@@ -159,6 +162,12 @@ RSpec.describe(ParallelSpecs) do
       ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, env: 'report')
       expect(ok).to eq(true)
       expect(output).to include('not failing')
+    end
+
+    it 'only lists them under MB_SOUND_PLAN_CHECK (check mode reruns every block)' do
+      ok, output = budget_report([example('spec/a_spec.rb', 3)], yaml, check: '1')
+      expect(ok).to eq(true)
+      expect(output).to include('MB_SOUND_PLAN_CHECK: not failing')
     end
 
     it "scales the budgets by the machine's speed" do

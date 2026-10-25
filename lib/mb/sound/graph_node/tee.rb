@@ -225,21 +225,28 @@ module MB
           attr_reader :sources
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
-          # Frames kept of where each branch was made (see #initialize).
-          TRACE_DEPTH = 24
+          # Files left out of the branches' creation traces (plumbing).
+          TRACE_SKIP = [__FILE__].freeze
 
           def initialize(tee, index, reader)
             @owner = tee
             @tee = tee
             @index = index
             @reader = reader
-            # Where the branch was made, for error messages (the nearest
-            # TRACE_DEPTH frames: a full backtrace from deep inside a synth
-            # lane build cost ~5 us per branch, ~10% of a voice build)
-            @trace = caller_locations(1, TRACE_DEPTH)
+            # Where the branch was made, for error messages: one frozen
+            # String of the nearest library and user frames
+            # (Internal.creation_trace; omnibus13: an Array of 24 Locations
+            # kept 25 old objects per branch for the graph's life)
+            @trace = Internal.creation_trace(skip: TRACE_SKIP)
             @sources = { tee: @tee }
             @rate = nil
             @node_type_name = 'Branch'
+          end
+
+          # Where the branch was made: "path:line" lines (see
+          # Internal.creation_trace), for error messages.
+          def creation_trace
+            @trace
           end
 
           # Inform the tee that this branch will no longer be used.  This may
@@ -593,7 +600,7 @@ module MB
 
           message = "A node downstream of #{original_source} modified the buffer shared by its #{@branches.count} branches " \
             "(copy a frozen input before modifying it).  Branch creation traces:\n" +
-            @branches.map { |b| "#{b}:\n\t#{b.instance_variable_get(:@trace)&.first(6)&.join("\n\t")}" }.join("\n")
+            @branches.map { |b| "#{b}:\n\t#{b.creation_trace.gsub("\n", "\n\t")}" }.join("\n")
 
           if Tee.shared_check == :warn
             warn "#{message}\nCopying the buffer for each branch of this Tee from now on."
@@ -675,7 +682,7 @@ module MB
 
             Tee creation traces:
             #{@branches.map.with_index { |b|
-              "\n\e[1m#{b}\e[0m:\n\t#{MB::U.highlight(b.instance_variable_get(:@trace))}\n\n"
+              "\n\e[1m#{b}\e[0m:\n\t#{b.creation_trace.gsub("\n", "\n\t")}\n\n"
             }.join}
           EOF
         end

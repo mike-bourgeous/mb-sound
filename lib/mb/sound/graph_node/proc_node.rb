@@ -62,7 +62,10 @@ module MB
 
           raise 'No sample rate given to ProcNode' unless @sample_rate
 
-          @callers = caller_locations(5, 24) # where it was made, for messages (a full backtrace costs ~5 us deep in a build)
+          # Where it was made, for messages: "path:line" lines in one frozen
+          # String (Internal.creation_trace; omnibus13: was 24 Locations kept
+          # for the graph's life)
+          @callers = Internal.creation_trace(skip: [__FILE__])
           @cb = block
 
           # Set by ArithmeticMethods and Tuning after construction (here so

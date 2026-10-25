@@ -34,8 +34,10 @@
 #
 # Snippets (bin/sound.rb):
 #     bpm 100
-#     bg :bass, preset(:square_bass, midi: seq(A1, A1, R, A2, A1, R, G1, E1).n8.loop)
-#     bg :organ, preset(:organ_reso, midi: (seq(A3, F3, C4, G3).n2 & seq(C4, A3, E4, B3).n2 & seq(E4, C4, G4, D4).n2).loop)
+#     # (grit 1 in their roles: the maintainer's Bench pick, 2026-10-24;
+#     # the presets' grit default stays 0)
+#     bg :bass, preset(:square_bass, midi: seq(A1, A1, R, A2, A1, R, G1, E1).n8.loop, grit: 1)
+#     bg :organ, preset(:organ_reso, midi: (seq(A3, F3, C4, G3).n2 & seq(C4, A3, E4, B3).n2 & seq(E4, C4, G4, D4).n2).loop, grit: 1)
 #     bg :brass, preset(:digibrass, midi: seq([A3, C4, E4].n8, R.n8, R.n4, [G3, C4, E4].n8, R.n8, [F3, A3, C4].n4).loop)
 #     bg :keys, preset(:organ_reso, midi: midi, grit: 1)    # live keyboard
 
@@ -105,7 +107,7 @@ module MB::Sound
         { wave: WAVE_VOICE_SYNTH3, semitones: 11.96, level: 0.3 },
       ],
       attack: nil,
-      cutoff: 900.0, reso: 0.6401, keytrack: 1.0, env_octaves: 1.5, drive: 2.0,
+      cutoff: 900.0, reso: 0.5, keytrack: 1.0, env_octaves: 1.5, drive: 2.0,
       filter_env: [[1.0, 0.005], [0.3, 0.15], [0.2, 0.3], [0.0, 0.3]],
       amp_env: [[1.0, 0.004], [1.0, 0.01], [1.0, 0.01], [0.0, 0.25]],
       vibrato: nil,
@@ -182,7 +184,7 @@ module MB::Sound
       patch: [:digibrass, Symbol, '-p', 'Patch to play', WAVE_VOICES.keys],
       grit: [0.0, Float, '-G', 'Grit 0..1: the oscillators held at the DOC\'s 38.46 kHz, aliasing (1: the prototype\'s grit)', 0.0..1.0],
       cutoff: [nil, Float, 'Filter cutoff in Hz at C4 before the envelope (digibrass 500, organ_reso 900, square_bass 150)', 20.0..10000.0],
-      reso: [nil, Float, 'lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.64, square_bass 0.48)', 0.0..1.0],
+      reso: [nil, Float, 'lp4 resonance 0..1 (digibrass 0.37, organ_reso 0.5, square_bass 0.48)', 0.0..1.0],
       voices: [nil, Integer, 'Voices (default: the patch\'s)', 1..16],
     ) { |midi, p|
       wave_voice(midi, p.patch, grit: p.grit, cutoff: p.cutoff, reso: p.reso, voices: p.voices)

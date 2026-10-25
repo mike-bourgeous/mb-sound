@@ -401,7 +401,7 @@ module MB
                 @position += count
 
                 @pad = buf.class.zeros(count) unless @pad.class == buf.class && @pad.length == count
-                @pad.fill(0)
+                BufferHelper.zero(@pad)
                 @pad[0...buf.length] = buf
                 return @pad
               end

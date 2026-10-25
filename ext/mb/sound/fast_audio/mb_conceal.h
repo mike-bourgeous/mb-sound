@@ -21,9 +21,10 @@
  *   comparisons.
  * - Level: concealed samples are clipped at the history's peak (equal-power
  *   seams of correlated grains, like two drum hits, can sum 3 dB over it).
- * - Decay: the concealed output falls 60 dB over +fade+ seconds (then
- *   silence), or over +quiet_fade+ once the writer marked the end of its
- *   audio (the gap is intended).
+ * - Decay: the concealed output holds its level for +hold+ seconds, then
+ *   falls 60 dB over +fade+ seconds (then silence), or falls over
+ *   +quiet_fade+ (no hold) once the writer marked the end of its audio (the
+ *   gap is intended).
  * - Return: real audio fades in over +exit_frames+ while the grains fade
  *   out (equal power).  Late audio is played, not dropped: the ring and the
  *   device clock move exactly as without concealment.
@@ -50,7 +51,8 @@ struct mb_conceal_settings {
 	int fixed; // loop the latest grain_min frames (no jitter; comparisons)
 	double history; // seconds of history grains come from
 	double grain_min, grain_max; // seconds
-	double fade; // seconds to -60 dB (0 or less: no decay)
+	double hold; // seconds at full level before the decay starts
+	double fade; // seconds to -60 dB after the hold (0 or less: no decay)
 	double quiet_fade; // seconds to -60 dB after the writer's end mark
 	double return_fade; // seconds of crossfade back to real audio
 	double match; // seconds compared when choosing the first grain
@@ -70,6 +72,7 @@ struct mb_conceal {
 	size_t cap; // a power of two
 	uint64_t total; // frames pushed since opening
 	size_t history, grain_min, grain_max, match_window, match_search, exit_frames;
+	size_t hold_frames; // frames at full level before the decay
 	double decay, quiet_decay, floor_gain, offset_decay, cur_decay;
 	uint64_t seed, draws;
 
@@ -80,6 +83,8 @@ struct mb_conceal {
 	uint64_t t0; // history end when the gap began
 	size_t avail; // history frames grains may read, ending at t0
 	double gain;
+	size_t held; // frames held at full level so far (up to hold_frames)
+	int quiet; // the writer marked the end of its audio: no hold
 	double peak; // the history's peak: concealed samples never exceed it
 	double offset[MB_CONCEAL_MAX_CHANNELS];
 	struct mb_conceal_grain cur, nxt;
@@ -123,6 +128,7 @@ static inline int mb_conceal_init(struct mb_conceal *c, const struct mb_conceal_
 	c->match_window = mb_conceal_seconds(s->match, rate);
 	c->match_search = mb_conceal_seconds(s->search, rate);
 	c->exit_frames = mb_conceal_seconds(s->return_fade, rate);
+	c->hold_frames = s->hold > 0 ? (size_t)round(s->hold * rate) : 0;
 	c->decay = s->fade > 0 ? pow(10.0, -3.0 / (s->fade * rate)) : 1.0;
 	c->quiet_decay = pow(10.0, -3.0 / ((s->quiet_fade > 0 ? s->quiet_fade : 1e-3) * rate));
 	c->floor_gain = 1e-3;
@@ -270,7 +276,11 @@ static inline void mb_conceal_frame(struct mb_conceal *c, float *out)
 		}
 	}
 
-	c->gain *= c->cur_decay;
+	if (c->held < c->hold_frames && !c->quiet) {
+		c->held++;
+	} else {
+		c->gain *= c->cur_decay;
+	}
 	if (c->gain < c->floor_gain) {
 		c->gain = 0;
 		c->faded = 1;
@@ -342,6 +352,7 @@ static inline int mb_conceal_enter(struct mb_conceal *c)
 	}
 	c->peak = peak;
 	c->gain = 1;
+	c->held = 0;
 	c->faded = 0;
 	c->active = 1;
 	c->in_exit = 0;
@@ -366,6 +377,7 @@ static inline size_t mb_conceal_process(struct mb_conceal *c, float *out, size_t
 
 	size_t ch = c->ch;
 	c->cur_decay = quiet ? c->quiet_decay : c->decay;
+	c->quiet = quiet ? 1 : 0;
 
 	if (count > 0) {
 		mb_conceal_push(c, out, count);

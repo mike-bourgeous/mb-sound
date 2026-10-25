@@ -16,6 +16,18 @@ module MB
         buf
       end
 
+      # Fills +buf+ (or its frames +from+...+to+) with +value+ in place and
+      # returns +buf+, like .zero: FastArithmetic.fill_range for real
+      # buffers and values, else Numo's #fill (three objects a call).
+      # Render paths use it instead of #fill (render_path_guard_spec).
+      def self.fill(buf, value, from = 0, to = buf.length)
+        done = value.is_a?(Numeric) && value.real? && FastArithmetic.fill_range(buf, from, to, value)
+        unless done
+          from == 0 && to == buf.length ? buf.fill(value) : buf[from...to].fill(value)
+        end
+        buf
+      end
+
       private
 
       # Creates or replaces a Numo:NArray buffer in @buf and @tmpbuf as needed,

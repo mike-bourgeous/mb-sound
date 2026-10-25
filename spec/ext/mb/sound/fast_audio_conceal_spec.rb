@@ -69,6 +69,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       'repeat, mono, 1024-frame pulls' => [:repeat, 1024, 1],
       'fixed grain' => [:fixed, 256, 2],
       'grain range override' => [{ grain: 0.005..0.012, history: 0.03, fade: 0.2 }, 64, 2],
+      'hold before the decay' => [{ hold: 0.03, fade: 0.1 }, 128, 2],
     }.each do |name, (spec, n, ch)|
       it "plays the same samples (#{name})" do
         co, ro, = run_both(conceal.settings(spec), stutter(n), channels: ch)
@@ -125,7 +126,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     end
 
     it 'fades out over a long gap (-60 dB over :fade, then zeros)' do
-      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(fade: 0.25))
+      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(hold: 0, fade: 0.25))
       k.process(signal(0, 9600, 1)[0].to_binary, 9600, false)
       out = deinterleave(k.process('', rate / 2, false), rate / 2, 1)[0]
       first = out[0...2400].abs.max
@@ -133,6 +134,29 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       expect(out[(rate / 8)...(rate / 8 + 2400)].abs.max).to be_between(first * 10**(-36 / 20.0), first * 10**(-24 / 20.0))
       expect(out[(rate / 4 + 10)..].abs.max).to eq(0)
       expect(k.state[:faded]).to eq(true)
+    end
+
+    it 'holds full level for :hold, then falls 60 dB over :fade' do
+      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(hold: 0.1, fade: 0.25))
+      k.process(signal(0, 9600, 1)[0].to_binary, 9600, false)
+      out = deinterleave(k.process('', rate / 2, false), rate / 2, 1)[0]
+      first = out[0...2400].abs.max
+      expect(first).to be > 0.3
+      # Still at full level just before the hold ends (the grains' own
+      # level varies, so compare with the signal's peak)
+      expect(out[(rate / 10 - 2400)...(rate / 10)].abs.max).to be > 0.3
+      # Half the fade after the hold: -30 dB
+      half = rate / 10 + rate / 8
+      expect(out[half...(half + 2400)].abs.max).to be_between(first * 10**(-36 / 20.0), first * 10**(-24 / 20.0))
+      expect(out[(rate / 10 + rate / 4 + 10)..].abs.max).to eq(0)
+    end
+
+    it 'skips the hold once the writer marks the end' do
+      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(:repeat).merge(hold: 0.5))
+      k.process(signal(0, 9600, 1)[0].to_binary, 9600, false)
+      k.process('', 256, false)
+      out = deinterleave(k.process('', 2400, true), 2400, 1)[0]
+      expect(out[1000..].abs.max).to eq(0)
     end
 
     it 'leaves the gap silent with :silence, after an end mark, or without enough history' do
@@ -168,10 +192,11 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     def concealed_noise(spec)
       settings = conceal.settings(spec.merge(fade: nil))
       k = MB::Sound::FastAudio::Concealer.new(1, rate, settings)
-      MB::Sound.with_seed(5) {
-        noise = Numo::SFloat.new(9600).rand(-0.5, 0.5)
-        k.process(noise.to_binary, 9600, false)
-      }
+      # (Numo's #rand has one global state, so its noise depends on the
+      # examples that ran before; a seeded Random keeps this one fixed)
+      r = Random.new(5)
+      noise = Numo::SFloat.cast(Array.new(9600) { r.rand(-0.5..0.5) })
+      k.process(noise.to_binary, 9600, false)
       deinterleave(k.process('', 32768, false), 32768, 1)[0]
     end
 
