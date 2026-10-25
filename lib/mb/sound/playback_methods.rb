@@ -547,6 +547,7 @@ module MB
       #     beat = grid(16, kick: 'x...x...', snare: '....x...')
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
+      #     swap :drums, beat2                       # the same: rows by name (rows it lacks go silent)
       def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?

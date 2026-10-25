@@ -103,9 +103,19 @@ module MB
         # The row clips, keyed by name.
         attr_reader :rows
 
+        # Row names of the clips kits were made with (weakly held), for
+        # Session#swap with a Kit (see .row_name).
+        ROW_NAMES = ObjectSpace::WeakMap.new
+
+        # The row name +clip+ had in the last Kit made with it, or nil.
+        def self.row_name(clip)
+          ROW_NAMES[clip]
+        end
+
         def initialize(rows)
           @instrument = nil # (see PlayedBy)
           @rows = rows.freeze
+          @rows.each { |name, clip| ROW_NAMES[clip] = name if clip.is_a?(Clip) }
         end
 
         # Returns the Clip for the row with the given +name+.

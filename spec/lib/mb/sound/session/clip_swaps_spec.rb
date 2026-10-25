@@ -66,6 +66,31 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect(starts.call).to contain_exactly([0, 1/16r], [3/16r], [0, 1/8r])
   end
 
+  it 'swaps a whole Kit by row names: missing rows go silent and come back, new rows warn (omnibus13)' do
+    beat = MB::Sound.grid(16, kick: 'x...', snare: '..x.', closed_hat: 'xxxx')
+    session.add(beat[:kick].loop.gate + beat[:snare].loop.gate * 2 + beat[:closed_hat].loop.gate * 4, name: :drums)
+    starts = -> { clips(:drums).map { |c| c.events.map(&:start) } }
+
+    # (the snare gone; a clap the graph has no voice for; +output+ is a
+    # let here, so stderr is caught by hand)
+    err = StringIO.new
+    old, $stderr = $stderr, err
+    begin
+      expect(session.swap(:drums, MB::Sound.grid(16, kick: 'xx..', closed_hat: 'x...', clap: 'x...'), at: :now)).to eq(3)
+    ensure
+      $stderr = old
+    end
+    expect(err.string).to match(/\Aswap :drums: :clap isn't a row the player plays/)
+    expect(starts.call).to contain_exactly([0, 1/16r], [], [0])
+    expect(clips(:drums).map(&:looping?)).to eq([true, true, true])
+
+    # The snare comes back from its silent row; the kick matches through its pending swap
+    expect(session.swap(:drums, MB::Sound.grid(16, kick: '...x', snare: 'x...', closed_hat: '.x..'), at: :now)).to eq(3)
+    expect(starts.call).to contain_exactly([3/16r], [0], [1/16r])
+
+    expect { session.swap(:drums, bass2) }.to raise_error(ArgumentError, /unrelated clips/)
+  end
+
   it 'swaps the clip of a synth, whose voices play the new chords' do
     chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
     session.add(chords.synth(voices: 2) { |v| v.number * v.gate }, name: :pad)
@@ -110,7 +135,7 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect { session.swap(:nope, bass2) }.to raise_error(ArgumentError, /No background player :nope/)
     session.add(bass.number, name: :bass)
     expect { session.swap(:bass, { bass2 => bass }) }.to raise_error(ArgumentError, /doesn't play any of the clips/)
-    expect { session.swap(:bass, 5) }.to raise_error(ArgumentError, /Pass a Clip or a Hash/)
+    expect { session.swap(:bass, 5) }.to raise_error(ArgumentError, /Pass a Clip, a Kit, or a Hash/)
 
     session.add(1.constant, name: :const)
     expect { session.swap(:const, bass2) }.to raise_error(ArgumentError, /doesn't play any clips/)

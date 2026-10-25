@@ -18,7 +18,12 @@ module MB
         # or #legato are rebuilt from the new clip with the same transforms
         # (a Clip#synth reads its clip through one source, so its voices
         # follow the swap like any other clip node).  Drum kits from #grid (or Hashes of clips) may
-        # be given as keys and values to swap each row with the same name.
+        # be given as keys and values to swap each row with the same name,
+        # or a new Kit alone: each row the player plays (found by the row
+        # names its clips had in their kit) plays the new kit's row of that
+        # name, and rows the new kit lacks go silent, as when a scene
+        # swaps kits (rows only the new kit has need voices the graph
+        # doesn't have: a warning, as scenes build the patch again then).
         #
         # Looping clips play in phase with the timeline; launch-aligned
         # loops (Clip#loop with +align: :launch+) start at their beginning on
@@ -38,7 +43,7 @@ module MB
           point = LaunchPoint.of(binding) or return nil
 
           _player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
-          count = planned_swaps(name, nodes, clips).length
+          count = planned_swaps(name, nodes, clips, warn: true).length
 
           time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, nodes))
           change(:swap, name, time, data: { clip: clip_label(clips) }) { |t|
@@ -83,8 +88,12 @@ module MB
 
         # Returns [node, new clip] pairs for swapping +clips+ into the clip
         # sources +nodes+, raising if none of them change.
-        def planned_swaps(name, nodes, clips)
-          mapping = clips.is_a?(Sequence::Clip) ? auto_swap_mapping(name, nodes, clips) : swap_mapping(clips)
+        def planned_swaps(name, nodes, clips, warn: false)
+          mapping = case clips
+                    when Sequence::Clip then auto_swap_mapping(name, nodes, clips)
+                    when Sequence::Kit then kit_swap_mapping(name, nodes, clips, warn: warn)
+                    else swap_mapping(clips)
+                    end
 
           # A swap waiting to happen can be swapped again, or replaced by a
           # swap of the clip playing now
@@ -116,6 +125,7 @@ module MB
           case clips
           when Hash then "#{clips.length} pair#{clips.length == 1 ? '' : 's'}"
           when Sequence::Clip then clips.to_s[0, 40]
+          when Sequence::Kit then "kit (#{clips.rows.keys.join(', ')})"
           else clips.class.name.split('::').last
           end
         end
@@ -124,7 +134,7 @@ module MB
         # Hashes of clips, matched by row name) to a Hash compared by
         # identity.
         def swap_mapping(clips)
-          raise ArgumentError, "Pass a Clip or a Hash from old clips to new clips (got #{clips.class})" unless clips.is_a?(Hash) && !clips.empty?
+          raise ArgumentError, "Pass a Clip, a Kit, or a Hash from old clips to new clips (got #{clips.class})" unless clips.is_a?(Hash) && !clips.empty?
 
           mapping = {}.compare_by_identity
           clips.each do |old, new|
@@ -142,6 +152,34 @@ module MB
             end
           end
 
+          mapping
+        end
+
+        # A mapping for swapping in Kit +kit+ (see #swap): from each played
+        # row's clip (the earliest clip in a source's lineage with a kit
+        # row name, so transforms made after it, like a machine's shuffle,
+        # are made again from the new row) to the new kit's row of that
+        # name, or a silent loop for rows the new kit lacks.
+        def kit_swap_mapping(name, nodes, kit, warn: false)
+          mapping = {}.compare_by_identity
+          played = []
+          nodes.each do |n|
+            [n.ring_clip, n.pending_clip, n.clip].compact.each do |c|
+              root = c.lineage.reverse.find { |x| Sequence::Kit.row_name(x) } or next
+              row = Sequence::Kit.row_name(root)
+              played << row
+              mapping[root] ||= kit.rows.fetch(row) {
+                # (a silent row keeps its name, so a later kit brings it back)
+                Sequence::Clip.new([], length: 1, loop: true).tap { |q| Sequence::Kit::ROW_NAMES[q] = row }
+              }
+            end
+          end
+          raise ArgumentError, "Player #{name.inspect} doesn't play a grid kit's rows; pass old_kit => new_kit" if mapping.empty?
+
+          extra = kit.rows.keys - played.uniq
+          if warn && !extra.empty?
+            Kernel.warn "swap #{name.inspect}: #{extra.map(&:inspect).join(', ')} #{extra.length == 1 ? 'isn\'t a row' : 'aren\'t rows'} the player plays (no voices for #{extra.length == 1 ? 'it' : 'them'}; bg or launch the kit to build them)"
+          end
           mapping
         end
 

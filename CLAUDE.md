@@ -252,7 +252,7 @@ One compander core (`GraphNode::Dynamics`, `fast_dynamics`, exact mirrors): a pe
 - Note marks: accent `!A1`, slide `~A1`, flam `D2.flam` (drum kits), `up`/`dn`/`oct`; `Rest`/`R`, `Tie`/`T`; `Seq#acid` and `acid(...)` for 303 patterns; voice helpers `v.accent`, `v.accent_sweep`, `v.acid_env`; demo `bin/synths/acid.rb`, `bin/songs/acid_song.rb`.  `!` is overridden only on Note and Step (test with `nil?`, never `!x`).
 - `clip.ghost_chords(1, 4, 7, 6, per: 1.bar, scale: scale(:minor, :a), harmonic:, tie: :contour)`: snaps a repeated melody to a silent chord progression (degrees from 1, note Arrays, nil), keeping rhythm and contour; looping clips repeat to fit; without `scale:` the chords are in the session key.
 - Clips remember what plays them (`Sequence::PlayedBy`, play-1): `brk.chop(...)` clips are `played_by` their slices and `machine.grid` grids by their kit design, carried through every transform, so `bg :x, chop` / `play chop` play the slices (= `chop.sampler(brk)`); plain clips play a soft saw, grids a TR-909 (a TR-808 when they name 808-only voices; omnibus9), envelopes a triangle plus pink noise; `clip.played_by(sf2(...))` picks one.
-- `swap :bass, bass2` changes a player's clips on the next bar, keeping graph state; derived clips are rederived.  Demos `bin/songs/sequence_demo.rb`, `swap_song.rb`.
+- `swap :bass, bass2` changes a player's clips on the next bar, keeping graph state; derived clips are rederived; `swap :drums, kit2` swaps a grid Kit's rows by name (rows it lacks go silent, rows the graph has no voices for warn; since omnibus13).  Demos `bin/songs/sequence_demo.rb`, `swap_song.rb`.
 
 ### Generative music (`design/notes/generative.md`)
 
