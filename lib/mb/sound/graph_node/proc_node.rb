@@ -130,7 +130,8 @@ module MB
           return 'a Ruby block' unless @plan_operator == '/' || @plan_operator == '**'
 
           operand = @sources[:operand]
-          return 'a constant exponent (Numo multiplies)' if @plan_operator == '**' && !operand.respond_to?(:sample)
+          # (a Float exponent is filled into a register; see Plan::Builder#pow)
+          return "a #{operand.class} exponent (Numo multiplies)" if @plan_operator == '**' && !operand.respond_to?(:sample) && !operand.is_a?(Float)
           return "a #{operand.class} divisor" if @plan_operator == '/' && operand.is_a?(Numeric) && !operand.is_a?(Float) && !operand.is_a?(Integer)
 
           nil

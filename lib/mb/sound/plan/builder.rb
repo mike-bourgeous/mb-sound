@@ -183,10 +183,16 @@ module MB
           emit(Op::Div.new(value(:real), node, a, b))
         end
 
-        # a ** b (see Op::Pow); real Values only.
+        # a ** b (see Op::Pow); real Values only.  A Float exponent
+        # (GraphNode#** of a number, e.g. a drum accent's velocity curve)
+        # is filled into a register first: FastArithmetic.power raises an
+        # SFloat to (float)e with C's double pow, as OP_POW does with a
+        # filled exponent.  Integer exponents stay unsupported (Numo raises
+        # to them by repeated multiplication).
         def pow(a, b)
           a, b = operands(a, b)
           raise Unsupported.new(node, 'complex power') if a.complex? || b.complex?
+          b = fill(b) if b.is_a?(Const) && b.value.is_a?(Float) && a.is_a?(Value)
           raise Unsupported.new(node, 'a constant exponent') unless b.is_a?(Value)
           raise Unsupported.new(node, 'a constant base') unless a.is_a?(Value)
 
