@@ -48,7 +48,8 @@ module MB
 
           # Waves with fast shapes at MB::Sound.precision :fast (vectorized
           # real sines; see Plan::VecSine): the unfused Tone uses the same
-          # shapes then, so the op stays exact.
+          # shapes then (FastSound.oscillate, Tone#kernel_ruby), so the op
+          # is exact at either precision.
           FAST_WAVES = [:sine].freeze
 
           # True if this op uses fast shapes (see MB::Sound.precision).
@@ -65,7 +66,7 @@ module MB
             @gain = gain
             @scan = scan
             @kernel = tone.send(:kernel)
-            @fast = Plan.precision == :fast && @kernel == :naive && FAST_WAVES.include?(tone.wave_type) &&
+            @fast = Precision.fast? && @kernel == :naive && FAST_WAVES.include?(tone.wave_type) &&
               tone.random_advance == 0 && !dst.complex?
 
             raise Unsupported.new(tone, "the #{@kernel} kernel") unless KERNELS.include?(@kernel)
@@ -76,13 +77,6 @@ module MB
 
           def operands
             [@frequency, @phase_mod, @width, @reset, @target, @gain, @scan].grep(Value)
-          end
-
-          # Exact at either precision: the unfused Tone computes the same
-          # shapes (FastSound.oscillate and #kernel_ruby follow
-          # MB::Sound.precision as the op does).
-          def exact?
-            true
           end
 
           def expression

@@ -219,7 +219,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
   end
 
-  describe 'fast precision (Plan.precision = :fast, the default)' do
+  describe 'fast precision (MB::Sound.precision = :fast, the default)' do
     around do |ex|
       old = MB::Sound::Plan.precision
       MB::Sound::Plan.precision = :fast
@@ -228,16 +228,17 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
       MB::Sound::Plan.precision = old
     end
 
-    it 'stays within its stated tolerance for sines with FM, PM, ranges, and resets' do
-      tol = MB::Sound::Plan::Op::Tone::FAST_TOLERANCE
-      r = plan_compare(tolerance: tol) {
+    # fast-sine-1: the unfused Tone uses the same fast sine at :fast, so
+    # plan_compare's planned-vs-unplanned check is bit for bit
+    it 'gives the unfused samples exactly for fast sines with FM, PM, ranges, and resets' do
+      r = plan_compare {
         trig = src.new(kind: :impulses, at: reset_points)
         a = fm(1).tone.sine.pm(src.new(seed: 2, scale: 40) * 1).reset(trig)
         b = fm(2, 3000, 2000).tone.sine.at(0.5).pm(src.new(seed: 3, complex: true, scale: 3) * 1).reset(trig, to: 1.0)
         a + b + 440.hz.sine.at(-3..1)
       }
       expect(r.program.tones.map(&:fast)).to all(eq(true))
-      expect(r.program).not_to be_exact
+      expect(r.program).to be_exact
       expect(r.program.to_s).to include('fast_sine')
     end
 

@@ -244,7 +244,7 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
         ops = r.program.ops.select { |op| op.is_a?(MB::Sound::Plan::Op::Pow) || op.is_a?(MB::Sound::Plan::Op::NoteFreq) }
         expect(ops.length).to eq(3)
         expect(ops.map(&:fast)).to all(eq(true))
-        expect(r.program).not_to be_exact
+        expect(r.program).to be_exact # (the unfused nodes use the same 2^x; fast-sine-1)
         c = r.outputs[:c].compact
         ruby = r.outputs[:ruby].compact
         expect(c.zip(ruby).map { |x, y| x.to_binary == y.to_binary }).to all(eq(true))
@@ -289,7 +289,7 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
         # Results down through float's subnormals to 0 (2^-160..2^40) through
         # the plan
         r = plan_compare(sizes: [13, 64]) { 2 ** (src.new(seed: 1, scale: 100, offset: -60) * 1) * 1 }
-        expect(r.program).not_to be_exact
+        expect(r.program).to be_exact # (the unfused nodes use the same 2^x; fast-sine-1)
       end
     end
 

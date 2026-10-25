@@ -80,13 +80,13 @@ enum {
 	OP_TONE,      // see run_tone
 	OP_COPY,      // dst, a, 0                   dst = a
 	OP_SHAPE,     // dst, a, object, sc          dst = shaper(a) (FastClip.shape); object: state Array; sc: mode, p1, p2, antialias
-	OP_NOTE_FREQ, // dst, a, object, fast        dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency; fast 1: mb_vec_note_freq (Plan.precision :fast)
+	OP_NOTE_FREQ, // dst, a, object, fast        dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency; fast 1: mb_vec_note_freq (MB::Sound.precision :fast)
 	OP_EVENTS,    // dst, object, 0              dst = the event list object rendered (see run_events)
 	OP_KEEP,      // dst, a, object              object [target, name]: target's ivar name (or Hash key) = last sample of a; dst unused
 	OP_ENVELOPE,  // see run_envelope
 	OP_SMOOTH,    // dst, a, object              dst = a smoothed (see run_smooth); object [smoother, jumps]
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
-	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
+	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (MB::Sound.precision :fast, a Constant or Knob base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
 	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[14], sc[15]); sc[0..13] settings; object: the Filter::FourPole
 	OP_BIQUAD,    // dst, a, cut, q, object, type  dst = Filter::Cookbook (structure: :biquad) on a (plan_biquad.c); cut/q registers; object: the Filter::Cookbook
@@ -425,7 +425,7 @@ static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, dou
  * target_r, gain_r, scan_r, sc (registers -1 for scalars or none).  Scalars
  * from sc: freq, pm, width, gain, advance, random advance, gain (#at),
  * offset, fade lo, fade hi, remove DC, has width, gain mode (0 none, 1
- * scalar, 2 register), fast shapes (Plan.precision :fast:
+ * scalar, 2 register), fast shapes (MB::Sound.precision :fast:
  * vec_sine_segment), scan, the warp's pivot (a constant; cycles).  The object is [tone, state, frequency value,
  * width value].  The wavetable kernel asks the tone for its table at the
  * start of the block and after each reset (Tone#plan_wavetable: key zones

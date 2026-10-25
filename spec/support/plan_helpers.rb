@@ -216,7 +216,7 @@ module PlanSpecHelpers
         expect(got.length).to eq(ref.length), "block #{i} (#{n} samples, #{e}): got #{got.length} samples, expected #{ref.length}"
 
         tol = e == :ruby ? (ruby_tolerance || tolerance) : tolerance
-        # Programs with inexact ops (Plan.precision :fast's sines) are within
+        # Programs with inexact ops (none since fast-sine-1) are within
         # -100 dB of the peak (errors of fast modulators accumulate in the
         # phases they modulate over the whole comparison)
         unless installations[e].regions.all? { |r| r.program.nil? || r.program.exact? }

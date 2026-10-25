@@ -56,7 +56,7 @@ RSpec.describe(MB::Sound::Phase) do
       expect(3i.to_polar_s).to eq("3.0\u2220" + "90.0\u00b0")
 
       # In phase inputs
-      expect(440.hz.sine.with_phase(90.degrees).sample(1)[0]).to be_within(1e-7).of(1)
+      expect(440.hz.sine.with_phase(90.degrees).sample(1)[0]).to be_within(2e-7).of(1) # (the fast sine peaks at 1 - 1.2e-7)
       expect(MB::Sound::Tone.value_at(:ramp, 90.degrees)).to be_within(1e-12).of(0.5)
     end
 
@@ -97,7 +97,7 @@ RSpec.describe(MB::Sound::Phase) do
       expect(take(440.hz.with_phase(0.25.cycles))).to eq(take(440.hz.sine.with_phase(0.25)))
       expect(take(440.hz.with_phase((Math::PI / 2).radians))).to eq(take(440.hz.sine.with_phase(0.25)))
       expect(take(440.hz.with_phase(MB::Sound::Phase.degrees(90)))).to eq(take(440.hz.sine.with_phase(0.25)))
-      expect(440.hz.sine.with_phase(0.25).sample(1)[0]).to be_within(1e-7).of(1)
+      expect(440.hz.sine.with_phase(0.25).sample(1)[0]).to be_within(2e-7).of(1) # (the fast sine peaks at 1 - 1.2e-7)
       expect { 440.hz.sine.with_phase(2.hz.lfo) }.to raise_error(ArgumentError, /cycles/)
     end
 

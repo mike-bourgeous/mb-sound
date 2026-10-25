@@ -1,6 +1,6 @@
 /*
- * A vectorizable 2^x for the plan layer's default precision (Plan.precision
- * :fast): note frequencies (Op::NoteFreq, tune_freq * 2^((n - note) / 12))
+ * A vectorizable 2^x for MB::Sound.precision :fast (the default;
+ * plans and the unfused kernels alike): note frequencies (Op::NoteFreq, tune_freq * 2^((n - note) / 12))
  * and powers of a patch-constant base (Op::Pow with a Constant base,
  * a^b = 2^(b log2 a)), replacing libm's pow per sample.  Branch-free (GCC
  * and clang vectorize the loops at the extensions' flags): x rounded to k + f
