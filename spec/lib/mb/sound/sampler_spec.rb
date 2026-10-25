@@ -282,6 +282,17 @@ RSpec.describe(MB::Sound::Sampler, :aggregate_failures) do
       expect { MB::Sound.bounce(100.hz.sine) }.to raise_error(ArgumentError, /length/)
     end
 
+    # alloc-2: the capture output's #channels returned everything captured
+    # so far, hstacked, and the Session reads #channels every buffer (its
+    # CUE channel count), so a 16-bar bounce took 37 s instead of 1.7 s
+    it 'renders in linear time (the capture output reports its channel count)' do
+      out = MB::Sound::Sampler::CaptureOutput.new(channels: 2)
+      out.write([Numo::SFloat[1, 2], Numo::SFloat[3, 4]])
+      expect(out.channels).to eq(2)
+      expect(out.captured.map(&:to_a)).to eq([[1, 2], [3, 4]])
+      expect(out.captured(3).map(&:to_a)).to eq([[1, 2, 0], [3, 4, 0]])
+    end
+
     # granular-2 found bin/songs/granular_song.rb bouncing its sources at the
     # default transport's 120 BPM in renders, after the song's `bpm 72` had
     # set only the render's own transport (fixes-14)
