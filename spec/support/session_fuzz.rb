@@ -8,8 +8,8 @@
 # - :runs: the render finishes without an error (800-frame buffers)
 # - :buffer_size: 367-frame buffers give the same mix within -80 dB of the
 #   peak ("ears win"), and the same length
-# - :plan: plans off gives the same mix (both at Plan.precision :exact)
-#   within -120 dB of the peak
+# - :plan: plans off gives the same mix, bit for bit (both at the default
+#   MB::Sound.precision :fast; fast-sine-1)
 # - :timeline: a timeline-following part (a looping tween, a looping
 #   clip's frequency) launched partway through the song plays from the
 #   launch what it plays there when started at bar 1, within -80 dB
@@ -166,7 +166,7 @@ module SessionFuzz
     plan = MB::Sound::Plan
     old = [plan.enabled, plan.precision]
     plan.enabled = plans
-    plan.precision = :exact
+    plan.precision = :fast
     MB::Sound.rewind
     MB::Sound.seed(1)
     out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: buffer_size)
@@ -273,7 +273,7 @@ module SessionFuzz
     when :plan
       ref = render(code, song.bars, plans: false)
       got = render(code, song.bars)
-      compare(ref, got, tolerance: 1e-6 * [peak(ref), 1e-2].max, label: 'planned vs unplanned (exact)')
+      compare(ref, got, tolerance: 0, label: 'planned vs unplanned')
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?

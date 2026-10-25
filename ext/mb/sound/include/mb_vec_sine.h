@@ -1,6 +1,6 @@
 /*
- * A vectorizable sine for the plan layer's default precision (Plan.precision
- * :fast): a phase pass (serial, double precision, the naive oscillator's
+ * A vectorizable sine for MB::Sound.precision :fast (the default;
+ * plans and the unfused kernels alike): a phase pass (serial, double precision, the naive oscillator's
  * exact phases) reduces each sample's phase plus phase modulation to
  * -0.5..0.5 cycles as a float, then this shape pass runs a branch-free
  * float polynomial that GCC and clang vectorize at the extensions' flags

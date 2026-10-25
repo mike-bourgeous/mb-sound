@@ -110,13 +110,19 @@ module MB
         # against the unfused graph (see the module description).
         attr_accessor :check
 
-        # :fast (the default) or :exact (MB_SOUND_PLAN_PRECISION=exact):
-        # with :fast, naive real sine tones use a vectorized float
-        # polynomial (mb_vec_sine.h, Ruby mirror Plan::VecSine; within 1e-6
-        # of the Tone's samples, about -120 dB, at about a sixth of libm's
-        # cost; user decision 2026-10-09); with :exact every op is
-        # bit-exact with its node.  Read when a region compiles.
-        attr_accessor :precision
+        # MB::Sound.precision (see MB::Sound::Precision), which plans read
+        # when a region compiles: at :fast (the default) naive real sines,
+        # note frequencies, and powers of a Constant base use the same fast
+        # math as the unfused kernels (so planned == unplanned); at :exact,
+        # libm in both.
+        def precision
+          MB::Sound::Precision.precision
+        end
+
+        # Sets MB::Sound.precision (both paths).
+        def precision=(value)
+          MB::Sound::Precision.precision = value
+        end
 
         # Whether structurally identical regions (e.g. a Synth's lanes) run
         # together in LaneGroups (default true; MB_SOUND_PLAN_LANES=0 turns
@@ -246,7 +252,6 @@ module MB
       self.min_nodes = 2
       self.lanes = ENV['MB_SOUND_PLAN_LANES'] != '0'
       self.fold_warnings = ENV['MB_SOUND_PLAN_FOLD_WARN'] != '0'
-      self.precision = ENV['MB_SOUND_PLAN_PRECISION'] == 'exact' ? :exact : :fast
     end
   end
 end

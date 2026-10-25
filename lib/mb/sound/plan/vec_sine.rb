@@ -2,10 +2,10 @@ module MB
   module Sound
     module Plan
       # The Ruby mirror of mb_vec_sine.h, the vectorizable sine of
-      # Plan.precision :fast (the default): the same float operations with
+      # MB::Sound.precision :fast (the default; planned and unfused naive
+      # sines, see MB::Sound::Precision): the same float operations with
       # Numo SFloat arithmetic, so it gives the C kernel's floats exactly.
-      # Within about 5e-7 of the exact sine (-126 dB; see
-      # Op::Tone::FAST_TOLERANCE).
+      # Within about 5e-7 of the exact sine (-126 dB).
       module VecSine
         # 1.5 * 2^52 (round to the nearest integer by adding and subtracting).
         ROUND = 6755399441055744.0

@@ -2,11 +2,12 @@ module MB
   module Sound
     module Plan
       # The Ruby mirror of mb_vec_exp2.h, the vectorizable 2^x of
-      # Plan.precision :fast (the default) for note frequencies
-      # (Op::NoteFreq) and powers of a constant base (Op::Pow): the same
-      # double operations with Numo DFloat arithmetic, so it gives the C
-      # kernel's floats exactly.  Matched libm's pow on every float tested
-      # (see the header); counted as within TOLERANCE.
+      # MB::Sound.precision :fast (the default) for note frequencies
+      # (Op::NoteFreq, FastSound.number_to_freq) and powers of a constant
+      # base (Op::Pow, FastArithmetic.power_fast): the same double
+      # operations with Numo DFloat arithmetic, so it gives the C kernel's
+      # floats exactly.  Matched libm's pow on every float tested (see the
+      # header).
       module VecExp2
         # |x| limit of the polynomial path (see MB_EXP2_LIMIT): beyond it and
         # for NaN, libm's result.
@@ -19,11 +20,6 @@ module MB
 
         # Taylor coefficients 1/n!, n = 11 down to 3 (as in the header).
         COEFFS = [39916800.0, 3628800.0, 362880.0, 40320.0, 5040.0, 720.0, 120.0, 24.0, 6.0].map { |d| 1.0 / d }.freeze
-
-        # The largest difference from libm's pow allowed in check mode and
-        # specs, relative to the output's level: two float steps (no
-        # difference was found in testing).
-        TOLERANCE = 2.4e-7
 
         # 2^x for a DFloat +x+ with every |x| <= LIMIT (a new DFloat; see
         # mb_vec_exp2).

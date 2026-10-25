@@ -2,11 +2,12 @@
 # random graphs, checked against relations that must hold for any graph
 # (spec/lib/mb/sound/relation_fuzz_spec.rb):
 #
-# - :plan_exact: planned == unplanned, bit for bit, at Plan.precision :exact
-#   (Synth lanes plan themselves, so "unplanned" is Plan.enabled = false)
-# - :plan_fast: at the default :fast precision, the difference's RMS within
-#   -60 dB of the signal's (sample by sample it isn't bounded; see #check)
-# - :plan_check: Plan.install(check: :raise) (MB_SOUND_PLAN_CHECK's
+# - :plan_exact: planned == unplanned, bit for bit, at MB::Sound.precision
+#   :exact (Synth lanes plan themselves, so "unplanned" is Plan.enabled =
+#   false)
+# - :plan_fast: the same at the default :fast precision (fast-sine-1: both
+#   paths use the same fast sine and 2^x)
+# - :plan_check: Plan.install(check: :raise) at :fast (MB_SOUND_PLAN_CHECK's
 #   comparison: every block planned, then unfused from restored state;
 #   samples and node states compared)
 # - :recipe: to_ruby(seeds: true), evaluated again, renders the same samples
@@ -33,13 +34,9 @@ module RelationFuzz
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the code, 'reason'], ...] }: skipped, counted.
-  # :fast sines driving discrete decisions: decimate's hold instants move
-  # by a sample (steps up to 0.02), and sah's LFO clock fires on other
-  # samples, so its random draws differ (RMS -15 dB); :exact is identical
-  FAST_DECISIONS = [/decimate\(\d+\.hz\.lfo|sweep\("sample_hold"\)|\.sah\(/, ':fast sines feeding discrete decisions (test-tiers-1 report)'].freeze
-  KNOWN = {
-    plan_fast: [FAST_DECISIONS],
-  }.freeze
+  # (Empty since fast-sine-1: :fast sines driving decimate's hold instants
+  # and sah clocks flipped decisions only while unplanned sines were libm's.)
+  KNOWN = {}.freeze
 
   Expr = Struct.new(:kind, :args, :kids) do
     def to_s = RelationFuzz.code(self)
@@ -293,33 +290,20 @@ module RelationFuzz
 
     case relation
     when :plan_exact, :plan_fast
+      # planned == unplanned bit for bit at either precision (fast-sine-1:
+      # the unfused kernels use the plans' fast sine and 2^x at :fast)
       precision = relation == :plan_exact ? :exact : :fast
-      ref = with_plan(enabled: false) { render(build(code)) }
+      ref = with_plan(enabled: false, precision: precision) { render(build(code)) }
       got = with_plan(precision: precision) {
         g = build(code)
         MB::Sound::Plan.install(g)
         render(g)
       }
-      return compare(ref, got, label: 'planned (exact) vs unplanned') if relation == :plan_exact
-
-      # :fast: the RMS of the difference within -60 dB of the signal's RMS.
-      # Sample by sample it isn't bounded: FM by fast-sine LFOs drifts past
-      # -100 dB within 0.1 s (errors accumulate in the modulated phases), and
-      # thresholds after them (quantize, decimate's hold instants) turn
-      # tiny differences into steps.
-      problem = compare(ref, got, tolerance: Float::INFINITY, label: 'planned (fast) vs unplanned')
-      return problem if problem
-
-      ref.zip(got).each_with_index do |(r, g), i|
-        next if r.length == 0
-
-        rms = ->(x) { Math.sqrt((x * x).mean) }
-        d = rms.(r - g)
-        return "planned (fast) vs unplanned: output #{i} RMS difference #{d} over -60 dB of the RMS #{rms.(r)}" if d > 1e-3 * [rms.(r), 1e-3].max
-      end
-      nil
+      compare(ref, got, label: "planned (#{precision}) vs unplanned")
     when :plan_check
-      with_plan(precision: :exact, check: :raise) {
+      # (:fast since fast-sine-1: unfused blocks compute the same fast
+      # sines, so check mode compares like for like)
+      with_plan(precision: :fast, check: :raise) {
         g = build(code)
         MB::Sound::Plan.install(g, check: :raise)
         render(g)

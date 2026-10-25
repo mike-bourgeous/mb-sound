@@ -413,6 +413,15 @@ RSpec.describe(MB::Sound::Arrangement) do
       set.track(:picky) { |c| raise 'not this clip' if c.events.length > 4; c.tone.saw }
       set.scene(:four, picky: a1)
       expect { set.warm_up(:picky, form: MB::Sound::Form.build { four 1 }) }.not_to output.to_stderr
+      expect(set.exercise_skipped).to eq([:picky])
+    end
+
+    it 'names the tracks whose exercise was skipped' do
+      set.track(:picky) { |c| raise 'not this clip' if c.events.length > 4; c.tone.saw }
+      set.scene(:three, picky: a1)
+      expect { within { set.play_form(MB::Sound::Form.build { three 1 }, warm_up: true) } }.to output(
+        /Warmed up 3 tracks and 1 section in \d+\.\d s \(skipped picky; skip with warm_up: false\)/
+      ).to_stdout
     end
 
     it 'says how many tracks were only built' do

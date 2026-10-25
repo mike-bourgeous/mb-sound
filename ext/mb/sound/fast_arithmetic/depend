@@ -1,1 +1,1 @@
-fast_arithmetic.o: $(srcdir)/../include/mb_ext_helpers.h
+fast_arithmetic.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_vec_exp2.h $(srcdir)/../include/mb_vec_sine.h
