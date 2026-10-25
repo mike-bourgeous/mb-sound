@@ -7,7 +7,8 @@ module MB
     # device thread plays grains of the last audio it played instead of
     # silence: Hann-like (equal-power) crossfaded grains of jittered lengths
     # (20-60 ms) from jittered positions in the last 120 ms, so there is no
-    # fixed repetition period to buzz at, falling 60 dB over a second, then
+    # fixed repetition period to buzz at, holding their level for 100 ms
+    # (:hold) and then falling 60 dB over a second, then
     # crossfades back (5 ms) when audio arrives.  Late audio is played, not
     # dropped, so the queue and the device clock move as before, and
     # underruns are counted as before (stats[:underruns]); stats[:concealed]
@@ -18,7 +19,7 @@ module MB
     #   :silence - silence while the queue is dry (the old behavior)
     #   :fixed   - loop the latest grain (one fixed length; comparisons only:
     #              it buzzes at rate / length)
-    #   { mode: :repeat, grain: 0.02..0.06, history: 0.12, fade: 1.0, ... }
+    #   { mode: :repeat, grain: 0.02..0.06, history: 0.12, hold: 0.1, fade: 1.0, ... }
     # AUDIO_CONCEAL is one of the names, optionally with a grain in ms
     # (`repeat:20-60`, `fixed:30`).  Times take seconds or Lengths (`20.ms`).
     module Concealment
@@ -34,7 +35,7 @@ module MB
         history: 0.12,
         grain_min: 0.02,
         grain_max: 0.06,
-        hold: 0.0,
+        hold: 0.1,
         fade: 1.0,
         quiet_fade: 0.02,
         return_fade: 0.005,

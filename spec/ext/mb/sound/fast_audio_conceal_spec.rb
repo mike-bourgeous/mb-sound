@@ -126,7 +126,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
     end
 
     it 'fades out over a long gap (-60 dB over :fade, then zeros)' do
-      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(fade: 0.25))
+      k = MB::Sound::FastAudio::Concealer.new(1, rate, conceal.settings(hold: 0, fade: 0.25))
       k.process(signal(0, 9600, 1)[0].to_binary, 9600, false)
       out = deinterleave(k.process('', rate / 2, false), rate / 2, 1)[0]
       first = out[0...2400].abs.max
