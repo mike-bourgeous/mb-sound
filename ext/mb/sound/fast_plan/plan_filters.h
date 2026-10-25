@@ -72,13 +72,13 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 		const struct mb_signal *w, _Bool warped, const struct mb_signal *scan, double adv, double rndadv, double g, double off,
 		_Bool remove_dc, VALUE phase_state, VALUE tstate, VALUE noise);
 
-// OP_DYNAMICS: FastDynamics.compand for one channel (plan_dynamics.c,
-// through mb_dynamics.h) on input +in+ into +d+, with +nside+ detector
+// OP_DYNAMICS: FastDynamics.compand (plan_dynamics.c, through
+// mb_dynamics.h) on the +nch+ inputs +in+ into +out+, with +nside+ detector
 // signals +side+ and DT_COUNT times +tim+ (in samples); +obj+ is the
 // GraphNode::Dynamics (its @params, @plan_curve, @state, and @delay are
 // read each block).  Raises on bad objects.
 struct mb_signal;
-void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
+void mb_plan_dynamics(float *const *out, long nch, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
 
 // OP_DECIMATE: FastLofi.decimate (plan_lofi.c, through mb_decimate.h) on
 // the real input +in+ into +d+ at the hold rate +rate+ (Hz), then, unless
@@ -87,5 +87,13 @@ void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_sign
 // GraphNode::Decimator (its @state, @rng, @sample_rate, @jitter, and @mode
 // are read each block).  Raises on bad objects.
 void mb_plan_decimate(float *d, const struct mb_signal *in, const struct mb_signal *rate, const struct mb_signal *mix, VALUE obj, size_t n);
+
+// OP_RESONATOR: FastResonator.ping (or .modes if +modal+; plan_resonator.c,
+// through mb_resonator.h) on the real input +in+ into +d+ at frequency
+// +freq+ (Hz) with decay +decay+ (samples to -60 dB); +obj+ is the
+// GraphNode::Resonator (its @state, @sample_rate, @cos_phase, @sin_phase,
+// and a ModalResonator's @table are read each block).  Raises on bad
+// objects.
+void mb_plan_resonator(float *d, const struct mb_signal *in, const struct mb_signal *freq, const struct mb_signal *decay, int modal, VALUE obj, size_t n);
 
 #endif

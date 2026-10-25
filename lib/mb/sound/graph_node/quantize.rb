@@ -84,6 +84,29 @@ module MB
 
           (data / inc).round * inc
         end
+
+        # Plan layer (see MB::Sound::Plan): a numeric increment is a
+        # division, a round, and a product, as Numo computes them on
+        # SFloats (fuse-more-1); a moving increment (its zero and
+        # non-finite masks) stays unfused.
+        include Plan::Describable
+
+        def plan_inputs
+          [@upstream]
+        end
+
+        def plan_unsupported_reason
+          return 'a moving increment' if @increment.respond_to?(:sample)
+
+          nil
+        end
+
+        def plan_describe(p)
+          x = p[@upstream]
+          return x if @increment == 0
+
+          p.unary(:round, p.div(x, @increment)) * @increment
+        end
       end
     end
   end

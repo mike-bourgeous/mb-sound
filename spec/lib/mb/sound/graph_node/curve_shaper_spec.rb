@@ -91,6 +91,33 @@ end
 RSpec.describe('MB::Sound::FastClip.shape_curve arguments') do
   let(:map) { Numo::DFloat[0, 1, 0, 1, 0, 1, 0, 0, 0.5, 0] }
 
+  it 'reuses its output for a steady (repeated frozen) input with #aease, the same values as shaping again' do
+    steady = Numo::SFloat.new(16).fill(0.37).freeze
+    other = Numo::SFloat.new(16).fill(0.81).freeze
+    src = Class.new {
+      include MB::Sound::GraphNode
+      attr_accessor :buf
+      def sample_rate = 48000.0
+      def sample(_count) = @buf
+      def sources = {}
+    }.new
+    node = src.aease(:quad_out, out: 0.2..0.9)
+    ref = MB::Sound::ArrayInput.new(data: [steady]).aease(:quad_out, out: 0.2..0.9).sample(16).dup
+
+    src.buf = steady
+    first = node.sample(16).dup
+    second = node.sample(16)
+    third = node.sample(16)
+    expect([first, second, third].map(&:to_a)).to all(eq(ref.to_a))
+    expect(second).to be_frozen
+    expect(third).to equal(second)
+
+    src.buf = other
+    changed = node.sample(16)
+    expect(changed).not_to be_frozen
+    expect(changed[0]).not_to eq(ref[0])
+  end
+
   it 'rejects bad forms, edges, tables, and coefficients' do
     buf = Numo::SFloat[0, 0.5]
     st = [0.0, 0.0, 0.0, 0]

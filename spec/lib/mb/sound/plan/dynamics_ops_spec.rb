@@ -57,12 +57,87 @@ RSpec.describe(MB::Sound::Plan, 'dynamics ops') do
     expect(r.unfused_blocks(:c)).to eq(2)
   end
 
-  it 'stays unfused for several channels and for limiters, saying why' do
+  it 'stays unfused for limiters, saying why, and names multichannel outputs as computed in their region' do
     text = MB::Sound::Plan.explain(
       (MB::Sound::GraphNode::Channels.new([220.hz.saw * 1, 330.hz.saw * 1]).compress * 1).outputs +
       [(220.hz.saw * 1).limit * 1]
     )
-    expect(text).to include('2-channel Dynamics', 'lookahead limiter')
+    expect(text).to include('lookahead limiter', 'an output of a 2-channel Dynamics (computed in its region)')
+  end
+
+  describe 'several channels (one op computing every channel, fuse-more-1)' do
+    def stereo(seed, **kw)
+      MB::Sound::GraphNode::Channels.new([src.new(seed: seed, scale: 0.9, **kw) * 1.2, src.new(seed: seed + 1, scale: 0.5) * 0.8])
+    end
+
+    def dyn_region(r, engine = :c)
+      r.regions(engine).find { |reg| reg.root.is_a?(MB::Sound::GraphNode::Dynamics) }
+    end
+
+    it 'runs a linked stereo compressor in one region with its inputs, computing both channels' do
+      r = plan_compare { |_c|
+        l, rt = stereo(11).compress(threshold: -18.db, ratio: 4, attack: 0.001, release: 0.01).to_a
+        l * 0.5 + rt * 0.25
+      }
+      reg = dyn_region(r)
+      expect(reg).not_to be_nil
+      op = reg.program.ops.grep(MB::Sound::Plan::Op::Dynamics).first
+      expect(op.channels.length).to eq(2)
+      expect(op.extra_dsts.length).to eq(1)
+      expect(reg.program.ops.grep(MB::Sound::Plan::Op::Output).length).to eq(1)
+      expect(reg.members.count { |m| m.is_a?(MB::Sound::GraphNode::Multiplier) }).to eq(2)
+      expect(reg.planned_blocks).to be > 0
+    end
+
+    it 'matches the right channel read before the left, three linked channels, and an unlinked RMS compressor' do
+      plan_compare { |_c|
+        l, rt = stereo(12).compress(threshold: -20.db, attack: 0.0005, release: 0.004).to_a
+        rt * 0.3 + l
+      }
+      plan_compare { |_c|
+        three = MB::Sound::GraphNode::Channels.new([src.new(seed: 13) * 1, src.new(seed: 14, scale: 0.3) * 1, src.new(seed: 15, kind: :steps, every: 41) * 1])
+        a, b, c = three.compress(threshold: -24.db, ratio: 6, hold: 0.001, makeup: :auto).to_a
+        a + b * 0.5 - c
+      }
+      plan_compare { |_c|
+        l, rt = stereo(16).compress(threshold: -20.db, detector: :rms, rms: 0.002, link: false, mix: 0.6).to_a
+        l - rt
+      }
+    end
+
+    it 'matches a stereo duck keyed by a sidechain boundary input, and node times' do
+      plan_compare { |_c|
+        l, rt = stereo(17).duck(src.new(seed: 19, kind: :steps, every: 60), amount: -12.db, release: 0.002 + 200.hz.asaw.at(0..0.001)).to_a
+        l + rt
+      }
+    end
+
+    it 'flushes a stereo lookahead tail after the inputs end (unfused), and ends where unplanned ends when a channel ends first' do
+      r = plan_compare(fallbacks: true, sizes: [100] * 10) { |_c|
+        st = MB::Sound::GraphNode::Channels.new([src.new(seed: 20, ends_at: 450) * 1, src.new(seed: 21, ends_at: 450) * 1])
+        l, rt = st.compress(threshold: -20.db, lookahead: 32.samples).to_a
+        l + rt
+      }
+      expect(r.unfused_blocks(:c)).to be >= 1
+
+      plan_compare(fallbacks: true, sizes: [100] * 10) { |_c|
+        st = MB::Sound::GraphNode::Channels.new([src.new(seed: 20, ends_at: 450) * 1, src.new(seed: 21, ends_at: 250) * 1])
+        l, rt = st.compress(threshold: -20.db).to_a
+        l + rt
+      }
+    end
+
+    it 'matches in check mode and with the Ruby mirror' do
+      plan_compare(check: :raise) { |_c|
+        l, rt = stereo(22).compress(threshold: -16.db, lookahead: 8.samples, hold: 0.0005).to_a
+        l * 0.7 + rt
+      }
+      r = plan_compare(engines: [:ruby]) { |_c|
+        l, rt = stereo(23).expand(threshold: -30.db).to_a
+        l + rt
+      }
+      expect(dyn_region(r, :ruby)).not_to be_nil
+    end
   end
 
   it 'gives the same samples under check mode' do

@@ -234,6 +234,8 @@ module MB
       [
         Gate, Number, Velocity, Lift, Trigger, KeyTrigger, Choke, EnvelopeInputs, Glide, FadeIn, PolyPressure,
         Bend, Control, Pressure,
+        # (held note marks like Velocity, whose feed they share; fuse-more-1)
+        Accent, PitchMark, FlamMark,
       ].each { |c| c.send(:plan_events!) }
 
       class ChannelNode

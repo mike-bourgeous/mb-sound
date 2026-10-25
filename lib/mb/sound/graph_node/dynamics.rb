@@ -88,6 +88,25 @@ module MB
             @owner.plan_unsupported_output(self)
           end
 
+          # A multichannel Dynamics computes every channel in a region of
+          # its own (see Dynamics as a Plan::MultiDescribable): the region
+          # finder reaches it through its outputs.
+          def plan_sources
+            planned_owner? ? { owner: @owner } : sources
+          end
+
+          # The multichannel Dynamics computing this output in its region
+          # (see Plan::MultiDescribable), or nil for one channel.
+          def plan_owner
+            planned_owner? ? @owner : nil
+          end
+
+          # True if the owner plans every channel at once (a multichannel
+          # GraphNode::Dynamics, not a Limiter).
+          def planned_owner?
+            @owner.is_a?(Plan::MultiDescribable) && @owner.channel_count > 1
+          end
+
           # Sidechains are always boundary inputs (another player's kick:
           # they may end, or come short, independently).
           def plan_boundary_inputs
@@ -138,7 +157,7 @@ module MB
                 warn "#{self.class.name} output #{index} sampled again before the other outputs"
               end
               @sampled.fill(false)
-              @frame = next_frame(count)
+              @frame = frame_for(count)
             end
 
             @sampled[index] = true
@@ -146,6 +165,12 @@ module MB
           end
 
           private
+
+          # The next frame (see #next_frame; GraphNode::Dynamics computes it
+          # through its plan region while one plans it, see #plan_frame).
+          def frame_for(count)
+            next_frame(count)
+          end
 
           # Reads the inputs (ended channels as silence while others play),
           # then the flush of +latency+ samples of silence, then :ended.
@@ -286,6 +311,16 @@ module MB
           @plan_curve = nil # (set later; see GraphNode::IvarPreset)
           @params = nil
           @times_list = nil # (reused by #process)
+
+          # Set by the plan layer (see MB::Sound::Plan::MultiDescribable),
+          # nil here so instances keep one object shape
+          @plan_bypass = nil
+          @plan_installations = nil
+          @plan_member = nil
+          @plan_region = nil
+          @plan_observed = nil
+          @plan_handoff = nil
+          @plan_restart = nil
           reset_state
 
           super(@inputs.each_with_index.map { |input, idx| Output.new(owner: self, index: idx, input: input) })
@@ -328,11 +363,115 @@ module MB
         # Plan layer: the reason output +output+ can't be a plan op, or nil
         # (see Output#plan_unsupported_reason).
         def plan_unsupported_output(output)
-          return "a #{channel_count}-channel #{self.class.name.rpartition('::').last} (its channels run together in one kernel)" if channel_count != 1
+          return "an output of a #{channel_count}-channel #{self.class.name.rpartition('::').last} (computed in its region)" if channel_count != 1
           return 'flushing its delayed tail after its input ended' if @flushing || @ended
 
           nil
         end
+
+        # Plan layer for several channels (fuse-more-1; see
+        # Plan::MultiDescribable): a multichannel compander runs every
+        # channel in one Plan::Op::Dynamics (one kernel call, as unplanned:
+        # linked channels share one detector), in a region of its own with
+        # the nodes only it reads; its Output nodes stay outside, read by
+        # other regions as boundary inputs.  One channel is planned through
+        # its Output (#plan_describe_output).
+        include Plan::MultiDescribable
+
+        # The inputs, sidechains, and time nodes (for the region finder).
+        def plan_sources
+          s = {}
+          @inputs.each_with_index { |n, i| s[:"input_#{i + 1}"] = n }
+          @sidechain_inputs&.each_with_index { |n, i| s[:"sidechain_#{i + 1}"] = n }
+          s.merge(time_sources)
+        end
+
+        def plan_inputs
+          plan_sources.values
+        end
+
+        # Sidechains are always boundary inputs (as for one channel).
+        def plan_boundary_inputs
+          @sidechain_inputs || []
+        end
+
+        def plan_unsupported_reason
+          return 'one channel (planned through its output)' if channel_count == 1
+          return 'flushing its delayed tail after its input ended' if @flushing || @ended
+
+          nil
+        end
+
+        # One Value per channel (see #plan_describe_output).
+        def plan_describe(p)
+          channels = @inputs.map { |i| p[i] }
+          sides = if @sidechain_inputs
+            sc = @sidechain_inputs.map { |s| p.boundary(s, optional: true) }
+            !@link && sc.length == 1 ? sc * channels.length : sc
+          else
+            channels
+          end
+          times = @times.values.map { |src|
+            if src.node?
+              v = p.optional(src.node)
+              src.unit == :seconds ? v * @sample_rate : v
+            else
+              src.constant_samples(@sample_rate)
+            end
+          }
+          plan_params
+          plan_curve
+          p.dynamics_channels(self, channels, sides, times)
+        end
+
+        # Short sidechain and time inputs are padded (see #fit), and
+        # channels that end play on as silence until every channel ended
+        # (see Framed#next_frame), so blocks with a short input run unfused.
+        def plan_pads_inputs?
+          true
+        end
+
+        # As for one channel (see Output#plan_input_ended).
+        def plan_input_ended(_source)
+          @plan_region&.installation&.exclude(self, 'a sidechain or time input ended')
+          :replay
+        end
+
+        # A channel that ends plays on as silence while the others play,
+        # and a lookahead flushes its delayed samples after the inputs end:
+        # the block where an input ends runs unfused, and the node stays
+        # unfused afterwards (see Plan::Region#prepare).
+        def plan_tail?
+          true
+        end
+
+        # One frame of every channel (an Array of buffers, or nil once the
+        # node ended): from the plan region rooted here while it plans,
+        # else (unplanned, or the region running unfused) from the node's
+        # own code.
+        def plan_frame(count)
+          unless @plan_bypass
+            if (handoff = @plan_handoff)
+              @plan_handoff = nil
+              buf = handoff[0].take_handoff(handoff[1], count)
+              return handoff[1].planned_frame(buf) unless buf.equal?(Plan::LaneGroup::NO_HANDOFF)
+            end
+
+            region = @plan_region
+            return region.sample_outputs(count) if region && !region.unfused
+          end
+
+          f = next_frame(count)
+          f == :ended ? nil : f
+        end
+
+        private
+
+        def frame_for(count)
+          plan_frame(count) || :ended
+        end
+
+        public
 
         # Plan layer: one Plan::Op::Dynamics for +output+ (one channel): its
         # input, the detector signals (the input, or the sidechain channels
