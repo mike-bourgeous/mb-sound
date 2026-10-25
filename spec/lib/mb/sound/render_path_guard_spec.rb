@@ -5,21 +5,24 @@ require 'prism'
 # fixed or listed here with the reason it is fine.  Entries name the file
 # and a piece of the matching code (not line numbers, so edits elsewhere
 # don't break them).
+# (constants in a module: constants in describe blocks land on Object)
+module RenderPathGuard; end
+
 RSpec.describe('render path code guards') do
-  LIB = File.expand_path('../../../../lib', __dir__)
+  RenderPathGuard::LIB = File.expand_path('../../../../lib', __dir__)
 
   def lib_files
-    Dir[File.join(LIB, '**', '*.rb')].sort
+    Dir[File.join(RenderPathGuard::LIB, '**', '*.rb')].sort
   end
 
-  def rel(path) = path.delete_prefix("#{File.dirname(LIB)}/")
+  def rel(path) = path.delete_prefix("#{File.dirname(RenderPathGuard::LIB)}/")
 
   # Each file's syntax tree, parsed once for every example.
-  TREES = {}
-  def parsed(f) = (TREES[f] ||= Prism.parse_file(f).value)
+  RenderPathGuard::TREES = {}
+  def parsed(f) = (RenderPathGuard::TREES[f] ||= Prism.parse_file(f).value)
 
   # Methods that run every buffer.
-  RENDER_METHODS = /\A(sample|internal_sample|sample_c|sample_ruby|sample_internal|render\w*|process\w*|next_frame|read)\z/
+  RenderPathGuard::RENDER_METHODS = /\A(sample|internal_sample|sample_c|sample_ruby|sample_internal|render\w*|process\w*|next_frame|read)\z/
 
   # Yields [file, method name, node] for every node in a method body, with
   # the method's locals assigned from a #sample call.
@@ -53,7 +56,7 @@ RSpec.describe('render path code guards') do
 
   # Numo's #fill allocates three objects a call; render paths fill with
   # BufferHelper.zero / BufferHelper.fill (alloc-2; omnibus13).
-  FILL_ALLOWED = [
+  RenderPathGuard::FILL_ALLOWED = [
     ['lib/mb/sound/graph_node/four_pole.rb', 'Numo::SFloat.new(count).fill(@last[key])', 'pads an input that ended (once)'],
     ['lib/mb/sound/graph_node/multitap_delay.rb', 'Numo::SFloat.new(count).fill(delays)', 'smoothing a constant tap time (an option; allocates its buffer anyway; open: reuse one)'],
     ['lib/mb/sound/notes/poly_pressure.rb', 'Numo::SFloat.new(count).fill(v)', 'a new steady buffer only when the value changes'],
@@ -67,11 +70,11 @@ RSpec.describe('render path code guards') do
   it 'fills buffers in render methods without Numo#fill' do
     found = []
     each_node_in_methods do |file, meth, node, _|
-      next unless meth.match?(RENDER_METHODS) && node.is_a?(Prism::CallNode) && node.name == :fill && node.receiver && node.arguments
+      next unless meth.match?(RenderPathGuard::RENDER_METHODS) && node.is_a?(Prism::CallNode) && node.name == :fill && node.receiver && node.arguments
       next if node.receiver.slice == 'BufferHelper'
       found << [file, node.slice]
     end
-    allowed = FILL_ALLOWED.map { |f, c, r| [f, c, r] }
+    allowed = RenderPathGuard::FILL_ALLOWED.map { |f, c, r| [f, c, r] }
     bad = found.reject { |file, code| allowed.any? { |af, ac, _| file.start_with?(af) && code.include?(ac) } }
     expect(bad).to eq([]), "Numo#fill in render methods (use BufferHelper.zero or .fill, or list it with a reason):\n#{report(bad)}"
     stale = allowed.reject { |af, ac, _| found.any? { |file, code| file.start_with?(af) && code.include?(ac) } }
@@ -83,7 +86,7 @@ RSpec.describe('render path code guards') do
   # to the whole buffer, so its changes move with the buffer size (the
   # harmonics amplitudes and the wavetable wrap mode, fuzz-fixes-1 and
   # omnibus13).  Read per sample (or at the sample where it matters).
-  LAST_ALLOWED = [
+  RenderPathGuard::LAST_ALLOWED = [
     ['lib/mb/sound/graph_node/four_pole.rb', 'data[-1]', 'remembers the last input to pad one that ends, not a parameter'],
     ['lib/mb/sound/graph_node/knob.rb', 'buf[-1]', 'holds a followed node\'s last value past its end'],
     ['lib/mb/sound/graph_node/zone_value.rb', 'num[-1]', 'a whole-buffer check before ptp; per sample otherwise'],
@@ -98,15 +101,15 @@ RSpec.describe('render path code guards') do
       last = (node.name == :[] && a&.length == 1 && a[0].is_a?(Prism::IntegerNode) && a[0].value == -1) || (node.name == :last && a.nil?)
       found << [file, node.slice] if last
     end
-    bad = unlisted(found, LAST_ALLOWED)
+    bad = unlisted(found, RenderPathGuard::LAST_ALLOWED)
     expect(bad).to eq([]), "parameters read once per buffer (read them per sample, or list with a reason):\n#{report(bad)}"
-    expect(unused(found, LAST_ALLOWED).map(&:first)).to eq([]), "unused entries: #{unused(found, LAST_ALLOWED)}"
+    expect(unused(found, RenderPathGuard::LAST_ALLOWED).map(&:first)).to eq([]), "unused entries: #{unused(found, RenderPathGuard::LAST_ALLOWED)}"
   end
 
   # A Rational time times a Float rate is a Float, which floors to the
   # sample before an edge that lands exactly on a sample (fuzz-fixes-1's
   # frame counts).  Multiply by an Integer or Rational rate (rate.to_r).
-  RATE_ALLOWED = [
+  RenderPathGuard::RATE_ALLOWED = [
     ['lib/mb/sound/ffmpeg_input.rb', '@info[:duration] || 0) * @sample_rate', 'a Float duration from ffprobe'],
     ['lib/mb/sound/ffmpeg_input.rb', '(start * @sample_rate).ceil', 'a Float start in seconds'],
     ['lib/mb/sound/synth.rb', '((last - t0) * rate).floor', 'rate is @sample_rate.to_r'],
@@ -126,9 +129,9 @@ RSpec.describe('render path code guards') do
     found = lib_files.flat_map { |f|
       File.readlines(f).filter_map { |l| [rel(f), l.strip] if l.match?(/\*\s*[@\w.]*rate\b[\w.]*\)\.(floor|ceil)\b/) && !l.strip.start_with?('#') }
     }
-    bad = unlisted(found, RATE_ALLOWED)
+    bad = unlisted(found, RenderPathGuard::RATE_ALLOWED)
     expect(bad).to eq([]), "frame counts from a product with a rate (check the types; Rational x Float isn't exact):\n#{report(bad)}"
-    expect(unused(found, RATE_ALLOWED).map(&:first)).to eq([]), "unused entries: #{unused(found, RATE_ALLOWED)}"
+    expect(unused(found, RenderPathGuard::RATE_ALLOWED).map(&:first)).to eq([]), "unused entries: #{unused(found, RenderPathGuard::RATE_ALLOWED)}"
   end
 
   # `0.5 < -90.db` goes through Decibels#coerce, an Array per comparison

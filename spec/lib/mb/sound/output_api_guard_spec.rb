@@ -5,12 +5,16 @@
 # read the channel count, which made a bounce's render quadratic).  Every
 # API method an output subclass defines must call super, or be listed here
 # with the reason it keeps the meaning (omnibus13).
-RSpec.describe('output API guard') do
+# (constants in a module: constants in describe blocks land on Object)
+module OutputApiGuard
   # What Session, render, and the scripts read from an output.
   API = %i[channels buffer_size sample_rate write close closed? latency end_stream release_writer frames_written].freeze
 
   # [class name, method] => reason
   ALLOWED = {}.freeze
+end
+
+RSpec.describe('output API guard') do
 
   def output_classes
     roots = [MB::Sound::NullOutput, MB::Sound::IOOutput, MB::Sound::DeviceOutput, MB::Sound::BackgroundOutput]
@@ -29,10 +33,10 @@ RSpec.describe('output API guard') do
 
   def shadowing(classes)
     classes.flat_map { |c|
-      API.filter_map { |name|
+      OutputApiGuard::API.filter_map { |name|
         next unless c.instance_methods(false).include?(name) || c.private_instance_methods(false).include?(name)
         next if c.superclass.method_defined?(name) == false # (the class introduces it)
-        next if calls_super?(c, name) || ALLOWED.key?([c.name, name])
+        next if calls_super?(c, name) || OutputApiGuard::ALLOWED.key?([c.name, name])
 
         "#{c.name}##{name} (#{c.instance_method(name).source_location&.join(':')})"
       }
