@@ -72,13 +72,13 @@ void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const str
 		const struct mb_signal *w, _Bool warped, const struct mb_signal *scan, double adv, double rndadv, double g, double off,
 		_Bool remove_dc, VALUE phase_state, VALUE tstate, VALUE noise);
 
-// OP_DYNAMICS: FastDynamics.compand for one channel (plan_dynamics.c,
-// through mb_dynamics.h) on input +in+ into +d+, with +nside+ detector
+// OP_DYNAMICS: FastDynamics.compand (plan_dynamics.c, through
+// mb_dynamics.h) on the +nch+ inputs +in+ into +out+, with +nside+ detector
 // signals +side+ and DT_COUNT times +tim+ (in samples); +obj+ is the
 // GraphNode::Dynamics (its @params, @plan_curve, @state, and @delay are
 // read each block).  Raises on bad objects.
 struct mb_signal;
-void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
+void mb_plan_dynamics(float *const *out, long nch, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n);
 
 // OP_DECIMATE: FastLofi.decimate (plan_lofi.c, through mb_decimate.h) on
 // the real input +in+ into +d+ at the hold rate +rate+ (Hz), then, unless

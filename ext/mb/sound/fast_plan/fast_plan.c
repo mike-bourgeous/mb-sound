@@ -95,7 +95,7 @@ enum {
 	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
 	OP_UNARY,     // dst, a, fn                  dst = fn(a) (see run_unary; Plan::Op::Unary)
 	OP_TAP,       // dst, a, object              object [buffer]: buffer[0...n] = a (Plan::Op::Tap); dst unused
-	OP_DYNAMICS,  // dst, a, object, sc, nside, side regs..., 5 time regs  dst = GraphNode::Dynamics (one channel) on a (see run_dynamics)
+	OP_DYNAMICS,  // dst, nch, object, sc, nside, nch input regs, nch - 1 more dst regs, side regs, 5 time regs  dst... = GraphNode::Dynamics (see run_dynamics)
 	OP_MIX,       // dst, nterms, sc, term regs...  dst = 0 + sum of (float)sc[k] * term k (see run_mix; Plan::Op::Mix)
 	OP_DECIMATE,  // dst, a, rate, mix, object, sc  dst = GraphNode::Decimator on a (see run_decimate; Plan::Op::Decimate)
 	OP_PAN_GAIN,  // dst, a, law, side, sc       dst = one side's pan law gain for positions a (see run_pan_gain; Plan::Op::PanGain)
@@ -1073,8 +1073,8 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 			len = 4 + (size_t)op[2];
 			break;
 		case OP_DYNAMICS:
-			if (pc + 6 > pw->nwords || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
-			len = 6 + (size_t)op[5] + 5;
+			if (pc + 6 > pw->nwords || op[2] < 1 || op[2] > 64 || op[5] < 1 || op[5] > 64) rb_raise(rb_eArgError, "Bad plan dynamics op at word %zu", pc);
+			len = 6 + 2 * (size_t)op[2] - 1 + (size_t)op[5] + 5;
 			break;
 		case OP_ENVELOPE:
 			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
@@ -1270,20 +1270,36 @@ static void op_signal(struct mb_signal *s, const struct regs *R, long nregs, int
 	}
 }
 
-// OP_DYNAMICS: dst, a, object, sc, nside, side registers (nside), then
-// DT_COUNT time registers (-1: the scalar sc[k]); object: the
-// GraphNode::Dynamics (see mb_plan_dynamics).
+// OP_DYNAMICS: dst, nch, object, sc, nside, nch input registers, nch - 1
+// more destination registers (channels 1 and up; channel 0 is dst), nside
+// side registers, then DT_COUNT time registers (-1: the scalar sc[k]);
+// object: the GraphNode::Dynamics (see mb_plan_dynamics).  Every channel
+// runs in one kernel call (a linked multichannel compressor shares one
+// detector).  The register allocator gives every destination its own slot,
+// apart from the operands.
 static void run_dynamics(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
 {
-	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan dynamics are real");
+	long nch = op[2];
+	long nside = op[5];
 	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan dynamics object at word %zu", pc);
 	if (op[4] < 0 || (size_t)op[4] + 5 > nscalars) rb_raise(rb_eArgError, "Bad plan dynamics scalars at word %zu", pc);
-	long nside = op[5];
-	struct mb_signal in, side[nside], tim[5];
-	op_signal(&in, R, nregs, op[2], 0.0, pc);
-	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, op[6 + k], 0.0, pc);
-	for (long k = 0; k < 5; k++) op_signal(&tim[k], R, nregs, op[6 + nside + k], sc[op[4] + k], pc);
-	mb_plan_dynamics(R->p[op[1]], &in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
+	const int32_t *ins = op + 6;
+	const int32_t *dsts = ins + nch;
+	const int32_t *sides = dsts + nch - 1;
+	const int32_t *times = sides + nside;
+
+	float *out[nch];
+	struct mb_signal in[nch], side[nside], tim[5];
+	for (long c = 0; c < nch; c++) {
+		int d = c == 0 ? op[1] : dsts[c - 1];
+		if (d < 0 || d >= nregs || !R->p[d] || R->c[d]) rb_raise(rb_eArgError, "Bad plan dynamics destination at word %zu", pc);
+		if (ins[c] < 0 || ins[c] >= nregs || !R->p[ins[c]]) rb_raise(rb_eArgError, "Bad plan dynamics input at word %zu", pc);
+		out[c] = R->p[d];
+		op_signal(&in[c], R, nregs, ins[c], 0.0, pc);
+	}
+	for (long k = 0; k < nside; k++) op_signal(&side[k], R, nregs, sides[k], 0.0, pc);
+	for (long k = 0; k < 5; k++) op_signal(&tim[k], R, nregs, times[k], sc[op[4] + k], pc);
+	mb_plan_dynamics(out, nch, in, side, nside, tim, rb_ary_entry(objects, op[3]), n);
 }
 
 // OP_MIX: dst, nterms, sc, then nterms real registers: one output row of

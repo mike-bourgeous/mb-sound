@@ -211,6 +211,10 @@ module MB
                 else
                   define(v, :slot, nil, take_slot)
                 end
+                # Ops computing several Values (a multichannel Dynamics)
+                # take a slot for each before their operands are freed
+                extra = op.respond_to?(:extra_dsts) ? op.extra_dsts : nil
+                extra&.each { |x| x.equal?(@program.output) ? define(x, :out, 0, nil) : define(x, :slot, nil, take_slot) }
               end
 
               # Free operands that die here (after the destination is taken)
@@ -222,8 +226,10 @@ module MB
               end
 
               # A value nobody reads (other than the output) frees its slot
-              if !last_use.key?(v) && !v.equal?(@program.output) && !@reserved[v] && (slot = @regs[v].last)
-                @free << slot
+              (extra ? [v] + extra : [v]).each do |x|
+                if !last_use.key?(x) && !x.equal?(@program.output) && !@reserved[x] && (slot = @regs[x].last)
+                  @free << slot
+                end
               end
             end
           end
@@ -288,8 +294,8 @@ module MB
             when Op::Dynamics
               @objects << op.dynamics
               cnum = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
-              [OPCODES[:dynamics], reg(op.dst), reg(op.a), @objects.length - 1, scalar(*op.times.map(&cnum)), op.sides.length,
-               *op.sides.map { |v| reg(v) }, *op.times.map { |v| value_reg(v) }]
+              [OPCODES[:dynamics], reg(op.dst), op.channels.length, @objects.length - 1, scalar(*op.times.map(&cnum)), op.sides.length,
+               *op.channels.map { |v| reg(v) }, *op.extra_dsts.map { |v| reg(v) }, *op.sides.map { |v| reg(v) }, *op.times.map { |v| value_reg(v) }]
             when Op::Tap
               @objects << op.holder
               [OPCODES[:tap], reg(op.dst), reg(op.a), @objects.length - 1]

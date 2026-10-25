@@ -31,7 +31,7 @@ static double *dyn_ivar(VALUE obj, ID id, long min, const char *what, _Bool writ
 	return (double *)(nary_get_pointer_for_write(v) + nary_get_offset(v));
 }
 
-void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n)
+void mb_plan_dynamics(float *const *out, long nch, const struct mb_signal *in, const struct mb_signal *side, long nside, const struct mb_signal *tim, VALUE obj, size_t n)
 {
 	if (!id_params) {
 		id_params = rb_intern("@params");
@@ -46,13 +46,13 @@ void mb_plan_dynamics(float *d, const struct mb_signal *in, const struct mb_sign
 	long nseg = (long)RNARRAY_SIZE(curve) / 5;
 	long la = (long)par[DP_LOOKAHEAD];
 	if (la < 0) rb_raise(rb_eArgError, "Lookahead must not be negative");
-	if (par[DP_LINK] == 0 && nside != 1) rb_raise(rb_eArgError, "An unlinked planned dynamics node needs one detector signal");
+	long ndet = par[DP_LINK] != 0 ? 1 : nch;
+	if (par[DP_LINK] == 0 && nside != nch) rb_raise(rb_eArgError, "An unlinked planned dynamics node needs one detector signal per channel");
 	if (nside < 1) rb_raise(rb_eArgError, "A planned dynamics node needs a detector signal");
 
-	double *st = dyn_ivar(obj, id_state, DYN_DET_STATE + 1, "state", 1);
-	double *dl = la > 0 ? dyn_ivar(obj, id_delay, la, "delay", 1) : NULL;
+	double *st = dyn_ivar(obj, id_state, ndet * DYN_DET_STATE + 1, "state", 1);
+	double *dl = la > 0 ? dyn_ivar(obj, id_delay, nch * la, "delay", 1) : NULL;
 
-	float *out[1] = { d };
-	mb_dyn_compand(out, 1, in, side, nside, tim, par, seg, nseg, st, dl, (long)n);
+	mb_dyn_compand(out, nch, in, side, nside, tim, par, seg, nseg, st, dl, (long)n);
 	RB_GC_GUARD(curve);
 }
