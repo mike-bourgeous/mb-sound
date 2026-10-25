@@ -26,6 +26,8 @@ RSpec.describe(QuickSelection) do
   end
 
   it 'has a committed map whose covering set mostly still exists' do
+    skip 'rake spec:quick:map is recording the map' if ENV['MB_SOUND_COVERAGE_PER_FILE']
+
     map = QuickSelection.load_map
     expect(map).not_to be_nil, 'no spec/quick_map.json: run rake spec:quick:map'
     gone = map['cover'] - QuickSelection.spec_files

@@ -444,13 +444,21 @@ namespace :spec do
       times = ParallelSpecs.known_times
       abort "spec:quick:map: no #{times_path}: run rake spec:parallel once first" if times.empty?
 
-      Dir.mktmpdir('quick-map') do |dir|
-        ENV['MB_SOUND_COVERAGE_PER_FILE'] = dir
-        ENV['MB_SOUND_SPEC_BUDGET'] = 'report' # (coverage makes examples slower than their budgets)
-        ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4))
-        ENV.delete('MB_SOUND_COVERAGE_PER_FILE')
-        File.write(times_path, saved) if saved
-        abort 'spec:quick:map: failures in the coverage run (no map written)' unless ok
+      # QUICK_COV=dir keeps the coverage there (and reuses it if it has a run)
+      keep = ENV['QUICK_COV']
+      Dir.mktmpdir('quick-map') do |tmp|
+        dir = keep || tmp
+        if keep && Dir[File.join(keep, '*.json')].any?
+          puts "spec:quick:map: reusing the coverage in #{keep}"
+        else
+          FileUtils.mkdir_p(dir)
+          ENV['MB_SOUND_COVERAGE_PER_FILE'] = dir
+          ENV['MB_SOUND_SPEC_BUDGET'] = 'report' # (coverage makes examples slower than their budgets)
+          ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4))
+          ENV.delete('MB_SOUND_COVERAGE_PER_FILE')
+          File.write(times_path, saved) if saved
+          abort 'spec:quick:map: failures in the coverage run (no map written)' unless ok
+        end
 
         map = QuickSelection.build_map(dir, times)
         File.write(QuickSelection::MAP_PATH, JSON.pretty_generate(map) + "\n")

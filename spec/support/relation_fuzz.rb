@@ -34,12 +34,14 @@ module RelationFuzz
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the code, 'reason'], ...] }: skipped, counted.
   PAN_HOLD = [/\.pan\(.*\.sample_hold\(/, 'plans give a wrong right channel for a pan over a sum with an ending input, read per channel (test-tiers-1 report, 2026-10-25)'].freeze
-  COMPLEX_HOLD = [/sweep\("(HilbertIIR|complex matrix \(Analytic\))"\).*\.sample_hold\(/, 'SampleHold raises RangeError on complex input (test-tiers-1 report)'].freeze
   HARMONICS = [/sweep\("harmonics \(HarmonicTable\)"\)/, 'harmonics(update: 64) differs by up to 0.3 at other buffer sizes (test-tiers-1 report)'].freeze
-  DECIMATE_FAST = [/decimate\(\d+\.hz\.lfo/, ":fast sines in a decimate rate move hold instants by a sample (steps of up to 0.02; test-tiers-1 report)"].freeze
+  # :fast sines driving discrete decisions: decimate's hold instants move
+  # by a sample (steps up to 0.02), and sah's LFO clock fires on other
+  # samples, so its random draws differ (RMS -15 dB); :exact is identical
+  FAST_DECISIONS = [/decimate\(\d+\.hz\.lfo|sweep\("sample_hold"\)|\.sah\(/, ':fast sines feeding discrete decisions (test-tiers-1 report)'].freeze
   KNOWN = {
-    plan_exact: [PAN_HOLD, COMPLEX_HOLD], plan_fast: [PAN_HOLD, COMPLEX_HOLD, DECIMATE_FAST], plan_check: [PAN_HOLD, COMPLEX_HOLD],
-    recipe: [COMPLEX_HOLD], document: [COMPLEX_HOLD], buffer_size: [COMPLEX_HOLD, HARMONICS],
+    plan_exact: [PAN_HOLD], plan_fast: [PAN_HOLD, FAST_DECISIONS], plan_check: [PAN_HOLD],
+    buffer_size: [HARMONICS],
   }.freeze
 
   Expr = Struct.new(:kind, :args, :kids) do
@@ -88,11 +90,17 @@ module RelationFuzz
     /\Acapture tap/, # (live capture plumbing)
   ].freeze
 
+  # Sweep factories with complex outputs
+  COMPLEX_SWEEPS = ['HilbertIIR', 'complex matrix (Analytic)'].freeze
+
   # A sweep factory's graph (the code's `RelationFuzz.sweep(name)`)
   def sweep(name)
     f = GraphSweep.factories.find { |n, _| n == name } or raise ArgumentError, "no graph sweep factory #{name.inspect}"
     g = f[1].call(GraphSweep::Context.new)
-    g.respond_to?(:mixdown) && g.respond_to?(:outputs) && g.outputs.length > 1 ? g.mixdown : g
+    g = g.mixdown if g.respond_to?(:mixdown) && g.respond_to?(:outputs) && g.outputs.length > 1
+    # (complex signals into real-only steps are deliberate errors: clip says
+    # "can't process complex data")
+    COMPLEX_SWEEPS.include?(name) ? g.real : g
   end
 
   def leaf(rng)
