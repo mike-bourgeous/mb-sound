@@ -45,6 +45,14 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
       end
     end
 
+    it 'matches the held note marks (accent, pitch mark, flam mark)' do
+      r = compare { |v| v.accent * 0.5 + v.accent(0.3) * 0.25 + v.pitch_mark * 0.01 + v.flam_mark }
+      expect(op_names(r)).to include(:Events)
+      expect(r.regions.first.members.grep(MB::Sound::Notes::Accent).length).to eq(2)
+      expect(r.regions.first.members.grep(MB::Sound::Notes::PitchMark).length).to eq(1)
+      expect(r.regions.first.members.grep(MB::Sound::Notes::FlamMark).length).to eq(1)
+    end
+
     it 'matches note nodes on a file with the sustain pedal' do
       compare('spec/test_data/c2_sustain.mid') { |v| v.gate + v.number * 0.01 + v.trigger }
     end
