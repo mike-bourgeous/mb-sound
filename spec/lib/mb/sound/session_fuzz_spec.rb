@@ -26,6 +26,7 @@ RSpec.describe('session fuzzing') do
     failures = seeds.flat_map { |s| SessionFuzz.run_seed(s, counts: counts) }
     summary = counts.sort.map { |k, v| "#{k} #{v}" }.join(', ')
     puts "session fuzz: #{seeds.length} seeds: #{summary}" if ENV['FUZZ'] || ENV['FUZZ_SEED']
+    expect(counts[:invalid]).to be <= [seeds.length * 0.1, 1].max, "#{counts[:invalid]} songs had generated user errors (SessionFuzz::INVALID)"
     expect(failures).to eq([]), failures.map(&:to_s).join("\n\n")
   end
 

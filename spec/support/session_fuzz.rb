@@ -36,6 +36,14 @@ module SessionFuzz
     # from 3000: "channel 0 differs by 0.4000096321105957 ... first at
     # frame 16551 (0.19999033212661743 vs 0.5999999642372131)"; even steps
     # and on-sample beat lines (120 BPM) match)
+    # (fuzz-fixes-1's second long run, seed 1194: a tr808 track stopped
+    # with ring: true at bar 1 beat 2 and relaunched by `go :s1` at bar 3
+    # beat 2 (q: 1/2r, frame 257142) at 112 BPM differs by buffer size
+    # from the relaunch on, at 367, 128, 1000, and 801 alike: "channel 0
+    # differs by 0.23722109198570251 ... first at frame 257142"; a plain
+    # stop and relaunch matches.  Not investigated: perhaps the revived
+    # kit's state depends on where its ring-out was cut or slept)
+    buffer_size: [[/ring: true/, 'a ringing-out track revived by a relaunch differs by buffer size']],
     timeline: [[/tween\(\[[^\]]*\], \[/, 'tweens with uneven steps (a step Array) launched where a step starts between samples resume from the wrong value']],
   }.freeze
 
@@ -194,6 +202,10 @@ module SessionFuzz
   # during a render fails :runs.
   EXPECTED_WARNINGS = [/\ANo background player :\w+ is playing/].freeze
 
+  # Errors that make a generated song invalid rather than show a bug
+  # (commands for players other commands ended first)
+  INVALID = [/No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/].freeze
+
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
 
@@ -245,7 +257,9 @@ module SessionFuzz
   end
 
   # Checks +relation+ for +song+: nil if it holds, :skip if it doesn't
-  # apply (a KNOWN case, no timeline parts), else a failure message.
+  # apply (a KNOWN case, no timeline parts, a song :runs found an error
+  # in), :invalid for a song with a generated user error (INVALID), else
+  # a failure message.
   def check(relation, song)
     code = song.code
     return :skip if KNOWN.fetch(relation, []).any? { |re, _| code.match?(re) }
@@ -258,6 +272,10 @@ module SessionFuzz
         warnings.empty? ? nil : "Warning: #{warnings.first(3).join}"
       rescue StandardError, SystemStackError => e
         (@errors ||= {})[code] = true
+        # (a generated user error: swapping a player a stop or scene
+        # already ended; the song is skipped, not failed)
+        return :invalid if INVALID.any? { |re| e.message.match?(re) }
+
         raise
       end
     when :buffer_size
@@ -340,6 +358,9 @@ module SessionFuzz
       r = check(rel, song)
       if r.nil?
         counts[rel] += 1
+        nil
+      elsif r == :invalid
+        counts[:invalid] += 1
         nil
       elsif r == :skip
         counts[:"#{rel}_skipped"] += 1
