@@ -1116,7 +1116,11 @@ module MB
           left = max_frames - frames + skip
           if (end_pos = end_time&.call)
             to_go = end_pos - transport.position
-            left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
+            # (in Rationals: a Float rate made the product of an exact frame
+            # count land just above it, e.g. 204.00000000000003, so ceil
+            # rendered one frame past the end bar at some buffer sizes;
+            # fuzz-fixes-1's Session fuzzer)
+            left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * Rational(rate)).ceil)
           end
           left
         }

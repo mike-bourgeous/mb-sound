@@ -655,6 +655,18 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(out).to be_closed
     end
 
+    # fuzz-fixes-1 (the Session fuzzer's find): the frames left to the end
+    # bar were an exact Rational times the output's Float rate, so 204
+    # frames came out 204.00000000000003 and ceil rendered one more (in
+    # 3/4 at 120 BPM with 367-frame buffers)
+    [800, 367, 128].each do |size|
+      it "ends a bars: render exactly on the end bar (#{size}-frame buffers, 3/4)" do
+        out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        MB::Sound.render(out, bars: 3, buffer_size: size) { MB::Sound.bpm 120; MB::Sound.meter 3, 4; MB::Sound.bg(:a, 0.1.constant) }
+        expect(out.frames_written).to eq(3 * 3 * 24000)
+      end
+    end
+
     describe 'time limits' do
       # Instead of 10 minutes of rendering
       before { stub_const('MB::Sound::PlaybackMethods::MAX_RENDER_SECONDS', 0.5) }
