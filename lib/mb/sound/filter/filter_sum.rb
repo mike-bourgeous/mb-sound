@@ -28,7 +28,7 @@ module MB
           if @acc.nil? || @acc.length != data.length || @acc.class != data.class
             @acc = data.class.zeros(data.length)
           else
-            @acc.fill(0)
+            BufferHelper.zero(@acc)
           end
 
           for idx in 0...@filters.length

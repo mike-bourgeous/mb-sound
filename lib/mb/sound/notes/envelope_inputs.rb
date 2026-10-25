@@ -115,7 +115,7 @@ module MB
           count = buf.length
           trig = BufferHelper.zero(writable(:trigger, count))
           vel = writable(:velocity, count)
-          chk = writable(:choke, count).fill(0)
+          chk = BufferHelper.zero(writable(:choke, count))
 
           gate_first = vel_first = nil
           gate_uniform = vel_uniform = true

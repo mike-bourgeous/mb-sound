@@ -146,7 +146,7 @@ module MB
             first_sample = count - 1 if first_sample >= count
 
             if first_sample > 0
-              @buf[0...first_sample].fill(@old_constant)
+              BufferHelper.fill(@buf, @old_constant, 0, first_sample)
             end
 
             # Per-sample updates
@@ -171,7 +171,7 @@ module MB
                 local_buf.inplace! * (@constant - @old_constant)
                 local_buf.inplace! + @old_constant
               else
-                local_buf.fill(@constant)
+                BufferHelper.fill(@buf, @constant, sample, next_sample)
               end
 
               @old_constant = value
@@ -180,7 +180,7 @@ module MB
             @changes.clear
 
           else
-            @buf.fill(@constant)
+            BufferHelper.fill(@buf, @constant)
           end
 
           @old_constant = @constant

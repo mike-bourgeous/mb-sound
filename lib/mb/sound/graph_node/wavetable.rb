@@ -62,8 +62,8 @@ module MB
         #           (back and forth), :clamp (the ends), or :zero (silence);
         #           or :shape, for a phase from -1 to 1 spread across the
         #           cycle and clamped (see GraphNode#waveshape).
-        #           A graph node picks the mode from its output (the last
-        #           sample of each buffer), its range (a MIDI controller's
+        #           A graph node picks the mode from its output (per
+        #           sample, since omnibus13), its range (a MIDI controller's
         #           MIDI::ControlSpec range, e.g. from Notes#cc, else 0..1)
         #           scaled to cover the modes.
         def initialize(table:, phase:, sample_rate:, scan: 0, increment: nil, interpolation: nil, wrap: :wrap, scan_wrap: false)
@@ -126,25 +126,39 @@ module MB
             scan = MB::M.zpad(scan, count) if scan.length < count
           end
 
-          case @wrap
-          when Symbol
-            wrap = @wrap
-
-          else
-            # Node-controlled wrapping mode
-            data = @wrap.sample(count)
-            return nil if data.nil? || data.empty?
-
-            modes = NODE_WRAP_MODES
-            index = MB::M.scale(data[-1], @wrap_range, 0..modes.length).floor
-            index = 0 if index < 0
-            index = modes.length - 1 if index >= modes.length
-            wrap = modes[index]
-          end
-
           buf_class = @table.complex? ? Numo::SComplex : Numo::SFloat
           @buf = buf_class.zeros(count) if @buf.nil? || @buf.length != count
-          @table.lookup(@buf.inplace!, phi, inc, scan, @interpolation, @sample_rate, wrap, @lstate, scan_wrap: @scan_wrap).not_inplace!
+
+          if @wrap.is_a?(Symbol)
+            return @table.lookup(@buf.inplace!, phi, inc, scan, @interpolation, @sample_rate, @wrap, @lstate, scan_wrap: @scan_wrap).not_inplace!
+          end
+
+          # Node-controlled wrapping mode, per sample (omnibus13: it was the
+          # buffer's last sample's mode for the whole buffer, so mode changes
+          # moved with the buffer size); the lookup runs once per run of
+          # samples in one mode
+          data = @wrap.sample(count)
+          return nil if data.nil? || data.empty?
+
+          data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
+          data = MB::M.zpad(data, count) if data.length < count # (held at 0's mode past a short read)
+          modes = NODE_WRAP_MODES
+          idx = MB::M.scale(Numo::DFloat.cast(data[0...count]), @wrap_range, 0..modes.length).floor.clip(0, modes.length - 1)
+          first = idx[0].to_i
+          if idx.eq(first).all?
+            return @table.lookup(@buf.inplace!, phi, inc, scan, @interpolation, @sample_rate, modes[first], @lstate, scan_wrap: @scan_wrap).not_inplace!
+          end
+
+          starts = [0, *((idx[1..] - idx[0...-1]).ne(0).where + 1).to_a, count]
+          starts.each_cons(2) do |from, to|
+            seg = @table.lookup(
+              @buf[from...to].inplace!, phi[from...to], inc.is_a?(Numo::NArray) ? inc[from...to] : inc,
+              scan.is_a?(Numo::NArray) ? scan[from...to] : scan, @interpolation, @sample_rate, modes[idx[from].to_i], @lstate,
+              scan_wrap: @scan_wrap
+            )
+            @buf[from...to] = seg unless seg.equal?(@buf)
+          end
+          @buf.not_inplace!
         end
       end
     end

@@ -79,9 +79,21 @@ module MB
 
       # Everything else a Float does, done by the gain (results are plain
       # Floats, Integers, or Rationals).
+      # Binary operators and comparisons take one argument without a
+      # splat, so `gain < 0.5` allocates nothing (a splat's Array per call
+      # was hidden per-buffer garbage where render paths compare gains;
+      # `0.5 < gain` still goes through #coerce's Array: compare Floats on
+      # render paths, render_path_guard_spec).
+      BINARY = %i[+ - * / ** % < > <= >= <=> divmod fdiv quo modulo].freeze
       (Float.public_instance_methods(false) - [:coerce, :==, :===, :eql?, :hash, :inspect, :to_s, :to_f]).each do |name|
-        define_method(name) do |*args, &block|
-          @linear.public_send(name, *args, &block)
+        if BINARY.include?(name)
+          define_method(name) do |other|
+            @linear.public_send(name, other)
+          end
+        else
+          define_method(name) do |*args, &block|
+            @linear.public_send(name, *args, &block)
+          end
         end
       end
 

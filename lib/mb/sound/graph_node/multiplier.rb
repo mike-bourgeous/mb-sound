@@ -93,7 +93,7 @@ module MB
           if arithmetic_fast?(count, sampled, @constant)
             retbuf = arithmetic_view(@buf, count, :buf)
             unless MB::Sound::FastArithmetic.product(retbuf, @constant, sampled)
-              retbuf.fill(@constant)
+              BufferHelper.fill(retbuf, @constant)
               sampled.each { |v, _| retbuf.inplace * v }
             end
             return retbuf.not_inplace!
