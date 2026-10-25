@@ -153,8 +153,10 @@ module MB
             return :ended if @ended
 
             data = @flushing ? nil : @inputs.map { |i| i.sample(count) }
-            live = data&.compact&.reject(&:empty?)
-            if live.nil? || live.empty?
+            # (the shortest live input, without compact/reject/map Arrays)
+            n = nil
+            data&.each { |d| n = d.length if d && !d.empty? && (n.nil? || d.length < n) }
+            if n.nil?
               @flushing = true
               remaining = latency - @flushed
               if remaining <= 0
@@ -165,8 +167,7 @@ module MB
               @flushed += n
               data = Array.new(@inputs.length, nil)
             else
-              n = live.map(&:length).min
-              data = data.map { |d| d.nil? || d.empty? ? nil : (d.length > n ? d[0...n] : d) }
+              data.map! { |d| d.nil? || d.empty? ? nil : (d.length > n ? d[0...n] : d) }
             end
 
             outs = Framed.next_buffers(self, @inputs.length, n)
@@ -284,6 +285,7 @@ module MB
           @flushed = 0
           @plan_curve = nil # (set later; see GraphNode::IvarPreset)
           @params = nil
+          @times_list = nil # (reused by #process)
           reset_state
 
           super(@inputs.each_with_index.map { |input, idx| Output.new(owner: self, index: idx, input: input) })
@@ -393,7 +395,9 @@ module MB
             data
           end
 
-          times = @times.values.map { |s| fit(s.samples(n, @sample_rate) || 0, n) }
+          times = (@times_list ||= [])
+          times.clear
+          @times.each_value { |s| times << fit(s.samples(n, @sample_rate) || 0, n) }
           @params ||= kernel_params
           MB::Sound::FastDynamics.compand(outs, data, sides, @transfer.table, @params, times, @state, @delay)
         end
