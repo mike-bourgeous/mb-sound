@@ -407,6 +407,8 @@ module MB
           @routed_span = false
           @bus_tapped = ::Set.new
           @bus_sources = ::Set.new
+          @bus_tapped_for = nil # (the bus_ranks the two sets were made for)
+          @routed_order = nil # (see #routed_order)
           @stem_shadows = {}
         end
 
@@ -663,6 +665,43 @@ module MB
           }
         end
 
+        # Players and buses in routing order, as sorted [rank, kind, index,
+        # player or bus] rows, kept while the players, buses, and ranks are
+        # the same objects under the same names (most spans), with the
+        # span's bus Hash: [ranks, players, buses, rows, buses by name,
+        # player names] (alloc-2).
+        def routed_order(players, buses, ranks)
+          c = @routed_order
+          return c if c && c[0].equal?(ranks) && same_objects?(c[1], players) && same_objects?(c[2], buses) && same_names?(c[5], players)
+
+          items = players.each_with_index.map { |p, i| [rank_of(ranks, p.name), 0, i, p] } +
+            buses.each_with_index.map { |b, i| [ranks[b.name] || 0, 1, i, b] }
+          items.sort_by! { |r, kind, i, _| [r, kind, i] }
+          @routed_order = [ranks, players.dup, buses.dup, items, buses.to_h { |b| [b.name, b] }, players.map(&:name)]
+        end
+
+        # True if +players+ still have +names+ (a cue launch renames its
+        # player; see Cue).
+        def same_names?(names, players)
+          i = 0
+          while i < names.length
+            return false unless names[i].equal?(players[i].name)
+            i += 1
+          end
+          true
+        end
+
+        # True if Arrays +a+ and +b+ hold the same objects in order.
+        def same_objects?(a, b)
+          return false unless a.length == b.length
+          i = 0
+          while i < a.length
+            return false unless a[i].equal?(b[i])
+            i += 1
+          end
+          true
+        end
+
         def rank_of(ranks, name)
           ranks[name] || ((t = Arrangement::Recording.monitored_track(name)) && ranks[t]) || 0
         end
@@ -672,9 +711,11 @@ module MB
         # Called by #render_span with the render lock held.
         def render_routed(players, mix, from, to, per_sample, count, frame, playing)
           buses = @mutex.synchronize { @buses.values }
+          ranks = bus_ranks
+          order = routed_order(players, buses, ranks)
           @bus_span += 1
           @bus_span_count = count
-          @bus_span_buses = buses.to_h { |b| [b.name, b] }
+          @bus_span_buses = order[4]
           buses.each { |b| b.input = nil }
           # Stems: each track's own copy of every bus it reaches (see
           # #stem_shadow), following its bus's mute
@@ -686,17 +727,18 @@ module MB
               sh.strip_ramp = b&.strip_ramp
             end
           end
-          @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
-          @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
+          # (readers change only with the routing, which makes new ranks)
+          unless @bus_tapped_for.equal?(ranks)
+            @bus_tapped = @mutex.synchronize { @bus_readers.each_value.flat_map(&:to_a).to_set }
+            @bus_sources = @bus_tapped.to_set { |k| k.is_a?(Array) ? k[0] : k }
+            @bus_tapped_for = ranks
+          end
           @send_knobs.each { |k| k.read(frame, count) } unless @send_knobs.empty?
           # Bus and send meters for the terminal UI (UI::BusMeter), while a
           # pane shows them
           @ui_bus_meter = @ui_feed&.bus_meter(self)
 
-          ranks = bus_ranks
-          items = players.each_with_index.map { |p, i| [rank_of(ranks, p.name), 0, i, p] } +
-            buses.each_with_index.map { |b, i| [ranks[b.name] || 0, 1, i, b] }
-          items.sort_by! { |r, kind, i, _| [r, kind, i] }
+          items = order[3]
 
           parts = @stems ? {} : nil
           prepare_stem_shadows(players, to) if parts
