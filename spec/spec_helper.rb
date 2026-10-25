@@ -1,3 +1,6 @@
+# Per-spec-file coverage for rake spec:quick:map (spec/support/per_file_coverage.rb)
+require_relative 'support/per_file_coverage' if ENV['MB_SOUND_COVERAGE_PER_FILE']
+
 require 'fileutils'
 
 # Ruby warnings fail the example that printed them (or the run, for
@@ -64,6 +67,7 @@ require_relative 'support/buffer_size_helpers'
 require_relative 'support/smoke_runs'
 require_relative 'support/warning_guard_hooks' # after spec_tmp, before subprocess_coverage
 require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
+PerFileCoverage.setup_subprocesses! if ENV['MB_SOUND_COVERAGE_PER_FILE'] # after warning_guard_hooks
 require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
 require_relative 'support/midi_list_source'
