@@ -583,6 +583,9 @@ module MB
             }
             # (#rehearse plays only tracks whose every build was played)
             @mutex.synchronize { @rehearsable[tr.name] = how.all?(:played) ? tr.patch : false } if play
+            # The rehearsal's short sections never reach a voice's second
+            # note: an exercise does (see #warm_exercise)
+            warm_exercise(tr, clips[0]) if play && form && how.all?(:played)
             result[tr.name] = [((MB::U.clock_now - t0) * 1000).round(1), how.include?(:built) ? :built : :played]
           end
         end
@@ -781,6 +784,49 @@ module MB
         nil
       ensure
         boxes&.each(&:close)
+      end
+
+      # Notes per round, rounds, and the step between rounds (whole notes)
+      # of #warm_exercise.
+      EXERCISE_NOTES = 8
+      EXERCISE_ROUNDS = 6
+      EXERCISE_STEP = 1/32r
+
+      # Plays self-contained track +tr+'s patch alone in a sandbox (see
+      # #warm_build) with an exercise made from +clip+'s notes: rounds of
+      # every note (up to EXERCISE_NOTES) an EXERCISE_STEP apart, each held
+      # three steps, at alternating velocities, so voices are reused,
+      # re-struck on held keys, stolen, and released within half a bar.
+      # #rehearse plays each section a few sixteenths long, so a synth
+      # there plays only its first notes, and its second notes compiled
+      # on the render thread live (memory_card's pad at 128 frames: 45 ms
+      # in bar 2, phase jumps of reused voices; 18 ms in bar 3, stealing;
+      # alloc-2).  Kits (a Sequence::Kit) and clips without notes are
+      # skipped, and a patch that can't take the exercise is skipped
+      # silently (it's only a warm-up).  Returns true if it played.
+      def warm_exercise(tr, clip)
+        return false unless clip.is_a?(Sequence::Clip)
+        values = clip.values.first(EXERCISE_NOTES)
+        return false if values.empty?
+
+        events = []
+        EXERCISE_ROUNDS.times do |r|
+          values.each do |v|
+            events << Sequence::Event.new(start: r * EXERCISE_STEP, length: 3 * EXERCISE_STEP, value: v, velocity: r.even? ? 1.0 : 0.5)
+          end
+        end
+        exercise = Sequence::Clip.new(events)
+
+        box = warm_sandbox
+        graph = Session.with_context(session: box) { tr.patch.call(exercise) }
+        box.add(graph, on: :now)
+        bar = (box.transport.bar_length / box.transport.whole_notes_per_second * box.sample_rate).to_f
+        (bar * WARM_UP_BARS / box.buffer_size).ceil.times { box.process_buffer }
+        true
+      rescue StandardError
+        false
+      ensure
+        box&.close
       end
 
       # The nodes of +graph+ (a Hash of node => true compared by identity;

@@ -39,7 +39,10 @@
 # --yjit-log=quiet' (--yjit-disable keeps Ruby from starting YJIT itself,
 # which would fix Ruby's call threshold of 30 instead of MB::Sound::JIT's), the
 # slowest buffers also list what compiled in them ("blocks for new types
-# or shapes" are YJIT chain versions).  Offline renders play once with
+# or shapes" are YJIT chain versions; SCENE_PROFILE_JIT_TOP=N lists N
+# methods instead of 6).  The profiler's own hooks compile in the first
+# live buffers too (the sandboxes skip them), so read past
+# bin/scene_profile.rb lines there.  Offline renders play once with
 # loudness: false, as live (a mastered song's targeted render would play
 # it twice, recording every buffer).  -R --band also paints the terminal
 # UI's deck (to /dev/null) as a song's --ui does.  Container realtime
@@ -73,7 +76,7 @@ module SceneProfile
 
   class << self
     attr_reader :phases, :blocks, :buffers
-    attr_accessor :landed
+    attr_accessor :landed, :players
 
     def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -184,7 +187,11 @@ module SceneProfile
       return super unless output.is_a?(EmuOutput) || output.is_a?(CountingOutput)
 
       nb = SceneProfile.blocks.length
-      @scene_players = {}
+      # (in a module variable, not an instance variable of the Session: a
+      # variable only the profiled Session had changed its shape, and YJIT
+      # compiled new versions of the Session's code in the first live
+      # buffers; alloc-2)
+      SceneProfile.players = players = {}
       SceneProfile.landed = 0
       gc0 = GC.stat(:time)
       majors = GC.stat(:major_gc_count)
@@ -204,10 +211,10 @@ module SceneProfile
       # (offline, the scheduled blocks' own compiling is theirs)
       yd[:compile_time_ns] -= SceneProfile.blocks[nb..].sum { |b| b[:yjit]&.[](:compile_time_ns).to_i } if offline && yd[:compile_time_ns]
       SceneProfile.buffers << {
-        secs: secs, cpu: cpu, other: secs - @scene_players.sum { |_, v| v },
+        secs: secs, cpu: cpu, other: secs - players.sum { |_, v| v },
         gc: GC.stat(:time) - gc0, yjit: yd, landed: SceneProfile.landed,
         major: (GC.latest_gc_info(:major_by) if GC.stat(:major_gc_count) != majors),
-        players: @scene_players, bar: transport.bar_at(transport.position).to_f,
+        players: players, bar: transport.bar_at(transport.position).to_f,
         jit: (SceneProfile.jit_log_since(w0) if yd[:compile_time_ns].to_i > 1_000_000),
       }
       r
@@ -225,7 +232,7 @@ module SceneProfile
       t0 = SceneProfile.clock
       super
     ensure
-      @scene_players["#{p.name}#{first ? '*' : ''}"] = SceneProfile.clock - t0 if @scene_players
+      SceneProfile.players["#{p.name}#{first ? '*' : ''}"] = SceneProfile.clock - t0 if SceneProfile.players
     end
   end
 
@@ -419,7 +426,7 @@ module SceneProfile
         puts format('  bar %6.2f %-18s %7s ms%s', b[:bar], b[:desc][0, 18], ms(b[:secs]), extra.empty? ? '' : " (#{extra})")
         phases = phase_text(b[:id], 6)
         puts "      #{phases}" unless phases.empty?
-        jit = jit_text(b[:jit], 6)
+        jit = jit_text(b[:jit], (ENV["SCENE_PROFILE_JIT_TOP"] || 6).to_i)
         puts "      #{jit}" if jit
       end
     end
@@ -448,7 +455,7 @@ module SceneProfile
         players = b[:players].sort_by { |_, v| -v }.first(4).map { |n, v| "#{n} #{ms(v)}" }.join(', ')
         extra = [("GC #{b[:gc]} ms" if b[:gc] > 0), yjit_text(b[:yjit]).then { |t| t.empty? || b[:yjit][:compile_time_ns] < 1e6 ? nil : t }, ("#{b[:landed]} change#{b[:landed] == 1 ? "" : "s"} landed" if b[:landed] > 0)].compact.join('; ')
         puts format('    bar %6.2f %7s ms (CPU %s, outside players %s)%s  %s', b[:bar], ms(b[:secs]), ms(b[:cpu]), ms(b[:other]), extra.empty? ? '' : " (#{extra})", players)
-        jit = jit_text(b[:jit], 6)
+        jit = jit_text(b[:jit], (ENV["SCENE_PROFILE_JIT_TOP"] || 6).to_i)
         puts "        #{jit}" if jit
       end
       compiling = @buffers.select { |b| b[:yjit][:compile_time_ns].to_i > 1_000_000 }
@@ -500,6 +507,21 @@ if MB::Sound.main_script?(__FILE__)
     bars = p.bars || (p.realtime ? [32, song_bars || 32].min : song_bars) or raise ArgumentError, "#{song} has no length; give --bars"
     yjit = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
     startup = MB::Sound.warm_up # as live scripts do
+    # The profiler's own hooks run only for the profiled Session, so they
+    # compiled in its first buffers (half of bar 1's compiling at 128
+    # frames, counted as the song's; alloc-2): run them on a throwaway
+    # Session first, and forget what it recorded
+    begin
+      box = MB::Sound::Session.new(realtime: false, output: SceneProfile::CountingOutput.new(p.buffer), buffer_size: p.buffer, channels: 2,
+        transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      MB::Sound::Session.with_context(session: box) do
+        box.add(0.constant, on: :now)
+        60.times { box.process_buffer }
+      end
+    ensure
+      box&.close
+      SceneProfile.buffers.clear
+    end
     quiet = File.open(File::NULL, 'w')
 
     if p.realtime
