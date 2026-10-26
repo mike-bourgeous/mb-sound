@@ -16,7 +16,7 @@ RSpec.describe('UI data files', :aggregate_failures) do
     ENV['MB_SOUND_UI_DIR'] = old
     ui::Themes.use(:default)
     ui::Themes.all.delete(:mine)
-    %i[mix notes cutoff].each { |n| ui.panes.delete(n) }
+    %i[mix notes cutoff patch].each { |n| ui.panes.delete(n) }
     ui.tile_layouts.delete(:saved_one)
   end
 
@@ -84,10 +84,13 @@ RSpec.describe('UI data files', :aggregate_failures) do
         pane :mix, kind: :meters, title: 'mix', rate: 15
         pane :notes, kind: :text, lines: ['drop at 33', 'break at 49'], role: :name
         pane :cutoff, kind: :knob, knob: :cut
+        pane :patch, kind: :inspector, title: 'patch', height: 10
       RUBY
       r = ui.reload_files
       expect(r[:errors]).to eq([])
-      expect(r[:panes]).to eq(%i[mix notes cutoff])
+      expect(r[:panes]).to eq(%i[mix notes cutoff patch])
+      expect(ui.panes[:patch]).to be_a(ui::Panes::Inspector)
+      expect([ui.panes[:patch].title, ui.panes[:patch].needs]).to eq(['patch', [:inspect]])
       expect(ui.panes[:mix]).to be_a(ui::Panes::Meters)
       expect([ui.panes[:mix].title, ui.panes[:mix].rate]).to eq(['mix', 15])
       expect(ui.panes[:notes].height).to eq(2)
