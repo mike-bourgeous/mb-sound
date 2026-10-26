@@ -173,6 +173,7 @@ module UIHelpers
       @vt = MB::Sound::UI::VT.new(rows, cols, scrollback: 0)
       @lock = Mutex.new
       @bytes = 0
+      @replies = [] # the last few [time, bytes] the VT answered (for #wait_input_idle's failures)
       @reader = Thread.new do
         loop do
           d = @master.readpartial(65_536)
@@ -180,7 +181,11 @@ module UIHelpers
             @bytes += d.bytesize
             @vt.feed(d)
             r = @vt.take_replies
-            @master.write(r) unless r.empty?
+            unless r.empty?
+              @replies << [MB::U.clock_now, r]
+              @replies.shift while @replies.length > 8
+              @master.write(r)
+            end
           end
         end
       rescue IOError, SystemCallError
@@ -190,6 +195,13 @@ module UIHelpers
 
     # Bytes the screen wrote so far.
     def bytes = @lock.synchronize { @bytes }
+
+    # The terminal's last answers to the screen's queries, as text with
+    # their ages ("\e[4;1R 2.31 s ago"), for failure messages.
+    def recent_replies
+      now = MB::U.clock_now
+      @lock.synchronize { @replies.map { |t, r| format('%s %.2f s ago', r.inspect, now - t) } }
+    end
 
     # Types +str+ a character at a time (as a person would).
     def type(str, delay: 0.002)
@@ -333,7 +345,8 @@ module UIHelpers
     end
     "not idle after #{timeout} s: #{term.unread} bytes unread, decoder #{decoder.pending? ? 'pending' : 'clear'}, " \
       "reader #{status.inspect}#{died ? " (#{died})" : ''}#{reader&.alive? && status != 'sleep' ? " at #{reader.backtrace&.first(4)&.join(' < ')}" : ''}, " \
-      "input lock #{locked.call ? 'held' : 'free'}"
+      "input lock #{locked.call ? 'held' : 'free'}" \
+      "#{term.respond_to?(:recent_replies) && !term.recent_replies.empty? ? "; terminal replies: #{term.recent_replies.join(', ')}" : ''}"
   end
 
   # As #wait_until, with the block run under +tiles+' input lock (see
