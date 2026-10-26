@@ -100,3 +100,4 @@ A merge isn't finished until these are done, in this order, without being asked 
 - Vernier (Ruby 3.2+ sampling profiler using thread event hooks: per-thread running/GVL-wait/blocked/GC timeline and markers in the Firefox Profiler; for render-thread stalls and Synth bookkeeping), after fuse-more-1 + fixes-1025 (2026-10-25)
 - Custom lint rules as RuboCop cops (node patterns, autocorrect, disable-with-reason comments, Prism parser; the guard specs' bug classes as project cops), after omnibus13 (2026-10-25)
 - Minimax polynomials (Remez exchange, equioscillation; Sollya fpminimax with float coefficients and constraints like an exact peak or odd symmetry; for the shared fast sine), after fast-sine-1 (2026-10-25)
+- Endless encoders and relative MIDI CCs (twos complement / binary offset / sign magnitude, acceleration; learn relative: adding clicks in Param position space), after sound-design-ui-1 (2026-10-26)
