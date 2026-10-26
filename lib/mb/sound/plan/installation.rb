@@ -28,6 +28,10 @@ module MB
         # SharedInputs can tell when to recompute.
         attr_reader :generation
 
+        # How many times the installation rebuilt after it was first built
+        # (for stats and specs; see #rebuild).
+        attr_reader :rebuilds
+
         # The LaneGroups of this installation's own regions (see
         # Plan.install), regrouped after each rebuild; nil when a Synth
         # groups its lanes' regions itself, or with Plan.lanes off.
@@ -48,6 +52,7 @@ module MB
           @watched = []
           @stale = false
           @generation = 0
+          @rebuilds = 0
           @shared = nil
           @retired = {}.compare_by_identity
         end
@@ -145,6 +150,7 @@ module MB
         # regroups the new regions (see #lane_groups) unless +regroup+ is
         # false.
         def rebuild(regroup: true)
+          @rebuilds += 1
           # Readers of shared inputs may change in the middle of a block
           @shared&.guard!
           uninstall
@@ -195,7 +201,19 @@ module MB
           warn "Plan: unsupported #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
           @excluded[node] = why
           @unsupported[node] = true
+          mark_excluded(node)
           stale!
+        end
+
+        # True if this installation leaves +node+ out of its regions (see
+        # #exclude, #unsupported!).
+        def excludes?(node)
+          @excluded.key?(node)
+        end
+
+        # Why +node+ is left out (nil if it isn't).
+        def exclusion_reason(node)
+          @excluded[node]
         end
 
         # The nodes left out of every region, with why (a Hash).
@@ -213,6 +231,7 @@ module MB
 
           warn "Plan: excluding #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
           @excluded[node] = why
+          mark_excluded(node)
           if until_restart && node.respond_to?(:plan_generation)
             watch = RestartWatch.new(self, node, node.plan_generation)
             node.instance_variable_set(:@plan_restart, watch)
@@ -236,9 +255,10 @@ module MB
           back.each do |w|
             w.node.instance_variable_set(:@plan_restart, nil)
             @excluded.delete(w.node)
+            unmark_excluded(w.node)
             warn "Plan: replanning #{Plan.node_label(w.node)}: its MIDI stream jumped" if ENV['MB_SOUND_PLAN_DEBUG']
           end
-          @unsupported.each_key { |n| @excluded.delete(n) }
+          @unsupported.each_key { |n| @excluded.delete(n); unmark_excluded(n) }
           @unsupported.clear
           stale!
         end
@@ -307,11 +327,35 @@ module MB
 
           owner = node.instance_variable_get(:@plan_region) || node.instance_variable_get(:@plan_member)
           return 'planned by another installation' if owner && !owner.installation.equal?(self)
+          # Left out by the installation that planned it (e.g. a Synth
+          # lane's envelope whose stream ended): another installation
+          # reaching it (the Session player's, through the Synth) would
+          # only find the same reason later, rebuilding its whole graph
+          # for each such node (render-rebuild-1: fm_bass's player
+          # installation took over 32 lane nodes the lanes had left out,
+          # then rebuilt 18 times as their envelopes ended)
+          ex = node.instance_variable_get(:@plan_excluded)
+          return "left out by another installation (#{ex.exclusion_reason(node)})" if ex && !ex.equal?(self) && ex.excludes?(node)
 
           node.plan_unsupported_reason
         end
 
         private
+
+        # Marks +node+ as left out by this installation (see
+        # #candidate_reason), unless another installation marked it first.
+        def mark_excluded(node)
+          return unless node.respond_to?(:sample) || node.is_a?(MultiDescribable)
+
+          ex = node.instance_variable_get(:@plan_excluded)
+          return if ex && !ex.equal?(self) && ex.excludes?(node)
+
+          node.instance_variable_set(:@plan_excluded, self)
+        end
+
+        def unmark_excluded(node)
+          node.instance_variable_set(:@plan_excluded, nil) if node.instance_variable_get(:@plan_excluded).equal?(self)
+        end
 
         # Visits every object reachable from the roots through #sources,
         # recording who reads what, in an order where readers come first.

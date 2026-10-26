@@ -392,23 +392,31 @@ module MB
           # and replan with it as a boundary (see EventList)
           feeders = @feeders
           unless feeders.empty?
+            finished = false
             k = 0
             while k < feeders.length
               f = feeders[k]
-              if f.plan_finished?(count)
-                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x|
-                  @installation.exclude(x, 'its event stream is over', until_restart: true)
-                  # Nodes reading it directly (not through a Tee) leave
-                  # with it, in the same rebuild (omnibus13: an
-                  # EnvelopeInputs' three Ports, found one region compile
-                  # at a time, rebuilt fm_bass's lanes 24-78 times in one
-                  # buffer)
-                  x.plan_direct_readers.each { |r| @installation.exclude(r, 'reads a node whose event stream is over', until_restart: true) } if x.respond_to?(:plan_direct_readers)
-                }
-                @result = run_unfused(count)
-                return :done
-              end
               k += 1
+              next unless f.plan_finished?(count)
+
+              # Every feeder finished in this block leaves at once, in one
+              # rebuild (render-rebuild-1: the four envelopes of an fm_bass
+              # lane, on one stream, were found one per block, each block
+              # unfused and each a rebuild of the lane)
+              finished = true
+              (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x|
+                @installation.exclude(x, 'its event stream is over', until_restart: true)
+                # Nodes reading it directly (not through a Tee) leave
+                # with it, in the same rebuild (omnibus13: an
+                # EnvelopeInputs' three Ports, found one region compile
+                # at a time, rebuilt fm_bass's lanes 24-78 times in one
+                # buffer)
+                x.plan_direct_readers.each { |r| @installation.exclude(r, 'reads a node whose event stream is over', until_restart: true) } if x.respond_to?(:plan_direct_readers)
+              }
+            end
+            if finished
+              @result = run_unfused(count)
+              return :done
             end
           end
 

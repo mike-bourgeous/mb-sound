@@ -95,7 +95,7 @@ module MB
         :@node_type_name, :@graph_node_name, :@named, :@graph_recipe, :@graph_io_document,
         :@channel_group, :@internal_tee, :@feedback_sources, :@handled_spies,
         :@plan_bypass, :@plan_installations, :@plan_member, :@plan_region,
-        :@plan_observed, :@plan_handoff, :@plan_restart
+        :@plan_observed, :@plan_handoff, :@plan_restart, :@plan_excluded
       )
 
       # The nodes that carry this node's output channels.  Every node has

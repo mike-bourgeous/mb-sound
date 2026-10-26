@@ -222,6 +222,7 @@ module MB
           @plan_observed = nil
           @plan_handoff = nil
           @plan_restart = nil
+          @plan_excluded = nil
 
           setup(inputs, settings)
 
