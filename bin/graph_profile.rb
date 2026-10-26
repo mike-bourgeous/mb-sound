@@ -5,7 +5,9 @@
 # where it would play, then its graph is captured instead (effects and
 # synths through ScriptRunner; songs through MB::Sound.bg, taking the
 # players launched immediately).  Only the graph is measured: no Session
-# mixing, master effects, or output.
+# mixing, master effects, or output, and so never a mastered render's
+# loudness targeting (one pass; Mastering::Targeting's pass 1 would record
+# every buffer, adding old objects and major GCs to the measurement).
 #
 # --profile wraps every node's #sample, which adds about 3 us per call, so
 # cheap nodes called often (Constant, Tee branches) look more expensive than
