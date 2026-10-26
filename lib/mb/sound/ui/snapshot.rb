@@ -6,15 +6,17 @@ module MB
       # the painter thread by Poll from public APIs that never take the
       # render lock.  Frozen plain data.
       Slow = Data.define(:tracks, :scenes, :scene, :queued, :recording, :armed, :form, :knob_specs, :buses, :routes, :landed, :clips, :midi,
-                         :matrix, :racks, :clocks, :inspector) do
+                         :matrix, :racks, :clocks, :inspector, :render_source) do
         # (The fields ux-1 r3 added default to empty: +buses+ BusInfos,
         # +routes+ (player => { to:, send: { bus => level } }), +landed+
         # LandedInfos (newest last), +clips+ ClipInfos, +midi+ a MidiInfo;
         # UI round 4: +matrix+ a MatrixInfo (or nil), +racks+ Rack::RackInfos;
         # time-automation: +clocks+ ClockInfos; sound-design-ui-1: +inspector+
-        # an Inspect::InspectInfo while a pane needs :inspect, else nil)
+        # an Inspect::InspectInfo while a pane needs :inspect, else nil;
+        # sound-design-ui-2: +render_source+ the inspected track's
+        # PatchRender::Source while a pane needs :render, else nil)
         def initialize(tracks:, scenes:, scene:, queued:, recording:, armed:, form:, knob_specs:, buses: [].freeze, routes: {}.freeze,
-                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil)
+                       landed: [].freeze, clips: [].freeze, midi: nil, matrix: nil, racks: [].freeze, clocks: [].freeze, inspector: nil, render_source: nil)
           super
         end
 
@@ -211,6 +213,7 @@ module MB
         def racks = slow.racks
         def clocks = slow.clocks
         def inspector = slow.inspector
+        def render_source = slow.render_source
 
         # Track +name+'s state for the clip matrix: the player's state this
         # buffer (#parts: :playing, :starting, :stopping, :ringing,

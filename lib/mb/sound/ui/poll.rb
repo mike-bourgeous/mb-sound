@@ -59,7 +59,8 @@ module MB
 
         # A new Slow, and the knobs to read per buffer ([name, knob] pairs)
         # for Feed#knob_refs=.  +needs+ is what the visible panes need
-        # (Feed#needs): :inspect gathers the inspector's InspectInfo.
+        # (Feed#needs): :inspect gathers the inspector's InspectInfo, :render
+        # the inspected track's PatchRender::Source.
         def call(needs = nil)
           s = @session
           arr = s.arrangement
@@ -99,12 +100,31 @@ module MB
             matrix: matrix_info(arr),
             racks: rack_infos(s),
             clocks: clock_infos(s),
-            inspector: needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil
+            inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
+            render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil
           )
           [slow, knobs.to_a.freeze]
         end
 
         private
+
+        # The inspected track's PatchRender::Source (the RENDER pane): its
+        # patch and clip (the arrangement's own mutex) and the session's
+        # tempo, meter, key, and tuning, or nil when nothing is inspected.
+        def render_source(s, arr, info)
+          name = info&.track or return nil
+          tr = arr.tracks[name]
+          t = s.transport
+          note =
+            if tr.nil? then "#{name} is not a track (bg :#{name}, ... without track): no patch to rebuild"
+            elsif !tr.patch? then "#{name} plays a graph, not a patch: track(:#{name}) { |clip| ... } renders"
+            end
+          PatchRender::Source.new(track: name, patch: tr&.patch, clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
+                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, sample_rate: 48000, note: note&.freeze)
+        rescue StandardError => e
+          warn_once(e)
+          nil
+        end
 
         # The clocks (Session#clocks: its own mutex; positions read without
         # the render lock, extrapolated past the last rendered cell).
