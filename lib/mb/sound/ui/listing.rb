@@ -77,6 +77,11 @@ module MB
       # tabs) rather than on the :wall, which shows every other pane.
       SESSION_PANES = %i[buses log lane clips clip racks midi].freeze
 
+      # The sound-design screen's panes, shown by `ui :sound` (the
+      # inspector, its preview and code, the picker, the CUE line, the
+      # keys) rather than on the :wall.
+      SOUND_PANES = %i[inspector preview code picker audition sound_keys].freeze
+
       class << self
         # The terminal's size (the screen's, else the console's).
         def size

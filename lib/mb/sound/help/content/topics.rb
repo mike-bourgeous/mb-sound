@@ -1196,5 +1196,33 @@ module MB
       note :terminal_ui
       see :now, :plots
     end
+
+    Help.topic :inspector, 'Sound design: the patch inspector', group: :look do
+      about <<~TEXT
+        `ui :sound` is the sound-design screen: the patch inspector beside
+        a preview of the node it shows and the graph's code, with the
+        console along the bottom.  The inspector follows a playing track
+        (the clip matrix's, else the first; t/T pick another) and lists the
+        knobs its graph reads as knob rows (a meter along the knob's curve,
+        value, unit, range), then the nodes it is made of (synth lanes and
+        unison copies counted once, ×n) and the params of the one picked
+        (n/N), knob-driven ones naming their knob.  NAV d goes into it:
+        Up/Down pick a knob, Left/Right turn it (Shift or H/L fine; a held
+        key is a live sweep you hear, one `turn :cut, 0 => 0.3, 1.n8 =>
+        0.5` line when you let go), Enter types a value (`turn :cut, ` on
+        the prompt line: `3000.hz`), 0 its default, m learns a MIDI
+        controller (`learn :cut`).  Every change is one console line,
+        printed in the console: journaled, undoable, in your take.  The
+        preview pane draws a filter's response or a shaper's curve and
+        follows the knob; the code pane (NAV c, arrows scroll) shows the
+        knob lines at their values now and the graph's Ruby.  Only knobs
+        turn so far: bind a preset's params to them (`preset :dnb_reese,
+        midi: clip, cutoff: :cut`).  The library picker and auditions on
+        CUE come with the library.
+      TEXT
+      commands :ui, :knob, :turn, :learn
+      note :sound_design_ui
+      see :ui, :knobs, :cue, :presets
+    end
   end
 end

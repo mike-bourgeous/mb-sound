@@ -347,3 +347,6 @@ The maintainer's answers to round 4 (workbench brief ux-r4b.md, with two correct
 | A held key needs live feedback but one journal entry; a pane-only preview made live and replay differ | preview steps recorded by the Session with frames; one line with `steps:` that the take lands at the first step | live/replay drift for gestures made of many key events | adopted (knob_gesture_spec checks replay bit for bit at two buffer sizes) |
 | Float time comparisons at a gap boundary (100.6 - 100.0 < 0.6) | gap checks with an epsilon (`GAP - 1e-9`) | flaky gesture ends at exact fake-clock steps | adopted |
 
+## The sound-design screen (sound-design-ui-1, 2026-10-26)
+
+`ui :sound`: the patch inspector, the node's preview, the graph's code, the library picker's place, the CUE line, the console along the bottom.  Its own note: `design/notes/sound_design_ui.md`.  For the screen in general: `Session#ui_graphs` (the players' graphs under the players' mutex, never the render lock) feeds `UI::Inspect` through Poll only while a visible pane needs `:inspect` (`Poll#call(needs)`, `Slow#inspector`); `UI::KnobTurns` is the racks pane's knob turning as a module (the inspector includes it too); `PaneKeys::Ask` lets a pane key open a prompt line whose text goes to the pane's `key_<answer>`; a pane's `enter_hint(state)` puts "Enter: ..." first on the status line in its mode.

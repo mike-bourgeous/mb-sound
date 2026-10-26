@@ -29,10 +29,33 @@ module UIHelpers
       knob_specs: {}.freeze,
       matrix: ui_fake_matrix,
       racks: ui_fake_racks,
+      inspector: ui_fake_inspector,
       buses: [UI::BusInfo.new(name: :verb, to: :master, description: 'reverb(:hall)', asleep: false, muted: false, sends: %i[pad].freeze, sources: [].freeze),
               UI::BusInfo.new(name: :drums, to: :master, description: 'compress', asleep: false, muted: false, sends: [].freeze, sources: %i[drums].freeze)].freeze,
       routes: { pad: { to: :master, send: { verb: 0.25 } }, drums: { to: :drums, send: {} } }.freeze
     )
+  end
+
+  # The inspector's data for a bass track reading knob +knob+ (sound
+  # design screen): an lp4 driven by it, a highpass with a real preview,
+  # a shaper, and the graph's Ruby; +prefix+ goes on names (text fitting).
+  def ui_fake_inspector(prefix = '', knob: :cut)
+    tr = MB::Sound::GraphNode::Traversable
+    pv = ->(value, unit: nil, label: nil, detail: nil, range: nil) { tr::ParamValue.new(value: value, type: :control, unit: unit, range: range, label: label, detail: detail) }
+    hp = { structure: :svf, filter_type: :highpass, sample_rate: 48000.0, cutoff: 150.0, quality: 0.7, gain: nil, db_gain: nil, label: 'highpass 150.0 Hz Q 0.7' }
+    params = ->(cls, values, preview = nil) { Ractor.make_shareable(tr::Params.new(node_class: cls, name: nil, values: values, preview: preview)) }
+    nodes = [
+      UI::Inspect::NodeInfo.new(key: 0, label: "#{prefix}lp4", kind: 'FourPole', count: 2, knobs: [knob].freeze,
+                                params: params.(MB::Sound::GraphNode::FourPole, { cutoff: pv.(2400.0, unit: 'Hz', label: knob) }), preview: false),
+      UI::Inspect::NodeInfo.new(key: 1, label: "#{prefix}highpass", kind: 'SampleWrapper', count: 4, knobs: [].freeze,
+                                params: params.(MB::Sound::Filter::SampleWrapper, { cutoff: pv.(150, unit: 'Hz'), quality: pv.(0.7, unit: ' Q') }, hp), preview: true),
+      UI::Inspect::NodeInfo.new(key: 2, label: 'softclip', kind: 'Shaper', count: 2, knobs: [].freeze,
+                                params: params.(MB::Sound::GraphNode::Shaper, {}, { mode: :softclip, p1: 0.35, p2: 0.95, label: 'softclip' }), preview: true),
+      UI::Inspect::NodeInfo.new(key: 3, label: 'saw', kind: 'KeyedTone', count: 6, knobs: [].freeze,
+                                params: params.(MB::Sound::Notes::KeyedTone, { frequency: pv.(nil, detail: "#{prefix}Frequency"), phase: pv.(0) }), preview: false),
+    ].freeze
+    code = "synth(#{prefix}riff, voices: 1) { |v|\n  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }\n  saws.lp4(knob(#{knob.inspect}), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality: 0.7)\n}"
+    UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil)
   end
 
   # A clip for the matrix: +notes+ as eighths from the start (nil: kit
