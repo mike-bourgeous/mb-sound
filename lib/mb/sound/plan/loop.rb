@@ -420,12 +420,6 @@ module MB
             @stretch = nil
           end
 
-          # True if every op gives exactly what its mirror gives (always: the
-          # C loop and #run_ruby are bit-identical).
-          def exact?
-            true
-          end
-
           # A listing of the ops (with ring writes and the history write).
           def to_s
             lower

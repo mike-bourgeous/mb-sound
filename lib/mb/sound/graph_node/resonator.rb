@@ -236,16 +236,6 @@ module MB
           [@state.to_a, @input_ended, @rung_out]
         end
 
-        # Check mode's state tolerance in inexact programs (see
-        # Plan::Region#check_block): the ringing state is a phasor whose
-        # phase sums the frequency's error over the block (a fast sine LFO
-        # sweeping the resonator moves it by about 2 pi * 6e-7 * f * n /
-        # fs), so its parts may differ more than other states, while the
-        # samples are still compared at the usual tolerance.
-        def plan_state_tolerance
-          1e-4
-        end
-
         def plan_restore(snapshot)
           state, @input_ended, @rung_out = snapshot
           @state[0..] = state

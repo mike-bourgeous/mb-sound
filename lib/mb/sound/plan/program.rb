@@ -60,11 +60,6 @@ module MB
           @taps ||= @ops.grep(Op::Tap)
         end
 
-        # True if every op is bit-exact with its node.
-        def exact?
-          @ops.all?(&:exact?)
-        end
-
         # The output type, :real or :complex.
         def output_type
           @output.type

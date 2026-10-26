@@ -17,7 +17,6 @@ RSpec.describe(MB::Sound::Plan::Op::Resonator) do
   it 'pings at a numeric frequency and decay, with a phase' do
     r = plan_compare { (hits * 1).ping(220, decay: 0.05, phase: 0.25) * 0.5 }
     expect(plan_op_names(r)).to include(:Resonator)
-    expect(r.program).to be_exact
   end
 
   it 'pings at a moving frequency and a moving decay node (seconds scaled to samples)' do

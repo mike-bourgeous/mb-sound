@@ -14,10 +14,6 @@ module MB
       # (Plan.changed) rebuilds the whole installation before the next
       # block.
       class Region
-        # How far node states may differ in check mode after a block of a
-        # program with inexact ops (relative to 1 or the value's size).
-        STATE_TOLERANCE = 1e-5
-
         # The node whose output this region computes.
         attr_reader :root
 
@@ -810,10 +806,8 @@ module MB
           nan_ok = planned.isnan.eq(reference.isnan).all?
           finite = diff[~(diff.isnan)]
           worst = finite.empty? ? 0.0 : finite.max # (every sample NaN on one side only: nan_ok reports it)
-          # Inexact ops (none since fast-sine-1) may differ by their
-          # tolerance, scaled by the output's level
-          limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max
-          return nil if nan_ok && worst <= limit
+          # Every op is bit-exact with its node (since fast-sine-1)
+          return nil if nan_ok && worst == 0
 
           idx = diff.isnan.where.to_a.first || diff.max_index
           "samples differ by up to #{worst} (first at #{idx}: planned #{planned[idx]}, unfused #{reference[idx]})"
@@ -856,13 +850,6 @@ module MB
           if problem.nil?
             stateful.each_with_index do |m, i|
               next if after[i] == planned_states[i]
-              # Inexact ops' differences can reach state through the ops
-              # after them (a fast sine modulating a frequency moves a
-              # phase), within the same tolerance
-              # (a node may say its state integrates such differences more,
-              # e.g. a resonator's ringing phase: #plan_state_tolerance)
-              tol = m.respond_to?(:plan_state_tolerance) ? m.plan_state_tolerance : STATE_TOLERANCE
-              next if !@program.exact? && Plan.states_close?(after[i], planned_states[i], tol)
               detail = planned_states[i].is_a?(Snapshot) && after[i].is_a?(Snapshot) ? planned_states[i].diff(after[i]) : "planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
               problem = "the state of #{Plan.node_label(m)} differs: #{detail}"
               break

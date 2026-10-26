@@ -188,7 +188,6 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
 
     it 'matches a node raised to a Float exponent (a drum accent curve), bit for bit, in C and the mirror' do
       r = plan_compare { (src.new(seed: 1).aabs ** 1.37) * 0.5 + (src.new(seed: 2) * 1) ** 2.0 + (src.new(seed: 3) * 1) ** 0.001 }
-      expect(r.program).to be_exact
       pows = r.program.ops.grep(MB::Sound::Plan::Op::Pow)
       expect(pows.length).to eq(3)
       expect(pows.map(&:fast)).to all(eq(false))
@@ -244,19 +243,16 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
         ops = r.program.ops.select { |op| op.is_a?(MB::Sound::Plan::Op::Pow) || op.is_a?(MB::Sound::Plan::Op::NoteFreq) }
         expect(ops.length).to eq(3)
         expect(ops.map(&:fast)).to all(eq(true))
-        expect(r.program).to be_exact # (the unfused nodes use the same 2^x; fast-sine-1)
         c = r.outputs[:c].compact
         ruby = r.outputs[:ruby].compact
         expect(c.zip(ruby).map { |x, y| x.to_binary == y.to_binary }).to all(eq(true))
       end
 
       it 'keeps powers of a node base and Plan.precision :exact on libm' do
-        r = plan_compare { (src.new(seed: 1, offset: 2) * 1) ** (src.new(seed: 2) * 1) * 1 }
-        expect(r.program).to be_exact
+        plan_compare { (src.new(seed: 1, offset: 2) * 1) ** (src.new(seed: 2) * 1) * 1 }
 
         MB::Sound::Plan.precision = :exact
-        r = plan_compare { 10 ** (src.new(seed: 1) * 1) * MB::Sound.tuning.freq(src.new(seed: 2, scale: 12, offset: 60) * 1) }
-        expect(r.program).to be_exact
+        plan_compare { 10 ** (src.new(seed: 1) * 1) * MB::Sound.tuning.freq(src.new(seed: 2, scale: 12, offset: 60) * 1) }
       end
 
       it 'matches libm within a float step for every note (and bend step) and 10^x' do
@@ -288,8 +284,7 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
 
         # Results down through float's subnormals to 0 (2^-160..2^40) through
         # the plan
-        r = plan_compare(sizes: [13, 64]) { 2 ** (src.new(seed: 1, scale: 100, offset: -60) * 1) * 1 }
-        expect(r.program).to be_exact # (the unfused nodes use the same 2^x; fast-sine-1)
+        plan_compare(sizes: [13, 64]) { 2 ** (src.new(seed: 1, scale: 100, offset: -60) * 1) * 1 }
       end
     end
 
