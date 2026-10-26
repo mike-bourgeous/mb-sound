@@ -454,7 +454,7 @@ module MB
             listed.each do |inst, r, prog|
               next unless alone.key?(r)
 
-              key, sites = ScaleMatch.core(prog)
+              key, sites = prog.scale_core
               cores[r] = [key, sites]
               shape = [key, prog.output_type]
               if inst.resamples?

@@ -27,6 +27,10 @@ module MB
         # The Installation this region belongs to.
         attr_reader :installation
 
+        # For internal use by Installation#commit: a region found by a
+        # build elsewhere joins the live installation.
+        attr_writer :installation
+
         # True while the region's nodes run their own #sample (a fallback
         # or check mode's reference run).
         attr_reader :unfused
@@ -259,6 +263,11 @@ module MB
           @recompile = true
         end
 
+        # True if a recompile was asked for and hasn't happened yet.
+        def recompile_requested?
+          !!@recompile
+        end
+
         # Compiles a region that hasn't played yet ahead of time (from
         # Plan.install, so a live graph's first block doesn't compile;
         # its tones start when it plays).  Returns the program or nil.
@@ -368,6 +377,12 @@ module MB
           if @installation.stale?
             @installation.rebuild
             @result = root_sample(count)
+            return :done
+          end
+
+          # Changed while a rebuild runs elsewhere (see Installation#stale?)
+          if @installation.held?(self)
+            @result = run_unfused(count)
             return :done
           end
 

@@ -32,6 +32,16 @@ module MB
           @title = title
           @lowered = nil
           @scratch = nil
+          @taps = nil
+          @signature = nil
+          @scale_core = nil
+        end
+
+        # ScaleMatch.core of this program (kept: LaneGroups#refresh asks
+        # again after every rebuild, and a rebuild elsewhere computes it
+        # ahead; see Plan::Rebuild).
+        def scale_core
+          @scale_core ||= ScaleMatch.core(self).freeze
         end
 
         # Every graph node with ops in this program (excluding boundary
