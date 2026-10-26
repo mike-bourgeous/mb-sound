@@ -323,6 +323,7 @@ module MB
           @plan_observed = nil
           @plan_handoff = nil
           @plan_restart = nil
+          @plan_excluded = nil
           reset_state
 
           super(@inputs.each_with_index.map { |input, idx| Output.new(owner: self, index: idx, input: input) })

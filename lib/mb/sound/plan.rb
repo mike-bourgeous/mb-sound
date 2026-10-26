@@ -124,6 +124,39 @@ module MB
           MB::Sound::Precision.precision = value
         end
 
+        # Where rebuilds happen (see Rebuild): +:auto+ (default) defers them
+        # on a realtime Session's render thread and rebuilds at once
+        # everywhere else (offline renders, specs, graphs sampled directly);
+        # +:inline+ always rebuilds at once; +:background+ defers them in
+        # every Session render (offline ones too: the build thread runs
+        # while the render waits for it, so where rebuilds land depends on
+        # timing; the samples don't); +:next_span+ defers them in every
+        # Session render to the start of its next span (deterministic).
+        # MB_SOUND_PLAN_REBUILDS sets it.
+        attr_reader :rebuilds
+
+        def rebuilds=(mode)
+          mode = mode.to_sym
+          raise ArgumentError, "Unknown Plan.rebuilds mode #{mode.inspect} (:auto, :inline, :background, :next_span)" unless %i[auto inline background next_span].include?(mode)
+
+          @rebuilds = mode
+        end
+
+        # The Deferral of the Session rendering on this thread, if it defers
+        # rebuilds (see Plan.rebuilds), else nil.
+        def deferral
+          Thread.current[:mb_sound_plan_deferral]
+        end
+
+        # Runs the block with +deferral+ as Plan.deferral on this thread.
+        def with_deferral(deferral)
+          old = Thread.current[:mb_sound_plan_deferral]
+          Thread.current[:mb_sound_plan_deferral] = deferral
+          yield
+        ensure
+          Thread.current[:mb_sound_plan_deferral] = old
+        end
+
         # Whether structurally identical regions (e.g. a Synth's lanes) run
         # together in LaneGroups (default true; MB_SOUND_PLAN_LANES=0 turns
         # it off).
@@ -177,13 +210,24 @@ module MB
         # installations covering +node+ rebuild their plans before their
         # next block; a settings change (+structure: false+: a sample rate,
         # a Multiplier's constant, a Mixer gain) only recompiles the region
-        # computing +node+.
+        # computing +node+.  +structure: :ended+ says only that +node+
+        # stopped reading inputs that ended (a ringing sum dropping a
+        # summand, an envelope's ended parameter): installations rebuild
+        # only the region computing +node+ (see Installation#inputs_ended).
         def changed(node, structure: true)
           GraphNode.structure_changed(node) if structure
           list = watch[node]
           return nil unless list
 
-          list.keys.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
+          list.keys.each do |inst|
+            if structure == :ended
+              inst.inputs_ended(node)
+            elsif structure
+              inst.stale!
+            else
+              inst.settings_changed(node)
+            end
+          end
           nil
         end
 
@@ -243,6 +287,7 @@ module MB
       end
 
       self.enabled = ENV['MB_SOUND_PLAN'] != '0'
+      self.rebuilds = (ENV['MB_SOUND_PLAN_REBUILDS'] || 'auto').to_sym
       self.engine = ENV['MB_SOUND_PLAN'] == 'ruby' ? :ruby : :c
       self.check = case ENV['MB_SOUND_PLAN_CHECK']
                    when nil, '', '0' then nil
@@ -278,6 +323,7 @@ require_relative 'plan/scale_match'
 require_relative 'plan/describable'
 require_relative 'plan/region'
 require_relative 'plan/installation'
+require_relative 'plan/rebuild'
 require_relative 'plan/shared_inputs'
 require_relative 'plan/lane_group'
 require_relative 'plan/loop'

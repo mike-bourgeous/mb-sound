@@ -90,7 +90,20 @@ module MB
         calls.times { graph.sample(buffer) }
         warm_up_plans(buffer)
 
-        warm_up_notes(calls: [calls, 60].min, buffer: buffer) if midi
+        if midi
+          warm_up_notes(calls: [calls, 60].min, buffer: buffer)
+          # The voices' own Ruby too, which planned lanes run only when
+          # their plans change (a note stream's end runs every lane unfused:
+          # cold, YJIT compiled it in that buffer, 50-120 ms for fm_bass)
+          if Plan.enabled
+            begin
+              Plan.enabled = false
+              warm_up_notes(calls: [calls, 60].min, buffer: buffer)
+            ensure
+              Plan.enabled = true
+            end
+          end
+        end
 
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
       end
@@ -113,6 +126,19 @@ module MB
         40.times do
           inst.rebuild
           graph.sample(buffer)
+        end
+
+        # A realtime render thread's side of rebuilds made elsewhere (see
+        # Plan::Rebuild): held regions running unfused, then the new layout
+        # landing at the next span (cold, an adopt took 5-14 ms in
+        # tunnel_vision's first changes)
+        deferral = Plan::Deferral.new(Monitor.new, mode: :next_span)
+        member = inst.regions.first&.members&.last
+        20.times do
+          inst.note_change(member) if member
+          Plan.with_deferral(deferral) { graph.sample(buffer) }
+          deferral.apply
+          member = inst.regions.first&.members&.last
         end
         inst.uninstall
       end

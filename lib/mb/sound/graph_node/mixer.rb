@@ -254,7 +254,7 @@ module MB
             (@ended ||= {}.compare_by_identity)[keys[idx]] = true
           end
           @live = nil
-          Plan.changed(self)
+          Plan.changed(self, structure: :ended)
           return nil if others && longest == 0
 
           out = arithmetic_combine(count, sampled, sources: gains, pad: 0, fill: @constant, stop_early: false) do |retbuf, inputs|

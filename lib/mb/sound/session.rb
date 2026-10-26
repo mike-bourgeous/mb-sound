@@ -322,6 +322,7 @@ module MB
         @mutex = Mutex.new
         @thread = nil
         @closed = false
+        @plan_deferral = nil # (see #plan_deferral)
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
 
@@ -991,6 +992,7 @@ module MB
         from = @transport.position
         to ||= from + count * per_sample
         old_span = Thread.current[:mb_sound_span]
+        old_deferral = Thread.current[:mb_sound_plan_deferral]
         @span.frame = @frame
         @span.pos = from
         @span.per_sample = per_sample
@@ -1027,6 +1029,12 @@ module MB
         advance_knobs(@frame, count) unless @knobs.empty?
         # Clocks: tempo points and variable-speed cells (see Clocks)
         begin_clock_span(count, per_sample)
+
+        # Plan rebuilds finished elsewhere land here, between blocks, and
+        # graphs rendered in this span defer theirs (see Plan::Rebuild)
+        deferral = plan_deferral
+        deferral&.apply
+        Thread.current[:mb_sound_plan_deferral] = deferral
 
         players = @mutex.synchronize { @players.values }
         @span_players = players # for Strip#asleep_reads
@@ -1083,8 +1091,37 @@ module MB
       ensure
         @knob_frame = nil
         Thread.current[:mb_sound_span] = old_span
+        Thread.current[:mb_sound_plan_deferral] = old_deferral
       end
       private :render_span
+
+      # The Plan::Deferral for plan rebuilds in this span, or nil to rebuild
+      # at once (see Plan.rebuilds: by default a realtime Session's render
+      # thread defers them).
+      def plan_deferral
+        case Plan.rebuilds
+        when :inline
+          nil
+        when :auto
+          return nil unless @realtime && Thread.current.equal?(@thread)
+
+          @plan_deferral = nil if @plan_deferral&.mode != :thread
+          @plan_deferral ||= Plan::Deferral.new(@render_lock)
+        when :background
+          @plan_deferral = nil if @plan_deferral&.mode != :thread
+          @plan_deferral ||= Plan::Deferral.new(@render_lock)
+        when :next_span
+          @plan_deferral = nil if @plan_deferral&.mode != :next_span
+          @plan_deferral ||= Plan::Deferral.new(@render_lock, mode: :next_span)
+        end
+      end
+      private :plan_deferral
+
+      # The Plan::Deferral this Session's renders defer plan rebuilds to
+      # (stats and specs), or nil before one did.
+      def plan_deferral_used
+        @plan_deferral
+      end
 
       # The span's mix buffers, zeroed: reused from span to span, since a
       # master chain reads the mix and returns its own buffers (the mix
@@ -1138,6 +1175,7 @@ module MB
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }
         @scheduler.close
+        @plan_deferral&.close
         @output&.close
         # (the graphs stay; see Strip.structure_check)
         check_structure! if Strip.structure_check

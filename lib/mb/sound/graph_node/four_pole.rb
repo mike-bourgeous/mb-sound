@@ -111,7 +111,7 @@ module MB
         # the parameter is its last value from the next plan on.
         def plan_input_ended(source)
           (@plan_ended ||= {}.compare_by_identity)[source] = true
-          Plan.changed(self)
+          Plan.changed(self, structure: :ended)
           :replay
         end
 
