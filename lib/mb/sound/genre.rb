@@ -26,9 +26,13 @@ module MB
       # of the drums track, read through the Session's buses), the track's
       # launch quantization +q+ and launch +fade+, a few words +about+ it,
       # the template bus its main out feeds (+to+, nil for the master), and
-      # its +send+ levels to template buses ({ bus => gain or knob name }).
-      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about, :to, :send) do
-        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil, to: nil, send: {})
+      # its +sends+ to template buses ({ bus => gain or knob name }; the
+      # keyword is +send:+, as for tracks, but the member is #sends: a
+      # #send would hide Object#send; omnibus14's guard in
+      # data_member_names_spec.rb).
+      Role = Data.define(:patch, :level, :params, :filter, :duck, :q, :fade, :about, :to, :sends) do
+        def initialize(patch:, level: nil, params: {}, filter: nil, duck: nil, q: nil, fade: nil, about: nil, to: nil, send: {}, sends: nil)
+          send = sends unless sends.nil? # (Data#with passes the member)
           raise ArgumentError, "A role's patch is a preset or method name (got #{patch.inspect})" unless patch.is_a?(Symbol)
           unless params.is_a?(Hash) && params.values.all? { |v| v.is_a?(Numeric) || v.is_a?(Symbol) }
             raise ArgumentError, "params: must be a Hash of numbers or knob names (got #{params.inspect})"
@@ -40,13 +44,15 @@ module MB
           end
           super(
             patch: patch, level: level, params: params.dup.freeze, filter: filter, duck: duck, q: q, fade: fade,
-            about: about&.dup&.freeze, to: to, send: send.dup.freeze
+            about: about&.dup&.freeze, to: to, sends: send.dup.freeze
           )
         end
 
         # The keyword options that rebuild this role (for Template#to_ruby).
         def options
-          to_h.except(:patch).reject { |k, v| v.nil? || (%i[params send].include?(k) && v.empty?) }
+          h = to_h.except(:patch, :sends)
+          h[:send] = sends
+          h.reject { |k, v| v.nil? || (%i[params send].include?(k) && v.empty?) }
         end
       end
 
@@ -457,7 +463,7 @@ module MB
           Genre.bus_order(buses).each { |n| MB::Sound.bus(n, to: buses[n].to || :master) { |sig| template.bus_chain(n, sig) } }
           MB::Sound.sidechain(trigger_track, shape: sidechain[3]) if trigger_track
           roles.each { |n, r|
-            MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.send unless r.send.empty?)) { |c| template.patch(n, c) }
+            MB::Sound.track(n, q: r.q, fade: r.fade, to: r.to, send: (r.sends unless r.sends.empty?)) { |c| template.patch(n, c) }
           }
           scenes.each_key { |s| MB::Sound.scene(s, **scene(s)) }
           self
@@ -871,11 +877,11 @@ module MB
           end
           Genre.bus_order(t.buses) # (raises for loops)
           t.roles.each do |n, r|
-            [*([r.to] if r.to), *r.send.keys].each do |b|
+            [*([r.to] if r.to), *r.sends.keys].each do |b|
               next if t.buses.key?(b)
               raise ArgumentError, "#{where}: role #{n.inspect} routes to #{b.inspect}, which is no bus#{Form.suggest(b, t.buses.keys)}"
             end
-            r.send.each_value do |v|
+            r.sends.each_value do |v|
               next unless v.is_a?(Symbol) && !t.knobs.key?(v)
               raise ArgumentError, "#{where}: role #{n.inspect} sends at #{v.inspect}, which is no knob#{Form.suggest(v, t.knobs.keys)}"
             end
