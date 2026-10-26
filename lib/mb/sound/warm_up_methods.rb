@@ -90,7 +90,20 @@ module MB
         calls.times { graph.sample(buffer) }
         warm_up_plans(buffer)
 
-        warm_up_notes(calls: [calls, 60].min, buffer: buffer) if midi
+        if midi
+          warm_up_notes(calls: [calls, 60].min, buffer: buffer)
+          # The voices' own Ruby too, which planned lanes run only when
+          # their plans change (a note stream's end runs every lane unfused:
+          # cold, YJIT compiled it in that buffer, 50-120 ms for fm_bass)
+          if Plan.enabled
+            begin
+              Plan.enabled = false
+              warm_up_notes(calls: [calls, 60].min, buffer: buffer)
+            ensure
+              Plan.enabled = true
+            end
+          end
+        end
 
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
       end
