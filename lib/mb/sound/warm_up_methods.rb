@@ -114,6 +114,19 @@ module MB
           inst.rebuild
           graph.sample(buffer)
         end
+
+        # A realtime render thread's side of rebuilds made elsewhere (see
+        # Plan::Rebuild): held regions running unfused, then the new layout
+        # landing at the next span (cold, an adopt took 5-14 ms in
+        # tunnel_vision's first changes)
+        deferral = Plan::Deferral.new(Monitor.new, mode: :next_span)
+        member = inst.regions.first&.members&.last
+        20.times do
+          inst.note_change(member) if member
+          Plan.with_deferral(deferral) { graph.sample(buffer) }
+          deferral.apply
+          member = inst.regions.first&.members&.last
+        end
         inst.uninstall
       end
 
