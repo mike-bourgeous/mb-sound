@@ -34,8 +34,8 @@ files:
     reason: one real process playing bin/ui_demo.rb's song for 2.5 s after its form warm-up (about 7-10 s in the Mac container since alloc-2's per-track warm-up exercise, 2026-10-25), with the band drawn and measured; 18.99 s at PARALLEL=8 under load against the default 8 x2.33 = 18.6
   spec/lib/mb/sound/buffer_size_invariance_spec.rb:
     file: 50
-    example: 12
-    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds); 2026-10-25 post-merge spec:full on the Mac at PARALLEL=8 under load 4.4 took 105.35 s = 45.2 reference seconds, over the old 45
+    example: 15
+    reason: one-sample-buffer renders of Synths to their end (about 70 us per buffer); runner 31 s, 7 s for the longest example (the Mac i9 at PARALLEL=2 19.6 s, 9.8 reference seconds); 2026-10-25 post-merge spec:full on the Mac at PARALLEL=8 under load 4.4 took 105.35 s = 45.2 reference seconds, over the old 45; 2026-10-26 the slow-tier example :196 (a Synth ending) took 31.66 s at x2.26 = 14 reference seconds in a post-merge spec:full, over the old example budget 12, and the same before and after render-rebuild-1 in alternating runs
   spec/lib/mb/sound/buffer_size_invariance_synth_spec.rb:
     file: 35
     example: 8

@@ -87,8 +87,9 @@ module MB
         end
 
         # Returns [node, new clip] pairs for swapping +clips+ into the clip
-        # sources +nodes+, raising if none of them change.
-        def planned_swaps(name, nodes, clips, warn: false)
+        # sources +nodes+, raising if none of them change (+strict+ false:
+        # returning none instead).
+        def planned_swaps(name, nodes, clips, warn: false, strict: true)
           mapping = case clips
                     when Sequence::Clip then auto_swap_mapping(name, nodes, clips)
                     when Sequence::Kit then kit_swap_mapping(name, nodes, clips, warn: warn)
@@ -104,7 +105,7 @@ module MB
             c ||= swapped_clip(n.clip, mapping)
             [n, c] if c
           }
-          raise ArgumentError, "Player #{name.inspect} doesn't play any of the clips being replaced" if swaps.empty?
+          raise ArgumentError, "Player #{name.inspect} doesn't play any of the clips being replaced" if swaps.empty? && strict
           swaps
         end
 
@@ -117,9 +118,18 @@ module MB
           # to swap; omnibus13, arm_state_spec's random walk, seed 9509)
           return 0 unless swap_target?(name)
 
+          # Likewise, later commands may have changed what the player plays
+          # (a `bg` of other clips, an undo) so that none of the clips this
+          # swap replaces play any more, or it plays no clips at all: the
+          # swap lands as nothing, never an error on the render thread
+          # (arm_state_spec's random walk, seed 44818).  Errors already clear
+          # when the swap is made are raised by #swap.
           @mutex.synchronize {
+            player = @players.values.select { |p| p.name == name && p.current? }.last || @stopped[name]
+            return 0 if player && player.timeline_nodes.grep(MIDI::ClipSource).empty?
+
             _, _, nodes = swap_target(name)
-            swaps = planned_swaps(name, nodes, clips)
+            swaps = planned_swaps(name, nodes, clips, strict: false)
             swaps.each { |n, c| n.swap_clip(c, time: time) }
             swaps.length
           }
