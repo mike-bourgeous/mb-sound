@@ -10,13 +10,24 @@ module MB
       # gives the phase the events cluster at and the share of events in
       # it, plus the coverage: the share of whole cycles in the run with an
       # event in the window.  The period with the best share x coverage
-      # wins if the window holds more events than chance would put there
-      # (a Poisson tail under uniform times).  Phases are against the epoch,
+      # wins if the window holds more events than chance would put there:
+      # a Poisson tail under uniform times for a window as wide as the
+      # cluster really is (at least MIN_WIDTH), times the number of such
+      # windows in a period (a scan correction: the window was placed where
+      # the events are).  So three big stalls within a few ms of :00.2 in a
+      # five-minute run count (omnibus14: probe-20261026-052506 reported
+      # none found with 4 needed), while three random times rarely fall
+      # that close.  Phases are against the epoch,
       # so periods that divide an hour read as wall-clock positions
       # (":59.9 of each minute").  A densest window rather than a circular
       # mean, since a few stalls at other times pull a mean phase away.
       module Periodicity
         PERIODS = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1800, 3600].freeze
+
+        # The narrowest cluster width (seconds) the chance estimate uses:
+        # tighter clusters count as this wide (the VM's minute stalls wander
+        # by a few hundred ms).
+        MIN_WIDTH = 0.5
 
         Result = Data.define(:period, :phase, :share, :coverage, :clusters, :cycles, :hits, :p_value) do
           # The phase as a wall-clock position: ":59.9" for minutes,
@@ -37,7 +48,7 @@ module MB
         # Detects the best period for +times+ (Floats, wall seconds) in a
         # run from +start+ to +stop+ (default the first and last times), or
         # returns nil.  +periods+ are candidates in seconds.
-        def detect(times, start: nil, stop: nil, periods: PERIODS, merge: 1.0, min_clusters: 4, min_share: 0.3, min_coverage: 0.4, max_p: 0.001)
+        def detect(times, start: nil, stop: nil, periods: PERIODS, merge: 1.0, min_clusters: 3, min_share: 0.3, min_coverage: 0.4, max_p: 0.001)
           clusters = merge_times(times.sort, merge)
           return nil if clusters.length < min_clusters
 
@@ -65,7 +76,10 @@ module MB
           inside = phases.select { |x| dist.(x, best) <= half }
           # (the window's center: the inside phases' mean, unwrapped around best)
           phase = (inside.sum { |x| best + ((x - best + p / 2.0) % p) - p / 2.0 } / inside.length) % p
-          inside = phases.count { |x| dist.(x, phase) <= half }
+          near = phases.select { |x| dist.(x, phase) <= half }
+          inside = near.length
+          # How wide the cluster really is, for the chance estimate
+          width = [2 * near.map { |x| dist.(x, phase) }.max.to_f, [MIN_WIDTH, 2 * half].min].max
 
           first = ((start - phase) / p).ceil
           last = ((stop - phase) / p).floor
@@ -84,7 +98,7 @@ module MB
           n = clusters.length
           Result.new(
             period: p, phase: phase, share: inside.to_f / n, coverage: cycles > 0 ? hits.to_f / cycles : 0.0,
-            clusters: n, cycles: cycles, hits: hits, p_value: poisson_tail(inside, n * [2 * half / p, 1.0].min),
+            clusters: n, cycles: cycles, hits: hits, p_value: [poisson_tail(inside, n * [width / p, 1.0].min) * p / width, 1.0].min,
           )
         end
 
