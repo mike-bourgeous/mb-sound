@@ -42,8 +42,16 @@ module MB
         # only by what changed).
         SEED = 0
 
-        # Frames per buffer of an offline render.
-        BUFFER = 800
+        # Frames per buffer of an offline render (the worker gives the GVL
+        # back between buffers, so smaller buffers keep the live render
+        # thread's waits short).
+        BUFFER = 256
+
+        # The share of wall time a Worker's render may take (it sleeps
+        # after each buffer for the rest; PatchRender.duty=): Ruby runs one
+        # thread at a time, so a render that never paused would take the
+        # GVL from the live render thread whenever both have work.
+        DUTY = 0.5
 
         # Columns of the min/max envelope kept per render (enough for a
         # 236-column terminal's Braille dots).
@@ -83,6 +91,7 @@ module MB
         @seconds = SECONDS
         @inline = false
         @clock = nil
+        @duty = Float(ENV['MB_SOUND_RENDER_DUTY'] || DUTY)
 
         class << self
           # The length of each render (seconds).
@@ -91,6 +100,15 @@ module MB
           # True: Drivers render on the calling thread (InlineWorker), for
           # specs and the golden captures.
           attr_accessor :inline
+
+          # The share of wall time a Worker's render may take (0 < duty <= 1;
+          # 1: no pauses, only Thread.pass).
+          attr_reader :duty
+
+          def duty=(d)
+            raise ArgumentError, "duty is a share of wall time, 0 < duty <= 1 (got #{d.inspect})" unless d.is_a?(Numeric) && d > 0 && d <= 1
+            @duty = d.to_f
+          end
 
           # The clock renders time themselves with (seconds; nil for
           # MB::U.clock_now; the golden captures fix it).
@@ -107,8 +125,10 @@ module MB
           # Renders +job+ (a Job) on the calling thread and returns a Result.
           # +contained+ is a Hash the caller keeps (patch => { clip => true
           # or false }) so a patch and clip are checked for nodes shared
-          # with outside graphs once, not every render.  Never raises.
-          def render(job, contained: nil)
+          # with outside graphs once, not every render.  +pace+ true (the
+          # Worker) sleeps after each buffer to keep to PatchRender.duty.
+          # Never raises.
+          def render(job, contained: nil, pace: false)
             src = job.source
             t0 = now
             clip = job.demo || src.clip.nil? ? Playable.demo_phrase : src.clip
@@ -119,7 +139,7 @@ module MB
             Internal.strictly do
               GCQuiet.during do
                 Internal.with_private_rng(SEED) do
-                  data = render_patch(job, clip, contained)
+                  data = render_patch(job, clip, contained, pace)
                 end
               end
             end
@@ -152,7 +172,7 @@ module MB
 
           # Builds the patch in a sandbox and renders it: the captured
           # channels, or a String saying why not.
-          def render_patch(job, clip, contained)
+          def render_patch(job, clip, contained, pace)
             src = job.source
             box, out = sandbox(job)
             graph = Session.with_context(session: box) { src.patch.call(clip) }
@@ -170,9 +190,12 @@ module MB
 
             box.add(graph, on: :now)
             frames = (job.seconds * src.sample_rate).round
+            rest = pace ? (1 - @duty) / @duty : 0
             (frames.to_f / BUFFER).ceil.times do
+              t = MB::U.clock_now
               box.process_buffer
-              Thread.pass # (the render and painter threads get the GVL between buffers)
+              # (the render and painter threads get the GVL between buffers)
+              rest > 0 ? sleep((MB::U.clock_now - t) * rest) : Thread.pass
             end
             out.captured(frames)
           ensure
@@ -410,7 +433,7 @@ module MB
                 @job = nil
                 j
               }
-              r = PatchRender.render(job, contained: @contained)
+              r = PatchRender.render(job, contained: @contained, pace: true)
               @mutex.synchronize {
                 @result = r if @result.nil? || r.seq > @result.seq
                 @running = false
