@@ -15,7 +15,7 @@ module MB
         # range and curve), then the nodes the graph is made of and the
         # selected node's params (read-only; knob-driven ones name their
         # knob).  Follows the clip matrix's track (else the first playing
-        # one) until t picks another.
+        # one) until t (or n, a node) picks one.
         #
         # Mode keys (NAV Enter, or NAV d): Up/Down pick a knob,
         # Left/Right turn it (Shift or H/L fine; a held key is a live sweep
@@ -70,7 +70,6 @@ module MB
               c.puts ['nothing to inspect ', :dim], ['(play a track: bg :bass, clip)', :dim]
               return
             end
-            remember_target(state, info)
             knobs = s.knobs.to_h { |k| [k.name, k] }
             list = info.knobs
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
@@ -206,14 +205,6 @@ module MB
           private
 
           def no_knob_note = 'no knob to turn: the graph reads none (knob :cut, 800.hz; then knob(:cut) in the patch)'
-
-          # Keeps Inspect.target on the track shown (so the track stays put
-          # when the clip matrix's cursor or the players change).
-          def remember_target(_state, info)
-            t = Inspect.target
-            return if t && t[:track] == info.track
-            Inspect.target = { track: info.track, node: t && t[:track] == info.track ? t[:node] : nil }.freeze
-          end
 
           def picked(state)
             s = state[:snap] or return nil

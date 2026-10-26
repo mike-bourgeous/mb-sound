@@ -10,7 +10,10 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
   let(:snap) { ui_fake_snapshot }
 
   before { MB::Sound::UI::Inspect.target = nil }
-  after { MB::Sound::UI::Inspect.target = nil }
+  after do
+    MB::Sound::UI::Inspect.target = nil
+    MB::Sound::UI::Panes::Clips.selected = nil
+  end
 
   def draw(name, snap, state = { title_in_rule: true }, w: 60, h: 12)
     grid = MB::Sound::Plot::Text::Cells.new(w, h)
@@ -138,6 +141,12 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(info.selected.preview).to eq(true) # (by default the first node with a preview)
       expect(info.code).to include('synth(', 'knob(:cut)')
       expect(Ractor.shareable?(info)).to eq(true)
+      # Without a target: the clip matrix's track, else the first player
+      expect(g.call(@session, nil).track).to eq(:bass)
+      ui::Panes::Clips.selected = [:pad, nil].freeze
+      expect(g.call(@session, nil).track).to eq(:pad)
+      expect(g.call(@session, { track: :bass }).track).to eq(:bass) # (a picked track wins)
+      ui::Panes::Clips.selected = nil
       again = g.call(@session, { track: :bass })
       expect(again.code).to equal(info.code) # (the node list and code: once per graph)
       expect(again.nodes.reject.with_index { |_, i| i == again.node }).to eq(info.nodes.reject.with_index { |_, i| i == info.node })
