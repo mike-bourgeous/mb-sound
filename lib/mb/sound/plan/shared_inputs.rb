@@ -34,6 +34,7 @@ module MB
           @installations = installations.compact
           @installations.each { |inst| inst.shared = self }
           @buffers = {}.compare_by_identity
+          @views = {}.compare_by_identity # source => GraphNode::FrozenView
           @sources = []
           @branches = []
           @generations = nil
@@ -79,7 +80,7 @@ module MB
             src = @sources[i]
             buf = src.sample(count)
             # Shared read-only, as the Tee would share it
-            buf = buf[0..].freeze if buf && !buf.frozen?
+            buf = (@views[src] ||= GraphNode::FrozenView.new).of(buf) if buf && !buf.frozen?
             bufs[src] = buf
             i += 1
           end
@@ -156,6 +157,7 @@ module MB
         # Recomputes which sources are shared (see the class description).
         def refresh
           @buffers.clear
+          @views.clear
           @sources = []
           @branches = []
 

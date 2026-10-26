@@ -597,8 +597,9 @@ module MB
         @state = nil
         @osc_buf = nil
         @truncated = false
-        @quiet_resets = nil
-        @quiet_locks = nil
+        # Steady-input cache keys (see GraphNode::FrozenView)
+        @quiet_resets = GraphNode::FrozenView::Key.new
+        @quiet_locks = GraphNode::FrozenView::Key.new
 
         # Set below or later (here so every Tone has one instance variable
         # layout; see GraphNode::IvarPreset)
@@ -2417,12 +2418,12 @@ module MB
       # buffer of a Notes trigger without note-ons) isn't scanned again.
       def reset_points(resets)
         return nil if resets.nil?
-        return nil if resets.equal?(@quiet_resets)
+        return nil if @quiet_resets.match?(resets)
 
         unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
           min, max = resets.minmax
           if min == 0 && max == 0 # cheaper than ne(0).where
-            @quiet_resets = resets if resets.frozen?
+            @quiet_resets.set(resets)
             return nil
           end
         end
@@ -2435,10 +2436,10 @@ module MB
       # #follow_timeline), or nil if there are none.  The tempo node's
       # shared frozen zeros are recognized without a scan.
       def lock_points(jumps)
-        return nil if jumps.nil? || jumps.equal?(@quiet_locks)
+        return nil if jumps.nil? || @quiet_locks.match?(jumps)
 
         if jumps.frozen? && jumps.max == 0 && jumps.min == 0
-          @quiet_locks = jumps
+          @quiet_locks.set(jumps)
           return nil
         end
 

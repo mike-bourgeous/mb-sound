@@ -32,6 +32,9 @@ module MB
             # Sources this block (swapped with the previous block's)
             srcs = (@pc_srcs ||= Array.new(code[:nsrc]))
             prev = (@pc_prev ||= Array.new(code[:nsrc]))
+            # Their generations (see GraphNode::FrozenView)
+            gens = (@pc_gens ||= Array.new(code[:nsrc], 0))
+            prev_gens = (@pc_prev_gens ||= Array.new(code[:nsrc], 0))
             hit = @pc_have
             k = 0
             while k < nl
@@ -39,19 +42,22 @@ module MB
               raise "No value for #{leaves[k]} in the latency estimate" if x.nil?
 
               srcs[k] = x
-              hit &&= same_value?(x, prev[k])
+              gens[k] = x.is_a?(Numo::NArray) ? GraphNode::FrozenView.generation(x) : 0
+              hit &&= same_value?(x, prev[k], prev_gens[k])
               k += 1
             end
             j = 0
             while j < rings.length
               x = rings[j].last_delay
               srcs[nl + j] = x
-              hit &&= same_value?(x, prev[nl + j])
+              gens[nl + j] = x.is_a?(Numo::NArray) ? GraphNode::FrozenView.generation(x) : 0
+              hit &&= same_value?(x, prev[nl + j], prev_gens[nl + j])
               j += 1
             end
             t = @pitch_ring.last_delay
             srcs[-1] = t
             @pc_srcs, @pc_prev = prev, srcs
+            @pc_gens, @pc_prev_gens = prev_gens, gens
             @pc_have = true
 
             pos = @pitch_pos || 0

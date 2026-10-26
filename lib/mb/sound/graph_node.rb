@@ -467,6 +467,7 @@ end
 
 require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/frozen_copy'
+require_relative 'graph_node/frozen_view'
 require_relative 'graph_node/sample_rate_helper'
 require_relative 'graph_node/graph_node_array_mixin'
 

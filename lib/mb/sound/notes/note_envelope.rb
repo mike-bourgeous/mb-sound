@@ -311,10 +311,12 @@ module MB
             f = @factor.sample(count)
             return nil if f.nil?
 
-            # The same frozen buffer as last time (e.g. a Notes controller's
-            # constant buffer passed through a Tee) holds the same values
-            return @steady_samples if f.equal?(@steady_buf) && sample_rate == @steady_rate
-            @steady_buf = nil
+            # The same frozen buffer as last time with the same generation
+            # (e.g. a Notes controller's constant buffer passed through a
+            # Tee; see GraphNode::FrozenView) holds the same values
+            key = (@steady_buf ||= GraphNode::FrozenView::Key.new)
+            return @steady_samples if sample_rate == @steady_rate && key.match?(f)
+            key.clear
 
             if f.length == count && (v = f[0]) == f.max && v == f.min
               if v != @steady_factor || sample_rate != @steady_rate
@@ -322,7 +324,7 @@ module MB
                 @steady_rate = sample_rate
                 @steady_samples = (scale(Numo::SFloat.zeros(1), Numo::SFloat[v]) * sample_rate)[0]
               end
-              @steady_buf = f if f.frozen?
+              key.set(f)
               return @steady_samples
             end
 

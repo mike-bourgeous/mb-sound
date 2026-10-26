@@ -91,6 +91,7 @@ module MB
           @boundaries = nil
           @consumers = nil
           @input_ops = nil
+          @replay_views = nil # (see #replay_unfused)
           @param_ops = nil
           @folds = nil
           @inputs = nil
@@ -200,6 +201,7 @@ module MB
           outputs.drop(1).each_with_index { |v, k| b.output(v, k + 1) } if @multi
 
           @input_ops = b.inputs
+          @replay_views = nil
           @param_ops = b.params
           ops, @folds = Fold.zero_products(b.ops)
           Fold.report(@folds)
@@ -768,7 +770,7 @@ module MB
               # One read of the source for every branch, shared read-only
               # as the Tee would share it
               buf = read[0]
-              buf = buf[0..].freeze if buf && !buf.frozen? && op.handles.length > 1
+              buf = ((@replay_views ||= {}.compare_by_identity)[op] ||= GraphNode::FrozenView.new).of(buf) if buf && !buf.frozen? && op.handles.length > 1
               buf = GraphNode::Tee::Branch::ENDED if buf.nil?
               op.handles.each { |h| h.replay = buf }
             else

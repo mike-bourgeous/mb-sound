@@ -303,10 +303,11 @@ module MB
         # buffer (FastArithmetic.product, which multiplies the same way), so
         # nothing is allocated per buffer.
         private def scaled(buf, sample_rate)
-          if buf.frozen? && buf.equal?(@scaled_from) && sample_rate == @scaled_rate
+          from = (@scaled_from ||= GraphNode::FrozenView::Key.new)
+          if sample_rate == @scaled_rate && from.match?(buf)
             return @scaled ||= (buf * sample_rate).freeze
           end
-          @scaled_from = buf.frozen? ? buf : nil
+          from.set(buf)
           @scaled_rate = sample_rate
           @scaled = nil
 

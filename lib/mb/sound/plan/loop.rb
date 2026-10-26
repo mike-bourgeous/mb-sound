@@ -393,6 +393,7 @@ module MB
             @lat_deps = nil
             @lat_rings = nil
             @lat_key = nil
+            @lat_gens = nil
             @lat_value = nil
             @response_program = nil
             @uneven_filters = nil
@@ -407,6 +408,8 @@ module MB
             @pitch_code = nil
             @pc_srcs = nil
             @pc_prev = nil
+            @pc_gens = nil
+            @pc_prev_gens = nil
             @pc_have = nil
             @pc_state = nil
             @pc_outs = nil
@@ -623,16 +626,17 @@ module MB
             # The latency depends only on a few values (gains on parallel
             # paths, cutoffs, other delays); reuse it while they hold still
             # (a buffer counts as the same only if it is the same frozen
-            # object: Constants and Notes nodes return one while they hold)
+            # object with the same generation: Constants and Notes nodes
+            # return one while they hold; see GraphNode::FrozenView)
             if @lat_deps && @lat_key
               same = true
               i = 0
               @lat_deps.each do |v|
-                same &&= same_value?(values[v], @lat_key[i])
+                same &&= same_value?(values[v], @lat_key[i], @lat_gens[i])
                 i += 1
               end
               @lat_rings.each do |g|
-                same &&= same_value?(g.last_delay, @lat_key[i])
+                same &&= same_value?(g.last_delay, @lat_key[i], @lat_gens[i])
                 i += 1
               end
               @lat_hit = same
@@ -649,6 +653,7 @@ module MB
               @lat_record = @lat_record_rings = nil
             end
             @lat_key = @lat_deps.map { |v| values[v] } + @lat_rings.map(&:last_delay)
+            @lat_gens = @lat_key.map { |x| x.is_a?(Numo::NArray) ? GraphNode::FrozenView.generation(x) : 0 }
             @lat_value = l
           end
 
@@ -1141,9 +1146,9 @@ module MB
             [(nr * dr + ni * di) / den + m0, (ni * dr - nr * di) / den]
           end
 
-          def same_value?(x, old)
+          def same_value?(x, old, old_gen)
             if x.is_a?(Numo::NArray)
-              x.equal?(old) && x.frozen?
+              x.frozen? && x.equal?(old) && GraphNode::FrozenView.generation(x) == old_gen
             else
               !old.is_a?(Numo::NArray) && x == old
             end
