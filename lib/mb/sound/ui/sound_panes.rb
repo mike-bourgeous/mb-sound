@@ -268,25 +268,29 @@ module MB
 
         # A one-shot offline render of the inspected track's patch
         # (sound-design-ui-2: "a one-shot render of the processed waveform
-        # updated periodically when parameters change"): the waveform's
-        # min/max envelope, peak, RMS, and LUFS on the first row, the render
-        # before it faintly behind (what the last change did).  A fresh
-        # instance of the patch renders on a worker thread
-        # (UI::PatchRender) a quarter second after the knobs it reads stop
-        # moving, at most every half second while they keep moving; the live
-        # graph is never touched.
+        # updated periodically when parameters change"): one note (the
+        # clip's first, else a guess from the track's role) through a fresh
+        # instance of the patch for half a second, drawn as the waveform's
+        # min/max envelope above its spectrum (beside it in a wide, short
+        # pane; one of them, s to switch, in a small one), the render before
+        # it faintly behind both (what the last change did), and LUFS, peak,
+        # and RMS on the first row.  It renders again 0.1 s after the knobs
+        # the graph reads stop moving, at most every 0.2 s while they move
+        # (UI::PatchRender: forked renders of one instance per patch and
+        # note; the live graph is never touched).
         #
-        # Mode keys (NAV Enter, or NAV w): s the spectrum or the waveform,
-        # o the faint previous render on or off, p the track's clip or the
-        # demo phrase, + and - the render's length, r render again.
+        # Mode keys (NAV Enter, or NAV w): s both views, the waveform, or
+        # the spectrum, o the faint previous render on or off, p the role's
+        # guessed note instead of the clip's first, + and - the render's
+        # length, r render again.
         class Render < Pane
           jump 'w'
 
           mode_keys do
             group 'Render'
-            on 's', :view, help: 'the spectrum or the waveform'
+            on 's', :view, help: 'both views, the waveform, or the spectrum'
             on 'o', :overlay, help: 'the previous render (faint) on or off'
-            on 'p', :phrase, help: "the track's clip or the demo phrase"
+            on 'p', :phrase, help: "the role's guessed note or the clip's first note"
             on ['+', '='], :length, 1, help: 'a longer render', label: '+ -'
             on '-', :length, -1, help: 'a shorter render', label: '+ -'
             on 'r', :again, help: 'render again'
@@ -296,10 +300,18 @@ module MB
           PREVIOUS = '#5c6370'
 
           # Render lengths + and - step through (seconds).
-          LENGTHS = [0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0].freeze
+          LENGTHS = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0].freeze
 
-          def initialize = super(:render, rate: 10, height: 8, width: 48, needs: [:inspect, :render], title: 'render', min_height: 3,
-                                          description: 'an offline render of the inspected track\'s patch: waveform (or spectrum), peak, RMS, LUFS, redone when its knobs change')
+          # Views s cycles through.
+          VIEWS = %i[both wave spectrum].freeze
+
+          # The fewest rows of each plot when both are stacked, and the
+          # fewest columns of each side by side.
+          STACK_ROWS = 5
+          SIDE_COLS = 45
+
+          def initialize = super(:render, rate: 10, height: 12, width: 48, needs: [:inspect, :render], title: 'render', min_height: 3,
+                                          description: 'an offline render of one note through the inspected track\'s patch: waveform and spectrum, peak, RMS, LUFS, redone when its knobs change')
 
           def plot?
             true
@@ -326,47 +338,67 @@ module MB
               return
             end
             driver = Render.driver(state)
-            driver.demo = !!state[:demo]
+            driver.guess = !!state[:guess]
             driver.tick(src, s.knobs, s.inspector&.knobs || [].freeze)
             r = driver.shown
             r = nil if r && r.track != src.track
-            draw_header(c, r, driver, src)
+            draw_header(c, r, driver)
             return if c.h < 2
             if r.nil? || r.error
               c.text(0, 1, c.fit(r ? r.error : 'rendering...', c.w), r ? :warn : :dim)
               return
             end
-            body = c.sub(0, 1, c.w, c.h - 1)
-            chart = chart_for(r, state[:overlay] == false ? nil : driver.previous, state[:view] || :wave, state)
-            return unless chart
+            prev = state[:overlay] == false ? nil : driver.previous
+            areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :both).each do |view, body|
+              chart = chart_for(r, prev, view, state)
+              plot(body, chart, state, view, look) if chart
+            end
+          end
+
+          # [[view, canvas], ...]: the plots that fit +body+ for +view+.
+          def areas(body, view)
+            return [[view, body]] unless view == :both
+            if body.h >= 2 * STACK_ROWS
+              top = body.h / 2
+              [[:wave, body.sub(0, 0, body.w, top)], [:spectrum, body.sub(0, top, body.w, body.h - top)]]
+            elsif body.w >= 2 * SIDE_COLS
+              left = body.w / 2
+              [[:wave, body.sub(0, 0, left, body.h)], [:spectrum, body.sub(left, 0, body.w - left, body.h)]]
+            else
+              [[:wave, body]]
+            end
+          end
+
+          # Draws +chart+ into +body+ through a Plot::Live kept per view.
+          def plot(body, chart, state, view, look)
             native = body.grid.is_a?(FastUI::Grid)
             lk = look && look != :auto ? look : Scope.auto_look(body.w, body.h)
-            live = state[:live]
-            if live.nil? || live.width != body.w || live.height != body.h || state[:native] != native || state[:look] != lk
-              live = state[:live] = Plot::Live.new(width: body.w, height: body.h, look: lk, native: native)
-              state[:native] = native
-              state[:look] = lk
+            lives = (state[:lives] ||= {})
+            live, was = lives[view]
+            if live.nil? || live.width != body.w || live.height != body.h || was != [native, lk]
+              live = Plot::Live.new(width: body.w, height: body.h, look: lk, native: native)
+              lives[view] = [live, [native, lk]]
             end
             live.draw(chart, body.grid, x: body.x, y: body.y)
           end
 
-          # The first row: the track and what it played, the figures, the
+          # The first row: the track and its figures, what it played, the
           # render's time, and a mark while a newer render waits or runs.
-          def draw_header(c, r, driver, src)
-            what = driver.demo || src.clip.nil? ? 'demo phrase' : 'clip'
-            x = c.text(0, 0, src.track.to_s, :name)
+          def draw_header(c, r, driver)
+            x = c.text(0, 0, r&.track.to_s, :name)
             if r && !r.error
               x = c.line(0, ['  ', :dim], [Panes.db(r.lufs), :text], [' LUFS', :dim], ['  peak ', :dim], [Panes.db(r.peak), :text],
                          ['  rms ', :dim], [Panes.db(r.rms), :text], x: x)
             end
-            tail = "  #{Panes.fmt(PatchRender.seconds)} s #{what}#{r && !r.error ? ", #{r.ms.round} ms" : ''}"
+            tail = r ? "  #{r.input}, #{Panes.fmt(r.frames.to_f / r.sample_rate)} s#{r.error ? '' : ", #{r.ms.round} ms"}" : "  #{Panes.fmt(PatchRender.seconds)} s"
             x = c.text(x, 0, c.fit(tail, [c.w - x - 2, 0].max), :dim)
             c.text(x, 0, ' …', :queued) if driver.pending? && x + 2 <= c.w
           end
 
           def key_view(state)
-            state[:view] = state[:view] == :spectrum ? :wave : :spectrum
-            state[:view] == :spectrum ? 'render: the spectrum' : 'render: the waveform'
+            i = VIEWS.index(state[:view] || :both) || 0
+            state[:view] = VIEWS[(i + 1) % VIEWS.length]
+            { both: 'render: the waveform above the spectrum (where they fit)', wave: 'render: the waveform', spectrum: 'render: the spectrum' }[state[:view]]
           end
 
           def key_overlay(state)
@@ -375,8 +407,8 @@ module MB
           end
 
           def key_phrase(state)
-            state[:demo] = !state[:demo]
-            state[:demo] ? 'render: the demo phrase' : "render: the track's clip (the demo phrase without one)"
+            state[:guess] = !state[:guess]
+            state[:guess] ? "render: the role's guessed note" : "render: the clip's first note (a guess without a clip)"
           end
 
           def key_length(_state, d)
@@ -401,15 +433,19 @@ module MB
           # The chart for Result +r+ (and +prev+ faintly behind, if any) in
           # +view+ (:wave or :spectrum), rebuilt only when they change.
           def chart_for(r, prev, view, state)
-            key = [r.seq, prev&.seq, view]
-            return state[:chart] if state[:chart_of] == key
+            charts = (state[:charts] ||= {})
+            key = [r.seq, prev&.seq]
+            hit = charts[view]
+            return hit[1] if hit && hit[0] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            if view == :spectrum && r.spectrum
+            if view == :spectrum
+              return nil unless r.spectrum
               f, db = r.spectrum
-              top = [db.max, prev&.spectrum ? prev.spectrum[1].max : -Float::INFINITY].max
+              ps = prev&.spectrum
+              top = [db.max, ps ? ps[1].max : -Float::INFINITY].max
               b.x :frequency, 20.0..(r.sample_rate / 2.0)
               b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
-              b.line(prev.spectrum[1], x: prev.spectrum[0], color: PREVIOUS) if prev&.spectrum
+              b.line(ps[1], x: ps[0], color: PREVIOUS) if ps
               b.line(db, x: f)
             else
               b.x :time, sample_rate: r.sample_rate
@@ -425,11 +461,11 @@ module MB
               b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
               b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
             end
-            state[:chart_of] = key
-            state[:chart] = b.build
+            chart = b.build
+            charts[view] = [key, chart]
+            chart
           rescue StandardError => e
-            state[:chart_of] = key
-            state[:chart] = nil
+            charts[view] = [key, nil]
             warn "render pane: #{e.class}: #{e.message}"
             nil
           end

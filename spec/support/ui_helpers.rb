@@ -73,7 +73,7 @@ module UIHelpers
     @ui_fake_patch ||= ->(clip) { clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env * 0.5 } }
     @ui_fake_clip ||= MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::C4.n2).n8
     UI::PatchRender::Source.new(track: track, patch: @ui_fake_patch, clip: @ui_fake_clip, bpm: 128, bar_length: 1r, key: nil, tuning: nil,
-                                channels: 2, sample_rate: 48000, note: nil)
+                                channels: 2, sample_rate: 48000, note: nil, words: track.to_s)
   end
 
   # A clip for the matrix: +notes+ as eighths from the start (nil: kit

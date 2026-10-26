@@ -28,12 +28,13 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
     tr = s.arrangement.tracks[name]
     t = s.transport
     pr::Source.new(track: name, patch: patch || tr&.patch, clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key, tuning: s.tuning,
-                   channels: 2, sample_rate: 48000, note: nil)
+                   channels: 2, sample_rate: 48000, note: nil, words: name.to_s)
   end
 
-  def job_for(s, seq = 1, source: source_of(s), seconds: 1.0, knobs: nil)
+  def job_for(s, seq = 1, source: source_of(s), seconds: 0.5, knobs: nil, input: nil)
     knobs ||= s.knobs.map { |n, k| [n, k.value, k.spec] }
-    pr::Job.new(seq: seq, key: [source.track, seq].freeze, source: source, knobs: knobs, seconds: seconds, demo: false)
+    input ||= pr.input(source, seconds)
+    pr::Job.new(seq: seq, key: [source.track, seq].freeze, source: source, input: input, knobs: knobs, seconds: seconds)
   end
 
   after do
@@ -53,14 +54,16 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
 
     it 'renders after DEBOUNCE of quiet, or every SWEEP while changes keep coming' do
       d = pr::Debounce.new
+      q = pr::DEBOUNCE
       d.change(0.0)
-      expect(d.submit?(0.2)).to eq(false)
-      expect(d.submit?(0.26)).to eq(true)
+      expect(d.submit?(q * 0.8)).to eq(false)
+      expect(d.submit?(q * 1.05)).to eq(true)
       expect(d.state).to eq(:busy)
       d.done
       expect(d.state).to eq(:idle)
 
       # A held sweep: a change every 50 ms renders at most every SWEEP
+      # (each render taking 100 ms)
       starts = []
       busy_until = nil
       t = 10.0
@@ -90,8 +93,8 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(e.state).to eq(:dirty)
       e.done
       expect(e.state).to eq(:waiting)
-      expect(e.submit?(0.2)).to eq(false)
-      expect(e.submit?(0.31)).to eq(true)
+      expect(e.submit?(0.05 + q * 0.8)).to eq(false)
+      expect(e.submit?(0.05 + q * 1.05)).to eq(true)
     end
   end
 
@@ -105,7 +108,7 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
         def finish(**over)
           j = @jobs.last
           @result = MB::Sound::UI::PatchRender::Result.new(seq: j.seq, key: j.key, track: j.source.track, lo: nil, hi: nil, frames: 0, sample_rate: 48000,
-                                                           peak: 0.0, rms: 0.0, lufs: 0.0, ms: 1.0, input: :clip, spectrum: nil, error: nil, **over)
+                                                           peak: 0.0, rms: 0.0, lufs: 0.0, ms: 1.0, input: 'x', spectrum: nil, how: :inline, error: nil, **over)
           @busy = false
         end
         attr_reader :result
@@ -135,12 +138,12 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(@driver.state).to eq(:idle)
 
       # A turn waits for quiet
-      now += 0.1
+      now += 1
       @driver.tick(src, knobs.(1000.0), [:cut])
-      now += 0.1
+      now += pr::DEBOUNCE * 0.6
       @driver.tick(src, knobs.(1000.0), [:cut])
       expect(fake.jobs.length).to eq(1)
-      now += 0.2
+      now += pr::DEBOUNCE * 0.6
       @driver.tick(src, knobs.(1000.0), [:cut])
       expect(fake.jobs.length).to eq(2)
       expect(fake.jobs.last.knobs.assoc(:cut)[1]).to eq(1000.0)
@@ -168,7 +171,7 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
   end
 
   describe 'renders' do
-    it 'renders a fresh instance of the patch with the knobs given, the same each time, without touching the live graph or the shared seeds' do
+    it 'renders one note through a fresh instance with the knobs given, the same each time, without touching the live graph or the shared seeds' do
       MB::Sound.seed(0)
       @session, out = bass_session
       4.times { @session.process_buffer }
@@ -177,27 +180,47 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       4.times { @other.process_buffer }
 
       shared = MB::Sound::Internal.root_rng.dup
-      cache = {}.compare_by_identity
-      a = pr.render(job_for(@session, 1), contained: cache)
+      cache = {}
+      a = pr.render(job_for(@session, 1), cache: cache)
       expect(a.error).to be_nil
-      expect(a.input).to eq(:clip)
+      expect(a.input).to eq('first note E1')
+      expect(a.how).to eq(:inline)
       expect(a.peak).to be_between(-30, 6)
       expect(a.lufs).to be_between(-40, 0)
       expect(a.lo.length).to eq(pr::ENVELOPE)
-      expect(a.frames).to eq(48000)
+      expect(a.frames).to eq(24000)
       expect(a.spectrum[0].length).to eq(pr::SPECTRUM_POINTS)
-      expect(cache.values.first.values).to eq([true]) # (self-contained, checked once)
-      b = pr.render(job_for(@session, 2), contained: cache)
+      expect(cache.values).to eq([true]) # (self-contained, checked once)
+      b = pr.render(job_for(@session, 2), cache: cache)
       expect(b.hi).to eq(a.hi) # (same seeds: renders differ only by what changed)
       knobs = @session.knobs.map { |n, k| [n, n == :cut ? 300.0 : k.value, k.spec] }
-      c = pr.render(job_for(@session, 3, knobs: knobs), contained: cache)
+      c = pr.render(job_for(@session, 3, knobs: knobs), cache: cache)
       expect(c.hi).not_to eq(a.hi)
       highs = ->(r) { r.spectrum[1][r.spectrum[0].gt(2000)].mean }
       expect(highs.(c)).to be < highs.(a) - 6 # (the cutoff turned down)
       expect(@session.knobs[:cut].value).to be_within(1e-9).of(2400) # (the live knob)
 
-      # The session that rendered three times plays on exactly as the one
-      # that didn't, and the shared generator gave no draws
+      # Forked from one Server instance: the same samples as in-process,
+      # knob turns without a rebuild (one server), a new note a new one
+      served = {}
+      fa = pr.render(job_for(@session, 4), cache: served, fork: true)
+      expect(fa.how).to eq(:fork)
+      expect(fa.hi).to eq(a.hi)
+      server = served[:server]
+      fc = pr.render(job_for(@session, 5, knobs: knobs), cache: served, fork: true)
+      expect(fc.hi).to eq(c.hi)
+      fa2 = pr.render(job_for(@session, 6), cache: served, fork: true)
+      expect(fa2.hi).to eq(a.hi) # (each render from the never-sampled instance)
+      expect(served[:server]).to equal(server)
+      guess = pr.input(source_of(@session), 0.5, guess: true)
+      fg = pr.render(job_for(@session, 7, input: guess), cache: served, fork: true)
+      expect(fg.input).to eq('bass guess A1')
+      expect(served[:server]).not_to equal(server)
+      expect { Process.kill(0, server.pid) }.to raise_error(Errno::ESRCH) # (the old one ended and was reaped)
+      served[:server].close
+
+      # The session that rendered plays on exactly as the one that didn't,
+      # and the shared generator gave no draws
       expect(MB::Sound.next_seed).to eq(shared.rand(1 << 62))
       8.times do
         @session.process_buffer
@@ -206,23 +229,47 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(out.captured).to eq(other_out.captured)
     end
 
-    it 'renders the demo phrase for a track without a clip or when asked, and says why it cannot render' do
+    it 'plays the clip\'s first note, a kit as it is, or a note guessed from the role; and says why it cannot render' do
       @session, = bass_session
-      src = source_of(@session).with(clip: nil)
-      r = pr.render(job_for(@session, source: src, seconds: 0.5))
-      expect(r.input).to eq(:demo)
+      src = source_of(@session)
+      clip = MB::Sound.seq(MB::Sound::Rest, (!MB::Sound::C3).n4, MB::Sound::E3).n8
+      inp = pr.input(src.with(clip: clip), 0.5)
+      expect(inp.kind).to eq(:clip_note)
+      ev = inp.clip.events
+      expect(ev.length).to eq(1)
+      expect([ev[0].start, ev[0].value.to_i, ev[0].length, ev[0].accented]).to eq([0r, 48, 1/4r, true])
+      expect(pr.input(src.with(clip: clip), 0.5).id).to eq(inp.id)
+      kit = MB::Sound.grid(16, kick: 'x...').loop rescue nil
+      expect(pr.input(src.with(clip: kit), 0.5).kind).to eq(:kit) if kit.respond_to?(:rows)
+      roles = {
+        'bass' => [:bass, 33], 'dnb_reese' => [:bass, 33], 'warm pad' => [:pad, 60], 'lead' => [:lead, 67], 'keys' => [:pluck, 60],
+        'kick' => [:kick, 36], 'mystery' => [:default, 48],
+      }
+      roles.each do |words, (role, note)|
+        g = pr.input(src.with(clip: nil, words: words), 0.5)
+        expect([g.kind, g.role, g.clip.events[0].value]).to eq([:guess, role, note]), words
+      end
+      pad = pr.input(src.with(clip: nil, words: 'pad'), 0.5).clip.events[0].length
+      bass = pr.input(src.with(clip: nil, words: 'bass'), 0.5).clip.events[0].length
+      expect(pad).to be > bass # (pads hold longer)
+      r = pr.render(job_for(@session, source: src.with(clip: nil)))
       expect(r.error).to be_nil
+      expect(r.input).to eq('bass guess A1')
 
       shared = 110.hz.saw
-      patch = ->(clip) { clip.env * shared }
-      r = pr.render(job_for(@session, source: source_of(@session, patch: patch), seconds: 0.5))
+      patch = ->(c) { c.env * shared }
+      r = pr.render(job_for(@session, source: source_of(@session, patch: patch)))
       expect(r.error).to include('reads nodes made outside it')
 
       bad = ->(_clip) { 220.hz.sine.nonexistent_dsl_method }
-      r = pr.render(job_for(@session, source: source_of(@session, patch: bad), seconds: 0.5))
+      r = pr.render(job_for(@session, source: source_of(@session, patch: bad)))
       expect(r.error).to start_with('NoMethodError')
+      cache = {}
+      r = pr.render(job_for(@session, source: source_of(@session, patch: bad)), cache: cache, fork: true)
+      expect(r.error).to start_with('NoMethodError') # (from the server)
+      cache[:server]&.close
 
-      r = pr.render(job_for(@session, source: source_of(@session).with(patch: nil, note: 'pad plays a graph'), seconds: 0.5))
+      r = pr.render(job_for(@session, source: source_of(@session).with(patch: nil, note: 'pad plays a graph')))
       expect(r.error).to eq('pad plays a graph')
     end
 
@@ -253,29 +300,36 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       grid.to_text(:none).lines.map(&:rstrip)
     end
 
-    it 'draws the waveform with its figures, the spectrum on s, and says why there is nothing to draw' do
+    it 'draws the waveform above the spectrum (beside it, or one of them, where they don\'t fit) with the figures, and says why there is nothing to draw' do
       snap = ui_fake_snapshot
       now = 0.0
       st = { title_in_rule: true, driver: pr::Driver.new(clock: -> { now }) }
-      text = draw(snap, st)
+      text = draw(snap, st, w: 80, h: 18)
       @driver = st[:driver]
-      expect(text[0]).to match(/\Abass  -\d+\.\d LUFS  peak -\d+\.\d  rms -\d+\.\d  3 s clip, 0 ms\z/)
-      expect(text[1..].join("\n")).to include('time (s)')
+      expect(text[0]).to match(/\Abass  -\d+\.\d LUFS  peak -\d+\.\d  rms -\d+\.\d  first note C3, 0\.5 s, 0 ms\z/)
+      body = text[1..].join("\n")
+      expect(body).to include('time (', 'frequency')
+      expect(body.index('time (')).to be < body.index('frequency') # (the waveform above)
+      wide = draw(snap, { title_in_rule: true, driver: st[:driver] }, w: 100, h: 9)
+      expect(wide.find { |l| l.include?('time (') }).to include('frequency') # (side by side)
+      small = draw(snap, { title_in_rule: true, driver: st[:driver] }, h: 9).join("\n")
+      expect(small).to include('time (')
+      expect(small).not_to include('frequency')
       pane = ui.panes.fetch(:render)
-      expect(pane.key_action(:view, st)).to eq('render: the spectrum')
-      expect(draw(snap, st).join("\n")).to include('frequency', '1k')
+      expect(pane.key_action(:view, st)).to include('the waveform')
+      expect(pane.key_action(:view, st)).to include('the spectrum')
+      expect(draw(snap, st, h: 9).join("\n")).to include('frequency')
 
       first = @driver.shown
-      expect(pane.key_action(:phrase, st)).to include('demo phrase')
+      expect(pane.key_action(:phrase, st)).to include('guessed note')
       draw(snap, st)
       now += 0.3
       text = draw(snap, st)
-      expect(text[0]).to include('demo phrase')
-      expect(@driver.shown.input).to eq(:demo)
+      expect(text[0]).to include('bass guess A1')
       expect(@driver.previous).to equal(first) # (drawn faintly behind)
 
-      expect(pane.key_action(:length, st, 1)).to include('4 s')
-      expect(pane.key_action(:length, st, -1)).to include('3 s')
+      expect(pane.key_action(:length, st, 1)).to include('0.75 s')
+      expect(pane.key_action(:length, st, -1)).to include('0.5 s')
       expect(pane.key_action(:again, st)).to eq('render: again')
 
       none = snap.with(slow: snap.slow.with(render_source: nil))

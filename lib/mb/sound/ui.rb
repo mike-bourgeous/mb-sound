@@ -232,7 +232,7 @@ module MB
             cols(weight: 5) {
               rows(width: 30) { pane :tracks, height: 7; pane :picker }
               rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
-              rows(weight: 3) { pane :code; pane :render, weight: 1, min: 6; pane :sound_keys, height: 9 }
+              rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8; pane :sound_keys, height: 9 }
             }
             pane :audition, height: 1
             repl weight: 2, min: 8

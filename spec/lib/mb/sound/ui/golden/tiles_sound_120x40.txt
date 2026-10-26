@@ -3,17 +3,17 @@
 ● drums  beat_a               │bass  2/3                                   │knob :cut, (100.0..8000.0).at(2400.0),
 ● bass   bass_a               │ cut       ███████▎   2400 Hz 100..8000 exp │    curve: :exp, unit: "Hz"
 ● lead   rec →21:1            │                                            │
-● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)
-                              │highpass  SampleWrapper ×4  2/4  n N: other…│synth(riff, voices: 1) { |v|
-                              │ cutoff     150 Hz                          │  saws = v.hz.unison(6, detune: 0.32) { |p,
-                              │ quality    0.7  Q                          │      _i| p.saw }                      more
-─ LIBRARY ──────────────── 6 ─┤                                            ├─ RENDER ─────────────────────────────── 7 ─
-find ▏                        │                                            │bass  -16.4 LUFS  peak -7.2  rms -20.5  3…
-                              │                                            │ 0.2┤⣄⣀⣀⣧⣄⣀⣦⣄⣀⣶⣄⣀⣀⣅⣀⣀⣀⣀⣀⣀⣀⣀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
-the library picker goes here: │                                            │ 0.0┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡷⠶⠶⠬⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤
-find-as-you-type, then        │                                            │-0.4┤⠋⠉⠉⠟⠋⠉⡿⠛⠉⡿⠛⠉⠉⠍⠉⠉⠉⠉⠉⠉⠉⠉⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁
-Enter: the likely action      │                                            │    └┬────────────┬───────────┬────────────┬
-(named on the status line),   │                                            │     0            1           2     time (s)
+● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)   more
+                              │highpass  SampleWrapper ×4  2/4  n N: other…├─ RENDER ─────────────────────────────── 6 ─
+                              │ cutoff     150 Hz                          │bass  -19.1 LUFS  peak -10.6  rms -20.7  …
+                              │ quality    0.7  Q                          │    │⢸⣦⣠⣄⣀⢀⣀⣨⢀⣀⣀⢀⣀⣀⣀⣨⡀⣀⡀    ⠅       ⠅
+─ LIBRARY ──────────────── 7 ─┤                                            │ 0.2┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⣥⣁⠁⠅⠁⠁⠁⠁⠁⠁⠁⠅⠁⠁⠁⠁⠁⠁⠁
+find ▏                        │                                            │    │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣶⣤⣤⣤⣀⣀⣀⣅⣀⣀⣀⣀⣀⣀⣀
+                              │                                            │ 0.0┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠿⠛⠋⠛⠋⠉⠉⠍⠉⠉⠉⠉⠉⠉⠉
+the library picker goes here: │                                            │-0.2┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⡋⡈⡀⡅⡀⡀⡀⡀⡀⡀⡀⡅⡀⡀⡀⡀⡀⡀⡀
+find-as-you-type, then        │                                            │    │⡿⠿⠛⠋⠉⠉⠁⠩⠉⠁⠉⠉⠁⠉⠉⠨⠉⠉⠈    ⠅       ⠅
+Enter: the likely action      │                                            │    └┬──────┬───────┬───────┬───────┬──────┬
+(named on the status line),   │                                            │     0     100     200     300     time (ms)
 a key per action, auditions   ├─ PREVIEW ────────────────────────────── 8 ─┼─ KEYS ───────────────────────────────── 9 ─
 on CUE only.                  │level (dB)                                  │Up Down    previous knob / next knob
                               │  0┤⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⢄⣄⣄⡤⠤⠤⠤⠤⠤⠤⠤⠤⠥⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠬⠤⠤⠤⠤⠤│Left Right turn the knob up / turn the knob…

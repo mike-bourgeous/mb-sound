@@ -6,51 +6,64 @@ module MB
       # "a one-shot render of the processed waveform updated periodically
       # when parameters change" (maintainer, 2026-10-26).
       #
-      # A render never touches the live graph: it calls the track's patch
-      # block again (the same code the live track built its graph with, so
-      # the same sound) in a throwaway Session (a sandbox like
-      # Arrangement#warm_up's: the session's tempo, meter, key, tuning, and
-      # copies of every knob at its value now), with its own random seeds
-      # (Internal.with_private_rng: the live set's seed draws are
-      # untouched), live mode off on that thread (Internal.strictly: a
-      # patch's mistakes are the result, not warnings), and major GCs held
-      # off (GCQuiet).  The first render of a patch and clip builds it
-      # twice and renders only if the two builds share no node: a patch
-      # that reaches nodes made outside it (shared with the live graph)
-      # would have them advanced.
+      # What renders: one note (the clip's first note, else a guess from
+      # the track's role: .input) through a fresh instance of the track's
+      # patch, built by calling its patch block again (the code the live
+      # track built its graph with, so the same sound) in a throwaway
+      # Session (a sandbox like Arrangement#warm_up's: the session's tempo,
+      # meter, key, tuning, and copies of every knob), for the first
+      # PatchRender.seconds (half a second by default).
       #
-      # The work happens on a Worker thread at low priority that passes
-      # the GVL after every buffer, never on the painter or render thread
-      # and never under the render lock; a Driver (one per pane placement,
-      # ticked by the pane on the painter thread) decides when to render
-      # with a Debounce and keeps the newest result.
+      # Cost (round 2, the maintainer's goal: no dropouts): a render Server
+      # process, forked once per patch and note (never per knob turn),
+      # builds the instance there (a build is ~100 ms of Ruby, which in this
+      # process held the GVL against the live render thread), and answers
+      # each render by forking a copy of the never-sampled instance that
+      # sets the knobs, renders, and writes the figures back; so every
+      # render starts from the same fresh state, and this process only
+      # writes a request and reads the answer.  Where fork is missing (or
+      # PatchRender.fork is false, and in the UI specs' inline mode) each
+      # render builds its own instance in-process instead, checking once per
+      # patch and note that a second build shares no node with the first (a
+      # patch reaching nodes made outside it would advance them; in a
+      # forked copy they advance only there).
+      #
+      # Builds and in-process renders use their own random seeds
+      # (Internal.with_private_rng: the live set's seed draws are
+      # untouched), live mode off on their thread (Internal.strictly: a
+      # patch's mistakes are the result, not warnings), and major GCs held
+      # off (GCQuiet).  The work happens on a Worker thread at low priority,
+      # never on the painter or render thread and never under the render
+      # lock; a Driver (one per pane placement, ticked by the pane on the
+      # painter thread) decides when to render with a Debounce and keeps the
+      # newest result.
       module PatchRender
-        # What a render plays by default (seconds; PatchRender.seconds=).
-        SECONDS = 3.0
+        # How much of the note a render plays by default (seconds;
+        # PatchRender.seconds=).
+        SECONDS = 0.5
 
         # Render lengths allowed (seconds).
-        SECONDS_RANGE = (0.5..20.0)
+        SECONDS_RANGE = (0.1..20.0)
 
         # The quiet time after the last change before a render starts.
-        DEBOUNCE = 0.25
+        DEBOUNCE = 0.1
 
         # While changes keep coming (a held sweep), a render starts at most
         # this long after the first change it hasn't rendered.
-        SWEEP = 0.5
+        SWEEP = 0.2
 
-        # The seed every render's root generator starts from (renders differ
-        # only by what changed).
+        # The seed the instance's build starts the root generator from, and
+        # the seed the render itself starts it from (renders differ only by
+        # what changed).
         SEED = 0
+        RENDER_SEED = 1
 
-        # Frames per buffer of an offline render (the worker gives the GVL
-        # back between buffers, so smaller buffers keep the live render
-        # thread's waits short).
+        # Frames per buffer of an offline render.
         BUFFER = 256
 
-        # The share of wall time a Worker's render may take (it sleeps
-        # after each buffer for the rest; PatchRender.duty=): Ruby runs one
-        # thread at a time, so a render that never paused would take the
-        # GVL from the live render thread whenever both have work.
+        # The share of wall time an in-process Worker render may take (it
+        # sleeps after each buffer for the rest; PatchRender.duty=); forked
+        # renders run at full speed in their own process.
         DUTY = 0.5
 
         # Columns of the min/max envelope kept per render (enough for a
@@ -60,38 +73,87 @@ module MB
         # Points of a render's spectrum (the pane's spectrum view).
         SPECTRUM_POINTS = 256
 
-        # A Worker thread with nothing to do for this long ends (a new
-        # request starts another).
+        # A Worker thread with nothing to do for this long ends, closing its
+        # instance (a new request starts another).
         IDLE = 10.0
+
+        # A forked render taking longer than this is killed (seconds).
+        FORK_TIMEOUT = 10.0
+
+        # The note a render plays when the track has no clip (or p asks for
+        # the guess): the first row whose words match the track's name or
+        # its graph's code (the preset or patch it plays) wins.  +hold+ is
+        # the note's length as a share of the render.
+        ROLES = [
+          { role: :kick, words: /kick|bd\b|808_kick/, note: 36, hold: 0.25 },
+          { role: :drums, words: /drum|perc|snare|hat|clap|tr808|tr909|kit/, note: 38, hold: 0.25 },
+          { role: :bass, words: /bass|reese|sub\b|wobble|acid/, note: 33, hold: 0.6 },
+          { role: :pad, words: /pad|string|choir|drone|swell|ambient/, note: 60, hold: 0.9 },
+          { role: :pluck, words: /pluck|keys|piano|bell|mallet|marimba|tine|arp/, note: 60, hold: 0.3 },
+          { role: :lead, words: /lead|solo|vox|vocal|melody/, note: 67, hold: 0.6 },
+        ].freeze
+
+        # The guess when no role matches.
+        DEFAULT_ROLE = { role: :default, note: 48, hold: 0.6 }.freeze
 
         # The inspected track's patch and what a render needs from the
         # live session (gathered by Poll; nothing here is read from the
         # session again): +track+ the player name, +patch+ the track's
         # patch block (nil for a graph track: +note+ says why there is no
-        # render), +clip+ the track's clip (nil: the demo phrase), +bpm+,
+        # render), +clip+ the track's clip (nil: a guessed note), +bpm+,
         # +bar_length+, +key+ (a MusicalKey), +tuning+, +channels+,
-        # +sample_rate+.
-        Source = Data.define(:track, :patch, :clip, :bpm, :bar_length, :key, :tuning, :channels, :sample_rate, :note)
+        # +sample_rate+, +words+ (the track's name and its graph's code, for
+        # the role guess).
+        Source = Data.define(:track, :patch, :clip, :bpm, :bar_length, :key, :tuning, :channels, :sample_rate, :note, :words) do
+          def initialize(words: nil, **rest) = super(words: words, **rest)
+        end
+
+        # What a render plays: +clip+ (a one-note Clip, or a Kit as given),
+        # +kind+ (:clip_note, :kit, or :guess), +role+ (the guessed role, or
+        # nil), +text+ (for the pane: "first note A1", "bass guess A1"), +id+
+        # (a value that is equal when the input is the same).
+        Input = Data.define(:clip, :kind, :role, :text, :id)
 
         # One render request: +seq+ (increasing), +key+ (what decides
-        # whether a render is current: Driver.key_of), +source+, +knobs+
-        # (frozen [name, value, Knob::Spec] rows for the sandbox), +seconds+,
-        # +demo+ (true: the demo phrase instead of the track's clip).
-        Job = Data.define(:seq, :key, :source, :knobs, :seconds, :demo)
+        # whether a render is current: Driver.key_of), +source+, +input+ (an
+        # Input), +knobs+ (frozen [name, value, Knob::Spec] rows for the
+        # sandbox), +seconds+.
+        Job = Data.define(:seq, :key, :source, :input, :knobs, :seconds) do
+          # What decides whether an instance can render this job: the patch,
+          # the input, and the transport's settings (not the knob values).
+          def instance_key
+            s = source
+            [s.patch.object_id, input.id, s.bpm, s.bar_length, s.key, s.tuning.object_id, s.channels, s.sample_rate].freeze
+          end
+        end
 
         # A finished render: +seq+ and +key+ of its Job, +track+, +lo+ and
         # +hi+ (frozen SFloat min/max envelopes over every channel, ENVELOPE
         # columns), +frames+, +sample_rate+, +peak+ (dBFS), +rms+ (dBFS),
-        # +lufs+ (integrated, -Infinity for silence), +ms+ (wall time of
-        # the build and render), +input+ (:clip or :demo), +spectrum+
-        # ([frequencies, dB] frozen DFloats, or nil), +error+ (why there is
-        # no audio, or nil).
-        Result = Data.define(:seq, :key, :track, :lo, :hi, :frames, :sample_rate, :peak, :rms, :lufs, :ms, :input, :spectrum, :error)
+        # +lufs+ (integrated, -Infinity for silence or renders under 400 ms),
+        # +ms+ (wall time of the render, with the instance's build when it
+        # was built for it), +input+ (the Input's text), +spectrum+
+        # ([frequencies, dB] frozen DFloats, or nil), +how+ (:fork or
+        # :inline), +error+ (why there is no audio, or nil).
+        Result = Data.define(:seq, :key, :track, :lo, :hi, :frames, :sample_rate, :peak, :rms, :lufs, :ms, :input, :spectrum, :how, :error)
+
+        # A built, never-sampled patch instance (see PatchRender; a
+        # Server's, or an in-process render's): +key+
+        # (Job#instance_key), +box+ (its sandbox Session), +out+ (the
+        # CaptureOutput), +ms+ (build time), +error+ (why it couldn't be
+        # built, or nil).
+        Instance = Struct.new(:key, :box, :out, :ms, :error, keyword_init: true) do
+          def close
+            box&.close
+            self.box = nil
+          end
+        end
 
         @seconds = SECONDS
         @inline = false
         @clock = nil
         @duty = Float(ENV['MB_SOUND_RENDER_DUTY'] || DUTY)
+        @fork = Process.respond_to?(:fork) && ENV['MB_SOUND_RENDER_FORK'] != '0'
 
         class << self
           # The length of each render (seconds).
@@ -101,8 +163,13 @@ module MB
           # specs and the golden captures.
           attr_accessor :inline
 
-          # The share of wall time a Worker's render may take (0 < duty <= 1;
-          # 1: no pauses, only Thread.pass).
+          # True (the default where Process.fork exists;
+          # MB_SOUND_RENDER_FORK=0 off): Workers render in forked processes
+          # from one instance per patch and note.
+          attr_accessor :fork
+
+          # The share of wall time an in-process Worker render may take
+          # (0 < duty <= 1; 1: no pauses, only Thread.pass).
           attr_reader :duty
 
           def duty=(d)
@@ -122,33 +189,54 @@ module MB
             @seconds = s.to_f
           end
 
-          # Renders +job+ (a Job) on the calling thread and returns a Result.
-          # +contained+ is a Hash the caller keeps (patch => { clip => true
-          # or false }) so a patch and clip are checked for nodes shared
-          # with outside graphs once, not every render.  +pace+ true (the
-          # Worker) sleeps after each buffer to keep to PatchRender.duty.
-          # Never raises.
-          def render(job, contained: nil, pace: false)
-            src = job.source
-            t0 = now
-            clip = job.demo || src.clip.nil? ? Playable.demo_phrase : src.clip
-            input = clip.equal?(src.clip) ? :clip : :demo
-            return failed(job, input, t0, src.note || 'no patch to rebuild') if src.patch.nil?
-
-            data = nil
-            Internal.strictly do
-              GCQuiet.during do
-                Internal.with_private_rng(SEED) do
-                  data = render_patch(job, clip, contained, pace)
-                end
+          # What +source+'s render plays (an Input): the first note of the
+          # track's clip (its value, velocity, length, and marks, from the
+          # start), a Kit as it is (its first hits), or with +guess+ (or no
+          # clip) the note of the track's role (ROLES, from Source#words)
+          # held for its share of +seconds+.
+          def input(source, seconds, guess: false)
+            clip = source.clip
+            if !guess && clip.respond_to?(:rows)
+              return Input.new(clip: clip, kind: :kit, role: nil, text: 'the kit', id: [:kit, clip.object_id].freeze)
+            end
+            if !guess && clip.respond_to?(:events)
+              ev = first_note(clip)
+              if ev
+                one = ev.dup
+                one.start = 0r
+                one.probability = nil
+                one.condition = nil
+                c = Sequence::Clip.new([one])
+                name = note_name(ev.value)
+                return Input.new(clip: c, kind: :clip_note, role: nil, text: "first note #{name}".freeze,
+                                 id: [:note, ev.value, ev.length, ev.velocity, ev.accented, ev.slid, ev.pitch].freeze)
               end
             end
-            return failed(job, input, t0, data) if data.is_a?(String)
+            row = role_of(source.words)
+            wn = Rational((seconds * row[:hold] * source.bpm.to_f / 240).round(4).to_s)
+            ev = Sequence::Event.new(start: 0r, length: wn, value: row[:note], velocity: 0.8)
+            Input.new(clip: Sequence::Clip.new([ev]), kind: :guess, role: row[:role], text: "#{row[:role]} guess #{note_name(row[:note])}".freeze,
+                      id: [:guess, row[:role], wn].freeze)
+          end
 
-            finish(job, input, t0, data)
+          # The ROLES row for +words+ (a String; nil: DEFAULT_ROLE).
+          def role_of(words)
+            text = words.to_s.downcase
+            ROLES.find { |r| r[:words].match?(text) } || DEFAULT_ROLE
+          end
+
+          # Renders +job+ (a Job) and returns a Result.  +cache+ is a Hash the
+          # caller keeps between jobs: with +fork+ it holds the Instance
+          # (built when the job's instance_key changes), else the
+          # self-contained checks per patch and input.  +pace+ (in-process
+          # Worker renders) sleeps after each buffer to keep to
+          # PatchRender.duty.  Never raises.
+          def render(job, cache: {}, fork: false, pace: false)
+            t0 = now
+            fork ? render_served(job, cache, t0) : render_inline(job, cache, pace, t0)
           rescue Exception => e # rubocop:disable Lint/RescueException (a patch's SystemStackError or NotImplementedError is its result too)
             raise if e.is_a?(Interrupt) || e.is_a?(SystemExit)
-            failed(job, input, t0, "#{e.class}: #{e.message}".lines.first.chomp)
+            failed(job, t0, "#{e.class}: #{e.message}".lines.first.chomp)
           end
 
           # [lo, hi]: the min and max of every channel of +data+ (SFloats)
@@ -170,43 +258,157 @@ module MB
 
           private
 
-          # Builds the patch in a sandbox and renders it: the captured
-          # channels, or a String saying why not.
-          def render_patch(job, clip, contained, pace)
+          # Builds a fresh instance for +job+ (renders it here once), never
+          # sampled before.
+          def render_inline(job, cache, pace, t0)
             src = job.source
-            box, out = sandbox(job)
-            graph = Session.with_context(session: box) { src.patch.call(clip) }
-            return 'the patch made nothing to play' if graph.nil?
+            return failed(job, t0, src.note || 'no patch to rebuild') if src.patch.nil?
+            inst = build(job, check: cache)
+            return failed(job, t0, inst.error) if inst.error
+            data = nil
+            Internal.strictly do
+              GCQuiet.during { data = play(inst, job.knobs, job.seconds, src.sample_rate, pace) }
+            end
+            finish(job, t0, data, :inline)
+          ensure
+            inst&.close
+          end
 
-            known = contained&.dig(src.patch, clip)
-            if known.nil?
-              known = self_contained?(job, clip, box, graph)
-              if contained
-                contained.clear if contained.length >= 8 && !contained.key?(src.patch)
-                (contained[src.patch] ||= {}.compare_by_identity)[clip] = known
+          # Renders +job+ through the cached Server (started first if the job
+          # needs another instance).
+          def render_served(job, cache, t0)
+            src = job.source
+            return failed(job, t0, src.note || 'no patch to rebuild') if src.patch.nil?
+            server = cache[:server]
+            unless server&.key == job.instance_key && server.alive?
+              server&.close
+              server = cache[:server] = Server.new(job)
+            end
+            payload = server.render(job)
+            ms = (now - t0) * 1000
+            if payload.is_a?(String)
+              server.close
+              cache.delete(:server)
+              return failed(job, t0, payload, ms: ms)
+            end
+            result_of(job, payload, ms, :fork)
+          end
+
+          # (Server process) Builds the instance for +job+, then answers each
+          # render request read from +jobs+ with a frame on +results+, from a
+          # forked copy of the never-sampled instance; leaves without exit
+          # hooks when +jobs+ closes (the parent closed it, or ended).
+          def serve(job, jobs, results)
+            Process.setpriority(Process::PRIO_PROCESS, 0, 10) rescue nil
+            $stdout.reopen(File::NULL)
+            $stderr.reopen(File::NULL)
+            inst = build(job, check: nil)
+            warm(job) if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? && !inst.error
+            loop do
+              msg = Server.read_frame(jobs, nil) or break
+              knobs, seconds = msg
+              if inst.error
+                Server.write_frame(results, inst.error)
+                next
+              end
+              rd, wr = IO.pipe
+              pid = Process.fork do
+                rd.close
+                begin
+                  GC.disable # (no marking pass copying every heap page)
+                  data = Internal.strictly { play(inst, knobs, seconds, job.source.sample_rate, false) }
+                  Server.write_frame(wr, figures(data, job.source.sample_rate))
+                rescue Exception => e # rubocop:disable Lint/RescueException
+                  Server.write_frame(wr, "#{e.class}: #{e.message}".lines.first.chomp) rescue nil
+                ensure
+                  exit!(0)
+                end
+              end
+              wr.close
+              payload = Server.read_frame(rd, FORK_TIMEOUT)
+              Process.kill(:KILL, pid) rescue nil if payload.nil?
+              Process.wait(pid) rescue nil
+              rd.close
+              Server.write_frame(results, payload || 'the render process ended without a result')
+            end
+          rescue Exception # rubocop:disable Lint/RescueException
+            nil
+          ensure
+            exit!(0)
+          end
+
+          # A sandbox and the patch's graph built in it, added (plans
+          # installed, never sampled), as an Instance.  With +check+ (a Hash),
+          # the first build of a patch and input also builds a second one and
+          # refuses a patch whose builds share a node.
+          def build(job, check:)
+            t0 = now
+            src = job.source
+            box = nil
+            err = nil
+            Internal.strictly do
+              GCQuiet.during do
+                Internal.with_private_rng(SEED) do
+                  box, out = sandbox(job)
+                  graph = Session.with_context(session: box) { src.patch.call(job.input.clip) }
+                  if graph.nil?
+                    err = 'the patch made nothing to play'
+                  elsif check
+                    key = [src.patch, job.input.id]
+                    ok = check.fetch(key) { check.clear if check.length >= 8; check[key] = self_contained?(job, box, graph) }
+                    err = 'the patch reads nodes made outside it (shared with the live graph): no render' unless ok
+                  end
+                  box.add(graph, on: :now) unless err
+                  return Instance.new(key: job.instance_key, box: box, out: out, ms: ((now - t0) * 1000).round(1), error: err)
+                end
               end
             end
-            return 'the patch reads nodes made outside it (shared with the live graph): no render' unless known
-
-            box.add(graph, on: :now)
-            frames = (job.seconds * src.sample_rate).round
-            rest = pace ? (1 - @duty) / @duty : 0
-            (frames.to_f / BUFFER).ceil.times do
-              t = MB::U.clock_now
-              box.process_buffer
-              # (the render and painter threads get the GVL between buffers)
-              rest > 0 ? sleep((MB::U.clock_now - t) * rest) : Thread.pass
-            end
-            out.captured(frames)
-          ensure
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            raise if e.is_a?(Interrupt) || e.is_a?(SystemExit)
             box&.close
+            Instance.new(key: job.instance_key, box: nil, out: nil, ms: ((now - t0) * 1000).round(1), error: "#{e.class}: #{e.message}".lines.first.chomp)
+          end
+
+          # (Server process, with YJIT) Builds and renders a second instance
+          # once, so the render's code is compiled here and every forked
+          # copy inherits it (each copy compiling it again made a 0.5 s
+          # dnb_reese render take ~480 ms instead of ~55).
+          def warm(job)
+            w = build(job, check: nil)
+            play(w, job.knobs, job.seconds, job.source.sample_rate, false) unless w.error
+          rescue StandardError
+            nil
+          ensure
+            w&.close
+          end
+
+          # Sets +inst+'s knobs to +knobs+ ([name, value, ...] rows; exact
+          # jumps before its first frame) and renders +seconds+: the
+          # captured channels.
+          def play(inst, knobs, seconds, rate, pace)
+            box = inst.box
+            have = box.knobs
+            knobs.each do |name, value, _|
+              k = have[name] or next
+              k.set(value, frame: 0, smooth: 0)
+            end
+            frames = (seconds * rate).round
+            rest = pace ? (1 - @duty) / @duty : 0
+            Internal.with_private_rng(RENDER_SEED) do
+              (frames.to_f / BUFFER).ceil.times do
+                t = MB::U.clock_now
+                box.process_buffer
+                rest > 0 ? sleep((MB::U.clock_now - t) * rest) : Thread.pass
+              end
+            end
+            inst.out.captured(frames)
           end
 
           # True if a second build of the patch shares no node with +graph+
           # (see PatchRender).
-          def self_contained?(job, clip, box, graph)
+          def self_contained?(job, box, graph)
             other, = sandbox(job)
-            second = Session.with_context(session: other) { job.source.patch.call(clip) }
+            second = Session.with_context(session: other) { job.source.patch.call(job.input.clip) }
             a = nodes_of(box, graph)
             b = nodes_of(other, second)
             a.each_key.none? { |n| b.include?(n) }
@@ -236,25 +438,36 @@ module MB
             [box, out]
           end
 
-          def finish(job, input, t0, data)
+          # The figures of rendered channels +data+ (a Hash: lo, hi, frames,
+          # peak, rms, lufs, spectrum).
+          def figures(data, rate)
             lo, hi = envelope(data)
             peak = data.map { |d| d.abs.max.to_f }.max.to_f
             sum = data.sum { |d| (Numo::DFloat.cast(d)**2).sum }
             count = data.sum(&:length)
             rms = count > 0 ? Math.sqrt(sum / count) : 0.0
-            lufs = MB::Sound.loudness(data, sample_rate: job.source.sample_rate, true_peak: false).integrated
-            Result.new(seq: job.seq, key: job.key, track: job.source.track, lo: lo, hi: hi, frames: data[0].length, sample_rate: job.source.sample_rate,
-                       peak: db(peak), rms: db(rms), lufs: lufs.to_f, ms: ((now - t0) * 1000).round(1), input: input,
-                       spectrum: spectrum(data, job.source.sample_rate), error: nil)
+            lufs = data[0].length >= rate * 0.4 ? MB::Sound.loudness(data, sample_rate: rate, true_peak: false).integrated.to_f : -Float::INFINITY
+            { lo: lo, hi: hi, frames: data[0].length, peak: db(peak), rms: db(rms), lufs: lufs, spectrum: spectrum(data, rate) }
+          end
+
+          def finish(job, t0, data, how)
+            result_of(job, figures(data, job.source.sample_rate), (now - t0) * 1000, how)
+          end
+
+          def result_of(job, f, ms, how)
+            Result.new(seq: job.seq, key: job.key, track: job.source.track, lo: f[:lo].freeze, hi: f[:hi].freeze, frames: f[:frames],
+                       sample_rate: job.source.sample_rate, peak: f[:peak], rms: f[:rms], lufs: f[:lufs], ms: ms.round(1), input: job.input.text,
+                       spectrum: f[:spectrum]&.map(&:freeze)&.freeze, how: how, error: nil)
           end
 
           # [frequencies, dB] of the render's average spectrum (the channels
           # mixed; Hann windows of 4096 samples, half overlapped, powers
-          # averaged; a full-scale sine reads 0 dB), at SPECTRUM_POINTS
-          # log-spaced frequencies from 20 Hz (the loudest bin near each), or
-          # nil for renders shorter than a window.
+          # averaged; a full-scale sine reads 0 dB; shorter renders use one
+          # window of their length's power of two), at SPECTRUM_POINTS
+          # log-spaced frequencies from 20 Hz (the loudest bin near each).
           def spectrum(data, rate, n = 4096)
             mono = data.length == 1 ? Numo::DFloat.cast(data[0]) : data.sum { |d| Numo::DFloat.cast(d) } / data.length
+            n = 2**Math.log2(mono.length).floor while mono.length < n && n > 256
             return nil if mono.length < n
             w = 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(n).seq * (2 * Math::PI / n))
             acc = Numo::DFloat.zeros(n / 2 + 1)
@@ -275,7 +488,21 @@ module MB
               f[i] = Math.sqrt(edges[i] * edges[i + 1])
               out[i] = db[a...b].max
             end
-            [f.freeze, out.freeze].freeze
+            [f, out]
+          rescue StandardError
+            nil
+          end
+
+          def note_name(v)
+            n = v.respond_to?(:number) ? v.number.round : v.to_i
+            "#{Poll::NOTE_NAMES[n % 12]}#{n / 12 - 1}"
+          rescue StandardError
+            v.to_s
+          end
+
+          def first_note(clip)
+            evs = (clip.send(:first_cycle_events) rescue clip.events)
+            Array(evs).select { |e| e.value }.min_by(&:start)
           rescue StandardError
             nil
           end
@@ -284,9 +511,96 @@ module MB
 
           def db(x) = x > 0 ? 20 * Math.log10(x) : -Float::INFINITY
 
-          def failed(job, input, t0, why)
+          def failed(job, t0, why, ms: nil)
             Result.new(seq: job.seq, key: job.key, track: job.source.track, lo: nil, hi: nil, frames: 0, sample_rate: job.source.sample_rate,
-                       peak: nil, rms: nil, lufs: nil, ms: ((now - t0) * 1000).round(1), input: input, spectrum: nil, error: why.to_s.freeze)
+                       peak: nil, rms: nil, lufs: nil, ms: (ms || (now - t0) * 1000).round(1), input: job.input&.text, spectrum: nil, how: nil,
+                       error: why.to_s.freeze)
+          end
+        end
+
+        # A render server for one instance (PatchRender.fork): a process
+        # forked from this one that builds the patch's instance (so builds
+        # never take this process's GVL) and, for each request, forks a copy
+        # of the never-sampled instance that sets the knobs, renders, and
+        # answers.  This process's cost per render is a small write and a
+        # read (the GVL free while waiting); the fork it pays once per
+        # instance, 1-5 ms of GVL by the heap's size.  A server ends when its
+        # request pipe closes (#close, or this process ending).
+        class Server
+          # The Job#instance_key it renders.
+          attr_reader :key
+
+          # The server's process id.
+          attr_reader :pid
+
+          def initialize(job)
+            @key = job.instance_key
+            jr, @jobs = IO.pipe
+            @results, rw = IO.pipe
+            [jr, @jobs, @results, rw].each(&:binmode)
+            @pid = Process.fork do
+              @jobs.close
+              @results.close
+              PatchRender.send(:serve, job, jr, rw)
+            end
+            jr.close
+            rw.close
+            @dead = false
+          end
+
+          # True until a request failed or #close.
+          def alive? = !@dead
+
+          # Renders +job+'s knobs and length: the figures (a Hash) or a String
+          # saying why not.
+          def render(job)
+            Server.write_frame(@jobs, [job.knobs.map { |n, v, _| [n, v] }, job.seconds])
+            Server.read_frame(@results, FORK_TIMEOUT + 30) || begin
+              @dead = true
+              'the render process ended without a result'
+            end
+          rescue SystemCallError, IOError => e
+            @dead = true
+            "the render process failed (#{e.class})"
+          end
+
+          # Ends the server and reaps it.
+          def close
+            @dead = true
+            @jobs.close unless @jobs.closed?
+            @results.close unless @results.closed?
+            Process.kill(:KILL, @pid) rescue nil
+            Process.wait(@pid) rescue nil
+            nil
+          end
+
+          # Writes +obj+ as one frame (a 4-byte length, then Marshal) to +io+.
+          def self.write_frame(io, obj)
+            data = Marshal.dump(obj)
+            io.write([data.bytesize].pack('N'), data)
+            io.flush
+          end
+
+          # The next frame's object from +io+, or nil at its end or after
+          # +timeout+ seconds (nil: no limit).
+          def self.read_frame(io, timeout)
+            head = read_exactly(io, 4, timeout) or return nil
+            body = read_exactly(io, head.unpack1('N'), timeout) or return nil
+            Marshal.load(body) # (frames from our own forked process only)
+          end
+
+          def self.read_exactly(io, n, timeout)
+            buf = +''.b
+            deadline = timeout && MB::U.clock_now + timeout
+            while buf.bytesize < n
+              left = deadline && deadline - MB::U.clock_now
+              return nil if left && left <= 0
+              return nil unless io.wait_readable(left)
+              chunk = io.read_nonblock(n - buf.bytesize, exception: false)
+              return nil if chunk.nil?
+              buf << chunk unless chunk == :wait_readable
+            end
+            buf
           end
         end
 
@@ -367,7 +681,7 @@ module MB
             @thread = nil
             @closed = false
             @running = false
-            @contained = {}.compare_by_identity
+            @cache = {} # (PatchRender.render: the Instance, or self-contained checks)
             @on_done = on_done
           end
 
@@ -405,6 +719,12 @@ module MB
 
           private
 
+          # (worker thread, holding the mutex) Closes the kept instance.
+          def drop_instance
+            @cache.delete(:server)&.close
+            @cache.clear
+          end
+
           def start
             @thread = Thread.new { run }
             @thread.name = 'mb-sound patch render'
@@ -420,12 +740,14 @@ module MB
                   left = deadline - MB::U.clock_now
                   if left <= 0
                     @thread = nil
+                    drop_instance
                     return
                   end
                   @cond.wait(@mutex, left)
                 end
                 if @closed
                   @thread = nil
+                  drop_instance
                   return
                 end
                 @running = true
@@ -433,7 +755,7 @@ module MB
                 @job = nil
                 j
               }
-              r = PatchRender.render(job, contained: @contained, pace: true)
+              r = PatchRender.render(job, cache: @cache, fork: PatchRender.fork, pace: true)
               @mutex.synchronize {
                 @result = r if @result.nil? || r.seq > @result.seq
                 @running = false
@@ -448,11 +770,11 @@ module MB
         class InlineWorker
           def initialize
             @result = nil
-            @contained = {}.compare_by_identity
+            @cache = {}
           end
 
           def submit(job)
-            @result = PatchRender.render(job, contained: @contained)
+            @result = PatchRender.render(job, cache: @cache)
             self
           end
 
@@ -488,18 +810,32 @@ module MB
             @previous = nil
             @source = nil
             @knobs = nil
-            @demo = false
+            @guess = false
+            @input = nil
+            @input_of = nil
+            @job_input = nil
           end
 
-          # True: renders play the demo phrase instead of the track's clip.
-          attr_accessor :demo
+          # True: renders play the role's guessed note instead of the clip's
+          # first note.
+          attr_accessor :guess
 
           # The key that decides whether a render is current: the track, its
-          # patch and clip by identity, the demo flag, the length, and the
-          # values of the knobs the graph reads (+read+: names).
-          def self.key_of(source, knobs, read, demo, seconds)
+          # patch by identity, the input (PatchRender.input's id), the
+          # length, and the values of the knobs the graph reads (+read+:
+          # names).
+          def self.key_of(source, input, knobs, read, seconds)
             values = read.map { |n| knobs.find { |k| k.name == n }&.value }
-            [source.track, source.patch.object_id, source.clip.object_id, demo, seconds, *values].freeze
+            [source.track, source.patch.object_id, input.id, seconds, *values].freeze
+          end
+
+          # The Input for +source+ now (kept while its clip, words, the guess
+          # flag, and the length stay the same).
+          def input_for(source)
+            of = [source.clip.object_id, source.words, @guess, PatchRender.seconds, source.bpm]
+            return @input if @input_of == of
+            @input_of = of
+            @input = PatchRender.input(source, PatchRender.seconds, guess: @guess)
           end
 
           # One tick: +source+ (a Source, or nil: nothing to render), +knobs+
@@ -511,10 +847,12 @@ module MB
             collect
             return self if source.nil?
 
-            key = Driver.key_of(source, knobs, read, @demo, PatchRender.seconds)
+            input = input_for(source)
+            key = Driver.key_of(source, input, knobs, read, PatchRender.seconds)
             if key != @key
               @key = key
               @source = source
+              @job_input = input
               @knobs = knobs
               @debounce.change(now) unless @debounce.state == :idle && @shown&.key == key
             else
@@ -524,7 +862,7 @@ module MB
             if @debounce.submit?(now, urgent: urgent)
               @seq += 1
               rows = @knobs.map { |k| [k.name, k.value, k.spec].freeze }.freeze
-              worker.submit(Job.new(seq: @seq, key: @key, source: @source, knobs: rows, seconds: PatchRender.seconds, demo: @demo))
+              worker.submit(Job.new(seq: @seq, key: @key, source: @source, input: @job_input, knobs: rows, seconds: PatchRender.seconds))
               @running_key = @key
               collect
             end

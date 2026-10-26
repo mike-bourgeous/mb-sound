@@ -120,7 +120,8 @@ module MB
             elsif !tr.patch? then "#{name} plays a graph, not a patch: track(:#{name}) { |clip| ... } renders"
             end
           PatchRender::Source.new(track: name, patch: tr&.patch, clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
-                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, sample_rate: 48000, note: note&.freeze)
+                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, sample_rate: 48000, note: note&.freeze,
+                                  words: "#{name} #{info.code}".freeze)
         rescue StandardError => e
           warn_once(e)
           nil
