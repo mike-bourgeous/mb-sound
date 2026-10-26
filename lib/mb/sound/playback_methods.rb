@@ -442,7 +442,7 @@ module MB
         session = Session.current
         preset = effects.is_a?(Mastering::Preset) || (effects.is_a?(Symbol) && effects != :show) || effects.is_a?(String) ? effects : nil
         if preset
-          preset = Mastering.preset(preset, **options) # (errors before anything is queued)
+          preset = Mastering.from_preset(preset, **options) # (errors before anything is queued)
         elsif !options.empty?
           raise ArgumentError, "master options #{options.keys.map(&:inspect).join(', ')} go with a mastering preset (master :club, #{options.keys.first}: ...)"
         elsif block.nil? && effects == :show
@@ -470,9 +470,9 @@ module MB
       #     masters(:vinyl).notes
       #     masters(:streaming, platform: :apple).target
       def masters(name = nil, **options)
-        return Mastering.preset(name, **options) if name
+        return Mastering.from_preset(name, **options) if name
 
-        Mastering.presets.each_value do |p|
+        Mastering.built_presets.each_value do |p|
           puts format('  %-11s %-44s %s', p.name.inspect, p.title, p.summary.sub(/\A\w+: /, ''))
         end
         Mastering.names
@@ -905,7 +905,7 @@ module MB
 
       private def render_targeted(filename, *sounds, loudness: nil, peak: :warn, master: nil, **kwargs, &block)
         override = master == :none ? false : master
-        override = Mastering.preset(override) if override
+        override = Mastering.from_preset(override) if override
         targeting = loudness != false
         loudness = nil if loudness == false
 

@@ -150,7 +150,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(described_class.classic_level(8, 4).to_db).to be_within(0.01).of(-9.03)
       expect(described_class.classic_level(4, 3).to_db).to be_within(0.01).of(-15.56)
       expect(described_class.classic_level(16, 4).to_db).to be_within(0.01).of(-6.02)
-      expect(described_class::PRESETS[:hall][:wet]).to eq(-20.db)
+      expect(described_class.preset_settings(:hall)[:wet]).to eq(-20.db)
     end
 
     it 'measures the requested decay time with the room-size layout' do
@@ -352,10 +352,10 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'plays :room wet at -10 dB and :hall with compact loops (user picks, 2026-10-10/11)' do
-      expect(described_class::PRESETS[:room][:wet]).to eq(-10.db)
-      expect(described_class::PRESETS[:hall][:loop_extra]).to eq(0)
+      expect(described_class.preset_settings(:room)[:wet]).to eq(-10.db)
+      expect(described_class.preset_settings(:hall)[:loop_extra]).to eq(0)
       [:space, :stadium, :default, :room].each do |preset|
-        expect(described_class::PRESETS[preset][:loop_extra]).to eq(described_class::CLASSIC_LOOP_EXTRA)
+        expect(described_class.preset_settings(preset)[:loop_extra]).to eq(described_class::CLASSIC_LOOP_EXTRA)
       end
     end
 

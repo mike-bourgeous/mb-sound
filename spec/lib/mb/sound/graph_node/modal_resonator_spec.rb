@@ -49,7 +49,7 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
   end
 
   it 'normalizes so a strike of 1 never peaks above 1' do
-    MB::Sound::GraphNode::ModalResonator::PRESETS.each_key do |name|
+    MB::Sound::GraphNode::ModalResonator.presets.each_key do |name|
       out = collect(impulses(4800, { 0 => 1 }).resonate(name, 330), limit: 48000)
       expect(out.abs.max).to be <= 1.0
       expect(out.abs.max).to be > 0.1, name.to_s
@@ -78,7 +78,7 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
   end
 
   it 'glides a gong from above its pitch down onto it, more for harder strikes' do
-    expect(MB::Sound::GraphNode::ModalResonator.preset(:gong).glide).to be > 0
+    expect(MB::Sound::GraphNode::ModalResonator.from_preset(:gong).glide).to be > 0
     out = collect(impulses(96000, { 0 => 1 }).resonate(:gong, 110, glide: 5), limit: 96000)
     early = peak_hz(out[0...8192], 100, 160)
     late = peak_hz(out[(96000 - 32768)..], 100, 160)
@@ -116,7 +116,7 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
   end
 
   it 'matches the sum of pings for a bowl (the ambient bowl) within float32 rounding' do
-    pre = MB::Sound::GraphNode::ModalResonator.preset(:bowl)
+    pre = MB::Sound::GraphNode::ModalResonator.from_preset(:bowl)
     strike = impulses(48000, { 0 => 1, 30000 => 0.6 })
     modal = collect(strike.resonate(:bowl, 220, normalize: false), limit: 48000)
     pings = MB::Sound::GraphNode::Tee.new(impulses(48000, { 0 => 1, 30000 => 0.6 }), pre.modes.length * 2).branches
@@ -180,7 +180,7 @@ RSpec.describe(MB::Sound::GraphNode::ModalResonator, :aggregate_failures) do
   end
 
   it 'raises with suggestions for unknown presets and bad modes' do
-    expect { impulses(10, {}).resonate(:bwol, 200) }.to raise_error(ArgumentError, /did you mean :bowl/)
+    expect { impulses(10, {}).resonate(:bwol, 200) }.to raise_error(ArgumentError, /Did you mean\?  :bowl/)
     expect { impulses(10, {}).resonate([[1, 1]]) }.to raise_error(ArgumentError, /frequency/)
     expect { impulses(10, {}).resonate([], 200) }.to raise_error(ArgumentError, /Modes/)
     expect { impulses(10, {}).resonate([[1, 'x']], 200) }.to raise_error(ArgumentError, /mode/)

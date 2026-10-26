@@ -526,7 +526,7 @@ module MB
           options[:ride] = true
           options[:lufs] = @options[:lufs] if @options.key?(:lufs)
         end
-        Mastering.preset(m, **options)
+        Mastering.from_preset(m, **options)
       end
 
       # Arranges a song with +block+ on the current session, at the --bpm

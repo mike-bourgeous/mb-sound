@@ -15,7 +15,7 @@ module MB
     # during a segment, the rest of the segment is re-planned from the
     # current level, so the output stays continuous.
     #
-    # Curves are signed dB (see CURVES): positive values move fast first (an
+    # Curves are signed dB (see Envelope::Curves): positive values move fast first (an
     # analog-style attack, a ringing decay), 0 is linear, and negative values
     # move slowly first (a swell).  The curve of a segment with curve d is
     # p(x) = (1 - e^(cx)) / (1 - e^c) with c = -d ln(10) / 20 (SuperCollider's
@@ -140,29 +140,43 @@ module MB
       # Keys for the last values of curve nodes (see #fit).
       CURVE_KEYS = SEGMENTS.map { |s| [s, :"#{s}_curve"] }.to_h.freeze
 
-      # Curve presets in dB: [attack, decay, release].
-      CURVES = {
-        linear: [0, 0, 0].freeze,
-        analog: [12, 60, 60].freeze,
-        snappy: [24, 90, 60].freeze,
-        gentle: [6, 21, 21].freeze,
-        swell: [-24, 21, 21].freeze,
-        dx: [-30, 30, 30].freeze,
-        smooth: [0, 0, 0].freeze,
-        pad: [0, 12, 12].freeze,
-      }.freeze
+      # Curve presets (the :env_curve family; `env.curve(:snappy)`,
+      # `adsr(..., curve: :pad)`): +curves+ in dB, [attack, decay, release],
+      # and +shape+ (:exp, or :s for the presets that set S-curves: :smooth
+      # is plain smoothstep S-curves (the old smoothstep ADSREnvelope,
+      # without its corners), :pad S-curves whose decay and release move a
+      # little faster first; see SHAPES).  Library files add more with
+      # `env_curve :name, curves: [a, d, r], shape: :exp` lines.
+      module Curves
+        extend MB::Sound::Presettable
+        preset_family :env_curve, kind: :envelope, label: 'curve preset', keys: %i[curves shape],
+          about: 'Envelope curve presets: adsr(0.01, 0.2, 0.7, 0.3).curve(:snappy)',
+          code: ->(e) { "env.curve(#{e.name.inspect})" }
 
-      # Segment shapes for the CURVES presets that set them (the rest set
-      # :exp on every segment): :smooth is plain smoothstep S-curves (the
-      # old smoothstep ADSREnvelope, without its corners), :pad S-curves
-      # whose decay and release move a little faster first (see SHAPES).
-      CURVE_SHAPES = {
-        smooth: :s,
-        pad: :s,
-      }.freeze
+        preset :linear, curves: [0, 0, 0].freeze, shape: :exp, tags: %i[straight], about: 'Straight lines'
+        preset :analog, curves: [12, 60, 60].freeze, shape: :exp, tags: %i[warm], about: 'The default: a gently curved attack, exponential decay and release'
+        preset :snappy, curves: [24, 90, 60].freeze, shape: :exp, tags: %i[punchy], about: 'A fast-curving attack and a steep decay'
+        preset :gentle, curves: [6, 21, 21].freeze, shape: :exp, tags: %i[soft], about: 'Slight curves'
+        preset :swell, curves: [-24, 21, 21].freeze, shape: :exp, tags: %i[slow], about: 'An attack that swells (slow first)'
+        preset :dx, curves: [-30, 30, 30].freeze, shape: :exp, tags: %i[fm], about: 'DX7-style: a swelling attack, even decay and release'
+        preset :smooth, curves: [0, 0, 0].freeze, shape: :s, tags: %i[scurve], about: 'Plain smoothstep S-curves'
+        preset :pad, curves: [0, 12, 12].freeze, shape: :s, tags: %i[scurve slow], about: 'S-curves whose decay and release move a little faster first'
+
+        # The [attack, decay, release] curves of preset +name+.
+        def self.values(name, note: true)
+          (note ? preset_entry(name) : Library.index.lookup(:env_curve, name, note: false) || preset_entry(name)).settings[:curves]
+        end
+
+        # The segment shape of +spec+ (a preset name; anything else is
+        # :exp).
+        def self.shape(spec)
+          e = (spec.is_a?(Symbol) || spec.is_a?(String)) && Library.index.lookup(:env_curve, spec, note: false)
+          e ? e.settings[:shape] || :exp : :exp
+        end
+      end
 
       # Segment shapes (the C enum env_shape), see #shape:
-      # - :exp (alias :exponential): the curve in dB (see CURVES); the
+      # - :exp (alias :exponential): the curve in dB (see Curves); the
       #   default.
       # - :s (alias :scurve): a smoothstep of the same curve, starting and
       #   ending with zero slope, so joints between S segments have no
@@ -188,7 +202,7 @@ module MB
       # The smallest step the overshoot bound uses (the C ENV_MIN_STEP).
       MIN_STEP = 1e-3
 
-      # Default times and sustain level (see PRESETS for per-preset changes).
+      # Default times and sustain level (see the presets below for per-preset changes).
       DEFAULT_ATTACK = 0.005
       DEFAULT_DECAY = 0.2
       DEFAULT_SUSTAIN = 0.7
@@ -197,14 +211,22 @@ module MB
       # The shortest default hold time (see #hold).
       MIN_HOLD = 0.1
 
-      # Settings for the constructors in EnvelopeMethods (see .preset).
-      PRESETS = {
-        adsr: { curve: :analog, sensitivity: 0..1 }.freeze,
-        env: { curve: :analog, sensitivity: 0.5..1 }.freeze,
-        amp_env: { curve: [12, 60, 40].freeze, sensitivity: -18.db..0.db, velocity_scale: :db }.freeze,
-        fm_env: { curve: :dx, sustain: 0, sensitivity: -12.db..0.db, velocity_scale: :db }.freeze,
-        filter_env: { curve: :analog, sustain: 0, sensitivity: 0.5..1, octaves: 2 }.freeze,
-      }.freeze
+      # Settings for the constructors in EnvelopeMethods (the :envelope
+      # family; see .from_preset).
+      extend MB::Sound::Presettable
+      preset_family :envelope, kind: :envelope, label: 'envelope preset',
+        keys: %i[curve sensitivity velocity_scale sustain octaves attack decay release hold],
+        about: 'Envelope constructors: adsr, env, amp_env, fm_env, filter_env',
+        code: ->(e) { "#{e.name}(0.01, 0.2, 0.7, 0.3)" }
+
+      preset :adsr, curve: :analog, sensitivity: 0..1, tags: %i[general], about: 'adsr: velocity scales the level 0..1'
+      preset :env, curve: :analog, sensitivity: 0.5..1, tags: %i[general], about: 'env: velocity scales the level 0.5..1'
+      preset :amp_env, curve: [12, 60, 40].freeze, sensitivity: -18.db..0.db, velocity_scale: :db, tags: %i[amp velocity],
+        about: 'amp_env: an amplitude envelope, velocity -18..0 dB'
+      preset :fm_env, curve: :dx, sustain: 0, sensitivity: -12.db..0.db, velocity_scale: :db, tags: %i[fm],
+        about: 'fm_env: an FM index envelope (DX curves, no sustain), velocity -12..0 dB'
+      preset :filter_env, curve: :analog, sustain: 0, sensitivity: 0.5..1, octaves: 2, tags: %i[filter],
+        about: 'filter_env: a filter envelope in octaves (2 by default), no sustain'
 
       # Kernel stages (the C enum env_stage).
       STAGE_IDLE = 0
@@ -279,7 +301,7 @@ module MB
       # C ENV_LINEAR_LIMIT).
       LINEAR_LIMIT = 1e-9
 
-      # Creates an envelope from the preset +name+ in PRESETS (:adsr, :env,
+      # Creates an envelope from the preset +name+ (:adsr, :env,
       # :amp_env, :fm_env, or :filter_env), with optional positional times
       # and sustain level, and any #initialize options (which override the
       # preset).  +:depth+ is an alias for +:octaves+.
@@ -289,9 +311,9 @@ module MB
       # velocity settings, and octaves; +decay+, +sustain+, and +release+
       # must then be left out.
       #
-      #     Envelope.preset(:amp_env, [[1, 0.01], [0.5, 0.4], [0.8, 1], [0, 0.5]], release_at: 3)
-      def self.preset(name, attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        settings = PRESETS.fetch(name) { raise ArgumentError, "Unknown envelope preset #{name.inspect} (#{PRESETS.keys.join(', ')})" }
+      #     Envelope.from_preset(:amp_env, [[1, 0.01], [0.5, 0.4], [0.8, 1], [0, 0.5]], release_at: 3)
+      def self.from_preset(name, attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        settings = preset_settings(name)
 
         if attack.is_a?(Array)
           raise ArgumentError, 'Give a segment list or ADSR times, not both' unless [decay, sustain, release].all?(&:nil?)
@@ -328,7 +350,7 @@ module MB
       attr_reader :preset_name
 
       # Returns a Hash of curves for each segment (see SEGMENTS) from any
-      # curve specification: a preset Symbol (see CURVES), a number or graph
+      # curve specification: a preset Symbol (see Curves), a number or graph
       # node for every segment, an Array of one value per segment ([attack,
       # decay, release] for ADSR), or a Hash of some segments (the rest come
       # from +current+).
@@ -341,10 +363,10 @@ module MB
       # may be segment names or roles (:attack, :decay, :release), and a
       # three-value Array applies by role when there aren't three segments.
       def self.curve_values(curve, current = nil, names: SEGMENTS, release_node: RELEASE_NODE)
-        current ||= role_values(CURVES[:analog], names, release_node)
+        current ||= role_values(Curves.values(:analog, note: false), names, release_node)
         values = case curve
                  when Symbol
-                   role_values(CURVES.fetch(curve) { raise ArgumentError, "Unknown curve preset #{curve.inspect} (#{CURVES.keys.join(', ')})" }, names, release_node)
+                   role_values(Curves.values(curve), names, release_node)
 
                  when Array
                    by_position(curve, names, release_node, 'Curve')
@@ -454,8 +476,8 @@ module MB
       #                                    `250.ms`, `96.samples`, `1.n8`),
       #                                    or a graph node (seconds).
       # +:sustain+ - The sustain level relative to the peak (number or node).
-      # +:curve+ - Curves in dB (see .curve_values and CURVES).  A preset
-      #           name also sets the shapes (see CURVE_SHAPES).
+      # +:curve+ - Curves in dB (see .curve_values and Curves).  A preset
+      #           name also sets the shapes (see Curves.shape).
       # +:shape+ - Segment shapes: :exp or :s for every segment, or per
       #           segment (see .shape_values, SHAPES, and #shape); applied
       #           after +:curve+.
@@ -712,8 +734,8 @@ module MB
       # returns the curves (a Hash of segment => dB or node) without
       # arguments.  Accepts the same arguments as +:curve+ in #initialize, or
       # three values for attack, decay, and release.  A preset name (see
-      # CURVES) also sets every segment's shape (:exp, or the preset's
-      # CURVE_SHAPES entry).
+      # Curves) also sets every segment's shape (:exp, or the preset's
+      # Curves shape).
       #
       # Example:
       #     adsr(0.01, 0.5, 0.3, 1).curve(:snappy)
@@ -726,7 +748,7 @@ module MB
         spec = args.length == 1 ? args.first : args
         values = self.class.curve_values(spec, @curves, names: @names, release_node: @release_node)
         @curves = values.transform_values { |v| v.is_a?(Numeric) ? v : v.get_sampler }
-        @shapes = self.class.shape_values(CURVE_SHAPES.fetch(spec, :exp), names: @names, release_node: @release_node) if spec.is_a?(Symbol) || @shapes.nil?
+        @shapes = self.class.shape_values(Curves.shape(spec), names: @names, release_node: @release_node) if spec.is_a?(Symbol) || @shapes.nil?
         changed!
         self
       end
@@ -994,8 +1016,8 @@ module MB
         times = [@times[:attack], @times[:decay], sustain, @times[:release]].map { |t|
           t.is_a?(Numeric) ? MB::M.sigfigs(t, 4) : t.to_s
         }
-        preset_shapes = ->(k) { self.class.shape_values(CURVE_SHAPES.fetch(k, :exp)) }
-        names = CURVES.select { |_, v| v == @curves.values }.keys
+        preset_shapes = ->(k) { self.class.shape_values(Curves.shape(k)) }
+        names = Curves.presets.select { |_, e| e.settings[:curves] == @curves.values }.keys
         preset = names.find { |k| preset_shapes.(k) == @shapes } || names.first
         curves = preset || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
         shapes = " shape #{@shapes.values.join('/')}" unless preset_shapes.(preset) == @shapes

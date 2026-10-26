@@ -27,7 +27,7 @@ module MB
         # Example:
         #     play 220.hz.saw.adsr(0.005, 0.3, 0.4, 1, curve: :snappy)
         def adsr(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-          self * MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
+          self * MB::Sound::Envelope.from_preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end
 
         # Pings a struck resonator with this node (a GraphNode::Resonator):
@@ -49,7 +49,7 @@ module MB
 
         # Strikes a modal resonator with this node (GraphNode::ModalResonator):
         # every impulse rings all the modes of a struck object at once,
-        # +preset+ (ModalResonator::PRESETS: :bowl, :rin, :gong, :bell,
+        # +preset+ (ModalResonator.presets: :bowl, :rin, :gong, :bell,
         # :chime, :tubular, :bar, :marimba, :vibes, :glass, :plate,
         # :membrane) or a list of modes [[ratio, amplitude, decay share,
         # beat multiple, bloom share], ...], at +freq+ (Hz: a number, node,
@@ -90,7 +90,7 @@ module MB
           preset ||= :bowl
 
           if preset.is_a?(Symbol)
-            p = ModalResonator.preset(preset)
+            p = ModalResonator.from_preset(preset)
             modes = p.modes
             decay ||= p.decay
             beat ||= p.beat

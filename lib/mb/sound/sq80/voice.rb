@@ -9,7 +9,7 @@ module MB
       # ENV1 blipping OSC3, ENV2 on the filter, a delayed vibrato LFO, and
       # two oddities: a per-key poly pressure flutter and a looping chop
       # envelope.  Console: MB::Sound.sq80 (SQ80Methods); named settings in
-      # SQ80::PATCHES.
+      # SQ80.presets.
       #
       # Settings (see DEFAULTS; Hash settings merge into the defaults, so
       # `env4: { t4: 50 }` changes only T4):

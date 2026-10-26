@@ -333,7 +333,7 @@ module MB
         # Presets: :room, :hall, :stadium, :space, :default (the classic
         # presets, as they sounded in 2026-01, except :room's wet now at 0 dB
         # and :hall's compact loops, 2026-10-10), plus the room-size presets
-        # :plate, :shimmer, :grit, :lofi, :gated, :drone.  See Reverb::PRESETS.
+        # :plate, :shimmer, :grit, :lofi, :gated, :drone.  See Reverb.presets.
         #
         # The friendly form: without a preset, +:room_size:+ (0..1),
         # +:decay:+ (the reverb time, RT60, in seconds or any Length), and

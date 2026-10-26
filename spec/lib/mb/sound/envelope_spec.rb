@@ -512,7 +512,7 @@ RSpec.describe(MB::Sound::Envelope) do
   describe 'curves' do
     [:linear, :analog, :snappy, :gentle, :swell, :dx].each do |preset|
       it "#{preset} matches the curve formula at half of each segment" do
-        a, d, r = described_class::CURVES[preset]
+        a, d, r = MB::Sound::Envelope::Curves.values(preset)
         env = described_class.new(attack: 1000.samples, decay: 2000.samples, sustain: 0.25, release: 500.samples, hold: 4000.samples, curve: preset)
         data = collect(env, 5000)
 
@@ -1212,7 +1212,7 @@ RSpec.describe(MB::Sound::Envelope) do
 
       it 'sets shapes from curve presets, and shape: after curve:' do
         expect(described_class.new(curve: :smooth).shape).to eq({ attack: :s, decay: :s, release: :s })
-        expect(described_class.new(curve: :pad).curve).to eq(described_class::SEGMENTS.zip(described_class::CURVES[:pad]).to_h)
+        expect(described_class.new(curve: :pad).curve).to eq(described_class::SEGMENTS.zip(MB::Sound::Envelope::Curves.values(:pad)).to_h)
         expect(described_class.new(curve: :pad).shape.values.uniq).to eq([:s])
         expect(described_class.new(curve: :smooth).curve(:analog).shape.values.uniq).to eq([:exp])
         expect(described_class.new(curve: :smooth).curve(release: 30).shape.values.uniq).to eq([:s])

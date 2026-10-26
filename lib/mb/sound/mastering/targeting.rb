@@ -499,7 +499,7 @@ module MB
           a = Loudness::Analyzer.new(channels: out.length, sample_rate: session.sample_rate)
           a.process(out)
           r = a.result
-          hz = presets.last.options.fetch(:mono) { DEFINITIONS[presets.last.name][:defaults][:mono] } || 120
+          hz = presets.last.options.fetch(:mono) { Mastering.preset_settings(presets.last.name).dig(:defaults, :mono) } || 120
           side = out.length == 2 ? Genre.low_side_db(out, frequency: hz, sample_rate: session.sample_rate) : nil
           input = input_from(records.last, origin, length)
           side_in = input.length == 2 ? Genre.low_side_db(input, frequency: hz, sample_rate: session.sample_rate) : nil

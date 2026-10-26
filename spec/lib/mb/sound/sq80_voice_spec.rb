@@ -1,7 +1,7 @@
 require 'digest'
 
 # The SQ-80-flavored voice in the library (MB::Sound.sq80, SQ80::Voice,
-# SQ80::Waves, SQ80::PATCHES; design/notes/sq80.md).
+# SQ80::Waves, SQ80.presets; design/notes/sq80.md).
 RSpec.describe(MB::Sound::SQ80Methods) do
   after { MB::Sound.rewind }
 
@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::SQ80Methods) do
     end
 
     it 'explains unknown names with suggestions' do
-      expect { MB::Sound.sq80(midi_file, :chopp) }.to raise_error(ArgumentError, /No SQ-80 patch :chopp.*chop/)
+      expect { MB::Sound.sq80(midi_file, :chopp) }.to raise_error(ArgumentError, /Unknown SQ-80 patch :chopp.*chop/m)
       expect { MB::Sound.sq80(midi_file, cutof: 3) }.to raise_error(ArgumentError, /cutof.*cutoff/)
       expect { MB::Sound.sq80(midi_file, osc1: { lvel: 3 }) }.to raise_error(ArgumentError, /osc1 setting :lvel.*level/)
       expect { MB::Sound.sq80(midi_file, osc1: { wave: :sawx }) }.to raise_error(ArgumentError, /sawx.*saw/)
@@ -177,12 +177,12 @@ RSpec.describe(MB::Sound::SQ80Methods) do
     it 'lists every patch with its description and returns the names' do
       names = nil
       expect { names = MB::Sound.sq80_patches }.to output(/:flutter_pad +A slow pad/).to_stdout
-      expect(names).to eq(MB::Sound::SQ80::PATCHES.keys)
+      expect(names).to eq(MB::Sound::SQ80.preset_names)
       expect(names).to include(:classic, :flutter_pad, :chop, :vox_lead, :prime_bass, :glass)
     end
   end
 
-  describe MB::Sound::SQ80::PATCHES do
+  describe 'SQ80 patches (SQ80.presets)' do
     it 'has :classic as the defaults an octave down (level matched)' do
       expect(MB::Sound::SQ80.patch(:classic).full_settings).to eq(MB::Sound::SQ80::Voice::DEFAULTS.merge(transpose: -12, level: 1.99))
     end
@@ -192,7 +192,7 @@ RSpec.describe(MB::Sound::SQ80Methods) do
       expect(MB::Sound::SQ80.patch(:prime_bass).full_settings[:transpose]).to eq(12)
     end
 
-    MB::Sound::SQ80::PATCHES.each_key do |name|
+    MB::Sound::SQ80.preset_names.each do |name|
       it "builds and plays :#{name}, and loads it as the preset sq80_#{name}" do
         g = MB::Sound.with_seed(3) { MB::Sound.sq80(midi_file, name) }
         out = render(g, 40)

@@ -128,7 +128,7 @@ module MB
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
           raise ArgumentError, "master options #{options.keys.map(&:inspect).join(', ')} go with a mastering preset (master :club, ...)" if preset.nil? && !options.empty?
-          preset = Mastering.preset(preset, **options) if preset
+          preset = Mastering.from_preset(preset, **options) if preset
           preset = mastering_override_for(preset, block)
 
           chain = build_master(block, description: description, preset: preset)
@@ -206,7 +206,7 @@ module MB
 
         # Sets #mastering_override (a preset name or Preset, false, or nil).
         def mastering_override=(preset)
-          @mastering_override = preset.nil? || preset == false ? preset : Mastering.preset(preset)
+          @mastering_override = preset.nil? || preset == false ? preset : Mastering.from_preset(preset)
         end
 
         # The gain renders give the trim of targeted mastering presets (see

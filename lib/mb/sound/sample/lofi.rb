@@ -9,23 +9,34 @@ module MB
         # (Hz or nil).  Not emulations: the rates and depths of the
         # machines' usual settings, aliasing from a zero-order hold, and
         # their filters as simple lowpasses.
-        PRESETS = {
-          # Akai S950: 12 bits, variable rate (31.25 kHz here, a jungle
-          # favourite for longer breaks), a filtered output
-          s950: { rate: 31_250, bits: 12, input_filter: true, filter: 13_000 },
-          # E-mu SP-1200: 12 bits at 26.04 kHz, no anti-alias filter on the
-          # way in, the gritty unfiltered outputs
-          sp1200: { rate: 26_040, bits: 12, input_filter: false, filter: nil },
-          # Akai MPC60: 12 bits (stored nonlinearly) at 40 kHz, filtered
-          mpc60: { rate: 40_000, bits: 12, input_filter: true, filter: 16_000 },
-        }.freeze
+        #
+        # Each preset also says how voices read its output unless told
+        # otherwise (+read:+, Sample::READ_STYLES): the MPC60, the cleanest
+        # converter, reads clean (band-limited, interpolated); the S950 and
+        # SP-1200 read drop-sample with no levels, aliasing as hits pitch up
+        # like the hardware (maintainer's Bench verdicts, 2026-10-13).
+        # Library files add more with `lofi :name, rate: ..., bits: ...`
+        # lines.
+        extend MB::Sound::Presettable
+        preset_family :lofi, kind: :sample_edit, keys: %i[rate bits input_filter filter read],
+          about: 'Classic samplers\' converters: sample.lofi(:s950)',
+          apply: ->(name, sample, **options) { sample.lofi(name, **options) },
+          code: ->(e) { "sample.lofi(#{e.name.inspect})" }
 
-        # How voices read each preset's output unless told otherwise
-        # (Sample::READ_STYLES): the MPC60, the cleanest converter, reads
-        # clean (band-limited, interpolated); the S950 and SP-1200 read
-        # drop-sample with no levels, aliasing as hits pitch up like the
-        # hardware (maintainer's Bench verdicts, 2026-10-13).
-        PRESET_READS = { s950: :drop, sp1200: :drop, mpc60: :clean }.freeze
+        param :rate, 31_250, range: 4000..48_000, unit: 'Hz', description: 'Converter sample rate (Hz)'
+        param :bits, 12, range: 1..24, description: 'Bits'
+
+        # Akai S950: 12 bits, variable rate (31.25 kHz here, a jungle
+        # favourite for longer breaks), a filtered output
+        preset :s950, rate: 31_250, bits: 12, input_filter: true, filter: 13_000, read: :drop, tags: %i[gritty jungle],
+          about: 'Akai S950: 12 bits at 31.25 kHz, a filtered output, read drop-sample'
+        # E-mu SP-1200: 12 bits at 26.04 kHz, no anti-alias filter on the
+        # way in, the gritty unfiltered outputs
+        preset :sp1200, rate: 26_040, bits: 12, input_filter: false, filter: nil, read: :drop, tags: %i[gritty dirty],
+          about: 'E-mu SP-1200: 12 bits at 26.04 kHz, no anti-alias filter, unfiltered outputs, read drop-sample'
+        # Akai MPC60: 12 bits (stored nonlinearly) at 40 kHz, filtered
+        preset :mpc60, rate: 40_000, bits: 12, input_filter: true, filter: 16_000, read: :clean, tags: %i[clean],
+          about: 'Akai MPC60: 12 bits at 40 kHz, filtered, read clean'
 
         module_function
 
@@ -36,10 +47,10 @@ module MB
           (Numo::DFloat.cast(data) * q).round / q
         end
 
-        # The settings for +preset+ (a PRESETS name or nil) with +options+
+        # The settings for +preset+ (a preset name or nil) with +options+
         # (rate:, bits:, input_filter:, filter:) changed.
         def settings(preset = nil, **options)
-          base = preset ? PRESETS.fetch(preset.to_sym) { raise ArgumentError, "Unknown lofi preset #{preset.inspect} (#{PRESETS.keys.join(', ')})" } : {}
+          base = preset ? preset_settings(preset.to_sym).except(:read) : {}
           bad = options.keys - [:rate, :bits, :input_filter, :filter]
           raise ArgumentError, "Unknown lofi options #{bad.inspect}" unless bad.empty?
           s = { rate: nil, bits: nil, input_filter: true, filter: nil }.merge(base).merge(options)

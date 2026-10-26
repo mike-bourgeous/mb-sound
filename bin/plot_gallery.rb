@@ -35,7 +35,7 @@ def gallery_charts(compact: false)
   sweep = Numo::NMath.sin(phase * 2 * Math::PI) * 0.12
   mix = arp + sweep
 
-  env = MB::Sound::Envelope.preset(:adsr, attack: 0.02, decay: 0.15, sustain: 0.6, release: 0.4, hold: 0.5)
+  env = MB::Sound::Envelope.from_preset(:adsr, attack: 0.02, decay: 0.15, sustain: 0.6, release: 0.4, hold: 0.5)
   env_data = Numo::DFloat.zeros(0).concatenate(*Array.new(100) { Numo::DFloat.cast(env.sample(480)) })
 
   cycle = Numo::DFloat.linspace(0, 1, 801)[0...800]
