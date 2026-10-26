@@ -186,9 +186,12 @@ module MB
         @probe.start
         @ticker&.start
         @stopping = false
+        # (files first: the consumer's first pass reads @last_flush, nil
+        # until start_files; a consumer that won the race stopped with
+        # "nil can't be coerced into Float", 2026-10-26 post-merge smoke)
+        start_files if @dir
         @consumer = Thread.new { consume }
         @consumer.name = 'latency-consumer'
-        start_files if @dir
         self
       end
 
@@ -419,7 +422,7 @@ module MB
           flush if @dir && Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_flush >= @options[:flush_every]
         end
       rescue => e
-        warn "Latency probe consumer stopped: #{e.class}: #{e.message}"
+        warn "Latency probe consumer stopped: #{e.class}: #{e.message} (at #{e.backtrace&.first})"
       end
 
       def ingest
