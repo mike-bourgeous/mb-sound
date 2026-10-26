@@ -63,6 +63,7 @@ RSpec.describe('set documents', :aggregate_failures) do
   let(:sessions) { [] }
 
   after { sessions.each(&:close) }
+  after { MB::Sound::Library.reload! } # (examples stub the preset directories)
 
   def session
     MB::Sound::Session.new(
@@ -294,6 +295,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     FileUtils.mkdir_p(dir)
     allow(io).to receive(:presets_dir).and_return(dir)
     allow(io).to receive(:user_presets_dir).and_return(dir)
+    MB::Sound::Library.reload! # (the library's shelves follow the stubbed directories)
     a = session
     path = nil
     within(a) {

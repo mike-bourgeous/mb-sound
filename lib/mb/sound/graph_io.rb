@@ -280,8 +280,11 @@ module MB
           user_presets_dir
         end
 
-        # The user data directory for presets.
+        # The user data directory for presets (the user shelf):
+        # $MB_SOUND_USER_PRESETS, else the platform's data directory.
         def user_presets_dir
+          env = ENV['MB_SOUND_USER_PRESETS']
+          return File.expand_path(env) unless env.to_s.empty?
           if RUBY_PLATFORM.include?('darwin')
             File.join(Dir.home, 'Library', 'Application Support', 'mb-sound', 'presets')
           else
@@ -293,8 +296,24 @@ module MB
         # The song or album project around the working directory: the
         # nearest directory up with a Gemfile naming mb-sound (other than
         # the mb-sound checkout itself), or nil.
+        #
+        # Remembered per directory (the walk reads the file system up to
+        # the root, about 0.25 ms, and the library's lookups ask often);
+        # Library.reload! (after saves) forgets.
         def project_dir(from = Dir.pwd)
           dir = File.expand_path(from)
+          memo = (@project_dirs ||= {})
+          return memo[dir] if memo.key?(dir)
+          memo.clear if memo.length > 64
+          memo[dir] = find_project_dir(dir)
+        end
+
+        # Forgets the remembered project directories (see .project_dir).
+        def forget_project_dirs
+          @project_dirs = {}
+        end
+
+        private def find_project_dir(dir)
           loop do
             gemfile = File.join(dir, 'Gemfile')
             if File.file?(gemfile) && !File.exist?(File.join(dir, 'mb-sound.gemspec')) &&
@@ -521,19 +540,29 @@ module MB
     # The console's save, preset, presets, and named_proc (bin/sound.rb).
     module GraphIOMethods
       # Saves +graph+ as preset +name+ (a Symbol; or a path ending in
-      # .mbg.rb) and prints where.  Returns the path.  Options as for
-      # GraphIO.dump (inputs:, params:, ...).
+      # .mbg.rb) on the save shelf (Library.save_shelf: $MB_SOUND_PRESETS,
+      # else the project's presets/, else the user shelf) and prints where.
+      # Returns the path, or nil when nothing was saved.  Never replaces a
+      # preset: when +name+ exists it warns and saves nothing (#save!
+      # replaces it; +bump: true+ saves the next free version, :name_v2,
+      # :name_v3, ...).  +tags:+ (words: adjectives and roles) and
+      # +about:+ (one line) describe it for Library find and the heads.
+      # Knobs the graph reads become knob lines (params); other options as
+      # for GraphIO.dump (inputs:, params:, ...).  Saves to the user shelf
+      # commit there (a git repository it makes on first use).
       #
-      #     save :dark_hall, input.reverb(:hall).softclip
-      def save(name, graph, **opts)
-        target = GraphIO.target_path(name)
-        existed = File.file?(target) || File.directory?(GraphIO.bundle_dir(target))
-        path = GraphIO.save(name, graph, **opts)
-        puts "Saved #{name} to #{path}#{' (replaced)' if existed}"
-        path
-      rescue GraphIO::DumpError => e
-        warn "Not saved: #{e.message}"
-        nil
+      #     save :dark_hall, input.reverb(:hall).softclip, tags: %i[dark big], about: 'A hall, clipped'
+      #     save :dark_hall, g, bump: true     # => :dark_hall_v2
+      def save(name, graph, bump: false, tags: nil, about: nil, **opts)
+        Library::Saving.save(name, graph, replace: false, bump: bump, tags: tags, about: about, **opts)
+      end
+
+      # Saves like #save, replacing preset +name+ if it exists (the user
+      # shelf's git history keeps the old one).
+      #
+      #     save! :dark_hall, g
+      def save!(name, graph, tags: nil, about: nil, **opts)
+        Library::Saving.save(name, graph, replace: true, bump: false, tags: tags, about: about, **opts)
       end
 
       # Loads preset +name+ (from GraphIO.preset_dirs; or a path) with the
@@ -565,12 +594,30 @@ module MB
       # +racks:+ (:session, :saved, :rename) settles named racks whose saved
       # definitions differ from the session's (see GraphIO.load); live, the
       # console asks instead.
+      #
+      # A library file's instrument or chain (`instrument :keys do |midi|
+      # ... end` on a shelf; see Library::FileLoader) loads like a rack
+      # document.  Names resolve through the shelves in search order (see
+      # Library.shelves).
       def preset(name, trust: nil, session: nil, seeds: :saved, racks: nil, **inputs_and_params)
-        path = name.to_s.include?('/') || name.to_s.end_with?('.rb') ? name.to_s : GraphIO.find_preset(name)
+        if name.to_s.include?('/') || name.to_s.end_with?('.rb')
+          path = name.to_s
+        else
+          kind, found = Library.index.preset_target(name)
+          if kind == :entry
+            Library.index.note_use(found)
+            session = Session.existing if session.nil?
+            rack = GraphIO.place_rack(session || Session.current, Library.rack_of(found), racks: racks, source: found.location)
+            return rack if inputs_and_params.empty?
+            return apply_preset_rack(rack, name, session || Session.current, session, inputs_and_params)
+          end
+          path = found
+        end
         unless path
-          names = GraphIO.presets.values.flatten
+          names = GraphIO.presets.values.flatten + Library.index.entries(family: :preset, documents: false).map(&:name)
           raise GraphIO::LoadError, "no preset #{name}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
         end
+        Library.index.note_path(path)
 
         doc = GraphIO.parse(path)
         if doc.kind == :set
@@ -588,13 +635,7 @@ module MB
           rack = GraphIO.place_rack(target, rack, racks: racks, source: path) if rack.name
           return rack if inputs_and_params.empty?
 
-          main = rack.input.name
-          raise ArgumentError, "preset #{name} needs its main input #{main}: (#{rack.input.type}) to apply it, or nothing for the Rack" unless inputs_and_params.key?(main)
-          graph = Session.with_context(session: target) { rack.call(inputs_and_params[main], **inputs_and_params.except(main)) }
-          if session && (graph.is_a?(GraphNode) || graph.is_a?(GraphNode::Channels))
-            attach_knob_midi(session, session.adopt_knobs(graph))
-          end
-          return graph
+          return apply_preset_rack(rack, name, target, session, inputs_and_params)
         end
 
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
@@ -617,6 +658,19 @@ module MB
           end
         end
 
+        graph
+      end
+
+      # Applies a preset's +rack+ to the inputs in +inputs_and_params+ (its
+      # main input by name, other ports and params as keywords) in
+      # +target+ (a Session), joining its knobs to +session+ (if any).
+      private def apply_preset_rack(rack, name, target, session, inputs_and_params)
+        main = rack.input.name
+        raise ArgumentError, "preset #{name} needs its main input #{main}: (#{rack.input.type}) to apply it, or nothing for the Rack" unless inputs_and_params.key?(main)
+        graph = Session.with_context(session: target) { rack.call(inputs_and_params[main], **inputs_and_params.except(main)) }
+        if session && (graph.is_a?(GraphNode) || graph.is_a?(GraphNode::Channels))
+          attach_knob_midi(session, session.adopt_knobs(graph))
+        end
         graph
       end
 

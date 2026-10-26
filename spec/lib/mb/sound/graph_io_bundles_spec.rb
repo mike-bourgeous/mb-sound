@@ -11,7 +11,10 @@ RSpec.describe('graph document bundles', :aggregate_failures) do
     FileUtils.mkdir_p(presets)
     allow(io).to receive(:presets_dir).and_return(presets)
     allow(io).to receive(:user_presets_dir).and_return(presets)
+    MB::Sound::Library.reload! # (the library's shelves follow the stubbed directories)
   end
+
+  after { MB::Sound::Library.reload! }
 
   def render(graph, buffers: 40, size: 512)
     RecipeHelpers.render(graph, buffers: buffers, size: size)

@@ -523,6 +523,49 @@ module MB
         value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? limited : typed(limited)
       end
 
+      # The 0..1 position of +value+ (a typed value or a plain number in
+      # the base unit) along the param's range and curve: what a knob, a
+      # MIDI controller, a TUI slider, and (later) morph, randomize, and
+      # macros move in, so a cutoff moves evenly in pitch and a gain
+      # evenly in dB ("plain and normalized parameters", maintainer's DYK
+      # mark "try", 2026-10-25).  :exp ranges are logarithmic (Decibels:
+      # even in dB), :linear and stepped ones linear, choices by index
+      # (0 for the first, 1 for the last), :switch and booleans 0 or 1.
+      # Values outside the range give positions outside 0..1.  Raises
+      # ArgumentError for params without a bounded range or choices.
+      def position(value)
+        if choices?
+          i = range.index(value)
+          raise ArgumentError, "#{name}: #{value.inspect} isn't one of #{range.map(&:inspect).join(', ')}" unless i
+          return range.length > 1 ? i.to_f / (range.length - 1) : 0.0
+        end
+        return value ? 1.0 : 0.0 if type == :boolean
+        lo, hi = position_ends
+        v = value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels) ? value.to_f : Param.magnitude(value).to_f
+        if curve == :exp
+          Math.log(v / lo) / Math.log(hi / lo)
+        else
+          (v - lo) / (hi - lo)
+        end
+      end
+
+      # The value at +position+ (see #position; 0 is the range's start, 1
+      # its end): typed as declared (2400.hz, -12.db), rounded to whole
+      # steps for stepped params, the nearest choice for lists, true at
+      # 0.5 and above for booleans.  Positions outside 0..1 give values
+      # outside the range (#check limits them).
+      def value(position)
+        pos = position.to_f
+        if choices?
+          return range[(pos * (range.length - 1)).round.clamp(0, range.length - 1)]
+        end
+        return pos >= 0.5 if type == :boolean
+        lo, hi = position_ends
+        v = curve == :exp ? lo * Math.exp(pos * Math.log(hi / lo)) : lo + pos * (hi - lo)
+        return v.round if stepped?
+        typed(v)
+      end
+
       # The ArgTypes::Signature view (see ArgTypes::Param): this record.
       def to_arg_param = self
 
@@ -614,6 +657,13 @@ module MB
         parts << 'clamp: false' unless clamp
         parts << "description: #{lit.(description)}" if description
         parts.empty? ? '' : ", #{parts.join(', ')}"
+      end
+
+      # The range's ends as base-unit Floats (for #position and #value).
+      def position_ends
+        r = magnitude_range
+        raise ArgumentError, "#{name}: positions need a range with two ends (got #{range.inspect})" unless r && r.end > r.begin
+        [r.begin, r.end]
       end
 
       def exp_range?(r)

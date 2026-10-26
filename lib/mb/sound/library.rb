@@ -58,21 +58,27 @@ module MB
         # $MB_SOUND_PRESETS or else the project's presets/, the user shelf,
         # gems naming a shelf (metadata 'mb_sound_shelf', a directory in
         # the gem), mb-sound's built-ins.  The first match wins.
+        #
+        # Remembered until the working directory, the environment
+        # ($MB_SOUND_PRESETS, $MB_SOUND_USER_PRESETS, $XDG_DATA_HOME,
+        # $HOME), or the bundle's gems change, or .reload!.
         def shelves
-          key = shelves_key
+          key = [Dir.pwd, ENV['MB_SOUND_PRESETS'], ENV['MB_SOUND_USER_PRESETS'], ENV['XDG_DATA_HOME'], ENV['HOME'], Gem.loaded_specs.size]
           cached = @shelves
           return cached[1] if cached && cached[0] == key
 
+          first = File.expand_path(GraphIO.presets_dir)
+          user = File.expand_path(GraphIO.user_presets_dir)
+          gems = gem_shelves
+
           list = [session_shelf]
           env = ENV['MB_SOUND_PRESETS']
-          if !env.to_s.empty?
-            list << Shelf.new(name: :env, dir: env, label: "$MB_SOUND_PRESETS #{File.expand_path(env)}")
-          elsif (project = GraphIO.project_dir)
-            list << Shelf.new(name: :project, dir: File.join(project, 'presets'), label: "project #{File.join(project, 'presets')}")
+          if first != user
+            name = !env.to_s.empty? && File.expand_path(env) == first ? :env : :project
+            list << Shelf.new(name: name, dir: first, label: "#{name == :env ? '$MB_SOUND_PRESETS' : 'project'} #{first}")
           end
-          user = user_dir
-          list << Shelf.new(name: :user, dir: user, label: "user #{user}") unless list.any? { |s| s.dir == File.expand_path(user) }
-          gem_shelves.each { |s| list << s }
+          list << Shelf.new(name: :user, dir: user, label: "user #{user}")
+          gems.each { |s| list << s unless list.any? { |o| o.dir == s.dir } }
           list << builtin_shelf
           list.freeze
           @shelves = [key, list]
@@ -100,12 +106,16 @@ module MB
         # Shelves of gems in the bundle whose gemspec metadata names one
         # (`spec.metadata['mb_sound_shelf'] = 'presets'`).
         def gem_shelves
-          Gem.loaded_specs.values.filter_map { |spec|
+          specs = Gem.loaded_specs
+          return @gem_shelves[1] if @gem_shelves && @gem_shelves[0] == specs.size
+          list = specs.values.filter_map { |spec|
             rel = spec.metadata && spec.metadata['mb_sound_shelf']
             next if rel.to_s.empty? || spec.name == 'mb-sound'
             dir = File.expand_path(rel, spec.full_gem_path)
             Shelf.new(name: :gem, dir: dir, label: "gem #{spec.name} #{dir}")
-          }.sort_by(&:label)
+          }.sort_by(&:label).freeze
+          @gem_shelves = [specs.size, list]
+          list
         rescue StandardError
           []
         end
@@ -247,14 +257,10 @@ module MB
         # Reads the shelves' files again on next use (see Index#reload!).
         def reload!
           @shelves = nil
+          GraphIO.forget_project_dirs
           index.reload!
         end
 
-        private
-
-        def shelves_key
-          [Dir.pwd, ENV['MB_SOUND_PRESETS'], ENV['MB_SOUND_USER_PRESETS'], ENV['XDG_DATA_HOME'], ENV['HOME'], Gem.loaded_specs.size]
-        end
       end
     end
   end
@@ -263,6 +269,9 @@ end
 require_relative 'library/entry'
 require_relative 'library/index'
 require_relative 'library/presettable'
+require_relative 'library/saving'
+require_relative 'library/methods'
+require_relative 'library/heads'
 
 module MB
   module Sound
@@ -271,6 +280,13 @@ module MB
       RACKS = ObjectSpace::WeakKeyMap.new
 
       autoload :FileLoader, File.expand_path('library/file_loader', __dir__)
+
+      # Everything `preset :x` loads: graph documents, rack documents,
+      # library-file instruments and chains, the Session's named racks.
+      index.define_family(:preset, kind: :instrument, about: 'Graph documents and library racks: preset :dnb_reese, midi: riff',
+                                   code: ->(e) { "preset(#{e.name.inspect})" })
+      # Clips in library files (`clip :walk_a, seq(A2, C3).n8.loop`).
+      index.define_family(:clip, kind: :clip, about: 'Clips: clip :walk_a, seq(...)', code: ->(e) { "L.seq.#{e.name}" })
     end
   end
 end

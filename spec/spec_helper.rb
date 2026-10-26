@@ -61,6 +61,10 @@ SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
 SPEC_SLOW = ENV['SLOW'] == '1' || SPEC_MEMCHECK
 
 require_relative 'support/spec_tmp'
+# The library's user shelf is an empty directory of this process (scripts
+# the specs run inherit it), so specs never read or write the user's own
+# presets (design/notes/library.md)
+ENV['MB_SOUND_USER_PRESETS'] = File.join(SpecTmp::ROOT, 'user-presets')
 require_relative 'support/spec_buffers'
 require_relative 'support/slow_tier'
 require_relative 'support/buffer_size_helpers'

@@ -26,7 +26,7 @@ module MB
           @doc = GraphIO.rack_document(rack)
           @name = name || @doc&.name || rack.name&.to_s
           @from = from || @doc&.meta&.[](:from)
-          @meta = (@doc ? @doc.meta.slice(:description) : {}).merge(meta)
+          @meta = (@doc ? @doc.meta.slice(:description, :tags) : {}).merge(meta)
           @assets = assets
         end
 

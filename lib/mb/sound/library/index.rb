@@ -159,8 +159,10 @@ module MB
         # included (see #preset_target).
         def candidates(family, name)
           name = name.to_sym
-          files = file_entries.select { |e| e.family == family && e.name == name }
-          code = @lock.synchronize { @code[[family, name]] }
+          all = file_entries
+          code = @code[[family, name]] # (registrations happen while loading; reads need no lock)
+          return code ? [code] : [] if all.empty? && family != :preset # (the common case: built-ins only)
+          files = all.select { |e| e.family == family && e.name == name }
           session = family == :preset ? session_entries.select { |e| e.name == name } : []
           (session + files + [code].compact).sort_by.with_index { |e, i| [e.shelf.rank, i] }
         end
@@ -290,9 +292,10 @@ module MB
         def file_entries
           return [] unless defined?(MB::Sound::GraphIO::Loader) # (still loading mb-sound)
           shelves = Library.shelves
-          key = shelves.map(&:dir)
+          return @files if @files_key.equal?(shelves) # (the shelves list is remembered: the same object while nothing changed)
+          key = shelves
           @lock.synchronize do
-            return @files if @files_key == key || @loading
+            return @files if @files_key.equal?(key) || @loading
             @loading = true
             begin
               @problems.reject! { |p| p.start_with?('file ') }
@@ -352,11 +355,11 @@ module MB
           s = defined?(MB::Sound::Session) && Session.existing
           return [] unless s
           shelf = Library.session_shelf
-          from_files = file_entries.filter_map { |e| Library.rack_of(e) }
+          from_files = file_entries.select { |e| Library.rack_of(e) }.map(&:name)
           s.racks.names.filter_map { |n|
             r = s.racks[n]
             next unless r
-            next if from_files.any? { |f| f.equal?(r) } # (a library file's rack: its entry says more)
+            next if from_files.include?(n) # (a library file's rack, placed by preset or use: its entry says more)
             kind = Library.rack_kind(r)
             Entry.new(name: n, kind: kind, family: :preset, shelf: shelf, location: 'session', builder: r, about: "#{r.kind} #{r.signature}")
           }
@@ -395,7 +398,7 @@ module MB
         def word_clash(entry, others)
           same = others.select { |o| o.kind == entry.kind && !(o.family == entry.family && o.name == entry.name) }
           families = @families.values.select { |f| f.kind == entry.kind }.map(&:name)
-          if families.include?(entry.name) && entry.family != entry.name
+          if families.include?(entry.name)
             return "#{entry.label} (#{entry.location}) is named like the #{entry.name} family under L.#{HEADS.key(entry.kind)}; rename it (e.g. :#{entry.name}_#{entry.family})"
           end
           if (o = same.find { |x| x.tags.include?(entry.name) })

@@ -120,10 +120,17 @@ module MB
           name.to_s.split('_').reject(&:empty?).map(&:to_sym)
         end
 
-        # The head path that reaches it: "L.fx.reverb.hall".
+        # The head path that reaches it: "L.fx.hall" when the name is
+        # unique under its head, else with the family ("L.fx.reverb.plate").
         def head_path
           head = HEADS.key(kind)
-          [*(head ? ['L', head] : ['L.all']), (family unless family == :preset || family == kind), name].compact.join('.')
+          same = Library.index.entries(kind: kind).count { |e| e.name == name }
+          [*(head ? ['L', head] : ['L.all']), (family if same > 1 && family != :preset), name].compact.join('.')
+        end
+
+        # A Proc calling the entry (`sig.then(&L.fx.hall)`).
+        def to_proc
+          method(:call).to_proc
         end
 
         # A label for messages: "reverb :hall" or "preset :dnb_reese".
