@@ -128,8 +128,10 @@ RSpec.describe(MB::Sound::Arrangement::Arm) do
     ].freeze
 
     # (seeds that found bugs, walked every run: 9509, a scene's queued swap
-    # landing after `forget` removed the player, omnibus13)
-    [nil, 9509].each do |fixed|
+    # landing after `forget` removed the player, omnibus13; 44818, a queued
+    # swap landing after other commands left the player playing none of
+    # its clips, 2026-10-26)
+    [nil, 9509, 44818].each do |fixed|
     it "keeps the invariant through random walks of commands (seed #{fixed || 'from RSpec'})" do
       rng = Random.new(fixed || RSpec.configuration.seed)
       8.times do |walk|
