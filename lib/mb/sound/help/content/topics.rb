@@ -1036,8 +1036,9 @@ module MB
       about <<~TEXT
         Every graph prints itself back as Ruby (`ruby node`; aliases print
         as their official names: `saw` as `ramp`); `save` writes a
-        graph document (or the whole set), `preset` loads one with new
-        inputs and params.
+        graph document (or the whole set) and never replaces one (`save!`
+        does; `bump: true` saves `:name_v2`; `tags:` and `about:` describe
+        it for `find`), `preset` loads one with new inputs and params.
 
         mb-sound comes with presets too (`presets`
         lists them): drum & bass, jungle, ambient, and funk instruments,
@@ -1052,6 +1053,39 @@ module MB
       note :graph_io
       example 'print a graph back as Ruby', sound: false do
         ruby 110.hz.saw.at(-20.db).lp4(800, resonance: 0.3).softclip
+      end
+    end
+
+    Help.topic :library, 'The library: find, heads, shelves', group: :keep do
+      about <<~TEXT
+        Every named thing (reverb and chorus presets, resonator banks,
+        envelope curves, mastering chains, instruments, effect chains,
+        drum machines, graph documents, clips) is an entry in one library.
+        `find 'dark bass'` lists the best matches with why each matched;
+        `L.fx.reverb.hall` reaches one by words, each narrowing the last
+        (`L.inst.reese` lists both Reeses, Tab shows what is left), and
+        `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
+        `L.fx`, `L.kit`, `L.seq`, `L.master`, `L.set`, `L.env`, `L.edit`,
+        `L.all`.
+
+        Entries come from shelves, searched in order: the session's racks,
+        the project's presets/ (your song), the user shelf (a git
+        repository every save commits to), gems, then mb-sound's own
+        (`shelves` lists them).  A library file on a shelf holds entries as
+        lines: `reverb :big_plate, decay: 3.5, tags: %i[bright big]`,
+        `instrument :keys do |midi| ... end`, `chain :dub do |sig| ...
+        end`, `clip :walk, seq(A2, C3).n8.loop`.  `collect` copies the
+        presets a song used into its presets/, `promote :x, to: :user` a
+        song's preset onto your shelf.
+      TEXT
+      commands :find, :shelves, :save, :save!, :collect, :promote, :promote!
+      note :library
+      see :presets, :racks
+      example 'find bright effects', sound: false do
+        find :bright, kind: :effect
+      end
+      example 'walk the heads', sound: false do
+        L.fx.reverb
       end
     end
 

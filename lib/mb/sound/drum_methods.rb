@@ -75,5 +75,19 @@ module MB
       end
       alias drum_kit kit
     end
+
+    # The drum machines as library entries (family :machine, `L.kit.tr909`).
+    Library.index.define_family(:machine, kind: :kit, owner: DrumMethods, about: 'Drum machines: tr808(grid), tr909(midi)',
+                                apply: ->(name, source = nil, **kw) { MB::Sound.public_send(name, source, **kw) },
+                                code: ->(e) { "#{e.name}(grid(16, kick: 'x...x...').loop)" })
+    {
+      tr808: [%i[analog classic], 'A TR-808-flavored kit: resonator, metal-bank, and noise voices'],
+      tr909: [%i[analog classic rom], 'A TR-909-flavored kit: analog kick/snare/toms/clap, 6-bit ROM hats and cymbals'],
+    }.each do |name, (tags, about)|
+      Library.index.register(Library::Entry.new(
+        name: name, kind: :kit, family: :machine, tags: tags, about: about, location: "lib/mb/sound/drum_methods.rb:#{DrumMethods.instance_method(name).source_location[1]}",
+        builder: ->(source = nil, **kw) { MB::Sound.public_send(name, source, **kw) }
+      ))
+    end
   end
 end

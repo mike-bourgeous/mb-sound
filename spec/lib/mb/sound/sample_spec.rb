@@ -100,7 +100,7 @@ RSpec.describe(MB::Sound::Sample, :aggregate_failures) do
       [:s950, :sp1200, :mpc60].each do |p|
         y = x.lofi(p)
         expect(y.length).to eq(x.length)
-        expect((y.data * 2048).round).to eq(y.data * 2048) unless MB::Sound::Sample::Lofi::PRESETS[p][:filter]
+        expect((y.data * 2048).round).to eq(y.data * 2048) unless MB::Sound::Sample::Lofi.preset_settings(p)[:filter]
       end
       expect(x.lofi(rate: 8000).data).not_to eq(x.data)
       expect { x.lofi(:tape) }.to raise_error(ArgumentError, /Unknown lofi preset/)

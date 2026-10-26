@@ -46,7 +46,7 @@ RSpec.describe('bin/plot_envelope.rb') do
       expect(status).to be_success, text
       text = MB::U.remove_ansi(text)
       expect(text).to start_with('adsr(0.05, 0.3, 0.4, 0.5) curve presets')
-      MB::Sound::Envelope::CURVES.each_key do |name|
+      MB::Sound::Envelope::Curves.preset_names.each do |name|
         expect(text).to include("━━ #{name}")
       end
       expect(text).to include('time (ms)')

@@ -133,7 +133,19 @@ module MB
           2.0 / Math.sqrt(inputs * outputs)
         end
 
-        # Some known-reasonable parameters for the reverb algorithm (plus an
+        # Keyword arguments of #reverb and Reverb.reverb besides +preset+
+        # and +input+ (all nil by default, meaning the preset's value).
+        OPTIONS = %i[
+          extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
+          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping damping_design lowpass highpass drive drive_mode
+          crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation duck gate threshold
+          diffusion_delays feedback_delays
+        ].freeze
+
+        # The reverb's presets (Presettable: `sig.reverb(:hall)`,
+        # Reverb.preset_settings(:hall); library files add more with
+        # `reverb :name, room_size: ..., decay: ...` lines): known-reasonable
+        # parameters for the reverb algorithm (plus an
         # extra_time value for roughly how long it takes for the reverb to ring
         # out).  The classic presets (:room, :hall, :stadium, :space,
         # :default) keep their 2026-01 structure and level (their +:level:+ is
@@ -148,164 +160,153 @@ module MB
         # +:damping:+ values were retuned on 2026-10-10 for
         # +damping_design: :exact+ (the new default) so they sound as with
         # Jot's design (the same RT60 at every frequency within 2%).
-        PRESETS = {
-          room: {
-            description: 'Subtle in-room reverb',
-            channels: 8,
-            stages: 4,
-            diffusion_range: 0.01,
-            feedback_range: 0.003..0.016,
-            feedback_gain: 0.45,
-            feedback_enabled: true,
-            loop_extra: CLASSIC_LOOP_EXTRA,
-            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
-            predelay: 0,
-            dry: 1,
-            wet: -10.db, # since 2026-10-11 (user: 0 dB too wet, -16 dB too low)
-            level: classic_level(8, 4),
-            seed: 0,
-            extra_time: 1,
-          },
-          hall: {
-            description: 'Something like a symphony hall',
-            channels: 8,
-            stages: 4,
-            diffusion_range: 0.05,
-            feedback_range: 0.03..0.14,
-            feedback_gain: 0.9,
-            feedback_enabled: true,
-            # Compact loops since 2026-10-10 (user's pick by ear): the line
-            # delays alone, gains retuned to the classic decay per second
-            loop_extra: 0,
-            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
-            predelay: 0,
-            dry: 1,
-            wet: -20.db,
-            level: classic_level(8, 4),
-            seed: 5,
-            extra_time: 6,
-          },
-          stadium: {
-            # TODO: it would be cool if the echoes panned around more
-            description: 'Stadium PA echo',
-            channels: 4,
-            stages: 3,
-            diffusion_range: 0.05,
-            feedback_range: 0.3..0.45,
-            feedback_gain: -4.db,
-            feedback_enabled: true,
-            loop_extra: CLASSIC_LOOP_EXTRA,
-            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
-            predelay: 0,
-            dry: 1,
-            wet: -6.db,
-            level: classic_level(4, 3),
-            seed: 13,
-            extra_time: 8,
-          },
-          space: {
-            description: 'Outer space, dreaming',
-            channels: 16,
-            stages: 4,
-            diffusion_range: 0.06,
-            feedback_range: 0.2,
-            feedback_gain: 0.97,
-            feedback_enabled: true,
-            loop_extra: CLASSIC_LOOP_EXTRA,
-            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
-            predelay: 0.01,
-            dry: 1,
-            wet: -4.5.db,
-            level: classic_level(16, 4),
-            seed: 0,
-            extra_time: 36,
-          },
-          plate: {
-            description: 'Dense and bright, a short plate (room-size layout)',
-            room_size: 0.35,
-            decay: 2.2,
-            damping: 0.34,
-            modulation: :subtle,
-            diffusion_modulation: :subtle,
-            seed: 2,
-          },
-          shimmer: {
-            description: 'A big space whose tail climbs in octaves',
-            room_size: 0.8,
-            decay: 6,
-            damping: 0.6,
-            highpass: 150,
-            shimmer: 0.5,
-            modulation: :lush,
-            seed: 3,
-          },
-          grit: {
-            description: 'A tail that saturates and crumbles as it decays',
-            room_size: 0.6,
-            decay: 4,
-            damping: 0.22,
-            highpass: 80,
-            drive: 3,
-            crush: 9,
-            modulation: :subtle,
-            seed: 4,
-          },
-          lofi: {
-            description: 'Wobbly, dark, and bit crushed',
-            room_size: 0.5,
-            decay: 3,
-            lowpass: 3000,
-            highpass: 200,
-            crush: 8,
-            modulation: :chorus,
-            seed: 5,
-          },
-          gated: {
-            description: '1980s gated reverb: a big room cut off 0.25 s after the hit',
-            room_size: 0.7,
-            decay: 2.5,
-            damping: 0.34,
-            gate: 0.25,
-            threshold: -30.db,
-            modulation: false,
-            seed: 7,
-          },
-          drone: {
-            description: 'Endless ambient wash (30 s decay)',
-            room_size: 1.0,
-            decay: 30,
-            damping: 0.72,
-            highpass: 60,
-            modulation: :lush,
-            diffusion_modulation: :subtle,
-            seed: 6,
-          },
-          default: {
-            channels: 8,
-            stages: 4,
-            diffusion_range: 0.0005..0.01,
-            feedback_range: 0.1,
-            feedback_gain: -6.db,
-            feedback_enabled: true,
-            loop_extra: CLASSIC_LOOP_EXTRA,
-            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
-            predelay: 0,
-            dry: 1,
-            wet: 1,
-            level: classic_level(8, 4),
-            seed: 0,
-            extra_time: 2,
-          },
-        }
+        extend MB::Sound::Presettable
+        preset_family :reverb, kind: :effect, keys: OPTIONS,
+          about: 'Reverb settings: sig.reverb(:hall), [l, r].reverb(:plate, mix: 0.3)',
+          apply: ->(name, input, **options) { input.reverb(name, **options) },
+          code: ->(e) { "sig.reverb(#{e.name.inspect})" }
 
-        # Keyword arguments of #reverb and Reverb.reverb besides +preset+
-        # and +input+ (all nil by default, meaning the preset's value).
-        OPTIONS = %i[
-          extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
-          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping damping_design lowpass highpass drive drive_mode
-          crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation duck gate threshold
-          diffusion_delays feedback_delays
-        ].freeze
+        param :room_size, 0.5, range: 0.0..1.0, description: 'Room size (room-size layout)'
+        param :decay, 2.0, range: 0.1..60.0, curve: :exp, unit: 's', description: 'Decay time (RT60) in seconds'
+        param :damping, 0.6, range: 0.0..1.0, description: 'High-frequency damping'
+        param :mix, 0.5, description: 'Dry/wet mix'
+
+        preset :room, about: 'Subtle in-room reverb', tags: %i[small subtle],
+          channels: 8,
+          stages: 4,
+          diffusion_range: 0.01,
+          feedback_range: 0.003..0.016,
+          feedback_gain: 0.45,
+          feedback_enabled: true,
+          loop_extra: CLASSIC_LOOP_EXTRA,
+          tuned_loop_extra: CLASSIC_LOOP_EXTRA,
+          predelay: 0,
+          dry: 1,
+          wet: -10.db, # since 2026-10-11 (user: 0 dB too wet, -16 dB too low)
+          level: classic_level(8, 4),
+          seed: 0,
+          extra_time: 1
+
+        preset :hall, about: 'Something like a symphony hall', tags: %i[big classic],
+          channels: 8,
+          stages: 4,
+          diffusion_range: 0.05,
+          feedback_range: 0.03..0.14,
+          feedback_gain: 0.9,
+          feedback_enabled: true,
+          # Compact loops since 2026-10-10 (user's pick by ear): the line
+          # delays alone, gains retuned to the classic decay per second
+          loop_extra: 0,
+          tuned_loop_extra: CLASSIC_LOOP_EXTRA,
+          predelay: 0,
+          dry: 1,
+          wet: -20.db,
+          level: classic_level(8, 4),
+          seed: 5,
+          extra_time: 6
+
+        preset :stadium, about: 'Stadium PA echo', tags: %i[echo huge],
+          # TODO: it would be cool if the echoes panned around more
+          channels: 4,
+          stages: 3,
+          diffusion_range: 0.05,
+          feedback_range: 0.3..0.45,
+          feedback_gain: -4.db,
+          feedback_enabled: true,
+          loop_extra: CLASSIC_LOOP_EXTRA,
+          tuned_loop_extra: CLASSIC_LOOP_EXTRA,
+          predelay: 0,
+          dry: 1,
+          wet: -6.db,
+          level: classic_level(4, 3),
+          seed: 13,
+          extra_time: 8
+
+        preset :space, about: 'Outer space, dreaming', tags: %i[huge dreamy],
+          channels: 16,
+          stages: 4,
+          diffusion_range: 0.06,
+          feedback_range: 0.2,
+          feedback_gain: 0.97,
+          feedback_enabled: true,
+          loop_extra: CLASSIC_LOOP_EXTRA,
+          tuned_loop_extra: CLASSIC_LOOP_EXTRA,
+          predelay: 0.01,
+          dry: 1,
+          wet: -4.5.db,
+          level: classic_level(16, 4),
+          seed: 0,
+          extra_time: 36
+
+        preset :plate, about: 'Dense and bright, a short plate (room-size layout)', tags: %i[bright dense short],
+          room_size: 0.35,
+          decay: 2.2,
+          damping: 0.34,
+          modulation: :subtle,
+          diffusion_modulation: :subtle,
+          seed: 2
+
+        preset :shimmer, about: 'A big space whose tail climbs in octaves', tags: %i[big octaves dreamy],
+          room_size: 0.8,
+          decay: 6,
+          damping: 0.6,
+          highpass: 150,
+          shimmer: 0.5,
+          modulation: :lush,
+          seed: 3
+
+        preset :grit, about: 'A tail that saturates and crumbles as it decays', tags: %i[dirty saturated],
+          room_size: 0.6,
+          decay: 4,
+          damping: 0.22,
+          highpass: 80,
+          drive: 3,
+          crush: 9,
+          modulation: :subtle,
+          seed: 4
+
+        preset :lofi, about: 'Wobbly, dark, and bit crushed', tags: %i[dark wobbly crushed],
+          room_size: 0.5,
+          decay: 3,
+          lowpass: 3000,
+          highpass: 200,
+          crush: 8,
+          modulation: :chorus,
+          seed: 5
+
+        preset :gated, about: '1980s gated reverb: a big room cut off 0.25 s after the hit', tags: %i[eighties short],
+          room_size: 0.7,
+          decay: 2.5,
+          damping: 0.34,
+          gate: 0.25,
+          threshold: -30.db,
+          modulation: false,
+          seed: 7
+
+        preset :drone, about: 'Endless ambient wash (30 s decay)', tags: %i[endless ambient],
+          room_size: 1.0,
+          decay: 30,
+          damping: 0.72,
+          highpass: 60,
+          modulation: :lush,
+          diffusion_modulation: :subtle,
+          seed: 6
+
+        preset :default, tags: %i[classic],
+          channels: 8,
+          stages: 4,
+          diffusion_range: 0.0005..0.01,
+          feedback_range: 0.1,
+          feedback_gain: -6.db,
+          feedback_enabled: true,
+          loop_extra: CLASSIC_LOOP_EXTRA,
+          tuned_loop_extra: CLASSIC_LOOP_EXTRA,
+          predelay: 0,
+          dry: 1,
+          wet: 1,
+          level: classic_level(8, 4),
+          seed: 0,
+          extra_time: 2
 
         # For internal use by Reverb.  Represents a single output on a stereo
         # or multi-channel reverb.
@@ -454,14 +455,11 @@ module MB
           end
 
           if preset
-            params = Reverb::PRESETS.fetch(preset) {
-              raise ArgumentError, "Unknown reverb preset #{preset.inspect} (#{Reverb::PRESETS.keys.join(', ')})"
-            }
+            params = Reverb.preset_settings(preset)
           else
             params = { room_size: ROOM_DEFAULTS[:room_size] }
           end
           params = params.merge(options)
-          params.delete(:description)
           params.delete(:feedback_gain) if options.key?(:decay) && !options.key?(:feedback_gain)
 
           rate = (input.is_a?(Array) ? input : input.outputs)[0].sample_rate
@@ -563,7 +561,7 @@ module MB
         end
 
         # Initializes a reverb node with the given parameters.  See
-        # PRESETS for some example defaults.  Generally one would use
+        # Reverb.presets for some example defaults.  Generally one would use
         # GraphNode#reverb to create a reverb.
         #
         # If +:upstream+ is a MultiOutput node, then it will split out all of

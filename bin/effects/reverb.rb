@@ -43,7 +43,7 @@ modulation = ->(str) {
 
 MB::Sound.effect_script(
   input_channels: 2,
-  preset: [nil, Symbol, '-p', "A named preset (#{MB::Sound::GraphNode::Reverb::PRESETS.keys.join(', ')})"],
+  preset: [nil, Symbol, '-p', "A named preset (#{MB::Sound::GraphNode::Reverb.preset_names.join(', ')})"],
   room_size: [nil, Float, 'Room size for the friendly form (0..1; default 0.5 when --decay or --damping is given)'],
   decay: [nil, Float, 'Reverb time (RT60) in seconds, instead of --feedback-gain'],
   damping: [nil, Float, 'How much faster high frequencies decay (0..1: the reverb time at Nyquist is 1 - damping times the reverb time)'],

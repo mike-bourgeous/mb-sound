@@ -7,7 +7,7 @@ module MB
       module MasteringMethods
         # Runs this signal (usually the whole mix, a stereo bundle) through
         # mastering preset +preset+ (:club, :streaming, :quiet, :vinyl, or a
-        # Mastering::Preset) with +options+ (see Mastering.preset: +lufs:+,
+        # Mastering::Preset) with +options+ (see Mastering.from_preset: +lufs:+,
         # +platform:+, +ceiling:+, +drive:+, +ride:+, +mono:+, +glue:+,
         # +clip:+, +de_ess:+).  Also available as #mastering.
         #
@@ -18,7 +18,7 @@ module MB
         #     master { |mix| mix.reverb(:hall, wet: -12.db).master(:club) }
         #     play file_input('mix.flac').master(:streaming, platform: :apple)
         def master(preset = :club, **options)
-          Mastering.build(Mastering.preset(preset, **options), self)
+          Mastering.build(Mastering.from_preset(preset, **options), self)
         end
         alias mastering master
 

@@ -887,7 +887,7 @@ module MB
       # The sample through a classic sampler's converters (see Sample::Lofi):
       # a preset (:s950, :sp1200, :mpc60) or +rate+ (Hz), +bits+, and an
       # output +filter+ (Hz, or nil).  Each preset also says how voices
-      # read it (Lofi::PRESET_READS): :mpc60, the cleanest, reads clean;
+      # read it (its read: setting): :mpc60, the cleanest, reads clean;
       # :s950 and :sp1200 read drop-sample with no band-limited levels,
       # like the hardware (aliasing as notes pitch up; maintainer's Bench
       # verdicts, 2026-10-13).  +read+ (:clean, :drop, or a Hash as for
@@ -900,7 +900,7 @@ module MB
       def lofi(preset = nil, read: nil, **options)
         settings = Lofi.settings(preset, **options)
         args = preset ? [preset] : []
-        style = read.nil? && preset ? Lofi::PRESET_READS.fetch(preset.to_sym) : read
+        style = read.nil? && preset ? Lofi.preset_settings(preset.to_sym)[:read] : read
         kwargs = read.nil? ? options : options.merge(read: read)
         edit(:lofi, args, kwargs, read: read_settings(style)) { |d| Lofi.process(d, sample_rate: sample_rate, **settings) }
       end

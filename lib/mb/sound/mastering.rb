@@ -96,7 +96,7 @@ module MB
         # What a render's target measures: :integrated (the default) or
         # :loudest (see MEASURES).
         def measure
-          options.fetch(:measure) { DEFINITIONS.dig(name, :defaults, :measure) || :integrated }
+          options.fetch(:measure) { Mastering.preset_settings(name).dig(:defaults, :measure) || :integrated }
         end
 
         # The window of +measure: :loudest+ in bars (LOUDEST_BARS unless
@@ -108,13 +108,13 @@ module MB
         # The share of bars at or under the level +measure: :bars+ targets
         # (BARS_PERCENTILE unless given).
         def percentile
-          options.fetch(:percentile) { DEFINITIONS.dig(name, :defaults, :percentile) || BARS_PERCENTILE }
+          options.fetch(:percentile) { Mastering.preset_settings(name).dig(:defaults, :percentile) || BARS_PERCENTILE }
         end
 
         # The share of the mix's section-to-section loudness differences
         # +measure: :sections+ keeps (SECTION_ENERGY unless given).
         def energy
-          options.fetch(:energy) { DEFINITIONS.dig(name, :defaults, :energy) || SECTION_ENERGY }.to_f
+          options.fetch(:energy) { Mastering.preset_settings(name).dig(:defaults, :energy) || SECTION_ENERGY }.to_f
         end
 
         # Words for what renders measure ("loudest 16 bars", "bars at the
@@ -139,9 +139,10 @@ module MB
           [name.inspect, *options.map { |k, v| "#{k}: #{Mastering.ruby(v)}" }].join(', ')
         end
 
-        # `Mastering.preset(:club, lufs: -8)`, which makes this preset again.
+        # `Mastering.from_preset(:club, lufs: -8)`, which makes this preset
+        # again.
         def to_ruby
-          "Mastering.preset(#{call_ruby})"
+          "Mastering.from_preset(#{call_ruby})"
         end
 
         # A one-line summary, e.g. "club: -8.5 LUFS, -0.5 dBTP, mono_below
@@ -162,68 +163,66 @@ module MB
         end
       end
 
-      # What each preset is for, its defaults, and the reasons for its
-      # chain (see design/notes/master_effects.md, "Mastering presets").
-      DEFINITIONS = {
-        club: {
-          title: 'Club: loud, low crest, mono lows',
-          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false, air: :static, measure: :loudest },
-          notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), the top ' \
-                 'octave above 18 kHz rolled off (lossy encoders cut it anyway, and their decoded peaks grow less; air: :dynamic, :band, false), a fast ' \
-                 'limiter 2 dB over the ceiling for transients, then a true-peak limiter at -0.5 dBTP; -8.5 LUFS ' \
-                 'integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13; mastering-2 Bench: the two limiters ' \
-                 'for dnb and techno); clip: true puts a gentle softclip(0.9, 1.4) in place of the fast limiter.  At ' \
-                 '-0.5 dBTP decoded MP3/AAC peaks can still pass 0 dBTP on dense masters (reports say so).',
-          source: 'Maintainer picks 2026-10-13/17 (low crest, near max true peak, -0.5 dBTP shares); genre templates dnb/house/techno; ' \
-                  'Giannoulis et al. 2012 (compressor design); BS.1770-4 Annex 2 (true peak)',
-        },
-        streaming: {
-          title: 'Streaming: platform loudness, -1 dBTP',
-          defaults: { lufs: :spotify, mono: false, glue: true },
-          notes: 'Reaches a streaming platform\'s normalization level (Loudness::TARGETS: :spotify -14, :youtube -14, ' \
-                 ':apple_music -16, :amazon_music -14, :soundcloud -14, ...) with gentle glue (1.5:1 RMS) and a true-peak ' \
-                 'limiter at the platform\'s ceiling.  Lossy encoders add inter-sample peaks: renders report decoded ' \
-                 'MP3/AAC true peaks (MixReport, Mastering.codec_peaks).',
-          source: 'Loudness::TARGETS (Spotify for Artists, read 2026-10-07; others reported, unverified); AES TD1008 ' \
-                  '(streaming loudness recommendation, -1 dBTP for lossy encodes; from memory)',
-        },
-        quiet: {
-          title: 'Quiet: wide dynamics, light limiting',
-          defaults: { lufs: -18.0, mono: false, glue: false },
-          notes: 'Ambient, film, and headphone listening: no compression, a slow-release true-peak limiter at -1 dBTP as a ' \
-                 'safety; -18 LUFS by default, lufs: :ebu_r128 (-23) or :atsc_a85 (-24) for broadcast.',
-          source: 'EBU R 128-2023 (-23 LUFS, -1 dBTP); ATSC A/85:2026 (-24 LKFS, -2 dBTP); genre :ambient (-19..-16)',
-        },
-        vinyl: {
-          title: 'Vinyl: mono lows, tamed highs, no brickwall',
-          defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 7000, clip: true },
-          notes: 'For a cutting engineer: mono below 150 Hz and a 25 Hz highpass (lateral bass is fine, vertical bass ' \
-                 'throws the stylus), gentle glue, and a split-band de-esser above 7 kHz (3:1, only on the loudest sibilance), since the RIAA pre-emphasis ' \
-                 'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
-                 'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
-                 'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).  ' \
-                 'A soft clipper last rounds the peaks off (its limit 0.5 dB under the ceiling, the knee 6 dB under that), so ' \
-                 'a 909 kick or a break reaches the target ("vinyl that clips first", on by default since 2026-10-22; ' \
-                 'clip: false for trim alone).',
-          source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
-                  'advice (mono lows, controlled sibilance, headroom), from memory',
-        },
-        hot: {
-          title: 'Hot: glue, then drive into a clipper and a true-peak limiter',
-          defaults: { lufs: -8.5, ceiling: -0.5.db, mono: false, glue: true, measure: :bars },
-          notes: 'Kez Volta\'s drum & bass master from "Tunnel Vision" (bin/synths/dnb.rb dnb_master) as a preset: ' \
-                 'a 2:1 glue compressor at -14 dBFS on the mix as it arrives (before the trim, as Kez had it), the trim ' \
-                 '(Kez drove 11 dB), a hard softclip(0.6, 1.0), and a true-peak limiter at -0.5 dBTP (60 ms release).  ' \
-                 'Louder and brighter drops than :club, with audible clipping on dense parts.  Renders measure ' \
-                 'the bars\' loudness distribution by default (measure: :bars, the quieter quarter of the bars at ' \
-                 'the target), so the clipper closes the gap between drops and breakdowns.  `drive: 11.db` is Kez\'s ' \
-                 'render exactly.',
-          source: 'Kez Volta, persona panel 2026-10-13 (research-persona-edm); maintainer\'s omnibus9 Bench pick ' \
-                  '(2026-10-18: "I like the direction but now the breakdown is too quiet")',
-        },
-      }.freeze
+      # What each preset is for (about:), its defaults, and the reasons for
+      # its chain (see design/notes/master_effects.md, "Mastering presets"):
+      # the :mastering family (Presettable).  Each builtin preset's chain is
+      # built by its own steps method; a library file's preset takes the
+      # chain of another with +like:+ (`mastering :loud_club, like: :club,
+      # defaults: { lufs: -7.5 }, about: '...'`).
+      extend MB::Sound::Presettable
+      preset_family :mastering, kind: :master, label: 'mastering preset', keys: %i[defaults notes source like],
+        about: 'Mastering presets: master :club, mix.master(:streaming, platform: :apple)',
+        apply: ->(name, mix = nil, **options) { mix ? mix.master(name, **options) : Mastering.from_preset(name, **options) },
+        code: ->(e) { "master #{e.name.inspect}" }
 
-      # Options of .preset: every preset takes COMMON_OPTIONS, and some
+      preset :club, about: 'Club: loud, low crest, mono lows', tags: %i[loud dance],
+        defaults: { lufs: -8.5, ceiling: -0.5.db, mono: 120, glue: true, clip: false, air: :static, measure: :loudest },
+        notes: 'Dance music for club systems: mono below 120 Hz, gentle glue (2:1 RMS, 3 dB over the target), the top ' \
+               'octave above 18 kHz rolled off (lossy encoders cut it anyway, and their decoded peaks grow less; air: :dynamic, :band, false), a fast ' \
+               'limiter 2 dB over the ceiling for transients, then a true-peak limiter at -0.5 dBTP; -8.5 LUFS ' \
+               'integrated.  "Less clipping, more limiting" (maintainer, 2026-10-13; mastering-2 Bench: the two limiters ' \
+               'for dnb and techno); clip: true puts a gentle softclip(0.9, 1.4) in place of the fast limiter.  At ' \
+               '-0.5 dBTP decoded MP3/AAC peaks can still pass 0 dBTP on dense masters (reports say so).',
+        source: 'Maintainer picks 2026-10-13/17 (low crest, near max true peak, -0.5 dBTP shares); genre templates dnb/house/techno; ' \
+                'Giannoulis et al. 2012 (compressor design); BS.1770-4 Annex 2 (true peak)'
+      preset :streaming, about: 'Streaming: platform loudness, -1 dBTP', tags: %i[platform],
+        defaults: { lufs: :spotify, mono: false, glue: true },
+        notes: 'Reaches a streaming platform\'s normalization level (Loudness::TARGETS: :spotify -14, :youtube -14, ' \
+               ':apple_music -16, :amazon_music -14, :soundcloud -14, ...) with gentle glue (1.5:1 RMS) and a true-peak ' \
+               'limiter at the platform\'s ceiling.  Lossy encoders add inter-sample peaks: renders report decoded ' \
+               'MP3/AAC true peaks (MixReport, Mastering.codec_peaks).',
+        source: 'Loudness::TARGETS (Spotify for Artists, read 2026-10-07; others reported, unverified); AES TD1008 ' \
+                '(streaming loudness recommendation, -1 dBTP for lossy encodes; from memory)'
+      preset :quiet, about: 'Quiet: wide dynamics, light limiting', tags: %i[dynamic broadcast],
+        defaults: { lufs: -18.0, mono: false, glue: false },
+        notes: 'Ambient, film, and headphone listening: no compression, a slow-release true-peak limiter at -1 dBTP as a ' \
+               'safety; -18 LUFS by default, lufs: :ebu_r128 (-23) or :atsc_a85 (-24) for broadcast.',
+        source: 'EBU R 128-2023 (-23 LUFS, -1 dBTP); ATSC A/85:2026 (-24 LKFS, -2 dBTP); genre :ambient (-19..-16)'
+      preset :vinyl, about: 'Vinyl: mono lows, tamed highs, no brickwall', tags: %i[analog],
+        defaults: { lufs: -14.0, ceiling: -1.db, mono: 150, glue: true, de_ess: 7000, clip: true },
+        notes: 'For a cutting engineer: mono below 150 Hz and a 25 Hz highpass (lateral bass is fine, vertical bass ' \
+               'throws the stylus), gentle glue, and a split-band de-esser above 7 kHz (3:1, only on the loudest sibilance), since the RIAA pre-emphasis ' \
+               'boosts the treble by up to about 20 dB at 20 kHz while cutting (sibilance and hats limit the level a cut ' \
+               'can take).  No brickwall limiter: the cutting engineer sets the level, so peaks stay under -1 dBTP by ' \
+               'trim alone (renders lower the trim instead of limiting; peaky mixes land under the -14 LUFS target).  ' \
+               'A soft clipper last rounds the peaks off (its limit 0.5 dB under the ceiling, the knee 6 dB under that), so ' \
+               'a 909 kick or a break reaches the target ("vinyl that clips first", on by default since 2026-10-22; ' \
+               'clip: false for trim alone).',
+        source: 'RIAA equalization curve (IEC 60098); genre :jungle (mono below 150 Hz for vinyl); common cutting-room ' \
+                'advice (mono lows, controlled sibilance, headroom), from memory'
+      preset :hot, about: 'Hot: glue, then drive into a clipper and a true-peak limiter', tags: %i[loud clipped],
+        defaults: { lufs: -8.5, ceiling: -0.5.db, mono: false, glue: true, measure: :bars },
+        notes: 'Kez Volta\'s drum & bass master from "Tunnel Vision" (bin/synths/dnb.rb dnb_master) as a preset: ' \
+               'a 2:1 glue compressor at -14 dBFS on the mix as it arrives (before the trim, as Kez had it), the trim ' \
+               '(Kez drove 11 dB), a hard softclip(0.6, 1.0), and a true-peak limiter at -0.5 dBTP (60 ms release).  ' \
+               'Louder and brighter drops than :club, with audible clipping on dense parts.  Renders measure ' \
+               'the bars\' loudness distribution by default (measure: :bars, the quieter quarter of the bars at ' \
+               'the target), so the clipper closes the gap between drops and breakdowns.  `drive: 11.db` is Kez\'s ' \
+               'render exactly.',
+        source: 'Kez Volta, persona panel 2026-10-13 (research-persona-edm); maintainer\'s omnibus9 Bench pick ' \
+                '(2026-10-18: "I like the direction but now the breakdown is too quiet")'
+
+      # Options of .from_preset: every preset takes COMMON_OPTIONS, and some
       # their own (PRESET_OPTIONS); an option a preset would ignore raises
       # (decks-1, 2026-10-22; Nev's N14: `master(:vinyl, clip: true)` was
       # accepted and did nothing).
@@ -286,17 +285,12 @@ module MB
       class << self
         # The preset names.
         def names
-          DEFINITIONS.keys
+          preset_names
         end
 
-        # True if +name+ names a preset (a Symbol or String).
-        def preset?(name)
-          (name.is_a?(Symbol) || name.is_a?(String)) && DEFINITIONS.key?(name.to_sym)
-        end
-
-        # Every preset at its defaults, by name.
-        def presets
-          names.to_h { |n| [n, preset(n)] }
+        # Every preset built at its defaults (Preset values), by name.
+        def built_presets
+          names.to_h { |n| [n, from_preset(n)] }
         end
 
         # A Preset: +name+ (:club, :streaming, :quiet, :vinyl, or a Preset,
@@ -327,18 +321,19 @@ module MB
         # - +percentile:+ (0..1) the share of measure: :bars;
         # - +energy:+ (0..1) the share of the mix's section-to-section
         #   loudness differences measure: :sections keeps (default 1).
-        def preset(name, **options)
+        def from_preset(name, **options)
           if name.is_a?(Preset)
             return name if options.empty?
             options = name.options.merge(options)
             name = name.name
           end
           key = name.respond_to?(:to_sym) ? name.to_sym : name
-          definition = DEFINITIONS[key]
-          unless definition
-            raise ArgumentError, "Unknown mastering preset #{name.inspect} (presets: #{names.map(&:inspect).join(', ')})#{Form.suggest(key, names)}"
-          end
-          accepted = COMMON_OPTIONS + PRESET_OPTIONS.fetch(key, [])
+          entry = preset_entry(key)
+          key = entry.name
+          definition = entry.settings
+          defaults = definition[:defaults] || {}
+          chain = definition[:like] || key
+          accepted = COMMON_OPTIONS + PRESET_OPTIONS.fetch(chain, [])
           unknown = options.keys - OPTIONS
           unless unknown.empty?
             raise ArgumentError, "Unknown option#{unknown.length > 1 ? 's' : ''} #{unknown.map(&:inspect).join(', ')} for master #{key.inspect} (options: #{accepted.join(', ')})#{Form.suggest(unknown[0], accepted)}"
@@ -360,7 +355,7 @@ module MB
           if options.key?(:percentile) && !(options[:percentile].is_a?(Numeric) && options[:percentile] >= 0 && options[:percentile] <= 1)
             raise ArgumentError, "percentile: is a share of bars from 0 to 1, e.g. 0.25 (got #{options[:percentile].inspect})"
           end
-          measure = options.fetch(:measure) { definition[:defaults][:measure] || :integrated }
+          measure = options.fetch(:measure) { defaults[:measure] || :integrated }
           if options.key?(:loudest_bars) && measure != :loudest
             raise ArgumentError, "loudest_bars: goes with measure: :loudest (master #{key.inspect} measures #{measure.inspect}); it would do nothing"
           end
@@ -374,12 +369,12 @@ module MB
             raise ArgumentError, "energy: goes with measure: :sections (master #{key.inspect} measures #{measure.inspect}); it would do nothing" if measure != :sections
           end
 
-          o = definition[:defaults].merge(options)
+          o = defaults.merge(options)
           o[:lufs] = o.delete(:platform) if o.key?(:platform)
           target = target_of(o[:lufs])
           # An explicit ceiling, else the preset's own (club, vinyl), else
           # the target's (platforms, broadcast)
-          ceiling = options.fetch(:ceiling) { definition[:defaults][:ceiling] || (target.true_peak || Loudness::DEFAULT_TRUE_PEAK).db }
+          ceiling = options.fetch(:ceiling) { defaults[:ceiling] || (target.true_peak || Loudness::DEFAULT_TRUE_PEAK).db }
           ceiling = Decibels.new(Decibels.db_of(ceiling, 'ceiling')) unless ceiling.is_a?(Decibels)
           raise ArgumentError, "ceiling: must be at most 0 dBTP (got #{ceiling.inspect})" if ceiling.db_value > 0
 
@@ -399,9 +394,9 @@ module MB
                    raise ArgumentError, "ride: is true, false, or a Hash of rider settings (got #{ride.inspect})"
                  end
 
-          steps = send(:"#{key}_steps", o, target, ceiling).map { |m, a, k| [m, a.freeze, k.freeze].freeze }.freeze
+          steps = send(:"#{chain}_steps", o, target, ceiling).map { |m, a, k| [m, a.freeze, k.freeze].freeze }.freeze
           Preset.new(
-            name: key, title: definition[:title], steps: steps, target: target, ceiling: ceiling,
+            name: key, title: entry.about, steps: steps, target: target, ceiling: ceiling,
             limiter: steps.any? { |s| s[0] == :limit }, drive: drive, fixed: fixed, ride: ride,
             options: options.dup.freeze, notes: definition[:notes], source: definition[:source]
           )
@@ -473,7 +468,7 @@ module MB
 
         private
 
-        # Kez's chain (see DEFINITIONS[:hot]): the glue reads the mix
+        # Kez's chain (see the :hot preset): the glue reads the mix
         # before the trim, as in bin/synths/dnb.rb's dnb_master.
         def hot_steps(o, _target, ceiling)
           steps = mono_steps(o)

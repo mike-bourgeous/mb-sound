@@ -64,20 +64,20 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'measures the loudest 16 bars for :club by default, and rejects unknown measures and windows' do
-      expect { described_class.preset(:club, measure: :peak) }.to raise_error(ArgumentError, /measure: is :integrated or :loudest or :bars/)
-      expect { described_class.preset(:club, loudest_bars: 0) }.to raise_error(ArgumentError, /loudest_bars: is a number of bars/)
-      expect(described_class.preset(:club)).to have_attributes(measure: :loudest, loudest_bars: 16)
-      expect(described_class.preset(:streaming).measure).to eq(:integrated)
-      expect(described_class.preset(:club, measure: :integrated).call_ruby).to eq(':club, measure: :integrated')
+      expect { described_class.from_preset(:club, measure: :peak) }.to raise_error(ArgumentError, /measure: is :integrated or :loudest or :bars/)
+      expect { described_class.from_preset(:club, loudest_bars: 0) }.to raise_error(ArgumentError, /loudest_bars: is a number of bars/)
+      expect(described_class.from_preset(:club)).to have_attributes(measure: :loudest, loudest_bars: 16)
+      expect(described_class.from_preset(:streaming).measure).to eq(:integrated)
+      expect(described_class.from_preset(:club, measure: :integrated).call_ruby).to eq(':club, measure: :integrated')
     end
 
     it 'measures a percentile of the bars for :hot by default, rejecting percentiles outside 0..1' do
-      expect(described_class.preset(:hot)).to have_attributes(measure: :bars, percentile: 0.25, measure_text: 'bars at the 25th percentile')
-      expect(described_class.preset(:club, measure: :bars, percentile: 0.5).measure_text).to eq('bars at the 50th percentile')
-      expect(described_class.preset(:club).measure_text).to eq('loudest 16 bars')
-      expect(described_class.preset(:quiet).measure_text).to be_nil
-      expect(described_class.preset(:hot).summary).to start_with('hot: -8.5 LUFS (bars at the 25th percentile), -0.5 dBTP')
-      expect { described_class.preset(:hot, percentile: 1.5) }.to raise_error(ArgumentError, /percentile: is a share of bars from 0 to 1/)
+      expect(described_class.from_preset(:hot)).to have_attributes(measure: :bars, percentile: 0.25, measure_text: 'bars at the 25th percentile')
+      expect(described_class.from_preset(:club, measure: :bars, percentile: 0.5).measure_text).to eq('bars at the 50th percentile')
+      expect(described_class.from_preset(:club).measure_text).to eq('loudest 16 bars')
+      expect(described_class.from_preset(:quiet).measure_text).to be_nil
+      expect(described_class.from_preset(:hot).summary).to start_with('hot: -8.5 LUFS (bars at the 25th percentile), -0.5 dBTP')
+      expect { described_class.from_preset(:hot, percentile: 1.5) }.to raise_error(ArgumentError, /percentile: is a share of bars from 0 to 1/)
       expect(described_class.ordinal(1)).to eq('1st')
       expect(described_class.ordinal(12)).to eq('12th')
       expect(described_class.ordinal(23)).to eq('23rd')
@@ -108,7 +108,7 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
       kez = MB::Sound.dnb_master(MB::Sound.stereo(MB::Sound.noise.at(0.3), MB::Sound.noise.at(0.3)), drive: 11.0).outputs
       MB::Sound.seed(3)
       mix = MB::Sound.stereo(MB::Sound.noise.at(0.3), MB::Sound.noise.at(0.3)).filter(:highpass, cutoff: 20, quality: 0.7)
-      hot = described_class.preset(:hot, drive: 11.db).apply(mix).outputs
+      hot = described_class.from_preset(:hot, drive: 11.db).apply(mix).outputs
       6.times do
         a = kez.map { |o| o.sample(800).dup }
         b = hot.map { |o| o.sample(800).dup }

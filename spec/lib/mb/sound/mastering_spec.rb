@@ -52,45 +52,45 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
   describe '.preset' do
     it 'makes the four presets with their targets and ceilings' do
       expect(described_class.names).to eq(%i[club streaming quiet vinyl hot])
-      club = described_class.preset(:club)
+      club = described_class.from_preset(:club)
       expect(club.target.lufs).to eq(-8.5)
       expect(club.ceiling.db_value).to eq(-0.5)
       expect(club.limiter).to eq(true)
       expect(club.steps.map(&:first)).to eq(%i[mono_below trim compress filter filter limit limit])
-      expect(described_class.preset(:club, clip: true).steps.map(&:first)).to eq(%i[mono_below trim compress filter filter softclip limit])
+      expect(described_class.from_preset(:club, clip: true).steps.map(&:first)).to eq(%i[mono_below trim compress filter filter softclip limit])
       expect(club).to be_frozen
       expect(club.steps).to be_frozen
 
-      apple = described_class.preset(:streaming, platform: :apple)
+      apple = described_class.from_preset(:streaming, platform: :apple)
       expect(apple.target.lufs).to eq(-16)
       expect(apple.ceiling.db_value).to eq(-1)
-      expect(described_class.preset(:streaming, lufs: :amazon).ceiling.db_value).to eq(-2)
+      expect(described_class.from_preset(:streaming, lufs: :amazon).ceiling.db_value).to eq(-2)
 
-      ebu = described_class.preset(:quiet, lufs: :ebu_r128)
+      ebu = described_class.from_preset(:quiet, lufs: :ebu_r128)
       expect(ebu.target.lufs).to eq(-23)
       expect(ebu.steps.map(&:first)).to eq(%i[trim limit])
 
-      vinyl = described_class.preset(:vinyl)
+      vinyl = described_class.from_preset(:vinyl)
       expect(vinyl.limiter).to eq(false)
       expect(vinyl.ceiling.db_value).to eq(-1)
       expect(vinyl.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
     end
 
     it 'takes options that change the chain' do
-      p = described_class.preset(:club, lufs: -9, ceiling: -1.db, clip: false, mono: false)
+      p = described_class.from_preset(:club, lufs: -9, ceiling: -1.db, clip: false, mono: false)
       expect(p.steps.map(&:first)).to eq(%i[trim compress filter filter limit limit])
       expect(p.steps.last[2][:ceiling].db_value).to eq(-1)
       expect(p.target.lufs).to eq(-9)
-      expect(described_class.preset(:club, drive: 6.db).targeted?).to eq(false)
-      expect(described_class.preset(:club, ride: true).ride).to eq(described_class::RIDE_DEFAULTS)
-      expect(described_class.preset(p, glue: false).steps.map(&:first)).to eq(%i[trim filter filter limit limit])
+      expect(described_class.from_preset(:club, drive: 6.db).targeted?).to eq(false)
+      expect(described_class.from_preset(:club, ride: true).ride).to eq(described_class::RIDE_DEFAULTS)
+      expect(described_class.from_preset(p, glue: false).steps.map(&:first)).to eq(%i[trim filter filter limit limit])
     end
 
     it 'takes the club\'s air stage as an option' do
-      expect(described_class.preset(:club, air: :dynamic).steps.map(&:first)).to include(:dynamic_air)
-      expect(described_class.preset(:club, air: :band).steps.map(&:first)).to include(:air_band)
-      expect(described_class.preset(:club, air: false).steps.map(&:first)).to eq(%i[mono_below trim compress limit limit])
-      expect { described_class.preset(:club, air: :loud) }.to raise_error(ArgumentError, /air: is :static/)
+      expect(described_class.from_preset(:club, air: :dynamic).steps.map(&:first)).to include(:dynamic_air)
+      expect(described_class.from_preset(:club, air: :band).steps.map(&:first)).to include(:air_band)
+      expect(described_class.from_preset(:club, air: false).steps.map(&:first)).to eq(%i[mono_below trim compress limit limit])
+      expect { described_class.from_preset(:club, air: :loud) }.to raise_error(ArgumentError, /air: is :static/)
       [:dynamic, :band].each do |air|
         out = run(test_mix(level: 0.6).master(:club, air: air), 24000, 800)
         a = MB::Sound::Loudness::Analyzer.new(channels: 2)
@@ -100,26 +100,26 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'prints itself back as the call that makes it' do
-      p = described_class.preset(:club, lufs: -9, ceiling: -1.db, ride: { up: 5 })
+      p = described_class.from_preset(:club, lufs: -9, ceiling: -1.db, ride: { up: 5 })
       expect(p.call_ruby).to eq(':club, lufs: -9, ceiling: -1.db, ride: { up: 5 }')
       expect(MB::Sound.module_eval(p.to_ruby)).to eq(p)
     end
 
     it 'refuses options a preset would ignore (N14), and measure options without their measure' do
-      expect { described_class.preset(:streaming, clip: true) }.to raise_error(ArgumentError, /master :streaming would ignore clip: \(an option of :club and :vinyl\)/)
-      expect { described_class.preset(:vinyl, air: :static) }.to raise_error(ArgumentError, /would ignore air: \(an option of :club\)/)
-      expect { described_class.preset(:hot, de_ess: 7000) }.to raise_error(ArgumentError, /would ignore de_ess:/)
-      expect { described_class.preset(:club, percentile: 0.3) }.to raise_error(ArgumentError, /percentile: goes with measure: :bars/)
-      expect { described_class.preset(:hot, loudest_bars: 8) }.to raise_error(ArgumentError, /loudest_bars: goes with measure: :loudest/)
-      expect { described_class.preset(:club, energy: 0.5) }.to raise_error(ArgumentError, /energy: goes with measure: :sections/)
-      expect { described_class.preset(:club, measure: :sections, energy: 2) }.to raise_error(ArgumentError, /energy: is the share/)
-      expect(described_class.preset(:club, measure: :sections, energy: 0.4)).to have_attributes(energy: 0.4, measure_text: 'each section, energy 0.4')
+      expect { described_class.from_preset(:streaming, clip: true) }.to raise_error(ArgumentError, /master :streaming would ignore clip: \(an option of :club and :vinyl\)/)
+      expect { described_class.from_preset(:vinyl, air: :static) }.to raise_error(ArgumentError, /would ignore air: \(an option of :club\)/)
+      expect { described_class.from_preset(:hot, de_ess: 7000) }.to raise_error(ArgumentError, /would ignore de_ess:/)
+      expect { described_class.from_preset(:club, percentile: 0.3) }.to raise_error(ArgumentError, /percentile: goes with measure: :bars/)
+      expect { described_class.from_preset(:hot, loudest_bars: 8) }.to raise_error(ArgumentError, /loudest_bars: goes with measure: :loudest/)
+      expect { described_class.from_preset(:club, energy: 0.5) }.to raise_error(ArgumentError, /energy: goes with measure: :sections/)
+      expect { described_class.from_preset(:club, measure: :sections, energy: 2) }.to raise_error(ArgumentError, /energy: is the share/)
+      expect(described_class.from_preset(:club, measure: :sections, energy: 0.4)).to have_attributes(energy: 0.4, measure_text: 'each section, energy 0.4')
     end
 
     it "gives :vinyl a soft clipper after the trim by default, and none with clip: false (M9, N12)" do
-      expect(described_class.preset(:vinyl).steps).to eq(described_class.preset(:vinyl, clip: true).steps)
-      expect(described_class.preset(:vinyl, clip: false).steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
-      v = described_class.preset(:vinyl, clip: true)
+      expect(described_class.from_preset(:vinyl).steps).to eq(described_class.from_preset(:vinyl, clip: true).steps)
+      expect(described_class.from_preset(:vinyl, clip: false).steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess])
+      v = described_class.from_preset(:vinyl, clip: true)
       expect(v.steps.map(&:first)).to eq(%i[mono_below highpass trim compress de_ess softclip])
       limit = (-1 - described_class::VINYL_CLIP_MARGIN).db.to_f
       expect(v.steps.last[1]).to eq([limit * 0.5, limit])
@@ -127,10 +127,10 @@ RSpec.describe(MB::Sound::Mastering, :aggregate_failures) do
     end
 
     it 'explains unknown presets and options' do
-      expect { described_class.preset(:clubb) }.to raise_error(ArgumentError, /Unknown mastering preset :clubb.*Did you mean\?  :club/m)
-      expect { described_class.preset(:club, luf: -8) }.to raise_error(ArgumentError, /Unknown option :luf .*Did you mean\?  :lufs/m)
-      expect { described_class.preset(:streaming, lufs: -14, platform: :apple) }.to raise_error(ArgumentError, /not both/)
-      expect { described_class.preset(:club, ceiling: 1.db) }.to raise_error(ArgumentError, /at most 0 dBTP/)
+      expect { described_class.from_preset(:clubb) }.to raise_error(ArgumentError, /Unknown mastering preset :clubb.*Did you mean\?  :club/m)
+      expect { described_class.from_preset(:club, luf: -8) }.to raise_error(ArgumentError, /Unknown option :luf .*Did you mean\?  :lufs/m)
+      expect { described_class.from_preset(:streaming, lufs: -14, platform: :apple) }.to raise_error(ArgumentError, /not both/)
+      expect { described_class.from_preset(:club, ceiling: 1.db) }.to raise_error(ArgumentError, /at most 0 dBTP/)
     end
 
     it 'lists the presets from the console' do

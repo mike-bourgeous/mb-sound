@@ -173,6 +173,11 @@ module MB
         end
 
         def call(str, options = {})
+          # Library heads (L.fx.reverb.<Tab>): their words, walked without
+          # running the chain (see Library::Heads.completions)
+          heads = Library::Heads.completions(str.to_s)
+          return heads if heads
+
           line = defined?(::Reline) ? ::Reline.line_buffer : nil
           names = Completion.names_for(str.to_s, line || str.to_s)
           return names if names && Completion.contextual?(str.to_s, line || str.to_s)

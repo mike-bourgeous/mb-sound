@@ -1,7 +1,7 @@
 module MB
   module Sound
     # Console methods for the SQ-80-flavored voice (SQ80::Voice, its patches
-    # in SQ80::PATCHES; see design/notes/sq80.md).
+    # in SQ80.presets; see design/notes/sq80.md).
     module SQ80Methods
       # An SQ-80-flavored synth (Ensoniq SQ-80 style, all original wave
       # tables): three wavetable oscillators (a formant wave, a SYNTH 3-style
@@ -41,7 +41,8 @@ module MB
       # Lists the SQ-80 voice patches (name and description) and returns
       # their names.  Each is also a preset: `preset :sq80_chop, midi: m`.
       def sq80_patches
-        SQ80::PATCHES.each_value do |p|
+        SQ80.patch_names.each do |n|
+          p = SQ80.patch(n)
           puts format('  %-13s %s', p.name.inspect, p.description)
         end
         SQ80.patch_names

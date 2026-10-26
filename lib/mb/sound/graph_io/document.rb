@@ -215,7 +215,7 @@ module MB
           @options = options
           @options = @doc.meta[:options] || {} if @doc && options.empty?
           @from = from || @doc&.meta&.[](:from)
-          @meta = (@doc ? @doc.meta.slice(:description) : {}).merge(meta) # (a loaded document keeps its description)
+          @meta = (@doc ? @doc.meta.slice(:description, :tags) : {}).merge(meta) # (a loaded document keeps its description)
         end
 
         # The document text.  Raises GraphIO::DumpError if part of the graph

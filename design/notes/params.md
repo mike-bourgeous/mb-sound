@@ -51,13 +51,17 @@ Built by param-1 (2026-10-24), phase 1 of the library design's critical path ("P
 
 GraphIO::FORMAT is 5: `param`/`knob` lines print as Params do, typed as declared.  `bin/save_presets.rb` rewrote all 47 presets (`graph 5`, `(lo..hi).at(v)`); every graph preset renders the same as its format-4 file (60 buffers of 800, md5 per preset), and set/rack presets' knobs have the same numbers.  Continuous knobs written with Integer ranges were migrated (maintainer: "Floats for continuous"): cutoffs and highpasses to typed Hz (`(150.hz..8000.hz).at(2400.hz)`), 0..1 sends and levels to Float ranges, in songs, genres, help, and three scripts' cutoff options; truly stepped values (seeds, voices, counts) keep Integer ranges.
 
+## Positions (library-core-1, 2026-10-26)
+
+`Param#position(value)` and `#value(position)` map values to 0..1 along the range and curve and back (the DYK mark "try": morph, randomize, and macros will work in position space, so a cutoff moves evenly in pitch): `:exp` logarithmic (Decibels: even in dB), linear and stepped linear (stepped values round), choices by index, booleans at 0.5; outside 0..1 gives values outside the range.  Presettable classes declare Params with `param` (built on first read; see library.md), and each preset entry carries them with the preset's values as defaults.
+
 ## Guard
 
 `spec/lib/mb/sound/param_guard_spec.rb` (lib: ArgTypes signatures, every ControlSpec, ChannelMixer params, genre knobs, the names table, and every literal `knob` call in lib/ and bin/ (song blocks, racks, help; `ParamGuard.source_knobs`, 49 checked, 2 skipped for variables); presets/: every document's param and knob lines) and `spec/bin/param_declarations_spec.rb` (every bin/ script's options, read in forks with `ScriptRunner.declarations_of`; `bin/sound.rb` and `bin/alloc_audit.rb` have no helper) check each Param with `spec/support/param_guard.rb`: default in range, a help line, a knob (numbers with a bounded range or a default inside 0..1), a document line that loads back equal (numbers and unit values), and `to_ruby` that parses.  2026-10-24: 2 ArgTypes params, 23 ControlSpecs, 6 mixer params, 15 genre knobs, 69 preset lines in 47 documents (all knobs and document lines), 521 options in 137 scripts (239 knobs, 195 document lines, 9 with names-table ranges, 239 without a range).
 
 ## Not yet
 
-Presettable and the index (phase 2); knob stepping (stepped params are metadata); genre templates building Params directly; a Param-backed help page per node.
+Knob stepping (stepped params are metadata); genre templates building Params directly; a Param-backed help page per node.
 
 ## Lessons
 

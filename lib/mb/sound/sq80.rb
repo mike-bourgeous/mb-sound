@@ -4,7 +4,7 @@ module MB
     # levels) converted to mb-sound's units, for building SQ-80-style voices
     # out of the library's general pieces (multi-segment envelopes, LFOs,
     # modulation sums, poly pressure), and the SQ-80-flavored voice built
-    # from them (SQ80::Voice, SQ80::Waves, SQ80::PATCHES; console
+    # from them (SQ80::Voice, SQ80::Waves, SQ80.presets; console
     # MB::Sound.sq80), and SysEx programs (SQ80::SysEx, SQ80::Program; their
     # mapping onto the voice is designed in design/notes/sq80.md, not
     # built).

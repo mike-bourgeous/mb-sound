@@ -25,22 +25,20 @@ module MB
         #   - I+II: 9.75 Hz, 3.3-3.7 ms (a fast, shallow vibrato-like warble)
         # :lush (not on the hardware) runs I and II at once: four taps, both
         # LFOs over the I/II range.
-        MODES = {
-          juno1: { rates: [0.513].freeze, min: 0.00166, max: 0.00535 }.freeze,
-          juno2: { rates: [0.863].freeze, min: 0.00166, max: 0.00535 }.freeze,
-          juno12: { rates: [9.75].freeze, min: 0.0033, max: 0.0037 }.freeze,
-          lush: { rates: [0.513, 0.863].freeze, min: 0.00166, max: 0.00535 }.freeze,
-        }.freeze
+        extend MB::Sound::Presettable
+        preset_family :chorus, kind: :effect, label: 'chorus mode', keys: %i[rates min max],
+          about: 'Chorus modes: sig.chorus(:juno2)',
+          apply: ->(name, input, **options) { input.chorus(name, **options) },
+          code: ->(e) { "sig.chorus(#{e.name.inspect})" }
 
-        # Other names for MODES.
-        ALIASES = {
-          juno: :juno1,
-          juno_i: :juno1,
-          juno_ii: :juno2,
-          juno_i_ii: :juno12,
-          juno3: :lush,
-          stacked: :lush,
-        }.freeze
+        preset :juno1, rates: [0.513].freeze, min: 0.00166, max: 0.00535, tags: %i[gentle], aliases: %i[juno juno_i],
+          about: 'Juno-60 chorus I: 0.513 Hz, 1.66-5.35 ms'
+        preset :juno2, rates: [0.863].freeze, min: 0.00166, max: 0.00535, tags: %i[wide], aliases: %i[juno_ii],
+          about: 'Juno-60 chorus II: 0.863 Hz, 1.66-5.35 ms'
+        preset :juno12, rates: [9.75].freeze, min: 0.0033, max: 0.0037, tags: %i[warble fast], aliases: %i[juno_i_ii],
+          about: 'Juno-60 chorus I+II: 9.75 Hz, 3.3-3.7 ms (a fast, shallow vibrato-like warble)'
+        preset :lush, rates: [0.513, 0.863].freeze, min: 0.00166, max: 0.00535, tags: %i[thick], aliases: %i[juno3 stacked],
+          about: 'Chorus I and II at once (not on the hardware): four taps, both LFOs over the I/II range'
 
         # The Juno-60 chorus board's anti-aliasing (before the BBD) and
         # reconstruction (after) lowpasses as [frequency in Hz, Q] per pole
@@ -86,13 +84,10 @@ module MB
         # its input ends (filter ring-out), and over which the hiss fades.
         TAIL_EXTRA = 0.05
 
-        # Returns the mode settings Hash for +mode+ (a MODES key or ALIASES
-        # name), raising ArgumentError for unknown modes.
+        # Returns the mode settings Hash for +mode+ (a preset name or alias),
+        # raising ArgumentError for unknown modes.
         def self.mode(mode)
-          mode = ALIASES.fetch(mode, mode)
-          MODES.fetch(mode) {
-            raise ArgumentError, "Unknown chorus mode #{mode.inspect} (use one of #{(MODES.keys + ALIASES.keys).join(', ')})"
-          }
+          preset_settings(mode)
         end
 
         # Builds the chorus on +input+ (see ChorusMethods#chorus for
@@ -291,7 +286,7 @@ module MB
         # +mode+ is :juno1 (alias :juno, :juno_i; 0.513 Hz over 1.66-5.35
         # ms), :juno2 (:juno_ii; 0.863 Hz, same range), or :juno12
         # (:juno_i_ii; 9.75 Hz over 3.3-3.7 ms), the Juno-60's buttons as
-        # measured by Pendragon (see Chorus::MODES), or :lush (:juno3,
+        # measured by Pendragon (see Chorus.presets), or :lush (:juno3,
         # :stacked), which the hardware doesn't have: modes I and II at once,
         # four taps (each LFO sweeps a left tap and an inverted right tap),
         # the two taps on each side mixed at equal power (each times

@@ -1198,7 +1198,7 @@ module MB
           inputs[:gate] = inputs[:gate] * mask if inputs[:gate]
           inputs[:trigger] = inputs[:trigger] * mask
         end
-        register(NoteEnvelope.preset(
+        register(NoteEnvelope.from_preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
         ))

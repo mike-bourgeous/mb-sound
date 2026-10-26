@@ -56,14 +56,14 @@ end
 
 MB::Sound.script(
   args: 0..4,
-  preset: ['adsr', '-p', 'Envelope preset', String, MB::Sound::Envelope::PRESETS.keys.map(&:to_s)],
-  curve: [nil, '-c', String, "Curve: a preset (#{MB::Sound::Envelope::CURVES.keys.join(', ')}), dB, or attack,decay,release dB"],
+  preset: ['adsr', '-p', 'Envelope preset', String, MB::Sound::Envelope.preset_names.map(&:to_s)],
+  curve: [nil, '-c', String, "Curve: a preset (#{MB::Sound::Envelope::Curves.preset_names.join(', ')}), dB, or attack,decay,release dB"],
   shape: [nil, '-s', String, 'Segment shape: exp or s (S-curve) for every segment, or attack,decay,release (e.g. s,exp,exp)'],
   hold: [nil, Float, 'Seconds from the start to the release (one-shots; default 2 * (attack + decay), at least 0.1)'],
   lift: [nil, Float, 'Release velocity (0..1; 0.5 leaves the release time alone, 0 doubles it, 1 halves it)', 0.0..1.0],
   gate: [nil, '-g', Float, 'Hold a gate for this many seconds instead of a one-shot'],
   velocity: [1.0, '-v', Float, 'Note velocity (0..1)', 0.0..1.0],
-  compare: [false, 'Plot every curve preset (CURVES) with the same times'],
+  compare: [false, 'Plot every curve preset (Envelope::Curves) with the same times'],
   db: [nil, Float, 'Plot in decibels over this range (e.g. 80)', 1.0..],
   terminal: [false, '-t', 'Plot as terminal text (the default; kept for old command lines)'],
   image: [false, '-I', 'Show an inline terminal image (iTerm2, kitty, sixel) instead of text'],
@@ -87,7 +87,7 @@ MB::Sound.script(
     end
     opts[:curve] = curve if curve
     opts[:shape] = parse_shape(p.shape) if p.shape
-    MB::Sound::Envelope.preset(preset, **positional, **opts)
+    MB::Sound::Envelope.from_preset(preset, **positional, **opts)
   }
 
   envelope = make.(parse_curve(p.curve))
@@ -112,7 +112,7 @@ MB::Sound.script(
 
   plots = {}
   if p.compare
-    MB::Sound::Envelope::CURVES.each_key do |name|
+    MB::Sound::Envelope::Curves.preset_names.each do |name|
       plots[name] = sample_all(make.(name), limit)
     end
   else

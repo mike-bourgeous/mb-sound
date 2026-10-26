@@ -379,7 +379,7 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     end
 
     it 'has the other envelope presets' do
-      expect(clip.amp_env.sensitivity).to eq(MB::Sound::Envelope::PRESETS[:amp_env][:sensitivity])
+      expect(clip.amp_env.sensitivity).to eq(MB::Sound::Envelope.preset_settings(:amp_env)[:sensitivity])
       expect(clip.fm_env.sustain).to eq(0)
       expect(clip.filt_env(depth: 3).octaves).to eq(3)
       expect(clip.env(gm: true).gm?).to eq(true)

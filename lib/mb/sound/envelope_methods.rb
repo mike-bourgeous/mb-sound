@@ -2,7 +2,7 @@ module MB
   module Sound
     # Envelope constructors, extended into MB::Sound (and so available in
     # bin/sound.rb).  Each makes an MB::Sound::Envelope from a preset (see
-    # Envelope::PRESETS) with positional attack, decay, sustain, and release
+    # Envelope.presets) with positional attack, decay, sustain, and release
     # (defaults: 5 ms, 0.2 s, 0.7, 0.3 s), plus any Envelope#initialize
     # options (+:curve+, +:hold+, +:gate+, +:trigger+, +:velocity+,
     # +:choke+, +:sensitivity+, +:velocity_scale+, +:legato+, +:sample_rate+).
@@ -22,13 +22,13 @@ module MB
       # A generic envelope with :analog curves ([12, 60, 60] dB) and velocity
       # sensitivity 0..1 (the peak is the velocity).
       def adsr(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, **options)
+        MB::Sound::Envelope.from_preset(:adsr, attack, decay, sustain, release, **options)
       end
 
       # A generic control envelope with :analog curves and velocity
       # sensitivity 0.5..1 (linear).
       def env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        MB::Sound::Envelope.preset(:env, attack, decay, sustain, release, **options)
+        MB::Sound::Envelope.from_preset(:env, attack, decay, sustain, release, **options)
       end
       alias envelope env
 
@@ -36,7 +36,7 @@ module MB
       # 60, 40] dB, for pads), and velocity from -18 dB to 0 dB (interpolated
       # in dB).
       def amp_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        MB::Sound::Envelope.preset(:amp_env, attack, decay, sustain, release, **options)
+        MB::Sound::Envelope.from_preset(:amp_env, attack, decay, sustain, release, **options)
       end
       alias amp_envelope amp_env
 
@@ -47,7 +47,7 @@ module MB
       # add up, so 18 dB per operator gave about 30 dB of index range).
       # Give +sensitivity:+ for more or less (e.g. `-18.db..0.db`).
       def fm_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        MB::Sound::Envelope.preset(:fm_env, attack, decay, sustain, release, **options)
+        MB::Sound::Envelope.from_preset(:fm_env, attack, decay, sustain, release, **options)
       end
       alias fm_envelope fm_env
 
@@ -60,7 +60,7 @@ module MB
       # Example:
       #     play 110.hz.saw.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
       def filter_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
-        MB::Sound::Envelope.preset(:filter_env, attack, decay, sustain, release, **options)
+        MB::Sound::Envelope.from_preset(:filter_env, attack, decay, sustain, release, **options)
       end
       alias filt_env filter_env
       alias filter_envelope filter_env
@@ -78,7 +78,7 @@ module MB
         rest = options.except(*known, :velocity)
         rest[:velocity] = options[:velocity] if options.key?(:velocity)
         segments_opts = SQ80.env_options(**env_opts)
-        MB::Sound::Envelope.preset(:adsr, **segments_opts, **rest)
+        MB::Sound::Envelope.from_preset(:adsr, **segments_opts, **rest)
       end
     end
   end

@@ -221,9 +221,11 @@ module MB
             names
           end
 
-          # True for Data value classes of the library (MIDI::ControlSpec).
+          # True for Data value classes of the library (MIDI::ControlSpec),
+          # not the Library's own records (entries, shelves: what library
+          # files describe, never values a graph holds).
           def data_class?(klass)
-            klass.is_a?(Class) && klass < Data && klass.name&.start_with?('MB::Sound::')
+            klass.is_a?(Class) && klass < Data && klass.name&.start_with?('MB::Sound::') && !klass.name.start_with?('MB::Sound::Library::')
           end
 
           # The constant a document names with +text+ (`GraphNode::Mixer`,

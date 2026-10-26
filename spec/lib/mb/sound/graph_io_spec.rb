@@ -581,7 +581,8 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       path = nil
       expect { path = MB::Sound.save(:quarter, graph) }.to output(/Saved quarter to .*presets\/quarter\.mbg\.rb/).to_stdout
       expect(path).to eq(File.join(tmp_path('presets'), 'quarter.mbg.rb'))
-      expect { MB::Sound.save(:quarter, graph) }.to output(/\(replaced\)/).to_stdout
+      expect { expect(MB::Sound.save(:quarter, graph)).to be_nil }.to output(/Not saved: quarter exists .*save! :quarter, \.\.\. replaces it, bump: true saves :quarter_v2/).to_stderr
+      expect { MB::Sound.save!(:quarter, graph) }.to output(/Saved quarter to .*\(replaced\)/).to_stdout
 
       names = nil
       expect { names = MB::Sound.presets }.to output(/quarter  \(inputs: input \(audio\); params: mix 0\.25\)/).to_stdout
@@ -607,7 +608,12 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       Dir.chdir(File.join(project, 'verse')) { expect(io.presets_dir).to eq(File.join(project, 'presets')) }
 
       expect(io.project_dir(File.expand_path('../../..', __dir__))).to be_nil # the mb-sound checkout itself
-      Dir.chdir(tmp_path('')) { expect(io.presets_dir).to eq(File.join(tmp_path('xdg'), 'mb-sound', 'presets')) } unless RUBY_PLATFORM.include?('darwin')
+      user = ENV.delete('MB_SOUND_USER_PRESETS') # (spec_helper's empty user shelf)
+      begin
+        Dir.chdir(tmp_path('')) { expect(io.presets_dir).to eq(File.join(tmp_path('xdg'), 'mb-sound', 'presets')) } unless RUBY_PLATFORM.include?('darwin')
+      ensure
+        ENV['MB_SOUND_USER_PRESETS'] = user
+      end
     end
 
     it 'refuses preset names that are paths in disguise' do

@@ -92,7 +92,7 @@ RSpec.describe('MB::Sound::FastResonator', :aggregate_failures) do
       a
     end
 
-    let(:rows) { modal.expand(modal.preset(:bowl).modes, 0.7) }
+    let(:rows) { modal.expand(modal.from_preset(:bowl).modes, 0.7) }
 
     it 'matches the Ruby mirror with scalar and moving inputs' do
       impulse = Numo::SFloat.zeros(500)

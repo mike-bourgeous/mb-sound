@@ -29,7 +29,7 @@ require 'mb-sound'
 chorus = MB::Sound::GraphNode::Chorus
 
 MB::Sound.effect_script(
-  mode: [:juno1, 'Chorus mode (Juno-60 buttons: I, II, I+II; lush = I and II at once)', chorus::MODES.keys + chorus::ALIASES.keys],
+  mode: [:juno1, 'Chorus mode (Juno-60 buttons: I, II, I+II; lush = I and II at once)', chorus.preset_names + chorus.preset_aliases.keys],
   rate: [nil, Float, "LFO rate in Hz (default: the mode's)"],
   depth: [1.0, "Sweep width as a fraction of the mode's"],
   dry: [1.0, 'Dry (input) level'],
@@ -39,7 +39,7 @@ MB::Sound.effect_script(
   cutoff: [nil, Float, 'BBD lowpass cutoff in Hz (turns the filters on)'],
   hiss: [nil, Float, 'Hiss level in dBFS (turns hiss on)'],
 ) { |input, p|
-  max_depth = chorus::ALIASES.fetch(p.mode, p.mode) == :juno12 ? 17.0 : 1.8
+  max_depth = chorus.preset_aliases.fetch(p.mode, p.mode) == :juno12 ? 17.0 : 1.8
   depth = p.midi_cc(1, :depth, range: 0.0..[p.depth * 2, max_depth].min)
 
   input.chorus(

@@ -414,30 +414,34 @@ module MB
         # - :default - gentle glue: 3:1 down, 1.5:1 up, half depth
         # - :eleven - over the top: 66:1 down, 4:1 up, full depth, loud and
         #   crunchy (follow it with #limit)
-        SQUEEZE_PRESETS = {
-          default: {
+        module Squeeze
+          extend MB::Sound::Presettable
+          preset_family :squeeze, kind: :effect, keys: %i[split depth upward_attack bands],
+            about: 'Three-band upward + downward compression: sig.squeeze(:eleven)',
+            apply: ->(name, input, **options) { input.squeeze(name, **options) },
+            code: ->(e) { "sig.squeeze(#{e.name.inspect})" }
+
+          preset :default, tags: %i[glue gentle], about: 'Gentle glue: 3:1 down, 1.5:1 up, half depth',
             split: [120, 2500].freeze, depth: 0.5, upward_attack: 0.002,
             bands: [
               { down: -24.db, down_ratio: 3, up: -42.db, up_ratio: 1.5, attack: 0.005, release: 0.2 }.freeze,
               { down: -26.db, down_ratio: 3, up: -44.db, up_ratio: 1.5, attack: 0.0025, release: 0.15 }.freeze,
               { down: -28.db, down_ratio: 3, up: -46.db, up_ratio: 1.5, attack: 0.00125, release: 0.1 }.freeze,
-            ].freeze,
-          }.freeze,
-          eleven: {
+            ].freeze
+          preset :eleven, tags: %i[extreme loud crunchy], about: 'Over the top: 66:1 down, 4:1 up, full depth (follow it with #limit)',
             split: [88.3, 2500].freeze, depth: 1.0, upward_attack: 0.0005,
             bands: [
               { down: -28.db, down_ratio: 66, up: -46.db, up_ratio: 4, attack: 0.003, release: 0.15 }.freeze,
               { down: -30.db, down_ratio: 66, up: -48.db, up_ratio: 4, attack: 0.0015, release: 0.1 }.freeze,
               { down: -32.db, down_ratio: 66, up: -50.db, up_ratio: 4, attack: 0.00075, release: 0.06 }.freeze,
-            ].freeze,
-          }.freeze,
-        }.freeze
+            ].freeze
+        end
 
         # Multiband upward + downward compression ("squeeze it to eleven"):
         # three LR4 bands, each compressed downward above a threshold and
         # upward below a lower one (upward below a lower one (at most +max_gain+ of lift, default 24.db)), with
         # :auto makeup per band.  +preset+ is :default (gentle glue) or
-        # :eleven (the extreme, OTT-style setting; see SQUEEZE_PRESETS).
+        # :eleven (the extreme, OTT-style setting; see Squeeze.presets).
         # +downward+ and +upward+ (0..1) scale the ratios toward 1:1; +time+
         # scales attack and release; +depth+ (0..1, default from the
         # preset) mixes each compressed band with the plain band
@@ -452,8 +456,7 @@ module MB
         #     play drums.squeeze(:eleven).limit       # crunchy, loud
         #     master { |mix| mix.squeeze(depth: 0.3, time: 0.5) }
         def squeeze(preset = :default, depth: nil, time: 1.0, upward: 1.0, downward: 1.0, split: nil, gain: 0.db, max_gain: 24.db, lookahead: 0.002)
-          settings = SQUEEZE_PRESETS[preset]
-          raise ArgumentError, "Unknown squeeze preset #{preset.inspect} (use #{SQUEEZE_PRESETS.keys.map(&:inspect).join(' or ')})" unless settings
+          settings = Squeeze.preset_settings(preset)
           depth ||= settings[:depth]
           split ||= settings[:split]
           raise ArgumentError, "Squeeze depth must be 0..1 (got #{depth.inspect})" unless depth.is_a?(Numeric) && (0..1).cover?(depth)

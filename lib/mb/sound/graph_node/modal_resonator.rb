@@ -13,7 +13,7 @@ module MB
       # high notes lose their top modes instead of aliasing.
       #
       # Usually made by SynthesisMethods#resonate from a named preset
-      # (ModalResonator::PRESETS: :bowl, :rin, :gong, :bell, :chime,
+      # (ModalResonator.presets: :bowl, :rin, :gong, :bell, :chime,
       # :tubular, :bar, :marimba, :vibes, :glass, :plate, :membrane), or
       # from a mode list.  #resonate adds the presets' pitch glides (a node
       # moving the frequency) and bloom twins (see .expand).
@@ -21,7 +21,7 @@ module MB
       # When the input ends the bank rings out, then ends once its ringing has
       # fallen below -120 dB (see Resonator#sample).
       class ModalResonator < Resonator
-        # A named set of modes (see PRESETS).  +modes+: [ratio, amplitude,
+        # A named set of modes (see .presets).  +modes+: [ratio, amplitude,
         # decay share, beat multiple, bloom share] for each mode; a mode with
         # a beat multiple gets a partner at +beat+ times it Hz higher, at
         # PARTNER_AMP of its amplitude and PARTNER_DECAY of its decay (a
@@ -59,112 +59,110 @@ module MB
         # measurements where real objects differ); amplitudes and decay
         # shares are chosen by ear within what the physics suggests (higher
         # modes quieter and shorter).
-        PRESETS = {
-          bowl: Preset.new(
-            modes: [[1.0, 1.0, 1.0, 1.0], [2.77, 0.45, 0.46, 2**1.3], [5.15, 0.22, 0.25, 3**1.3], [8.1, 0.1, 0.15, 4**1.3]],
-            decay: 24, beat: 0.7, pitch: 220,
-            about: 'a singing bowl: the (2,0)..(5,0) shell modes at measured bowl ratios (1 : 2.77 : 5.15 : 8.1), ' \
-                   'each a beating doublet, wider above (bin/synths/ambient.rb\'s bowl)'
-          ),
-          rin: Preset.new(
-            modes: [[1.0, 1.0, 1.0, 1.0], [2.77, 0.45, 0.46, 2**1.3], [5.15, 0.22, 0.25, 3**1.3], [8.1, 0.1, 0.15, 4**1.3]],
-            decay: 24, beat: 1.6, pitch: 880,
-            about: 'a rin (small temple bowl): the bowl\'s modes with faster beating'
-          ),
-          gong: Preset.new(
-            modes: [
-              [1.0, 1.0, 1.0, 1.0], [1.73, 0.8, 0.85, nil], [2.33, 0.7, 0.75, 1.0], [3.91, 0.5, 0.9, nil, 0.12],
-              [4.11, 0.5, 0.9, 1.0, 0.15], [6.3, 0.45, 1.05, nil, 0.21], [6.71, 0.42, 1.05, 1.0, 0.24], [7.34, 0.4, 1.12, nil, 0.3],
-              [8.95, 0.36, 1.2, nil, 0.36], [11.1, 0.32, 1.2, nil, 0.42], [12.73, 0.28, 1.2, nil, 0.48], [14.6, 0.26, 1.2, nil, 0.54],
-              [16.84, 0.24, 1.2, nil, 0.6], [19.3, 0.2, 1.2, nil, 0.66],
-            ],
-            decay: 14, beat: 0.35, pitch: 110, glide: 0.8, glide_time: 2.5,
-            about: 'a tam-tam: a free circular plate\'s modes (2,0) (0,1) (3,0) (1,1) (4,0) (5,0) (2,1) (0,2) (6,0) (7,0) ' \
-                   '(Rossing) and a denser inharmonic cluster above; the pitch starts 0.8 semitones high and settles as ' \
-                   'the plate calms, and the upper modes bloom in over a second or two as the energy cascades upward'
-          ),
-          bell: Preset.new(
-            modes: [
-              [0.5, 0.5, 1.0, 1.0], [1.0, 0.6, 0.65, 1.0], [1.2, 0.55, 0.5, 1.0], [1.5, 0.25, 0.25, nil],
-              [2.0, 1.0, 0.35, 1.5], [2.5, 0.35, 0.2, nil], [2.67, 0.3, 0.18, nil], [3.0, 0.3, 0.16, nil],
-              [4.0, 0.25, 0.12, nil], [5.33, 0.12, 0.08, nil],
-            ],
-            decay: 14, beat: 0.6, pitch: 262,
-            about: 'a church bell (minor-third tuning), the prime on the note: hum 0.5, prime 1, tierce 1.2 (a minor third), ' \
-                   'quint 1.5, nominal 2 (loudest at the strike), then the major tenth, eleventh, twelfth, double ' \
-                   'octave, and upper fourth; the hum rings longest, the upper partials fade fast, and the nominal, twelfth, and ' \
-                   'double octave (2 : 3 : 4) put the strike note on the prime'
-          ),
-          chime: Preset.new(
-            modes: [[1.0, 0.8, 1.0, 1.0], [2.756, 1.0, 0.75, 1.0], [5.404, 0.45, 0.5, nil], [8.933, 0.22, 0.35, nil], [13.34, 0.1, 0.25, nil]],
-            decay: 7, beat: 0.15, pitch: 880,
-            about: 'a wind chime: an aluminum tube hanging free, whose bending modes follow the free-free beam ' \
-                   '(1 : 2.756 : 5.404 : 8.933 : 13.34); the fundamental and the bright second mode ring long, with a slight beat'
-          ),
-          tubular: Preset.new(
-            modes: [[0.617, 0.15, 1.0, nil], [1.21, 0.4, 1.0, nil], [2.0, 1.0, 0.8, nil], [2.988, 0.8, 0.6, nil], [4.173, 0.5, 0.4, nil], [5.556, 0.25, 0.3, nil]],
-            decay: 6, beat: 0, pitch: 440,
-            about: 'an orchestral tubular bell: a free tube\'s bending modes, (2n+1)^2 for n = 2..7; modes 4-6 sit near 2 : 3 : 4, ' \
-                   'so the ear hears a pitch an octave below mode 4 (ratio 1, which no mode plays); bell-like (:chime until textures-2)'
-          ),
-          bar: Preset.new(
-            modes: [[1.0, 1.0, 1.0, nil], [2.756, 0.5, 0.5, nil], [5.404, 0.25, 0.3, nil], [8.933, 0.12, 0.2, nil], [13.34, 0.06, 0.12, nil]],
-            decay: 3, beat: 0, pitch: 1760,
-            about: 'an untuned metal bar (free-free beam): 1 : 2.756 : 5.404 : 8.933 : 13.34, a glockenspiel without tuning cuts'
-          ),
-          marimba: Preset.new(
-            modes: [[1.0, 1.0, 1.0, nil], [3.99, 0.35, 0.35, nil], [9.14, 0.12, 0.15, nil]],
-            decay: 1.2, beat: 0, pitch: 440,
-            about: 'a marimba bar: wood cut under the middle to tune the modes to about 1 : 4 : 9.1; short, dark'
-          ),
-          vibes: Preset.new(
-            modes: [[1.0, 1.0, 1.0, nil], [4.0, 0.3, 0.45, nil], [10.0, 0.08, 0.2, nil]],
-            decay: 6, beat: 0, pitch: 440,
-            about: 'a vibraphone bar: aluminum tuned to 1 : 4 : 10, ringing long (add a tremolo with .at(5.hz.lfo.at(0.6..1)))'
-          ),
-          glass: Preset.new(
-            modes: [[1.0, 1.0, 1.0, 1.0], [2.32, 0.3, 0.5, 1.5], [4.25, 0.12, 0.3, 2.0], [6.63, 0.05, 0.2, nil]],
-            decay: 8, beat: 0.4, pitch: 660,
-            about: 'a wine glass: the rim\'s (2,0)..(5,0) modes at measured ratios 1 : 2.32 : 4.25 : 6.63 (Rossing), ' \
-                   'slightly uneven glass splitting them into slow beats; real wine glasses ring at about 400-1000 Hz ' \
-                   '(G4-B5), so lower notes are giants\' glasses'
-          ),
-          plate: Preset.new(
-            modes: [
-              [1.0, 1.0, 1.0, nil], [2.014, 0.7, 0.75, nil], [2.987, 0.58, 0.6, nil], [3.703, 0.52, 0.55, nil],
-              [4.0, 0.5, 0.5, nil], [5.69, 0.42, 0.42, nil], [6.07, 0.4, 0.4, nil], [6.3, 0.4, 0.4, nil],
-              [7.31, 0.37, 0.37, nil], [8.05, 0.35, 0.35, nil], [9.0, 0.33, 0.33, nil], [9.11, 0.33, 0.33, nil],
-            ],
-            decay: 5, beat: 0, pitch: 200,
-            about: 'a sheet of metal (a thin rectangular plate, sides 1 : 1.4, edges held): modes m^2 + (n / 1.4)^2, ' \
-                   'dense and clangy; the plate reverb\'s raw material'
-          ),
-          membrane: Preset.new(
-            modes: [
-              [1.0, 1.0, 1.0, nil], [1.594, 0.7, 0.7, nil], [2.136, 0.5, 0.55, nil], [2.296, 0.45, 0.5, nil],
-              [2.653, 0.35, 0.45, nil], [2.918, 0.3, 0.4, nil], [3.156, 0.25, 0.35, nil], [3.501, 0.2, 0.3, nil],
-            ],
-            decay: 0.5, beat: 0, pitch: 100,
-            about: 'a drum head (an ideal circular membrane): Bessel-function zeros 1 : 1.594 : 2.136 : 2.296 : 2.653 ...; ' \
-                   'short, tom-like'
-          ),
-        }.freeze
+        extend MB::Sound::Presettable
+        preset_family :resonator, kind: :effect, keys: %i[modes decay beat pitch glide glide_time],
+          about: 'Modal resonator banks: trig.resonate(:bowl, C4)',
+          apply: ->(name, input, *args, **options) { input.resonate(name, *args, **options) },
+          code: ->(e) { "trig.resonate(#{e.name.inspect})" }
 
-        # Preset names (and aliases) for error messages and help.
-        ALIASES = { singing_bowl: :bowl, tam_tam: :gong, tamtam: :gong, wine_glass: :glass, tube: :chime, wind_chime: :chime,
-                    tubular_bell: :tubular, tubular_bells: :tubular, church_bell: :bell,
-                    glockenspiel: :bar, vibraphone: :vibes, sheet: :plate, plate_metal: :plate, drum: :membrane }.freeze
+        preset :bowl, tags: %i[metal ringing],
+          modes: [[1.0, 1.0, 1.0, 1.0], [2.77, 0.45, 0.46, 2**1.3], [5.15, 0.22, 0.25, 3**1.3], [8.1, 0.1, 0.15, 4**1.3]],
+          decay: 24, beat: 0.7, pitch: 220,
+          about: 'a singing bowl: the (2,0)..(5,0) shell modes at measured bowl ratios (1 : 2.77 : 5.15 : 8.1), ' \
+                 'each a beating doublet, wider above (bin/synths/ambient.rb\'s bowl)'
+        preset :rin, tags: %i[metal ringing bright],
+          modes: [[1.0, 1.0, 1.0, 1.0], [2.77, 0.45, 0.46, 2**1.3], [5.15, 0.22, 0.25, 3**1.3], [8.1, 0.1, 0.15, 4**1.3]],
+          decay: 24, beat: 1.6, pitch: 880,
+          about: 'a rin (small temple bowl): the bowl\'s modes with faster beating'
+        preset :gong, tags: %i[metal huge],
+          modes: [
+            [1.0, 1.0, 1.0, 1.0], [1.73, 0.8, 0.85, nil], [2.33, 0.7, 0.75, 1.0], [3.91, 0.5, 0.9, nil, 0.12],
+            [4.11, 0.5, 0.9, 1.0, 0.15], [6.3, 0.45, 1.05, nil, 0.21], [6.71, 0.42, 1.05, 1.0, 0.24], [7.34, 0.4, 1.12, nil, 0.3],
+            [8.95, 0.36, 1.2, nil, 0.36], [11.1, 0.32, 1.2, nil, 0.42], [12.73, 0.28, 1.2, nil, 0.48], [14.6, 0.26, 1.2, nil, 0.54],
+            [16.84, 0.24, 1.2, nil, 0.6], [19.3, 0.2, 1.2, nil, 0.66],
+          ],
+          decay: 14, beat: 0.35, pitch: 110, glide: 0.8, glide_time: 2.5,
+          about: 'a tam-tam: a free circular plate\'s modes (2,0) (0,1) (3,0) (1,1) (4,0) (5,0) (2,1) (0,2) (6,0) (7,0) ' \
+                 '(Rossing) and a denser inharmonic cluster above; the pitch starts 0.8 semitones high and settles as ' \
+                 'the plate calms, and the upper modes bloom in over a second or two as the energy cascades upward'
+        preset :bell, tags: %i[metal ringing],
+          modes: [
+            [0.5, 0.5, 1.0, 1.0], [1.0, 0.6, 0.65, 1.0], [1.2, 0.55, 0.5, 1.0], [1.5, 0.25, 0.25, nil],
+            [2.0, 1.0, 0.35, 1.5], [2.5, 0.35, 0.2, nil], [2.67, 0.3, 0.18, nil], [3.0, 0.3, 0.16, nil],
+            [4.0, 0.25, 0.12, nil], [5.33, 0.12, 0.08, nil],
+          ],
+          decay: 14, beat: 0.6, pitch: 262,
+          about: 'a church bell (minor-third tuning), the prime on the note: hum 0.5, prime 1, tierce 1.2 (a minor third), ' \
+                 'quint 1.5, nominal 2 (loudest at the strike), then the major tenth, eleventh, twelfth, double ' \
+                 'octave, and upper fourth; the hum rings longest, the upper partials fade fast, and the nominal, twelfth, and ' \
+                 'double octave (2 : 3 : 4) put the strike note on the prime'
+        preset :chime, tags: %i[metal bright],
+          modes: [[1.0, 0.8, 1.0, 1.0], [2.756, 1.0, 0.75, 1.0], [5.404, 0.45, 0.5, nil], [8.933, 0.22, 0.35, nil], [13.34, 0.1, 0.25, nil]],
+          decay: 7, beat: 0.15, pitch: 880,
+          about: 'a wind chime: an aluminum tube hanging free, whose bending modes follow the free-free beam ' \
+                 '(1 : 2.756 : 5.404 : 8.933 : 13.34); the fundamental and the bright second mode ring long, with a slight beat'
+        preset :tubular, tags: %i[metal orchestral],
+          modes: [[0.617, 0.15, 1.0, nil], [1.21, 0.4, 1.0, nil], [2.0, 1.0, 0.8, nil], [2.988, 0.8, 0.6, nil], [4.173, 0.5, 0.4, nil], [5.556, 0.25, 0.3, nil]],
+          decay: 6, beat: 0, pitch: 440,
+          about: 'an orchestral tubular bell: a free tube\'s bending modes, (2n+1)^2 for n = 2..7; modes 4-6 sit near 2 : 3 : 4, ' \
+                 'so the ear hears a pitch an octave below mode 4 (ratio 1, which no mode plays); bell-like (:chime until textures-2)'
+        preset :bar, tags: %i[metal bright short],
+          modes: [[1.0, 1.0, 1.0, nil], [2.756, 0.5, 0.5, nil], [5.404, 0.25, 0.3, nil], [8.933, 0.12, 0.2, nil], [13.34, 0.06, 0.12, nil]],
+          decay: 3, beat: 0, pitch: 1760,
+          about: 'an untuned metal bar (free-free beam): 1 : 2.756 : 5.404 : 8.933 : 13.34, a glockenspiel without tuning cuts'
+        preset :marimba, tags: %i[wood short],
+          modes: [[1.0, 1.0, 1.0, nil], [3.99, 0.35, 0.35, nil], [9.14, 0.12, 0.15, nil]],
+          decay: 1.2, beat: 0, pitch: 440,
+          about: 'a marimba bar: wood cut under the middle to tune the modes to about 1 : 4 : 9.1; short, dark'
+        preset :vibes, tags: %i[metal mellow],
+          modes: [[1.0, 1.0, 1.0, nil], [4.0, 0.3, 0.45, nil], [10.0, 0.08, 0.2, nil]],
+          decay: 6, beat: 0, pitch: 440,
+          about: 'a vibraphone bar: aluminum tuned to 1 : 4 : 10, ringing long (add a tremolo with .at(5.hz.lfo.at(0.6..1)))'
+        preset :glass, tags: %i[bright ringing],
+          modes: [[1.0, 1.0, 1.0, 1.0], [2.32, 0.3, 0.5, 1.5], [4.25, 0.12, 0.3, 2.0], [6.63, 0.05, 0.2, nil]],
+          decay: 8, beat: 0.4, pitch: 660,
+          about: 'a wine glass: the rim\'s (2,0)..(5,0) modes at measured ratios 1 : 2.32 : 4.25 : 6.63 (Rossing), ' \
+                 'slightly uneven glass splitting them into slow beats; real wine glasses ring at about 400-1000 Hz ' \
+                 '(G4-B5), so lower notes are giants\' glasses'
+        preset :plate, tags: %i[metal clangy],
+          modes: [
+            [1.0, 1.0, 1.0, nil], [2.014, 0.7, 0.75, nil], [2.987, 0.58, 0.6, nil], [3.703, 0.52, 0.55, nil],
+            [4.0, 0.5, 0.5, nil], [5.69, 0.42, 0.42, nil], [6.07, 0.4, 0.4, nil], [6.3, 0.4, 0.4, nil],
+            [7.31, 0.37, 0.37, nil], [8.05, 0.35, 0.35, nil], [9.0, 0.33, 0.33, nil], [9.11, 0.33, 0.33, nil],
+          ],
+          decay: 5, beat: 0, pitch: 200,
+          about: 'a sheet of metal (a thin rectangular plate, sides 1 : 1.4, edges held): modes m^2 + (n / 1.4)^2, ' \
+                 'dense and clangy; the plate reverb\'s raw material'
+        preset :membrane, tags: %i[skin short],
+          modes: [
+            [1.0, 1.0, 1.0, nil], [1.594, 0.7, 0.7, nil], [2.136, 0.5, 0.55, nil], [2.296, 0.45, 0.5, nil],
+            [2.653, 0.35, 0.45, nil], [2.918, 0.3, 0.4, nil], [3.156, 0.25, 0.35, nil], [3.501, 0.2, 0.3, nil],
+          ],
+          decay: 0.5, beat: 0, pitch: 100,
+          about: 'a drum head (an ideal circular membrane): Bessel-function zeros 1 : 1.594 : 2.136 : 2.296 : 2.653 ...; ' \
+                 'short, tom-like'
 
-        # Returns the Preset named +name+ (a PRESETS key or ALIASES name),
-        # raising with suggestions otherwise.
-        def self.preset(name)
-          key = ALIASES.fetch(name, name)
-          PRESETS.fetch(key) {
-            names = PRESETS.keys + ALIASES.keys
-            hint = DidYouMean::SpellChecker.new(dictionary: names).correct(name).first
-            raise ArgumentError, "Unknown resonator preset #{name.inspect}#{hint ? " (did you mean #{hint.inspect}?)" : ''}; " \
-                                 "presets are #{PRESETS.keys.map(&:inspect).join(', ')}"
-          }
+        # Other names for the presets (lookups only).
+        preset_alias :singing_bowl, :bowl
+        preset_alias :tam_tam, :gong
+        preset_alias :tamtam, :gong
+        preset_alias :wine_glass, :glass
+        preset_alias :tube, :chime
+        preset_alias :wind_chime, :chime
+        preset_alias :tubular_bell, :tubular
+        preset_alias :tubular_bells, :tubular
+        preset_alias :church_bell, :bell
+        preset_alias :glockenspiel, :bar
+        preset_alias :vibraphone, :vibes
+        preset_alias :sheet, :plate
+        preset_alias :plate_metal, :plate
+        preset_alias :drum, :membrane
+
+        # The Preset of preset +name+ (or an alias; see .presets), raising
+        # ArgumentError with suggestions otherwise.
+        def self.from_preset(name)
+          e = preset_entry(name)
+          Preset.new(**e.settings, about: e.about)
         end
 
         # Expands mode lists into kernel rows [ratio, offset Hz, amplitude,

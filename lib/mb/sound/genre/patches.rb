@@ -176,6 +176,34 @@ module MB
           }
         end
       end
+
+      # The patches as library entries (family :genre_patch; `L.inst.riser`,
+      # find "weather"): [kind, tags, about] per method.
+      PATCH_ENTRIES = {
+        riser: [:instrument, %i[noise build], 'A noise riser: a resonant bandpass sweeping up over 4 bars, swelling'],
+        breaks: [:instrument, %i[jungle drums chopped], 'A chopped break on a truncating sampler voice, through an S950-ish output stage'],
+        rain: [:instrument, %i[weather texture stereo], 'Rain that ignores its notes: a wandering pink-noise bed, hiss, and drops'],
+        wind: [:instrument, %i[weather texture stereo], 'Wind that ignores its notes: brown noise through a wandering bandpass, in gusts'],
+        hiss: [:effect, %i[noise tape], 'Tape hiss that stops with the sound (a bus effect)'],
+        house_bass: [:instrument, %i[bass house mono], 'A house bass: a saw through a four-pole with a tempo-set decay, a sine body'],
+        acid: [:instrument, %i[bass techno mono], 'A TB-303-style line: slides, the diode ladder, accents'],
+        roller: [:instrument, %i[bass techno stereo], 'A techno roller: a short sub with a noise tick, the top in a small room'],
+        stab: [:instrument, %i[chord techno mono], 'A detuned saw stab (the Reese voice) with a drive knob'],
+      }.freeze
+
+      Library.index.define_family(
+        :genre_patch, kind: :instrument, owner: Patches, about: 'Patches genre templates use where no preset fits',
+        apply: ->(name, source = nil, **kw) { Patches.public_send(name, source, **kw) },
+        code: ->(e) { "Genre::Patches.#{e.name}(midi)" }
+      )
+      PATCH_ENTRIES.each do |name, (kind, tags, about)|
+        file, line = Patches.method(name).source_location
+        Library.index.register(Library::Entry.new(
+          name: name, kind: kind, family: :genre_patch, tags: tags, about: about,
+          location: "#{file.delete_prefix(File.expand_path('../../..', __dir__) + '/')}:#{line}",
+          builder: ->(source = nil, **kw) { Patches.public_send(name, source, **kw) }
+        ))
+      end
     end
   end
 end
