@@ -6,15 +6,15 @@
 ● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)
                               │highpass  SampleWrapper ×4  2/4  n N: other…│synth(riff, voices: 1) { |v|
                               │ cutoff     150 Hz                          │  saws = v.hz.unison(6, detune: 0.32) { |p,
-                              │ quality    0.7  Q                          │      _i| p.saw }
-─ LIBRARY ──────────────── 6 ─┤                                            │  saws.lp4(knob(:cut), resonance:
-find ▏                        │                                            │      0.25).softclip(0.35,
-                              │                                            │      0.95).filter(:highpass, cutoff: 150,
-the library picker goes here: │                                            │      quality: 0.7)
-find-as-you-type, then        │                                            │}
-Enter: the likely action      │                                            │
-(named on the status line),   │                                            │
-a key per action, auditions   ├─ PREVIEW ────────────────────────────── 7 ─┼─ KEYS ───────────────────────────────── 8 ─
+                              │ quality    0.7  Q                          │      _i| p.saw }                      more
+─ LIBRARY ──────────────── 6 ─┤                                            ├─ RENDER ─────────────────────────────── 7 ─
+find ▏                        │                                            │bass  -16.4 LUFS  peak -7.2  rms -20.5  3…
+                              │                                            │ 0.2┤⣄⣀⣀⣧⣄⣀⣦⣄⣀⣶⣄⣀⣀⣅⣀⣀⣀⣀⣀⣀⣀⣀⡀⡀⡀⡨⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀⡀
+the library picker goes here: │                                            │ 0.0┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡷⠶⠶⠬⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤
+find-as-you-type, then        │                                            │-0.4┤⠋⠉⠉⠟⠋⠉⡿⠛⠉⡿⠛⠉⠉⠍⠉⠉⠉⠉⠉⠉⠉⠉⠁⠁⠁⠩⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁
+Enter: the likely action      │                                            │    └┬────────────┬───────────┬────────────┬
+(named on the status line),   │                                            │     0            1           2     time (s)
+a key per action, auditions   ├─ PREVIEW ────────────────────────────── 8 ─┼─ KEYS ───────────────────────────────── 9 ─
 on CUE only.                  │level (dB)                                  │Up Down    previous knob / next knob
                               │  0┤⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⢄⣄⣄⡤⠤⠤⠤⠤⠤⠤⠤⠤⠥⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠬⠤⠤⠤⠤⠤│Left Right turn the knob up / turn the knob…
                               │   │      ⢀⡠⠔⠟⠉           ⠅           ⠨     │Enter      type a value for the knob
@@ -24,9 +24,9 @@ on CUE only.                  │level (dB)                                  │
                               │-60┤         ⠅            ⠅           ⠨     │n N        the next node / the previous node
                               │   └┴─┴─┴┴┴┴┴┬───┴─┴┴─┴┴┴┴┬──┴──┴┴─┴┴┴┬───┴─│/          find in the library (later)
                               │            100          1k   frequency (Hz)│a          audition on CUE (later)
-─ AUDITION ───────────────────┴────────────────────────────────────────────┴──────────────────────────────────────── 9 ─
+─ AUDITION ───────────────────┴────────────────────────────────────────────┴─────────────────────────────────────── 10 ─
 CUE ○ nothing cued  │ audition: the picker's entry plays here (cue :x, sound)
-─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 10 ─
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 11 ─
 
 
 

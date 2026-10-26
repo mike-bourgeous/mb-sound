@@ -14,7 +14,7 @@ module MB
       #
       # Built-in kinds: the built-in panes (:transport, :form, :tracks,
       # :queue, :knobs, :meters, :cpu, :scope with look:; the sound-design
-      # screen's :inspector, :preview, :code, :audition), :text (lines:,
+      # screen's :inspector, :preview, :code, :audition, :render), :text (lines:,
       # role:), and :knob (knob: one knob, large).  Every kind takes rate:,
       # height:, width:, title:.
       module PaneFiles
@@ -64,7 +64,7 @@ module MB
             builtin = {
               transport: Panes::Transport, form: Panes::Form, tracks: Panes::Tracks, queue: Panes::Queue,
               knobs: Panes::Knobs, meters: Panes::Meters, cpu: Panes::CPU,
-              inspector: Panes::Inspector, preview: Panes::Preview, code: Panes::Code, audition: Panes::Audition,
+              inspector: Panes::Inspector, preview: Panes::Preview, code: Panes::Code, audition: Panes::Audition, render: Panes::Render,
             }.to_h { |k, cls| [k, ->(name, **o) { cls.new.configured(name, **o) }] }
             builtin[:scope] = ->(name, look: nil, **o) { Panes::Scope.new(name, look: look).configured(name, **o) }
             builtin[:text] = ->(name, **o) { TextPane.new(name, **o) }

@@ -266,6 +266,175 @@ module MB
           end
         end
 
+        # A one-shot offline render of the inspected track's patch
+        # (sound-design-ui-2: "a one-shot render of the processed waveform
+        # updated periodically when parameters change"): the waveform's
+        # min/max envelope, peak, RMS, and LUFS on the first row, the render
+        # before it faintly behind (what the last change did).  A fresh
+        # instance of the patch renders on a worker thread
+        # (UI::PatchRender) a quarter second after the knobs it reads stop
+        # moving, at most every half second while they keep moving; the live
+        # graph is never touched.
+        #
+        # Mode keys (NAV Enter, or NAV w): s the spectrum or the waveform,
+        # o the faint previous render on or off, p the track's clip or the
+        # demo phrase, + and - the render's length, r render again.
+        class Render < Pane
+          jump 'w'
+
+          mode_keys do
+            group 'Render'
+            on 's', :view, help: 'the spectrum or the waveform'
+            on 'o', :overlay, help: 'the previous render (faint) on or off'
+            on 'p', :phrase, help: "the track's clip or the demo phrase"
+            on ['+', '='], :length, 1, help: 'a longer render', label: '+ -'
+            on '-', :length, -1, help: 'a shorter render', label: '+ -'
+            on 'r', :again, help: 'render again'
+          end
+
+          # The color of the previous render behind the current one.
+          PREVIOUS = '#5c6370'
+
+          # Render lengths + and - step through (seconds).
+          LENGTHS = [0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0].freeze
+
+          def initialize = super(:render, rate: 10, height: 8, width: 48, needs: [:inspect, :render], title: 'render', min_height: 3,
+                                          description: 'an offline render of the inspected track\'s patch: waveform (or spectrum), peak, RMS, LUFS, redone when its knobs change')
+
+          def plot?
+            true
+          end
+
+          # The pane's PatchRender::Driver in +state+ (made on first use).
+          def self.driver(state) = (state[:driver] ||= PatchRender::Driver.new)
+
+          def draw(c, s, state, look: nil)
+            c.clear
+            return if c.w <= 0 || c.h <= 0
+            if @title && !state[:title_in_rule]
+              c.text(0, 0, 'RENDER', :title)
+              c = c.sub(0, 1, c.w, c.h - 1)
+              return if c.h <= 0
+            end
+            src = s&.render_source
+            unless src
+              c.text(0, 0, c.fit('nothing to render (play a track: bg :bass, clip)', c.w), :dim)
+              return
+            end
+            unless src.patch
+              c.text(0, 0, c.fit(src.note || 'no patch to rebuild', c.w), :dim)
+              return
+            end
+            driver = Render.driver(state)
+            driver.demo = !!state[:demo]
+            driver.tick(src, s.knobs, s.inspector&.knobs || [].freeze)
+            r = driver.shown
+            r = nil if r && r.track != src.track
+            draw_header(c, r, driver, src)
+            return if c.h < 2
+            if r.nil? || r.error
+              c.text(0, 1, c.fit(r ? r.error : 'rendering...', c.w), r ? :warn : :dim)
+              return
+            end
+            body = c.sub(0, 1, c.w, c.h - 1)
+            chart = chart_for(r, state[:overlay] == false ? nil : driver.previous, state[:view] || :wave, state)
+            return unless chart
+            native = body.grid.is_a?(FastUI::Grid)
+            lk = look && look != :auto ? look : Scope.auto_look(body.w, body.h)
+            live = state[:live]
+            if live.nil? || live.width != body.w || live.height != body.h || state[:native] != native || state[:look] != lk
+              live = state[:live] = Plot::Live.new(width: body.w, height: body.h, look: lk, native: native)
+              state[:native] = native
+              state[:look] = lk
+            end
+            live.draw(chart, body.grid, x: body.x, y: body.y)
+          end
+
+          # The first row: the track and what it played, the figures, the
+          # render's time, and a mark while a newer render waits or runs.
+          def draw_header(c, r, driver, src)
+            what = driver.demo || src.clip.nil? ? 'demo phrase' : 'clip'
+            x = c.text(0, 0, src.track.to_s, :name)
+            if r && !r.error
+              x = c.line(0, ['  ', :dim], [Panes.db(r.lufs), :text], [' LUFS', :dim], ['  peak ', :dim], [Panes.db(r.peak), :text],
+                         ['  rms ', :dim], [Panes.db(r.rms), :text], x: x)
+            end
+            tail = "  #{Panes.fmt(PatchRender.seconds)} s #{what}#{r && !r.error ? ", #{r.ms.round} ms" : ''}"
+            x = c.text(x, 0, c.fit(tail, [c.w - x - 2, 0].max), :dim)
+            c.text(x, 0, ' …', :queued) if driver.pending? && x + 2 <= c.w
+          end
+
+          def key_view(state)
+            state[:view] = state[:view] == :spectrum ? :wave : :spectrum
+            state[:view] == :spectrum ? 'render: the spectrum' : 'render: the waveform'
+          end
+
+          def key_overlay(state)
+            state[:overlay] = state[:overlay] == false
+            state[:overlay] ? 'render: the previous render behind' : 'render: no previous render'
+          end
+
+          def key_phrase(state)
+            state[:demo] = !state[:demo]
+            state[:demo] ? 'render: the demo phrase' : "render: the track's clip (the demo phrase without one)"
+          end
+
+          def key_length(_state, d)
+            now = PatchRender.seconds
+            i = LENGTHS.index { |l| l >= now - 1e-9 } || LENGTHS.length - 1
+            i += 1 if d > 0 && LENGTHS[i] <= now + 1e-9
+            i -= 1 if d < 0
+            PatchRender.seconds = LENGTHS[i.clamp(0, LENGTHS.length - 1)]
+            "render: #{Panes.fmt(PatchRender.seconds)} s (PatchRender.seconds)"
+          end
+
+          def key_again(state)
+            Render.driver(state).again
+            'render: again'
+          end
+
+          # What Enter does in the pane (the status line).
+          def enter_hint(_state) = nil
+
+          private
+
+          # The chart for Result +r+ (and +prev+ faintly behind, if any) in
+          # +view+ (:wave or :spectrum), rebuilt only when they change.
+          def chart_for(r, prev, view, state)
+            key = [r.seq, prev&.seq, view]
+            return state[:chart] if state[:chart_of] == key
+            b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
+            if view == :spectrum && r.spectrum
+              f, db = r.spectrum
+              top = [db.max, prev&.spectrum ? prev.spectrum[1].max : -Float::INFINITY].max
+              b.x :frequency, 20.0..(r.sample_rate / 2.0)
+              b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
+              b.line(prev.spectrum[1], x: prev.spectrum[0], color: PREVIOUS) if prev&.spectrum
+              b.line(db, x: f)
+            else
+              b.x :time, sample_rate: r.sample_rate
+              peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0].max.to_f
+              peak = 1.0 if peak <= 0
+              b.y Plot::Scale::Symmetric.new(-peak..peak, label: nil)
+              # (two areas from 0 draw the min/max envelope: in C, where a
+              # band mark's fill is Ruby, 1.3-3 ms a draw)
+              if prev
+                b.area(prev.hi, x: 0..prev.frames, base: 0.0, color: PREVIOUS)
+                b.area(prev.lo, x: 0..prev.frames, base: 0.0, color: PREVIOUS)
+              end
+              b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
+              b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
+            end
+            state[:chart_of] = key
+            state[:chart] = b.build
+          rescue StandardError => e
+            state[:chart_of] = key
+            state[:chart] = nil
+            warn "render pane: #{e.class}: #{e.message}"
+            nil
+          end
+        end
+
         # The inspected graph's code: the knobs it reads at their values now
         # (`knob :cut, (150.hz..8000.hz).at(3100.hz)`), then its Ruby
         # (`to_ruby`), redrawn only when either changes.  Arrows scroll.

@@ -80,7 +80,7 @@ module MB
       # The sound-design screen's panes, shown by `ui :sound` (the
       # inspector, its preview and code, the picker, the CUE line, the
       # keys) rather than on the :wall.
-      SOUND_PANES = %i[inspector preview code picker audition sound_keys].freeze
+      SOUND_PANES = %i[inspector preview code render picker audition sound_keys].freeze
 
       class << self
         # The terminal's size (the screen's, else the console's).

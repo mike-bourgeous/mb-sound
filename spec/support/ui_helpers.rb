@@ -4,6 +4,13 @@
 module UIHelpers
   UI = MB::Sound::UI
 
+  # The RENDER pane renders on the drawing thread in UI specs (no worker
+  # threads from panes drawn by every capture), with renders timed at 0 ms
+  # so captures are the same every run; PatchRender's own specs use Workers
+  # and the real clock where they test them.
+  UI::PatchRender.inline = true
+  UI::PatchRender.clock = -> { 0.0 }
+
   def ui_knob_spec(name, default, range, **opts)
     MB::Sound::GraphNode::Knob::Spec.new(name: name, default: default, range: range, **opts)
   end
@@ -30,6 +37,7 @@ module UIHelpers
       matrix: ui_fake_matrix,
       racks: ui_fake_racks,
       inspector: ui_fake_inspector,
+      render_source: ui_fake_render_source,
       buses: [UI::BusInfo.new(name: :verb, to: :master, description: 'reverb(:hall)', asleep: false, muted: false, sends: %i[pad].freeze, sources: [].freeze),
               UI::BusInfo.new(name: :drums, to: :master, description: 'compress', asleep: false, muted: false, sends: [].freeze, sources: %i[drums].freeze)].freeze,
       routes: { pad: { to: :master, send: { verb: 0.25 } }, drums: { to: :drums, send: {} } }.freeze
@@ -56,6 +64,16 @@ module UIHelpers
     ].freeze
     code = "synth(#{prefix}riff, voices: 1) { |v|\n  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }\n  saws.lp4(knob(#{knob.inspect}), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality: 0.7)\n}"
     UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil)
+  end
+
+  # The RENDER pane's source for the fake bass track: a small real patch
+  # (a triangle synth, so captures move only when its few nodes change)
+  # playing a fixed phrase.
+  def ui_fake_render_source(track = :bass)
+    @ui_fake_patch ||= ->(clip) { clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env * 0.5 } }
+    @ui_fake_clip ||= MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::C4.n2).n8
+    UI::PatchRender::Source.new(track: track, patch: @ui_fake_patch, clip: @ui_fake_clip, bpm: 128, bar_length: 1r, key: nil, tuning: nil,
+                                channels: 2, sample_rate: 48000, note: nil)
   end
 
   # A clip for the matrix: +notes+ as eighths from the start (nil: kit
