@@ -106,7 +106,7 @@ module MB
           @params = CurveShaper.kernel_params(@curve, @edges, [@in_lo, @in_scale, @out_lo, @out_scale]) if @antialias
           @state = [0.0, 0.0, 0.0, 0]
           @buf = nil
-          @steady_in = nil
+          @steady_in = FrozenView::Key.new # (see FrozenView)
           @steady_out = nil
           @node_type_name = "#{'a' unless @antialias}ease"
         end
@@ -122,18 +122,19 @@ module MB
 
           @buf = Numo::SFloat.zeros(data.length) if @buf.nil? || @buf.length != data.length
           unless @antialias
-            # A steady input (the same frozen buffer again, e.g. a held
-            # Notes value like v.velocity) gives the same output: a frozen
-            # copy is kept and returned while it lasts, instead of shaping
-            # every sample again (fuse-more-1: plain shapers on note values
-            # ran per voice per buffer through Numo)
-            if data.frozen? && data.equal?(@steady_in)
+            # A steady input (the same frozen buffer again with the same
+            # generation, e.g. a held Notes value like v.velocity; see
+            # FrozenView) gives the same output: a frozen copy is kept and
+            # returned while it lasts, instead of shaping every sample again
+            # (fuse-more-1: plain shapers on note values ran per voice per
+            # buffer through Numo)
+            if @steady_in.match?(data)
               return @steady_out if @steady_out
 
               @buf[0..] = plain(data)
               return @steady_out = @buf.dup.freeze
             end
-            @steady_in = data.frozen? ? data : nil
+            @steady_in.set(data)
             @steady_out = nil
 
             @buf[0..] = plain(data)

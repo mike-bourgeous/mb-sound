@@ -176,24 +176,24 @@ module MB
           @sample_rate = sample_rate.to_f
           @buf = nil
           @steady = nil
-          @steady_in = nil
+          @steady_in = GraphNode::FrozenView::Key.new # (see GraphNode::FrozenView)
           @node_type_name = "SQ-80 #{kind} time"
         end
 
         def sample(count)
           s = @source.sample(count)
           return nil if s.nil?
-          return @steady if s.equal?(@steady_in) && @steady && @steady.length == s.length
+          return @steady if @steady && @steady.length == s.length && @steady_in.match?(s)
 
           if s.frozen? && (v = s[0]) == s.max && v == s.min
             value = time(v)
             @steady = @steady && @steady.length == s.length && @steady_value == value ? @steady : Numo::SFloat.new(s.length).fill(value).freeze
             @steady_value = value
-            @steady_in = s
+            @steady_in.set(s)
             return @steady
           end
 
-          @steady_in = nil
+          @steady_in.clear
           @buf = Numo::SFloat.zeros(s.length) if @buf.nil? || @buf.length != s.length
           @buf[0..] = s.to_a.map { |x| time(x) }
           @buf

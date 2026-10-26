@@ -14,6 +14,10 @@ require_relative '../../../support/allocation_budget'
 # YJIT, as specs run).  When one fails: look at the named sites first
 # (reused buffers, cached Arrays, no per-buffer Hashes/Procs/Rationals;
 # see design/notes/graph_nodes.md), and raise a budget only with a reason.
+#
+# One pass: the Sessions here run #process_buffer, never a mastered
+# render's loudness targeting (Mastering::Targeting's pass 1 records every
+# buffer, which would show up as old objects and major GCs).
 RSpec.describe('render-path allocations') do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, buffer_size: 128, sleep: false) }

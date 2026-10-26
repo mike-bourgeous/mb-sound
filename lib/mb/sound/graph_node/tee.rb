@@ -433,6 +433,7 @@ module MB
           @frame_snapshot = nil
           @buffered = false
           @copying = false
+          @views = nil # a FrozenView, made when first needed
         end
 
         # Adds a new branch to the Tee and returns it.
@@ -581,10 +582,11 @@ module MB
             return
           end
 
-          # A frozen source buffer is shared as it is, so consumers can tell
-          # an unchanged buffer by identity (e.g. Notes nodes' constant
-          # buffers)
-          @frame_data = buf.frozen? ? buf : buf[0..].freeze
+          # A frozen source buffer is shared as it is (e.g. Notes nodes'
+          # constant buffers, whose identity and generation say they are
+          # unchanged); a reused one gets the same reused frozen view with a
+          # new generation (see FrozenView)
+          @frame_data = buf.frozen? ? buf : (@views ||= FrozenView.new).of(buf)
           @frame_snapshot = buf.to_binary if Tee.shared_check && !@copying
         end
 

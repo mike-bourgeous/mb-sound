@@ -39,19 +39,6 @@ module MB
             []
           end
 
-          # True if this op gives exactly the samples of the node it
-          # describes (all P1 ops; a future vectorized op might claim a
-          # tolerance instead, see #tolerance).
-          def exact?
-            true
-          end
-
-          # The largest difference from the node's own output allowed when
-          # not #exact? (relative to full scale).
-          def tolerance
-            0.0
-          end
-
           # The listing line's right-hand side.
           def expression
             raise NotImplementedError

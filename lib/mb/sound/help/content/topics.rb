@@ -705,7 +705,7 @@ module MB
       end
       example 'the techno template, its routing', sound: false do
         t = genre(:techno)
-        [t.sidechain, t.buses.keys, t.roles[:stab].send, t.form.bars]
+        [t.sidechain, t.buses.keys, t.roles[:stab].sends, t.form.bars]
       end
     end
 

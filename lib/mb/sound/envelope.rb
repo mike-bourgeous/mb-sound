@@ -1493,16 +1493,18 @@ module MB
 
       # True if a gate (+key+ :gate; every sample 0) or trigger (:trigger;
       # no sample above 0) input can't start a note: nil, a number, or a
-      # frozen buffer (remembered by identity, since frozen buffers don't
-      # change).
+      # frozen buffer (remembered with its generation; see
+      # GraphNode::FrozenView).
       def quiet?(key, value)
         return true if value.nil?
         return key == :gate ? value == 0 : value <= 0 if value.is_a?(Numeric)
-        return true if value.equal?(@quiet[key])
+
+        k = (@quiet[key] ||= GraphNode::FrozenView::Key.new)
+        return true if k.match?(value)
         return false unless value.frozen?
 
         quiet = key == :gate ? value.max == 0 && value.min == 0 : value.max <= 0
-        @quiet[key] = value if quiet
+        k.set(value) if quiet
         quiet
       end
 
@@ -1565,15 +1567,22 @@ module MB
       # last value if +:pad+ is nil), remembering its last value for when its
       # node ends.  Numbers are returned unchanged; nil gives the last value.
       #
-      # A frozen buffer of +count+ samples seen last time for +key+ (e.g. a
-      # Notes node's constant buffer) is returned at once: it holds the same
+      # A frozen buffer of +count+ samples seen last time for +key+ with the
+      # same generation (e.g. a Notes node's constant buffer; see
+      # GraphNode::FrozenView) is returned at once: it holds the same
       # values, so its last value is already remembered.
       def fit(key, data, count, pad: nil)
         return @last.fetch(key, 0.0) if data.nil?
         return data if data.is_a?(Numeric)
-        return data if data.equal?(@fitted[key]) && data.length == count
 
-        @fitted[key] = data.frozen? && (data.is_a?(Numo::SFloat) || data.is_a?(Numo::DFloat)) ? data : nil
+        k = (@fitted[key] ||= GraphNode::FrozenView::Key.new)
+        return data if data.length == count && k.match?(data)
+
+        if data.is_a?(Numo::SFloat) || data.is_a?(Numo::DFloat)
+          k.set(data)
+        else
+          k.clear
+        end
 
         data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
         @last[key] = data[-1] unless data.empty?

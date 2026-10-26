@@ -31,7 +31,12 @@ module MB
           initial ||= number.respond_to?(:value) ? number.value : MB::Sound::Notes::DEFAULT_NUMBER
           @value = MB::Sound.tuning.frequency_of(initial + @constant)
           @buf = nil
-          @steady_key = nil
+          # Steady-input cache (see #steady and GraphNode::FrozenView)
+          @steady_n = GraphNode::FrozenView::Key.new
+          @steady_offsets = @nodes.map { GraphNode::FrozenView::Key.new }
+          @offset_bufs = Array.new(@nodes.length)
+          @steady_note = nil
+          @steady_frequency = nil
           @steady = nil
           @node_type_name = 'Notes Frequency'
         end
@@ -62,35 +67,45 @@ module MB
         private
 
         # Returns the cached frozen output if +n+ and every offset buffer are
-        # the frozen buffers it was computed from, else computes it (frozen
-        # and cached if every input was frozen).
+        # the frozen buffers it was computed from, with the same generations
+        # (GraphNode::FrozenView), else computes it (frozen and cached if
+        # every input was frozen).
         def steady(n)
-          offsets = @nodes.map { |node| node.sample(n.length) }
+          offsets = @offset_bufs
+          idx = 0
+          while idx < @nodes.length
+            offsets[idx] = @nodes[idx].sample(n.length)
+            idx += 1
+          end
           tuning = Tuning.current
 
-          key = @steady_key
-          if key && key[0].equal?(n) && key[1] == tuning.note && key[2] == tuning.frequency && same_buffers?(offsets, key[3])
+          if @steady && @steady_n.match?(n) && @steady_note == tuning.note && @steady_frequency == tuning.frequency && steady_offsets?(offsets)
             return @steady
           end
 
           out = compute(n, offsets)
-          if out && offsets.all? { |o| o.frozen? && o.length == n.length }
-            @steady_key = [n, tuning.note, tuning.frequency, offsets]
+          if out && offsets.all? { |o| o&.frozen? && o.length == n.length }
+            @steady_n.set(n)
+            idx = 0
+            while idx < offsets.length
+              @steady_offsets[idx].set(offsets[idx])
+              idx += 1
+            end
+            @steady_note = tuning.note
+            @steady_frequency = tuning.frequency
             @steady = out.dup.freeze
             return @steady
           end
 
-          @steady_key = nil
+          @steady = nil
           out
         end
 
-        # True if Arrays +a+ and +b+ hold the same objects (without an
-        # Enumerator per call).
-        def same_buffers?(a, b)
-          return false unless a.length == b.length
+        # True if every offset buffer in +offsets+ matches its steady key.
+        def steady_offsets?(offsets)
           idx = 0
-          while idx < a.length
-            return false unless a[idx].equal?(b[idx])
+          while idx < offsets.length
+            return false unless @steady_offsets[idx].match?(offsets[idx])
             idx += 1
           end
           true

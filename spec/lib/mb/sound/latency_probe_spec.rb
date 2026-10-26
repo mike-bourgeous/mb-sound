@@ -88,6 +88,33 @@ RSpec.describe(MB::Sound::LatencyProbe, :aggregate_failures) do
       expect(per.detect([1.0, 2.0])).to be_nil
     end
 
+    # omnibus14: three big minute-aligned episodes in a five-minute run
+    # (tmp/latency_probe/probe-20261026-052506, 2026-10-26) reported "none
+    # found": four clusters were needed, and the chance estimate used the
+    # whole 3 s window instead of the cluster's real width
+    it 'finds three tight minute-aligned stalls in a five-minute run' do
+      times = [1_792_992_420.2291, 1_792_992_480.2235, 1_792_992_600.2283] # 05:27:00.2, 05:28:00.2, 05:30:00.2
+      r = per.detect(times, start: 1_792_992_306, stop: 1_792_992_607)
+      expect(r).not_to be_nil
+      expect(r.period).to eq(60)
+      expect(r.to_s).to eq('stalls cluster at :00.2 of each minute (100% of stall episodes; in 3 of 5 minutes)')
+      # With the small episodes of that run mixed in, no period stands out
+      # (the report looks at the big ones first: Report#periodicity's tiers)
+      small = [1_792_992_309.8725, 1_792_992_310.6731, 1_792_992_312.2058, 1_792_992_316.9688, 1_792_992_377.0545]
+      expect(per.detect(small + times, start: 1_792_992_306, stop: 1_792_992_607)).to be_nil
+    end
+
+    it 'rarely finds a period in a few random times (under 1% of runs)' do
+      [[3, 300], [5, 300], [8, 3600], [20, 3600]].each do |n, span|
+        found = (0...400).count { |s|
+          rng = Random.new(s)
+          times = Array.new(n) { 1_792_800_000 + rng.rand(0.0..span.to_f) }
+          per.detect(times, start: 1_792_800_000, stop: 1_792_800_000 + span)
+        }
+        expect(found).to be <= 4, "#{n} random times in #{span} s: a period in #{found} of 400 runs"
+      end
+    end
+
     it 'merges times closer than a second' do
       expect(per.merge_times([1.0, 1.5, 2.2, 5.0], 1.0)).to eq([1.0, 5.0])
     end

@@ -3,6 +3,10 @@
 # performance, by category and by source line (the 2026-10-19 allocation
 # audit, kept as a tool; workbench research/alloc-audit/allocations-128.md).
 #
+# One pass: the Session runs #process_buffer, never a mastered render's
+# loudness targeting (Mastering::Targeting's pass 1 records every buffer:
+# old objects and major GCs that aren't the render's own).
+#
 # Scenario: a non-realtime Session (NullOutput, #process_buffer) plays the
 # Night Bus flow (`demo`, `play_form`, `seek 21`) while the terminal
 # keyboard's path (UI::Keyboard::Link -> the Session's MIDI input, its

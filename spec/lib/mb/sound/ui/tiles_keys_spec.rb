@@ -62,7 +62,9 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@tiles.tiler.layout.panes).to include(:keyboard)
     expect(@tiles.tiler.rects[:keyboard].h).to eq(8)
     expect(@keyboard.resolved_mode).to eq(:tap)
-    expect(@term.text).to include('auto (tap) (no key-up)') # (:auto shown as itself, ui-api-1)
+    # (:auto shown as itself, ui-api-1; the pane is painted a frame after
+    # the mode line: waited for, as a loaded check-mode suite showed)
+    expect(@term.wait_for('auto (tap) (no key-up)')).to eq(true), @term.text
     @keyboard.off_mode = :hold # (notes that last until an exit)
 
     @term.type('zc')
@@ -301,8 +303,11 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(out.sounding).to be_empty
   end
 
+  # (Wall-clock timing: a realtime Session and typed keys.  At 240 bpm a
+  # loaded check-mode run once typed two keys a 1 s bar apart, so the
+  # phrase was one note; at 120 bpm a bar is 2 s.)
   it 'plays an armed track and captures what was played into a clip, through the Session MIDI input' do
-    transport = MB::Sound::Sequence::Transport.new(bpm: 240)
+    transport = MB::Sound::Sequence::Transport.new(bpm: 120)
     @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, buffer_size: 512), transport: transport, realtime: true)
     keyboard = MB::Sound::UI::Keyboard.new(out: MB::Sound::UI::Keyboard::Link.new(session: @session, patch: nil), off_mode: :tap)
     keyboard.out.attach # (so arm doesn't warn about missing live MIDI where there is none)
@@ -324,7 +329,10 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(wait_until(timeout: 6) { @session.arrangement.captures.key?(:lead_1) }).to eq(true), @term.text
     clip = @session.arrangement.captures[:lead_1]
     expect(@term.wait_for(/capture: what you played loops into :lead at \d+:\d/)).to eq(true), @term.text
-    expect(clip.events.map(&:value)).to eq([48, 52, 55])
+    # (in phase with the timeline: a phrase typed across the loop's start
+    # plays its later notes first, so the order depends on where in the bar
+    # the keys landed; the played order is checked above)
+    expect(clip.events.map(&:value).sort).to eq([48, 52, 55])
 
     # Step entry's w swaps the clip so far into the armed track (a journaled change)
     lead_changes = -> { @session.journal.changes.count { |e| e.subject == :lead } }
