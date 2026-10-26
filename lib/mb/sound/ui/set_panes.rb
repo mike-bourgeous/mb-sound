@@ -386,22 +386,16 @@ module MB
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
         class Racks < Pane
+          include KnobTurns
           jump 'r'
 
-          # Position steps of a turn: coarse and fine (Shift).
-          STEP = 0.02
-          FINE = 0.002
+          # Position steps of a turn: coarse and fine (Shift); see KnobTurns.
+          STEP = KnobTurns::STEP
+          FINE = KnobTurns::FINE
 
           # Seconds a turned value is used over the snapshot's, until the
           # snapshot catches up.
-          PENDING = 0.6
-
-          class << self
-            # The gestures' clock (monotonic seconds; specs set their own).
-            attr_writer :clock
-
-            def clock = @clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
-          end
+          PENDING = KnobTurns::PENDING
 
           mode_keys do
             group 'Racks'
@@ -464,10 +458,9 @@ module MB
                 k = knobs[kn]
                 short = kn.to_s.split('/').last
                 spec = k&.spec || r.knob_specs[short.to_sym]
-                value = pending(state, kn) || k&.value || spec&.default
-                g = state[:gesture]
-                target = g&.turning? && g.knob == kn ? g.value : nil
-                value = target if target
+                value, turning = shown_value(state, kn, k)
+                value ||= spec&.default
+                target = turning ? value : nil
                 sel = state[:mode] && kn == picked
                 x = c.run(0, y, "  #{c.fit(short, 8).ljust(8)}", sel ? :key : :name, reverse: sel)
                 range = spec ? " #{Panes.fmt(spec.range.begin)}..#{Panes.fmt(spec.range.end)}#{spec.curve == :exp ? ' exp' : ''}" : ''
@@ -488,65 +481,9 @@ module MB
             out
           end
 
-          # A turn key: starts or extends the gesture on the picked knob
-          # (another knob's gesture goes out first) with a live Preview;
-          # its Commit comes from #key_tick when the keys stop (or #flush).
-          def key_turn(state, step)
-            cell = picked(state) or return 'no knob to turn (racks with knobs show them while they play)'
-            kn, k = cell
-            now = Racks.clock.call
-            g = (state[:gesture] ||= TurnGesture.new)
-            out = g.turning? && g.knob != kn ? flush(state) : nil
-            v = g.turning? ? g.value : (pending(state, kn) || k.value)
-            nv = Float(TurnGesture.number(k.spec.clamp(k.spec.value((k.spec.position(v) + step).clamp(0.0, 1.0)))))
-            [*out, g.step(kn, v, nv, now)]
-          end
-
-          def key_reset(state)
-            cell = picked(state) or return 'no knob'
-            kn, k = cell
-            [*flush(state), set(state, kn, k.spec.default)]
-          end
-
-          # Time passes (the screen calls it while #key_wait says so): the
-          # gesture's Commit once its keys stopped, else nil.
-          def key_tick(state)
-            g = state[:gesture] or return nil
-            run = g.tick(Racks.clock.call)
-            remember(state, g) if run
-            run
-          end
-
-          # Seconds until #key_tick has a Commit, or nil.
-          def key_wait(state) = state[:gesture]&.wait(Racks.clock.call)
-
-          # The screen ran the lines a key or #tick returned.
-          def lines_ran(state)
-            state[:gesture]&.ran
-          end
-
           private
 
-          # The gesture's Commit now (another key), as an Array (empty
-          # without one).
-          def flush(state)
-            g = state[:gesture] or return []
-            run = g.flush(Racks.clock.call) or return []
-            remember(state, g)
-            [run]
-          end
-
-          # The gesture's last value stands in for the knob until the
-          # snapshot catches up.
-          def remember(state, g)
-            (state[:pending] ||= {})[g.knob] = [g.value, Racks.clock.call]
-          end
-
-          def set(state, kn, value)
-            (state[:pending] ||= {})[kn] = [value, Racks.clock.call]
-            v = TurnGesture.number(value)
-            PaneKeys::Run["turn #{kn.inspect}, #{v}", "#{kn} #{v}"]
-          end
+          def no_knob_note = 'no knob to turn (racks with knobs show them while they play)'
 
           def picked(state)
             s = state[:snap] or return nil
@@ -554,11 +491,6 @@ module MB
             return nil if list.empty?
             kn = list[state[:pick].to_i.clamp(0, list.length - 1)][0]
             [kn, s.knobs.find { |k| k.name == kn }]
-          end
-
-          def pending(state, kn)
-            v, at = state[:pending]&.[](kn)
-            v if at && Racks.clock.call - at < PENDING
           end
         end
       end

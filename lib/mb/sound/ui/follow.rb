@@ -35,7 +35,7 @@ module MB
         def poll(now)
           return if @poll.nil? || (@polled_at && now - @polled_at < Follow::POLL)
           @polled_at = now
-          slow, refs = @poll.call
+          slow, refs = @poll.call(@feed.needs)
           @feed.slow = slow
           @feed.knob_refs = refs
         rescue => e
