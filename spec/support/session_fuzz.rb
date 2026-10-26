@@ -9,7 +9,9 @@
 # - :buffer_size: 367-frame buffers give the same mix within -80 dB of the
 #   peak ("ears win"), and the same length
 # - :plan: plans off gives the same mix, bit for bit (both at the default
-#   MB::Sound.precision :fast; fast-sine-1)
+#   MB::Sound.precision :fast; fast-sine-1), and so do plans whose rebuilds
+#   wait for a block boundary (Plan.rebuilds :next_span, as a realtime
+#   Session's render thread defers them; render-rebuild-1)
 # - :timeline: a timeline-following part (a looping tween, a looping
 #   clip's frequency) launched partway through the song plays from the
 #   launch what it plays there when started at bar 1, within -80 dB
@@ -162,11 +164,12 @@ module SessionFuzz
 
   # Renders +code+ for +bars+ bars in +buffer_size+-frame buffers; returns
   # the mix (one DFloat per channel).
-  def render(code, bars, buffer_size: 800, plans: true)
+  def render(code, bars, buffer_size: 800, plans: true, rebuilds: :inline)
     plan = MB::Sound::Plan
-    old = [plan.enabled, plan.precision]
+    old = [plan.enabled, plan.precision, plan.rebuilds]
     plan.enabled = plans
     plan.precision = :fast
+    plan.rebuilds = rebuilds
     MB::Sound.rewind
     MB::Sound.seed(1)
     out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: buffer_size)
@@ -181,7 +184,7 @@ module SessionFuzz
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
     out.captured.map { |c| Numo::DFloat.cast(c) }
   ensure
-    plan.enabled, plan.precision = old
+    plan.enabled, plan.precision, plan.rebuilds = old
     MB::Sound.rewind
   end
 
@@ -273,7 +276,8 @@ module SessionFuzz
     when :plan
       ref = render(code, song.bars, plans: false)
       got = render(code, song.bars)
-      compare(ref, got, tolerance: 0, label: 'planned vs unplanned')
+      compare(ref, got, tolerance: 0, label: 'planned vs unplanned') ||
+        compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?

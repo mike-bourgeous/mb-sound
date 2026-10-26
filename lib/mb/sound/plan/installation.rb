@@ -71,7 +71,7 @@ module MB
           @all_changed = nil
           # Rebuilds that must happen before the next block, whatever the
           # context (see #foreign_read)
-          @urgent = false
+          @urgent = nil
           # A rebuild in progress elsewhere (see #stale?, Plan::Deferral),
           # and the regions running unfused until it lands (see #held?)
           @job = nil
@@ -182,8 +182,17 @@ module MB
           @stale = true
           @changes += 1
           if node.nil?
+            # A structural change may give a node fused in a region a new
+            # reader (a Tee branch), which reads it whether or not the
+            # region runs (e.g. a muted player's shared nodes kept in step,
+            # Session::Strip#read_while_asleep): the plans rebuild before
+            # the next block wherever they render, as before
+            # render-rebuild-1 (found by master_spec's muted player with
+            # Plan.rebuilds :background: its LFO read from outside the old
+            # layout's region)
             @all_changed = @changes
             @hold_all = true
+            @urgent = @changes
           else
             @changed[node] = @changes
             r = @region_of&.[](node)
@@ -271,7 +280,7 @@ module MB
           if layout.nil? || (@all_changed && @all_changed > job.since) || !layout.kept_current?(self)
             # (stale stays set: the next #stale? starts another)
             warn "Plan: dropped a rebuild of #{Plan.node_label(@roots[0])}: #{job.error ? "#{job.error.class}: #{job.error.message}" : 'changed meanwhile'}" if ENV['MB_SOUND_PLAN_DEBUG']
-            @urgent = true if job.error # (rebuild here, in the next block)
+            @urgent = @changes if job.error # (rebuild here, in the next block)
             return false
           end
 
@@ -405,7 +414,7 @@ module MB
           # Its region can't run unfused for long (the node's two readers
           # would both advance it), so this rebuilds before the next block
           # even where rebuilds are deferred
-          @urgent = true
+          @urgent = @changes
         end
 
         # Why +node+ is read as a boundary input (for listings).
@@ -611,7 +620,7 @@ module MB
           # Changes after +since+ stay
           @changed.delete_if { |_, n| n <= since } unless @changed.empty?
           @all_changed = nil if @all_changed && @all_changed <= since
-          @urgent = false
+          @urgent = nil if @urgent && @urgent <= since
           @held.clear
           @hold_all = !@all_changed.nil?
           @changed.each_key { |n| (r = @region_of[n]) && (@held[r] = true) }

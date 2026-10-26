@@ -134,7 +134,7 @@ RSpec.describe('Plan rebuilds') do
       expect(binaries(planned)).to eq(binaries(unplanned))
     end
 
-    it 'drops a build a structural change overtook, and builds again' do
+    it 'drops a build a structural change overtook, and rebuilds at once' do
       # A structural change between the build's start (in the span that
       # changed the plans) and the next span, where it would land
       changed = false
@@ -148,7 +148,11 @@ RSpec.describe('Plan rebuilds') do
       _, _, planned = render_song(true, rebuilds: :next_span, &between)
       expect(changed).to eq(true)
       expect(@deferral.dropped).to be >= 1
-      expect(@render_rebuilds).to eq(0)
+      # (a structural change rebuilds before the next block wherever the
+      # plans render: a node fused in a region may have a new reader): the
+      # lane's installation and the Session player's, which reaches the
+      # lane's output through the Synth
+      expect(@render_rebuilds).to eq(2)
       _, _, unplanned = render_song(false)
       expect(binaries(planned)).to eq(binaries(unplanned))
     end
