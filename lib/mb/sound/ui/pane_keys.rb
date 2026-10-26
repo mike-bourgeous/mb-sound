@@ -53,7 +53,8 @@ module MB
       # `lines_ran(state)` after running what a key or tick returned.  A
       # key_ method may return several results as an Array: Runs, a
       # Preview (a live unjournaled knob move), a Commit (a gesture's
-      # line, from the Session).
+      # line, from the Session), an Ask (a value to type on a prompt
+      # line, handed to key_<answer>).
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
@@ -123,6 +124,14 @@ module MB
         # status line.
         Commit = Data.define(:knob, :note) do
           def self.[](knob, note = nil) = new(knob: knob, note: note&.freeze)
+        end
+
+        # A value a pane key asks the user to type (the inspector's Enter):
+        # the screen opens a prompt line (+prompt+, starting with +text+),
+        # and on Enter calls the pane's key_<+answer+>(state, typed text),
+        # whose result it handles like a key's.  Esc cancels.
+        Ask = Data.define(:prompt, :text, :answer) do
+          def self.[](prompt, text, answer) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer)
         end
 
         # The pane's keymap (its kind's), or nil.

@@ -20,11 +20,13 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
       recording: [].freeze,
       matrix: ui_fake_matrix(long),
       racks: ui_fake_racks(long),
+      inspector: ui_fake_inspector(long, knob: :"#{long}knob"),
       form: base.slow.form.with(section: :"#{long}section", next: :"#{long}next")
     )
     base.with(
       slow: slow,
-      parts: [ui::PartLoad.new(name: :"#{long}part", kind: :player, state: :playing, load: 0.1)].freeze,
+      parts: [ui::PartLoad.new(name: :"#{long}part", kind: :player, state: :playing, load: 0.1),
+              ui::PartLoad.new(name: :"#{long}lead/cue", kind: :player, state: :playing, load: 0.1)].freeze,
       knobs: [ui::KnobValue.new(name: :"#{long}knob", value: 1.0, spec: ui_knob_spec(:"#{long}knob", 0.0, 0.0..2.0, unit: "#{long}unit"))].freeze
     )
   end
@@ -42,10 +44,12 @@ RSpec.describe('UI text fitting', :aggregate_failures) do
       next if pane.plot? || %i[messages message keyboard page].include?(pane.name) # (page: its text is a help page, not snapshot names; density_spec)
       rows = draw(pane, snap, 30, 6)
       cut = rows.select { |r| r.include?('LONGNAM') }
-      expect(cut).not_to be_empty, "#{pane.name} shows no long name: #{rows.inspect}" unless %i[transport meters].include?(pane.name)
-      cut.each { |r| expect(r).to include('…'), "#{pane.name}: #{r.inspect}" }
+      expect(cut).not_to be_empty, "#{pane.name} shows no long name: #{rows.inspect}" unless %i[transport meters picker sound_keys].include?(pane.name) # (the picker and keys panes: fixed text)
+      # (the code pane wraps: a word broken across lines ends in Canvas::BREAK, a mark too)
+      mark = pane.name == :code ? /…|\\\z/ : /…/
+      cut.each { |r| expect(r).to match(mark), "#{pane.name}: #{r.inspect}" }
       # Whatever reaches the right edge was cut with an ellipsis, or is a number or meter that fits
-      rows.each { |r| expect(r[-1]).to match(/[\s…\d%█▏▎▍▌▋▊▉·│]/), "#{pane.name}: #{r.inspect}" }
+      rows.each { |r| expect(r[-1]).to match(pane.name == :code ? /[\s…\\]/ : /[\s…\d%█▏▎▍▌▋▊▉·│]/), "#{pane.name}: #{r.inspect}" }
     end
   end
 

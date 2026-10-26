@@ -68,7 +68,7 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
       end
     end
 
-    %i[tiles studio session mixer].each do |layout|
+    %i[tiles studio session mixer sound].each do |layout|
       it "matches the golden capture of the #{layout} screen at #{cols}x#{rows}" do
         set = %i[session mixer].include?(layout) # (ux-r4: the set's panes with rack rack knobs)
         expect_golden("tiles_#{layout}_#{cols}x#{rows}", tiles_capture(layout, rows, cols, rack_knobs: set).to_text)

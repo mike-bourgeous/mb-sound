@@ -122,6 +122,7 @@ module MB
           @placed = @placed_layout = @grid = @shown = @canvases = @drawn_at = @first_refresh = @last_cursor = nil
           @line_cursor = @old_winch = @signals = @wake_r = @wake_w = nil
           @attached = @poll = @polled_at = @poll_warned = @last = nil
+          @asking = nil # ([pane name, PaneKeys::Ask] while a pane's value prompt is open)
           @input = input
           @output = output
           @session = session
@@ -1028,6 +1029,7 @@ module MB
 
         def line_done(kind, text)
           @full = true
+          return answer_pane(text) if kind == :pane_value
           return if text.nil? || text.strip.empty?
           case kind
           when :palette then run_palette(text)
@@ -1353,6 +1355,11 @@ module MB
               code = s&.gesture_line(x.knob)
               run_pane_line(PaneKeys::Run[code, x.note]) if code
               ran = true
+            when PaneKeys::Ask
+              # (a value to type: a prompt line; #line_done hands the text to the pane)
+              @asking = [name, x]
+              @router.open_line(:pane_value, x.prompt)
+              @router.line.insert(x.text) unless x.text.empty?
             when String
               flash(x, :key)
             when :close
@@ -1364,6 +1371,17 @@ module MB
           pane = @panes[name]
           pane.lines_ran(@states[name]) if ran && pane.respond_to?(:lines_ran)
           @full = true
+        end
+
+        # The typed answer (nil: cancelled) to the open PaneKeys::Ask: the
+        # asking pane's key_<answer>, handled like a key's result.
+        def answer_pane(text)
+          name, ask = @asking
+          @asking = nil
+          return unless name
+          return flash('cancelled', :dim) if text.nil?
+          pane = @panes[name] or return
+          pane_result(name, pane.key_action(ask.answer, @states[name], text))
         end
 
         # Seconds until a pane on screen has a line due (UI::PaneKeys
@@ -2008,13 +2026,22 @@ module MB
             hint =
               if @router.state == :pending then "#{Input::Keymap.chord_name(@router.prefix.key.chord)} ..."
               elsif mode == :play then @note || @hints || ''
-              elsif mode == :pane then "Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
+              elsif mode == :pane then "#{enter_hint}Esc nav  ? keys  #{(m = @panes[@tiler.focus]&.mode_keymap) ? Keys.hints(m) : ''}"
               else HINTS[step ? :step : mode] || ''
               end
             c.text(x + 1, 0, c.fit(hint, room), @note && mode == :play ? :key : :dim)
           end
           c.text(@cols - right.length, 0, right, :key) unless right.empty?
           c.text(warn_at, 0, badge_w, :warn) if warn_at
+        end
+
+        # "Enter: <what it does>  " for the focused pane in its mode, when
+        # the pane names it (#enter_hint: the sound-design screen names
+        # Enter's action before it is pressed), else "".
+        def enter_hint
+          p = @panes[@tiler.focus]
+          h = p.respond_to?(:enter_hint) ? p.enter_hint(@states[@tiler.focus]) : nil
+          h ? "Enter: #{h}  " : ''
         end
 
         # Where the terminal's cursor goes: the REPL's cursor in its pane,

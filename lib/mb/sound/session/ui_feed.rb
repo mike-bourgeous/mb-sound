@@ -26,6 +26,16 @@ module MB
           @ui_feed = feed
         end
 
+        # Each current player's graph by name (the GraphNodeInput the
+        # Session renders), for the terminal UI's inspector
+        # (UI::Inspect): read under the players' mutex only, never the
+        # render lock, so a poll thread may call it while the render thread
+        # renders.  Callers read settings only (Traversable#param_info,
+        # #to_ruby), never sample.
+        def ui_graphs
+          @mutex.synchronize { @players.values.select(&:current?).to_h { |p| [p.name, p.input] } }
+        end
+
         # The players, buses, and master chains with their CPU time since
         # the last call, resetting the counts (an Array of UIPart).  Called
         # by the feed on the render thread with the render lock held.

@@ -46,6 +46,7 @@ module MB
           @lanes = {}
           @scene_launches = {}
           @lock = Mutex.new
+          @inspector = nil # (the inspector's Inspect::Gatherer, made when a pane first needs it)
           @subscription = session.journal.subscribe { |e| note(e) }
           session.journal.changes.each { |e| note(e, seen: false) }
         end
@@ -57,8 +58,9 @@ module MB
         end
 
         # A new Slow, and the knobs to read per buffer ([name, knob] pairs)
-        # for Feed#knob_refs=.
-        def call
+        # for Feed#knob_refs=.  +needs+ is what the visible panes need
+        # (Feed#needs): :inspect gathers the inspector's InspectInfo.
+        def call(needs = nil)
           s = @session
           arr = s.arrangement
           armed = arr.armed.keys.freeze
@@ -96,7 +98,8 @@ module MB
             midi: midi_info(s, knobs),
             matrix: matrix_info(arr),
             racks: rack_infos(s),
-            clocks: clock_infos(s)
+            clocks: clock_infos(s),
+            inspector: needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil
           )
           [slow, knobs.to_a.freeze]
         end
