@@ -175,7 +175,8 @@ RSpec.describe MB::Sound::Library do
       write('bad.rb', "reverb :x, decay: 2\nif true then 1 end\n")
       write('typo.rb', "reverb :y, decya: 2\n")
       write('verb.rb', "shout :z\n")
-      problems = index.problems.join("\n")
+      problems = nil
+      expect { problems = index.problems.join("\n") }.to output(/Library: user: file .*bad\.rb.*\(skipped\)/).to_stderr
       expect(problems).to match(/bad\.rb.*if/)
       expect(problems).to match(/typo\.rb:1: reverb :y: unknown setting :decya \(did you mean decay\?\)/)
       expect(problems).to match(/verb\.rb:1: a library file holds entries/)

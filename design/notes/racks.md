@@ -148,6 +148,10 @@ Slots and swaps of racks (R3), zones, Hash matchers, `within`/`sometimes`, MIDI 
 
 `bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (rack knobs `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: `/app/tmp/listening/racks-r2/` (bench id racks-r2-2026-10-17).
 
+## Racks as library entries (library-core-1, 2026-10-26)
+
+Instruments and effect chains are racks (maintainer, 2026-10-24): a library file's `instrument :x do |midi| ... end` is an irack, `chain :x do |sig| ... end` an arack (`note_fx` an mrack), each an Entry of family :preset whose builder places the rack in the Session (`GraphIO.place_rack`) and applies it; `preset :x` gives the Rack like a rack document; the Session's named racks are entries of the :session shelf (for find and the heads).  See library.md.
+
 ## Params (param-1, 2026-10-24)
 
 Rack knobs (`knob :space, 0.3, range:, curve:, cc:, description:` in a rack block) build their `MB::Sound::Param` through `Knob::Spec` (`design/notes/params.md`), description included, so they take typed values (`knob :tone, 2400.hz, range: 600.hz..8000.hz`), ranged defaults, and names-table ranges (`knob :mix, 0.3` is 0..1) like any knob.

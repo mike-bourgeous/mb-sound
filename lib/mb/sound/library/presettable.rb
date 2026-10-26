@@ -91,6 +91,11 @@ module MB
         Library.index.add_alias(preset_family_name, alias_name, name)
       end
 
+      # Other names lookups accept ({ alias => preset name }).
+      def preset_aliases
+        Library.index.aliases(preset_family_name)
+      end
+
       # The presets of this family by name ({ name => Entry }, the first
       # in search order of each name: library files on the shelves before
       # the class's own lines).
@@ -118,6 +123,11 @@ module MB
       def preset_settings(name)
         preset_entry(name).settings
       end
+
+      # The declarations are private: lines in the class body (`preset
+      # :hall, ...`), never calls from outside (`Reverb.preset(:hall)`
+      # would declare instead of look up; use .preset_entry).
+      private :preset_family, :param, :preset, :preset_alias
 
       private
 

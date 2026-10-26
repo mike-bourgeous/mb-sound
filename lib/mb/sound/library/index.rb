@@ -80,7 +80,7 @@ module MB
           @problems = []
           @warned = Set.new
           @documents = {} # path => [mtime, size, Entry]
-          @uses = {}
+          @uses = {}.compare_by_identity # (Data#hash would hash every setting per lookup)
           @loading = false
         end
 
@@ -412,8 +412,12 @@ module MB
           nil
         end
 
+        # Records a problem; on shelves other than the shipped one it also
+        # warns (once), since nothing else would say so.
         def problem(shelf, message)
-          @lock.synchronize { @problems << "#{shelf.name}: #{message}" unless @problems.include?("#{shelf.name}: #{message}") }
+          text = "#{shelf.name}: #{message}"
+          added = @lock.synchronize { @problems.include?(text) ? false : (@problems << text) }
+          once("#{text} (skipped)") if added && !shelf.shipped?
         end
 
         def once(message)
