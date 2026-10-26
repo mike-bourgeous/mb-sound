@@ -16,4 +16,14 @@ RSpec.describe(MB::Sound::LiveMethods) do
     expect { result = MB::Sound.live_error(ArgumentError.new('nope')) }.to output(/ArgumentError: nope.*live mode: ignored/).to_stderr
     expect(result).to be_nil
   end
+
+  it 'raises on a thread inside Internal.strictly while other threads stay live' do
+    MB::Sound.live = true
+    MB::Sound::Internal.strictly do
+      expect(MB::Sound.live?).to eq(false)
+      expect { MB::Sound.live_error(ArgumentError.new('nope')) }.to raise_error(ArgumentError, 'nope')
+      expect(Thread.new { MB::Sound.live? }.value).to eq(true)
+    end
+    expect(MB::Sound.live?).to eq(true)
+  end
 end

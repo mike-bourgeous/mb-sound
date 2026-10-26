@@ -87,4 +87,23 @@ RSpec.describe(MB::Sound::RandomMethods) do
       expect(a.sample(100)).to eq(b.sample(100))
     end
   end
+
+  describe 'Internal.with_private_rng' do
+    it 'gives the calling thread its own root generator, leaving the shared one and other threads alone' do
+      MB::Sound.seed(4)
+      shared = MB::Sound::Internal.root_rng.dup
+      inside = MB::Sound::Internal.with_private_rng(9) {
+        a = MB::Sound.next_seed
+        b = MB::Sound.with_seed(3) { MB::Sound.next_seed }
+        other = Thread.new { MB::Sound.random_seed }.value
+        [a, b, MB::Sound.random_seed, other]
+      }
+      expect(inside[0]).to eq(Random.new(9).rand(1 << 62))
+      expect(inside[1]).to eq(Random.new(3).rand(1 << 62))
+      expect(inside[2]).to eq(9) # (with_seed put the private one back)
+      expect(inside[3]).to eq(4) # (another thread: the shared one)
+      expect(MB::Sound.random_seed).to eq(4)
+      expect(MB::Sound.next_seed).to eq(shared.rand(1 << 62)) # (no draws taken from it)
+    end
+  end
 end
