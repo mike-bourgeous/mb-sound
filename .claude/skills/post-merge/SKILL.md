@@ -102,3 +102,4 @@ A merge isn't finished until these are done, in this order, without being asked 
 - Minimax polynomials (Remez exchange, equioscillation; Sollya fpminimax with float coefficients and constraints like an exact peak or odd symmetry; for the shared fast sine), after fast-sine-1 (2026-10-25)
 - Endless encoders and relative MIDI CCs (twos complement / binary offset / sign magnitude, acceleration; learn relative: adding clicks in Param position space), after sound-design-ui-1 (2026-10-26)
 - NKS preset tags (Type/Sub-Type/Character vocabularies, closed facet lists plus free tags, eight-knob parameter pages; for the library facets and the inspector), after library-core-1 (2026-10-26)
+- Read-copy-update for realtime swaps (lock-free readers, copy then publish one pointer, grace periods; farbot RealtimeObject; the background plan swap and warm-up as the same shape), after render-rebuild-1 + fixes-1026 (2026-10-26)
