@@ -242,7 +242,7 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       kit = MB::Sound.grid(16, kick: 'x...').loop rescue nil
       expect(pr.input(src.with(clip: kit), 0.5).kind).to eq(:kit) if kit.respond_to?(:rows)
       roles = {
-        'bass' => [:bass, 33], 'dnb_reese' => [:bass, 33], 'warm pad' => [:pad, 60], 'lead' => [:lead, 67], 'keys' => [:pluck, 60],
+        'bass' => [:bass, 33], 'dnb_reese' => [:bass, 33], 'warm pad' => [:pad, 48], 'lead' => [:lead, 67], 'keys' => [:pluck, 60],
         'kick' => [:kick, 36], 'mystery' => [:default, 48],
       }
       roles.each do |words, (role, note)|

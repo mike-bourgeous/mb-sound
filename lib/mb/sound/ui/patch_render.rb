@@ -88,7 +88,7 @@ module MB
           { role: :kick, words: /kick|bd\b|808_kick/, note: 36, hold: 0.25 },
           { role: :drums, words: /drum|perc|snare|hat|clap|tr808|tr909|kit/, note: 38, hold: 0.25 },
           { role: :bass, words: /bass|reese|sub\b|wobble|acid/, note: 33, hold: 0.6 },
-          { role: :pad, words: /pad|string|choir|drone|swell|ambient/, note: 60, hold: 0.9 },
+          { role: :pad, words: /pad|string|choir|drone|swell|ambient/, note: 48, hold: 0.9 },
           { role: :pluck, words: /pluck|keys|piano|bell|mallet|marimba|tine|arp/, note: 60, hold: 0.3 },
           { role: :lead, words: /lead|solo|vox|vocal|melody/, note: 67, hold: 0.6 },
         ].freeze
