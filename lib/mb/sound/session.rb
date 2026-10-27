@@ -246,6 +246,12 @@ module MB
       # The Tuning for notes played in this session (MB::Sound.tuning).
       attr_reader :tuning
 
+      # Frames this Session has rendered (it grows by a buffer when the
+      # render thread finishes one; others may read it without a lock: the
+      # sound-design screen's previews start their heavier steps right
+      # after a buffer, UI::PatchRender).
+      def frames_rendered = @frame
+
       # The default master bus gain (-10 dB), leaving headroom for mixes of
       # full-scale oscillators.
       DEFAULT_MASTER_GAIN = 10 ** (-10 / 20.0)

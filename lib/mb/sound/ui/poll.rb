@@ -133,7 +133,7 @@ module MB
           note = walk[:synth] ? nil : "#{name} has no synth voice to copy (the preview plays one voice of a synth: synth(midi) { |v| ... })"
           PatchRender::Source.new(track: name, synth: walk[:synth], clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
                                   tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, note: note&.freeze,
-                                  words: "#{name} #{info.code}".freeze, live: walk[:live])
+                                  words: "#{name} #{info.code}".freeze, live: walk[:live], frames: (walk[:frames] ||= -> { s.frames_rendered }))
         rescue StandardError => e
           warn_once(e)
           nil

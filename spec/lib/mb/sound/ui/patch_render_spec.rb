@@ -52,7 +52,7 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
     @session&.close
     @other&.close
     @driver&.close
-    @cache&.[](:copy)&.close
+    @cache&.[](:copies)&.each_value(&:close)
     pr.rate = nil
     MB::Sound.rewind
   end
@@ -218,6 +218,9 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       guess = pr.render(job_for(@session, 5, source: src, input: pr.input(src, 0.5, guess: true)), cache: @cache)
       expect(guess.input).to eq('bass guess A1')
       expect(@cache[:copy]).not_to equal(copy) # (another note: a new copy)
+      again = pr.render(job_for(@session, 6, source: src), cache: @cache)
+      expect(@cache[:copy]).to equal(copy) # (back to the clip's note: the kept copy, no build)
+      expect(again.hi).to eq(a.hi)
 
       # The session that previewed plays on exactly as the one that didn't,
       # and the shared generator gave no draws
@@ -314,6 +317,31 @@ RSpec.describe(MB::Sound::UI::PatchRender, :aggregate_failures) do
       expect(pad.synth).to be_nil
       r = pr.render(job_for(@session, source: pad))
       expect(r.error).to include('no synth voice to copy')
+    end
+
+    it 'works in windows right after the render thread finishes a buffer' do
+      frames = 0
+      ticker = Thread.new { 20.times { sleep 0.01; frames += 512 } }
+      clock = -> { frames }
+      f0 = frames
+      t0 = MB::U.clock_now
+      pr.send(:slack, clock, true)
+      expect(frames).not_to eq(f0) # (returned once a buffer was done)
+      expect(MB::U.clock_now - t0).to be < 0.04
+      pr.send(:slack, clock, true) # (a second buffer: the time between them)
+      st = Thread.current[:mb_sound_preview_slack]
+      expect(st[:period]).to be_within(0.008).of(0.01)
+      # rest passes inside the window and waits for the next buffer after it
+      f1 = frames
+      pr.send(:rest, true, frames: clock)
+      expect(frames).to eq(f1) # (inside the window: no wait)
+      sleep 0.006
+      pr.send(:rest, true, frames: clock)
+      expect(frames).not_to eq(f1) # (window used: waited for the next buffer)
+      expect(pr.send(:slack, nil, true)).to be_nil # (no session to follow)
+    ensure
+      ticker&.join
+      Thread.current[:mb_sound_preview_slack] = nil
     end
 
     it 'renders on a low-priority worker thread that ends when idle' do

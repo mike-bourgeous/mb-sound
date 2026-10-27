@@ -15,24 +15,28 @@ module MB
       # render (so knob turns need no rebuild), with its plans installed.
       # Each render puts every node's state back as it was after the build
       # (Plan::Describable#plan_snapshot/#plan_restore: oscillator phases,
-      # filter and envelope states), plays the note, and:
-      #
-      # - samples whole periods of the note until a period's shape stops
-      #   changing (the filters settled), then keeps that period from a
-      #   rising zero crossing; when no period repeats (detuned unison
-      #   copies), a few periods from a zero crossing after the longest
-      #   settle time (.cycle);
-      # - plays the note again from the same state for PatchRender.seconds
-      #   (with the role's hold) for the envelope view and the figures.
+      # filter and envelope states) and plays the note once, held for the
+      # clip note's length or the role's share: whole periods are compared
+      # until one stops changing (the filters settled) and that period is
+      # kept from a rising zero crossing; when no period repeats (detuned
+      # unison copies), a few periods from a zero crossing (.cycle).  The
+      # same render gives the envelope view, the figures, and the spectrum
+      # of the settled part.
       #
       # The copy runs at the lowest of RATES that keeps every lowpass
       # cutoff under 1/RATE_FACTOR of the rate (.rate_for), else (moving
       # cutoffs, no lowpass, a voice that can't change rate) 48 kHz.
       #
-      # It runs in this process on a Worker thread at low priority, in
-      # CHUNK-frame blocks with the GVL passed between them, sleeping to
-      # keep to PatchRender.duty; never on the painter or render thread,
-      # never under the render lock, never sampling the live graph.
+      # It runs in this process on a Worker thread at low priority,
+      # in CHUNK-frame blocks and short analysis steps, each followed by
+      # .rest: with a live Session to follow (Source#frames), the worker
+      # works only in a window right after each buffer the render thread
+      # finishes (a share of the time between buffers), so the two don't
+      # want the GVL at once.  Renders reuse their buffers (Copy#work) and
+      # the last few copies (COPIES), so they make few objects (2-3
+      # thousand an update) for the garbage collector.  Never on the
+      # painter or render thread, never under the render lock, never
+      # sampling the live graph.
       module PatchRender
         # How long the envelope view plays (seconds; PatchRender.seconds=).
         SECONDS = 0.5
@@ -48,8 +52,9 @@ module MB
         SWEEP = 0.2
 
         # Frames per block of a preview render (the GVL is passed between
-        # blocks).
-        CHUNK = 128
+        # blocks; a voice's graph allocates a few objects per block, so
+        # 256 rather than 128).
+        CHUNK = 256
 
         # The share of wall time a Worker render may take (it sleeps after
         # each block for the rest; PatchRender.duty=).
@@ -73,6 +78,11 @@ module MB
         # same RMS: slow envelopes don't count as change).
         SETTLED_DB = -40.0
 
+        # Samples .settle_scan compares between pauses, and the points of
+        # each period it compares.
+        SCAN_FRAMES = 4096
+        SCAN_POINTS = 64
+
         # The longest the cycle view waits for a period to settle (seconds);
         # notes whose periods never repeat (unison) show UNISON_PERIODS
         # periods from here.
@@ -86,6 +96,14 @@ module MB
 
         # Points of a render's spectrum.
         SPECTRUM_POINTS = 256
+
+        # Windows a spectrum averages (the last ones of the settled sound).
+        SPECTRUM_WINDOWS = 3
+
+        # Copies a render cache keeps (the most recent ones: switching back
+        # to a track or note just previewed doesn't build again, and drops
+        # no copy for the garbage collector to find in the old generation).
+        COPIES = 4
 
         # A Worker thread with nothing to do for this long ends, dropping
         # its copy (a new request starts another).
@@ -114,9 +132,11 @@ module MB
         # +bar_length+, +key+, +tuning+, +channels+, +note+, +words+ (the
         # track's name and its graph's code, for the role guess), +live+
         # (the live graph's nodes by identity, so a copy that shares one is
-        # refused).
-        Source = Data.define(:track, :synth, :clip, :bpm, :bar_length, :key, :tuning, :channels, :note, :words, :live) do
-          def initialize(words: nil, live: nil, synth: nil, **rest) = super(words: words, live: live, synth: synth, **rest)
+        # refused), +frames+ (a Proc giving the live session's
+        # Session#frames_rendered, or nil: the heavier steps start right
+        # after the render thread finishes a buffer, .slack).
+        Source = Data.define(:track, :synth, :clip, :bpm, :bar_length, :key, :tuning, :channels, :note, :words, :live, :frames) do
+          def initialize(words: nil, live: nil, synth: nil, frames: nil, **rest) = super(words: words, live: live, synth: synth, frames: frames, **rest)
         end
 
         # What a render plays: +note+ (a MIDI note number), +velocity+
@@ -196,7 +216,12 @@ module MB
             self
           end
 
+          # (No events: the same frozen Array, so blocks without notes make
+          # no objects)
+          NONE = [].freeze
+
           def read_events(from, to)
+            return NONE if @pending.empty? || @pending[0].time >= to
             out = @pending.take_while { |e| e.time < to }
             @pending = @pending.drop(out.length)
             out.each { |e| @sounding.delete(e.note) if e.type == :note_off }
@@ -209,11 +234,15 @@ module MB
         # voice block runs; it never renders), +feed+ (the NoteFeed),
         # +outputs+ (the voice's output nodes), +states+ ([node, snapshot]
         # pairs from after the build), +streams+ ([MIDI::Stream, ivars] of
-        # the note streams after the build), +rate+, +ms+ (build time),
+        # the note streams after the build), +rate+, +want+ (the rate
+        # .rate_for chose; +rate+ differs when the voice couldn't change
+        # rate), +work+ (buffers reused by every render), +ms+ (build time),
         # +error+.
-        Copy = Struct.new(:key, :scope, :feed, :outputs, :states, :streams, :start, :rate, :ms, :error, keyword_init: true) do
+        Copy = Struct.new(:key, :scope, :shared, :feed, :outputs, :states, :streams, :start, :rate, :want, :work, :ms, :error, keyword_init: true) do
+          # Closes its scope unless the scope is +shared+ (kept by a Worker
+          # for the next copy).
           def close
-            scope&.close
+            scope&.close unless shared
             self.scope = nil
           end
         end
@@ -295,12 +324,17 @@ module MB
           def render(job, cache: {}, pace: false)
             t0 = now
             src = job.source
+            Thread.current[:mb_sound_preview_frames] = pace ? src.frames : nil
+            slack(src.frames, pace) # (everything from here on in the windows after buffers)
             return failed(job, t0, src.note || 'no voice to copy') if src.synth.nil?
-            copy = cache[:copy]
-            unless copy && copy.key == job.copy_key
-              copy&.close
-              copy = cache[:copy] = build(job)
-            end
+            want = @rate || rate_for(live_cutoffs(job))
+            copies = (cache[:copies] ||= {})
+            key = [job.copy_key, want]
+            copy = copies.delete(key) # (then put back last: the most recent)
+            copy ||= build(job, want, pace, cache[:scopes])
+            copies[key] = copy
+            copies.shift[1].close while copies.length > COPIES
+            cache[:copy] = copy
             return failed(job, t0, copy.error) if copy.error
 
             out = nil
@@ -320,44 +354,59 @@ module MB
           # periods from a zero crossing after it.
           def cycle(data, rate, freq)
             mix = mix_of(data)
-            settled, = settle_scan(mix, rate, freq, 2)
-            extract(data, mix, rate, freq, settled)
+            settled = settle_scan(mix, rate, freq, mix.length)
+            extract(data, mix, rate, freq, settled, SETTLE_MAX)
           end
 
-          # Scans periods +k+, k + 1, ... of +mix+ (see .cycle) as far as it
-          # reaches (and no further than SETTLE_MAX): [the settled period's
-          # number, or nil; the next period to scan].
-          def settle_scan(mix, rate, freq, k)
+          # The first period of +mix+ (counting from 2, within its first
+          # +frames+ and SETTLE_MAX) that differs from the one before by
+          # less than SETTLED_DB (see .cycle), or nil.  Every period at once:
+          # rows of a matrix, the next period read a fractional period
+          # later (linearly interpolated: periods are rarely whole samples).
+          def settle_scan(mix, rate, freq, frames, pace: false)
             period = rate / freq.to_f
             len = period.floor
-            idx = Numo::DFloat.new(len).seq
-            while ((k + 1) * period).ceil + 1 < mix.length && k * period <= SETTLE_MAX * rate
-              s0 = ((k - 1) * period).round
-              a = mix[s0...(s0 + len)]
-              # (the next period read a fractional period later, linearly
-              # interpolated: periods are rarely whole samples)
-              pos = idx + (s0 + period)
-              i0 = Numo::Int64.cast(pos.floor)
-              f = pos - pos.floor
-              b = mix[i0] * (1 - f) + mix[i0 + 1] * f
-              ra = Math.sqrt((a**2).mean)
-              rb = Math.sqrt((b**2).mean)
-              if ra > 1e-6 && rb > 1e-6
-                diff = Math.sqrt(((a / ra - b / rb)**2).mean)
-                return [k, k + 1] if 20 * Math.log10(diff + 1e-12) < SETTLED_DB
-              end
-              k += 1
+            top = [frames, mix.length].min
+            count = ((top - 2 - len - period) / period).floor
+            count = [count, (SETTLE_MAX * rate / period).floor].min
+            return nil if count < 1 || len < 2
+            # (at most SCAN_POINTS points of each period: enough to see a
+            # shape still changing, and few temporary arrays)
+            points = [len, SCAN_POINTS].min
+            cols = (Numo::DFloat.new(points).seq * (len.to_f / points)).floor.reshape(1, points)
+            step = [(SCAN_FRAMES / points), 1].max
+            (0...count).step(step) do |first|
+              rows = [step, count - first].min
+              # Period k - 1 starts at round((k - 1) * period), k = first + 2..
+              starts = ((Numo::DFloat.new(rows).seq + (first + 1)) * period).round
+              idx = starts.reshape(rows, 1) + cols
+              a = mix[Numo::Int64.cast(idx)]
+              pos = idx + period
+              i0 = pos.floor
+              f = pos - i0
+              i0 = Numo::Int64.cast(i0)
+              b = mix[i0] * (1 - f)
+              (b.inplace + mix[i0 + 1] * f).not_inplace!
+              ra = Numo::NMath.sqrt((a * a).mean(axis: 1))
+              rb = Numo::NMath.sqrt((b * b).mean(axis: 1))
+              ok = ra.gt(1e-6) & rb.gt(1e-6)
+              d = a / ra.reshape(rows, 1)
+              (d.inplace - b / rb.reshape(rows, 1)).not_inplace!
+              diff = Numo::NMath.sqrt((d * d).mean(axis: 1))
+              hit = (ok & diff.lt(10**(SETTLED_DB / 20.0))).where
+              return first + hit[0] + 2 unless hit.empty?
+              rest(pace)
             end
-            [nil, k]
+            nil
           end
 
           # The cycle view's [cycle, periods, settled seconds] (see .cycle)
-          # from period +settled+ (nil: UNISON_PERIODS periods from
-          # SETTLE_MAX or the end).
-          def extract(data, mix, rate, freq, settled)
+          # from period +settled+ (nil: UNISON_PERIODS periods from +at+
+          # seconds, or as late as the data allows).
+          def extract(data, mix, rate, freq, settled, at)
             period = rate / freq.to_f
             periods = settled ? 1 : UNISON_PERIODS
-            from = settled ? (settled * period).round : [(SETTLE_MAX * rate).round, mix.length - ((periods + 1) * period).ceil].min
+            from = settled ? (settled * period).round : [(at * rate).round, mix.length - ((periods + 1) * period).ceil].min
             from = [from, 0].max
             z = rising_zero(mix, from, (from + period).ceil)
             len = (periods * period).round
@@ -365,9 +414,13 @@ module MB
             [data.map { |d| d[z...(z + len)].dup.freeze }.freeze, periods, settled && (settled * period / rate)]
           end
 
-          # The mean of channels +data+ (a DFloat).
-          def mix_of(data)
-            data.length == 1 ? Numo::DFloat.cast(data[0]) : data.sum { |d| Numo::DFloat.cast(d) } / data.length
+          # The mean of channels +data+ (a DFloat; into +out+ when given).
+          def mix_of(data, out = nil)
+            out ||= Numo::DFloat.zeros(data[0].length)
+            out.fill(0)
+            data.each { |d| (out.inplace + d).not_inplace! }
+            (out.inplace / data.length).not_inplace! if data.length > 1
+            out
           end
 
           # The first sample at or after +from+ (before +to+) where +mix+
@@ -392,7 +445,8 @@ module MB
               # (whole spans as rows of a matrix; the remainder joins the last)
               m = n / columns
               data.each_with_index do |d, c|
-                rows = Numo::SFloat.cast(d[0...(m * columns)]).reshape(columns, m)
+                part = d[0...(m * columns)]
+                rows = (part.reshape(columns, m) rescue Numo::SFloat.cast(part).reshape(columns, m)) # (a view of the render's buffer: no copy)
                 l = rows.min(axis: 1)
                 h = rows.max(axis: 1)
                 if n > m * columns
@@ -416,41 +470,39 @@ module MB
 
           private
 
-          # Builds the Copy for +job+: the voice at 48 kHz, its lowpass
-          # cutoffs read for the rate (.rate_for), and when that is lower,
-          # the voice built again and set to it (a voice that can't change
-          # rate stays at 48 kHz).
-          def build(job)
+          # Builds the Copy for +job+ at +rate+ (a voice that can't change
+          # rate stays at 48 kHz), in steps with a pause (.rest) between them,
+          # so the render thread gets the GVL between steps; only the voice
+          # block's own call is one stretch.
+          def build(job, rate, pace, scopes = nil)
             t0 = now
-            copy = build_at(job, RATES.last)
-            return copy if copy.error
-            rate = @rate || rate_for(lowpass_cutoffs(copy.outputs))
-            if rate != RATES.last
-              low = build_at(job, rate)
-              if low.error
-                low.close
-              else
-                copy.close
-                copy = low
-              end
+            copy = build_at(job, rate, pace, scopes)
+            if copy.error && rate != RATES.last && copy.error.start_with?('MB::Sound::GraphNode::SampleRateHelper', 'RuntimeError')
+              copy.close unless scopes
+              copy = build_at(job, RATES.last, pace, scopes)
             end
+            copy.want = rate
             copy.ms = ((now - t0) * 1000).round(1)
             copy
           end
 
           # One copy of the voice at +rate+ (see .build).
-          def build_at(job, rate)
+          def build_at(job, rate, pace, scopes = nil)
             src = job.source
             synth = src.synth
             scope = nil
             Internal.strictly do
               Internal.with_private_rng(synth.seed) do
-                scope = scope_for(job, rate)
+                slack(src.frames, pace)
+                scope = scopes ? scope_kept(job, rate, scopes) : scope_for(job, rate)
+                rest(pace)
                 feed = NoteFeed.new
                 v = Notes.new(feed, sustain: false, sample_rate: rate)
+                slack(src.frames, pace)
                 graph = Session.with_context(session: scope) {
                   Synth.with_lane(0, synth.lanes.length) { MB::Sound.with_seed(synth.seed) { synth.voice_block.call(v, 0) } }
                 }
+                rest(pace)
                 outs = (graph.respond_to?(:outputs) ? graph.outputs.to_a : [graph]).map(&:get_sampler)
                 nodes = graph_nodes(outs)
                 # Readers of the live knobs (a document param bound to a
@@ -465,21 +517,27 @@ module MB
                 nodes = graph_nodes(outs)
                 live = src.live
                 if live && nodes.any? { |n| live.key?(n.__id__) }
-                  return Copy.new(key: job.copy_key, scope: scope, error: 'the voice reads nodes made outside it (shared with the live graph): no preview')
+                  return Copy.new(key: job.copy_key, scope: scope, shared: !scopes.nil?, error: 'the voice reads nodes made outside it (shared with the live graph): no preview')
                 end
+                rest(pace)
+                slack(src.frames, pace)
                 if rate != RATES.last && nodes.any? { |n| n.respond_to?(:sample_rate) && n.sample_rate.to_f != rate }
                   begin
                     outs.each { |o| o.sample_rate = rate }
                   rescue GraphNode::SampleRateHelper::SampleRateSupportError, RuntimeError => e
-                    return Copy.new(key: job.copy_key, scope: scope, error: "#{e.class}: #{e.message}")
+                    return Copy.new(key: job.copy_key, scope: scope, shared: !scopes.nil?, error: "#{e.class}: #{e.message}")
                   end
                 end
+                rest(pace)
+                slack(src.frames, pace)
                 Plan.install(outs)
+                rest(pace)
                 # One block before any note, so every node has made its state
                 # (oscillators make theirs on their first block) before the
                 # snapshot every render goes back to
                 prime = Copy.new(outputs: outs)
-                run(prime, (CHUNK * rate / 48000.0).round, false) # (the same time at every rate: oscillators' phases at the note)
+                # (the same time at every rate: oscillators' phases at the note)
+                prime.outputs.each { |o| o.sample((CHUNK * rate / 48000.0).round) }
                 start = feed.position
                 # (knobs and their readers keep counting forward: the values
                 # set before each render land on the next frame they read)
@@ -489,17 +547,30 @@ module MB
                 # reading them (their readers' cursors are in the nodes'
                 # snapshots)
                 streams = streams_of(v).map { |st| [st, stream_state(st)] }
-                return Copy.new(key: job.copy_key, scope: scope, feed: feed, outputs: outs, states: states, streams: streams, start: start, rate: rate, error: nil)
+                rest(pace)
+                return Copy.new(key: job.copy_key, scope: scope, shared: !scopes.nil?, feed: feed, outputs: outs, states: states, streams: streams,
+                                start: start, rate: rate, work: {}, error: nil)
               end
             end
           rescue Exception => e # rubocop:disable Lint/RescueException
             raise if e.is_a?(Interrupt) || e.is_a?(SystemExit)
-            Copy.new(key: job.copy_key, scope: scope, error: "#{e.class}: #{e.message}".lines.first.chomp)
+            Copy.new(key: job.copy_key, scope: scope, shared: !scopes.nil?, error: "#{e.class}: #{e.message}".lines.first.chomp)
           end
 
           # The nodes of the graph of +outputs+ (numbers left out).
           def graph_nodes(outputs)
             outputs.flat_map { |o| [o, *o.graph(include_tees: true)] }.uniq(&:__id__).reject { |n| n.is_a?(Numeric) }
+          end
+
+          # A scope (.scope_for) kept in +scopes+ (a Hash the caller keeps)
+          # while the session's settings and the knob specs stay the same: a
+          # Session takes 5-30 ms to make, and the copy's knobs are set
+          # before every render anyway.
+          def scope_kept(job, rate, scopes)
+            src = job.source
+            key = [src.bpm, src.bar_length, src.key, src.tuning.object_id, src.channels, rate, job.knobs.map { |n, _, sp| [n, sp] }].freeze
+            scopes.delete_if { |k, sc| k != key && (sc.close || true) } if scopes.length > 2
+            scopes[key] ||= scope_for(job, rate)
           end
 
           # The Session knob(:x) reads while the voice block builds the copy:
@@ -522,17 +593,30 @@ module MB
             scope
           end
 
-          # The cutoffs (Hz, nil for one that moves) of the lowpass filters in
-          # the graph of +outputs+.
-          def lowpass_cutoffs(outputs)
-            nodes = outputs.flat_map { |o| [o, *o.graph] }.uniq(&:__id__)
+          # The lowpass cutoffs (.lowpass_cutoffs) of the live voice the job
+          # copies (the Synth's first lane, read without sampling it), knobs
+          # at the job's values.
+          def live_cutoffs(job)
+            graph = job.source.synth.instance_variable_get(:@lane_graphs)&.first
+            return [nil] unless graph
+            values = job.knobs.to_h { |name, value, _| [name, value] }
+            lowpass_cutoffs(graph, values)
+          rescue StandardError
+            [nil]
+          end
+
+          # The cutoffs (Hz, nil for one that moves) of the lowpass filters
+          # among +nodes+; knob readers read +values+ (name => value) when
+          # given, else the knob.
+          def lowpass_cutoffs(nodes, values = {})
             nodes.filter_map { |n|
               lowpass = n.is_a?(GraphNode::FourPole) || (defined?(GraphNode::DiodeLadder) && n.is_a?(GraphNode::DiodeLadder)) ||
                         (n.respond_to?(:preview_data) && (n.preview_data rescue nil).is_a?(Hash) && n.preview_data[:filter_type] == :lowpass)
               next unless lowpass
-              v = n.respond_to?(:param_info) ? n.param_info[:cutoff]&.value : nil
-              v = n.instance_variable_get(:@cutoff) if v.nil? && n.instance_variable_defined?(:@cutoff)
-              [held_value(v)]
+              v = n.instance_variable_defined?(:@cutoff) ? n.instance_variable_get(:@cutoff) : nil
+              v = n.param_info[:cutoff]&.value if v.nil? && n.respond_to?(:param_info)
+              v = GraphNode.climb_tee_tree(v) if v.is_a?(GraphNode)
+              [v.is_a?(GraphNode::Knob::Reader) && values.key?(v.knob.name) ? values[v.knob.name].to_f : held_value(v)]
             }.flatten(1)
           end
 
@@ -549,49 +633,45 @@ module MB
             nil
           end
 
-          # Renders the cycle view and the envelope view from the copy's
-          # state after its build: [cycle data, envelope data, settled
-          # samples for the spectrum].
+          # Plays the note once from the copy's state after its build, held
+          # for the clip note's length (or the role's share of the envelope
+          # view), for the envelope view's length or as long as the cycle
+          # view needs (SETTLE_MAX of the held note, and a few periods):
+          # [cycle, envelope data, the held sound after the cycle (for the
+          # spectrum), freq].  Every buffer is the copy's own (Copy#work).
           def play(copy, job, pace)
             rate = copy.rate
             freq = (job.source.tuning || Tuning.default).frequency_of(job.input.note).to_f
+            hold = job.input.hold || job.seconds * role_of(job.source.words)[:hold]
+            held = (hold * rate).floor
+            show = (job.seconds * rate).round
+            need = ([SETTLE_MAX, hold.to_f].min * rate + (UNISON_PERIODS + 2) * rate / freq).ceil
+            frames = [show, need].max
 
             restore(copy)
             set_knobs(copy, job)
-            copy.feed.play(job.input.note, job.input.velocity)
-            # (in pieces of a few periods, stopping a period after the one
-            # that settled)
-            limit = ((SETTLE_MAX + (UNISON_PERIODS + 2) / freq) * rate).ceil
-            piece = [(4 * rate / freq).ceil, CHUNK].max
-            bufs = copy.outputs.map { Numo::SFloat.zeros(limit) }
-            mix = Numo::DFloat.zeros(limit)
-            got = 0
-            k = 2
-            settled = nil
-            while got < limit
-              n = [piece, limit - got].min
-              run(copy, n, pace, into: bufs, at: got)
-              bufs.each { |b| mix[got...(got + n)] += b[got...(got + n)] }
-              got += n
-              settled, k = settle_scan(mix[0...got], rate, freq, k) unless settled
-              rest(pace)
-              break if settled && got >= ((settled + 3) * rate / freq).ceil
+            copy.feed.play(job.input.note, job.input.velocity, hold)
+            work = copy.work
+            padded = (frames + CHUNK - 1) / CHUNK * CHUNK
+            unless work[:bufs] && work[:bufs][0].length >= padded
+              work[:bufs] = copy.outputs.map { Numo::SFloat.zeros(padded) }
+              work[:mix] = Numo::DFloat.zeros(padded)
             end
+            bufs = work[:bufs]
+            mix = work[:mix]
+            run(copy, frames, pace, into: bufs, at: 0)
             copy.feed.release(job.input.note)
-            settle = bufs.map { |b| b[0...got] }
-            mix = mix[0...got] / bufs.length
-            cyc = extract(settle, mix, rate, freq, settled)
+            data = bufs.map { |b| b[0...frames] }
+            m = mix_of(data, mix[0...frames])
             rest(pace)
-
-            restore(copy)
-            set_knobs(copy, job)
-            hold = job.input.hold || job.seconds * (role_of(job.source.words)[:hold])
-            copy.feed.play(job.input.note, job.input.velocity, [hold, job.seconds].min)
-            frames = (job.seconds * rate).round
-            env = copy.outputs.map { Numo::SFloat.zeros(frames) }
-            run(copy, frames, pace, into: env, at: 0)
-            copy.feed.release(job.input.note)
-            [cyc, env, settle, freq]
+            settled = settle_scan(m, rate, freq, held, pace: pace)
+            rest(pace)
+            at = [SETTLE_MAX, hold.to_f - (UNISON_PERIODS + 1) / freq].min
+            cyc = extract(data, m, rate, freq, settled, [at, 0].max)
+            from = settled ? (settled * rate / freq).round : [(at * rate).round, 0].max
+            to = [[held, frames].min, from + 1].max
+            tail = data.map { |d| d[from...to] }
+            [cyc, data.map { |d| d[0...[show, frames].min] }, tail, freq]
           end
 
           # Puts every node's state, the note streams, and the feed back as
@@ -635,32 +715,88 @@ module MB
           end
 
           # Samples +frames+ frames of the copy's outputs in CHUNK blocks:
-          # into +into+ (an SFloat per output, from +at+), else new SFloats.
-          # Pauses after each block (.rest).
+          # into +into+ (an SFloat per output, from +at+, at least +frames+
+          # rounded up to whole blocks long), else new SFloats.  Each block
+          # is copied without views (FastArithmetic.copy_range), so a block
+          # makes no objects of its own.  Pauses after each block (.rest).
           def run(copy, frames, pace, into: nil, at: 0)
             outs = copy.outputs
-            into ||= outs.map { Numo::SFloat.zeros(frames) }
-            off = at
-            left = frames
-            while left > 0
-              n = [CHUNK, left].min
+            blocks = (frames + CHUNK - 1) / CHUNK
+            into ||= outs.map { Numo::SFloat.zeros(blocks * CHUNK) }
+            blocks.times do |k|
               t = MB::U.clock_now
+              off = at + k * CHUNK
               outs.each_with_index do |o, i|
-                d = o.sample(n)
-                into[i][off...(off + n)] = d unless d.nil?
+                d = o.sample(CHUNK)
+                next if d.nil?
+                FastArithmetic.copy_range(into[i], off, d, 0, CHUNK) || (into[i][off...(off + CHUNK)] = d)
               end
-              off += n
-              left -= n
               rest(pace, MB::U.clock_now - t)
             end
             into
           end
 
-          # Gives the GVL to the other threads after +busy+ seconds of work:
-          # with +pace+ (Worker renders) a sleep keeping to PatchRender.duty
-          # (at least a pass), else Thread.pass.
-          def rest(pace, busy = 0.0005)
-            if pace && @duty < 1
+          # Waits (up to +timeout+ seconds, in short sleeps) for the live
+          # render thread to finish a buffer (+frames+, Source#frames,
+          # changes), so the work that follows runs while the render thread
+          # waits on its output, and starts the thread's work window (see
+          # .rest).  Without +frames+ (or +pace+), returns at once.
+          def slack(frames, pace, timeout = 0.05)
+            return unless frames && pace
+            st = (Thread.current[:mb_sound_preview_slack] ||= { period: nil, step: nil, frame: nil, at: nil, window: nil })
+            f0 = frames.call
+            t0 = MB::U.clock_now
+            deadline = t0 + timeout
+            # (when this buffer's end was seen, most of the way to the next
+            # one in one sleep, then short looks: each look takes the GVL for
+            # a moment)
+            if st[:period] && st[:frame] == f0
+              ahead = st[:at] + st[:period] * 0.75 - t0
+              sleep([ahead, timeout].min) if ahead > 0.0005
+            end
+            sleep(0.0005) while frames.call == f0 && MB::U.clock_now < deadline
+            now = MB::U.clock_now
+            f1 = frames.call
+            if f1 != f0
+              d = f1 - f0
+              # (the time between buffers, from two buffer ends seen one
+              # after the other; the window is a share of it)
+              if st[:frame] == f0 && st[:at] && (st[:step].nil? || d <= st[:step])
+                st[:step] = d
+                dt = now - st[:at]
+                st[:period] = st[:period] ? st[:period] * 0.8 + dt * 0.2 : dt if dt < 0.2
+              end
+            end
+            st[:frame] = f1
+            st[:at] = now
+            st[:window] = now
+          end
+
+          # The share of the time between the render thread's buffers a
+          # Worker works in, right after one (the rest of it the render
+          # thread has the GVL to itself), and the bounds of that window.
+          WINDOW_SHARE = 0.35
+          WINDOW_MIN = 0.0004
+          WINDOW_MAX = 0.004
+
+          # Gives the GVL to the other threads after +busy+ seconds of work.
+          # Worker renders (+pace+) following a live Session (+frames+, the
+          # render's Source#frames): work in windows right after each buffer
+          # the render thread finishes (WINDOW_SHARE of the time between
+          # buffers), waiting for the next buffer once a window is used up.
+          # Without +frames+, a sleep keeping to PatchRender.duty; else
+          # Thread.pass.
+          def rest(pace, busy = 0.0005, frames: Thread.current[:mb_sound_preview_frames])
+            if pace && frames
+              st = Thread.current[:mb_sound_preview_slack]
+              return slack(frames, pace) unless st && st[:window]
+              window = ((st[:period] || 0.01) * WINDOW_SHARE).clamp(WINDOW_MIN, WINDOW_MAX)
+              if MB::U.clock_now - st[:window] > window
+                slack(frames, pace)
+              else
+                Thread.pass
+              end
+            elsif pace && @duty < 1
               sleep([busy * (1 - @duty) / @duty, 0.0001].max)
             else
               Thread.pass
@@ -668,69 +804,118 @@ module MB
           end
 
           def result_of(job, copy, out, t0, pace: false)
-            cyc, env, settle, freq = out
+            cyc, env, tail, freq = out
             cycle_data, periods, settled = cyc
             rate = copy.rate
             lo, hi = envelope(env)
-            rest(pace)
             peak = env.map { |d| d.abs.max.to_f }.max.to_f
-            sum = env.sum { |d| (Numo::DFloat.cast(d)**2).sum }
+            sum = env.sum { |d| (d * d).sum.to_f }
             count = env.sum(&:length)
             rms = count > 0 ? Math.sqrt(sum / count) : 0.0
-            lufs = loudness(env, rate, pace)
             rest(pace)
-            tail = settle.map { |d| d[(d.length / 2)..].dup }
+            lufs = loudness(env, rate, pace, copy.work)
+            rest(pace)
             Result.new(seq: job.seq, key: job.key, track: job.source.track, cycle: cycle_data, periods: periods, settled: settled, frequency: freq,
                        lo: lo, hi: hi, frames: env[0].length, rate: rate, peak: db(peak), rms: db(rms), lufs: lufs,
-                       spectrum: spectrum(tail, rate, pace: pace), ms: ((now - t0) * 1000).round(1), input: job.input.text, error: nil)
+                       spectrum: spectrum(tail, rate, pace: pace, work: copy.work), ms: ((now - t0) * 1000).round(1), input: job.input.text, error: nil)
           end
 
-          # The integrated loudness of +data+ (LUFS; -Infinity under 400 ms),
-          # measured a tenth of a second at a time (.rest between).
-          def loudness(data, rate, pace)
-            n = data[0].length
-            return -Float::INFINITY if n < rate * 0.4
-            an = Loudness::Analyzer.new(channels: data.length, sample_rate: rate, true_peak: false)
-            step = (rate / 10).round
-            (0...n).step(step) do |a|
-              an.process(data.map { |d| d[a...[a + step, n].min] })
+          # The integrated loudness of +data+ (LUFS; -Infinity under 400 ms):
+          # BS.1770 K-weighting (the filters kept per rate and channel count
+          # in +work+), 400 ms blocks every 100 ms, the absolute and relative
+          # gates (Loudness.gate), with the block energies from one running
+          # sum (Loudness::Analyzer makes a few hundred objects per call).
+          def loudness(data, rate, pace, work = {})
+            n = data.map(&:length).min.to_i
+            size = (0.4 * rate).round
+            return -Float::INFINITY if n < size
+            filters = (work[[:k_weighting, rate, data.length]] ||= Array.new(data.length) { Loudness.k_weighting(rate) })
+            weights = Loudness.default_weights(data.length)
+            x = work[:lufs_x]
+            z = work[:lufs_z]
+            if x.nil? || x.length != n
+              x = work[:lufs_x] = Numo::DFloat.zeros(n)
+              z = work[:lufs_z] = Numo::DFloat.zeros(n)
+            end
+            z.fill(0)
+            any = false
+            data.each_with_index do |d, c|
+              next if weights[c] == 0
+              shelf, highpass = filters[c]
+              shelf.reset
+              highpass.reset
+              x[true] = d[0...n]
+              # (the biquads work in place on an in-place array: no buffers
+              # made per render)
+              shelf.process(x.inplace)
+              highpass.process(x.inplace)
+              x.not_inplace!
+              (x.inplace * x).not_inplace!
+              (x.inplace * weights[c]).not_inplace! if weights[c] != 1
+              (z.inplace + x).not_inplace!
+              any = true
               rest(pace)
             end
-            an.result.integrated.to_f
+            return -Float::INFINITY unless any
+            hop = (0.1 * rate).round
+            energies = Numo::DFloat.cast(((n - size) / hop + 1).times.map { |k| z[(k * hop)...(k * hop + size)].sum / size })
+            Loudness.gate(energies)[0]
           end
 
           # [frequencies, dB] of +data+'s average spectrum (the channels
-          # mixed; Hann windows, half overlapped, of up to 4096 samples; a
+          # mixed; Hann windows, half overlapped, of up to 2048 samples; a
           # full-scale sine reads 0 dB), at SPECTRUM_POINTS log-spaced
           # frequencies from 20 Hz to Nyquist (the loudest bin near each).
-          def spectrum(data, rate, n = 4096, pace: false)
-            mono = data.length == 1 ? Numo::DFloat.cast(data[0]) : data.sum { |d| Numo::DFloat.cast(d) } / data.length
-            n = 2**Math.log2(mono.length).floor while mono.length < n && n > 256
-            return nil if mono.length < n
-            w = 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(n).seq * (2 * Math::PI / n))
-            acc = Numo::DFloat.zeros(n / 2 + 1)
+          # The window, the band index matrix, and the work arrays are kept
+          # per length and rate (+work+, a Hash).
+          def spectrum(data, rate, n = 2048, pace: false, work: {})
+            len = data.map(&:length).min.to_i
+            n /= 2 while len < n && n > 256
+            return nil if len < n
+            tables = (work[[:spectrum, n, rate]] ||= spectrum_tables(n, rate))
+            w, bands, f, mono, acc, seg = tables
+            mono = tables[3] = Numo::DFloat.zeros(len) if mono.length < len
+            mono = mix_of(data.map { |d| d[0...len] }, mono[0...len])
+            acc.fill(0)
             count = 0
-            (0..mono.length - n).step(n / 2) do |a|
-              acc += Numo::Pocketfft.rfft(mono[a...(a + n)] * w).abs**2
+            # (the last SPECTRUM_WINDOWS windows: the sound has settled)
+            starts = (0..len - n).step(n / 2).to_a.last(SPECTRUM_WINDOWS)
+            starts.each do |a|
+              seg[true] = mono[a...(a + n)]
+              (seg.inplace * w).not_inplace!
+              mag = Numo::Pocketfft.rfft(seg).abs
+              (mag.inplace * mag).not_inplace!
+              (acc.inplace + mag).not_inplace!
               count += 1
               rest(pace)
             end
-            mag = Numo::NMath.sqrt(acc / count) * (2.0 / w.sum)
+            mag = Numo::NMath.sqrt(acc / count)
+            (mag.inplace * (2.0 / w.sum)).not_inplace!
             db = 20 * Numo::NMath.log10(mag.clip(1e-5, nil))
-            df = rate.to_f / n
-            edges = Numo::DFloat.logspace(Math.log10(20.0), Math.log10(rate / 2.0), SPECTRUM_POINTS + 1)
-            f = Numo::DFloat.zeros(SPECTRUM_POINTS)
-            out = Numo::DFloat.zeros(SPECTRUM_POINTS)
-            SPECTRUM_POINTS.times do |i|
-              a = (edges[i] / df).round.clamp(1, n / 2)
-              b = [(edges[i + 1] / df).round, a + 1].max.clamp(a + 1, n / 2 + 1)
-              f[i] = Math.sqrt(edges[i] * edges[i + 1])
-              out[i] = db[a...b].max
-              rest(pace) if i % 64 == 63
-            end
-            [f.freeze, out.freeze].freeze
+            db = db.concatenate(Numo::DFloat[-Float::INFINITY]) # (the pad the band matrix points at)
+            [f, db[bands].max(axis: 1).freeze].freeze
           rescue StandardError
             nil
+          end
+
+          # [window, band index matrix (SPECTRUM_POINTS rows of bin indices,
+          # padded with the index past the last bin), band centers (frozen),
+          # a mix buffer, a power accumulator, a window buffer] for .spectrum.
+          def spectrum_tables(n, rate)
+            w = 0.5 - 0.5 * Numo::NMath.cos(Numo::DFloat.new(n).seq * (2 * Math::PI / n))
+            df = rate.to_f / n
+            edges = Numo::DFloat.logspace(Math.log10(20.0), Math.log10(rate / 2.0), SPECTRUM_POINTS + 1)
+            ranges = SPECTRUM_POINTS.times.map { |i|
+              a = (edges[i] / df).round.clamp(1, n / 2)
+              b = [(edges[i + 1] / df).round, a + 1].max.clamp(a + 1, n / 2 + 1)
+              (a...b)
+            }
+            width = ranges.map(&:size).max
+            pad = n / 2 + 1
+            bands = Numo::Int64.new(SPECTRUM_POINTS, width).fill(pad)
+            ranges.each_with_index { |r, i| bands[i, 0...r.size] = Numo::Int64.cast(r.to_a) }
+            f = Numo::DFloat.cast(SPECTRUM_POINTS.times.map { |i| Math.sqrt(edges[i] * edges[i + 1]) }).freeze
+            [w, bands, f, Numo::DFloat.zeros(0), Numo::DFloat.zeros(n / 2 + 1), Numo::DFloat.zeros(n)]
           end
 
           def note_number(v)
@@ -840,7 +1025,7 @@ module MB
             @thread = nil
             @closed = false
             @running = false
-            @cache = {} # (PatchRender.render: the Copy)
+            @cache = { scopes: {} } # (PatchRender.render: the Copy, and the scopes kept for the next one)
             @on_done = on_done
           end
 
@@ -880,8 +1065,11 @@ module MB
 
           # (worker thread, holding the mutex) Closes the kept copy.
           def drop_copy
-            @cache.delete(:copy)&.close
+            @cache.delete(:copy)
+            @cache.delete(:copies)&.each_value(&:close)
+            @cache.delete(:scopes)&.each_value(&:close)
             @cache.clear
+            @cache[:scopes] = {}
           end
 
           def start
