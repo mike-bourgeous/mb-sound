@@ -382,16 +382,22 @@ module MB
           # seconds unless +unit+ is :samples).  +unit+ is :seconds
           # (default, with ms/µs as fits), :samples, or :bars (data in
           # bars from 0; labeled from bar 1, +beats+ per bar).
-          def initialize(domain = nil, label: 'time', sample_rate: nil, unit: :seconds, beats: 4, **kwargs)
+          #
+          # +divisions+ (seconds only): ticks every nice step for about that
+          # many divisions whatever the plot's size, and the axis title says
+          # the span and the step ("1.24s 0.2s/div"; the envelope preview).
+          def initialize(domain = nil, label: 'time', sample_rate: nil, unit: :seconds, beats: 4, divisions: nil, **kwargs)
             @sample_rate = sample_rate&.to_f
             @time_unit = unit
             @beats = beats
+            @divisions = divisions
             super(domain, label: label, **kwargs)
           end
 
           def title
             return "#{@label} (samples)" if @time_unit == :samples
             return 'bar' if @time_unit == :bars
+            return division_title if @divisions && @lo
 
             "#{@label} (#{display_unit[0]})"
           end
@@ -404,6 +410,7 @@ module MB
               return bar_ticks(count)
             end
 
+            count = @divisions if @divisions
             _, factor = display_unit
             lo = seconds(@lo) * factor
             hi = seconds(@hi) * factor
@@ -411,6 +418,16 @@ module MB
             values = Format.steps(lo, hi, step)
             labels = Format.labels(values, step)
             values.zip(labels).map { |v, l| Tick.new(value: data_value(v / factor), label: l) }
+          end
+
+          # The span and the step between ticks of a +divisions+ scale,
+          # e.g. "1.24s 0.2s/div" or "820ms 100ms/div".
+          def division_title
+            unit, factor = display_unit
+            span = seconds(@hi - @lo)
+            step = Format.nice_step(span * factor, @divisions) / factor
+            f = ->(s) { "#{MB::M.sigfigs(s * factor, 3).to_s.sub(/\.0\z/, '')}#{unit}" }
+            "#{f.(span)} #{f.(step)}/div"
           end
 
           private

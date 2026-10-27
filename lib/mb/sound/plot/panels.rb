@@ -1,3 +1,5 @@
+require_relative 'envelope_view'
+
 module MB
   module Sound
     module Plot
@@ -30,11 +32,16 @@ module MB
           # GraphNode::Traversable::Params) onto +chart+ (a ChartBuilder).
           # Returns the chart, or nil if the class has no preview or its
           # snapshot can't be drawn.  A pure function of +params+.
-          def preview(klass, params, chart)
+          #
+          # +live+ is what a painter knows of the node beyond its settings
+          # (nil, or a frozen Hash: an envelope's playhead and note peak,
+          # see EnvelopeView.draw), passed to blocks taking a third
+          # argument |params, chart, live|.
+          def preview(klass, params, chart, live: nil)
             klass.ancestors.each do |a|
               blk = a.name && @previews[a.name]
               next unless blk
-              return blk.call(params, chart) ? chart : nil
+              return (blk.arity == 3 || blk.arity < -3 ? blk.call(params, chart, live) : blk.call(params, chart)) ? chart : nil
             end
             nil
           end
@@ -62,6 +69,14 @@ module MB
           chart.x :frequency, f[0]..f[-1]
           chart.y Scale::DB.new([top - 66, -60].max..top)
           chart.line db, x: f, label: d[:label]
+        end
+
+        # Envelopes: one note through a copy rendered at a low rate, the
+        # sustain held for a fixed share of the plot (EnvelopeView).
+        register('MB::Sound::Envelope') do |params, chart, live|
+          d = params.preview
+          next nil unless d.is_a?(Hash) && d[:kind] == :envelope
+          EnvelopeView.draw(d, chart, live)
         end
 
         # Shapers: the transfer curve over inputs -2..2, with the input as a

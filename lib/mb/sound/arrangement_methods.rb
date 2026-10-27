@@ -138,6 +138,30 @@ module MB
         Session.current.arrangement.tweak(name, op, at: point, fade: fade, **opts)
       end
 
+      # Makes a number in track +name+'s patch turnable (live literals): a
+      # new knob, :"bass/reso" for `lp4: :resonance` (`as:` names it,
+      # `range:` ranges it; else the Param names table's range for the
+      # param, holding the literal's value), and the patch built again with
+      # `knob(:"bass/reso")` in that argument's place, swapped in at the
+      # track's launch point (`on:`, `in:`, `at:`) keeping its routing.
+      # The new graph sounds the same at the knob's starting value; its
+      # voices and tails start fresh.  +what+ is { method => param } (the
+      # DSL method that took the literal: lp4, amp_env, filter, ...; `nth:`
+      # which of the patch's calls of it, in the order the patch makes them) or a graph
+      # document param's name (a preset's param no knob drives).  One undo
+      # step: undo brings the literal (the old patch and graph) back.
+      # Returns the swap's journal entry.  The inspector (ui :sound) runs
+      # it for a picked param on Enter.
+      #
+      #     bind :bass, lp4: :resonance           # knob :"bass/reso"
+      #     bind :bass, amp_env: :attack, as: :att
+      #     bind :bass, :cutoff                   # preset :dnb_reese's param
+      def bind(name, what = nil, nth: 0, as: nil, range: nil, at: nil, on: nil, in: nil, fade: nil, **method_param)
+        point = LaunchPoint.of(binding) or return nil
+        what ||= method_param
+        Session.current.arrangement.bind_literal(name, what, nth: nth, as: as, range: range, point: point, fade: fade)
+      end
+
       # With an argument, sets the set-wide launch quantization (an
       # alignment like +on:+: a number of bars, :beat, :bar, :clip, :now, or
       # a Duration).  Returns it.

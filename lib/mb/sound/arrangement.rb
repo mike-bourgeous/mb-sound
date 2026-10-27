@@ -291,6 +291,7 @@ module MB
         @session.route(name, to: to || :keep, send: send) if to || send
 
         tr = nil
+        patch = Arrangement.counted(patch) if patch
         @mutex.synchronize {
           old = @tracks[name]
           tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger)
@@ -298,6 +299,26 @@ module MB
         set_ahead(tr, graph) if graph || !lead.is_a?(Length::Attack)
         refresh_monitor(tr)
         name
+      end
+
+      # +patch+ (a track's patch block) counting its top-level recorded
+      # calls while it builds (GraphNode::Recipe.counting), so a literal in
+      # the graph it built can be named by where its call was made and
+      # bound to a knob (LiteralBinding).  A block like the patch: arity,
+      # parameters, lambda?, and source location are the patch's.
+      def self.counted(patch)
+        return patch if patch.respond_to?(:unbound_patch) || patch.respond_to?(:counted_patch)
+        wrapped = proc { |*a, **kw, &b| GraphNode::Recipe.counting { kw.empty? ? patch.call(*a, &b) : patch.call(*a, **kw, &b) } }
+        wrapped.define_singleton_method(:arity) { patch.arity }
+        wrapped.define_singleton_method(:parameters) { |**k| patch.parameters(**k) }
+        wrapped.define_singleton_method(:lambda?) { patch.lambda? }
+        wrapped.define_singleton_method(:source_location) { patch.source_location }
+        wrapped.define_singleton_method(:counted_patch) { patch }
+        # (writers that wrap the user's block themselves, e.g. a set
+        # document's, run it in #patch_context)
+        wrapped.define_singleton_method(:patch_block) { patch }
+        wrapped.define_singleton_method(:patch_context) { |&blk| GraphNode::Recipe.counting(&blk) }
+        wrapped
       end
 
       # How far ahead of the timeline track +name+ plays, in whole notes
@@ -498,13 +519,15 @@ module MB
 
       # The Set state for undo (see Session#note_undo_extra).
       def undo_state
-        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), scene: @current_scene, arms: (@arms || {}).dup } }
+        @mutex.synchronize { { clips: @tracks.transform_values(&:clip), patches: @tracks.transform_values(&:patch), scene: @current_scene, arms: (@arms || {}).dup } }
       end
 
       # Puts the Set state back (called by Session undo and redo).
       def restore_undo_state(state)
         @mutex.synchronize {
           state[:clips].each { |n, c| @tracks[n].clip = c if @tracks[n] }
+          # (a bound literal's undo: the patch before it; see LiteralBinding)
+          state[:patches]&.each { |n, pt| @tracks[n].patch = pt if @tracks[n] && pt }
           @current_scene = state[:scene]
           @arms = state[:arms].dup if state[:arms]
         }

@@ -17,11 +17,16 @@ module MB
         # knob).  Follows the clip matrix's track (else the first playing
         # one) until t (or n, a node) picks one.
         #
-        # Mode keys (NAV Enter, or NAV d): Up/Down pick a knob,
-        # Left/Right turn it (Shift or H/L fine; a held key is a live sweep
-        # and one `turn` line when it stops), Enter types a value (`turn
-        # :cut, 3000.hz`), 0 its default, m learns a MIDI controller for it
-        # (`learn :cut`), t/T the next/previous track, n/N (] [) the
+        # Mode keys (NAV Enter, or NAV d): Up/Down pick a knob, then on
+        # down the selected node's params, Left/Right turn it (Shift or H/L
+        # fine; a held key is a live sweep and one `turn` line when it
+        # stops; a param a knob drives turns that knob), Enter types a value
+        # (`turn :cut, 3000.hz`) or, on a param no knob drives (a literal
+        # like `resonance: 0.25`, an envelope time, a document param),
+        # offers its `bind` line (Arrangement::LiteralBinding: a new knob,
+        # the patch rebuilt with it on the track's launch point; the status
+        # line says so first), 0 its default, m learns a MIDI controller for
+        # it (`learn :cut`), t/T the next/previous track, n/N (] [) the
         # next/previous node.
         class Inspector < Pane
           include KnobTurns
@@ -29,15 +34,15 @@ module MB
 
           mode_keys do
             group 'Inspector'
-            on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down'
-            on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down'
+            on [:up, 'k'], :pick, -1, help: 'previous knob or param', label: 'Up Down'
+            on [:down, 'j'], :pick, 1, help: 'next knob or param', label: 'Up Down'
             on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Left Right'
             on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left Right'
             on [:right, :shift], :turn, KnobTurns::FINE, help: 'turn up, fine'
             on [:left, :shift], :turn, -KnobTurns::FINE, help: 'turn down, fine'
             on ['L'], :turn, KnobTurns::FINE, help: 'turn up, fine'
             on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
-            on :enter, :ask, help: 'type a value for the knob (turn :cut, 3000.hz)', label: 'Enter'
+            on :enter, :ask, help: 'type a value, or bind a literal param (turn :cut, 3000.hz)', label: 'Enter'
             on '0', :reset, help: "the knob's default"
             on 'm', :learn, help: 'learn a MIDI controller for the knob (learn :cut: turn one)'
             on ['t'], :track, 1, help: 'the next track', label: 't T'
@@ -59,6 +64,13 @@ module MB
           # What Enter does now, for the status line (the design's rule:
           # name Enter's action before it is pressed).
           def enter_hint(state)
+            if (pp = picked_param(state)) && !pp[1].label.is_a?(Symbol)
+              b = pp[2]
+              return nil unless b
+              return "#{pp[0]}: #{b.reason}" unless b.line
+              track = state[:snap]&.inspector&.track
+              return "make #{pp[0]} knob #{b.knob.inspect}: rebuilds #{track} at its launch point (voices and tails start fresh)"
+            end
             cell = picked(state)
             cell ? "type #{cell[0]}'s value" : nil
           end
@@ -72,7 +84,8 @@ module MB
             end
             knobs = s.knobs.to_h { |k| [k.name, k] }
             list = info.knobs
-            pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
+            rows = list.length + (info.selected&.params&.values&.length || 0)
+            pick = rows == 0 ? nil : (state[:pick] = state[:pick].to_i.clamp(0, rows - 1))
 
             idx = info.tracks.index(info.track)
             x = c.line(0, [info.track.to_s, :name], ["  #{idx ? idx + 1 : '?'}/#{info.tracks.length}", :dim])
@@ -113,12 +126,13 @@ module MB
               y += 1
             end
 
-            draw_node(c, info, y + (y < c.h - 2 ? 1 : 0)) if y < c.h - 1
+            draw_node(c, info, y + (y < c.h - 2 ? 1 : 0), state[:mode] && pick && pick >= list.length ? pick - list.length : nil) if y < c.h - 1
           end
 
           # The selected node (title row: label, copies, which of how many)
-          # and its params below.
-          def draw_node(c, info, y)
+          # and its params below (param +psel+ picked: reversed, and a
+          # literal's Enter action after it).
+          def draw_node(c, info, y, psel = nil)
             n = info.selected
             unless n
               c.text(0, y, 'no nodes with params', :dim)
@@ -142,15 +156,23 @@ module MB
             x = c.line(y, [n.label, :key], ["  #{n.kind}#{n.count > 1 ? " ×#{n.count}" : ''}", :dim], ["  #{info.node + 1}/#{info.nodes.length}", :dim])
             c.text(x, y, c.fit('  n N: other nodes', [c.w - x, 0].max), :dim)
             y += 1
-            n.params.values.each do |name, v|
+            # (a picked param below the pane's last row scrolls the list)
+            vals = n.params.values.to_a
+            first = psel && psel >= c.h - y ? psel - (c.h - y) + 1 : 0
+            vals.each_with_index do |(name, v), i|
+              next if i < first
               break if y >= c.h
-              x = c.text(1, y, c.pad(name.to_s, 10), :name)
+              sel = i == psel
+              x = c.run(1, y, c.pad(name.to_s, 10), sel ? :key : :name, reverse: sel)
               text, role =
                 if v.label.is_a?(Symbol) then ["#{c.glyph(:arrow)} knob #{v.label} #{Panes.fmt(v.value)}#{v.unit ? " #{v.unit}" : ''}", :key]
                 elsif !v.value.nil? then ["#{Panes.fmt(v.value)}#{v.unit ? " #{v.unit}" : ''}", :text]
                 else ["#{c.glyph(:arrow)} #{v.label || v.detail}", :dim]
                 end
-              c.text(x + 1, y, c.fit(text, [c.w - x - 1, 0].max), role)
+              x = c.text(x + 1, y, c.fit(text, [c.w - x - 1, 0].max), role)
+              if sel && (b = n.binds[name])
+                c.text(x, y, c.fit(b.line ? "  Enter: knob #{b.knob.inspect}" : "  #{b.reason}", [c.w - x, 0].max), :dim)
+              end
               y += 1
             end
             c.text(1, y, '(no params of its own)', :dim) if n.params.values.empty? && y < c.h
@@ -163,6 +185,12 @@ module MB
           end
 
           def key_ask(state)
+            if (pp = picked_param(state)) && !pp[1].label.is_a?(Symbol)
+              name, _v, b = pp
+              return "#{name}: driven by #{pp[1].detail || 'a node'}" unless b
+              return "#{name}: #{b.reason}" unless b.line
+              return [*flush(state), PaneKeys::Ask['', b.line, :bind]]
+            end
             cell = picked(state) or return no_knob_note
             kn, k = cell
             value, = shown_value(state, kn, k)
@@ -176,6 +204,13 @@ module MB
             text = text.to_s.strip
             return 'nothing typed' if text.empty?
             PaneKeys::Run["turn #{cell[0].inspect}, #{text}", "#{cell[0]} #{text}"]
+          end
+
+          # The `bind` line #key_ask offered, as typed (Enter runs it).
+          def key_bind(state, text)
+            text = text.to_s.strip
+            return 'nothing typed' if text.empty?
+            PaneKeys::Run[text, "#{text}: the patch rebuilds at the track's launch point"]
           end
 
           def key_learn(state)
@@ -206,22 +241,52 @@ module MB
 
           def no_knob_note = 'no knob to turn: the graph reads none (knob :cut, 800.hz; then knob(:cut) in the patch)'
 
+          # The picked knob: a knob row, or a param row a knob drives
+          # ([name, KnobValue]), else nil.
           def picked(state)
             s = state[:snap] or return nil
             info = s.inspector or return nil
-            return nil if info.knobs.empty?
-            kn = info.knobs[state[:pick].to_i.clamp(0, info.knobs.length - 1)]
+            if (pp = picked_param(state))
+              kn = pp[1].label
+              return nil unless kn.is_a?(Symbol)
+            else
+              return nil if info.knobs.empty?
+              kn = info.knobs[state[:pick].to_i.clamp(0, info.knobs.length - 1)]
+            end
             k = s.knobs.find { |kv| kv.name == kn } or return nil
             [kn, k]
+          end
+
+          # The picked param row of the selected node: [name, ParamValue,
+          # Bind or nil], or nil on a knob row.
+          def picked_param(state)
+            info = state[:snap]&.inspector or return nil
+            i = state[:pick].to_i - info.knobs.length
+            n = info.selected
+            return nil if i < 0 || n.nil?
+            name, v = n.params.values.to_a[i] || n.params.values.to_a.last
+            return nil unless name
+            [name, v, n.binds[name]]
           end
         end
 
         # The selected node's preview (Plot::Panels: a filter's response, a
-        # shaper's curve), drawn through Plot::Live like the scope; follows
-        # turned knobs (the node's snapshot is taken again every poll).
+        # shaper's curve, an envelope's note), drawn through Plot::Live like
+        # the scope; follows turned knobs (the node's snapshot is taken
+        # again every poll).  An envelope's playhead (NodeInfo#live, read
+        # 4 times a second) moves on between polls by the clock while its
+        # segment runs (Clock: a lambda for specs).
         class Preview < Pane
+          class << self
+            # The clock the playhead moves by (monotonic seconds; specs set
+            # a lambda).
+            attr_writer :clock
+
+            def now = @clock ? @clock.call : Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          end
+
           def initialize = super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
-                                           description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve')
+                                           description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
 
           def plot?
             true
@@ -235,7 +300,7 @@ module MB
             chart = n&.preview ? chart_for(n, state) : nil
             unless chart
               c.clear
-              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters and shapers have one)" : 'no node selected (the inspector: n)', w), :dim)
+              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters, shapers, and envelopes have one)" : 'no node selected (the inspector: n)', w), :dim)
               return
             end
             native = c.grid.is_a?(FastUI::Grid)
@@ -251,18 +316,29 @@ module MB
 
           private
 
-          # The node's chart, rebuilt only when its params change.
+          # The node's chart, rebuilt only when its params (or a playhead)
+          # change.
           def chart_for(n, state)
-            return state[:chart] if state[:chart_of] == n.params
+            live = live_now(n.live)
+            key = [n.params, live]
+            return state[:chart] if state[:chart_of] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b) ? b.build : nil
-            state[:chart_of] = n.params
+            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            state[:chart_of] = key
             state[:chart] = chart
           rescue StandardError => e
-            state[:chart_of] = n.params
+            state[:chart_of] = key
             state[:chart] = nil
             warn "preview of #{n.label}: #{e.class}: #{e.message}"
             nil
+          end
+
+          # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
+          # read while its segment runs (rounded to a tenth of a frame at
+          # 8 per second, so a held sustain doesn't rebuild the chart).
+          def live_now(live)
+            return live unless live && live[:at] && live[:stage] == :segment
+            live.merge(elapsed: ((Preview.now - live[:at]) * 80).floor / 80.0)
           end
         end
 

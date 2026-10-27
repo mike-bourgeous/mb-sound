@@ -74,6 +74,16 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
         expect_golden("tiles_#{layout}_#{cols}x#{rows}", tiles_capture(layout, rows, cols, rack_knobs: set).to_text)
       end
     end
+
+    # envelope-view-1: the sound screen's preview of an amp envelope with
+    # a note in its decay (playhead) at peak 0.7 (the velocity trace)
+    it "matches the golden capture of the sound screen's envelope preview at #{cols}x#{rows}" do
+      MB::Sound::UI::Panes::Preview.clock = -> { 0.0 }
+      snap = -> { s = ui_fake_snapshot; s.with(slow: s.slow.with(inspector: ui_fake_envelope_inspector)) }
+      expect_golden("tiles_sound_envelope_#{cols}x#{rows}", tiles_capture(:sound, rows, cols, snap: snap).to_text)
+    ensure
+      MB::Sound::UI::Panes::Preview.clock = nil
+    end
   end
 
   # ux-fix-1 (maintainer: help pages "as ui overlay when ui is up"): the
@@ -111,12 +121,12 @@ RSpec.describe(MB::Sound::UI::Density, :aggregate_failures) do
 
   # A tiled screen at +rows+ x +cols+ drawing ui_fake_snapshot once, without
   # a console (so its text is deterministic; the REPL pane stays empty).
-  def tiles_capture(layout, rows, cols, rack_knobs: false)
+  def tiles_capture(layout, rows, cols, rack_knobs: false, snap: nil)
     @capture&.stop
     @capture_term&.close
     @capture_term = UIHelpers::FakeTerminal.new(rows, cols)
     @capture = MB::Sound::UI::Tiles.new(layout: MB::Sound::UI.tiles_layout_named(layout), input: @capture_term.slave, output: @capture_term.slave, repl: :none,
-                             probe: false, size: [rows, cols], clock: -> { 0.0 }, source: -> { ui_fake_snapshot(rack_knobs: rack_knobs) },
+                             probe: false, size: [rows, cols], clock: -> { 0.0 }, source: snap || -> { ui_fake_snapshot(rack_knobs: rack_knobs) },
                              keyboard: MB::Sound::UI::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
     @capture.start(thread: false)
     @capture.refresh(0.0)

@@ -1061,6 +1061,11 @@ module MB
             return named_proc(node, scope) if name == :named_proc
             return bus_reader(node, scope) if name == :bus
             return drawn_seed(node, scope) if name == :drawn_seed
+            # knob(:"bass/reso") reads a knob the header defined whose name
+            # isn't a Ruby identifier (as a bare name reads the others)
+            if name == :knob && !@header && !MB::Sound::Rack.application && node.block.nil? && (a = node.arguments&.arguments)&.length == 1 && a[0].is_a?(Prism::SymbolNode) && @knobs&.key?(a[0].unescaped.to_sym)
+              return knob(a[0].unescaped.to_sym)
+            end
             # (knob inside a rack's block is the rack's own knob: RackMethods#rack_knob)
             if Document::HEADER.include?(name) && !(name == :knob && MB::Sound::Rack.application)
               raise error(node, "#{name} belongs in the header, before the graph")

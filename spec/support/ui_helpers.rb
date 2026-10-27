@@ -66,6 +66,20 @@ module UIHelpers
     UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil)
   end
 
+  # The fake inspector with an amp envelope (a real one's snapshot: A 20
+  # ms, D 300 ms, S 0.6, R 500 ms, -18..0 dB velocity) selected, its note
+  # 0.1 s into the decay at peak 0.7 (+live+ false: no note), read at
+  # monotonic time 0 (envelope-view-1).
+  FAKE_ENVELOPE = MB::Sound.amp_env(0.02, 0.3, 0.6, 0.5)
+
+  def ui_fake_envelope_inspector(live: true)
+    info = ui_fake_inspector
+    snap = Ractor.make_shareable(FAKE_ENVELOPE.param_snapshot)
+    play = live ? { stage: :segment, segment: 1, position: 0.1, peak: 0.7, at: 0.0 }.freeze : nil
+    env = UI::Inspect::NodeInfo.new(key: info.nodes.length, label: 'amp_env', kind: 'Envelope', count: 6, knobs: [].freeze, params: snap, preview: true, live: play)
+    info.with(nodes: [*info.nodes, env].freeze, node: info.nodes.length)
+  end
+
   # The RENDER pane's source for the fake bass track: a small real synth
   # (a triangle voice, so captures move only when its few nodes change)
   # with a fixed phrase.

@@ -19,8 +19,21 @@ module MB
         # unison copies with the same settings), +params+ its frozen
         # Traversable::Params (#param_snapshot), +preview+ true when
         # Plot::Panels draws one for it, +knobs+ the knob names its params
-        # read (Symbols).
-        NodeInfo = Data.define(:key, :label, :kind, :count, :params, :preview, :knobs)
+        # read (Symbols), +live+ what a preview shows beyond the settings
+        # (an envelope's sounding note: see .live_of; nil otherwise),
+        # +binds+ (the selected node's; else empty) its params that no knob
+        # drives, as { param => Bind }: live literals.
+        NodeInfo = Data.define(:key, :label, :kind, :count, :params, :preview, :knobs, :live, :binds) do
+          def initialize(key:, label:, kind:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze)
+            super
+          end
+        end
+
+        # How a param no knob drives can be made one (live literals,
+        # Arrangement::LiteralBinding): the console +line+ that binds it
+        # (`bind :bass, lp4: :resonance`) and the +knob+ it makes, or nil
+        # and the +reason+ it can't (not a number, a graph track, ...).
+        Bind = Data.define(:line, :knob, :reason)
 
         # What the inspector shows of one track: +track+ (the player name,
         # nil when nothing plays), +tracks+ (players with graphs, in the
@@ -42,7 +55,7 @@ module MB
           MB::Sound::GraphNode::Constant MB::Sound::GraphNode::Knob MB::Sound::GraphNode::Knob::Reader
           MB::Sound::GraphNode::Tee MB::Sound::GraphNode::Tee::Branch MB::Sound::GraphNode::Multiplier
           MB::Sound::GraphNode::Mixer MB::Sound::GraphNode::ProcNode MB::Sound::Notes::Frequency
-          MB::Sound::Synth::Output MB::Sound::GraphNodeInput
+          MB::Sound::Synth::Output MB::Sound::GraphNodeInput MB::Sound::Notes::NoteEnvelope::GmTime
         ].freeze
 
         # Nodes listed at most (a big graph's tail is left out).
@@ -61,6 +74,7 @@ module MB
         class Gatherer
           def initialize
             @cache = {}
+            @peaks = {} # (the last sounding note's peak per envelope group, by the group's first node)
           end
 
           # The InspectInfo for +session+'s track +target+ asks for (see
@@ -90,7 +104,7 @@ module MB
             # and preview follow turns; the others keep their first one)
             if sel && (n = entry[:objects][sel])
               nodes = nodes.dup
-              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n))
+              nodes[sel] = nodes[sel].with(params: Inspect.snapshot(n), live: live_of(entry[:groups][sel]), binds: binds_of(session, track, entry, sel, n))
               nodes.freeze
             end
             InspectInfo.new(track: track, tracks: tracks, knobs: entry[:knobs], nodes: nodes, node: sel, code: entry[:code], error: nil)
@@ -101,6 +115,46 @@ module MB
           end
 
           private
+
+          # The Binds of node +n+ (index +sel+ of +entry+'s graph) of track
+          # +track+ (kept per graph: literals change only when it is built
+          # again): every param with a number and no knob.
+          def binds_of(session, track, entry, sel, n)
+            (entry[:binds] ||= {})[sel] ||= begin
+              lb = Arrangement::LiteralBinding
+              tr = session.respond_to?(:arrangement) ? session.arrangement.tracks[track] : nil
+              all = tr&.patch? ? (entry[:all] ||= lb.nodes(entry[:roots])) : nil
+              Inspect.snapshot(n).values.each_with_object({}) { |(name, v), h|
+                next if v.label.is_a?(Symbol) || !v.value.is_a?(Numeric)
+                h[name] =
+                  if !tr&.patch?
+                    Bind.new(line: nil, knob: nil, reason: "#{track} plays a graph, not a patch: nothing to rebuild".freeze)
+                  else
+                    begin
+                      t = lb.target(entry[:roots], n, name, all: all)
+                      Bind.new(line: lb.line(track, t).freeze, knob: lb.knob_name(track, t.param), reason: nil)
+                    rescue StandardError => e
+                      Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)
+                    end
+                  end
+              }.freeze
+            end
+          end
+
+          # The playhead of an envelope group's newest sounding note (see
+          # Inspect.live_of), keeping the last note's peak after it ends.
+          def live_of(group)
+            return nil unless group&.first.respond_to?(:playhead_state)
+            key = group.first.__id__
+            live = Inspect.live_of(group)
+            @peaks.shift while @peaks.length > 64
+            if live
+              @peaks[key] = live[:peak]
+              live
+            elsif (peak = @peaks[key])
+              { stage: :idle, peak: peak }.freeze
+            end
+          end
 
           def pick_track(want, tracks)
             return want if want && tracks.include?(want)
@@ -150,8 +204,12 @@ module MB
             next if n.is_a?(Numeric) || !n.respond_to?(:param_info)
             next if SKIP.include?(n.class.name)
             info = n.param_info
+            lits = literal_params(n, info)
+            info = info.merge(lits) unless lits.empty?
             next if info.empty? && !preview?(n)
-            sig = [n.class, info.map { |name, v| [name, v.value, v.label] }]
+            # (copies with the same settings are one row; settings only a
+            # preview reads tell apart, e.g. an amp and a filter envelope)
+            sig = [n.class, info.map { |name, v| [name, v.value, v.label] }, preview?(n) ? (n.preview_data rescue nil) : nil]
             (groups[sig] ||= []) << n
           end
           rows = groups.values.map { |list|
@@ -159,15 +217,33 @@ module MB
             snap = Inspect.snapshot(n)
             read = Inspect.knobs_read(n).freeze
             preview = preview?(n)
-            [n, list.length, snap, read, preview]
+            [n, list.length, snap, read, preview, list.freeze]
           }
           rows = rows.sort_by.with_index { |(_, _, _, read, preview), i| [read.empty? ? (preview ? 1 : 2) : 0, i] }.first(MAX_NODES)
-          nodes = rows.each_with_index.map { |(n, count, snap, read, preview), i|
+          nodes = rows.each_with_index.map { |(n, count, snap, read, preview, _), i|
             NodeInfo.new(key: i, label: label_of(n), kind: n.class.name.split('::').last.freeze, count: count, params: snap, preview: preview, knobs: read)
           }.freeze
 
           code = roots.filter_map { |r| r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
-          { nodes: nodes, objects: rows.map(&:first).freeze, knobs: knobs.freeze, code: code.empty? ? nil : code }
+          { nodes: nodes, objects: rows.map(&:first).freeze, groups: rows.map(&:last).freeze, knobs: knobs.freeze, code: code.empty? ? nil : code }
+        end
+
+        # Where the newest sounding note of an envelope +group+ (the copies
+        # of one envelope: synth lanes) is, as a frozen Hash for
+        # Plot::Panels::EnvelopeView (+:stage+ :segment or :sustain,
+        # +:segment+, +:position+ seconds into it, +:peak+, +:at+ the
+        # monotonic clock when read, for painters to move it on), or nil
+        # when none sounds.  Reads each envelope's state as the render
+        # thread left it (Envelope#playhead_state), never the render lock.
+        def live_of(group)
+          best = nil
+          group.each do |e|
+            stage, seg, pos, since, peak, rate = e.playhead_state
+            next unless stage == :segment || stage == :sustain
+            best = [since, stage, seg, pos / rate, peak] if best.nil? || since < best[0]
+          end
+          return nil unless best
+          { stage: best[1], segment: best[2], position: best[3], peak: best[4], at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }.freeze
         end
 
         # True if Plot::Panels draws a preview for +node+'s class.
@@ -178,10 +254,41 @@ module MB
         # +node+'s frozen Traversable::Params (#param_snapshot; nodes with a
         # parameter API of their own that lack it get one from
         # #param_info).
+        #
+        # The numbers the node's recorded call was given that #param_info
+        # doesn't list (a filter's `resonance: 0.25` kept as a Float) are
+        # added as params (detail "literal"), so the inspector shows them
+        # and can bind them (Arrangement::LiteralBinding).
         def snapshot(node)
-          return node.param_snapshot if node.respond_to?(:param_snapshot)
-          GraphNode::Traversable::Params.new(node_class: node.class, name: nil, values: node.param_info, preview: nil)
+          snap = node.respond_to?(:param_snapshot) ? node.param_snapshot : GraphNode::Traversable::Params.new(node_class: node.class, name: nil, values: node.param_info, preview: nil)
+          lits = literal_params(node, snap.values)
+          lits.empty? ? snap : snap.with(values: snap.values.merge(lits).freeze)
         end
+
+        # The literal arguments of +node+'s recorded call missing from
+        # +values+ (see .snapshot), as { name => ParamValue }.
+        def literal_params(node, values)
+          lb = Arrangement::LiteralBinding
+          call = lb.call_of(node) or return {}
+          names = lb.positional_names(call) || []
+          found = call.args.each_with_index.filter_map { |v, i| names[i] && [names[i], v] } + call.kwargs.to_a
+          found.each_with_object({}) { |(name, v), h|
+            next unless name.is_a?(Symbol) && !values.key?(name) && lb.literal?(v)
+            num, unit =
+              case v
+              when Pitch then [v.frequency.to_f, 'Hz']
+              when Length::Seconds then [Length.seconds(v).to_f, 's']
+              when Length::Samples then [v.value, 'samples']
+              else [v.is_a?(Integer) ? v : v.to_f, nil]
+              end
+            h[name] = GraphNode::Traversable::ParamValue.new(value: num, type: :control, unit: unit&.freeze, range: nil, label: nil, detail: LITERAL)
+          }
+        rescue StandardError
+          {}
+        end
+
+        # The detail of a literal param (see .literal_params).
+        LITERAL = 'literal'.freeze
 
         # The knob names +node+'s params read: directly, or through a few
         # nodes of arithmetic (`lp4(knob(:cut) * lfo)` reads :cut).

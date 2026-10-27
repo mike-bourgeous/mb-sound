@@ -640,6 +640,9 @@ module MB
 
         params = inputs_and_params.select { |k, _| doc.params.key?(k) }
         inputs = inputs_and_params.reject { |k, _| doc.params.key?(k) }
+        # (params a live literal bound to knobs: Arrangement::LiteralBinding)
+        bound = Arrangement::LiteralBinding.document_params(doc.name)
+        params = params.merge(bound.slice(*doc.params.keys)) if bound
         graph = GraphIO.load(path, inputs: inputs, params: params, trust: trust, seeds: seeds, racks: racks)
 
         session = Session.existing if session.nil?
