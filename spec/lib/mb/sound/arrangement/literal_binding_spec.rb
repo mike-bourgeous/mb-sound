@@ -142,7 +142,7 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
       expect { MB::Sound.bind(:pad, lp4: :resonance) }.to raise_error(ArgumentError, /No track :pad/)
       MB::Sound.track(:pad2, 220.hz.saw.lp4(800, resonance: 0.3))
       expect { MB::Sound.bind(:pad2, lp4: :resonance) }.to raise_error(described_class::Error, /pad2 plays a graph, not a patch/)
-      expect { MB::Sound.bind(:lead, synth: :voices) }.to raise_error(described_class::Error, /bind :lead, synth: :voices: the patch raised .* nothing was changed/)
+      expect { MB::Sound.bind(:lead, synth: :voices) }.to raise_error(described_class::Error, /voices of synth is a count \(2; read once while the patch builds\): shown read-only/)
       expect(s.knobs).not_to have_key(:"lead/voices")
       expect { MB::Sound.bind(:lead, lp5: :resonance) }.to raise_error(described_class::Error, /no lp5 in the track's graph \(did you mean lp4\?\)/)
       expect { MB::Sound.bind(:lead, lp4: :drive) }.to raise_error(described_class::Error, /drive isn't an argument of lp4/)
@@ -191,6 +191,9 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     lp4 = info.selected
     expect(lp4.binds[:resonance]).to have_attributes(line: 'bind :lead, lp4: :resonance', knob: :"lead/reso", reason: nil)
     expect(lp4.binds[:cutoff].line).to eq('bind :lead, lp4: :cutoff')
+    synth = g.call(s, { track: :lead, node: info.nodes.index { |n| n.label == 'synth' } }).selected
+    expect(synth.params.values[:voices].value).to eq(2) # (shown, read-only)
+    expect(synth.binds[:voices]).to have_attributes(line: nil, reason: a_string_including('a count'))
     expect(Ractor.shareable?(info)).to eq(true)
 
     snap = ui_fake_snapshot

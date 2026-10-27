@@ -38,6 +38,20 @@ module MB
           v.is_a?(Numeric) || v.is_a?(Pitch)
         end
 
+        # Param names that count things (voices, copies, taps, ...): read
+        # once while a patch builds, so an Integer given to one is shown
+        # read-only, never bound (the maintainer, 2026-10-27).
+        COUNT_NAMES = %i[voices spares count copies taps bands steps stages order lanes size n].freeze
+
+        # True for a count-like literal (see COUNT_NAMES; also names the
+        # Param names table ranges in Integer steps).
+        def self.count?(param, value)
+          return false unless value.is_a?(Integer)
+          return true if COUNT_NAMES.include?(param)
+          r = Param.name_entry(param)&.dig(:range)
+          r.is_a?(Range) && r.begin.is_a?(Integer)
+        end
+
         module_function
 
         # The nodes of graph +roots+, each once.
@@ -81,6 +95,9 @@ module MB
           value = slot[0] == :kw ? call.kwargs[slot[1]] : call.args[slot[1]]
           unless LiteralBinding.literal?(value)
             raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
+          end
+          if LiteralBinding.count?(param, value)
+            raise Error, "#{param} of #{method} is a count (#{value}; read once while the patch builds): shown read-only, no knob"
           end
           nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
           Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil)
