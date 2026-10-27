@@ -1247,11 +1247,17 @@ module MB
         the prompt line: `3000.hz`), 0 its default, m learns a MIDI
         controller (`learn :cut`).  Every change is one console line,
         printed in the console: journaled, undoable, in your take.  The
-        preview pane draws a filter's response or a shaper's curve and
-        follows the knob; the code pane (NAV c, arrows scroll) shows the
-        knob lines at their values now and the graph's Ruby.  Only knobs
-        turn so far: bind a preset's params to them (`preset :dnb_reese,
-        midi: clip, cutoff: :cut`).  The render pane (NAV w) keeps a second
+        preview pane draws a filter's response, a shaper's curve, or an
+        envelope's note (the sustain a third of the plot, the breakpoints
+        named in ms and dB, a playhead while a note sounds) and follows the
+        knob; the code pane (NAV c, arrows scroll) shows the knob lines at
+        their values now and the graph's Ruby.  Down past the knobs picks
+        the node's params: a number no knob drives (`resonance: 0.25`, an
+        envelope's attack, a preset's param) becomes one with Enter, which
+        offers `bind :bass, lp4: :resonance`: a knob :"bass/reso" at that
+        value, and the patch rebuilt reading it at the track's launch
+        point (it sounds the same until you turn it; its voices start
+        fresh; undo brings the number back).  The render pane (NAV w) keeps a second
         copy of the track's voice and plays one note through it (the clip's
         first, else a guess from the track's role: a low bass note, a held
         pad) from a reset state: one cycle once the filters settle (a few
@@ -1263,7 +1269,7 @@ module MB
         envelope's length, r renders again.  The library picker
         and auditions on CUE come with the library.
       TEXT
-      commands :ui, :knob, :turn, :learn
+      commands :ui, :knob, :turn, :learn, :bind
       note :sound_design_ui
       see :ui, :knobs, :cue, :presets
     end

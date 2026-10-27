@@ -38,7 +38,11 @@ module MB
         # MB::Sound.with_seed block, or nil (see Recipe.lane).
         # +written+ is the name the code called when it differs from +name+
         # (an alias, recorded under its official name; see .official_name).
-        Call = Struct.new(:receiver, :name, :args, :kwargs, :block, :block_kind, :invocations, :scope, :seq, :seeds, :lane, :statements, :written)
+        # +ordinal+ counts the calls of this name made before it in its
+        # scope (the build block invocation, or a .counting block at the
+        # top level; nil outside both), so .key_of names the same call
+        # when the same code builds again (see .substituting).
+        Call = Struct.new(:receiver, :name, :args, :kwargs, :block, :block_kind, :invocations, :scope, :seq, :seeds, :lane, :statements, :written, :ordinal)
 
         # One call of a recorded build block: its arguments, result, the
         # block's local variables when it returned, whether anything inside
@@ -48,7 +52,9 @@ module MB
         # RubyVM::InstructionSequence until its frame's Binding is taken
         # (then the Binding, or false if it can't be found); nil afterwards
         # (see Recipe.trace_locals).
-        Invocation = Struct.new(:args, :result, :locals, :seeded, :statements, :call, :frame)
+        # +counts+ is internal: the calls made in it so far by name (see
+        # Call#ordinal).
+        Invocation = Struct.new(:args, :result, :locals, :seeded, :statements, :call, :frame, :counts)
 
         # The recipe of one object: the Call that made it (+call+), calls
         # that configured it afterwards (+config+), and Calls that returned
@@ -80,8 +86,10 @@ module MB
 
         # Thread-local recording state.  +drawn+ is a seed the next
         # outermost call is given that was drawn when its graph was saved
-        # (see #given_drawn_seed).
-        State = Struct.new(:depth, :current, :scopes, :seeded, :drawn)
+        # (see #given_drawn_seed).  +counts+ counts top-level calls by name
+        # inside a .counting block (nil outside one); +subs+ the argument
+        # substitutions of a .substituting block (nil outside one).
+        State = Struct.new(:depth, :current, :scopes, :seeded, :drawn, :counts, :subs)
 
         # Methods that take build blocks (run while the graph is built, their
         # nodes part of the recipe), by name.  Every other recorded method's
@@ -273,21 +281,35 @@ module MB
             drawn = st.drawn
             st.drawn = nil
             seeds = nil
+            pass_args = args # (what the method gets: the recorded kwargs may leave a given drawn seed out)
+            pass_kwargs = kwargs
             if drawn && kwargs[:seed] == drawn
               kwargs = kwargs.except(:seed)
               seeds = [drawn]
             end
 
             kind = block && (kind || (BUILD_BLOCKS.include?(name) ? :build : :runtime))
-            call = Call.new(receiver, name, args, kwargs, block, kind, nil, st.scopes.last, 0, seeds, lane(st))
+            inv = st.scopes.last
+            counts = inv ? (inv.counts ||= {}) : st.counts
+            ordinal = counts && (counts[name] = counts.fetch(name, -1) + 1)
+            if st.subs && ordinal
+              # (an argument given again as something else: Recipe.substituting)
+              call0 = Call.new(receiver, name, args, kwargs, nil, nil, nil, inv, 0, nil, nil, nil, nil, ordinal)
+              if (rule = st.subs[key_of(call0)])
+                args, kwargs = rule.call(args, kwargs)
+                pass_args, pass_kwargs = rule.call(pass_args, pass_kwargs)
+              end
+            end
+            call = Call.new(receiver, name, args, kwargs, block, kind, nil, inv, 0, seeds, lane(st))
             call.written = written if written && written != name
+            call.ordinal = ordinal
             pass = kind == :build ? wrap_block(block, call) : block
 
             st.depth += 1
             old_current = st.current
             st.current = call
             result = begin
-              yield(pass)
+              yield(pass, pass_args, pass_kwargs)
             ensure
               st.depth -= 1
               st.current = old_current
@@ -404,6 +426,57 @@ module MB
             # seed-drawing nodes in creation order (RubyWriter#seeded_key).
             st.current.seeds = (st.current.seeds || []) << seed if st.current && (st.seeded == 0 || st.current.lane)
             st.scopes.last&.seeded = true
+          end
+
+          # Runs the block with top-level calls counted (Call#ordinal), so
+          # the calls it records can be named again (.key_of) when the same
+          # code runs again (Arrangement tracks build their patches this
+          # way).  Nested blocks count on in the outer one.
+          def counting
+            st = state
+            return yield if st.counts
+            st.counts = {}
+            begin
+              yield
+            ensure
+              st.counts = nil
+            end
+          end
+
+          # Runs the block (which builds a graph, counting: see .counting)
+          # with some calls' arguments given as something else: +subs+ is
+          # a Hash { call key (.key_of) => callable(args, kwargs) returning
+          # [args, kwargs] }.  The calls record the arguments they were
+          # given (so `lp4(1200, resonance: knob(:"bass/reso"))` prints).
+          # Used by live literals (Arrangement::LiteralBinding).
+          def substituting(subs)
+            st = state
+            old = st.subs
+            st.subs = old ? old.merge(subs) : subs
+            begin
+              counting { yield }
+            ensure
+              st.subs = old
+            end
+          end
+
+          # A key naming recorded call +call+ by where it was made: the
+          # chain of enclosing build calls, each by name and ordinal, then
+          # its own name and ordinal ([:top, :synth, 0, :lp4, 0]), the same
+          # for every invocation of a build block (every synth lane).  Nil
+          # for calls made outside a .counting block.
+          def key_of(call)
+            key = []
+            c = call
+            8.times do
+              return nil if c.ordinal.nil?
+              key.unshift(c.name, c.ordinal)
+              inv = c.scope
+              return key.unshift(:top).freeze if inv.nil?
+              c = inv.call
+              return nil unless c
+            end
+            nil
           end
 
           # Records a call made for its effect on a block argument (e.g. a
@@ -565,7 +638,7 @@ module MB
                 official = ([first] + aliases).to_h { |n| [n, official_name(target, n)] }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   callee = __callee__
-                  Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b| super(*args, **kwargs, &b) }
+                  Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
                 rescue ArgumentError => e
                   raise ErrorFormat.unknown_keyword(e, self, callee) || e
                 end

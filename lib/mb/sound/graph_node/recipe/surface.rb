@@ -198,7 +198,7 @@ module MB
         module NewRecording
           def new(*args, **kwargs, &block)
             if Recipe.enabled && Recipe.state.depth == 0 && !Recipe.library_caller?(caller_locations(1, 1)[0])
-              Recipe.call(self, :new, args, kwargs, block) { |b| super(*args, **kwargs, &b) }
+              Recipe.call(self, :new, args, kwargs, block) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
             else
               super
             end
@@ -245,7 +245,7 @@ module MB
 
             Numeric.prepend(Module.new.tap { |m|
               m.define_method(:constant) do |*args, **kwargs, &block|
-                Recipe.call(self, :constant, args, kwargs, block) { |b| super(*args, **kwargs, &b) }
+                Recipe.call(self, :constant, args, kwargs, block) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
               end
             })
             @wrapped[:numeric] << :constant
