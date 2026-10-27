@@ -104,3 +104,4 @@ A merge isn't finished until these are done, in this order, without being asked 
 - NKS preset tags (Type/Sub-Type/Character vocabularies, closed facet lists plus free tags, eight-knob parameter pages; for the library facets and the inspector), after library-core-1 (2026-10-26)
 - Read-copy-update for realtime swaps (lock-free readers, copy then publish one pointer, grace periods; farbot RealtimeObject; the background plan swap and warm-up as the same shape), after render-rebuild-1 + fixes-1026 (2026-10-26)
 - The ABA problem and version counters (tagged pointers, seqlocks; generations as a change signal for panes and spies), after omnibus14 (2026-10-26)
+- Oscilloscope triggering (level/slope, holdoff, period tracking, slow phosphor; for the live scope pane), after sound-design-ui-2 + envelope-view-1 (2026-10-27)
