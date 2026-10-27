@@ -66,14 +66,18 @@ module UIHelpers
     UI::Inspect::InspectInfo.new(track: :"#{prefix}bass", tracks: [:drums, :"#{prefix}bass", :pad].freeze, knobs: [knob].freeze, nodes: nodes, node: 1, code: code.freeze, error: nil)
   end
 
-  # The RENDER pane's source for the fake bass track: a small real patch
-  # (a triangle synth, so captures move only when its few nodes change)
-  # playing a fixed phrase.
+  # The RENDER pane's source for the fake bass track: a small real synth
+  # (a triangle voice, so captures move only when its few nodes change)
+  # with a fixed phrase.
+  # (Built once when this file loads: fake snapshots stay as quick to make
+  # as before, which wall-clock examples like the heard-snapshot one count
+  # on.  The synth is never sampled; previews build their own copy.)
+  FAKE_CLIP = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::C4.n2).n8
+  FAKE_SYNTH = MB::Sound::Synth.new(FAKE_CLIP.notes, voices: 2, seed: 1) { |v| v.hz.triangle.lp4(1200.hz) * v.amp_env * 0.5 }
+
   def ui_fake_render_source(track = :bass)
-    @ui_fake_patch ||= ->(clip) { clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env * 0.5 } }
-    @ui_fake_clip ||= MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::C4.n2).n8
-    UI::PatchRender::Source.new(track: track, patch: @ui_fake_patch, clip: @ui_fake_clip, bpm: 128, bar_length: 1r, key: nil, tuning: nil,
-                                channels: 2, sample_rate: 48000, note: nil, words: track.to_s)
+    UI::PatchRender::Source.new(track: track, synth: FAKE_SYNTH, clip: FAKE_CLIP, bpm: 128, bar_length: 1r, key: nil, tuning: nil,
+                                channels: 2, note: nil, words: track.to_s, live: {}.freeze)
   end
 
   # A clip for the matrix: +notes+ as eighths from the start (nil: kit

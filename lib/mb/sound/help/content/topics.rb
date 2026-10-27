@@ -1251,15 +1251,16 @@ module MB
         follows the knob; the code pane (NAV c, arrows scroll) shows the
         knob lines at their values now and the graph's Ruby.  Only knobs
         turn so far: bind a preset's params to them (`preset :dnb_reese,
-        midi: clip, cutoff: :cut`).  The render pane (NAV w) plays one
-        note (the clip's first, else a guess from the track's role: a low
-        bass note, a held pad) through a fresh copy of the track's patch
-        for half a second and draws the waveform above its spectrum, with
-        LUFS, peak, and RMS and the render before it faintly behind; it
-        renders again a tenth of a second after the knobs it reads stop
-        moving, in a separate process, never touching what you hear.  In
-        it, s picks the views, o the previous render, p the guessed note,
-        + and - the length, r renders again.  The library picker
+        midi: clip, cutoff: :cut`).  The render pane (NAV w) keeps a second
+        copy of the track's voice and plays one note through it (the clip's
+        first, else a guess from the track's role: a low bass note, a held
+        pad) from a reset state: one cycle once the filters settle (a few
+        for detuned unison), its spectrum, and half a second of the note's
+        envelope, with LUFS, peak, and RMS and the render before it faintly
+        behind; it renders again a tenth of a second after the knobs it
+        reads stop moving, never touching what you hear.  In it, s picks
+        the views, o the previous render, p the guessed note, + and - the
+        envelope's length, r renders again.  The library picker
         and auditions on CUE come with the library.
       TEXT
       commands :ui, :knob, :turn, :learn

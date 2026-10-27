@@ -189,6 +189,12 @@ module MB
       # description).
       attr_reader :seed
 
+      # The block that builds one voice's graph from |v, index| (the
+      # sound-design screen's RENDER pane builds a second copy of one voice
+      # with it; UI::PatchRender), and the number of lanes it was built
+      # for (per_voice values depend on it).
+      attr_reader :voice_block
+
       # The output controls in use (see CONTROLS; the +:controls+ given to
       # the constructor).
       attr_reader :output_controls
@@ -260,6 +266,7 @@ module MB
         @piece = nil
         @piece_array = nil
         @piece_serial = 0
+        @voice_block = block
 
         @retrigger = retrigger
         retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)

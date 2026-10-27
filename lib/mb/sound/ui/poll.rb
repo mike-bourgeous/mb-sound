@@ -47,6 +47,7 @@ module MB
           @scene_launches = {}
           @lock = Mutex.new
           @inspector = nil # (the inspector's Inspect::Gatherer, made when a pane first needs it)
+          @render_walk = nil # (#render_source: the inspected graph's Synth and nodes)
           @subscription = session.journal.subscribe { |e| note(e) }
           session.journal.changes.each { |e| note(e, seen: false) }
         end
@@ -108,20 +109,31 @@ module MB
 
         private
 
-        # The inspected track's PatchRender::Source (the RENDER pane): its
-        # patch and clip (the arrangement's own mutex) and the session's
-        # tempo, meter, key, and tuning, or nil when nothing is inspected.
+        # The inspected track's PatchRender::Source (the RENDER pane): the
+        # Synth in its graph (whose voice block builds the preview's copy),
+        # the live graph's nodes (a copy sharing one is refused), the
+        # track's clip (for its first note), and the session's tempo,
+        # meter, key, and tuning, or nil when nothing is inspected.  The
+        # graph walk is kept per graph (by its roots' identity).
         def render_source(s, arr, info)
           name = info&.track or return nil
+          roots = Inspect.roots(s.ui_graphs[name])
+          walk = @render_walk
+          unless walk && walk[:name] == name && walk[:roots].length == roots.length && walk[:roots].zip(roots).all? { |a, b| a.equal?(b) }
+            nodes = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph(include_tees: true) : [])] }.uniq(&:__id__)
+            synth = nodes.find { |n| n.is_a?(Synth) }
+            live = nodes.each_with_object({}) { |n, h| h[n.__id__] = true }
+            if synth
+              synth.instance_variable_get(:@lane_graphs)&.each { |g| g.each { |n| live[n.__id__] = true } }
+            end
+            walk = @render_walk = { name: name, roots: roots, synth: synth, live: live.freeze }
+          end
           tr = arr.tracks[name]
           t = s.transport
-          note =
-            if tr.nil? then "#{name} is not a track (bg :#{name}, ... without track): no patch to rebuild"
-            elsif !tr.patch? then "#{name} plays a graph, not a patch: track(:#{name}) { |clip| ... } renders"
-            end
-          PatchRender::Source.new(track: name, patch: tr&.patch, clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
-                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, sample_rate: 48000, note: note&.freeze,
-                                  words: "#{name} #{info.code}".freeze)
+          note = walk[:synth] ? nil : "#{name} has no synth voice to copy (the preview plays one voice of a synth: synth(midi) { |v| ... })"
+          PatchRender::Source.new(track: name, synth: walk[:synth], clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
+                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, note: note&.freeze,
+                                  words: "#{name} #{info.code}".freeze, live: walk[:live])
         rescue StandardError => e
           warn_once(e)
           nil

@@ -266,33 +266,33 @@ module MB
           end
         end
 
-        # A one-shot offline render of the inspected track's patch
-        # (sound-design-ui-2: "a one-shot render of the processed waveform
-        # updated periodically when parameters change"): one note (the
-        # clip's first, else a guess from the track's role) through a fresh
-        # instance of the patch for half a second, drawn as the waveform's
-        # min/max envelope above its spectrum (beside it in a wide, short
-        # pane; one of them, s to switch, in a small one), the render before
-        # it faintly behind both (what the last change did), and LUFS, peak,
-        # and RMS on the first row.  It renders again 0.1 s after the knobs
-        # the graph reads stop moving, at most every 0.2 s while they move
-        # (UI::PatchRender: forked renders of one instance per patch and
-        # note; the live graph is never touched).
+        # A preview of the inspected track's voice (sound-design-ui-2: "a
+        # one-shot render of the processed waveform updated periodically
+        # when parameters change"): a second copy of one voice
+        # (UI::PatchRender) plays one note (the clip's first, else a guess
+        # from the track's role) from a reset state, drawn as one settled
+        # cycle from a rising zero crossing (a few cycles when detuned
+        # unison copies never repeat) above the settled sound's spectrum,
+        # with the note's envelope (half a second, min/max) below them in a
+        # tall pane; the render before it faintly behind; LUFS, peak, and
+        # RMS on the first row.  It renders again 0.1 s after the knobs the
+        # voice reads stop moving, at most every 0.2 s while they move; the
+        # live graph is never touched.
         #
-        # Mode keys (NAV Enter, or NAV w): s both views, the waveform, or
-        # the spectrum, o the faint previous render on or off, p the role's
-        # guessed note instead of the clip's first, + and - the render's
-        # length, r render again.
+        # Mode keys (NAV Enter, or NAV w): s the views (all that fit, the
+        # cycle, the envelope, the spectrum), o the faint previous render on
+        # or off, p the role's guessed note instead of the clip's first, +
+        # and - the envelope's length, r render again.
         class Render < Pane
           jump 'w'
 
           mode_keys do
             group 'Render'
-            on 's', :view, help: 'both views, the waveform, or the spectrum'
+            on 's', :view, help: 'the views: all that fit, the cycle, the envelope, the spectrum'
             on 'o', :overlay, help: 'the previous render (faint) on or off'
             on 'p', :phrase, help: "the role's guessed note or the clip's first note"
-            on ['+', '='], :length, 1, help: 'a longer render', label: '+ -'
-            on '-', :length, -1, help: 'a shorter render', label: '+ -'
+            on ['+', '='], :length, 1, help: 'a longer envelope view', label: '+ -'
+            on '-', :length, -1, help: 'a shorter envelope view', label: '+ -'
             on 'r', :again, help: 'render again'
           end
 
@@ -303,7 +303,7 @@ module MB
           LENGTHS = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 20.0].freeze
 
           # Views s cycles through.
-          VIEWS = %i[both wave spectrum].freeze
+          VIEWS = %i[all cycle envelope spectrum].freeze
 
           # The fewest rows of each plot when both are stacked, and the
           # fewest columns of each side by side.
@@ -311,7 +311,7 @@ module MB
           SIDE_COLS = 45
 
           def initialize = super(:render, rate: 10, height: 12, width: 48, needs: [:inspect, :render], title: 'render', min_height: 3,
-                                          description: 'an offline render of one note through the inspected track\'s patch: waveform and spectrum, peak, RMS, LUFS, redone when its knobs change')
+                                          description: 'a preview of one note through a copy of the inspected voice: a settled cycle, its spectrum, the envelope, peak, RMS, LUFS, redone when its knobs change')
 
           def plot?
             true
@@ -333,8 +333,8 @@ module MB
               c.text(0, 0, c.fit('nothing to render (play a track: bg :bass, clip)', c.w), :dim)
               return
             end
-            unless src.patch
-              c.text(0, 0, c.fit(src.note || 'no patch to rebuild', c.w), :dim)
+            unless src.synth
+              c.text(0, 0, c.fit(src.note || 'no voice to copy', c.w), :dim)
               return
             end
             driver = Render.driver(state)
@@ -349,23 +349,27 @@ module MB
               return
             end
             prev = state[:overlay] == false ? nil : driver.previous
-            areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :both).each do |view, body|
+            areas(c.sub(0, 1, c.w, c.h - 1), state[:view] || :all).each do |view, body|
               chart = chart_for(r, prev, view, state)
               plot(body, chart, state, view, look) if chart
             end
           end
 
-          # [[view, canvas], ...]: the plots that fit +body+ for +view+.
+          # [[view, canvas], ...]: the plots that fit +body+ for +view+ (:all:
+          # the cycle above the spectrum above the envelope, as many as fit
+          # STACK_ROWS rows each; side by side in a wide, short pane).
           def areas(body, view)
-            return [[view, body]] unless view == :both
-            if body.h >= 2 * STACK_ROWS
-              top = body.h / 2
-              [[:wave, body.sub(0, 0, body.w, top)], [:spectrum, body.sub(0, top, body.w, body.h - top)]]
+            return [[view, body]] unless view == :all
+            rows = body.h / STACK_ROWS
+            if rows >= 2
+              list = rows >= 3 ? %i[cycle spectrum envelope] : %i[cycle spectrum]
+              h = body.h / list.length
+              list.each_with_index.map { |v, i| [v, body.sub(0, i * h, body.w, i == list.length - 1 ? body.h - i * h : h)] }
             elsif body.w >= 2 * SIDE_COLS
               left = body.w / 2
-              [[:wave, body.sub(0, 0, left, body.h)], [:spectrum, body.sub(left, 0, body.w - left, body.h)]]
+              [[:cycle, body.sub(0, 0, left, body.h)], [:spectrum, body.sub(left, 0, body.w - left, body.h)]]
             else
-              [[:wave, body]]
+              [[:cycle, body]]
             end
           end
 
@@ -382,23 +386,28 @@ module MB
             live.draw(chart, body.grid, x: body.x, y: body.y)
           end
 
-          # The first row: the track and its figures, what it played, the
-          # render's time, and a mark while a newer render waits or runs.
+          # The first row: the track and its figures, what it played (and
+          # whether its period settled), the copy's rate, the render's time,
+          # and a mark while a newer render waits or runs.
           def draw_header(c, r, driver)
             x = c.text(0, 0, r&.track.to_s, :name)
             if r && !r.error
               x = c.line(0, ['  ', :dim], [Panes.db(r.lufs), :text], [' LUFS', :dim], ['  peak ', :dim], [Panes.db(r.peak), :text],
                          ['  rms ', :dim], [Panes.db(r.rms), :text], x: x)
+              how = r.settled ? "settled #{(r.settled * 1000).round} ms" : "#{r.periods} cycles"
+              tail = "  #{r.input}, #{how}, #{Panes.fmt(r.rate / 1000.0)} kHz, #{r.ms.round} ms"
+            else
+              tail = r ? "  #{r.input}" : ''
             end
-            tail = r ? "  #{r.input}, #{Panes.fmt(r.frames.to_f / r.sample_rate)} s#{r.error ? '' : ", #{r.ms.round} ms"}" : "  #{Panes.fmt(PatchRender.seconds)} s"
             x = c.text(x, 0, c.fit(tail, [c.w - x - 2, 0].max), :dim)
             c.text(x, 0, ' …', :queued) if driver.pending? && x + 2 <= c.w
           end
 
           def key_view(state)
-            i = VIEWS.index(state[:view] || :both) || 0
+            i = VIEWS.index(state[:view] || :all) || 0
             state[:view] = VIEWS[(i + 1) % VIEWS.length]
-            { both: 'render: the waveform above the spectrum (where they fit)', wave: 'render: the waveform', spectrum: 'render: the spectrum' }[state[:view]]
+            { all: 'render: the cycle, the spectrum, and the envelope (where they fit)', cycle: 'render: the settled cycle',
+              envelope: 'render: the envelope', spectrum: 'render: the spectrum' }[state[:view]]
           end
 
           def key_overlay(state)
@@ -417,7 +426,7 @@ module MB
             i += 1 if d > 0 && LENGTHS[i] <= now + 1e-9
             i -= 1 if d < 0
             PatchRender.seconds = LENGTHS[i.clamp(0, LENGTHS.length - 1)]
-            "render: #{Panes.fmt(PatchRender.seconds)} s (PatchRender.seconds)"
+            "render: the envelope #{Panes.fmt(PatchRender.seconds)} s (PatchRender.seconds)"
           end
 
           def key_again(state)
@@ -431,32 +440,43 @@ module MB
           private
 
           # The chart for Result +r+ (and +prev+ faintly behind, if any) in
-          # +view+ (:wave or :spectrum), rebuilt only when they change.
+          # +view+ (:cycle, :envelope, or :spectrum), rebuilt only when they
+          # change.
           def chart_for(r, prev, view, state)
             charts = (state[:charts] ||= {})
             key = [r.seq, prev&.seq]
             hit = charts[view]
             return hit[1] if hit && hit[0] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            if view == :spectrum
+            case view
+            when :spectrum
               return nil unless r.spectrum
               f, db = r.spectrum
               ps = prev&.spectrum
               top = [db.max, ps ? ps[1].max : -Float::INFINITY].max
-              b.x :frequency, 20.0..(r.sample_rate / 2.0)
+              b.x :frequency, 20.0..[r.rate / 2.0, ps ? prev.rate / 2.0 : 0].max
               b.y Plot::Scale::DB.new(-90.0..[(top / 10.0).ceil * 10, -40].max.to_f)
               b.line(ps[1], x: ps[0], color: PREVIOUS) if ps
               b.line(db, x: f)
+            when :cycle
+              return nil unless r.cycle && r.cycle[0].length > 1
+              ms = ->(res) { (0..(res.cycle[0].length - 1) * 1000.0 / res.rate) }
+              peak = [*r.cycle.map { |d| d.abs.max }, *(prev&.cycle || []).map { |d| d.abs.max }].max.to_f
+              peak = 1.0 if peak <= 0
+              b.x :linear, label: 'ms'
+              b.y Plot::Scale::Symmetric.new(-peak..peak, label: nil)
+              prev&.cycle&.each { |d| b.line(d, x: ms.(prev), color: PREVIOUS) }
+              r.cycle.each_with_index { |d, i| b.line(d, x: ms.(r), color: i) }
             else
-              b.x :time, sample_rate: r.sample_rate
+              b.x :time, sample_rate: r.rate
               peak = [r.hi.max, -r.lo.min, prev ? [prev.hi.max, -prev.lo.min].max : 0].max.to_f
               peak = 1.0 if peak <= 0
               b.y Plot::Scale::Symmetric.new(-peak..peak, label: nil)
               # (two areas from 0 draw the min/max envelope: in C, where a
               # band mark's fill is Ruby, 1.3-3 ms a draw)
               if prev
-                b.area(prev.hi, x: 0..prev.frames, base: 0.0, color: PREVIOUS)
-                b.area(prev.lo, x: 0..prev.frames, base: 0.0, color: PREVIOUS)
+                b.area(prev.hi, x: 0..(prev.frames * r.rate / prev.rate), base: 0.0, color: PREVIOUS)
+                b.area(prev.lo, x: 0..(prev.frames * r.rate / prev.rate), base: 0.0, color: PREVIOUS)
               end
               b.area(r.hi, x: 0..r.frames, base: 0.0, color: 0)
               b.area(r.lo, x: 0..r.frames, base: 0.0, color: 0)
