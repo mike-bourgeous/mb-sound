@@ -86,7 +86,10 @@ module MB
           @warnings = []
           @lit = GraphNode::Recipe::RubyWriter.new(nil)
           @knobs = @session.knobs
-          @knob_nodes = @knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s }
+          # (knobs print as the names the set's `knob` lines define; a name
+          # that isn't a Ruby identifier, like a bound literal's :"bass/reso",
+          # as knob(:"bass/reso"))
+          @knob_nodes = @knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s.match?(/\A[a-z_][A-Za-z0-9_]*\z/) ? n.to_s : "knob(#{n.inspect})" }
           @used = Set.new(@knobs.keys.map(&:to_s))
 
           body = []
@@ -266,8 +269,11 @@ module MB
         # the lines, or none with a problem if the block raised.
         def block_statement(name, args, kwargs, block, block_args, what)
           call = GraphNode::Recipe::Call.new(MB::Sound, name, args, kwargs, block, :build, nil, nil, 0, nil, nil)
-          wrapped = GraphNode::Recipe.wrap_block(block, call)
-          wrapped.call(*block_args)
+          # (a track's patch wrapper: its user block, built in its context)
+          inner = block.respond_to?(:patch_block) ? block.patch_block : block
+          call.block = inner
+          wrapped = GraphNode::Recipe.wrap_block(inner, call)
+          block.respond_to?(:patch_context) ? block.patch_context { wrapped.call(*block_args) } : wrapped.call(*block_args)
 
           # The writer prints objects through their calls: a holder whose
           # recipe is this call prints as the statement

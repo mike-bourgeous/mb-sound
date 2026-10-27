@@ -465,6 +465,11 @@ module MB
           # its own name and ordinal ([:top, :synth, 0, :lp4, 0]), the same
           # for every invocation of a build block (every synth lane).  Nil
           # for calls made outside a .counting block.
+          #
+          # A build call made outside one (no ordinal, at the top level: a
+          # set document's writer wrapping a track's patch block as a
+          # statement) counts as the top level for the calls inside it,
+          # whose own counts start fresh as a .counting block's do.
           def key_of(call)
             key = []
             c = call
@@ -475,6 +480,7 @@ module MB
               return key.unshift(:top).freeze if inv.nil?
               c = inv.call
               return nil unless c
+              return key.unshift(:top).freeze if c.ordinal.nil? && c.scope.nil?
             end
             nil
           end

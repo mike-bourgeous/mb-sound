@@ -34,15 +34,15 @@ module MB
 
           mode_keys do
             group 'Inspector'
-            on [:up, 'k'], :pick, -1, help: 'previous knob (or param)', label: 'Up Down'
-            on [:down, 'j'], :pick, 1, help: 'next knob, then the node\'s params', label: 'Up Down'
+            on [:up, 'k'], :pick, -1, help: 'previous knob or param', label: 'Up Down'
+            on [:down, 'j'], :pick, 1, help: 'next knob or param', label: 'Up Down'
             on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Left Right'
             on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left Right'
             on [:right, :shift], :turn, KnobTurns::FINE, help: 'turn up, fine'
             on [:left, :shift], :turn, -KnobTurns::FINE, help: 'turn down, fine'
             on ['L'], :turn, KnobTurns::FINE, help: 'turn up, fine'
             on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
-            on :enter, :ask, help: 'type a value for the knob (turn :cut, 3000.hz); on a literal param: bind it to a new knob', label: 'Enter'
+            on :enter, :ask, help: 'type a value, or bind a literal param (turn :cut, 3000.hz)', label: 'Enter'
             on '0', :reset, help: "the knob's default"
             on 'm', :learn, help: 'learn a MIDI controller for the knob (learn :cut: turn one)'
             on ['t'], :track, 1, help: 'the next track', label: 't T'

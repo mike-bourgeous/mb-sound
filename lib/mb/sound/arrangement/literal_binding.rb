@@ -20,11 +20,11 @@ module MB
       # Enter binds.
       module LiteralBinding
         # Where a literal is: +kind+ :call (an argument of a recorded DSL
-        # call: +method+ its name, +nth+ which of the patch's calls of that
+        # call: +call_name+ its method's name, +nth+ which of the patch's calls of that
         # name (in the order the patch makes them), +key+ (Recipe.key_of), +slot+ [:arg, index]
         # or [:kw, name]) or :document (a graph document's param: +document+
         # its name), +param+ the param's name, +value+ the literal.
-        Target = Data.define(:kind, :method, :nth, :key, :slot, :param, :value, :document)
+        Target = Data.define(:kind, :call_name, :nth, :key, :slot, :param, :value, :document)
 
         # A literal that can't be bound, with the reason.
         class Error < ArgumentError; end
@@ -82,7 +82,7 @@ module MB
             raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
           end
           nth = keys_of(roots, method).index(key) or raise Error, "#{method} isn't in the track's graph"
-          Target.new(kind: :call, method: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil)
+          Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil)
         end
 
         # The Target for the +nth+ call of +method+ in graph +roots+ and its
@@ -102,7 +102,7 @@ module MB
           name = src.graph_node_name.to_sym
           doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
           return nil unless doc && doc.params.key?(name)
-          Target.new(kind: :document, method: nil, nth: nil, key: nil, slot: nil, param: name, value: src.constant, document: doc.name.to_s)
+          Target.new(kind: :document, call_name: nil, nth: nil, key: nil, slot: nil, param: name, value: src.constant, document: doc.name.to_s)
         end
 
         # A document param by name in graph +roots+ (`bind :bass, :cutoff`).
@@ -111,7 +111,7 @@ module MB
           raise Error, "the track's graph has no document param #{param.inspect} (bind :x, method: :param for a literal)" unless doc && doc.params.key?(param)
           c = nodes(roots).find { |n| n.is_a?(GraphNode::Constant) && n.named? && n.graph_node_name.to_sym == param }
           value = c ? c.constant : doc.params[param][:value]
-          Target.new(kind: :document, method: nil, nth: nil, key: nil, slot: nil, param: param, value: value, document: doc.name.to_s)
+          Target.new(kind: :document, call_name: nil, nth: nil, key: nil, slot: nil, param: param, value: value, document: doc.name.to_s)
         end
 
         # The argument of +call+ that param +param+ is: a keyword of that
@@ -166,14 +166,14 @@ module MB
         # The console line binding Target +t+ on track +track+.
         def line(track, t)
           return "bind #{track.inspect}, #{t.param.inspect}" if t.kind == :document
-          "bind #{track.inspect}, #{t.method}: #{t.param.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
+          "bind #{track.inspect}, #{t.call_name}: #{t.param.inspect}#{", nth: #{t.nth}" if t.nth > 0}"
         end
 
         # +patch+ (a track's patch block) built with Target +t+'s literal
         # replaced by knob +kname+ (read as Session.current's knob of that
         # name, so rehearsal sandboxes read their copies): a block like the
         # patch (arity, parameters, source location), remembering what it
-        # binds (#bindings) and the patch it wraps (#unbound).
+        # binds (#literal_bindings) and the patch it wraps (#unbound_patch).
         #
         # +knob+ (a GraphNode::Knob) stands in for the new binding's knob
         # instead (bind_literal's test build, before the knob exists).
@@ -208,6 +208,8 @@ module MB
           bindings = bindings.freeze
           wrapped.define_singleton_method(:literal_bindings) { bindings }
           wrapped.define_singleton_method(:unbound_patch) { base }
+          wrapped.define_singleton_method(:patch_block) { base.respond_to?(:patch_block) ? base.patch_block : base }
+          wrapped.define_singleton_method(:patch_context) { |&blk| LiteralBinding.with_documents(docs) { GraphNode::Recipe.substituting(subs, &blk) } }
           wrapped
         end
 

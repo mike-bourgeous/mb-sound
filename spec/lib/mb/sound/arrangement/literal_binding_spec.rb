@@ -53,7 +53,9 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     call = lp4.instance_variable_get(:@graph_recipe).call
     expect(rec.key_of(call)).to eq([:top, :synth, 0, :lp4, 0])
     outside = LEAD.call(MB::Sound.seq(MB::Sound::C3).notes).graph.find { |n| n.is_a?(MB::Sound::GraphNode::FourPole) }
-    expect(rec.key_of(outside.instance_variable_get(:@graph_recipe).call)).to be_nil # (not counted: no key)
+    # (a build block outside a counting block is the top level of its calls)
+    expect(rec.key_of(outside.instance_variable_get(:@graph_recipe).call)).to eq([:top, :lp4, 0])
+    expect(rec.key_of(MB::Sound::GraphNode::Recipe.record_of(220.hz.saw.lp4(800)).call)).to be_nil # (not counted: no key)
 
     seen = []
     sub = { [:top, :synth, 0, :lp4, 0] => ->(args, kwargs) { seen << kwargs[:resonance]; [args, kwargs.merge(resonance: 0.5)] } }
@@ -122,6 +124,15 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     end
     4.times { s.process_buffer }
     expect(code_of(s)).to include('knob(:"lead/reso")', 'knob(:"lead/release")')
+
+    # A set document saves the patch reading the knobs (the user's block,
+    # built with the bindings)
+    text = MB::Sound::GraphIO.dump(s.arrangement, name: 'bound')
+    expect(text).to include('knob :"lead/reso"', 'track(:lead) { |c|', 'lp4(1200.hz, resonance: knob(:"lead/reso"))', 'knob(:"lead/release")')
+    s2 = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    @sessions << s2
+    doc = MB::Sound::GraphIO.load(text, session: s2)
+    expect(MB::Sound::GraphIO.dump(doc.session.arrangement, name: 'bound').lines.reject { |l| l.include?('saved:') }).to eq(text.lines.reject { |l| l.include?('saved:') })
   end
 
   it 'says why a param can\'t be bound' do

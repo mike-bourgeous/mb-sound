@@ -314,6 +314,10 @@ module MB
         wrapped.define_singleton_method(:lambda?) { patch.lambda? }
         wrapped.define_singleton_method(:source_location) { patch.source_location }
         wrapped.define_singleton_method(:counted_patch) { patch }
+        # (writers that wrap the user's block themselves, e.g. a set
+        # document's, run it in #patch_context)
+        wrapped.define_singleton_method(:patch_block) { patch }
+        wrapped.define_singleton_method(:patch_context) { |&blk| GraphNode::Recipe.counting(&blk) }
         wrapped
       end
 
