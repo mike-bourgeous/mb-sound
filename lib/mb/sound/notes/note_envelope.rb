@@ -171,6 +171,12 @@ module MB
 
         private
 
+        # The time as the patch gave it, before GM2 scaling (see
+        # Envelope::Preview).
+        def preview_time_source(name)
+          @gm && @base_times.key?(name) ? @base_times[name] : super
+        end
+
         # #sample in a Synth lane (Notes#envelope_grid? is false): nil once
         # the stream ended before this buffer, every envelope of the Notes
         # is idle, and the lane is quiet (Notes#quiet?), so in-lane filters

@@ -217,11 +217,22 @@ module MB
         end
 
         # The selected node's preview (Plot::Panels: a filter's response, a
-        # shaper's curve), drawn through Plot::Live like the scope; follows
-        # turned knobs (the node's snapshot is taken again every poll).
+        # shaper's curve, an envelope's note), drawn through Plot::Live like
+        # the scope; follows turned knobs (the node's snapshot is taken
+        # again every poll).  An envelope's playhead (NodeInfo#live, read
+        # 4 times a second) moves on between polls by the clock while its
+        # segment runs (Clock: a lambda for specs).
         class Preview < Pane
+          class << self
+            # The clock the playhead moves by (monotonic seconds; specs set
+            # a lambda).
+            attr_writer :clock
+
+            def now = @clock ? @clock.call : Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          end
+
           def initialize = super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
-                                           description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve')
+                                           description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
 
           def plot?
             true
@@ -235,7 +246,7 @@ module MB
             chart = n&.preview ? chart_for(n, state) : nil
             unless chart
               c.clear
-              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters and shapers have one)" : 'no node selected (the inspector: n)', w), :dim)
+              c.text(0, 0, c.fit(n ? "#{n.label}: no preview (filters, shapers, and envelopes have one)" : 'no node selected (the inspector: n)', w), :dim)
               return
             end
             native = c.grid.is_a?(FastUI::Grid)
@@ -251,18 +262,29 @@ module MB
 
           private
 
-          # The node's chart, rebuilt only when its params change.
+          # The node's chart, rebuilt only when its params (or a playhead)
+          # change.
           def chart_for(n, state)
-            return state[:chart] if state[:chart_of] == n.params
+            live = live_now(n.live)
+            key = [n.params, live]
+            return state[:chart] if state[:chart_of] == key
             b = Plot::ChartBuilder.new(title: nil, x: nil, y: nil, legend: false, grid: true)
-            chart = Plot::Panels.preview(n.params.node_class, n.params, b) ? b.build : nil
-            state[:chart_of] = n.params
+            chart = Plot::Panels.preview(n.params.node_class, n.params, b, live: live) ? b.build : nil
+            state[:chart_of] = key
             state[:chart] = chart
           rescue StandardError => e
-            state[:chart_of] = n.params
+            state[:chart_of] = key
             state[:chart] = nil
             warn "preview of #{n.label}: #{e.class}: #{e.message}"
             nil
+          end
+
+          # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
+          # read while its segment runs (rounded to a tenth of a frame at
+          # 8 per second, so a held sustain doesn't rebuild the chart).
+          def live_now(live)
+            return live unless live && live[:at] && live[:stage] == :segment
+            live.merge(elapsed: ((Preview.now - live[:at]) * 80).floor / 80.0)
           end
         end
 

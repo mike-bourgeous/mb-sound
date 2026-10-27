@@ -405,6 +405,7 @@ module GraphSweep
 
   # Node classes the sweep doesn't build, with reasons.
   EXEMPT = {
+    'MB::Sound::Envelope::PreviewGate' => "the envelope preview copy's one-note gate (a display render); envelope_view_spec runs it",
     'MB::Sound::DeviceInput' => 'sound card input; device_input_spec runs it',
     'MB::Sound::Mastering::Targeting::Tap' => "records a render's first pass at a preset's trim; mastering_spec's targeted renders run it",
     'MB::Sound::Mastering::Targeting::Tap::Output' => 'an output of Mastering::Targeting::Tap (see there)',
