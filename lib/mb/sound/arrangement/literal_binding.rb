@@ -54,9 +54,9 @@ module MB
         # The call keys of +method+'s calls in graph +roots+, in the order
         # the patch made them (by Call#seq: the same from any root, and when
         # the patch builds again).
-        def keys_of(roots, method)
+        def keys_of(roots, method, all: nil)
           seqs = {}
-          nodes(roots).each do |n|
+          (all || nodes(roots)).each do |n|
             c = call_of(n)
             next unless c && (c.written || c.name) == method
             k = GraphNode::Recipe.key_of(c) or next
@@ -66,8 +66,9 @@ module MB
         end
 
         # The Target for param +param+ of +node+ in graph +roots+ (see
-        # Target), or raises Error saying why it can't be bound.
-        def target(roots, node, param)
+        # Target), or raises Error saying why it can't be bound.  +all+ is
+        # .nodes(roots) if the caller has it (it walks the graph).
+        def target(roots, node, param, all: nil)
           param = param.to_sym
           if (doc = document_param(roots, node, param))
             return doc
@@ -81,7 +82,7 @@ module MB
           unless LiteralBinding.literal?(value)
             raise Error, "#{param} of #{method} is #{value.is_a?(Sequence::Duration) ? 'a tempo length' : 'not a number'} (#{value.inspect[0, 40]}): only numbers become knobs"
           end
-          nth = keys_of(roots, method).index(key) or raise Error, "#{method} isn't in the track's graph"
+          nth = keys_of(roots, method, all: all).index(key) or raise Error, "#{method} isn't in the track's graph"
           Target.new(kind: :call, call_name: method, nth: nth, key: key, slot: slot, param: param, value: value, document: nil)
         end
 

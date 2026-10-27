@@ -123,6 +123,7 @@ module MB
             (entry[:binds] ||= {})[sel] ||= begin
               lb = Arrangement::LiteralBinding
               tr = session.respond_to?(:arrangement) ? session.arrangement.tracks[track] : nil
+              all = tr&.patch? ? (entry[:all] ||= lb.nodes(entry[:roots])) : nil
               Inspect.snapshot(n).values.each_with_object({}) { |(name, v), h|
                 next if v.label.is_a?(Symbol) || !v.value.is_a?(Numeric)
                 h[name] =
@@ -130,7 +131,7 @@ module MB
                     Bind.new(line: nil, knob: nil, reason: "#{track} plays a graph, not a patch: nothing to rebuild".freeze)
                   else
                     begin
-                      t = lb.target(entry[:roots], n, name)
+                      t = lb.target(entry[:roots], n, name, all: all)
                       Bind.new(line: lb.line(track, t).freeze, knob: lb.knob_name(track, t.param), reason: nil)
                     rescue StandardError => e
                       Bind.new(line: nil, knob: nil, reason: (e.is_a?(lb::Error) ? e.message : "#{e.class}: #{e.message}").dup.freeze)
@@ -202,17 +203,18 @@ module MB
           all.each do |n|
             next if n.is_a?(Numeric) || !n.respond_to?(:param_info)
             next if SKIP.include?(n.class.name)
-            snap = Inspect.snapshot(n)
-            info = snap.values
+            info = n.param_info
+            lits = literal_params(n, info)
+            info = info.merge(lits) unless lits.empty?
             next if info.empty? && !preview?(n)
             # (copies with the same settings are one row; settings only a
             # preview reads tell apart, e.g. an amp and a filter envelope)
             sig = [n.class, info.map { |name, v| [name, v.value, v.label] }, preview?(n) ? (n.preview_data rescue nil) : nil]
-            (groups[sig] ||= []) << [n, snap]
+            (groups[sig] ||= []) << n
           end
-          rows = groups.values.map { |pairs|
-            n, snap = pairs.first
-            list = pairs.map(&:first)
+          rows = groups.values.map { |list|
+            n = list.first
+            snap = Inspect.snapshot(n)
             read = Inspect.knobs_read(n).freeze
             preview = preview?(n)
             [n, list.length, snap, read, preview, list.freeze]
