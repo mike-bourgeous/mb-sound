@@ -123,6 +123,7 @@ RSpec.describe('render path code guards') do
     ['lib/mb/sound/notes/node.rb', '((time - from) * rate).floor', 'rate is @rate_r (Rational)'],
     ['lib/mb/sound/wavetable/builder.rb', '(valid * rate).ceil', 'a Float length in seconds'],
     ['lib/mb/sound/session/midi_input.rb', '((e.time - start) * rate).floor', 'rate is output.sample_rate.round (Integer)'],
+    ['lib/mb/sound/ui/patch_render.rb', 'held = (hold * rate).floor', 'how much of a RENDER pane preview the note is held for (Float seconds, a display bound)'],
   ].freeze
 
   it 'floors and ceils frame counts from exact products' do

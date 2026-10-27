@@ -4,6 +4,7 @@ require_relative 'ui/snapshot'
 require_relative 'ui/bus_meter'
 require_relative 'ui/poll'
 require_relative 'ui/inspect'
+require_relative 'ui/patch_render'
 require_relative 'ui/data_file'
 require_relative 'ui/themes/theme_set'
 require_relative 'ui/canvas'
@@ -104,7 +105,7 @@ module MB
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
           Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::Keyboard.new,
           Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::Midi.new,
-          Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new,
+          Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new, Panes::Render.new,
         ].to_h { |p| [p.name, p] }
       end
 
@@ -147,7 +148,7 @@ module MB
         session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
-        sound: ['sound design: the patch inspector (a track\'s knobs to turn, its nodes\' params), the node\'s preview, the graph\'s code, the library picker (placeholder), the CUE line, the console below', '120x40 and up'],
+        sound: ['sound design: the patch inspector (a track\'s knobs to turn, its nodes\' params), the node\'s preview, the graph\'s code, an offline render of the patch, the library picker (placeholder), the CUE line, the console below', '120x40 and up'],
         wall: ['the performance panes at once (tracks, queue, knobs, cpu, the keyboard, meters, scope, spectrum, messages; the set panes are on ui :session), for big terminals', '200x60 and up'],
         show: ['song_script --ui: a big scope and spectrum, no console', '120x40 and up'],
         play: ['synth_script --ui: the keyboard, scope, spectrum, no console', '120x40 and up'],
@@ -222,7 +223,8 @@ module MB
             }
           },
           # Sound design (sound-design-ui-1): the patch inspector beside
-          # the node's preview and the graph's code, the library picker
+          # the node's preview and the graph's code with the patch's
+          # offline render (sound-design-ui-2), the library picker
           # (a placeholder until the library index) and the tracks at the
           # left, the CUE line and the console below at full width
           sound: Viewports.layout(:sound, focus: :repl) {
@@ -230,7 +232,7 @@ module MB
             cols(weight: 5) {
               rows(width: 30) { pane :tracks, height: 7; pane :picker }
               rows(weight: 3) { pane :inspector, weight: 3; pane :preview, weight: 2, min: 8 }
-              rows(weight: 3) { pane :code; pane :sound_keys, height: 9 }
+              rows(weight: 3) { pane :code; pane :render, weight: 2, min: 8; pane :sound_keys, height: 9 }
             }
             pane :audition, height: 1
             repl weight: 2, min: 8

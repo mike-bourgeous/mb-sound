@@ -313,6 +313,11 @@ module MB
       # Restarts the root random generator from +seed+ (see
       # RandomMethods#seed).  Returns the seed.
       def reseed(seed)
+        if (own = Thread.current.thread_variable_get(:mb_sound_private_rng))
+          own[1] = Integer(seed)
+          own[0] = Random.new(own[1])
+          return own[1]
+        end
         @root_seed = Integer(seed)
         @root_rng = Random.new(@root_seed)
         @root_seed
@@ -320,13 +325,18 @@ module MB
 
       # The root seed (see RandomMethods#seed).
       def root_seed
+        own = Thread.current.thread_variable_get(:mb_sound_private_rng)
+        return own[1] if own
         root_rng
         @root_seed
       end
 
       # The root random number generator (a Random; see RandomMethods), for
-      # library code that can control the order of its draws.
+      # library code that can control the order of its draws.  Inside
+      # .with_private_rng, the calling thread's own generator.
       def root_rng
+        own = Thread.current.thread_variable_get(:mb_sound_private_rng)
+        return own[0] if own
         reseed(default_seed) if @root_rng.nil?
         @root_rng
       end
@@ -334,9 +344,43 @@ module MB
       # Replaces the root generator and its seed (RandomMethods#with_seed
       # and #keeping_random_state put the old ones back; a take's replay
       # restores the generator it saved).
-      def restore_rng(rng, seed = @root_seed)
+      def restore_rng(rng, seed = nil)
+        if (own = Thread.current.thread_variable_get(:mb_sound_private_rng))
+          own[0] = rng
+          own[1] = seed unless seed.nil?
+          return
+        end
         @root_rng = rng
-        @root_seed = seed
+        @root_seed = seed unless seed.nil?
+      end
+
+      # Runs the block with live mode off on the calling thread only, so
+      # LiveMethods#live_error raises there as in scripts while the console stays
+      # live: offline sandboxes (UI::PatchRender's renders of a patch)
+      # report a patch's mistakes as their result instead of printing a
+      # warning per render.  Returns the block's value.
+      def strictly
+        old = Thread.current.thread_variable_get(:mb_sound_strict)
+        Thread.current.thread_variable_set(:mb_sound_strict, true)
+        yield
+      ensure
+        Thread.current.thread_variable_set(:mb_sound_strict, old)
+      end
+
+      # Runs the block with a root generator of the calling thread's own,
+      # started from +seed+: every draw from the root generator on this
+      # thread (RandomMethods#seed, #with_seed, #next_seed, Synth lane
+      # seeds) uses it, and other threads keep the shared one, untouched.
+      # The sound-design screen's offline renders build patches on a worker
+      # thread this way while a set plays (UI::PatchRender): a scene built
+      # on the scheduler thread meanwhile draws the seeds it would have
+      # drawn anyway.  Returns the block's value.
+      def with_private_rng(seed)
+        old = Thread.current.thread_variable_get(:mb_sound_private_rng)
+        Thread.current.thread_variable_set(:mb_sound_private_rng, [Random.new(Integer(seed)), Integer(seed)])
+        yield
+      ensure
+        Thread.current.thread_variable_set(:mb_sound_private_rng, old)
       end
 
       # The shared plotters behind PlotMethods#plotter: a terminal text

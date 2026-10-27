@@ -14,7 +14,7 @@ module MB
     module LiveMethods
       # True in live mode (see LiveMethods).
       def live?
-        !!@live
+        !!@live && !Thread.current.thread_variable_get(:mb_sound_strict) # (see Internal.strictly)
       end
 
       # Turns live mode on or off.

@@ -22,6 +22,7 @@ In the inspector: Up/Down pick a knob, Left/Right turn it (Shift or H/L fine; a 
 ```
 transport | form                                          (1 row)
 tracks (7)      | inspector (weight 3)  | code              (the main area, weight 5)
+                |                       | render (weight 2, min 8)
 library picker  | preview (weight 2)    | keys (9)
 audition: the CUE line                                    (1 row)
 console (weight 2, at least 8 rows), full width
@@ -37,6 +38,7 @@ The console runs along the bottom at full width: the tiles keep it at least half
 | `code` (jump c) | `Panes::Code` | the knob lines the graph reads at their values now (`knob :cut, (150.hz..8000.hz).at(3100.hz)`), then the graph's `to_ruby`, wrapped with a hanging indent; recomputed only when the code or a knob value changes | arrows, PgUp/PgDn, y |
 | `picker` | `Panes::Picker` | placeholder: the library picker (find-as-you-type, Enter's likely action, a key per action, auditions on CUE) | |
 | `audition` | `Panes::Audition` | one line: parts on CUE (`:"x/cue"` players), the `:phones` and `:cue_mix` knobs, where the picker's audition plays | |
+| `render` (jump w) | `Panes::Render` (plot) | one note through a second copy of the track's voice: a settled cycle, its spectrum, the envelope, LUFS, peak, RMS, the previous render faintly behind; renders again 0.1 s after the knobs it reads stop moving (see The render pane) | s views, o overlay, p guessed note, + - envelope length, r again |
 | `sound_keys` | `Panes::SoundKeys` | the inspector's keys (from its keymap, so they can't drift) and the planned ones, dim, marked later (/ find, a audition, Enter the picker's action, S save, b A/B, * favourite) | |
 
 The status line names Enter's action while a pane's mode is on (`Tiles#enter_hint`: a pane's `enter_hint(state)`, the design's "Enter's guessed action is named in the status line before it is pressed"), first, before the usual pane hints.
@@ -48,7 +50,67 @@ The status line names Enter's action while a pane's mode is on (`Tiles#enter_hin
 - **Turning**: `UI::KnobTurns` (`ui/knob_turns.rb`), the racks pane's turning moved into a module both panes include: PaneKeys::Preview steps through `Session#preview_turn` while a key is held, one PaneKeys::Commit (`Session#gesture_line`) when it stops (TurnGesture), PaneKeys::Run `turn` lines for set values; a turn moves by 2% (0.2% fine) of the knob's position along its curve (`Spec#position`/`#value`: a cutoff moves evenly in pitch), stepped knobs (Integer ranges) by one step.
 - **Typed values**: a key may return `PaneKeys::Ask[prompt, text, answer]`: the tiles open a prompt line (the palette's line editor, Router `:line`, returning to the pane's mode), and Enter hands the text to the pane's `key_<answer>(state, text)`, whose result is handled like a key's (the inspector's is a `turn :cut, <text>` line); Esc cancels.
 
+## The render pane (sound-design-ui-2)
+
+The maintainer, after the mock-up captures (2026-10-26): "a one-shot render of the processed waveform updated periodically when parameters change".  Three rounds:
+
+- Round 1 rendered 3 s of the track's clip through its whole patch (Synth, clip, sandbox Session) on a worker thread; held: the live render thread's lag went from p99 0.7 ms to ~10 ms in a held sweep (builds were ~100 ms of Ruby holding the GVL).
+- Round 2 rendered one note for 0.5 s in forked processes (one render server per patch, a forked copy per render); the lag came back to the no-render numbers.
+- Round 3 (2026-10-27), his redesign: "I'm expecting that I will build up a patch from nodes. I had no problem with realtime rendering a waveform+filter for one cycle in the fft_experiment by just keeping two copies and calling sample one time on the second copy"; "one can reset every oscillator and filter in the copy, grab a bunch of cycles, and find the Nth cycle where N is long enough for the filter to be at steady state.  Maybe show a few cycles and/or adjust to zero crossings when using unison"; "The second copy can also run at a much lower sample rate for display, as long as it's not too close to filter frequency response warping territory".  What is built now, replacing the forks and the sandbox render:
+
+`Panes::Render` (`render`, jump w; the right column between the code and the keys, weight 2, at least 8 rows):
+
+- **The copy** (`UI::PatchRender::Copy`): one voice of the inspected graph's Synth, built by calling the live `Synth#voice_block` again (lane 0's index and seed, `Synth.with_lane`, so `per_voice` values and seeds match lane 0) with a `Notes` reading a `NoteFeed` (a MIDI::Source the render plays notes into).  Not a Synth, no clip, never in a Session's render.  `knob(:x)` inside the block resolves through a scope Session that is never rendered: it only holds copies of the session's knobs (at the copy's rate) and the tempo, meter, key, and tuning for build-time lengths; readers of live knobs that the block captured (a document param bound to a knob is resolved when the preset loads) are rebound to the copy's knob of that name, and a copy that still shares any node with the live graph is refused.  Plans are installed on it.  It is rebuilt only when the voice block, the note, or the session settings change (Job#copy_key); a knob turn sets the copy's knobs (exact jumps) and renders again.  The copy is built on the worker under `Internal.with_private_rng` (the voice block draws seeds; the shared generator would race scene builds) and `Internal.strictly`.
+- **Reset**: one block of silence after the build (so every oscillator has made its state), then a snapshot of every node's `plan_snapshot` and of the note streams' state; each render puts them back (`plan_restore`, the feed and streams rewound to that stream time), so every render starts from the same state: the same knobs give the same samples.  Knobs and their readers keep counting forward (the values set before a render land on the next frame they read).
+- **The cycle view** (`PatchRender.cycle`): the note held, sampled a few periods at a time; a period has settled once it differs from the one before by less than -40 dB after both are scaled to the same RMS (the next period read a fractional period later, linearly interpolated; slow envelopes don't count as change).  The view is that period from the first rising zero crossing of the channels' mix after it, plus a period's worth of samples to stop.  A note whose periods never repeat within 0.4 s (detuned unison copies, a moving LFO) shows 4 periods from a rising zero crossing at 0.4 s.  The settled sound's second half gives the spectrum.
+- **The envelope view**: the copy reset again and the note played for `PatchRender.seconds` (0.5 s), held for the clip note's length or the role's share; min/max over 1024 columns; LUFS (measured a tenth of a second at a time), peak, RMS.
+- **Input** (`PatchRender.input`): the clip's first note (number, velocity, length), else a guess from `ROLES` matched on the track's name and its graph's code: kick C2, drums D2, bass A1, pad C3 (the maintainer, 2026-10-27: "pad C3 to start probably"), pluck/keys C4, lead G4, else C3.
+- **Rate** (`PatchRender.rate_for`): the lowest of 24, 32, 48 kHz at least 8 times every lowpass cutoff in the copy (four-pole, diode, lowpass SVFs; a cutoff that moves, an LFO or envelope on it, keeps 48 kHz, as does a voice with no lowpass or one that can't change rate).  Measured against the same copy at 48 kHz (a saw through lp4, and 16 detuned saws through lp4), drawn as the pane draws (each column's min and max): at 88 columns the cycle differs only by an edge landing one column over (0.0-0.9% of the peak once a column's shift is allowed; 6-24% without); at 472 columns 0.0-4.7% (a Braille dot of 8 rows is 6.2%).  12 and 16 kHz rounded the saw's edge visibly at 472 columns (12-23% beyond a column's shift), so the lowest rate is 24 kHz.  RMS within 0.03 dB, peak within 0.16 dB.  dnb_reese stays at 48 kHz (its cutoff has an LFO).
+- **Views**: s cycles all that fit (the cycle above the spectrum above the envelope, 5 rows each at least; the cycle beside the spectrum in a wide, short pane; the cycle alone in a small one), the cycle, the envelope, the spectrum.  The first row: track, LUFS, peak, RMS, what played, "settled 18 ms" or "4 cycles", the copy's rate, the render's time.
+- **When** (`PatchRender::Debounce`, a state machine with a transition table: idle, waiting, busy, dirty): 0.1 s after the last change (the track, the voice block, the input, the length, the values of the knobs the voice reads), at most every 0.2 s while changes keep coming, at once when nothing is shown for the track.  A render of a track no longer inspected is dropped; the overlay is only ever the same track's.
+- **Where**: in this process, `PatchRender::Worker` (one thread per pane placement, priority -3, ending after 10 s idle and dropping its copies), in 256-frame blocks and short analysis steps, each followed by `.rest`.  Round 4 (below): the worker works only in windows right after the live render thread finishes a buffer.  `PatchRender.inline` (UI specs, captures) renders on the drawing thread.
+
+### Round 4: trim (2026-10-27)
+
+The maintainer: merge once the live render thread's lag in a held sweep is at the no-preview numbers ("Trim first"); post-synth effects needn't be in the plot ("only per-voice effects"), so the one-voice copy is the right scope.
+
+- **Work windows** (`.slack`, `.rest`): `Session#frames_rendered` (new, a lock-free reader) reaches the copy through `Source#frames`.  The worker waits for it to change (the render thread just finished a buffer and is about to wait on its output), then works for `WINDOW_SHARE` (0.35) of the time between buffers (measured from two buffer ends seen one after the other; 0.4-4 ms), then waits for the next buffer: one sleep most of the way, then 0.5 ms looks.  Every render starts with a wait, so nothing it does lands on the render thread's turn.  This was the change that mattered: the time the render thread spent late was in waking from its pacing sleep, not in rendering, and only while a render's first steps (before any pause) or its windows ran into the render thread's wake.  Neither window size (0.1 against 0.35) nor GC timing changed the lag once every step was in a window.
+- **Builds**: in steps with a window between them (the scope, the voice block's call, rebinding and checks, the rate change, `Plan.install`, the prime and snapshots).  The voice block's call is still one stretch (6-9 ms for dnb_reese when warm), started at a window's beginning.  The scope Session is kept by the Worker for the next copy while the settings and knob specs stay (a Session took 5-30 ms to make), the rate comes from the live voice's lane graph (no 48 kHz build to read cutoffs from), and the last `COPIES` (4) copies are kept: switching back to a track or note just previewed doesn't build again, and drops no copy into the old generation.  A rate band change (a knob moving a lowpass cutoff across 3/4 kHz) makes a new copy.
+- **One render a note**: the note plays once, held for the clip note's length or the role's share; the cycle comes from its held part, the envelope view and figures from the first `seconds`, the spectrum from the held part after the cycle.  (Round 3 played it twice.)
+- **Allocations** (objects per update, dnb_reese / a lp4 saw / 16 detuned saws): 16.7k / 6.1k / 15.0k before, 2.8k / 1.5k / 3.1k after.  Buffers kept per copy (`Copy#work`) and copied into without views (`FastArithmetic.copy_range`); `NoteFeed#read_events` returns one frozen empty Array between notes; the settle scan compares every period at once in matrices, 64 points a period, in 4096-sample pieces; the spectrum keeps its window, band index matrix (one `max(axis: 1)` for 256 bands), and buffers, averaging the last 3 windows of 2048; loudness is BS.1770 on kept K-weighting filters working in place, block energies from slices (the same LUFS as `Loudness::Analyzer` to 1e-3, which made a few hundred objects a call).  The graph itself makes ~1 object a block.  With malloc churn down, the major collections (`:oldmalloc`) during a sweep went away.
+- **Cost per update** (YJIT): dnb_reese 44 → 12 ms, the lp4 saw 4.6 → 2.6 ms, 16 detuned saws 18.5 → 6.5 ms.
+
+| live lag behind the clock, held sweep previewing dnb_reese, 3 x 6 s (one Session, one Driver; the copy built before) | no previews | round 3 (same harness) | round 4 |
+|---|---|---|---|
+| 512 frames, knob sweep | p99 0.69-0.72 ms, max 0.84-1.15 | p99 0.95-1.40, max 2.0-9.7 | p99 0.69-0.73, max 0.77-1.23 |
+| 512 frames, switching between two notes (kept copies) | | p99 3.2-7.4, max 10.9-11.8 | p99 0.69-0.74, max 0.77-0.94 |
+| 512 frames, a new note every second (a build each) | | p99 2.0-2.5, max 8.8-10.8 | p99 0.79-1.02, max 2.7-10.7 |
+| 256 frames (`latency :low`), knob sweep | p99 0.70-0.72, max 0.93-1.07 | p99 1.10-1.13, max 2.5-9.5 | p99 0.72-0.74, max 0.92-1.16 |
+| 256 frames, switching between two notes | | p99 1.9-5.6, max 11.0-12.1 | p99 0.70-0.71, max 0.83-2.71 |
+| 256 frames, a new note every second | | p99 2.4-3.8, max 8.0-10.7 | p99 0.80-1.35, max 2.8-6.4 |
+| the first build (YJIT compiling it) | | p99 4.3, max 8.5-10.9 | p99 1.0-5.3, max 10.9-11.4 |
+
+What's left: a build of a new voice or note is one 6-9 ms stretch (the voice block) plus the major collections the dropped copies' garbage brings (`:nofree`, `:oldmalloc`), up to ~11 ms once per build; the first build of a patch also compiles its code (YJIT).  A knob sweep and switching among kept copies are at the no-preview numbers.
+
+### Measurements (Mac container, 2026-10-27, YJIT as in bin/sound.rb)
+
+| what | round 2 (forked) | round 3 (copy in-process) |
+|---|---|---|
+| dnb_reese per update (48 kHz) | 145 ms wall, none on this process's GVL | median 44 ms, max 62 (the first, with the copy's build: 227 ms, build 82 of it) |
+| a saw through lp4 on the knob (24 kHz) | - | median 4.6 ms (settled after 18 ms) |
+| 16 detuned saws through lp4 (24 kHz; worst case tried) | median 102 ms wall | median 18.5 ms, max 23 (48 kHz: 30 ms) |
+| build per knob turn | none | none (once per voice block and note: 8-95 ms) |
+| painter, all views, charts kept (44x9 / 44x16 / 100x24) | - | 0.42 / 0.27 / 0.33 ms a draw |
+| live lag behind the clock, 512 frames (default), held sweep previewing dnb_reese, 4 x 6 s, the first round's start-up left out | p99 0.7 ms, max 0.7-0.9 (no previews: p99 0.7, max 0.8-1.0) | p99 1.0-1.8 ms, max 2.0-3.3 |
+| same, 256 frames (`latency :low`) | p99 0.7-0.8, max 1.9-5.9 (no previews: p99 0.7, max 0.7-1.0) | p99 0.8-1.3 ms, max 1.9-5.1 |
+| the round that builds the copy (once per voice and note) | - | p99 3.7-4.6 ms, max 10.6-11.3 (the build: one unpaused stretch) |
+
+Between rounds 1 and 3, the per-render GVL work fell from ~100 ms builds to blocks of 0.1-0.3 ms.  What's left over the no-preview numbers is the pauses' granularity and minor GCs from the render's ~16k objects; the copy's build (when the voice block or note changes) is one stretch of 8-95 ms, at the 10 ms GVL timeslice.
+
 ## Open questions (2026-10-26, for the maintainer)
+
+Render pane (sound-design-ui-2, round 4): the ROLES table (notes and holds per role); voices of graphs without a Synth (no voice block to call: a `bg :pad, sound` graph says so); a new voice or note's build (the voice block's call, 6-9 ms, and the collections after it: up to ~11 ms of lag once per build); the pane's place once tried (at 120x40 it has room for the cycle only); effects' demo sources once the picker's auditions exist.
+
 
 In the mock-up's README, numbered; the ones that change direction: whether `:sound` is the name, the console along the bottom, turning document params that aren't knobs (dnb_reese's `param :cutoff` when not bound to a knob: a rebuild, the "live literals" step), which track the inspector follows, the code panel as the graph's `to_ruby` versus the track's patch block, and which nodes get previews next (lp4/diode responses, envelopes, compander curves).
 

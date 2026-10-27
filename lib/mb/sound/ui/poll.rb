@@ -47,6 +47,7 @@ module MB
           @scene_launches = {}
           @lock = Mutex.new
           @inspector = nil # (the inspector's Inspect::Gatherer, made when a pane first needs it)
+          @render_walk = nil # (#render_source: the inspected graph's Synth and nodes)
           @subscription = session.journal.subscribe { |e| note(e) }
           session.journal.changes.each { |e| note(e, seen: false) }
         end
@@ -59,7 +60,8 @@ module MB
 
         # A new Slow, and the knobs to read per buffer ([name, knob] pairs)
         # for Feed#knob_refs=.  +needs+ is what the visible panes need
-        # (Feed#needs): :inspect gathers the inspector's InspectInfo.
+        # (Feed#needs): :inspect gathers the inspector's InspectInfo, :render
+        # the inspected track's PatchRender::Source.
         def call(needs = nil)
           s = @session
           arr = s.arrangement
@@ -99,12 +101,43 @@ module MB
             matrix: matrix_info(arr),
             racks: rack_infos(s),
             clocks: clock_infos(s),
-            inspector: needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil
+            inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
+            render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil
           )
           [slow, knobs.to_a.freeze]
         end
 
         private
+
+        # The inspected track's PatchRender::Source (the RENDER pane): the
+        # Synth in its graph (whose voice block builds the preview's copy),
+        # the live graph's nodes (a copy sharing one is refused), the
+        # track's clip (for its first note), and the session's tempo,
+        # meter, key, and tuning, or nil when nothing is inspected.  The
+        # graph walk is kept per graph (by its roots' identity).
+        def render_source(s, arr, info)
+          name = info&.track or return nil
+          roots = Inspect.roots(s.ui_graphs[name])
+          walk = @render_walk
+          unless walk && walk[:name] == name && walk[:roots].length == roots.length && walk[:roots].zip(roots).all? { |a, b| a.equal?(b) }
+            nodes = roots.flat_map { |r| [r, *(r.respond_to?(:graph) ? r.graph(include_tees: true) : [])] }.uniq(&:__id__)
+            synth = nodes.find { |n| n.is_a?(Synth) }
+            live = nodes.each_with_object({}) { |n, h| h[n.__id__] = true }
+            if synth
+              synth.instance_variable_get(:@lane_graphs)&.each { |g| g.each { |n| live[n.__id__] = true } }
+            end
+            walk = @render_walk = { name: name, roots: roots, synth: synth, live: live.freeze }
+          end
+          tr = arr.tracks[name]
+          t = s.transport
+          note = walk[:synth] ? nil : "#{name} has no synth voice to copy (the preview plays one voice of a synth: synth(midi) { |v| ... })"
+          PatchRender::Source.new(track: name, synth: walk[:synth], clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
+                                  tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, note: note&.freeze,
+                                  words: "#{name} #{info.code}".freeze, live: walk[:live], frames: (walk[:frames] ||= -> { s.frames_rendered }))
+        rescue StandardError => e
+          warn_once(e)
+          nil
+        end
 
         # The clocks (Session#clocks: its own mutex; positions read without
         # the render lock, extrapolated past the last rendered cell).
