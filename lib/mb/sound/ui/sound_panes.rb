@@ -287,8 +287,27 @@ module MB
             def now = @clock ? @clock.call : Process.clock_gettime(Process::CLOCK_MONOTONIC)
           end
 
-          def initialize = super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
-                                           description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
+          # The playhead's time step: elapsed time is rounded to it, finer
+          # than a frame at 120 fps, so the playhead moves every frame
+          # while a segment runs (and a held sustain, without elapsed
+          # time, never rebuilds the chart).
+          PLAYHEAD_STEP = 1 / 240.0
+
+          def initialize
+            super(:preview, rate: 8, height: 10, width: 48, needs: [:inspect], title: 'preview', min_height: 3,
+                            description: 'the inspected node\'s preview: a filter\'s response, a shaper\'s transfer curve, an envelope\'s note with a playhead')
+            @playhead = false
+          end
+
+          # A live pane (UI::PaneRates: the painter's target rate, slowing
+          # under load like the meters) while the inspected node has a
+          # playhead (an envelope's note: maintainer 2026-10-28, "can it
+          # reach 60+ like other parts of the UI?"), else a list pane at its
+          # own rate (a filter's response changes only when turned).
+          # Measured per frame (48x10 and 100x20, YJIT): the envelope chart
+          # 0.18 ms, Plot::Live#draw 0.27-0.34 ms, so the chart is rebuilt
+          # whole rather than caching it and moving only the playhead.
+          def priority = @playhead ? :live : :list
 
           def plot?
             true
@@ -299,6 +318,7 @@ module MB
             h = c.h
             return if w <= 0 || h <= 0
             n = s&.inspector&.selected
+            @playhead = !n&.live.nil?
             chart = n&.preview ? chart_for(n, state) : nil
             unless chart
               c.clear
@@ -336,11 +356,10 @@ module MB
           end
 
           # +live+ (NodeInfo#live) with +:elapsed+, the seconds since it was
-          # read while its segment runs (rounded to a tenth of a frame at
-          # 8 per second, so a held sustain doesn't rebuild the chart).
+          # read while its segment runs (in PLAYHEAD_STEPs).
           def live_now(live)
             return live unless live && live[:at] && live[:stage] == :segment
-            live.merge(elapsed: ((Preview.now - live[:at]) * 80).floor / 80.0)
+            live.merge(elapsed: ((Preview.now - live[:at]) / PLAYHEAD_STEP).floor * PLAYHEAD_STEP)
           end
         end
 

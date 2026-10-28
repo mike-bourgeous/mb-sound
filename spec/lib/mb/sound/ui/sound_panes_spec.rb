@@ -89,6 +89,35 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(draw(:preview, lp4, {}, w: 50, h: 10)[0]).to include('lp4: no preview')
     end
 
+    it 'runs the preview as a live pane while a playhead moves, rebuilding only for a moving playhead (omnibus15)' do
+      pane = ui.panes.fetch(:preview)
+      draw(:preview, snap, {}, w: 50, h: 10)
+      expect(MB::Sound::UI::PaneRates.priority_of(:preview, pane)).to eq(:list) # (a filter's response)
+
+      now = 0.0
+      MB::Sound::UI::Panes::Preview.clock = -> { now }
+      env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
+      state = {}
+      draw(:preview, env, state, w: 50, h: 10)
+      expect(MB::Sound::UI::PaneRates.priority_of(:preview, pane)).to eq(:live)
+      first = state[:chart]
+      now = 1 / 60.0
+      draw(:preview, env, state, w: 50, h: 10)
+      expect(state[:chart]).not_to equal(first) # (the playhead moved a frame)
+
+      held = ui_fake_envelope_inspector
+      sus = held.with(nodes: [*held.nodes[0...-1], held.nodes[-1].with(live: { stage: :sustain, segment: 2, position: 0.0, peak: 0.7, at: 0.0 }.freeze)].freeze)
+      sus_snap = snap.with(slow: snap.slow.with(inspector: sus))
+      draw(:preview, sus_snap, state, w: 50, h: 10)
+      chart = state[:chart]
+      now = 2.0
+      draw(:preview, sus_snap, state, w: 50, h: 10)
+      expect(state[:chart]).to equal(chart) # (a held sustain doesn't rebuild)
+      expect(MB::Sound::UI::PaneRates.priority_of(:preview, pane)).to eq(:live)
+    ensure
+      MB::Sound::UI::Panes::Preview.clock = nil
+    end
+
     it 'lists the inspector\'s keys from its keymap and the planned ones, and the CUE line' do
       built, planned = ui::Panes::SoundKeys.rows
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
