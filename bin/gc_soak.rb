@@ -224,6 +224,10 @@ module MB::Sound
           head = 4096 - last.rss_mb
           lines << format('4 GB lasts about %.0f more minutes at this slope (%.0f minutes of audio in all)', head / slope / 60, (4096 - s[0].rss_mb - (w.rss_mb - s[0].rss_mb)) / slope / 60 + w.seconds / 60)
         end
+        if (sess = @session) && sess.respond_to?(:warmed) && !(w = sess.warmed).empty?
+          by = w.group_by(&:result)
+          lines << 'warm-ups (Session::Warming, the last 32): ' + by.map { |r, l| format('%d %s (%.0f ms)', l.length, r, l.sum(&:ms)) }.join(', ')
+        end
         if @types0 && @types1
           secs = @types1[2] - @types0[2]
           d = @types1[0].to_h { |k, v| [k, v - (@types0[0][k] || 0)] }.select { |_, v| v > 0 }.sort_by { -_2 }.first(10)

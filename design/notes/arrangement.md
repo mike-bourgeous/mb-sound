@@ -166,6 +166,43 @@ Before/after (Mac container, offline `bin/scene_profile.rb`, master-ai with the 
 
 The branch's memory_card 512 worst buffer (79.2 ms) is seven consecutive buffers at bars 30.97-31.02 with no compiling and no GC, every player slow in proportion: a VM stall, not the code.  The warm-up exercise adds 0.5-2.8 s.  Realtime `-R --band` (24 bars, the fixed tool -> branch): allocation while playing fell 12-60% (tunnel_vision 128: 426k -> 175k objects/s; memory_card 128 GC 544 -> 321 ms), but underrun counts stayed within noise (memory_card 128/20 ms 33 -> 32, tunnel_vision 128/20 34 -> 32), since in the container they line up with the VM's stalls (`latency_probe.md`); judge underruns natively.
 
+## Warming changes before they land (branch `dropouts-2`, 2026-10-28)
+
+The maintainer: "Creating a new bus causes dropouts.  Do we lose from the plan creation step more than we gain from the optimizations?"  No: the landing buffer of `bus(:verb) { |sig| sig.reverb(:hall, mix: 1) }` was 93% YJIT compiling (the reverb, the routed render, the bus bookkeeping), with no GC and no Plan.install in it; plans still win steady state (median buffer 0.22 vs 0.35 ms).  `Session::Warming` (`lib/mb/sound/session/warming.rb`) compiles that code before the change is queued:
+
+- **What warms.** `Buses#bus` (the chain built again from the bus's block, silent first, then two noise stand-ins playing into it and sending to it, and a `feed`), `Master#master` (block and preset again, under a noise stand-in), and `Session#add` (`bg`, tracks, scenes: a track's patch built again, `warm:` from `Arrangement#start_track`, else a copy loaded from the graph's recipe, `to_ruby` through `GraphIO.load`; half a bar of it, so a clip's next notes play).
+- **Where.** A sandbox Session (`Session#warm_sandbox`, now also the Arrangement warm-up's: the session's buffer size, channels, rate, tempo, meter, knob and clock copies; sandboxes never warm) on a thread at the scheduler's priority, joined by the caller, with a private root generator (`Internal.with_private_rng`: live seeds unchanged), `Internal.strictly`, and `GCQuiet`.  The sandbox's timeline is seeked so its change lands where the live one is expected to (`#warm_time`, mid-buffer, mid-loop): landing paths, and clips that follow the timeline, take the same branches.
+- **Two rounds**, each in a new sandbox: code that runs once per object or per session (lazy setup, a node's first buffer, a bus's creation) runs before its method has been called often enough to compile (MB::Sound::JIT's threshold 5), so with one round those branches compiled live, inside the hot method, where the change landed (the hall bus's landing still compiled 23 ms; with two, 5).
+- **Never touching the live graphs.** A copy that shares a node with the live chain or graph (a node its block captured) is only built (`:built`), and the Tee branches it made on live nodes are destroyed under the render lock.  Renders with and without warming are bit-identical (`warming_spec.rb`; `SessionFuzz`'s `:warm` relation renders every song with `Warming.always`).
+- **When.** `warm_changes` :auto (realtime sessions with YJIT; `MB_SOUND_WARM=0` off), true, false; a kind and set of node classes is warmed once per process (`Warming.signature`); a scheduled block skips a warm-up it lacks the time for (twice the last one's time, or 0.5 s, before the block's time; `:skipped`); never while the caller holds a realtime session's render lock.  `Session#warmed` lists the last 32.
+- **Shapes.** The first routed span set `@ui_bus_meter` lazily, so the Session's shape changed and YJIT compiled new versions of every Session method in that buffer (~10 ms); it is preset now, and `ivar_layout_spec.rb` checks a busy session keeps its instance variables.
+
+Measured (Mac container, offline Session, 256 frames, a dnb_reese track and a pad playing, YJIT; landing buffer ms / YJIT compile in it; cold -> warm; steady worst buffer ~12-17 ms in this VM):
+
+| change | plans on | plans off | prompt cost (cold -> warm) |
+|---|---|---|---|
+| `bus(:verb) { reverb(:hall, mix: 1) }` | 66 / 63 -> 6.5 / 5 | 41 / 38 -> ~7 (a GC buffer 27) | 59 -> 314 ms |
+| `bus { reverb(:plate).lp4(3000) }` | 63 / 58 -> (GC buffer 31, compile 0) | 38 / 35 -> 7 / 5 | 70 -> 320 ms |
+| `master { softclip(0, 0.1) * 0.1.hz.lfo.at(-6.db..20.db) ... }` | 48 / 46 -> 4 / 3 | 37 / 34 -> (GC 28, compile 0) | 27 -> 116 ms |
+| `bg :lead, preset(:digibrass, midi: clip)` | 152 / 139 -> 26 / 13 | 187 / 159 -> 30 / 12 | 0.9 -> 2.3 s |
+| a track's first launch (digibrass patch) | 138 / 127 -> 9 / 2.5 | 172 / 147 -> 16 / 2 | 0.46 -> 1.2 s |
+
+The cost moves to the prompt (most of it the same compiling, plus building the copies twice and, for graphs, loading a recipe copy: digibrass's `GraphIO.load` ~300 ms).  Forms rehearse already, so their scheduled scene builds mostly skip warm-ups (night_bus_flow: 1 played, 6 skipped).  Left: `feed`'s undo snapshot and knob glide still compile ~8 ms where a first send lands.
+
+## Live allocation and GC off (branch `dropouts-2`, 2026-10-28)
+
+The maintainer: "I'd like to be able to run for an hour with GC off."  `bin/gc_soak.rb` plays a song script live (warm-up, rehearsal, realtime Session with render and scheduler threads) on a NullOutput with a virtual clock let through at `--speed` times real time, disables GC once the music starts, and reports the window's growth and the steady RSS slope per audio second, objects per second, live objects by type (and with `--sites`, the lines allocating most, traced in 2 s chunks: tracing a whole GC-off run ran out of memory; `--dump` writes a chunk's heap with internal objects, which found the imemos); `--gc on|quiet` reports GC runs instead.  Results (Mac container, MB per audio second after the first 30 s, 100 s at 1.5x, warm-ups off for comparison; master-ai -> dropouts-2; first 30 s in brackets):
+
+| song | 128 frames | 256 | 512 |
+|---|---|---|---|
+| tunnel_vision | 9.06 [+220 MB] -> 1.51 [+10] | 6.04 [+153] -> 1.29 [+13] | 4.55 [+106] -> 1.00 [+9] |
+| night_bus_flow | 14.98 [+29] -> 1.87 [+5] | 12.09 [+19] -> 1.29 [+5] | 10.71 [+18] -> 1.05 [+5] |
+| genre_demo -G dnb | 7.41 [+205] -> 1.48 [+50] | 4.80 [+129] -> 1.25 [+38] | 3.60 [+92] -> 1.17 [+48] |
+
+Objects per audio second at 256 frames: 64.5k/56.4k/51.8k -> 17.9k/19.3k/14.3k.  With ~3.5 GB of headroom, 1.3 MB/s lasts about 45 minutes; an hour needs ~1 MB/s (512 frames is there).  The sites cut are listed in `graph_nodes.md` (Allocation on the render path); what is left is mostly Rationals of the timeline and MIDI streams (span ends, clip sources, `shared_advance`), the Numo steps of nodes without C paths (glides with curves, tone jump residuals, drum voice cell tracking), and scene builds' own garbage on the scheduler thread.  The slow tier's `spec/bin/gc_soak_spec.rb` fails above 2 MB/s for tunnel_vision at 256 frames.
+
+**GC on plain buffers** (the maintainer saw a 31 ms GC in a buffer with nothing landing): minor collections (`gc_by: :newobj` or `:malloc`, not majors), long because a build's survivors are still young: every minor marks them until they are promoted (old after surviving three).  After the setup of `bus_cost.rb` (dnb_reese + pad + bus) the minors took 19, 13, 8, 2.4 ms on master-ai (one every ~1000 buffers at 59 objects a buffer); on the branch the first came at buffer 1849 (30 objects a buffer), 21 ms.  GCQuiet makes this worse on purpose for blocks (nothing built in a block is promoted until it ends), but it is what keeps majors away.  With GC on, night_bus_flow at 256 frames for 150 s: master-ai 28 GCs (5 major), 709 ms in all, worst audio second 70 ms; the branch 6 (1 major), 193 ms, 37 ms; with GCQuiet's setting for the whole run (`--gc quiet`) master-ai 16 (no major), 408 ms, 17 ms, the branch 3, 89 ms, 18 ms, the heap then growing 0.73 MB/s instead of 0.33.  Not widened (a question for the maintainer).
+
 ## Song forms (`lib/mb/sound/form.rb`, `form/`, console `FormMethods`)
 
 Maintainer, 2026-10-10: "I'd vote for the block builder" (`flow` alias of `form`; strings withdrawn), fills "close; may tweak after it's built".  2026-10-11: follow actions moved from section definitions to the flow ("The decision should be attached to the outer structure. For generative infinite pieces, goto (potentially with a random choice target). Maybe there are also label entries in the flow for goto to use as targets."; then "Yes. Seek should also accept labels in this regime."): a section's `next:` applied at every appearance, so a weighted choice after a section's second appearance could wrap the playhead backwards.

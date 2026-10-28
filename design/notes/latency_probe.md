@@ -48,3 +48,8 @@ Cost (Mac container): ~6% of one core at the defaults (thread CPU per second ~60
 - **The minute stall**: "stalls cluster at :00.2 of each minute (72% of stall episodes; in 13 of 16 minutes), among the 18 episodes of at least 10 ms".  Each is ~330 ms long (from :00.2 to :00.55; 20-35 ticks over the threshold), and within it single ticks of the 128 KiB memory walk take ~10.5 ms (460x its baseline) with the thread's CPU time equal to the wall time, and often the CPU-only loop takes ~10.6 ms too: the vCPU itself runs slow (it isn't descheduled; steal stays 0), memory work most of all, then the next deadline is ~12-14 ms late.  scene-jit-1 saw 5-10x slower CPU from :59.8 to :00.8 with a 33 ms memory workload.
 - Other big episodes at random seconds (:41.3, :06.5, :15, :48) look the same (~10.5 ms walks).
 - Ruby ticker stalls over 2 ms: 705, of which 649 during probe episodes (system), 28 process, 19 GC, 9 YJIT; GC 14 runs (no majors), 126 ms in all.
+
+## GC stalls seen by the probe (dropouts-2, 2026-10-28)
+
+What the Ruby ticker attributes to `:gc` in a live set is mostly minor collections, not majors: a scene's or bus's build leaves young survivors that every minor marks until they are promoted, 10-20 ms for the first two or three minors after a big build (arrangement.md, Live allocation and GC off).  With the branch's allocation cuts a live song collects 3-6 times a minute less often (night_bus_flow at 256 frames: 14.0 -> 3.0 runs a minute, GC 709 -> 193 ms over 150 s); `bin/gc_soak.rb --gc on` reports runs, majors, and the worst audio second's GC time for a song.
+
