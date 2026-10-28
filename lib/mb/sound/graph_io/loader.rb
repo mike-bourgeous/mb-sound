@@ -618,7 +618,9 @@ module MB
           end
           missing = declared - @given_inputs.keys
           unless missing.empty?
-            raise LoadError.new("#{@label}: missing input#{'s' if missing.length > 1} #{missing.join(', ')} (give #{missing.map { |m| "#{m}: ..." }.join(', ')})", path: @path)
+            notes = missing.select { |m| @document.input_types[m] == :notes || (m == :midi && !@document.input_types.key?(m)) }
+            hint = notes.empty? ? '' : "; an instrument plays notes: `#{@document.name || 'x'}` on a track gets the track's clip (track :x, :#{@document.name || 'x'})"
+            raise LoadError.new("#{@label}: missing input#{'s' if missing.length > 1} #{missing.join(', ')} (give #{missing.map { |m| "#{m}: ..." }.join(', ')}#{hint})", path: @path)
           end
 
           extra = @given_inputs.keys - declared

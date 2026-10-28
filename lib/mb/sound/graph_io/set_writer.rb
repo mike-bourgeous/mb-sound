@@ -237,6 +237,10 @@ module MB
             if tr.trigger && tr.patch && (opts.keys - %i[q fade nudge]).empty?
               # A trigger track (SidechainMethods#sidechain): its patch as a block
               block_statement(:sidechain, [name], opts, tr.patch, [probe_clip(name, tr)], "trigger track #{name.inspect}")
+            elsif tr.patch && (sym = instrument_symbol(tr.patch))
+              # A library instrument (`track :bass, :dnb_reese`; Arrangement::InstrumentPatch)
+              opts[:trigger] = true if tr.trigger
+              ["track #{[name.inspect, sym.inspect, *opts.map { |k, v| "#{k}: #{lit(v)}" }].join(', ')}"]
             elsif tr.patch
               opts[:trigger] = true if tr.trigger
               block_statement(:track, [name], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")
@@ -245,6 +249,15 @@ module MB
               graph_statement("track #{name.inspect}", tr.graph, opts.map { |k, v| "#{k}: #{lit(v)}" })
             end
           }
+        end
+
+        # The Symbol naming the library instrument +patch+ plays (see
+        # Arrangement::InstrumentPatch), if it names it back; nil for patch
+        # blocks and bound literals (printed as their blocks).
+        def instrument_symbol(patch)
+          return nil if patch.respond_to?(:literal_bindings)
+          entry = Arrangement::InstrumentPatch.entry_of(patch) or return nil
+          Arrangement::InstrumentPatch.symbol_for(entry)
         end
 
         # The clip a patch is built from: the track's clip, else the first

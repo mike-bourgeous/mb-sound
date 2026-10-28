@@ -223,6 +223,7 @@ require_relative 'sound/arrangement/clip_matrix'
 require_relative 'sound/arrangement'
 require_relative 'sound/arrangement/cue'
 require_relative 'sound/arrangement/literal_binding'
+require_relative 'sound/arrangement/instrument'
 require_relative 'sound/form'
 
 require_relative 'sound/plot_output'

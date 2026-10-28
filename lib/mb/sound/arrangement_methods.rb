@@ -35,8 +35,18 @@ module MB
       # Also available as #define_track.
       # +trigger: true+ makes it a trigger track, heard only by sidechain readers
       # (see SidechainMethods#sidechain).
-      def track(name, graph = nil, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
-        Session.current.arrangement.track(name, graph, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, &patch)
+      #
+      # A library instrument plays the track's clips (library-instruments-1):
+      # an Entry or a preset's name, optionally with the clip it plays
+      # (either order), e.g. `track :bass, L.inst.dnb.dnb_reese`, `track
+      # :bass, :dnb_reese`, `track :bass, riff, :dnb_reese` (then `bg :bass,
+      # riff` or a scene plays it).  The same as `track(:bass) { |clip|
+      # preset :dnb_reese, midi: clip }`.  Giving a playing track another
+      # instrument builds it again at its launch point (one undo step).
+      # Resonator effects play as struck instruments (`track :bells,
+      # L.fx.bell` is L.inst.bell); other effects raise with where they go.
+      def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, clock: nil, trigger: false, &patch)
+        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, clock: clock, trigger: trigger, &patch)
       end
       alias define_track track
 

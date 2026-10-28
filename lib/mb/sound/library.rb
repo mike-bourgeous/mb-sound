@@ -162,8 +162,23 @@ module MB
           inputs = doc.inputs
           Entry.new(
             name: name.to_sym, kind: kind, family: :preset, tags: tags, about: about, params: params.is_a?(Hash) ? params.select { |_, v| v.is_a?(MB::Sound::Param) } : {},
-            shelf: shelf, location: path, settings: { inputs: inputs, document: true }, builder: ->(**kw) { MB::Sound.preset(path, **kw) }
+            shelf: shelf, location: path, settings: { inputs: inputs, document: true }, builder: document_builder(path, inputs)
           )
+        end
+
+        # The builder of a graph document's Entry: `entry.(midi: clip)`, or
+        # with the main input positional (`entry.(clip)`, `track(:bass,
+        # &entry)`, `sig.then(&entry)`): MB::Sound.preset(path, ...).
+        def document_builder(path, inputs)
+          main = Array(inputs).first
+          lambda do |*args, **kw|
+            if args.length == 1 && main && !kw.key?(main)
+              kw = { main => args.first, **kw }
+            elsif !args.empty?
+              raise ArgumentError, "preset #{File.basename(path, GraphIO::EXTENSION)} takes #{main ? "its #{main} (one positional) and " : ''}params as keywords (got #{args.length} positional)"
+            end
+            MB::Sound.preset(path, **kw)
+          end
         end
 
         # The kind of a parsed graph Document.
