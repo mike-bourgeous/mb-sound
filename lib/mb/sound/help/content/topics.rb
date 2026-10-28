@@ -561,12 +561,12 @@ module MB
 
     Help.topic :tempo, 'Tempo, tuning, and the timeline', group: :time do
       about <<~TEXT
-        One transport for everything: tempo, a meter map, and bar numbers
-        that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
+        One transport for everything: tempo (`bpm 174`, also `tempo 174`),
+        a meter map, and bar numbers that stay stable.  Durations (`1.n8.dotted`, `2.bars`) follow the
         tempo; `1.beat.hz` locks a tone to the beat; `tuning` moves every
         Note.
       TEXT
-      commands :bpm, :meter, :rewind, :seek, :bar, :transport, :tuning
+      commands :bpm, :tempo, :meter, :rewind, :seek, :bar, :transport, :tuning
       note :tempo_sync, :numbers_lengths_phases
       see :schedule
       example 'a tempo-locked wobble' do

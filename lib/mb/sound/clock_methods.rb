@@ -25,6 +25,12 @@ module MB
           raise ArgumentError, "clock #{name.inspect}, x: give a tempo (138.75.bpm), a ratio (5/4r), or a period (19.7.seconds)" unless speed.nil?
           return session.clock!(name)
         end
+        if base.is_a?(GraphNode) || base.is_a?(Range)
+          # (`clock :woozy, 0.1.hz.lfo.at(0.5..2)`: from the take; omnibus15)
+          raise ArgumentError, "clock #{name.inspect}, base: the base is a fixed tempo (138.75.bpm), ratio (5/4r), or period (19.7.seconds) " \
+                               "(got #{ArgTypes.describe_value(base)}); a moving speed goes in speed:, e.g. " \
+                               "`clock #{name.inspect}, 1/1r, speed: 4.bars.lfo.at(0.5..2)` (a tempo LFO, knob(:x), or cc(1, 0.5..2))"
+        end
         session.define_clock(name, base, speed: speed.nil? ? 1 : speed)
       end
 

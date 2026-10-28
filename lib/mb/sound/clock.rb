@@ -110,6 +110,10 @@ module MB
           raise ArgumentError, "A clock speed is a number from 0 up (got #{speed.inspect})" unless speed.real? && speed.finite? && speed >= 0
           speed
         when Symbol, GraphNode::Knob, GraphNode::Knob::Reader then speed
+        when GraphNode
+          # (a tempo LFO, `4.bars.lfo.at(0.5..2)`, read per 800-frame cell
+          # like any param; Hz LFOs raise naming the tempo LFO; omnibus15)
+          MIDI::Param.wrap(speed, 'A clock speed')
         else
           return speed if speed.respond_to?(:value_at)
           raise ArgumentError, "A clock speed is a number, a knob name, knob(:x), or a param like cc(1, 0.5..2) (got #{speed.inspect})"

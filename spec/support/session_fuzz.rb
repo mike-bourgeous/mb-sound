@@ -5,7 +5,9 @@
 # the code), rendered by MB::Sound.render and checked against relations
 # that must hold for any song (spec/lib/mb/sound/session_fuzz_spec.rb):
 #
-# - :runs: the render finishes without an error (800-frame buffers)
+# - :runs: the render finishes without an error (800-frame buffers);
+#   steps include re-bgs of looped clips after one-shots and cue/launch
+#   sequences (omnibus15)
 # - :buffer_size: 367-frame buffers give the same mix within -80 dB of the
 #   peak ("ears win"), and the same length
 # - :plan: plans off gives the same mix, bit for bit (both at the default
@@ -166,6 +168,20 @@ module SessionFuzz
     if !synths.empty? && rng.rand < 0.35
       t = pick(rng, synths)
       lines << "at_bar(#{rng.rand(1..bars)}, beat: 2) { bg :#{t}, seq(C5, D5).n16, on: :now; bg :#{t}, seq(E5, G5).n8.loop, in: 1/4r }"
+    end
+    # (omnibus15) CUE and launch on a synth track: a cued clip launched by
+    # `launch` alone, or a playing part pre-listened, then launched (its
+    # pre-listen ends)
+    if !synths.empty? && rng.rand < 0.35
+      t = pick(rng, synths)
+      bar = rng.rand(1..bars)
+      if rng.rand < 0.5
+        lines << "at_bar(#{bar}) { cue :#{t}, seq(A4, C5).n8.loop }"
+        lines << "at_bar(#{bar}, beat: 3) { launch }"
+      else
+        lines << "at_bar(#{bar}) { bg :#{t}, seq(A4, C5).n8.loop, on: :now; cue :#{t} }"
+        lines << "at_bar(#{bar}, beat: 3) { launch :#{t} }"
+      end
     end
     Song.new(header: header, lines: lines, bars: bars)
   end

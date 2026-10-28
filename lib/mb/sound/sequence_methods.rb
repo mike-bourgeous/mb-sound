@@ -448,7 +448,17 @@ module MB
       # Sequence::Transport#override_bpm).  In a scheduled block, the rest of
       # the block reads the queued tempo (`bpm` returns it, and Durations,
       # #bounce, etc. count at it; see Sequence.current_transport).
+      #
+      # Also #tempo (`tempo 174`, like `genre(:dnb, tempo: 174)`).  The
+      # session's tempo is one number: a drifting part plays on a clock
+      # instead (see #clock's +speed:+).
       def bpm(beats_per_minute = nil)
+        beats_per_minute = beats_per_minute.to_f if beats_per_minute.is_a?(Tempo)
+        unless beats_per_minute.nil? || (beats_per_minute.is_a?(Numeric) && beats_per_minute.real?)
+          # (`bpm 0.1.hz.lfo.at(90..180)`, `bpm 90..180`: omnibus15, from the take)
+          raise ArgumentError, "bpm takes a number (the session's tempo, e.g. bpm 174; got #{ArgTypes.describe_value(beats_per_minute)}); " \
+                               'for a part whose tempo drifts, play it on a clock: `clock :woozy, 1/1r, speed: 4.bars.lfo.at(0.5..2)`, then `bg :x, clip, clock: :woozy`'
+        end
         context = MB::Sound::Session.context
         beats_per_minute = transport.scaled_bpm(beats_per_minute) if beats_per_minute
         if beats_per_minute && context&.[](:batch)
@@ -461,6 +471,7 @@ module MB
         transport.bpm = beats_per_minute if beats_per_minute
         context&.[](:pending_bpm) || transport.bpm
       end
+      alias_method :tempo, :bpm
 
       private
 

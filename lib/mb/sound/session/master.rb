@@ -292,14 +292,19 @@ module MB
           chans = source.outputs
           capturing = !@mastering_capture.nil?
           result, built = Mastering.building(trim: @mastering_trim, capture: capturing) {
-            r = if block.nil?
-                  GraphNode::Channels.new(chans)
-                elsif block.arity == 0 || block.arity == 1
-                  block.call(GraphNode::Channels.new(chans))
-                elsif block.arity < 0 || block.arity == @channels
-                  block.call(*chans)
-                else
-                  raise ArgumentError, "Give the master block one parameter (the whole mix) or #{@channels} (one per channel); got #{block.arity}"
+            r = begin
+                  if block.nil?
+                    GraphNode::Channels.new(chans)
+                  elsif block.arity == 0 || block.arity == 1
+                    block.call(GraphNode::Channels.new(chans))
+                  elsif block.arity < 0 || block.arity == @channels
+                    block.call(*chans)
+                  else
+                    raise ArgumentError, "Give the master block one parameter (the whole mix) or #{@channels} (one per channel); got #{block.arity}"
+                  end
+                rescue NameError => e
+                  # (`master { reverb }`: the block has no receiver; omnibus15)
+                  raise BlockHints.with_hint(e, call: label == 'master' ? 'master' : "bus(#{label.to_sym.inspect})", param: label == 'master' ? 'mix' : 'sig')
                 end
             if preset
               list = master_nodes(r)

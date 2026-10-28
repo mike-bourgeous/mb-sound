@@ -89,9 +89,13 @@ module MB
         def patch_error(name, patch, source, error, what)
           where = patch_line(patch, error)
           from = source.equal?(PatchCheck.probe) ? 'a test clip' : (source.is_a?(Session::MidiInput::LiveClip) ? 'live MIDI' : name_of(source))
+          # (`track(:bass) { preset :dnb_reese, midi: clip }`: say how to
+          # name the clip, or reach the signal; omnibus15)
+          call = what.start_with?('track ') ? "track(#{what.delete_prefix('track ')})" : what
+          hint = BlockHints.hint(error, call: call, param: 'clip')
           PatchError.new(
             "#{what}: the patch raised #{error.class}: #{error.message.lines.first.to_s.chomp} " \
-            "(#{where ? "at #{where}, " : ''}built from #{from}); nothing was changed",
+            "(#{where ? "at #{where}, " : ''}built from #{from}); nothing was changed#{hint ? "; #{hint}" : ''}",
             track: name, original: error
           ).tap { |pe| pe.set_backtrace(error.backtrace || []) }
         end
