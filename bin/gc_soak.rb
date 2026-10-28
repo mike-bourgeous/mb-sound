@@ -60,7 +60,8 @@ module MB::Sound
     Sample = Data.define(:seconds, :rss_mb, :objects, :render_objects, :gc_count, :gc_ms, :majors)
 
     class << self
-      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count, :dump, :gc_quiet
+      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count, :dump, :gc_quiet, :max_rss
+      attr_reader :over_rss
       attr_reader :samples, :window_sites, :end_sites, :render_objects, :started
 
       def setup
@@ -72,6 +73,7 @@ module MB::Sound
         @last_wall = nil
         @band = nil
         @played = 0.0
+        @over_rss = nil
         @types0 = nil
         @types1 = nil
         @chunk_at = nil
@@ -100,6 +102,12 @@ module MB::Sound
         end
         chunk(played) if @sites
         @types0 ||= types if !@sites && played >= @window
+        if @max_rss && @samples[-1].rss_mb > @max_rss
+          # (a runaway, e.g. under MB_SOUND_PLAN_CHECK=1's check machinery,
+          # stops here instead of filling the machine)
+          @over_rss = @samples[-1].rss_mb
+          raise Done
+        end
         raise Done if @limit && played >= @limit
       end
 
@@ -199,7 +207,8 @@ module MB::Sound
       # The report (a String) and the steady slope in MB per audio second.
       def report(song, buffer_size)
         s = @samples
-        return ['No audio played', nil] if s.length < 3
+        stopped = @over_rss ? format('Stopped: RSS passed %.0f MB (--max-rss %d) at %.0f s of audio', @over_rss, @max_rss, s[-1]&.seconds || 0) : nil
+        return [[stopped, 'No audio played'].compact.join("\n"), nil] if s.length < 3
 
         w = s.find { |x| x.seconds >= @window } || s[s.length / 2]
         last = s[-1]
@@ -208,6 +217,7 @@ module MB::Sound
         objs = steady_secs > 0 ? (last.objects - w.objects) / steady_secs : nil
         robjs = steady_secs > 0 ? (last.render_objects - w.render_objects) / steady_secs : nil
         lines = []
+        lines << stopped if stopped
         lines << format('%s: %d-frame buffers, speed %.1fx, GC %s, YJIT %s%s; %.0f s of audio after the warm-up',
           File.basename(song), buffer_size, @speed, @gc_off ? 'off' : (@gc_quiet ? 'on without majors' : 'on'), (defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?) ? 'on' : 'off',
           @band_on ? ', UI deck painting' : '', last.seconds)
@@ -295,6 +305,7 @@ if MB::Sound.main_script?(__FILE__)
     by: ['bytes', String, 'Order --sites lines by bytes or objects', ['bytes', 'objects']],
     band: [false, 'Also paint the terminal UI\'s deck (to /dev/null), as a song\'s --ui does'],
     budget: [nil, Float, 'Exit with status 1 if the steady slope is over this many MB per audio second', 0.0..1000.0],
+    max_rss: [4096, Integer, 'Stop (exit status 1) once the process passes this many MB of RSS (0: no limit)', 0..1_000_000],
   ) { |args, p|
     song, *song_args = args
     raise ArgumentError, "No such song script: #{song}" unless File.file?(song)
@@ -311,6 +322,7 @@ if MB::Sound.main_script?(__FILE__)
     soak.band_on = p.band
     soak.by_count = p.by == 'objects'
     soak.dump = p.dump
+    soak.max_rss = p.max_rss.positive? ? p.max_rss : nil
     MB::Sound::Session.prepend(soak::SessionHook)
     MB::Sound::Internal.singleton_class.prepend(soak::WaitHook)
 
@@ -333,6 +345,6 @@ if MB::Sound.main_script?(__FILE__)
     text, slope = soak.report(song, p.buffer)
     puts text
     MB::Sound::Session.default&.close
-    exit 1 if p.budget && slope && slope > p.budget
+    exit 1 if soak.over_rss || (p.budget && slope && slope > p.budget)
   }
 end
