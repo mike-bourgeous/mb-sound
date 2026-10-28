@@ -1024,7 +1024,9 @@ module MB
           # After every input's source has ended (the ended ones padded with
           # silence; see PaddedInput), the output ends where the last of
           # them did
-          unless dry.include?(nil) || wet.include?(nil)
+          # (any?(&:nil?), not include?(nil): NArray#== casts nil to an
+          # NArray, ~9000 objects a second)
+          unless dry.any?(&:nil?) || wet.any?(&:nil?)
             n = nil
             dry.each { |b| n = b.length if n.nil? || b.length < n }
             wet.each { |b| n = b.length if n.nil? || b.length < n }

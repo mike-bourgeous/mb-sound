@@ -89,6 +89,7 @@ module MB
           @ring_read = nil
           @ring_feedback = nil
           @result_buf = nil
+          @dry_buf = nil # (see #gains_reused)
           @minmax = [0.0, 0.0] # (reused by #delay_buffer)
           @ring = nil
           @ring_zeros = nil
@@ -320,6 +321,13 @@ module MB
             return target if target && MB::Sound::FastArithmetic.wet_dry(target, delayed, wet, data, dry != 0 ? dry : nil)
           end
 
+          # Moving gains on SFloat buffers: the same products and sums in
+          # reused buffers (dropouts-2: a moving wet was ~640 KB/s of
+          # garbage in night_bus_flow)
+          if (r = gains_reused(data, delayed, wet, dry, length))
+            return r
+          end
+
           result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
           if dry.is_a?(Numo::NArray)
             result = result + data * dry[0...length]
@@ -386,6 +394,30 @@ module MB
         private
 
         # A reused SFloat buffer as long as +data+ (an SFloat), or nil.
+        # #process's wet * delayed + dry * data (gains Numerics or SFloats
+        # as long as the block) in reused SFloats, or nil for other types.
+        def gains_reused(data, delayed, wet, dry, length)
+          return nil unless data.is_a?(Numo::SFloat) && delayed.is_a?(Numo::SFloat) && data.length == length && delayed.length == length
+          return nil unless (wet.is_a?(Numeric) || (wet.is_a?(Numo::SFloat) && wet.length == length)) &&
+                            (dry.is_a?(Numeric) || (dry.is_a?(Numo::SFloat) && dry.length == length))
+          return nil if wet.is_a?(Numeric) && !wet.real?
+          return nil if dry.is_a?(Numeric) && !dry.real?
+
+          r = @result_buf = reuse_buffer(@result_buf, data)
+          return nil unless MB::Sound::FastArithmetic.copy(r, delayed)
+          r.inplace * wet
+          if dry.is_a?(Numo::NArray) || dry != 0
+            t = @dry_buf = reuse_buffer(@dry_buf, data)
+            return nil unless MB::Sound::FastArithmetic.copy(t, data)
+            t.inplace * dry
+            r.inplace + t
+          end
+          return r unless data.inplace? && !data.frozen?
+
+          data[true] = r
+          data
+        end
+
         def reuse_buffer(buf, data)
           return nil unless data.is_a?(Numo::SFloat)
           buf && buf.length == data.length ? buf : Numo::SFloat.zeros(data.length)

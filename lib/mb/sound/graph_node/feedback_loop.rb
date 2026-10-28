@@ -214,6 +214,12 @@ module MB
           @check_failed = false
           @out = nil
           @out_views = {}
+          # (reused every block; dropouts-2)
+          @delay_casts = []
+          @comp_buf = nil
+          @sustain_bufs = {}
+          @cutoff_buf = nil
+          @range = [0.0, 0.0]
 
           compile
         end
@@ -384,10 +390,14 @@ module MB
             return nil if d.nil?
 
             d = d[0...n] if d.is_a?(Numo::NArray) && d.length > n
-            max = d.is_a?(Numo::NArray) ? d.max.to_f : d.to_f
+            max = if d.is_a?(Numo::NArray)
+                    MB::Sound::FastArithmetic.min_max(d, @range) ? @range[1] : d.max.to_f
+                  else
+                    d.to_f
+                  end
             max = 0.0 unless max.finite?
             g.line.prepare(n, max + 2, Numo::SFloat)
-            g.last_delay = d.is_a?(Numo::NArray) ? Numo::DFloat.cast(d) : d.to_f
+            g.last_delay = d.is_a?(Numo::NArray) ? delay_cast(i, d) : d.to_f
             @delays[i] = d
           end
 
@@ -400,7 +410,7 @@ module MB
             if @compensate
               l = @compensate == :dc ? @program.latency(@values) : track[0]
               d = comp.last_delay
-              @delays[idx] = d.is_a?(Numo::NArray) || l.is_a?(Numo::NArray) ? Numo::DFloat.cast(d - l) : d - l
+              @delays[idx] = d.is_a?(Numo::NArray) || l.is_a?(Numo::NArray) ? compensated(d, l) : d - l
               @latency = l.is_a?(Numo::NArray) ? l.mean : l
             end
           end
@@ -409,6 +419,43 @@ module MB
           return out unless @ring
 
           ring_out(out, ringing ? 0 : (ring_start || 0))
+        end
+
+        # Delay times +d+ for ring +i+ as a DFloat: +d+ itself if it is one
+        # (as Numo::DFloat.cast returns it), else cast into a reused one.
+        def delay_cast(i, d)
+          return d if d.is_a?(Numo::DFloat)
+
+          buf = @delay_casts[i]
+          buf = @delay_casts[i] = Numo::DFloat.zeros(d.length) if buf.nil? || buf.length != d.length
+          buf[0..] = d
+          buf
+        end
+
+        # Numo::DFloat.cast(d - l) (delay times less the latency, either a
+        # DFloat or a Float) in a reused DFloat: the same differences.
+        def compensated(d, l)
+          n = d.is_a?(Numo::NArray) ? d.length : l.length
+          buf = @comp_buf
+          buf = @comp_buf = Numo::DFloat.zeros(n) if buf.nil? || buf.length != n
+          if d.is_a?(Numo::NArray)
+            buf[0..] = d unless MB::Sound::FastArithmetic.copy(buf, d)
+            buf.inplace - l
+          else
+            # (d - l as -l + d: the same rounding)
+            buf[0..] = l unless MB::Sound::FastArithmetic.copy(buf, l)
+            buf.inplace * -1.0
+            buf.inplace + d
+          end
+          buf
+        end
+
+        # Numo::SFloat.cast(v) for sustain param +index+ in a reused SFloat.
+        def sustain_cast(index, v)
+          buf = @sustain_bufs[index]
+          buf = @sustain_bufs[index] = Numo::SFloat.zeros(v.length) if buf.nil? || buf.length != v.length
+          buf[0..] = v
+          buf
         end
 
         # After an input ends, the loop rings out until its output (what it
@@ -456,9 +503,16 @@ module MB
             v = case op.role
                 when :gain then track[1]
                 when :rest then track[2]
-                when :cutoff then @program.sustain_cutoff(@program.pitch_ring.last_delay)
+                when :cutoff
+                  t = @program.pitch_ring.last_delay
+                  if t.is_a?(Numo::DFloat)
+                    @cutoff_buf = Numo::DFloat.zeros(t.length) if @cutoff_buf.nil? || @cutoff_buf.length != t.length
+                    @program.sustain_cutoff_into(t, @cutoff_buf)
+                  else
+                    @program.sustain_cutoff(t)
+                  end
                 end
-            v = Numo::SFloat.cast(v.length > n ? v[0...n] : v) if v.is_a?(Numo::NArray)
+            v = sustain_cast(op.index, v.length > n ? v[0...n] : v) if v.is_a?(Numo::NArray)
             @params[op.index] = v
           end
         end

@@ -161,6 +161,7 @@ RSpec.describe(MB::Sound::GraphNode::FrozenView) do
   describe 'guard: no cache keyed on a frozen buffer identity alone' do
     allowed = {
       'circular_buffer.rb#peek' => 'compares its own reused view target, not an input buffer',
+      'curve.rb#map!' => 'checks that the scratch buffer is not the input (aliasing), not a cache',
       'filter/delay.rb#process' => 'compares with the :end marker Symbol',
       'graph_node/recipe.rb#note' => 'recipe bookkeeping, not buffers',
       'midi/clip_source.rb#read_events' => 'compares clips and tempo Rationals, not buffers',

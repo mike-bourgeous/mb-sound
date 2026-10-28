@@ -146,6 +146,16 @@ module MB
           )
         end
 
+        # d.abs.max without allocating for real SFloat/DFloat buffers
+        # (FastArithmetic.min_max; dropouts-2), as a Float.
+        def abs_peak(d)
+          r = (@tail_range ||= [0.0, 0.0])
+          return d.abs.max unless MB::Sound::FastArithmetic.min_max(d, r)
+          lo, hi = r
+          p = -lo > hi ? -lo : hi
+          p.nan? ? d.abs.max : p
+        end
+
         # Follows a ringing player's output +data+ (+frames+ frames from
         # session frame +frame+), returning how many of those frames to mix:
         # all of them, or fewer if the tail's quiet stretch reaches
@@ -164,7 +174,8 @@ module MB
           # stretch can start and end inside one): a silent buffer, or one
           # whose last sample is loud (the tail is still going)
           if frames < quiet
-            peak = chans.map { |d| d.abs.max }.max || 0
+            peak = 0
+            chans.each { |d| v = abs_peak(d); peak = v if v > peak }
             if peak < Master::TAIL_THRESHOLD
               ending = ring.quiet_from + quiet
               return ending <= frame + frames ? MB::M.max(ending - frame, 0) : frames

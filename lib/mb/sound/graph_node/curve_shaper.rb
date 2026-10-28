@@ -108,6 +108,8 @@ module MB
           @buf = nil
           @steady_in = FrozenView::Key.new # (see FrozenView)
           @steady_out = nil
+          @plain_x = nil # (reused by #plain)
+          @plain_scratch = nil
           @node_type_name = "#{'a' unless @antialias}ease"
         end
 
@@ -150,8 +152,11 @@ module MB
           "#{super} -- #{@node_type_name}(#{@curve}, #{@input} -> #{@output}, #{@edges}#{', symmetric' if @symmetric})"
         end
 
-        # The plain (exact) shaper of +data+ (a Numo::DFloat result).
+        # The plain (exact) shaper of +data+ (a Numo::DFloat result; a
+        # reused one when the curve maps in place: Curve#map_edges!).
         def plain(data)
+          return plain_reused(data) unless @symmetric
+
           x = (Numo::DFloat.cast(data) - @in_lo) * @in_scale
           if @symmetric
             y = @curve.map_edges(x.abs, @edges)
@@ -161,6 +166,23 @@ module MB
             y = @curve.map_edges(x, @edges)
           end
           y * @out_scale + @out_lo
+        end
+
+        # #plain in reused DFloats (the same operations in place; dropouts-2:
+        # a smoothstep shaper's temporaries were ~5 MB/s of garbage).
+        def plain_reused(data)
+          n = data.length
+          x = @plain_x
+          x = @plain_x = Numo::DFloat.zeros(n) if x.nil? || x.length != n
+          sc = @plain_scratch
+          sc = @plain_scratch = Numo::DFloat.zeros(n) if sc.nil? || sc.length != n
+          x[0..] = data unless MB::Sound::FastArithmetic.copy(x, data)
+          x.inplace - @in_lo
+          x.inplace * @in_scale
+          y = @curve.map_edges!(x, @edges, sc)
+          y.inplace * @out_scale
+          y.inplace + @out_lo
+          y
         end
 
         # Converts a range argument: a Range, or a number n for 0..n.

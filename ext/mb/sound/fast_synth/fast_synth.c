@@ -1274,7 +1274,7 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 }
 
 /*
- * call-seq: MB::Sound::FastSynth.sync_pulse_edges(phases, increments, prev, eps) -> [pulses, increments] or nil
+ * call-seq: MB::Sound::FastSynth.sync_pulse_edges(phases, increments, prev, eps, out = nil) -> [pulses, increments] or nil
  *
  * The edge part of BandLimit.sync_pulses (its Ruby mirror,
  * BandLimit.sync_pulses_ruby, is compared with it in specs; alloc-2):
@@ -1283,11 +1283,31 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
  * from +prev+ = [last phase, last increment, primed]), and updates +prev+.
  * The same double operations as the Numo code (additions, subtractions,
  * divisions, floor, comparisons: nothing a compiler could fuse).  Returns
- * new SFloats of the pulses (clipped to -1..1) and +increments+ (a DFloat
- * as long as +phases+), or nil for other arguments.
+ * SFloats of the pulses (clipped to -1..1) and +increments+ (a DFloat
+ * as long as +phases+), or nil for other arguments.  The SFloats are new,
+ * or with +out+ (an Array of two writable contiguous SFloats as long as
+ * +phases+) those two, written over, and +out+ is returned (dropouts-2:
+ * a synced tone's reused port buffers).
  */
-static VALUE ruby_sync_pulse_edges(VALUE self, VALUE phases, VALUE incs, VALUE prev, VALUE eps_v)
+static _Bool sync_out_pair(VALUE out, VALUE klass, size_t n)
 {
+	if (!RB_TYPE_P(out, T_ARRAY) || RARRAY_LEN(out) != 2) {
+		return 0;
+	}
+	for (long i = 0; i < 2; i++) {
+		VALUE b = RARRAY_AREF(out, i);
+		if (CLASS_OF(b) != klass || RNARRAY_NDIM(b) != 1 || RNARRAY_SIZE(b) != n || OBJ_FROZEN(b) || !RTEST(nary_check_contiguous(b))) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static VALUE ruby_sync_pulse_edges(int argc, VALUE *argv, VALUE self)
+{
+	VALUE phases, incs, prev, eps_v, out;
+	rb_scan_args(argc, argv, "41", &phases, &incs, &prev, &eps_v, &out);
+
 	if (CLASS_OF(phases) != numo_cDFloat || CLASS_OF(incs) != numo_cDFloat || !RB_TYPE_P(prev, T_ARRAY) || RARRAY_LEN(prev) != 3) {
 		return Qnil;
 	}
@@ -1307,8 +1327,9 @@ static VALUE ruby_sync_pulse_edges(VALUE self, VALUE phases, VALUE incs, VALUE p
 	double *ph = (double *)(nary_get_pointer_for_write(phases) + nary_get_offset(phases));
 	const double *inc = (const double *)(nary_get_pointer_for_read(incs) + nary_get_offset(incs));
 
-	VALUE pulses = rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
-	VALUE incs_out = rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	_Bool reuse = !NIL_P(out) && sync_out_pair(out, numo_cSFloat, n);
+	VALUE pulses = reuse ? RARRAY_AREF(out, 0) : rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	VALUE incs_out = reuse ? RARRAY_AREF(out, 1) : rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
 	float *pu = (float *)(nary_get_pointer_for_write(pulses) + nary_get_offset(pulses));
 	float *io = (float *)(nary_get_pointer_for_write(incs_out) + nary_get_offset(incs_out));
 
@@ -1350,21 +1371,28 @@ static VALUE ruby_sync_pulse_edges(VALUE self, VALUE phases, VALUE incs, VALUE p
 
 	RB_GC_GUARD(phases);
 	RB_GC_GUARD(incs);
-	return rb_assoc_new(pulses, incs_out);
+	RB_GC_GUARD(pulses);
+	RB_GC_GUARD(incs_out);
+	return reuse ? out : rb_assoc_new(pulses, incs_out);
 }
 
 /*
- * call-seq: MB::Sound::FastSynth.sync_running_phases(freq, advance, phase) -> [phases, increments] or nil
+ * call-seq: MB::Sound::FastSynth.sync_running_phases(freq, advance, phase, out = nil) -> [phases, increments] or nil
  *
  * BandLimit.sync_phases for a frequency signal (an SFloat of Hz): the
  * increments freq * advance (each value read as a float, then a double)
  * and the kernels' running phase from +phase+ (mb_wrap_phase after each
- * step), as new DFloats; nil for other arguments (the Ruby code runs).
- * The increments are stored before the phases read them, so no compiler
- * fuses the multiply and add (alloc-2).
+ * step), as new DFloats, or with +out+ (an Array of two writable
+ * contiguous DFloats as long as +freq+) into those, returning +out+; nil
+ * for other arguments (the Ruby code runs).  The increments are stored
+ * before the phases read them, so no compiler fuses the multiply and add
+ * (alloc-2).
  */
-static VALUE ruby_sync_running_phases(VALUE self, VALUE freq, VALUE advance_v, VALUE phase_v)
+static VALUE ruby_sync_running_phases(int argc, VALUE *argv, VALUE self)
 {
+	VALUE freq, advance_v, phase_v, out;
+	rb_scan_args(argc, argv, "31", &freq, &advance_v, &phase_v, &out);
+
 	if (CLASS_OF(freq) != numo_cSFloat || RNARRAY_NDIM(freq) != 1 || !RTEST(nary_check_contiguous(freq))) {
 		return Qnil;
 	}
@@ -1377,8 +1405,9 @@ static VALUE ruby_sync_running_phases(VALUE self, VALUE freq, VALUE advance_v, V
 	}
 
 	double advance = NUM2DBL(advance_v);
-	VALUE phases = rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
-	VALUE incs = rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	_Bool reuse = !NIL_P(out) && sync_out_pair(out, numo_cDFloat, n);
+	VALUE phases = reuse ? RARRAY_AREF(out, 0) : rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
+	VALUE incs = reuse ? RARRAY_AREF(out, 1) : rb_funcall(numo_cDFloat, rb_intern("zeros"), 1, SIZET2NUM(n));
 	const float *f = (const float *)(nary_get_pointer_for_read(freq) + nary_get_offset(freq));
 	double *ph = (double *)(nary_get_pointer_for_write(phases) + nary_get_offset(phases));
 	volatile double *inc = (double *)(nary_get_pointer_for_write(incs) + nary_get_offset(incs));
@@ -1393,7 +1422,9 @@ static VALUE ruby_sync_running_phases(VALUE self, VALUE freq, VALUE advance_v, V
 	}
 
 	RB_GC_GUARD(freq);
-	return rb_assoc_new(phases, incs);
+	RB_GC_GUARD(phases);
+	RB_GC_GUARD(incs);
+	return reuse ? out : rb_assoc_new(phases, incs);
 }
 
 void Init_fast_synth(void)
@@ -1415,6 +1446,6 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
 	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
-	rb_define_module_function(fast_synth, "sync_pulse_edges", ruby_sync_pulse_edges, 4);
-	rb_define_module_function(fast_synth, "sync_running_phases", ruby_sync_running_phases, 3);
+	rb_define_module_function(fast_synth, "sync_pulse_edges", ruby_sync_pulse_edges, -1);
+	rb_define_module_function(fast_synth, "sync_running_phases", ruby_sync_running_phases, -1);
 }

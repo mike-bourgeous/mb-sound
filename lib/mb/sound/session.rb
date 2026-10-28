@@ -308,6 +308,7 @@ module MB
         @per_sample_cache = nil # (see #span_per_sample)
         @span_mix_bufs = nil # (see #span_mix)
         @reuse_mix = false # (see #process_buffer)
+        @tail_range = nil # (see Tails#abs_peak)
         @master_out_bufs = nil # (see Master#process_master)
         @tuning = tuning
         self.master_gain = master_gain

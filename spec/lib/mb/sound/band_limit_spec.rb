@@ -925,6 +925,26 @@ RSpec.describe(MB::Sound::BandLimit) do
       end
     end
 
+    it 'gives the same pulses into reused buffers (dropouts-2)' do
+      sig = Numo::SFloat.new(300).rand(-3000, 9000)
+      [[0.1, sig, 300, [0.7, 0.01, 1]], [0.3, 440.0, 128, [0.29, 440.0 / 48000, 1]]].each do |phi, freq, n, prev|
+        bufs = [[Numo::DFloat.zeros(n), Numo::DFloat.zeros(n)], [Numo::SFloat.zeros(n), Numo::SFloat.zeros(n)]]
+        p1 = prev.dup
+        p2 = prev.dup
+        a = MB::Sound::BandLimit.sync_pulses(phi, freq, 1 / 48000.0, n, p1)
+        b = MB::Sound::BandLimit.sync_pulses(phi, freq, 1 / 48000.0, n, p2, bufs)
+        expect(b[0].to_binary).to eq(a[0].to_binary)
+        expect(b[1].to_binary).to eq(a[1].to_binary)
+        expect(p2).to eq(p1)
+        expect(b[0]).to equal(bufs[1][0]) if freq.is_a?(Numo::SFloat)
+      end
+      # (wrong lengths: new arrays, the same values)
+      p1 = [0.7, 0.01, 1]
+      wrong = [[Numo::DFloat.zeros(3), Numo::DFloat.zeros(3)], [Numo::SFloat.zeros(3), Numo::SFloat.zeros(3)]]
+      c = MB::Sound::BandLimit.sync_pulses(0.1, sig, 1 / 48000.0, 300, p1, wrong)
+      expect(c[0].length).to eq(300)
+    end
+
     it 'gives the same sync ports from the C edges as from the Numo mirror' do
       out = ->(native) {
         unless native

@@ -272,4 +272,27 @@ RSpec.describe('MB::Sound::Curve#lookup') do
     expect { MB::Sound::FastClip.curve_lookup(Numo::DFloat[0], nil, nil, nil, nil) }.to raise_error(ArgumentError, /table/)
     expect { MB::Sound::FastClip.curve_lookup(Numo::DFloat[0], Numo::DFloat[0, 1], Numo::DFloat[0], Numo::DFloat[0, 1], Numo::DFloat[0, 1]) }.to raise_error(ArgumentError, /short/)
   end
+
+  describe '#map! and #map_edges!' do
+    # dropouts-2: render paths map in place, so every curve's in-place form
+    # must give #map's values bit for bit (and the rest fall back to #map)
+    it 'give #map and #map_edges values for every named curve' do
+      x = Numo::DFloat[-0.3, -0.0, 0.0, 1e-9, 0.1, 0.25, 0.5, 0.75, 0.999999, 1.0, 1.4, *Numo::DFloat.new(64).rand(-0.5, 1.5).to_a]
+      MB::Sound::Curve.names.each do |name|
+        c = MB::Sound::Curve[name]
+        expect(c.map!(x.dup, Numo::DFloat.zeros(x.length)).to_a).to eq(c.map(x).to_a), name.to_s
+        %i[clamp raw].each do |edges|
+          expect(c.map_edges!(x.dup, edges, Numo::DFloat.zeros(x.length)).to_a).to eq(c.map_edges(x, edges).to_a), "#{name} #{edges}"
+        end
+      end
+    end
+
+    it 'leave frozen and other inputs to #map' do
+      c = MB::Sound::Curve[:smoothstep]
+      x = Numo::DFloat[0.1, 0.5].freeze
+      expect(c.map!(x, Numo::DFloat.zeros(2)).to_a).to eq(c.map(x).to_a)
+      expect(x.to_a).to eq([0.1, 0.5])
+      expect(c.map!(Numo::SFloat[0.5], Numo::DFloat.zeros(1)).to_a).to eq([0.5])
+    end
+  end
 end

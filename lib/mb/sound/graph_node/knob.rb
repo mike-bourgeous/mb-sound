@@ -445,6 +445,7 @@ module MB
           @render_flip = 0
           @render_views = FrozenView.new
           @ramp_t = nil
+          @ramp_scratch = nil
           @follow_buf = nil
           @cc = @spec.cc
           @midi = nil
@@ -953,7 +954,8 @@ module MB
           t.inplace / seg.length
           ends = j0 + n >= seg.length
           t.inplace.clip(0.0, 1.0) if ends
-          c = seg.curve ? seg.curve.map(t) : t
+          # (in place but on the last frames, which read t again below)
+          c = seg.curve ? (ends ? seg.curve.map(t) : seg.curve.map!(t, ramp_scratch(n))) : t
           if @spec.curve == :exp
             p0 = @spec.position(seg.from)
             p1 = @spec.position(seg.to)
@@ -971,6 +973,13 @@ module MB
             v[done] = seg.to
           end
           v
+        end
+
+        # A reused DFloat of +n+ samples for Curve#map! in #ramp_values.
+        def ramp_scratch(n)
+          sc = @ramp_scratch
+          sc = @ramp_scratch = Numo::DFloat.zeros(n) if sc.nil? || sc.length != n
+          sc
         end
 
         # +n+ frames of the followed node (holding its last value once it
