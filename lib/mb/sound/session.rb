@@ -1582,7 +1582,7 @@ module MB
         # ring-out differed by buffer size, SessionFuzz seed 1194)
         quiet = ringing && p.ring.stop_frame ? (RING_QUIET_SECONDS * rate).round : nil
         total = frames
-        loop do
+        while true # (not loop do: its break and return allocated an imemo per player per buffer)
           frames = total
           if quiet
             ending = p.ring.quiet_from + quiet - base
@@ -1644,7 +1644,9 @@ module MB
           if routed
             deliver_player(p, data, ramp, mix, stem, offset, frames, fade: fade)
           else
-            mix.each_with_index do |m, c|
+            c = -1
+            while (c += 1) < mix.length # (no each_with_index: an imemo per player per buffer)
+              m = mix[c]
               d = data[c % data.length]
               next if d.nil? || d.empty?
               d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)

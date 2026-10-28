@@ -60,7 +60,7 @@ module MB::Sound
     Sample = Data.define(:seconds, :rss_mb, :objects, :render_objects, :gc_count)
 
     class << self
-      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count
+      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count, :dump
       attr_reader :samples, :window_sites, :end_sites, :render_objects, :started
 
       def setup
@@ -157,6 +157,11 @@ module MB::Sound
       def chunk(played)
         @played = played
         return if played < @chunk_at
+        if @dump && played - CHUNK >= @window
+          # (one chunk's heap, internal objects too, for imemo sites)
+          File.open(@dump, 'w') { |f| ObjectSpace.dump_all(output: f, since: @gen) }
+          @dump = nil
+        end
         tally_into(played - CHUNK < @window ? @window_sites : @end_sites)
         ObjectSpace.trace_object_allocations_clear
         GC.enable
@@ -275,6 +280,7 @@ if MB::Sound.main_script?(__FILE__)
     window: [60.0, Float, 'Seconds of audio counted as the start (landings, first buffers) before the steady slope', 1.0..3600.0],
     gc: ['off', String, 'Ruby GC while playing: off (GC.disable once the music starts) or on', ['off', 'on']],
     sites: [0, Integer, 'Trace allocations and list this many lines (0: none)', 0..1000],
+    dump: [nil, String, 'With --sites, write one traced chunk after the window as ObjectSpace.dump_all JSON lines (internal objects too)'],
     by: ['bytes', String, 'Order --sites lines by bytes or objects', ['bytes', 'objects']],
     band: [false, 'Also paint the terminal UI\'s deck (to /dev/null), as a song\'s --ui does'],
     budget: [nil, Float, 'Exit with status 1 if the steady slope is over this many MB per audio second', 0.0..1000.0],
@@ -292,6 +298,7 @@ if MB::Sound.main_script?(__FILE__)
     soak.gc_off = p.gc == 'off'
     soak.band_on = p.band
     soak.by_count = p.by == 'objects'
+    soak.dump = p.dump
     MB::Sound::Session.prepend(soak::SessionHook)
     MB::Sound::Internal.singleton_class.prepend(soak::WaitHook)
 

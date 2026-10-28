@@ -185,8 +185,9 @@ module MB
               end
               idx += 1
             end
-            PARAMS.each_with_index do |(_, unit), idx|
-              params[idx] = params[idx] * @sample_rate if unit == :seconds && params[idx].is_a?(Numeric)
+            idx = -1
+            while (idx += 1) < PARAMS.length # (no each_with_index: an imemo a call)
+              params[idx] = params[idx] * @sample_rate if PARAMS[idx][1] == :seconds && params[idx].is_a?(Numeric)
             end
 
             if @outputs.empty? || @outputs[0].length != count

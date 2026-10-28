@@ -422,7 +422,16 @@ module MB
         # Starts a chain whose time has come, handing over from the older
         # chains at the frame where it starts in this buffer.
         def activate_master(chains, from, to, per_sample, rate)
-          @mutex.synchronize {
+          # (the lock taken only when a chain may start: the return from
+          # inside the block made an imemo every buffer)
+          chain = chains.last
+          return if chain.started
+          @mutex.synchronize { activate_master_locked(chains, from, to, per_sample, rate) }
+        end
+
+        # #activate_master with the lock held.
+        def activate_master_locked(chains, from, to, per_sample, rate)
+          begin
             chain = chains.last
             return if chain.started || (chain.start >= to && @players.any?)
 
@@ -458,7 +467,7 @@ module MB
                 c.ramp_from = offset
               end
             end
-          }
+          end
         end
 
         # Renders one chain's output into +out+.
@@ -484,7 +493,9 @@ module MB
             c.capture.add(@frame, input, data, ramp)
             @mastering_capture&.note_sections(self, @frame, count, @span.pos)
           end
-          out.each_with_index do |o, idx|
+          idx = -1
+          while (idx += 1) < out.length # (no each_with_index: an imemo a call)
+            o = out[idx]
             d = data[idx]
             next if d.length == count && (ramp.nil? || ramp.length == count) && FastArithmetic.add_at(o, 0, d, count, ramp)
             d = d * ramp if ramp

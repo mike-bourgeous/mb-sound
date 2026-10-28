@@ -790,7 +790,14 @@ module MB
         # renders the frames in between first; one that starts before it
         # (a reader that fell behind) gets the current value.
         def read(frame, count)
-          @lock.synchronize {
+          # (the body outside the block: a return from inside the block made
+          # an imemo each read, ~4000 a second in tunnel_vision; dropouts-2)
+          @lock.synchronize { read_locked(frame, count) }
+        end
+
+        # #read with the lock held.
+        def read_locked(frame, count)
+          begin
             if @span_frame == frame && count <= @span_count
               out = @span_out
               return out if count == @span_count || !out.is_a?(Numo::NArray)
@@ -816,7 +823,7 @@ module MB
             end
 
             @value
-          }
+          end
         end
 
         # A frozen buffer of +count+ samples of +value+, reused while both

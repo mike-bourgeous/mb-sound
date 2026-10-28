@@ -821,7 +821,9 @@ module MB
             stem = stem_shadow_input(track, route.to)
           end
 
-          dest.each_with_index do |m, c|
+          c = -1
+          while (c += 1) < dest.length # (no each_with_index: an imemo a call)
+            m = dest[c]
             d = data[c % data.length]
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
@@ -999,7 +1001,9 @@ module MB
 
             ramp = ramp_levels(b, :strip_level, :strip_ramp, frame + p0, p1 - p0)
             n = p1 - p0
-            out.each_with_index do |o, c|
+            c = -1
+            while (c += 1) < out.length # (no each_with_index: an imemo a call)
+              o = out[c]
               acc_add(tap[c], p0, o, n, nil, nil, 0) if tap # (readers hear it before its mute)
               (FastArithmetic.scale(o, ramp) || o.inplace * ramp) if ramp
               acc_add(dest[c], p0, o, n, nil, nil, 0)

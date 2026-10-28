@@ -955,7 +955,8 @@ module MB
           # (scales the dry input in place unless it's a frozen, shared
           # buffer, which is scaled into a reused buffer per channel)
           @dry_scaled.clear
-          dry.each_with_index { |c, idx| @dry_scaled << scale_dry(c, idx) }
+          idx = -1
+          @dry_scaled << scale_dry(dry[idx], idx) while (idx += 1) < dry.length # (no each_with_index: an imemo a call)
           @dry_output = @dry_scaled
           @dry_groups = partition_reused(:dry, @dry_output, @output_channels)
         end
@@ -983,9 +984,10 @@ module MB
         # Fills reused [buffer, 1] pairs in +pairs+ for each of +bufs+.
         def unity_pairs(pairs, bufs)
           pairs.pop while pairs.length > bufs.length
-          bufs.each_with_index do |b, i|
+          i = -1
+          while (i += 1) < bufs.length # (no each_with_index: an imemo a call)
             pair = (pairs[i] ||= [nil, 1])
-            pair[0] = b
+            pair[0] = bufs[i]
           end
           pairs
         end
@@ -1059,9 +1061,12 @@ module MB
             @partitions[key] = [[list.length, count, idx], groups]
             plan = @partitions[key][0]
           end
-          plan[2].each_with_index do |g, gi|
+          gi = -1
+          while (gi += 1) < plan[2].length # (no each_with_index: imemos every buffer)
+            g = plan[2][gi]
             out = groups[gi]
-            g.each_with_index { |li, j| out[j] = list[li] }
+            j = -1
+            out[j] = list[g[j]] while (j += 1) < g.length
           end
           groups
         end
@@ -1085,8 +1090,9 @@ module MB
           return [nil] if ended
 
           inputs = @line_input_bufs
-          @line_inputs.each_with_index do |u, i|
-            b = bufs[u.object_id]
+          i = -1
+          while (i += 1) < @line_inputs.length # (no each_with_index: an imemo a call)
+            b = bufs[@line_inputs[i].object_id]
             inputs[i] = b.length > n ? b[0...n] : b
           end
           @network.process(inputs, n) || [nil]
