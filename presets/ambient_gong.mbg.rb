@@ -3,11 +3,11 @@
 graph 5,
   name: "ambient_gong",
   kind: :synth,
-  saved: "2026-10-24T18:49:28Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:22:05Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :gong from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :gong, wear: 0.6 }
+  options: { patch: :gong, decay: nil, attack: nil, release: nil, tip: nil, wear: 0.6 }
 inputs midi: :notes
 param :space, (0.0..1.0).at(0.5), description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 param :tune, (-24.0..12.0).at(-7.0), description: "Gong shimmer tuning in semitones (the shimmer partials and their noise band)"

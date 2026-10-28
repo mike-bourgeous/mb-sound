@@ -175,22 +175,22 @@ module MB::Sound
   # notes, mono.  The oscillators run free (.free): resetting their phase
   # at a note-on while the last note's release still rang clicked
   # (patches-2, 2026-10-13); the same for the Reese and the flute.
-  def self.jungle_sub_voice(midi, level: 0.3, glide: 0.05)
+  def self.jungle_sub_voice(midi, level: 0.3, glide: 0.05, release: 0.12)
     synth(midi, voices: 1) { |v|
       p = v.hz.glide(glide, legato: true)
-      (p.sine.free + p.transpose(12).sine.free * 0.15) * v.env(0.006, 0.2, 0.85, 0.12, gm: false).legato
+      (p.sine.free + p.transpose(12).sine.free * 0.15) * v.env(0.006, 0.2, 0.85, release, gm: false).legato
     } * level
   end
 
   # The Reese: two saws +detune+ apart, an octave sine under them, a
   # lowpass breathing between +low+ and +high+ Hz on a 2-bar LFO.
-  def self.jungle_reese_voice(midi, level: 0.32, detune: 16.cents, low: 260, high: 700)
+  def self.jungle_reese_voice(midi, level: 0.32, detune: 16.cents, low: 260, high: 700, glide: 0.06, release: 0.15)
     synth(midi, voices: 1) { |v|
-      p = v.hz.glide(0.06, legato: true)
+      p = v.hz.glide(glide, legato: true)
       saws = p.unison(2, detune: detune, phase: 0.0) { |c, _i| c.saw.free }
       breath = 1.bar.hz.transpose(-12).lfo.at(low..high)
       body = saws.lp4(breath, resonance: 0.2)
-      (body * 0.9 + p.sine.free * 0.6) * v.env(0.02, 0.3, 0.9, 0.15, gm: false).legato
+      (body * 0.9 + p.sine.free * 0.6) * v.env(0.02, 0.3, 0.9, release, gm: false).legato
     }.softclip(0.5, 0.95) * level
   end
 
@@ -204,9 +204,9 @@ module MB::Sound
   # +level+ is the same for both (the tine is trimmed to the FM keys'
   # loudness on the jungle template's stabs plus 5 dB: see
   # JUNGLE_KEYS_TINE_TRIM).
-  def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22, piano: :tine)
+  def self.jungle_keys_voice(midi, level: 0.15, bark: 0.22, tremolo: 4.6, hall: 0.22, piano: :tine, decay: 4.5)
     if piano == :tine
-      tine = tine_piano_voice(midi, bark: bark / 0.22, tremolo: 0.22, rate: tremolo)
+      tine = tine_piano_voice(midi, bark: bark / 0.22, tremolo: 0.22, rate: tremolo, decay: decay)
       return tine.reverb(:hall, mix: hall) * (level * JUNGLE_KEYS_TINE_TRIM)
     end
     raise ArgumentError, "Unknown jungle keys piano #{piano.inspect} (:tine or :fm)" unless piano == :fm
@@ -223,10 +223,10 @@ module MB::Sound
 
   # The string pad: five saws per note +detune+ apart, slow attack, a
   # lowpass at +cutoff+, highpassed at 180 Hz, Juno chorus, hall.
-  def self.jungle_pad_voice(midi, level: 0.085, cutoff: 2400, detune: 22.cents, hall: 0.35)
+  def self.jungle_pad_voice(midi, level: 0.085, cutoff: 2400, detune: 22.cents, hall: 0.35, attack: 1.2, release: 1.8)
     pad = synth(midi, voices: 4) { |v|
       saws = v.hz.unison(5, detune: detune) { |c, _i| c.saw }
-      saws.filter(:lowpass, cutoff: cutoff, quality: 0.6) * v.env(1.2, 1.0, 0.8, 1.8, gm: false)
+      saws.filter(:lowpass, cutoff: cutoff, quality: 0.6) * v.env(attack, 1.0, 0.8, release, gm: false)
     }
     pad.filter(:highpass, cutoff: 180, quality: 0.7).chorus(:juno12).reverb(:hall, mix: hall) * level
   end
@@ -234,11 +234,11 @@ module MB::Sound
   # The flute-ish lead: triangle and sine with a little bandpassed breath,
   # a delayed vibrato, a dotted-eighth echo (+send+ wet, a number or a
   # node; +feedback+) and a hall.
-  def self.jungle_flute_voice(midi, send: 0.3, level: 0.17, feedback: 0.35, breath: 0.05)
+  def self.jungle_flute_voice(midi, send: 0.3, level: 0.17, feedback: 0.35, breath: 0.05, glide: 0.04, attack: 0.04)
     lead = synth(midi, voices: 1) { |v|
-      p = v.hz.glide(0.04, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)
+      p = v.hz.glide(glide, legato: true).vibrato(5.2, depth: 15.cents, delay: 0.25)
       air = noise.filter(:bandpass, cutoff: 2600, quality: 1.2) * breath
-      (p.triangle.free * 0.6 + p.sine.free * 0.5 + air) * v.env(0.04, 0.3, 0.8, 0.25, gm: false)
+      (p.triangle.free * 0.6 + p.sine.free * 0.5 + air) * v.env(attack, 0.3, 0.8, 0.25, gm: false)
     }
     (lead * level).delay(1.n8.dotted, feedback: feedback, wet: send, dry: 1).reverb(:hall, mix: 0.25)
   end
@@ -253,16 +253,30 @@ module MB::Sound
   # :jungle_keys preset follow.
   JUNGLE_KEYS_TINE_TRIM = 3.2 * 5.db
 
-  # The script's patches by name (see the header), with the script's
-  # parameters as named Constants (so --save makes them preset params).
-  def self.jungle_patch(midi, patch = :keys, cutoff: 16000.0, echo: 0.3)
+  # The knobs each patch's preset has (library-instruments-1; see
+  # bin/synths/dnb.rb's DNB_KNOBS): each patch's own values, given as
+  # named Constants so --save makes them params.
+  JUNGLE_KNOBS = {
+    breaks: { cutoff: 16000.0, grit: 0.25 },
+    sub: { release: 0.12 }, # (a glide node would make its idle lane sleep, stopping its free sines: not the same sound)
+    reese: { glide: 0.06, release: 0.15 },
+    keys: { decay: 4.5 },
+    pad: { cutoff: 2400.0, attack: 1.2, release: 1.8 },
+    flute: { echo: 0.3, glide: 0.04, attack: 0.04 },
+  }.freeze
+
+  # The script's patches by name (see the header), with the patch's knobs
+  # (JUNGLE_KNOBS, overridden by the script's options) as named Constants
+  # (so --save makes them preset params).
+  def self.jungle_patch(midi, patch = :keys, **opts)
+    k = (JUNGLE_KNOBS[patch] || {}).to_h { |name, v| [name, (opts[name] || v).to_f.constant.named(name.to_s)] }
     case patch
-    when :breaks then jungle_breaks_voice(midi, cutoff: cutoff.constant.named('cutoff'))
-    when :sub then jungle_sub_voice(midi)
-    when :reese then jungle_reese_voice(midi)
-    when :keys then jungle_keys_voice(midi)
-    when :pad then jungle_pad_voice(midi)
-    when :flute then jungle_flute_voice(midi, send: echo.constant.named('echo'))
+    when :breaks then jungle_breaks_voice(midi, **k)
+    when :sub then jungle_sub_voice(midi, **k)
+    when :reese then jungle_reese_voice(midi, **k)
+    when :keys then jungle_keys_voice(midi, **k)
+    when :pad then jungle_pad_voice(midi, **k)
+    when :flute then jungle_flute_voice(midi, send: k[:echo], glide: k[:glide], attack: k[:attack])
     when :perc then jungle_perc(midi)
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
@@ -282,10 +296,15 @@ module MB::Sound
     synth_script(
       description: ->(p) { jungle_description(p.patch) },
       patch: [:keys, Symbol, '-p', 'Patch to play', [:breaks, :sub, :reese, :keys, :pad, :flute, :perc]],
-      cutoff: [16000.0, Float, '-c', 'Breaks lowpass in Hz', 200.0..16000.0],
-      echo: [0.3, Float, '-e', 'Flute echo send 0..1', 0.0..1.0],
+      cutoff: [nil, Float, '-c', 'Lowpass cutoff in Hz (breaks 16000, pad 2400)', 20.0..16000.0],
+      grit: [nil, Float, 'Breaks crusher wet share 0..1 (0.25)', 0.0..1.0],
+      glide: [nil, Float, 'Legato glide in seconds (reese 0.06, flute 0.04)', 0.0..0.5],
+      attack: [nil, Float, 'Attack in seconds (pad 1.2, flute 0.04)', 0.001..8.0],
+      decay: [nil, Float, 'Keys decay in seconds (4.5)', 0.1..20.0],
+      release: [nil, Float, 'Release in seconds (sub 0.12, reese 0.15, pad 1.8)', 0.001..10.0],
+      echo: [nil, Float, '-e', 'Flute echo send 0..1 (0.3)', 0.0..1.0],
     ) { |midi, p|
-      jungle_patch(midi, p.patch, cutoff: p.cutoff, echo: p.echo)
+      jungle_patch(midi, p.patch, **JUNGLE_KNOBS.values.flat_map(&:keys).uniq.to_h { |n| [n, p[n]] })
     }
   end
 end

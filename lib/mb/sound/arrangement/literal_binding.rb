@@ -296,6 +296,10 @@ module MB
           return kn
         elsif what.is_a?(Symbol) && doc && !doc.params.key?(what) && @session.knobs[what] && !doc.params.empty?
           ps = doc.params.keys
+          # (the params whose range holds the knob's value, if any: a cutoff for knob :cut at 2400 Hz)
+          value = @session.knobs[what].value
+          fits = ps.select { |n| (r = doc.params[n][:range]).is_a?(Range) && Param.magnitude(r.begin).to_f <= value && value <= Param.magnitude(r.end).to_f }
+          ps = fits unless fits.empty?
           line = ps.length == 1 ? "bind #{name.inspect}, #{ps.first}: #{what.inspect}" : "bind #{name.inspect}, <param>: #{what.inspect} (params: #{ps.join(', ')})"
           return MB::Sound.live_error(LiteralBinding::Error.new("bind #{name.inspect}, #{what.inspect}: #{what.inspect} is a knob, not a param of #{doc.name} (did you mean #{line}?)"))
         end

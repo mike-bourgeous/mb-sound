@@ -3,11 +3,11 @@
 graph 5,
   name: "ambient_harp",
   kind: :synth,
-  saved: "2026-10-24T18:49:32Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:22:11Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :harp from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :harp, tune: -7.0, spread: 0.7 }
+  options: { patch: :harp, decay: nil, attack: nil, release: nil, tip: nil, tune: -7.0, spread: 0.7 }
 inputs midi: :notes
 param :space, (0.0..1.0).at(0.5), description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 param :wear, (0.0..1.0).at(0.6), description: "Tape wear 0..1 (koto, harp): 12 bits of grain at 0, 10 at 0.6, 7 at 1"

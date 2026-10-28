@@ -35,6 +35,28 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       .select { |e| e.settings.is_a?(Hash) && e.settings[:document] && !e.params.empty? && e.shelf.shipped? }.map(&:name)
   end
 
+  # The curated knobs of the shipped instrument presets (item 3: saved
+  # from the scripts' knob tables, e.g. bin/synths/dnb.rb's DNB_KNOBS; the
+  # same sound at their defaults: bin/save_presets.rb --check and the
+  # renders against master-ai's documents).
+  CURATED = {
+    dnb_reese: %i[cutoff resonance drive glide], dnb_sub: %i[cutoff release], dnb_neuro: %i[cutoff decay grit],
+    dnb_pad: %i[cutoff attack release], dnb_pluck: %i[cutoff decay echo], dnb_boom: %i[decay drop],
+    jungle_breaks: %i[cutoff grit], jungle_sub: %i[release], jungle_reese: %i[glide release], jungle_keys: %i[decay],
+    jungle_pad: %i[cutoff attack release], jungle_flute: %i[glide attack echo],
+    funk_bass: %i[bite decay], funk_keys: %i[body decay], funk_clav: %i[cutoff decay], funk_talkbox: %i[glide echo],
+    funk_choir: %i[dub keep attack release],
+    ambient_bowl: %i[space decay], ambient_rin: %i[space decay], ambient_koto: %i[space wear decay],
+    ambient_drone: %i[attack release], ambient_rainstick: %i[tip],
+    tine_piano: %i[bark pickup decay release amp], tine_crunch: %i[bark pickup decay release amp], reed_piano: %i[bark pickup decay release],
+  }.freeze
+
+  it 'ships the curated knobs as preset params' do
+    CURATED.each do |name, params|
+      expect(MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(name)).params.keys).to match_array(params), name.inspect
+    end
+  end
+
   it 'finds the shipped instrument presets with params' do
     expect(self.class.preset_names).to include(:dnb_reese, :digibrass, :sq80_classic, :ambient_gong)
   end
@@ -59,7 +81,8 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     k = s.knobs[:"bass/cutoff"]
     param = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(:dnb_reese)).declarations[:cutoff]
     expect(k.spec.range).to eq(param.magnitude_range)
-    expect(k.spec.curve).to eq(param.curve)
+    expect(k.spec.curve).to eq(:exp) # (a plain-number cutoff: the names table's curve)
+    expect(s.knobs[:"bass/cutoff"].spec.range).to eq(20.0..10000.0)
     expect(k.spec.param.description).to eq(param.description)
 
     s2, turned = run(
@@ -104,7 +127,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
       s.process_buffer
       text = MB::Sound::GraphIO::SetWriter.new(s.arrangement).to_s
     end
-    expect(text).to include('knob :"bass/cutoff", (150.0..8000.0).at(900.0)', "track :bass, :dnb_reese\n")
+    expect(text).to include('knob :"bass/cutoff", (20.0..10000.0).at(900.0)', "track :bass, :dnb_reese\n")
     s2, = run(->(s) { MB::Sound::GraphIO.load(text, session: s); MB::Sound.go(:a, on: :now) }, buffers: 4)
     expect(s2.knobs[:"bass/cutoff"].value).to eq(900.0)
   end
@@ -129,7 +152,8 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     expect(code).not_to include('bass/cutoff')
     # the inspector's knob rows: the knob the graph reads
     info = MB::Sound::UI::Inspect::Gatherer.new.call(s, { track: :bass, node: nil })
-    expect(info.knobs).to eq([:cut])
+    expect(info.knobs).to include(:cut, :"bass/resonance", :"bass/drive", :"bass/glide")
+    expect(info.knobs).not_to include(:"bass/cutoff")
 
     s2, = run(->(_s) { MB::Sound.track(:bass, :digibrass); MB::Sound.bg(:bass, clip) }, buffers: 4)
     info = MB::Sound::UI::Inspect::Gatherer.new.call(s2, { track: :bass, node: nil })

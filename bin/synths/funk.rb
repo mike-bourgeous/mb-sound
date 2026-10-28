@@ -185,10 +185,10 @@ module MB::Sound
   # A round funk bass: sine body plus a lowpassed saw that opens with
   # velocity (up to +bite+ Hz above 160), short and punchy; ghost notes are
   # just thumps.
-  def self.funk_bass_voice(midi, bite: 1400, level: 0.55)
+  def self.funk_bass_voice(midi, bite: 1400, level: 0.55, decay: 0.5)
     synth(midi, voices: 2) { |v|
       f = v.hz
-      env = v.amp_env(0.003, 0.5, 0.55, 0.05)
+      env = v.amp_env(0.003, decay, 0.55, 0.05)
       cut = v.filter_env(0.002, 0.18, 0.15, 0.05) * v.velocity * bite + 160
       ((f.sine * 0.8 + f.saw.lp4(cut, resonance: 0.25) * 0.55) * env)
     }.softclip(0.6, 0.95) * level
@@ -196,20 +196,20 @@ module MB::Sound
 
   # FM electric piano: a 1:1 body pair whose index falls (+body+), a 14:1
   # tine bark for hard strikes (+tine+), auto-pan at +tremolo+ Hz.
-  def self.funk_keys_voice(midi, level: 1, body: 0.25, tine: 0.18, tremolo: 4.5)
+  def self.funk_keys_voice(midi, level: 1, body: 0.25, tine: 0.18, tremolo: 4.5, decay: 3.0)
     synth(midi, voices: 8, retrigger: :string) { |v|
       body_mod = v.hz.sine.free * v.fm_env(0, 2.0, 0, 0.5) * body
       body_osc = v.hz.sine.free.pm(body_mod)
       tine_mod = v.hz.transpose(Math.log2(14).oct).sine.free * v.fm_env(0, 0.3, 0, 0.1) * v.velocity * tine
       tine_osc = v.hz.sine.free.pm(tine_mod)
-      (body_osc + tine_osc * 0.6) * v.amp_env(0.002, 3.0, 0, 0.25) * 0.35
+      (body_osc + tine_osc * 0.6) * v.amp_env(0.002, decay, 0, 0.25) * 0.35
     }.softclip(0.8, 0.95).filter(:highpass, cutoff: 160).pan(tremolo.hz.lfo.at(0.35)) * level
   end
 
   # A clav-ish stab: a narrow pulse (+width+), highpassed and quick.
-  def self.funk_clav_voice(midi, width: 0.2, cutoff: 3500, level: 0.6)
+  def self.funk_clav_voice(midi, width: 0.2, cutoff: 3500, level: 0.6, decay: 0.12)
     synth(midi, voices: 4) { |v|
-      v.hz.pulse(width).filter(:highpass, cutoff: 400).lp4(cutoff) * v.amp_env(0.001, 0.12, 0, 0.04) * level
+      v.hz.pulse(width).filter(:highpass, cutoff: 400).lp4(cutoff) * v.amp_env(0.001, decay, 0, 0.04) * level
     }
   end
 
@@ -283,11 +283,11 @@ module MB::Sound
 
   # A soft "ooh" choir: two saws a little apart per note through an alto
   # "u -> o" formant, slow attack, highpassed at 220 Hz.
-  def self.funk_choir_voice(midi, level: 0.36)
+  def self.funk_choir_voice(midi, level: 0.36, attack: 0.35, release: 0.8)
     synth(midi, voices: 4) { |v|
       f = v.hz.vibrato(4.6, depth: 0.12)
       (f.saw * 0.5 + f.transpose(0.07).saw * 0.5).formant(:u, :o, morph: 0.6, voice: :alto) *
-        v.amp_env(0.35, 1.0, 0.8, 0.8) * level
+        v.amp_env(attack, 1.0, 0.8, release) * level
     }.filter(:highpass, cutoff: 220)
   end
 
@@ -298,17 +298,30 @@ module MB::Sound
     sig + (sig * dub).delay(length, feedback: keep, wet: 1, dry: 0)
   end
 
-  # The script's patches by name (see the header), with the script's
-  # parameters as named Constants (so --save makes them preset params).
-  def self.funk_patch(midi, patch = :keys, dub: 0.0, keep: 0.82)
+  # The knobs each patch's preset has (library-instruments-1; see
+  # bin/synths/dnb.rb's DNB_KNOBS): each patch's own values, given as
+  # named Constants so --save makes them params.
+  FUNK_KNOBS = {
+    bass: { bite: 1400.0, decay: 0.5 },
+    keys: { body: 0.25, decay: 3.0 },
+    clav: { cutoff: 3500.0, decay: 0.12 },
+    talkbox: { glide: 0.045, echo: 0.22 },
+    choir: { dub: 0.0, keep: 0.82, attack: 0.35, release: 0.8 },
+  }.freeze
+
+  # The script's patches by name (see the header), with the patch's knobs
+  # (FUNK_KNOBS, overridden by the script's options) as named Constants
+  # (so --save makes them preset params).
+  def self.funk_patch(midi, patch = :keys, **opts)
+    k = (FUNK_KNOBS[patch] || {}).to_h { |name, v| [name, (opts[name] || v).to_f.constant.named(name.to_s)] }
     case patch
     when :beat then funk_beat(midi)
     when :perc then funk_perc(midi)
-    when :bass then funk_bass_voice(midi)
-    when :keys then funk_keys_voice(midi)
-    when :clav then funk_clav_voice(midi)
-    when :talkbox then funk_talkbox_voice(midi)
-    when :choir then funk_dub_loop(funk_choir_voice(midi), dub: dub.constant.named('dub'), keep: keep.constant.named('keep'))
+    when :bass then funk_bass_voice(midi, **k)
+    when :keys then funk_keys_voice(midi, **k)
+    when :clav then funk_clav_voice(midi, **k)
+    when :talkbox then funk_talkbox_voice(midi, **k)
+    when :choir then funk_dub_loop(funk_choir_voice(midi, attack: k[:attack], release: k[:release]), dub: k[:dub], keep: k[:keep])
     else raise ArgumentError, "Unknown patch #{patch.inspect}"
     end
   end
@@ -327,10 +340,18 @@ module MB::Sound
     synth_script(
       description: ->(p) { funk_description(p.patch) },
       patch: [:keys, Symbol, '-p', 'Patch to play', [:beat, :perc, :bass, :keys, :clav, :talkbox, :choir]],
-      dub: [0.0, Float, '-d', 'Choir looper footswitch: 1 records into the loop', 0.0..1.0],
-      keep: [0.82, Float, '-k', 'Choir looper feedback per pass 0..1', 0.0..0.99],
+      dub: [nil, Float, '-d', 'Choir looper footswitch: 1 records into the loop (0)', 0.0..1.0],
+      keep: [nil, Float, '-k', 'Choir looper feedback per pass 0..1 (0.82)', 0.0..0.99],
+      bite: [nil, Float, 'Bass filter envelope depth in Hz above 160, times velocity (1400)', 0.0..8000.0],
+      body: [nil, Float, 'Keys body FM index (0.25)', 0.0..2.0],
+      cutoff: [nil, Float, 'Clav lowpass cutoff in Hz (3500)', 200.0..16000.0],
+      glide: [nil, Float, 'Talkbox glide in seconds (0.045)', 0.0..0.5],
+      echo: [nil, Float, 'Talkbox echo level 0..1 (0.22)', 0.0..1.0],
+      attack: [nil, Float, 'Choir attack in seconds (0.35)', 0.001..8.0],
+      decay: [nil, Float, 'Decay in seconds (bass 0.5, keys 3, clav 0.12)', 0.01..10.0],
+      release: [nil, Float, 'Choir release in seconds (0.8)', 0.001..10.0],
     ) { |midi, p|
-      funk_patch(midi, p.patch, dub: p.dub, keep: p.keep)
+      funk_patch(midi, p.patch, **FUNK_KNOBS.values.flat_map(&:keys).uniq.to_h { |n| [n, p[n]] })
     }
   end
 end

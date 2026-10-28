@@ -3,20 +3,21 @@
 graph 5,
   name: "ambient_koto",
   kind: :synth,
-  saved: "2026-10-24T18:49:30Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:22:08Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :koto from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :koto, tune: -7.0, spread: 0.7 }
+  options: { patch: :koto, attack: nil, release: nil, tip: nil, tune: -7.0, spread: 0.7 }
 inputs midi: :notes
 param :space, (0.0..1.0).at(0.5), description: "Room level 0..1 (bowls, rin, gong, koto, harp)"
 param :wear, (0.0..1.0).at(0.6), description: "Tape wear 0..1 (koto, harp): 12 bits of grain at 0, 10 at 0.6, 7 at 1"
+param :decay, (0.1..60.0).at(3.2), description: "Decay in seconds (bowl and rin 24, koto 3.2)"
 
 voice = synth(midi, voices: 4) { |v|
   sig = v.hz
   body = sig.transpose(0).sine.at(0.9) * v.env(0.002, 1.8, 0.15, 1.5, gm: false)
   tine = sig.transpose(33.68825906469125).sine.at(0.25) * v.env(0.001, 0.25, 0, 0.2, gm: false)
-  sig.pm(body + tine) * v.env(0.004, 3.2, 0.0, 1.6, gm: false) * (v.velocity * 0.5 + 0.5)
+  sig.pm(body + tine) * v.env(0.004, decay, 0.0, 1.6, gm: false) * (v.velocity * 0.5 + 0.5)
 }
 sig = (voice * 0.11).pan(-0.15)
 sig2 = sig.and_then(silence(12)) + sig.reverb(room_size: 0.7, decay: 6, damping: 0.55, predelay: 0.03, dry: 0, wet: 1) * space

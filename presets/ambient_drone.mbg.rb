@@ -3,12 +3,14 @@
 graph 5,
   name: "ambient_drone",
   kind: :synth,
-  saved: "2026-10-24T18:49:34Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:22:13Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/ambient.rb",
   description: "Ambient patch :drone from bin/synths/ambient.rb, first made by Kaede Rowntree, a fictional piano tuner turned field recordist, for the soundscape \"Tin Roof, Slow River\" (bin/songs/tin_roof.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-zen).",
-  options: { patch: :drone, space: 0.5, wear: 0.6, tune: -7.0, spread: 0.7 }
+  options: { patch: :drone, decay: nil, tip: nil, space: 0.5, wear: 0.6, tune: -7.0, spread: 0.7 }
 inputs midi: :notes
+param :attack, (0.01..20.0).at(3.0), description: "Drone swell in seconds (3)"
+param :release, (0.01..30.0).at(4.0), description: "Drone release in seconds (4)"
 
 synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
   sig = v.freq
@@ -18,5 +20,5 @@ synth(midi, voices: 3, seed: drawn_seed(900450186894289455)) { |v|
   sig5 = drift(0.05, range: -0.2..0.2, smooth: :smoothstep, from: 0.0)
   sig6 = drift(0.05, range: -0.2..0.2, smooth: :smoothstep, from: 0.0)
   sig7 = drift(0.05, range: -0.25..0.25, smooth: :smoothstep, from: 0.0)
-  stereo(((sig * 1.0 + sig2).tone.sine * 0.5 + (sig * 1.4983070768766815 + 0.31 + sig3).tone.sine * 0.3 + (sig * 2.0 - 0.17 + sig4).tone.sine * 0.18).softclip(0.8, 0.95).filter(:lowpass, cutoff: 900, quality: 0.6), ((sig * 1.0 + sig5).tone.sine * 0.5 + (sig * 1.4983070768766815 + 0.31 + sig6).tone.sine * 0.3 + (sig * 2.0 - 0.22000000000000003 + sig7).tone.sine * 0.18).softclip(0.8, 0.95).filter(:lowpass, cutoff: 900, quality: 0.6)) * 1.0 * 0.18 * v.env(3.0, 0, 1, 4.0, curve: :gentle, gm: false)
+  stereo(((sig * 1.0 + sig2).tone.sine * 0.5 + (sig * 1.4983070768766815 + 0.31 + sig3).tone.sine * 0.3 + (sig * 2.0 - 0.17 + sig4).tone.sine * 0.18).softclip(0.8, 0.95).filter(:lowpass, cutoff: 900, quality: 0.6), ((sig * 1.0 + sig5).tone.sine * 0.5 + (sig * 1.4983070768766815 + 0.31 + sig6).tone.sine * 0.3 + (sig * 2.0 - 0.22000000000000003 + sig7).tone.sine * 0.18).softclip(0.8, 0.95).filter(:lowpass, cutoff: 900, quality: 0.6)) * 1.0 * 0.18 * v.env(attack, 0, 1, release, curve: :gentle, gm: false)
 }

@@ -74,7 +74,7 @@ module MB
         def knob_for(session, track, param)
           kname = knob_name(track, param.name)
           default = knob_default(param)
-          opts = { curve: param.curve, description: param.description, clamp: param.clamp }
+          opts = { curve: curve_of(param), description: param.description, clamp: param.clamp }
           spec = GraphNode::Knob::Spec.new(name: kname, default: default, **opts)
           existing = session.knobs[kname]
           if existing
@@ -84,6 +84,21 @@ module MB
             return k
           end
           session.knob(kname, default, **opts)
+        end
+
+        # The knob curve for +param+: its own, except that a plain-number
+        # param whose name the Param names table types as a frequency or a
+        # time (cutoff, attack, decay, release, ...; graph documents
+        # saved from script options have plain numbers) turns on the
+        # table's :exp curve when its range stays above 0, so a cutoff
+        # moves evenly in pitch.
+        def curve_of(param)
+          c = param.curve
+          return c unless c == :linear && param.type == :number && param.range && param.bounded?
+          e = MB::Sound::Param.name_entry(param.name) or return c
+          r = e[:range]
+          exp = e[:curve] == :exp || (r && r.begin.is_a?(MB::Sound::Pitch))
+          exp && MB::Sound::Param.magnitude(param.range.begin).to_f > 0 ? :exp : c
         end
 
         # A ranged default for +param+: its own range at its value (typed as

@@ -3,13 +3,14 @@
 graph 5,
   name: "jungle_breaks",
   kind: :synth,
-  saved: "2026-10-24T18:49:10Z",
-  mb_sound: "0.12.0.usegit (97de948a)",
+  saved: "2026-10-28T06:21:41Z",
+  mb_sound: "0.12.0.usegit (b7efc32b)",
   from: "bin/synths/jungle.rb",
   description: "90s jungle patch :breaks from bin/synths/jungle.rb, first made by Nev Ashdown (Skylark Junction), a fictional 90s atmospheric jungle producer, for the song \"Memory Card\" (bin/songs/memory_card.rb) in the persona panel experiment of 2026-10-13 (research branch research-persona-jungle).",
-  options: { patch: :breaks, echo: 0.3 }
+  options: { patch: :breaks, glide: nil, attack: nil, decay: nil, release: nil, echo: nil }
 inputs midi: :notes
-param :cutoff, (200.0..16000.0).at(16000.0), description: "Breaks lowpass in Hz"
+param :cutoff, (20.0..16000.0).at(16000.0), description: "Lowpass cutoff in Hz (breaks 16000, pad 2400)"
+param :grit, (0.0..1.0).at(0.25), description: "Breaks crusher wet share 0..1 (0.25)"
 asset "assets/jungle_record.flac", sha256: "c12085b491e7bc732add4dd49016650b5e93affdf8b7ef5af4f4b5f64829bb96"
 
 Sampler::Instrument.new { |i|
@@ -26,4 +27,4 @@ Sampler::Instrument.new { |i|
   i.region(Sample["assets/jungle_record.flac"].slices(at: [0.n16, 1.n16, 2.n16, 3.n16, 4.n16, 5.n16, 6.n16, 7.n16, 8.n16, 9.n16, 10.n16, 11.n16, 12.n16, 13.n16, 14.n16, 15.n16, 16.n16, 17.n16, 18.n16, 19.n16, 20.n16, 21.n16, 22.n16, 23.n16, 24.n16, 25.n16, 26.n16, 27.n16, 28.n16, 29.n16, 30.n16, 31.n16]).name(k: 0..1, h: 2..3, s: 4..5, sk: 4..7, g: 7..7, kk: 10..11, s2: 12..15, k2: 16..19, s3: 20..23, full: 0..31)[12...16].reverse, keys: 112..122, root: 113.0)
 }.sampler(midi, seed: drawn_seed(900450186894289455)) { |v, s|
   s * v.env(0.0005, 0.01, 1, 0.006, gm: false) * (v.velocity * 1.3333333333333333)
-}.filter(:lowpass, cutoff: 13000, quality: 0.6).decimate(30000, mix: 0.25).filter(:lowpass, cutoff: cutoff, quality: 0.9).softclip(0.6, 0.98) * 1.6
+}.filter(:lowpass, cutoff: 13000, quality: 0.6).decimate(30000, mix: grit).filter(:lowpass, cutoff: cutoff, quality: 0.9).softclip(0.6, 0.98) * 1.6
