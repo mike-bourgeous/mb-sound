@@ -18,6 +18,7 @@ module MB
           :@node_type_name, :@graph_node_name, :@named, :@graph_recipe, :@graph_io_document, :@channel_group,
           :@feedback_sources, :@internal_tee, :@handled_spies, :@curve, :@gm_time,
           :@delay, :@delay_buf, :@time_node, :@time_buf, :@spec, :@first_fill, :@uniform, :@render_offset, :@segment_start, :@adding, :@from,
+          :@glide_bufs, # (scratch, see Glide#fill)
         ].freeze
 
         def plan_inputs

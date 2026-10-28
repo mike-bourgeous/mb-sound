@@ -241,7 +241,7 @@ module MB
 
         # Returns true if every channel of +data+ is below TAIL_THRESHOLD.
         def quiet?(data)
-          data.all? { |d| d.empty? || d.abs.max < TAIL_THRESHOLD }
+          data.all? { |d| d.empty? || abs_peak(d) < TAIL_THRESHOLD } # (no Numo temporaries; Tails#abs_peak)
         end
 
         private

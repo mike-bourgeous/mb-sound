@@ -48,6 +48,15 @@ RSpec.describe(ParallelSpecs) do
     expect(JSON.parse(File.read(times_path))).to eq('spec/a_spec.rb' => 0.5, 'spec/b_spec.rb' => 0.25)
   end
 
+  it 'reports errors outside examples, such as a spec file that does not load (dropouts-2)' do
+    write_json(0, [example('spec/a_spec.rb', 0.5)])
+    File.write(File.join(out_dir, '1.json'), JSON.generate('examples' => [example('spec/b_spec.rb', 0.25)], 'summary' => { 'errors_outside_of_examples_count' => 1 }))
+    ok, output = report([['spec/a_spec.rb'], ['spec/b_spec.rb', 'spec/broken_spec.rb']], [status, status(code: 1)])
+    expect(ok).to eq(false)
+    expect(output).to include('2 examples, 0 failures, 0 pending, 1 errors outside examples')
+    expect(output).to match(/process 1 had 1 error outside examples/)
+  end
+
   it 'reports a process that died without its JSON, and still writes the others\' times' do
     File.write(times_path, JSON.generate('spec/old_spec.rb' => 9.0, 'spec/c_spec.rb' => 4.0))
     write_json(0, [example('spec/a_spec.rb', 0.5)])

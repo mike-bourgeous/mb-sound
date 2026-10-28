@@ -53,6 +53,7 @@ module MB
             @sampled = Array.new(@inputs.length, false)
             @frame = nil
             @buffer_sets = nil # (Framed.next_buffers)
+            @frame_data = Array.new(@inputs.length) # (Framed#next_frame)
             @buffer_index = nil
             @ended = false
             @flushing = false

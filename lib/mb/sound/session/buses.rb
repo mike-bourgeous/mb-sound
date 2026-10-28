@@ -1148,7 +1148,10 @@ module MB
           chains = @mutex.synchronize { (@bus_chain_copies[b] ||= []).replace(b.chains) } # (reused per bus, as Master#process_master's)
           seg =
             if input.nil?
-              Array.new(@channels) { Numo::SFloat.zeros(n) }
+              # (frozen zeros, reused: chains copy their input; dropouts-2)
+              z = @bus_zero_seg
+              z = @bus_zero_seg = Array.new(@channels) { Numo::SFloat.zeros(n).freeze }.freeze if z.nil? || z[0].length != n || z.length != @channels
+              z
             elsif p0 == 0 && input.all? { |x| x.length == n }
               input # (the whole span: no views)
             else

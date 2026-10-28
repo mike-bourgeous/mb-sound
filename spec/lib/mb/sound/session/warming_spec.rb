@@ -80,14 +80,14 @@ RSpec.describe(MB::Sound::Session::Warming) do
     s&.close
   end
 
-  it 'skips a warm-up in an offline render's scheduled block (no time before the block's)' do
+  it "warms in an offline render's scheduled block, which runs half a bar ahead" do
     s = new_session(true)
     MB::Sound::Session.with_context(session: s) do
       s.add(110.hz.saw.at(0.1), name: :a)
       MB::Sound.at_bar(2) { MB::Sound.bus(:late) { |sig| sig.reverb(:room, mix: 1) } }
       run(s, 380) # (bar 2 at 120 BPM: 375 buffers)
     end
-    expect(s.warmed.find { |w| w.name == :late }).to have_attributes(result: :skipped, reason: /0.00 s before the block's time/)
+    expect(s.warmed.find { |w| w.name == :late }).to have_attributes(result: :played)
   ensure
     s&.close
   end

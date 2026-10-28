@@ -386,7 +386,10 @@ module MB
         # Session.span; MIDI::Stream#spy)
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
-        @asleep_ids = nil
+        @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
+        @span_graph_scratch = nil
+        @kept_scratch = nil # (see Strip#read_kept_graphs)
+        @bus_zero_seg = nil # (see Buses#run_bus_chains)
         @asleep_graphs = nil
         @bus_span_count = nil
         @bus_span_buses = nil

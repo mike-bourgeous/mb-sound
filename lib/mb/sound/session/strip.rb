@@ -353,19 +353,34 @@ module MB
         # #asleep_reads).
         def span_graphs
           @span_graphs ||= begin
-            list = (@span_players || @mutex.synchronize { @players.values }).map(&:input)
-            list.concat(@kept_graphs.keys) unless @kept_graphs.empty?
+            # (gathered into a reused Array and compared by identity with
+            # the last list: no Arrays a span while the graphs hold;
+            # dropouts-2)
+            list = (@span_graph_scratch ||= [])
+            list.clear
+            players = @span_players || @mutex.synchronize { @players.values }
+            players.each { |p| list << p.input }
+            @kept_graphs.each_key { |k| list << k } unless @kept_graphs.empty?
             chains = @master_chains
             chains&.each { |c| list << c.chain_graph unless c.bypass? }
-            list.concat(bus_chain_graphs) # (fixes-13; see Buses)
-            ids = list.map(&:__id__)
-            if ids == @asleep_ids
-              @asleep_graphs
+            bus_chain_graphs.each { |g| list << g } # (fixes-13; see Buses)
+            prev = @asleep_graphs
+            if prev && prev.length == list.length && same_graphs?(prev, list)
+              prev
             else
-              @asleep_ids = ids
-              @asleep_graphs = list
+              @asleep_graphs = list.dup
             end
           end
+        end
+
+        # True if Arrays +a+ and +b+ (as long) hold the same objects in order.
+        def same_graphs?(a, b)
+          i = 0
+          while i < a.length
+            return false unless a[i].equal?(b[i])
+            i += 1
+          end
+          true
         end
 
         # Moves the branches of shared nodes in graphs waiting to start (see
@@ -459,7 +474,8 @@ module MB
         def read_kept_graphs(frame)
           return if @kept_graphs.empty?
 
-          kept = {}.compare_by_identity
+          kept = (@kept_scratch ||= {}.compare_by_identity) # (reused every span)
+          kept.clear
           @mutex.synchronize {
             @stopped.each_value { |s| kept[s.input] = true }
             @players.each_value { |o| kept[o.input] = false if o.started }

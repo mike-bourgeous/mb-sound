@@ -183,10 +183,14 @@ module ParallelSpecs
   def report(groups, statuses, wall, out_dir: OUT_DIR, times_path: TIMES_PATH, budgets_path: BUDGETS_PATH, budget_scale: 1.0)
     examples = []
     crashed = []
+    outside = {} # (process index => errors outside examples, e.g. a spec file that doesn't load)
     groups.each_index do |i|
       json = File.join(out_dir, "#{i}.json")
       begin
-        examples.concat(JSON.parse(File.read(json)).fetch('examples'))
+        report = JSON.parse(File.read(json))
+        examples.concat(report.fetch('examples'))
+        n = report.dig('summary', 'errors_outside_of_examples_count').to_i
+        outside[i] = n if n > 0
       rescue Errno::ENOENT, JSON::ParserError, KeyError, TypeError
         crashed << i
       end
@@ -198,8 +202,9 @@ module ParallelSpecs
 
     failed = examples.select { |e| e['status'] == 'failed' }
     pending = examples.count { |e| e['status'] == 'pending' }
-    puts format('spec:parallel: %d examples, %d failures, %d pending in %.1f s wall (%.1f s of examples)',
-                examples.length, failed.length, pending, wall, file_times.values.sum)
+    puts format('spec:parallel: %d examples, %d failures, %d pending%s in %.1f s wall (%.1f s of examples)',
+                examples.length, failed.length, pending,
+                outside.empty? ? '' : format(', %d errors outside examples', outside.values.sum), wall, file_times.values.sum)
 
     puts 'Slowest files:'
     file_times.sort_by { |_, t| -t }.first(10).each { |f, t| puts format('  %6.2f s %s%s', t, f, t > SLOW_FILE ? '  SLOW' : '') }
@@ -214,6 +219,9 @@ module ParallelSpecs
     within_budget = check_budgets(file_times, examples, budgets_path, scale: budget_scale)
 
     failed.each { |e| puts "rspec #{e['file_path']}:#{e['line_number']} # #{e['full_description']}" }
+    # (dropouts-2: a spec file with a syntax error printed "0 failures"; its
+    # examples never ran)
+    outside.each { |i, n| puts "spec:parallel: process #{i} had #{n} error#{n == 1 ? '' : 's'} outside examples (a file that didn't load?; see #{display_path(File.join(out_dir, "#{i}.log"))})" }
     report_warnings(groups.length, out_dir)
     crashed.each { |i| report_crash(i, groups[i], statuses[i], out_dir) }
     bad = statuses.each_with_index.reject { |s, i| s.success? || crashed.include?(i) }
