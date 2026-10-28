@@ -272,6 +272,7 @@ require_relative 'library/presettable'
 require_relative 'library/saving'
 require_relative 'library/methods'
 require_relative 'library/heads'
+require_relative 'library/finder'
 
 module MB
   module Sound
