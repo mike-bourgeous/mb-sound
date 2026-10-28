@@ -155,7 +155,8 @@ module MB
             end
             y += 1
             return if y >= c.h
-            x = c.line(y, [n.label, :key], ["  #{n.kind}#{n.count > 1 ? " ×#{n.count}" : ''}", :dim], ["  #{info.node + 1}/#{info.nodes.length}", :dim])
+            role = n.role && n.role != n.label ? "  #{n.role}" : ''
+            x = c.line(y, [n.label, :key], ["#{role}#{n.count > 1 ? " ×#{n.count}" : ''}", :dim], ["  #{info.node + 1}/#{info.nodes.length}", :dim])
             c.text(x, y, c.fit('  n N: other nodes', [c.w - x, 0].max), :dim)
             y += 1
             # (a picked param below the pane's last row scrolls the list)
@@ -236,7 +237,7 @@ module MB
             i = ((info.node || 0) + d) % info.nodes.length
             Inspect.target = { track: info.track, node: i }.freeze
             n = info.nodes[i]
-            "node #{n.label} (#{n.kind}) #{i + 1}/#{info.nodes.length}"
+            "node #{n.label}#{n.role && n.role != n.label ? " (#{n.role})" : ''} #{i + 1}/#{info.nodes.length}"
           end
 
           private

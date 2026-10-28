@@ -5,7 +5,7 @@
 ● lead   rec →21:1            │                                            │
 ● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)   more
                               │      amp_env×6                             ├─ RENDER ─────────────────────────────── 6 ─
-                              │amp_env  Envelope ×6  5/5  n N: other nodes │bass  -22.2 LUFS  peak -11.2  rms -20.8  …
+                              │amp_env  env ×6  5/5  n N: other nodes      │bass  -22.2 LUFS  peak -11.2  rms -20.8  …
                               │ attack     0.02 s                          │ 0.2┤⠄⠄⠄⠄⠄⠄⣄⠴⠎⠭⠖⢦⡄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄
 ─ LIBRARY ──────────────── 7 ─┤ decay      0.3 s                           │    │   ⣠⠴⠊   ⠨  ⠈⠑⠤⣀   ⠨         ⠅
 find ▏                        │ sustain    0.6                             │    │⣀⠴⠊⠁     ⠨     ⠈⠓⢦⡀⠨         ⠅

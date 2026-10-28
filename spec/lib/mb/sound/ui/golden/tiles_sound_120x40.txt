@@ -4,7 +4,7 @@
 ● bass   bass_a               │ cut       ███████▎   2400 Hz 100..8000 exp │    curve: :exp, unit: "Hz"
 ● lead   rec →21:1            │                                            │
 ● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6     │# bass: the graph it plays (to_ruby)   more
-                              │highpass  SampleWrapper ×4  2/4  n N: other…├─ RENDER ─────────────────────────────── 6 ─
+                              │highpass  filter ×4  2/4  n N: other nodes  ├─ RENDER ─────────────────────────────── 6 ─
                               │ cutoff     150 Hz                          │bass  -22.2 LUFS  peak -11.2  rms -20.8  …
                               │ quality    0.7  Q                          │ 0.2┤⠄⠄⠄⠄⠄⠄⣄⠴⠎⠭⠖⢦⡄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠄⠄⠄
 ─ LIBRARY ──────────────── 7 ─┤                                            │    │   ⣠⠴⠊   ⠨  ⠈⠑⠤⣀   ⠨         ⠅

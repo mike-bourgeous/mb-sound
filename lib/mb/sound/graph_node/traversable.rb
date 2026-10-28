@@ -203,7 +203,40 @@ module MB
           else
             type = port_type_of(v)
             ParamValue.new(value: nil, type: type == :notes ? :notes : :control, unit: nil, range: range,
-              label: v.respond_to?(:named?) && v.named? ? v.graph_node_name.to_s.dup.freeze : nil, detail: v.to_s.dup.freeze)
+              label: v.respond_to?(:named?) && v.named? ? v.graph_node_name.to_s.dup.freeze : nil, detail: words_of(v).dup.freeze)
+          end
+        end
+
+        # Short DSL words for node +v+ (a param's input, as the sound
+        # panes show it: "knob cut × lfo", "notes frequency", "2 bars
+        # jumps"): its name, a knob, a number, products and sums one level
+        # deep, its recipe's method name or a tone's wave, else its type
+        # name in lower-case words; never a class name (omnibus15).
+        def self.words_of(v, depth = 1)
+          v = GraphNode.climb_tee_tree(v)
+          case v
+          when Numeric then MB::M.sigfigs(v.to_f, 3).to_s
+          when Constant then MB::M.sigfigs(v.constant.to_f, 3).to_s
+          when Knob::Reader then "knob #{v.knob.name}"
+          when Knob then "knob #{v.name}"
+          else
+            return v.graph_node_name.to_s if v.respond_to?(:named?) && v.named?
+            if depth > 0 && (v.is_a?(Multiplier) || v.is_a?(Mixer))
+              parts = (v.is_a?(Multiplier) ? v.multiplicands : v.summands).map { |m| words_of(m, depth - 1) }
+              c = v.constant
+              parts.unshift(MB::M.sigfigs(c.to_f, 3).to_s) if c.is_a?(Numeric) && c != (v.is_a?(Multiplier) ? 1 : 0)
+              return parts.join(v.is_a?(Multiplier) ? ' × ' : ' + ')
+            end
+            rec = v.instance_variable_defined?(:@graph_recipe) ? v.instance_variable_get(:@graph_recipe) : nil
+            name = rec.respond_to?(:call) && rec.call.respond_to?(:name) ? rec.call.name : nil
+            name = nil if name && !name.to_s.match?(/\A[a-z_]/) # (operators: their words below)
+            name ||= v.wave_type if v.is_a?(MB::Sound::Tone)
+            return name.to_s if name
+
+            t = v.respond_to?(:node_type_name) ? v.node_type_name.to_s : ''
+            t = v.to_s.split('/', 2).last.to_s if t.match?(/\A(Port|Tempo Hz)\z/) # (a timeline port: "2 bars.jumps")
+            t = t.tr('.', ' ').gsub(/([a-z\d])([A-Z])/, '\\1 \\2').downcase
+            t.empty? ? 'a node' : t
           end
         end
 

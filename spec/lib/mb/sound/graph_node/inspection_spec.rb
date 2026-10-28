@@ -16,7 +16,7 @@ RSpec.describe('GraphNode inspection protocol') do
       lfo = 3.hz.lfo.at(200..900)
       f = 110.hz.saw.filter(:lowpass, cutoff: lfo)
       expect(f.params[:cutoff]).to be_a(MB::Sound::GraphNode)
-      expect(f.param_info[:cutoff].to_h).to include(value: nil, type: :control, detail: lfo.to_s)
+      expect(f.param_info[:cutoff].to_h).to include(value: nil, type: :control, detail: MB::Sound::GraphNode::Traversable.words_of(lfo))
     end
 
     it 'describes knob readers with their range' do

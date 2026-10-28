@@ -23,11 +23,41 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
 
   def key(name, state, action, *args) = ui.panes.fetch(name).key_action(action, state, *args)
 
+  SOUND_PANES = %i[inspector preview render code picker audition sound_keys].freeze
+
+  # Ruby class names of node classes (basenames: SampleWrapper, FourPole,
+  # ...), which no sound pane may show (omnibus15; maintainer: "it
+  # shouldn't mention SampleWrapper").
+  def node_class_names
+    @node_class_names ||= ObjectSpace.each_object(Class).select { |c|
+      c.name&.start_with?('MB::Sound::') && (c.include?(MB::Sound::GraphNode) || c <= MB::Sound::Filter::SampleWrapper)
+    }.map { |c| c.name.split('::').last }.uniq
+  end
+
+  # Every sound pane's text for each node of +snap+'s inspector (picked in
+  # turn by +pick+, a block returning the snapshot with node i picked),
+  # plus the inspector's node-stepping messages.
+  def sound_text(snap, &pick)
+    info = snap.inspector
+    texts = []
+    (info ? info.nodes.length : 1).times do |i|
+      s = pick ? pick.call(i) : snap
+      SOUND_PANES.each { |name| texts << draw(name, s, { title_in_rule: true }, w: 100, h: 30).join("\n") }
+      texts << key(:inspector, { snap: s }, :node, 1).to_s if info
+    end
+    texts.join("\n")
+  end
+
+  def expect_no_class_names(text)
+    found = node_class_names.select { |n| text.match?(/\b#{n}\b/) }
+    expect(found).to eq([]), "class names in the sound panes: #{found.join(', ')}\n#{text.lines.grep(/\b(#{found.join('|')})\b/).first(5).join}"
+  end
+
   describe 'the panes with fake data' do
     it 'draws the track, its knob rows, the nodes as chips, and the picked node\'s params' do
       text = draw(:inspector, snap).join("\n")
       expect(text).to include('bass  2/3', 'cut', '2400 Hz', '100..8000 exp', 'nodes lp4×2 highpass×4 softclip×2 saw×6')
-      expect(text).to include('highpass  SampleWrapper ×4  2/4', 'cutoff     150 Hz', 'quality    0.7  Q')
+      expect(text).to include('highpass  filter ×4  2/4', 'cutoff     150 Hz', 'quality    0.7  Q')
       lp4 = snap.with(slow: snap.slow.with(inspector: snap.inspector.with(node: 0)))
       expect(draw(:inspector, lp4).join("\n")).to include('cutoff     → knob cut 2400 Hz')
       empty = snap.with(slow: snap.slow.with(inspector: nil))
@@ -118,6 +148,13 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       MB::Sound::UI::Panes::Preview.clock = nil
     end
 
+    it 'shows no node class names in any sound pane, only DSL names and roles (omnibus15)' do
+      env = snap.with(slow: snap.slow.with(inspector: ui_fake_envelope_inspector))
+      text = sound_text(env) { |i| env.with(slow: env.slow.with(inspector: env.inspector.with(node: i))) }
+      expect(text).to include('lp4  filter ×2', 'saw  osc ×6')
+      expect_no_class_names(text)
+    end
+
     it 'lists the inspector\'s keys from its keymap and the planned ones, and the CUE line' do
       built, planned = ui::Panes::SoundKeys.rows
       expect(built.map(&:first)).to include('Up Down', 'Left Right', 'Enter', '0', 'm', 't T', 'n N')
@@ -184,6 +221,17 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       again = g.call(@session, { track: :bass })
       expect(again.code).to equal(info.code) # (the node list and code: once per graph)
       expect(again.nodes.reject.with_index { |_, i| i == again.node }).to eq(info.nodes.reject.with_index { |_, i| i == info.node })
+    end
+
+    it 'shows no node class names in any sound pane for the dnb_reese preset (omnibus15)' do
+      ui::Inspect.target = { track: :bass, node: nil }
+      first = live_snap
+      expect(first.inspector.nodes.map(&:label)).to include('lp4', 'highpass', 'saw')
+      text = sound_text(first) { |i|
+        ui::Inspect.target = { track: :bass, node: i }
+        live_snap
+      }
+      expect_no_class_names(text)
     end
 
     it 'gathers only while a pane needs it, following turned knobs in the picked node\'s preview' do

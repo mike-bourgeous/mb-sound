@@ -14,8 +14,9 @@ module MB
       module Inspect
         # One node of the inspected graph worth showing: +key+ its index
         # in InspectInfo#nodes, +label+ what made it (the DSL method name
-        # from its recipe, else its node name or class), +kind+ the class's
-        # short name, +count+ how many copies the graph has (synth lanes,
+        # from its recipe, else its node name; never a class name), +role+
+        # what it is for in a patch ('osc', 'filter', 'env', ...; see
+        # .role_of; nil when nothing fits), +count+ how many copies the graph has (synth lanes,
         # unison copies with the same settings), +params+ its frozen
         # Traversable::Params (#param_snapshot), +preview+ true when
         # Plot::Panels draws one for it, +knobs+ the knob names its params
@@ -23,8 +24,8 @@ module MB
         # (an envelope's sounding note: see .live_of; nil otherwise),
         # +binds+ (the selected node's; else empty) its params that no knob
         # drives, as { param => Bind }: live literals.
-        NodeInfo = Data.define(:key, :label, :kind, :count, :params, :preview, :knobs, :live, :binds) do
-          def initialize(key:, label:, kind:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze)
+        NodeInfo = Data.define(:key, :label, :role, :count, :params, :preview, :knobs, :live, :binds) do
+          def initialize(key:, label:, role:, count:, params:, preview:, knobs:, live: nil, binds: {}.freeze)
             super
           end
         end
@@ -221,7 +222,8 @@ module MB
           }
           rows = rows.sort_by.with_index { |(_, _, _, read, preview), i| [read.empty? ? (preview ? 1 : 2) : 0, i] }.first(MAX_NODES)
           nodes = rows.each_with_index.map { |(n, count, snap, read, preview, _), i|
-            NodeInfo.new(key: i, label: label_of(n), kind: n.class.name.split('::').last.freeze, count: count, params: snap, preview: preview, knobs: read)
+            label = label_of(n)
+            NodeInfo.new(key: i, label: label, role: role_of(n, label), count: count, params: snap, preview: preview, knobs: read)
           }.freeze
 
           code = roots.filter_map { |r| r.respond_to?(:to_ruby) ? (r.to_ruby rescue nil) : nil }.uniq.join("\n").freeze
@@ -320,12 +322,37 @@ module MB
         CLASS_LABELS = {
           'FourPole' => 'lp4', 'DiodeLadder' => 'diode', 'NoteEnvelope' => 'env', 'Envelope' => 'env', 'Unison' => 'unison',
           'Reverb' => 'reverb', 'Chorus' => 'chorus', 'Dynamics' => 'dynamics', 'Limiter' => 'limit', 'Formant' => 'formant',
+          'SampleWrapper' => 'filter', 'Decimator' => 'decimate', 'ModalResonator' => 'resonate', 'Resonator' => 'ping',
         }.freeze
+
+        # Roles by class (the first of a node's ancestors listed here), for
+        # the inspector's node rows: what a node is for, in the words of
+        # the DSL rather than its class (maintainer, 2026-10-28: "it
+        # shouldn't mention SampleWrapper").
+        ROLES = {
+          'MB::Sound::Tone' => 'osc', 'MB::Sound::GraphNode::Wavetable' => 'osc',
+          'MB::Sound::GraphNode::SamplerVoice' => 'osc', 'MB::Sound::GraphNode::Grains' => 'osc',
+          'MB::Sound::Filter::SampleWrapper' => 'filter', 'MB::Sound::GraphNode::FourPole' => 'filter',
+          'MB::Sound::GraphNode::Formant' => 'filter', 'MB::Sound::GraphNode::Resonator' => 'filter',
+          'MB::Sound::Envelope' => 'env',
+          'MB::Sound::GraphNode::Shaper' => 'shaper', 'MB::Sound::GraphNode::Decimator' => 'lofi',
+          'MB::Sound::GraphNode::Reverb' => 'fx', 'MB::Sound::GraphNode::Chorus' => 'fx', 'MB::Sound::GraphNode::FeedbackLoop' => 'fx',
+          'MB::Sound::GraphNode::Dynamics' => 'dynamics',
+          'MB::Sound::Synth' => 'voices',
+          'MB::Sound::GraphNode::ChannelMixer' => 'mix', 'MB::Sound::GraphNode::ChannelMixer::Output' => 'mix', 'MB::Sound::GraphNode::Mixer' => 'mix', 'MB::Sound::GraphNode::Multiplier' => 'mix',
+          'MB::Sound::GraphNode::Knob' => 'control', 'MB::Sound::GraphNode::Knob::Reader' => 'control', 'MB::Sound::GraphNode::Constant' => 'control',
+          'MB::Sound::Notes::Node' => 'control', 'MB::Sound::GraphNode::Drift' => 'mod', 'MB::Sound::GraphNode::Dust' => 'mod',
+        }.freeze
+
+        # Labels of filter-shaped nodes that are effects (a delay line in a
+        # SampleWrapper).
+        FX_LABELS = %w[delay multitap].freeze
 
         # What made +node+: its node name, else what its preview says it is
         # (a filter's type, a shaper's mode), else its recipe's method name
         # (lp4, softclip), a tone's wave, or CLASS_LABELS, else its class's
-        # short name.
+        # short name in snake_case (FadeIn: fade_in), never the class name
+        # itself.
         def label_of(node)
           return node.graph_node_name.to_s.freeze if node.respond_to?(:named?) && node.named?
           d = node.respond_to?(:preview_data) ? (node.preview_data rescue nil) : nil
@@ -334,8 +361,23 @@ module MB
           rec = node.instance_variable_defined?(:@graph_recipe) ? node.instance_variable_get(:@graph_recipe) : nil
           name = rec.respond_to?(:call) && rec.call.respond_to?(:name) ? rec.call.name : nil
           name ||= node.wave_type if node.respond_to?(:wave_type)
-          short = node.class.name.split('::').last
-          (name || CLASS_LABELS[short] || short).to_s.freeze
+          short = node.class.name.to_s.split('::').last.to_s
+          (name || CLASS_LABELS[short] || snake(short)).to_s.freeze
+        end
+
+        # What +node+ (labelled +label+) is for (see ROLES), or nil.
+        def role_of(node, label = nil)
+          return 'fx' if FX_LABELS.include?(label)
+          node.class.ancestors.each do |a|
+            r = a.name && ROLES[a.name]
+            return r.freeze if r
+          end
+          nil
+        end
+
+        # "FadeIn" -> "fade_in".
+        def snake(name)
+          name.gsub(/([a-z\d])([A-Z])/, '\\1_\\2').downcase
         end
       end
     end

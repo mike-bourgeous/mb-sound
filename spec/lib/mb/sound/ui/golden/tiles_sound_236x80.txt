@@ -4,7 +4,7 @@
 ● bass   bass_a               │ cut       ███████████████████████▎         2400 Hz 100..8000 exp                                     │
 ● lead   rec →21:1            │                                                                                                      │# bass: the graph it plays (to_ruby)
 ● pad    stopping chords      │nodes lp4×2 highpass×4 softclip×2 saw×6                                                               │synth(riff, voices: 1) { |v|
-                              │highpass  SampleWrapper ×4  2/4  n N: other nodes                                                     │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
+                              │highpass  filter ×4  2/4  n N: other nodes                                                            │  saws = v.hz.unison(6, detune: 0.32) { |p, _i| p.saw }
                               │ cutoff     150 Hz                                                                                    │  saws.lp4(knob(:cut), resonance: 0.25).softclip(0.35, 0.95).filter(:highpass, cutoff: 150, quality:
                               │ quality    0.7  Q                                                                                    │      0.7)
 ─ LIBRARY ──────────────── 6 ─┤                                                                                                      │}
