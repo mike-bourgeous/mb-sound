@@ -132,6 +132,32 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     expect(s2.knobs[:"bass/cutoff"].value).to eq(900.0)
   end
 
+  it 'replays a take with an instrument track and its knob turned, bit for bit' do
+    lines = {
+      0 => ['track :bass, :dnb_sub', 'bg :bass, seq(F1, T, R, Ab1).n8.loop'],
+      40 => ['turn :"bass/cutoff", 300.0, over: 1'],
+      120 => ['track :bass, :jungle_sub'],
+    }
+    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), channels: 2, buffer_size: 800, realtime: false, raise_errors: true)
+    @sessions << session
+    b = MB::Sound::Take.console_binding
+    out = []
+    MB::Sound.seed(5)
+    t = MB::Sound::Take.new(session: session)
+    240.times do |i|
+      lines.fetch(i, []).each { |code| MB::Sound::Session.with_context(session: session) { t.line(code, b) } }
+      out << session.process_buffer[0].dup
+    end
+    live = SpecBuffers.join(out)
+    expect(live.abs.max).to be > 0.05
+    expect(session.knobs[:"bass/cutoff"].value).to eq(300.0)
+    MB::Sound.seed(5)
+    data = []
+    t.replay.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_sizes: [800], tail: 0) { |mix| data << mix[0].dup }
+    data = SpecBuffers.join(data)
+    expect((data[0...live.length] - live).abs.max).to eq(0)
+  end
+
   it 'binds a preset param to an existing knob (bind :bass, cutoff: :cut), and explains the other spellings' do
     clip = BASS_RIFF
     s, = run(->(_s) {
