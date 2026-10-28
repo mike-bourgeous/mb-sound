@@ -298,7 +298,7 @@ module MB
           while i < b.length
             g = (start + i) / grid * grid + grid
             stop = [g - start, b.length].min
-            @cell_loud ||= loud?(i == 0 && stop == b.length ? b : b[i...stop])
+            @cell_loud ||= i == 0 && stop == b.length ? loud?(b) : loud_range?(b, i, stop - i)
             if start + stop == g
               @silent_cells = @cell_loud ? 0 : @silent_cells + 1
               @cell_loud = false
@@ -308,6 +308,20 @@ module MB
             end
             i = stop
           end
+        end
+
+        # The smallest float above SILENCE: for float samples, |x| > SILENCE
+        # exactly when |x| >= LOUD_FLOAT (FastArithmetic.last_at_least's
+        # comparison).
+        LOUD_FLOAT = begin
+          f = [SILENCE].pack('e').unpack1('e')
+          f > SILENCE ? f : [[f].pack('e').unpack1('L') + 1].pack('L').unpack1('e')
+        end
+
+        # #loud? of +n+ samples of +b+ from +i+, without a view (dropouts-2).
+        def loud_range?(b, i, n)
+          r = MB::Sound::FastArithmetic.last_at_least(b, i, n, LOUD_FLOAT)
+          r ? r >= 0 : loud?(b[i...(i + n)])
         end
 
         # True if +b+ has a sample beyond SILENCE.
