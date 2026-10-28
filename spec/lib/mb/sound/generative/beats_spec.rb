@@ -100,6 +100,33 @@ RSpec.describe('MB::Sound#beats (evolving rhythms)', :aggregate_failures) do
     s&.close
   end
 
+  it 'saves in graph documents with its knob, loading the rows without trust' do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), realtime: false, channels: 1)
+    MB::Sound::Session.with_context(session: s) {
+      MB::Sound.knob :energy, 0.7
+      g = MB::Sound.beats(16, energy: MB::Sound.knob(:energy), hold: 2, seed: 3) {
+        kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]
+        hat euclid(10, 16), mutate: 0.5
+        row :bass, [1, 0, 0.5, 0] * 4, note: 36
+        fill every: 4, snare: 0.6
+      }
+      lead = MB::Sound.motifs(MB::Sound.scale(:dorian, :d).weights, 8, density: MB::Sound.knob(:energy), seed: 4)
+      graph = MB::Sound.tr909(g) + lead.synth { |v| v.hz.sine * v.env(0.01, 0.1, 0.5, 0.1) }
+      doc = MB::Sound::GraphIO.dump(graph, name: :steer)
+      expect(doc).to include('knob :energy, 0.7')
+      expect(doc).to include('energy: energy').and include('density: energy')
+      loaded = MB::Sound::GraphIO.load(doc)
+      expect(loaded).to be_a(MB::Sound::GraphNode)
+      # The same samples as the graph saved (both knobs rest at 0.7)
+      a = SpecBuffers.join(Array.new(120) { graph.sample(800).dup })
+      b = SpecBuffers.join(Array.new(120) { loaded.sample(800).dup })
+      expect(a.abs.max).to be > 0.1
+      expect(b).to eq(a)
+    }
+  ensure
+    s&.close
+  end
+
   it 'explains mistakes' do
     expect { MB::Sound.beats { snair [1] } }.to raise_error(NoMethodError, /did you mean :snare/)
     expect { MB::Sound.beats { kick [2] } }.to raise_error(ArgumentError, /probabilities from 0 to 1/)

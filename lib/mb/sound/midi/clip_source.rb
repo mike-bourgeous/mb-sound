@@ -34,6 +34,12 @@ module MB
         # The Clip being played.
         attr_reader :clip
 
+        # The graph nodes (knobs, tempo LFOs) a steered generator clip reads
+        # (Sequence::Clip#param_nodes).
+        def param_nodes
+          @clip.param_nodes
+        end
+
         # The MIDI channel (0-based) given to the clip's events.
         attr_reader :channel
 

@@ -538,9 +538,19 @@ module MB
         phrases: motifs come back (through key changes), `b` answers `a`
         and lands home, repeats vary a little, and every `evolve:` passes
         the motifs mutate a step here and there; `range:`/`around:` set
-        the register.
+        the register.  `beats(16) { kick [1, 0, 0, 0] * 4; hat euclid(10, 16),
+        mutate: 0.5 }` is an evolving rhythm for any drum kit: rows drift,
+        Euclidean rows mutate, `energy:` thins or fills (raising it only
+        adds hits), `hold: 2` repeats each random bar, `fill every: 8`
+        fills phrase ends; `rhythm(field, [1, 0, 0.5, 0] * 4)` is one
+        melodic row.  Steer them live: options like `density:`, `mutate:`,
+        `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`,
+        `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
+        cycle a `lead:` (one beat) before it starts, so a `turn` steers the
+        next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
+        { |cycle, dice, busy:| }` hands them to your block.
       TEXT
-      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs
+      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
       see :sequences, :random
       example 'a melody that blurs and changes key' do
@@ -552,6 +562,17 @@ module MB
         h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
         tune = motifs(h, 8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4)
         bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'an evolving beat steered by a knob' do
+        knob :energy, 0.3
+        groove = beats(16, hold: 2, energy: knob(:energy)) do
+          kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]
+          clap [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12]
+          hat euclid(10, 16), mutate: 0.5, drift: 0.15, level: 0.7
+          fill every: 4, snare: 0.7
+        end
+        bg :try, tr909(groove).at(-18.db)
+        turn :energy, 0.9, over: 4
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)

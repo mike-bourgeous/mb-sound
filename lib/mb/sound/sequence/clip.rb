@@ -150,6 +150,17 @@ module MB
           !@steer_lead.nil?
         end
 
+        # The graph nodes (knobs, tempo LFOs) the steered generators of this
+        # clip read (Generative::Steer#nodes), for documents and Sessions.
+        def param_nodes
+          return [] unless @steer_lead
+          @variations.flat_map { |v|
+            b = v.block
+            b = b.generator while b.is_a?(Generative::Mapped)
+            b.is_a?(Generative::Generator) && b.steer ? b.steer.nodes : []
+          }.uniq
+        end
+
         # The decision lead of a steered clip in whole notes (the longest of
         # its generators'), or nil.
         def steer_lead

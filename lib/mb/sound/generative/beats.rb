@@ -189,7 +189,7 @@ module MB
         # `open_hat`, `cp`, ...; a typo raises with did-you-mean), or `row
         # :name, ..., note:` / `notes:` for other names; `euclid(hits,
         # steps)` patterns; `fill every: 8, snare: 0.7`.
-        class Builder < BasicObject
+        class Builder
           # Row names (GM drums and drum machine voices).
           NAMES = Sequence::Grid::GM_DRUMS.merge(Sequence::Grid::ROW_ALIASES).freeze
 
