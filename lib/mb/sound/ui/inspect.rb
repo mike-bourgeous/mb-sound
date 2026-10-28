@@ -190,10 +190,22 @@ module MB
 
         def recipe?(n) = n.instance_variable_defined?(:@graph_recipe) && !n.instance_variable_get(:@graph_recipe).nil?
 
+        # The nodes +root+ reads, itself first: its #graph, or for a root
+        # that isn't a GraphNode but has sources (a ChannelMixer: Pan,
+        # Balance, Unison, the multi-output node holding the recipe) the
+        # same walk from it (GraphNode.graph; before omnibus15 such roots
+        # showed only themselves: tine_piano's inspector listed one node,
+        # found by research-sound-design-nav).
+        def nodes_of(root)
+          return root.graph if root.respond_to?(:graph)
+          return GraphNode.graph(root) if root.respond_to?(:sources)
+          [root]
+        end
+
         # The node list, knob names, and code of graph +roots+ (see
         # InspectInfo): { nodes:, objects:, knobs:, code: }.
         def walk(roots)
-          all = roots.flat_map { |r| r.respond_to?(:graph) ? r.graph : [r] }.uniq(&:object_id)
+          all = roots.flat_map { |r| nodes_of(r) }.uniq(&:object_id)
           knobs = []
           all.each do |n|
             k = n.is_a?(GraphNode::Knob::Reader) ? n.knob : n.is_a?(GraphNode::Knob) ? n : nil
