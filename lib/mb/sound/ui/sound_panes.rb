@@ -49,6 +49,8 @@ module MB
             on ['T'], :track, -1, help: 'the previous track', label: 't T'
             on ['n', ']'], :node, 1, help: 'the next node (preview and params)', label: 'n N'
             on ['N', '['], :node, -1, help: 'the previous node', label: 'n N'
+            on :tab, :node, 1, help: 'the next node (preview and params)', label: 'Tab S-Tab'
+            on [:tab, :shift], :node, -1, help: 'the previous node', label: 'Tab S-Tab'
           end
 
           keys do

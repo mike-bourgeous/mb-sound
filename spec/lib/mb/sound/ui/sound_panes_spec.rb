@@ -57,6 +57,11 @@ RSpec.describe('UI sound-design screen', :aggregate_failures) do
       expect(ui::Inspect.target).to eq({ track: :pad, node: nil })
       expect(key(:inspector, st, :node, 1)).to include('node softclip')
       expect(ui::Inspect.target).to eq({ track: :bass, node: 2 })
+
+      # Tab and Shift-Tab step through the nodes like n and N
+      km = ui::Panes::Inspector.mode_keymap
+      expect(km[ui::Input::Key.new(key: :tab, mods: [])]).to eq(km[ui::Input::Key.new(key: 'n', mods: [])])
+      expect(km[ui::Input::Key.new(key: :tab, mods: [:shift])]).to eq(km[ui::Input::Key.new(key: 'N', mods: [])])
     end
 
     it 'steps stepped knobs one step at a time' do
