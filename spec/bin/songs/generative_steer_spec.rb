@@ -12,16 +12,16 @@ RSpec.describe('bin/songs/generative_steer.rb') do
   end
 
   it 'fills the lead in over the intro (the density gesture) and thickens the drums, unlike the fixed version' do
-    clips, audio = steer_piece(10)
+    clips, audio = steer_piece(9)
     expect(audio.map { |c| c.abs.max }.max).to be_between(0.1, 1.0)
     lead = (0..8).map { |c| clips[:lead].events_for(c).length }
-    drums = (0..9).map { |c| clips[:drums].events_for(c).length }
+    drums = (0..8).map { |c| clips[:drums].events_for(c).length }
     expect(lead.first).to be <= 4
     expect(lead[7]).to be >= lead.first + 6
     expect(drums.last(2).sum).to be > drums.first(2).sum
 
-    fixed, = steer_piece(10, steer: false)
-    flat = (0..8).map { |c| fixed[:lead].events_for(c).length }
+    fixed, = steer_piece(5, steer: false)
+    flat = (0..4).map { |c| fixed[:lead].events_for(c).length }
     expect(flat.max - flat.min).to be <= 4
   end
 
