@@ -160,6 +160,97 @@ module MB
         Sequence::Clip.generate(m.length, values: notes, seed: seed, name: "motifs(seed: #{seed})", align: align) { |cycle, dice| m.events(cycle, dice) }
       end
 
+      # An evolving rhythm (Generative::Beats; G3): a generator clip of
+      # rows of per-step hit probabilities, played by any drum kit
+      # (`tr909(groove)`, `tr808`, kit-builder kits; Clip#values lists the
+      # rows' notes) or, for rows with +notes:+, any synth.  In the block,
+      # each row is a method named after a drum (`kick`, `snare`, `clap`,
+      # `hat`, `open_hat`, `ride`, `cowbell`, `rim`, `low_tom`, ...; typos
+      # raise with did-you-mean) taking a pattern (an Array of
+      # probabilities, or `euclid(hits, steps)`) and options: +keep:+ steps
+      # that never drift (anchors), +drift:+ how far the other steps'
+      # probabilities wander (smoothly, over +over:+ hold blocks),
+      # +mutate:+ how much a Euclidean row's hit count and rotation change,
+      # +level:+, +energy: false+ (ignore the energy), +length:+ (steps).
+      # `row :name, pattern, note: C2` or `notes: field` names other rows
+      # (melodic rows walk the field's scale notes).  `fill every: 8,
+      # snare: 0.7, low_tom: 0.3` raises those rows in the last beat of
+      # every 8th cycle (`last:` a length).
+      #
+      # +energy+ (0..1; a number, a lambda of the cycle, or a knob) thins
+      # below 0.5 and fills above it; draws are fixed per +hold+ block, so
+      # raising the energy only adds hits and `hold: 2` plays each random
+      # bar twice.  +groove+ is the velocity per step (an Array, cycled, or
+      # a lambda of the step's 0...1 position), +swing+ (0.5 straight to
+      # 0.75) delays odd steps, +humanize+ varies velocities.  A knob for
+      # +energy+ or +swing+ is read once per cycle at its decision point,
+      # +lead:+ (one beat) before it (Generative::Steer).
+      #
+      #     knob :energy, 0.4
+      #     groove = beats(16, hold: 2, swing: 0.54, energy: knob(:energy), seed: 5) do
+      #       kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]
+      #       clap [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12], level: 0.9
+      #       hat euclid(10, 16), mutate: 0.5, drift: 0.15, level: 0.75
+      #       snare [0, 0, 0, 0.1] * 4, drift: 0.2, level: 0.55
+      #       fill every: 8, snare: 0.7, low_tom: 0.3
+      #     end
+      #     bg :drums, tr909(groove)
+      #     turn :energy, 0.9, over: 8     # a build, a cycle at a time
+      def beats(steps = 16, step: 1.n16, hold: 1, over: 8, energy: 0.5, swing: 0.5, groove: Generative::Beats::GROOVE, humanize: 0.08,
+                seed: nil, align: :timeline, lead: nil, &block)
+        raise ArgumentError, 'beats needs a block of rows: beats(16) { kick [1, 0, 0, 0] * 4 }' unless block
+        raise ArgumentError, "beats' steps is an Integer from 1 to 256 (got #{steps.inspect})" unless steps.is_a?(Integer) && steps.between?(1, 256)
+        step = Generative.length_of(step, :step)
+        raise ArgumentError, "beats' hold: is a whole number of cycles from 1 (got #{hold.inspect})" unless hold.is_a?(Integer) && hold >= 1
+        raise ArgumentError, "beats' over: is a whole number of hold blocks from 1 (got #{over.inspect})" unless over.is_a?(Integer) && over >= 1
+        unless energy.respond_to?(:call) || MIDI::Param.param?(energy) || (energy.is_a?(Numeric) && energy.between?(0, 1))
+          raise ArgumentError, "beats' energy: is from 0 to 1, a knob or other param, or a lambda of the cycle (got #{energy.inspect})"
+        end
+        unless swing.respond_to?(:call) || MIDI::Param.param?(swing) || (swing.is_a?(Numeric) && swing.between?(0.5, 0.75))
+          raise ArgumentError, "beats' swing: is from 0.5 (straight) to 0.75, or a knob or other param (got #{swing.inspect})"
+        end
+        raise ArgumentError, "beats' groove: is an Array of velocities or a lambda of the step's position (got #{groove.inspect})" unless groove.respond_to?(:call) || (groove.is_a?(Array) && !groove.empty?)
+        raise ArgumentError, "beats' humanize: is from 0 to 1 (got #{humanize.inspect})" unless humanize.is_a?(Numeric) && humanize.between?(0, 1)
+
+        builder = Generative::Beats::Builder.new(steps, step * steps)
+        builder.instance_exec(&block)
+        rows, fill = builder.__result
+        raise ArgumentError, 'beats needs at least one row' if rows.empty? && fill.nil?
+        if fill
+          fill.rows.each_key do |name|
+            next if rows.any? { |r| r.name == name }
+            # A drum only in fills
+            builder.row(name, [0], energy: false)
+            rows = builder.__result[0]
+          end
+        end
+        seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+        b = Generative::Beats.new(rows, steps: steps, step: step, hold: hold, over: over, energy: energy, swing: swing, groove: groove,
+          humanize: humanize, fill: fill, seed: seed)
+        reach = MB::M.max(b.length * 2, step * (steps + rows.map(&:length).max.ceil))
+        params = { energy: energy, swing: swing }.select { |_, v| !v.respond_to?(:call) && MIDI::Param.param?(v) }
+        unless params.empty?
+          return Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach,
+            lead: lead, params: params) { |cycle, dice, **v| b.events(cycle, dice, **v) }
+        end
+        Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach) { |cycle, dice|
+          b.events(cycle, dice)
+        }
+      end
+
+      # An evolving rhythm for a melodic line (#beats with one row of
+      # +notes+): +pattern+ is the per-step hit probability (an Array, or
+      # `euclid`-style via #beats), the notes a walk of the scale notes of
+      # +source+ (Weights, a Harmony, a Scale, a Field, or Harmony#over)
+      # where each hit starts; the other options as #beats.
+      #
+      #     bass = rhythm(h.over(D2..D3), [1, 0, 0.3, 0.6] * 4, energy: knob(:energy), hold: 2, length: 2)
+      #     bg :bass, bass.synth { |v| v.hz.saw.lp4(600) * v.env(0.005, 0.2, 0.3, 0.1) }
+      def rhythm(source, pattern = [1, 0, 0.4, 0] * 4, steps: nil, length: 1, drift: 0.15, keep: [0], level: 0.9, **options)
+        steps ||= pattern.length
+        beats(steps, **options) { row :line, pattern, notes: source, keep: keep, drift: drift, level: level, length: length }
+      end
+
       # Sparse generated hits (Generative::Strikes): on each step of
       # +every+, a strike with probability +chance+ (a number, or a lambda
       # of the cycle), none within +gap+ steps after another candidate, its
