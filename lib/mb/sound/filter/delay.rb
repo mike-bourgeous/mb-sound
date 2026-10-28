@@ -304,7 +304,8 @@ module MB
 
           if feedback && feedback != 0
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
-            delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state, out: @read_buf)
+            fb = feedback.is_a?(Numo::NArray) && feedback.length != length ? feedback[0...length] : feedback # (no view for the whole block)
+            delayed = @line.feedback(data, delays, fb, interpolation: @interpolation, state: @read_state, out: @read_buf)
           else
             @line.write(data)
             @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
@@ -403,18 +404,16 @@ module MB
           return nil if wet.is_a?(Numeric) && !wet.real?
           return nil if dry.is_a?(Numeric) && !dry.real?
 
+          # (FastArithmetic.scale and .accumulate: the same float steps as
+          # Numo's, without its temporaries)
           r = @result_buf = reuse_buffer(@result_buf, data)
-          return nil unless MB::Sound::FastArithmetic.copy(r, delayed)
-          r.inplace * wet
+          return nil unless MB::Sound::FastArithmetic.copy(r, delayed) && MB::Sound::FastArithmetic.scale(r, wet)
           if dry.is_a?(Numo::NArray) || dry != 0
-            t = @dry_buf = reuse_buffer(@dry_buf, data)
-            return nil unless MB::Sound::FastArithmetic.copy(t, data)
-            t.inplace * dry
-            r.inplace + t
+            r.inplace + data * dry unless length == 0 || MB::Sound::FastArithmetic.accumulate(r, 0, data, 0, length, dry, 0, nil, 0)
           end
           return r unless data.inplace? && !data.frozen?
 
-          data[true] = r
+          data[true] = r unless MB::Sound::FastArithmetic.copy(data, r)
           data
         end
 

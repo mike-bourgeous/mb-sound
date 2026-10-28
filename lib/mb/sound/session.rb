@@ -390,6 +390,7 @@ module MB
         @span_graph_scratch = nil
         @kept_scratch = nil # (see Strip#read_kept_graphs)
         @span_player_list = nil # (see #render_span)
+        @span_step = nil # (see #span_step)
         @bus_zero_seg = nil # (see Buses#run_bus_chains)
         @asleep_graphs = nil
         @bus_span_count = nil
@@ -980,7 +981,9 @@ module MB
           # A seek (or its undo) landing inside the buffer splits it: the
           # frames before it, then the rest from the new position (see
           # Seeks), so it lands on the same frame at any buffer size
-          parts = []
+          # (no Array for the usual one span; dropouts-2)
+          first = nil
+          parts = nil
           remaining = count
           while remaining > 0
             @scheduler.apply_timed_changes
@@ -990,7 +993,7 @@ module MB
             # typed in, like live lines typed between buffers, so a tempo
             # they set covers the whole span (see Scheduler::Entry#exact)
             from = @transport.position
-            to = from + remaining * per_sample
+            to = from + span_step(remaining, per_sample)
             if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
@@ -999,11 +1002,16 @@ module MB
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             # (the span's end, computed once when the span is the rest)
-            parts << render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
+            r = render_span(n, per_sample, n == remaining && @transport.position.equal?(from) ? to : nil)
+            if first.nil?
+              first = r
+            else
+              (parts ||= [first]) << r
+            end
             remaining -= n
           end
           @ui_feed.capture(self) if @ui_feed&.wants_capture? # players, buses, chains, while they can't change
-          parts.length == 1 ? parts[0] : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
+          parts.nil? ? first : parts.transpose.map { |chans| chans.reduce { |a, b| a.concatenate(b) } }
         }
 
         # How busy rendering is (before the output blocks), for deciding
@@ -1021,6 +1029,18 @@ module MB
         @ui_feed&.publish(self, mix, count, @load)
         mix
       end
+
+      # +count+ * +per_sample+ (whole notes), kept while both hold (a
+      # Rational every buffer otherwise).
+      def span_step(count, per_sample)
+        c = @span_step
+        return c[2] if c && c[0] == count && c[1].equal?(per_sample)
+
+        v = count * per_sample
+        @span_step = [count, per_sample, v]
+        v
+      end
+      private :span_step
 
       # Renders +count+ frames (one span of #process_buffer): scheduled
       # blocks, changes landing in the span, players, and the master chain.
