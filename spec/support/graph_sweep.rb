@@ -95,6 +95,24 @@ module GraphSweep
     }
   end
 
+  # Biquads, lp4 modes, and the diode ladder inside feedback loops
+  # (delay-fx-1's loop ops), constant and modulated.
+  def self.loop_filter_factories
+    biquads = MB::Sound::Filter::Cookbook::FILTER_TYPES.map { |t|
+      gain = MB::Sound::Filter::SVF::GAIN_TYPES.include?(t)
+      ["feedback biquad(#{t.inspect})", ->(c) {
+        c.sig.feedback { |fb, input| input + fb.delay(40.samples).filter(t, cutoff: c.mod(400, 3000), quality: 1.2, gain: gain ? 1.5 : nil, structure: :biquad) * 0.4 }
+      }]
+    }
+    ladders = MB::Sound::Filter::FourPole::MODES.keys.map { |m|
+      ["feedback lp4(mode: #{m.inspect})", ->(c) {
+        c.sig.feedback { |fb, input| input + fb.delay(40.samples).lp4(c.mod(300, 4000), resonance: c.mod(0, 0.7, 3), mode: m, drive: 1.5) * 0.5 }
+      }]
+    }
+    ladders << ['feedback diode', ->(c) { c.sig.delay(0.002, feedback: 0.6) { |fb| fb.diode(c.mod(400, 3000), resonance: 0.4) } }]
+    biquads + ladders
+  end
+
   def self.four_pole_factories
     fp = MB::Sound::Filter::FourPole
     modes = fp::MODES.keys.flat_map { |m|
@@ -406,7 +424,7 @@ module GraphSweep
   end
 
   def self.factories
-    node_factories + svf_factories + biquad_factories + four_pole_factories + filter_object_factories
+    node_factories + svf_factories + biquad_factories + four_pole_factories + loop_filter_factories + filter_object_factories
   end
 
   # Node classes the sweep doesn't build, with reasons.

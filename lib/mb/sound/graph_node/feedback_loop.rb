@@ -268,7 +268,7 @@ module MB
         end
 
         # What runs inside a feedback loop, for messages.
-        LOOP_OPS = 'delays, arithmetic, shapers, and SVF filters run inside loops'
+        LOOP_OPS = 'delays, arithmetic, shapers, SVF and biquad filters, and lp4/diode ladders run inside loops'
 
         # The message for a loop that can't run one sample at a time
         # because of +e+ (a Plan::Unsupported): names the DSL method and
@@ -279,15 +279,7 @@ module MB
         def self.unsupported_message(e)
           node = e.node
           live = 'in live mode it runs as a block graph instead (slower; op latencies aren\'t compensated)'
-          if node.is_a?(FourPole)
-            c = node.cutoff
-            cut = c.is_a?(Numeric) ? (c == c.round ? c.round : c.to_f.round(2)).to_s : '...'
-            ["lp4 and diode (four-pole ladders) can't run inside a feedback loop yet; use .filter(:lowpass, cutoff: #{cut}) (an SVF), which can (#{LOOP_OPS}); #{live}", false]
-          elsif node.respond_to?(:base_filter) && node.base_filter.is_a?(Filter::Biquad)
-            ["structure: :biquad filters can't run inside a feedback loop; leave structure: out (an SVF, which can: #{LOOP_OPS}); #{live}", false]
-          else
-            ["this feedback loop can't run one sample at a time (#{e.message.sub(/\A#{Regexp.escape(Plan.node_label(node))}: /, '')}; #{LOOP_OPS}); #{live}", true]
-          end
+          ["this feedback loop can't run one sample at a time (#{e.message.sub(/\A#{Regexp.escape(Plan.node_label(node))}: /, '')}; #{LOOP_OPS}); #{live}", true]
         end
 
         private
@@ -523,6 +515,8 @@ module MB
           states = @program.ops.filter_map { |op|
             case op
             when Plan::Op::Shape then op.shaper.plan_state.dup
+            when Plan::Loop::Op::Biquad then op.loop_snapshot
+            when Plan::Op::FourPole then [op.filter.instance_variable_get(:@state).dup, op.filter.instance_variable_get(:@cutoff), op.filter.instance_variable_get(:@resonance)]
             when Plan::Loop::Op::Svf then op.filter.instance_variable_get(:@state).dup
             when Plan::Loop::Op::LoopHistory then op.state.dup
             end
@@ -565,6 +559,19 @@ module MB
           end
           k = 0
           @program.ops.each do |op|
+            case op
+            when Plan::Loop::Op::Biquad
+              op.loop_restore(states[k])
+              k += 1
+              next
+            when Plan::Op::FourPole
+              st, fc, res = states[k]
+              op.filter.instance_variable_get(:@state).replace(st)
+              op.filter.instance_variable_set(:@cutoff, fc)
+              op.filter.instance_variable_set(:@resonance, res)
+              k += 1
+              next
+            end
             arr = case op
                   when Plan::Op::Shape then op.shaper.plan_state
                   when Plan::Loop::Op::Svf then op.filter.instance_variable_get(:@state)

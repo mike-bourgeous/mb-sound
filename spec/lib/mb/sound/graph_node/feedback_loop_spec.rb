@@ -2,12 +2,21 @@
 # compensation (Karplus-Strong tuning, echo times), the fallback, errors,
 # and how loops sit in planned graphs and synths.
 RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
-  # ux-fix-1 item 19: `fb.lp4(2000)` said "no loop lowering for MB::Sound::Plan::Op::FourPole"
-  it 'names lp4 and the SVF to use instead when a loop has a four-pole filter' do
-    expect { 261.63.hz.saw.delay(0.25, feedback: 0.5) { |fb| fb.lp4(2000) } }
-      .to raise_error(MB::Sound::Plan::Unsupported, /\Alp4 and diode \(four-pole ladders\) can't run inside a feedback loop yet; use \.filter\(:lowpass, cutoff: 2000\) \(an SVF\), which can/)
-    expect { 261.63.hz.saw.feedback { |fb, x| x + fb.delay(0.01).filter(:lowpass, cutoff: 1000, structure: :biquad) * 0.5 } }
-      .to raise_error(MB::Sound::Plan::Unsupported, /\Astructure: :biquad filters can't run inside a feedback loop; leave structure: out/)
+  # ux-fix-1 item 19 asked for a message naming lp4; since delay-fx-1 lp4,
+  # diode, and biquads run inside loops
+  it 'runs lp4, diode, and biquad filters inside loops' do
+    a = 261.63.hz.saw.at(0.3).until(0.05).delay(0.01, feedback: 0.5) { |fb| fb.lp4(2000) }
+    b = 261.63.hz.saw.at(0.3).until(0.05).feedback { |fb, x| x + fb.delay(0.01).filter(:lowpass, cutoff: 1000, structure: :biquad) * 0.5 }
+    c = 261.63.hz.saw.at(0.3).until(0.05).feedback { |fb, x| x + fb.delay(0.01).diode(1000) * 0.5 }
+    [a, b, c].each do |g|
+      expect(g.explain).not_to match(/block graph/)
+      expect(g.sample(4800).abs.max).to be > 0.1
+    end
+  end
+
+  it 'names what runs inside loops when a node has no loop ops' do
+    expect { 261.63.hz.saw.feedback { |fb, x| x + fb.delay(0.01).proc { |v| v } * 0.5 } }
+      .to raise_error(MB::Sound::Plan::Unsupported, /can't run one sample at a time .*lp4\/diode ladders run inside loops/)
   end
 
   # The fundamental of +data+ in Hz: a zero-padded Hann-windowed FFT peak

@@ -147,8 +147,16 @@ module MB
             gain = @inputs[:gain] || (f.gain || 1.0)
             p.svf(f, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)], gain: p[gain])
 
+          when MB::Sound::Filter::Cookbook
+            # A direct form biquad (`structure: :biquad`), per sample as its
+            # dynamic kernel (Plan::Loop::Op::Biquad)
+            if (why = plan_unsupported_reason)
+              raise Plan::Unsupported.new(self, why)
+            end
+            p.biquad(@base_filter, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)])
+
           else
-            raise Plan::Unsupported.new(self, "#{@base_filter.class.name.sub('MB::Sound::', '')} has no loop ops (delays and SVF filters run inside feedback loops)")
+            raise Plan::Unsupported.new(self, "#{@base_filter.class.name.sub('MB::Sound::', '')} has no loop ops (delays and SVF and biquad filters run inside feedback loops)")
           end
         end
 

@@ -130,6 +130,38 @@ module MB
 
             def opcode = :svf
           end
+
+          # A direct form biquad (Filter::Cookbook, `structure: :biquad`) on
+          # the loop, its coefficients computed every sample as its dynamic
+          # kernel does (delay-fx-1).  #filter is a Filter::SVF of the same
+          # type, cutoff, quality, and gain (the same cookbook response),
+          # used only for the loop's latency and sustain analysis, so the
+          # biquad counts as that SVF there; #cookbook is the filter that
+          # runs (its state is the Cookbook's own).
+          class Biquad < Svf
+            attr_reader :cookbook
+
+            def initialize(dst, node, a, cookbook, cutoff:, quality:, gain:)
+              @cookbook = cookbook
+              super(dst, node, a, Filter::SVF.from_cookbook(cookbook), cutoff: cutoff, quality: quality, gain: gain)
+            end
+
+            def expression
+              "biquad_#{@cookbook.filter_type}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality})"
+            end
+
+            def opcode = :biquad
+
+            # The Cookbook's state for check mode (see
+            # GraphNode::FeedbackLoop#snapshot).
+            def loop_snapshot
+              Filter::SampleWrapper::PLAN_BIQUAD_IVARS.map { |v| @cookbook.instance_variable_get(v) }
+            end
+
+            def loop_restore(values)
+              Filter::SampleWrapper::PLAN_BIQUAD_IVARS.each_with_index { |v, i| @cookbook.instance_variable_set(v, values[i]) }
+            end
+          end
         end
 
         # A Filter::Delay node inside a loop: its delay line (the node's own
@@ -222,7 +254,7 @@ module MB
                 elsif node.is_a?(Plan::Describable) && (why = node.plan_unsupported_reason).nil?
                   node.plan_describe(self)
                 else
-                  raise Unsupported.new(node, why || "#{Plan.class_label(node)} has no loop ops (a feedback loop runs arithmetic, shapers, delays, and SVF filters per sample)")
+                  raise Unsupported.new(node, why || "#{Plan.class_label(node)} has no loop ops (a feedback loop runs arithmetic, shapers, delays, SVF and biquad filters, and lp4/diode ladders per sample)")
                 end
             v = const(v) if v.is_a?(Numeric)
             v = fill(v) if v.is_a?(Plan::Const)
@@ -272,6 +304,15 @@ module MB
             emit(Op::Svf.new(value(:real), node, a, filter, cutoff: self[cutoff], quality: self[quality], gain: self[gain]))
           end
 
+          # A direct form biquad (see Op::Biquad).
+          def biquad(cookbook, a, cutoff:, quality:)
+            a = self[a]
+            raise Unsupported.new(node, 'a complex input') if a.complex?
+
+            gain = Filter::SVF.from_cookbook(cookbook).gain || 1.0
+            emit(Op::Biquad.new(value(:real), node, a, cookbook, cutoff: self[cutoff], quality: self[quality], gain: const(gain)))
+          end
+
           # A value FeedbackLoop sets every block (see Op::SustainParam).
           def sustain_param(role)
             op = Op::SustainParam.new(value(:real), node, role: role, index: @params.length)
@@ -292,11 +333,20 @@ module MB
             super
           end
 
+          # A four-pole's parameter memory (GraphNode::FourPole#plan_param):
+          # not needed in a loop, where an ended parameter input reads as 0
+          # like every boundary input (see GraphNode::FeedbackLoop).
+          def keep_last(a, target, ivar)
+            raise Unsupported.new(node, 'keep_last inside a feedback loop') unless node.is_a?(GraphNode::FourPole)
+
+            nil
+          end
+
           def tone(*, **)
             raise Unsupported.new(node, 'an oscillator inside a feedback loop (P1 runs arithmetic, shapers, delays, and SVF filters per sample)')
           end
 
-          %i[events smooth keep_last note_freq part envelope].each do |m|
+          %i[events smooth note_freq part envelope].each do |m|
             define_method(m) do |*, **|
               raise Unsupported.new(node, "#{m} inside a feedback loop")
             end
@@ -322,6 +372,7 @@ module MB
           OPCODES = {
             end: 0, fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, max: 9, copy: 10,
             shape: 11, svf: 12, dread: 13, dwrite: 14, hread: 15, hwrite: 16, muladd: 17, mulsadd: 18,
+            biquad: 19, four_pole: 20,
           }.freeze
 
           # Sinc reads closer than the kernel's reach blend into cubic over
@@ -519,6 +570,16 @@ module MB
                 objects << sh.plan_state
                 body << [OPCODES[:shape], reg.(op.dst), reg.(op.a), objects.length - 1,
                          sc.(Plan::Op::Shape::MODES.fetch(sh.mode), sh.p1, sh.p2, sh.antialias ? 1 : 0)]
+              when Op::Biquad
+                cb = op.cookbook
+                objects << cb
+                params = [op.cutoff, op.quality].map { |v| v.is_a?(Plan::Const) ? -1 - sc.(v.value.to_f) : reg.(v) }
+                body << [OPCODES[:biquad], reg.(op.dst), reg.(op.a), objects.length - 1, *params,
+                         Filter::Cookbook::FILTER_TYPE_IDS.fetch(cb.filter_type), sc.(cb.sample_rate, cb.db_gain.nil? ? Float::NAN : cb.db_gain)]
+              when Plan::Op::FourPole
+                objects << op.filter
+                params = [op.cutoff, op.resonance].map { |v| v.is_a?(Plan::Const) ? -1 - sc.(v.parts[0].to_f) : reg.(v) }
+                body << [OPCODES[:four_pole], reg.(op.dst), reg.(op.a), objects.length - 1, *params, sc.(*op.settings)]
               when Op::Svf
                 objects << op.filter.instance_variable_get(:@state)
                 params = [op.cutoff, op.quality, op.gain].map { |v| v.is_a?(Plan::Const) ? -1 - sc.(v.value.to_f) : reg.(v) }
@@ -1109,6 +1170,9 @@ module MB
                     when Op::Svf
                       x = build.call(op.a)
                       x && emit.call([:svf, nil, x, op])
+                    when Plan::Op::FourPole
+                      # (counted as a wire: no latency estimate yet)
+                      build.call(op.a)
                     end
                 memo[v] = r
               end
@@ -1237,6 +1301,12 @@ module MB
               sh = op.shaper
               x = Numo::SFloat[regs[@reg[op.a]]]
               MB::Sound::Shaper.shape_ruby(x, sh.mode, sh.p1, sh.p2, sh.antialias, sh.plan_state)[0]
+            when Op::Biquad
+              val = ->(v) { v.is_a?(Plan::Const) ? v.value.to_f : regs[@reg[v]] }
+              op.cookbook.dynamic_process(Numo::SFloat[regs[@reg[op.a]]], cutoff: Numo::SFloat[val.(op.cutoff)], quality: Numo::SFloat[val.(op.quality)])[0]
+            when Plan::Op::FourPole
+              val = ->(v) { v.is_a?(Plan::Const) ? v.parts[0] : Numo::SFloat[regs[@reg[v]]] }
+              op.filter.dynamic_process_ruby(Numo::SFloat[regs[@reg[op.a]]], cutoff: val.(op.cutoff), resonance: val.(op.resonance))[0]
             when Op::Svf
               val = ->(v) { v.is_a?(Plan::Const) ? v.value.to_f : regs[@reg[v]] }
               f = op.filter
@@ -1344,6 +1414,8 @@ module MB
                 when Op::Svf
                   ma = moments(op.a, values, memo)
                   svf_latency(op, ma, values)
+                when Plan::Op::FourPole
+                  moments(op.a, values, memo) # (a wire for now)
                 else
                   ZERO
                 end

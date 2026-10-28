@@ -201,7 +201,16 @@ module RelationFuzz
     when :decimate then "#{k[0]}.decimate(#{ctl(a[0])})"
     when :at then "#{k[0]}.at(#{ctl(a[0])})"
     when :compress then "#{k[0]}.compress(threshold: #{a[0]}.db, ratio: #{a[1]})"
-    when :feedback then "#{k[0]}.feedback { |fb, input| input + fb.delay(#{a[0]}.samples) * #{a[1]} }"
+    when :feedback
+      # (the loop filter comes from the delay length, so seeds draw the
+      # same graphs as before delay-fx-1 added biquad and lp4 loop ops)
+      insert = case a[0] % 4
+               when 1 then ".filter(:lowpass, cutoff: 3000, quality: 0.7, structure: :biquad)"
+               when 2 then '.lp4(2500, resonance: 0.3)'
+               when 3 then '.diode(2000, resonance: 0.2)'
+               else ''
+               end
+      "#{k[0]}.feedback { |fb, input| input + fb.delay(#{a[0]}.samples)#{insert} * #{a[1]} }"
     when :ease then "#{k[0]}.ease(#{a[0].inspect})"
     when :formant then "#{k[0]}.formant(#{a[0].inspect})"
     when :pan then "#{k[0]}.pan(#{ctl(a[0])})"

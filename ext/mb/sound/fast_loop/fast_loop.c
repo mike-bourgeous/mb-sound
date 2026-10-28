@@ -68,6 +68,8 @@
 #include "mb_clip_shape.h"
 #include "mb_svf.h"
 #include "mb_delay_interp.h"
+#include "mb_biquad.h"
+#include "mb_four_pole.h"
 
 #include "loop_pitch.h"
 
@@ -100,6 +102,8 @@ enum {
 	OP_HWRITE,    // hist, a               the history's value = a
 	OP_MULADD,    // dst, a, b, c          dst = a + b * c (two roundings, as OP_MUL then OP_ADD)
 	OP_MULSADD,   // dst, a, b, sc         dst = a + (float)c * b (as OP_MULS then OP_ADD)
+	OP_BIQUAD,    // dst, a, obj, fc, q, type, sc   dst = Filter::Cookbook (direct form biquad) on a, coefficients per sample as its dynamic kernel (mb_biquad.h; obj: the Cookbook; fc, q: a register or -1 - scalar index; sc: sample rate, dB gain or NaN)
+	OP_FOUR_POLE, // dst, a, obj, fc, res, sc       dst = Filter::FourPole (four-pole or diode ladder) on a (mb_four_pole.h; obj: the Filter::FourPole; fc, res: a register or -1 - scalar index; sc: 14 settings as fast_plan's OP_FOUR_POLE)
 	OP_COUNT,
 
 	// Internal ops made by the decode-time rewriter (never in words)
@@ -112,7 +116,7 @@ static const int op_words[OP_COUNT] = {
 	[OP_END] = 0, [OP_FILL] = 2, [OP_MUL] = 3, [OP_MULS] = 3, [OP_ADD] = 3, [OP_ADDS] = 3,
 	[OP_DIV] = 3, [OP_DIVS] = 3, [OP_POW] = 3, [OP_MAX] = 3, [OP_COPY] = 2, [OP_SHAPE] = 4,
 	[OP_SVF] = 8, [OP_DREAD] = 2, [OP_DWRITE] = 2, [OP_HREAD] = 2, [OP_HWRITE] = 2,
-	[OP_MULADD] = 4, [OP_MULSADD] = 4,
+	[OP_MULADD] = 4, [OP_MULSADD] = 4, [OP_BIQUAD] = 7, [OP_FOUR_POLE] = 6,
 };
 
 // Sinc reads at delays shorter than the kernel's reach (taps newer than the
@@ -183,6 +187,197 @@ struct ring_state {
 	long dint; // the delay of OP_DREAD_INT reads (0: none)
 	VALUE obj, read_state;
 };
+
+// A Filter::Cookbook biquad on the loop (OP_BIQUAD): its settings,
+// coefficients, and state, read from the filter's instance variables at
+// the start of a call and written back at the end (as fast_plan's
+// plan_biquad.c and Cookbook#dynamic_process_c).
+struct biquad_state {
+	VALUE filter;
+	enum filter_types type;
+	double rate, g, f0_max;
+	struct biquad_coeffs bq;
+	double x1, x2, y1, y2;
+	double last_fc, last_q;
+};
+
+// A Filter::FourPole (four-pole or diode ladder) on the loop
+// (OP_FOUR_POLE): settings, coefficient caches, state, and flush grid
+// count (as fast_plan's plan_filters.c).
+struct four_pole_state {
+	VALUE filter, state;
+	struct mb_fp_args args;
+	_Bool diode, driven;
+	double pi_over_rate, fc_max, inv_drive;
+	struct mb_fp_cache fcc;
+	struct mb_dl_cache dcc;
+	double st[4];
+	long fk;
+	double last_fc, last_res;
+};
+
+static ID id_lp_sample_rate, id_lp_db_gain, id_lp_f0_max, id_lp_x1, id_lp_x2, id_lp_y1, id_lp_y2, id_lp_omega,
+	id_lp_b0, id_lp_b1, id_lp_b2, id_lp_a1, id_lp_a2, id_lp_quality, id_lp_center_frequency, id_lp_cutoff,
+	id_lp_state, id_lp_resonance;
+
+static void loop_filter_ids(void)
+{
+	if (id_lp_sample_rate) {
+		return;
+	}
+	id_lp_sample_rate = rb_intern("@sample_rate");
+	id_lp_db_gain = rb_intern("@db_gain");
+	id_lp_f0_max = rb_intern("@f0_max");
+	id_lp_x1 = rb_intern("@x1");
+	id_lp_x2 = rb_intern("@x2");
+	id_lp_y1 = rb_intern("@y1");
+	id_lp_y2 = rb_intern("@y2");
+	id_lp_omega = rb_intern("@omega");
+	id_lp_b0 = rb_intern("@b0");
+	id_lp_b1 = rb_intern("@b1");
+	id_lp_b2 = rb_intern("@b2");
+	id_lp_a1 = rb_intern("@a1");
+	id_lp_a2 = rb_intern("@a2");
+	id_lp_quality = rb_intern("@quality");
+	id_lp_center_frequency = rb_intern("@center_frequency");
+	id_lp_cutoff = rb_intern("@cutoff");
+	id_lp_state = rb_intern("@state");
+	id_lp_resonance = rb_intern("@resonance");
+}
+
+static void biquad_read(struct biquad_state *b, VALUE filter, int type, double rate, double g)
+{
+	b->filter = filter;
+	b->type = (enum filter_types)type;
+	b->rate = rate;
+	b->g = g;
+	b->f0_max = 0.49 * rate;
+	b->bq.omega = NUM2DBL(rb_ivar_get(filter, id_lp_omega));
+	b->bq.b0 = NUM2DBL(rb_ivar_get(filter, id_lp_b0));
+	b->bq.b1 = NUM2DBL(rb_ivar_get(filter, id_lp_b1));
+	b->bq.b2 = NUM2DBL(rb_ivar_get(filter, id_lp_b2));
+	b->bq.a1 = NUM2DBL(rb_ivar_get(filter, id_lp_a1));
+	b->bq.a2 = NUM2DBL(rb_ivar_get(filter, id_lp_a2));
+	b->x1 = NUM2DBL(rb_ivar_get(filter, id_lp_x1));
+	b->x2 = NUM2DBL(rb_ivar_get(filter, id_lp_x2));
+	b->y1 = NUM2DBL(rb_ivar_get(filter, id_lp_y1));
+	b->y2 = NUM2DBL(rb_ivar_get(filter, id_lp_y2));
+	b->last_fc = NAN;
+	b->last_q = NAN;
+}
+
+// One sample through the biquad (mb_dynamic_biquad_run's loop body).
+static inline double biquad_step(struct biquad_state *b, double fc, double q, float x)
+{
+	double f0 = fc >= DYNAMIC_MIN_CUTOFF ? fmin(fc, b->f0_max) : DYNAMIC_MIN_CUTOFF;
+	double quality = fmax(q, 1e-10);
+	b->bq = cookbook(b->type, b->rate, f0, b->g, quality, NAN, NAN);
+	double x0 = x;
+	double y0 = biquad_filter(b->bq.b0, b->bq.b1, b->bq.b2, b->bq.a1, b->bq.a2, x0, b->x1, b->x2, b->y1, b->y2);
+	b->y2 = b->y1;
+	b->y1 = y0;
+	b->x2 = b->x1;
+	b->x1 = x0;
+	b->last_fc = fc;
+	b->last_q = q;
+	return y0;
+}
+
+static void biquad_write(struct biquad_state *b)
+{
+	VALUE f = b->filter;
+	rb_ivar_set(f, id_lp_omega, rb_float_new(b->bq.omega));
+	rb_ivar_set(f, id_lp_b0, rb_float_new(b->bq.b0));
+	rb_ivar_set(f, id_lp_b1, rb_float_new(b->bq.b1));
+	rb_ivar_set(f, id_lp_b2, rb_float_new(b->bq.b2));
+	rb_ivar_set(f, id_lp_a1, rb_float_new(b->bq.a1));
+	rb_ivar_set(f, id_lp_a2, rb_float_new(b->bq.a2));
+	rb_ivar_set(f, id_lp_x1, rb_float_new(b->x1));
+	rb_ivar_set(f, id_lp_x2, rb_float_new(b->x2));
+	rb_ivar_set(f, id_lp_y1, rb_float_new(b->y1));
+	rb_ivar_set(f, id_lp_y2, rb_float_new(b->y2));
+	if (!isnan(b->last_q) || !isnan(b->last_fc)) {
+		// As Cookbook#dynamic_process_c: the last quality (at least 1e-10)
+		// and cutoff (clamped as the kernel clamps it)
+		double qv = b->last_q < 1e-10 ? 1e-10 : b->last_q;
+		rb_ivar_set(f, id_lp_quality, rb_float_new(qv));
+		double f0 = b->last_fc;
+		f0 = f0 >= DYNAMIC_MIN_CUTOFF ? (f0 <= b->f0_max ? f0 : b->f0_max) : DYNAMIC_MIN_CUTOFF;
+		rb_ivar_set(f, id_lp_center_frequency, rb_float_new(f0));
+		rb_ivar_set(f, id_lp_cutoff, rb_float_new(f0));
+	}
+}
+
+static void four_pole_read(struct four_pole_state *f, VALUE filter, const double *cfg)
+{
+	f->filter = filter;
+	f->state = rb_ivar_get(filter, id_lp_state);
+	Check_Type(f->state, T_ARRAY);
+	if (RARRAY_LEN(f->state) != 4 && RARRAY_LEN(f->state) != 5) {
+		rb_raise(rb_eArgError, "Four-pole state must have four elements (five with the flush grid count)");
+	}
+	double rate = NUM2DBL(rb_ivar_get(filter, id_lp_sample_rate));
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+	struct mb_fp_args args = {
+		.rate = rate, .k_max = cfg[0], .comp = cfg[1], .drive = cfg[2],
+		.mix = { cfg[3], cfg[4], cfg[5], cfg[6], cfg[7] },
+		.curve = (int)cfg[8], .drive_mode = (int)cfg[9], .clip = (int)cfg[10], .normalize = (int)cfg[11],
+		.tuning = (int)cfg[13],
+	};
+	f->args = args;
+	f->diode = cfg[12] != 0;
+	if (!isfinite(args.k_max) || !isfinite(args.comp) || !(args.drive >= 0) || !isfinite(args.drive) ||
+			args.curve < FP_CURVE_LINEAR || args.curve > FP_CURVE_SELF_OSC_DB ||
+			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (f->diode && args.drive_mode == FP_DRIVE_STAGES) ||
+			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD ||
+			!fp_tuning_valid(args.tuning, f->diode)) {
+		rb_raise(rb_eArgError, "Bad loop four-pole settings");
+	}
+	for (int j = 0; j < 4; j++) {
+		f->st[j] = mb_finite_entry(f->state, j);
+	}
+	f->fk = mb_flush_count_read(f->state, 4);
+	f->pi_over_rate = M_PI / rate;
+	f->fc_max = rate * FP_MAX_CUTOFF_RATIO;
+	f->driven = args.drive > 0;
+	f->inv_drive = args.drive > 0 ? 1.0 / args.drive : 0.0;
+	mb_fp_cache_init(&f->fcc);
+	mb_dl_cache_init(&f->dcc, &f->args);
+	f->last_fc = NAN;
+	f->last_res = NAN;
+}
+
+// One sample through the four-pole or diode ladder (the run kernels' loop
+// bodies, with the coefficient caches kept across samples).
+static inline double four_pole_step(struct four_pole_state *f, double fc, double res, float x)
+{
+	double y;
+	if (f->diode) {
+		mb_dl_coef_update(&f->dcc, &f->args, fc, res, f->pi_over_rate, f->fc_max);
+		y = mb_dl_step(&f->args, &f->dcc.c, f->driven, x, f->st);
+	} else {
+		mb_fp_coef_update(&f->fcc, &f->args, fc, res, f->pi_over_rate, f->fc_max);
+		y = mb_fp_step(&f->args, &f->fcc.c, f->inv_drive, f->driven, x, f->st);
+	}
+	mb_fp_flush_tick(&f->fk, f->st);
+	f->last_fc = fc;
+	f->last_res = res;
+	return y;
+}
+
+static void four_pole_write(struct four_pole_state *f)
+{
+	for (int j = 0; j < 4; j++) {
+		rb_ary_store(f->state, j, rb_float_new(f->st[j]));
+	}
+	rb_ary_store(f->state, 4, rb_float_new((double)f->fk));
+	if (!isnan(f->last_fc) || !isnan(f->last_res)) {
+		rb_ivar_set(f->filter, id_lp_cutoff, rb_float_new(f->last_fc));
+		rb_ivar_set(f->filter, id_lp_resonance, rb_float_new(f->last_res));
+	}
+}
 
 struct hist_state {
 	float v;
@@ -492,7 +687,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 	}
 
 	// Decode the ops (validating operands) and count state ops
-	size_t nops = 0, nshape = 0, nsvf = 0;
+	size_t nops = 0, nshape = 0, nsvf = 0, nbiquad = 0, nfourpole = 0;
 	for (size_t q = pc;;) {
 		if (q >= nwords) rb_raise(rb_eArgError, "Loop body has no end");
 		int op = w[q];
@@ -501,12 +696,19 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		if (op == OP_END) break;
 		if (op == OP_SHAPE) nshape++;
 		if (op == OP_SVF) nsvf++;
+		if (op == OP_BIQUAD) nbiquad++;
+		if (op == OP_FOUR_POLE) nfourpole++;
 		q += 1 + op_words[op];
 	}
 
 	struct ins *code = ALLOCA_N(struct ins, nops);
 	struct shaper_state *shapers = ALLOCA_N(struct shaper_state, nshape + 1);
 	struct svf_state *svfs = ALLOCA_N(struct svf_state, nsvf + 1);
+	struct biquad_state *biquads = ALLOCA_N(struct biquad_state, nbiquad + 1);
+	struct four_pole_state *fourpoles = ALLOCA_N(struct four_pole_state, nfourpole + 1);
+	if (nbiquad > 0 || nfourpole > 0) {
+		loop_filter_ids();
+	}
 	_Bool *ring_written = ALLOCA_N(_Bool, nrings + 1);
 	memset(ring_written, 0, sizeof(_Bool) * (nrings + 1));
 
@@ -518,6 +720,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		[OP_SVF] = &&L_OP_SVF, [OP_DREAD] = &&L_OP_DREAD, [OP_DWRITE] = &&L_OP_DWRITE,
 		[OP_HREAD] = &&L_OP_HREAD, [OP_HWRITE] = &&L_OP_HWRITE, [OP_MULADD] = &&L_OP_MULADD,
 		[OP_MULSADD] = &&L_OP_MULSADD, [OP_DREAD_INT] = &&L_OP_DREAD_INT,
+		[OP_BIQUAD] = &&L_OP_BIQUAD, [OP_FOUR_POLE] = &&L_OP_FOUR_POLE,
 	};
 #endif
 
@@ -525,7 +728,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 #define SCALAR(x) do { if ((x) < 0 || (x) >= nscalars) rb_raise(rb_eArgError, "Bad loop scalar %d at word %zu", (int)(x), q); } while (0)
 #define OBJECT(x) do { if ((x) < 0 || (x) >= nobjects) rb_raise(rb_eArgError, "Bad loop object %d at word %zu", (int)(x), q); } while (0)
 
-	size_t ishape = 0, isvf = 0;
+	size_t ishape = 0, isvf = 0, ibiquad = 0, ifourpole = 0;
 	for (size_t j = 0, q = pc; j < nops; j++) {
 		const int32_t *o = w + q;
 		struct ins *p = &code[j];
@@ -617,6 +820,37 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				s->fk = mb_flush_count_read(s->state, 2);
 				break;
 			}
+			case OP_BIQUAD: case OP_FOUR_POLE: {
+				REG(o[1]); REG(o[2]); OBJECT(o[3]);
+				p->dst = o[1]; p->a = o[2];
+				for (int m = 0; m < 2; m++) {
+					int r = o[4 + m];
+					if (r >= 0) {
+						REG(r);
+						p->kreg[m] = r;
+					} else {
+						SCALAR(-1 - r);
+						p->kreg[m] = -1;
+						p->kd[m] = sc[-1 - r];
+					}
+				}
+				p->kreg[2] = -1;
+				VALUE obj = rb_ary_entry(objects, o[3]);
+				if (p->op == OP_BIQUAD) {
+					int type = o[6];
+					if (type < FILT_LOWPASS || type > FILT_BANDPASS_SKIRT) rb_raise(rb_eArgError, "Bad loop biquad type %d", type);
+					if (o[7] < 0 || o[7] + 2 > nscalars) rb_raise(rb_eArgError, "Bad loop biquad scalars at word %zu", q);
+					double rate = sc[o[7]];
+					if (!(rate > 0) || !isfinite(rate)) rb_raise(rb_eArgError, "Bad loop biquad sample rate");
+					p->st = (int)ibiquad;
+					biquad_read(&biquads[ibiquad++], obj, type, rate, sc[o[7] + 1]);
+				} else {
+					if (o[6] < 0 || o[6] + 14 > nscalars) rb_raise(rb_eArgError, "Bad loop four-pole scalars at word %zu", q);
+					p->st = (int)ifourpole;
+					four_pole_read(&fourpoles[ifourpole++], obj, sc + o[6]);
+				}
+				break;
+			}
 			case OP_DREAD:
 				REG(o[1]);
 				if (o[2] < 0 || o[2] >= nrings) rb_raise(rb_eArgError, "Bad loop ring at word %zu", q);
@@ -665,7 +899,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			switch (p->op) {
 				case OP_END: case OP_FILL: case OP_DREAD: case OP_HREAD:
 					break;
-				case OP_SVF:
+				case OP_SVF: case OP_BIQUAD: case OP_FOUR_POLE:
 					p->a = alias[p->a];
 					for (int m = 0; m < 3; m++) {
 						if (p->kreg[m] >= 0) {
@@ -794,6 +1028,20 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			R[p->dst] = (float)y;
 			NEXT;
 		}
+		OPCASE(OP_BIQUAD) {
+			// (constant parameters read as the float buffers the dynamic
+			// kernel reads)
+			double fc = p->kreg[0] >= 0 ? R[p->kreg[0]] : (double)(float)p->kd[0];
+			double q = p->kreg[1] >= 0 ? R[p->kreg[1]] : (double)(float)p->kd[1];
+			R[p->dst] = (float)biquad_step(&biquads[p->st], fc, q, R[p->a]);
+			NEXT;
+		}
+		OPCASE(OP_FOUR_POLE) {
+			double fc = p->kreg[0] >= 0 ? R[p->kreg[0]] : p->kd[0];
+			double res = p->kreg[1] >= 0 ? R[p->kreg[1]] : p->kd[1];
+			R[p->dst] = (float)four_pole_step(&fourpoles[p->st], fc, res, R[p->a]);
+			NEXT;
+		}
 		OPCASE(OP_DREAD) {
 			struct ring_state *g = &rings[p->st];
 			double d = g->dd ? g->dd[i] : (g->df ? (double)g->df[i] : g->dconst);
@@ -859,6 +1107,12 @@ sample_done:
 		rb_ary_store(svfs[k].state, 1, rb_float_new(svfs[k].ic2));
 		rb_ary_store(svfs[k].state, 2, rb_float_new((double)svfs[k].fk));
 	}
+	for (size_t k = 0; k < nbiquad; k++) {
+		biquad_write(&biquads[k]);
+	}
+	for (size_t k = 0; k < nfourpole; k++) {
+		four_pole_write(&fourpoles[k]);
+	}
 	for (int k = 0; k < nrings; k++) {
 		struct ring_state *g = &rings[k];
 		rb_ary_store(g->obj, 1, LONG2NUM(g->w));
@@ -909,6 +1163,8 @@ static VALUE ruby_constants(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("hwrite")), INT2NUM(OP_HWRITE));
 	rb_hash_aset(h, ID2SYM(rb_intern("muladd")), INT2NUM(OP_MULADD));
 	rb_hash_aset(h, ID2SYM(rb_intern("mulsadd")), INT2NUM(OP_MULSADD));
+	rb_hash_aset(h, ID2SYM(rb_intern("biquad")), INT2NUM(OP_BIQUAD));
+	rb_hash_aset(h, ID2SYM(rb_intern("four_pole")), INT2NUM(OP_FOUR_POLE));
 	rb_hash_aset(h, ID2SYM(rb_intern("sinc_blend")), DBL2NUM(LOOP_SINC_BLEND));
 	rb_hash_aset(h, ID2SYM(rb_intern("svf_flush")), DBL2NUM(LOOP_SVF_FLUSH));
 #if MB_LOOP_GOTO
