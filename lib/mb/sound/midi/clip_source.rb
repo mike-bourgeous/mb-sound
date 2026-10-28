@@ -267,6 +267,23 @@ module MB
         # +previous+ and the stream seconds since it started at the current
         # tempo as +elapsed+.
         def chase_at(time)
+          return steering { chase_at_position(time) } if @clip.steered?
+          chase_at_position(time)
+        end
+
+        # Runs the block with Generative::Steer.origin set to where this
+        # source's clip position 0 is on the timeline, so a steered
+        # generator reads its knobs at its decision points' timeline
+        # positions (:clocked for a clip on its own clock).
+        def steering
+          prev = Thread.current[:mb_steer_origin]
+          Generative::Steer.origin = @clock ? :clocked : @origin
+          yield
+        ensure
+          Generative::Steer.origin = prev
+        end
+
+        def chase_at_position(time)
           pos = clip_position
           e = @clip.event_at(pos) or return nil
           looping = @clip.looping? && @clip.length > 0
@@ -658,7 +675,11 @@ module MB
           end
           start = @flam_lead && @flam_start
 
-          found = @clip.edges(wn_from, wn_to, early: early, fills: fills)
+          found = if @clip.steered?
+                    steering { @clip.edges(wn_from, wn_to, early: early, fills: fills) }
+                  else
+                    @clip.edges(wn_from, wn_to, early: early, fills: fills)
+                  end
           arm_quiet(to, wn_to, wnps) if @flam_lead.nil? && @clock.nil? && self.class.quiet_reads
           out = found.empty? ? Stream::NO_EVENTS : found.filter_map { |time, type, event, cycle|
             t = from + (time - wn_from) / wnps

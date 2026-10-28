@@ -33,15 +33,12 @@ module MB
           @mutex = Mutex.new
         end
 
-        # The events of +cycle+ with +dice+ (Dice.new(seed, cycle)).
-        def events(cycle, dice)
+        # The events of +cycle+ with +dice+ (Dice.new(seed, cycle)); a
+        # moving +chance+ (a knob, cc, LFO) comes decided for the cycle at
+        # its decision point (Generative::Steer, G3).
+        def events(cycle, dice, chance: @chance)
           root = Dice.new(dice.seed, :strike)
-          chance = if @chance.respond_to?(:call) then @chance.call(cycle).to_f
-                   elsif MIDI::Param.param?(@chance)
-                     # A moving parameter (a knob, cc, LFO) read at the cycle's start
-                     MIDI::Param.value_at(MIDI::Param.wrap(@chance, 'strikes chance'), cycle * @length).to_f
-                   else @chance.to_f
-                   end
+          chance = chance.respond_to?(:call) ? chance.call(cycle).to_f : chance.to_f.clamp(0.0, 1.0)
           first = cycle * @steps
           # Candidates from gap - 1 steps before the cycle on (one call into C)
           from = first - (@gap - 1)

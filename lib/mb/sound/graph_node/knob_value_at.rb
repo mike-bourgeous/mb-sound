@@ -60,7 +60,7 @@ module MB
             }
 
             value = known_value(frame, *snap, queued_segments(pos, frame))
-            decide(pos, value) if pos
+            decide(pos, value) if pos && !MIDI::Param.peeking? # (peeks decide nothing)
             value
           end
 

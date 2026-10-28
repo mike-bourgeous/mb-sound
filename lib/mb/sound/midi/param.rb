@@ -48,6 +48,24 @@ module MB
           x.respond_to?(:value_at) ? x.value_at(pos, transport: transport, stream: stream) : x
         end
 
+        # Runs the block with param reads as peeks (G3, Generative::Steer
+        # speculating on the next cycle): knobs answer what they know
+        # without deciding (no decision remembered or logged for takes) and
+        # choices keep their hysteresis state, so a peek never changes what
+        # a later read answers.  Returns the block's value.
+        def self.peek
+          prev = Thread.current[:mb_param_peek]
+          Thread.current[:mb_param_peek] = true
+          yield
+        ensure
+          Thread.current[:mb_param_peek] = prev
+        end
+
+        # True inside Param.peek on this thread.
+        def self.peeking?
+          Thread.current[:mb_param_peek] ? true : false
+        end
+
         # True if +x+ moves (a param, or something #wrap makes one of).
         def self.param?(x)
           x.is_a?(Base) || x.is_a?(Sequence::Clip) || x.is_a?(GraphNode::Knob::Reader) ||
@@ -328,6 +346,7 @@ module MB
           def index_at(x)
             n = @choices.length
             raw = MB::M.clamp((x * n).floor, 0, n - 1)
+            peek = Param.peeking?
             @lock.synchronize {
               last = @last
               if last && raw != last
@@ -336,7 +355,8 @@ module MB
                 hi = (last + 1).to_f / n + HYSTERESIS / n
                 raw = last if x >= lo && x < hi
               end
-              @last = raw
+              @last = raw unless peek
+              raw
             }
           end
 
