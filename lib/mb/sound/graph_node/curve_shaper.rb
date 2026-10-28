@@ -110,6 +110,10 @@ module MB
           @steady_out = nil
           @plain_x = nil # (reused by #plain)
           @plain_scratch = nil
+          # The exact shaper in C for linear and smoothstep curves
+          # (FastArithmetic.ease_plain, the same values; dropouts-2)
+          @ease_kind = !@antialias && !@symmetric && %i[clamp raw none].include?(@edges) ?
+            (@curve.equal?(MB::Sound::Curve.linear) ? 0 : (@curve.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)) : nil
           @node_type_name = "#{'a' unless @antialias}ease"
         end
 
@@ -133,13 +137,13 @@ module MB
             if @steady_in.match?(data)
               return @steady_out if @steady_out
 
-              @buf[0..] = plain(data)
+              plain_into(@buf, data)
               return @steady_out = @buf.dup.freeze
             end
             @steady_in.set(data)
             @steady_out = nil
 
-            @buf[0..] = plain(data)
+            plain_into(@buf, data)
             return @buf
           end
 
@@ -166,6 +170,13 @@ module MB
             y = @curve.map_edges(x, @edges)
           end
           y * @out_scale + @out_lo
+        end
+
+        # @buf[0..] = plain(data), in C for linear and smoothstep curves.
+        def plain_into(buf, data)
+          return if @ease_kind && MB::Sound::FastArithmetic.ease_plain(buf, data, @in_lo, @in_scale, @ease_kind, @edges == :clamp, @out_scale, @out_lo)
+
+          buf[0..] = plain(data)
         end
 
         # #plain in reused DFloats (the same operations in place; dropouts-2:

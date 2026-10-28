@@ -428,7 +428,7 @@ module MB
 
           buf = @delay_casts[i]
           buf = @delay_casts[i] = Numo::DFloat.zeros(d.length) if buf.nil? || buf.length != d.length
-          buf[0..] = d
+          buf[0..] = d unless MB::Sound::FastArithmetic.cast_copy(buf, d)
           buf
         end
 
@@ -454,7 +454,7 @@ module MB
         def sustain_cast(index, v)
           buf = @sustain_bufs[index]
           buf = @sustain_bufs[index] = Numo::SFloat.zeros(v.length) if buf.nil? || buf.length != v.length
-          buf[0..] = v
+          buf[0..] = v unless MB::Sound::FastArithmetic.cast_copy(buf, v)
           buf
         end
 

@@ -69,6 +69,7 @@ typedef struct { float r, i; } mb_sc;
 typedef struct { double r, i; } mb_dc;
 
 static size_t elem_size(enum mb_arith_type t);
+static enum mb_arith_type writable_real(VALUE out);
 
 static enum mb_arith_type arith_type(VALUE v)
 {
@@ -505,6 +506,115 @@ static VALUE ruby_copy(VALUE self, VALUE out, VALUE src)
 	}
 
 	RB_GC_GUARD(src);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.cast_copy(out, src) -> out or nil
+ *
+ * Copies +src+ into +out+ converting between SFloat and DFloat as Numo's
+ * cast does ((float) or (double) of each value), without allocating, for
+ * contiguous 1D buffers of the same length (+out+ writable).  Returns nil
+ * without writing for anything else (dropouts-2: a feedback loop's moving
+ * delay times and sustain params, every block).
+ */
+static VALUE ruby_cast_copy(VALUE self, VALUE out, VALUE src)
+{
+	enum mb_arith_type ot = writable_real(out);
+	enum mb_arith_type st = arith_type(src);
+	if (ot == MB_ARITH_NONE || (st != MB_ARITH_SF && st != MB_ARITH_DF)) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	if (!shape_ok(src, length)) {
+		return Qnil;
+	}
+
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+	const char *srcp = read_ptr(src);
+	if (ot == st) {
+		if (length > 0) {
+			memmove(outp, srcp, length * elem_size(ot));
+		}
+	} else if (ot == MB_ARITH_SF) {
+		float *o = (float *)outp;
+		const double *d = (const double *)srcp;
+		for (size_t i = 0; i < length; i++) {
+			o[i] = (float)d[i];
+		}
+	} else {
+		double *o = (double *)outp;
+		const float *f = (const float *)srcp;
+		for (size_t i = 0; i < length; i++) {
+			o[i] = (double)f[i];
+		}
+	}
+
+	RB_GC_GUARD(src);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.ease_plain(out, data, in_lo, in_scale, kind, clamp, out_scale, out_lo) -> out or nil
+ *
+ * GraphNode::CurveShaper's exact (plain, not antialiased) shaper for the
+ * linear (+kind+ 0) and smoothstep (+kind+ 1) curves, as its Numo code
+ * computes it (CurveShaper#plain): x = (double(data) - in_lo) * in_scale,
+ * clipped to 0..1 if +clamp+, y = x (linear) or x * x * (3 - 2x) (as
+ * (x * x) * (x * -2 + 3), the same rounding), then y * out_scale + out_lo,
+ * stored as float in +out+ (an SFloat as long as +data+, an SFloat or
+ * DFloat).  Each Numo step allocated a few objects every buffer
+ * (dropouts-2).  Returns nil without writing for anything else.
+ */
+static VALUE ruby_ease_plain(VALUE self, VALUE out, VALUE data, VALUE in_lo_v, VALUE in_scale_v, VALUE kind_v, VALUE clamp_v, VALUE out_scale_v, VALUE out_lo_v)
+{
+	if (writable_real(out) != MB_ARITH_SF) {
+		return Qnil;
+	}
+	enum mb_arith_type dt = arith_type(data);
+	size_t length = RNARRAY_SIZE(out);
+	if ((dt != MB_ARITH_SF && dt != MB_ARITH_DF) || !shape_ok(data, length)) {
+		return Qnil;
+	}
+	if (!RB_FLOAT_TYPE_P(in_lo_v) || !RB_FLOAT_TYPE_P(in_scale_v) || !RB_FLOAT_TYPE_P(out_scale_v) || !RB_FLOAT_TYPE_P(out_lo_v) || !RB_INTEGER_TYPE_P(kind_v)) {
+		return Qnil;
+	}
+	long kind = NUM2LONG(kind_v);
+	if (kind != 0 && kind != 1) {
+		return Qnil;
+	}
+
+	double in_lo = RFLOAT_VALUE(in_lo_v);
+	double in_scale = RFLOAT_VALUE(in_scale_v);
+	double out_scale = RFLOAT_VALUE(out_scale_v);
+	double out_lo = RFLOAT_VALUE(out_lo_v);
+	_Bool clamp = RTEST(clamp_v);
+
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	const char *srcp = read_ptr(data);
+	for (size_t i = 0; i < length; i++) {
+		double x = dt == MB_ARITH_SF ? (double)((const float *)srcp)[i] : ((const double *)srcp)[i];
+		x = x - in_lo;
+		x = x * in_scale;
+		if (clamp) {
+			// (Numo's clip: below min gives min, above max gives max)
+			if (x < 0.0) x = 0.0;
+			if (x > 1.0) x = 1.0;
+		}
+		double y = x;
+		if (kind == 1) {
+			double s = x * -2.0;
+			s = s + 3.0;
+			double q = x * x;
+			y = q * s;
+		}
+		y = y * out_scale;
+		y = y + out_lo;
+		o[i] = (float)y;
+	}
+
+	RB_GC_GUARD(data);
 	return out;
 }
 
@@ -1361,6 +1471,8 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "scale", ruby_scale, 2);
 	rb_define_module_function(fast_arithmetic, "mix", ruby_mix, 3);
 	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
+	rb_define_module_function(fast_arithmetic, "cast_copy", ruby_cast_copy, 2);
+	rb_define_module_function(fast_arithmetic, "ease_plain", ruby_ease_plain, 8);
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
 	rb_define_module_function(fast_arithmetic, "divide", ruby_divide, 2);
 	rb_define_module_function(fast_arithmetic, "power", ruby_power, 2);

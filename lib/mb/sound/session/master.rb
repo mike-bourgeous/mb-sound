@@ -371,7 +371,8 @@ module MB
         # itself if there are no chains).  +playing+ is true if any player is
         # playing, for keeping clips in master chains on the timeline.
         def process_master(mix, from, to, per_sample, count, playing:, seeked:)
-          chains = @mutex.synchronize { @master_chains&.dup }
+          # (a reused copy, taken under the lock)
+          chains = @mutex.synchronize { @master_chains.nil? || @master_chains.empty? ? nil : (@master_copy ||= []).replace(@master_chains) }
           return mix if chains.nil? || chains.empty?
 
           # Keep clips in effects on the timeline, which pauses while idle
@@ -502,13 +503,17 @@ module MB
           c.source.write(input)
           t = MB::U.clock_now
           gc = GC.stat(:time)
-          results = {}
-          data = c.nodes.map { |n|
+          # (a reused Hash and, per chain, a reused Array: every buffer)
+          results = (@chain_results ||= {})
+          results.clear
+          data = (@chain_data[c] ||= [])
+          data.clear
+          c.nodes.each do |n|
             d = (results[n.__id__] ||= n.sample(count))
             raise "The master chain ended (got #{d&.length.inspect} of #{count} samples)" if d.nil? || d.length < count
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
-            d
-          }
+            data << d
+          end
           elapsed = MB::U.clock_now - t
           c.cpu = (c.cpu || 0.0) + elapsed if @ui_feed
           check_master_speed(c, Session.without_gc(elapsed, gc), count)

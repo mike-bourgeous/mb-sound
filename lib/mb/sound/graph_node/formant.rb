@@ -164,13 +164,15 @@ module MB
           m = @morph.is_a?(Float) ? @morph : @morph.sample(n)
           s = @shift.is_a?(Float) ? @shift : @shift.sample(n)
           w = @width.is_a?(Float) ? @width : @width.sample(n)
-          [m, s, w].each do |v|
-            next if v.is_a?(Float)
-            return nil if v.nil? || v.empty?
-            n = v.length if v.length < n
-          end
+          # (no Arrays, no return from a block: every buffer; dropouts-2)
+          return nil if (!m.is_a?(Float) && (m.nil? || m.empty?)) || (!s.is_a?(Float) && (s.nil? || s.empty?)) || (!w.is_a?(Float) && (w.nil? || w.empty?))
+          n = m.length if !m.is_a?(Float) && m.length < n
+          n = s.length if !s.is_a?(Float) && s.length < n
+          n = w.length if !w.is_a?(Float) && w.length < n
           x = x[0...n] if x.length > n
-          m, s, w = [m, s, w].map { |v| v.is_a?(Float) || v.length == n ? v : v[0...n] }
+          m = m[0...n] unless m.is_a?(Float) || m.length == n
+          s = s[0...n] unless s.is_a?(Float) || s.length == n
+          w = w[0...n] unless w.is_a?(Float) || w.length == n
 
           @out = Numo::SFloat.zeros(n) if @out.nil? || @out.length != n
           MB::Sound::FastFilter.formant(@out, x, @tables, m, s, w, @state, @sample_rate, @normalize)

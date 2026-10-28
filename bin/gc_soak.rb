@@ -60,7 +60,7 @@ module MB::Sound
     Sample = Data.define(:seconds, :rss_mb, :objects, :render_objects, :gc_count)
 
     class << self
-      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on
+      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count
       attr_reader :samples, :window_sites, :end_sites, :render_objects, :started
 
       def setup
@@ -132,7 +132,8 @@ module MB::Sound
         def types
           t = ObjectSpace.count_objects.reject { |k, _| k == :TOTAL || k == :FREE }
           t.merge!(ObjectSpace.count_imemo_objects) if ObjectSpace.respond_to?(:count_imemo_objects)
-          [t, ObjectSpace.memsize_of_all, @samples[-1]&.seconds || 0.0]
+          y = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? RubyVM::YJIT.runtime_stats : {}
+          [t, ObjectSpace.memsize_of_all, @samples[-1]&.seconds || 0.0, (y[:code_region_size] || 0) + (y[:yjit_alloc_size] || 0), GC.stat(:malloc_increase_bytes)]
         end
 
       def finish
@@ -214,8 +215,9 @@ module MB::Sound
         if @types0 && @types1
           secs = @types1[2] - @types0[2]
           d = @types1[0].to_h { |k, v| [k, v - (@types0[0][k] || 0)] }.select { |_, v| v > 0 }.sort_by { -_2 }.first(10)
-          lines << format('after the first %.0f s, live objects by type per second: %s; object memory (ObjectSpace.memsize_of_all) +%.2f MB/s',
-            @window, d.map { |k, v| format('%s %.0f', k.to_s.delete_prefix('T_'), v / secs) }.join(', '), (@types1[1] - @types0[1]) / secs / 1024.0 / 1024)
+          mb = ->(i) { (@types1[i] - @types0[i]) / secs / 1024.0 / 1024 }
+          lines << format('after the first %.0f s, live objects by type per second: %s; object memory (ObjectSpace.memsize_of_all) +%.2f MB/s, YJIT code and metadata +%.2f MB/s',
+            @window, d.map { |k, v| format('%s %.0f', k.to_s.delete_prefix('T_'), v / secs) }.join(', '), mb.(1), mb.(3))
         end
         if @sites && @end_sites && !@end_sites.empty?
           lines << '(--sites: GC ran between traced chunks, so the RSS numbers above are not a GC-off slope)'
@@ -231,10 +233,10 @@ module MB::Sound
         diff.each { |(f, _, _), (c, b)| x = cats[category(f)]; x[0] += c; x[1] += b }
         out << format('after the first %.0f s, by category (objects/s, KB/s):', @window)
         cats.sort_by { |_, (_, b)| -b }.each { |name, (c, b)| out << format('  %-13s %9.0f %9.1f', name, c / secs, b / secs / 1024) }
-        out << "top #{@sites} lines by bytes (objects/s, KB/s, category, allocating method):"
+        out << "top #{@sites} lines by #{@by_count ? 'objects' : 'bytes'} (objects/s, KB/s, category, allocating method):"
         by_line = Hash.new { |h, k| h[k] = [0, 0, []] }
         diff.each { |(f, l, m), (c, b)| x = by_line[[f, l]]; x[0] += c; x[1] += b; x[2] << m }
-        by_line.sort_by { |_, (_, b, _)| -b }.first(@sites).each do |(f, l), (c, b, ms)|
+        by_line.sort_by { |_, (c, b, _)| @by_count ? -c : -b }.first(@sites).each do |(f, l), (c, b, ms)|
           out << format('  %8.0f %8.1f  %-12s %s:%d %s', c / secs, b / secs / 1024, category(f), f, l, ms.uniq.first(2).join(', '))
         end
         out
@@ -273,6 +275,7 @@ if MB::Sound.main_script?(__FILE__)
     window: [60.0, Float, 'Seconds of audio counted as the start (landings, first buffers) before the steady slope', 1.0..3600.0],
     gc: ['off', String, 'Ruby GC while playing: off (GC.disable once the music starts) or on', ['off', 'on']],
     sites: [0, Integer, 'Trace allocations and list this many lines (0: none)', 0..1000],
+    by: ['bytes', String, 'Order --sites lines by bytes or objects', ['bytes', 'objects']],
     band: [false, 'Also paint the terminal UI\'s deck (to /dev/null), as a song\'s --ui does'],
     budget: [nil, Float, 'Exit with status 1 if the steady slope is over this many MB per audio second', 0.0..1000.0],
   ) { |args, p|
@@ -288,6 +291,7 @@ if MB::Sound.main_script?(__FILE__)
     soak.sites = p.sites.positive? ? p.sites : nil
     soak.gc_off = p.gc == 'off'
     soak.band_on = p.band
+    soak.by_count = p.by == 'objects'
     MB::Sound::Session.prepend(soak::SessionHook)
     MB::Sound::Internal.singleton_class.prepend(soak::WaitHook)
 

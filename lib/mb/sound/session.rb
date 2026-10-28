@@ -309,6 +309,15 @@ module MB
         @span_mix_bufs = nil # (see #span_mix)
         @reuse_mix = false # (see #process_buffer)
         @tail_range = nil # (see Tails#abs_peak)
+        @taps_copy = nil # (see #call_taps)
+        @master_copy = nil # (see Master#process_master)
+        @bus_chain_copies = {}.compare_by_identity # (see Buses#run_bus_chains)
+        @bus_shared_copies = {}.compare_by_identity # (see Buses#bus_read_shared)
+        @routed_buses = [] # (see Buses#render_routed)
+        @send_rows = {}.compare_by_identity # (see Buses#send_rows)
+        @only_keys = {} # (see Buses#bus_signal)
+        @chain_results = nil # (see Master#master_chain_output)
+        @chain_data = {}.compare_by_identity
         @master_out_bufs = nil # (see Master#process_master)
         @tuning = tuning
         self.master_gain = master_gain
@@ -1702,9 +1711,12 @@ module MB
         end
       end
 
+      NO_TAPS = [].freeze
+
       # Calls each #add_tap block with the mix, removing blocks that raise.
       def call_taps(mix)
-        taps = @mutex.synchronize { @taps.dup }
+        # (a reused copy, taken under the lock: no Array a buffer)
+        taps = @mutex.synchronize { @taps.empty? ? NO_TAPS : (@taps_copy ||= []).replace(@taps) }
         taps.each do |t|
           t.call(mix)
         rescue => e

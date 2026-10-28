@@ -670,4 +670,52 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       expect(bits_same(out, copy)).to eq(true)
     end
   end
+
+  describe '.cast_copy' do
+    it 'casts between SFloat and DFloat as Numo does, without allocating' do
+      d = Numo::DFloat[0.1, -1e-40, 3.4e39, 1.0 / 3, Float::NAN, -0.0, 1e-46]
+      out = Numo::SFloat.zeros(d.length)
+      expect(MB::Sound::FastArithmetic.cast_copy(out, d)).to equal(out)
+      expect(out.to_binary).to eq(Numo::SFloat.cast(d).to_binary)
+      f = Numo::SFloat[0.1, -2.5, 1e-38, Float::INFINITY]
+      o2 = Numo::DFloat.zeros(f.length)
+      MB::Sound::FastArithmetic.cast_copy(o2, f)
+      expect(o2.to_binary).to eq(Numo::DFloat.cast(f).to_binary)
+      expect(MB::Sound::FastArithmetic.cast_copy(Numo::SFloat.zeros(3), d)).to be_nil
+      expect(MB::Sound::FastArithmetic.cast_copy(Numo::SFloat.zeros(7).freeze, d)).to be_nil
+      expect(MB::Sound::FastArithmetic.cast_copy(Numo::SComplex.zeros(7), d)).to be_nil
+    end
+  end
+
+  describe '.ease_plain' do
+    # GraphNode::CurveShaper's Numo shaper is the reference (dropouts-2)
+    it 'shapes as CurveShaper#plain does, bit for bit' do
+      rng = Random.new(3)
+      vals = [-2.0, -0.5, -1e-30, 0.0, -0.0, 0.25, 0.5, 0.999, 1.0, 1.5, 7.0, Float::NAN, Float::INFINITY] + Array.new(200) { rng.rand(-1.5..1.5) }
+      [Numo::SFloat, Numo::DFloat].each do |klass|
+        data = klass.cast(vals)
+        [[:linear, 0], [:smoothstep, 1]].each do |name, kind|
+          %i[clamp raw].each do |edges|
+            [[-1.0..1.0, 0.0..1.0], [0.2..0.9, -3.0..5.0]].each do |input, output|
+              shaper = MB::Sound::GraphNode::CurveShaper.new(0.constant, curve: MB::Sound::Curve[name], input: input, output: output, edges: edges, antialias: false)
+              ref = Numo::SFloat.cast(shaper.send(:plain, data))
+              lo = input.begin.to_f
+              out = Numo::SFloat.zeros(data.length)
+              r = MB::Sound::FastArithmetic.ease_plain(out, data, lo, 1.0 / (input.end - input.begin), kind, edges == :clamp, output.end - output.begin, output.begin.to_f)
+              expect(r).to equal(out)
+              expect(out.to_binary).to eq(ref.to_binary), [klass, name, edges, input].inspect
+            end
+          end
+        end
+      end
+    end
+
+    it 'returns nil for other arguments' do
+      out = Numo::SFloat.zeros(4)
+      expect(MB::Sound::FastArithmetic.ease_plain(out, Numo::SFloat.zeros(3), 0.0, 1.0, 1, true, 1.0, 0.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.ease_plain(out, Numo::SFloat.zeros(4), 0.0, 1.0, 2, true, 1.0, 0.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.ease_plain(Numo::DFloat.zeros(4), Numo::SFloat.zeros(4), 0.0, 1.0, 1, true, 1.0, 0.0)).to be_nil
+      expect(MB::Sound::FastArithmetic.ease_plain(out, Numo::SFloat.zeros(4), 0, 1.0, 1, true, 1.0, 0.0)).to be_nil
+    end
+  end
 end

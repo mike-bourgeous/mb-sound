@@ -447,6 +447,7 @@ module MB
           @ramp_t = nil
           @ramp_scratch = nil
           @follow_buf = nil
+          @follow_range = nil
           @cc = @spec.cc
           @midi = nil
           @learning = nil
@@ -897,7 +898,7 @@ module MB
             n = stop - pos
             case seg
             when Hold
-              out[pos...stop] = seg.value
+              out[pos...stop] = seg.value unless MB::Sound::FastArithmetic.fill_range(out, pos, stop, seg.value)
               @value = seg.value
             when Ramp
               out[pos...stop] = ramp_values(seg, f, n)
@@ -909,7 +910,8 @@ module MB
                 @value = out[stop - 1]
               end
             when Follow
-              out[pos...stop] = follow_values(seg, n)
+              v = follow_values(seg, n)
+              out[pos...stop] = v unless v.is_a?(Numo::SFloat) && MB::Sound::FastArithmetic.copy_range(out, pos, v, 0, n)
               @value = out[stop - 1]
             end
 
@@ -999,12 +1001,19 @@ module MB
           return seg.map.call(Numo::DFloat.cast(buf)) if seg.map
           return buf unless @spec.clamp?
 
+          # (inside the range already, as a followed knob or LFO usually
+          # is: clip would change nothing; found without allocating)
+          lo = @spec.range.begin
+          hi = @spec.range.end
+          r = (@follow_range ||= [0.0, 0.0])
+          return buf if MB::Sound::FastArithmetic.min_max(buf, r) && r[0] >= lo && r[1] <= hi
+
           # (clipped in a reused copy of the same type: the same values as
           # buf.clip)
           c = @follow_buf
           c = @follow_buf = buf.class.new(n) if c.nil? || c.class != buf.class || c.length != n
           c[0..] = buf unless MB::Sound::FastArithmetic.copy(c, buf)
-          c.inplace.clip(@spec.range.begin, @spec.range.end)
+          c.inplace.clip(lo, hi)
           c
         end
 

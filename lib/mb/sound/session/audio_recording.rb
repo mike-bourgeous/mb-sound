@@ -163,16 +163,19 @@ module MB
           @captures = []
         end
 
+        # (no recorders: no Array a buffer)
+        NONE = [].freeze
+
         # Gives the recorders the buffer of the mix that starts at session
         # frame +frame+ (called by #process_buffer after the output write).
         def record_mix(mix, frame)
-          caps = @recording_lock.synchronize { @captures.dup }
+          caps = @recording_lock.synchronize { @captures.empty? ? NONE : @captures.dup }
           unless caps.empty?
             done = caps.select { |r| r.write(mix, frame) }
             @recording_lock.synchronize { @captures -= done } unless done.empty?
           end
 
-          list = @recording_lock.synchronize { @recordings.dup }
+          list = @recording_lock.synchronize { @recordings.empty? ? NONE : @recordings.dup }
           return if list.empty?
 
           done = list.select { |r| r.write(mix, frame) }
