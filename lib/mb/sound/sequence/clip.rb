@@ -107,7 +107,7 @@ module MB
         # +:values+ lists the values (notes) the clip may play when its
         # variations play notes its base events don't (a generator clip,
         # see .generate); drum kits choose their voices from #values.
-        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false, values: nil)
+        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [], performed: false, values: nil, controls: nil)
           @instrument = nil # (see PlayedBy)
           @clock = nil # (see Clocked)
           @events = events.sort_by(&:start).freeze
@@ -115,6 +115,7 @@ module MB
           @performed = !!performed
           max_end = @events.map(&:end_time).max || 0
           @length = (length || max_end).to_r
+          @controls = Clip.check_controls(controls, @length)
           @loop = !!loop
           @seed = Integer(seed)
           @align = align
@@ -211,7 +212,7 @@ module MB
         #
         #     bg :ball, bounce_hits(3.beats).loop(align: :launch).synth { |v| ... }
         def loop(seed: @seed, align: @align)
-          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations, performed: @performed, values: @values)
+          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations, performed: @performed, values: @values, controls: @controls)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
@@ -219,14 +220,16 @@ module MB
         def |(other)
           other = Clip.from(other)
           shifted = other.first_cycle_events.map { |e| e.with(start: e.start + @length) }
-          Clip.new(first_cycle_events + shifted, length: @length + other.length, seed: @seed, performed: @performed && other.performed?)
+          lanes = Clip.merge_lanes(@controls, Clip.shift_lanes(other.controls, @length))
+          Clip.new(first_cycle_events + shifted, length: @length + other.length, seed: @seed, performed: @performed && other.performed?, controls: lanes)
         end
 
         # Returns a non-looping clip that plays this clip and +other+ at the
         # same time.  The length is the longer of the two.
         def &(other)
           other = Clip.from(other)
-          Clip.new(first_cycle_events + other.first_cycle_events, length: MB::M.max(@length, other.length), seed: @seed, performed: @performed && other.performed?)
+          Clip.new(first_cycle_events + other.first_cycle_events, length: MB::M.max(@length, other.length), seed: @seed, performed: @performed && other.performed?,
+                   controls: Clip.merge_lanes(@controls, other.controls))
         end
 
         # The events of cycle 0 (see #events_for) with early starts (see
@@ -273,7 +276,8 @@ module MB
         # cross +span+ shortened to end there.
         def truncate(span)
           span = Duration.whole_notes(span)
-          map_cycles(length: span) { |events, _cycle|
+          lanes = @controls.filter_map { |l| l.map_points { |p, v| [p, v] if p < span } }
+          map_cycles(length: span, controls: lanes) { |events, _cycle|
             events.select { |e| e.start < span }.map { |e|
               e.end_time > span ? e.with(length: span - e.start) : e
             }
@@ -370,7 +374,8 @@ module MB
         def stretch(factor)
           factor = factor.to_r
           raise ArgumentError, 'Stretch factor must be positive' unless factor > 0
-          map_clip(length: @length * factor) { |e| e.with(start: e.start * factor, length: e.length * factor) }
+          lanes = @controls.map { |l| l.map_points { |p, v| [p * factor, v] } }
+          map_clip(length: @length * factor, controls: lanes) { |e| e.with(start: e.start * factor, length: e.length * factor) }
         end
 
         # Half time: every time and length (and the loop) +factor+ times as
@@ -517,7 +522,7 @@ module MB
         #
         #     seq(C4, E4, G4.n4).n8.reverse   # G4 (quarter), E4, C4
         def reverse
-          map_clip { |e| e.with(start: MB::M.max(@length - e.end_time, 0r)) }
+          map_clip(controls: @controls.filter_map { |l| Clip.reverse_lane(l, @length) }) { |e| e.with(start: MB::M.max(@length - e.end_time, 0r)) }
         end
         alias retrograde reverse
 
@@ -592,7 +597,7 @@ module MB
           shift %= @length
           return with_events(@events) if shift == 0
 
-          map_clip { |e| e.with(start: (e.start + shift) % @length) }
+          map_clip(controls: @controls.map { |l| Clip.rotate_lane(l, shift, @length) }) { |e| e.with(start: (e.start + shift) % @length) }
         end
         alias shift rotate
 
@@ -1087,7 +1092,8 @@ module MB
 
         def to_s
           vary = @variations.empty? ? '' : " varying #{@variations.map(&:name).join(', ')}"
-          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{@events.map(&:to_s).join(', ')})"
+          ctl = @controls.empty? ? '' : "; controls #{@controls.join(', ')}"
+          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{@events.map(&:to_s).join(', ')}#{ctl})"
         end
 
         def inspect
@@ -1106,20 +1112,20 @@ module MB
 
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
-        def with_events(events, length: @length, variations: @variations, values: @values)
-          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations, performed: @performed, values: values)
+        def with_events(events, length: @length, variations: @variations, values: @values, controls: @controls)
+          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations, performed: @performed, values: values, controls: controls)
         end
 
         # Returns a Clip with each event transformed by the block.  The
         # events a generator makes (variations whose block is a
         # Generative::Producer, which replace the events rather than change
         # them) go through the block too, and so do the clip's +values+.
-        def map_clip(length: @length, &map)
+        def map_clip(length: @length, controls: @controls, &map)
           variations = @variations.map { |v|
             v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.mapped(map)) : v
           }
           values = @values&.map { |x| map.call(Event.new(start: 0r, length: 0r, value: x, velocity: DEFAULT_VELOCITY)).value }
-          with_events(@events.map(&map), length: length, variations: variations, values: values)
+          with_events(@events.map(&map), length: length, variations: variations, values: values, controls: controls)
         end
 
         # True if this clip's events come from a generator (a Variation
@@ -1135,11 +1141,11 @@ module MB
         # transforms that work on whole lists (ratchet, truncate, permute,
         # ghost chords): every clip transform works per cycle on generator
         # clips (maintainer decision 5, 2026-10-16).
-        def map_cycles(length: @length, values: @values, &map)
+        def map_cycles(length: @length, values: @values, controls: @controls, &map)
           variations = @variations.map { |v|
             v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.cycle_mapped(map)) : v
           }
-          with_events(map.call(@events, 0), length: length, variations: variations, values: values)
+          with_events(map.call(@events, 0), length: length, variations: variations, values: values, controls: controls)
         end
 
         private
@@ -1231,7 +1237,8 @@ module MB
             }.flatten,
             length: @length * count,
             seed: @seed,
-            performed: @performed
+            performed: @performed,
+            controls: (1...count).reduce(@controls) { |lanes, c| Clip.merge_lanes(lanes, Clip.shift_lanes(@controls, c * @length)) }
           )
         end
 

@@ -626,6 +626,9 @@ module MB
           return unless wnps > 0
           edge, cap = @clip.edge_horizon(wn)
           return if edge.nil? && cap.nil?
+          if @clip.controls? && (ctl = @clip.control_horizon(wn)) && (edge.nil? || ctl < edge)
+            edge = ctl
+          end
 
           r = QUIET_BASE_RATE.lcm(to.denominator)
           q = edge && ((to + (edge - wn) / wnps) * r).floor
@@ -638,6 +641,40 @@ module MB
           @quiet_rate = r
           @quiet_wnps = wnps
           @quiet_clip = @clip
+        end
+
+        # Note Events +notes+ of stream times [from, to) (clip positions
+        # [wn_from, wn_to) at +wnps+) with the clip's controller values
+        # (Sequence::Clip#control_edges) merged in, a controller before the
+        # notes at the same time (so a note starts with the value sent on
+        # its step).  After a launch, seek, swap (+early+), or a skipped
+        # span (Source#read past the position), each lane's value from
+        # before the new position comes first, at +from+.
+        def with_controls(notes, from, wn_from, wn_to, wnps, early)
+          ctl = @clip.control_edges(wn_from, wn_to)
+          fresh = early || @jump_pending
+          chase = fresh ? @clip.control_chase(wn_from) : Sequence::Clip::EMPTY_CHASE
+          return notes if ctl.empty? && chase.empty? && !fresh
+
+          list = fresh ? @clip.controls.flat_map { |l| l.setup_events(channel: @channel, time: from) } : []
+          chase.each { |lane, v| list << lane.event(v, channel: @channel, time: from) }
+          return notes if list.empty? && ctl.empty?
+          ctl.each { |time, lane, v| list << lane.event(v, channel: @channel, time: from + (time - wn_from) / wnps) }
+          return list if notes.empty?
+
+          # (both lists are sorted by time; controllers first at equal times)
+          out = []
+          i = j = 0
+          while i < list.length || j < notes.length
+            if j >= notes.length || (i < list.length && list[i].time <= notes[j].time)
+              out << list[i]
+              i += 1
+            else
+              out << notes[j]
+              j += 1
+            end
+          end
+          out
         end
 
         # Converts the clip's edges for stream times [from, to) to Events and
@@ -672,6 +709,7 @@ module MB
               Event.note_off(event.value, channel: @channel, time: t)
             end
           }
+          out = with_controls(out, from, wn_from, wn_to, wnps, early) if @clip.controls?
           return out unless start
 
           # Not past a pending swap (its clip may have no flams there)

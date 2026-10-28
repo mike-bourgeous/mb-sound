@@ -105,7 +105,9 @@ module MB
       # Notes#cc and the GM-named controls such as Notes#mod), starting at
       # the spec's default.  Reset all controllers (CC 121) returns the
       # controllers that MIDI RP-15 resets (RESET_CONTROLLERS) to their
-      # defaults.  Values use the raw 7-bit number (MSB only for now).
+      # defaults.  Values use the raw 7-bit number (MSB only for now),
+      # except values between 7-bit steps (a clip's fitted controller lane
+      # sends Float values; midi-import-1), which keep their fraction.
       class Control < ChannelNode
         # Controllers reset by reset all controllers (RP-15): modulation,
         # expression (to its default, 127), and the pedals 64 to 69.
@@ -143,7 +145,10 @@ module MB
 
         def update(event)
           return unless event.cc?(@spec.number)
-          @value = @spec.value(event.raw || (event.value * 127).round)
+          raw = event.raw || (event.value * 127).round
+          fine = event.value * 127
+          raw = fine if fine >= 0 && fine <= 127 && (fine - raw).abs > 1e-6 # (values outside 0..1 keep their clamped raw)
+          @value = @spec.value(raw)
         end
 
         def reset?
