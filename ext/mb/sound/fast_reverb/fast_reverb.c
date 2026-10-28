@@ -771,22 +771,36 @@ static VALUE rev_process(VALUE self, VALUE inputs, VALUE outputs, VALUE params, 
 		rb_raise(rb_eArgError, "Need %d parameters", P_COUNT);
 	}
 
-	// Signals (cast copies, if any, are kept alive in these Arrays)
-	VALUE in_vals = rb_ary_dup(inputs);
-	VALUE par_vals = rb_ary_dup(params);
+	// Signals (cast copies, if any, are kept alive in these Arrays, made
+	// only when something was cast: the usual SFloats and Floats are read
+	// where they are, so every call made two Arrays for nothing; dropouts-2)
+	VALUE in_vals = Qnil;
+	VALUE par_vals = Qnil;
 	struct mb_signal *in = ALLOCA_N(struct mb_signal, n);
 	struct mb_signal par[P_COUNT];
 	float **out = ALLOCA_N(float *, n);
 	for (long j = 0; j < n; j++) {
-		VALUE v = rb_ary_entry(in_vals, j);
+		VALUE v0 = rb_ary_entry(inputs, j);
+		VALUE v = v0;
 		mb_signal_input(&v, count, "Input", &in[j]);
-		rb_ary_store(in_vals, j, v);
+		if (v != v0) {
+			if (NIL_P(in_vals)) {
+				in_vals = rb_ary_new();
+			}
+			rb_ary_push(in_vals, v);
+		}
 		out[j] = out_ptr(outputs, j, count);
 	}
 	for (long k = 0; k < P_COUNT; k++) {
-		VALUE v = rb_ary_entry(par_vals, k);
+		VALUE v0 = rb_ary_entry(params, k);
+		VALUE v = v0;
 		mb_signal_input(&v, count, "Parameter", &par[k]);
-		rb_ary_store(par_vals, k, v);
+		if (v != v0) {
+			if (NIL_P(par_vals)) {
+				par_vals = rb_ary_new();
+			}
+			rb_ary_push(par_vals, v);
+		}
 	}
 
 	double fs = r->sample_rate;

@@ -389,6 +389,7 @@ module MB
         @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
         @span_graph_scratch = nil
         @kept_scratch = nil # (see Strip#read_kept_graphs)
+        @span_player_list = nil # (see #render_span)
         @bus_zero_seg = nil # (see Buses#run_bus_chains)
         @asleep_graphs = nil
         @bus_span_count = nil
@@ -1073,7 +1074,9 @@ module MB
         deferral&.apply
         Thread.current[:mb_sound_plan_deferral] = deferral
 
-        players = @mutex.synchronize { @players.values }
+        # (a reused copy, taken under the lock: every span; dropouts-2)
+        players = (@span_player_list ||= [])
+        @mutex.synchronize { players.clear; @players.each_value { |p| players << p } }
         @span_players = players # for Strip#asleep_reads
         @span_graphs = nil
         # Graphs waiting to start keep in step with shared nodes (see Strip)

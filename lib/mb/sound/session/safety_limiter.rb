@@ -45,6 +45,8 @@ module MB
           @safety_limiter = on
           @safety_source = nil
           @safety_nodes = nil
+          @safety_in = nil # (reused by #safety_limited)
+          @safety_out = nil
         end
 
         # The main mix to write: +mix+ through the safety limiter when it
@@ -59,8 +61,15 @@ module MB
             @safety_nodes = GraphNode::Channels.new(@safety_source.outputs)
               .limit(ceiling: SAFETY_CEILING, lookahead: 0, true_peak: false, release: SAFETY_RELEASE).outputs
           end
-          @safety_source.write(mix.map { |c| Numo::SFloat.cast(c) })
-          out = @safety_nodes.map { |n| n.sample(mix[0].length) }
+          # (reused Arrays: it runs every buffer of a live session)
+          ins = (@safety_in ||= [])
+          ins.clear
+          mix.each { |c| ins << Numo::SFloat.cast(c) }
+          @safety_source.write(ins)
+          out = (@safety_out ||= [])
+          out.clear
+          n = mix[0].length
+          @safety_nodes.each { |node| out << node.sample(n) }
           master_active? ? mix : out
         end
       end

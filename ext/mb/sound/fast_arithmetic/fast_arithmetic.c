@@ -618,6 +618,69 @@ static VALUE ruby_ease_plain(VALUE self, VALUE out, VALUE data, VALUE in_lo_v, V
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.knob_ramp(out, pos, n, j0, length, curve, exp, mul, add1, add2, to) -> out or nil
+ *
+ * GraphNode::Knob#ramp_values written into out[pos, n] (an SFloat) as its
+ * Numo code computes them (dropouts-2: about ten Numo steps a buffer while
+ * a knob turns): t = (j0 + 1 + i) / length, clipped to 0..1 on the ramp's
+ * last block (j0 + n >= length); the curve (+curve+ 0: none or linear, 1:
+ * smoothstep as Curve#map! computes it); then x * mul + add1 (linear knob
+ * scales, +exp+ false) or exp(x * mul + add1 + add2) (:exp knobs; two
+ * additions, as Ruby's `c + a + b` does), and +to+ where t reached 1;
+ * stored as float.  Returns nil without writing for other arguments.
+ */
+static VALUE ruby_knob_ramp(VALUE self, VALUE out, VALUE pos_v, VALUE n_v, VALUE j0_v, VALUE length_v, VALUE curve_v, VALUE exp_v, VALUE mul_v, VALUE add1_v, VALUE add2_v, VALUE to_v)
+{
+	if (writable_real(out) != MB_ARITH_SF) {
+		return Qnil;
+	}
+	if (!RB_INTEGER_TYPE_P(pos_v) || !RB_INTEGER_TYPE_P(n_v) || !RB_INTEGER_TYPE_P(j0_v) || !RB_INTEGER_TYPE_P(length_v) || !RB_INTEGER_TYPE_P(curve_v)) {
+		return Qnil;
+	}
+	if (!RB_FLOAT_TYPE_P(mul_v) || !RB_FLOAT_TYPE_P(add1_v) || !RB_FLOAT_TYPE_P(add2_v) || !RB_FLOAT_TYPE_P(to_v)) {
+		return Qnil;
+	}
+	long pos = NUM2LONG(pos_v), n = NUM2LONG(n_v), j0 = NUM2LONG(j0_v), length = NUM2LONG(length_v), curve = NUM2LONG(curve_v);
+	long size = (long)RNARRAY_SIZE(out);
+	if (pos < 0 || n < 0 || pos + n > size || length <= 0 || (curve != 0 && curve != 1)) {
+		return Qnil;
+	}
+
+	_Bool exp_scale = RTEST(exp_v);
+	double mul = RFLOAT_VALUE(mul_v), add1 = RFLOAT_VALUE(add1_v), add2 = RFLOAT_VALUE(add2_v), to = RFLOAT_VALUE(to_v);
+	double len = (double)length;
+	_Bool ends = j0 + n >= length;
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out)) + pos;
+	for (long i = 0; i < n; i++) {
+		double t = (double)(j0 + 1) + (double)i;
+		t = t / len;
+		if (ends) {
+			if (t < 0.0) t = 0.0;
+			if (t > 1.0) t = 1.0;
+		}
+		double x = t;
+		if (curve == 1) {
+			double sc = x * -2.0;
+			sc = sc + 3.0;
+			double q = x * x;
+			x = q * sc;
+		}
+		x = x * mul;
+		x = x + add1;
+		if (exp_scale) {
+			x = x + add2;
+			x = exp(x);
+		}
+		if (ends && t >= 1.0) {
+			x = to;
+		}
+		o[i] = (float)x;
+	}
+
+	return out;
+}
+
 // Numo's default min/max (types/real_accum.h f_min/f_max): leading NaNs
 // are skipped, later NaNs never compare, and an all-NaN buffer gives its last
 // value.
@@ -1473,6 +1536,7 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
 	rb_define_module_function(fast_arithmetic, "cast_copy", ruby_cast_copy, 2);
 	rb_define_module_function(fast_arithmetic, "ease_plain", ruby_ease_plain, 8);
+	rb_define_module_function(fast_arithmetic, "knob_ramp", ruby_knob_ramp, 11);
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
 	rb_define_module_function(fast_arithmetic, "divide", ruby_divide, 2);
 	rb_define_module_function(fast_arithmetic, "power", ruby_power, 2);

@@ -89,6 +89,7 @@ module MB
 
         # Reads every MidiInput for the span (called by #render_span).
         def pump_midi(frame, count, from, per_sample)
+          return if @midi_inputs.empty? # (no Array a span without inputs)
           inputs = @midi_lock.synchronize { @midi_inputs.values }
           return if inputs.empty?
           rate = output.sample_rate.round

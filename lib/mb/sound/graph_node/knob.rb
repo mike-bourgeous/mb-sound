@@ -901,7 +901,7 @@ module MB
               out[pos...stop] = seg.value unless MB::Sound::FastArithmetic.fill_range(out, pos, stop, seg.value)
               @value = seg.value
             when Ramp
-              out[pos...stop] = ramp_values(seg, f, n)
+              out[pos...stop] = ramp_values(seg, f, n) unless ramp_into(out, pos, seg, f, n)
               if f + n >= seg.start + seg.length
                 # Done: hold the target from here on
                 @value = seg.to
@@ -975,6 +975,24 @@ module MB
             v[done] = seg.to
           end
           v
+        end
+
+        # #ramp_values written into out[pos, n] in C (FastArithmetic.knob_ramp:
+        # the same values) for ramps without a curve or with a linear or
+        # smoothstep one; false for others.
+        def ramp_into(out, pos, seg, f, n)
+          cv = seg.curve
+          kind = cv.nil? || cv.equal?(MB::Sound::Curve.linear) ? 0 : (cv.equal?(MB::Sound::Curve.smoothstep) ? 1 : nil)
+          return false unless kind
+
+          if @spec.curve == :exp
+            p0 = @spec.position(seg.from)
+            p1 = @spec.position(seg.to)
+            r = Math.log(@spec.range.end / @spec.range.begin)
+            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, true, r * (p1 - p0), Math.log(@spec.range.begin), p0 * r, seg.to)
+          else
+            !!MB::Sound::FastArithmetic.knob_ramp(out, pos, n, f - seg.start, seg.length, kind, false, seg.to - seg.from, seg.from, 0.0, seg.to)
+          end
         end
 
         # A reused DFloat of +n+ samples for Curve#map! in #ramp_values.

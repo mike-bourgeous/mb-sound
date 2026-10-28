@@ -622,6 +622,7 @@ module MB
 
         def init_knobs
           @knobs = {}
+          @knob_list = [] # (see #advance_knobs)
           @snapshots = {}
           @knob_lock = Mutex.new
           @knob_frame = nil
@@ -651,7 +652,8 @@ module MB
         # the turn; see GraphNode::Knob#follow).
         def advance_knobs(frame, count)
           @knob_frame = frame
-          list = @knob_lock.synchronize { @knobs.values }
+          list = @knob_list # (a reused copy, taken under the lock; dropouts-2)
+          @knob_lock.synchronize { list.clear; @knobs.each_value { |k| list << k } }
           list.each { |k| k.read(frame, count) }
         end
 

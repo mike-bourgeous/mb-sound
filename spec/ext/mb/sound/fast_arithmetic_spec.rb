@@ -718,4 +718,26 @@ RSpec.describe(MB::Sound::FastArithmetic) do
       expect(MB::Sound::FastArithmetic.ease_plain(out, Numo::SFloat.zeros(4), 0, 1.0, 1, true, 1.0, 0.0)).to be_nil
     end
   end
+
+  describe '.knob_ramp' do
+    # GraphNode::Knob#ramp_values is the reference (dropouts-2)
+    it 'writes Knob#ramp_values bit for bit' do
+      ramp = MB::Sound::GraphNode::Knob::Ramp
+      [[100.0..8000.0, :exp], [0.0..1.0, :linear], [-12.0..12.0, :linear]].each do |range, curve|
+        knob = MB::Sound::GraphNode::Knob.new(:k, range.begin, range: range, curve: curve)
+        [nil, MB::Sound::Curve.linear, MB::Sound::Curve.smoothstep].each do |c|
+          [[0, 37, 4000], [3950, 64, 4000], [0, 256, 100], [99, 1, 100], [17, 300, 31]].each do |j0, n, length|
+            seg = ramp.new(0, length, range.end * 0.9, c, range.begin + (range.end - range.begin) * 0.1)
+            ref = Numo::SFloat.cast(knob.send(:ramp_values, seg, j0, n))
+            out = Numo::SFloat.zeros(n + 5)
+            expect(MB::Sound::FastArithmetic.knob_ramp(out, 5, n, j0, length, c&.equal?(MB::Sound::Curve.smoothstep) ? 1 : 0, curve == :exp,
+              *(curve == :exp ? [Math.log(range.end / range.begin) * (knob.spec.position(seg.to) - knob.spec.position(seg.from)), Math.log(range.begin), knob.spec.position(seg.from) * Math.log(range.end / range.begin)] : [seg.to - seg.from, seg.from, 0.0]),
+              seg.to)).to equal(out)
+            expect(out[5..].to_binary).to eq(ref.to_binary), [range, curve, c&.name, j0, n, length].inspect
+            expect(out[0...5].to_a).to eq([0.0] * 5)
+          end
+        end
+      end
+    end
+  end
 end
