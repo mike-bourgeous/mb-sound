@@ -438,6 +438,12 @@ module MB
                 f = unwrap(n.frequency)
                 ok = f.is_a?(Sequence::TempoNode) && f.mode == :hz && n.phase_mod.nil? && SHAPES.include?(n.wave_type)
                 next if ok
+                hz = f.is_a?(GraphNode::Constant) ? f.constant.to_f : (f.is_a?(Numeric) ? f.to_f : nil)
+                if hz&.positive? && hz < 20 && n.phase_mod.nil?
+                  # (a Hz LFO: name the tempo LFO with about its period)
+                  raise NotAParam, "#{what} reads params at decision points, which follow the timeline, not a sample clock: " \
+                    "write #{tempo_lfo_for(hz)}.lfo.at(...) for #{MB::M.sigfigs(hz, 3)}.hz.lfo, or use cc(1, lo..hi), knob(:x), or a clip"
+                end
                 raise NotAParam, "#{what} reads params at decision points: a tempo LFO like 2.bars.lfo (plain shapes, #at, with_phase) works, " \
                   "a #{n.wave_type} Tone at #{Param.label(n.frequency)} doesn't (a transform has no sample clock; to steer it from audio, have a knob follow it: turn :x, follow: node)"
               else
@@ -445,6 +451,17 @@ module MB
                   "not audio-rate nodes like #{n.class.name.split('::').last}; to steer it from audio, have a knob follow it: turn :x, follow: node"
               end
             end
+          end
+
+          # A tempo length about one period of +hz+ at the current tempo, as
+          # Ruby: "5.bars" (0.1 Hz at 120 BPM), else "3.beats".
+          def self.tempo_lfo_for(hz)
+            t = Sequence.current_transport
+            whole = t.whole_notes_per_second.to_f / hz
+            bars = whole / t.bar_length.to_f
+            return (bars.round == 1 ? '1.bar' : "#{bars.round}.bars") if bars >= 0.75
+            beats = MB::M.max((whole * 4).round, 1)
+            beats == 1 ? '1.beat' : "#{beats}.beats"
           end
 
           # The value of the tree at +pos+.
