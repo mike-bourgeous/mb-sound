@@ -379,6 +379,209 @@ static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, V
 	return LONG2NUM(wrap_index(offset + (long)count, capacity));
 }
 
+// The most lines and taps FastDelay.network takes.
+#define NETWORK_MAX 64
+
+/*
+ * Runs a delay network one sample at a time (GraphNode::DelayNetwork:
+ * multitap feedback, ping-pong and cross-feedback): +buffers+ (an Array of
+ * L real delay lines, SFloat) written at +offsets+ (an Array of L write
+ * offsets), +inputs+ (an Array of L SFloat inputs or nils for silence),
+ * +outs+ (an Array of T SFloat tap outputs, each at least +count+ long),
+ * +tap_lines+ (an Array of T line indices), +delays+ (an Array of T delays
+ * in samples: numbers or per-sample NArrays), +gains+ (an Array of L Arrays
+ * of T gains: numbers, per-sample NArrays, or nil for none), +states+ (an
+ * Array of T read-state Arrays, as for read; or nil).  Each sample writes
+ * every line's input, reads every tap (as #feedback reads its one tap:
+ * whole-sample delays directly unless sinc), then adds each line's gains
+ * times the taps (in tap order, in double precision) to what it wrote, and
+ * stores each tap's value in its output.  Returns an Array of the new
+ * write offsets.  The Ruby version is DelayLine.network_ruby.
+ */
+static VALUE ruby_delay_network(VALUE self, VALUE buffers, VALUE offsets, VALUE inputs, VALUE outs, VALUE tap_lines, VALUE delays, VALUE gains, VALUE mode, VALUE kernel, VALUE states, VALUE count_v)
+{
+	Check_Type(buffers, T_ARRAY);
+	Check_Type(offsets, T_ARRAY);
+	Check_Type(inputs, T_ARRAY);
+	Check_Type(outs, T_ARRAY);
+	Check_Type(tap_lines, T_ARRAY);
+	Check_Type(delays, T_ARRAY);
+	Check_Type(gains, T_ARRAY);
+
+	long lines = RARRAY_LEN(buffers);
+	long taps = RARRAY_LEN(outs);
+	if (lines < 1 || taps < 1 || lines > NETWORK_MAX || taps > NETWORK_MAX) {
+		rb_raise(rb_eArgError, "A delay network needs 1..%d lines and taps (got %ld lines, %ld taps)", NETWORK_MAX, lines, taps);
+	}
+	if (RARRAY_LEN(offsets) != lines || RARRAY_LEN(inputs) != lines || RARRAY_LEN(gains) != lines ||
+			RARRAY_LEN(tap_lines) != taps || RARRAY_LEN(delays) != taps) {
+		rb_raise(rb_eArgError, "Delay network Array lengths don't match its %ld lines and %ld taps", lines, taps);
+	}
+	if (RTEST(states)) {
+		Check_Type(states, T_ARRAY);
+		if (RARRAY_LEN(states) != taps) {
+			rb_raise(rb_eArgError, "A delay network needs one read state per tap");
+		}
+	}
+
+	size_t count = NUM2SIZET(count_v);
+	int m;
+	struct sinc_kernel k;
+	double unused_prev;
+	_Bool unused_have;
+	read_interpolation(mode, kernel, Qnil, &m, &k, &unused_prev, &unused_have);
+	double margin = delay_margin(m, &k);
+
+	float *buf[NETWORK_MAX];
+	long cap[NETWORK_MAX];
+	long off[NETWORK_MAX];
+	long w[NETWORK_MAX];
+	const float *in[NETWORK_MAX];
+	VALUE in_values[NETWORK_MAX];
+	for (long j = 0; j < lines; j++) {
+		VALUE b = rb_ary_entry(buffers, j);
+		if (check_delay_buffer(b, "Delay network buffer")) {
+			rb_raise(rb_eArgError, "Delay network lines must be real (SFloat)");
+		}
+		buf[j] = (float *)(nary_get_pointer_for_write(b) + nary_get_offset(b));
+		cap[j] = RNARRAY_SHAPE(b)[0];
+		if (cap[j] - 1 - margin < 0) {
+			rb_raise(rb_eArgError, "A delay network buffer is too small for this interpolation mode");
+		}
+		off[j] = NUM2LONG(rb_ary_entry(offsets, j));
+
+		in_values[j] = rb_ary_entry(inputs, j);
+		in[j] = NULL;
+		if (RTEST(in_values[j])) {
+			ensure_sfloat(&in_values[j]);
+			if ((size_t)RNARRAY_SHAPE(in_values[j])[0] < count) {
+				rb_raise(rb_eArgError, "Delay network inputs must be at least as long as the block");
+			}
+			in[j] = (const float *)(nary_get_pointer_for_read(in_values[j]) + nary_get_offset(in_values[j]));
+		}
+	}
+
+	long line_of[NETWORK_MAX];
+	float *out[NETWORK_MAX];
+	double max[NETWORK_MAX];
+	double prev[NETWORK_MAX];
+	_Bool have_prev[NETWORK_MAX];
+	_Bool moving[NETWORK_MAX];
+	struct control_input dctl[NETWORK_MAX];
+	VALUE delay_values[NETWORK_MAX];
+	for (long t = 0; t < taps; t++) {
+		line_of[t] = NUM2LONG(rb_ary_entry(tap_lines, t));
+		if (line_of[t] < 0 || line_of[t] >= lines) {
+			rb_raise(rb_eArgError, "Delay network tap %ld reads line %ld of %ld", t, line_of[t], lines);
+		}
+		VALUE o = rb_ary_entry(outs, t);
+		if (CLASS_OF(o) != numo_cSFloat || RNARRAY_NDIM(o) != 1 || !RTEST(nary_check_contiguous(o)) || (size_t)RNARRAY_SHAPE(o)[0] < count) {
+			rb_raise(rb_eArgError, "Delay network outputs must be contiguous 1D SFloat NArrays at least as long as the block");
+		}
+		out[t] = (float *)(nary_get_pointer_for_write(o) + nary_get_offset(o));
+		max[t] = cap[line_of[t]] - 1 - margin;
+
+		delay_values[t] = rb_ary_entry(delays, t);
+		read_control_input(&delay_values[t], count, "Delay", &dctl[t]);
+		moving[t] = dctl[t].f || dctl[t].d || dctl[t].c;
+
+		prev[t] = 0;
+		have_prev[t] = 0;
+		if (RTEST(states)) {
+			VALUE st = rb_ary_entry(states, t);
+			if (RTEST(st)) {
+				Check_Type(st, T_ARRAY);
+				VALUE p = rb_ary_entry(st, 0);
+				if (RTEST(p)) {
+					prev[t] = NUM2DBL(p);
+					have_prev[t] = 1;
+				}
+			}
+		}
+	}
+
+	// Gains: an index into gctl per (line, tap), -1 for none
+	int gidx[NETWORK_MAX][NETWORK_MAX];
+	struct control_input *gctl = ALLOCA_N(struct control_input, lines * taps);
+	VALUE gain_values = rb_ary_new_capa(lines * taps); // (keeps cast gains alive)
+	int ng = 0;
+	for (long j = 0; j < lines; j++) {
+		VALUE row = rb_ary_entry(gains, j);
+		Check_Type(row, T_ARRAY);
+		if (RARRAY_LEN(row) != taps) {
+			rb_raise(rb_eArgError, "Each delay network gain row needs one gain per tap");
+		}
+		for (long t = 0; t < taps; t++) {
+			VALUE g = rb_ary_entry(row, t);
+			gidx[j][t] = -1;
+			if (!RTEST(g)) {
+				continue;
+			}
+			read_control_input(&g, count, "Gain", &gctl[ng]);
+			if (gctl[ng].c || cimag(gctl[ng].scalar) != 0) {
+				rb_raise(rb_eArgError, "Delay network gains must be real");
+			}
+			rb_ary_push(gain_values, g);
+			gidx[j][t] = ng++;
+		}
+	}
+
+	double v[NETWORK_MAX];
+	for (size_t i = 0; i < count; i++) {
+		for (long j = 0; j < lines; j++) {
+			w[j] = wrap_index(off[j] + (long)i, cap[j]);
+			buf[j][w[j]] = in[j] ? in[j][i] : 0.0f;
+		}
+
+		for (long t = 0; t < taps; t++) {
+			long j = line_of[t];
+			double d = delay_value(&dctl[t], i, max[t]);
+			double rate = delay_rate(d, &prev[t], &have_prev[t], moving[t]);
+			_Bool whole = d == floor(d) && m != DELAY_SINC;
+			v[t] = whole ? (double)buf[j][wrap_index(w[j] - (long)d, cap[j])] : delay_interp_real(buf[j], cap[j], w[j], d, m, &k, rate);
+		}
+
+		for (long j = 0; j < lines; j++) {
+			double acc = buf[j][w[j]];
+			for (long t = 0; t < taps; t++) {
+				int g = gidx[j][t];
+				if (g >= 0) {
+					acc = acc + creal(control_value(&gctl[g], i)) * v[t];
+				}
+			}
+			buf[j][w[j]] = acc;
+		}
+
+		for (long t = 0; t < taps; t++) {
+			out[t][i] = v[t];
+		}
+	}
+
+	VALUE result = rb_ary_new_capa(lines);
+	for (long j = 0; j < lines; j++) {
+		rb_ary_push(result, LONG2NUM(wrap_index(off[j] + (long)count, cap[j])));
+	}
+	if (RTEST(states)) {
+		for (long t = 0; t < taps; t++) {
+			VALUE st = rb_ary_entry(states, t);
+			if (RTEST(st) && have_prev[t]) {
+				rb_ary_store(st, 0, DBL2NUM(prev[t]));
+			}
+		}
+	}
+
+	RB_GC_GUARD(gain_values);
+	RB_GC_GUARD(kernel);
+	for (long j = 0; j < lines; j++) {
+		RB_GC_GUARD(in_values[j]);
+	}
+	for (long t = 0; t < taps; t++) {
+		RB_GC_GUARD(delay_values[t]);
+	}
+
+	return result;
+}
+
 void Init_fast_delay(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -387,4 +590,5 @@ void Init_fast_delay(void)
 
 	rb_define_module_function(fast_delay, "read", ruby_delay_read, 7);
 	rb_define_module_function(fast_delay, "feedback", ruby_delay_feedback, 9);
+	rb_define_module_function(fast_delay, "network", ruby_delay_network, 11);
 }

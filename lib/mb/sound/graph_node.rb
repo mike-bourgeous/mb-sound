@@ -21,6 +21,7 @@ require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
 require_relative 'graph_node/chorus'
+require_relative 'graph_node/stereo_delay_methods'
 require_relative 'graph_node/dynamics_methods'
 require_relative 'graph_node/sampling_methods'
 require_relative 'graph_node/blend_methods'
@@ -80,6 +81,7 @@ module MB
       include DebugMethods
       include ChannelMethods
       include ChorusMethods
+      include StereoDelayMethods
       include DynamicsMethods
       include SamplingMethods
       include BlendMethods
@@ -493,6 +495,7 @@ require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/branch_watch'
 require_relative 'graph_node/multitap_delay'
+require_relative 'graph_node/delay_network'
 require_relative 'graph_node/feedback_loop'
 require_relative 'graph_node/unary_function'
 require_relative 'graph_node/complex_node'

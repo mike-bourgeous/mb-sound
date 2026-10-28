@@ -282,6 +282,12 @@ module GraphSweep
       ['delay modulated', ->(c) { c.sig.delay(c.mod(0.001, 0.004, 3), feedback: c.mod(0, 0.6), wet: 0.5, dry: 0.5) }],
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
+      ['multitap feedback (DelayNetwork)', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples, feedback: [0.3, c.mod(0, 0.4), 0], smooth: true).mixdown }],
+      ['ping_pong and haas', ->(c) {
+        c.sig.ping_pong(c.mod(0.001, 0.002), feedback: c.mod(0.2, 0.6), spread: 0.5, mix: 0.4).mixdown +
+          c.stereo_sig.ping_pong(0.0013, feedback: -0.5, input: :stereo, interpolation: :cubic).mixdown +
+          c.sig.haas(0.0007, side: :left, level: c.mod(0.5, 1)).mixdown
+      }],
       ['reverb', ->(c) { c.stereo_sig.reverb(:room) }],
       ['reverb room-size factory', ->(c) { c.sig.reverb(room_size: 0.3, decay: 0.5, damping: 0.5) + c.sig.reverb(room_size: 0.2, decay: 0.3, output_channels: 2).mixdown }],
       ['reverb modulation and loop processing', ->(c) {

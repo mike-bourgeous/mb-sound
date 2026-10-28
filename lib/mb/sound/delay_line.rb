@@ -323,6 +323,103 @@ module MB
         out
       end
 
+      # Runs a delay network (GraphNode::DelayNetwork) for +count+ samples,
+      # one sample at a time: +lines+ (real DelayLines, each prepared for
+      # the block), +inputs+ (one SFloat or nil per line), +tap_lines+ (the
+      # line index each tap reads), +delays+ (per tap: delays in samples, a
+      # Numeric or an NArray per sample), +gains+ (per line, an Array with
+      # a gain per tap: a Numeric, an NArray per sample, or nil for none).
+      # Each sample writes every line's input, reads every tap (as
+      # #feedback reads its one tap), then adds each line's gains times the
+      # taps to what it wrote.  One line with one tap and gains [[g]] gives
+      # #feedback's samples exactly.
+      #
+      # +states+ is an Array of read-state Arrays (one per tap, see #read),
+      # +outs+ an Array of SFloat buffers (one per tap, at least +count+
+      # long) the taps are written into.  Returns +outs+.
+      def self.network(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil, outs:)
+        m = lines[0].send(:mode, interpolation)
+        lines.each(&:begin_network_block)
+        offsets = MB::Sound::FastDelay.network(
+          lines.map(&:network_buffer), lines.map(&:write_offset_for_network), inputs, outs, tap_lines,
+          delays.map { |d| lines[0].send(:real_delay, d) }, gains, m, SINC_KERNEL, states, count
+        )
+        lines.each_with_index { |l, j| l.end_network_block(offsets[j]) }
+        outs
+      end
+
+      # The Ruby version of .network (the same arguments without +outs+;
+      # returns new SFloat tap outputs).
+      def self.network_ruby(lines, inputs, tap_lines, delays, gains, count, interpolation: :linear, states: nil)
+        m = lines[0].send(:mode, interpolation)
+        lines.each(&:begin_network_block)
+        sinc = INTERPOLATION[:sinc]
+        outs = tap_lines.map { Numo::SFloat.zeros(count) }
+        prev = tap_lines.each_index.map { |t| states&.[](t)&.[](0) }
+        ins = inputs.map { |b| b&.to_a }
+        ds = delays.map { |d| d = lines[0].send(:real_delay, d); d.is_a?(Numo::NArray) ? d.to_a : d }
+        gs = gains.map { |row| row.map { |g| g.is_a?(Numo::NArray) ? g.to_a : g } }
+        offs = lines.map(&:write_offset_for_network)
+        bufs = lines.map(&:network_buffer)
+
+        count.times do |i|
+          w = lines.each_with_index.map { |l, j|
+            wj = (offs[j] + i) % l.capacity
+            bufs[j][wj] = ins[j] ? ins[j][i] : 0.0
+            wj
+          }
+
+          v = tap_lines.each_with_index.map { |j, t|
+            l = lines[j]
+            d = ds[t]
+            d = l.send(:clamp, d.is_a?(Array) ? d[i] : d, m)
+            rate = prev[t] && ds[t].is_a?(Array) ? (1.0 - (d - prev[t])).abs : 1.0
+            prev[t] = d
+            if d == d.floor && m != sinc
+              bufs[j][(w[j] - d.to_i) % l.capacity]
+            else
+              l.send(:interpolate, w[j], d, m, rate)
+            end
+          }
+
+          lines.each_index do |j|
+            acc = bufs[j][w[j]]
+            gs[j].each_with_index do |g, t|
+              next if g.nil? || g == false
+              acc += (g.is_a?(Array) ? g[i] : g.to_f) * v[t]
+            end
+            bufs[j][w[j]] = acc
+          end
+
+          v.each_with_index { |x, t| outs[t][i] = x }
+        end
+
+        prev.each_with_index { |p, t| states[t][0] = p.to_f if states && states[t] && !p.nil? }
+        lines.each_with_index { |l, j| l.end_network_block((offs[j] + count) % l.capacity) }
+        outs
+      end
+
+      # For .network: the buffer (raises for complex lines).
+      def network_buffer
+        raise ArgumentError, 'Delay networks run real (SFloat) lines only' if complex?
+        @buffer
+      end
+
+      # For .network: the next sample's write offset.
+      def write_offset_for_network
+        @write_offset
+      end
+
+      # For .network: marks the block about to be written.
+      def begin_network_block
+        @block_start = @write_offset
+      end
+
+      # For .network: the write offset after the block.
+      def end_network_block(offset)
+        @write_offset = offset
+      end
+
       # Returns a copy of the buffer rotated so the oldest sample is first
       # and the newest is last.
       def unwrapped

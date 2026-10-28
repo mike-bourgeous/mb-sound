@@ -96,6 +96,7 @@ module MB
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
+          *StereoDelayMethods.public_instance_methods(false), # (stereo in, stereo out)
           :blend, # (the effect gets the whole bundle)
           *MasteringMethods.public_instance_methods(false), # (one chain for every channel)
           *DynamicsMethods.public_instance_methods(false),

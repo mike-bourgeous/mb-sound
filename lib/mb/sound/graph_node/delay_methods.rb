@@ -139,6 +139,23 @@ module MB
           out
         end
 
+        # The feedback gains of #multitap's +count+ taps for +feedback+ (see
+        # #multitap): an Array as given, one gain shared evenly.
+        def self.tap_gains(feedback, count)
+          if feedback.is_a?(Array)
+            raise ArgumentError, "multitap feedback: needs one gain per tap (#{count}; got #{feedback.length})" unless feedback.length == count
+            return feedback
+          end
+          if feedback.is_a?(Numeric)
+            raise ArgumentError, "multitap feedback: must be real (got #{feedback.inspect})" unless feedback.real?
+            return Array.new(count, feedback.to_f / count)
+          end
+          raise ArgumentError, "multitap feedback: is a number, a node, or an Array of them (got #{feedback.inspect})" unless feedback.respond_to?(:sample)
+
+          g = count == 1 ? feedback : feedback * (1.0 / count)
+          Array.new(count, g)
+        end
+
         # The sum of +a+ and +b+ that plays on until both end (a Mixer with
         # stop_early: false), so a delay's echoes ring out after its input
         # (and the dry signal) ends.
@@ -309,10 +326,33 @@ module MB
         #
         # +:interpolation+ is as for #delay.
         #
+        # +:feedback+ makes the taps regenerate (a GraphNode::DelayNetwork
+        # with one line, run per sample in C): an Array of one gain per tap
+        # (numbers or nodes; 0 or nil for a tap that isn't fed back), or one
+        # gain (a number or node) for the loop as a whole, shared evenly by
+        # the taps (each tap feeds back gain / taps, so any gain below 1
+        # decays however many taps there are).  The line gets the input plus
+        # every gain times its tap, so the echoes multiply like a tape echo
+        # with several playback heads.  Without +:feedback+ the taps are a
+        # plain MultitapDelay, as before.
+        #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, name: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smooth: nil, smoothing: nil)
+        #     a, b, c = sig.multitap(1.n8, 3.n16, 1.n4, feedback: [0.3, 0, 0.25])   # regenerating heads
+        #     sig.multitap(150.ms, 400.ms, feedback: 0.6).to_a.sum                # one intensity knob
+        def multitap(*delays, name: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smooth: nil, smoothing: nil, feedback: nil)
           smoothing = DelayMethods.smooth_keyword(smooth, smoothing, false)
+          unless feedback.nil? || feedback == false
+            raise ArgumentError, 'No delay taps were provided; give delay times (seconds, lengths, Durations, or graph nodes)' if delays.empty?
+
+            return MB::Sound::GraphNode::DelayNetwork.new(
+              inputs: [self],
+              taps: delays.map { |d| [0, d] },
+              gains: [DelayMethods.tap_gains(feedback, delays.length)],
+              initial_buffer: initial_buffer, interpolation: interpolation, smoothing: smoothing
+            ).named(name).taps.then { |taps| Channels.new(taps) }
+          end
+
           MB::Sound::GraphNode::MultitapDelay.new(
             self,
             *delays,
