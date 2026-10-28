@@ -106,6 +106,9 @@ module MB
               input = Array(entry.settings[:inputs]).first || :midi
               path = entry.location
               ->(clip) { MB::Sound.preset(path, input => clip) }
+            elsif (names = TrackKnobs::ENTRY_PARAMS[entry.family])
+              # (an entry family's params as the track's knobs: struck decays)
+              ->(clip) { entry.call(clip, **TrackKnobs.entry_knobs(entry, names)) }
             else
               ->(clip) { entry.call(clip) }
             end

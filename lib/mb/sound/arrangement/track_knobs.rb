@@ -21,7 +21,28 @@ module MB
       # The track's name and Session reach `preset` through the patch's
       # build (Arrangement.counted wraps every track patch in .building).
       module TrackKnobs
+        # Library entry families whose params a track playing one gets as
+        # knobs, with the params that can be (read as nodes): struck
+        # instruments' decay (Struck::KNOB_PARAMS).  Other families'
+        # params stay numbers (their voices take numbers in places a knob
+        # can't follow, or would change their sound; graph documents' are
+        # all knobs, above).
+        ENTRY_PARAMS = { struck: %i[decay] }.freeze
+
         module_function
+
+        # { param => GraphNode::Knob } for the +names+ params of library
+        # Entry +entry+ in the building track (see .knob_for), or {}
+        # outside a track's patch build.
+        def entry_knobs(entry, names)
+          track, session = current
+          return {} unless track && session
+          names.each_with_object({}) do |name, h|
+            param = entry.params[name] or next
+            k = knob_for(session, track, param)
+            h[name] = k if k
+          end
+        end
 
         # Runs the block as track +name+'s patch build in +session+ (see
         # .current).

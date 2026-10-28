@@ -609,16 +609,29 @@ module MB
         copy as a new slot, named with a version mark (`:bass_b_v2`, then
         `_v3`; `launch :bass, :bass_b_v2` plays it again); the clip pane
         shows what made it.
+
+        A library instrument is a patch too: `track :bass, L.inst.dnb.dnb_reese`
+        (or `track :bass, :dnb_reese`, or with its clip: `track :bass, riff,
+        :dnb_reese`).  A preset's params become the track's knobs
+        (`turn :"bass/cutoff", 900.hz`; scenes take `"bass/cutoff": 3000`),
+        `bind :bass, cutoff: :cut` makes one follow another knob, and
+        `track :bass, L.inst.jungle_reese` again changes the instrument at
+        its launch point (one undo step).
       TEXT
       commands :track, :tracks, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
-      see :flow, :knobs, :now
+      see :flow, :knobs, :now, :library
       example 'two scenes' do
         track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
         scene :try_a, try_bass: seq(A1, rest, A1, A2).n8.loop
         scene :try_b, try_bass: seq(F1, rest, F1, F2).n8.loop
         go :try_a
         go :try_b, in: 1.bar
+      end
+      example 'a library instrument on a track, its cutoff a knob (at the library\'s level: loud)', sound: false do
+        track :try_bass, :dnb_sub, q: 1
+        bg :try_bass, seq(A1, rest, A1, A2).n8.loop
+        turn :"try_bass/cutoff", 80.0, over: 2
       end
       example 'launch and tweak a clip' do
         track(:try_bass, q: 1) { |c| c.tone.saw.at(-10.db).lp4(500, resonance: 0.3) * c.amp_env }
@@ -1077,8 +1090,17 @@ module MB
         end`, `clip :walk, seq(A2, C3).n8.loop`.  `collect` copies the
         presets a song used into its presets/, `promote :x, to: :user` a
         song's preset onto your shelf.
+
+        Instruments play on tracks (`track :bass, L.inst.dnb.dnb_reese`;
+        `help :sets`) and from `play L.inst.x` (a demo phrase).  Effects
+        go after a sound: `sig.then(&L.fx.hall)`, or on a bus.  The
+        resonator effects are instruments too: `L.inst.bar` strikes the
+        :bar resonator from notes (`struck(clip, :bar)`; every resonator
+        preset has one, built from it), `L.fx.bar.ping(C5)` strikes it
+        once, `play L.fx.bar` plays a strike, and a library file line
+        `struck :my_bell, resonator: :bell, decay: 8` makes another.
       TEXT
-      commands :find, :shelves, :save, :save!, :collect, :promote, :promote!
+      commands :find, :shelves, :save, :save!, :collect, :promote, :promote!, :struck
       note :library
       see :presets, :racks
       example 'find bright effects', sound: false do
@@ -1086,6 +1108,9 @@ module MB
       end
       example 'walk the heads', sound: false do
         L.fx.reverb
+      end
+      example 'a struck resonator from notes' do
+        bg :try, struck(seq(C5, E5, G5, C6).n8.loop, :marimba).at(-12.db)
       end
     end
 
