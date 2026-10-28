@@ -281,7 +281,10 @@ module MB
             if @tempo_map.fixed?
               set_cell_bpm(@tempo_map.bpm_at(whole_notes.to_r))
             else
-              @tempo_map = @tempo_map.collapse(@position, @bpm.to_r)
+              # (the map's tempo where the seek lands, not the span's cell
+              # tempo, so replays at any buffer size collapse alike)
+              @tempo_map = @tempo_map.collapse(@position, @tempo_map.segment_at(@position).is_a?(TempoMap::Follow) ? @bpm.to_r : @tempo_map.bpm_at(@position))
+              set_cell_bpm(@tempo_map.segments[0].bpm) if @tempo_map.static?
               @tempo_map = nil if @tempo_map.static?
             end
           end

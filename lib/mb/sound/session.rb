@@ -1099,6 +1099,10 @@ module MB
         end_cue_span(mix, count) # the phones mix (see Cue)
 
         @frame += count
+        # A moving tempo is read for the next frame now, so changes landing
+        # between buffers (console lines) and inside spans (take replays at
+        # other buffer sizes) see the same tempo (see TempoChanges)
+        tempo_cell(1) if moving && @transport.tempo_moves?
         @transport_record = transport_record_for(moving)
         mix
       ensure

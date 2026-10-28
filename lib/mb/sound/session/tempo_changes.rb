@@ -41,13 +41,18 @@ module MB
               if follow
                 map.follow(follow, at: pos, last: @transport.bpm.to_r)
               elsif over
-                from = map.varying_at?(pos) ? @transport.bpm.to_r : map.bpm_at(pos)
+                # (the map's tempo at the landing position, not the
+                # span's cell tempo: take replays run lines before or after
+                # a cell starts depending on buffer sizes)
+                @tempo_reader ||= method(:read_tempo_source)
+                from = map.bpm_at(pos, @tempo_reader)
                 length = ramp_length(over, pos, from, target, curve)
                 map.with(Sequence::TempoMap::Ramp.new(pos: pos, from: from, to: target, length: length, curve: curve))
               else
                 map.step(target, at: pos)
               end
             }
+            tempo_cell(1) # (the tempo where it landed, for what lands with it)
           }
         end
 
@@ -157,6 +162,7 @@ module MB
           else
             @transport.tempo_change { |_map, _pos| state.map }
           end
+          tempo_cell(1)
         end
       end
     end

@@ -14,6 +14,8 @@ module MB
     #     t.to_r             # => (555/4)
     #     t.whole_notes_per_second # => (37/64)
     class Tempo
+      include Comparable
+
       # The tempo as given (an Integer, Float, or Rational).
       attr_reader :bpm
 
@@ -58,6 +60,12 @@ module MB
 
       def ==(other)
         other.is_a?(Tempo) && other.to_r == @exact
+      end
+
+      # Tempos compare by BPM, so they make ranges (`90.bpm..180.bpm`, for
+      # knob ranges and checks); other values don't compare (nil).
+      def <=>(other)
+        other.is_a?(Tempo) ? @exact <=> other.to_r : nil
       end
       alias eql? ==
 
