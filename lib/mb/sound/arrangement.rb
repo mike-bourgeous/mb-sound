@@ -871,19 +871,11 @@ module MB
         set
       end
 
-      # A throwaway Session for #warm_build: the session's tempo, meter,
-      # channels, rate, and buffer size, and copies of its knobs.
+      # A throwaway Session for #warm_build (Session#warm_sandbox: the
+      # session's tempo, meter, channels, rate, and buffer size, and
+      # copies of its knobs).
       def warm_sandbox
-        t = @session.transport
-        transport = Sequence::Transport.new(bpm: t.bpm, bar_length: t.bar_length)
-        channels = @session.instance_variable_get(:@channels)
-        output = NullOutput.new(channels: channels, sample_rate: @session.sample_rate, buffer_size: @session.buffer_size, sleep: false)
-        box = Session.new(output: output, transport: transport, channels: channels, buffer_size: @session.buffer_size, realtime: false, raise_errors: true, master_gain: 1)
-        @session.knobs.each do |name, k|
-          sp = k.spec
-          box.knob(name, k.value, range: sp.range, curve: sp.curve, unit: sp.unit, takeover: sp.takeover, smooth: sp.smooth)
-        end
-        box
+        @session.warm_sandbox
       end
 
       # "key:text" for the listings, or "key: :sym" when +text+ is a
@@ -1111,7 +1103,8 @@ module MB
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
-          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}")
+          @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.patch.call(clip) } })
           @mutex.synchronize { tr.clip = clip }
         elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)

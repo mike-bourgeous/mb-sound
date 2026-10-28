@@ -30,6 +30,7 @@ require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
 require_relative 'session/ui_feed'
+require_relative 'session/warming'
 
 module MB
   module Sound
@@ -87,6 +88,7 @@ module MB
       include MonitorTrim
       include SafetyLimiter
       include UIFeed
+      include Warming
       include Buses # it extends Strip, Undo, and Seeks through super
       include Cue # last: it extends Strip, Undo, Seeks, and Buses through super
 
@@ -346,6 +348,7 @@ module MB
         init_safety_limiter(safety_limiter.nil? ? realtime : safety_limiter)
         init_buses
         init_cue(cue_output)
+        init_warming
         @names = Names.new
         @racks = Racks.new(self)
         @arrangement = nil
@@ -460,7 +463,11 @@ module MB
       #
       # +:to+ and +:send+ set the name's routing (see Buses#route): the bus
       # its main out feeds, and its sends (bus name => level).
-      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil)
+      #
+      # +:warm+ is a Proc that builds a copy of the graph (a track's patch
+      # again), for warming its code before it lands (see Warming; without
+      # it, a copy is loaded from the graph's recipe).
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil, to: :keep, send: nil, warm: nil)
         raise IOError, 'Session is closed' if @closed
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -484,6 +491,9 @@ module MB
         # the render thread where it waits and starts
         input.prime
         description = shorten(description || playable.description)
+
+        # Its code compiled here rather than where it lands (see Warming)
+        warm_graph(name, nodes, warm, warm_time(point, start_time))
 
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 

@@ -1,7 +1,8 @@
 # Session fuzzing over small random songs (spec/support/session_fuzz.rb):
 # renders finish without errors or unexpected warnings, buffer sizes give
 # the same mix within -80 dB, plans don't change it, and timeline-following
-# parts launched mid-song match the same parts from bar 1.
+# parts launched mid-song match the same parts from bar 1, and warming
+# changes before they land doesn't change it either.
 # Everyday: SEEDS seeds from a fixed base plus one from RSpec's seed;
 # FUZZ=N runs N seeds (the long mode), FUZZ_SEED=n one seed (a repro),
 # FUZZ_BASE=n moves the fixed base.
@@ -33,7 +34,7 @@ RSpec.describe('session fuzzing') do
   it 'generates valid songs that use every kind of command' do
     songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
-    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter].each do |word|
+    %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter bus( feed master].each do |word|
       expect(all).to include(word)
     end
     songs.each { |code| expect { Prism.parse(code).errors.then { |e| raise e.map(&:message).join(', ') unless e.empty? } }.not_to raise_error }

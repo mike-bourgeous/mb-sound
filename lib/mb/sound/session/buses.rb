@@ -117,6 +117,8 @@ module MB
 
           @mutex.synchronize { @bus_defs[name] = [block, to || :master, description].freeze }
 
+          warm_bus_chain(name, block, chain, warm_time(point, start_time)) # (its code compiled here, not where it lands; see Warming)
+
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           c = change(:bus, name, time, data: { description: chain.description, fade: fade, to: to || :master }, graph: chain.chain_graph) { |t|
             start_bus_chain(name, chain, block, t)
@@ -410,6 +412,7 @@ module MB
           @bus_tapped_for = nil # (the bus_ranks the two sets were made for)
           @routed_order = nil # (see #routed_order)
           @stem_shadows = {}
+          @ui_bus_meter = nil # (see #render_routed)
         end
 
         # True if anything needs the routed render (buses, or graphs that

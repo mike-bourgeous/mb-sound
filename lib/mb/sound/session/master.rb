@@ -135,6 +135,7 @@ module MB
           chain.mode, chain.fade = master_mode(fade)
           @master_block = block
           @master_preset = preset
+          warm_master_chain(block, preset, chain, warm_time(point, start_time)) # (its code compiled here, not where it lands; see Warming)
 
           time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           change(:master, :master, time, data: { description: chain.description, fade: fade }, graph: chain.chain_graph) { |t|
