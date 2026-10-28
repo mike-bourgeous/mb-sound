@@ -448,8 +448,42 @@ module MB
       # Sequence::Transport#override_bpm).  In a scheduled block, the rest of
       # the block reads the queued tempo (`bpm` returns it, and Durations,
       # #bounce, etc. count at it; see Sequence.current_transport).
-      def bpm(beats_per_minute = nil)
+      #
+      # Ramps and followed tempo (tempo-maps-1; see Sequence::TempoMap):
+      # +over:+ ramps from the tempo in effect to +beats_per_minute+ over
+      # bars (through the meter map), a Duration, or seconds, shaped by
+      # +curve:+ (a Curve name; linear in BPM by default); a knob name,
+      # knob(:x), or a param like `4.bars.lfo.at(150..180)` makes the
+      # tempo follow it (read every 800 frames).  These, and any launch
+      # point (+on:+, +in:+, +at:+), make a journaled, undoable :tempo
+      # change landing on its exact frame (and return its journal entry);
+      # a new tempo replaces a ramp from where it is.  A plain `bpm 120`
+      # sets one constant tempo right away, as before.
+      #
+      #     bpm 140, over: 4.bars                 # accelerando
+      #     bpm 90, over: 2, curve: :smooth, on: :bar
+      #     knob :tempo, 120, range: 60..200; bpm :tempo
+      #     bpm 4.bars.lfo.at(150..180)
+      def bpm(beats_per_minute = nil, over: nil, curve: nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        if beats_per_minute.is_a?(Range)
+          return MB::Sound.live_error(ArgumentError.new(
+            "bpm #{beats_per_minute.inspect}: a tempo is one value; to move between tempos, ramp (bpm 140, over: 4.bars), follow a knob " \
+            '(knob :tempo, 120, range: 60..200; bpm :tempo), or follow a tempo LFO (bpm 4.bars.lfo.at(90..180))'
+          ))
+        end
+        follow = tempo_source?(beats_per_minute)
+        if follow || over || curve || point.given?
+          raise ArgumentError, 'curve: shapes a ramp; give over: too (bpm 140, over: 4.bars, curve: :smooth)' if curve && !over
+          target = follow ? nil : transport.scaled_bpm(beats_per_minute.is_a?(MB::Sound::Tempo) ? beats_per_minute.to_r : beats_per_minute)
+          label = "bpm #{follow ? Sequence::TempoMap.source_ruby(beats_per_minute) : target.inspect}#{", over: #{over.inspect}" if over}"
+          return session_command(nil, label: label, kind: :tempo) { |s, time|
+            s.change_tempo_map(target, over: over, curve: curve, follow: follow ? beats_per_minute : nil, at: point, start_time: point.given? ? nil : time)
+          }
+        end
+
         context = MB::Sound::Session.context
+        beats_per_minute = beats_per_minute.bpm if beats_per_minute.is_a?(MB::Sound::Tempo)
         beats_per_minute = transport.scaled_bpm(beats_per_minute) if beats_per_minute
         if beats_per_minute && context&.[](:batch)
           session, time = context[:session], context[:time]
@@ -462,7 +496,25 @@ module MB
         context&.[](:pending_bpm) || transport.bpm
       end
 
+      # Accelerando: #bpm with +over:+ (`accel 160, over: 8.bars`).
+      def accel(beats_per_minute, over:, curve: nil, at: nil, on: nil, in: nil)
+        bpm(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
+      end
+      alias accelerando accel
+
+      # Ritardando: #bpm with +over:+ (`rit 90, over: 2.bars`).
+      def rit(beats_per_minute, over:, curve: nil, at: nil, on: nil, in: nil)
+        bpm(beats_per_minute, over: over, curve: curve, at: at, on: on, in: binding.local_variable_get(:in))
+      end
+      alias ritardando rit
+
       private
+
+      # True if +x+ is a tempo to follow (a knob name, a Knob or reader, a
+      # param, or a graph node a param reads) rather than a number.
+      def tempo_source?(x)
+        x.is_a?(Symbol) || x.is_a?(GraphNode) || x.is_a?(GraphNode::Knob::Reader) || x.is_a?(MIDI::Param::Base) || x.is_a?(Sequence::Clip)
+      end
 
       # The velocity multiplier for #bounce_hits' +:decay+, as a lambda of
       # the hit index and position fraction.
