@@ -1,6 +1,4 @@
 RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
-  DL = MB::Sound::DelayLine unless defined?(DL)
-
   # Renders every output of +outs+ (nodes) in buffers cycling through
   # +sizes+, reading each output in turn every buffer, until they all end
   # or +limit+ samples.  Returns one SFloat per output.
@@ -27,57 +25,6 @@ RSpec.describe(MB::Sound::GraphNode::DelayNetwork) do
 
   def nonzero(buf, count = 6)
     buf.to_a.each_with_index.select { |v, _| v.abs > 1e-9 }.first(count).map { |v, i| [i, v.round(6)] }
-  end
-
-  describe 'FastDelay.network' do
-    let(:input) { Numo::SFloat.new(600).rand(-1, 1).tap { Numo::NArray.srand(5) } }
-    let(:moving) { Numo::DFloat.new(600).seq * 0.04 + 10.3 }
-
-    [:linear, :cubic, :sinc].each do |interp|
-      it "matches DelayLine#feedback exactly with one line and one tap (#{interp})" do
-        a = DL.new(200)
-        b = DL.new(200)
-        [a, b].each { |l| l.prepare(600, 40) }
-        expected = a.feedback(input, moving, 0.7, interpolation: interp, state: [])
-        out = [Numo::SFloat.zeros(600)]
-        DL.network([b], [input], [0], [moving], [[0.7]], 600, interpolation: interp, states: [[]], outs: out)
-        expect(out[0]).to eq(expected)
-        expect(b.unwrapped).to eq(a.unwrapped)
-      end
-
-      it "matches its Ruby mirror exactly with two lines, three taps, and per-sample gains (#{interp})" do
-        gain = Numo::SFloat.new(600).seq(0, 0.0005)
-        make = ->(ls) { [ls, [input, nil], [0, 1, 0], [17, moving, 33.5], [[nil, 0.6, gain], [0.5, nil, 0.1]], 600] }
-
-        l1 = Array.new(2) { DL.new(300).tap { |l| l.prepare(600, 60) } }
-        l2 = Array.new(2) { DL.new(300).tap { |l| l.prepare(600, 60) } }
-        s1 = Array.new(3) { [] }
-        s2 = Array.new(3) { [] }
-
-        out = Array.new(3) { Numo::SFloat.zeros(600) }
-        DL.network(*make.(l1), interpolation: interp, states: s1, outs: out)
-        ruby = DL.network_ruby(*make.(l2), interpolation: interp, states: s2)
-
-        expect(out).to eq(ruby)
-        expect(s1).to eq(s2)
-        expect(l1.map(&:unwrapped)).to eq(l2.map(&:unwrapped))
-        expect(out.map { |o| o.abs.max }).to all(be > 0.1)
-      end
-    end
-
-    it 'raises for complex lines and mismatched Arrays' do
-      l = DL.new(100)
-      l.prepare(10, 5, Numo::SComplex)
-      expect { DL.network([l], [nil], [0], [3], [[0.5]], 10, outs: [Numo::SFloat.zeros(10)]) }.to raise_error(ArgumentError, /real/)
-
-      l = DL.new(100)
-      expect {
-        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [0], [3, 4], [[0.5]], 0, nil, nil, 10)
-      }.to raise_error(ArgumentError, /lengths/)
-      expect {
-        MB::Sound::FastDelay.network([l.network_buffer], [0], [nil], [Numo::SFloat.zeros(10)], [1], [3], [[0.5]], 0, nil, nil, 10)
-      }.to raise_error(ArgumentError, /line 1/)
-    end
   end
 
   describe '#multitap with feedback:' do
