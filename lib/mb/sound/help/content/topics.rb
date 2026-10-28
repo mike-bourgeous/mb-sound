@@ -932,7 +932,9 @@ module MB
         CCs, bend (with its RPN range), and pressure come along as lanes
         that voices read (`v.mod`, `v.cc(74)`, `v.bend`): `cc: :fit` turns
         dense recorded steps into a few smooth keys, `cc: false` drops
-        them.  `timing: :performed` keeps a rubato file's tempo map.
+        them; a lane turns a knob too (`turn :vol,
+        clip.control(7).keyframes(0.0..1.0)`).  `timing: :performed`
+        keeps a rubato file's tempo map.
         `midi_kit 'beat.mid'` makes the drum tracks a grid-like Kit for
         tr808/tr909.  Saved graph documents keep the notes and lanes as
         `events(...)`, not the file.

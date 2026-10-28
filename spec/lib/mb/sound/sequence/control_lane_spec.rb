@@ -53,6 +53,15 @@ RSpec.describe(MB::Sound::Sequence::ControlLane) do
     end
   end
 
+  it 'gives knob keyframes for turn (a controller-only clip as a gesture)' do
+    linear = lane_class.new(:cc, 7, [[0r, 0.0], [2r, 1.0]], curve: :linear)
+    keys = linear.keyframes(-60.0..0.0)
+    expect(keys).to eq({ 0 => -60.0, MB::Sound::Sequence::Duration.new(2r) => 0.0 })
+    expect(linear.gesture_curve).to eq(:linear)
+    g = MB::Sound::Gesture.from_hash(keys, curve: linear.gesture_curve, per_sample: 1/96000r, rate: 48000)
+    expect(g.keys).to eq([[0, -60.0], [192000, 0.0]])
+  end
+
   describe 'clip transforms' do
     it 'keep lanes through note transforms and loop' do
       [clip.transpose(2), clip.legato(0.5), clip.vel(0.3), clip.humanize(1/64r, seed: 2), clip.loop, clip.named(:x)].each do |c|

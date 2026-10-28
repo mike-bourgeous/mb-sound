@@ -199,6 +199,28 @@ module MB
           @positions[i]
         end
 
+        # The lane as knob keyframes for `turn`: { time => value } with
+        # times as Durations from the clip's start (0 for the first) and
+        # values mapped onto +range+ (the knob's range; the lane's own
+        # values without one), e.g. a controller-only clip's volume ramp
+        # as a knob gesture:
+        #
+        #     ramp = midi_clip('volume ramp.mid', cc: :fit).control(7)
+        #     turn :vol, ramp.keyframes(0.0..1.0), curve: ramp.gesture_curve
+        def keyframes(range = nil)
+          lo = @type == :bend ? -1.0 : 0.0
+          @points.to_h { |p, v|
+            u = (v - lo) / (1.0 - lo)
+            [p.zero? ? 0 : Duration.new(p), range ? range.begin.to_f + (range.end.to_f - range.begin.to_f) * u : v]
+          }
+        end
+
+        # The `turn` curve: that matches the lane's (:step for step lanes,
+        # nil for cubic, :linear).
+        def gesture_curve
+          @curve
+        end
+
         # A MIDI::Event sending +value+ at stream +time+ on +channel+.
         def event(value, channel:, time:)
           case @type
