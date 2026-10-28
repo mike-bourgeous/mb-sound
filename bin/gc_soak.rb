@@ -57,10 +57,10 @@ module MB::Sound
     # Stops the song once enough audio played (see --seconds).
     class Done < Exception; end # (not a StandardError: past the script runner's rescue)
 
-    Sample = Data.define(:seconds, :rss_mb, :objects, :render_objects, :gc_count)
+    Sample = Data.define(:seconds, :rss_mb, :objects, :render_objects, :gc_count, :gc_ms, :majors)
 
     class << self
-      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count, :dump
+      attr_accessor :speed, :limit, :window, :sites, :gc_off, :band_on, :by_count, :dump, :gc_quiet
       attr_reader :samples, :window_sites, :end_sites, :render_objects, :started
 
       def setup
@@ -96,7 +96,7 @@ module MB::Sound
         played = (out.frames_consumed - @frame0) / session.sample_rate.to_f
         while played >= @samples.length
           @samples << Sample.new(seconds: played, rss_mb: rss_mb, objects: GC.stat(:total_allocated_objects) - @objects0,
-                                 render_objects: @render_objects, gc_count: GC.count - @gc0)
+                                 render_objects: @render_objects, gc_count: GC.count - @gc0, gc_ms: GC.stat(:time) - @gc_ms0, majors: GC.stat(:major_gc_count) - @majors0)
         end
         chunk(played) if @sites
         @types0 ||= types if !@sites && played >= @window
@@ -112,6 +112,7 @@ module MB::Sound
         end
         GC.start
         GC.disable if @gc_off || @sites
+        GC.config(rgengc_allow_full_mark: false) if @gc_quiet # (GCQuiet's setting for the whole run)
         if @sites
           @window_sites = Hash.new { |h, k| h[k] = [0, 0] }
           @end_sites = Hash.new { |h, k| h[k] = [0, 0] }
@@ -122,9 +123,11 @@ module MB::Sound
         @frame0 = @out.frames_consumed
         @objects0 = GC.stat(:total_allocated_objects)
         @gc0 = GC.count
+        @gc_ms0 = GC.stat(:time)
+        @majors0 = GC.stat(:major_gc_count)
         @render_objects = 0
         @started = MB::U.clock_now
-        @samples << Sample.new(seconds: 0.0, rss_mb: rss_mb, objects: 0, render_objects: 0, gc_count: 0)
+        @samples << Sample.new(seconds: 0.0, rss_mb: rss_mb, objects: 0, render_objects: 0, gc_count: 0, gc_ms: 0, majors: 0)
       end
 
       # Live objects by type (T_* and imemo kinds) and the memory they use
@@ -206,13 +209,17 @@ module MB::Sound
         robjs = steady_secs > 0 ? (last.render_objects - w.render_objects) / steady_secs : nil
         lines = []
         lines << format('%s: %d-frame buffers, speed %.1fx, GC %s, YJIT %s%s; %.0f s of audio after the warm-up',
-          File.basename(song), buffer_size, @speed, @gc_off ? 'off' : 'on', (defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?) ? 'on' : 'off',
+          File.basename(song), buffer_size, @speed, @gc_off ? 'off' : (@gc_quiet ? 'on without majors' : 'on'), (defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?) ? 'on' : 'off',
           @band_on ? ', UI deck painting' : '', last.seconds)
         lines << format('RSS at the start %.0f MB; first %.0f s: +%.0f MB (%.0f k objects/s); after it: %s MB/s, %s k objects/s (render thread %s k/s), %s bytes/object by RSS',
           s[0].rss_mb, w.seconds, w.rss_mb - s[0].rss_mb, w.objects / [w.seconds, 1e-9].max / 1e3,
           slope ? format('%.2f', slope) : '-', objs ? format('%.1f', objs / 1e3) : '-', robjs ? format('%.1f', robjs / 1e3) : '-',
           slope && objs && objs > 0 ? format('%.0f', slope * 1024 * 1024 / objs) : '-')
-        lines << format('GC runs while playing: %d', last.gc_count) unless @gc_off
+        unless @gc_off
+          per = s.each_cons(2).map { |a, b| b.gc_ms - a.gc_ms }
+          lines << format('GC while playing: %d runs (%d major), %d ms in all, %.1f runs a minute after the first %.0f s; worst audio second %d ms of GC',
+            last.gc_count, last.majors, last.gc_ms, steady_secs > 0 ? (last.gc_count - w.gc_count) * 60.0 / steady_secs : 0, w.seconds, per.max || 0)
+        end
         if @gc_off && slope && slope > 0
           head = 4096 - last.rss_mb
           lines << format('4 GB lasts about %.0f more minutes at this slope (%.0f minutes of audio in all)', head / slope / 60, (4096 - s[0].rss_mb - (w.rss_mb - s[0].rss_mb)) / slope / 60 + w.seconds / 60)
@@ -278,7 +285,7 @@ if MB::Sound.main_script?(__FILE__)
     speed: [1.0, Float, 'Times real time to let audio through (1: as a sound card)', 0.1..20.0],
     seconds: [nil, Float, 'Stop after this many seconds of audio (default: the whole song)', 1.0..36000.0],
     window: [60.0, Float, 'Seconds of audio counted as the start (landings, first buffers) before the steady slope', 1.0..3600.0],
-    gc: ['off', String, 'Ruby GC while playing: off (GC.disable once the music starts) or on', ['off', 'on']],
+    gc: ['off', String, 'Ruby GC while playing: off (GC.disable once the music starts), on, or quiet (on, but no major GCs: GCQuiet for the whole run)', ['off', 'on', 'quiet']],
     sites: [0, Integer, 'Trace allocations and list this many lines (0: none)', 0..1000],
     dump: [nil, String, 'With --sites, write one traced chunk after the window as ObjectSpace.dump_all JSON lines (internal objects too)'],
     by: ['bytes', String, 'Order --sites lines by bytes or objects', ['bytes', 'objects']],
@@ -296,6 +303,7 @@ if MB::Sound.main_script?(__FILE__)
     soak.window = p.window
     soak.sites = p.sites.positive? ? p.sites : nil
     soak.gc_off = p.gc == 'off'
+    soak.gc_quiet = p.gc == 'quiet'
     soak.band_on = p.band
     soak.by_count = p.by == 'objects'
     soak.dump = p.dump
