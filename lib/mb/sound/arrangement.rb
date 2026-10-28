@@ -275,6 +275,7 @@ module MB
         clock = Sequence::Clocked.check_name(clock) if clock.is_a?(Symbol)
         clock = MB::Sound::Clock.coerce(clock) unless clock.nil? || clock.is_a?(Symbol)
         graph = Sequence::Clocked.apply(graph, clock) if graph && clock
+        patch = Arrangement.counted(patch, track: name, session: @session) if patch
         # Built once now, so a broken patch fails here (see PatchCheck)
         begin
           ok = check_patch(name, patch, clip || @mutex.synchronize { @tracks[name]&.clip })
@@ -293,7 +294,6 @@ module MB
 
         tr = nil
         old = nil
-        patch = Arrangement.counted(patch) if patch
         before = entry && undo_state
         @mutex.synchronize {
           old = @tracks[name]
@@ -361,9 +361,14 @@ module MB
       # the graph it built can be named by where its call was made and
       # bound to a knob (LiteralBinding).  A block like the patch: arity,
       # parameters, lambda?, and source location are the patch's.
-      def self.counted(patch)
+      #
+      # +track+ and +session+ name the track whose patch it is: the build
+      # runs in TrackKnobs.building, so a graph document the patch loads
+      # makes its params the track's knobs.
+      def self.counted(patch, track: nil, session: nil)
         return patch if patch.respond_to?(:unbound_patch) || patch.respond_to?(:counted_patch)
-        wrapped = proc { |*a, **kw, &b| GraphNode::Recipe.counting { kw.empty? ? patch.call(*a, &b) : patch.call(*a, **kw, &b) } }
+        build = ->(&blk) { track ? TrackKnobs.building(track, session) { GraphNode::Recipe.counting(&blk) } : GraphNode::Recipe.counting(&blk) }
+        wrapped = proc { |*a, **kw, &b| build.() { kw.empty? ? patch.call(*a, &b) : patch.call(*a, **kw, &b) } }
         wrapped.define_singleton_method(:arity) { patch.arity }
         wrapped.define_singleton_method(:parameters) { |**k| patch.parameters(**k) }
         wrapped.define_singleton_method(:lambda?) { patch.lambda? }
@@ -372,7 +377,7 @@ module MB
         # (writers that wrap the user's block themselves, e.g. a set
         # document's, run it in #patch_context)
         wrapped.define_singleton_method(:patch_block) { patch }
-        wrapped.define_singleton_method(:patch_context) { |&blk| GraphNode::Recipe.counting(&blk) }
+        wrapped.define_singleton_method(:patch_context) { |&blk| build.(&blk) }
         wrapped
       end
 

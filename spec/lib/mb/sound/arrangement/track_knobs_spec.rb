@@ -1,0 +1,138 @@
+# Preset params become knobs on tracks (library-instruments-1, item 2):
+# a track whose patch loads a graph document gets each param it doesn't
+# give as the Session knob :"track/param", at the param's value with its
+# Param's range and curve, read by the graph: the same samples until it is
+# turned; `bind :bass, cutoff: :cut` makes the param follow another knob.
+RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
+  BASS_RIFF = MB::Sound.seq(MB::Sound::F1, MB::Sound::T, MB::Sound::R, MB::Sound::Ab1, MB::Sound::C2.n4).n8.loop
+  DRUM_GRID = MB::Sound.grid(16, kick: 'x...', snare: '..x.', closed_hat: 'xxxx').loop
+
+  before { @sessions = [] }
+  after {
+    @sessions.each(&:close)
+    MB::Sound.rewind
+  }
+
+  # A Session that runs +setup+, then plays +buffers+ buffers, running
+  # +acts+ ({ buffer => Proc }) on the way; returns [session, left, right].
+  def run(setup, buffers: 120, acts: {})
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, realtime: false)
+    @sessions << s
+    MB::Sound::Session.with_context(session: s) { setup.call(s) }
+    buffers.times do |i|
+      (a = acts[i]) && MB::Sound::Session.with_context(session: s) { a.call(s) }
+      s.process_buffer
+    end
+    [s, *out.captured.map { |c| Numo::DFloat.cast(c) }]
+  end
+
+  # The shipped instrument presets with params (graph documents).
+  def self.preset_names
+    MB::Sound::Library.index.entries(kind: :instrument, family: :preset)
+      .select { |e| e.settings.is_a?(Hash) && e.settings[:document] && !e.params.empty? && e.shelf.shipped? }.map(&:name)
+  end
+
+  it 'finds the shipped instrument presets with params' do
+    expect(self.class.preset_names).to include(:dnb_reese, :digibrass, :sq80_classic, :ambient_gong)
+  end
+
+  # (a few in the everyday tier, every one under SLOW=1)
+  [:dnb_reese, :digibrass, :reed_piano, *SlowTier.slow_tier(preset_names - %i[dnb_reese digibrass reed_piano], keep: 0)].each do |n|
+    it "plays #{n} bit for bit like its params given as numbers, with them as the track's knobs" do
+      doc = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(n))
+      defaults = doc.params.transform_values { |v| v[:value] }
+      clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
+      _, *ref = run(->(_s) { MB::Sound.track(:t) { |c| MB::Sound.preset(n, midi: c, **defaults) }; MB::Sound.bg(:t, clip) }, buffers: 30)
+      s, *got = run(->(_s) { MB::Sound.track(:t, n); MB::Sound.bg(:t, clip) }, buffers: 30)
+      expect(s.knobs.keys).to eq(defaults.keys.map { |k| :"t/#{k}" })
+      expect(got).to eq(ref)
+      expect(ref[0].abs.max).to be > 0.001
+      expect(s.knobs.values.map(&:value)).to eq(doc.declarations.values_at(*defaults.keys).map { |p| MB::Sound::Param.magnitude(p.default).to_f })
+    end
+  end
+
+  it 'gives each track its own knobs with the param\'s range and curve, turned, in scenes, and undone' do
+    s, base = run(->(_s) { MB::Sound.track(:bass, :dnb_reese); MB::Sound.bg(:bass, BASS_RIFF) })
+    k = s.knobs[:"bass/cutoff"]
+    param = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(:dnb_reese)).declarations[:cutoff]
+    expect(k.spec.range).to eq(param.magnitude_range)
+    expect(k.spec.curve).to eq(param.curve)
+    expect(k.spec.param.description).to eq(param.description)
+
+    s2, turned = run(
+      ->(_s) { MB::Sound.track(:bass, :dnb_reese); MB::Sound.track(:bass2, :dnb_reese); MB::Sound.bg(:bass, BASS_RIFF) },
+      acts: { 30 => ->(_s) { MB::Sound.turn(:"bass/cutoff", 300.0) } }
+    )
+    expect(s2.knobs.keys).to include(:"bass/cutoff", :"bass2/cutoff")
+    expect(turned[0...24_000]).to eq(base[0...24_000])
+    expect((turned[30_000..] - base[30_000..]).abs.max).to be > 0.01
+    expect(s2.knobs[:"bass2/cutoff"].value).to eq(2400.0)
+
+    # A scene's knob value; the turn undone
+    s3, = run(->(_s) {
+      MB::Sound.track(:bass, :dnb_reese)
+      MB::Sound.scene(:dark, bass: BASS_RIFF, "bass/cutoff": 400.0)
+      MB::Sound.go(:dark, on: :now)
+    }, buffers: 10)
+    expect(s3.knobs[:"bass/cutoff"].value).to eq(400.0)
+    MB::Sound::Session.with_context(session: s3) { MB::Sound.turn(:"bass/cutoff", 900.0); MB::Sound.undo(on: :now) }
+    4.times { s3.process_buffer }
+    expect(s3.knobs[:"bass/cutoff"].value).to eq(400.0)
+  end
+
+  it 'makes no knobs for params the patch gives, nor for presets outside tracks' do
+    s, = run(->(s) {
+      MB::Sound.knob(:cut, 2400.0, range: 150.0..8000.0)
+      MB::Sound.track(:a) { |c| MB::Sound.preset(:digibrass, midi: c, cutoff: 800, grit: :cut) }
+      MB::Sound.bg(:pad, MB::Sound.preset(:dnb_reese, midi: BASS_RIFF))
+      MB::Sound.bg(:a, BASS_RIFF)
+    }, buffers: 4)
+    expect(s.knobs.keys).to contain_exactly(:cut, :"a/reso")
+  end
+
+  it 'saves the knobs in set documents and loads them back, turned' do
+    text = nil
+    s, = run(->(s) {
+      MB::Sound.track(:bass, :dnb_reese)
+      MB::Sound.scene(:a, bass: BASS_RIFF.named(:riff))
+    }, buffers: 0)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.turn(:"bass/cutoff", 900.0, on: :now)
+      s.process_buffer
+      text = MB::Sound::GraphIO::SetWriter.new(s.arrangement).to_s
+    end
+    expect(text).to include('knob :"bass/cutoff", (150.0..8000.0).at(900.0)', "track :bass, :dnb_reese\n")
+    s2, = run(->(s) { MB::Sound::GraphIO.load(text, session: s); MB::Sound.go(:a, on: :now) }, buffers: 4)
+    expect(s2.knobs[:"bass/cutoff"].value).to eq(900.0)
+  end
+
+  it 'binds a preset param to an existing knob (bind :bass, cutoff: :cut), and explains the other spellings' do
+    clip = BASS_RIFF
+    s, = run(->(_s) {
+      MB::Sound.knob(:cut, 2400.0, range: 150.0..8000.0)
+      MB::Sound.track(:bass, :dnb_reese)
+      MB::Sound.bg(:bass, clip)
+    }, buffers: 4)
+    MB::Sound::Session.with_context(session: s) do
+      expect { MB::Sound.bind(:bass, :cut) }.to raise_error(MB::Sound::Arrangement::LiteralBinding::Error, /did you mean bind :bass, cutoff: :cut\?/)
+      expect { expect(MB::Sound.bind(:bass, :cutoff)).to eq(:"bass/cutoff") }.to output(/already knob :"bass\/cutoff"/).to_stdout
+      expect { MB::Sound.bind(:bass, cutoff: :cutt) }.to raise_error(MB::Sound::Arrangement::LiteralBinding::Error, /no knob :cutt.*:cut/m)
+      entry = MB::Sound.bind(:bass, cutoff: :cut, on: :now)
+      expect(entry.to_s).to start_with('bg :bass')
+    end
+    4.times { s.process_buffer }
+    code = MB::Sound::UI::Inspect.roots(s.ui_graphs[:bass]).first.to_ruby
+    expect(code).to include('knob(:cut)')
+    expect(code).not_to include('bass/cutoff')
+    # the inspector's knob rows: the knob the graph reads
+    info = MB::Sound::UI::Inspect::Gatherer.new.call(s, { track: :bass, node: nil })
+    expect(info.knobs).to eq([:cut])
+
+    s2, = run(->(_s) { MB::Sound.track(:bass, :digibrass); MB::Sound.bg(:bass, clip) }, buffers: 4)
+    info = MB::Sound::UI::Inspect::Gatherer.new.call(s2, { track: :bass, node: nil })
+    expect(info.knobs).to contain_exactly(:"bass/grit", :"bass/cutoff", :"bass/reso")
+  end
+end

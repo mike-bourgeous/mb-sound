@@ -279,6 +279,26 @@ module MB
           return MB::Sound.live_error(LiteralBinding::Error.new("#{name} isn't playing: bind finds its literals in the graph it plays (bg #{name.inspect}, clip)"))
         end
         roots = UI::Inspect.roots(input)
+        doc = roots.lazy.filter_map { |r| GraphIO.document_of(r) }.first
+        follow = nil
+        # (library-instruments-1: a preset's param following an existing
+        # knob, `bind :bass, cutoff: :cut`; params already the track's knobs
+        # (TrackKnobs); the guess `bind :bass, :cut`)
+        if what.is_a?(Hash) && what.length == 1 && doc && doc.params.key?(what.keys.first.to_sym) && what.values.first.is_a?(Symbol)
+          follow = what.values.first
+          unless @session.knobs[follow]
+            return MB::Sound.live_error(LiteralBinding::Error.new("bind #{name.inspect}, #{what.keys.first}: #{follow.inspect}: no knob #{follow.inspect}#{GraphIO.suggest(follow, @session.knobs.keys)} (knob #{follow.inspect}, ... makes one)"))
+          end
+          what = what.keys.first.to_sym
+        elsif what.is_a?(Symbol) && doc && doc.params.key?(what) && reads_knob?(roots, TrackKnobs.knob_name(name, what))
+          kn = TrackKnobs.knob_name(name, what)
+          puts "\e[2m#{name}'s #{what} is already knob #{kn.inspect}: turn #{kn.inspect}, ...; bind #{name.inspect}, #{what}: :other follows another knob\e[0m"
+          return kn
+        elsif what.is_a?(Symbol) && doc && !doc.params.key?(what) && @session.knobs[what] && !doc.params.empty?
+          ps = doc.params.keys
+          line = ps.length == 1 ? "bind #{name.inspect}, #{ps.first}: #{what.inspect}" : "bind #{name.inspect}, <param>: #{what.inspect} (params: #{ps.join(', ')})"
+          return MB::Sound.live_error(LiteralBinding::Error.new("bind #{name.inspect}, #{what.inspect}: #{what.inspect} is a knob, not a param of #{doc.name} (did you mean #{line}?)"))
+        end
         t =
           begin
             if what.is_a?(Hash)
@@ -292,10 +312,10 @@ module MB
             return MB::Sound.live_error(e)
           end
 
-        kname = (as || LiteralBinding.knob_name(name, t.param)).to_sym
+        kname = (follow || as || LiteralBinding.knob_name(name, t.param)).to_sym
         default = LiteralBinding.knob_default(t.param, t.value, range)
         k = @session.knobs[kname]
-        if k && (k.value - Param.magnitude(default.default).to_f).abs > 1e-9 * [1.0, k.value.abs].max
+        if k && !follow && (k.value - Param.magnitude(default.default).to_f).abs > 1e-9 * [1.0, k.value.abs].max
           return MB::Sound.live_error(LiteralBinding::Error.new("knob #{kname.inspect} is at #{k.value}, not #{name}'s #{t.param} (#{Param.literal(default.default)}): give as: another name"))
         end
 
@@ -321,7 +341,7 @@ module MB
         (@session.knob(kname, default) or return nil) unless k
 
         entry = nil
-        @session.command("bind #{name.inspect} #{t.param} -> knob #{kname.inspect}") {
+        @session.command("bind #{name.inspect} #{t.param} -> #{follow ? 'follows ' : ''}knob #{kname.inspect}") {
           before = undo_state
           @mutex.synchronize { tr.patch = LiteralBinding.wrap(tr.patch, t, kname) }
           time = resolve(tr.q || @quant, tr, point)
@@ -329,6 +349,13 @@ module MB
           @session.note_undo_extra(self, before, undo_state)
         }
         entry && @session.journal[entry.seq]
+      end
+
+      private
+
+      # True if graph +roots+ read Session knob +kname+.
+      def reads_knob?(roots, kname)
+        LiteralBinding.nodes(roots).any? { |n| n.is_a?(GraphNode::Knob::Reader) && n.knob.name == kname }
       end
     end
   end

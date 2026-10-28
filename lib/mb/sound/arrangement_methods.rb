@@ -165,7 +165,12 @@ module MB
       #
       #     bind :bass, lp4: :resonance           # knob :"bass/reso"
       #     bind :bass, amp_env: :attack, as: :att
-      #     bind :bass, :cutoff                   # preset :dnb_reese's param
+      #     bind :bass, cutoff: :cut              # preset :dnb_reese's param follows knob :cut
+      #
+      # A track playing a graph document already has its params as knobs
+      # (:"bass/cutoff"; Arrangement::TrackKnobs), so `bind :bass, :cutoff`
+      # names that knob; `bind :bass, cutoff: :cut` makes the param follow
+      # an existing knob instead (one undo step, like a literal's bind).
       def bind(name, what = nil, nth: 0, as: nil, range: nil, at: nil, on: nil, in: nil, fade: nil, **method_param)
         point = LaunchPoint.of(binding) or return nil
         what ||= method_param
